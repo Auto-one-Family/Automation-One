@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+*.env
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Certificates (keep structure, ignore keys)
+certificates/*.key
+certificates/clients/*.key
+
+# Database
+*.db
+*.sqlite3
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
