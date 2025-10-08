@@ -1,0 +1,80 @@
+# ==========================================
+# AutomationOne .gitignore
+# ==========================================
+
+# ========== GLOBAL ==========
+.DS_Store
+.AppleDouble
+.LSOverride
+*~
+.Trash-*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+*.tmp
+*.temp
+.cache/
+
+# ========== ESP32 (El Trabajante) ==========
+El\ Trabajante/.pio/
+El\ Trabajante/.vscode/
+El\ Trabajante/build/
+El\ Trabajante/.pio
+El\ Trabajante/platformio.ini.bak
+El\ Trabajante/*.bin
+El\ Trabajante/*.elf
+El\ Trabajante/.pioenvs
+El\ Trabajante/.piolibdeps
+
+# ========== SERVER (El Servador) ==========
+El\ Servador/__pycache__/
+El\ Servador/*.py[cod]
+El\ Servador/*$py.class
+El\ Servador/.Python
+El\ Servador/env/
+El\ Servador/venv/
+El\ Servador/ENV/
+El\ Servador/.venv
+El\ Servador/pip-log.txt
+El\ Servador/pip-delete-this-directory.txt
+El\ Servador/.pytest_cache/
+El\ Servador/.coverage
+El\ Servador/htmlcov/
+El\ Servador/dist/
+El\ Servador/build/
+El\ Servador/eggs/
+El\ Servador/.eggs/
+El\ Servador/*.egg-info/
+El\ Servador/*.egg
+El\ Servador/*.db
+El\ Servador/*.sqlite
+El\ Servador/*.sqlite3
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+El\ Servador/.env
+El\ Trabajante/.env
+
+# Secrets & Certificates
+*.key
+*.pem
+*.crt
+!ca.crt
+certificates/*.key
+certificates/*.pem
+
+# ========== DOCS ==========
+docs/.vuepress/dist
+docs/.vuepress/.cache
+docs/.vuepress/.temp
