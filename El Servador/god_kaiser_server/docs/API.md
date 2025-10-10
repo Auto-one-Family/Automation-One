@@ -2,3 +2,4 @@
 
 ## Endpoints
 [API Documentation folgt]
+

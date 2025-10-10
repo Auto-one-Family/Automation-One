@@ -2,3 +2,4 @@
 
 ## Topic Structure
 [MQTT Topics Dokumentation folgt]
+

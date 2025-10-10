@@ -104,3 +104,4 @@ Alle 85 Dateien wurden angelegt. Bereit für Implementation!
 2. Module implementieren (siehe docs/)
 3. Unit-Tests schreiben
 4. Integration testen
+

@@ -20,3 +20,4 @@ poetry run uvicorn src.main:app --reload
 
 ## Architecture
 Siehe `/docs/ARCHITECTURE.md`
+

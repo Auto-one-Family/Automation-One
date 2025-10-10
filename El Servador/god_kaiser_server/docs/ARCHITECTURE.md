@@ -8,3 +8,4 @@
 
 ## Database Schema
 [Schema folgt]
+
