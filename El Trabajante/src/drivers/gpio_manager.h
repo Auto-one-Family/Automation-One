@@ -1,0 +1,151 @@
+#ifndef DRIVERS_GPIO_MANAGER_H
+#define DRIVERS_GPIO_MANAGER_H
+
+#include <Arduino.h>
+#include <vector>
+
+// ============================================
+// GPIO Manager - Hardware Safety System
+// ============================================
+// Critical system for preventing hardware damage through GPIO misuse
+// Documentation: ZZZ.md lines 1930-2012
+// Migration: PROJECT_ANALYSIS_REPORT.md Block 6
+
+// ============================================
+// GPIO PIN INFO STRUCTURE
+// ============================================
+// Tracks the state and ownership of each GPIO pin
+
+struct GPIOPinInfo {
+    uint8_t pin;                // GPIO pin number
+    char owner[32];             // Owner identifier ("sensor", "actuator", "system")
+    char component_name[32];    // Component name ("DS18B20", "Pump1", etc.)
+    uint8_t mode;               // Pin mode (INPUT, OUTPUT, INPUT_PULLUP)
+    bool in_safe_mode;          // Pin is in safe mode (INPUT_PULLUP)
+    
+    // Constructor to ensure null-termination
+    GPIOPinInfo() : pin(255), mode(INPUT), in_safe_mode(true) {
+        owner[0] = '\0';
+        component_name[0] = '\0';
+    }
+};
+
+// ============================================
+// GPIO MANAGER CLASS
+// ============================================
+// Singleton class managing all GPIO operations with safety checks
+
+class GPIOManager {
+public:
+    // ============================================
+    // SINGLETON PATTERN
+    // ============================================
+    // Get the single instance of GPIOManager
+    static GPIOManager& getInstance() {
+        static GPIOManager instance;
+        return instance;
+    }
+
+    // Prevent copy and move operations
+    GPIOManager(const GPIOManager&) = delete;
+    GPIOManager& operator=(const GPIOManager&) = delete;
+    GPIOManager(GPIOManager&&) = delete;
+    GPIOManager& operator=(GPIOManager&&) = delete;
+
+    // ============================================
+    // CRITICAL: SAFE-MODE INITIALIZATION
+    // ============================================
+    // MUST be called as the FIRST action in setup()!
+    // Initializes all safe GPIO pins to INPUT_PULLUP to prevent hardware damage
+    // This ensures no pins are in undefined states that could trigger actuators
+    void initializeAllPinsToSafeMode();
+
+    // ============================================
+    // PIN MANAGEMENT
+    // ============================================
+    // Request exclusive use of a GPIO pin
+    // Returns false if pin is reserved, already in use, or invalid
+    // owner: Component type requesting the pin ("sensor", "actuator")
+    // component_name: Specific component name for debugging
+    bool requestPin(uint8_t gpio, const char* owner, const char* component_name);
+
+    // Release a GPIO pin back to safe mode
+    // Returns pin to INPUT_PULLUP state
+    bool releasePin(uint8_t gpio);
+
+    // Configure pin mode (INPUT, OUTPUT, INPUT_PULLUP)
+    // Validates pin availability and hardware limitations
+    bool configurePinMode(uint8_t gpio, uint8_t mode);
+
+    // ============================================
+    // PIN QUERIES
+    // ============================================
+    // Check if a pin is available for use
+    bool isPinAvailable(uint8_t gpio) const;
+
+    // Check if a pin is reserved (Boot/UART/etc.)
+    bool isPinReserved(uint8_t gpio) const;
+
+    // Check if a pin is currently in safe mode
+    bool isPinInSafeMode(uint8_t gpio) const;
+
+    // ============================================
+    // EMERGENCY SAFE-MODE
+    // ============================================
+    // Emergency function: Return ALL pins to safe mode
+    // Used in error conditions to prevent hardware damage
+    void enableSafeModeForAllPins();
+
+    // ============================================
+    // INFORMATION METHODS
+    // ============================================
+    // Get detailed information about a specific pin
+    GPIOPinInfo getPinInfo(uint8_t gpio) const;
+
+    // Print status of all GPIO pins to Serial
+    void printPinStatus() const;
+
+    // Get count of available (unallocated) pins
+    uint8_t getAvailablePinCount() const;
+
+    // ============================================
+    // I2C PIN MANAGEMENT
+    // ============================================
+    // Release I2C pins if I2C bus is not being used
+    // WARNING: Only call if you're certain I2C will never be used!
+    void releaseI2CPins();
+
+private:
+    // ============================================
+    // PRIVATE CONSTRUCTOR (SINGLETON)
+    // ============================================
+    GPIOManager() {}
+    ~GPIOManager() {}
+
+    // ============================================
+    // INTERNAL STATE
+    // ============================================
+    // Vector storing information about all GPIO pins
+    std::vector<GPIOPinInfo> pins_;
+
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+    // Check if pin is in reserved pins array (board-specific)
+    bool isReservedPin(uint8_t gpio) const;
+
+    // Check if pin is input-only (ESP32 WROOM specific)
+    bool isInputOnlyPin(uint8_t gpio) const;
+    
+    // Verify that a pin is in the expected state after pinMode()
+    bool verifyPinState(uint8_t pin, uint8_t expected_mode);
+};
+
+// ============================================
+// GLOBAL INSTANCE ACCESS
+// ============================================
+// Convenient global reference to the singleton instance
+extern GPIOManager& gpioManager;
+
+#endif // DRIVERS_GPIO_MANAGER_H
+
