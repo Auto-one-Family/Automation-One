@@ -37,7 +37,7 @@ Standard-Workflow (90% der Anwendungen):
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER 1: God (Raspberry Pi 5)                               │
-│ Rolle: KI/Analytics, Predictions, Model Training            │
+│ Rolle: KI/Analytics, Predictions, Model Training, LLM zur einfachen Steuerung über Web-Interface            │
 │ Port: 8001 (HTTP REST)                                      │
 │ Tech: Python, TensorFlow/PyTorch, Pandas                    │
 └─────────────────────────────────────────────────────────────┘
