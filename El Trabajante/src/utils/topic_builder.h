@@ -3,35 +3,33 @@
 
 #include <Arduino.h>
 
-// TopicBuilder - Zentralisierte MQTT-Topic-Generierung
-// KRITISCH: MQTT-Topic-Struktur muss UNVERÄNDERT bleiben für Backward-Compatibility!
+// ============================================
+// TOPIC BUILDER STATIC CLASS (Phase 1 - Guide-konform)
+// ============================================
 class TopicBuilder {
 public:
-  // Standard Topic: kaiser/{kaiser_id}/esp/{esp_id}/{topic_type}/{gpio}
-  static String buildTopic(const String& kaiser_id, 
-                          const String& esp_id,
-                          const String& topic_type, 
-                          const String& gpio = "");
+  // Configuration
+  static void setEspId(const char* esp_id);
+  static void setKaiserId(const char* kaiser_id);
   
-  // Special Topic: kaiser/{kaiser_id}/esp/{esp_id}/{topic_type}/{subpath}
-  static String buildSpecialTopic(const String& kaiser_id,
-                                 const String& esp_id,
-                                 const String& topic_type,
-                                 const String& subpath = "");
-  
-  // Broadcast Topic: kaiser/{kaiser_id}/broadcast/{topic_type}
-  static String buildBroadcastTopic(const String& kaiser_id,
-                                   const String& topic_type);
-  
-  // Hierarchical Topic: kaiser/{kaiser_id}/master/{master_zone_id}/esp/{esp_id}/subzone/{subzone_id}/{gpio}
-  static String buildHierarchicalTopic(const String& kaiser_id,
-                                      const String& master_zone_id,
-                                      const String& esp_id,
-                                      const String& subzone_id,
-                                      const String& gpio);
+  // Phase 1: 8 Critical Topic Patterns (Guide-konform)
+  static const char* buildSensorDataTopic(uint8_t gpio);        // Pattern 1
+  static const char* buildSensorBatchTopic();                   // Pattern 2
+  static const char* buildActuatorCommandTopic(uint8_t gpio);   // Pattern 3
+  static const char* buildActuatorStatusTopic(uint8_t gpio);    // Pattern 4
+  static const char* buildSystemHeartbeatTopic();               // Pattern 5
+  static const char* buildSystemCommandTopic();                 // Pattern 6
+  static const char* buildConfigTopic();                        // Pattern 7
+  static const char* buildBroadcastEmergencyTopic();            // Pattern 8
   
 private:
-  static const size_t BUFFER_SIZE = 256;
+  static char topic_buffer_[256];
+  static char esp_id_[32];
+  static char kaiser_id_[64];
+  // ✅ Buffer-Validation Helper (fix for buffer-overflow protection)
+  static const char* validateTopicBuffer(int snprintf_result);
+  
+  TopicBuilder() = delete;  // Static class only
 };
 
 #endif

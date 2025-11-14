@@ -1,110 +1,113 @@
 #include "topic_builder.h"
 #include "logger.h"
 
-String TopicBuilder::buildTopic(const String& kaiser_id, 
-                                const String& esp_id,
-                                const String& topic_type, 
-                                const String& gpio) {
-  char topic_buffer[BUFFER_SIZE];
-  
-  // ✅ FIX #2: snprintf mit Return-Wert prüfen
-  int written;
-  if (gpio.length() > 0) {
-    written = snprintf(topic_buffer, BUFFER_SIZE, 
-                      "kaiser/%s/esp/%s/%s/%s",
-                      kaiser_id.c_str(),
-                      esp_id.c_str(),
-                      topic_type.c_str(),
-                      gpio.c_str());
-  } else {
-    written = snprintf(topic_buffer, BUFFER_SIZE, 
-                      "kaiser/%s/esp/%s/%s",
-                      kaiser_id.c_str(),
-                      esp_id.c_str(),
-                      topic_type.c_str());
-  }
-  
-  // ✅ FIX #2: Truncation-Prüfung
-  if (written < 0) {
-    LOG_ERROR("TopicBuilder: snprintf failed (encoding error)");
-    return "";
-  }
-  
-  if (written >= BUFFER_SIZE) {
-    LOG_ERROR("TopicBuilder: Topic truncated! Required: " + String(written) + 
-              " bytes, buffer: " + String(BUFFER_SIZE) + " bytes");
-    return "";
-  }
-  
-  return String(topic_buffer);
+// ============================================
+// STATIC MEMBER INITIALIZATION
+// ============================================
+char TopicBuilder::topic_buffer_[256];
+char TopicBuilder::esp_id_[32] = "unknown";
+char TopicBuilder::kaiser_id_[64] = "god";
+
+// ============================================
+// CONFIGURATION
+// ============================================
+void TopicBuilder::setEspId(const char* esp_id) {
+  strncpy(esp_id_, esp_id, sizeof(esp_id_) - 1);
+  esp_id_[sizeof(esp_id_) - 1] = '\0';
 }
 
-String TopicBuilder::buildSpecialTopic(const String& kaiser_id,
-                                      const String& esp_id,
-                                      const String& topic_type,
-                                      const String& subpath) {
-  char topic_buffer[BUFFER_SIZE];
-  
-  int written;
-  if (subpath.length() > 0) {
-    written = snprintf(topic_buffer, BUFFER_SIZE, 
-                      "kaiser/%s/esp/%s/%s/%s",
-                      kaiser_id.c_str(),
-                      esp_id.c_str(),
-                      topic_type.c_str(),
-                      subpath.c_str());
-  } else {
-    written = snprintf(topic_buffer, BUFFER_SIZE, 
-                      "kaiser/%s/esp/%s/%s",
-                      kaiser_id.c_str(),
-                      esp_id.c_str(),
-                      topic_type.c_str());
-  }
-  
-  if (written < 0 || written >= BUFFER_SIZE) {
-    LOG_ERROR("TopicBuilder: buildSpecialTopic truncated");
-    return "";
-  }
-  
-  return String(topic_buffer);
+void TopicBuilder::setKaiserId(const char* kaiser_id) {
+  strncpy(kaiser_id_, kaiser_id, sizeof(kaiser_id_) - 1);
+  kaiser_id_[sizeof(kaiser_id_) - 1] = '\0';
 }
 
-String TopicBuilder::buildBroadcastTopic(const String& kaiser_id,
-                                        const String& topic_type) {
-  char topic_buffer[BUFFER_SIZE];
-  
-  int written = snprintf(topic_buffer, BUFFER_SIZE, 
-                        "kaiser/%s/broadcast/%s",
-                        kaiser_id.c_str(),
-                        topic_type.c_str());
-  
-  if (written < 0 || written >= BUFFER_SIZE) {
-    LOG_ERROR("TopicBuilder: buildBroadcastTopic truncated");
+// ============================================
+// BUFFER VALIDATION HELPER
+// ============================================
+// Validates snprintf result for encoding errors and truncation
+// Returns empty string on error for safe error handling
+const char* TopicBuilder::validateTopicBuffer(int snprintf_result) {
+  // ✅ Check 1: Encoding error (snprintf returned negative)
+  if (snprintf_result < 0) {
+    LOG_ERROR("TopicBuilder: snprintf encoding error!");
     return "";
   }
   
-  return String(topic_buffer);
+  // ✅ Check 2: Buffer overflow (truncation occurred)
+  if (snprintf_result >= (int)sizeof(topic_buffer_)) {
+    LOG_ERROR("TopicBuilder: Topic truncated! Required: " + 
+              String(snprintf_result) + " bytes, buffer: " + 
+              String(sizeof(topic_buffer_)) + " bytes");
+    return "";
+  }
+  
+  // ✅ Success: Return buffer pointer
+  return topic_buffer_;
 }
 
-String TopicBuilder::buildHierarchicalTopic(const String& kaiser_id,
-                                           const String& master_zone_id,
-                                           const String& esp_id,
-                                           const String& subzone_id,
-                                           const String& gpio) {
-  char topic_buffer[BUFFER_SIZE];
-  
-  int written = snprintf(topic_buffer, BUFFER_SIZE, 
-                        "kaiser/%s/master/%s/esp/%s/subzone/%s/%s",
-                        kaiser_id.c_str(),
-                        master_zone_id.c_str(),
-                        esp_id.c_str(),
-                        subzone_id.c_str(),
-                        gpio.c_str());
-  
-  if (written < 0 || written >= BUFFER_SIZE) {
-    LOG_ERROR("TopicBuilder: buildHierarchicalTopic truncated");
-    return "";
-  }
-  
-  return String(topic_buffer);
+// ============================================
+// PHASE 1: 8 CRITICAL TOPIC PATTERNS
+// ============================================
+
+// Pattern 1: kaiser/god/esp/{esp_id}/sensor/{gpio}/data
+const char* TopicBuilder::buildSensorDataTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/sensor/%d/data",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 2: kaiser/god/esp/{esp_id}/sensor/batch
+const char* TopicBuilder::buildSensorBatchTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/sensor/batch",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 3: kaiser/god/esp/{esp_id}/actuator/{gpio}/command
+const char* TopicBuilder::buildActuatorCommandTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/actuator/%d/command",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 4: kaiser/god/esp/{esp_id}/actuator/{gpio}/status
+const char* TopicBuilder::buildActuatorStatusTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/actuator/%d/status",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 5: kaiser/god/esp/{esp_id}/system/heartbeat
+const char* TopicBuilder::buildSystemHeartbeatTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/system/heartbeat",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 6: kaiser/god/esp/{esp_id}/system/command
+const char* TopicBuilder::buildSystemCommandTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/system/command",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 7: kaiser/god/esp/{esp_id}/config
+const char* TopicBuilder::buildConfigTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/config",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// Pattern 8: kaiser/broadcast/emergency
+const char* TopicBuilder::buildBroadcastEmergencyTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/broadcast/emergency");
+  return validateTopicBuffer(written);
 }
