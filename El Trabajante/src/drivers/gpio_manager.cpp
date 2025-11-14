@@ -47,7 +47,7 @@ void GPIOManager::initializeAllPinsToSafeMode() {
         
         // Verify pin state
         if (!verifyPinState(pin, INPUT_PULLUP)) {
-            Serial.printf("  ⚠️  WARNING: GPIO %d may not be in safe state!\n", pin);
+            LOG_WARNING("GPIO " + String(pin) + " may not be in safe state!");
             warning_count++;
         }
         
@@ -60,7 +60,7 @@ void GPIOManager::initializeAllPinsToSafeMode() {
         info.in_safe_mode = true;
         pins_.push_back(info);
         
-        Serial.printf("  GPIO %2d: Safe-Mode (INPUT_PULLUP)\n", pin);
+        LOG_DEBUG("GPIO " + String(pin) + ": Safe-Mode (INPUT_PULLUP)");
     }
     
     // Auto-reserve I2C pins for system use
@@ -68,27 +68,21 @@ void GPIOManager::initializeAllPinsToSafeMode() {
     bool i2c_scl = requestPin(HardwareConfig::I2C_SCL_PIN, "system", "I2C_SCL");
     
     if (i2c_sda && i2c_scl) {
-        Serial.printf("✅ I2C pins auto-reserved (SDA: GPIO %d, SCL: GPIO %d)\n",
-                     HardwareConfig::I2C_SDA_PIN,
-                     HardwareConfig::I2C_SCL_PIN);
-        LOG_INFO("GPIOManager: I2C pins (SDA/SCL) auto-reserved for system bus");
+        LOG_INFO("I2C pins auto-reserved (SDA: GPIO " + String(HardwareConfig::I2C_SDA_PIN) + 
+                 ", SCL: GPIO " + String(HardwareConfig::I2C_SCL_PIN) + ")");
     } else {
-        Serial.println("⚠️  WARNING: Could not auto-reserve I2C pins");
         LOG_WARNING("GPIOManager: I2C pin auto-reservation failed");
     }
     
     // Log initialization summary
-    Serial.println();
     if (warning_count > 0) {
-        Serial.printf("⚠️  %d pin(s) failed verification - check hardware!\n", warning_count);
         LOG_WARNING("GPIOManager: " + String(warning_count) + " pins failed safe-mode verification");
     } else {
-        Serial.println("✅ All pins successfully set to Safe-Mode");
+        LOG_INFO("All pins successfully set to Safe-Mode");
     }
-    Serial.printf("   Board: %s\n", BOARD_TYPE);
-    Serial.printf("   Available Pins: %d\n", HardwareConfig::SAFE_PIN_COUNT);
-    Serial.printf("   Reserved Pins: %d\n", HardwareConfig::RESERVED_PIN_COUNT);
-    Serial.println("=====================================\n");
+    LOG_INFO("Board: " + String(BOARD_TYPE));
+    LOG_INFO("Available Pins: " + String(HardwareConfig::SAFE_PIN_COUNT));
+    LOG_INFO("Reserved Pins: " + String(HardwareConfig::RESERVED_PIN_COUNT));
     
     LOG_INFO("GPIOManager: Safe-Mode initialization complete");
 }
@@ -102,7 +96,6 @@ void GPIOManager::initializeAllPinsToSafeMode() {
 bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* component_name) {
     // ✅ VALIDATION 1: Check if pin is reserved
     if (isReservedPin(gpio)) {
-        Serial.printf("❌ ERROR: GPIO %d is reserved (Boot/UART/Flash)!\n", gpio);
         LOG_ERROR("GPIOManager: Attempted to request reserved pin " + String(gpio));
         return false;
     }
@@ -110,8 +103,6 @@ bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* compon
     // ✅ VALIDATION 2: Check if pin is already in use
     for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio && pin_info.owner[0] != '\0') {
-            Serial.printf("❌ ERROR: GPIO %d already used by %s (%s)!\n", 
-                gpio, pin_info.owner, pin_info.component_name);
             LOG_ERROR("GPIOManager: Pin " + String(gpio) + " conflict - already owned by " + String(pin_info.owner));
             return false;
         }
@@ -126,14 +117,12 @@ bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* compon
             pin_info.component_name[sizeof(pin_info.component_name) - 1] = '\0';
             pin_info.in_safe_mode = false;
             
-            Serial.printf("✅ GPIO %d reserved by %s (%s)\n", gpio, owner, component_name);
             LOG_INFO("GPIOManager: Pin " + String(gpio) + " allocated to " + String(component_name));
             return true;
         }
     }
     
     // Pin not found in safe pins array
-    Serial.printf("❌ ERROR: GPIO %d not found in safe pins array!\n", gpio);
     LOG_ERROR("GPIOManager: Pin " + String(gpio) + " not in safe pins list");
     return false;
 }
@@ -146,15 +135,13 @@ bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* compon
 bool GPIOManager::releasePin(uint8_t gpio) {
     for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio) {
-            Serial.printf("ℹ️  Releasing GPIO %d (was: %s/%s)\n", 
-                gpio, pin_info.owner, pin_info.component_name);
+            LOG_INFO("Releasing GPIO " + String(gpio) + " (was: " + String(pin_info.owner) + "/" + String(pin_info.component_name) + ")");
             
             // Return hardware pin to safe state
             pinMode(gpio, INPUT_PULLUP);
             
             // Verify safe mode
             if (!verifyPinState(gpio, INPUT_PULLUP)) {
-                Serial.printf("⚠️  WARNING: GPIO %d safe-mode verification failed\n", gpio);
                 LOG_WARNING("Pin " + String(gpio) + " may not be in safe state after release");
             }
             
@@ -169,7 +156,7 @@ bool GPIOManager::releasePin(uint8_t gpio) {
         }
     }
     
-    Serial.printf("⚠️  WARNING: GPIO %d not found for release\n", gpio);
+    LOG_WARNING("GPIO " + String(gpio) + " not found for release");
     return false;
 }
 
@@ -180,7 +167,6 @@ bool GPIOManager::releasePin(uint8_t gpio) {
 // Used in error conditions to prevent hardware damage
 
 void GPIOManager::enableSafeModeForAllPins() {
-    Serial.println("🚨 EMERGENCY: Enabling Safe-Mode for ALL pins!");
     LOG_CRITICAL("GPIOManager: Emergency safe-mode activated");
     
     uint8_t warning_count = 0;
@@ -193,7 +179,6 @@ void GPIOManager::enableSafeModeForAllPins() {
             de_energized_count++;
             delayMicroseconds(10);            // Allow hardware to settle
             
-            Serial.printf("  GPIO %d: De-energized (was OUTPUT)\n", pin_info.pin);
             LOG_INFO("Emergency: GPIO " + String(pin_info.pin) + " de-energized before safe-mode");
         }
         
@@ -202,7 +187,7 @@ void GPIOManager::enableSafeModeForAllPins() {
         
         // Verify emergency safe mode
         if (!verifyPinState(pin_info.pin, INPUT_PULLUP)) {
-            Serial.printf("  ⚠️  WARNING: GPIO %d emergency safe-mode failed\n", pin_info.pin);
+            LOG_WARNING("GPIO " + String(pin_info.pin) + " emergency safe-mode failed");
             warning_count++;
         }
         
@@ -214,7 +199,6 @@ void GPIOManager::enableSafeModeForAllPins() {
     }
     
     if (de_energized_count > 0) {
-        Serial.printf("✅ %d output pin(s) de-energized before safe-mode\n", de_energized_count);
         LOG_INFO("Emergency: " + String(de_energized_count) + " outputs de-energized");
     }
     
@@ -222,7 +206,6 @@ void GPIOManager::enableSafeModeForAllPins() {
         LOG_CRITICAL("Emergency safe-mode: " + String(warning_count) + " pins failed verification!");
     }
     
-    Serial.println("✅ All pins set to Safe-Mode (INPUT_PULLUP)");
     LOG_INFO("GPIOManager: All pins returned to safe mode");
 }
 
@@ -234,7 +217,6 @@ void GPIOManager::enableSafeModeForAllPins() {
 bool GPIOManager::configurePinMode(uint8_t gpio, uint8_t mode) {
     // ✅ VALIDATION 1: Pin reserved?
     if (isReservedPin(gpio)) {
-        Serial.printf("❌ ERROR: Cannot configure reserved GPIO %d!\n", gpio);
         LOG_ERROR("GPIOManager: Attempted to configure reserved pin " + String(gpio));
         return false;
     }
@@ -242,7 +224,6 @@ bool GPIOManager::configurePinMode(uint8_t gpio, uint8_t mode) {
     // ✅ VALIDATION 2: Input-Only Pin check (ESP32 WROOM specific)
     #ifndef XIAO_ESP32C3
     if (isInputOnlyPin(gpio) && mode == OUTPUT) {
-        Serial.printf("❌ ERROR: GPIO %d is Input-Only (cannot set OUTPUT)!\n", gpio);
         LOG_ERROR("GPIOManager: Attempted OUTPUT mode on input-only pin " + String(gpio));
         return false;
     }
@@ -267,7 +248,6 @@ bool GPIOManager::configurePinMode(uint8_t gpio, uint8_t mode) {
             
             String mode_str = (mode == INPUT) ? "INPUT" : 
                              (mode == OUTPUT) ? "OUTPUT" : "INPUT_PULLUP";
-            Serial.printf("✅ GPIO %d configured as %s\n", gpio, mode_str.c_str());
             LOG_DEBUG("GPIOManager: Pin " + String(gpio) + " mode set to " + mode_str);
             return true;
         }
@@ -331,26 +311,25 @@ GPIOPinInfo GPIOManager::getPinInfo(uint8_t gpio) const {
 }
 
 void GPIOManager::printPinStatus() const {
-    Serial.println("\n=== GPIO PIN STATUS ===");
-    Serial.printf("Board: %s\n", BOARD_TYPE);
-    Serial.printf("Total Managed Pins: %zu\n", pins_.size());
-    Serial.println();
+    LOG_INFO("=== GPIO PIN STATUS ===");
+    LOG_INFO("Board: " + String(BOARD_TYPE));
+    LOG_INFO("Total Managed Pins: " + String(pins_.size()));
     
     for (const auto& pin_info : pins_) {
-        Serial.printf("  GPIO %2d: ", pin_info.pin);
+        String status = "GPIO " + String(pin_info.pin) + ": ";
         
         if (pin_info.in_safe_mode) {
-            Serial.println("SAFE-MODE (available)");
+            status += "SAFE-MODE (available)";
         } else if (pin_info.owner[0] == '\0') {
-            Serial.println("AVAILABLE");
+            status += "AVAILABLE";
         } else {
-            Serial.printf("USED by %s (%s)\n", 
-                pin_info.owner, 
-                pin_info.component_name);
+            status += "USED by " + String(pin_info.owner) + " (" + String(pin_info.component_name) + ")";
         }
+        
+        LOG_INFO(status);
     }
     
-    Serial.println("=======================\n");
+    LOG_INFO("=======================");
 }
 
 uint8_t GPIOManager::getAvailablePinCount() const {
@@ -368,16 +347,13 @@ uint8_t GPIOManager::getAvailablePinCount() const {
 // ============================================
 
 void GPIOManager::releaseI2CPins() {
-    Serial.println("⚠️  Releasing I2C pins for general GPIO use");
     LOG_WARNING("GPIOManager: I2C pins released - I2C bus will not be available");
     
     releasePin(HardwareConfig::I2C_SDA_PIN);
     releasePin(HardwareConfig::I2C_SCL_PIN);
     
-    Serial.printf("I2C pins released: SDA (GPIO %d), SCL (GPIO %d)\n",
-                 HardwareConfig::I2C_SDA_PIN,
-                 HardwareConfig::I2C_SCL_PIN);
-    
+    LOG_INFO("I2C pins released: SDA (GPIO " + String(HardwareConfig::I2C_SDA_PIN) + 
+             "), SCL (GPIO " + String(HardwareConfig::I2C_SCL_PIN) + ")");
     LOG_INFO("GPIOManager: I2C pins now available for general GPIO use");
 }
 
