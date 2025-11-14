@@ -143,6 +143,110 @@ void test_topic_builder_with_config() {
 }
 
 // ============================================
+// TEST: System Health MQTT Export
+// ============================================
+void test_system_health_mqtt_export() {
+  Serial.println("\n=== Testing System Health MQTT Export ===");
+  
+  // Collect system health metrics
+  uint32_t free_heap = ESP.getFreeHeap();
+  uint32_t heap_size = ESP.getHeapSize();
+  uint32_t uptime_ms = millis();
+  uint8_t boot_count = configManager.getSystemConfig().boot_count;
+  uint16_t error_count = errorTracker.getErrorCount();
+  bool has_critical = errorTracker.hasCriticalErrors();
+  
+  // Verify all metrics are readable
+  TEST_ASSERT_TRUE(free_heap > 0);
+  TEST_ASSERT_TRUE(heap_size > 0);
+  TEST_ASSERT_TRUE(uptime_ms > 0);
+  
+  // Simulate JSON payload construction (Phase 2 will actually send MQTT)
+  String health_json = "{";
+  health_json += "\"esp_id\":\"" + configManager.getESPId() + "\",";
+  health_json += "\"uptime_ms\":" + String(uptime_ms) + ",";
+  health_json += "\"free_heap_kb\":" + String(free_heap / 1024) + ",";
+  health_json += "\"boot_count\":" + String(boot_count) + ",";
+  health_json += "\"error_count\":" + String(error_count) + ",";
+  health_json += "\"has_critical_errors\":" + String(has_critical ? "true" : "false");
+  health_json += "}";
+  
+  Serial.println("Health JSON: " + health_json);
+  TEST_ASSERT_TRUE(health_json.length() > 50);  // Valid JSON should be >50 chars
+  
+  LOG_INFO("System health MQTT export test complete");
+}
+
+// ============================================
+// TEST: Boot Time Measurement
+// ============================================
+void test_boot_time_measurement() {
+  Serial.println("\n=== Testing Boot Time Measurement ===");
+  
+  // Measure time taken for full system initialization
+  uint32_t start_time = millis();
+  
+  // Reinitialize all Phase 1 modules
+  gpioManager.initializeAllPinsToSafeMode();
+  logger.begin();
+  storageManager.begin();
+  configManager.begin();
+  configManager.loadAllConfigs();
+  errorTracker.begin();
+  
+  uint32_t boot_time_ms = millis() - start_time;
+  
+  Serial.printf("Boot time: %d ms\n", boot_time_ms);
+  
+  // Boot time should be < 2000ms (2 seconds) for industrial systems
+  TEST_ASSERT_LESS_THAN(2000, boot_time_ms);
+  
+  LOG_INFO("Boot time measurement test complete");
+}
+
+// ============================================
+// TEST: Memory Fragmentation Under Load
+// ============================================
+void test_memory_fragmentation() {
+  Serial.println("\n=== Testing Memory Fragmentation ===");
+  
+  uint32_t initial_free = ESP.getFreeHeap();
+  uint32_t min_free = initial_free;
+  
+  // Simulate load: Log 100 messages + track 50 errors
+  for (int i = 0; i < 100; i++) {
+    logger.info("Load test message " + String(i));
+    
+    if (i % 2 == 0) {
+      String error_msg = "Load test error " + String(i);
+      errorTracker.trackError(1000 + i, error_msg.c_str());
+    }
+    
+    uint32_t current_free = ESP.getFreeHeap();
+    if (current_free < min_free) {
+      min_free = current_free;
+    }
+  }
+  
+  uint32_t final_free = ESP.getFreeHeap();
+  uint32_t fragmentation = initial_free - min_free;
+  float fragmentation_pct = (float)fragmentation / (float)initial_free * 100.0;
+  
+  Serial.printf("Initial Free: %d bytes\n", initial_free);
+  Serial.printf("Minimum Free: %d bytes\n", min_free);
+  Serial.printf("Final Free: %d bytes\n", final_free);
+  Serial.printf("Fragmentation: %d bytes (%.2f%%)\n", fragmentation, fragmentation_pct);
+  
+  // Fragmentation should be < 10KB under load
+  TEST_ASSERT_LESS_THAN(10000, fragmentation);
+  
+  // Memory should recover to near-initial after circular buffer wraps
+  TEST_ASSERT_TRUE(final_free > (initial_free - 5000));
+  
+  LOG_INFO("Memory fragmentation test complete");
+}
+
+// ============================================
 // UNITY SETUP
 // ============================================
 void setup() {
@@ -153,12 +257,18 @@ void setup() {
   
   UNITY_BEGIN();
   
+  // Original tests
   RUN_TEST(test_boot_sequence);
   RUN_TEST(test_memory_usage);
   RUN_TEST(test_logger_integration);
   RUN_TEST(test_config_persistence);
   RUN_TEST(test_error_tracking_integration);
   RUN_TEST(test_topic_builder_with_config);
+  
+  // NEW: Hardware observability tests
+  RUN_TEST(test_system_health_mqtt_export);
+  RUN_TEST(test_boot_time_measurement);
+  RUN_TEST(test_memory_fragmentation);
   
   UNITY_END();
   
