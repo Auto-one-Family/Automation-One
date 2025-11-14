@@ -1270,7 +1270,306 @@ String esp_id = configManager.getESPId();
 
 ---
 
-**Last Updated:** 2025-11-14  
-**Phase:** 1 - Core Infrastructure  
+## Hardware Abstraction Layer (Phase 3)
+
+### I2C Bus Manager
+
+#### Header
+```cpp
+#include "drivers/i2c_bus.h"
+```
+
+#### Singleton Access
+```cpp
+I2CBusManager& i2cBusManager = I2CBusManager::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize I2C bus (loads HardwareConfig, reserves GPIO pins)
+bool begin();
+
+// Deinitialize I2C bus (releases GPIO pins)
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Bus Operations
+```cpp
+// Scan I2C bus for devices (0x08-0x77)
+// addresses: output array for found device addresses
+// max_addresses: size of addresses array
+// found_count: output parameter with number of devices found
+bool scanBus(uint8_t addresses[], uint8_t max_addresses, uint8_t& found_count);
+
+// Check if specific device is present
+bool isDevicePresent(uint8_t address);
+```
+
+#### Raw Data Operations (Pi-Enhanced Mode)
+```cpp
+// Read raw bytes from I2C device register
+bool readRaw(uint8_t device_address, uint8_t register_address, 
+             uint8_t* buffer, size_t length);
+
+// Write raw bytes to I2C device register
+bool writeRaw(uint8_t device_address, uint8_t register_address,
+              const uint8_t* data, size_t length);
+```
+
+#### Status Queries
+```cpp
+// Get detailed bus status string
+String getBusStatus() const;  // Format: "I2C[SDA:4,SCL:5,Freq:100kHz,Init:true]"
+```
+
+#### Example Usage
+```cpp
+// Initialize
+if (!i2cBusManager.begin()) {
+    LOG_ERROR("I2C initialization failed");
+    return;
+}
+
+// Scan for devices
+uint8_t addresses[10];
+uint8_t found;
+i2cBusManager.scanBus(addresses, 10, found);
+
+// Read from device
+uint8_t buffer[2];
+if (i2cBusManager.readRaw(0x44, 0x00, buffer, 2)) {
+    // Process raw data (send to God-Kaiser for processing)
+}
+```
+
+---
+
+### OneWire Bus Manager
+
+#### Header
+```cpp
+#include "drivers/onewire_bus.h"
+```
+
+#### Singleton Access
+```cpp
+OneWireBusManager& oneWireBusManager = OneWireBusManager::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize OneWire bus
+bool begin();
+
+// Deinitialize OneWire bus
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Device Discovery
+```cpp
+// Scan OneWire bus for devices
+// rom_codes: output array [max_devices][8] for ROM codes
+// max_devices: maximum number of devices to scan
+// found_count: output parameter with number of devices found
+bool scanDevices(uint8_t rom_codes[][8], uint8_t max_devices, uint8_t& found_count);
+
+// Check if specific device is present
+bool isDevicePresent(const uint8_t rom_code[8]);
+```
+
+#### Raw Temperature Reading (Pi-Enhanced Mode)
+```cpp
+// Read raw temperature from DS18B20
+// rom_code: 8-byte ROM code of device
+// raw_value: output 12-bit signed temperature value
+//            Range: -550 to +1250 (represents -55.0°C to +125.0°C)
+//            Resolution: 0.0625°C per LSB
+// NOTE: NO local conversion - raw value sent to God-Kaiser
+bool readRawTemperature(const uint8_t rom_code[8], int16_t& raw_value);
+```
+
+#### Status Queries
+```cpp
+// Get detailed bus status string
+String getBusStatus() const;  // Format: "OneWire[Pin:6,Init:true]"
+```
+
+#### Example Usage
+```cpp
+// Initialize
+if (!oneWireBusManager.begin()) {
+    LOG_ERROR("OneWire initialization failed");
+    return;
+}
+
+// Discover devices
+uint8_t rom_codes[5][8];
+uint8_t found;
+oneWireBusManager.scanDevices(rom_codes, 5, found);
+
+// Read temperature
+int16_t raw_temp;
+if (oneWireBusManager.readRawTemperature(rom_codes[0], raw_temp)) {
+    // Send raw value to God-Kaiser for processing
+    // Server will convert: temp_celsius = raw_temp * 0.0625
+}
+```
+
+---
+
+### PWM Controller
+
+#### Header
+```cpp
+#include "drivers/pwm_controller.h"
+```
+
+#### Singleton Access
+```cpp
+PWMController& pwmController = PWMController::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize PWM controller (configures all channels)
+bool begin();
+
+// Deinitialize PWM controller (detaches all channels)
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Channel Management
+```cpp
+// Attach GPIO to PWM channel
+// gpio: GPIO pin to attach
+// channel_out: output parameter with assigned channel number
+bool attachChannel(uint8_t gpio, uint8_t& channel_out);
+
+// Detach PWM channel
+bool detachChannel(uint8_t channel);
+
+// Check if channel is attached
+bool isChannelAttached(uint8_t channel) const;
+
+// Get channel number for GPIO
+uint8_t getChannelForGPIO(uint8_t gpio) const;  // Returns 255 if not found
+```
+
+#### PWM Configuration
+```cpp
+// Set PWM frequency (1 Hz - 40 MHz)
+bool setFrequency(uint8_t channel, uint32_t frequency);
+
+// Set PWM resolution (1-16 bits)
+bool setResolution(uint8_t channel, uint8_t resolution_bits);
+```
+
+#### PWM Output Control
+```cpp
+// Set duty cycle (absolute value)
+// duty_cycle: 0 to (2^resolution - 1)
+// Example: For 12-bit resolution, range is 0-4095
+bool write(uint8_t channel, uint32_t duty_cycle);
+
+// Set duty cycle (percentage)
+// percent: 0.0 to 100.0
+bool writePercent(uint8_t channel, float percent);
+```
+
+#### Status Queries
+```cpp
+// Get detailed status of all channels
+String getChannelStatus() const;
+```
+
+#### Example Usage
+```cpp
+// Initialize
+if (!pwmController.begin()) {
+    LOG_ERROR("PWM initialization failed");
+    return;
+}
+
+// Attach channel
+uint8_t channel;
+if (pwmController.attachChannel(10, channel)) {
+    // Set to 50% duty cycle
+    pwmController.writePercent(channel, 50.0);
+    
+    // Or set absolute value (2048 = 50% of 4095 for 12-bit)
+    pwmController.write(channel, 2048);
+}
+```
+
+---
+
+## Hardware Configuration
+
+Phase 3 modules automatically load board-specific configuration:
+
+### XIAO ESP32-C3
+```cpp
+I2C:     SDA = GPIO 4,  SCL = GPIO 5,  Frequency = 100 kHz
+OneWire: Pin = GPIO 6
+PWM:     6 Channels, Frequency = 1 kHz, Resolution = 12-bit
+```
+
+### ESP32-WROOM-32
+```cpp
+I2C:     SDA = GPIO 21, SCL = GPIO 22, Frequency = 100 kHz
+OneWire: Pin = GPIO 4
+PWM:     16 Channels, Frequency = 1 kHz, Resolution = 12-bit
+```
+
+All pins are automatically reserved via GPIOManager during initialization.
+
+---
+
+## Error Codes Reference - Phase 3
+
+### I2C Error Codes (1010-1014)
+```cpp
+ERROR_I2C_INIT_FAILED       1010  // I2C bus initialization failed
+ERROR_I2C_DEVICE_NOT_FOUND  1011  // I2C device not found at address
+ERROR_I2C_READ_FAILED       1012  // I2C read operation failed
+ERROR_I2C_WRITE_FAILED      1013  // I2C write operation failed
+ERROR_I2C_BUS_ERROR         1014  // I2C bus error (timeout, SCL/SDA stuck)
+```
+
+### OneWire Error Codes (1020-1022)
+```cpp
+ERROR_ONEWIRE_INIT_FAILED   1020  // OneWire initialization failed
+ERROR_ONEWIRE_NO_DEVICES    1021  // No devices found on bus
+ERROR_ONEWIRE_READ_FAILED   1022  // OneWire read operation failed
+```
+
+### PWM Error Codes (1030-1032)
+```cpp
+ERROR_PWM_INIT_FAILED       1030  // PWM initialization failed
+ERROR_PWM_CHANNEL_FULL      1031  // No free PWM channels
+ERROR_PWM_SET_FAILED        1032  // PWM value set failed
+```
+
+### Error Handling Example
+```cpp
+if (!i2cBusManager.readRaw(0x44, 0x00, buffer, 2)) {
+    // Error automatically logged to ErrorTracker
+    // Check error with: errorTracker.getErrorHistory()
+}
+```
+
+---
+
+**Last Updated:** 2025-01-28  
+**Phase:** 1 & 3 - Core Infrastructure + Hardware Abstraction  
 **Status:** Production Ready
 
