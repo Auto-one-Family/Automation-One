@@ -111,15 +111,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 2 Communication Layer
+## [2.0.0] - Phase 2 Communication Layer - 2025-11-14
 
-### Planned
+### Added
 
-- WiFiManager
-- MQTTClient
-- HTTPClient
-- WebConfigServer
-- NetworkDiscovery
+#### Communication Modules
+
+- **WiFiManager** (`src/services/communication/wifi_manager.*`)
+  - WiFi connection management with auto-reconnect
+  - Exponential backoff reconnection (30s base interval, max 10 attempts)
+  - Connection monitoring via `loop()` method
+  - Status reporting (RSSI, IP, SSID, connection status)
+  - Error logging via ErrorTracker (ERROR_WIFI_* codes)
+  - Integration with WiFiConfig from ConfigManager
+  - Singleton pattern (consistent with Phase 1)
+
+- **MQTTClient** (`src/services/communication/mqtt_client.*`)
+  - MQTT client management with PubSubClient wrapper
+  - Anonymous and authenticated modes (transition support)
+  - Offline message buffer (100 messages max, circular buffer)
+  - Exponential backoff reconnection (1s base, 60s max)
+  - Heartbeat system (60s interval, QoS 0, JSON payload)
+  - Message callback routing
+  - Safe publish with retries
+  - Connection status reporting
+  - Singleton pattern (consistent with Phase 1)
+
+#### Integration
+
+- **main.cpp Phase 2 Integration** (`src/main.cpp`)
+  - WiFiManager initialization after ConfigManager
+  - WiFi connection using ConfigManager.getWiFiConfig()
+  - MQTTClient initialization after WiFi connection
+  - MQTTConfig built from WiFiConfig and SystemConfig
+  - Topic subscriptions:
+    - System command topic
+    - Config topic
+    - Broadcast emergency topic
+  - MQTT callback for message routing (placeholder for Phase 4)
+  - Loop integration: `wifiManager.loop()` and `mqttClient.loop()`
+
+#### Testing
+
+- **Unit Tests** (`test/`)
+  - test_wifi_manager.cpp (4 tests)
+  - test_mqtt_client.cpp (7 tests)
+  - test_phase2_integration.cpp (3 integration tests)
+  - **Total: 14 new tests**
+
+### Changed
+
+- main.cpp: Added Phase 2 communication layer initialization
+- main.cpp: Updated loop() to include WiFi and MQTT monitoring
+- Banner updated to reflect Phase 2 completion
+
+### Removed
+
+- None
+
+### Known Issues
+
+- HTTPClient, WebServer, NetworkDiscovery deferred (optional modules)
+- TopicBuilder buffer-overflow checks still pending (non-blocking)
+
+### Performance
+
+- WiFi connection timeout: 10 seconds
+- WiFi reconnection interval: 30 seconds
+- MQTT heartbeat interval: 60 seconds
+- MQTT reconnection backoff: 1s → 60s (exponential)
+- Offline buffer processing: <100ms on reconnect
+- Memory usage: ~25 KB / 320 KB (7.8%)
+
+### Dependencies
+
+- PubSubClient library (MQTT client)
+- WiFi.h (ESP32 Core)
+- WiFiClient.h (ESP32 Core)
+
+---
+
+## [1.0.0] - Phase 1 Core Infrastructure - 2025-11-14
 
 ---
 

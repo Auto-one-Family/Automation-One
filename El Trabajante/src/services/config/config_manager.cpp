@@ -129,7 +129,7 @@ bool ConfigManager::saveWiFiConfig(const WiFiConfig& config) {
   return success;
 }
 
-bool ConfigManager::validateWiFiConfig(const WiFiConfig& config) {
+bool ConfigManager::validateWiFiConfig(const WiFiConfig& config) const {
   // SSID must not be empty
   if (config.ssid.length() == 0) {
     LOG_WARNING("ConfigManager: WiFi SSID is empty");
@@ -227,7 +227,7 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
   return success;
 }
 
-bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) {
+bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
   // Kaiser ID should be set
   if (kaiser.kaiser_id.length() == 0) {
     LOG_WARNING("ConfigManager: Kaiser ID is empty");

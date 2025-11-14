@@ -19,13 +19,13 @@ public:
   // WiFi Configuration
   bool loadWiFiConfig(WiFiConfig& config);
   bool saveWiFiConfig(const WiFiConfig& config);
-  bool validateWiFiConfig(const WiFiConfig& config);
+  bool validateWiFiConfig(const WiFiConfig& config) const;
   void resetWiFiConfig();
   
   // Zone Configuration
   bool loadZoneConfig(KaiserZone& kaiser, MasterZone& master);
   bool saveZoneConfig(const KaiserZone& kaiser, const MasterZone& master);
-  bool validateZoneConfig(const KaiserZone& kaiser);
+  bool validateZoneConfig(const KaiserZone& kaiser) const;
   
   // System Configuration (NEU für Phase 1)
   bool loadSystemConfig(SystemConfig& config);

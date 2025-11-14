@@ -9,6 +9,8 @@
 #include "error_handling/error_tracker.h"
 #include "utils/topic_builder.h"
 #include "models/system_types.h"
+#include "services/communication/wifi_manager.h"
+#include "services/communication/mqtt_client.h"
 
 // ============================================
 // GLOBAL VARIABLES
@@ -32,7 +34,7 @@ void setup() {
   // STEP 2: BOOT BANNER (before Logger exists)
   // ============================================
   Serial.println("\n╔════════════════════════════════════════╗");
-  Serial.println("║  ESP32 Sensor Network v4.0 (Phase 1)  ║");
+  Serial.println("║  ESP32 Sensor Network v4.0 (Phase 2)  ║");
   Serial.println("╚════════════════════════════════════════╝");
   Serial.printf("Chip Model: %s\n", ESP.getChipModel());
   Serial.printf("CPU Frequency: %d MHz\n", ESP.getCpuFreqMHz());
@@ -100,29 +102,100 @@ void setup() {
   LOG_INFO("  ✅ Config Manager");
   LOG_INFO("  ✅ Error Tracker");
   LOG_INFO("  ✅ Topic Builder");
-  LOG_INFO("");
-  LOG_INFO("System ready for Phase 2 (Communication Layer)");
   
   // Print memory stats
-  LOG_INFO("=== Memory Status ===");
+  LOG_INFO("=== Memory Status (Phase 1) ===");
   LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
   LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
   LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
   LOG_INFO("=====================");
   
   // ============================================
-  // Future: PHASE 2+ modules will go here
+  // STEP 10: PHASE 2 - COMMUNICATION LAYER
   // ============================================
-  // WiFiManager, MQTTClient, etc.
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 2: Communication Layer         ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+  
+  // WiFi Manager
+  if (!wifiManager.begin()) {
+    LOG_ERROR("WiFiManager initialization failed!");
+    return;
+  }
+  
+  WiFiConfig wifi_config = configManager.getWiFiConfig();
+  if (!wifiManager.connect(wifi_config)) {
+    LOG_ERROR("WiFi connection failed");
+    LOG_WARNING("System will continue but WiFi features unavailable");
+  } else {
+    LOG_INFO("WiFi connected successfully");
+  }
+  
+  // MQTT Client
+  if (!mqttClient.begin()) {
+    LOG_ERROR("MQTTClient initialization failed!");
+    return;
+  }
+  
+  MQTTConfig mqtt_config;
+  mqtt_config.server = wifi_config.server_address;
+  mqtt_config.port = wifi_config.mqtt_port;
+  mqtt_config.client_id = configManager.getESPId();
+  mqtt_config.username = wifi_config.mqtt_username;  // Can be empty (Anonymous)
+  mqtt_config.password = wifi_config.mqtt_password;  // Can be empty (Anonymous)
+  mqtt_config.keepalive = 60;
+  mqtt_config.timeout = 10;
+  
+  if (!mqttClient.connect(mqtt_config)) {
+    LOG_ERROR("MQTT connection failed");
+    LOG_WARNING("System will continue but MQTT features unavailable");
+  } else {
+    LOG_INFO("MQTT connected successfully");
+    
+    // Subscribe to critical topics
+    String system_command_topic = TopicBuilder::buildSystemCommandTopic();
+    String config_topic = TopicBuilder::buildConfigTopic();
+    String emergency_topic = TopicBuilder::buildBroadcastEmergencyTopic();
+    
+    mqttClient.subscribe(system_command_topic);
+    mqttClient.subscribe(config_topic);
+    mqttClient.subscribe(emergency_topic);
+    
+    LOG_INFO("Subscribed to system topics");
+    
+    // Set MQTT callback for message routing (placeholder for Phase 4)
+    mqttClient.setCallback([](const String& topic, const String& payload) {
+      LOG_INFO("MQTT message received: " + topic);
+      LOG_DEBUG("Payload: " + payload);
+      // Message routing will be implemented in Phase 4
+    });
+  }
+  
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 2: Communication Layer READY  ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+  LOG_INFO("Modules Initialized:");
+  LOG_INFO("  ✅ WiFi Manager");
+  LOG_INFO("  ✅ MQTT Client");
+  LOG_INFO("");
+  
+  // Print memory stats
+  LOG_INFO("=== Memory Status (Phase 2) ===");
+  LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+  LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
+  LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
+  LOG_INFO("=====================");
 }
 
 // ============================================
-// LOOP - Phase 1 has no loop functionality yet
+// LOOP - Phase 2 Communication Monitoring
 // ============================================
 void loop() {
-  // Phase 1 has no loop functionality
-  // Phase 2+ will add WiFi/MQTT handling
-  delay(1000);
+  // Phase 2: Communication monitoring
+  wifiManager.loop();      // Monitor WiFi connection
+  mqttClient.loop();       // Process MQTT messages + heartbeat
+  
+  delay(10);  // Small delay to prevent watchdog issues
 }
 
 
