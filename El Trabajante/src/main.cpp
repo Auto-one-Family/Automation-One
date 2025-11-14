@@ -12,6 +12,11 @@
 #include "services/communication/wifi_manager.h"
 #include "services/communication/mqtt_client.h"
 
+// Phase 3: Hardware Abstraction Layer
+#include "drivers/i2c_bus.h"
+#include "drivers/onewire_bus.h"
+#include "drivers/pwm_controller.h"
+
 // ============================================
 // GLOBAL VARIABLES
 // ============================================
@@ -181,6 +186,59 @@ void setup() {
   
   // Print memory stats
   LOG_INFO("=== Memory Status (Phase 2) ===");
+  LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+  LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
+  LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
+  LOG_INFO("=====================");
+  
+  // ============================================
+  // STEP 11: PHASE 3 - HARDWARE ABSTRACTION LAYER
+  // ============================================
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 3: Hardware Abstraction Layer  ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+  
+  // I2C Bus Manager
+  if (!i2cBusManager.begin()) {
+    LOG_ERROR("I2C Bus Manager initialization failed!");
+    errorTracker.trackError(ERROR_I2C_INIT_FAILED, 
+                           ERROR_SEVERITY_CRITICAL,
+                           "I2C begin() failed");
+  } else {
+    LOG_INFO("I2C Bus Manager initialized");
+  }
+  
+  // OneWire Bus Manager
+  if (!oneWireBusManager.begin()) {
+    LOG_ERROR("OneWire Bus Manager initialization failed!");
+    errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
+                           ERROR_SEVERITY_CRITICAL,
+                           "OneWire begin() failed");
+  } else {
+    LOG_INFO("OneWire Bus Manager initialized");
+  }
+  
+  // PWM Controller
+  if (!pwmController.begin()) {
+    LOG_ERROR("PWM Controller initialization failed!");
+    errorTracker.trackError(ERROR_PWM_INIT_FAILED,
+                           ERROR_SEVERITY_CRITICAL,
+                           "PWM begin() failed");
+  } else {
+    LOG_INFO("PWM Controller initialized");
+  }
+  
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 3: Hardware Abstraction READY  ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+  LOG_INFO("Modules Initialized:");
+  LOG_INFO("  ✅ I2C Bus Manager");
+  LOG_INFO("  ✅ OneWire Bus Manager");
+  LOG_INFO("  ✅ PWM Controller");
+  LOG_INFO("");
+  
+  // Print memory stats
+  LOG_INFO("=== Memory Status (Phase 3) ===");
   LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
   LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
   LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
