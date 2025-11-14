@@ -4,45 +4,66 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
-// StorageManager für NVS-Operations
+// ============================================
+// STORAGE MANAGER CLASS (Guide-konform)
+// ============================================
 class StorageManager {
 public:
   // Singleton Instance
   static StorageManager& getInstance();
   
-  // Namespace Management
-  bool beginNamespace(const String& namespace_name, bool read_only = false);
+  // Initialization (Guide-konform)
+  bool begin();
+  
+  // Namespace Management (const char* für API-Konsistenz)
+  bool beginNamespace(const char* namespace_name, bool read_only = false);
   void endNamespace();
   
-  // Get/Set Operations (typ-sicher)
-  bool getString(const String& key, String& value, const String& default_value = "");
-  bool setString(const String& key, const String& value);
+  // Primary API: const char* (Guide-konform, zero-copy)
+  bool putString(const char* key, const char* value);
+  const char* getString(const char* key, const char* default_value = nullptr);
+  bool putInt(const char* key, int value);
+  int getInt(const char* key, int default_value = 0);
+  bool putUInt8(const char* key, uint8_t value);
+  uint8_t getUInt8(const char* key, uint8_t default_value = 0);
+  bool putUInt16(const char* key, uint16_t value);
+  uint16_t getUInt16(const char* key, uint16_t default_value = 0);
+  bool putBool(const char* key, bool value);
+  bool getBool(const char* key, bool default_value = false);
+  bool putULong(const char* key, unsigned long value);
+  unsigned long getULong(const char* key, unsigned long default_value = 0);
   
-  bool getInt(const String& key, int& value, int default_value = 0);
-  bool setInt(const String& key, int value);
-  
-  bool getUInt8(const String& key, uint8_t& value, uint8_t default_value = 0);
-  bool setUInt8(const String& key, uint8_t value);
-  
-  bool getUInt16(const String& key, uint16_t& value, uint16_t default_value = 0);
-  bool setUInt16(const String& key, uint16_t value);
-  
-  bool getBool(const String& key, bool& value, bool default_value = false);
-  bool setBool(const String& key, bool value);
+  // Convenience Wrapper: String (Kompatibilität)
+  inline bool putString(const char* key, const String& value) {
+    return putString(key, value.c_str());
+  }
+  inline String getStringObj(const char* key, const String& default_value = "") {
+    const char* result = getString(key, default_value.c_str());
+    return result ? String(result) : default_value;
+  }
   
   // Namespace Utilities
-  bool clearNamespace(const String& namespace_name);
-  bool namespaceExists(const String& namespace_name);
+  bool clearNamespace();
+  bool keyExists(const char* key);
+  size_t getFreeEntries();
   
 private:
   StorageManager();  // Private Constructor (Singleton)
+  ~StorageManager() = default;
+  StorageManager(const StorageManager&) = delete;
+  StorageManager& operator=(const StorageManager&) = delete;
   
-  Preferences _preferences;
-  String _current_namespace = "";
-  bool _namespace_open = false;
+  Preferences preferences_;
+  bool namespace_open_;
+  char current_namespace_[16];
+  
+  // Static buffer für getString (Guide-konform)
+  static char string_buffer_[256];
 };
 
-// Global StorageManager Instance
+// ============================================
+// GLOBAL STORAGE MANAGER INSTANCE
+// ============================================
 extern StorageManager& storageManager;
 
 #endif

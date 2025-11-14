@@ -1,201 +1,265 @@
 #include "storage_manager.h"
 #include "../../utils/logger.h"
 
-// Global StorageManager Instance
+// ============================================
+// STATIC MEMBER INITIALIZATION
+// ============================================
+char StorageManager::string_buffer_[256];
+
+// ============================================
+// GLOBAL STORAGE MANAGER INSTANCE
+// ============================================
 StorageManager& storageManager = StorageManager::getInstance();
 
-// Singleton
+// ============================================
+// SINGLETON IMPLEMENTATION
+// ============================================
 StorageManager& StorageManager::getInstance() {
   static StorageManager instance;
   return instance;
 }
 
-StorageManager::StorageManager() {}
+StorageManager::StorageManager()
+  : namespace_open_(false) {
+  current_namespace_[0] = '\0';
+}
 
-bool StorageManager::beginNamespace(const String& namespace_name, bool read_only) {
-  if (_namespace_open) {
+// ============================================
+// INITIALIZATION (Guide-konform)
+// ============================================
+bool StorageManager::begin() {
+  namespace_open_ = false;
+  current_namespace_[0] = '\0';
+  LOG_INFO("StorageManager: Initialized");
+  return true;
+}
+
+// ============================================
+// NAMESPACE MANAGEMENT
+// ============================================
+bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) {
+  if (namespace_open_) {
     LOG_WARNING("StorageManager: Namespace already open, closing first");
     endNamespace();
   }
   
-  bool success = _preferences.begin(namespace_name.c_str(), read_only);
-  if (success) {
-    _current_namespace = namespace_name;
-    _namespace_open = true;
-    LOG_DEBUG("StorageManager: Opened namespace '" + namespace_name + "'");
-  } else {
-    LOG_ERROR("StorageManager: Failed to open namespace '" + namespace_name + "'");
+  if (!preferences_.begin(namespace_name, read_only)) {
+    LOG_ERROR("StorageManager: Failed to open namespace: " + String(namespace_name));
+    return false;
   }
   
-  return success;
+  namespace_open_ = true;
+  strncpy(current_namespace_, namespace_name, sizeof(current_namespace_) - 1);
+  current_namespace_[sizeof(current_namespace_) - 1] = '\0';
+  
+  LOG_DEBUG("StorageManager: Opened namespace: " + String(namespace_name));
+  return true;
 }
 
 void StorageManager::endNamespace() {
-  if (_namespace_open) {
-    _preferences.end();
-    LOG_DEBUG("StorageManager: Closed namespace '" + _current_namespace + "'");
-    _current_namespace = "";
-    _namespace_open = false;
+  if (namespace_open_) {
+    preferences_.end();
+    namespace_open_ = false;
+    LOG_DEBUG("StorageManager: Closed namespace: " + String(current_namespace_));
+    current_namespace_[0] = '\0';
   }
 }
 
-bool StorageManager::getString(const String& key, String& value, const String& default_value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for getString()");
-    value = default_value;
+// ============================================
+// PRIMARY API: const char* (Guide-konform)
+// ============================================
+
+// String operations
+bool StorageManager::putString(const char* key, const char* value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putString");
     return false;
   }
   
-  value = _preferences.getString(key.c_str(), default_value.c_str());
+  size_t bytes = preferences_.putString(key, value);
+  if (bytes == 0 && strlen(value) > 0) {
+    LOG_ERROR("StorageManager: Failed to write string key: " + String(key));
+    return false;
+  }
+  
+  LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value));
   return true;
 }
 
-bool StorageManager::setString(const String& key, const String& value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for setString()");
+const char* StorageManager::getString(const char* key, const char* default_value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getString");
+    return default_value;
+  }
+  
+  String value = preferences_.getString(key, default_value ? default_value : "");
+  strncpy(string_buffer_, value.c_str(), sizeof(string_buffer_) - 1);
+  string_buffer_[sizeof(string_buffer_) - 1] = '\0';
+  
+  LOG_DEBUG("StorageManager: Read " + String(key) + " = " + value);
+  return string_buffer_;
+}
+
+// Integer operations
+bool StorageManager::putInt(const char* key, int value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putInt");
     return false;
   }
   
-  size_t written = _preferences.putString(key.c_str(), value.c_str());
-  if (written == 0) {
-    LOG_ERROR("StorageManager: Failed to write String key '" + key + "' in namespace '" + _current_namespace + "'");
+  size_t bytes = preferences_.putInt(key, value);
+  if (bytes == 0) {
+    LOG_ERROR("StorageManager: Failed to write int key: " + String(key));
     return false;
   }
   
+  LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value));
   return true;
 }
 
-bool StorageManager::getInt(const String& key, int& value, int default_value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for getInt()");
-    value = default_value;
-    return false;
+int StorageManager::getInt(const char* key, int default_value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getInt");
+    return default_value;
   }
   
-  value = _preferences.getInt(key.c_str(), default_value);
-  return true;
+  int value = preferences_.getInt(key, default_value);
+  LOG_DEBUG("StorageManager: Read " + String(key) + " = " + String(value));
+  return value;
 }
 
-bool StorageManager::setInt(const String& key, int value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for setInt()");
+// UInt8 operations
+bool StorageManager::putUInt8(const char* key, uint8_t value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putUInt8");
     return false;
   }
   
-  size_t written = _preferences.putInt(key.c_str(), value);
-  if (written == 0) {
-    LOG_ERROR("StorageManager: Failed to write Int key '" + key + "' in namespace '" + _current_namespace + "'");
-    return false;
-  }
-  
-  return true;
-}
-
-bool StorageManager::getUInt8(const String& key, uint8_t& value, uint8_t default_value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for getUInt8()");
-    value = default_value;
-    return false;
-  }
-  
-  value = _preferences.getUChar(key.c_str(), default_value);
-  return true;
-}
-
-bool StorageManager::setUInt8(const String& key, uint8_t value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for setUInt8()");
-    return false;
-  }
-  
-  size_t written = _preferences.putUChar(key.c_str(), value);
-  if (written == 0) {
-    LOG_ERROR("StorageManager: Failed to write UInt8 key '" + key + "' in namespace '" + _current_namespace + "'");
-    return false;
-  }
-  
-  return true;
-}
-
-bool StorageManager::getUInt16(const String& key, uint16_t& value, uint16_t default_value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for getUInt16()");
-    value = default_value;
-    return false;
-  }
-  
-  value = _preferences.getUShort(key.c_str(), default_value);
-  return true;
-}
-
-bool StorageManager::setUInt16(const String& key, uint16_t value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for setUInt16()");
-    return false;
-  }
-  
-  size_t written = _preferences.putUShort(key.c_str(), value);
-  if (written == 0) {
-    LOG_ERROR("StorageManager: Failed to write UInt16 key '" + key + "' in namespace '" + _current_namespace + "'");
+  size_t bytes = preferences_.putUChar(key, value);
+  if (bytes == 0) {
+    LOG_ERROR("StorageManager: Failed to write uint8 key: " + String(key));
     return false;
   }
   
   return true;
 }
 
-bool StorageManager::getBool(const String& key, bool& value, bool default_value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for getBool()");
-    value = default_value;
+uint8_t StorageManager::getUInt8(const char* key, uint8_t default_value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getUInt8");
+    return default_value;
+  }
+  
+  return preferences_.getUChar(key, default_value);
+}
+
+// UInt16 operations
+bool StorageManager::putUInt16(const char* key, uint16_t value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putUInt16");
     return false;
   }
   
-  value = _preferences.getBool(key.c_str(), default_value);
+  size_t bytes = preferences_.putUShort(key, value);
+  if (bytes == 0) {
+    LOG_ERROR("StorageManager: Failed to write uint16 key: " + String(key));
+    return false;
+  }
+  
   return true;
 }
 
-bool StorageManager::setBool(const String& key, bool value) {
-  if (!_namespace_open) {
-    LOG_ERROR("StorageManager: No namespace open for setBool()");
+uint16_t StorageManager::getUInt16(const char* key, uint16_t default_value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getUInt16");
+    return default_value;
+  }
+  
+  return preferences_.getUShort(key, default_value);
+}
+
+// Boolean operations
+bool StorageManager::putBool(const char* key, bool value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putBool");
     return false;
   }
   
-  size_t written = _preferences.putBool(key.c_str(), value);
-  if (written == 0) {
-    LOG_ERROR("StorageManager: Failed to write Bool key '" + key + "' in namespace '" + _current_namespace + "'");
+  size_t bytes = preferences_.putBool(key, value);
+  if (bytes == 0) {
+    LOG_ERROR("StorageManager: Failed to write bool key: " + String(key));
     return false;
   }
   
   return true;
 }
 
-bool StorageManager::clearNamespace(const String& namespace_name) {
-  bool was_open = _namespace_open;
-  if (was_open) {
-    endNamespace();
+bool StorageManager::getBool(const char* key, bool default_value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getBool");
+    return default_value;
   }
   
-  bool success = _preferences.begin(namespace_name.c_str(), false);
+  return preferences_.getBool(key, default_value);
+}
+
+// Unsigned long operations
+bool StorageManager::putULong(const char* key, unsigned long value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putULong");
+    return false;
+  }
+  
+  size_t bytes = preferences_.putULong(key, value);
+  if (bytes == 0) {
+    LOG_ERROR("StorageManager: Failed to write ulong key: " + String(key));
+    return false;
+  }
+  
+  return true;
+}
+
+unsigned long StorageManager::getULong(const char* key, unsigned long default_value) {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getULong");
+    return default_value;
+  }
+  
+  return preferences_.getULong(key, default_value);
+}
+
+// ============================================
+// NAMESPACE UTILITIES
+// ============================================
+bool StorageManager::clearNamespace() {
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for clear");
+    return false;
+  }
+  
+  bool success = preferences_.clear();
   if (success) {
-    _preferences.clear();
-    _preferences.end();
-    LOG_INFO("StorageManager: Cleared namespace '" + namespace_name + "'");
+    LOG_INFO("StorageManager: Cleared namespace: " + String(current_namespace_));
   } else {
-    LOG_ERROR("StorageManager: Failed to clear namespace '" + namespace_name + "'");
-  }
-  
-  if (was_open) {
-    beginNamespace(_current_namespace, false);
+    LOG_ERROR("StorageManager: Failed to clear namespace: " + String(current_namespace_));
   }
   
   return success;
 }
 
-bool StorageManager::namespaceExists(const String& namespace_name) {
-  bool success = _preferences.begin(namespace_name.c_str(), true);
-  if (success) {
-    _preferences.end();
+bool StorageManager::keyExists(const char* key) {
+  if (!namespace_open_) {
+    return false;
   }
-  return success;
+  
+  return preferences_.isKey(key);
+}
+
+size_t StorageManager::getFreeEntries() {
+  if (!namespace_open_) {
+    return 0;
+  }
+  
+  return preferences_.freeEntries();
 }
 

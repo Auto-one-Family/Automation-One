@@ -3,320 +3,332 @@
 #include "../../utils/logger.h"
 #include <WiFi.h>
 
-// Global ConfigManager Instance
+// ============================================
+// GLOBAL CONFIG MANAGER INSTANCE
+// ============================================
 ConfigManager& configManager = ConfigManager::getInstance();
 
-// Singleton
+// ============================================
+// SINGLETON IMPLEMENTATION
+// ============================================
 ConfigManager& ConfigManager::getInstance() {
   static ConfigManager instance;
   return instance;
 }
 
-ConfigManager::ConfigManager() {
-  _generateESPId();
-  _loadKaiserId();
+ConfigManager::ConfigManager()
+  : wifi_config_loaded_(false),
+    zone_config_loaded_(false),
+    system_config_loaded_(false) {
 }
 
-// WiFi Configuration
+// ============================================
+// INITIALIZATION + ORCHESTRIERUNG (Guide-konform)
+// ============================================
+bool ConfigManager::begin() {
+  wifi_config_loaded_ = false;
+  zone_config_loaded_ = false;
+  system_config_loaded_ = false;
+  
+  LOG_INFO("ConfigManager: Initialized (Phase 1 - WiFi/Zone/System only)");
+  return true;
+}
+
+bool ConfigManager::loadAllConfigs() {
+  LOG_INFO("ConfigManager: Loading Phase 1 configurations...");
+  
+  bool success = true;
+  success &= loadWiFiConfig(wifi_config_);
+  success &= loadZoneConfig(kaiser_, master_);
+  success &= loadSystemConfig(system_config_);
+  
+  // Generate ESP ID if missing
+  generateESPIdIfMissing();
+  
+  if (success) {
+    LOG_INFO("ConfigManager: All Phase 1 configurations loaded successfully");
+  } else {
+    LOG_WARNING("ConfigManager: Some configurations failed to load");
+  }
+  
+  return success;
+}
+
+// ============================================
+// WIFI CONFIGURATION
+// ============================================
 bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
   if (!storageManager.beginNamespace("wifi_config", true)) {
+    LOG_ERROR("ConfigManager: Failed to open wifi_config namespace");
     return false;
   }
   
-  storageManager.getString("ssid", config.ssid);
-  storageManager.getString("password", config.password);
-  storageManager.getString("server_address", config.server_address);
-  storageManager.getUInt16("mqtt_port", config.mqtt_port, 8883);
-  storageManager.getString("mqtt_username", config.mqtt_username);
-  storageManager.getString("mqtt_password", config.mqtt_password);
+  // Load WiFi settings
+  config.ssid = storageManager.getStringObj("ssid", "");
+  config.password = storageManager.getStringObj("password", "");
+  
+  // Load server settings
+  config.server_address = storageManager.getStringObj("server_address", "192.168.0.198");
+  config.mqtt_port = storageManager.getUInt16("mqtt_port", 8883);
+  
+  // Load credentials
+  config.mqtt_username = storageManager.getStringObj("mqtt_username", "");
+  config.mqtt_password = storageManager.getStringObj("mqtt_password", "");
+  
+  // Load status
+  config.configured = storageManager.getBool("configured", false);
   
   storageManager.endNamespace();
   
-  LOG_INFO("ConfigManager: WiFi Config loaded");
+  wifi_config_loaded_ = true;
+  
+  LOG_INFO("ConfigManager: WiFi config loaded - SSID: " + config.ssid + 
+           ", Server: " + config.server_address);
+  
   return true;
 }
 
 bool ConfigManager::saveWiFiConfig(const WiFiConfig& config) {
+  LOG_INFO("ConfigManager: Saving WiFi configuration...");
+  
+  if (!validateWiFiConfig(config)) {
+    LOG_ERROR("ConfigManager: WiFi config validation failed, not saving");
+    return false;
+  }
+  
   if (!storageManager.beginNamespace("wifi_config", false)) {
+    LOG_ERROR("ConfigManager: Failed to open wifi_config namespace for writing");
     return false;
   }
   
   bool success = true;
-  success &= storageManager.setString("ssid", config.ssid);
-  success &= storageManager.setString("password", config.password);
-  success &= storageManager.setString("server_address", config.server_address);
-  success &= storageManager.setUInt16("mqtt_port", config.mqtt_port);
-  success &= storageManager.setString("mqtt_username", config.mqtt_username);
-  success &= storageManager.setString("mqtt_password", config.mqtt_password);
+  // Save WiFi settings
+  success &= storageManager.putString("ssid", config.ssid);
+  success &= storageManager.putString("password", config.password);
+  
+  // Save server settings
+  success &= storageManager.putString("server_address", config.server_address);
+  success &= storageManager.putUInt16("mqtt_port", config.mqtt_port);
+  
+  // Save credentials
+  success &= storageManager.putString("mqtt_username", config.mqtt_username);
+  success &= storageManager.putString("mqtt_password", config.mqtt_password);
+  
+  // Save status
+  success &= storageManager.putBool("configured", config.configured);
   
   storageManager.endNamespace();
   
   if (success) {
-    LOG_INFO("ConfigManager: WiFi Config saved");
+    wifi_config_ = config;
+    LOG_INFO("ConfigManager: WiFi configuration saved");
   } else {
-    LOG_ERROR("ConfigManager: Failed to save WiFi Config");
+    LOG_ERROR("ConfigManager: Failed to save WiFi configuration");
   }
   
   return success;
 }
 
-void ConfigManager::resetWiFiConfig() {
-  storageManager.clearNamespace("wifi_config");
-  LOG_INFO("ConfigManager: WiFi Config reset");
-}
-
-// Zone Configuration
-bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
-  if (!storageManager.beginNamespace("zone_config", true)) {
+bool ConfigManager::validateWiFiConfig(const WiFiConfig& config) {
+  // SSID must not be empty
+  if (config.ssid.length() == 0) {
+    LOG_WARNING("ConfigManager: WiFi SSID is empty");
     return false;
   }
   
-  storageManager.getString("kaiser_id", kaiser.kaiser_id);
-  storageManager.getString("kaiser_name", kaiser.kaiser_name);
-  storageManager.getBool("connected", kaiser.connected);
+  // Server address must not be empty
+  if (config.server_address.length() == 0) {
+    LOG_WARNING("ConfigManager: Server address is empty");
+    return false;
+  }
   
-  storageManager.getString("master_zone_id", master.master_zone_id);
-  storageManager.getString("master_zone_name", master.master_zone_name);
-  storageManager.getBool("is_master_esp", master.is_master_esp);
+  // MQTT port must be in valid range
+  if (config.mqtt_port == 0 || config.mqtt_port > 65535) {
+    LOG_WARNING("ConfigManager: Invalid MQTT port: " + String(config.mqtt_port));
+    return false;
+  }
+  
+  return true;
+}
+
+void ConfigManager::resetWiFiConfig() {
+  LOG_INFO("ConfigManager: Resetting WiFi configuration to defaults");
+  
+  if (!storageManager.beginNamespace("wifi_config", false)) {
+    return;
+  }
+  
+  storageManager.clearNamespace();
+  storageManager.endNamespace();
+  
+  wifi_config_ = WiFiConfig();  // Reset to defaults
+}
+
+// ============================================
+// ZONE CONFIGURATION
+// ============================================
+bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
+  LOG_INFO("ConfigManager: Loading Zone configuration...");
+  
+  if (!storageManager.beginNamespace("zone_config", true)) {
+    LOG_ERROR("ConfigManager: Failed to open zone_config namespace");
+    return false;
+  }
+  
+  // Load Kaiser zone
+  kaiser.kaiser_id = storageManager.getStringObj("kaiser_id", "");
+  kaiser.kaiser_name = storageManager.getStringObj("kaiser_name", "");
+  kaiser.connected = storageManager.getBool("connected", false);
+  
+  // Load Master zone
+  master.master_zone_id = storageManager.getStringObj("master_zone_id", "");
+  master.master_zone_name = storageManager.getStringObj("master_zone_name", "");
+  master.is_master_esp = storageManager.getBool("is_master_esp", false);
   
   storageManager.endNamespace();
   
-  // Cache Kaiser ID
-  _kaiser_id = kaiser.kaiser_id;
+  zone_config_loaded_ = true;
   
-  LOG_INFO("ConfigManager: Zone Config loaded (Kaiser: " + kaiser.kaiser_id + ")");
+  LOG_INFO("ConfigManager: Zone config loaded - Kaiser: " + kaiser.kaiser_id + 
+           ", Master: " + master.master_zone_id);
+  
   return true;
 }
 
 bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& master) {
+  LOG_INFO("ConfigManager: Saving Zone configuration...");
+  
   if (!storageManager.beginNamespace("zone_config", false)) {
+    LOG_ERROR("ConfigManager: Failed to open zone_config namespace for writing");
     return false;
   }
   
   bool success = true;
-  success &= storageManager.setString("kaiser_id", kaiser.kaiser_id);
-  success &= storageManager.setString("kaiser_name", kaiser.kaiser_name);
-  success &= storageManager.setBool("connected", kaiser.connected);
+  // Save Kaiser zone
+  success &= storageManager.putString("kaiser_id", kaiser.kaiser_id);
+  success &= storageManager.putString("kaiser_name", kaiser.kaiser_name);
+  success &= storageManager.putBool("connected", kaiser.connected);
   
-  success &= storageManager.setString("master_zone_id", master.master_zone_id);
-  success &= storageManager.setString("master_zone_name", master.master_zone_name);
-  success &= storageManager.setBool("is_master_esp", master.is_master_esp);
-  
-  storageManager.endNamespace();
-  
-  // Update Cache
-  _kaiser_id = kaiser.kaiser_id;
-  
-  if (success) {
-    LOG_INFO("ConfigManager: Zone Config saved");
-  } else {
-    LOG_ERROR("ConfigManager: Failed to save Zone Config");
-  }
-  
-  return success;
-}
-
-// Sensor Configuration
-bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors, uint8_t& loaded_count) {
-  if (!storageManager.beginNamespace("sensor_config", true)) {
-    return false;
-  }
-  
-  storageManager.getUInt8("sensor_count", loaded_count, 0);
-  
-  for (uint8_t i = 0; i < loaded_count && i < max_sensors; i++) {
-    String prefix = "sensor_" + String(i) + "_";
-    
-    storageManager.getUInt8(prefix + "gpio", sensors[i].gpio);
-    storageManager.getString(prefix + "type", sensors[i].sensor_type);
-    storageManager.getString(prefix + "name", sensors[i].sensor_name);
-    storageManager.getString(prefix + "subzone", sensors[i].subzone_id);
-    storageManager.getBool(prefix + "active", sensors[i].active);
-    
-    // ✅ Pi-Enhanced Mode: raw_mode ist immer true
-    sensors[i].raw_mode = true;
-  }
-  
-  storageManager.endNamespace();
-  
-  LOG_INFO("ConfigManager: Loaded " + String(loaded_count) + " sensors");
-  return true;
-}
-
-bool ConfigManager::saveSensorConfig(const SensorConfig sensors[], uint8_t sensor_count) {
-  if (!storageManager.beginNamespace("sensor_config", false)) {
-    return false;
-  }
-  
-  bool success = storageManager.setUInt8("sensor_count", sensor_count);
-  
-  for (uint8_t i = 0; i < sensor_count; i++) {
-    String prefix = "sensor_" + String(i) + "_";
-    
-    success &= storageManager.setUInt8(prefix + "gpio", sensors[i].gpio);
-    success &= storageManager.setString(prefix + "type", sensors[i].sensor_type);
-    success &= storageManager.setString(prefix + "name", sensors[i].sensor_name);
-    success &= storageManager.setString(prefix + "subzone", sensors[i].subzone_id);
-    success &= storageManager.setBool(prefix + "active", sensors[i].active);
-  }
+  // Save Master zone
+  success &= storageManager.putString("master_zone_id", master.master_zone_id);
+  success &= storageManager.putString("master_zone_name", master.master_zone_name);
+  success &= storageManager.putBool("is_master_esp", master.is_master_esp);
   
   storageManager.endNamespace();
   
   if (success) {
-    LOG_INFO("ConfigManager: Saved " + String(sensor_count) + " sensors");
+    kaiser_ = kaiser;
+    master_ = master;
+    LOG_INFO("ConfigManager: Zone configuration saved");
   } else {
-    LOG_ERROR("ConfigManager: Failed to save sensors");
+    LOG_ERROR("ConfigManager: Failed to save Zone configuration");
   }
   
   return success;
 }
 
-// Actuator Configuration
-bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_actuators, uint8_t& loaded_count) {
-  if (!storageManager.beginNamespace("actuator_config", true)) {
-    return false;
-  }
-  
-  storageManager.getUInt8("actuator_count", loaded_count, 0);
-  
-  for (uint8_t i = 0; i < loaded_count && i < max_actuators; i++) {
-    String prefix = "actuator_" + String(i) + "_";
-    
-    storageManager.getUInt8(prefix + "gpio", actuators[i].gpio);
-    storageManager.getString(prefix + "type", actuators[i].actuator_type);
-    storageManager.getString(prefix + "name", actuators[i].actuator_name);
-    storageManager.getString(prefix + "subzone", actuators[i].subzone_id);
-    storageManager.getBool(prefix + "active", actuators[i].active);
-  }
-  
-  storageManager.endNamespace();
-  
-  LOG_INFO("ConfigManager: Loaded " + String(loaded_count) + " actuators");
-  return true;
-}
-
-bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t actuator_count) {
-  if (!storageManager.beginNamespace("actuator_config", false)) {
-    return false;
-  }
-  
-  bool success = storageManager.setUInt8("actuator_count", actuator_count);
-  
-  for (uint8_t i = 0; i < actuator_count; i++) {
-    String prefix = "actuator_" + String(i) + "_";
-    
-    success &= storageManager.setUInt8(prefix + "gpio", actuators[i].gpio);
-    success &= storageManager.setString(prefix + "type", actuators[i].actuator_type);
-    success &= storageManager.setString(prefix + "name", actuators[i].actuator_name);
-    success &= storageManager.setString(prefix + "subzone", actuators[i].subzone_id);
-    success &= storageManager.setBool(prefix + "active", actuators[i].active);
-  }
-  
-  storageManager.endNamespace();
-  
-  if (success) {
-    LOG_INFO("ConfigManager: Saved " + String(actuator_count) + " actuators");
-  } else {
-    LOG_ERROR("ConfigManager: Failed to save actuators");
-  }
-  
-  return success;
-}
-
-// System State
-bool ConfigManager::loadSystemState(SystemState& state) {
-  if (!storageManager.beginNamespace("system_config", true)) {
-    return false;
-  }
-  
-  uint8_t state_int;
-  storageManager.getUInt8("current_state", state_int, STATE_BOOT);
-  state = (SystemState)state_int;
-  
-  storageManager.endNamespace();
-  
-  return true;
-}
-
-bool ConfigManager::saveSystemState(SystemState state) {
-  if (!storageManager.beginNamespace("system_config", false)) {
-    return false;
-  }
-  
-  bool success = storageManager.setUInt8("current_state", (uint8_t)state);
-  
-  storageManager.endNamespace();
-  
-  return success;
-}
-
-// Utilities
-bool ConfigManager::isConfigurationComplete() const {
-  WiFiConfig wifi;
-  KaiserZone kaiser;
-  MasterZone master;
-  
-  // Check WiFi Config
-  if (!const_cast<ConfigManager*>(this)->loadWiFiConfig(wifi)) {
-    return false;
-  }
-  if (wifi.ssid.length() == 0) {
-    return false;
-  }
-  
-  // Check Zone Config
-  if (!const_cast<ConfigManager*>(this)->loadZoneConfig(kaiser, master)) {
-    return false;
-  }
+bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) {
+  // Kaiser ID should be set
   if (kaiser.kaiser_id.length() == 0) {
+    LOG_WARNING("ConfigManager: Kaiser ID is empty");
     return false;
   }
   
   return true;
+}
+
+// ============================================
+// SYSTEM CONFIGURATION (NEU für Phase 1)
+// ============================================
+bool ConfigManager::loadSystemConfig(SystemConfig& config) {
+  LOG_INFO("ConfigManager: Loading System configuration...");
+  
+  if (!storageManager.beginNamespace("system_config", true)) {
+    LOG_ERROR("ConfigManager: Failed to open system_config namespace");
+    return false;
+  }
+  
+  config.esp_id = storageManager.getStringObj("esp_id", "");
+  config.device_name = storageManager.getStringObj("device_name", "ESP32");
+  config.current_state = (SystemState)storageManager.getUInt8("current_state", STATE_BOOT);
+  config.safe_mode_reason = storageManager.getStringObj("safe_mode_reason", "");
+  config.boot_count = storageManager.getUInt16("boot_count", 0);
+  
+  storageManager.endNamespace();
+  
+  system_config_loaded_ = true;
+  
+  LOG_INFO("ConfigManager: System config loaded - ESP ID: " + config.esp_id);
+  
+  return true;
+}
+
+bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
+  LOG_INFO("ConfigManager: Saving System configuration...");
+  
+  if (!storageManager.beginNamespace("system_config", false)) {
+    LOG_ERROR("ConfigManager: Failed to open system_config namespace for writing");
+    return false;
+  }
+  
+  bool success = true;
+  success &= storageManager.putString("esp_id", config.esp_id);
+  success &= storageManager.putString("device_name", config.device_name);
+  success &= storageManager.putUInt8("current_state", (uint8_t)config.current_state);
+  success &= storageManager.putString("safe_mode_reason", config.safe_mode_reason);
+  success &= storageManager.putUInt16("boot_count", config.boot_count);
+  
+  storageManager.endNamespace();
+  
+  if (success) {
+    system_config_ = config;
+    LOG_INFO("ConfigManager: System configuration saved");
+  } else {
+    LOG_ERROR("ConfigManager: Failed to save System configuration");
+  }
+  
+  return success;
+}
+
+// ============================================
+// CONFIGURATION STATUS (Guide-konform)
+// ============================================
+bool ConfigManager::isConfigurationComplete() const {
+  return wifi_config_loaded_ && 
+         zone_config_loaded_ && 
+         system_config_loaded_ &&
+         validateWiFiConfig(wifi_config_) &&
+         validateZoneConfig(kaiser_);
 }
 
 void ConfigManager::printConfigurationStatus() const {
-  LOG_INFO("=== Configuration Status ===");
-  LOG_INFO("ESP ID: " + _esp_id);
-  LOG_INFO("Kaiser ID: " + _kaiser_id);
-  LOG_INFO("Config Complete: " + String(isConfigurationComplete() ? "YES" : "NO"));
+  LOG_INFO("=== Configuration Status (Phase 1) ===");
+  LOG_INFO("WiFi Config: " + String(wifi_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
+  LOG_INFO("Zone Config: " + String(zone_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
+  LOG_INFO("System Config: " + String(system_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
+  LOG_INFO("Sensor/Actuator Config: ⚠️  Deferred to Phase 3 (Server-Centric)");
+  LOG_INFO("Configuration Complete: " + String(isConfigurationComplete() ? "✅ YES" : "❌ NO"));
+  LOG_INFO("======================================");
 }
 
-bool ConfigManager::backupConfiguration() {
-  // TODO: Implement backup to separate namespace
-  LOG_WARNING("ConfigManager: backupConfiguration() not implemented yet");
-  return false;
-}
-
-bool ConfigManager::restoreConfiguration() {
-  // TODO: Implement restore from backup namespace
-  LOG_WARNING("ConfigManager: restoreConfiguration() not implemented yet");
-  return false;
-}
-
-// Helper Methods
-void ConfigManager::_generateESPId() {
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
-  
-  char mac_str[18];
-  snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  
-  _esp_id = String(mac_str);
-  
-  LOG_INFO("ConfigManager: Generated ESP ID: " + _esp_id);
-}
-
-bool ConfigManager::_loadKaiserId() {
-  if (!storageManager.beginNamespace("zone_config", true)) {
-    return false;
+// ============================================
+// HELPER METHODS
+// ============================================
+void ConfigManager::generateESPIdIfMissing() {
+  if (system_config_.esp_id.length() == 0) {
+    LOG_WARNING("ConfigManager: ESP ID not configured - generating from MAC address");
+    
+    WiFi.mode(WIFI_STA);  // Must be before macAddress()
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    
+    char esp_id[32];
+    snprintf(esp_id, sizeof(esp_id), "ESP_%02X%02X%02X", 
+             mac[3], mac[4], mac[5]);
+    
+    system_config_.esp_id = String(esp_id);
+    saveSystemConfig(system_config_);
+    
+    LOG_INFO("ConfigManager: Generated ESP ID: " + system_config_.esp_id);
   }
-  
-  storageManager.getString("kaiser_id", _kaiser_id);
-  
-  storageManager.endNamespace();
-  
-  return _kaiser_id.length() > 0;
 }
-
