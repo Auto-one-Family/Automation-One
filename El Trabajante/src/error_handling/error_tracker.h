@@ -2,9 +2,10 @@
 #define ERROR_HANDLING_ERROR_TRACKER_H
 
 #include <Arduino.h>
-#include <vector>
 
-// Error Categories (aus ZZZ.md Phase 8)
+// ============================================
+// ERROR CATEGORIES (Guide-konform: 1000-4999)
+// ============================================
 enum ErrorCategory {
   ERROR_HARDWARE = 1000,       // GPIO, I2C, PWM
   ERROR_SERVICE = 2000,        // Sensor, Actuator, Config
@@ -12,66 +13,89 @@ enum ErrorCategory {
   ERROR_APPLICATION = 4000     // State, Memory, System
 };
 
-// Error Severity
+// ============================================
+// ERROR SEVERITY LEVELS
+// ============================================
 enum ErrorSeverity {
-  ERROR_SEVERITY_INFO = 0,
-  ERROR_SEVERITY_WARNING = 1,
-  ERROR_SEVERITY_ERROR = 2,
-  ERROR_SEVERITY_CRITICAL = 3
+  ERROR_SEVERITY_WARNING = 1,  // Recoverable warning
+  ERROR_SEVERITY_ERROR = 2,    // Error but system can continue
+  ERROR_SEVERITY_CRITICAL = 3  // Critical error, system unstable
 };
 
-// System Error Entry
-struct SystemError {
-  int error_code;
-  ErrorCategory category;
-  ErrorSeverity severity;
-  String message;
-  String context;
+// ============================================
+// ERROR ENTRY STRUCTURE (Guide-konform: fixed size)
+// ============================================
+struct ErrorEntry {
   unsigned long timestamp;
+  uint16_t error_code;
+  ErrorSeverity severity;
+  char message[128];
+  uint8_t occurrence_count;  // Duplicate tracking
+  
+  ErrorEntry() 
+    : timestamp(0), error_code(0),
+      severity(ERROR_SEVERITY_ERROR),
+      occurrence_count(0) {
+    message[0] = '\0';
+  }
 };
 
-// ErrorTracker Class
+// ============================================
+// ERROR TRACKER CLASS
+// ============================================
 class ErrorTracker {
 public:
   // Singleton Instance
   static ErrorTracker& getInstance();
   
-  // Error Logging
-  void logError(int error_code, 
-               ErrorCategory category,
-               ErrorSeverity severity,
-               const String& message,
-               const String& context = "");
+  // Initialization (Guide-konform)
+  void begin();
+  
+  // Primary API: const char* (Guide-konform)
+  void trackError(uint16_t error_code, ErrorSeverity severity, const char* message);
+  void trackError(uint16_t error_code, const char* message);  // Default severity: ERROR
   
   // Convenience Methods
-  void logHardwareError(int error_code, const String& message, const String& context = "");
-  void logServiceError(int error_code, const String& message, const String& context = "");
-  void logCommunicationError(int error_code, const String& message, const String& context = "");
-  void logApplicationError(int error_code, const String& message, const String& context = "");
+  void logHardwareError(uint16_t code, const char* message);
+  void logServiceError(uint16_t code, const char* message);
+  void logCommunicationError(uint16_t code, const char* message);
+  void logApplicationError(uint16_t code, const char* message);
   
-  // Error History
-  String getErrorHistory(ErrorSeverity min_severity = ERROR_SEVERITY_INFO) const;
+  // Error Retrieval
+  String getErrorHistory(uint8_t max_entries = 20) const;
+  String getErrorsByCategory(ErrorCategory category, uint8_t max_entries = 10) const;
   size_t getErrorCount() const;
+  size_t getErrorCountByCategory(ErrorCategory category) const;
+  
+  // Error Status
+  bool hasActiveErrors() const;
+  bool hasCriticalErrors() const;
   void clearErrors();
   
-  // Last Error
-  bool hasErrors() const;
-  SystemError getLastError() const;
-  
   // Utilities
-  static String getErrorCategoryString(ErrorCategory category);
-  static String getErrorSeverityString(ErrorSeverity severity);
+  static const char* getCategoryString(uint16_t error_code);
+  static ErrorCategory getCategory(uint16_t error_code);
   
 private:
   ErrorTracker();  // Private Constructor (Singleton)
+  ~ErrorTracker() = default;
+  ErrorTracker(const ErrorTracker&) = delete;
+  ErrorTracker& operator=(const ErrorTracker&) = delete;
   
-  std::vector<SystemError> _error_history;
-  size_t _max_entries = 50;
+  // Fixed Array Circular Buffer (Guide-konform)
+  static const size_t MAX_ERROR_ENTRIES = 50;
+  ErrorEntry error_buffer_[MAX_ERROR_ENTRIES];
+  size_t error_buffer_index_;
+  size_t error_count_;
   
-  void _addToHistory(const SystemError& error);
+  // Helper methods
+  void addToBuffer(uint16_t error_code, ErrorSeverity severity, const char* message);
+  void logErrorToLogger(uint16_t error_code, ErrorSeverity severity, const char* message);
 };
 
-// Global ErrorTracker Instance
+// ============================================
+// GLOBAL ERROR TRACKER INSTANCE
+// ============================================
 extern ErrorTracker& errorTracker;
 
 #endif

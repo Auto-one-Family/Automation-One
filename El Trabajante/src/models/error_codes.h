@@ -1,0 +1,127 @@
+#ifndef MODELS_ERROR_CODES_H
+#define MODELS_ERROR_CODES_H
+
+// ============================================
+// ERROR CODE RANGES (Guide-konform)
+// ============================================
+// HARDWARE:       1000-1999
+// SERVICE:        2000-2999
+// COMMUNICATION:  3000-3999
+// APPLICATION:    4000-4999
+
+// ============================================
+// HARDWARE ERROR CODES (1000-1999)
+// ============================================
+#define ERROR_GPIO_RESERVED         1001
+#define ERROR_GPIO_CONFLICT         1002
+#define ERROR_GPIO_INIT_FAILED      1003
+#define ERROR_GPIO_INVALID_MODE     1004
+#define ERROR_GPIO_READ_FAILED      1005
+#define ERROR_GPIO_WRITE_FAILED     1006
+
+#define ERROR_I2C_INIT_FAILED       1010
+#define ERROR_I2C_DEVICE_NOT_FOUND  1011
+#define ERROR_I2C_READ_FAILED       1012
+#define ERROR_I2C_WRITE_FAILED      1013
+#define ERROR_I2C_BUS_ERROR         1014
+
+#define ERROR_ONEWIRE_INIT_FAILED   1020
+#define ERROR_ONEWIRE_NO_DEVICES    1021
+#define ERROR_ONEWIRE_READ_FAILED   1022
+
+#define ERROR_PWM_INIT_FAILED       1030
+#define ERROR_PWM_CHANNEL_FULL      1031
+#define ERROR_PWM_SET_FAILED        1032
+
+#define ERROR_SENSOR_READ_FAILED    1040
+#define ERROR_SENSOR_INIT_FAILED    1041
+#define ERROR_SENSOR_NOT_FOUND      1042
+#define ERROR_SENSOR_TIMEOUT        1043
+
+#define ERROR_ACTUATOR_SET_FAILED   1050
+#define ERROR_ACTUATOR_INIT_FAILED  1051
+#define ERROR_ACTUATOR_NOT_FOUND    1052
+#define ERROR_ACTUATOR_CONFLICT     1053
+
+// ============================================
+// SERVICE ERROR CODES (2000-2999)
+// ============================================
+#define ERROR_NVS_INIT_FAILED       2001
+#define ERROR_NVS_READ_FAILED       2002
+#define ERROR_NVS_WRITE_FAILED      2003
+#define ERROR_NVS_NAMESPACE_FAILED  2004
+#define ERROR_NVS_CLEAR_FAILED      2005
+
+#define ERROR_CONFIG_INVALID        2010
+#define ERROR_CONFIG_MISSING        2011
+#define ERROR_CONFIG_LOAD_FAILED    2012
+#define ERROR_CONFIG_SAVE_FAILED    2013
+#define ERROR_CONFIG_VALIDATION     2014
+
+#define ERROR_LOGGER_INIT_FAILED    2020
+#define ERROR_LOGGER_BUFFER_FULL    2021
+
+#define ERROR_STORAGE_INIT_FAILED   2030
+#define ERROR_STORAGE_READ_FAILED   2031
+#define ERROR_STORAGE_WRITE_FAILED  2032
+
+// ============================================
+// COMMUNICATION ERROR CODES (3000-3999)
+// ============================================
+#define ERROR_WIFI_INIT_FAILED      3001
+#define ERROR_WIFI_CONNECT_TIMEOUT  3002
+#define ERROR_WIFI_CONNECT_FAILED   3003
+#define ERROR_WIFI_DISCONNECT       3004
+#define ERROR_WIFI_NO_SSID          3005
+
+#define ERROR_MQTT_INIT_FAILED      3010
+#define ERROR_MQTT_CONNECT_FAILED   3011
+#define ERROR_MQTT_PUBLISH_FAILED   3012
+#define ERROR_MQTT_SUBSCRIBE_FAILED 3013
+#define ERROR_MQTT_DISCONNECT       3014
+#define ERROR_MQTT_BUFFER_FULL      3015
+#define ERROR_MQTT_PAYLOAD_INVALID  3016
+
+#define ERROR_HTTP_INIT_FAILED      3020
+#define ERROR_HTTP_REQUEST_FAILED   3021
+#define ERROR_HTTP_RESPONSE_INVALID 3022
+#define ERROR_HTTP_TIMEOUT          3023
+
+#define ERROR_NETWORK_UNREACHABLE   3030
+#define ERROR_DNS_FAILED            3031
+#define ERROR_CONNECTION_LOST       3032
+
+// ============================================
+// APPLICATION ERROR CODES (4000-4999)
+// ============================================
+#define ERROR_STATE_INVALID         4001
+#define ERROR_STATE_TRANSITION      4002
+#define ERROR_STATE_MACHINE_STUCK   4003
+
+#define ERROR_OPERATION_TIMEOUT     4010
+#define ERROR_OPERATION_FAILED      4011
+#define ERROR_OPERATION_CANCELLED   4012
+
+#define ERROR_COMMAND_INVALID       4020
+#define ERROR_COMMAND_PARSE_FAILED  4021
+#define ERROR_COMMAND_EXEC_FAILED   4022
+
+#define ERROR_PAYLOAD_INVALID       4030
+#define ERROR_PAYLOAD_TOO_LARGE     4031
+#define ERROR_PAYLOAD_PARSE_FAILED  4032
+
+#define ERROR_MEMORY_FULL           4040
+#define ERROR_MEMORY_ALLOCATION     4041
+#define ERROR_MEMORY_LEAK           4042
+
+#define ERROR_SYSTEM_INIT_FAILED    4050
+#define ERROR_SYSTEM_RESTART        4051
+#define ERROR_SYSTEM_SAFE_MODE      4052
+
+#define ERROR_TASK_FAILED           4060
+#define ERROR_TASK_TIMEOUT          4061
+#define ERROR_TASK_QUEUE_FULL       4062
+
+#endif
+
+

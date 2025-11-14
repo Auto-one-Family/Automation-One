@@ -58,6 +58,16 @@ struct WiFiConfig {
   uint16_t mqtt_port = 8883;             // MQTT Port (default: 8883 für TLS)
   String mqtt_username = "";             // ✅ OPTIONAL (kann leer sein - Anonymous Mode)
   String mqtt_password = "";             // ✅ OPTIONAL (kann leer sein - Anonymous Mode)
+  bool configured = false;               // ✅ Konfigurationsstatus
+};
+
+// System Configuration (Phase 1 - NEU)
+struct SystemConfig {
+  String esp_id = "";
+  String device_name = "ESP32";
+  SystemState current_state = STATE_BOOT;
+  String safe_mode_reason = "";
+  uint16_t boot_count = 0;
 };
 
 // Utility Functions (Deklaration, Implementierung in .cpp später)

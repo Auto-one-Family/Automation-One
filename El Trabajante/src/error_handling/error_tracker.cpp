@@ -1,90 +1,123 @@
 #include "error_tracker.h"
 #include "../utils/logger.h"
 
-// Global ErrorTracker Instance
+// ============================================
+// GLOBAL ERROR TRACKER INSTANCE
+// ============================================
 ErrorTracker& errorTracker = ErrorTracker::getInstance();
 
-// Singleton
+// ============================================
+// SINGLETON IMPLEMENTATION
+// ============================================
 ErrorTracker& ErrorTracker::getInstance() {
   static ErrorTracker instance;
   return instance;
 }
 
-ErrorTracker::ErrorTracker() {
-  _error_history.reserve(_max_entries);
+ErrorTracker::ErrorTracker()
+  : error_buffer_index_(0),
+    error_count_(0) {
+  // Initialize fixed buffer
+  for (size_t i = 0; i < MAX_ERROR_ENTRIES; i++) {
+    error_buffer_[i] = ErrorEntry();
+  }
 }
 
-void ErrorTracker::logError(int error_code, 
-                           ErrorCategory category,
-                           ErrorSeverity severity,
-                           const String& message,
-                           const String& context) {
-  // Create Error Entry
-  SystemError error;
-  error.error_code = error_code;
-  error.category = category;
-  error.severity = severity;
-  error.message = message;
-  error.context = context;
-  error.timestamp = millis();
+// ============================================
+// INITIALIZATION (Guide-konform)
+// ============================================
+void ErrorTracker::begin() {
+  error_buffer_index_ = 0;
+  error_count_ = 0;
   
-  // Add to History
-  _addToHistory(error);
+  for (size_t i = 0; i < MAX_ERROR_ENTRIES; i++) {
+    error_buffer_[i] = ErrorEntry();
+  }
   
+  LOG_INFO("ErrorTracker: Initialized");
+}
+
+// ============================================
+// ERROR TRACKING (Primary API)
+// ============================================
+void ErrorTracker::trackError(uint16_t error_code, ErrorSeverity severity, const char* message) {
   // Log to Logger
-  String log_message = "[" + String(error_code) + "] ";
-  log_message += getErrorCategoryString(category) + " - ";
-  log_message += message;
-  if (context.length() > 0) {
-    log_message += " (Context: " + context + ")";
-  }
+  logErrorToLogger(error_code, severity, message);
   
-  switch (severity) {
-    case ERROR_SEVERITY_INFO:
-      LOG_INFO(log_message);
-      break;
-    case ERROR_SEVERITY_WARNING:
-      LOG_WARNING(log_message);
-      break;
-    case ERROR_SEVERITY_ERROR:
-      LOG_ERROR(log_message);
-      break;
-    case ERROR_SEVERITY_CRITICAL:
-      LOG_CRITICAL(log_message);
-      break;
-  }
+  // Add to circular buffer
+  addToBuffer(error_code, severity, message);
 }
 
-void ErrorTracker::logHardwareError(int error_code, const String& message, const String& context) {
-  logError(ERROR_HARDWARE + error_code, ERROR_HARDWARE, ERROR_SEVERITY_ERROR, message, context);
+void ErrorTracker::trackError(uint16_t error_code, const char* message) {
+  trackError(error_code, ERROR_SEVERITY_ERROR, message);
 }
 
-void ErrorTracker::logServiceError(int error_code, const String& message, const String& context) {
-  logError(ERROR_SERVICE + error_code, ERROR_SERVICE, ERROR_SEVERITY_ERROR, message, context);
+// ============================================
+// CONVENIENCE METHODS
+// ============================================
+void ErrorTracker::logHardwareError(uint16_t code, const char* message) {
+  trackError(ERROR_HARDWARE + code, ERROR_SEVERITY_ERROR, message);
 }
 
-void ErrorTracker::logCommunicationError(int error_code, const String& message, const String& context) {
-  logError(ERROR_COMMUNICATION + error_code, ERROR_COMMUNICATION, ERROR_SEVERITY_ERROR, message, context);
+void ErrorTracker::logServiceError(uint16_t code, const char* message) {
+  trackError(ERROR_SERVICE + code, ERROR_SEVERITY_ERROR, message);
 }
 
-void ErrorTracker::logApplicationError(int error_code, const String& message, const String& context) {
-  logError(ERROR_APPLICATION + error_code, ERROR_APPLICATION, ERROR_SEVERITY_CRITICAL, message, context);
+void ErrorTracker::logCommunicationError(uint16_t code, const char* message) {
+  trackError(ERROR_COMMUNICATION + code, ERROR_SEVERITY_ERROR, message);
 }
 
-String ErrorTracker::getErrorHistory(ErrorSeverity min_severity) const {
+void ErrorTracker::logApplicationError(uint16_t code, const char* message) {
+  trackError(ERROR_APPLICATION + code, ERROR_SEVERITY_ERROR, message);
+}
+
+// ============================================
+// ERROR RETRIEVAL
+// ============================================
+String ErrorTracker::getErrorHistory(uint8_t max_entries) const {
   String result = "";
-  result.reserve(500);
+  size_t entries_added = 0;
   
-  for (const auto& error : _error_history) {
-    if (error.severity >= min_severity) {
-      result += "[" + String(error.timestamp) + "] ";
-      result += "[" + String(error.error_code) + "] ";
-      result += getErrorSeverityString(error.severity) + " - ";
-      result += error.message;
-      if (error.context.length() > 0) {
-        result += " (Context: " + error.context + ")";
+  // Start from oldest entry
+  size_t start_index = (error_count_ < MAX_ERROR_ENTRIES) ? 0 : error_buffer_index_;
+  
+  for (size_t i = 0; i < error_count_ && entries_added < max_entries; i++) {
+    size_t index = (start_index + i) % MAX_ERROR_ENTRIES;
+    const ErrorEntry& entry = error_buffer_[index];
+    
+    result += "[" + String(entry.timestamp) + "] ";
+    result += "[" + String(entry.error_code) + "] ";
+    result += "[" + String(getCategoryString(entry.error_code)) + "] ";
+    result += String(entry.message);
+    if (entry.occurrence_count > 1) {
+      result += " (x" + String(entry.occurrence_count) + ")";
+    }
+    result += "\n";
+    entries_added++;
+  }
+  
+  return result;
+}
+
+String ErrorTracker::getErrorsByCategory(ErrorCategory category, uint8_t max_entries) const {
+  String result = "";
+  size_t entries_added = 0;
+  
+  size_t start_index = (error_count_ < MAX_ERROR_ENTRIES) ? 0 : error_buffer_index_;
+  
+  for (size_t i = 0; i < error_count_ && entries_added < max_entries; i++) {
+    size_t index = (start_index + i) % MAX_ERROR_ENTRIES;
+    const ErrorEntry& entry = error_buffer_[index];
+    
+    if (getCategory(entry.error_code) == category) {
+      result += "[" + String(entry.timestamp) + "] ";
+      result += "[" + String(entry.error_code) + "] ";
+      result += String(entry.message);
+      if (entry.occurrence_count > 1) {
+        result += " (x" + String(entry.occurrence_count) + ")";
       }
       result += "\n";
+      entries_added++;
     }
   }
   
@@ -92,50 +125,127 @@ String ErrorTracker::getErrorHistory(ErrorSeverity min_severity) const {
 }
 
 size_t ErrorTracker::getErrorCount() const {
-  return _error_history.size();
+  return error_count_;
+}
+
+size_t ErrorTracker::getErrorCountByCategory(ErrorCategory category) const {
+  size_t count = 0;
+  
+  size_t start_index = (error_count_ < MAX_ERROR_ENTRIES) ? 0 : error_buffer_index_;
+  
+  for (size_t i = 0; i < error_count_; i++) {
+    size_t index = (start_index + i) % MAX_ERROR_ENTRIES;
+    if (getCategory(error_buffer_[index].error_code) == category) {
+      count++;
+    }
+  }
+  
+  return count;
+}
+
+// ============================================
+// ERROR STATUS
+// ============================================
+bool ErrorTracker::hasActiveErrors() const {
+  return error_count_ > 0;
+}
+
+bool ErrorTracker::hasCriticalErrors() const {
+  size_t start_index = (error_count_ < MAX_ERROR_ENTRIES) ? 0 : error_buffer_index_;
+  
+  for (size_t i = 0; i < error_count_; i++) {
+    size_t index = (start_index + i) % MAX_ERROR_ENTRIES;
+    if (error_buffer_[index].severity == ERROR_SEVERITY_CRITICAL) {
+      return true;
+    }
+  }
+  
+  return false;
 }
 
 void ErrorTracker::clearErrors() {
-  _error_history.clear();
+  error_buffer_index_ = 0;
+  error_count_ = 0;
+  LOG_INFO("ErrorTracker: Error history cleared");
 }
 
-bool ErrorTracker::hasErrors() const {
-  return _error_history.size() > 0;
-}
-
-SystemError ErrorTracker::getLastError() const {
-  if (_error_history.size() > 0) {
-    return _error_history.back();
-  }
-  return SystemError();
-}
-
-String ErrorTracker::getErrorCategoryString(ErrorCategory category) {
-  switch (category) {
-    case ERROR_HARDWARE: return "HARDWARE";
-    case ERROR_SERVICE: return "SERVICE";
-    case ERROR_COMMUNICATION: return "COMM";
-    case ERROR_APPLICATION: return "APP";
-    default: return "UNKNOWN";
-  }
-}
-
-String ErrorTracker::getErrorSeverityString(ErrorSeverity severity) {
-  switch (severity) {
-    case ERROR_SEVERITY_INFO: return "INFO";
-    case ERROR_SEVERITY_WARNING: return "WARN";
-    case ERROR_SEVERITY_ERROR: return "ERROR";
-    case ERROR_SEVERITY_CRITICAL: return "CRIT";
-    default: return "UNKNOWN";
-  }
-}
-
-void ErrorTracker::_addToHistory(const SystemError& error) {
-  // Circular Buffer: Älteste Einträge löschen wenn voll
-  if (_error_history.size() >= _max_entries) {
-    _error_history.erase(_error_history.begin());
+// ============================================
+// HELPER METHODS
+// ============================================
+void ErrorTracker::addToBuffer(uint16_t error_code, ErrorSeverity severity, const char* message) {
+  // Check if this error already exists in recent entries (last 5) - occurrence counting
+  for (int i = 0; i < 5 && i < (int)error_count_; i++) {
+    int check_index = (error_buffer_index_ - 1 - i + MAX_ERROR_ENTRIES) % MAX_ERROR_ENTRIES;
+    ErrorEntry& entry = error_buffer_[check_index];
+    
+    if (entry.error_code == error_code && strcmp(entry.message, message) == 0) {
+      entry.occurrence_count++;
+      entry.timestamp = millis();  // Update timestamp
+      return;  // Don't add duplicate
+    }
   }
   
-  _error_history.push_back(error);
+  // Add new entry
+  size_t index = error_buffer_index_;
+  error_buffer_[index].timestamp = millis();
+  error_buffer_[index].error_code = error_code;
+  error_buffer_[index].severity = severity;
+  strncpy(error_buffer_[index].message, message, sizeof(error_buffer_[index].message) - 1);
+  error_buffer_[index].message[sizeof(error_buffer_[index].message) - 1] = '\0';
+  error_buffer_[index].occurrence_count = 1;
+  
+  // Advance circular buffer index
+  error_buffer_index_ = (error_buffer_index_ + 1) % MAX_ERROR_ENTRIES;
+  
+  // Track total count (up to MAX_ERROR_ENTRIES)
+  if (error_count_ < MAX_ERROR_ENTRIES) {
+    error_count_++;
+  }
 }
 
+void ErrorTracker::logErrorToLogger(uint16_t error_code, ErrorSeverity severity, const char* message) {
+  String log_msg = "[" + String(error_code) + "] [" + 
+                   String(getCategoryString(error_code)) + "] " + 
+                   String(message);
+  
+  switch (severity) {
+    case ERROR_SEVERITY_WARNING:
+      LOG_WARNING(log_msg.c_str());
+      break;
+    case ERROR_SEVERITY_ERROR:
+      LOG_ERROR(log_msg.c_str());
+      break;
+    case ERROR_SEVERITY_CRITICAL:
+      LOG_CRITICAL(log_msg.c_str());
+      break;
+  }
+}
+
+// ============================================
+// UTILITIES
+// ============================================
+const char* ErrorTracker::getCategoryString(uint16_t error_code) {
+  if (error_code >= ERROR_APPLICATION && error_code < 5000) {
+    return "APPLICATION";
+  } else if (error_code >= ERROR_COMMUNICATION && error_code < 4000) {
+    return "COMMUNICATION";
+  } else if (error_code >= ERROR_SERVICE && error_code < 3000) {
+    return "SERVICE";
+  } else if (error_code >= ERROR_HARDWARE && error_code < 2000) {
+    return "HARDWARE";
+  } else {
+    return "UNKNOWN";
+  }
+}
+
+ErrorCategory ErrorTracker::getCategory(uint16_t error_code) {
+  if (error_code >= ERROR_APPLICATION && error_code < 5000) {
+    return ERROR_APPLICATION;
+  } else if (error_code >= ERROR_COMMUNICATION && error_code < 4000) {
+    return ERROR_COMMUNICATION;
+  } else if (error_code >= ERROR_SERVICE && error_code < 3000) {
+    return ERROR_SERVICE;
+  } else {
+    return ERROR_HARDWARE;
+  }
+}
