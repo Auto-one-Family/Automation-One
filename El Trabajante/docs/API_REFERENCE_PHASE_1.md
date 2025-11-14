@@ -1,0 +1,1276 @@
+# API Reference - Phase 1 Core Infrastructure
+
+Complete API documentation for all Phase 1 modules. All modules follow a consistent design pattern: **Singleton instances** with **const char\* primary API** and **String wrapper convenience methods**.
+
+---
+
+## Table of Contents
+
+1. [Logger System](#logger-system)
+2. [StorageManager](#storagemanager)
+3. [ConfigManager](#configmanager)
+4. [ErrorTracker](#errortracker)
+5. [TopicBuilder](#topicbuilder)
+6. [GPIOManager](#gpiomanager)
+7. [Error Codes Reference](#error-codes-reference)
+8. [Type Definitions](#type-definitions)
+
+---
+
+## Logger System
+
+### Header
+```cpp
+#include "utils/logger.h"
+```
+
+### Log Levels
+```cpp
+enum LogLevel {
+  LOG_DEBUG = 0,      // Detailed diagnostic information
+  LOG_INFO = 1,       // General informational messages
+  LOG_WARNING = 2,    // Warning conditions
+  LOG_ERROR = 3,      // Error conditions
+  LOG_CRITICAL = 4    // Critical errors, system unstable
+};
+```
+
+### Initialization
+
+```cpp
+// Get singleton instance
+Logger& logger = Logger::getInstance();
+
+// Initialize logger (must call in setup())
+void logger.begin();
+
+// Configure log output level (default: LOG_DEBUG)
+void logger.setLogLevel(LogLevel level);
+
+// Enable/disable serial output (default: true)
+void logger.setSerialEnabled(bool enabled);
+
+// Set maximum log buffer entries (default: 50)
+void logger.setMaxLogEntries(size_t max_entries);
+```
+
+### Logging Methods - Primary API (const char\*)
+
+**Zero-copy, memory-efficient methods for production code.**
+
+```cpp
+void logger.log(LogLevel level, const char* message);
+void logger.debug(const char* message);
+void logger.info(const char* message);
+void logger.warning(const char* message);
+void logger.error(const char* message);
+void logger.critical(const char* message);
+```
+
+### Logging Methods - Wrapper API (String)
+
+**Convenience methods for code that generates dynamic messages.**
+
+```cpp
+inline void logger.log(LogLevel level, const String& message);
+inline void logger.debug(const String& message);
+inline void logger.info(const String& message);
+inline void logger.warning(const String& message);
+inline void logger.error(const String& message);
+inline void logger.critical(const String& message);
+```
+
+### Convenience Macros
+
+**Use macros for cleaner, more readable logging code.**
+
+```cpp
+LOG_DEBUG(msg)      // Expands to logger.debug(msg)
+LOG_INFO(msg)       // Expands to logger.info(msg)
+LOG_WARNING(msg)    // Expands to logger.warning(msg)
+LOG_ERROR(msg)      // Expands to logger.error(msg)
+LOG_CRITICAL(msg)   // Expands to logger.critical(msg)
+```
+
+### Log Management and Queries
+
+```cpp
+// Clear all log entries
+void logger.clearLogs();
+
+// Retrieve formatted log history
+// Returns: String with formatted log entries
+// min_level: Minimum log level to include (default: LOG_DEBUG)
+// max_entries: Maximum entries to return (default: 50)
+String logger.getLogs(LogLevel min_level = LOG_DEBUG, size_t max_entries = 50) const;
+
+// Get total number of logged entries
+size_t logger.getLogCount() const;
+
+// Check if a specific log level is enabled
+bool logger.isLogLevelEnabled(LogLevel level) const;
+
+// Convert LogLevel to string representation
+static const char* logger.getLogLevelString(LogLevel level);
+
+// Convert string to LogLevel (returns LOG_DEBUG if invalid)
+static LogLevel logger.getLogLevelFromString(const char* level_str);
+```
+
+### Log Entry Structure
+
+```cpp
+struct LogEntry {
+  unsigned long timestamp;   // Milliseconds since boot (millis())
+  LogLevel level;            // Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  char message[128];         // Fixed-size message buffer
+};
+```
+
+**Note:** Messages longer than 127 characters will be truncated.
+
+### Usage Examples
+
+```cpp
+// Basic initialization
+logger.begin();
+logger.setLogLevel(LOG_INFO);
+
+// Using macros (recommended)
+LOG_INFO("System started");
+LOG_DEBUG("Debug info");
+LOG_ERROR("Error occurred");
+
+// Using direct methods
+logger.info("Temperature reading");
+logger.warning("Low battery");
+logger.critical("Critical failure");
+
+// Using String (dynamic messages)
+String sensor_name = "Temperature";
+logger.info(String("Reading from ") + sensor_name);
+
+// Retrieving logs
+String history = logger.getLogs(LOG_INFO, 20);
+Serial.println(history);
+
+// Checking log status
+size_t count = logger.getLogCount();
+if (logger.isLogLevelEnabled(LOG_WARNING)) {
+  LOG_WARNING("Warning level is enabled");
+}
+```
+
+### Design Notes
+
+- **Circular buffer:** Automatically overwrites oldest entries when buffer is full
+- **Fixed memory:** All entries stored in fixed-size array (no heap fragmentation)
+- **Dual API:** const char\* for performance, String for convenience
+- **Serial output:** Each log entry is also printed to serial in real-time
+- **Thread-safe:** Safe for use in FreeRTOS tasks
+
+---
+
+## StorageManager
+
+### Header
+```cpp
+#include "services/config/storage_manager.h"
+```
+
+Abstraction layer over ESP32 NVS (Non-Volatile Storage) using Preferences API.
+
+### Initialization
+
+```cpp
+// Get singleton instance
+StorageManager& storageManager = StorageManager::getInstance();
+
+// Initialize NVS storage (must call in setup())
+bool storageManager.begin();  // Returns: true on success
+```
+
+### Namespace Management
+
+**NVS organizes data into logical namespaces. Must manage namespace lifecycle.**
+
+```cpp
+// Open a namespace for reading/writing
+// read_only: Set to true to prevent modifications
+bool storageManager.beginNamespace(const char* namespace_name, bool read_only = false);
+
+// Close current namespace
+// Must be called before opening a different namespace
+void storageManager.endNamespace();
+```
+
+### String Storage (Primary API)
+
+```cpp
+// Store string value
+bool storageManager.putString(const char* key, const char* value);
+
+// Retrieve string value
+// Returns: Pointer to internal buffer or default_value if not found
+// WARNING: Value is valid only until next call!
+const char* storageManager.getString(const char* key, const char* default_value = nullptr);
+
+// Convenience method: Check if key exists
+bool storageManager.keyExists(const char* key);
+```
+
+### String Storage (Wrapper API)
+
+```cpp
+// Store string from String object
+inline bool storageManager.putString(const char* key, const String& value);
+
+// Retrieve as String object
+// Returns: String object (safe for storage in variables)
+inline String storageManager.getStringObj(const char* key, const String& default_value = "");
+```
+
+### Numeric Storage (Primary API)
+
+```cpp
+// Integer storage
+bool storageManager.putInt(const char* key, int value);
+int storageManager.getInt(const char* key, int default_value = 0);
+
+// Unsigned 8-bit integer (0-255)
+bool storageManager.putUInt8(const char* key, uint8_t value);
+uint8_t storageManager.getUInt8(const char* key, uint8_t default_value = 0);
+
+// Unsigned 16-bit integer (0-65535)
+bool storageManager.putUInt16(const char* key, uint16_t value);
+uint16_t storageManager.getUInt16(const char* key, uint16_t default_value = 0);
+
+// Boolean storage
+bool storageManager.putBool(const char* key, bool value);
+bool storageManager.getBool(const char* key, bool default_value = false);
+
+// Unsigned long storage
+bool storageManager.putULong(const char* key, unsigned long value);
+unsigned long storageManager.getULong(const char* key, unsigned long default_value = 0);
+```
+
+### Namespace Utilities
+
+```cpp
+// Clear all key-value pairs in current namespace
+bool storageManager.clearNamespace();
+
+// Get number of free entries in current namespace
+size_t storageManager.getFreeEntries();
+```
+
+### Static Buffer
+
+StorageManager maintains a static internal buffer for string storage:
+```cpp
+static char string_buffer_[256];  // Max string length: 255 characters
+```
+
+### Usage Examples
+
+```cpp
+// Initialize storage
+storageManager.begin();
+
+// Store WiFi credentials
+storageManager.beginNamespace("wifi");
+storageManager.putString("ssid", "MyNetwork");
+storageManager.putString("password", "MyPassword123");
+storageManager.endNamespace();
+
+// Retrieve WiFi credentials
+storageManager.beginNamespace("wifi", true);  // Read-only mode
+const char* ssid = storageManager.getString("ssid");
+String password = storageManager.getStringObj("password");
+storageManager.endNamespace();
+
+// Store numeric configuration
+storageManager.beginNamespace("device");
+storageManager.putInt("boot_count", 42);
+storageManager.putBool("initialized", true);
+storageManager.putUInt16("port", 8883);
+storageManager.endNamespace();
+
+// Retrieve with type checking
+storageManager.beginNamespace("device", true);
+int boots = storageManager.getInt("boot_count", 0);
+bool initialized = storageManager.getBool("initialized", false);
+storageManager.endNamespace();
+
+// Clear a namespace
+storageManager.beginNamespace("temp_data");
+storageManager.clearNamespace();  // Remove all entries
+storageManager.endNamespace();
+```
+
+### Design Notes
+
+- **NVS backend:** Persistent storage survives power cycles
+- **Limited writes:** Each key can be written ~100,000 times (wear leveling applies)
+- **Static buffer:** Strings returned from `getString()` use internal buffer—copy immediately if needed for later use
+- **Namespace isolation:** Data in different namespaces doesn't interfere with each other
+- **Type consistency:** Retrieve data with the same type it was stored as
+
+---
+
+## ConfigManager
+
+### Header
+```cpp
+#include "services/config/config_manager.h"
+```
+
+Orchestrates loading, saving, and validating system configuration across multiple sources.
+
+### Initialization
+
+```cpp
+// Get singleton instance
+ConfigManager& configManager = ConfigManager::getInstance();
+
+// Initialize ConfigManager and load storage
+bool configManager.begin();
+
+// Load all saved configurations into memory
+bool configManager.loadAllConfigs();
+```
+
+### WiFi Configuration
+
+```cpp
+// Load WiFi configuration from storage
+bool configManager.loadWiFiConfig(WiFiConfig& config);
+
+// Save WiFi configuration to storage
+bool configManager.saveWiFiConfig(const WiFiConfig& config);
+
+// Validate WiFi configuration completeness
+bool configManager.validateWiFiConfig(const WiFiConfig& config);
+
+// Reset WiFi configuration to defaults
+void configManager.resetWiFiConfig();
+```
+
+### Zone Configuration
+
+```cpp
+// Load Kaiser and Master zone configurations
+bool configManager.loadZoneConfig(KaiserZone& kaiser, MasterZone& master);
+
+// Save Kaiser and Master zone configurations
+bool configManager.saveZoneConfig(const KaiserZone& kaiser, const MasterZone& master);
+
+// Validate Kaiser zone configuration
+bool configManager.validateZoneConfig(const KaiserZone& kaiser);
+```
+
+### System Configuration
+
+```cpp
+// Load system configuration (ESP ID, state, boot count)
+bool configManager.loadSystemConfig(SystemConfig& config);
+
+// Save system configuration
+bool configManager.saveSystemConfig(const SystemConfig& config);
+```
+
+### Configuration Status
+
+```cpp
+// Check if all required configurations are loaded
+bool configManager.isConfigurationComplete() const;
+
+// Print configuration status to Serial (for debugging)
+void configManager.printConfigurationStatus() const;
+```
+
+### Cached Accessors
+
+ConfigManager caches configurations in memory. Use these methods to access cached values:
+
+```cpp
+// Get cached WiFi configuration
+const WiFiConfig& configManager.getWiFiConfig() const;
+
+// Get cached Kaiser zone
+const KaiserZone& configManager.getKaiser() const;
+
+// Get cached Master zone
+const MasterZone& configManager.getMasterZone() const;
+
+// Get cached system configuration
+const SystemConfig& configManager.getSystemConfig() const;
+
+// Quick access to Kaiser ID (for TopicBuilder)
+String configManager.getKaiserId() const;
+
+// Quick access to ESP ID (for TopicBuilder)
+String configManager.getESPId() const;
+```
+
+### Configuration Structures
+
+#### WiFiConfig
+```cpp
+struct WiFiConfig {
+  String ssid = "";                    // WiFi network name
+  String password = "";                // WiFi network password
+  String server_address = "";          // Bibliothek (God-Kaiser Server) IP
+  uint16_t mqtt_port = 8883;           // MQTT port (default: 8883 for TLS)
+  String mqtt_username = "";           // MQTT username (optional, anonymous if empty)
+  String mqtt_password = "";           // MQTT password (optional, anonymous if empty)
+  bool configured = false;             // Configuration status flag
+};
+```
+
+#### KaiserZone
+```cpp
+struct KaiserZone {
+  String kaiser_id = "";               // Unique Kaiser device identifier
+  String kaiser_name = "";             // Human-readable Kaiser name
+  String system_name = "";             // Overall system name
+  bool connected = false;              // Connection status
+  bool id_generated = false;           // Whether ID was auto-generated
+};
+```
+
+#### MasterZone
+```cpp
+struct MasterZone {
+  String master_zone_id = "";          // Master zone unique identifier
+  String master_zone_name = "";        // Master zone name
+  bool assigned = false;               // Whether assigned to a zone
+  bool is_master_esp = false;          // Whether this ESP is the master
+};
+```
+
+#### SystemConfig
+```cpp
+struct SystemConfig {
+  String esp_id = "";                  // Unique ESP device identifier
+  String device_name = "ESP32";        // Human-readable device name
+  SystemState current_state = STATE_BOOT;  // Current system state
+  String safe_mode_reason = "";        // Reason if in safe mode
+  uint16_t boot_count = 0;             // Number of system boots
+};
+```
+
+### Usage Examples
+
+```cpp
+// Initialize and load all configurations
+configManager.begin();
+configManager.loadAllConfigs();
+
+// Check if fully configured
+if (!configManager.isConfigurationComplete()) {
+  LOG_WARNING("System not fully configured");
+}
+
+// Load WiFi configuration for editing
+WiFiConfig wifi = configManager.getWiFiConfig();
+wifi.ssid = "NewNetwork";
+wifi.password = "NewPassword";
+if (configManager.saveWiFiConfig(wifi)) {
+  LOG_INFO("WiFi config saved");
+}
+
+// Use cached Kaiser ID for MQTT topics
+String kaiser_id = configManager.getKaiserId();
+LOG_INFO("Kaiser ID: " + kaiser_id);
+
+// Get quick access values
+String esp_id = configManager.getESPId();
+const SystemConfig& sys_config = configManager.getSystemConfig();
+LOG_INFO("System state: " + String(sys_config.current_state));
+```
+
+### Design Notes
+
+- **Caching:** All configurations are cached in memory after loading
+- **Orchestration:** Manages configurations from multiple sources (StorageManager)
+- **Validation:** Provides validation methods for configuration integrity
+- **Phase 1 scope:** Handles WiFi, Zone, and System configurations
+- **Phase 3 deferred:** Sensor/Actuator configuration deferred to Phase 3
+
+---
+
+## ErrorTracker
+
+### Header
+```cpp
+#include "error_handling/error_tracker.h"
+```
+
+Tracks system errors with categorization, severity levels, and occurrence counting.
+
+### Error Categories
+
+```cpp
+enum ErrorCategory {
+  ERROR_HARDWARE = 1000,       // GPIO, I2C, PWM, sensors, actuators
+  ERROR_SERVICE = 2000,        // Storage, config, logger
+  ERROR_COMMUNICATION = 3000,  // WiFi, MQTT, HTTP
+  ERROR_APPLICATION = 4000     // State machine, memory, system
+};
+```
+
+### Error Severity Levels
+
+```cpp
+enum ErrorSeverity {
+  ERROR_SEVERITY_WARNING = 1,    // Recoverable warning
+  ERROR_SEVERITY_ERROR = 2,      // Error, system can continue
+  ERROR_SEVERITY_CRITICAL = 3    // Critical, system unstable
+};
+```
+
+### Initialization
+
+```cpp
+// Get singleton instance
+ErrorTracker& errorTracker = ErrorTracker::getInstance();
+
+// Initialize ErrorTracker (must call in setup())
+void errorTracker.begin();
+```
+
+### Error Tracking - Primary API
+
+```cpp
+// Track error with full details
+void errorTracker.trackError(uint16_t error_code, ErrorSeverity severity, const char* message);
+
+// Track error with default severity (ERROR_SEVERITY_ERROR)
+void errorTracker.trackError(uint16_t error_code, const char* message);
+```
+
+### Convenience Methods (Category-Specific)
+
+```cpp
+// Track hardware error
+void errorTracker.logHardwareError(uint16_t code, const char* message);
+
+// Track service error
+void errorTracker.logServiceError(uint16_t code, const char* message);
+
+// Track communication error
+void errorTracker.logCommunicationError(uint16_t code, const char* message);
+
+// Track application error
+void errorTracker.logApplicationError(uint16_t code, const char* message);
+```
+
+### Error Retrieval
+
+```cpp
+// Get formatted error history (most recent first)
+String errorTracker.getErrorHistory(uint8_t max_entries = 20) const;
+
+// Get errors filtered by category
+String errorTracker.getErrorsByCategory(ErrorCategory category, uint8_t max_entries = 10) const;
+
+// Get total number of tracked errors
+size_t errorTracker.getErrorCount() const;
+
+// Get error count for specific category
+size_t errorTracker.getErrorCountByCategory(ErrorCategory category) const;
+```
+
+### Error Status Queries
+
+```cpp
+// Check if any errors are currently active
+bool errorTracker.hasActiveErrors() const;
+
+// Check if any critical errors are active
+bool errorTracker.hasCriticalErrors() const;
+
+// Clear all tracked errors
+void errorTracker.clearErrors();
+```
+
+### Error Utilities
+
+```cpp
+// Get category name for error code
+static const char* errorTracker.getCategoryString(uint16_t error_code);
+
+// Get category from error code
+static ErrorCategory errorTracker.getCategory(uint16_t error_code);
+```
+
+### Error Entry Structure
+
+```cpp
+struct ErrorEntry {
+  unsigned long timestamp;         // When error occurred (millis())
+  uint16_t error_code;             // Error code (see error_codes.h)
+  ErrorSeverity severity;          // Severity level (WARNING/ERROR/CRITICAL)
+  char message[128];               // Error message (max 127 chars)
+  uint8_t occurrence_count;        // Number of times this error occurred
+  
+  ErrorEntry();                    // Default constructor
+};
+```
+
+### Usage Examples
+
+```cpp
+// Initialize error tracking
+errorTracker.begin();
+
+// Track errors with different severities
+errorTracker.trackError(ERROR_I2C_INIT_FAILED, 
+                       ERROR_SEVERITY_CRITICAL, 
+                       "I2C bus initialization failed");
+
+errorTracker.trackError(ERROR_SENSOR_READ_FAILED, 
+                       "Temperature sensor read timeout");
+
+// Using convenience methods
+errorTracker.logHardwareError(ERROR_GPIO_RESERVED, "GPIO 5 already in use");
+errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED, "MQTT broker unreachable");
+
+// Check error status
+if (errorTracker.hasCriticalErrors()) {
+  LOG_CRITICAL("System has critical errors!");
+  logger.info(errorTracker.getErrorHistory(10));  // Show last 10 errors
+}
+
+// Filter errors by category
+String hardware_errors = errorTracker.getErrorsByCategory(ERROR_HARDWARE, 5);
+LOG_INFO(hardware_errors);
+
+// Monitor error count
+if (errorTracker.getErrorCountByCategory(ERROR_COMMUNICATION) > 5) {
+  LOG_WARNING("Multiple communication errors detected");
+}
+
+// Clear errors after handling
+errorTracker.clearErrors();
+```
+
+### Design Notes
+
+- **Circular buffer:** Automatically overwrites oldest errors when full (max 50)
+- **Occurrence counting:** Duplicate errors increment occurrence counter instead of creating new entries
+- **Logger integration:** All tracked errors are also logged to Logger
+- **Categorization:** Error codes automatically map to categories based on numeric range
+- **Severity tracking:** Critical errors can trigger emergency procedures
+
+---
+
+## TopicBuilder
+
+### Header
+```cpp
+#include "utils/topic_builder.h"
+```
+
+Generates MQTT topic strings for the 8 critical Phase 1 communication patterns.
+
+### Configuration
+
+```cpp
+// Set ESP device ID for topic generation
+static void TopicBuilder::setEspId(const char* esp_id);
+
+// Set Kaiser device ID for topic generation
+static void TopicBuilder::setKaiserId(const char* kaiser_id);
+```
+
+### Topic Generation Methods - Phase 1 Patterns
+
+#### Pattern 1: Sensor Data Topic (GPIO-Specific)
+```cpp
+// Build topic for individual sensor data
+static const char* TopicBuilder::buildSensorDataTopic(uint8_t gpio);
+// Example output: "/kaiser/Kaiser0/esp/Esp0/sensor/gpio_5/data"
+```
+
+#### Pattern 2: Sensor Batch Topic (All Sensors)
+```cpp
+// Build topic for batch sensor data from all sensors
+static const char* TopicBuilder::buildSensorBatchTopic();
+// Example output: "/kaiser/Kaiser0/esp/Esp0/sensor/batch"
+```
+
+#### Pattern 3: Actuator Command Topic (GPIO-Specific)
+```cpp
+// Build topic for sending commands to specific actuator
+static const char* TopicBuilder::buildActuatorCommandTopic(uint8_t gpio);
+// Example output: "/kaiser/Kaiser0/esp/Esp0/actuator/gpio_5/command"
+```
+
+#### Pattern 4: Actuator Status Topic (GPIO-Specific)
+```cpp
+// Build topic for actuator status feedback
+static const char* TopicBuilder::buildActuatorStatusTopic(uint8_t gpio);
+// Example output: "/kaiser/Kaiser0/esp/Esp0/actuator/gpio_5/status"
+```
+
+#### Pattern 5: System Heartbeat Topic
+```cpp
+// Build topic for periodic system heartbeat
+static const char* TopicBuilder::buildSystemHeartbeatTopic();
+// Example output: "/kaiser/Kaiser0/esp/Esp0/system/heartbeat"
+```
+
+#### Pattern 6: System Command Topic
+```cpp
+// Build topic for receiving system commands
+static const char* TopicBuilder::buildSystemCommandTopic();
+// Example output: "/kaiser/Kaiser0/esp/Esp0/system/command"
+```
+
+#### Pattern 7: Configuration Topic
+```cpp
+// Build topic for configuration updates
+static const char* TopicBuilder::buildConfigTopic();
+// Example output: "/kaiser/Kaiser0/esp/Esp0/config"
+```
+
+#### Pattern 8: Broadcast Emergency Topic
+```cpp
+// Build topic for emergency broadcasts (all ESPs subscribe)
+static const char* TopicBuilder::buildBroadcastEmergencyTopic();
+// Example output: "/kaiser/Kaiser0/broadcast/emergency"
+```
+
+### Static Buffers
+
+```cpp
+static char topic_buffer_[256];   // Topic string buffer
+static char esp_id_[32];          // Current ESP ID
+static char kaiser_id_[64];       // Current Kaiser ID
+```
+
+### Usage Examples
+
+```cpp
+// Configure with IDs from ConfigManager
+String esp_id = configManager.getESPId();
+String kaiser_id = configManager.getKaiserId();
+TopicBuilder::setEspId(esp_id.c_str());
+TopicBuilder::setKaiserId(kaiser_id.c_str());
+
+// Generate sensor data topic
+const char* sensor_topic = TopicBuilder::buildSensorDataTopic(5);
+mqttClient.publish(sensor_topic, "25.5");  // Publish temperature
+
+// Generate actuator command topic
+const char* actuator_topic = TopicBuilder::buildActuatorCommandTopic(12);
+mqttClient.subscribe(actuator_topic);  // Subscribe to commands
+
+// Generate batch sensor topic
+const char* batch_topic = TopicBuilder::buildSensorBatchTopic();
+mqttClient.publish(batch_topic, sensor_batch_json);
+
+// Generate system topics
+const char* heartbeat_topic = TopicBuilder::buildSystemHeartbeatTopic();
+const char* command_topic = TopicBuilder::buildSystemCommandTopic();
+
+// Emergency topic (broadcast to all ESPs)
+const char* emergency_topic = TopicBuilder::buildBroadcastEmergencyTopic();
+mqttClient.publish(emergency_topic, "SYSTEM_SHUTDOWN");
+```
+
+### Topic Pattern Structure
+
+All topics follow this hierarchy:
+```
+/kaiser/{KAISER_ID}/esp/{ESP_ID}/sensor/{type}/{subtype}
+/kaiser/{KAISER_ID}/esp/{ESP_ID}/actuator/{type}/{subtype}
+/kaiser/{KAISER_ID}/esp/{ESP_ID}/system/{function}
+/kaiser/{KAISER_ID}/esp/{ESP_ID}/config
+/kaiser/{KAISER_ID}/broadcast/{emergency}
+```
+
+Where:
+- `{KAISER_ID}` = Kaiser device ID (e.g., "Kaiser0")
+- `{ESP_ID}` = ESP device ID (e.g., "Esp0")
+- `{type}` = Component type ("gpio_N", "batch", "heartbeat", etc.)
+- `{subtype}` = Operation ("data", "command", "status")
+
+### Design Notes
+
+- **Static class:** No instances, only static methods
+- **Buffer reuse:** Returns pointer to static buffer—copy if needed for later use
+- **Guard length:** 256-char buffer accommodates all Phase 1 patterns
+- **Initialization required:** Must call `setEspId()` and `setKaiserId()` before generating topics
+- **No validation:** Topics are generated without checking ID format—ensure valid IDs are provided
+
+---
+
+## GPIOManager
+
+### Header
+```cpp
+#include "drivers/gpio_manager.h"
+```
+
+Hardware safety system preventing GPIO misuse and resource conflicts. **CRITICAL: Must initialize before any GPIO operations.**
+
+### Initialization - CRITICAL
+
+```cpp
+// Get singleton instance
+GPIOManager& gpioManager = GPIOManager::getInstance();
+
+// ⚠️ MUST be called as FIRST action in setup()!
+// Initializes all GPIO pins to INPUT_PULLUP safe mode
+void gpioManager.initializeAllPinsToSafeMode();
+```
+
+**Why first?** Uninitialized GPIO pins are in undefined states and can trigger actuators, causing hardware damage.
+
+### Pin Management
+
+```cpp
+// Request exclusive use of a GPIO pin
+// Returns: true if pin is available and allocated
+// owner: "sensor", "actuator", "system", etc.
+// component_name: Specific name for debugging ("DS18B20", "Pump1", etc.)
+bool gpioManager.requestPin(uint8_t gpio, const char* owner, const char* component_name);
+
+// Release GPIO pin, returning it to safe mode (INPUT_PULLUP)
+bool gpioManager.releasePin(uint8_t gpio);
+
+// Configure pin mode (INPUT, OUTPUT, INPUT_PULLUP)
+// Validates hardware limitations (e.g., can't use certain pins as output)
+bool gpioManager.configurePinMode(uint8_t gpio, uint8_t mode);
+```
+
+### Pin Query Methods
+
+```cpp
+// Check if pin is available for allocation
+bool gpioManager.isPinAvailable(uint8_t gpio) const;
+
+// Check if pin is reserved (boot pins, UART, SPI, etc.)
+bool gpioManager.isPinReserved(uint8_t gpio) const;
+
+// Check if pin is currently in safe mode
+bool gpioManager.isPinInSafeMode(uint8_t gpio) const;
+```
+
+### Emergency Safe Mode
+
+```cpp
+// Emergency function: Return ALL pins to safe mode
+// Use in error conditions to prevent hardware damage
+void gpioManager.enableSafeModeForAllPins();
+```
+
+### Information Methods
+
+```cpp
+// Get detailed information about a pin
+GPIOPinInfo gpioManager.getPinInfo(uint8_t gpio) const;
+
+// Print status of all GPIO pins to Serial (for debugging)
+void gpioManager.printPinStatus() const;
+
+// Get count of currently available pins
+uint8_t gpioManager.getAvailablePinCount() const;
+```
+
+### Special PIN Management
+
+```cpp
+// Release I2C pins (SDA/SCL)
+// ⚠️ WARNING: Only call if I2C will never be used!
+void gpioManager.releaseI2CPins();
+```
+
+### GPIOPinInfo Structure
+
+```cpp
+struct GPIOPinInfo {
+  uint8_t pin;                  // GPIO pin number
+  char owner[32];               // Owner ("sensor", "actuator", "system")
+  char component_name[32];      // Component name ("DS18B20", "Pump1")
+  uint8_t mode;                 // Pin mode (INPUT, OUTPUT, INPUT_PULLUP)
+  bool in_safe_mode;            // Whether pin is in safe mode (INPUT_PULLUP)
+  
+  GPIOPinInfo();                // Default constructor (initializes safely)
+};
+```
+
+### Usage Examples
+
+```cpp
+// CRITICAL: Initialize safe mode FIRST!
+void setup() {
+  Serial.begin(115200);
+  gpioManager.initializeAllPinsToSafeMode();  // ⚠️ MUST BE FIRST!
+  
+  // Now safe to initialize other systems
+  logger.begin();
+  storageManager.begin();
+  
+  // Request pins for components
+  gpioManager.requestPin(5, "sensor", "Temperature_DS18B20");
+  gpioManager.requestPin(12, "actuator", "Pump_1");
+  
+  // Configure pin modes
+  gpioManager.configurePinMode(5, INPUT);
+  gpioManager.configurePinMode(12, OUTPUT);
+}
+
+// Check pin availability
+if (gpioManager.isPinAvailable(15)) {
+  gpioManager.requestPin(15, "sensor", "New_Sensor");
+  gpioManager.configurePinMode(15, INPUT);
+} else {
+  LOG_WARNING("GPIO 15 already in use");
+}
+
+// Query pin status
+GPIOPinInfo pin_info = gpioManager.getPinInfo(12);
+LOG_INFO("Pin 12 owner: " + String(pin_info.owner));
+LOG_INFO("Pin 12 component: " + String(pin_info.component_name));
+
+// Monitor available pins
+uint8_t available = gpioManager.getAvailablePinCount();
+LOG_INFO("Available pins: " + String(available));
+
+// Print complete status
+gpioManager.printPinStatus();
+
+// Emergency: Return all pins to safe mode
+if (errorTracker.hasCriticalErrors()) {
+  gpioManager.enableSafeModeForAllPins();
+  LOG_CRITICAL("All GPIO pins returned to safe mode!");
+}
+
+// Release pin when no longer needed
+gpioManager.releasePin(5);
+
+// Release I2C pins if I2C is not used
+gpioManager.releaseI2CPins();  // Frees SDA/SCL for other uses
+```
+
+### GPIO Reservations (ESP32 WROOM-32)
+
+**Reserved pins** (cannot be used):
+- GPIO 6, 8, 9, 10, 11: SPI Flash
+- GPIO 0: Boot/Strapping (use with care)
+- GPIO 12: Boot/Strapping (use with care)
+- GPIO 15: Strapping
+
+**Input-only pins**:
+- GPIO 34, 35, 36, 39: No output capability
+
+**Special considerations**:
+- Pins used for UART (typically 1, 3)
+- Pins used for I2C (typically 21, 22)
+- Pins used for SPI (typically 18, 19, 23)
+
+### Design Notes
+
+- **Singleton pattern:** Only one instance manages all GPIO
+- **Safe-mode critical:** Always initializes all pins to INPUT_PULLUP
+- **Allocation tracking:** Prevents conflicts and resource leaks
+- **Board-specific:** Handles ESP32 WROOM-32 and XIAO ESP32C3 variants
+- **Emergency mode:** Can force all pins to safe state for recovery
+- **Debugging support:** `printPinStatus()` helps diagnose allocation issues
+
+---
+
+## Error Codes Reference
+
+All error codes are organized into four categories with specific numeric ranges.
+
+### Hardware Errors (1000-1999)
+
+**GPIO Errors:**
+- `ERROR_GPIO_RESERVED` (1001) - Pin already reserved
+- `ERROR_GPIO_CONFLICT` (1002) - Pin allocation conflict
+- `ERROR_GPIO_INIT_FAILED` (1003) - Initialization failed
+- `ERROR_GPIO_INVALID_MODE` (1004) - Invalid pin mode
+- `ERROR_GPIO_READ_FAILED` (1005) - Read operation failed
+- `ERROR_GPIO_WRITE_FAILED` (1006) - Write operation failed
+
+**I2C Errors:**
+- `ERROR_I2C_INIT_FAILED` (1010) - I2C bus initialization failed
+- `ERROR_I2C_DEVICE_NOT_FOUND` (1011) - I2C device not found at address
+- `ERROR_I2C_READ_FAILED` (1012) - I2C read operation failed
+- `ERROR_I2C_WRITE_FAILED` (1013) - I2C write operation failed
+- `ERROR_I2C_BUS_ERROR` (1014) - I2C bus error
+
+**OneWire Errors:**
+- `ERROR_ONEWIRE_INIT_FAILED` (1020) - OneWire initialization failed
+- `ERROR_ONEWIRE_NO_DEVICES` (1021) - No devices found on bus
+- `ERROR_ONEWIRE_READ_FAILED` (1022) - OneWire read operation failed
+
+**PWM Errors:**
+- `ERROR_PWM_INIT_FAILED` (1030) - PWM initialization failed
+- `ERROR_PWM_CHANNEL_FULL` (1031) - No free PWM channels
+- `ERROR_PWM_SET_FAILED` (1032) - PWM value set failed
+
+**Sensor Errors:**
+- `ERROR_SENSOR_READ_FAILED` (1040) - Sensor read failed
+- `ERROR_SENSOR_INIT_FAILED` (1041) - Sensor initialization failed
+- `ERROR_SENSOR_NOT_FOUND` (1042) - Sensor not found
+- `ERROR_SENSOR_TIMEOUT` (1043) - Sensor read timeout
+
+**Actuator Errors:**
+- `ERROR_ACTUATOR_SET_FAILED` (1050) - Actuator command failed
+- `ERROR_ACTUATOR_INIT_FAILED` (1051) - Actuator initialization failed
+- `ERROR_ACTUATOR_NOT_FOUND` (1052) - Actuator not found
+- `ERROR_ACTUATOR_CONFLICT` (1053) - Actuator resource conflict
+
+### Service Errors (2000-2999)
+
+**NVS Storage Errors:**
+- `ERROR_NVS_INIT_FAILED` (2001) - NVS initialization failed
+- `ERROR_NVS_READ_FAILED` (2002) - NVS read operation failed
+- `ERROR_NVS_WRITE_FAILED` (2003) - NVS write operation failed
+- `ERROR_NVS_NAMESPACE_FAILED` (2004) - Namespace operation failed
+- `ERROR_NVS_CLEAR_FAILED` (2005) - Namespace clear failed
+
+**Configuration Errors:**
+- `ERROR_CONFIG_INVALID` (2010) - Invalid configuration data
+- `ERROR_CONFIG_MISSING` (2011) - Required configuration missing
+- `ERROR_CONFIG_LOAD_FAILED` (2012) - Configuration load failed
+- `ERROR_CONFIG_SAVE_FAILED` (2013) - Configuration save failed
+- `ERROR_CONFIG_VALIDATION` (2014) - Configuration validation failed
+
+**Logger Errors:**
+- `ERROR_LOGGER_INIT_FAILED` (2020) - Logger initialization failed
+- `ERROR_LOGGER_BUFFER_FULL` (2021) - Log buffer overflow
+
+**Storage Errors:**
+- `ERROR_STORAGE_INIT_FAILED` (2030) - Storage manager initialization failed
+- `ERROR_STORAGE_READ_FAILED` (2031) - Storage read operation failed
+- `ERROR_STORAGE_WRITE_FAILED` (2032) - Storage write operation failed
+
+### Communication Errors (3000-3999)
+
+**WiFi Errors:**
+- `ERROR_WIFI_INIT_FAILED` (3001) - WiFi initialization failed
+- `ERROR_WIFI_CONNECT_TIMEOUT` (3002) - WiFi connection timeout
+- `ERROR_WIFI_CONNECT_FAILED` (3003) - WiFi connection failed
+- `ERROR_WIFI_DISCONNECT` (3004) - WiFi disconnected
+- `ERROR_WIFI_NO_SSID` (3005) - SSID not found
+
+**MQTT Errors:**
+- `ERROR_MQTT_INIT_FAILED` (3010) - MQTT initialization failed
+- `ERROR_MQTT_CONNECT_FAILED` (3011) - MQTT connection failed
+- `ERROR_MQTT_PUBLISH_FAILED` (3012) - MQTT publish failed
+- `ERROR_MQTT_SUBSCRIBE_FAILED` (3013) - MQTT subscribe failed
+- `ERROR_MQTT_DISCONNECT` (3014) - MQTT disconnected
+- `ERROR_MQTT_BUFFER_FULL` (3015) - MQTT buffer overflow
+- `ERROR_MQTT_PAYLOAD_INVALID` (3016) - MQTT payload invalid
+
+**HTTP Errors:**
+- `ERROR_HTTP_INIT_FAILED` (3020) - HTTP initialization failed
+- `ERROR_HTTP_REQUEST_FAILED` (3021) - HTTP request failed
+- `ERROR_HTTP_RESPONSE_INVALID` (3022) - HTTP response invalid
+- `ERROR_HTTP_TIMEOUT` (3023) - HTTP operation timeout
+
+**Network Errors:**
+- `ERROR_NETWORK_UNREACHABLE` (3030) - Network unreachable
+- `ERROR_DNS_FAILED` (3031) - DNS resolution failed
+- `ERROR_CONNECTION_LOST` (3032) - Connection lost
+
+### Application Errors (4000-4999)
+
+**State Machine Errors:**
+- `ERROR_STATE_INVALID` (4001) - Invalid system state
+- `ERROR_STATE_TRANSITION` (4002) - Invalid state transition
+- `ERROR_STATE_MACHINE_STUCK` (4003) - State machine stuck
+
+**Operation Errors:**
+- `ERROR_OPERATION_TIMEOUT` (4010) - Operation timeout
+- `ERROR_OPERATION_FAILED` (4011) - Operation failed
+- `ERROR_OPERATION_CANCELLED` (4012) - Operation cancelled
+
+**Command Errors:**
+- `ERROR_COMMAND_INVALID` (4020) - Invalid command
+- `ERROR_COMMAND_PARSE_FAILED` (4021) - Command parsing failed
+- `ERROR_COMMAND_EXEC_FAILED` (4022) - Command execution failed
+
+**Payload Errors:**
+- `ERROR_PAYLOAD_INVALID` (4030) - Invalid payload
+- `ERROR_PAYLOAD_TOO_LARGE` (4031) - Payload too large
+- `ERROR_PAYLOAD_PARSE_FAILED` (4032) - Payload parsing failed
+
+**Memory Errors:**
+- `ERROR_MEMORY_FULL` (4040) - Memory full
+- `ERROR_MEMORY_ALLOCATION` (4041) - Memory allocation failed
+- `ERROR_MEMORY_LEAK` (4042) - Memory leak detected
+
+**System Errors:**
+- `ERROR_SYSTEM_INIT_FAILED` (4050) - System initialization failed
+- `ERROR_SYSTEM_RESTART` (4051) - System restart required
+- `ERROR_SYSTEM_SAFE_MODE` (4052) - System in safe mode
+
+**Task Errors:**
+- `ERROR_TASK_FAILED` (4060) - Task failed
+- `ERROR_TASK_TIMEOUT` (4061) - Task timeout
+- `ERROR_TASK_QUEUE_FULL` (4062) - Task queue full
+
+---
+
+## Type Definitions
+
+### SystemState Enum
+
+```cpp
+enum SystemState {
+  STATE_BOOT = 0,                   // System booting
+  STATE_WIFI_SETUP,                 // WiFi configuration
+  STATE_WIFI_CONNECTED,             // WiFi connected
+  STATE_MQTT_CONNECTING,            // Connecting to MQTT
+  STATE_MQTT_CONNECTED,             // Connected to MQTT
+  STATE_AWAITING_USER_CONFIG,       // Waiting for configuration
+  STATE_ZONE_CONFIGURED,            // Zone configuration complete
+  STATE_SENSORS_CONFIGURED,         // Sensors configured
+  STATE_OPERATIONAL,                // System operational
+  STATE_LIBRARY_DOWNLOADING,        // Downloading library (Phase 3 optional)
+  STATE_SAFE_MODE,                  // Safe mode (error recovery)
+  STATE_ERROR                       // Error state
+};
+
+// Convert SystemState to string
+String getSystemStateString(SystemState state);
+```
+
+### LogLevel Enum
+
+```cpp
+enum LogLevel {
+  LOG_DEBUG = 0,       // Detailed diagnostic information
+  LOG_INFO = 1,        // General informational messages
+  LOG_WARNING = 2,     // Warning conditions
+  LOG_ERROR = 3,       // Error conditions
+  LOG_CRITICAL = 4     // Critical errors, system unstable
+};
+```
+
+### ErrorCategory Enum
+
+```cpp
+enum ErrorCategory {
+  ERROR_HARDWARE = 1000,       // GPIO, I2C, PWM, sensors, actuators
+  ERROR_SERVICE = 2000,        // Storage, config, logger
+  ERROR_COMMUNICATION = 3000,  // WiFi, MQTT, HTTP
+  ERROR_APPLICATION = 4000     // State machine, memory, system
+};
+```
+
+### ErrorSeverity Enum
+
+```cpp
+enum ErrorSeverity {
+  ERROR_SEVERITY_WARNING = 1,    // Recoverable warning
+  ERROR_SEVERITY_ERROR = 2,      // Error, system can continue
+  ERROR_SEVERITY_CRITICAL = 3    // Critical, system unstable
+};
+```
+
+---
+
+## Best Practices & Design Patterns
+
+### 1. Initialization Order (Critical!)
+
+```cpp
+void setup() {
+  Serial.begin(115200);
+  
+  // 1. GPIO safe mode FIRST (prevents hardware damage)
+  gpioManager.initializeAllPinsToSafeMode();
+  
+  // 2. Core services
+  logger.begin();
+  storageManager.begin();
+  errorTracker.begin();
+  
+  // 3. Configuration
+  configManager.begin();
+  configManager.loadAllConfigs();
+  
+  // 4. Topic builder
+  TopicBuilder::setEspId(configManager.getESPId().c_str());
+  TopicBuilder::setKaiserId(configManager.getKaiserId().c_str());
+  
+  // 5. Application-specific
+  // ... your code ...
+}
+```
+
+### 2. Error Handling Pattern
+
+```cpp
+if (!storageManager.begin()) {
+  errorTracker.logServiceError(ERROR_STORAGE_INIT_FAILED, 
+                              "StorageManager initialization failed");
+  logger.critical("Fatal: Cannot continue without storage");
+  return;
+}
+```
+
+### 3. Logging Pattern
+
+```cpp
+// Prefer macros for fixed messages
+LOG_INFO("System initialized");
+
+// Use direct methods for dynamic messages
+String message = "Device temperature: " + String(temp);
+logger.info(message);
+```
+
+### 4. Resource Cleanup
+
+```cpp
+// Allocate resource
+gpioManager.requestPin(5, "sensor", "Temperature");
+
+// Use resource
+// ... operations ...
+
+// Release resource
+gpioManager.releasePin(5);
+```
+
+### 5. Configuration Access Pattern
+
+```cpp
+// Load configuration once
+configManager.begin();
+configManager.loadAllConfigs();
+
+// Access from cache frequently
+const WiFiConfig& wifi = configManager.getWiFiConfig();
+String esp_id = configManager.getESPId();
+```
+
+---
+
+## Summary Table
+
+| Module | Purpose | Singleton | Global Instance |
+|--------|---------|-----------|-----------------|
+| **Logger** | Logging with circular buffer | Yes | `extern Logger& logger` |
+| **StorageManager** | NVS abstraction (key-value storage) | Yes | `extern StorageManager& storageManager` |
+| **ConfigManager** | Configuration orchestration | Yes | `extern ConfigManager& configManager` |
+| **ErrorTracker** | Error tracking with categorization | Yes | `extern ErrorTracker& errorTracker` |
+| **TopicBuilder** | MQTT topic generation | Static class (no instance) | `TopicBuilder::` prefix |
+| **GPIOManager** | GPIO safety & allocation | Yes | `extern GPIOManager& gpioManager` |
+
+---
+
+**Last Updated:** 2025-11-14  
+**Phase:** 1 - Core Infrastructure  
+**Status:** Production Ready
+
