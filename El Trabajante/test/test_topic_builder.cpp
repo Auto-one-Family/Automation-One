@@ -46,6 +46,39 @@ void test_topic_builder_actuator_status() {
 }
 
 // ============================================
+// TEST: Actuator Response Topic (Phase 5)
+// ============================================
+void test_topic_builder_actuator_response() {
+  TopicBuilder::setEspId("esp32_010");
+  TopicBuilder::setKaiserId("god");
+  
+  const char* topic = TopicBuilder::buildActuatorResponseTopic(12);
+  TEST_ASSERT_EQUAL_STRING("kaiser/god/esp/esp32_010/actuator/12/response", topic);
+}
+
+// ============================================
+// TEST: Actuator Alert Topic (Phase 5)
+// ============================================
+void test_topic_builder_actuator_alert() {
+  TopicBuilder::setEspId("esp32_011");
+  TopicBuilder::setKaiserId("god");
+  
+  const char* topic = TopicBuilder::buildActuatorAlertTopic(7);
+  TEST_ASSERT_EQUAL_STRING("kaiser/god/esp/esp32_011/actuator/7/alert", topic);
+}
+
+// ============================================
+// TEST: Actuator Emergency Topic (Phase 5)
+// ============================================
+void test_topic_builder_actuator_emergency() {
+  TopicBuilder::setEspId("esp32_012");
+  TopicBuilder::setKaiserId("god");
+  
+  const char* topic = TopicBuilder::buildActuatorEmergencyTopic();
+  TEST_ASSERT_EQUAL_STRING("kaiser/god/esp/esp32_012/actuator/emergency", topic);
+}
+
+// ============================================
 // TEST: System Heartbeat Topic (Pattern 5)
 // ============================================
 void test_topic_builder_heartbeat() {
@@ -108,6 +141,9 @@ void setup() {
   RUN_TEST(test_topic_builder_sensor_batch);
   RUN_TEST(test_topic_builder_actuator_command);
   RUN_TEST(test_topic_builder_actuator_status);
+  RUN_TEST(test_topic_builder_actuator_response);
+  RUN_TEST(test_topic_builder_actuator_alert);
+  RUN_TEST(test_topic_builder_actuator_emergency);
   RUN_TEST(test_topic_builder_heartbeat);
   RUN_TEST(test_topic_builder_system_command);
   RUN_TEST(test_topic_builder_config);
