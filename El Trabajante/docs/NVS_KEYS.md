@@ -40,23 +40,21 @@ Diese Dokumentation listet alle NVS-Keys auf, die von StorageManager verwendet w
 
 - **Namespace**: `sensor_config`
 
-- **Keys** (pro Sensor: 8 Keys × max 20 Sensoren = 160 Keys):
+- **Keys** (pro Sensor: 6 Keys × max 20 Sensoren = 120 Keys):
 
   - `sensor_count` (uint8_t) - Anzahl konfigurierter Sensoren (0-20)
 
   - `sensor_{i}_gpio` (uint8_t) - GPIO-Pin (i = 0-19)
 
-  - `sensor_{i}_type` (String) - Sensor-Typ (z.B. "DHT22", "DS18B20", "BMP280")
+  - `sensor_{i}_type` (String) - Sensor-Typ (z.B. "ph_sensor", "temperature_ds18b20", "soil_moisture")
 
   - `sensor_{i}_name` (String) - Sensor-Name für UI
 
+  - `sensor_{i}_subzone` (String) - Subzone-Zuordnung (z.B. "zone_1", "zone_2")
+
   - `sensor_{i}_active` (bool) - Aktiv?
 
-  - `sensor_{i}_interval_ms` (uint16_t) - Leseintervall in Millisekunden
-
-  - `sensor_{i}_offset` (float) - Kalibrations-Offset
-
-  - `sensor_{i}_unit` (String) - Einheit (z.B. "°C", "%", "hPa")
+  - `sensor_{i}_raw_mode` (bool) - Raw-Mode aktiv? (immer `true` für Server-Centric Architecture)
 
 ## Actuator Configuration
 
@@ -81,6 +79,8 @@ Diese Dokumentation listet alle NVS-Keys auf, die von StorageManager verwendet w
   - `actuator_{i}_pwm_channel` (uint8_t) - PWM-Kanal - nur für PWM/SERVO
 
   - `actuator_{i}_default_state` (uint8_t) - Standard-Zustand (0=OFF, 1=ON)
+
+> **Phase-Status:** In Phase 5 (Server-Centric Option 2) werden keine Actuator-Configs in diesem Namespace gespeichert. Der Abschnitt bleibt unverändert dokumentiert, aber die Keys werden erst mit Phase 6 (Hybrid/Persistenz) aktiv genutzt.
 
 ## System Configuration
 
