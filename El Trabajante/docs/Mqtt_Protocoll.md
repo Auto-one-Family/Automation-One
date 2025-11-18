@@ -1378,6 +1378,8 @@ mosquitto_pub -h localhost \
 }
 ```
 
+> **Aktueller Architektur-Stand (Phase 5):** Actuator-Abschnitt dient als einzige Quelle für Actuator-Configs (Option 2, MQTT-only). Persistente Speicherung via NVS ist bewusst deaktiviert und folgt erst in Phase 6 (Hybrid-Ansatz).
+
 **ESP32-Verhalten:**
 1. Empfängt Config-Update
 2. Validiert JSON-Schema
@@ -2342,6 +2344,115 @@ def process_sensor_data(payload):
 │             └─> db/repositories/sensor_repo.py (Save)           │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+### Flow 1b: Sensor-Reading → HTTP Processing → MQTT Publish (Pi-Enhanced Mode)
+
+**Hinweis:** Dieser Flow beschreibt die Server-Centric Architecture, bei der Raw-Sensor-Daten via HTTP an den God-Kaiser Server gesendet werden, dort verarbeitet werden, und die verarbeiteten Werte dann via MQTT publiziert werden.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ESP32: Sensor-Manager                                           │
+│ └─> Timer-Trigger (30s)                                         │
+│     └─> performAllMeasurements()                                │
+│         └─> readRawAnalog(gpio) / readRawI2C() / readRawOneWire()│
+│             └─> Sensor-Hardware (I2C/OneWire/ADC)               │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ ESP32: PiEnhancedProcessor                                      │
+│ └─> sendRawData(RawSensorData)                                  │
+│     └─> HTTP POST Request                                       │
+│         └─> URL: http://{server_address}:8000/api/v1/sensors/process│
+│         └─> Content-Type: application/json                      │
+│         └─> Timeout: 5000ms                                     │
+│         └─> Payload: {esp_id, gpio, sensor_type, raw_value, timestamp, metadata}│
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ God-Kaiser Server: HTTP API                                     │
+│ └─> Port: 8000                                                  │
+│ └─> Endpoint: /api/v1/sensors/process                           │
+│     └─> services/sensor_service.py (Processing)                 │
+│         └─> Dynamic Import: sensor_libraries/active/{sensor_type}.py│
+│         └─> Complex Algorithms (Kalman-Filter, Temp-Compensation)│
+│         └─> Quality Assessment                                  │
+│         └─> Response: {processed_value, unit, quality, timestamp}│
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ ESP32: PiEnhancedProcessor                                      │
+│ └─> parseResponse(JSON)                                         │
+│     └─> ProcessedSensorData: {value, unit, quality, timestamp}  │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ ESP32: MQTT-Client                                              │
+│ └─> publish()                                                   │
+│     └─> Topic: kaiser/god/esp/{esp_id}/sensor/{gpio}/data      │
+│     └─> Payload: {ts, gpio, raw, value, unit, quality, ...}    │
+│     └─> QoS: 1                                                  │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ MQTT Broker (Mosquitto)                                         │
+│ └─> Route to Subscribers                                        │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ God-Kaiser Server: MQTT-Subscriber                              │
+│ └─> mqtt/subscriber.py                                          │
+│     └─> mqtt/handlers/sensor_handler.py                         │
+│         └─> db/repositories/sensor_repo.py (Save)               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**HTTP API Spezifikation:**
+
+- **Base URL:** `http://{server_address}:8000`
+- **Endpoint:** `/api/v1/sensors/process`
+- **Method:** POST
+- **Content-Type:** `application/json`
+- **Timeout:** 5000ms (default)
+- **Port:** 8000 (hardcoded in `PiEnhancedProcessor`)
+
+**Request Payload:**
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "gpio": 4,
+  "sensor_type": "ph_sensor",
+  "raw_value": 2048,
+  "timestamp": 1735818000,
+  "metadata": "{}"
+}
+```
+
+**Response Payload (HTTP 200):**
+```json
+{
+  "processed_value": 7.2,
+  "unit": "pH",
+  "quality": "good",
+  "timestamp": 1735818000
+}
+```
+
+**Error Response (HTTP 4xx/5xx):**
+```json
+{
+  "error": "Processing failed",
+  "message": "Sensor calibration required"
+}
+```
+
+**Circuit-Breaker Pattern:**
+- Bei HTTP-Fehler: `consecutive_failures_++`
+- Bei `consecutive_failures_ >= 5`: `circuit_open_ = true`
+- Bei `circuit_open_`: Keine Requests für 60s
+- Nach Timeout: Automatisches Reset, `consecutive_failures_ = 0`
+- Bei erfolgreichem Request: `consecutive_failures_ = 0`, `circuit_open_ = false`
 
 ---
 
