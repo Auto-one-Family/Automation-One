@@ -17,6 +17,14 @@
 #include "drivers/onewire_bus.h"
 #include "drivers/pwm_controller.h"
 
+// Phase 4: Sensor System
+#include "services/sensor/sensor_manager.h"
+#include "models/sensor_types.h"
+
+// Phase 5: Actuator System
+#include "services/actuator/actuator_manager.h"
+#include "services/actuator/safety_controller.h"
+
 // ============================================
 // GLOBAL VARIABLES
 // ============================================
@@ -24,6 +32,13 @@ SystemConfig g_system_config;
 WiFiConfig g_wifi_config;
 KaiserZone g_kaiser;
 MasterZone g_master;
+
+// ============================================
+// FORWARD DECLARATIONS
+// ============================================
+void handleSensorConfig(const String& payload);
+void parseAndConfigureSensor(const String& sensor_json);
+void handleActuatorConfig(const String& payload);
 
 // ============================================
 // SETUP - INITIALIZATION ORDER (Guide-konform)
@@ -160,19 +175,56 @@ void setup() {
     // Subscribe to critical topics
     String system_command_topic = TopicBuilder::buildSystemCommandTopic();
     String config_topic = TopicBuilder::buildConfigTopic();
-    String emergency_topic = TopicBuilder::buildBroadcastEmergencyTopic();
+    String broadcast_emergency_topic = TopicBuilder::buildBroadcastEmergencyTopic();
+    String actuator_command_topic = TopicBuilder::buildActuatorCommandTopic(0);
+    String actuator_command_wildcard = actuator_command_topic;
+    actuator_command_wildcard.replace("/0/command", "/+/command");
+    String esp_emergency_topic = TopicBuilder::buildActuatorEmergencyTopic();
     
     mqttClient.subscribe(system_command_topic);
     mqttClient.subscribe(config_topic);
-    mqttClient.subscribe(emergency_topic);
+    mqttClient.subscribe(broadcast_emergency_topic);
+    mqttClient.subscribe(actuator_command_wildcard);
+    mqttClient.subscribe(esp_emergency_topic);
     
-    LOG_INFO("Subscribed to system topics");
+    LOG_INFO("Subscribed to system + actuator topics");
     
-    // Set MQTT callback for message routing (placeholder for Phase 4)
+    // Set MQTT callback for message routing (Phase 4)
     mqttClient.setCallback([](const String& topic, const String& payload) {
       LOG_INFO("MQTT message received: " + topic);
       LOG_DEBUG("Payload: " + payload);
-      // Message routing will be implemented in Phase 4
+      
+      // Handle sensor configuration
+      String config_topic = String(TopicBuilder::buildConfigTopic());
+      if (topic == config_topic) {
+        handleSensorConfig(payload);
+        handleActuatorConfig(payload);
+        return;
+      }
+      
+      // Actuator commands
+      String actuator_command_prefix = String(TopicBuilder::buildActuatorCommandTopic(0));
+      actuator_command_prefix.replace("/0/command", "/");
+      if (topic.startsWith(actuator_command_prefix)) {
+        actuatorManager.handleActuatorCommand(topic, payload);
+        return;
+      }
+      
+      // ESP-specific emergency stop
+      String esp_emergency_topic = String(TopicBuilder::buildActuatorEmergencyTopic());
+      if (topic == esp_emergency_topic) {
+        safetyController.emergencyStopAll("ESP emergency command");
+        return;
+      }
+      
+      // Broadcast emergency
+      String broadcast_emergency_topic = String(TopicBuilder::buildBroadcastEmergencyTopic());
+      if (topic == broadcast_emergency_topic) {
+        safetyController.emergencyStopAll("Broadcast emergency");
+        return;
+      }
+      
+      // Additional message handlers can be added here
     });
   }
   
@@ -243,17 +295,252 @@ void setup() {
   LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
   LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
   LOG_INFO("=====================");
+  
+  // ============================================
+  // STEP 12: PHASE 4 - SENSOR SYSTEM
+  // ============================================
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 4: Sensor System               ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+  
+  // Sensor Manager
+  if (!sensorManager.begin()) {
+    LOG_ERROR("Sensor Manager initialization failed!");
+    errorTracker.trackError(ERROR_SENSOR_INIT_FAILED,
+                           ERROR_SEVERITY_CRITICAL,
+                           "SensorManager begin() failed");
+  } else {
+    LOG_INFO("Sensor Manager initialized");
+    
+    // Load sensor configs from NVS
+    SensorConfig sensors[10];
+    uint8_t loaded_count = 0;
+    if (configManager.loadSensorConfig(sensors, 10, loaded_count)) {
+      LOG_INFO("Loaded " + String(loaded_count) + " sensor configs from NVS");
+      for (uint8_t i = 0; i < loaded_count; i++) {
+        sensorManager.configureSensor(sensors[i]);
+      }
+    }
+  }
+  
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 4: Sensor System READY         ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+  LOG_INFO("Modules Initialized:");
+  LOG_INFO("  ✅ Sensor Manager");
+  LOG_INFO("");
+  
+  // Print memory stats
+  LOG_INFO("=== Memory Status (Phase 4) ===");
+  LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+  LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
+  LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
+  LOG_INFO("=====================");
+
+  // ============================================
+  // STEP 13: PHASE 5 - ACTUATOR SYSTEM
+  // ============================================
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 5: Actuator System            ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
+
+  if (!safetyController.begin()) {
+    LOG_ERROR("Safety Controller initialization failed!");
+    errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
+                            ERROR_SEVERITY_CRITICAL,
+                            "SafetyController begin() failed");
+  } else {
+    LOG_INFO("Safety Controller initialized");
+  }
+
+  if (!actuatorManager.begin()) {
+    LOG_ERROR("Actuator Manager initialization failed!");
+    errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
+                            ERROR_SEVERITY_CRITICAL,
+                            "ActuatorManager begin() failed");
+  } else {
+    LOG_INFO("Actuator Manager initialized (waiting for MQTT configs)");
+  }
+
+  LOG_INFO("╔════════════════════════════════════════╗");
+  LOG_INFO("║   Phase 5: Actuator System READY      ║");
+  LOG_INFO("╚════════════════════════════════════════╝");
 }
 
 // ============================================
-// LOOP - Phase 2 Communication Monitoring
+// LOOP - Phase 2 Communication Monitoring + Phase 4/5 Operations
 // ============================================
 void loop() {
   // Phase 2: Communication monitoring
   wifiManager.loop();      // Monitor WiFi connection
   mqttClient.loop();       // Process MQTT messages + heartbeat
   
+  // Phase 4: Sensor measurements
+  sensorManager.performAllMeasurements();
+
+  // Phase 5: Actuator maintenance
+  actuatorManager.processActuatorLoops();
+  static unsigned long last_actuator_status = 0;
+  if (millis() - last_actuator_status > 30000) {
+    actuatorManager.publishAllActuatorStatus();
+    last_actuator_status = millis();
+  }
+  
   delay(10);  // Small delay to prevent watchdog issues
+}
+
+// ============================================
+// MQTT MESSAGE HANDLERS (PHASE 4)
+// ============================================
+void handleSensorConfig(const String& payload) {
+  LOG_INFO("Handling sensor configuration from MQTT");
+  
+  // Simple JSON parsing (no external library)
+  // Expected format: {"sensors": [{"gpio": 4, "sensor_type": "ph_sensor", "sensor_name": "Boden pH", "subzone_id": "zone_1", "active": true}]}
+  
+  // Find sensors array
+  int sensors_start = payload.indexOf("\"sensors\":[");
+  if (sensors_start == -1) {
+    LOG_ERROR("Invalid sensor config payload: missing 'sensors' array");
+    return;
+  }
+  
+  sensors_start += 11;  // Length of "sensors":[
+  int sensors_end = payload.lastIndexOf("]");
+  if (sensors_end == -1 || sensors_end <= sensors_start) {
+    LOG_ERROR("Invalid sensor config payload: malformed 'sensors' array");
+    return;
+  }
+  
+  String sensors_array = payload.substring(sensors_start, sensors_end + 1);
+  
+  // Parse each sensor config
+  int sensor_start = 0;
+  int brace_count = 0;
+  bool in_sensor = false;
+  String current_sensor = "";
+  
+  for (int i = 0; i < sensors_array.length(); i++) {
+    char c = sensors_array.charAt(i);
+    
+    if (c == '{') {
+      if (!in_sensor) {
+        in_sensor = true;
+        sensor_start = i;
+        brace_count = 1;
+        current_sensor = "";
+      } else {
+        brace_count++;
+      }
+    } else if (c == '}') {
+      brace_count--;
+      if (brace_count == 0 && in_sensor) {
+        current_sensor = sensors_array.substring(sensor_start, i + 1);
+        parseAndConfigureSensor(current_sensor);
+        in_sensor = false;
+        current_sensor = "";
+      }
+    }
+    
+    if (in_sensor) {
+      current_sensor += c;
+    }
+  }
+}
+
+void parseAndConfigureSensor(const String& sensor_json) {
+  // Parse individual sensor JSON
+  // {"gpio": 4, "sensor_type": "ph_sensor", "sensor_name": "Boden pH", "subzone_id": "zone_1", "active": true}
+  
+  SensorConfig config;
+  config.gpio = 255;
+  config.active = false;
+  config.raw_mode = true;  // Always true for Server-Centric
+  
+  // Extract GPIO
+  int gpio_start = sensor_json.indexOf("\"gpio\":");
+  if (gpio_start != -1) {
+    gpio_start += 7;
+    int gpio_end = sensor_json.indexOf(",", gpio_start);
+    if (gpio_end == -1) {
+      gpio_end = sensor_json.indexOf("}", gpio_start);
+    }
+    if (gpio_end != -1) {
+      String gpio_str = sensor_json.substring(gpio_start, gpio_end);
+      gpio_str.trim();
+      config.gpio = gpio_str.toInt();
+    }
+  }
+  
+  // Extract sensor_type
+  int type_start = sensor_json.indexOf("\"sensor_type\":\"");
+  if (type_start != -1) {
+    type_start += 15;  // Length of "sensor_type":""
+    int type_end = sensor_json.indexOf("\"", type_start);
+    if (type_end != -1) {
+      config.sensor_type = sensor_json.substring(type_start, type_end);
+    }
+  }
+  
+  // Extract sensor_name
+  int name_start = sensor_json.indexOf("\"sensor_name\":\"");
+  if (name_start != -1) {
+    name_start += 15;  // Length of "sensor_name":""
+    int name_end = sensor_json.indexOf("\"", name_start);
+    if (name_end != -1) {
+      config.sensor_name = sensor_json.substring(name_start, name_end);
+    }
+  }
+  
+  // Extract subzone_id
+  int subzone_start = sensor_json.indexOf("\"subzone_id\":\"");
+  if (subzone_start != -1) {
+    subzone_start += 14;  // Length of "subzone_id":""
+    int subzone_end = sensor_json.indexOf("\"", subzone_start);
+    if (subzone_end != -1) {
+      config.subzone_id = sensor_json.substring(subzone_start, subzone_end);
+    }
+  }
+  
+  // Extract active
+  int active_start = sensor_json.indexOf("\"active\":");
+  if (active_start != -1) {
+    active_start += 9;  // Length of "active":
+    int active_end = sensor_json.indexOf(",", active_start);
+    if (active_end == -1) {
+      active_end = sensor_json.indexOf("}", active_start);
+    }
+    if (active_end != -1) {
+      String active_str = sensor_json.substring(active_start, active_end);
+      active_str.trim();
+      config.active = (active_str == "true");
+    }
+  }
+  
+  // Configure or remove sensor
+  if (config.gpio != 255 && config.sensor_type.length() > 0) {
+    if (config.active) {
+      if (sensorManager.configureSensor(config)) {
+        // Save to NVS
+        configManager.saveSensorConfig(config);
+        LOG_INFO("Sensor configured: GPIO " + String(config.gpio) + " (" + config.sensor_type + ")");
+      } else {
+        LOG_ERROR("Failed to configure sensor on GPIO " + String(config.gpio));
+      }
+    } else {
+      // Remove sensor
+      sensorManager.removeSensor(config.gpio);
+      configManager.removeSensorConfig(config.gpio);
+      LOG_INFO("Sensor removed: GPIO " + String(config.gpio));
+    }
+  } else {
+    LOG_WARNING("Invalid sensor config: GPIO or sensor_type missing");
+  }
+}
+
+void handleActuatorConfig(const String& payload) {
+  LOG_INFO("Handling actuator configuration from MQTT");
+  actuatorManager.handleActuatorConfig(payload);
 }
 
 
