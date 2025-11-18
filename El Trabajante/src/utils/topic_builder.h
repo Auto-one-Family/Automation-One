@@ -17,6 +17,9 @@ public:
   static const char* buildSensorBatchTopic();                   // Pattern 2
   static const char* buildActuatorCommandTopic(uint8_t gpio);   // Pattern 3
   static const char* buildActuatorStatusTopic(uint8_t gpio);    // Pattern 4
+  static const char* buildActuatorResponseTopic(uint8_t gpio);  // Phase 5
+  static const char* buildActuatorAlertTopic(uint8_t gpio);     // Phase 5
+  static const char* buildActuatorEmergencyTopic();             // Phase 5
   static const char* buildSystemHeartbeatTopic();               // Pattern 5
   static const char* buildSystemCommandTopic();                 // Pattern 6
   static const char* buildConfigTopic();                        // Pattern 7

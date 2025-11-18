@@ -81,6 +81,30 @@ const char* TopicBuilder::buildActuatorStatusTopic(uint8_t gpio) {
   return validateTopicBuffer(written);
 }
 
+// Phase 5: kaiser/god/esp/{esp_id}/actuator/{gpio}/response
+const char* TopicBuilder::buildActuatorResponseTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/%d/response",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
+// Phase 5: kaiser/god/esp/{esp_id}/actuator/{gpio}/alert
+const char* TopicBuilder::buildActuatorAlertTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/%d/alert",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
+// Phase 5: kaiser/god/esp/{esp_id}/actuator/emergency
+const char* TopicBuilder::buildActuatorEmergencyTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/emergency",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // Pattern 5: kaiser/god/esp/{esp_id}/system/heartbeat
 const char* TopicBuilder::buildSystemHeartbeatTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
