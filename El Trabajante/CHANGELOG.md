@@ -191,11 +191,235 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] - Phase 1 Core Infrastructure - 2025-11-14
+## [3.0.0] - Phase 3 Hardware Abstraction Layer - 2025-01-28
+
+### Added
+
+#### Hardware Abstraction Modules
+
+- **I2CBusManager** (`src/drivers/i2c_bus.*`)
+  - I2C bus initialization and management
+  - Bus scanning for device detection
+  - Raw read/write operations
+  - Error handling with ErrorTracker integration
+  - Hardware-specific configuration (XIAO ESP32-C3, ESP32-WROOM-32)
+  - Singleton pattern (consistent with Phase 1-2)
+
+- **OneWireBusManager** (`src/drivers/onewire_bus.*`)
+  - OneWire bus initialization and management
+  - Device scanning (ROM address discovery)
+  - Raw temperature reading (DS18B20 support)
+  - Error handling with ErrorTracker integration
+  - Hardware-specific pin configuration
+  - Singleton pattern (consistent with Phase 1-2)
+
+- **PWMController** (`src/drivers/pwm_controller.*`)
+  - PWM channel management (6 channels for XIAO, 16 for WROOM)
+  - Channel attachment/detachment
+  - 12-bit resolution support (0-4095)
+  - Frequency configuration (default: 1 kHz)
+  - Percentage-based and absolute value writing
+  - Error handling with ErrorTracker integration
+  - Singleton pattern (consistent with Phase 1-2)
+
+#### Integration
+
+- **main.cpp Phase 3 Integration** (`src/main.cpp`)
+  - I2CBusManager initialization after WiFi connection
+  - OneWireBusManager initialization
+  - PWMController initialization
+  - Hardware-specific pin auto-reservation via GPIOManager
+
+### Changed
+
+- GPIO Manager: Auto-reservation of I2C pins during initialization
+- Memory Strategy: Hardware abstraction uses minimal heap allocation
+
+### Removed
+
+- None
+
+### Known Issues
+
+- None
+
+### Performance
+
+- I2C bus scan: ~100ms for 8-bit address space
+- OneWire device scan: ~500ms (depends on device count)
+- PWM update: <1ms per channel
+- Memory usage: ~30 KB / 320 KB (9.4%)
+
+### Dependencies
+
+- Wire.h (ESP32 Core - I2C)
+- OneWire library (ESP32 Core)
+- ledc.h (ESP32 Core - PWM)
+
+---
+
+## [4.0.0] - Phase 4 Sensor System - 2025-01-28
+
+### Added
+
+#### Communication Modules
+
+- **HTTPClient** (`src/services/communication/http_client.*`)
+  - HTTP POST/GET request support
+  - URL parsing (IP:Port or hostname)
+  - JSON payload encoding
+  - Response parsing (status code, body, max 1KB)
+  - Timeout handling (default: 5000ms)
+  - Error handling (connection failed, timeout, HTTP error)
+  - WiFiClient integration via WiFiManager
+  - Memory-safe response handling (String.reserve())
+  - Singleton pattern (consistent with Phase 1-3)
+
+#### Sensor Processing Modules
+
+- **PiEnhancedProcessor** (`src/services/sensor/pi_enhanced_processor.*`)
+  - HTTP communication with God-Kaiser Server (Port 8000)
+  - Raw sensor data sending (RawSensorData → ProcessedSensorData)
+  - JSON response parsing (without external library)
+  - Circuit-breaker pattern (5 failures → 60s pause)
+  - Server address from ConfigManager (WiFiConfig.server_address)
+  - Error handling (circuit open, HTTP error, JSON parse error)
+  - Singleton pattern (consistent with Phase 1-3)
+
+#### Sensor Management Modules
+
+- **SensorManager** (`src/services/sensor/sensor_manager.*`)
+  - Sensor registry (SensorConfig array, max 20 sensors)
+  - GPIO-based sensor management
+  - Sensor configuration (configureSensor, removeSensor, getSensorConfig)
+  - Raw data reading (Analog, Digital, I2C, OneWire)
+  - Automatic MQTT publishing (every 30s via performAllMeasurements)
+  - Integration with PiEnhancedProcessor (HTTP processing)
+  - Legacy Phase 3 methods (performI2CMeasurement, performOneWireMeasurement)
+  - Singleton pattern (consistent with Phase 1-3)
+
+#### Models
+
+- **SensorConfig** (`src/models/sensor_types.h`)
+  - GPIO pin assignment
+  - Sensor type (string-based: "ph_sensor", "temperature_ds18b20", etc.)
+  - Sensor name and subzone assignment
+  - Active status and raw_mode flag (always true for server-centric)
+  - Last reading tracking
+
+- **SensorReading** (`src/models/sensor_types.h`)
+  - Raw value (ADC 0-4095 or OneWire raw)
+  - Processed value from server
+  - Unit and quality assessment
+  - Timestamp and validation status
+  - Error message support
+
+- **RawSensorData** (`src/services/sensor/pi_enhanced_processor.h`)
+  - GPIO, sensor type, raw value
+  - Timestamp and metadata (JSON)
+
+- **ProcessedSensorData** (`src/services/sensor/pi_enhanced_processor.h`)
+  - Processed value, unit, quality
+  - Timestamp and validation status
+  - Error message support
+
+#### Integration
+
+- **main.cpp Phase 4 Integration** (`src/main.cpp`)
+  - HTTPClient initialization
+  - PiEnhancedProcessor initialization
+  - SensorManager initialization
+  - Sensor configuration via MQTT (config topic handler)
+  - Sensor measurement loop (performAllMeasurements every 30s)
+  - MQTT callback for sensor configuration updates
+
+- **ConfigManager Sensor Support** (`src/services/config/config_manager.*`)
+  - Sensor configuration save/load to NVS
+  - NVS keys: `sensor_{i}_gpio`, `sensor_{i}_type`, `sensor_{i}_name`, `sensor_{i}_subzone`, `sensor_{i}_active`, `sensor_{i}_raw_mode`
+  - Index-based sensor storage (not GPIO-based)
+  - Sensor count tracking
+
+#### MQTT Topics
+
+- **Sensor Data Publishing**
+  - Topic: `kaiser/god/esp/{esp_id}/sensor/{gpio}/data`
+  - QoS: 1 (at least once)
+  - Frequency: 30s (automatic)
+  - Payload: JSON with timestamp, ESP-ID, GPIO, type, raw/processed value, unit, quality
+
+- **Sensor Configuration**
+  - Topic: `kaiser/god/esp/{esp_id}/config` (subscribe)
+  - Payload: JSON array of sensor configurations
+  - Automatic NVS storage via ConfigManager
+
+#### HTTP API Integration
+
+- **God-Kaiser Server API**
+  - Endpoint: `http://{server_address}:8000/api/v1/sensors/process`
+  - Method: POST
+  - Content-Type: `application/json`
+  - Request: Raw sensor data (esp_id, gpio, sensor_type, raw_value, timestamp, metadata)
+  - Response: Processed sensor data (processed_value, unit, quality, timestamp)
+  - Timeout: 5000ms
+
+### Changed
+
+- ConfigManager: Added sensor configuration methods (saveSensorConfig, loadSensorConfig, removeSensorConfig)
+- main.cpp: Added sensor measurement loop and MQTT config handler
+- NVS Keys: Added sensor-related keys (see NVS_KEYS.md)
+
+### Removed
+
+- None
+
+### Known Issues
+
+- None
+
+### Performance
+
+- HTTP request latency: ~100ms (HTTP roundtrip)
+- Sensor reading cycle: 30s (all active sensors)
+- Circuit-breaker timeout: 60s (after 5 consecutive failures)
+- Memory usage: ~35 KB / 320 KB (10.9%)
+
+### Dependencies
+
+- HTTPClient (Phase 4)
+- WiFiClient.h (ESP32 Core)
+- MQTTClient (Phase 2)
+- I2CBusManager, OneWireBusManager (Phase 3)
 
 ---
 
 ## Version History
+
+- **4.0.0** - Phase 4 Sensor System (2025-01-28)
+- **3.0.0** - Phase 3 Hardware Abstraction Layer (2025-01-28)
+- **2.0.0** - Phase 2 Communication Layer (2025-11-14)
+## [5.0.0] - Phase 5 Actuator System - 2025-11-18
+
+### Added
+
+- Actuator model extensions (`src/models/actuator_types.h`): expanded structs + helper utilities
+- Actuator drivers (`PumpActuator`, `PWMActuator`, `ValveActuator`) + `IActuatorDriver` interface
+- `SafetyController` emergency state-machine with broadcast + ESP-scoped topics
+- `ActuatorManager` registry, MQTT command/response/alert/status handling, config parsing
+- TopicBuilder Phase-5 helpers (response, alert, actuator emergency)
+- ConfigManager actuator persistence hooks (`load/save/validateActuatorConfig`) for future Option 3 (currently unused in Option 2 mode)
+- `main.cpp` Phase 5 integration (MQTT wildcard subscription, callback routing, loop maintenance)
+- Tests: `test_topic_builder.cpp` (new Actuator topic cases), `test_actuator_models.cpp`
+
+### Changed
+
+- `docs/PHASE_5_IMPLEMENTATION.md`, `docs/Roadmap.md`, `docs/NVS_KEYS.md` updated for Phase 5 status + Option 2 decision
+- `CHANGELOG.md` now documents Phase 5 milestone
+
+### Notes
+
+- Phase 5 remains **server-centric (Option 2)**. Persistence hooks are dormant until Phase 6 Hybrid rollout.
+
+---
 
 - **1.0.0** - Phase 1 Core Infrastructure (2025-11-14)
 - **0.0.0** - Project initialization (2025-11-13)
