@@ -1569,7 +1569,577 @@ if (!i2cBusManager.readRaw(0x44, 0x00, buffer, 2)) {
 
 ---
 
+## Communication Layer (Phase 2)
+
+### WiFiManager
+
+#### Header
+```cpp
+#include "services/communication/wifi_manager.h"
+```
+
+#### Singleton Access
+```cpp
+WiFiManager& wifiManager = WiFiManager::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize WiFi manager
+bool begin();
+
+// Connect to WiFi network
+bool connect(const WiFiConfig& config);
+
+// Disconnect from WiFi
+bool disconnect();
+
+// Check connection status
+bool isConnected() const;
+
+// Attempt reconnection
+void reconnect();
+
+// Monitor connection (call in loop)
+void loop();
+```
+
+#### Status Queries
+```cpp
+// Get connection status string
+String getConnectionStatus() const;
+
+// Get WiFi signal strength (RSSI)
+int8_t getRSSI() const;
+
+// Get local IP address
+IPAddress getLocalIP() const;
+
+// Get connected SSID
+String getSSID() const;
+```
+
+#### Example Usage
+```cpp
+// Initialize
+wifiManager.begin();
+
+// Connect
+WiFiConfig config;
+config.ssid = "MyNetwork";
+config.password = "MyPassword";
+wifiManager.connect(config);
+
+// Monitor in loop
+void loop() {
+    wifiManager.loop();
+}
+```
+
+---
+
+### MQTTClient
+
+#### Header
+```cpp
+#include "services/communication/mqtt_client.h"
+```
+
+#### Singleton Access
+```cpp
+MQTTClient& mqttClient = MQTTClient::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize MQTT client
+bool begin();
+
+// Connect to MQTT broker
+bool connect(const MQTTConfig& config);
+
+// Disconnect from broker
+bool disconnect();
+
+// Check connection status
+bool isConnected() const;
+
+// Attempt reconnection
+void reconnect();
+
+// Monitor connection (call in loop)
+void loop();
+```
+
+#### Authentication
+```cpp
+// Transition from anonymous to authenticated mode
+bool transitionToAuthenticated(const String& username, const String& password);
+
+// Check if in anonymous mode
+bool isAnonymousMode() const;
+```
+
+#### Publishing
+```cpp
+// Publish message
+bool publish(const String& topic, const String& payload, uint8_t qos = 1);
+
+// Publish with retry logic
+bool safePublish(const String& topic, const String& payload, uint8_t qos = 1, uint8_t retries = 3);
+```
+
+#### Subscription
+```cpp
+// Subscribe to topic
+bool subscribe(const String& topic);
+
+// Unsubscribe from topic
+bool unsubscribe(const String& topic);
+
+// Set message callback
+void setCallback(std::function<void(const String&, const String&)> callback);
+```
+
+#### Heartbeat
+```cpp
+// Publish heartbeat (automatic every 60s)
+void publishHeartbeat();
+```
+
+#### Status Queries
+```cpp
+// Get connection status string
+String getConnectionStatus() const;
+
+// Get connection attempt count
+uint16_t getConnectionAttempts() const;
+
+// Check for offline messages
+bool hasOfflineMessages() const;
+
+// Get offline message count
+uint16_t getOfflineMessageCount() const;
+```
+
+#### MQTTConfig Structure
+```cpp
+struct MQTTConfig {
+    String server;              // Broker IP/Hostname
+    uint16_t port;             // Broker Port (default: 1883/8883)
+    String client_id;           // ESP32 Client ID
+    String username;            // Optional (empty = anonymous)
+    String password;            // Optional (empty = anonymous)
+    int keepalive;              // Keepalive Interval (default: 60s)
+    int timeout;                // Connection Timeout (default: 10s)
+};
+```
+
+#### Example Usage
+```cpp
+// Initialize
+mqttClient.begin();
+
+// Connect
+MQTTConfig config;
+config.server = "192.168.1.100";
+config.port = 1883;
+config.client_id = configManager.getESPId();
+config.username = "";  // Anonymous mode
+config.password = "";
+mqttClient.connect(config);
+
+// Subscribe
+mqttClient.subscribe(TopicBuilder::buildSystemCommandTopic());
+
+// Set callback
+mqttClient.setCallback([](const String& topic, const String& payload) {
+    LOG_INFO("MQTT message: " + topic);
+});
+
+// Monitor in loop
+void loop() {
+    mqttClient.loop();
+}
+```
+
+---
+
+## Sensor System (Phase 4)
+
+### HTTPClient
+
+#### Header
+```cpp
+#include "services/communication/http_client.h"
+```
+
+#### Singleton Access
+```cpp
+HTTPClient& httpClient = HTTPClient::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize HTTP client
+bool begin();
+
+// Deinitialize HTTP client
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### HTTP Requests
+```cpp
+// POST request (Primary API - const char*)
+HTTPResponse post(const char* url, const char* payload, 
+                 const char* content_type = "application/json",
+                 int timeout_ms = 5000);
+
+// POST request (String wrapper)
+inline HTTPResponse post(const String& url, const String& payload,
+                        const String& content_type = "application/json",
+                        int timeout_ms = 5000);
+
+// GET request
+HTTPResponse get(const char* url, int timeout_ms = 5000);
+
+// GET request (String wrapper)
+inline HTTPResponse get(const String& url, int timeout_ms = 5000);
+```
+
+#### Configuration
+```cpp
+// Set default timeout
+void setTimeout(int timeout_ms);
+
+// Get current timeout
+int getTimeout() const;
+```
+
+#### HTTPResponse Structure
+```cpp
+struct HTTPResponse {
+    int status_code = 0;        // HTTP status code (200, 404, etc.)
+    String body;                // Response body (max 1KB for sensor responses)
+    bool success = false;       // true if status_code 2xx
+    char error_message[128];    // Error message if failed
+};
+```
+
+#### Example Usage
+```cpp
+// Initialize
+httpClient.begin();
+
+// POST request
+String url = "http://192.168.1.100:8000/api/v1/sensors/process";
+String payload = "{\"gpio\":4,\"sensor_type\":\"ph_sensor\",\"raw_value\":2048}";
+HTTPResponse response = httpClient.post(url, payload);
+
+if (response.success) {
+    LOG_INFO("Response: " + response.body);
+} else {
+    LOG_ERROR("HTTP Error: " + String(response.error_message));
+}
+```
+
+---
+
+### PiEnhancedProcessor
+
+#### Header
+```cpp
+#include "services/sensor/pi_enhanced_processor.h"
+```
+
+#### Singleton Access
+```cpp
+PiEnhancedProcessor& piEnhancedProcessor = PiEnhancedProcessor::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize processor
+bool begin();
+
+// Deinitialize processor
+void end();
+```
+
+#### Raw Data Processing
+```cpp
+// Send raw sensor data to God-Kaiser Server
+bool sendRawData(const RawSensorData& data, ProcessedSensorData& processed_out);
+```
+
+#### Server Status
+```cpp
+// Check if Pi server is available
+bool isPiAvailable() const;
+
+// Get server address
+String getPiServerAddress() const;
+
+// Get server port
+uint16_t getPiServerPort() const;
+
+// Get last response time
+unsigned long getLastResponseTime() const;
+```
+
+#### Circuit-Breaker Pattern
+```cpp
+// Check if circuit breaker is open (server unavailable)
+bool isCircuitOpen() const;
+
+// Manually reset circuit breaker
+void resetCircuitBreaker();
+
+// Get consecutive failure count
+uint8_t getConsecutiveFailures() const;
+```
+
+#### Data Structures
+```cpp
+struct RawSensorData {
+    uint8_t gpio;               // GPIO pin number
+    String sensor_type;          // "ph_sensor", "temperature_ds18b20", etc.
+    uint32_t raw_value;          // ADC value (0-4095) or OneWire raw
+    unsigned long timestamp;     // Timestamp in milliseconds
+    String metadata;             // Optional: JSON with additional info
+};
+
+struct ProcessedSensorData {
+    float value;                 // Processed value (e.g., 7.2 pH)
+    String unit;                 // "pH", "°C", "ppm", etc.
+    String quality;              // "excellent", "good", "fair", "poor", "bad", "stale"
+    unsigned long timestamp;     // Timestamp
+    bool valid;                  // true if processing successful
+    String error_message;        // Error message if failed
+};
+```
+
+#### Example Usage
+```cpp
+// Initialize
+piEnhancedProcessor.begin();
+
+// Send raw data
+RawSensorData raw_data;
+raw_data.gpio = 4;
+raw_data.sensor_type = "ph_sensor";
+raw_data.raw_value = 2048;
+raw_data.timestamp = millis();
+raw_data.metadata = "{}";
+
+ProcessedSensorData processed;
+if (piEnhancedProcessor.sendRawData(raw_data, processed)) {
+    LOG_INFO("Processed value: " + String(processed.value) + " " + processed.unit);
+} else {
+    LOG_ERROR("Processing failed: " + processed.error_message);
+}
+
+// Check circuit breaker
+if (piEnhancedProcessor.isCircuitOpen()) {
+    LOG_WARNING("Pi server unavailable, circuit breaker open");
+}
+```
+
+---
+
+### SensorManager
+
+#### Header
+```cpp
+#include "services/sensor/sensor_manager.h"
+```
+
+#### Singleton Access
+```cpp
+SensorManager& sensorManager = SensorManager::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize sensor manager
+bool begin();
+
+// Deinitialize sensor manager
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Sensor Configuration
+```cpp
+// Configure a sensor
+bool configureSensor(const SensorConfig& config);
+
+// Remove a sensor
+bool removeSensor(uint8_t gpio);
+
+// Get sensor configuration
+SensorConfig getSensorConfig(uint8_t gpio) const;
+
+// Check if sensor exists on GPIO
+bool hasSensorOnGPIO(uint8_t gpio) const;
+
+// Get active sensor count
+uint8_t getActiveSensorCount() const;
+```
+
+#### Sensor Reading
+```cpp
+// Perform measurement for a specific GPIO-based sensor
+bool performMeasurement(uint8_t gpio, SensorReading& reading_out);
+
+// Perform measurements for all active sensors (publishes via MQTT automatically)
+void performAllMeasurements();
+```
+
+#### Raw Data Reading Methods
+```cpp
+// Read raw analog value
+uint32_t readRawAnalog(uint8_t gpio);
+
+// Read raw digital value
+uint32_t readRawDigital(uint8_t gpio);
+
+// Read raw I2C data
+bool readRawI2C(uint8_t gpio, uint8_t device_address, 
+                uint8_t reg, uint8_t* buffer, size_t len);
+
+// Read raw OneWire data
+bool readRawOneWire(uint8_t gpio, const uint8_t rom[8], int16_t& raw_value);
+```
+
+#### Legacy Phase 3 Methods
+```cpp
+// Perform I2C measurement (Phase 3 compatibility)
+bool performI2CMeasurement(uint8_t device_address, uint8_t reg, 
+                           uint8_t* buffer, size_t len);
+
+// Perform OneWire measurement (Phase 3 compatibility)
+bool performOneWireMeasurement(const uint8_t rom[8], int16_t& raw_value);
+```
+
+#### Status Queries
+```cpp
+// Get sensor info string
+String getSensorInfo(uint8_t gpio) const;
+```
+
+#### SensorConfig Structure
+```cpp
+struct SensorConfig {
+    uint8_t gpio = 255;                    // GPIO pin
+    String sensor_type = "";               // "ph_sensor", "temperature_ds18b20", etc.
+    String sensor_name = "";               // User-defined name
+    String subzone_id = "";                // Subzone assignment
+    bool active = false;                   // Sensor active?
+    bool raw_mode = true;                  // Always true (raw data mode)
+    uint32_t last_raw_value = 0;           // Last raw value (ADC 0-4095)
+    unsigned long last_reading = 0;        // Timestamp of last reading
+};
+```
+
+#### SensorReading Structure
+```cpp
+struct SensorReading {
+    uint8_t gpio;                          // GPIO pin
+    String sensor_type;                    // Sensor type
+    uint32_t raw_value;                    // ADC value
+    float processed_value;                 // Processed value from server
+    String unit;                           // Unit from server
+    String quality;                        // Quality from server
+    unsigned long timestamp;               // Timestamp
+    bool valid;                            // true if reading successful
+    String error_message;                  // Error message if failed
+};
+```
+
+#### Example Usage
+```cpp
+// Initialize
+sensorManager.begin();
+
+// Configure sensor
+SensorConfig config;
+config.gpio = 4;
+config.sensor_type = "ph_sensor";
+config.sensor_name = "Boden pH";
+config.subzone_id = "zone_1";
+config.active = true;
+config.raw_mode = true;
+
+if (sensorManager.configureSensor(config)) {
+    LOG_INFO("Sensor configured on GPIO " + String(config.gpio));
+}
+
+// Perform measurement for specific sensor
+SensorReading reading;
+if (sensorManager.performMeasurement(4, reading)) {
+    LOG_INFO("Value: " + String(reading.processed_value) + " " + reading.unit);
+}
+
+// Perform all measurements (automatic MQTT publishing)
+sensorManager.performAllMeasurements();
+
+// In main loop
+void loop() {
+    sensorManager.performAllMeasurements();  // Measures all sensors every 30s
+}
+```
+
+---
+
+## Actuator System (Phase 5 - Skeleton)
+
+### ActuatorManager
+
+#### Header
+```cpp
+#include "services/actuator/actuator_manager.h"
+```
+
+#### Singleton Access
+```cpp
+ActuatorManager& actuatorManager = ActuatorManager::getInstance();
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize actuator manager
+bool begin();
+
+// Deinitialize actuator manager
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### PWM Actuator Control (Phase 3 Preparation)
+```cpp
+// Attach a PWM actuator to a GPIO pin
+bool attachPwmActuator(uint8_t gpio, uint8_t& channel_out);
+
+// Set PWM actuator output (percentage)
+bool setPwmPercent(uint8_t channel, float percent);
+
+// Detach a PWM actuator
+bool detachPwmActuator(uint8_t channel);
+```
+
+**Note:** Full actuator management implementation is planned for Phase 5.
+
+---
+
 **Last Updated:** 2025-01-28  
-**Phase:** 1 & 3 - Core Infrastructure + Hardware Abstraction  
-**Status:** Production Ready
+**Phase:** 1, 2, 3 & 4 - Core Infrastructure + Communication + Hardware Abstraction + Sensor System  
+**Status:** Production Ready (Phase 0-4 Complete)
 
