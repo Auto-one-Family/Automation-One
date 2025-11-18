@@ -8,6 +8,7 @@
 #include "actuator_drivers/iactuator_driver.h"
 
 class GPIOManager;
+class ActuatorManagerTestHelper;
 
 // ============================================
 // Actuator Manager - Phase 5 Implementation
@@ -55,6 +56,7 @@ public:
   bool isInitialized() const { return initialized_; }
 
 private:
+  friend class ActuatorManagerTestHelper;
   struct RegisteredActuator {
     bool in_use = false;
     uint8_t gpio = 255;
@@ -82,6 +84,7 @@ private:
   bool parseActuatorDefinition(const String& json, ActuatorConfig& config) const;
   String buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const;
   String buildResponsePayload(const ActuatorCommand& command, bool success, const String& message) const;
+  void publishConfigResponse(bool success, const String& message);
 
   RegisteredActuator actuators_[MAX_ACTUATORS];
   uint8_t actuator_count_;

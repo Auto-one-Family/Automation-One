@@ -23,6 +23,7 @@ public:
   static const char* buildSystemHeartbeatTopic();               // Pattern 5
   static const char* buildSystemCommandTopic();                 // Pattern 6
   static const char* buildConfigTopic();                        // Pattern 7
+  static const char* buildConfigResponseTopic();
   static const char* buildBroadcastEmergencyTopic();            // Pattern 8
   
 private:

@@ -129,6 +129,14 @@ const char* TopicBuilder::buildConfigTopic() {
   return validateTopicBuffer(written);
 }
 
+// Config response: kaiser/god/esp/{esp_id}/config_response
+const char* TopicBuilder::buildConfigResponseTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/config_response",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // Pattern 8: kaiser/broadcast/emergency
 const char* TopicBuilder::buildBroadcastEmergencyTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 

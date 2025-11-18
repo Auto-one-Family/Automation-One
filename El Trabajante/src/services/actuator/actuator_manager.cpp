@@ -290,7 +290,10 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
     return false;
   }
 
-  if (!validateActuatorValue(actuator->config.actuator_type, value)) {
+  float normalized_value = value;
+  if (isPwmActuatorType(actuator->config.actuator_type)) {
+    normalized_value = constrain(value, 0.0f, 1.0f);
+  } else if (!validateActuatorValue(actuator->config.actuator_type, value)) {
     LOG_ERROR("Actuator value out of range for GPIO " + String(gpio));
     errorTracker.trackError(ERROR_COMMAND_INVALID,
                             ERROR_SEVERITY_ERROR,
@@ -298,7 +301,7 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
     return false;
   }
 
-  bool success = actuator->driver->setValue(value);
+  bool success = actuator->driver->setValue(normalized_value);
   actuator->config = actuator->driver->getConfig();
   if (success) {
     publishActuatorStatus(gpio);
@@ -481,16 +484,22 @@ bool ActuatorManager::parseActuatorDefinition(const String& json, ActuatorConfig
 bool ActuatorManager::handleActuatorConfig(const String& payload) {
   int array_start = payload.indexOf("\"actuators\"");
   if (array_start == -1) {
+    publishActuatorAlert(255, "config_invalid", "Payload missing actuators");
+    publishConfigResponse(false, "Payload missing 'actuators'");
     LOG_ERROR("Actuator config payload missing 'actuators'");
     return false;
   }
   array_start = payload.indexOf('[', array_start);
   if (array_start == -1) {
+    publishActuatorAlert(255, "config_invalid", "Actuator array start missing");
+    publishConfigResponse(false, "Payload missing actuator array start");
     LOG_ERROR("Actuator config payload missing array start");
     return false;
   }
   int array_end = payload.indexOf(']', array_start);
   if (array_end == -1) {
+    publishActuatorAlert(255, "config_invalid", "Actuator array end missing");
+    publishConfigResponse(false, "Payload missing actuator array end");
     LOG_ERROR("Actuator config payload missing array end");
     return false;
   }
@@ -523,7 +532,13 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
   }
 
   LOG_INFO("ActuatorManager applied " + String(configured) + " actuator configs");
-  return configured > 0;
+  bool success = configured > 0;
+  if (!success) {
+    publishActuatorAlert(255, "config_invalid", "No valid actuator entries");
+  }
+  publishConfigResponse(success,
+                        success ? "Actuator configs applied" : "No valid actuator entries");
+  return success;
 }
 
 String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const {
@@ -591,6 +606,16 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"ts\":" + String(millis()) + ",";
   payload += "\"gpio\":" + String(gpio) + ",";
   payload += "\"type\":\"" + alert_type + "\",";
+  payload += "\"message\":\"" + message + "\"";
+  payload += "}";
+  mqttClient.safePublish(String(topic), payload, 1);
+}
+
+void ActuatorManager::publishConfigResponse(bool success, const String& message) {
+  const char* topic = TopicBuilder::buildConfigResponseTopic();
+  String payload = "{";
+  payload += "\"ts\":" + String(millis()) + ",";
+  payload += "\"success\":" + String(success ? "true" : "false") + ",";
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
   mqttClient.safePublish(String(topic), payload, 1);

@@ -13,6 +13,7 @@ const uint16_t MAX_RECONNECT_ATTEMPTS = 10;
 // STATIC MEMBERS
 // ============================================
 MQTTClient* MQTTClient::instance_ = nullptr;
+std::function<void(const String&, const String&)> MQTTClient::test_publish_hook_;
 
 // ============================================
 // GLOBAL MQTT CLIENT INSTANCE
@@ -202,6 +203,11 @@ bool MQTTClient::isAnonymousMode() const {
 // PUBLISHING
 // ============================================
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
+    if (test_publish_hook_) {
+        test_publish_hook_(topic, payload);
+        return true;
+    }
+
     if (!isConnected()) {
         LOG_WARNING("MQTT not connected, adding to offline buffer");
         return addToOfflineBuffer(topic, payload, qos);
@@ -340,6 +346,14 @@ void MQTTClient::handleDisconnection() {
     if (isConnected()) {
         disconnection_logged = false;
     }
+}
+
+void MQTTClient::setTestPublishHook(std::function<void(const String&, const String&)> hook) {
+    test_publish_hook_ = std::move(hook);
+}
+
+void MQTTClient::clearTestPublishHook() {
+    test_publish_hook_ = nullptr;
 }
 
 bool MQTTClient::shouldAttemptReconnect() const {

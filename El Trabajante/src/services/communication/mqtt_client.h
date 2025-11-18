@@ -57,6 +57,8 @@ public:
     // Publishing
     bool publish(const String& topic, const String& payload, uint8_t qos = 1);
     bool safePublish(const String& topic, const String& payload, uint8_t qos = 1, uint8_t retries = 3);
+  void setTestPublishHook(std::function<void(const String&, const String&)> hook);
+  void clearTestPublishHook();
     
     // Subscription
     bool subscribe(const String& topic);
@@ -118,6 +120,7 @@ private:
     // Static callback for PubSubClient
     static void staticCallback(char* topic, byte* payload, unsigned int length);
     static MQTTClient* instance_;
+  static std::function<void(const String&, const String&)> test_publish_hook_;
 };
 
 // ============================================
