@@ -64,21 +64,99 @@ public:
     bool performOneWireMeasurement(const uint8_t rom[8], int16_t& raw_value);
 
     // ============================================
+    // SENSOR CONFIGURATION (PHASE 4)
+    // ============================================
+    // Configure a sensor
+    bool configureSensor(const SensorConfig& config);
+    
+    // Remove a sensor
+    bool removeSensor(uint8_t gpio);
+    
+    // Get sensor configuration
+    SensorConfig getSensorConfig(uint8_t gpio) const;
+    
+    // Check if sensor exists on GPIO
+    bool hasSensorOnGPIO(uint8_t gpio) const;
+    
+    // Get active sensor count
+    uint8_t getActiveSensorCount() const;
+
+    // ============================================
+    // SENSOR READING (PHASE 4)
+    // ============================================
+    // Perform measurement for a specific GPIO-based sensor
+    bool performMeasurement(uint8_t gpio, SensorReading& reading_out);
+    
+    // Perform measurements for all active sensors
+    // Publishes results via MQTT automatically
+    void performAllMeasurements();
+    
+    // ============================================
+    // RAW DATA READING METHODS (PHASE 4)
+    // ============================================
+    // Read raw analog value
+    uint32_t readRawAnalog(uint8_t gpio);
+    
+    // Read raw digital value
+    uint32_t readRawDigital(uint8_t gpio);
+    
+    // Read raw I2C data
+    bool readRawI2C(uint8_t gpio, uint8_t device_address, 
+                    uint8_t reg, uint8_t* buffer, size_t len);
+    
+    // Read raw OneWire data
+    bool readRawOneWire(uint8_t gpio, const uint8_t rom[8], int16_t& raw_value);
+    
+    // ============================================
     // STATUS QUERIES
     // ============================================
     bool isInitialized() const { return initialized_; }
+    
+    // Get sensor info string
+    String getSensorInfo(uint8_t gpio) const;
 
 private:
     // ============================================
     // PRIVATE CONSTRUCTOR (SINGLETON)
     // ============================================
-    SensorManager() : initialized_(false) {}
-    ~SensorManager() {}
+    SensorManager();
+    ~SensorManager();
+
+    // Prevent copy
+    SensorManager(const SensorManager&) = delete;
+    SensorManager& operator=(const SensorManager&) = delete;
 
     // ============================================
     // INTERNAL STATE
     // ============================================
+    static const uint8_t MAX_SENSORS = 10;
+    SensorConfig sensors_[MAX_SENSORS];
+    uint8_t sensor_count_;
     bool initialized_;
+    
+    // Component references
+    class PiEnhancedProcessor* pi_processor_;
+    class MQTTClient* mqtt_client_;
+    class I2CBusManager* i2c_bus_;
+    class OneWireBusManager* onewire_bus_;
+    class GPIOManager* gpio_manager_;
+    
+    // Measurement timing
+    unsigned long last_measurement_time_;
+    unsigned long measurement_interval_;  // 30s default
+    
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+    // Find sensor config by GPIO
+    SensorConfig* findSensorConfig(uint8_t gpio);
+    const SensorConfig* findSensorConfig(uint8_t gpio) const;
+    
+    // Publish sensor reading via MQTT
+    void publishSensorReading(const SensorReading& reading);
+    
+    // Build MQTT payload from sensor reading
+    String buildMQTTPayload(const SensorReading& reading) const;
 };
 
 // ============================================
