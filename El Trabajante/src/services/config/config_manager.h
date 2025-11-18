@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include "../../models/system_types.h"
+#include "../../models/sensor_types.h"
+#include "../../models/actuator_types.h"
 
 // ============================================
 // CONFIG MANAGER CLASS (Phase 1 - Server-Centric)
@@ -31,12 +33,28 @@ public:
   bool loadSystemConfig(SystemConfig& config);
   bool saveSystemConfig(const SystemConfig& config);
   
-  // ⚠️ PHASE 3: Sensor/Actuator Configuration (DEFERRED)
-  // Diese Methoden werden in Phase 3 implementiert (Server-Centric Business Logic)
-  // bool loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors, uint8_t& loaded_count);
-  // bool saveSensorConfig(const SensorConfig sensors[], uint8_t sensor_count);
-  // bool loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_actuators, uint8_t& loaded_count);
-  // bool saveActuatorConfig(const ActuatorConfig actuators[], uint8_t actuator_count);
+  // ============================================
+  // SENSOR CONFIGURATION (PHASE 4)
+  // ============================================
+  // Save single sensor config
+  bool saveSensorConfig(const SensorConfig& config);
+  
+  // Save array of sensor configs
+  bool saveSensorConfig(const SensorConfig* sensors, uint8_t count);
+  
+  // Load all sensor configs
+  bool loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors, uint8_t& loaded_count);
+  
+  // Remove sensor config
+  bool removeSensorConfig(uint8_t gpio);
+  
+  // Validate sensor config
+  bool validateSensorConfig(const SensorConfig& config) const;
+  
+  // Actuator configuration (Phase 5+)
+  bool loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_actuators, uint8_t& loaded_count);
+  bool saveActuatorConfig(const ActuatorConfig actuators[], uint8_t actuator_count);
+  bool validateActuatorConfig(const ActuatorConfig& config) const;
   
   // Configuration Status (Guide-konform)
   bool isConfigurationComplete() const;
