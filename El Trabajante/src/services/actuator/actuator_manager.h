@@ -2,87 +2,93 @@
 #define SERVICES_ACTUATOR_ACTUATOR_MANAGER_H
 
 #include <Arduino.h>
+#include <memory>
+
+#include "../../models/actuator_types.h"
+#include "actuator_drivers/iactuator_driver.h"
+
+class GPIOManager;
 
 // ============================================
-// Actuator Manager - Phase 5 Foundation
+// Actuator Manager - Phase 5 Implementation
 // ============================================
-// Phase 3: Preparatory skeleton for PWM control
-// Phase 5: Full actuator management implementation
-//
-// Purpose: Actuator control coordination
-// - PWM-based actuator control (pumps, valves, dimmers)
-// - Safety constraints and interlocks
-// - Integration with Cross-ESP Logic (Phase 6)
-
-// ============================================
-// ACTUATOR MANAGER CLASS
-// ============================================
-// Singleton class managing actuator operations
-
 class ActuatorManager {
 public:
-    // ============================================
-    // SINGLETON PATTERN
-    // ============================================
-    static ActuatorManager& getInstance() {
-        static ActuatorManager instance;
-        return instance;
-    }
+  static ActuatorManager& getInstance();
 
-    // Prevent copy and move operations
-    ActuatorManager(const ActuatorManager&) = delete;
-    ActuatorManager& operator=(const ActuatorManager&) = delete;
-    ActuatorManager(ActuatorManager&&) = delete;
-    ActuatorManager& operator=(ActuatorManager&&) = delete;
+  ActuatorManager(const ActuatorManager&) = delete;
+  ActuatorManager& operator=(const ActuatorManager&) = delete;
+  ActuatorManager(ActuatorManager&&) = delete;
+  ActuatorManager& operator=(ActuatorManager&&) = delete;
 
-    // ============================================
-    // LIFECYCLE MANAGEMENT
-    // ============================================
-    // Initialize actuator manager
-    bool begin();
+  bool begin();
+  void end();
 
-    // Deinitialize actuator manager
-    void end();
+  // Registry management
+  bool configureActuator(const ActuatorConfig& config);
+  bool removeActuator(uint8_t gpio);
+  bool hasActuatorOnGPIO(uint8_t gpio) const;
+  ActuatorConfig getActuatorConfig(uint8_t gpio) const;
+  uint8_t getActiveActuatorCount() const { return actuator_count_; }
 
-    // ============================================
-    // PWM ACTUATOR CONTROL (PHASE 3 PREPARATION)
-    // ============================================
-    // These methods will be fully implemented in Phase 5
-    // Currently serve as API skeleton for Phase 3 integration
-    
-    // Attach a PWM actuator to a GPIO pin
-    // Returns assigned PWM channel in channel_out
-    bool attachPwmActuator(uint8_t gpio, uint8_t& channel_out);
-    
-    // Set PWM actuator output (percentage)
-    // channel: PWM channel (0-15)
-    // percent: Output percentage (0.0 - 100.0)
-    bool setPwmPercent(uint8_t channel, float percent);
-    
-    // Detach a PWM actuator
-    bool detachPwmActuator(uint8_t channel);
+  // Control operations
+  bool controlActuator(uint8_t gpio, float value);
+  bool controlActuatorBinary(uint8_t gpio, bool state);
 
-    // ============================================
-    // STATUS QUERIES
-    // ============================================
-    bool isInitialized() const { return initialized_; }
+  // Safety operations
+  bool emergencyStopAll();
+  bool emergencyStopActuator(uint8_t gpio);
+  bool clearEmergencyStop();
+  bool clearEmergencyStopActuator(uint8_t gpio);
+  bool getEmergencyStopStatus(uint8_t gpio) const;
+  bool resumeOperation();
+  void processActuatorLoops();
+
+  // MQTT integration
+  bool handleActuatorCommand(const String& topic, const String& payload);
+  bool handleActuatorConfig(const String& payload);
+  void publishActuatorStatus(uint8_t gpio);
+  void publishAllActuatorStatus();
+  void publishActuatorResponse(const ActuatorCommand& command, bool success, const String& message);
+  void publishActuatorAlert(uint8_t gpio, const String& alert_type, const String& message);
+
+  bool isInitialized() const { return initialized_; }
 
 private:
-    // ============================================
-    // PRIVATE CONSTRUCTOR (SINGLETON)
-    // ============================================
-    ActuatorManager() : initialized_(false) {}
-    ~ActuatorManager() {}
+  struct RegisteredActuator {
+    bool in_use = false;
+    uint8_t gpio = 255;
+    std::unique_ptr<IActuatorDriver> driver;
+    ActuatorConfig config;
+    bool emergency_stopped = false;
+  };
 
-    // ============================================
-    // INTERNAL STATE
-    // ============================================
-    bool initialized_;
+#ifdef XIAO_ESP32C3
+  static const uint8_t MAX_ACTUATORS = 8;
+#else
+  static const uint8_t MAX_ACTUATORS = 12;
+#endif
+
+  ActuatorManager();
+  ~ActuatorManager() = default;
+
+  RegisteredActuator* findActuator(uint8_t gpio);
+  const RegisteredActuator* findActuator(uint8_t gpio) const;
+  RegisteredActuator* getFreeSlot();
+
+  bool validateActuatorConfig(const ActuatorConfig& config) const;
+  std::unique_ptr<IActuatorDriver> createDriver(const String& actuator_type) const;
+  uint8_t extractGPIOFromTopic(const String& topic) const;
+  bool parseActuatorDefinition(const String& json, ActuatorConfig& config) const;
+  String buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const;
+  String buildResponsePayload(const ActuatorCommand& command, bool success, const String& message) const;
+
+  RegisteredActuator actuators_[MAX_ACTUATORS];
+  uint8_t actuator_count_;
+  bool initialized_;
+  GPIOManager* gpio_manager_;
 };
 
-// ============================================
-// GLOBAL INSTANCE ACCESS
-// ============================================
 extern ActuatorManager& actuatorManager;
 
-#endif // SERVICES_ACTUATOR_ACTUATOR_MANAGER_H
+#endif  // SERVICES_ACTUATOR_ACTUATOR_MANAGER_H
