@@ -576,7 +576,7 @@ void loop() {
 ### Verwendet von
 - `src/main.cpp` → Initialisierung und `loop()` Aufruf
 - `services/sensor/sensor_manager.cpp` → Sensor-Data publishing (Phase 4)
-- `services/actuator/actuator_manager.cpp` → Command subscription (Phase 5)
+- `services/actuator/actuator_manager.cpp` → Actuator-Status/-Response/-Alert publishing + Command subscription (Phase 5)
 
 ### Verwendet
 - `utils/logger.h` → Logging (Phase 1)
@@ -635,7 +635,71 @@ ERROR_MQTT_PAYLOAD_INVALID = 3016   // MQTT payload invalid
 
 ---
 
-**Status:** ✅ API vollständig implementiert (Phase 2)  
+**Status:** ✅ API vollständig implementiert (Phase 2) - Verwendet in Phase 4 & 5  
 **Implementierungszeit:** ~10 Tage (wie geplant)  
 **Komplexität:** Mittel-Hoch (PubSubClient + Offline-Buffer + Heartbeat)  
-**Code-Qualität:** Industrial-Grade (follows Phase 1 patterns)
+**Code-Qualität:** Industrial-Grade (follows Phase 1 patterns)  
+**Phase 5 Integration:** Wird für Actuator-MQTT-Communication verwendet (keine API-Änderungen)
+
+---
+
+## Performance Guidelines
+
+### Loop-Call Requirements
+
+**CRITICAL:** `mqttClient.loop()` MUSS in `main.cpp::loop()` aufgerufen werden.
+
+**Frequenz-Requirements:**
+- **Minimum:** 10 Hz (alle 100ms) für reliable Message-Processing
+- **Empfohlen:** 20-50 Hz (alle 20-50ms) für responsive Command-Handling
+- **Maximum:** 100+ Hz (alle 10ms) möglich, aber unnötig (kein Performance-Vorteil)
+
+**Timing-Verhalten:**
+- **QoS 0:** Non-blocking, sofortiger Return (~<1ms)
+- **QoS 1:** Wartet auf PUBACK (typisch 5-50ms, max 5s Timeout)
+- **Callback:** Läuft im loop()-Context (MUSS schnell sein, nicht blockierend!)
+
+**Best Practice:**
+```cpp
+void loop() {
+    mqttClient.loop();         // Process MQTT (non-blocking)
+    sensorManager.loop();      // Sensor measurements
+    actuatorManager.processActuatorLoops();  // Actuator processing
+    delay(20);                 // 50 Hz loop frequency
+}
+```
+
+**Warnung:** Lange Callback-Operationen (>100ms) blockieren MQTT-Processing! Lagere in FreeRTOS-Tasks aus wenn nötig.
+
+---
+
+### Payload-Size Limits
+
+**PubSubClient Default:** 256 bytes max payload size (MQTT_MAX_PACKET_SIZE)
+
+**Praktische Payload-Größen (Phase 5):**
+
+| Message-Type | Typical Size | Max Size | Status |
+|--------------|--------------|----------|--------|
+| `sensor/data` | 150-200 bytes | 256 bytes | ✅ OK |
+| `actuator/status` | 120-180 bytes | 256 bytes | ✅ OK |
+| `actuator/response` | 150 bytes | 256 bytes | ✅ OK |
+| `actuator/alert` | 100 bytes | 256 bytes | ✅ OK |
+| `heartbeat` | 180 bytes | 256 bytes | ✅ OK |
+| `config` (5 actuators) | 800+ bytes | 256 bytes | ❌ OVERFLOW |
+
+**Config-Overflow-Problem:**
+- Config mit >3 Aktoren überschreitet 256 bytes
+- **Workaround (Phase 5):** Max 2-3 Aktoren pro Config-Message
+- **Lösung (Phase 6+):** `MQTT_MAX_PACKET_SIZE` erhöhen oder Config fragmentieren
+
+**Buffer-Size-Erhöhung (Optional):**
+```cpp
+// In platformio.ini:
+build_flags = 
+    -DMQTT_MAX_PACKET_SIZE=1024    // 1KB Payload-Limit (nicht in Phase 5)
+```
+
+**Memory-Impact:** +768 bytes Heap pro vergrößertes Paket
+
+**Empfehlung Phase 5:** Behalte 256 bytes, fragmentiere große Configs manuell.

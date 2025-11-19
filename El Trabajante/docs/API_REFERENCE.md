@@ -2097,7 +2097,7 @@ void loop() {
 
 ---
 
-## Actuator System (Phase 5 - Skeleton)
+## Actuator System (Phase 5 - Complete)
 
 ### ActuatorManager
 
@@ -2111,35 +2111,839 @@ void loop() {
 ActuatorManager& actuatorManager = ActuatorManager::getInstance();
 ```
 
+#### Memory Management
+
+**Memory-Safe Design:**
+- Drivers werden als `std::unique_ptr<IActuatorDriver>` gespeichert
+- Automatische Deallocation beim `removeActuator()` oder `end()`
+- RAII-Pattern verhindert Memory-Leaks
+- Move-Semantics für effiziente Ownership-Transfer
+
+**Implementation:**
+```cpp
+// In actuator_manager.cpp:
+auto driver = createDriver(config.actuator_type);  // unique_ptr created
+slot->driver = std::move(driver);                  // Ownership transferred
+// Wenn slot->driver überschrieben wird: alter Driver automatisch deleted
+```
+
+**Heap-Usage:**
+- RegisteredActuator Array: 12 slots × ~150 bytes = ~2KB
+- Driver Objects: ~100-200 bytes pro Driver
+- **Total:** ~2-4KB (abhängig von Driver-Count)
+
+**Max Actuators:**
+- XIAO ESP32-C3: 8 Actuators
+- ESP32 WROOM-32: 12 Actuators
+
 #### Lifecycle Management
 ```cpp
 // Initialize actuator manager
 bool begin();
 
-// Deinitialize actuator manager
+// Deinitialize actuator manager (stops all actuators, releases GPIO)
 void end();
 
 // Check initialization status
 bool isInitialized() const;
 ```
 
-#### PWM Actuator Control (Phase 3 Preparation)
+#### Actuator Configuration
 ```cpp
-// Attach a PWM actuator to a GPIO pin
-bool attachPwmActuator(uint8_t gpio, uint8_t& channel_out);
+// Configure/register an actuator
+// If active=false: removes actuator
+// If GPIO conflict detected: returns false
+bool configureActuator(const ActuatorConfig& config);
 
-// Set PWM actuator output (percentage)
-bool setPwmPercent(uint8_t channel, float percent);
+// Remove actuator from registry
+bool removeActuator(uint8_t gpio);
 
-// Detach a PWM actuator
-bool detachPwmActuator(uint8_t channel);
+// Check if actuator exists on GPIO
+bool hasActuatorOnGPIO(uint8_t gpio) const;
+
+// Get actuator configuration
+ActuatorConfig getActuatorConfig(uint8_t gpio) const;
+
+// Get count of active actuators
+uint8_t getActiveActuatorCount() const;
 ```
 
-**Note:** Full actuator management implementation is planned for Phase 5.
+#### Actuator Control
+```cpp
+// Control actuator with normalized value (0.0-1.0)
+// For PWM: sets PWM duty cycle
+// For Binary: >=0.5 = ON, <0.5 = OFF
+// Returns false if emergency-stopped
+bool controlActuator(uint8_t gpio, float value);
+
+// Control binary actuator (ON/OFF)
+// Returns false if emergency-stopped
+bool controlActuatorBinary(uint8_t gpio, bool state);
+```
+
+#### Safety Operations
+```cpp
+// Emergency stop all actuators
+// Sets all actuators to OFF, marks as emergency-stopped
+bool emergencyStopAll();
+
+// Emergency stop specific actuator
+bool emergencyStopActuator(uint8_t gpio);
+
+// Clear emergency-stop flags (actuators remain OFF!)
+bool clearEmergencyStop();
+
+// Clear emergency for specific actuator
+bool clearEmergencyStopActuator(uint8_t gpio);
+
+// Get emergency-stop status
+bool getEmergencyStopStatus(uint8_t gpio) const;
+
+// Schrittweise Reaktivierung (nach clearEmergencyStop)
+bool resumeOperation();
+
+// Process actuator loops (call in main loop)
+void processActuatorLoops();
+```
+
+#### MQTT Integration
+```cpp
+// Handle incoming actuator command from MQTT
+// Topic: kaiser/god/esp/{esp_id}/actuator/{gpio}/command
+// Payload: {"command":"ON","value":1.0,"duration":0}
+bool handleActuatorCommand(const String& topic, const String& payload);
+
+// Handle actuator config from MQTT
+// Topic: kaiser/god/esp/{esp_id}/config
+// Payload: {"actuators":[...]}
+bool handleActuatorConfig(const String& payload);
+
+// Publish actuator status
+void publishActuatorStatus(uint8_t gpio);
+
+// Publish all actuator statuses
+void publishAllActuatorStatus();
+
+// Publish command response
+void publishActuatorResponse(const ActuatorCommand& command, bool success, const String& message);
+
+// Publish alert
+void publishActuatorAlert(uint8_t gpio, const String& alert_type, const String& message);
+```
+
+#### Example Usage
+```cpp
+// Initialize
+actuatorManager.begin();
+
+// Configure pump actuator
+ActuatorConfig config;
+config.gpio = 5;
+config.actuator_type = "pump";
+config.actuator_name = "Bewässerungspumpe";
+config.active = true;
+config.critical = true;
+config.inverted_logic = false;
+config.default_state = false;
+
+if (actuatorManager.configureActuator(config)) {
+  LOG_INFO("Pump configured on GPIO 5");
+}
+
+// Control actuator
+actuatorManager.controlActuatorBinary(5, true);  // Turn ON
+
+// Emergency stop
+actuatorManager.emergencyStopAll();
+
+// Clear emergency (actuators stay OFF)
+actuatorManager.clearEmergencyStop();
+
+// Resume operation
+actuatorManager.resumeOperation();
+
+// In main loop
+void loop() {
+  actuatorManager.processActuatorLoops();
+}
+```
 
 ---
 
-**Last Updated:** 2025-01-28  
-**Phase:** 1, 2, 3 & 4 - Core Infrastructure + Communication + Hardware Abstraction + Sensor System  
-**Status:** Production Ready (Phase 0-4 Complete)
+### SafetyController
+
+#### Header
+```cpp
+#include "services/actuator/safety_controller.h"
+```
+
+#### Singleton Access
+```cpp
+SafetyController& safetyController = SafetyController::getInstance();
+```
+
+#### Emergency-Stop vs. Safe-Mode
+
+**Emergency-Stop (Actuator-Level):**
+- Stoppt **NUR Aktoren** (Sensoren, MQTT, WiFi laufen weiter)
+- Schnelle Recovery möglich (Resume-Command von Server)
+- System bleibt operational
+- Dauer: Temporär (Sekunden bis Minuten)
+- **Use-Case:** User-Stop, Routine-Maintenance, Sensor-Triggered-Stop
+
+**Safe-Mode (System-Level):**
+- Stoppt **ALLE Subsysteme** außer WiFi/MQTT
+- Nur via Reboot oder `exit_safe_mode` Command verlassbar
+- System geht in "frozen state" (keine Operationen)
+- Dauer: Persistent bis manueller Eingriff
+- **Use-Case:** Kritischer Hardware-Fehler, GPIO-Konflikt, Memory-Corruption
+
+**Wichtig:** Emergency-Stop ≠ Safe-Mode! Emergency-Stop ist reversibel, Safe-Mode ist kritisch.
+
+**Code-Unterschied:**
+```cpp
+// Emergency-Stop (reversibel):
+safetyController.emergencyStopAll("User request");
+safetyController.clearEmergencyStop();       // Flags gelöscht
+actuatorManager.resumeOperation();           // Aktoren wieder an
+
+// Safe-Mode (kritisch):
+systemController.enterSafeMode("GPIO conflict");
+// → System frozen, nur Reboot oder exit_safe_mode hilft
+```
+
+#### Lifecycle Management
+```cpp
+// Initialize safety controller
+bool begin();
+
+// Deinitialize safety controller
+void end();
+```
+
+#### Emergency Operations
+```cpp
+// Emergency stop all actuators
+bool emergencyStopAll(const String& reason);
+
+// Emergency stop specific actuator
+bool emergencyStopActuator(uint8_t gpio, const String& reason);
+
+// Clear emergency-stop (with safety verification)
+bool clearEmergencyStop();
+
+// Clear emergency for specific actuator
+bool clearEmergencyStopActuator(uint8_t gpio);
+
+// Resume operation (schrittweise Reaktivierung)
+bool resumeOperation();
+```
+
+#### Status Queries
+```cpp
+// Check if emergency is active (system-wide)
+bool isEmergencyActive() const;
+
+// Check if emergency is active for specific actuator
+bool isEmergencyActive(uint8_t gpio) const;
+
+// Get emergency state
+EmergencyState getEmergencyState() const;
+
+// Get emergency reason
+String getEmergencyReason() const;
+
+// Get recovery progress string
+String getRecoveryProgress() const;
+```
+
+#### Configuration
+```cpp
+// Set recovery configuration
+void setRecoveryConfig(const RecoveryConfig& config);
+
+// Get recovery configuration
+RecoveryConfig getRecoveryConfig() const;
+```
+
+#### RecoveryConfig Structure
+```cpp
+struct RecoveryConfig {
+  uint32_t inter_actuator_delay_ms = 2000;    // Delay between actuator activations
+  bool critical_first = true;                  // Activate critical actuators first
+  uint32_t verification_timeout_ms = 5000;     // Safety verification timeout
+  uint8_t max_retry_attempts = 3;              // Max retry attempts
+};
+```
+
+#### Example Usage
+```cpp
+// Initialize
+safetyController.begin();
+
+// Emergency stop with reason
+safetyController.emergencyStopAll("User triggered emergency");
+
+// Check status
+if (safetyController.isEmergencyActive()) {
+  LOG_WARNING("System in emergency mode");
+  String reason = safetyController.getEmergencyReason();
+  LOG_INFO("Reason: " + reason);
+}
+
+// Clear emergency
+if (safetyController.clearEmergencyStop()) {
+  LOG_INFO("Emergency cleared, ready to resume");
+}
+
+// Resume operation
+if (safetyController.resumeOperation()) {
+  LOG_INFO("Operation resumed");
+}
+```
+
+---
+
+### IActuatorDriver (Interface)
+
+#### Header
+```cpp
+#include "services/actuator/actuator_drivers/iactuator_driver.h"
+```
+
+#### Driver Performance & Characteristics
+
+**Übersicht:**
+
+| Driver | Type | Response-Time | Max-Frequency | Lifetime | Power-Draw |
+|--------|------|---------------|---------------|----------|------------|
+| **PumpActuator** | Binary (Relay) | 10-20ms | 1 Hz | ~100k Cycles | 50-100mA |
+| **PWMActuator** | Analog (PWM) | <1ms | Beliebig | Unlimited | Negligible |
+| **ValveActuator** | Positional (Servo) | 200-600ms | 0.5 Hz | Unlimited | 100-500mA |
+
+**PumpActuator (Relay-based):**
+- **Switching-Time:** 10-20ms (Relay-Latenz)
+- **Max-Frequency:** 1 Switch/Sekunde empfohlen (Relay-Schonung)
+- **Lifetime:** ~100.000 Cycles (Relay-Verschleiß)
+- **Runtime-Protection:** 1h Max-Runtime, 30s Cooldown, 60 Activations/Hour
+
+**PWMActuator (PWM-based):**
+- **PWM-Frequency:** 1 kHz (Standard, konfigurierbar bis 40 kHz)
+- **Resolution:** 8-bit (0-255)
+- **Response-Time:** <1ms (instant)
+- **Max-Frequency:** Beliebig (keine mechanischen Teile)
+- **Use-Case:** LED-Dimming, Motor-Speed-Control, Heizung
+
+**ValveActuator (H-Bridge-controlled):**
+- **Motor-Type:** DC-Motor mit H-Bridge (Direction + Enable Pin)
+- **Response-Time:** 200-600ms (Mechanical Full-Sweep)
+- **Position-Range:** 0-100 (0=closed, 100=open)
+- **Movement-Control:** Timed movement (transition_time_ms)
+- **Max-Frequency:** 0.5 Hz empfohlen (Motor-Schonung)
+- **Use-Case:** Motorventile, Klappen, Positionierungssysteme
+
+#### Abstract Interface
+```cpp
+class IActuatorDriver {
+public:
+  virtual ~IActuatorDriver() = default;
+
+  // Lifecycle
+  virtual bool begin(const ActuatorConfig& config) = 0;
+  virtual void end() = 0;
+  virtual bool isInitialized() const = 0;
+
+  // Control operations
+  virtual bool setValue(float normalized_value) = 0;  // 0.0 - 1.0
+  virtual bool setBinary(bool state) = 0;             // true = ON/OPEN
+
+  // Safety
+  virtual bool emergencyStop(const String& reason) = 0;
+  virtual bool clearEmergency() = 0;
+  virtual void loop() = 0;  // Optional periodic processing
+
+  // Status
+  virtual ActuatorStatus getStatus() const = 0;
+  virtual const ActuatorConfig& getConfig() const = 0;
+  virtual String getType() const = 0;
+};
+```
+
+**Note:** This is an abstract interface. Use concrete drivers: PumpActuator, PWMActuator, ValveActuator.
+
+---
+
+### PumpActuator (Binary Actuator)
+
+#### Header
+```cpp
+#include "services/actuator/actuator_drivers/pump_actuator.h"
+```
+
+#### Construction
+```cpp
+PumpActuator pump;
+```
+
+#### Lifecycle
+```cpp
+// Initialize pump with configuration
+bool begin(const ActuatorConfig& config);
+
+// Deinitialize pump (turns OFF, releases GPIO)
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Control
+```cpp
+// Set value (normalized 0.0-1.0)
+// >=0.5 = ON, <0.5 = OFF
+bool setValue(float normalized_value);
+
+// Set binary state
+bool setBinary(bool state);
+```
+
+#### Safety
+```cpp
+// Emergency stop pump
+bool emergencyStop(const String& reason);
+
+// Clear emergency flag
+bool clearEmergency();
+
+// Loop processing (runtime protection)
+void loop();
+```
+
+#### Status
+```cpp
+// Get actuator status
+ActuatorStatus getStatus() const;
+
+// Get configuration
+const ActuatorConfig& getConfig() const;
+
+// Get type
+String getType() const;  // Returns "pump"
+
+// Check if running
+bool isRunning() const;
+
+// Check if can activate (runtime protection)
+bool canActivate() const;
+```
+
+#### Runtime Protection
+```cpp
+struct RuntimeProtection {
+  unsigned long max_runtime_ms = 3600000UL;      // 1h continuous runtime
+  uint16_t max_activations_per_hour = 60;        // Duty-cycle protection
+  unsigned long cooldown_ms = 30000UL;           // 30s cooldown
+  unsigned long activation_window_ms = 3600000UL; // 1h window
+};
+
+// Set runtime protection configuration
+void setRuntimeProtection(const RuntimeProtection& protection);
+```
+
+#### Implementation Details
+
+**Runtime-Protection Parameters:**
+```cpp
+struct RuntimeProtection {
+  unsigned long max_runtime_ms = 3600000UL;      // 1h continuous (default)
+  uint16_t max_activations_per_hour = 60;        // Duty-cycle protection
+  unsigned long cooldown_ms = 30000UL;           // 30s cooldown
+  unsigned long activation_window_ms = 3600000UL; // 1h window
+};
+```
+
+**Protection-Logic:**
+- Tracked in RAM (not persisted in NVS in Phase 5)
+- Accumulated runtime resets after cooldown
+- Activation-History: Last 60 activations tracked
+- Protection triggered: Log ERROR, publish Alert, refuse activation
+
+**GPIO-Control:**
+- **Inverted-Logic Support:** `LOW = ON` wenn `config.inverted_logic = true`
+- **Default-State:** Applied on `begin()` (Failsafe)
+- **Emergency-Stop:** Immediate GPIO → LOW (oder HIGH wenn inverted)
+
+#### Example Usage
+```cpp
+PumpActuator pump;
+
+ActuatorConfig config;
+config.gpio = 5;
+config.actuator_type = "pump";
+config.actuator_name = "Bewässerungspumpe";
+config.default_state = false;
+config.inverted_logic = false;  // HIGH = ON
+config.critical = true;          // High-priority actuator
+
+if (pump.begin(config)) {
+  // Turn ON
+  pump.setBinary(true);
+  
+  // Check status
+  if (pump.isRunning()) {
+    LOG_INFO("Pump is running");
+  }
+  
+  // Emergency stop
+  pump.emergencyStop("Overcurrent detected");
+  
+  // Process runtime protection (call in loop!)
+  pump.loop();
+}
+
+// Configure runtime protection
+PumpActuator::RuntimeProtection protection;
+protection.max_runtime_ms = 1800000UL;  // 30min max
+protection.cooldown_ms = 60000UL;       // 1min cooldown
+pump.setRuntimeProtection(protection);
+```
+
+---
+
+### PWMActuator
+
+#### Header
+```cpp
+#include "services/actuator/actuator_drivers/pwm_actuator.h"
+```
+
+#### Lifecycle
+```cpp
+// Initialize PWM actuator
+bool begin(const ActuatorConfig& config);
+
+// Deinitialize PWM actuator
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Control
+```cpp
+// Set PWM value (normalized 0.0-1.0)
+// Internally converted to 0-255
+bool setValue(float normalized_value);
+
+// Set binary state (0.0 or 1.0)
+bool setBinary(bool state);
+```
+
+#### Safety
+```cpp
+// Emergency stop (sets PWM to 0)
+bool emergencyStop(const String& reason);
+
+// Clear emergency flag
+bool clearEmergency();
+
+// Loop processing (not used)
+void loop();
+```
+
+#### Status
+```cpp
+// Get actuator status
+ActuatorStatus getStatus() const;
+
+// Get configuration
+const ActuatorConfig& getConfig() const;
+
+// Get type
+String getType() const;  // Returns "pwm"
+```
+
+#### Implementation Details
+
+**PWM-Channel Management:**
+- Auto-assigned via `PWMController::getInstance()`
+- Channel stored in `config.pwm_channel` after `begin()`
+- Default PWM-Frequency: 1 kHz
+- Resolution: 8-bit (0-255 internal)
+
+**Value Conversion:**
+```cpp
+// API: Normalized 0.0-1.0
+setValue(0.5f);
+
+// Internal: PWM 0-255
+pwm_value_ = (uint8_t)(normalized_value * 255.0f);  // = 128
+
+// Hardware: ledc_set_duty()
+ledcWrite(pwm_channel_, pwm_value_);
+```
+
+**Emergency-Stop-Behavior:**
+- Sets PWM to 0
+- Channel remains attached
+- Clearable via `clearEmergency()`
+
+#### Example Usage
+```cpp
+PWMActuator pwm;
+
+ActuatorConfig config;
+config.gpio = 12;
+config.actuator_type = "pwm";
+config.actuator_name = "LED Dimmer";
+config.pwm_channel = 255;  // Auto-assign
+config.default_pwm = 0;    // Start OFF
+
+if (pwm.begin(config)) {
+  // Channel was auto-assigned:
+  LOG_INFO("PWM Channel: " + String(pwm.getConfig().pwm_channel));
+  
+  // Set to 50%
+  pwm.setValue(0.5f);  // → PWM = 128
+  
+  // Set to 100%
+  pwm.setValue(1.0f);  // → PWM = 255
+  
+  // Turn OFF
+  pwm.setValue(0.0f);  // → PWM = 0
+  
+  // Binary control
+  pwm.setBinary(true);  // → PWM = 255
+  pwm.setBinary(false); // → PWM = 0
+}
+```
+
+---
+
+### ValveActuator (H-Bridge Controlled)
+
+#### Header
+```cpp
+#include "services/actuator/actuator_drivers/valve_actuator.h"
+```
+
+#### Lifecycle
+```cpp
+// Initialize valve
+bool begin(const ActuatorConfig& config);
+
+// Deinitialize valve
+void end();
+
+// Check initialization status
+bool isInitialized() const;
+```
+
+#### Control
+```cpp
+// Set valve position (normalized 0.0-1.0)
+// 0.0 = fully closed, 1.0 = fully open
+bool setValue(float normalized_value);
+
+// Set binary state (closed/open)
+bool setBinary(bool state);
+```
+
+#### Safety
+```cpp
+// Emergency stop valve (stops movement)
+bool emergencyStop(const String& reason);
+
+// Clear emergency flag
+bool clearEmergency();
+
+// Loop processing (movement control)
+void loop();
+```
+
+#### Status
+```cpp
+// Get actuator status
+ActuatorStatus getStatus() const;
+
+// Get configuration
+const ActuatorConfig& getConfig() const;
+
+// Get type
+String getType() const;  // Returns "valve"
+
+// Get current position (0-100)
+uint8_t getCurrentPosition() const;
+
+// Check if moving
+bool isMoving() const;
+```
+
+#### Configuration
+```cpp
+// Set transition time for valve movement
+void setTransitionTime(uint32_t transition_time_ms);
+```
+
+#### Implementation Details
+
+**H-Bridge Control:**
+- **Enable Pin (gpio):** Motor-Enable (HIGH = Motor an)
+- **Direction Pin (aux_gpio):** Motor-Richtung (HIGH = open, LOW = close)
+- **Position-Tracking:** 0-100 (0 = closed, 100 = open)
+- **Movement-Control:** Timed (transition_time_ms, Default: 5000ms für 0→100)
+
+**Movement-Algorithm:**
+```cpp
+// setValue(0.75f) → Target Position = 75
+current_position_ = 0;  // Start closed
+target_position_ = 75;
+
+// Calculate movement time
+int32_t delta = target_position_ - current_position_;  // +75
+uint32_t move_time = abs(delta) * transition_time_ms_ / 100;  // 3750ms
+
+// Apply direction
+digitalWrite(direction_pin_, delta > 0 ? HIGH : LOW);  // HIGH = open
+digitalWrite(enable_pin_, HIGH);  // Enable motor
+
+// Wait for movement (in loop())
+// After move_time: digitalWrite(enable_pin_, LOW)
+```
+
+**Emergency-Stop-Behavior:**
+- Stops movement immediately (Enable → LOW)
+- Current position preserved
+- Clearable via `clearEmergency()`
+
+**Wichtig:** `loop()` MUSS aufgerufen werden für Movement-Completion!
+
+#### Example Usage
+```cpp
+ValveActuator valve;
+
+ActuatorConfig config;
+config.gpio = 14;           // Enable pin (Motor ON/OFF)
+config.aux_gpio = 15;       // Direction pin (Open/Close)
+config.actuator_type = "valve";
+config.actuator_name = "Hauptventil";
+config.default_state = false;  // Start closed
+
+if (valve.begin(config)) {
+  // Set transition time (5s for full sweep)
+  valve.setTransitionTime(5000);
+  
+  // Open valve fully
+  valve.setValue(1.0f);  // Target: Position 100
+  
+  // Wait for movement in loop
+  while (valve.isMoving()) {
+    valve.loop();  // REQUIRED!
+    delay(50);
+  }
+  LOG_INFO("Valve fully open");
+  
+  // Set to 50% open
+  valve.setValue(0.5f);  // Target: Position 50
+  
+  // Close valve
+  valve.setValue(0.0f);  // Target: Position 0
+  
+  // Check status
+  LOG_INFO("Current position: " + String(valve.getCurrentPosition()));
+  
+  // In main loop
+  valve.loop();  // MUST call for movement control!
+}
+```
+
+---
+
+### Data Structures (Phase 5)
+
+#### ActuatorConfig
+```cpp
+struct ActuatorConfig {
+  uint8_t gpio = 255;              // Primary GPIO pin
+  uint8_t aux_gpio = 255;          // Auxiliary GPIO (valves, H-bridge)
+  String actuator_type = "";       // "pump", "valve", "pwm", "relay"
+  String actuator_name = "";       // Human-readable name
+  String subzone_id = "";          // Optional grouping
+  bool active = false;             // Enabled flag
+  bool critical = false;           // Safety priority
+  
+  uint8_t pwm_channel = 255;       // PWM channel (auto-assigned)
+  bool inverted_logic = false;     // LOW = ON
+  uint8_t default_pwm = 0;         // Default PWM value (0-255)
+  bool default_state = false;      // Failsafe state
+  
+  bool current_state = false;      // Live state (not persisted)
+  uint8_t current_pwm = 0;         // Live PWM duty
+  unsigned long last_command_ts = 0;
+  unsigned long accumulated_runtime_ms = 0;
+};
+```
+
+#### ActuatorCommand
+```cpp
+struct ActuatorCommand {
+  uint8_t gpio = 255;
+  String command = "";        // "ON","OFF","PWM","TOGGLE"
+  float value = 0.0f;         // 0.0 - 1.0
+  uint32_t duration_s = 0;    // Optional duration
+  unsigned long timestamp = 0;
+};
+```
+
+#### ActuatorStatus
+```cpp
+struct ActuatorStatus {
+  uint8_t gpio = 255;
+  String actuator_type = "";
+  bool current_state = false;
+  uint8_t current_pwm = 0;
+  unsigned long runtime_ms = 0;
+  bool error_state = false;
+  String error_message = "";
+  EmergencyState emergency_state = EmergencyState::EMERGENCY_NORMAL;
+};
+```
+
+#### EmergencyState Enum
+```cpp
+enum class EmergencyState : uint8_t {
+  EMERGENCY_NORMAL = 0,      // Normal operation
+  EMERGENCY_ACTIVE,          // Emergency stop active
+  EMERGENCY_CLEARING,        // Clearing emergency flags
+  EMERGENCY_RESUMING         // Resuming operation
+};
+```
+
+---
+
+**Last Updated:** 2025-01-29  
+**Phase:** 1, 2, 3, 4 & 5 - Core Infrastructure + Communication + Hardware Abstraction + Sensor System + Actuator System  
+**Status:** Production Ready (Phase 0-5 Complete)
+
+---
+
+## ⚠️ Phase 5 Implementation Notes
+
+**Implemented Features:**
+- ✅ ActuatorManager (Registry, Control, Emergency-Stop)
+- ✅ SafetyController (Emergency-Stop, Recovery)
+- ✅ 3 Concrete Drivers (PumpActuator, PWMActuator, ValveActuator)
+- ✅ MQTT Integration (Command, Status, Response, Alert)
+- ✅ Server-Centric Architecture (MQTT-only config, no NVS persistence)
+
+**NOT Implemented (Deferred to Phase 6+):**
+- ❌ Interlock System (Hardware-Interlock zwischen Aktoren)
+- ❌ Watchdog Timers (Hardware-Watchdog für Actuator-Timeouts)
+- ❌ Advanced Safety-Topics (safety/status, safety/alert)
+- ❌ Extended Status-Metrics (activation_count, temperature, power_consumption)
+- ❌ NVS-Persistence für Runtime-Protection-Parameter
+- ❌ Emergency-Response-Topic (separate Response für Emergency-Stop)
+
+**Design Philosophy:**
+Phase 5 fokussiert auf **minimale, funktionierende Actuator-Control** mit **Server-Centric Safety**. Erweiterte Safety-Features (Interlock, Watchdog) werden bewusst server-seitig implementiert, um ESP32-Komplexität minimal zu halten.
 

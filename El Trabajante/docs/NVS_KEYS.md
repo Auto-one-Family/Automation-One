@@ -60,27 +60,33 @@ Diese Dokumentation listet alle NVS-Keys auf, die von StorageManager verwendet w
 
 - **Namespace**: `actuator_config`
 
-- **Keys** (pro Aktor: 9 Keys × max 20 Aktoren = 180 Keys):
+- **Keys** (pro Aktor: **10 Keys** × max 20 Aktoren = **200 Keys**):
 
   - `actuator_count` (uint8_t) - Anzahl konfigurierter Aktoren (0-20)
 
   - `actuator_{i}_gpio` (uint8_t) - GPIO-Pin (i = 0-19)
 
-  - `actuator_{i}_type` (String) - Aktor-Typ (z.B. "RELAY", "PWM", "SERVO")
+  - `actuator_{i}_aux_gpio` (uint8_t) - **✅ NEU (Phase 5)** Auxiliary GPIO (z.B. Ventil-Richtungspin, H-Bridge) (255 = unused)
+
+  - `actuator_{i}_type` (String) - Aktor-Typ ("pump", "pwm", "valve", "relay")
 
   - `actuator_{i}_name` (String) - Aktor-Name für UI
 
+  - `actuator_{i}_subzone` (String) - Subzone-Zuordnung
+
   - `actuator_{i}_active` (bool) - Aktiv?
+
+  - `actuator_{i}_critical` (bool) - **✅ NEU (Phase 5)** Kritisches System (z.B. Bewässerungspumpe) - Safety-Priorität
 
   - `actuator_{i}_inverted` (bool) - Invertierte Logik? (LOW = ON)
 
-  - `actuator_{i}_pwm_freq` (uint16_t) - PWM-Frequenz (Hz) - nur für PWM/SERVO
+  - `actuator_{i}_default_state` (bool) - Standard-Zustand (false=OFF, true=ON)
 
-  - `actuator_{i}_pwm_channel` (uint8_t) - PWM-Kanal - nur für PWM/SERVO
+  - `actuator_{i}_default_pwm` (uint8_t) - **✅ NEU (Phase 5)** Standard-PWM-Wert (0-255) für PWM-Aktoren
 
-  - `actuator_{i}_default_state` (uint8_t) - Standard-Zustand (0=OFF, 1=ON)
-
-> **Phase-Status:** In Phase 5 (Server-Centric Option 2) werden keine Actuator-Configs in diesem Namespace gespeichert. Der Abschnitt bleibt unverändert dokumentiert, aber die Keys werden erst mit Phase 6 (Hybrid/Persistenz) aktiv genutzt.
+> **Phase-Status:** ✅ **AKTUALISIERT (Phase 5)** - Die NVS-Speicher-Funktionalität ist vollständig implementiert (`ConfigManager::saveActuatorConfig()` / `loadActuatorConfig()`), wird aber in Phase 5 bewusst **NICHT verwendet** (Server-Centric Option 2). Stattdessen erfolgt Actuator-Konfiguration **ausschließlich via MQTT** (`/config` Topic mit `actuators[]` Array). Die NVS-Keys dienen als **Fallback-Mechanismus** für Phase 6 (Hybrid/Persistenz-Mode) und als **Defense-in-Depth** gegen Server-Fehlkonfigurationen (GPIO-Konflikt-Check bleibt aktiv).
+>
+> **Architektur-Hinweis:** Siehe `docs/ZZZ.md` - "Server-Centric Pragmatic Deviations" für Details zur bewussten Nicht-Nutzung von NVS-Persistenz in Phase 5.
 
 ## System Configuration
 
@@ -128,13 +134,17 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 
 ## Memory Usage
 
-**Realistisches Memory-Profil nach Phase 1 Init:**
+**Realistisches Memory-Profil nach Phase 5 Complete:**
 
 - WiFi Stack: ~15KB
 - Config Structs (20 Sensoren + 20 Aktoren): ~8KB
 - MQTT Buffers: ~10KB
 - Logger Buffer: ~5KB
-- **Gesamtsumme: ~50KB** (nicht <10KB wie ursprünglich angenommen)
+- **ActuatorManager (Phase 5):**
+  - RegisteredActuator Array (12 slots): ~2KB
+  - Driver Virtual Tables: ~1KB
+  - Safety-Controller State: ~1KB
+- **Gesamtsumme: ~54KB** (von 320KB verfügbar)
 
 ## Notes
 

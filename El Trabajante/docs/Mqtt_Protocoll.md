@@ -305,21 +305,57 @@ if (heap_change_percent > 20.0) {
 
 **QoS:** 1  
 **Retain:** false  
-**Frequency:** Bei Zustandsänderung  
-**Module:** `services/actuator/actuator_manager.cpp`
+**Frequency:** Bei Zustandsänderung (nach `setValue()` / `setBinary()` / Emergency)  
+**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorStatus()`
 
 **Payload-Schema:**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "gpio": 5,
-  "actuator_type": "RELAY",           // "RELAY", "PWM", "VALVE", etc.
-  "state": "ON",                       // "ON", "OFF", "PWM"
-  "value": 1.0,                        // 0.0-1.0 (1.0 = 100%)
-  "last_command": 1735817950           // Unix timestamp
+  "ts": 1735818000,                      // Timestamp (millis) - REQUIRED
+  "gpio": 5,                             // GPIO Pin - REQUIRED
+  "type": "pump",                        // Actuator-Typ ("pump","pwm","valve","relay") - REQUIRED
+  "state": true,                         // Digital ON/OFF - REQUIRED
+  "pwm": 128,                            // PWM-Wert (0-255) - REQUIRED (0 bei Binary-Actuators)
+  "runtime_ms": 3600000,                 // Akkumulierte Laufzeit in ms - REQUIRED
+  "emergency": "normal"                  // Emergency-Status ("normal","active","clearing","resuming") - REQUIRED
 }
 ```
+
+**Payload-Beispiel (Pump):**
+```json
+{
+  "ts": 1735818000,
+  "gpio": 5,
+  "type": "pump",
+  "state": true,
+  "pwm": 0,
+  "runtime_ms": 3600000,
+  "emergency": "normal"
+}
+```
+
+**Payload-Beispiel (PWM Actuator):**
+```json
+{
+  "ts": 1735818000,
+  "gpio": 12,
+  "type": "pwm",
+  "state": true,
+  "pwm": 128,
+  "runtime_ms": 0,
+  "emergency": "normal"
+}
+```
+
+**Emergency-Status-Values:**
+- `normal`: Normalbetrieb
+- `active`: Emergency-Stop aktiv (Actuator gestoppt)
+- `clearing`: Emergency wird gelöscht (Flags zurückgesetzt, aber Actuator bleibt AUS)
+- `resuming`: Schrittweise Reaktivierung läuft (`resumeOperation()`)
+
+**Design-Note:** `esp_id` ist NICHT im Payload enthalten (redundant, da bereits im Topic-Path).
+
+**Minimalistisches Payload-Design:** Phase 5 verwendet bewusst minimale Payloads (7 Felder) für optimale Performance. Erweiterte Metriken (activation_count, total_runtime, temperature) sind NICHT implementiert.
 
 ---
 
@@ -329,21 +365,55 @@ if (heap_change_percent > 20.0) {
 
 **QoS:** 1  
 **Retain:** false  
-**Frequency:** Nach jedem Command  
-**Module:** `services/actuator/actuator_manager.cpp`
+**Frequency:** Nach jedem Actuator-Command (sofort)  
+**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorResponse()`
 
 **Payload-Schema:**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "gpio": 5,
-  "command": "ON",                     // Original Command
-  "value": 1.0,                        // Angeforderter Wert
-  "success": true,                     // Command erfolgreich
-  "message": "Actuator activated"      // Optional: Fehlermeldung
+  "ts": 1735818000,                      // Timestamp (millis) - REQUIRED
+  "gpio": 5,                             // GPIO Pin - REQUIRED
+  "command": "ON",                       // Original Command ("ON","OFF","PWM","TOGGLE") - REQUIRED
+  "value": 1.0,                          // Angeforderter Wert (0.0-1.0) - REQUIRED
+  "duration": 0,                         // Duration in Sekunden (0 = unbegrenzt) - REQUIRED
+  "success": true,                       // Command erfolgreich ausgeführt - REQUIRED
+  "message": "Actuator activated"        // Status-Message oder Fehler - REQUIRED
 }
 ```
+
+**Payload-Beispiel (Success):**
+```json
+{
+  "ts": 1735818000,
+  "gpio": 5,
+  "command": "ON",
+  "value": 1.0,
+  "duration": 0,
+  "success": true,
+  "message": "Command executed"
+}
+```
+
+**Payload-Beispiel (Failure - Emergency-Stop):**
+```json
+{
+  "ts": 1735818000,
+  "gpio": 5,
+  "command": "ON",
+  "value": 1.0,
+  "duration": 0,
+  "success": false,
+  "message": "Actuator GPIO 5 is emergency stopped"
+}
+```
+
+**Command-Types:**
+- `ON`: Binary Actuator einschalten
+- `OFF`: Binary Actuator ausschalten
+- `PWM`: PWM-Wert setzen (value: 0.0-1.0)
+- `TOGGLE`: Zustand umschalten
+
+**Hinweis:** Response wird IMMER gesendet, auch bei Fehler (success: false).
 
 ---
 
@@ -353,20 +423,50 @@ if (heap_change_percent > 20.0) {
 
 **QoS:** 1  
 **Retain:** false  
-**Frequency:** Bei Alert-Ereignis  
-**Module:** `services/actuator/actuator_manager.cpp`
+**Frequency:** Bei Alert-Ereignissen (Emergency-Stop, Config-Fehler, Runtime-Protection)  
+**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorAlert()`
 
 **Payload-Schema:**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "gpio": 5,
-  "alert_type": "overrun",             // "overrun", "fault", "emergency"
-  "severity": "critical",              // "warning", "critical"
-  "message": "Max runtime exceeded"
+  "ts": 1735818000,                      // Timestamp (millis) - REQUIRED
+  "gpio": 5,                             // GPIO Pin (255 = system-wide) - REQUIRED
+  "type": "emergency_stop",              // Alert-Typ - REQUIRED
+  "message": "Actuator stopped"          // Alert-Message - REQUIRED
 }
 ```
+
+**Payload-Beispiel (Emergency-Stop):**
+```json
+{
+  "ts": 1735818000,
+  "gpio": 5,
+  "type": "emergency_stop",
+  "message": "Actuator stopped"
+}
+```
+
+**Payload-Beispiel (Config-Fehler - System-wide):**
+```json
+{
+  "ts": 1735818000,
+  "gpio": 255,
+  "type": "config_invalid",
+  "message": "Payload missing 'actuators'"
+}
+```
+
+**Alert-Types:**
+- `emergency_stop`: Actuator wurde notgestoppt
+- `config_invalid`: Ungültige Actuator-Konfiguration empfangen
+- `runtime_protection`: Runtime-Schutz aktiviert (nur bei Pump-Actuators)
+- `overrun`: Max-Laufzeit überschritten
+- `fault`: Hardware-Fehler
+- `verification_failed`: Safety-Verification fehlgeschlagen
+
+**Hinweis:** `gpio: 255` bedeutet System-weiter Alert (nicht Actuator-spezifisch).
+
+**Severity-Levels:** ⚠️ **NICHT IMPLEMENTIERT** in Phase 5 - Alle Alerts haben implizit `severity: "critical"`.
 
 ---
 
@@ -1240,6 +1340,26 @@ mosquitto_pub -h localhost \
 - `diagnostics`: Diagnostik-Report senden
 - `reset_config`: Konfiguration zurücksetzen
 
+**Resume-Operation Details:**
+```json
+{
+  "command": "resume_operation",
+  "params": {}                         // Keine Parameter in Phase 5
+}
+```
+
+**ESP32-Verhalten:**
+1. Prüft ob Emergency-State = RESUMING oder ACTIVE
+2. Wartet `inter_actuator_delay_ms` (Default: 2000ms)
+3. Setzt Emergency-State = NORMAL
+4. Löscht Emergency-Reason
+5. Published All-Actuator-Status
+6. Sendet Response
+
+**Timing:** Default 2000ms Delay (konfigurierbar via `SafetyController::setRecoveryConfig()`)
+
+**Hinweis:** Phase 5 unterstützt KEINE komplexen Resume-Parameter (gpio_order, mode, etc.). Resume ist simpel: Delay + Clear + Status-Update.
+
 **Response:** → `kaiser/god/esp/{esp_id}/system/response`
 
 ---
@@ -1292,6 +1412,23 @@ mosquitto_pub -h localhost \
 - `safe_mode`: Safe-Mode aktivieren
 
 **Response:** → `kaiser/god/esp/{esp_id}/safe_mode`
+
+**Emergency-Stop Timing:**
+- **Response-Time:** <50ms (vom MQTT-Empfang bis GPIO-LOW)
+- **Guarantee:** Synchron im loop()-Context (keine Task-Delays)
+- **Recovery-Flow:**
+  1. Emergency-Stop empfangen → **Immediate** (0ms)
+  2. Alle Aktoren → OFF → **10-20ms** (GPIO-Latenz)
+  3. Alert published → **50-100ms** (MQTT QoS 1)
+  4. Wait for `exit_safe_mode` Command
+  5. Wait for `resume_operation` Command
+  6. Resume mit Delay → **Default 2000ms** pro Aktor
+
+**Safety-Garantien:**
+- Emergency-Stop unterbricht **ALLE** laufenden Commands
+- Keine neuen Commands während Emergency (success: false)
+- `clearEmergencyStop()` löscht nur Flags, Aktoren bleiben AUS
+- Expliziter `resume_operation` Command erforderlich für Reaktivierung
 
 ---
 
@@ -1369,16 +1506,21 @@ mosquitto_pub -h localhost \
   "actuators": [                       // Optional
     {
       "gpio": 5,
-      "type": "RELAY",
+      "aux_gpio": 255,                 // Optional: Auxiliary GPIO (z.B. Ventil-Richtungspin)
+      "type": "pump",                  // "pump", "pwm", "valve", "relay"
       "name": "Pumpe 1",
       "subzone_id": "zone_a",
-      "active": true
+      "active": true,
+      "critical": false,               // Safety-Priorität
+      "inverted": false,               // Invertierte Logik (LOW = ON)
+      "default_state": false,          // Failsafe-Zustand
+      "default_pwm": 0                 // PWM-Standard (0-255)
     }
   ]
 }
 ```
 
-> **Aktueller Architektur-Stand (Phase 5):** Actuator-Abschnitt dient als einzige Quelle für Actuator-Configs (Option 2, MQTT-only). Persistente Speicherung via NVS ist bewusst deaktiviert und folgt erst in Phase 6 (Hybrid-Ansatz).
+> **Aktueller Architektur-Stand (Phase 5):** Actuator-Abschnitt dient als **einzige Quelle** für Actuator-Configs (Option 2, MQTT-only). Persistente Speicherung via NVS ist bewusst deaktiviert und folgt erst in Phase 6 (Hybrid-Ansatz). Siehe `docs/ZZZ.md` - "Server-Centric Pragmatic Deviations".
 
 **ESP32-Verhalten:**
 1. Empfängt Config-Update

@@ -262,34 +262,46 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 **Example Payloads:**
 
 ```json
-// Binary ON
+// Binary ON (Phase 5 - Simple)
 {
-  "command": "ON",
-  "reason": "Automation Rule: pH too low",
-  "rule_id": "rule_ph_correction",
-  "timestamp": 1234567890
+  "command": "ON"
 }
 
 // Binary OFF
 {
-  "command": "OFF",
-  "reason": "Manual control",
-  "timestamp": 1234567890
+  "command": "OFF"
 }
 
 // PWM Control
 {
   "command": "PWM",
-  "value": 0.75,
-  "reason": "Gradual adjustment",
-  "timestamp": 1234567890
+  "value": 0.75
 }
 
 // Toggle
 {
-  "command": "TOGGLE",
-  "reason": "Manual control",
-  "timestamp": 1234567890
+  "command": "TOGGLE"
+}
+
+// With optional duration (timed operation)
+{
+  "command": "ON",
+  "duration": 300  // Auto-off after 300 seconds
+}
+```
+
+**⚠️ Phase 5 Limitation - Metadata Fields:**
+
+The ESP currently does NOT parse `reason`, `rule_id`, or external `timestamp` fields. These can be sent by the server for logging purposes but will be **ignored** by the ESP.
+
+**Advanced Payload (Phase 6+ Roadmap):**
+
+```json
+{
+  "command": "ON",
+  "reason": "Automation Rule: pH too low",     // TODO: Phase 6 - Auditing
+  "rule_id": "rule_ph_correction",            // TODO: Phase 6 - Rule tracking
+  "timestamp": 1234567890                      // TODO: Phase 6 - Server time sync
 }
 ```
 
@@ -297,8 +309,10 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 
 - ✅ `command` must be one of: "ON", "OFF", "PWM", "TOGGLE"
 - ✅ `value` required for PWM (0.0-1.0 range)
-- ✅ `reason` is optional but recommended for auditing
-- ✅ `rule_id` is optional, used for automation tracking
+- ✅ `duration` optional, in seconds (auto-off timer)
+- ⏸️ `reason` ignored in Phase 5 (planned for Phase 6 auditing system)
+- ⏸️ `rule_id` ignored in Phase 5 (planned for Phase 6 automation tracking)
+- ⏸️ `timestamp` ignored in Phase 5 (ESP uses local millis(), server time sync planned for Phase 6)
 
 **ESP Response (Published to `/response` topic):**
 
@@ -390,21 +404,39 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 
 **Test Reference:** test_integration.cpp::test_system_health_mqtt_export()
 
-**Full Payload Example:**
+**Phase 5 Actual Payload:**
 
 ```json
 {
-  "esp_id": "ESP_ABC123",
-  "uptime_ms": 3600000,
-  "free_heap_kb": 245,
-  "boot_count": 42,
-  "error_count": 3,
-  "has_critical_errors": false,
-  "sensor_count": 5,
-  "actuator_count": 3,
-  "wifi_rssi": -45,
-  "mqtt_connected": true,
-  "timestamp": 1234567890
+  "ts": 1234567890,         // Timestamp (milliseconds since boot)
+  "uptime": 3600,           // Uptime in SECONDS (not ms!)
+  "heap_free": 250880,      // Free heap in BYTES (not KB!)
+  "wifi_rssi": -45          // WiFi signal strength
+}
+```
+
+**⚠️ Phase 5 Limitation - Simplified Heartbeat:**
+
+The current implementation sends a minimal heartbeat (4 fields only). For complete system status (sensor_count, actuator_count, error tracking), a separate `system/status` topic is planned for Phase 6.
+
+**Phase 6+ Comprehensive Heartbeat (Roadmap):**
+
+```json
+{
+  "esp_id": "ESP_ABC123",           // TODO: Phase 6
+  "ts": 1234567890,                 // ✅ Available
+  "uptime": 3600,                   // ✅ Available (seconds)
+  "uptime_ms": 3600000,             // TODO: Phase 6 (milliseconds)
+  "heap_free": 250880,              // ✅ Available (bytes)
+  "free_heap_kb": 245,              // TODO: Phase 6 (kilobytes)
+  "boot_count": 42,                 // TODO: Phase 6
+  "error_count": 3,                 // TODO: Phase 6
+  "has_critical_errors": false,     // TODO: Phase 6
+  "sensor_count": 5,                // TODO: Phase 6 (available internally)
+  "actuator_count": 3,              // TODO: Phase 6 (available internally)
+  "wifi_rssi": -45,                 // ✅ Available
+  "mqtt_connected": true,           // TODO: Phase 6
+  "timestamp": 1234567890           // ✅ Available as "ts"
 }
 ```
 
@@ -415,6 +447,7 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 - Alert if no heartbeat for 180s (3 missed)
 - Track RSSI for connectivity issues
 - Monitor heap for memory leaks
+- **⚠️ Note:** Uptime is in **seconds**, heap_free is in **bytes** (convert to KB server-side)
 
 ---
 
@@ -822,13 +855,22 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 - Server can detect memory leaks (increasing usage)
 - Low memory triggers alerts
 
-**MQTT Payload (in heartbeat):**
+**MQTT Payload (in heartbeat - Phase 5 Actual):**
 
 ```json
 {
-  "free_heap_kb": 245,
-  "heap_size_kb": 320,
-  "min_free_heap_kb": 220
+  "heap_free": 250880  // Bytes, NOT KB! (convert server-side: 250880 / 1024 = 245 KB)
+}
+```
+
+**Phase 6+ Enhanced Memory Tracking (Roadmap):**
+
+```json
+{
+  "heap_free": 250880,      // ✅ Available (bytes)
+  "free_heap_kb": 245,      // TODO: Phase 6 (kilobytes)
+  "heap_size_kb": 320,      // TODO: Phase 6
+  "min_free_heap_kb": 220   // TODO: Phase 6
 }
 ```
 
@@ -854,23 +896,18 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 
 **MQTT Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat`
 
-**Full Payload Example:**
+**Phase 5 Actual Payload:**
 
 ```json
 {
-  "esp_id": "ESP_ABC123",
-  "uptime_ms": 3600000,
-  "free_heap_kb": 245,
-  "boot_count": 42,
-  "error_count": 3,
-  "has_critical_errors": false,
-  "sensor_count": 5,
-  "actuator_count": 3,
-  "wifi_rssi": -45,
-  "mqtt_connected": true,
-  "timestamp": 1234567890
+  "ts": 1234567890,         // Timestamp (milliseconds since boot)
+  "uptime": 3600,           // Uptime in SECONDS (not ms!)
+  "heap_free": 250880,      // Free heap in BYTES (not KB!)
+  "wifi_rssi": -45          // WiFi signal strength
 }
 ```
+
+**⚠️ Important:** See section above for Phase 6+ comprehensive heartbeat roadmap (sensor_count, actuator_count, error tracking, etc.)
 
 #### Test 8: test_boot_time_measurement()
 
@@ -1796,11 +1833,11 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 **Server Relevance:**
 
 - Resume is NOT immediate (safety feature)
-- **TIMING CALCULATION:**
-  - Base delay: 50ms per actuator (configurable via `RecoveryConfig`)
-  - With 10 actuators: 10 × 50ms = 500ms minimum
-  - Safety margin: Add 500ms buffer for network latency
-  - **Recommended:** Wait 1-2s after `CLEAR_EMERGENCY` before sending commands
+- **⚠️ TIMING CALCULATION (Phase 5 Actual):**
+  - Fixed delay: 50ms (does NOT scale with actuator count)
+  - Actuators clear simultaneously, NOT sequentially
+  - Safety margin: Add 200ms buffer for network latency
+  - **Recommended:** Wait 250-300ms after `CLEAR_EMERGENCY` before sending commands
 
 **Resume Command:**
 
@@ -1810,18 +1847,26 @@ client.subscribe("kaiser/+/esp/+/system/heartbeat")
 }
 ```
 
-**Resume Process:**
+**Resume Process (Phase 5 Actual):**
 
-1. ESP clears emergency state
-2. Waits 50ms per actuator (configurable)
-3. Reactivates actuators one by one
-4. Publishes status updates for each
+1. ESP clears emergency state (global flag)
+2. Single safety delay (50ms default, NOT per actuator)
+3. All actuators cleared simultaneously
+4. Actuators restart on next command (lazy resume, not proactive)
 
-**Server Implementation Example:**
+**🔧 Phase 6+ Enhancement (Roadmap):**
+
+Sequential resume with per-actuator delays:
+- Base delay: 50ms per actuator (configurable via `RecoveryConfig`)
+- With 10 actuators: 10 × 50ms = 500ms minimum
+- Status publishing for each restarted actuator
+- Critical-first resume priority
+
+**Server Implementation Example (Phase 5 Actual):**
 
 ```python
 def resume_operations(esp_id: str) -> None:
-    """Safely resume ESP operations after emergency stop"""
+    """Safely resume ESP operations after emergency stop (Phase 5)"""
     
     # Step 1: Send CLEAR_EMERGENCY
     mqtt_client.publish(
@@ -1830,7 +1875,7 @@ def resume_operations(esp_id: str) -> None:
         qos=1
     )
     
-    # Step 2: Wait for safety verification (1s for verification + margin)
+    # Step 2: Wait for safety verification
     time.sleep(1.0)
     
     # Step 3: Send RESUME command
@@ -1840,23 +1885,61 @@ def resume_operations(esp_id: str) -> None:
         qos=1
     )
     
-    # Step 4: Wait for sequential restart
-    # Formula: (actuator_count × 50ms) + 500ms buffer
-    actuator_count = get_actuator_count(esp_id)
-    wait_time = (actuator_count * 0.05) + 0.5  # seconds
-    time.sleep(wait_time)
+    # Step 4: Wait for resume delay (Phase 5 - Fixed 50ms, NOT per actuator)
+    # Fixed delay + 200ms buffer (does NOT depend on actuator_count)
+    time.sleep(0.25)  # 250ms total
     
-    # Step 5: Verify all actuators resumed successfully
+    # Step 5: Actuators are now cleared, can send commands
+    # Note: Actuators restart lazily on first command, not proactively
     if not verify_resume_complete(esp_id):
         logger.error(f"Resume failed for {esp_id}")
         # Retry or alert
 ```
 
+**Phase 6+ Enhanced Resume (Roadmap):**
+
+```python
+def resume_operations_phase6(esp_id: str) -> None:
+    """Phase 6+ sequential resume with per-actuator delays"""
+    
+    mqtt_client.publish(
+        f"kaiser/god/esp/{esp_id}/actuator/emergency",
+        json.dumps({"command": "CLEAR_EMERGENCY"}),
+        qos=1
+    )
+    
+    time.sleep(1.0)
+    
+    mqtt_client.publish(
+        f"kaiser/god/esp/{esp_id}/actuator/emergency",
+        json.dumps({"command": "RESUME"}),
+        qos=1
+    )
+    
+    # Sequential restart: (actuator_count × 50ms) + 500ms buffer
+    actuator_count = get_actuator_count(esp_id)
+    wait_time = (actuator_count * 0.05) + 0.5  # seconds
+    time.sleep(wait_time)
+    
+    if not verify_resume_complete(esp_id):
+        logger.error(f"Resume failed for {esp_id}")
+```
+
 **Timing Examples:**
+
+**Phase 5 (Fixed Delay):**
 
 | Actuator Count | Resume Time | Total Wait Time |
 |----------------|-------------|-----------------|
-| 1 actuator | 50ms | 1.0s + 0.5s = 1.5s |
+| 1 actuator | 50ms | 1.0s + 0.25s = 1.25s |
+| 5 actuators | 50ms | 1.0s + 0.25s = 1.25s |
+| 10 actuators | 50ms | 1.0s + 0.25s = 1.25s |
+
+**Phase 6+ (Sequential Delay - Roadmap):**
+
+| Actuator Count | Resume Time | Total Wait Time |
+|----------------|-------------|-----------------|
+| 1 actuator | 50ms | 1.0s + 0.55s = 1.55s |
 | 5 actuators | 250ms | 1.0s + 0.75s = 1.75s |
 | 10 actuators | 500ms | 1.0s + 1.0s = 2.0s |
 | 20 actuators | 1000ms | 1.0s + 1.5s = 2.5s |
@@ -2124,11 +2207,14 @@ def on_heartbeat(client, userdata, msg):
     esp_last_seen[esp_id] = time.time()
     
     # Check for issues
+    # ⚠️ Phase 5 Note: has_critical_errors not yet in heartbeat (planned Phase 6)
     if payload.get("has_critical_errors"):
         alert_admin(f"ESP {esp_id} has critical errors")
     
-    if payload.get("free_heap_kb") < 50:
-        alert_admin(f"ESP {esp_id} low memory: {payload['free_heap_kb']}KB")
+    # Convert bytes to KB (Phase 5 sends heap_free in bytes, not free_heap_kb)
+    heap_kb = payload.get("heap_free", 0) / 1024
+    if heap_kb < 50:
+        alert_admin(f"ESP {esp_id} low memory: {heap_kb:.0f}KB")
     
     if payload.get("wifi_rssi") < -80:
         alert_admin(f"ESP {esp_id} poor WiFi: {payload['wifi_rssi']}dBm")
@@ -2545,10 +2631,11 @@ docker-compose down
 #### 🔌 Services
 
 **1. Mosquitto MQTT Broker**
-- **Port:** 1883 (MQTT), 9001 (WebSocket)
+- **Port:** 1883 (MQTT), 9001 (WebSocket - ENABLED in Phase 5.1)
 - **Authentication:** Anonymous (for testing only)
 - **Max Connections:** 100
 - **Configuration:** `mosquitto.conf`
+- **⚠️ WebSocket Note:** Port 9001 is now configured for WebSocket connections (see mosquitto.conf update)
 
 **2. FastAPI Mock Server**
 - **Port:** 8000 (HTTP)
@@ -2931,8 +3018,18 @@ def handle_actuator_alert(topic: str, payload: Dict[str, Any]) -> None:
 
 **Complete WebSocket Integration Example:**
 
+**⚠️ IMPORTANT - JavaScript Dashboard Class:**
+
+The following JavaScript code is a **WORKING TEMPLATE**, not a file in the repository. It demonstrates how to connect a web UI to the mock server's WebSocket interface (now enabled on port 9001).
+
+**To use this:**
+1. Copy this code into your own project
+2. Install `mqtt` package: `npm install mqtt`
+3. Ensure Mosquitto WebSocket is running (see mosquitto.conf update)
+4. Customize the UI handlers for your needs
+
 ```javascript
-// dashboard.js - Complete God-Kaiser Dashboard Integration
+// dashboard.js - Complete God-Kaiser Dashboard Integration Template
 
 import mqtt from 'mqtt';
 
@@ -3217,21 +3314,35 @@ for i in {1..100}; do
       FREE_HEAP=$((200 + RANDOM % 100))
       RSSI=$((-40 - RANDOM % 40))
       
+      # Phase 5 Actual Heartbeat Format
       mosquitto_pub -h localhost -t "kaiser/god/esp/$ESP_ID/system/heartbeat" \
         -m "{
-          \"esp_id\":\"$ESP_ID\",
-          \"uptime_ms\":$UPTIME,
-          \"free_heap_kb\":$FREE_HEAP,
-          \"boot_count\":1,
-          \"error_count\":0,
-          \"has_critical_errors\":false,
-          \"sensor_count\":5,
-          \"actuator_count\":3,
-          \"wifi_rssi\":$RSSI,
-          \"mqtt_connected\":true,
-          \"timestamp\":$(date +%s)
+          \"ts\":$UPTIME,
+          \"uptime\":$((UPTIME / 1000)),
+          \"heap_free\":$((FREE_HEAP * 1024)),
+          \"wifi_rssi\":$RSSI
         }" \
         -q 1
+      
+      # Phase 6+ Format (for testing future compatibility)
+      # mosquitto_pub -h localhost -t "kaiser/god/esp/$ESP_ID/system/heartbeat" \
+      #   -m "{
+      #     \"esp_id\":\"$ESP_ID\",
+      #     \"ts\":$UPTIME,
+      #     \"uptime\":$((UPTIME / 1000)),
+      #     \"uptime_ms\":$UPTIME,
+      #     \"heap_free\":$((FREE_HEAP * 1024)),
+      #     \"free_heap_kb\":$FREE_HEAP,
+      #     \"boot_count\":1,
+      #     \"error_count\":0,
+      #     \"has_critical_errors\":false,
+      #     \"sensor_count\":5,
+      #     \"actuator_count\":3,
+      #     \"wifi_rssi\":$RSSI,
+      #     \"mqtt_connected\":true,
+      #     \"timestamp\":$(date +%s)
+      #   }" \
+      #   -q 1
       
       sleep 60
     done
