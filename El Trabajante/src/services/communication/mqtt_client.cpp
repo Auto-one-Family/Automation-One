@@ -40,7 +40,12 @@ MQTTClient::MQTTClient()
       reconnect_delay_ms_(RECONNECT_BASE_DELAY_MS),
       initialized_(false),
       anonymous_mode_(true),
-      last_heartbeat_(0) {
+      last_heartbeat_(0),
+      circuit_breaker_("MQTT", 5, 30000, 10000) {
+  // Circuit Breaker configured:
+  // - 5 failures → OPEN
+  // - 30s recovery timeout
+  // - 10s half-open test timeout
 }
 
 MQTTClient::~MQTTClient() {
@@ -121,6 +126,9 @@ bool MQTTClient::connectToBroker() {
         reconnect_attempts_ = 0;
         reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
         
+        // Reset Circuit Breaker on successful connection (Phase 6+)
+        circuit_breaker_.recordSuccess();
+        
         // Process offline buffer
         processOfflineBuffer();
         
@@ -148,7 +156,16 @@ bool MQTTClient::isConnected() {
 void MQTTClient::reconnect() {
     if (isConnected()) {
         LOG_DEBUG("MQTT already connected");
+        circuit_breaker_.recordSuccess();  // Reset on successful connection
         return;
+    }
+    
+    // ============================================
+    // CIRCUIT BREAKER CHECK (Phase 6+)
+    // ============================================
+    if (!circuit_breaker_.allowRequest()) {
+        LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
+        return;  // Skip reconnect attempt
     }
     
     if (!shouldAttemptReconnect()) {
@@ -163,6 +180,9 @@ void MQTTClient::reconnect() {
              String(MAX_RECONNECT_ATTEMPTS) + ")");
     
     if (!connectToBroker()) {
+        // ❌ RECONNECT FAILED
+        circuit_breaker_.recordFailure();
+        
         // Exponential backoff
         reconnect_delay_ms_ = calculateBackoffDelay();
         
@@ -171,6 +191,15 @@ void MQTTClient::reconnect() {
             errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED, 
                                                "Max reconnection attempts reached");
         }
+        
+        // Check if Circuit Breaker opened
+        if (circuit_breaker_.isOpen()) {
+            LOG_WARNING("Circuit Breaker OPENED after reconnect failures");
+            LOG_WARNING("  Will retry in 30 seconds");
+        }
+    } else {
+        // ✅ RECONNECT SUCCESS
+        circuit_breaker_.recordSuccess();
     }
 }
 
@@ -200,7 +229,7 @@ bool MQTTClient::isAnonymousMode() const {
 }
 
 // ============================================
-// PUBLISHING
+// PUBLISHING (WITH CIRCUIT BREAKER - Phase 6+)
 // ============================================
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
     if (test_publish_hook_) {
@@ -208,19 +237,56 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         return true;
     }
 
+    // ============================================
+    // CIRCUIT BREAKER CHECK
+    // ============================================
+    if (!circuit_breaker_.allowRequest()) {
+        LOG_WARNING("MQTT publish blocked by Circuit Breaker (Service DOWN)");
+        LOG_DEBUG("  Topic: " + topic);
+        LOG_DEBUG("  Circuit State: OPEN (waiting for recovery)");
+        // Don't add to offline buffer when circuit is open - it will retry on recovery
+        return false;
+    }
+
+    // ============================================
+    // CONNECTION CHECK
+    // ============================================
     if (!isConnected()) {
         LOG_WARNING("MQTT not connected, adding to offline buffer");
+        circuit_breaker_.recordFailure();  // Connection failure counts
         return addToOfflineBuffer(topic, payload, qos);
     }
     
+    // ============================================
+    // MQTT PUBLISH
+    // ============================================
     bool success = mqtt_.publish(topic.c_str(), payload.c_str(), qos == 1);
     
     if (success) {
+        // ✅ SUCCESS
+        circuit_breaker_.recordSuccess();
         LOG_DEBUG("Published: " + topic);
+        
+        // Optional: Payload preview (first 50 chars)
+        if (payload.length() > 50) {
+            LOG_DEBUG("  Payload: " + payload.substring(0, 50) + "...");
+        } else {
+            LOG_DEBUG("  Payload: " + payload);
+        }
+        
     } else {
+        // ❌ FAILURE
+        circuit_breaker_.recordFailure();
         LOG_ERROR("Publish failed: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED, 
                                            ("Publish failed: " + topic).c_str());
+        
+        // Check if Circuit Breaker opened
+        if (circuit_breaker_.isOpen()) {
+            LOG_WARNING("Circuit Breaker OPENED after failure threshold");
+            LOG_WARNING("  MQTT will be unavailable for 30 seconds");
+        }
+        
         addToOfflineBuffer(topic, payload, qos);
     }
     
@@ -228,14 +294,29 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 }
 
 bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t qos, uint8_t retries) {
+    // Circuit Breaker is checked inside publish(), so we don't need to check here
+    // But we reduce retries if Circuit Breaker is OPEN to avoid spam
+    
+    if (circuit_breaker_.isOpen()) {
+        LOG_DEBUG("SafePublish: Circuit Breaker OPEN, skipping retries");
+        return publish(topic, payload, qos);  // Single attempt only
+    }
+    
     for (uint8_t i = 0; i < retries; i++) {
         if (publish(topic, payload, qos)) {
             return true;
         }
+        
+        // Don't retry if Circuit Breaker opened during attempts
+        if (circuit_breaker_.isOpen()) {
+            LOG_DEBUG("SafePublish: Circuit Breaker OPENED, stopping retries");
+            break;
+        }
+        
         delay(100);
     }
     
-    LOG_ERROR("SafePublish failed after " + String(retries) + " retries");
+    LOG_ERROR("SafePublish failed after retries");
     return false;
 }
 

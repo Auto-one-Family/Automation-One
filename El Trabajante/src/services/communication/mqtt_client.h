@@ -8,6 +8,7 @@
 #include "../../utils/logger.h"
 #include "../../utils/topic_builder.h"
 #include "../../error_handling/error_tracker.h"
+#include "../../error_handling/circuit_breaker.h"
 #include "../../models/system_types.h"
 
 // ============================================
@@ -108,6 +109,9 @@ private:
     
     // Callback
     std::function<void(const String&, const String&)> message_callback_;
+    
+    // Circuit Breaker (Phase 6+)
+    CircuitBreaker circuit_breaker_;
     
     // Helper methods
     bool connectToBroker();
