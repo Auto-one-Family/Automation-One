@@ -626,6 +626,33 @@ if (success_count == sensors.size()) {
 }
 ```
 
+### Thread-Safety Warning
+
+**⚠️ Thread-Safety Status:**
+
+- `ConfigResponseBuilder` ist **NICHT thread-safe**, da es auf `mqttClient.safePublish()` zugreift.
+- `mqttClient` ist ein Singleton ohne Mutex-Protection → parallele Aufrufe von `publishSuccess()` / `publishError()` aus mehreren FreeRTOS-Tasks können zu Race-Conditions führen.
+- **Empfehlung:** Alle Config-Operationen (Sensor/Actuator/WiFi/System) sollten im **Main-Loop-Task** ausgeführt werden.
+- **Phase 6 Design:** Aktuell wird ConfigResponseBuilder nur synchron aus MQTT-Callback-Handler (main.cpp, actuator_manager.cpp) aufgerufen → kein Multi-Threading aktiv → **safe**.
+- **Für FreeRTOS-Integration (Phase 7+):** Falls Config-Operationen in separaten Tasks laufen, muss ein Mutex um `ConfigResponseBuilder::publish*()` Aufrufe gelegt werden.
+
+**Code-Beispiel (FreeRTOS-Safe Pattern):**
+```cpp
+// Phase 7+ (Multi-Threading): Mutex Protection erforderlich
+SemaphoreHandle_t config_mutex = xSemaphoreCreateMutex();
+
+void taskSafeConfigResponse() {
+  if (xSemaphoreTake(config_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+    ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, 1, "OK");
+    xSemaphoreGive(config_mutex);
+  } else {
+    LOG_ERROR("Config mutex timeout");
+  }
+}
+```
+
+**Aktueller Status (Phase 6):** Keine Mutex-Protection nötig, da alle Aufrufe synchron im Main-Loop erfolgen.
+
 ---
 
 ## ErrorTracker
