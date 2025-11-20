@@ -1,6 +1,36 @@
 #include "storage_manager.h"
 #include "../../utils/logger.h"
 
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+namespace {
+class StorageLockGuard {
+ public:
+  explicit StorageLockGuard(SemaphoreHandle_t mutex) : mutex_(mutex), locked_(false) {
+    if (mutex_) {
+      locked_ = xSemaphoreTake(mutex_, portMAX_DELAY) == pdTRUE;
+      if (!locked_) {
+        LOG_ERROR("StorageManager: Failed to acquire mutex");
+      }
+    } else {
+      locked_ = true;
+    }
+  }
+
+  ~StorageLockGuard() {
+    if (mutex_ && locked_) {
+      xSemaphoreGive(mutex_);
+    }
+  }
+
+  bool locked() const { return locked_; }
+
+ private:
+  SemaphoreHandle_t mutex_;
+  bool locked_;
+};
+}  // namespace
+#endif
+
 // ============================================
 // STATIC MEMBER INITIALIZATION
 // ============================================
@@ -20,7 +50,11 @@ StorageManager& StorageManager::getInstance() {
 }
 
 StorageManager::StorageManager()
-  : namespace_open_(false) {
+  : namespace_open_(false)
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  , nvs_mutex_(nullptr)
+#endif
+{
   current_namespace_[0] = '\0';
 }
 
@@ -28,6 +62,16 @@ StorageManager::StorageManager()
 // INITIALIZATION (Guide-konform)
 // ============================================
 bool StorageManager::begin() {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  if (nvs_mutex_ == nullptr) {
+    nvs_mutex_ = xSemaphoreCreateMutex();
+    if (nvs_mutex_ == nullptr) {
+      LOG_ERROR("StorageManager: Failed to create mutex");
+      return false;
+    }
+    LOG_INFO("StorageManager: Thread-safety enabled (mutex created)");
+  }
+#endif
   namespace_open_ = false;
   current_namespace_[0] = '\0';
   LOG_INFO("StorageManager: Initialized");
@@ -38,9 +82,18 @@ bool StorageManager::begin() {
 // NAMESPACE MANAGEMENT
 // ============================================
 bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (namespace_open_) {
     LOG_WARNING("StorageManager: Namespace already open, closing first");
-    endNamespace();
+    preferences_.end();
+    namespace_open_ = false;
+    LOG_DEBUG("StorageManager: Closed namespace: " + String(current_namespace_));
+    current_namespace_[0] = '\0';
   }
   
   if (!preferences_.begin(namespace_name, read_only)) {
@@ -57,6 +110,12 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
 }
 
 void StorageManager::endNamespace() {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return;
+  }
+#endif
   if (namespace_open_) {
     preferences_.end();
     namespace_open_ = false;
@@ -71,6 +130,12 @@ void StorageManager::endNamespace() {
 
 // String operations
 bool StorageManager::putString(const char* key, const char* value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for putString");
     return false;
@@ -87,6 +152,12 @@ bool StorageManager::putString(const char* key, const char* value) {
 }
 
 const char* StorageManager::getString(const char* key, const char* default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for getString");
     return default_value;
@@ -102,6 +173,12 @@ const char* StorageManager::getString(const char* key, const char* default_value
 
 // Integer operations
 bool StorageManager::putInt(const char* key, int value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for putInt");
     return false;
@@ -118,6 +195,12 @@ bool StorageManager::putInt(const char* key, int value) {
 }
 
 int StorageManager::getInt(const char* key, int default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for getInt");
     return default_value;
@@ -130,6 +213,12 @@ int StorageManager::getInt(const char* key, int default_value) {
 
 // UInt8 operations
 bool StorageManager::putUInt8(const char* key, uint8_t value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for putUInt8");
     return false;
@@ -145,6 +234,12 @@ bool StorageManager::putUInt8(const char* key, uint8_t value) {
 }
 
 uint8_t StorageManager::getUInt8(const char* key, uint8_t default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for getUInt8");
     return default_value;
@@ -155,6 +250,12 @@ uint8_t StorageManager::getUInt8(const char* key, uint8_t default_value) {
 
 // UInt16 operations
 bool StorageManager::putUInt16(const char* key, uint16_t value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for putUInt16");
     return false;
@@ -170,6 +271,12 @@ bool StorageManager::putUInt16(const char* key, uint16_t value) {
 }
 
 uint16_t StorageManager::getUInt16(const char* key, uint16_t default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for getUInt16");
     return default_value;
@@ -180,6 +287,12 @@ uint16_t StorageManager::getUInt16(const char* key, uint16_t default_value) {
 
 // Boolean operations
 bool StorageManager::putBool(const char* key, bool value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for putBool");
     return false;
@@ -195,6 +308,12 @@ bool StorageManager::putBool(const char* key, bool value) {
 }
 
 bool StorageManager::getBool(const char* key, bool default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for getBool");
     return default_value;
@@ -205,6 +324,12 @@ bool StorageManager::getBool(const char* key, bool default_value) {
 
 // Unsigned long operations
 bool StorageManager::putULong(const char* key, unsigned long value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for putULong");
     return false;
@@ -220,6 +345,12 @@ bool StorageManager::putULong(const char* key, unsigned long value) {
 }
 
 unsigned long StorageManager::getULong(const char* key, unsigned long default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for getULong");
     return default_value;
@@ -232,6 +363,12 @@ unsigned long StorageManager::getULong(const char* key, unsigned long default_va
 // NAMESPACE UTILITIES
 // ============================================
 bool StorageManager::clearNamespace() {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     LOG_ERROR("StorageManager: No namespace open for clear");
     return false;
@@ -248,6 +385,12 @@ bool StorageManager::clearNamespace() {
 }
 
 bool StorageManager::keyExists(const char* key) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
   if (!namespace_open_) {
     return false;
   }
@@ -256,6 +399,12 @@ bool StorageManager::keyExists(const char* key) {
 }
 
 size_t StorageManager::getFreeEntries() {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return 0;
+  }
+#endif
   if (!namespace_open_) {
     return 0;
   }

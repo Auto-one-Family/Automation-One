@@ -2,6 +2,7 @@
 #define SERVICES_ACTUATOR_ACTUATOR_MANAGER_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <memory>
 
 #include "../../models/actuator_types.h"
@@ -81,10 +82,12 @@ private:
   bool validateActuatorConfig(const ActuatorConfig& config) const;
   std::unique_ptr<IActuatorDriver> createDriver(const String& actuator_type) const;
   uint8_t extractGPIOFromTopic(const String& topic) const;
-  bool parseActuatorDefinition(const String& json, ActuatorConfig& config) const;
+  bool parseActuatorDefinition(const JsonObjectConst& obj,
+                               ActuatorConfig& config,
+                               String& error_message,
+                               ConfigErrorCode& error_code) const;
   String buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const;
   String buildResponsePayload(const ActuatorCommand& command, bool success, const String& message) const;
-  void publishConfigResponse(bool success, const String& message);
 
   RegisteredActuator actuators_[MAX_ACTUATORS];
   uint8_t actuator_count_;

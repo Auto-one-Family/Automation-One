@@ -4,9 +4,12 @@
 
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
+#include "../../models/config_types.h"
 #include "../../models/error_codes.h"
 #include "../../services/communication/mqtt_client.h"
+#include "../../services/config/config_response.h"
 #include "../../services/sensor/sensor_manager.h"
+#include "../../utils/json_helpers.h"
 #include "../../utils/logger.h"
 #include "../../utils/topic_builder.h"
 #include "actuator_drivers/pump_actuator.h"
@@ -463,82 +466,174 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   return success;
 }
 
-bool ActuatorManager::parseActuatorDefinition(const String& json, ActuatorConfig& config) const {
+bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
+                                              ActuatorConfig& config,
+                                              String& error_message,
+                                              ConfigErrorCode& error_code) const {
   config = ActuatorConfig();
-  config.gpio = static_cast<uint8_t>(extractJSONUInt32(json, "gpio", 255));
-  config.aux_gpio = static_cast<uint8_t>(extractJSONUInt32(json, "aux_gpio", 255));
-  config.actuator_type = extractJSONString(json, "type");
-  if (config.actuator_type.length() == 0) {
-    config.actuator_type = extractJSONString(json, "actuator_type");
+  error_message = "";
+  error_code = ConfigErrorCode::NONE;
+
+  if (!obj.containsKey("gpio")) {
+    error_message = "Actuator config missing required field 'gpio'";
+    error_code = ConfigErrorCode::MISSING_FIELD;
+    return false;
   }
-  config.actuator_name = extractJSONString(json, "name");
-  config.subzone_id = extractJSONString(json, "subzone_id");
-  config.active = extractJSONBool(json, "active", true);
-  config.critical = extractJSONBool(json, "critical", false);
-  config.inverted_logic = extractJSONBool(json, "inverted", false);
-  config.default_state = extractJSONBool(json, "default_state", false);
-  config.default_pwm = static_cast<uint8_t>(extractJSONUInt32(json, "default_pwm", 0));
-  return config.gpio != 255 && config.actuator_type.length() > 0;
+
+  int gpio_value = 255;
+  if (!JsonHelpers::extractInt(obj, "gpio", gpio_value)) {
+    error_message = "Actuator field 'gpio' must be an integer";
+    error_code = ConfigErrorCode::TYPE_MISMATCH;
+    return false;
+  }
+  config.gpio = static_cast<uint8_t>(gpio_value);
+
+  int aux_gpio_value = 255;
+  if (JsonHelpers::extractInt(obj, "aux_gpio", aux_gpio_value)) {
+    config.aux_gpio = static_cast<uint8_t>(aux_gpio_value);
+  }
+
+  if (obj.containsKey("actuator_type")) {
+    if (!JsonHelpers::extractString(obj, "actuator_type", config.actuator_type)) {
+      error_message = "Actuator field 'actuator_type' must be a string";
+      error_code = ConfigErrorCode::TYPE_MISMATCH;
+      return false;
+    }
+  } else if (obj.containsKey("type")) {
+    if (!JsonHelpers::extractString(obj, "type", config.actuator_type)) {
+      error_message = "Actuator field 'type' must be a string";
+      error_code = ConfigErrorCode::TYPE_MISMATCH;
+      return false;
+    }
+  } else {
+    error_message = "Actuator config missing required field 'actuator_type'";
+    error_code = ConfigErrorCode::MISSING_FIELD;
+    return false;
+  }
+
+  if (config.actuator_type.length() == 0) {
+    error_message = "Actuator type cannot be empty";
+    error_code = ConfigErrorCode::VALIDATION_FAILED;
+    return false;
+  }
+
+  if (obj.containsKey("actuator_name")) {
+    if (!JsonHelpers::extractString(obj, "actuator_name", config.actuator_name)) {
+      error_message = "Actuator field 'actuator_name' must be a string";
+      error_code = ConfigErrorCode::TYPE_MISMATCH;
+      return false;
+    }
+  } else if (obj.containsKey("name")) {
+    if (!JsonHelpers::extractString(obj, "name", config.actuator_name)) {
+      error_message = "Actuator field 'name' must be a string";
+      error_code = ConfigErrorCode::TYPE_MISMATCH;
+      return false;
+    }
+  } else {
+    error_message = "Actuator config missing required field 'actuator_name'";
+    error_code = ConfigErrorCode::MISSING_FIELD;
+    return false;
+  }
+
+  JsonHelpers::extractString(obj, "subzone_id", config.subzone_id, "");
+
+  bool bool_value = false;
+  if (JsonHelpers::extractBool(obj, "active", bool_value, true)) {
+    config.active = bool_value;
+  } else {
+    config.active = true;
+  }
+
+  if (JsonHelpers::extractBool(obj, "critical", bool_value, false)) {
+    config.critical = bool_value;
+  }
+
+  if (JsonHelpers::extractBool(obj, "inverted_logic", bool_value, false)) {
+    config.inverted_logic = bool_value;
+  } else if (JsonHelpers::extractBool(obj, "inverted", bool_value, false)) {
+    config.inverted_logic = bool_value;
+  }
+
+  if (JsonHelpers::extractBool(obj, "default_state", bool_value, false)) {
+    config.default_state = bool_value;
+  }
+
+  int default_pwm_value = 0;
+  if (JsonHelpers::extractInt(obj, "default_pwm", default_pwm_value)) {
+    default_pwm_value = constrain(default_pwm_value, 0, 255);
+    config.default_pwm = static_cast<uint8_t>(default_pwm_value);
+  }
+
+  return true;
 }
 
 bool ActuatorManager::handleActuatorConfig(const String& payload) {
-  int array_start = payload.indexOf("\"actuators\"");
-  if (array_start == -1) {
-    publishActuatorAlert(255, "config_invalid", "Payload missing actuators");
-    publishConfigResponse(false, "Payload missing 'actuators'");
-    LOG_ERROR("Actuator config payload missing 'actuators'");
-    return false;
-  }
-  array_start = payload.indexOf('[', array_start);
-  if (array_start == -1) {
-    publishActuatorAlert(255, "config_invalid", "Actuator array start missing");
-    publishConfigResponse(false, "Payload missing actuator array start");
-    LOG_ERROR("Actuator config payload missing array start");
-    return false;
-  }
-  int array_end = payload.indexOf(']', array_start);
-  if (array_end == -1) {
-    publishActuatorAlert(255, "config_invalid", "Actuator array end missing");
-    publishConfigResponse(false, "Payload missing actuator array end");
-    LOG_ERROR("Actuator config payload missing array end");
+  LOG_INFO("Handling actuator configuration from MQTT");
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    String message = "Failed to parse actuator config JSON: " + String(error.c_str());
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::ACTUATOR, ConfigErrorCode::JSON_PARSE_ERROR, message);
     return false;
   }
 
-  String array_content = payload.substring(array_start + 1, array_end);
+  JsonArray actuators = doc["actuators"].as<JsonArray>();
+  if (actuators.isNull()) {
+    String message = "Actuator config missing 'actuators' array";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message);
+    return false;
+  }
+
+  size_t total = actuators.size();
+  if (total == 0) {
+    String message = "Actuator config array is empty";
+    LOG_WARNING(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message);
+    return false;
+  }
   uint8_t configured = 0;
+  for (JsonObject actuatorObj : actuators) {
+    ActuatorConfig config;
+    String parse_error;
+    ConfigErrorCode error_code = ConfigErrorCode::NONE;
+    JsonVariantConst failed_variant = actuatorObj;
 
-  int depth = 0;
-  int object_start = -1;
-  for (int i = 0; i < array_content.length(); i++) {
-    char c = array_content[i];
-    if (c == '{') {
-      if (depth == 0) {
-        object_start = i;
+    if (!parseActuatorDefinition(actuatorObj, config, parse_error, error_code)) {
+      if (parse_error.isEmpty()) {
+        parse_error = "Invalid actuator definition";
       }
-      depth++;
-    } else if (c == '}') {
-      depth--;
-      if (depth == 0 && object_start != -1) {
-        String obj = array_content.substring(object_start, i + 1);
-        ActuatorConfig config;
-        if (parseActuatorDefinition(obj, config)) {
-          if (configureActuator(config)) {
-            configured++;
-          }
-        }
-        object_start = -1;
+      if (error_code == ConfigErrorCode::NONE) {
+        error_code = ConfigErrorCode::VALIDATION_FAILED;
       }
+      ConfigResponseBuilder::publishError(
+          ConfigType::ACTUATOR, error_code, parse_error, failed_variant);
+      continue;
     }
+
+    if (!configureActuator(config)) {
+      String message = "Failed to configure actuator on GPIO " + String(config.gpio);
+      LOG_ERROR(message);
+      ConfigResponseBuilder::publishError(
+          ConfigType::ACTUATOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant);
+      continue;
+    }
+
+    configured++;
   }
 
-  LOG_INFO("ActuatorManager applied " + String(configured) + " actuator configs");
-  bool success = configured > 0;
-  if (!success) {
-    publishActuatorAlert(255, "config_invalid", "No valid actuator entries");
+  if (configured == total) {
+    String message = "Configured " + String(configured) + " actuator(s) successfully";
+    ConfigResponseBuilder::publishSuccess(ConfigType::ACTUATOR, configured, message);
+    return true;
   }
-  publishConfigResponse(success,
-                        success ? "Actuator configs applied" : "No valid actuator entries");
-  return success;
+
+  return configured > 0;
 }
 
 String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const {
@@ -606,16 +701,6 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"ts\":" + String(millis()) + ",";
   payload += "\"gpio\":" + String(gpio) + ",";
   payload += "\"type\":\"" + alert_type + "\",";
-  payload += "\"message\":\"" + message + "\"";
-  payload += "}";
-  mqttClient.safePublish(String(topic), payload, 1);
-}
-
-void ActuatorManager::publishConfigResponse(bool success, const String& message) {
-  const char* topic = TopicBuilder::buildConfigResponseTopic();
-  String payload = "{";
-  payload += "\"ts\":" + String(millis()) + ",";
-  payload += "\"success\":" + String(success ? "true" : "false") + ",";
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
   mqttClient.safePublish(String(topic), payload, 1);

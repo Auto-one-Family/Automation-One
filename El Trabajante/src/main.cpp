@@ -2,12 +2,17 @@
 // INCLUDES
 // ============================================
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "drivers/gpio_manager.h"
 #include "utils/logger.h"
 #include "services/config/storage_manager.h"
 #include "services/config/config_manager.h"
+#include "services/config/config_response.h"
 #include "error_handling/error_tracker.h"
+#include "models/config_types.h"
+#include "models/error_codes.h"
 #include "utils/topic_builder.h"
+#include "utils/json_helpers.h"
 #include "models/system_types.h"
 #include "services/communication/wifi_manager.h"
 #include "services/communication/mqtt_client.h"
@@ -37,7 +42,7 @@ MasterZone g_master;
 // FORWARD DECLARATIONS
 // ============================================
 void handleSensorConfig(const String& payload);
-void parseAndConfigureSensor(const String& sensor_json);
+bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj);
 void handleActuatorConfig(const String& payload);
 
 // ============================================
@@ -394,148 +399,156 @@ void loop() {
 // ============================================
 void handleSensorConfig(const String& payload) {
   LOG_INFO("Handling sensor configuration from MQTT");
-  
-  // Simple JSON parsing (no external library)
-  // Expected format: {"sensors": [{"gpio": 4, "sensor_type": "ph_sensor", "sensor_name": "Boden pH", "subzone_id": "zone_1", "active": true}]}
-  
-  // Find sensors array
-  int sensors_start = payload.indexOf("\"sensors\":[");
-  if (sensors_start == -1) {
-    LOG_ERROR("Invalid sensor config payload: missing 'sensors' array");
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    String message = "Failed to parse sensor config JSON: " + String(error.c_str());
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::JSON_PARSE_ERROR, message);
     return;
   }
-  
-  sensors_start += 11;  // Length of "sensors":[
-  int sensors_end = payload.lastIndexOf("]");
-  if (sensors_end == -1 || sensors_end <= sensors_start) {
-    LOG_ERROR("Invalid sensor config payload: malformed 'sensors' array");
+
+  JsonArray sensors = doc["sensors"].as<JsonArray>();
+  if (sensors.isNull()) {
+    String message = "Sensor config missing 'sensors' array";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message);
     return;
   }
-  
-  String sensors_array = payload.substring(sensors_start, sensors_end + 1);
-  
-  // Parse each sensor config
-  int sensor_start = 0;
-  int brace_count = 0;
-  bool in_sensor = false;
-  String current_sensor = "";
-  
-  for (int i = 0; i < sensors_array.length(); i++) {
-    char c = sensors_array.charAt(i);
-    
-    if (c == '{') {
-      if (!in_sensor) {
-        in_sensor = true;
-        sensor_start = i;
-        brace_count = 1;
-        current_sensor = "";
-      } else {
-        brace_count++;
-      }
-    } else if (c == '}') {
-      brace_count--;
-      if (brace_count == 0 && in_sensor) {
-        current_sensor = sensors_array.substring(sensor_start, i + 1);
-        parseAndConfigureSensor(current_sensor);
-        in_sensor = false;
-        current_sensor = "";
-      }
+
+  size_t total = sensors.size();
+  if (total == 0) {
+    String message = "Sensor config array is empty";
+    LOG_WARNING(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message);
+    return;
+  }
+
+  uint8_t success_count = 0;
+  for (JsonObject sensorObj : sensors) {
+    if (parseAndConfigureSensor(sensorObj)) {
+      success_count++;
     }
-    
-    if (in_sensor) {
-      current_sensor += c;
-    }
+  }
+
+  if (success_count == total) {
+    String message = "Configured " + String(success_count) + " sensor(s) successfully";
+    ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, success_count, message);
   }
 }
 
-void parseAndConfigureSensor(const String& sensor_json) {
-  // Parse individual sensor JSON
-  // {"gpio": 4, "sensor_type": "ph_sensor", "sensor_name": "Boden pH", "subzone_id": "zone_1", "active": true}
-  
+bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
   SensorConfig config;
-  config.gpio = 255;
-  config.active = false;
-  config.raw_mode = true;  // Always true for Server-Centric
-  
-  // Extract GPIO
-  int gpio_start = sensor_json.indexOf("\"gpio\":");
-  if (gpio_start != -1) {
-    gpio_start += 7;
-    int gpio_end = sensor_json.indexOf(",", gpio_start);
-    if (gpio_end == -1) {
-      gpio_end = sensor_json.indexOf("}", gpio_start);
-    }
-    if (gpio_end != -1) {
-      String gpio_str = sensor_json.substring(gpio_start, gpio_end);
-      gpio_str.trim();
-      config.gpio = gpio_str.toInt();
-    }
+  JsonVariantConst failed_variant = sensor_obj;
+
+  if (!sensor_obj.containsKey("gpio")) {
+    String message = "Sensor config missing required field 'gpio'";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message, failed_variant);
+    return false;
   }
-  
-  // Extract sensor_type
-  int type_start = sensor_json.indexOf("\"sensor_type\":\"");
-  if (type_start != -1) {
-    type_start += 15;  // Length of "sensor_type":""
-    int type_end = sensor_json.indexOf("\"", type_start);
-    if (type_end != -1) {
-      config.sensor_type = sensor_json.substring(type_start, type_end);
-    }
+
+  int gpio_value = 255;
+  if (!JsonHelpers::extractInt(sensor_obj, "gpio", gpio_value)) {
+    String message = "Sensor field 'gpio' must be an integer";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::TYPE_MISMATCH, message, failed_variant);
+    return false;
   }
-  
-  // Extract sensor_name
-  int name_start = sensor_json.indexOf("\"sensor_name\":\"");
-  if (name_start != -1) {
-    name_start += 15;  // Length of "sensor_name":""
-    int name_end = sensor_json.indexOf("\"", name_start);
-    if (name_end != -1) {
-      config.sensor_name = sensor_json.substring(name_start, name_end);
-    }
+  config.gpio = static_cast<uint8_t>(gpio_value);
+
+  if (!sensor_obj.containsKey("sensor_type")) {
+    String message = "Sensor config missing required field 'sensor_type'";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message, failed_variant);
+    return false;
   }
-  
-  // Extract subzone_id
-  int subzone_start = sensor_json.indexOf("\"subzone_id\":\"");
-  if (subzone_start != -1) {
-    subzone_start += 14;  // Length of "subzone_id":""
-    int subzone_end = sensor_json.indexOf("\"", subzone_start);
-    if (subzone_end != -1) {
-      config.subzone_id = sensor_json.substring(subzone_start, subzone_end);
-    }
+  if (!JsonHelpers::extractString(sensor_obj, "sensor_type", config.sensor_type)) {
+    String message = "Sensor field 'sensor_type' must be a string";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::TYPE_MISMATCH, message, failed_variant);
+    return false;
   }
-  
-  // Extract active
-  int active_start = sensor_json.indexOf("\"active\":");
-  if (active_start != -1) {
-    active_start += 9;  // Length of "active":
-    int active_end = sensor_json.indexOf(",", active_start);
-    if (active_end == -1) {
-      active_end = sensor_json.indexOf("}", active_start);
-    }
-    if (active_end != -1) {
-      String active_str = sensor_json.substring(active_start, active_end);
-      active_str.trim();
-      config.active = (active_str == "true");
-    }
+
+  if (!sensor_obj.containsKey("sensor_name")) {
+    String message = "Sensor config missing required field 'sensor_name'";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message, failed_variant);
+    return false;
   }
-  
-  // Configure or remove sensor
-  if (config.gpio != 255 && config.sensor_type.length() > 0) {
-    if (config.active) {
-      if (sensorManager.configureSensor(config)) {
-        // Save to NVS
-        configManager.saveSensorConfig(config);
-        LOG_INFO("Sensor configured: GPIO " + String(config.gpio) + " (" + config.sensor_type + ")");
-      } else {
-        LOG_ERROR("Failed to configure sensor on GPIO " + String(config.gpio));
-      }
-    } else {
-      // Remove sensor
-      sensorManager.removeSensor(config.gpio);
-      configManager.removeSensorConfig(config.gpio);
-      LOG_INFO("Sensor removed: GPIO " + String(config.gpio));
-    }
+  if (!JsonHelpers::extractString(sensor_obj, "sensor_name", config.sensor_name)) {
+    String message = "Sensor field 'sensor_name' must be a string";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::TYPE_MISMATCH, message, failed_variant);
+    return false;
+  }
+
+  JsonHelpers::extractString(sensor_obj, "subzone_id", config.subzone_id, "");
+
+  bool bool_value = true;
+  if (JsonHelpers::extractBool(sensor_obj, "active", bool_value, true)) {
+    config.active = bool_value;
   } else {
-    LOG_WARNING("Invalid sensor config: GPIO or sensor_type missing");
+    config.active = true;
   }
+
+  if (JsonHelpers::extractBool(sensor_obj, "raw_mode", bool_value, true)) {
+    config.raw_mode = bool_value;
+  } else {
+    config.raw_mode = true;
+  }
+
+  if (!configManager.validateSensorConfig(config)) {
+    String message = "Sensor validation failed for GPIO " + String(config.gpio);
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::VALIDATION_FAILED, message, failed_variant);
+    return false;
+  }
+
+  if (!config.active) {
+    if (!sensorManager.removeSensor(config.gpio)) {
+      LOG_WARNING("Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
+    }
+    if (!configManager.removeSensorConfig(config.gpio)) {
+      String message = "Failed to remove sensor config from NVS for GPIO " + String(config.gpio);
+      LOG_ERROR(message);
+      ConfigResponseBuilder::publishError(
+          ConfigType::SENSOR, ConfigErrorCode::NVS_WRITE_FAILED, message, failed_variant);
+      return false;
+    }
+    LOG_INFO("Sensor removed: GPIO " + String(config.gpio));
+    return true;
+  }
+
+  if (!sensorManager.configureSensor(config)) {
+    String message = "Failed to configure sensor on GPIO " + String(config.gpio);
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant);
+    return false;
+  }
+
+  if (!configManager.saveSensorConfig(config)) {
+    String message = "Failed to save sensor config to NVS for GPIO " + String(config.gpio);
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::NVS_WRITE_FAILED, message, failed_variant);
+    return false;
+  }
+
+  LOG_INFO("Sensor configured: GPIO " + String(config.gpio) + " (" + config.sensor_type + ")");
+  return true;
 }
 
 void handleActuatorConfig(const String& payload) {

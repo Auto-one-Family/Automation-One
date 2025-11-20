@@ -1,6 +1,8 @@
 #ifndef MODELS_ERROR_CODES_H
 #define MODELS_ERROR_CODES_H
 
+#include <Arduino.h>
+
 // ============================================
 // ERROR CODE RANGES (Guide-konform)
 // ============================================
@@ -121,6 +123,72 @@
 #define ERROR_TASK_FAILED           4060
 #define ERROR_TASK_TIMEOUT          4061
 #define ERROR_TASK_QUEUE_FULL       4062
+
+// ============================================
+// CONFIGURATION RESPONSE ERROR CODES (Enum)
+// ============================================
+enum class ConfigErrorCode : uint8_t {
+  NONE = 0,
+  JSON_PARSE_ERROR,
+  VALIDATION_FAILED,
+  GPIO_CONFLICT,
+  NVS_WRITE_FAILED,
+  TYPE_MISMATCH,
+  MISSING_FIELD,
+  OUT_OF_RANGE,
+  UNKNOWN_ERROR
+};
+
+inline const char* configErrorCodeToString(ConfigErrorCode code) {
+  switch (code) {
+    case ConfigErrorCode::NONE:
+      return "NONE";
+    case ConfigErrorCode::JSON_PARSE_ERROR:
+      return "JSON_PARSE_ERROR";
+    case ConfigErrorCode::VALIDATION_FAILED:
+      return "VALIDATION_FAILED";
+    case ConfigErrorCode::GPIO_CONFLICT:
+      return "GPIO_CONFLICT";
+    case ConfigErrorCode::NVS_WRITE_FAILED:
+      return "NVS_WRITE_FAILED";
+    case ConfigErrorCode::TYPE_MISMATCH:
+      return "TYPE_MISMATCH";
+    case ConfigErrorCode::MISSING_FIELD:
+      return "MISSING_FIELD";
+    case ConfigErrorCode::OUT_OF_RANGE:
+      return "OUT_OF_RANGE";
+    default:
+      return "UNKNOWN_ERROR";
+  }
+}
+
+inline ConfigErrorCode stringToConfigErrorCode(const String& code) {
+  if (code == "NONE") {
+    return ConfigErrorCode::NONE;
+  }
+  if (code == "JSON_PARSE_ERROR") {
+    return ConfigErrorCode::JSON_PARSE_ERROR;
+  }
+  if (code == "VALIDATION_FAILED") {
+    return ConfigErrorCode::VALIDATION_FAILED;
+  }
+  if (code == "GPIO_CONFLICT") {
+    return ConfigErrorCode::GPIO_CONFLICT;
+  }
+  if (code == "NVS_WRITE_FAILED") {
+    return ConfigErrorCode::NVS_WRITE_FAILED;
+  }
+  if (code == "TYPE_MISMATCH") {
+    return ConfigErrorCode::TYPE_MISMATCH;
+  }
+  if (code == "MISSING_FIELD") {
+    return ConfigErrorCode::MISSING_FIELD;
+  }
+  if (code == "OUT_OF_RANGE") {
+    return ConfigErrorCode::OUT_OF_RANGE;
+  }
+  return ConfigErrorCode::UNKNOWN_ERROR;
+}
 
 #endif
 

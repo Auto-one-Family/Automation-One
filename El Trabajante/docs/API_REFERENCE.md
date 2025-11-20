@@ -316,6 +316,36 @@ storageManager.endNamespace();
 - **Namespace isolation:** Data in different namespaces doesn't interfere with each other
 - **Type consistency:** Retrieve data with the same type it was stored as
 
+### Thread-Safety Warning
+
+**⚠️ Thread-Safety Status (Phase 6):**
+
+- ESP32 Preferences API ist nicht thread-safe → parallele Zugriffe benötigen einen Mutex.
+- Standard-Builds (Flag **nicht** gesetzt) laufen weiter im Single-Task-Modus – identisches Verhalten wie zuvor.
+- Wird das Build-Flag `CONFIG_ENABLE_THREAD_SAFETY` definiert, erstellt `StorageManager` automatisch einen FreeRTOS-Mutex (`SemaphoreHandle_t nvs_mutex_`) und schützt **alle** `beginNamespace()`, `put*()`, `get*()` und `clearNamespace()` Aufrufe.
+
+**Aktivierung:**
+```ini
+; platformio.ini
+[env:esp32]
+build_flags =
+  -D CONFIG_ENABLE_THREAD_SAFETY
+```
+
+Nach Aktivierung erscheint im Log:
+```
+StorageManager: Thread-safety enabled (mutex created)
+```
+
+**Multitask-Einsatz (Phase 7+):**
+- Tasks können StorageManager direkt nutzen – der interne Mutex serialisiert die Zugriffe.
+- Kein manuelles `xSemaphoreTake` mehr notwendig, solange alle Zugriffe über StorageManager laufen.
+- Für lange Operationen kann optional weiterhin ein externer Mutex verwendet werden (z.B. um mehrere `put*()` Calls atomar zu bündeln).
+
+**Single-Task Empfehlung:**
+- Ohne Flag bleibt Verhalten identisch zu Phase 5 (nur `setup()` greift auf NVS zu).
+- Keine Codeänderung nötig, solange keine parallelen Tasks NVS aufrufen.
+
 ---
 
 ## ConfigManager
@@ -497,6 +527,104 @@ LOG_INFO("System state: " + String(sys_config.current_state));
 - **Validation:** Provides validation methods for configuration integrity
 - **Phase 1 scope:** Handles WiFi, Zone, and System configurations
 - **Phase 3 deferred:** Sensor/Actuator configuration deferred to Phase 3
+
+---
+
+## ConfigResponseBuilder
+
+**Files:** `src/services/config/config_response.h` / `.cpp`  
+**Purpose:** Baut das standardisierte MQTT-Response-Protokoll für Sensor- und Actuator-Konfigurationen auf `/config_response`.
+
+### API Overview
+
+```cpp
+#include "services/config/config_response.h"
+```
+
+#### `bool publishSuccess(ConfigType type, uint8_t count, const String& message)`
+
+Publiziert ein ACK (`status: "success"`).  
+`type` unterscheidet Sensor/Actuator/WiFi/System, `count` beschreibt die Anzahl der erfolgreich angewendeten Items.
+
+```cpp
+ConfigResponseBuilder::publishSuccess(
+    ConfigType::SENSOR,
+    success_count,
+    "Configured " + String(success_count) + " sensor(s) successfully");
+```
+
+#### `bool publishError(ConfigType type, ConfigErrorCode error_code, const String& message, JsonVariantConst failed_item = JsonVariantConst())`
+
+Publiziert eine Fehlerantwort (NACK) inklusive standardisiertem Fehlercode.  
+`failed_item` kann das problematische JSON-Objekt (Sensor/Actuator) enthalten.
+
+```cpp
+ConfigResponseBuilder::publishError(
+    ConfigType::ACTUATOR,
+    ConfigErrorCode::MISSING_FIELD,
+    "Actuator config missing required field 'gpio'",
+    actuatorObj);
+```
+
+#### `bool publish(const ConfigResponsePayload& payload)`
+
+Low-Level Hook, falls Payload extern aufgebaut wird (z.B. Tests). Ruft intern `mqttClient.safePublish()` mit QoS 1 auf.
+
+### Payload Structure
+
+```cpp
+struct ConfigResponsePayload {
+  ConfigStatus status = ConfigStatus::SUCCESS;
+  ConfigType type = ConfigType::UNKNOWN;
+  uint8_t count = 0;
+  String message;
+  String error_code = "NONE";
+  DynamicJsonDocument failed_item{256};
+};
+```
+
+### ConfigErrorCode Cheatsheet
+
+| Code               | Beschreibung                                   |
+|--------------------|-----------------------------------------------|
+| `NONE`             | Platzhalter bei Erfolg                        |
+| `JSON_PARSE_ERROR` | JSON konnte nicht deserialisiert werden       |
+| `VALIDATION_FAILED`| Feld-/GPIO-Validation fehlgeschlagen          |
+| `GPIO_CONFLICT`    | GPIO ist bereits anderweitig belegt           |
+| `NVS_WRITE_FAILED` | Persistenz-Operation fehlgeschlagen           |
+| `TYPE_MISMATCH`    | Datentyp stimmt nicht mit Erwartung überein   |
+| `MISSING_FIELD`    | Pflichtfeld fehlt im Payload                  |
+| `OUT_OF_RANGE`     | Wert außerhalb zulässigem Bereich             |
+| `UNKNOWN_ERROR`    | Fallback für nicht klassifizierte Fehler      |
+
+### Usage Pattern
+
+```cpp
+DynamicJsonDocument doc(4096);
+auto error = deserializeJson(doc, payload);
+if (error) {
+  ConfigResponseBuilder::publishError(
+      ConfigType::SENSOR,
+      ConfigErrorCode::JSON_PARSE_ERROR,
+      "Failed to parse JSON: " + String(error.c_str()));
+  return;
+}
+
+JsonArray sensors = doc["sensors"].as<JsonArray>();
+uint8_t success_count = 0;
+for (JsonObject sensorObj : sensors) {
+  if (parseAndConfigureSensor(sensorObj)) {
+    success_count++;
+  }
+}
+
+if (success_count == sensors.size()) {
+  ConfigResponseBuilder::publishSuccess(
+      ConfigType::SENSOR,
+      success_count,
+      "Configured " + String(success_count) + " sensor(s) successfully");
+}
+```
 
 ---
 

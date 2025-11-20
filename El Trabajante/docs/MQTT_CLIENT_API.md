@@ -244,6 +244,254 @@ mqttClient.publish(topic, payload, 1);
 
 ---
 
+### Config JSON-Schemas
+
+#### Sensor-Config Payload
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/config`  
+**Direction:** Server → ESP (PUBLISH)  
+**QoS:** 1 (Guaranteed Delivery)  
+**Retention:** false
+
+**JSON-Schema:**
+```json
+{
+  "sensors": [
+    {
+      "gpio": 4,
+      "sensor_type": "ph_sensor",
+      "sensor_name": "Boden pH Zone 1",
+      "subzone_id": "zone_1",
+      "active": true,
+      "raw_mode": true
+    },
+    {
+      "gpio": 5,
+      "sensor_type": "temperature_ds18b20",
+      "sensor_name": "Wasser Temp",
+      "subzone_id": "zone_1",
+      "active": true,
+      "raw_mode": false
+    }
+  ]
+}
+```
+
+**Field-Beschreibungen:**
+- `gpio`: GPIO Pin für Sensor (ADC: 32-39, Digital: 0-39)
+- `sensor_type`: Sensor-Typ-Identifier (Server-definiert)
+- `sensor_name`: Human-Readable Name für Logging/UI
+- `subzone_id`: Zuordnung zu Subzone (Optional)
+- `active`: Sensor aktiv (true) oder deaktiviert (false)
+- `raw_mode`: Raw ADC-Werte (true) oder kalibrierte Werte (false)
+
+**Validation-Rules:**
+- GPIO 0-39 (ESP32-Standard)
+- `sensor_type` nicht leer
+- `sensor_name` nicht leer
+- Kein GPIO-Konflikt mit anderen Sensoren/Aktoren
+
+---
+
+#### Actuator-Config Payload
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/config`  
+**Direction:** Server → ESP (PUBLISH)  
+**QoS:** 1 (Guaranteed Delivery)  
+**Retention:** false
+
+**JSON-Schema:**
+```json
+{
+  "actuators": [
+    {
+      "gpio": 5,
+      "aux_gpio": 255,
+      "actuator_type": "pump",
+      "actuator_name": "Haupt-Pumpe A",
+      "subzone_id": "zone_1",
+      "active": true,
+      "critical": true,
+      "inverted_logic": false,
+      "default_state": false,
+      "default_pwm": 0
+    },
+    {
+      "gpio": 18,
+      "aux_gpio": 19,
+      "actuator_type": "pwm",
+      "actuator_name": "Lüfter PWM",
+      "subzone_id": "zone_2",
+      "active": true,
+      "critical": false,
+      "inverted_logic": false,
+      "default_state": false,
+      "default_pwm": 128
+    }
+  ]
+}
+```
+
+**Field-Beschreibungen:**
+- `gpio`: Primary GPIO Pin (Output)
+- `aux_gpio`: Secondary GPIO Pin (z.B. H-Bridge Direction, 255=unused)
+- `actuator_type`: Actuator-Type (`"pump"`, `"pwm"`, `"valve"`, `"relay"`)
+- `actuator_name`: Human-Readable Name
+- `subzone_id`: Subzone-Zuordnung
+- `active`: Aktor aktiv (true) oder deaktiviert (false)
+- `critical`: Kritischer Aktor (true) → Safe-Mode bevorzugt
+- `inverted_logic`: LOW=ON (true) oder HIGH=ON (false)
+- `default_state`: Default Boot-State (ON/OFF)
+- `default_pwm`: Default PWM Duty-Cycle (0-255, nur für PWM)
+
+**Validation-Rules:**
+- GPIO 0-39
+- `actuator_type` ∈ {pump, pwm, valve, relay}
+- `actuator_name` nicht leer
+- Kein GPIO-Konflikt
+- `aux_gpio` ≠ `gpio` (falls verwendet)
+
+---
+
+#### Config-Update-Flow
+
+```
+┌──────────────┐                      ┌─────────────┐                      ┌──────────────┐
+│   Server     │                      │    MQTT     │                      │    ESP32     │
+│ (God-Kaiser) │                      │   Broker    │                      │   (Client)   │
+└──────┬───────┘                      └──────┬──────┘                      └──────┬───────┘
+       │                                     │                                     │
+       │ 1. Config ändern (UI/Logic)         │                                     │
+       │                                     │                                     │
+       │ 2. PUBLISH /config (JSON)           │                                     │
+       ├────────────────────────────────────>│                                     │
+       │    QoS: 1, Retain: false            │                                     │
+       │                                     │                                     │
+       │                                     │ 3. DELIVER /config (QoS 1)          │
+       │                                     ├────────────────────────────────────>│
+       │                                     │                                     │
+       │                                     │                 4. Parse JSON       │
+       │                                     │                 5. Validate Config  │
+       │                                     │                    ├─> GPIO Range   │
+       │                                     │                    ├─> Type Check   │
+       │                                     │                    └─> Conflict Det │
+       │                                     │                                     │
+       │                                     │                 6. Apply Config     │
+       │                                     │                    ├─> sensorManager│
+       │                                     │                    └─> actuatorMgr  │
+       │                                     │                                     │
+       │                                     │                 7. NVS Save         │
+       │                                     │                    (Nur Sensors!)   │
+       │                                     │                                     │
+       │                                     │                 8. Register HAL     │
+       │                                     │                    (GPIO-Setup)     │
+       │                                     │                                     │
+       │                                     │ 9. PUBLISH /config_response (ACK)   │
+       │                                     │<────────────────────────────────────┤
+       │                                     │    {"status":"success","count":2}   │
+       │                                     │                                     │
+       │ 10. RECEIVE /config_response        │                                     │
+       │<────────────────────────────────────┤                                     │
+       │                                     │                                     │
+       │ 11. UI Update (Success Notification)│                                     │
+       │                                     │                                     │
+```
+
+**Timing:**
+- Step 2-3: <100ms (MQTT-Latency)
+- Step 4-8: <500ms (Parse + Validate + Apply + NVS)
+- Step 9-10: <100ms (MQTT-Latency)
+- **Total:** <700ms (Server → ESP → Response)
+
+---
+
+#### Config-Response Topic
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/config_response`  
+**Direction:** ESP → Server (PUBLISH)  
+**QoS:** 1  
+**Retention:** false  
+**Implementation:** `ConfigResponseBuilder` (`src/services/config/config_response.*`)  
+**Verwendet von:** Sensor- und Actuator-Konfiguration (Phase 6)
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "type": "sensor",
+  "count": 2,
+  "message": "Configured 2 sensors successfully"
+}
+```
+
+**Error Response (Validation-Fehler):**
+```json
+{
+  "status": "error",
+  "type": "sensor",
+  "error_code": "VALIDATION_FAILED",
+  "message": "Sensor validation failed: GPIO 50 out of range (max 39)",
+  "failed_item": {
+    "gpio": 50,
+    "sensor_type": "ph_sensor"
+  }
+}
+```
+
+**Error Response (GPIO-Conflict):**
+```json
+{
+  "status": "error",
+  "type": "actuator",
+  "error_code": "GPIO_CONFLICT",
+  "message": "GPIO 5 already used by Sensor 'Boden pH'",
+  "failed_item": {
+    "gpio": 5,
+    "actuator_type": "pump"
+  }
+}
+```
+
+**Error Response (JSON-Parse-Fehler):**
+```json
+{
+  "status": "error",
+  "type": "unknown",
+  "error_code": "JSON_PARSE_ERROR",
+  "message": "Failed to parse JSON: Missing closing brace"
+}
+```
+
+---
+
+**Standardisierte Config-Error-Codes (`ConfigErrorCode`):**
+
+- `JSON_PARSE_ERROR` – JSON konnte nicht deserialisiert werden
+- `VALIDATION_FAILED` – Feldvalidierung fehlgeschlagen (Range, Pflichtfeld, etc.)
+- `GPIO_CONFLICT` – GPIO bereits durch Sensor oder Actuator belegt
+- `NVS_WRITE_FAILED` – Preferences/NVS Schreibvorgang fehlgeschlagen
+- `TYPE_MISMATCH` – Datentyp stimmt nicht mit Erwartung überein
+- `MISSING_FIELD` – Pflichtfeld fehlt im Payload
+- `OUT_OF_RANGE` – Wert außerhalb zulässigem Bereich
+- `UNKNOWN_ERROR` – Fallback für nicht spezifizierte Fehler
+- `NONE` – Platzhalter bei Erfolgsnachrichten
+
+---
+
+#### Error-Handling-Matrix
+
+| Error-Type | ESP-Action | Response | Server-Action |
+|------------|------------|----------|---------------|
+| **JSON-Parse-Fehler** | `LOG_ERROR`, Abort | NACK (`JSON_PARSE_ERROR`) | Retry mit korrigiertem JSON |
+| **Validation-Fehler** | `LOG_WARNING`, Abort | NACK (`VALIDATION_FAILED`) | Fix Config, Retry |
+| **GPIO-Conflict** | `LOG_ERROR`, Abort | NACK (`GPIO_CONFLICT`) | Resolve Conflict, Retry |
+| **NVS-Write-Fehler** | `LOG_ERROR`, Abort | NACK (`NVS_WRITE_FAILED`) | Retry oder Factory-Reset |
+| **Success** | `LOG_INFO`, Apply | ACK (`success`) | UI-Update, Continue |
+
+**Note:** Bei NACK wird **keine Config angewendet** (Transactional Semantics).
+
+---
+
 ### Subscription
 
 #### `bool subscribe(const String& topic)`

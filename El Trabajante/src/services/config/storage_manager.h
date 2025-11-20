@@ -4,6 +4,11 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
+
 // ============================================
 // STORAGE MANAGER CLASS (Guide-konform)
 // ============================================
@@ -59,6 +64,10 @@ private:
   
   // Static buffer für getString (Guide-konform)
   static char string_buffer_[256];
+
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  SemaphoreHandle_t nvs_mutex_;
+#endif
 };
 
 // ============================================

@@ -20,6 +20,75 @@ Diese Dokumentation listet alle NVS-Keys auf, die von StorageManager verwendet w
 
   - `mqtt_password` (String) - MQTT Password (optional)
 
+### Default-Values & Constraints
+
+Diese Tabelle zeigt **Default-Werte**, die verwendet werden, wenn Keys **nicht in NVS** existieren (z.B. First-Boot).
+
+#### WiFi Configuration (Namespace: `wifi_config`)
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `ssid` | String | `""` (empty) | Max 32 chars | WiFi Network Name |
+| `password` | String | `""` (empty) | Max 64 chars | WiFi Network Password |
+| `server_address` | String | `"192.168.0.198"` | IPv4 or Hostname | MQTT Broker IP/Hostname |
+| `mqtt_port` | uint16_t | `8883` | 1-65535 | MQTT Broker Port (8883=TLS, 1883=Plain) |
+| `mqtt_username` | String | `""` (empty) | Max 64 chars | MQTT Auth Username (Optional) |
+| `mqtt_password` | String | `""` (empty) | Max 64 chars | MQTT Auth Password (Optional) |
+| `configured` | bool | `false` | - | WiFi Configuration Status |
+
+#### Zone Configuration (Namespace: `zone_config`)
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `kaiser_id` | String | `""` (empty) | Generated if missing | Kaiser Zone Identifier |
+| `kaiser_name` | String | `""` (empty) | Max 64 chars | Human-Readable Kaiser Name |
+| `master_zone_id` | String | `""` (empty) | Max 32 chars | Parent Zone Identifier |
+| `master_zone_name` | String | `""` (empty) | Max 64 chars | Parent Zone Name |
+| `is_master_esp` | bool | `false` | - | Is this ESP the Master? |
+| `connected` | bool | `false` | - | Connection Status |
+
+#### System Configuration (Namespace: `system_config`)
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `esp_id` | String | `""` → **Generated** | Format: `ESP_XXXXXX` | Generated from MAC if missing |
+| `device_name` | String | `"ESP32"` | Max 32 chars | Human-Readable Device Name |
+| `current_state` | uint8_t | `0` (STATE_BOOT) | 0-11 | State Machine Current State |
+| `safe_mode_reason` | String | `""` (empty) | Max 128 chars | Reason for Safe-Mode Entry |
+| `boot_count` | uint16_t | `0` | 0-65535 | Number of Reboots |
+
+#### Sensor Configuration (Namespace: `sensor_config`)
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `sensor_count` | uint8_t | `0` | 0-20 | Number of Configured Sensors |
+| `sensor_{i}_gpio` | uint8_t | N/A | 0-39 | GPIO Pin for Sensor i |
+| `sensor_{i}_type` | String | N/A | Max 32 chars | Sensor Type (e.g. "ph_sensor") |
+| `sensor_{i}_name` | String | N/A | Max 64 chars | Human-Readable Sensor Name |
+| `sensor_{i}_subzone` | String | N/A | Max 32 chars | Subzone Identifier |
+| `sensor_{i}_active` | bool | N/A | - | Is Sensor Active? |
+| `sensor_{i}_raw_mode` | bool | `true` | - | Raw ADC Mode (true) or Calibrated (false) |
+
+**Note:** Sensor-Array-Elemente haben **keine Default-Values**. Keys werden nur geschrieben, wenn ein Sensor konfiguriert wird.
+
+#### Actuator Configuration (Namespace: `actuator_config`)
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `actuator_count` | uint8_t | `0` | 0-20 | Number of Configured Actuators |
+| `actuator_{i}_gpio` | uint8_t | N/A | 0-39 | Primary GPIO Pin |
+| `actuator_{i}_aux_gpio` | uint8_t | N/A | 0-39 or 255 | Auxiliary GPIO (255=unused) |
+| `actuator_{i}_type` | String | N/A | Max 32 chars | Actuator Type ("pump","pwm","valve","relay") |
+| `actuator_{i}_name` | String | N/A | Max 64 chars | Human-Readable Actuator Name |
+| `actuator_{i}_subzone` | String | N/A | Max 32 chars | Subzone Identifier |
+| `actuator_{i}_active` | bool | N/A | - | Is Actuator Active? |
+| `actuator_{i}_critical` | bool | N/A | - | Critical Actuator (true) or Optional (false) |
+| `actuator_{i}_inverted` | bool | N/A | - | Inverted Logic (LOW=ON if true) |
+| `actuator_{i}_default_state` | bool | N/A | - | Default State (ON/OFF) at Boot |
+| `actuator_{i}_default_pwm` | uint8_t | N/A | 0-255 | Default PWM Duty Cycle (0-255) |
+
+**Note:** Actuator-Array-Elemente haben **keine Default-Values**. Keys werden nur geschrieben, wenn ein Aktor konfiguriert wird.
+
 ## Kaiser/Zone Configuration
 
 - **Namespace**: `zone_config`
@@ -132,19 +201,24 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 - `kaiser/{kaiser_id}/esp/{esp_id}/config/request` - Konfig-Anfrage
 - `kaiser/{kaiser_id}/esp/{esp_id}/config/response` - Konfig-Antwort
 
-## Memory Usage
+### Memory-Usage Summary
 
-**Realistisches Memory-Profil nach Phase 5 Complete:**
+**Total Keys (Worst-Case):**
+- WiFi: 7 Keys
+- Zone: 6 Keys
+- System: 5 Keys
+- Sensors: 1 + (6 × 20) = 121 Keys (bei 20 Sensoren)
+- Actuators: 1 + (10 × 20) = 201 Keys (bei 20 Aktoren)
+- **TOTAL: ~340 Keys** (bei voller Auslastung)
 
-- WiFi Stack: ~15KB
-- Config Structs (20 Sensoren + 20 Aktoren): ~8KB
-- MQTT Buffers: ~10KB
-- Logger Buffer: ~5KB
-- **ActuatorManager (Phase 5):**
-  - RegisteredActuator Array (12 slots): ~2KB
-  - Driver Virtual Tables: ~1KB
-  - Safety-Controller State: ~1KB
-- **Gesamtsumme: ~54KB** (von 320KB verfügbar)
+**Estimated NVS-Usage:**
+- Strings (avg 30 bytes): ~240 Keys × 30 = 7.2 KB
+- Integers (4 bytes): ~100 Keys × 4 = 400 bytes
+- **TOTAL: ~8 KB** (bei voller Auslastung)
+
+**NVS-Partition:** 20 KB (Standard ESP32)  
+**Usage:** ~40% (bei 20 Sensoren + 20 Aktoren)  
+**Safe-Margin:** ✅ 60% frei
 
 ## Notes
 
