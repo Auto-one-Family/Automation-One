@@ -27,7 +27,12 @@ WiFiManager& WiFiManager::getInstance() {
 WiFiManager::WiFiManager() 
     : last_reconnect_attempt_(0),
       reconnect_attempts_(0),
-      initialized_(false) {
+      initialized_(false),
+      circuit_breaker_("WiFi", 10, 60000, 15000) {
+  // Circuit Breaker configured:
+  // - 10 failures → OPEN (WiFi needs more tolerance)
+  // - 60s recovery timeout (WiFi takes longer)
+  // - 15s half-open test timeout
 }
 
 WiFiManager::~WiFiManager() {
@@ -86,18 +91,30 @@ bool WiFiManager::connectToNetwork() {
     unsigned long start_time = millis();
     while (WiFi.status() != WL_CONNECTED) {
         if (millis() - start_time > WIFI_TIMEOUT_MS) {
+            // ❌ CONNECTION FAILED
             LOG_ERROR("WiFi connection timeout");
             errorTracker.logCommunicationError(ERROR_WIFI_CONNECT_TIMEOUT, 
                                                "WiFi connection timeout");
+            circuit_breaker_.recordFailure();  // Phase 6+
+            
+            // Check if Circuit Breaker opened
+            if (circuit_breaker_.isOpen()) {
+                LOG_WARNING("WiFi Circuit Breaker OPENED after failure threshold");
+                LOG_WARNING("  Will retry in 60 seconds");
+            }
+            
             return false;
         }
         delay(100);
     }
     
+    // ✅ CONNECTION SUCCESS
     LOG_INFO("WiFi connected! IP: " + WiFi.localIP().toString());
     LOG_INFO("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
     
     reconnect_attempts_ = 0;
+    circuit_breaker_.recordSuccess();  // Phase 6+
+    
     return true;
 }
 
@@ -116,7 +133,16 @@ bool WiFiManager::isConnected() const {
 void WiFiManager::reconnect() {
     if (isConnected()) {
         LOG_DEBUG("WiFi already connected");
+        circuit_breaker_.recordSuccess();  // Reset on successful connection
         return;
+    }
+    
+    // ============================================
+    // CIRCUIT BREAKER CHECK (Phase 6+)
+    // ============================================
+    if (!circuit_breaker_.allowRequest()) {
+        LOG_DEBUG("WiFi reconnect blocked by Circuit Breaker (waiting for recovery)");
+        return;  // Skip reconnect attempt
     }
     
     if (!shouldAttemptReconnect()) {
@@ -131,11 +157,16 @@ void WiFiManager::reconnect() {
              String(MAX_RECONNECT_ATTEMPTS) + ")");
     
     if (!connectToNetwork()) {
+        // connectToNetwork already calls circuit_breaker_.recordFailure()
+        
         if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
             LOG_CRITICAL("Max WiFi reconnection attempts reached");
             errorTracker.logCommunicationError(ERROR_WIFI_CONNECT_FAILED, 
                                                "Max reconnection attempts reached");
         }
+    } else {
+        // ✅ RECONNECT SUCCESS
+        // connectToNetwork already calls circuit_breaker_.recordSuccess()
     }
 }
 

@@ -6,6 +6,7 @@
 #include "../../models/system_types.h"
 #include "../../utils/logger.h"
 #include "../../error_handling/error_tracker.h"
+#include "../../error_handling/circuit_breaker.h"
 
 // ============================================
 // WIFI MANAGER CLASS (Phase 2 - Communication Layer)
@@ -46,6 +47,9 @@ private:
     unsigned long last_reconnect_attempt_;
     uint16_t reconnect_attempts_;
     bool initialized_;
+    
+    // Circuit Breaker (Phase 6+)
+    CircuitBreaker circuit_breaker_;
     
     // Helper methods
     bool connectToNetwork();
