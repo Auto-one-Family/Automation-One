@@ -136,13 +136,14 @@ void setup() {
   LOG_INFO("=====================");
   
   // ============================================
-  // STEP 10: PHASE 2 - COMMUNICATION LAYER
+  // STEP 10: PHASE 2 - COMMUNICATION LAYER (with Circuit Breaker - Phase 6+)
   // ============================================
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 2: Communication Layer         ║");
+  LOG_INFO("║   (with Circuit Breaker Protection)    ║");
   LOG_INFO("╚════════════════════════════════════════╝");
   
-  // WiFi Manager
+  // WiFi Manager (Circuit Breaker: 10 failures → 60s timeout)
   if (!wifiManager.begin()) {
     LOG_ERROR("WiFiManager initialization failed!");
     return;
@@ -156,7 +157,7 @@ void setup() {
     LOG_INFO("WiFi connected successfully");
   }
   
-  // MQTT Client
+  // MQTT Client (Circuit Breaker: 5 failures → 30s timeout)
   if (!mqttClient.begin()) {
     LOG_ERROR("MQTTClient initialization failed!");
     return;
@@ -376,9 +377,9 @@ void setup() {
 // LOOP - Phase 2 Communication Monitoring + Phase 4/5 Operations
 // ============================================
 void loop() {
-  // Phase 2: Communication monitoring
-  wifiManager.loop();      // Monitor WiFi connection
-  mqttClient.loop();       // Process MQTT messages + heartbeat
+  // Phase 2: Communication monitoring (with Circuit Breaker - Phase 6+)
+  wifiManager.loop();      // Monitor WiFi connection (Circuit Breaker integrated)
+  mqttClient.loop();       // Process MQTT messages + heartbeat (Circuit Breaker integrated)
   
   // Phase 4: Sensor measurements
   sensorManager.performAllMeasurements();
@@ -389,6 +390,21 @@ void loop() {
   if (millis() - last_actuator_status > 30000) {
     actuatorManager.publishAllActuatorStatus();
     last_actuator_status = millis();
+  }
+  
+  // ============================================
+  // PHASE 6+: SYSTEM HEALTH MONITORING (every 5 minutes)
+  // ============================================
+  static unsigned long last_health_check = 0;
+  if (millis() - last_health_check >= 300000) {  // 5 minutes
+    last_health_check = millis();
+    
+    LOG_INFO("=== System Health Check ===");
+    LOG_INFO("WiFi Status: " + wifiManager.getConnectionStatus());
+    LOG_INFO("MQTT Status: " + mqttClient.getConnectionStatus());
+    LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+    LOG_INFO("Uptime: " + String(millis() / 1000) + " seconds");
+    LOG_INFO("==========================");
   }
   
   delay(10);  // Small delay to prevent watchdog issues
