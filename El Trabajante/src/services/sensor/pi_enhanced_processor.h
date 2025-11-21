@@ -2,6 +2,7 @@
 #define SERVICES_SENSOR_PI_ENHANCED_PROCESSOR_H
 
 #include <Arduino.h>
+#include "../../error_handling/circuit_breaker.h"
 
 // ============================================
 // PI ENHANCED PROCESSOR CLASS (Phase 4 - Server-Centric Core)
@@ -74,11 +75,12 @@ public:
     unsigned long getLastResponseTime() const;
     
     // ============================================
-    // CIRCUIT-BREAKER-PATTERN
+    // CIRCUIT-BREAKER-PATTERN (Phase 6+)
     // ============================================
     bool isCircuitOpen() const;          // Server nicht erreichbar
-    void resetCircuitBreaker();
+    void resetCircuitBreaker();          // Manual reset
     uint8_t getConsecutiveFailures() const;
+    CircuitState getCircuitState() const;  // ✅ NEU: Get state (CLOSED/OPEN/HALF_OPEN)
     
 private:
     // ============================================
@@ -99,12 +101,8 @@ private:
     uint16_t pi_server_port_;
     unsigned long last_response_time_;
     
-    // Circuit-Breaker
-    uint8_t consecutive_failures_;
-    uint8_t max_failures_;
-    bool circuit_open_;
-    unsigned long circuit_open_time_;
-    unsigned long circuit_timeout_;
+    // Circuit Breaker (Phase 6+) - Shared implementation
+    CircuitBreaker circuit_breaker_;
     
     // ============================================
     // HELPER METHODS
@@ -117,12 +115,6 @@ private:
     
     // Parse JSON response
     bool parseResponse(const String& json_response, ProcessedSensorData& processed_out);
-    
-    // Update circuit breaker state
-    void updateCircuitBreaker(bool success);
-    
-    // Check if circuit breaker should reset
-    void checkCircuitBreakerReset();
 };
 
 // ============================================

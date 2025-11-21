@@ -26,11 +26,11 @@ PiEnhancedProcessor::PiEnhancedProcessor()
       pi_server_address_(""),
       pi_server_port_(8000),
       last_response_time_(0),
-      consecutive_failures_(0),
-      max_failures_(5),
-      circuit_open_(false),
-      circuit_open_time_(0),
-      circuit_timeout_(60000) {  // 60 seconds
+      circuit_breaker_("PiServer", 5, 60000, 10000) {
+  // Circuit Breaker configured (Phase 6+):
+  // - 5 failures → OPEN (like MQTT)
+  // - 60s recovery timeout
+  // - 10s half-open test timeout
 }
 
 PiEnhancedProcessor::~PiEnhancedProcessor() {
@@ -81,7 +81,7 @@ void PiEnhancedProcessor::end() {
 }
 
 // ============================================
-// SEND RAW DATA TO SERVER
+// SEND RAW DATA TO SERVER (with Circuit Breaker - Phase 6+)
 // ============================================
 bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensorData& processed_out) {
     // Initialize processed_out
@@ -92,51 +92,73 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     processed_out.timestamp = 0;
     processed_out.error_message = "";
     
-    // Check circuit breaker
-    checkCircuitBreakerReset();
-    
-    if (circuit_open_) {
-        LOG_WARNING("PiEnhancedProcessor: Circuit breaker is OPEN - skipping request");
-        processed_out.error_message = "Circuit breaker open";
+    // ============================================
+    // CIRCUIT BREAKER CHECK (Phase 6+)
+    // ============================================
+    if (!circuit_breaker_.allowRequest()) {
+        LOG_WARNING("PiEnhancedProcessor: Circuit breaker blocked request (Service DOWN)");
+        LOG_DEBUG("  Circuit State: " + String(circuit_breaker_.isOpen() ? "OPEN" : "HALF_OPEN"));
+        processed_out.error_message = "Circuit breaker open - waiting for recovery";
         return false;
     }
     
+    // ============================================
+    // HTTP CLIENT CHECK
+    // ============================================
     if (!http_client_ || !http_client_->isInitialized()) {
         LOG_ERROR("PiEnhancedProcessor: HTTPClient not initialized");
         processed_out.error_message = "HTTPClient not initialized";
-        updateCircuitBreaker(false);
+        circuit_breaker_.recordFailure();  // ✅ Count as failure
         return false;
     }
     
-    // Build request URL
+    // ============================================
+    // BUILD & SEND REQUEST
+    // ============================================
     String url = buildRequestUrl();
-    
-    // Build request payload
     String payload = buildRequestPayload(data);
     
-    // Send POST request
+    LOG_DEBUG("PiEnhancedProcessor: Sending request to " + url);
+    
     HTTPResponse response = http_client_->post(url.c_str(), payload.c_str(), 
                                                "application/json", 5000);
     
-    // Update circuit breaker
-    updateCircuitBreaker(response.success);
-    
+    // ============================================
+    // HANDLE RESPONSE
+    // ============================================
     if (!response.success) {
+        // ❌ HTTP REQUEST FAILED
+        circuit_breaker_.recordFailure();
         LOG_ERROR("PiEnhancedProcessor: HTTP request failed - " + String(response.error_message));
         processed_out.error_message = response.error_message;
+        
+        // Check if Circuit Breaker opened
+        if (circuit_breaker_.isOpen()) {
+            LOG_WARNING("PiEnhancedProcessor: Circuit Breaker OPENED after failures");
+            LOG_WARNING("  Will retry in 60 seconds");
+        }
+        
         return false;
     }
     
-    // Parse response
+    // ============================================
+    // PARSE RESPONSE
+    // ============================================
     if (!parseResponse(response.body, processed_out)) {
+        // ❌ PARSE FAILED
+        circuit_breaker_.recordFailure();
         LOG_ERROR("PiEnhancedProcessor: Failed to parse response");
+        LOG_DEBUG("  Response: " + response.body.substring(0, 100));
         processed_out.error_message = "JSON parse error";
-        updateCircuitBreaker(false);
         return false;
     }
     
-    // Update last response time
+    // ✅ SUCCESS
+    circuit_breaker_.recordSuccess();
     last_response_time_ = millis();
+    
+    LOG_DEBUG("PiEnhancedProcessor: Request successful - Value: " + 
+              String(processed_out.value) + " " + processed_out.unit);
     
     return true;
 }
@@ -263,45 +285,16 @@ bool PiEnhancedProcessor::parseResponse(const String& json_response, ProcessedSe
 }
 
 // ============================================
-// UPDATE CIRCUIT BREAKER
+// CIRCUIT BREAKER METHODS (Phase 6+)
 // ============================================
-void PiEnhancedProcessor::updateCircuitBreaker(bool success) {
-    if (success) {
-        // Reset on success
-        consecutive_failures_ = 0;
-        circuit_open_ = false;
-        circuit_open_time_ = 0;
-    } else {
-        // Increment failures
-        consecutive_failures_++;
-        
-        if (consecutive_failures_ >= max_failures_) {
-            circuit_open_ = true;
-            circuit_open_time_ = millis();
-            LOG_WARNING("PiEnhancedProcessor: Circuit breaker OPENED after " + 
-                       String(consecutive_failures_) + " failures");
-        }
-    }
-}
+// Note: updateCircuitBreaker() and checkCircuitBreakerReset() removed
+// Replaced by circuit_breaker_.recordSuccess/Failure() and allowRequest()
 
 // ============================================
-// CHECK CIRCUIT BREAKER RESET
-// ============================================
-void PiEnhancedProcessor::checkCircuitBreakerReset() {
-    if (circuit_open_ && (millis() - circuit_open_time_ >= circuit_timeout_)) {
-        // Timeout expired, reset circuit breaker
-        circuit_open_ = false;
-        consecutive_failures_ = 0;
-        circuit_open_time_ = 0;
-        LOG_INFO("PiEnhancedProcessor: Circuit breaker RESET after timeout");
-    }
-}
-
-// ============================================
-// SERVER STATUS QUERIES
+// SERVER STATUS QUERIES (Phase 6+)
 // ============================================
 bool PiEnhancedProcessor::isPiAvailable() const {
-    return !circuit_open_;
+    return !circuit_breaker_.isOpen();
 }
 
 String PiEnhancedProcessor::getPiServerAddress() const {
@@ -317,17 +310,19 @@ unsigned long PiEnhancedProcessor::getLastResponseTime() const {
 }
 
 bool PiEnhancedProcessor::isCircuitOpen() const {
-    return circuit_open_;
+    return circuit_breaker_.isOpen();
 }
 
 void PiEnhancedProcessor::resetCircuitBreaker() {
-    circuit_open_ = false;
-    consecutive_failures_ = 0;
-    circuit_open_time_ = 0;
+    circuit_breaker_.reset();
     LOG_INFO("PiEnhancedProcessor: Circuit breaker manually RESET");
 }
 
 uint8_t PiEnhancedProcessor::getConsecutiveFailures() const {
-    return consecutive_failures_;
+    return circuit_breaker_.getFailureCount();
+}
+
+CircuitState PiEnhancedProcessor::getCircuitState() const {
+    return circuit_breaker_.getState();
 }
 
