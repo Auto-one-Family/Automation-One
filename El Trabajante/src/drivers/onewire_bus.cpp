@@ -40,7 +40,7 @@ bool OneWireBusManager::begin() {
         LOG_ERROR("Failed to reserve OneWire pin " + String(pin_));
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,
-                               "Pin reservation failed: GPIO " + String(pin_));
+                               ("Pin reservation failed: GPIO " + String(pin_)).c_str());
         return false;
     }
     

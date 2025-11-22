@@ -167,7 +167,19 @@ Diese Tabelle zeigt **Default-Werte**, die verwendet werden, wenn Keys **nicht i
 
   - `device_name` (String) - User-definierter Name
 
-  - `current_state` (uint8_t) - SystemState (0=BOOT, 1=SAFE_MODE, 2=CONFIG_MODE, 3=CONNECTING, 4=OPERATIONAL, 5=ERROR)
+  - `current_state` (uint8_t) - SystemState (0-11, siehe Mqtt_Protocoll.md State-Values)
+    - 0: BOOT
+    - 1: WIFI_SETUP
+    - 2: WIFI_CONNECTED
+    - 3: MQTT_CONNECTING
+    - 4: MQTT_CONNECTED
+    - 5: AWAITING_USER_CONFIG
+    - 6: ZONE_CONFIGURED
+    - 7: SENSORS_CONFIGURED
+    - 8: OPERATIONAL
+    - 9: LIBRARY_DOWNLOADING
+    - 10: SAFE_MODE
+    - 11: ERROR
 
   - `safe_mode_reason` (String) - Grund für Safe-Mode
 

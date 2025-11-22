@@ -30,6 +30,9 @@
 #include "services/actuator/actuator_manager.h"
 #include "services/actuator/safety_controller.h"
 
+// Phase 6: Provisioning System
+#include "services/provisioning/provision_manager.h"
+
 // ============================================
 // GLOBAL VARIABLES
 // ============================================
@@ -66,6 +69,71 @@ void setup() {
   Serial.printf("Free Heap: %d bytes\n\n", ESP.getFreeHeap());
   
   // ============================================
+  // STEP 2.5: BOOT-BUTTON FACTORY RESET CHECK (Before GPIO init!)
+  // ============================================
+  // Check if Boot button (GPIO 0) is pressed for Factory Reset
+  // This MUST be before gpioManager.initializeAllPinsToSafeMode()
+  const uint8_t BOOT_BUTTON_PIN = 0;  // GPIO 0 on ESP32
+  const unsigned long HOLD_TIME_MS = 10000;  // 10 seconds
+  
+  pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+  
+  if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
+    Serial.println("╔════════════════════════════════════════╗");
+    Serial.println("║  ⚠️  BOOT BUTTON PRESSED              ║");
+    Serial.println("║  Hold for 10 seconds for Factory Reset║");
+    Serial.println("╚════════════════════════════════════════╝");
+    
+    unsigned long start_time = millis();
+    bool held_for_10s = true;
+    uint8_t last_second = 0;
+    
+    while (millis() - start_time < HOLD_TIME_MS) {
+      if (digitalRead(BOOT_BUTTON_PIN) == HIGH) {
+        held_for_10s = false;
+        Serial.println("\nButton released - Factory Reset cancelled");
+        break;
+      }
+      
+      // Progress indicator (every second)
+      uint8_t current_second = (millis() - start_time) / 1000;
+      if (current_second > last_second) {
+        Serial.print(".");
+        last_second = current_second;
+      }
+      
+      delay(100);
+    }
+    
+    if (held_for_10s) {
+      Serial.println("\n╔════════════════════════════════════════╗");
+      Serial.println("║  🔥 FACTORY RESET TRIGGERED           ║");
+      Serial.println("╚════════════════════════════════════════╝");
+      
+      // Initialize minimal systems for NVS access
+      storageManager.begin();
+      configManager.begin();
+      
+      // Clear WiFi config
+      configManager.resetWiFiConfig();
+      Serial.println("✅ WiFi configuration cleared");
+      
+      // Clear zone config
+      KaiserZone kaiser;
+      MasterZone master;
+      configManager.saveZoneConfig(kaiser, master);
+      Serial.println("✅ Zone configuration cleared");
+      
+      Serial.println("\n╔════════════════════════════════════════╗");
+      Serial.println("║  ✅ FACTORY RESET COMPLETE            ║");
+      Serial.println("╚════════════════════════════════════════╝");
+      Serial.println("Rebooting in 2 seconds...");
+      delay(2000);
+      ESP.restart();
+    }
+  }
+  
+  // ============================================
   // STEP 3: GPIO SAFE-MODE (CRITICAL - FIRST!)
   // ============================================
   // MUST be first to prevent hardware damage from undefined GPIO states
@@ -100,6 +168,73 @@ void setup() {
   configManager.loadSystemConfig(g_system_config);
   
   configManager.printConfigurationStatus();
+  
+  // ═══════════════════════════════════════════════════
+  // STEP 6.5: PROVISIONING CHECK (Phase 6)
+  // ═══════════════════════════════════════════════════
+  // Check if ESP needs provisioning (no config or empty SSID)
+  if (!g_wifi_config.configured || g_wifi_config.ssid.length() == 0) {
+    LOG_INFO("╔════════════════════════════════════════╗");
+    LOG_INFO("║   NO CONFIG - STARTING PROVISIONING   ║");
+    LOG_INFO("╚════════════════════════════════════════╝");
+    LOG_INFO("ESP is not provisioned. Starting AP-Mode...");
+    
+    // Initialize Provision Manager
+    if (!provisionManager.begin()) {
+      LOG_ERROR("ProvisionManager initialization failed!");
+      LOG_CRITICAL("Cannot provision ESP - check logs");
+      return;  // Stop setup
+    }
+    
+    // Start AP-Mode
+    if (provisionManager.startAPMode()) {
+      LOG_INFO("╔════════════════════════════════════════╗");
+      LOG_INFO("║  ACCESS POINT MODE ACTIVE             ║");
+      LOG_INFO("╚════════════════════════════════════════╝");
+      LOG_INFO("Connect to: AutoOne-" + g_system_config.esp_id);
+      LOG_INFO("Password: provision");
+      LOG_INFO("Open browser: http://192.168.4.1");
+      LOG_INFO("");
+      LOG_INFO("Waiting for configuration (timeout: 10 minutes)...");
+      
+      // Block until config received (or timeout: 10 minutes)
+      if (provisionManager.waitForConfig(600000)) {
+        // ✅ SUCCESS: Config received
+        LOG_INFO("╔════════════════════════════════════════╗");
+        LOG_INFO("║  ✅ PROVISIONING SUCCESSFUL           ║");
+        LOG_INFO("╚════════════════════════════════════════╝");
+        LOG_INFO("Configuration saved to NVS");
+        LOG_INFO("Rebooting in 2 seconds...");
+        delay(2000);
+        ESP.restart();  // Reboot to apply config
+      } else {
+        // ❌ TIMEOUT: No config received
+        LOG_ERROR("╔════════════════════════════════════════╗");
+        LOG_ERROR("║  ❌ PROVISIONING TIMEOUT              ║");
+        LOG_ERROR("╚════════════════════════════════════════╝");
+        LOG_ERROR("No configuration received within 10 minutes");
+        LOG_ERROR("ESP will enter Safe-Mode");
+        LOG_ERROR("Please check:");
+        LOG_ERROR("  1. WiFi connection to ESP AP");
+        LOG_ERROR("  2. God-Kaiser server status");
+        LOG_ERROR("  3. Network connectivity");
+        
+        // Provisioning failed - stays in AP-Mode (handled by ProvisionManager)
+        // User can still manually configure via HTTP API
+        return;  // Stop setup - AP stays active
+      }
+    } else {
+      // Failed to start AP-Mode
+      LOG_CRITICAL("Failed to start AP-Mode!");
+      LOG_CRITICAL("ESP cannot be provisioned - hardware issue?");
+      return;  // Stop setup
+    }
+  }
+  
+  // ═══════════════════════════════════════════════════
+  // NORMAL FLOW: Config vorhanden
+  // ═══════════════════════════════════════════════════
+  LOG_INFO("Configuration found - starting normal flow");
   
   // ============================================
   // STEP 7: ERROR TRACKER (Error history)
@@ -178,6 +313,10 @@ void setup() {
   } else {
     LOG_INFO("MQTT connected successfully");
     
+    // Phase 7: Send initial heartbeat for ESP discovery/registration
+    mqttClient.publishHeartbeat();
+    LOG_INFO("Initial heartbeat sent for ESP registration");
+    
     // Subscribe to critical topics
     String system_command_topic = TopicBuilder::buildSystemCommandTopic();
     String config_topic = TopicBuilder::buildConfigTopic();
@@ -187,13 +326,20 @@ void setup() {
     actuator_command_wildcard.replace("/0/command", "/+/command");
     String esp_emergency_topic = TopicBuilder::buildActuatorEmergencyTopic();
     
+    // Phase 7: Zone assignment topic
+    String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
+    if (g_kaiser.kaiser_id.length() == 0) {
+      zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
+    }
+    
     mqttClient.subscribe(system_command_topic);
     mqttClient.subscribe(config_topic);
     mqttClient.subscribe(broadcast_emergency_topic);
     mqttClient.subscribe(actuator_command_wildcard);
     mqttClient.subscribe(esp_emergency_topic);
+    mqttClient.subscribe(zone_assign_topic);
     
-    LOG_INFO("Subscribed to system + actuator topics");
+    LOG_INFO("Subscribed to system + actuator + zone assignment topics");
     
     // Set MQTT callback for message routing (Phase 4)
     mqttClient.setCallback([](const String& topic, const String& payload) {
@@ -227,6 +373,118 @@ void setup() {
       String broadcast_emergency_topic = String(TopicBuilder::buildBroadcastEmergencyTopic());
       if (topic == broadcast_emergency_topic) {
         safetyController.emergencyStopAll("Broadcast emergency");
+        return;
+      }
+      
+      // System commands (factory reset, etc.)
+      String system_command_topic = String(TopicBuilder::buildSystemCommandTopic());
+      if (topic == system_command_topic) {
+        // Parse JSON payload
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+        
+        if (!error) {
+          String command = doc["command"].as<String>();
+          bool confirm = doc["confirm"] | false;
+          
+          if (command == "factory_reset" && confirm) {
+            LOG_WARNING("╔════════════════════════════════════════╗");
+            LOG_WARNING("║  FACTORY RESET via MQTT               ║");
+            LOG_WARNING("╚════════════════════════════════════════╝");
+            
+            // Acknowledge command
+            String response = "{\"status\":\"factory_reset_initiated\",\"esp_id\":\"" + 
+                            configManager.getESPId() + "\"}";
+            mqttClient.publish(system_command_topic + "/response", response);
+            
+            // Clear configs
+            configManager.resetWiFiConfig();
+            KaiserZone kaiser;
+            MasterZone master;
+            configManager.saveZoneConfig(kaiser, master);
+            
+            LOG_INFO("✅ Configuration cleared via MQTT");
+            LOG_INFO("Rebooting in 3 seconds...");
+            delay(3000);
+            ESP.restart();
+          }
+        }
+        return;
+      }
+      
+      // Phase 7: Zone Assignment Handler
+      String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
+      if (g_kaiser.kaiser_id.length() == 0) {
+        zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
+      }
+      
+      if (topic == zone_assign_topic) {
+        LOG_INFO("╔════════════════════════════════════════╗");
+        LOG_INFO("║  ZONE ASSIGNMENT RECEIVED             ║");
+        LOG_INFO("╚════════════════════════════════════════╝");
+        
+        // Parse JSON payload
+        DynamicJsonDocument doc(512);
+        DeserializationError error = deserializeJson(doc, payload);
+        
+        if (!error) {
+          String zone_id = doc["zone_id"].as<String>();
+          String master_zone_id = doc["master_zone_id"].as<String>();
+          String zone_name = doc["zone_name"].as<String>();
+          String kaiser_id = doc["kaiser_id"].as<String>();
+          
+          LOG_INFO("Zone ID: " + zone_id);
+          LOG_INFO("Master Zone: " + master_zone_id);
+          LOG_INFO("Zone Name: " + zone_name);
+          LOG_INFO("Kaiser ID: " + kaiser_id);
+          
+          // Update zone configuration
+          if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaiser_id)) {
+            // Update global variables
+            g_kaiser.zone_id = zone_id;
+            g_kaiser.master_zone_id = master_zone_id;
+            g_kaiser.zone_name = zone_name;
+            g_kaiser.zone_assigned = true;
+            if (kaiser_id.length() > 0) {
+              g_kaiser.kaiser_id = kaiser_id;
+              // Update TopicBuilder with new kaiser_id
+              TopicBuilder::setKaiserId(kaiser_id.c_str());
+            }
+            
+            // Send acknowledgment
+            String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
+            DynamicJsonDocument ack_doc(256);
+            ack_doc["esp_id"] = g_system_config.esp_id;
+            ack_doc["status"] = "zone_assigned";
+            ack_doc["zone_id"] = zone_id;
+            ack_doc["master_zone_id"] = master_zone_id;
+            ack_doc["timestamp"] = millis();
+            
+            String ack_payload;
+            serializeJson(ack_doc, ack_payload);
+            mqttClient.publish(ack_topic, ack_payload);
+            
+            LOG_INFO("✅ Zone assignment successful");
+            LOG_INFO("ESP is now part of zone: " + zone_id);
+            
+            // Update system state
+            g_system_config.current_state = STATE_ZONE_CONFIGURED;
+            configManager.saveSystemConfig(g_system_config);
+            
+            // Send updated heartbeat
+            mqttClient.publishHeartbeat();
+          } else {
+            LOG_ERROR("❌ Failed to save zone configuration");
+            
+            // Send error acknowledgment
+            String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
+            String error_response = "{\"esp_id\":\"" + g_system_config.esp_id + 
+                                   "\",\"status\":\"error\",\"message\":\"Failed to save zone config\"}";
+            mqttClient.publish(ack_topic, error_response);
+          }
+        } else {
+          LOG_ERROR("Failed to parse zone assignment JSON");
+        }
         return;
       }
       

@@ -214,6 +214,73 @@ kaiser/
 
 ---
 
+## System State Machine (Vollständig)
+
+### State Definitions
+
+| State ID | State Name | Description | Typical Duration |
+|----------|-----------|-------------|------------------|
+| 0 | BOOT | System initialization | 1-2s |
+| 1 | WIFI_SETUP | Captive portal for WiFi config | Until configured |
+| 2 | WIFI_CONNECTED | WiFi connection established | Persistent |
+| 3 | MQTT_CONNECTING | Attempting MQTT connection | 5-10s |
+| 4 | MQTT_CONNECTED | MQTT broker connected | Persistent |
+| 5 | AWAITING_USER_CONFIG | Waiting for zone/sensor config | Until configured |
+| 6 | ZONE_CONFIGURED | Zone assignment complete | Persistent |
+| 7 | SENSORS_CONFIGURED | Sensors initialized | Persistent |
+| 8 | OPERATIONAL | Normal operation mode | Persistent |
+| 9 | LIBRARY_DOWNLOADING | OTA library download (optional) | 10-60s |
+| 10 | SAFE_MODE | Safe mode (GPIO safe state) | Until manual recovery |
+| 11 | ERROR | Unrecoverable error state | Until reboot |
+
+### State Transitions
+
+```mermaid
+stateDiagram-v2
+    [*] --> BOOT
+    
+    BOOT --> WIFI_SETUP : No WiFi Config
+    BOOT --> WIFI_CONNECTED : Valid WiFi Config
+    
+    WIFI_SETUP --> WIFI_CONNECTED : Config Saved
+    WIFI_CONNECTED --> MQTT_CONNECTING : Start Connection
+    
+    MQTT_CONNECTING --> MQTT_CONNECTED : Auth Success
+    MQTT_CONNECTING --> WIFI_CONNECTED : Connection Failed
+    
+    MQTT_CONNECTED --> AWAITING_USER_CONFIG : No Zone Config
+    MQTT_CONNECTED --> ZONE_CONFIGURED : Zone Config Present
+    
+    AWAITING_USER_CONFIG --> ZONE_CONFIGURED : Config Received via MQTT
+    ZONE_CONFIGURED --> SENSORS_CONFIGURED : Sensors Initialized
+    SENSORS_CONFIGURED --> OPERATIONAL : All Systems OK
+    
+    OPERATIONAL --> LIBRARY_DOWNLOADING : User Requests OTA Library
+    LIBRARY_DOWNLOADING --> OPERATIONAL : Download Complete
+    
+    OPERATIONAL --> SAFE_MODE : Critical Hardware Error
+    SAFE_MODE --> OPERATIONAL : Manual Recovery
+    
+    OPERATIONAL --> ERROR : Fatal Error
+    ERROR --> [*] : Reboot Required
+    
+    note right of OPERATIONAL
+        Main operating state
+        - Sensors reading
+        - Actuators controlled
+        - MQTT heartbeat 60s
+    end note
+    
+    note right of SAFE_MODE
+        Emergency state
+        - All GPIOs INPUT_PULLUP
+        - Actuators de-energized
+        - MQTT still active
+    end note
+```
+
+---
+
 ### Heartbeat Change-Detection Rules
 
 **Forced Heartbeat (alle 60s):**

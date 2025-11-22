@@ -28,6 +28,9 @@ public:
   bool loadZoneConfig(KaiserZone& kaiser, MasterZone& master);
   bool saveZoneConfig(const KaiserZone& kaiser, const MasterZone& master);
   bool validateZoneConfig(const KaiserZone& kaiser) const;
+  // Phase 7: Dynamic Zone Assignment
+  bool updateZoneAssignment(const String& zone_id, const String& master_zone_id, 
+                            const String& zone_name, const String& kaiser_id);
   
   // System Configuration (NEU für Phase 1)
   bool loadSystemConfig(SystemConfig& config);

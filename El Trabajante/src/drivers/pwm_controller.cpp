@@ -124,7 +124,7 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
         LOG_ERROR("No free PWM channels available");
         errorTracker.trackError(ERROR_PWM_CHANNEL_FULL,
                                ERROR_SEVERITY_ERROR,
-                               "All " + String(max_channels_) + " channels in use");
+                               ("All " + String(max_channels_) + " channels in use").c_str());
         return false;
     }
     
@@ -133,7 +133,7 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
         LOG_ERROR("Failed to reserve GPIO " + String(gpio) + " for PWM");
         errorTracker.trackError(ERROR_PWM_INIT_FAILED,
                                ERROR_SEVERITY_ERROR,
-                               "GPIO reservation failed: " + String(gpio));
+                               ("GPIO reservation failed: " + String(gpio)).c_str());
         return false;
     }
     

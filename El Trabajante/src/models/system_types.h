@@ -20,14 +20,22 @@ enum SystemState {
   STATE_ERROR
 };
 
-// Kaiser Zone - UNVERÄNDERT
+// Kaiser Zone - ENHANCED (Phase 7: Dynamic Zones)
 // Migration aus: main.cpp:390-413
+// Enhanced with hierarchical zone support
 struct KaiserZone {
-  String kaiser_id = "";
-  String kaiser_name = "";
-  String system_name = "";
-  bool connected = false;
-  bool id_generated = false;
+  // Primary Zone Identification (NEW - Phase 7)
+  String zone_id = "";              // Primary zone identifier (e.g., "greenhouse_zone_1")
+  String master_zone_id = "";       // Parent zone for hierarchy (e.g., "greenhouse")
+  String zone_name = "";            // Human-readable zone name
+  bool zone_assigned = false;       // Zone configuration status
+  
+  // Kaiser Communication (Existing)
+  String kaiser_id = "";            // God-Kaiser identifier
+  String kaiser_name = "";          // Kaiser name (optional)
+  String system_name = "";          // System name (optional)
+  bool connected = false;           // MQTT connection status
+  bool id_generated = false;        // Kaiser ID generation flag
 };
 
 // Master Zone - UNVERÄNDERT

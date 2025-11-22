@@ -1,6 +1,15 @@
 #include "mqtt_client.h"
 #include "../../models/error_codes.h"
+#include "../../services/config/config_manager.h"
+#include "../../services/sensor/sensor_manager.h"
+#include "../../services/actuator/actuator_manager.h"
 #include <WiFi.h>
+
+// ============================================
+// EXTERNAL GLOBAL VARIABLES (from main.cpp)
+// ============================================
+extern KaiserZone g_kaiser;
+extern SystemConfig g_system_config;
 
 // ============================================
 // CONSTANTS
@@ -380,12 +389,18 @@ void MQTTClient::publishHeartbeat() {
     // Build heartbeat topic
     const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
     
-    // Build heartbeat payload (JSON)
+    // Build heartbeat payload (JSON) - Phase 7: Enhanced with Zone Info
     String payload = "{";
+    payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+    payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
+    payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
+    payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
     payload += "\"ts\":" + String(current_time) + ",";
     payload += "\"uptime\":" + String(millis() / 1000) + ",";
     payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
-    payload += "\"wifi_rssi\":" + String(WiFi.RSSI());
+    payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
+    payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
+    payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount());
     payload += "}";
     
     // Publish with QoS 0 (heartbeat doesn't need guaranteed delivery)

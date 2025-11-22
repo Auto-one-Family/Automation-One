@@ -175,22 +175,30 @@ bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
     return false;
   }
   
-  // Load Kaiser zone
+  // Load Hierarchical Zone Info (Phase 7: Dynamic Zones)
+  kaiser.zone_id = storageManager.getStringObj("zone_id", "");
+  kaiser.master_zone_id = storageManager.getStringObj("master_zone_id", "");
+  kaiser.zone_name = storageManager.getStringObj("zone_name", "");
+  kaiser.zone_assigned = storageManager.getBool("zone_assigned", false);
+  
+  // Load Kaiser zone (Existing)
   kaiser.kaiser_id = storageManager.getStringObj("kaiser_id", "");
   kaiser.kaiser_name = storageManager.getStringObj("kaiser_name", "");
   kaiser.connected = storageManager.getBool("connected", false);
+  kaiser.id_generated = storageManager.getBool("id_generated", false);
   
-  // Load Master zone
-  master.master_zone_id = storageManager.getStringObj("master_zone_id", "");
-  master.master_zone_name = storageManager.getStringObj("master_zone_name", "");
+  // Load Master zone (Legacy - kept for compatibility)
+  master.master_zone_id = storageManager.getStringObj("legacy_master_zone_id", "");
+  master.master_zone_name = storageManager.getStringObj("legacy_master_zone_name", "");
   master.is_master_esp = storageManager.getBool("is_master_esp", false);
   
   storageManager.endNamespace();
   
   zone_config_loaded_ = true;
   
-  LOG_INFO("ConfigManager: Zone config loaded - Kaiser: " + kaiser.kaiser_id + 
-           ", Master: " + master.master_zone_id);
+  LOG_INFO("ConfigManager: Zone config loaded - Zone: " + kaiser.zone_id + 
+           ", Master: " + kaiser.master_zone_id + 
+           ", Kaiser: " + kaiser.kaiser_id);
   
   return true;
 }
@@ -204,14 +212,21 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
   }
   
   bool success = true;
-  // Save Kaiser zone
+  // Save Hierarchical Zone Info (Phase 7: Dynamic Zones)
+  success &= storageManager.putString("zone_id", kaiser.zone_id);
+  success &= storageManager.putString("master_zone_id", kaiser.master_zone_id);
+  success &= storageManager.putString("zone_name", kaiser.zone_name);
+  success &= storageManager.putBool("zone_assigned", kaiser.zone_assigned);
+  
+  // Save Kaiser zone (Existing)
   success &= storageManager.putString("kaiser_id", kaiser.kaiser_id);
   success &= storageManager.putString("kaiser_name", kaiser.kaiser_name);
   success &= storageManager.putBool("connected", kaiser.connected);
+  success &= storageManager.putBool("id_generated", kaiser.id_generated);
   
-  // Save Master zone
-  success &= storageManager.putString("master_zone_id", master.master_zone_id);
-  success &= storageManager.putString("master_zone_name", master.master_zone_name);
+  // Save Master zone (Legacy - kept for compatibility)
+  success &= storageManager.putString("legacy_master_zone_id", master.master_zone_id);
+  success &= storageManager.putString("legacy_master_zone_name", master.master_zone_name);
   success &= storageManager.putBool("is_master_esp", master.is_master_esp);
   
   storageManager.endNamespace();
@@ -219,7 +234,8 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
   if (success) {
     kaiser_ = kaiser;
     master_ = master;
-    LOG_INFO("ConfigManager: Zone configuration saved");
+    LOG_INFO("ConfigManager: Zone configuration saved (Zone: " + 
+             kaiser.zone_id + ", Master: " + kaiser.master_zone_id + ")");
   } else {
     LOG_ERROR("ConfigManager: Failed to save Zone configuration");
   }
@@ -235,6 +251,38 @@ bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
   }
   
   return true;
+}
+
+// Phase 7: Dynamic Zone Assignment
+bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& master_zone_id, 
+                                        const String& zone_name, const String& kaiser_id) {
+  LOG_INFO("ConfigManager: Updating zone assignment...");
+  LOG_INFO("  Zone ID: " + zone_id);
+  LOG_INFO("  Master Zone: " + master_zone_id);
+  LOG_INFO("  Zone Name: " + zone_name);
+  LOG_INFO("  Kaiser ID: " + kaiser_id);
+  
+  // Update kaiser_ structure
+  kaiser_.zone_id = zone_id;
+  kaiser_.master_zone_id = master_zone_id;
+  kaiser_.zone_name = zone_name;
+  kaiser_.zone_assigned = true;
+  
+  // Update kaiser_id if provided
+  if (kaiser_id.length() > 0) {
+    kaiser_.kaiser_id = kaiser_id;
+  }
+  
+  // Persist to NVS
+  bool success = saveZoneConfig(kaiser_, master_);
+  
+  if (success) {
+    LOG_INFO("ConfigManager: Zone assignment updated successfully");
+  } else {
+    LOG_ERROR("ConfigManager: Failed to update zone assignment");
+  }
+  
+  return success;
 }
 
 // ============================================

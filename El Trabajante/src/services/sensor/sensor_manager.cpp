@@ -125,16 +125,35 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         return false;
     }
     
-    // Check if sensor already exists
+    // Phase 7: Check if sensor already exists (runtime reconfiguration support)
     SensorConfig* existing = findSensorConfig(config.gpio);
     if (existing) {
-        // Update existing sensor
+        // Runtime reconfiguration: Update existing sensor
+        LOG_INFO("Sensor Manager: Updating existing sensor on GPIO " + String(config.gpio));
+        
+        // Check if sensor type changed
+        bool type_changed = (existing->sensor_type != config.sensor_type);
+        if (type_changed) {
+            LOG_INFO("  Sensor type changed: " + existing->sensor_type + " → " + config.sensor_type);
+        }
+        
+        // Update configuration
         *existing = config;
-        LOG_INFO("Sensor Manager: Updated sensor on GPIO " + String(config.gpio));
+        existing->active = true;
+        
+        // Phase 7: Persist to NVS immediately
+        if (!configManager.saveSensorConfig(config)) {
+            LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+        } else {
+            LOG_INFO("  ✅ Configuration persisted to NVS");
+        }
+        
+        LOG_INFO("Sensor Manager: Updated sensor on GPIO " + String(config.gpio) + 
+                 " (" + config.sensor_type + ")");
         return true;
     }
     
-    // Check if we have space
+    // New sensor: Check if we have space
     if (sensor_count_ >= MAX_SENSORS) {
         LOG_ERROR("Sensor Manager: Maximum sensor count reached");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
@@ -165,7 +184,14 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
     sensors_[sensor_count_].active = true;
     sensor_count_++;
     
-    LOG_INFO("Sensor Manager: Configured sensor on GPIO " + String(config.gpio) + 
+    // Phase 7: Persist to NVS immediately
+    if (!configManager.saveSensorConfig(config)) {
+        LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+    } else {
+        LOG_INFO("  ✅ Configuration persisted to NVS");
+    }
+    
+    LOG_INFO("Sensor Manager: Configured new sensor on GPIO " + String(config.gpio) + 
              " (" + config.sensor_type + ")");
     
     return true;
@@ -183,8 +209,11 @@ bool SensorManager::removeSensor(uint8_t gpio) {
         return false;
     }
     
+    LOG_INFO("Sensor Manager: Removing sensor on GPIO " + String(gpio));
+    
     // Release GPIO
     gpio_manager_->releasePin(gpio);
+    LOG_INFO("  ✅ GPIO " + String(gpio) + " released");
     
     // Remove sensor (shift array)
     for (uint8_t i = 0; i < sensor_count_; i++) {
@@ -198,6 +227,13 @@ bool SensorManager::removeSensor(uint8_t gpio) {
             sensors_[sensor_count_].active = false;
             break;
         }
+    }
+    
+    // Phase 7: Persist removal to NVS immediately
+    if (!configManager.removeSensorConfig(gpio)) {
+        LOG_ERROR("Sensor Manager: Failed to remove sensor config from NVS");
+    } else {
+        LOG_INFO("  ✅ Configuration removed from NVS");
     }
     
     LOG_INFO("Sensor Manager: Removed sensor on GPIO " + String(gpio));
@@ -452,16 +488,25 @@ void SensorManager::publishSensorReading(const SensorReading& reading) {
 
 String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     String payload;
-    payload.reserve(256);
+    payload.reserve(384);  // Increased for zone info
     
-    // Get ESP ID from ConfigManager
+    // Get ESP ID and Zone info from ConfigManager
     ConfigManager& config = ConfigManager::getInstance();
     String esp_id = config.getESPId();
     
-    // Build JSON payload
+    // Phase 7: Get zone information from global variables (extern from main.cpp)
+    extern KaiserZone g_kaiser;
+    
+    // Build JSON payload with zone information
     payload = "{";
     payload += "\"esp_id\":\"";
     payload += esp_id;
+    payload += "\",";
+    payload += "\"zone_id\":\"";
+    payload += g_kaiser.zone_id;
+    payload += "\",";
+    payload += "\"subzone_id\":\"";
+    payload += reading.subzone_id;  // From sensor config
     payload += "\",";
     payload += "\"gpio\":";
     payload += String(reading.gpio);

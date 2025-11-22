@@ -7,6 +7,7 @@
 #include "../../models/config_types.h"
 #include "../../models/error_codes.h"
 #include "../../services/communication/mqtt_client.h"
+#include "../../services/config/config_manager.h"
 #include "../../services/config/config_response.h"
 #include "../../services/sensor/sensor_manager.h"
 #include "../../utils/json_helpers.h"
@@ -123,7 +124,7 @@ void ActuatorManager::end() {
   LOG_INFO("ActuatorManager shutdown complete");
 }
 
-RegisteredActuator* ActuatorManager::getFreeSlot() {
+ActuatorManager::RegisteredActuator* ActuatorManager::getFreeSlot() {
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (!actuators_[i].in_use) {
       return &actuators_[i];
@@ -132,7 +133,7 @@ RegisteredActuator* ActuatorManager::getFreeSlot() {
   return nullptr;
 }
 
-RegisteredActuator* ActuatorManager::findActuator(uint8_t gpio) {
+ActuatorManager::RegisteredActuator* ActuatorManager::findActuator(uint8_t gpio) {
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (actuators_[i].in_use && actuators_[i].gpio == gpio) {
       return &actuators_[i];
@@ -141,7 +142,7 @@ RegisteredActuator* ActuatorManager::findActuator(uint8_t gpio) {
   return nullptr;
 }
 
-const RegisteredActuator* ActuatorManager::findActuator(uint8_t gpio) const {
+const ActuatorManager::RegisteredActuator* ActuatorManager::findActuator(uint8_t gpio) const {
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (actuators_[i].in_use && actuators_[i].gpio == gpio) {
       return &actuators_[i];
@@ -164,16 +165,16 @@ bool ActuatorManager::validateActuatorConfig(const ActuatorConfig& config) const
 
 std::unique_ptr<IActuatorDriver> ActuatorManager::createDriver(const String& actuator_type) const {
   if (actuator_type == ActuatorTypeTokens::PUMP) {
-    return std::make_unique<PumpActuator>();
+    return std::unique_ptr<IActuatorDriver>(new PumpActuator());
   }
   if (actuator_type == ActuatorTypeTokens::PWM) {
-    return std::make_unique<PWMActuator>();
+    return std::unique_ptr<IActuatorDriver>(new PWMActuator());
   }
   if (actuator_type == ActuatorTypeTokens::VALVE) {
-    return std::make_unique<ValveActuator>();
+    return std::unique_ptr<IActuatorDriver>(new ValveActuator());
   }
   if (actuator_type == ActuatorTypeTokens::RELAY) {
-    return std::make_unique<PumpActuator>();  // Relay handled like pump (binary)
+    return std::unique_ptr<IActuatorDriver>(new PumpActuator());  // Relay handled like pump (binary)
   }
   LOG_ERROR("Unknown actuator type: " + actuator_type);
   return nullptr;
@@ -189,6 +190,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     return false;
   }
 
+  // Phase 7: Handle deactivation/removal
   if (!config.active) {
     LOG_INFO("Actuator config deactivating GPIO " + String(config.gpio));
     removeActuator(config.gpio);
@@ -207,7 +209,24 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     return false;
   }
 
-  if (hasActuatorOnGPIO(config.gpio)) {
+  // Phase 7: Runtime reconfiguration - check if actuator exists
+  bool is_reconfiguration = hasActuatorOnGPIO(config.gpio);
+  if (is_reconfiguration) {
+    RegisteredActuator* existing = findActuator(config.gpio);
+    if (existing) {
+      LOG_INFO("Actuator Manager: Runtime reconfiguration on GPIO " + String(config.gpio));
+      
+      // Check if type changed
+      bool type_changed = (existing->config.actuator_type != config.actuator_type);
+      if (type_changed) {
+        LOG_INFO("  Actuator type changed: " + existing->config.actuator_type + 
+                 " → " + config.actuator_type);
+        // Emergency stop before type change
+        if (existing->driver) {
+          existing->driver->setState(false);
+        }
+      }
+    }
     removeActuator(config.gpio);
   }
 
@@ -238,10 +257,27 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   slot->gpio = config.gpio;
   slot->in_use = true;
   slot->emergency_stopped = false;
-  actuator_count_++;
+  
+  if (!is_reconfiguration) {
+    actuator_count_++;
+  }
 
-  LOG_INFO("Actuator configured on GPIO " + String(config.gpio) +
-           " type: " + config.actuator_type);
+  // Phase 7: Persist to NVS immediately (save all actuators)
+  ActuatorConfig actuators[MAX_ACTUATORS];
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
+    if (actuators_[i].in_use) {
+      actuators[count++] = actuators_[i].config;
+    }
+  }
+  if (!configManager.saveActuatorConfig(actuators, count)) {
+    LOG_ERROR("Actuator Manager: Failed to persist config to NVS");
+  } else {
+    LOG_INFO("  ✅ Configuration persisted to NVS");
+  }
+
+  LOG_INFO("Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") + 
+           " on GPIO " + String(config.gpio) + " type: " + config.actuator_type);
   publishActuatorStatus(config.gpio);
   return true;
 }
@@ -252,7 +288,12 @@ bool ActuatorManager::removeActuator(uint8_t gpio) {
     return false;
   }
 
+  LOG_INFO("Actuator Manager: Removing actuator on GPIO " + String(gpio));
+  
+  // Phase 7: Safety - stop actuator before removal
   if (actuator->driver) {
+    LOG_INFO("  Stopping actuator before removal");
+    actuator->driver->setState(false);
     actuator->driver->end();
     actuator->driver.reset();
   }
@@ -262,6 +303,21 @@ bool ActuatorManager::removeActuator(uint8_t gpio) {
   actuator->config = ActuatorConfig();
   actuator->emergency_stopped = false;
   actuator_count_ = actuator_count_ > 0 ? actuator_count_ - 1 : 0;
+  
+  // Phase 7: Persist removal to NVS immediately (save remaining actuators)
+  ActuatorConfig actuators[MAX_ACTUATORS];
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
+    if (actuators_[i].in_use) {
+      actuators[count++] = actuators_[i].config;
+    }
+  }
+  if (!configManager.saveActuatorConfig(actuators, count)) {
+    LOG_ERROR("Actuator Manager: Failed to persist config to NVS");
+  } else {
+    LOG_INFO("  ✅ Configuration persisted to NVS");
+  }
+  
   LOG_INFO("Actuator removed from GPIO " + String(gpio));
   return true;
 }
@@ -603,8 +659,9 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
     String parse_error;
     ConfigErrorCode error_code = ConfigErrorCode::NONE;
     JsonVariantConst failed_variant = actuatorObj;
+    JsonObjectConst actuatorObjConst = actuatorObj;
 
-    if (!parseActuatorDefinition(actuatorObj, config, parse_error, error_code)) {
+    if (!parseActuatorDefinition(actuatorObjConst, config, parse_error, error_code)) {
       if (parse_error.isEmpty()) {
         parse_error = "Invalid actuator definition";
       }
@@ -637,7 +694,14 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
 }
 
 String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const {
+  // Phase 7: Get zone information from global variables (extern from main.cpp)
+  extern KaiserZone g_kaiser;
+  extern SystemConfig g_system_config;
+  
   String payload = "{";
+  payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
+  payload += "\"subzone_id\":\"" + config.subzone_id + "\",";
   payload += "\"ts\":" + String(millis()) + ",";
   payload += "\"gpio\":" + String(status.gpio) + ",";
   payload += "\"type\":\"" + config.actuator_type + "\",";
@@ -673,7 +737,13 @@ void ActuatorManager::publishAllActuatorStatus() {
 String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,
                                              bool success,
                                              const String& message) const {
+  // Phase 7: Get zone information from global variables
+  extern KaiserZone g_kaiser;
+  extern SystemConfig g_system_config;
+  
   String payload = "{";
+  payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
   payload += "\"ts\":" + String(millis()) + ",";
   payload += "\"gpio\":" + String(command.gpio) + ",";
   payload += "\"command\":\"" + command.command + "\",";

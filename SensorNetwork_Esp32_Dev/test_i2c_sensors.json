@@ -1,0 +1,45 @@
+{
+  "esp_id": "ESP_12345678",
+  "sensors": [
+    {
+      "gpio": 21,
+      "type": "SENSOR_CUSTOM_PI_ENHANCED",
+      "i2c_address": "0x44",
+      "sensor_hint": "SHT31",
+      "subzone_id": "greenhouse_zone",
+      "name": "SHT31_Temperature_Humidity"
+    },
+    {
+      "gpio": 22,
+      "type": "SENSOR_CUSTOM_PI_ENHANCED",
+      "i2c_address": "0x76",
+      "sensor_hint": "BME280",
+      "subzone_id": "greenhouse_zone",
+      "name": "BME280_Pressure_Temp"
+    },
+    {
+      "gpio": 23,
+      "type": "SENSOR_CUSTOM_PI_ENHANCED",
+      "i2c_address": "0x48",
+      "sensor_hint": "ADS1115",
+      "subzone_id": "nutrient_tank",
+      "name": "ADS1115_Analog_Converter"
+    },
+    {
+      "gpio": 24,
+      "type": "SENSOR_CUSTOM_PI_ENHANCED",
+      "i2c_address": "0x39",
+      "sensor_hint": "TSL2561",
+      "subzone_id": "light_zone",
+      "name": "TSL2561_Light_Sensor"
+    },
+    {
+      "gpio": 25,
+      "type": "SENSOR_CUSTOM_PI_ENHANCED",
+      "i2c_address": "0x68",
+      "sensor_hint": "MPU6050",
+      "subzone_id": "motion_zone",
+      "name": "MPU6050_Accelerometer"
+    }
+  ]
+} 
