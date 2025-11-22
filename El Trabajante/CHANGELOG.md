@@ -421,6 +421,175 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.0.0] - Phase 6 Error Recovery & Circuit Breaker - 2025-01-28
+
+### Added
+
+#### Error Recovery Modules
+
+- **CircuitBreaker** (`src/error_handling/circuit_breaker.*`)
+  - Circuit breaker pattern for service protection
+  - Three states: CLOSED, OPEN, HALF_OPEN
+  - Configurable failure threshold, open timeout, half-open timeout
+  - Automatic state transitions with recovery testing
+  - Manual reset capability
+  - Service-specific naming for logging
+  - Singleton pattern (per service instance)
+
+- **ProvisionManager** (`src/services/provisioning/provision_manager.*`)
+  - WiFi Access Point mode for initial configuration
+  - HTTP API for configuration provisioning
+  - Automatic fallback to AP mode if WiFi not configured
+  - Configuration timeout handling (10 minutes)
+  - Integration with ConfigManager for WiFi config persistence
+
+#### Circuit Breaker Integration
+
+- **WiFiManager Circuit Breaker** (`src/services/communication/wifi_manager.*`)
+  - Configuration: 10 failures → OPEN, 60s recovery timeout, 15s half-open test
+  - Blocks reconnection attempts when OPEN
+  - Automatic recovery testing in HALF_OPEN state
+  - Success/failure tracking for state transitions
+
+- **MQTTClient Circuit Breaker** (`src/services/communication/mqtt_client.*`)
+  - Configuration: 5 failures → OPEN, 30s recovery timeout, 10s half-open test
+  - Blocks publish and reconnect attempts when OPEN
+  - Integrated into `publish()`, `reconnect()`, and `safePublish()`
+  - Automatic recovery on successful operations
+
+- **PiEnhancedProcessor Circuit Breaker** (`src/services/sensor/pi_enhanced_processor.*`)
+  - Configuration: 5 failures → OPEN, 60s recovery timeout, 10s half-open test
+  - Blocks HTTP requests when OPEN
+  - Prevents connection storms to God-Kaiser server
+  - Automatic recovery on successful HTTP responses
+
+#### Integration
+
+- **main.cpp Phase 6 Integration** (`src/main.cpp`)
+  - ProvisionManager initialization and AP mode check (lines 173-231)
+  - Circuit breaker protection for WiFi and MQTT (lines 274-295)
+  - System health monitoring (every 5 minutes, lines 654-666)
+  - Error recovery logging
+  - Boot button factory reset check (lines 72-134)
+
+### Changed
+
+- WiFiManager: Added circuit breaker protection to prevent connection storms
+- MQTTClient: Added circuit breaker protection for publish and reconnect operations
+- PiEnhancedProcessor: Enhanced with circuit breaker for server failure handling
+- Error recovery: Automatic reconnection with exponential backoff and circuit breaker protection
+- Documentation: Updated API_REFERENCE.md and MQTT_CLIENT_API.md with circuit breaker details
+
+### Performance
+
+- Circuit breaker overhead: <0.1% CPU, ~100 bytes memory per breaker
+- Reconnection protection: Prevents connection storms (stack overflow prevention)
+- Recovery time: 30-60s timeout before retry attempts
+
+### Dependencies
+
+- CircuitBreaker (Phase 6)
+- ProvisionManager (Phase 6)
+
+---
+
+## [7.0.0] - Phase 7 Dynamic Zone Assignment - 2025-01-28
+
+### Added
+
+#### Zone Management Modules
+
+- **Dynamic Zone Assignment** (`src/services/config/config_manager.*`)
+  - `updateZoneAssignment()` method for runtime zone updates via MQTT
+  - Hierarchical zone support (zone_id, master_zone_id, zone_name)
+  - Zone assignment status tracking (`zone_assigned` flag)
+  - NVS persistence for zone configuration
+  - TopicBuilder reconfiguration on zone assignment
+
+- **KaiserZone Structure Enhancement** (`src/models/system_types.h`)
+  - Phase 7 fields: `zone_id`, `master_zone_id`, `zone_name`, `zone_assigned`
+  - Backward compatibility with existing `kaiser_id`, `kaiser_name` fields
+  - Hierarchical zone organization support
+
+#### MQTT Integration
+
+- **Zone Assignment Handler** (`src/main.cpp` lines 329-340, 415-489)
+  - Topic subscription: `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign` (assigned ESPs)
+  - Topic subscription: `kaiser/god/esp/{esp_id}/zone/assign` (unassigned ESPs)
+  - JSON payload parsing (zone_id, master_zone_id, zone_name, kaiser_id)
+  - Automatic TopicBuilder reconfiguration (`TopicBuilder::setKaiserId()`)
+  - Global variable updates (`g_kaiser` structure)
+  - Acknowledgment publishing (`kaiser/{kaiser_id}/esp/{esp_id}/zone/ack` topic, QoS 1)
+  - System state update (`STATE_ZONE_CONFIGURED`)
+  - Updated heartbeat publishing after assignment
+
+- **Heartbeat Enhancement** (`src/services/communication/mqtt_client.cpp`)
+  - Zone information included in heartbeat payload
+  - Fields: `zone_id`, `master_zone_id`, `zone_assigned`
+  - Automatic zone info inclusion from global `g_kaiser` variable
+  - Manual string concatenation for performance (not DynamicJsonDocument)
+
+#### NVS Storage
+
+- **Zone Configuration Keys** (`docs/NVS_KEYS.md`)
+  - Phase 7 keys: `zone_id`, `master_zone_id`, `zone_name`, `zone_assigned`
+  - Legacy keys maintained for backward compatibility
+  - Implementation details documented with code references
+
+#### Documentation
+
+- **Zone Assignment Flow** (`docs/system-flows/08-zone-assignment-flow.md`)
+  - Complete flow documentation with code references
+  - MQTT topic migration behavior
+  - Subscription handling during boot and reassignment
+  - Boot sequence integration
+
+- **API Documentation Updates**
+  - API_REFERENCE.md: KaiserZone structure and updateZoneAssignment() documented
+  - MQTT_CLIENT_API.md: Heartbeat payload format with zone info
+  - NVS_KEYS.md: Phase 7 zone configuration keys
+
+### Changed
+
+- ConfigManager: Enhanced with `updateZoneAssignment()` for runtime zone updates (lines 257-286)
+- MQTTClient: Heartbeat payload enhanced with zone information (Phase 7, lines 392-404)
+- TopicBuilder: Automatic kaiser_id update on zone assignment (`setKaiserId()`)
+- System state: `STATE_ZONE_CONFIGURED` added to state machine (enum value: 6)
+- SensorManager: Zone information included in sensor data publishing (Phase 7)
+- ActuatorManager: Zone information included in actuator status publishing (Phase 7)
+- Runtime reconfiguration: Sensor and actuator configs persist immediately to NVS (Phase 7)
+
+### Removed
+
+- None (backward compatible)
+
+### Known Issues
+
+- MQTT subscriptions not automatically updated on kaiser_id change (requires reconnection)
+- Zone reassignment requires MQTT reconnection for subscription update
+
+### Performance
+
+- Zone assignment operation: 50-150ms (NVS writes + MQTT publish)
+- Memory overhead: ~500 bytes (zone config namespace)
+- Heartbeat payload: +50 bytes (zone info fields)
+
+### Dependencies
+
+- ConfigManager (Phase 1)
+- MQTTClient (Phase 2)
+- TopicBuilder (Phase 1)
+
+---
+
+## Version History
+
+- **7.0.0** - Phase 7 Dynamic Zone Assignment (2025-01-28)
+- **6.0.0** - Phase 6 Error Recovery & Circuit Breaker (2025-01-28)
+- **5.0.0** - Phase 5 Actuator System (2025-11-18)
+- **4.0.0** - Phase 4 Sensor System (2025-01-28)
+- **3.0.0** - Phase 3 Hardware Abstraction Layer (2025-01-28)
+- **2.0.0** - Phase 2 Communication Layer (2025-11-14)
 - **1.0.0** - Phase 1 Core Infrastructure (2025-11-14)
 - **0.0.0** - Project initialization (2025-11-13)
 

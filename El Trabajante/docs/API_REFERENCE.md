@@ -397,6 +397,68 @@ bool configManager.saveZoneConfig(const KaiserZone& kaiser, const MasterZone& ma
 
 // Validate Kaiser zone configuration
 bool configManager.validateZoneConfig(const KaiserZone& kaiser);
+
+// Phase 7: Dynamic Zone Assignment (Runtime zone update via MQTT)
+bool configManager.updateZoneAssignment(const String& zone_id, 
+                                        const String& master_zone_id, 
+                                        const String& zone_name, 
+                                        const String& kaiser_id);
+```
+
+**File:** `src/services/config/config_manager.cpp` (lines 257-286)
+
+**updateZoneAssignment() Implementation:**
+
+```cpp
+bool ConfigManager::updateZoneAssignment(const String& zone_id, 
+                                        const String& master_zone_id, 
+                                        const String& zone_name, 
+                                        const String& kaiser_id) {
+  LOG_INFO("ConfigManager: Updating zone assignment...");
+  LOG_INFO("  Zone ID: " + zone_id);
+  LOG_INFO("  Master Zone: " + master_zone_id);
+  LOG_INFO("  Zone Name: " + zone_name);
+  LOG_INFO("  Kaiser ID: " + kaiser_id);
+  
+  // Update kaiser_ structure
+  kaiser_.zone_id = zone_id;
+  kaiser_.master_zone_id = master_zone_id;
+  kaiser_.zone_name = zone_name;
+  kaiser_.zone_assigned = true;
+  
+  // Update kaiser_id if provided
+  if (kaiser_id.length() > 0) {
+    kaiser_.kaiser_id = kaiser_id;
+  }
+  
+  // Persist to NVS via saveZoneConfig()
+  bool success = saveZoneConfig(kaiser_, master_);
+  
+  if (success) {
+    LOG_INFO("ConfigManager: Zone assignment updated successfully");
+  } else {
+    LOG_ERROR("ConfigManager: Failed to update zone assignment");
+  }
+  
+  return success;
+}
+```
+
+**Usage Example:**
+
+```cpp
+// Called from MQTT zone assignment handler (main.cpp:442)
+if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaiser_id)) {
+  // Update global variables
+  g_kaiser.zone_id = zone_id;
+  g_kaiser.master_zone_id = master_zone_id;
+  g_kaiser.zone_name = zone_name;
+  g_kaiser.zone_assigned = true;
+  if (kaiser_id.length() > 0) {
+    g_kaiser.kaiser_id = kaiser_id;
+    TopicBuilder::setKaiserId(kaiser_id.c_str());
+  }
+}
 ```
 
 ### System Configuration
@@ -459,15 +521,34 @@ struct WiFiConfig {
 ```
 
 #### KaiserZone
+
+**File:** `src/models/system_types.h` (lines 23-39)
+
 ```cpp
+// Kaiser Zone - ENHANCED (Phase 7: Dynamic Zones)
 struct KaiserZone {
-  String kaiser_id = "";               // Unique Kaiser device identifier
-  String kaiser_name = "";             // Human-readable Kaiser name
-  String system_name = "";             // Overall system name
-  bool connected = false;              // Connection status
-  bool id_generated = false;           // Whether ID was auto-generated
+  // Primary Zone Identification (NEW - Phase 7)
+  String zone_id = "";              // Primary zone identifier (e.g., "greenhouse_zone_1")
+  String master_zone_id = "";       // Parent zone for hierarchy (e.g., "greenhouse")
+  String zone_name = "";            // Human-readable zone name
+  bool zone_assigned = false;       // Zone configuration status
+  
+  // Kaiser Communication (Existing)
+  String kaiser_id = "";            // God-Kaiser identifier
+  String kaiser_name = "";          // Kaiser name (optional)
+  String system_name = "";          // System name (optional)
+  bool connected = false;           // MQTT connection status
+  bool id_generated = false;        // Kaiser ID generation flag
 };
 ```
+
+**Phase 7 Enhancements:**
+- `zone_id`: Primary zone identifier assigned by God-Kaiser
+- `master_zone_id`: Parent master zone for hierarchical organization
+- `zone_name`: Human-readable zone name for UI display
+- `zone_assigned`: Boolean flag indicating zone assignment status
+
+**NVS Storage:** All fields persisted in `zone_config` namespace via `saveZoneConfig()`.
 
 #### MasterZone
 ```cpp

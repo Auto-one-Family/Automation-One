@@ -38,14 +38,57 @@ Diese Tabelle zeigt **Default-Werte**, die verwendet werden, wenn Keys **nicht i
 
 #### Zone Configuration (Namespace: `zone_config`)
 
+**File:** `src/services/config/config_manager.cpp` (lines 170-244)
+
+**Phase 7 Keys (Hierarchical Zone Info):**
+
 | Key | Type | Default | Constraint | Description |
 |-----|------|---------|------------|-------------|
-| `kaiser_id` | String | `""` (empty) | Generated if missing | Kaiser Zone Identifier |
-| `kaiser_name` | String | `""` (empty) | Max 64 chars | Human-Readable Kaiser Name |
-| `master_zone_id` | String | `""` (empty) | Max 32 chars | Parent Zone Identifier |
-| `master_zone_name` | String | `""` (empty) | Max 64 chars | Parent Zone Name |
-| `is_master_esp` | bool | `false` | - | Is this ESP the Master? |
-| `connected` | bool | `false` | - | Connection Status |
+| `zone_id` | String | `""` (empty) | Max 64 chars | Primary zone identifier (Phase 7) |
+| `master_zone_id` | String | `""` (empty) | Max 64 chars | Parent master zone ID (Phase 7) |
+| `zone_name` | String | `""` (empty) | Max 64 chars | Human-readable zone name (Phase 7) |
+| `zone_assigned` | bool | `false` | - | Zone assignment status flag (Phase 7) |
+
+**Existing Keys (Kaiser Communication):**
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `kaiser_id` | String | `""` (empty) | Max 64 chars | Kaiser instance identifier |
+| `kaiser_name` | String | `""` (empty) | Max 64 chars | Human-readable Kaiser name |
+| `connected` | bool | `false` | - | MQTT connection status |
+| `id_generated` | bool | `false` | - | Kaiser ID generation flag |
+
+**Legacy Keys (Backward Compatibility):**
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `legacy_master_zone_id` | String | `""` (empty) | Max 64 chars | Legacy master zone ID |
+| `legacy_master_zone_name` | String | `""` (empty) | Max 64 chars | Legacy master zone name |
+| `is_master_esp` | bool | `false` | - | Legacy master ESP flag |
+
+**Implementation:**
+
+```cpp
+// Loading (config_manager.cpp:170-204)
+kaiser.zone_id = storageManager.getStringObj("zone_id", "");
+kaiser.master_zone_id = storageManager.getStringObj("master_zone_id", "");
+kaiser.zone_name = storageManager.getStringObj("zone_name", "");
+kaiser.zone_assigned = storageManager.getBool("zone_assigned", false);
+kaiser.kaiser_id = storageManager.getStringObj("kaiser_id", "");
+kaiser.kaiser_name = storageManager.getStringObj("kaiser_name", "");
+kaiser.connected = storageManager.getBool("connected", false);
+kaiser.id_generated = storageManager.getBool("id_generated", false);
+
+// Saving (config_manager.cpp:206-244)
+storageManager.putString("zone_id", kaiser.zone_id);
+storageManager.putString("master_zone_id", kaiser.master_zone_id);
+storageManager.putString("zone_name", kaiser.zone_name);
+storageManager.putBool("zone_assigned", kaiser.zone_assigned);
+storageManager.putString("kaiser_id", kaiser.kaiser_id);
+storageManager.putString("kaiser_name", kaiser.kaiser_name);
+storageManager.putBool("connected", kaiser.connected);
+storageManager.putBool("id_generated", kaiser.id_generated);
+```
 
 #### System Configuration (Namespace: `system_config`)
 

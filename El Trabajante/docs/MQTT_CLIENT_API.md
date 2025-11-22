@@ -153,19 +153,99 @@ if (!mqttClient.connect(config)) {
 ---
 
 #### `void reconnect()`
-**Beschreibung:** Versucht MQTT-Reconnection mit Exponential Backoff  
+**Beschreibung:** Versucht MQTT-Reconnection mit Exponential Backoff und Circuit Breaker  
+**File:** `src/services/communication/mqtt_client.cpp` (lines 155-203)
+
+**Tatsächliche Implementierung:**
+
+**File:** `src/services/communication/mqtt_client.cpp` (lines 165-220)
+
+```cpp
+void MQTTClient::reconnect() {
+    if (isConnected()) {
+        LOG_DEBUG("MQTT already connected");
+        circuit_breaker_.recordSuccess();  // Reset on successful connection
+        return;
+    }
+    
+    // Circuit Breaker Check (Phase 6+)
+    if (!circuit_breaker_.allowRequest()) {
+        LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
+        return;  // Skip reconnect attempt
+    }
+    
+    if (!shouldAttemptReconnect()) {
+        return;
+    }
+    
+    reconnect_attempts_++;
+    last_reconnect_attempt_ = millis();
+    
+    LOG_INFO("Attempting MQTT reconnection (attempt " + 
+             String(reconnect_attempts_) + "/" + 
+             String(MAX_RECONNECT_ATTEMPTS) + ")");
+    
+    if (!connectToBroker()) {
+        // Reconnect failed
+        circuit_breaker_.recordFailure();
+        
+        // Exponential backoff
+        reconnect_delay_ms_ = calculateBackoffDelay();
+        
+        if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+            LOG_CRITICAL("Max MQTT reconnection attempts reached");
+            errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED, 
+                                               "Max reconnection attempts reached");
+        }
+        
+        // Check if Circuit Breaker opened
+        if (circuit_breaker_.isOpen()) {
+            LOG_WARNING("Circuit Breaker OPENED after reconnect failures");
+            LOG_WARNING("  Will retry in 30 seconds");
+        }
+    } else {
+        // Reconnect successful
+        LOG_INFO("MQTT reconnected successfully");
+        circuit_breaker_.recordSuccess();
+        reconnect_attempts_ = 0;
+        reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
+        
+        // Process offline buffer
+        processOfflineBuffer();
+    }
+}
+```
+
 **Verhalten:**
-- Prüft ob bereits verbunden → return
+- Prüft ob bereits verbunden → return (keine Aktion)
+- Prüft Circuit Breaker → blockiert wenn OPEN
 - Prüft ob Reconnect erlaubt (`shouldAttemptReconnect()`)
+- Prüft Backoff-Delay → wartet wenn nötig
 - Incrementiert Reconnect-Counter
 - Ruft `connectToBroker()` auf
-- Bei Fehler: Berechnet neuen Backoff-Delay
-- Bei Max Attempts: Loggt Critical Error
+- Bei Erfolg:
+  - Record Success im Circuit Breaker
+  - Reset Reconnect-Counter
+  - Verarbeitet Offline-Buffer (`processOfflineBuffer()`)
+- Bei Fehler:
+  - Record Failure im Circuit Breaker
+  - Berechnet neuen Backoff-Delay
+  - Bei Max Attempts (10): Loggt Critical Error
 
 **Exponential Backoff:**
-- Base Delay: 1000ms (1s)
-- Max Delay: 60000ms (60s)
+- Base Delay: 1000ms (`RECONNECT_BASE_DELAY_MS`)
+- Max Delay: 60000ms (`RECONNECT_MAX_DELAY_MS`)
 - Formula: `delay = base * (2^attempts)`, capped at max
+- Max Attempts: 10 (`MAX_RECONNECT_ATTEMPTS`)
+
+**Backoff Sequence:**
+- Attempt 1: 1s delay
+- Attempt 2: 2s delay
+- Attempt 3: 4s delay
+- Attempt 4: 8s delay
+- Attempt 5: 16s delay
+- Attempt 6: 32s delay
+- Attempt 7+: 60s delay (capped)
 
 ---
 
@@ -555,22 +635,81 @@ mqttClient.setCallback([](const String& topic, const String& payload) {
 
 #### `void publishHeartbeat()`
 **Beschreibung:** Publiziert System-Heartbeat (automatisch alle 60s)  
-**Verhalten:**
-- Prüft ob 60s seit letztem Heartbeat vergangen
-- Baut Heartbeat-Topic via `TopicBuilder::buildSystemHeartbeatTopic()`
-- Baut JSON Payload:
-  ```json
-  {
-    "ts": 1735818000,
-    "uptime": 3600,
-    "heap_free": 245760,
-    "wifi_rssi": -65
-  }
-  ```
-- Publiziert mit QoS 0 (heartbeat doesn't need guaranteed delivery)
-- Wird automatisch in `loop()` aufgerufen
+**File:** `src/services/communication/mqtt_client.cpp` (lines 380-408)
 
-**Heartbeat Interval:** 60 Sekunden (HEARTBEAT_INTERVAL_MS)
+**Verhalten:**
+- Prüft ob 60s seit letztem Heartbeat vergangen (`HEARTBEAT_INTERVAL_MS = 60000`)
+- Baut Heartbeat-Topic via `TopicBuilder::buildSystemHeartbeatTopic()`
+- Baut JSON Payload via **manuelle String-Konkatenation** (nicht DynamicJsonDocument für Performance)
+
+**Tatsächliche Implementierung:**
+
+```cpp
+void MQTTClient::publishHeartbeat() {
+    unsigned long current_time = millis();
+    
+    if (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS) {
+        return;
+    }
+    
+    last_heartbeat_ = current_time;
+    
+    // Build heartbeat topic
+    const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
+    
+    // Build heartbeat payload (JSON) - Phase 7: Enhanced with Zone Info
+    String payload = "{";
+    payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+    payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
+    payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
+    payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
+    payload += "\"ts\":" + String(current_time) + ",";
+    payload += "\"uptime\":" + String(millis() / 1000) + ",";
+    payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
+    payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
+    payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
+    payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount());
+    payload += "}";
+    
+    // Publish with QoS 0 (heartbeat doesn't need guaranteed delivery)
+    publish(topic, payload, 0);
+}
+```
+
+**Heartbeat Payload Format (Phase 7):**
+
+```json
+{
+  "esp_id": "ESP_AB12CD",
+  "zone_id": "greenhouse_zone_1",
+  "master_zone_id": "greenhouse_master",
+  "zone_assigned": true,
+  "ts": 1234567890,
+  "uptime": 12345,
+  "heap_free": 250000,
+  "wifi_rssi": -45,
+  "sensor_count": 3,
+  "actuator_count": 2
+}
+```
+
+**Fields:**
+- `esp_id`: ESP device identifier (from `g_system_config.esp_id`)
+- `zone_id`: Primary zone identifier (Phase 7, from `g_kaiser.zone_id`)
+- `master_zone_id`: Parent master zone (Phase 7, from `g_kaiser.master_zone_id`)
+- `zone_assigned`: Zone assignment status flag (Phase 7, boolean)
+- `ts`: Timestamp in milliseconds (`millis()`)
+- `uptime`: Uptime in seconds (`millis() / 1000`)
+- `heap_free`: Free heap memory in bytes (`ESP.getFreeHeap()`)
+- `wifi_rssi`: WiFi signal strength (`WiFi.RSSI()`)
+- `sensor_count`: Active sensor count (from `sensorManager.getActiveSensorCount()`)
+- `actuator_count`: Active actuator count (from `actuatorManager.getActiveActuatorCount()`)
+
+**Heartbeat Interval:** 60 Sekunden (`HEARTBEAT_INTERVAL_MS = 60000`)
+
+**QoS:** 0 (at most once - heartbeat doesn't need guaranteed delivery)
+
+**Automatic Publishing:** Wird automatisch in `loop()` aufgerufen wenn verbunden
 
 ---
 
@@ -578,11 +717,38 @@ mqttClient.setCallback([](const String& topic, const String& payload) {
 
 #### `void loop()`
 **Beschreibung:** MUSS in main loop() aufgerufen werden  
+**File:** `src/services/communication/mqtt_client.cpp` (lines 413-428)
+
 **Frequenz:** Jede Iteration (non-blocking)  
+
+**Tatsächliche Implementierung:**
+
+```cpp
+void MQTTClient::loop() {
+    if (!initialized_) {
+        return;
+    }
+    
+    // Process MQTT loop
+    if (isConnected()) {
+        mqtt_.loop();  // Process incoming messages
+        
+        // Publish heartbeat (automatic, every 60s)
+        publishHeartbeat();
+    } else {
+        // Attempt reconnection (with exponential backoff)
+        reconnect();
+    }
+}
+```
+
 **Verhalten:**
-- Ruft `mqtt_.loop()` auf (verarbeitet eingehende Messages)
-- Wenn verbunden: Ruft `publishHeartbeat()` auf
-- Wenn nicht verbunden: Versucht Reconnection
+- Prüft Initialisierung (`initialized_` Flag)
+- Wenn verbunden:
+  - Ruft `mqtt_.loop()` auf (verarbeitet eingehende Messages, ruft Callback auf)
+  - Ruft `publishHeartbeat()` auf (automatisch alle 60s)
+- Wenn nicht verbunden:
+  - Versucht Reconnection via `reconnect()` (mit Exponential Backoff und Circuit Breaker)
 
 **Beispiel:**
 ```cpp
@@ -592,6 +758,8 @@ void loop() {
     // ... other code
 }
 ```
+
+**Wichtig:** `loop()` ist **non-blocking** - blockiert nicht länger als ~10-50ms (abhängig von MQTT-Verarbeitung).
 
 ---
 
@@ -667,19 +835,94 @@ void loop() {
 
 ### `void processOfflineBuffer()`
 **Beschreibung:** Verarbeitet Offline-Buffer nach Reconnection  
+**File:** `src/services/communication/mqtt_client.cpp` (lines 468-500)
+
+**Tatsächliche Implementierung:**
+
+**File:** `src/services/communication/mqtt_client.cpp` (lines 473-503)
+
+```cpp
+void MQTTClient::processOfflineBuffer() {
+    if (offline_buffer_count_ == 0) {
+        return;
+    }
+    
+    LOG_INFO("Processing offline buffer (" + String(offline_buffer_count_) + " messages)");
+    
+    uint16_t processed = 0;
+    for (uint16_t i = 0; i < offline_buffer_count_; i++) {
+        if (publish(offline_buffer_[i].topic, 
+                   offline_buffer_[i].payload, 
+                   offline_buffer_[i].qos)) {
+            processed++;
+        } else {
+            // Failed to publish, keep remaining messages in buffer
+            break;
+        }
+    }
+    
+    // Remove processed messages from buffer
+    if (processed > 0) {
+        uint16_t remaining = offline_buffer_count_ - processed;
+        for (uint16_t i = 0; i < remaining; i++) {
+            offline_buffer_[i] = offline_buffer_[i + processed];
+        }
+        offline_buffer_count_ = remaining;
+        
+        LOG_INFO("Processed " + String(processed) + " offline messages, " + 
+                 String(remaining) + " remaining");
+    }
+}
+```
+
 **Verhalten:**
-- Sendet gepufferte Messages in FIFO-Reihenfolge
-- Entfernt erfolgreich gesendete Messages
-- Behält fehlgeschlagene Messages im Buffer
+- Prüft Verbindungsstatus und Buffer-Status
+- Sendet gepufferte Messages in FIFO-Reihenfolge (älteste zuerst)
+- Bei erfolgreichem Publish: Incrementiert `processed` Counter
+- Bei fehlgeschlagenem Publish: Stoppt Verarbeitung (behält restliche Messages)
+- Entfernt erfolgreich gesendete Messages aus Buffer (shift remaining messages)
+- Aktualisiert `offline_buffer_count_`
+
+**Wichtig:** 
+- Verarbeitung stoppt bei erstem Fehler (um Connection-Storm zu vermeiden)
+- Restliche Messages bleiben im Buffer für nächsten Reconnect
+- Buffer ist FIFO (First-In-First-Out)
 
 ---
 
 ### `bool addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos)`
 **Beschreibung:** Fügt Message zu Offline-Buffer hinzu  
-**Rückgabe:** `true` bei Erfolg  
+**File:** `src/services/communication/mqtt_client.cpp` (lines 505-521)
+
+**Tatsächliche Implementierung:**
+
+```cpp
+bool MQTTClient::addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos) {
+    if (offline_buffer_count_ >= MAX_OFFLINE_MESSAGES) {
+        LOG_ERROR("Offline buffer full, dropping message");
+        errorTracker.logCommunicationError(ERROR_MQTT_BUFFER_FULL, 
+                                           "Offline buffer full");
+        return false;
+    }
+    
+    offline_buffer_[offline_buffer_count_].topic = topic;
+    offline_buffer_[offline_buffer_count_].payload = payload;
+    offline_buffer_[offline_buffer_count_].qos = qos;
+    offline_buffer_[offline_buffer_count_].timestamp = millis();
+    offline_buffer_count_++;
+    
+    LOG_DEBUG("Added to offline buffer (count: " + String(offline_buffer_count_) + ")");
+    return true;
+}
+```
+
+**Rückgabe:** `true` bei Erfolg, `false` wenn Buffer voll  
 **Fehlerbehandlung:**
-- Buffer voll → Loggt Fehler (ERROR_MQTT_BUFFER_FULL)
-- Verwirft älteste Message (FIFO)
+- Buffer voll (100 Messages) → Loggt Fehler (ERROR_MQTT_BUFFER_FULL)
+- Message wird verworfen (nicht gespeichert)
+- **Wichtig:** Keine FIFO-Überschreibung - neue Message wird verworfen
+
+**Buffer Capacity:** `MAX_OFFLINE_MESSAGES = 100`
 
 ---
 
@@ -708,6 +951,63 @@ void loop() {
 4. reconnect() wird aufgerufen (Exponential Backoff)
 5. Nach Reconnect: processOfflineBuffer()
 ```
+
+### Circuit Breaker Integration (Phase 6+)
+
+**File:** `src/services/communication/mqtt_client.cpp` (lines 53, 265, 276, 288, 294-297, 309-312, 319-323)
+
+**Configuration:**
+```cpp
+// Constructor (mqtt_client.cpp:44-58)
+circuit_breaker_("MQTT", 5, 30000, 10000)
+// - 5 failures → OPEN
+// - 30s recovery timeout
+// - 10s half-open test timeout
+```
+
+**Integration Points:**
+
+1. **Publish Failure:**
+```cpp
+if (!success) {
+    circuit_breaker_.recordFailure();
+    if (circuit_breaker_.isOpen()) {
+        LOG_WARNING("Circuit Breaker OPENED after failure threshold");
+        LOG_WARNING("  MQTT will be unavailable for 30 seconds");
+    }
+    addToOfflineBuffer(topic, payload, qos);
+}
+```
+
+2. **Publish Success:**
+```cpp
+if (success) {
+    circuit_breaker_.recordSuccess();
+}
+```
+
+3. **Connection Check:**
+```cpp
+if (!isConnected()) {
+    circuit_breaker_.recordFailure();  // Connection failure counts
+    return addToOfflineBuffer(topic, payload, qos);
+}
+```
+
+4. **SafePublish with Circuit Breaker:**
+```cpp
+if (circuit_breaker_.isOpen()) {
+    LOG_DEBUG("SafePublish: Circuit Breaker OPEN, skipping retries");
+    return publish(topic, payload, qos);  // Single attempt only
+}
+```
+
+**Behavior:**
+- After 5 consecutive failures → Circuit Breaker opens
+- All publish attempts blocked for 30 seconds
+- After timeout → Half-open state (allows one test request)
+- If test succeeds → Circuit Breaker closes (normal operation)
+- If test fails → Circuit Breaker opens again (another 30s timeout)
 
 ### Publish-Fehler
 ```

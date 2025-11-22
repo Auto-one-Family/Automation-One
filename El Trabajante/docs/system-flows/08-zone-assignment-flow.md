@@ -6,10 +6,11 @@ Hierarchical zone management (Phase 7) allows God-Kaiser to organize ESPs into l
 
 ## Files Analyzed
 
-- `src/main.cpp` (lines 415-489) - Zone assignment handler
-- `src/services/config/config_manager.cpp` - updateZoneAssignment()
-- `src/models/system_types.h` - Zone data structures
-- `src/utils/topic_builder.cpp` - Topic reconfiguration
+- `src/main.cpp` (lines 329-340, 415-489) - Zone assignment subscription and handler
+- `src/services/config/config_manager.cpp` (lines 170-286) - Zone config loading and updateZoneAssignment()
+- `src/models/system_types.h` (lines 23-48) - Zone data structures
+- `src/utils/topic_builder.cpp` (lines 19-22) - Topic reconfiguration
+- `src/services/communication/mqtt_client.cpp` (lines 380-408) - Heartbeat with zone info
 - `docs/NVS_KEYS.md` - Zone configuration keys
 
 ## Prerequisites
@@ -52,24 +53,31 @@ God-Kaiser (Top Level)
 
 **File:** `src/models/system_types.h`
 
+**File:** `src/models/system_types.h` (lines 23-39, 41-48)
+
 ```cpp
+// Kaiser Zone - ENHANCED (Phase 7: Dynamic Zones)
 struct KaiserZone {
-  String kaiser_id = "";          // Kaiser instance ID
-  String kaiser_name = "";        // Kaiser instance name
-  String zone_id = "";            // Current zone ID
-  String zone_name = "";          // Zone human-readable name
-  String master_zone_id = "";     // Parent master zone
-  String master_zone_name = "";   // Master zone name
-  bool zone_assigned = false;     // Zone assignment status
-  bool connected = false;         // Connected to Kaiser
+  // Primary Zone Identification (NEW - Phase 7)
+  String zone_id = "";              // Primary zone identifier (e.g., "greenhouse_zone_1")
+  String master_zone_id = "";       // Parent zone for hierarchy (e.g., "greenhouse")
+  String zone_name = "";            // Human-readable zone name
+  bool zone_assigned = false;       // Zone configuration status
+  
+  // Kaiser Communication (Existing)
+  String kaiser_id = "";            // God-Kaiser identifier
+  String kaiser_name = "";          // Kaiser name (optional)
+  String system_name = "";          // System name (optional)
+  bool connected = false;           // MQTT connection status
+  bool id_generated = false;        // Kaiser ID generation flag
 };
 
+// Master Zone - Legacy (kept for compatibility)
 struct MasterZone {
-  String zone_id = "";            // Master zone ID
-  String zone_name = "";          // Master zone name
-  bool is_master_esp = false;     // Is this ESP the master?
-  String master_esp_id = "";      // Master ESP ID (if not this)
-  uint8_t connected_esps = 0;     // ESPs in this master zone
+  String master_zone_id = "";
+  String master_zone_name = "";
+  bool assigned = false;
+  bool is_master_esp = false;
 };
 ```
 
@@ -107,7 +115,34 @@ struct MasterZone {
 
 ## Flow Steps
 
-### STEP 1: MQTT Message Reception
+### STEP 1: MQTT Subscription (During Boot)
+
+**File:** `src/main.cpp` (lines 329-340)
+
+**Code:**
+
+```cpp
+// Phase 7: Zone assignment topic subscription
+String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + 
+                          g_system_config.esp_id + "/zone/assign";
+if (g_kaiser.kaiser_id.length() == 0) {
+  zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
+}
+
+mqttClient.subscribe(zone_assign_topic);
+LOG_INFO("Subscribed to system + actuator + zone assignment topics");
+```
+
+**Subscription Logic:**
+- If `g_kaiser.kaiser_id` is empty (unassigned): Subscribe to `kaiser/god/esp/{esp_id}/zone/assign`
+- If `g_kaiser.kaiser_id` is set (assigned): Subscribe to `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
+- Subscription happens during Phase 2 (Communication Layer) initialization
+
+**Note:** The ESP subscribes to BOTH topics during boot if zone config is loaded from NVS. The handler checks both topics.
+
+---
+
+### STEP 2: MQTT Message Reception
 
 **File:** `src/main.cpp` (lines 415-421)
 
@@ -135,7 +170,7 @@ if (topic == zone_assign_topic) {
 
 ---
 
-### STEP 2: Parse Zone Information
+### STEP 3: Parse Zone Information
 
 **File:** `src/main.cpp` (lines 426-440)
 
@@ -167,7 +202,7 @@ if (!error) {
 
 ---
 
-### STEP 3: Update Configuration
+### STEP 4: Update Configuration
 
 **File:** `src/main.cpp` (lines 442-476)
 
@@ -232,59 +267,76 @@ if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaise
 
 ---
 
-### STEP 4: Persist to NVS
+### STEP 5: Persist to NVS
 
-**File:** `src/services/config/config_manager.cpp`
+**File:** `src/services/config/config_manager.cpp` (lines 257-286)
 
 **Code:**
 
 ```cpp
-bool ConfigManager::updateZoneAssignment(const String& zone_id,
-                                        const String& master_zone_id,
-                                        const String& zone_name,
+// Phase 7: Dynamic Zone Assignment
+bool ConfigManager::updateZoneAssignment(const String& zone_id, 
+                                        const String& master_zone_id, 
+                                        const String& zone_name, 
                                         const String& kaiser_id) {
-  if (!storageManager.beginNamespace("zone_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open zone_config namespace");
-    return false;
-  }
+  LOG_INFO("ConfigManager: Updating zone assignment...");
+  LOG_INFO("  Zone ID: " + zone_id);
+  LOG_INFO("  Master Zone: " + master_zone_id);
+  LOG_INFO("  Zone Name: " + zone_name);
+  LOG_INFO("  Kaiser ID: " + kaiser_id);
   
-  // Save zone information
-  storageManager.putString("zone_id", zone_id);
-  storageManager.putString("master_zone_id", master_zone_id);
-  storageManager.putString("zone_name", zone_name);
-  storageManager.putBool("zone_assigned", true);
+  // Update kaiser_ structure
+  kaiser_.zone_id = zone_id;
+  kaiser_.master_zone_id = master_zone_id;
+  kaiser_.zone_name = zone_name;
+  kaiser_.zone_assigned = true;
   
-  // Update kaiser if provided
+  // Update kaiser_id if provided
   if (kaiser_id.length() > 0) {
-    storageManager.putString("kaiser_id", kaiser_id);
-    storageManager.putBool("connected", true);
+    kaiser_.kaiser_id = kaiser_id;
   }
   
-  storageManager.endNamespace();
+  // Persist to NVS via saveZoneConfig()
+  bool success = saveZoneConfig(kaiser_, master_);
   
-  LOG_INFO("ConfigManager: Zone assignment saved to NVS");
-  return true;
+  if (success) {
+    LOG_INFO("ConfigManager: Zone assignment updated successfully");
+  } else {
+    LOG_ERROR("ConfigManager: Failed to update zone assignment");
+  }
+  
+  return success;
 }
 ```
+
+**NVS Persistence:** `saveZoneConfig()` saves all zone fields to NVS namespace `zone_config`.
 
 ### NVS Keys
 
 **Namespace:** `zone_config`
 
-**Keys:**
-- `zone_id` (String) - Zone identifier
-- `master_zone_id` (String) - Master zone ID
-- `zone_name` (String) - Zone name
-- `zone_assigned` (bool) - Assignment status
+**Phase 7 Keys (Hierarchical Zone Info):**
+- `zone_id` (String) - Primary zone identifier
+- `master_zone_id` (String) - Parent master zone ID
+- `zone_name` (String) - Human-readable zone name
+- `zone_assigned` (bool) - Zone assignment status flag
+
+**Existing Keys (Kaiser Communication):**
 - `kaiser_id` (String) - Kaiser instance ID
-- `kaiser_name` (String) - Kaiser name
-- `connected` (bool) - Connection status
+- `kaiser_name` (String) - Kaiser name (optional)
+- `connected` (bool) - MQTT connection status
+- `id_generated` (bool) - Kaiser ID generation flag
+
+**Legacy Keys (Backward Compatibility):**
+- `legacy_master_zone_id` (String) - Legacy master zone ID
+- `legacy_master_zone_name` (String) - Legacy master zone name
+- `is_master_esp` (bool) - Legacy master ESP flag
 
 ---
 
-### STEP 5: Reconfigure Topic Builder
+### STEP 6: Reconfigure Topic Builder
 
-**File:** `src/utils/topic_builder.cpp`
+**File:** `src/utils/topic_builder.cpp` (lines 19-22)
 
 **Code:**
 
@@ -295,23 +347,29 @@ void TopicBuilder::setKaiserId(const char* kaiser_id) {
 }
 ```
 
-**Effect:** All subsequent MQTT topics use new Kaiser ID
+**Effect:** All subsequent MQTT topics built via `TopicBuilder` use new Kaiser ID
 
 **Example:**
 
-Before:
+Before (unassigned):
 ```
 kaiser/god/esp/ESP_AB12CD/sensor/4/data
+kaiser/god/esp/ESP_AB12CD/system/heartbeat
 ```
 
-After:
+After (assigned):
 ```
 kaiser/kaiser_production_001/esp/ESP_AB12CD/sensor/4/data
+kaiser/kaiser_production_001/esp/ESP_AB12CD/system/heartbeat
 ```
+
+**Important:** TopicBuilder uses static buffer `kaiser_id_[64]` with default value `"god"` (line 9). After zone assignment, all new topics use the updated kaiser_id.
+
+**Note:** Existing subscriptions are NOT automatically updated. The ESP continues to listen on the old topic until reconnection. See "MQTT Subscription Behavior" section below.
 
 ---
 
-### STEP 6: Publish Acknowledgment
+### STEP 7: Publish Acknowledgment
 
 **Acknowledgment Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/ack`
 
@@ -341,31 +399,41 @@ kaiser/kaiser_production_001/esp/ESP_AB12CD/sensor/4/data
 
 ---
 
-### STEP 7: Publish Updated Heartbeat
+### STEP 8: Publish Updated Heartbeat
 
-**File:** `src/services/communication/mqtt_client.cpp`
+**File:** `src/services/communication/mqtt_client.cpp` (lines 380-408)
 
 **Code:**
 
 ```cpp
 void MQTTClient::publishHeartbeat() {
-  String topic = TopicBuilder::buildSystemHeartbeatTopic();
-  
-  DynamicJsonDocument doc(512);
-  doc["esp_id"] = configManager.getESPId();
-  doc["zone_id"] = g_kaiser.zone_id;
-  doc["master_zone_id"] = g_kaiser.master_zone_id;
-  doc["zone_name"] = g_kaiser.zone_name;
-  doc["zone_assigned"] = g_kaiser.zone_assigned;
-  doc["uptime"] = millis() / 1000;
-  doc["free_heap"] = ESP.getFreeHeap();
-  doc["wifi_rssi"] = WiFi.RSSI();
-  doc["timestamp"] = millis();
-  
-  String payload;
-  serializeJson(doc, payload);
-  
-  publish(topic, payload, 1);
+    unsigned long current_time = millis();
+    
+    if (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS) {
+        return;
+    }
+    
+    last_heartbeat_ = current_time;
+    
+    // Build heartbeat topic
+    const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
+    
+    // Build heartbeat payload (JSON) - Phase 7: Enhanced with Zone Info
+    String payload = "{";
+    payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+    payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
+    payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
+    payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
+    payload += "\"ts\":" + String(current_time) + ",";
+    payload += "\"uptime\":" + String(millis() / 1000) + ",";
+    payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
+    payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
+    payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
+    payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount());
+    payload += "}";
+    
+    // Publish with QoS 0 (heartbeat doesn't need guaranteed delivery)
+    publish(topic, payload, 0);
 }
 ```
 
@@ -376,14 +444,17 @@ void MQTTClient::publishHeartbeat() {
   "esp_id": "ESP_AB12CD",
   "zone_id": "greenhouse_zone_1",
   "master_zone_id": "greenhouse_master",
-  "zone_name": "Greenhouse Section 1",
   "zone_assigned": true,
+  "ts": 1234567890,
   "uptime": 12345,
-  "free_heap": 250000,
+  "heap_free": 250000,
   "wifi_rssi": -45,
-  "timestamp": 1234567890
+  "sensor_count": 3,
+  "actuator_count": 2
 }
 ```
+
+**Note:** Heartbeat uses manual string concatenation (not DynamicJsonDocument) for efficiency. Topic is built via `TopicBuilder::buildSystemHeartbeatTopic()` which uses the current `kaiser_id_` from TopicBuilder.
 
 ---
 
@@ -404,12 +475,18 @@ void MQTTClient::publishHeartbeat() {
 ### Reassignment
 
 1. User changes ESP zone in God-Kaiser UI
-2. God-Kaiser publishes new zone assignment
-3. ESP receives on current Kaiser topic
-4. ESP updates configuration
-5. ESP resubscribes to new topics
-6. ESP acknowledges
-7. ESP starts publishing to new zone topics
+2. God-Kaiser publishes new zone assignment on current Kaiser topic (`kaiser/{current_kaiser_id}/esp/{esp_id}/zone/assign`)
+3. ESP receives and processes assignment
+4. ESP updates configuration (NVS + globals + TopicBuilder)
+5. ESP acknowledges on new Kaiser topic (`kaiser/{new_kaiser_id}/esp/{esp_id}/zone/ack`)
+6. ESP publishes heartbeat with new zone info (on new Kaiser topic)
+7. ESP continues to listen on OLD subscription until MQTT reconnection
+8. After MQTT reconnection, ESP subscribes to new topics automatically
+
+**Important:** MQTT subscriptions are NOT automatically updated when kaiser_id changes. The ESP will:
+- Continue receiving messages on old topic (if still subscribed)
+- Publish new messages on new topic (via TopicBuilder)
+- Resubscribe to new topics only after MQTT reconnection (during `connectToBroker()`)
 
 ---
 
@@ -417,21 +494,42 @@ void MQTTClient::publishHeartbeat() {
 
 ### Before Zone Assignment
 
-| Topic Type | Pattern |
-|------------|---------|
-| Sensor Data | `kaiser/god/esp/{esp_id}/sensor/{gpio}/data` |
-| Actuator Command | `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` |
-| Config | `kaiser/god/esp/{esp_id}/config` |
-| Heartbeat | `kaiser/god/esp/{esp_id}/system/heartbeat` |
+| Topic Type | Pattern | Example |
+|------------|---------|---------|
+| Sensor Data | `kaiser/god/esp/{esp_id}/sensor/{gpio}/data` | `kaiser/god/esp/ESP_AB12CD/sensor/4/data` |
+| Actuator Command | `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | `kaiser/god/esp/ESP_AB12CD/actuator/5/command` |
+| Config | `kaiser/god/esp/{esp_id}/config` | `kaiser/god/esp/ESP_AB12CD/config` |
+| Heartbeat | `kaiser/god/esp/{esp_id}/system/heartbeat` | `kaiser/god/esp/ESP_AB12CD/system/heartbeat` |
+| Zone Assign | `kaiser/god/esp/{esp_id}/zone/assign` | `kaiser/god/esp/ESP_AB12CD/zone/assign` |
 
 ### After Zone Assignment
 
-| Topic Type | Pattern |
-|------------|---------|
-| Sensor Data | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data` |
-| Actuator Command | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command` |
-| Config | `kaiser/{kaiser_id}/esp/{esp_id}/config` |
-| Heartbeat | `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat` |
+| Topic Type | Pattern | Example |
+|------------|---------|---------|
+| Sensor Data | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data` | `kaiser/kaiser_prod_001/esp/ESP_AB12CD/sensor/4/data` |
+| Actuator Command | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command` | `kaiser/kaiser_prod_001/esp/ESP_AB12CD/actuator/5/command` |
+| Config | `kaiser/{kaiser_id}/esp/{esp_id}/config` | `kaiser/kaiser_prod_001/esp/ESP_AB12CD/config` |
+| Heartbeat | `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat` | `kaiser/kaiser_prod_001/esp/ESP_AB12CD/system/heartbeat` |
+| Zone Assign | `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign` | `kaiser/kaiser_prod_001/esp/ESP_AB12CD/zone/assign` |
+| Zone ACK | `kaiser/{kaiser_id}/esp/{esp_id}/zone/ack` | `kaiser/kaiser_prod_001/esp/ESP_AB12CD/zone/ack` |
+
+### MQTT Subscription Behavior
+
+**During Boot (Phase 2):**
+- ESP subscribes to zone assignment topic based on loaded `g_kaiser.kaiser_id`
+- If `kaiser_id` is empty: subscribes to `kaiser/god/esp/{esp_id}/zone/assign`
+- If `kaiser_id` is set: subscribes to `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
+
+**After Zone Assignment:**
+- ESP updates `TopicBuilder::kaiser_id_` immediately
+- All NEW topics built via TopicBuilder use new kaiser_id
+- Existing subscriptions remain active (no automatic unsubscribe/resubscribe)
+- ESP will resubscribe to new topics only after MQTT reconnection
+
+**During MQTT Reconnection:**
+- `main.cpp` (lines 329-340) rebuilds subscription topics using current `g_kaiser.kaiser_id`
+- ESP automatically subscribes to new zone assignment topic
+- Old subscription is implicitly dropped (MQTT broker handles cleanup)
 
 ---
 
@@ -495,17 +593,28 @@ STATE_BOOT
 
 **State Tracking:**
 
+**File:** `src/models/system_types.h` (lines 8-21)
+
 ```cpp
 enum SystemState {
   STATE_BOOT = 0,
-  STATE_PROVISIONED,
-  STATE_CONNECTED,
-  STATE_ZONE_CONFIGURED,
+  STATE_WIFI_SETUP,
+  STATE_WIFI_CONNECTED,
+  STATE_MQTT_CONNECTING,
+  STATE_MQTT_CONNECTED,
+  STATE_AWAITING_USER_CONFIG,
+  STATE_ZONE_CONFIGURED,        // Zone assignment complete
+  STATE_SENSORS_CONFIGURED,
   STATE_OPERATIONAL,
+  STATE_LIBRARY_DOWNLOADING,    // Optional - OTA Library Mode
   STATE_SAFE_MODE = 10,
   STATE_ERROR = 11
 };
 ```
+
+**State Transition:**
+- Zone assignment sets `g_system_config.current_state = STATE_ZONE_CONFIGURED` (value: 6)
+- State is persisted to NVS via `configManager.saveSystemConfig()`
 
 ---
 
@@ -579,28 +688,41 @@ enum SystemState {
 ### Topic Migration Issues
 
 **Causes:**
-- MQTT broker ACL restrictions
-- Topic buffer overflow
+- MQTT broker ACL restrictions (new kaiser_id not authorized)
+- Topic buffer overflow (256-byte buffer in TopicBuilder)
+- Subscription mismatch (listening on old topic, publishing on new)
 
 **Mitigation:**
-- Gradual topic migration
-- Unsubscribe old topics after success
-- Fallback to "god" kaiser if migration fails
+- TopicBuilder validates buffer size (truncation detection)
+- ESP continues to listen on old subscription until reconnection
+- After reconnection, ESP automatically subscribes to new topics
+- Fallback: If kaiser_id is empty, defaults to "god"
+
+**Known Limitation:**
+- No automatic unsubscribe/resubscribe when kaiser_id changes
+- ESP must reconnect to MQTT to update subscriptions
+- This is intentional to avoid subscription storms during zone reassignment
 
 ---
 
 ## Performance Impact
 
 **Zone Assignment Operation:**
-- Duration: 50-100ms
-- NVS Writes: ~5 keys
-- MQTT Messages: 2 (ack + heartbeat)
-- Memory: ~1KB temporary
+- Duration: 50-150ms (NVS writes + MQTT publish)
+- NVS Writes: 7-9 keys (zone_id, master_zone_id, zone_name, zone_assigned, kaiser_id, connected, legacy keys)
+- MQTT Messages: 2 (ack QoS 1 + heartbeat QoS 0)
+- Memory: ~1KB temporary (JSON buffers: 512 bytes + 256 bytes)
+- CPU: <1% (synchronous operation in loop context)
 
 **Ongoing Impact:**
-- None - zone info cached in memory
-- Topic strings pre-built
-- No additional MQTT traffic
+- Memory: Zone info cached in `g_kaiser` global (minimal overhead)
+- Topic strings: Built on-demand via TopicBuilder (256-byte static buffer)
+- MQTT traffic: No additional overhead (heartbeat already includes zone info)
+- CPU: <0.1% (zone info included in existing heartbeat)
+
+**NVS Storage:**
+- Zone config namespace: ~500 bytes (7-9 keys × ~50-60 bytes average)
+- Total NVS usage: ~8KB (with sensors/actuators at full capacity)
 
 ---
 
@@ -629,11 +751,72 @@ mosquitto_sub -h 192.168.0.198 -p 8883 \
 
 ---
 
+## Boot Sequence Integration
+
+**File:** `src/main.cpp` (lines 170-190)
+
+During boot, zone configuration is loaded from NVS:
+
+```cpp
+// Load zone configuration
+configManager.loadZoneConfig(g_kaiser, g_master);
+
+// Configure TopicBuilder with loaded kaiser_id
+TopicBuilder::setEspId(g_system_config.esp_id.c_str());
+TopicBuilder::setKaiserId(g_kaiser.kaiser_id.c_str());
+```
+
+**Boot Behavior:**
+- If zone_assigned = true: ESP starts with zone info, subscribes to assigned kaiser topic
+- If zone_assigned = false: ESP starts unassigned, subscribes to `kaiser/god/...` topic
+- System state loaded from NVS (may be STATE_ZONE_CONFIGURED if previously assigned)
+
+**See:** [Boot Sequence](01-boot-sequence.md) for complete initialization flow
+
+---
+
+## Zone Loading from NVS
+
+**File:** `src/services/config/config_manager.cpp` (lines 170-204)
+
+```cpp
+bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
+  if (!storageManager.beginNamespace("zone_config", true)) {
+    return false;
+  }
+  
+  // Load Hierarchical Zone Info (Phase 7)
+  kaiser.zone_id = storageManager.getStringObj("zone_id", "");
+  kaiser.master_zone_id = storageManager.getStringObj("master_zone_id", "");
+  kaiser.zone_name = storageManager.getStringObj("zone_name", "");
+  kaiser.zone_assigned = storageManager.getBool("zone_assigned", false);
+  
+  // Load Kaiser zone (Existing)
+  kaiser.kaiser_id = storageManager.getStringObj("kaiser_id", "");
+  kaiser.kaiser_name = storageManager.getStringObj("kaiser_name", "");
+  kaiser.connected = storageManager.getBool("connected", false);
+  kaiser.id_generated = storageManager.getBool("id_generated", false);
+  
+  // Load Master zone (Legacy - kept for compatibility)
+  master.master_zone_id = storageManager.getStringObj("legacy_master_zone_id", "");
+  master.master_zone_name = storageManager.getStringObj("legacy_master_zone_name", "");
+  master.is_master_esp = storageManager.getBool("is_master_esp", false);
+  
+  storageManager.endNamespace();
+  return true;
+}
+```
+
+**Default Values:** All strings default to empty `""`, booleans default to `false` if not found in NVS.
+
+---
+
 ## Next Flows
 
-→ [Boot Sequence](01-boot-sequence.md) - Zone loading during boot  
+→ [Boot Sequence](01-boot-sequence.md) - Zone loading during boot (lines 170-190, 247-248)  
 → [Sensor Reading Flow](02-sensor-reading-flow.md) - Zone info in sensor data  
-→ [MQTT Message Routing](06-mqtt-message-routing-flow.md) - Zone assignment handler  
+→ [MQTT Message Routing](06-mqtt-message-routing-flow.md) - Zone assignment handler (lines 800-876)  
+→ [Error Recovery Flow](07-error-recovery-flow.md) - Circuit breaker protection for MQTT
 
 ---
 

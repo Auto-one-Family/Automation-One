@@ -12,8 +12,11 @@ Periodic sensor measurement, processing, and MQTT publishing cycle. This flow de
 - `src/models/sensor_types.h` (lines 1-47) - Sensor data structures
 - `src/utils/topic_builder.cpp` (lines 53-58) - Sensor topic generation
 - `src/services/communication/mqtt_client.cpp` - MQTT publishing
-- `src/drivers/i2c_bus.cpp` - I2C sensor communication
-- `src/drivers/onewire_bus.cpp` - OneWire sensor communication
+- `src/drivers/i2c_bus.cpp` (lines 225-282) - I2C bus manager readRaw implementation
+- `src/drivers/onewire_bus.cpp` (lines 185-254) - OneWire bus manager readRawTemperature implementation
+- `src/services/sensor/pi_enhanced_processor.cpp` (lines 86-202) - HTTP communication with God-Kaiser
+- `src/services/sensor/pi_enhanced_processor.h` (lines 1-101) - Pi-Enhanced Processor interface
+- `src/models/system_types.h` - KaiserZone structure (for zone_id)
 
 ## Prerequisites
 
@@ -42,7 +45,7 @@ void loop() {
 
 ### STEP 1: Timer Check
 
-**File:** `src/services/sensor/sensor_manager.cpp` (lines 360-368)
+**File:** `src/services/sensor/sensor_manager.cpp` (lines 360-384)
 
 **Code:**
 
@@ -58,7 +61,19 @@ void SensorManager::performAllMeasurements() {
     }
     
     // Measure all active sensors
-    // ...
+    for (uint8_t i = 0; i < sensor_count_; i++) {
+        if (!sensors_[i].active) {
+            continue;
+        }
+        
+        SensorReading reading;
+        if (performMeasurement(sensors_[i].gpio, reading)) {
+            // Publish via MQTT
+            publishSensorReading(reading);
+        }
+    }
+    
+    last_measurement_time_ = now;
 }
 ```
 
@@ -68,21 +83,45 @@ void SensorManager::performAllMeasurements() {
 - Drain power on battery-powered ESPs
 
 **Timing Logic:**
-- `last_measurement_time_`: Timestamp of last measurement (milliseconds)
-- `measurement_interval_`: Default 30000ms (30 seconds)
+- `last_measurement_time_`: Timestamp of last measurement (milliseconds), initialized to 0 in `begin()` (line 53)
+- `measurement_interval_`: Default 30000ms (30 seconds) - **Note:** Declared in header (line 146) but initialization not visible in current code. Should be initialized in private constructor to 30000.
 - `now - last_measurement_time_`: Elapsed time since last measurement
+
+**Initialization:**
+
+**File:** `src/services/sensor/sensor_manager.cpp` (lines 22-58)
+
+```cpp
+bool SensorManager::begin() {
+    // ...
+    initialized_ = true;
+    last_measurement_time_ = 0;  // Line 53
+    // Note: measurement_interval_ should be initialized to 30000 in constructor
+    // ...
+}
+```
+
+**File:** `src/services/sensor/sensor_manager.h` (line 146)
+
+```cpp
+unsigned long measurement_interval_;  // 30s default
+```
+
+**Recommendation:** Ensure `measurement_interval_` is initialized to 30000 in the private constructor (not visible in current codebase).
 
 **Behavior:**
 - If interval not elapsed → Return immediately (no-op)
-- If interval elapsed → Proceed with measurements
+- If interval elapsed → Proceed with measurements for all active sensors
 
 **Configuration:** Interval can be changed dynamically (future feature)
+
+**Architecture Note:** This implements the **Server-Centric Autonomous Measurement Pattern** where ESP32 measures periodically autonomously (standard in Industrial IoT like AWS Greengrass, Azure IoT Edge). Rationale: Minimizes MQTT traffic, server control via `measurement_interval` config.
 
 ---
 
 ### STEP 2: Iterate Active Sensors
 
-**File:** `src/services/sensor/sensor_manager.cpp` (lines 370-384)
+**File:** `src/services/sensor/sensor_manager.cpp` (lines 370-381)
 
 **Code:**
 
@@ -99,23 +138,23 @@ for (uint8_t i = 0; i < sensor_count_; i++) {
         publishSensorReading(reading);
     }
 }
-
-last_measurement_time_ = now;
 ```
 
-**Purpose:** Process each configured sensor
+**Purpose:** Process each configured sensor sequentially
 
 **Sensor Registry:**
-- `sensors_[]`: Fixed-size array (max 10 sensors)
-- `sensor_count_`: Number of configured sensors
-- `active` flag: Skip inactive sensors
+- `sensors_[]`: Fixed-size array (max 10 sensors, defined as `MAX_SENSORS = 10`)
+- `sensor_count_`: Number of configured sensors (0-10)
+- `active` flag: Skip inactive sensors immediately
 
 **Error Handling:**
-- Sensor read failure → Log error → Continue with next sensor
+- Sensor read failure → `performMeasurement()` returns false → Skip MQTT publishing → Continue with next sensor
 - MQTT publish failure → Log error → Continue with next sensor
 - **Non-blocking:** One sensor failure doesn't affect others
 
 **Timing:** Serial execution (one sensor at a time)
+
+**Memory:** `SensorReading` struct allocated on stack per iteration (~48 bytes), automatically freed after each sensor
 
 ---
 
@@ -195,12 +234,29 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     reading_out.valid = processed.valid;
     reading_out.error_message = processed.error_message;
     
-    // Update config
+    // Update config with latest reading
     config->last_raw_value = raw_value;
     config->last_reading = millis();
     
     return success;
 }
+```
+
+**⚠️ Code Issue:** The `SensorReading` struct does not include `subzone_id` field (see `src/models/sensor_types.h` lines 34-44). However, `buildMQTTPayload()` attempts to access `reading.subzone_id` (line 509). This should be `config->subzone_id` instead. 
+
+**Current Behavior:** The code may compile if String default-constructs to empty string, resulting in empty `subzone_id` in MQTT payload. To fix, `performMeasurement()` should copy `subzone_id` from config to reading, or `buildMQTTPayload()` should access it from the sensor config directly.
+
+**Recommended Fix:**
+```cpp
+// In performMeasurement(), add:
+reading_out.subzone_id = config->subzone_id;
+```
+
+Or in `buildMQTTPayload()`, get config and use:
+```cpp
+const SensorConfig* config = findSensorConfig(reading.gpio);
+payload += config ? config->subzone_id : "";
+```
 ```
 
 **Sensor Type Routing:**
@@ -218,15 +274,44 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
 
 El Trabajante uses a **Server-Centric** architecture where raw sensor data is sent to God-Kaiser (Pi-Enhanced Processor) for calibration and processing:
 
+**File:** `src/services/sensor/pi_enhanced_processor.cpp` (lines 86-164)
+
 1. ESP reads **raw value** (ADC, I2C bytes, OneWire temp)
-2. ESP sends raw value to Pi-Enhanced Processor
-3. Pi applies calibration, filtering, unit conversion
-4. Pi returns **processed value** with unit and quality
+2. ESP builds `RawSensorData` structure:
+   - `gpio`: GPIO pin number
+   - `sensor_type`: Sensor type string (e.g., "ph_sensor", "temperature_ds18b20")
+   - `raw_value`: Raw ADC/I2C/OneWire value
+   - `timestamp`: millis() timestamp
+   - `metadata`: JSON string (currently "{}")
+3. ESP calls `pi_processor_->sendRawData(raw_data, processed)`
+4. PiEnhancedProcessor sends HTTP POST request to God-Kaiser:
+   - URL: `http://{pi_server_address}:{pi_server_port}/api/v1/sensors/process`
+   - Payload: JSON with esp_id, gpio, sensor_type, raw_value, timestamp, metadata
+   - Timeout: 5000ms
+5. God-Kaiser processes raw data:
+   - Applies calibration curves
+   - Performs filtering/algorithms
+   - Converts units
+   - Assesses quality
+6. PiEnhancedProcessor receives `ProcessedSensorData`:
+   - `value`: Processed float value
+   - `unit`: Unit string (e.g., "pH", "°C", "ppm")
+   - `quality`: Quality assessment ("excellent", "good", "fair", "poor", "bad", "stale")
+   - `valid`: Success flag
+   - `error_message`: Error description if failed
+7. ESP fills `SensorReading` with processed data
 
 **Benefits:**
 - Calibration updates without reflashing ESP
-- Complex algorithms on powerful Pi
+- Complex algorithms on powerful Pi (Python libraries)
 - Consistent processing across all ESPs
+- Centralized quality assessment
+- Circuit breaker pattern for resilience (Phase 6+)
+
+**Error Handling:**
+- Circuit breaker blocks requests if server is down
+- HTTP failures tracked and circuit opens after threshold
+- Processing failures return `valid = false` but measurement continues
 
 ---
 
@@ -281,11 +366,24 @@ bool SensorManager::readRawI2C(uint8_t gpio, uint8_t device_address,
 }
 ```
 
+**I2C Bus Manager Implementation:**
+
+**File:** `src/drivers/i2c_bus.cpp` (lines 225-282)
+
+The `I2CBusManager::readRaw()` method:
+1. Validates bus initialization and parameters
+2. Writes register address to device
+3. Performs repeated start (doesn't release bus)
+4. Reads requested number of bytes
+5. Validates received byte count matches request
+6. Returns false on any error (bus error, device not found, incomplete read)
+
 **I2C Communication:**
-- **Bus:** Shared I2C bus (SDA/SCL pins)
-- **Frequency:** 100kHz (standard mode)
-- **Addressing:** 7-bit addresses (0x08-0x77)
-- **Timing:** ~1-5ms per transaction
+- **Bus:** Shared I2C bus (SDA/SCL pins configured in I2CBusManager)
+- **Frequency:** 100kHz (standard mode, configurable)
+- **Addressing:** 7-bit addresses (0x08-0x77, validated)
+- **Timing:** ~1-5ms per transaction (depends on bus speed and data length)
+- **Error Tracking:** Errors logged via ErrorTracker with severity levels
 
 **Common I2C Sensors:**
 
@@ -295,7 +393,14 @@ bool SensorManager::readRawI2C(uint8_t gpio, uint8_t device_address,
 | BME280 (temp/pressure) | 0x76 | 0xF7 | 8 bytes (pressure, temp, humidity) |
 | Generic I2C | Configurable | Configurable | Raw bytes |
 
-**Error Detection:** I2C bus errors return false
+**Error Detection:** 
+- I2C bus errors return false
+- Errors tracked via `errorTracker.trackError()` with codes:
+  - `ERROR_I2C_BUS_ERROR` (critical severity)
+  - `ERROR_I2C_DEVICE_NOT_FOUND` (warning severity)
+  - `ERROR_I2C_READ_FAILED` (error severity)
+
+**Note:** In `performMeasurement()`, the GPIO parameter is passed but not used by `readRawI2C()`. The I2C bus is shared and GPIO is managed by I2CBusManager during initialization.
 
 ---
 
@@ -316,18 +421,44 @@ bool SensorManager::readRawOneWire(uint8_t gpio, const uint8_t rom[8], int16_t& 
 }
 ```
 
+**OneWire Bus Manager Implementation:**
+
+**File:** `src/drivers/onewire_bus.cpp` (lines 185-254)
+
+The `OneWireBusManager::readRawTemperature()` method:
+1. Validates bus initialization
+2. Resets OneWire bus (checks for device presence)
+3. Selects device by ROM code
+4. Starts temperature conversion (command 0x44, parasitic power)
+5. Waits 750ms for 12-bit conversion to complete
+6. Resets bus again and reselects device
+7. Reads scratchpad (command 0xBE, 9 bytes)
+8. Validates CRC8 checksum
+9. Extracts raw 16-bit signed temperature value
+10. Returns false on any error (reset failed, CRC error)
+
 **OneWire Protocol:**
-- **Single wire:** Data + power on one GPIO
-- **ROM Code:** 8-byte unique device identifier
-- **Resolution:** 9-12 bit configurable (0.5°C to 0.0625°C)
-- **Timing:** ~750ms for 12-bit conversion
+- **Single wire:** Data + power on one GPIO (configured in OneWireBusManager)
+- **ROM Code:** 8-byte unique device identifier (required for device selection)
+- **Resolution:** 12-bit fixed (0.0625°C per LSB)
+- **Timing:** ~750ms for 12-bit conversion (hardcoded delay)
+- **CRC:** 8-bit CRC validation on scratchpad data
 
 **DS18B20 Specific:**
 - Temperature range: -55°C to +125°C
-- Raw value: 16-bit signed integer (0.0625°C per bit)
-- Example: 0x0191 = 25.0625°C
+- Raw value: 16-bit signed integer (range: -550 to +1250)
+- Resolution: 0.0625°C per bit
+- Example: 0x0191 (401 decimal) = 25.0625°C
+- Conversion formula (done on server): `temp_celsius = raw_value * 0.0625`
 
-**Multiple Sensors:** Each sensor on OneWire bus has unique ROM code
+**Multiple Sensors:** Each sensor on OneWire bus has unique ROM code. ROM code must be stored in SensorConfig (currently TODO in code line 302).
+
+**Error Detection:**
+- OneWire bus errors return false
+- Errors tracked via `errorTracker.trackError()` with `ERROR_ONEWIRE_READ_FAILED`
+- Common errors: Bus reset failed, CRC validation failed
+
+**Note:** In `performMeasurement()`, ROM code is currently hardcoded to `{0}` (line 302), which will fail for actual devices. ROM code should be stored in `SensorConfig` structure.
 
 ---
 
@@ -346,7 +477,7 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     ConfigManager& config = ConfigManager::getInstance();
     String esp_id = config.getESPId();
     
-    // Phase 7: Get zone information from global variables
+    // Phase 7: Get zone information from global variables (extern from main.cpp)
     extern KaiserZone g_kaiser;
     
     // Build JSON payload with zone information
@@ -358,7 +489,8 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     payload += g_kaiser.zone_id;
     payload += "\",";
     payload += "\"subzone_id\":\"";
-    payload += reading.subzone_id;  // From sensor config
+    payload += reading.subzone_id;  // ⚠️ NOTE: SensorReading struct doesn't have subzone_id field
+    // Should be: config->subzone_id (from sensor config)
     payload += "\",";
     payload += "\"gpio\":";
     payload += String(reading.gpio);
@@ -409,7 +541,7 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
 |-------|------|--------|-------------|
 | `esp_id` | String | ConfigManager | ESP32 unique identifier |
 | `zone_id` | String | Global g_kaiser | Hierarchical zone assignment |
-| `subzone_id` | String | Sensor config | Sensor-specific subzone |
+| `subzone_id` | String | Sensor config | Sensor-specific subzone (⚠️ **Note:** Currently accessed from `reading.subzone_id` which doesn't exist in struct - should be from `config->subzone_id`) |
 | `gpio` | Number | Sensor config | GPIO pin number |
 | `sensor_type` | String | Sensor config | Sensor type identifier |
 | `raw_value` | Number | Sensor read | Raw ADC/I2C/OneWire value |
@@ -609,15 +741,31 @@ errorTracker.trackError(ERROR_SENSOR_READ_FAILED,
 - God-Kaiser server down
 - Network partition
 - Processing error
+- Circuit breaker open (Phase 6+)
 
 **Behavior:**
-1. Publish raw value only
-2. Set processed_value = 0
-3. Set unit = "raw"
-4. Set quality = "unknown"
-5. **Continue measurement cycle**
 
-**Degraded Mode:** ESP continues operating with raw data
+**File:** `src/services/sensor/pi_enhanced_processor.cpp` (lines 86-164)
+
+1. Circuit breaker check: If circuit breaker is OPEN or HALF_OPEN, request is blocked
+2. HTTP request failure: `sendRawData()` returns false
+3. `performMeasurement()` receives `processed.valid = false`
+4. Reading is still filled with:
+   - `processed_value = 0.0` (from ProcessedSensorData initialization)
+   - `unit = ""` (empty string)
+   - `quality = ""` (empty string)
+   - `valid = false`
+   - `error_message` set by PiEnhancedProcessor
+5. **MQTT publishing still occurs** (if `performMeasurement()` returns true despite processing failure)
+6. **Continue measurement cycle** - next sensor is processed
+
+**Circuit Breaker Pattern (Phase 6+):**
+- Circuit breaker tracks consecutive failures
+- After threshold failures, circuit opens (blocks requests for 60 seconds)
+- Prevents flooding server during outages
+- Automatically transitions to HALF_OPEN for retry
+
+**Degraded Mode:** ESP continues operating with raw data. MQTT payload includes `raw_value` even if processing failed, allowing God-Kaiser to process offline if needed.
 
 ---
 
@@ -627,9 +775,12 @@ errorTracker.trackError(ERROR_SENSOR_READ_FAILED,
 
 | Allocation | Size | Scope |
 |------------|------|-------|
-| SensorReading struct | ~48 bytes | Per sensor |
-| JSON payload buffer | ~384 bytes | Temporary |
-| I2C buffer | ~32 bytes | Temporary |
+| SensorReading struct | ~48 bytes | Per sensor (stack) |
+| JSON payload buffer | ~384 bytes | Temporary (String with reserve) |
+| I2C buffer | ~6-32 bytes | Temporary (per sensor type) |
+| OneWire scratchpad | ~9 bytes | Temporary (DS18B20) |
+| RawSensorData struct | ~24 bytes | Temporary (HTTP request) |
+| ProcessedSensorData struct | ~32 bytes | Temporary (HTTP response) |
 
 **Total per measurement:** ~500 bytes stack
 
@@ -642,9 +793,17 @@ errorTracker.trackError(ERROR_SENSOR_READ_FAILED,
 - MQTT offline buffer: 100 × MQTTMessage = ~25KB
 
 **Dynamic Allocations:**
-- JSON payload: ~256 bytes (temporary, freed immediately)
+- JSON payload: ~256-384 bytes (temporary, freed immediately after publish)
+- HTTP request payload: ~128-256 bytes (temporary, freed after HTTP call)
+- HTTP response buffer: Variable (managed by HTTPClient)
 
-**Total:** ~26KB baseline + temporary allocations
+**Total:** ~26KB baseline + temporary allocations (freed immediately)
+
+**Memory Management:**
+- All String objects use `reserve()` to prevent reallocation
+- Temporary objects are stack-allocated and automatically freed
+- No malloc()/free() in hot path
+- HTTPClient manages its own buffers (not counted in SensorManager)
 
 ---
 
@@ -688,15 +847,25 @@ errorTracker.trackError(ERROR_SENSOR_READ_FAILED,
 ### Bandwidth
 
 **Per Message:**
-- Topic: ~60 bytes
-- Payload: ~256 bytes
-- Total: ~316 bytes
+- Topic: ~60-80 bytes (depends on kaiser_id and esp_id length)
+  - Pattern: `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data`
+  - Example: `kaiser/god/esp/ESP_AB12CD/sensor/4/data` = 47 bytes
+- Payload: ~256-384 bytes (depends on zone_id, subzone_id, sensor_name lengths)
+  - Minimum: ~200 bytes (short IDs, no subzone)
+  - Typical: ~300 bytes (with zone and subzone)
+  - Maximum: ~400 bytes (long zone names, sensor names)
+- Total: ~316-464 bytes per message
 
 **Per Day (5 sensors, 30s interval):**
-- 14,400 messages × 316 bytes = 4.5 MB/day
-- ~135 MB/month
+- 14,400 messages × 350 bytes (average) = 5.0 MB/day
+- ~150 MB/month
 
-**Scalable:** 100 ESPs × 5 sensors = 450 MB/month (manageable)
+**Scalable:** 100 ESPs × 5 sensors = 500 MB/month (manageable for modern MQTT brokers)
+
+**Network Considerations:**
+- MQTT QoS 1 ensures delivery but may cause duplicates
+- Broker should handle ~0.17 messages/second per ESP
+- 100 ESPs = ~17 messages/second (well within broker capacity)
 
 ---
 
@@ -828,10 +997,15 @@ After sensor reading:
 
 ## Related Documentation
 
-- [Boot Sequence](01-boot-sequence.md) - Sensor Manager initialization
-- `docs/API_REFERENCE.md` - SensorManager API
-- `docs/NVS_KEYS.md` - Sensor config persistence
-- `src/models/sensor_types.h` - Sensor data structures
+- [Boot Sequence](01-boot-sequence.md) - Sensor Manager initialization (Phase 4)
+- [MQTT Message Routing](06-mqtt-message-routing-flow.md) - Message dispatch and handler coordination
+- [Runtime Sensor Config Flow](04-runtime-sensor-config-flow.md) - Dynamic sensor configuration via MQTT
+- `docs/API_REFERENCE.md` - SensorManager API documentation
+- `docs/NVS_KEYS.md` - Sensor config persistence in NVS
+- `src/models/sensor_types.h` - Sensor data structures (SensorConfig, SensorReading)
+- `src/services/sensor/pi_enhanced_processor.h` - Pi-Enhanced Processor interface
+- `src/drivers/i2c_bus.h` - I2C Bus Manager interface
+- `src/drivers/onewire_bus.h` - OneWire Bus Manager interface
 
 ---
 

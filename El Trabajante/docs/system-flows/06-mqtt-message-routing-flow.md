@@ -8,9 +8,15 @@ Central MQTT message dispatch system that routes incoming messages to appropriat
 
 - `src/main.cpp` (lines 344-492) - Complete MQTT callback lambda
 - `src/main.cpp` (lines 321-342) - Topic subscriptions
+- `src/main.cpp` (lines 674-831) - Sensor/Actuator config handlers
 - `src/services/communication/mqtt_client.cpp` (lines 1-603) - MQTT client implementation
+- `src/services/communication/mqtt_client.cpp` (lines 585-602) - Static callback bridge
 - `src/services/communication/mqtt_client.h` (lines 1-136) - MQTT client interface
 - `src/utils/topic_builder.cpp` (lines 1-146) - Topic pattern generation
+- `src/utils/topic_builder.h` (lines 1-40) - Topic builder interface
+- `src/services/actuator/actuator_manager.cpp` (lines 626-694) - Actuator config handler
+- `src/services/actuator/safety_controller.cpp` (lines 37-48) - Emergency stop implementation
+- `src/services/config/config_response.cpp` (lines 1-73) - Config response builder
 
 ## Prerequisites
 
@@ -74,7 +80,7 @@ LOG_INFO("Subscribed to system + actuator + zone assignment topics");
 
 ### STEP 1: PubSubClient Receives Message
 
-**File:** `src/services/communication/mqtt_client.cpp` (static callback)
+**File:** `src/services/communication/mqtt_client.cpp` (lines 67-78, 585-602)
 
 **Process:**
 1. MQTT broker sends message to ESP32
@@ -85,11 +91,46 @@ LOG_INFO("Subscribed to system + actuator + zone assignment topics");
 **Callback Registration:**
 
 ```cpp
-void MQTTClient::begin() {
+// File: src/services/communication/mqtt_client.cpp (lines 67-78)
+bool MQTTClient::begin() {
+    if (initialized_) {
+        LOG_WARNING("MQTTClient already initialized");
+        return true;
+    }
+    
     mqtt_.setCallback(staticCallback);
-    // ...
+    
+    initialized_ = true;
+    LOG_INFO("MQTTClient initialized");
+    return true;
 }
 ```
+
+**Static Callback Bridge:**
+
+```cpp
+// File: src/services/communication/mqtt_client.cpp (lines 585-602)
+void MQTTClient::staticCallback(char* topic, byte* payload, unsigned int length) {
+    if (!instance_) {
+        return;
+    }
+    
+    // Convert to String
+    String topic_str = String(topic);
+    String payload_str;
+    payload_str.reserve(length);
+    for (unsigned int i = 0; i < length; i++) {
+        payload_str += (char)payload[i];
+    }
+    
+    // Call user callback
+    if (instance_->message_callback_) {
+        instance_->message_callback_(topic_str, payload_str);
+    }
+}
+```
+
+**Note:** The static callback is necessary because PubSubClient requires a C-style function pointer. The singleton instance pointer (`instance_`) is set during `getInstance()` call.
 
 ---
 
@@ -113,6 +154,42 @@ mqttClient.setCallback([](const String& topic, const String& payload) {
 - DEBUG level: Full payload (can be disabled in production)
 
 **Router Logic:** Sequential if-else chain matching topic patterns
+
+**Handler Priority Order:**
+
+The routing logic uses a sequential if-else chain, so the order matters:
+
+1. **Configuration Messages** (checked first - most common)
+2. **Actuator Commands** (wildcard prefix match)
+3. **ESP Emergency Stop** (exact match)
+4. **Broadcast Emergency** (exact match)
+5. **System Commands** (exact match)
+6. **Zone Assignment** (exact match)
+
+**Why This Order:**
+- Configuration messages are most frequent and should be processed quickly
+- Emergency stops are checked before system commands (safety priority)
+- Exact matches are checked after prefix matches (more specific first)
+
+**Routing Flow Diagram:**
+
+```
+MQTT Message Received
+        ↓
+[1] Config Topic? → YES → handleSensorConfig() + handleActuatorConfig() → RETURN
+        ↓ NO
+[2] Actuator Command Prefix? → YES → actuatorManager.handleActuatorCommand() → RETURN
+        ↓ NO
+[3] ESP Emergency Topic? → YES → safetyController.emergencyStopAll() → RETURN
+        ↓ NO
+[4] Broadcast Emergency Topic? → YES → safetyController.emergencyStopAll() → RETURN
+        ↓ NO
+[5] System Command Topic? → YES → Process System Command → RETURN
+        ↓ NO
+[6] Zone Assignment Topic? → YES → Process Zone Assignment → RETURN
+        ↓ NO
+[7] Unknown Topic → Log INFO → Ignore → RETURN
+```
 
 ---
 
@@ -169,10 +246,197 @@ if (topic == config_topic) {
 1. `handleSensorConfig(payload)` - Processes sensor array
 2. `handleActuatorConfig(payload)` - Processes actuator array
 
-**Details:** See [Runtime Sensor Config Flow](04-runtime-sensor-config-flow.md) and [Runtime Actuator Config Flow](05-runtime-actuator-config-flow.md)
+**Handler Implementation:**
 
-**Response Topics:**
-- `kaiser/{kaiser_id}/esp/{esp_id}/config_response`
+**File:** `src/main.cpp` (lines 674-826)
+
+```cpp
+// File: src/main.cpp (lines 674-716)
+void handleSensorConfig(const String& payload) {
+  LOG_INFO("Handling sensor configuration from MQTT");
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    String message = "Failed to parse sensor config JSON: " + String(error.c_str());
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::JSON_PARSE_ERROR, message);
+    return;
+  }
+
+  JsonArray sensors = doc["sensors"].as<JsonArray>();
+  if (sensors.isNull()) {
+    String message = "Sensor config missing 'sensors' array";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message);
+    return;
+  }
+
+  size_t total = sensors.size();
+  if (total == 0) {
+    String message = "Sensor config array is empty";
+    LOG_WARNING(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message);
+    return;
+  }
+
+  uint8_t success_count = 0;
+  for (JsonObject sensorObj : sensors) {
+    if (parseAndConfigureSensor(sensorObj)) {
+      success_count++;
+    }
+  }
+
+  if (success_count == total) {
+    String message = "Configured " + String(success_count) + " sensor(s) successfully";
+    ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, success_count, message);
+  }
+}
+```
+
+**File:** `src/main.cpp` (lines 828-831)
+
+```cpp
+// File: src/main.cpp (lines 828-831)
+void handleActuatorConfig(const String& payload) {
+  LOG_INFO("Handling actuator configuration from MQTT");
+  actuatorManager.handleActuatorConfig(payload);
+}
+```
+
+**Actuator Config Handler:**
+
+**File:** `src/services/actuator/actuator_manager.cpp` (lines 626-694)
+
+```cpp
+// File: src/services/actuator/actuator_manager.cpp (lines 626-694)
+bool ActuatorManager::handleActuatorConfig(const String& payload) {
+  LOG_INFO("Handling actuator configuration from MQTT");
+
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    String message = "Failed to parse actuator config JSON: " + String(error.c_str());
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::ACTUATOR, ConfigErrorCode::JSON_PARSE_ERROR, message);
+    return false;
+  }
+
+  JsonArray actuators = doc["actuators"].as<JsonArray>();
+  if (actuators.isNull()) {
+    String message = "Actuator config missing 'actuators' array";
+    LOG_ERROR(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message);
+    return false;
+  }
+
+  size_t total = actuators.size();
+  if (total == 0) {
+    String message = "Actuator config array is empty";
+    LOG_WARNING(message);
+    ConfigResponseBuilder::publishError(
+        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message);
+    return false;
+  }
+  
+  uint8_t configured = 0;
+  for (JsonObject actuatorObj : actuators) {
+    ActuatorConfig config;
+    String parse_error;
+    ConfigErrorCode error_code = ConfigErrorCode::NONE;
+    JsonVariantConst failed_variant = actuatorObj;
+    JsonObjectConst actuatorObjConst = actuatorObj;
+
+    if (!parseActuatorDefinition(actuatorObjConst, config, parse_error, error_code)) {
+      if (parse_error.isEmpty()) {
+        parse_error = "Invalid actuator definition";
+      }
+      if (error_code == ConfigErrorCode::NONE) {
+        error_code = ConfigErrorCode::VALIDATION_FAILED;
+      }
+      ConfigResponseBuilder::publishError(
+          ConfigType::ACTUATOR, error_code, parse_error, failed_variant);
+      continue;
+    }
+
+    if (!configureActuator(config)) {
+      String message = "Failed to configure actuator on GPIO " + String(config.gpio);
+      LOG_ERROR(message);
+      ConfigResponseBuilder::publishError(
+          ConfigType::ACTUATOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant);
+      continue;
+    }
+
+    configured++;
+  }
+
+  if (configured == total) {
+    String message = "Configured " + String(configured) + " actuator(s) successfully";
+    ConfigResponseBuilder::publishSuccess(ConfigType::ACTUATOR, configured, message);
+    return true;
+  }
+
+  return configured > 0;
+}
+```
+
+**Config Response Publishing:**
+
+**File:** `src/services/config/config_response.cpp` (lines 35-48)
+
+```cpp
+// File: src/services/config/config_response.cpp (lines 35-48)
+bool ConfigResponseBuilder::publish(const ConfigResponsePayload& payload) {
+  String json_payload = buildJsonPayload(payload);
+  String topic = String(TopicBuilder::buildConfigResponseTopic());
+
+  bool published = mqttClient.safePublish(topic, json_payload, 1);
+  if (published) {
+    LOG_INFO("ConfigResponse published [" + String(configTypeToString(payload.type)) +
+             "] status=" + String(configStatusToString(payload.status)));
+  } else {
+    LOG_ERROR("ConfigResponse publish failed for topic: " + topic);
+  }
+
+  return published;
+}
+```
+
+**Response Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/config_response`
+
+**Response Payload Format:**
+
+```json
+{
+  "status": "success",
+  "type": "sensor",
+  "count": 3,
+  "message": "Configured 3 sensor(s) successfully"
+}
+```
+
+**Error Response Format:**
+
+```json
+{
+  "status": "error",
+  "type": "sensor",
+  "count": 0,
+  "message": "Sensor config missing required field 'gpio'",
+  "error_code": "MISSING_FIELD",
+  "failed_item": {
+    "sensor_type": "temp_ds18b20",
+    "sensor_name": "Temperature Sensor"
+  }
+}
+```
+
+**Details:** See [Runtime Sensor Config Flow](04-runtime-sensor-config-flow.md) and [Runtime Actuator Config Flow](05-runtime-actuator-config-flow.md)
 
 **QoS:** 1 (at least once)
 
@@ -206,19 +470,43 @@ if (topic.startsWith(actuator_command_prefix)) {
 
 ```json
 {
-  "command": "set_state",
-  "value": 1,
+  "command": "ON",
+  "value": 1.0,
+  "duration": 0,
   "timestamp": 1234567890,
   "command_id": "cmd_abc123"
 }
 ```
 
 **Commands Supported:**
-- `set_state` - Binary ON/OFF (value: 0 or 1)
-- `set_pwm` - PWM duty cycle (value: 0-255)
-- `emergency_stop` - Immediate stop
+
+| Command | Description | Value Range | Handler Method |
+|---------|-------------|-------------|----------------|
+| `ON` | Turn actuator on | Ignored | `controlActuatorBinary(gpio, true)` |
+| `OFF` | Turn actuator off | Ignored | `controlActuatorBinary(gpio, false)` |
+| `PWM` | Set PWM duty cycle | 0.0 - 1.0 | `controlActuator(gpio, value)` |
+| `TOGGLE` | Toggle current state | Ignored | `controlActuatorBinary(gpio, !current_state)` |
 
 **Handler:** `actuatorManager.handleActuatorCommand(topic, payload)`
+
+**Topic Matching Logic:**
+
+```cpp
+// File: src/main.cpp (lines 357-363)
+// Actuator commands
+String actuator_command_prefix = String(TopicBuilder::buildActuatorCommandTopic(0));
+actuator_command_prefix.replace("/0/command", "/");
+if (topic.startsWith(actuator_command_prefix)) {
+  actuatorManager.handleActuatorCommand(topic, payload);
+  return;
+}
+```
+
+**Example Topic Matching:**
+- Built prefix: `kaiser/god/esp/ESP_AB12CD/actuator/`
+- Incoming topic: `kaiser/god/esp/ESP_AB12CD/actuator/5/command`
+- Match: ✅ `startsWith()` returns true
+- GPIO extracted: `5` (from topic parsing in ActuatorManager)
 
 **Details:** See [Actuator Command Flow](03-actuator-command-flow.md)
 
@@ -256,17 +544,47 @@ if (topic == esp_emergency_topic) {
 2. All actuators immediately stopped
 3. Emergency state persists until cleared
 
-**Safety Behavior:**
-- Stops ALL actuators on this ESP
-- Sets emergency flag on SafetyController
-- Prevents any actuator commands until cleared
-- Publishes emergency status to MQTT
+**Safety Controller Implementation:**
 
-**Clear Emergency:** Requires separate command via system topic or manual intervention
+**File:** `src/services/actuator/safety_controller.cpp` (lines 37-48)
+
+```cpp
+// File: src/services/actuator/safety_controller.cpp (lines 37-48)
+bool SafetyController::emergencyStopAll(const String& reason) {
+    if (!initialized_ && !begin()) {
+        return false;
+    }
+
+    emergency_state_ = EmergencyState::EMERGENCY_ACTIVE;
+    emergency_reason_ = reason;
+    emergency_timestamp_ = millis();
+    logEmergencyEvent(reason, 255);
+
+    return actuatorManager.emergencyStopAll();
+}
+```
+
+**Safety Behavior:**
+- Stops ALL actuators on this ESP via `actuatorManager.emergencyStopAll()`
+- Sets emergency flag on SafetyController (`EMERGENCY_ACTIVE`)
+- Logs emergency event with reason and timestamp
+- Prevents any actuator commands until cleared (checked in ActuatorManager)
+- Publishes emergency status to MQTT (via ActuatorManager alert topics)
+
+**Emergency State Machine:**
+
+| State | Description | Can Receive Commands |
+|-------|-------------|---------------------|
+| `EMERGENCY_NORMAL` | Normal operation | Yes |
+| `EMERGENCY_ACTIVE` | Emergency active | No |
+| `EMERGENCY_CLEARING` | Verification in progress | No |
+| `EMERGENCY_RESUMING` | Resuming operation | No |
+
+**Clear Emergency:** Requires separate command via system topic or manual intervention via `safetyController.clearEmergencyStop()`
 
 **QoS:** 1 (at least once)
 
-**Priority:** Highest - bypasses all other processing
+**Priority:** Highest - bypasses all other processing (checked before actuator command execution)
 
 ---
 
@@ -296,18 +614,51 @@ if (topic == broadcast_emergency_topic) {
 2. All actuators immediately stopped
 3. Emergency state persists
 
+**Implementation:**
+
+```cpp
+// File: src/main.cpp (lines 372-377)
+// Broadcast emergency
+String broadcast_emergency_topic = String(TopicBuilder::buildBroadcastEmergencyTopic());
+if (topic == broadcast_emergency_topic) {
+  safetyController.emergencyStopAll("Broadcast emergency");
+  return;
+}
+```
+
+**Topic Building:**
+
+**File:** `src/utils/topic_builder.cpp` (lines 140-145)
+
+```cpp
+// File: src/utils/topic_builder.cpp (lines 140-145)
+const char* TopicBuilder::buildBroadcastEmergencyTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/broadcast/emergency");
+  return validateTopicBuffer(written);
+}
+```
+
 **Use Cases:**
 - System-wide emergency (fire, flood, etc.)
 - Critical sensor failure detected by God-Kaiser
 - Manual emergency stop button on control panel
+- Network-wide safety shutdown
 
 **Difference from ESP Emergency:**
-- Broadcast affects ALL ESPs
-- ESP Emergency affects only one ESP
+
+| Aspect | Broadcast Emergency | ESP Emergency |
+|--------|---------------------|---------------|
+| Topic Pattern | `kaiser/broadcast/emergency` | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency` |
+| Scope | ALL ESPs in system | Single ESP only |
+| Subscription | All ESPs subscribe | ESP-specific subscription |
+| Use Case | Global safety event | Local ESP issue |
 
 **QoS:** 1 (at least once)
 
 **Retained:** False (emergency is time-sensitive, not persistent)
+
+**Note:** Broadcast emergency is processed identically to ESP emergency - both call `safetyController.emergencyStopAll()` with different reason strings for logging purposes.
 
 ---
 
@@ -388,8 +739,24 @@ if (topic == system_command_topic) {
 8. Reboot ESP
 
 **NVS Operations:**
-- **Namespaces Cleared:** `wifi_config`, `zone_config`
-- **Preserved:** Sensor/actuator configs (optional - could be added)
+
+**File:** `src/main.cpp` (lines 401-404)
+
+```cpp
+// Clear configs
+configManager.resetWiFiConfig();
+KaiserZone kaiser;
+MasterZone master;
+configManager.saveZoneConfig(kaiser, master);
+```
+
+- **Namespaces Cleared:** 
+  - `wifi_config` - WiFi credentials and MQTT settings
+  - `zone_config` - Kaiser and zone assignments
+- **Preserved:** 
+  - `sensor_config` - Sensor configurations (not cleared)
+  - `actuator_config` - Actuator configurations (not cleared)
+  - `system_config` - System settings (not cleared)
 
 **Response Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/command/response`
 
@@ -402,9 +769,23 @@ if (topic == system_command_topic) {
 }
 ```
 
+**Response Publishing:**
+
+```cpp
+// File: src/main.cpp (lines 396-398)
+// Acknowledge command
+String response = "{\"status\":\"factory_reset_initiated\",\"esp_id\":\"" + 
+                configManager.getESPId() + "\"}";
+mqttClient.publish(system_command_topic + "/response", response);
+```
+
 **Safety:** Requires explicit `confirm: true` to prevent accidental resets
 
+**Reboot Delay:** 3 seconds (allows acknowledgment to be published before ESP restarts)
+
 **QoS:** 1 (at least once)
+
+**Note:** After factory reset, ESP reboots and enters provisioning mode if WiFi config is empty (see Boot Sequence Phase 6).
 
 ---
 
@@ -581,6 +962,48 @@ if (topic == zone_assign_topic) {
 
 **Current Implementation:** All handlers execute synchronously, but operations are fast (<100ms typical)
 
+**Callback Thread Safety:**
+
+- **Single-threaded:** ESP32 Arduino core runs on single thread
+- **No preemption:** Callback executes to completion before next message
+- **Blocking:** Long operations in callback block MQTT processing
+- **Best Practice:** Keep handlers fast, use flags for heavy processing in main loop
+
+**Example of Non-blocking Pattern (if needed):**
+
+```cpp
+// ❌ BAD: Blocking delay in callback
+mqttClient.setCallback([](const String& topic, const String& payload) {
+  delay(5000);  // Blocks MQTT processing for 5 seconds!
+  // ...
+});
+
+// ✅ GOOD: Set flag, process in main loop
+bool process_config_flag = false;
+String config_payload;
+
+mqttClient.setCallback([](const String& topic, const String& payload) {
+  if (topic == config_topic) {
+    process_config_flag = true;
+    config_payload = payload;  // Copy payload
+  }
+});
+
+void loop() {
+  mqttClient.loop();
+  
+  if (process_config_flag) {
+    process_config_flag = false;
+    handleSensorConfig(config_payload);  // Process in main loop
+  }
+}
+```
+
+**Note:** Current implementation processes all handlers synchronously in callback, which is acceptable because:
+- Handlers are fast (<100ms)
+- MQTT keepalive is 60 seconds (plenty of time)
+- No heavy operations in callbacks
+
 ---
 
 ### JSON Parsing
@@ -615,7 +1038,24 @@ if (error) {
 
 **Log Message:** "MQTT message received: {topic}" (INFO level only)
 
+**Code:**
+
+```cpp
+// File: src/main.cpp (lines 344-492)
+mqttClient.setCallback([](const String& topic, const String& payload) {
+  LOG_INFO("MQTT message received: " + topic);
+  LOG_DEBUG("Payload: " + payload);
+  
+  // Handler chain - if no handler matches, message is ignored
+  // ...
+  
+  // Additional message handlers can be added here
+});
+```
+
 **Recovery:** None needed - not an error condition
+
+**Note:** Messages on unsubscribed topics are filtered by MQTT broker and never reach the ESP32 callback.
 
 ---
 
@@ -638,11 +1078,73 @@ if (error) {
 **Behavior:** Handler returns false or logs error → No retry
 
 **Examples:**
-- Sensor config validation fails → Error response published
-- Actuator GPIO conflict → Error response published
-- NVS write fails → Error logged, continue
 
-**Recovery:** Depends on handler - most publish error responses
+1. **Sensor Config Validation Fails:**
+
+```cpp
+// File: src/main.cpp (lines 785-791)
+if (!configManager.validateSensorConfig(config)) {
+  String message = "Sensor validation failed for GPIO " + String(config.gpio);
+  LOG_ERROR(message);
+  ConfigResponseBuilder::publishError(
+      ConfigType::SENSOR, ConfigErrorCode::VALIDATION_FAILED, message, failed_variant);
+  return false;
+}
+```
+
+2. **Actuator GPIO Conflict:**
+
+```cpp
+// File: src/services/actuator/actuator_manager.cpp
+if (!gpio_manager_->isPinAvailable(config.gpio)) {
+  LOG_ERROR("ActuatorManager: GPIO " + String(config.gpio) + " not available");
+  ConfigResponseBuilder::publishError(
+      ConfigType::ACTUATOR, ConfigErrorCode::VALIDATION_FAILED, 
+      "GPIO conflict", failed_variant);
+  return false;
+}
+```
+
+3. **NVS Write Fails:**
+
+```cpp
+// File: src/main.cpp (lines 816-822)
+if (!configManager.saveSensorConfig(config)) {
+  String message = "Failed to save sensor config to NVS for GPIO " + String(config.gpio);
+  LOG_ERROR(message);
+  ConfigResponseBuilder::publishError(
+      ConfigType::SENSOR, ConfigErrorCode::NVS_WRITE_FAILED, message, failed_variant);
+  return false;
+}
+```
+
+**Recovery:** Depends on handler - most publish error responses via `ConfigResponseBuilder::publishError()`
+
+**Error Response Publishing:**
+
+**File:** `src/services/config/config_response.cpp` (lines 16-33)
+
+```cpp
+// File: src/services/config/config_response.cpp (lines 16-33)
+bool ConfigResponseBuilder::publishError(ConfigType type,
+                                         ConfigErrorCode error_code,
+                                         const String& message,
+                                         JsonVariantConst failed_item) {
+  ConfigResponsePayload payload;
+  payload.status = ConfigStatus::ERROR;
+  payload.type = type;
+  payload.count = 0;
+  payload.message = message;
+  payload.error_code = String(configErrorCodeToString(error_code));
+  payload.failed_item.clear();
+
+  if (!failed_item.isNull()) {
+    payload.failed_item.set(failed_item);
+  }
+
+  return publish(payload);
+}
+```
 
 ---
 
@@ -671,9 +1173,70 @@ void loop() {
 - Handle reconnection if disconnected
 
 **Heartbeat:**
-- Sent every 60 seconds
-- Topic: `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat`
-- Includes ESP status, memory, uptime, zone info
+
+**File:** `src/services/communication/mqtt_client.cpp` (lines 380-408)
+
+```cpp
+// File: src/services/communication/mqtt_client.cpp (lines 380-408)
+void MQTTClient::publishHeartbeat() {
+    unsigned long current_time = millis();
+    
+    if (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS) {
+        return;
+    }
+    
+    last_heartbeat_ = current_time;
+    
+    // Build heartbeat topic
+    const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
+    
+    // Build heartbeat payload (JSON) - Phase 7: Enhanced with Zone Info
+    String payload = "{";
+    payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+    payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
+    payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
+    payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
+    payload += "\"ts\":" + String(current_time) + ",";
+    payload += "\"uptime\":" + String(millis() / 1000) + ",";
+    payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
+    payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
+    payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
+    payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount());
+    payload += "}";
+    
+    // Publish with QoS 0 (heartbeat doesn't need guaranteed delivery)
+    publish(topic, payload, 0);
+}
+```
+
+- **Interval:** 60 seconds (`HEARTBEAT_INTERVAL_MS`)
+- **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat`
+- **QoS:** 0 (heartbeat doesn't need guaranteed delivery)
+- **Payload Includes:**
+  - `esp_id` - ESP identifier
+  - `zone_id` - Current zone assignment (Phase 7)
+  - `master_zone_id` - Master zone ID (Phase 7)
+  - `zone_assigned` - Boolean zone assignment status (Phase 7)
+  - `ts` - Timestamp (millis)
+  - `uptime` - System uptime in seconds
+  - `heap_free` - Free heap memory in bytes
+  - `wifi_rssi` - WiFi signal strength
+  - `sensor_count` - Number of active sensors
+  - `actuator_count` - Number of active actuators
+
+**Heartbeat Topic Building:**
+
+**File:** `src/utils/topic_builder.cpp` (lines 108-114)
+
+```cpp
+// File: src/utils/topic_builder.cpp (lines 108-114)
+const char* TopicBuilder::buildSystemHeartbeatTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/system/heartbeat",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+```
 
 ---
 
@@ -698,9 +1261,31 @@ void loop() {
 
 ### Memory Usage
 
-- **Stack per callback:** ~2-5KB (JSON buffers)
-- **Heap per callback:** 0KB (statically allocated)
-- **MQTT client buffer:** 256 bytes (message payload limit: configurable)
+**Stack Allocation per Callback:**
+
+| Handler | JSON Buffer Size | Total Stack |
+|---------|------------------|------------|
+| Sensor Config | 4096 bytes | ~4.5KB |
+| Actuator Config | 4096 bytes | ~4.5KB |
+| Zone Assignment | 512 bytes | ~1KB |
+| System Command | 256 bytes | ~0.5KB |
+| Actuator Command | ~256 bytes (parsing) | ~0.5KB |
+| Emergency Stop | 0 bytes | ~0.1KB |
+
+**Heap Allocation:**
+- **Per callback:** 0KB (all allocations are stack-based)
+- **MQTT client buffer:** 256 bytes (PubSubClient internal buffer)
+- **Offline buffer:** 100 messages × ~300 bytes = ~30KB (static allocation)
+
+**Memory Management:**
+- JSON documents are stack-allocated and automatically freed when handler returns
+- String concatenation uses stack-allocated buffers
+- No dynamic memory allocation in message handlers (prevents fragmentation)
+
+**Memory Limits:**
+- Maximum payload size: Limited by PubSubClient buffer (default 256 bytes, configurable)
+- Maximum JSON document: 4096 bytes (sensor/actuator config)
+- Maximum offline messages: 100 (defined in `MQTTClient::MAX_OFFLINE_MESSAGES`)
 
 ---
 
@@ -825,12 +1410,118 @@ From MQTT routing, messages are dispatched to:
 
 ---
 
+## Topic Builder Details
+
+**File:** `src/utils/topic_builder.cpp` (lines 1-146)
+
+**Static Configuration:**
+
+```cpp
+// File: src/utils/topic_builder.cpp (lines 7-9)
+char TopicBuilder::topic_buffer_[256];
+char TopicBuilder::esp_id_[32] = "unknown";
+char TopicBuilder::kaiser_id_[64] = "god";
+```
+
+**Configuration Methods:**
+
+```cpp
+// File: src/utils/topic_builder.cpp (lines 14-22)
+void TopicBuilder::setEspId(const char* esp_id) {
+  strncpy(esp_id_, esp_id, sizeof(esp_id_) - 1);
+  esp_id_[sizeof(esp_id_) - 1] = '\0';
+}
+
+void TopicBuilder::setKaiserId(const char* kaiser_id) {
+  strncpy(kaiser_id_, kaiser_id, sizeof(kaiser_id_) - 1);
+  kaiser_id_[sizeof(kaiser_id_) - 1] = '\0';
+}
+```
+
+**Initialization:**
+
+**File:** `src/main.cpp` (lines 247-250)
+
+```cpp
+// File: src/main.cpp (lines 247-250)
+TopicBuilder::setEspId(g_system_config.esp_id.c_str());
+TopicBuilder::setKaiserId(g_kaiser.kaiser_id.c_str());
+
+LOG_INFO("TopicBuilder configured with ESP ID: " + g_system_config.esp_id);
+```
+
+**Dynamic Kaiser ID Update:**
+
+**File:** `src/main.cpp` (lines 448-455)
+
+```cpp
+// File: src/main.cpp (lines 448-455)
+if (kaiser_id.length() > 0) {
+  g_kaiser.kaiser_id = kaiser_id;
+  // Update TopicBuilder with new kaiser_id
+  TopicBuilder::setKaiserId(kaiser_id.c_str());
+}
+```
+
+**Buffer Validation:**
+
+**File:** `src/utils/topic_builder.cpp` (lines 27-46)
+
+```cpp
+// File: src/utils/topic_builder.cpp (lines 27-46)
+const char* TopicBuilder::validateTopicBuffer(int snprintf_result) {
+  // ✅ Check 1: Encoding error (snprintf returned negative)
+  if (snprintf_result < 0) {
+    LOG_ERROR("TopicBuilder: snprintf encoding error!");
+    return "";
+  }
+  
+  // ✅ Check 2: Buffer overflow (truncation occurred)
+  if (snprintf_result >= (int)sizeof(topic_buffer_)) {
+    LOG_ERROR("TopicBuilder: Topic truncated! Required: " + 
+              String(snprintf_result) + " bytes, buffer: " + 
+              String(sizeof(topic_buffer_)) + " bytes");
+    return "";
+  }
+  
+  // ✅ Success: Return buffer pointer
+  return topic_buffer_;
+}
+```
+
+**All Topic Patterns:**
+
+| Method | Pattern | Example |
+|--------|---------|---------|
+| `buildSensorDataTopic(gpio)` | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data` | `kaiser/god/esp/ESP_AB12CD/sensor/4/data` |
+| `buildSensorBatchTopic()` | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/batch` | `kaiser/god/esp/ESP_AB12CD/sensor/batch` |
+| `buildActuatorCommandTopic(gpio)` | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command` | `kaiser/god/esp/ESP_AB12CD/actuator/5/command` |
+| `buildActuatorStatusTopic(gpio)` | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status` | `kaiser/god/esp/ESP_AB12CD/actuator/5/status` |
+| `buildActuatorResponseTopic(gpio)` | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response` | `kaiser/god/esp/ESP_AB12CD/actuator/5/response` |
+| `buildActuatorAlertTopic(gpio)` | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert` | `kaiser/god/esp/ESP_AB12CD/actuator/5/alert` |
+| `buildActuatorEmergencyTopic()` | `kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency` | `kaiser/god/esp/ESP_AB12CD/actuator/emergency` |
+| `buildSystemHeartbeatTopic()` | `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat` | `kaiser/god/esp/ESP_AB12CD/system/heartbeat` |
+| `buildSystemCommandTopic()` | `kaiser/{kaiser_id}/esp/{esp_id}/system/command` | `kaiser/god/esp/ESP_AB12CD/system/command` |
+| `buildConfigTopic()` | `kaiser/{kaiser_id}/esp/{esp_id}/config` | `kaiser/god/esp/ESP_AB12CD/config` |
+| `buildConfigResponseTopic()` | `kaiser/{kaiser_id}/esp/{esp_id}/config_response` | `kaiser/god/esp/ESP_AB12CD/config_response` |
+| `buildBroadcastEmergencyTopic()` | `kaiser/broadcast/emergency` | `kaiser/broadcast/emergency` |
+
+**Note:** All topics use the static `topic_buffer_` which is reused for each call. The buffer is thread-safe for single-threaded ESP32 operation.
+
+---
+
 ## Related Documentation
 
-- [Boot Sequence](01-boot-sequence.md) - MQTT initialization
-- [Error Recovery Flow](07-error-recovery-flow.md) - Connection recovery
+- [Boot Sequence](01-boot-sequence.md) - MQTT initialization and topic subscription
+- [Actuator Command Flow](03-actuator-command-flow.md) - Detailed actuator command processing
+- [Runtime Sensor Config Flow](04-runtime-sensor-config-flow.md) - Sensor configuration details
+- [Runtime Actuator Config Flow](05-runtime-actuator-config-flow.md) - Actuator configuration details
+- [Error Recovery Flow](07-error-recovery-flow.md) - Connection recovery and circuit breaker
+- [Zone Assignment Flow](08-zone-assignment-flow.md) - Zone management details
 - `docs/MQTT_CLIENT_API.md` - MQTT client detailed API
 - `docs/Mqtt_Protocoll.md` - God-Kaiser MQTT protocol specification
+- `src/utils/topic_builder.h` - Topic builder interface
+- `src/services/config/config_response.h` - Config response builder interface
 
 ---
 
