@@ -17,6 +17,22 @@
 SensorManager& sensorManager = SensorManager::getInstance();
 
 // ============================================
+// CONSTRUCTOR / DESTRUCTOR
+// ============================================
+SensorManager::SensorManager()
+    : sensor_count_(0),
+      initialized_(false),
+      pi_processor_(nullptr),
+      mqtt_client_(nullptr),
+      i2c_bus_(nullptr),
+      onewire_bus_(nullptr),
+      gpio_manager_(nullptr) {}
+
+SensorManager::~SensorManager() {
+    end();
+}
+
+// ============================================
 // LIFECYCLE: INITIALIZATION
 // ============================================
 bool SensorManager::begin() {
@@ -338,6 +354,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     // Fill reading output
     reading_out.gpio = gpio;
     reading_out.sensor_type = config->sensor_type;
+    reading_out.subzone_id = config->subzone_id;
     reading_out.raw_value = raw_value;
     reading_out.processed_value = processed.value;
     reading_out.unit = processed.unit;

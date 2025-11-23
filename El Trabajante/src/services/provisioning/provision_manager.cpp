@@ -390,7 +390,7 @@ void ProvisionManager::enterSafeMode() {
   configManager.saveSystemConfig(sys_config);
   
   // Track error
-  errorTracker.trackError(ERROR_SYSTEM_SAFE_MODE_ENTERED, 
+  errorTracker.trackError(ERROR_SYSTEM_SAFE_MODE,
                          ERROR_SEVERITY_CRITICAL,
                          "Provisioning failed - Safe-Mode active");
   
@@ -433,7 +433,7 @@ bool ProvisionManager::startWiFiAP() {
   
   if (!success) {
     LOG_ERROR("Failed to start WiFi AP");
-    errorTracker.trackError(ERROR_WIFI_AP_FAILED, 
+    errorTracker.trackError(ERROR_WIFI_INIT_FAILED,
                            ERROR_SEVERITY_CRITICAL,
                            "WiFi.softAP() failed");
     return false;
@@ -825,11 +825,14 @@ void ProvisionManager::sendJsonSuccess(const String& message) {
   DynamicJsonDocument doc(256);
   doc["success"] = true;
   doc["message"] = message;
-  
+
   String response;
   serializeJson(doc, response);
-  
+
   server_->send(200, "application/json", response);
 }
 
+unsigned long ProvisionManager::getUptimeSeconds() const {
+  return millis() / 1000;
+}
 

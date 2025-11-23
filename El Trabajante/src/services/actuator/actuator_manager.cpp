@@ -223,7 +223,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
                  " → " + config.actuator_type);
         // Emergency stop before type change
         if (existing->driver) {
-          existing->driver->setState(false);
+          existing->driver->setBinary(false);
         }
       }
     }
@@ -293,7 +293,7 @@ bool ActuatorManager::removeActuator(uint8_t gpio) {
   // Phase 7: Safety - stop actuator before removal
   if (actuator->driver) {
     LOG_INFO("  Stopping actuator before removal");
-    actuator->driver->setState(false);
+    actuator->driver->setBinary(false);
     actuator->driver->end();
     actuator->driver.reset();
   }

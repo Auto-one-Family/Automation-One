@@ -52,10 +52,3 @@ private:
 };
 
 #endif  // SERVICES_ACTUATOR_DRIVERS_VALVE_ACTUATOR_H
-
-
-
-<<<<<<< HEAD
-
-=======
->>>>>>> aa0dd964d5868fbf152c5b845c9348c6571a298f

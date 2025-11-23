@@ -34,6 +34,7 @@ struct SensorConfig {
 struct SensorReading {
   uint8_t gpio;
   String sensor_type;
+  String subzone_id;                     // Subzone-Zuordnung (aus SensorConfig)
   uint32_t raw_value;                    // ADC-Wert
   float processed_value;                 // Vom Server zurückgegeben
   String unit;                           // Vom Server zurückgegeben

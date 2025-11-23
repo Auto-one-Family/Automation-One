@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "../../models/actuator_types.h"
+#include "../../models/error_codes.h"
 #include "actuator_drivers/iactuator_driver.h"
 
 class GPIOManager;
@@ -66,11 +67,9 @@ private:
     bool emergency_stopped = false;
   };
 
-#ifdef XIAO_ESP32C3
-  static const uint8_t MAX_ACTUATORS = 8;
-#else
-  static const uint8_t MAX_ACTUATORS = 12;
-#endif
+  #ifndef MAX_ACTUATORS
+    #define MAX_ACTUATORS 12  // Default fallback for ESP32 Dev
+  #endif
 
   ActuatorManager();
   ~ActuatorManager() = default;

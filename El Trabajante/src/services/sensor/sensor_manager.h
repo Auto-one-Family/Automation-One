@@ -2,6 +2,7 @@
 #define SERVICES_SENSOR_SENSOR_MANAGER_H
 
 #include <Arduino.h>
+#include "../../models/sensor_types.h"
 
 // ============================================
 // Sensor Manager - Phase 4 Foundation
@@ -14,9 +15,6 @@
 // - Coordinate I2C and OneWire sensor readings
 // - Provide raw data to PiEnhancedProcessor
 // - NO local sensor processing (Server-Centric!)
-
-// Forward declarations
-struct SensorConfig;
 
 // ============================================
 // SENSOR MANAGER CLASS
@@ -122,14 +120,12 @@ private:
     SensorManager();
     ~SensorManager();
 
-    // Prevent copy
-    SensorManager(const SensorManager&) = delete;
-    SensorManager& operator=(const SensorManager&) = delete;
-
     // ============================================
     // INTERNAL STATE
     // ============================================
-    static const uint8_t MAX_SENSORS = 10;
+    #ifndef MAX_SENSORS
+      #define MAX_SENSORS 10  // Default fallback if not defined in platformio.ini
+    #endif
     SensorConfig sensors_[MAX_SENSORS];
     uint8_t sensor_count_;
     bool initialized_;
