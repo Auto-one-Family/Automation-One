@@ -10,10 +10,11 @@ Complete API documentation for all Phase 1 modules. All modules follow a consist
 2. [StorageManager](#storagemanager)
 3. [ConfigManager](#configmanager)
 4. [ErrorTracker](#errortracker)
-5. [TopicBuilder](#topicbuilder)
-6. [GPIOManager](#gpiomanager)
-7. [Error Codes Reference](#error-codes-reference)
-8. [Type Definitions](#type-definitions)
+5. [HealthMonitor](#healthmonitor)
+6. [TopicBuilder](#topicbuilder)
+7. [GPIOManager](#gpiomanager)
+8. [Error Codes Reference](#error-codes-reference)
+9. [Type Definitions](#type-definitions)
 
 ---
 
@@ -902,6 +903,159 @@ errorTracker.clearErrors();
 
 ---
 
+## HealthMonitor
+
+### Header
+```cpp
+#include "error_handling/health_monitor.h"
+```
+
+Monitors system health metrics and publishes diagnostics snapshots via MQTT.
+
+### Initialization
+
+```cpp
+// Get singleton instance
+HealthMonitor& healthMonitor = HealthMonitor::getInstance();
+
+// Initialize HealthMonitor (must call in setup())
+bool healthMonitor.begin();
+
+// Configure publish interval (default: 60000ms = 60s)
+void healthMonitor.setPublishInterval(unsigned long interval_ms);
+
+// Enable/disable change detection (default: true)
+void healthMonitor.setChangeDetectionEnabled(bool enabled);
+```
+
+### Health Snapshot Generation
+
+```cpp
+// Get current health snapshot
+HealthSnapshot healthMonitor.getCurrentSnapshot() const;
+
+// Get snapshot as JSON string
+String healthMonitor.getSnapshotJSON() const;
+```
+
+### Publishing
+
+```cpp
+// Publish snapshot immediately (ignores change detection)
+void healthMonitor.publishSnapshot();
+
+// Publish snapshot only if significant changes detected
+void healthMonitor.publishSnapshotIfChanged();
+
+// Loop method (call in main loop for automatic publishing)
+void healthMonitor.loop();
+```
+
+### Status Getters
+
+```cpp
+// Get heap information
+uint32_t healthMonitor.getHeapFree() const;
+uint32_t healthMonitor.getHeapMinFree() const;
+uint8_t healthMonitor.getHeapFragmentation() const;
+
+// Get uptime
+unsigned long healthMonitor.getUptimeSeconds() const;
+```
+
+### HealthSnapshot Structure
+
+```cpp
+struct HealthSnapshot {
+    unsigned long timestamp;              // Seconds since boot
+    uint32_t heap_free;                   // Free heap (bytes)
+    uint32_t heap_min_free;               // Minimum free heap since boot
+    uint8_t heap_fragmentation_percent;  // Heap fragmentation (0-100)
+    unsigned long uptime_seconds;         // Uptime in seconds
+    size_t error_count;                   // Total error count from ErrorTracker
+    bool wifi_connected;                  // WiFi connection status
+    int8_t wifi_rssi;                    // WiFi signal strength (dBm)
+    bool mqtt_connected;                 // MQTT connection status
+    uint8_t sensor_count;                 // Active sensor count
+    uint8_t actuator_count;               // Active actuator count
+    SystemState system_state;             // Current system state
+};
+```
+
+### Change Detection
+
+HealthMonitor publishes snapshots automatically when:
+- **Heap change:** >20% relative change
+- **RSSI change:** >10 dBm absolute change
+- **Connection status:** WiFi or MQTT connection state changes
+- **Component count:** Sensor or actuator count changes
+- **System state:** SystemState changes
+- **Error count:** >5 errors since last publish
+
+**Thresholds:**
+- `HEAP_CHANGE_THRESHOLD_PERCENT = 20`
+- `RSSI_CHANGE_THRESHOLD_DBM = 10`
+
+### MQTT Integration
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics`  
+**QoS:** 0 (at most once)  
+**Frequency:** Every 60s (configurable) + on significant changes  
+**TopicBuilder:** `TopicBuilder::buildSystemDiagnosticsTopic()`
+
+**JSON Payload Example:**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "heap_free": 150000,
+  "heap_min_free": 120000,
+  "heap_fragmentation": 15,
+  "uptime_seconds": 3600,
+  "error_count": 3,
+  "wifi_connected": true,
+  "wifi_rssi": -65,
+  "mqtt_connected": true,
+  "sensor_count": 4,
+  "actuator_count": 2,
+  "system_state": "OPERATIONAL"
+}
+```
+
+### Usage Examples
+
+```cpp
+// Initialize in setup()
+healthMonitor.begin();
+healthMonitor.setPublishInterval(60000);  // 60 seconds
+healthMonitor.setChangeDetectionEnabled(true);
+
+// In main loop()
+void loop() {
+    healthMonitor.loop();  // Publishes automatically if needed
+}
+
+// Manual snapshot
+HealthSnapshot snapshot = healthMonitor.getCurrentSnapshot();
+LOG_INFO("Heap free: " + String(snapshot.heap_free) + " bytes");
+LOG_INFO("Uptime: " + String(snapshot.uptime_seconds) + " seconds");
+
+// Get JSON for custom publishing
+String json = healthMonitor.getSnapshotJSON();
+mqttClient.publish(custom_topic, json);
+```
+
+### Design Notes
+
+- **Singleton pattern:** Only one instance manages health monitoring
+- **Change detection:** Reduces MQTT traffic by publishing only on significant changes
+- **Automatic publishing:** `loop()` handles timing and change detection
+- **Dependencies:** Uses WiFiManager, MQTTClient, SensorManager, ActuatorManager, ErrorTracker
+- **Topic consistency:** Uses TopicBuilder for topic generation
+- **QoS 0:** Diagnostics are non-critical (next snapshot in 60s)
+
+---
+
 ## TopicBuilder
 
 ### Header
@@ -979,6 +1133,41 @@ static const char* TopicBuilder::buildBroadcastEmergencyTopic();
 // Example output: "/kaiser/Kaiser0/broadcast/emergency"
 ```
 
+#### Pattern 9: Actuator Response Topic (Phase 5)
+```cpp
+// Build topic for actuator command responses
+static const char* TopicBuilder::buildActuatorResponseTopic(uint8_t gpio);
+// Example output: "/kaiser/Kaiser0/esp/Esp0/actuator/gpio_5/response"
+```
+
+#### Pattern 10: Actuator Alert Topic (Phase 5)
+```cpp
+// Build topic for actuator alerts (emergency stops, errors, etc.)
+static const char* TopicBuilder::buildActuatorAlertTopic(uint8_t gpio);
+// Example output: "/kaiser/Kaiser0/esp/Esp0/actuator/gpio_5/alert"
+```
+
+#### Pattern 11: Actuator Emergency Topic (Phase 5)
+```cpp
+// Build topic for actuator emergency commands (subscribe)
+static const char* TopicBuilder::buildActuatorEmergencyTopic();
+// Example output: "/kaiser/Kaiser0/esp/Esp0/actuator/emergency"
+```
+
+#### Pattern 12: Config Response Topic
+```cpp
+// Build topic for configuration response (ACK/NACK)
+static const char* TopicBuilder::buildConfigResponseTopic();
+// Example output: "/kaiser/Kaiser0/esp/Esp0/config_response"
+```
+
+#### Pattern 13: System Diagnostics Topic (Phase 7)
+```cpp
+// Build topic for system diagnostics/health monitoring
+static const char* TopicBuilder::buildSystemDiagnosticsTopic();
+// Example output: "kaiser/god/esp/ESP_12AB34CD/system/diagnostics"
+```
+
 ### Static Buffers
 
 ```cpp
@@ -1038,9 +1227,12 @@ Where:
 
 - **Static class:** No instances, only static methods
 - **Buffer reuse:** Returns pointer to static buffer—copy if needed for later use
-- **Guard length:** 256-char buffer accommodates all Phase 1 patterns
+- **Guard length:** 256-char buffer accommodates all Phase 1-5 patterns
 - **Initialization required:** Must call `setEspId()` and `setKaiserId()` before generating topics
 - **No validation:** Topics are generated without checking ID format—ensure valid IDs are provided
+- **Buffer validation:** All methods use `validateTopicBuffer()` to detect truncation and encoding errors
+- **Phase 5 additions:** `buildActuatorResponseTopic()`, `buildActuatorAlertTopic()`, `buildActuatorEmergencyTopic()`, and `buildConfigResponseTopic()` added in Phase 5
+- **Phase 7 additions:** `buildSystemDiagnosticsTopic()` added in Phase 7
 
 ---
 
@@ -1501,6 +1693,7 @@ String esp_id = configManager.getESPId();
 | **StorageManager** | NVS abstraction (key-value storage) | Yes | `extern StorageManager& storageManager` |
 | **ConfigManager** | Configuration orchestration | Yes | `extern ConfigManager& configManager` |
 | **ErrorTracker** | Error tracking with categorization | Yes | `extern ErrorTracker& errorTracker` |
+| **HealthMonitor** | System health monitoring | Yes | `extern HealthMonitor& healthMonitor` |
 | **TopicBuilder** | MQTT topic generation | Static class (no instance) | `TopicBuilder::` prefix |
 | **GPIOManager** | GPIO safety & allocation | Yes | `extern GPIOManager& gpioManager` |
 
@@ -3158,8 +3351,8 @@ enum class EmergencyState : uint8_t {
 ---
 
 **Last Updated:** 2025-01-29  
-**Phase:** 1, 2, 3, 4 & 5 - Core Infrastructure + Communication + Hardware Abstraction + Sensor System + Actuator System  
-**Status:** Production Ready (Phase 0-5 Complete)
+**Phase:** 1, 2, 3, 4, 5 & 7 - Core Infrastructure + Communication + Hardware Abstraction + Sensor System + Actuator System + Error Handling & Health Monitoring  
+**Status:** Production Ready (Phase 0-5, 7 Complete)
 
 ---
 

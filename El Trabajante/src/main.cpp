@@ -9,6 +9,7 @@
 #include "services/config/config_manager.h"
 #include "services/config/config_response.h"
 #include "error_handling/error_tracker.h"
+#include "error_handling/health_monitor.h"
 #include "models/config_types.h"
 #include "models/error_codes.h"
 #include "utils/topic_builder.h"
@@ -508,6 +509,19 @@ void setup() {
   LOG_INFO("=====================");
   
   // ============================================
+  // STEP 10.5: PHASE 7 - HEALTH MONITOR
+  // ============================================
+  if (!healthMonitor.begin()) {
+    LOG_ERROR("HealthMonitor initialization failed!");
+    errorTracker.trackError(ERROR_SYSTEM_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                           "HealthMonitor begin() failed");
+  } else {
+    LOG_INFO("Health Monitor initialized");
+    healthMonitor.setPublishInterval(60000);  // 60 seconds
+    healthMonitor.setChangeDetectionEnabled(true);
+  }
+  
+  // ============================================
   // STEP 11: PHASE 3 - HARDWARE ABSTRACTION LAYER
   // ============================================
   LOG_INFO("╔════════════════════════════════════════╗");
@@ -651,19 +665,9 @@ void loop() {
   }
   
   // ============================================
-  // PHASE 6+: SYSTEM HEALTH MONITORING (every 5 minutes)
+  // PHASE 7: HEALTH MONITORING (automatic via HealthMonitor)
   // ============================================
-  static unsigned long last_health_check = 0;
-  if (millis() - last_health_check >= 300000) {  // 5 minutes
-    last_health_check = millis();
-    
-    LOG_INFO("=== System Health Check ===");
-    LOG_INFO("WiFi Status: " + wifiManager.getConnectionStatus());
-    LOG_INFO("MQTT Status: " + mqttClient.getConnectionStatus());
-    LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
-    LOG_INFO("Uptime: " + String(millis() / 1000) + " seconds");
-    LOG_INFO("==========================");
-  }
+  healthMonitor.loop();  // Publishes automatically if needed
   
   delay(10);  // Small delay to prevent watchdog issues
 }

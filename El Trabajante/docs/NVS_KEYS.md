@@ -162,7 +162,7 @@ storageManager.putBool("id_generated", kaiser.id_generated);
 
   - `sensor_{i}_name` (String) - Sensor-Name für UI
 
-  - `sensor_{i}_subzone` (String) - Subzone-Zuordnung (z.B. "zone_1", "zone_2")
+  - `sensor_{i}_subzone` (String) - Subzone-Zuordnung (z.B. "zone_1", "zone_2") (entspricht `subzone_id` im SensorConfig)
 
   - `sensor_{i}_active` (bool) - Aktiv?
 
@@ -184,7 +184,7 @@ storageManager.putBool("id_generated", kaiser.id_generated);
 
   - `actuator_{i}_name` (String) - Aktor-Name für UI
 
-  - `actuator_{i}_subzone` (String) - Subzone-Zuordnung
+  - `actuator_{i}_subzone` (String) - Subzone-Zuordnung (entspricht `subzone_id` im ActuatorConfig)
 
   - `actuator_{i}_active` (bool) - Aktiv?
 

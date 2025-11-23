@@ -78,7 +78,8 @@ kaiser/
 **QoS:** 1 (at least once)  
 **Retain:** false  
 **Frequency:** Alle 30s (konfigurierbar: 2s - 5min)  
-**Module:** `services/sensor/sensor_manager.cpp` → `services/communication/mqtt_client.cpp`
+**Module:** `services/sensor/sensor_manager.cpp` → `services/communication/mqtt_client.cpp`  
+**TopicBuilder:** `TopicBuilder::buildSensorDataTopic(uint8_t gpio)`
 
 **Payload-Schema:**
 ```json
@@ -138,12 +139,13 @@ kaiser/
 
 ### 2. Sensor-Batch (Mehrere Sensoren)
 
-**Topic:** `kaiser/god/esp/{esp_id}/sensor_batch`
+**Topic:** `kaiser/god/esp/{esp_id}/sensor/batch`
 
 **QoS:** 1  
 **Retain:** false  
 **Frequency:** Alle 60s (optional)  
-**Module:** `services/sensor/sensor_manager.cpp`
+**Module:** `services/sensor/sensor_manager.cpp`  
+**TopicBuilder:** `TopicBuilder::buildSensorBatchTopic()`
 
 **Payload-Schema:**
 ```json
@@ -178,7 +180,8 @@ kaiser/
 **QoS:** 0 (at most once, Latency-optimiert)  
 **Retain:** false  
 **Frequency:** Alle 60s (forced) + bei Zustandsänderung (change-detection)  
-**Module:** `core/main_loop.cpp`
+**Module:** `services/communication/mqtt_client.cpp` → `publishHeartbeat()`  
+**TopicBuilder:** `TopicBuilder::buildSystemHeartbeatTopic()`
 
 **Payload-Schema:**
 ```json
@@ -373,7 +376,8 @@ if (heap_change_percent > 20.0) {
 **QoS:** 1  
 **Retain:** false  
 **Frequency:** Bei Zustandsänderung (nach `setValue()` / `setBinary()` / Emergency)  
-**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorStatus()`
+**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorStatus()`  
+**TopicBuilder:** `TopicBuilder::buildActuatorStatusTopic(uint8_t gpio)`
 
 **Payload-Schema:**
 ```json
@@ -433,7 +437,8 @@ if (heap_change_percent > 20.0) {
 **QoS:** 1  
 **Retain:** false  
 **Frequency:** Nach jedem Actuator-Command (sofort)  
-**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorResponse()`
+**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorResponse()`  
+**TopicBuilder:** `TopicBuilder::buildActuatorResponseTopic(uint8_t gpio)`
 
 **Payload-Schema:**
 ```json
@@ -491,7 +496,8 @@ if (heap_change_percent > 20.0) {
 **QoS:** 1  
 **Retain:** false  
 **Frequency:** Bei Alert-Ereignissen (Emergency-Stop, Config-Fehler, Runtime-Protection)  
-**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorAlert()`
+**Module:** `services/actuator/actuator_manager.cpp` → `publishActuatorAlert()`  
+**TopicBuilder:** `TopicBuilder::buildActuatorAlertTopic(uint8_t gpio)`
 
 **Payload-Schema:**
 ```json
@@ -541,24 +547,40 @@ if (heap_change_percent > 20.0) {
 
 **Topic:** `kaiser/god/esp/{esp_id}/system/diagnostics`
 
-**QoS:** 1  
+**QoS:** 0 (at most once)  
 **Retain:** false  
-**Frequency:** Auf Anfrage oder alle 10min  
-**Module:** `error_handling/health_monitor.cpp`
+**Frequency:** Alle 60s (konfigurierbar) + bei signifikanten Änderungen  
+**Module:** `error_handling/health_monitor.cpp` → `HealthMonitor::loop()`  
+**TopicBuilder:** `TopicBuilder::buildSystemDiagnosticsTopic()`
 
 **Payload-Schema:**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "heap_free": 245760,
-  "heap_min": 200000,                  // Minimum Heap seit Boot
-  "uptime": 3600,
-  "wifi_rssi": -65,
-  "mqtt_reconnects": 2,                // Anzahl Reconnects
-  "error_count": 0                     // Fehler seit Boot
+  "ts": 1735818000,                      // Timestamp (seconds) - REQUIRED
+  "esp_id": "ESP_12AB34CD",              // ESP32 ID - REQUIRED
+  "heap_free": 150000,                   // Freier Heap (Bytes) - REQUIRED
+  "heap_min_free": 120000,               // Minimum Heap seit Boot - REQUIRED
+  "heap_fragmentation": 15,              // Heap-Fragmentierung (0-100) - REQUIRED
+  "uptime_seconds": 3600,                // Uptime in Sekunden - REQUIRED
+  "error_count": 3,                      // Fehler-Anzahl (ErrorTracker) - REQUIRED
+  "wifi_connected": true,                // WiFi-Verbindungsstatus - REQUIRED
+  "wifi_rssi": -65,                      // WiFi Signal (dBm) - REQUIRED
+  "mqtt_connected": true,                // MQTT-Verbindungsstatus - REQUIRED
+  "sensor_count": 4,                     // Anzahl aktive Sensoren - REQUIRED
+  "actuator_count": 2,                   // Anzahl aktive Aktoren - REQUIRED
+  "system_state": "OPERATIONAL"         // SystemState als String - REQUIRED
 }
 ```
+
+**Change-Detection-Regeln:**
+- Heap-Änderung >20% relativ
+- RSSI-Änderung >10 dBm absolut
+- Verbindungsstatus-Änderung (WiFi/MQTT)
+- Sensor/Aktuator-Count-Änderung
+- SystemState-Änderung
+- Error-Count-Änderung >5 Fehler
+
+**QoS 0 Begründung:** Diagnostik-Daten sind nicht kritisch, nächster Snapshot kommt in 60s. Latency-Optimierung wichtiger als Zuverlässigkeit.
 
 ---
 
@@ -1387,7 +1409,8 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/god/esp/{esp_id}/system/command`
 
 **QoS:** 1  
-**Handler:** `core/system_controller.cpp::handleSystemCommand()`
+**Handler:** `core/system_controller.cpp::handleSystemCommand()`  
+**TopicBuilder:** `TopicBuilder::buildSystemCommandTopic()`
 
 **Payload-Schema:**
 ```json
@@ -1436,7 +1459,8 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/god/esp/{esp_id}/actuator/{gpio}/command`
 
 **QoS:** 1  
-**Handler:** `services/actuator/actuator_manager.cpp::handleActuatorCommand()`
+**Handler:** `services/actuator/actuator_manager.cpp::handleActuatorCommand()`  
+**TopicBuilder:** `TopicBuilder::buildActuatorCommandTopic(uint8_t gpio)`
 
 **Payload-Schema:**
 ```json
@@ -1462,7 +1486,8 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/god/esp/{esp_id}/actuator/emergency`
 
 **QoS:** 1  
-**Handler:** `services/actuator/actuator_manager.cpp::handleEmergency()`
+**Handler:** `services/actuator/actuator_manager.cpp::handleEmergency()`  
+**TopicBuilder:** `TopicBuilder::buildActuatorEmergencyTopic()`
 
 **Payload-Schema:**
 ```json
@@ -1504,7 +1529,8 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/broadcast/emergency`
 
 **QoS:** 1  
-**Handler:** `services/actuator/actuator_manager.cpp::handleBroadcastEmergency()`
+**Handler:** `services/actuator/actuator_manager.cpp::handleBroadcastEmergency()`  
+**TopicBuilder:** `TopicBuilder::buildBroadcastEmergencyTopic()`
 
 **Payload-Schema:**
 ```json
@@ -1540,7 +1566,8 @@ mosquitto_pub -h localhost \
 **Topic:** `kaiser/god/esp/{esp_id}/config`
 
 **QoS:** 1  
-**Handler:** `services/config/config_manager.cpp::handleConfigUpdate()`
+**Handler:** `services/config/config_manager.cpp::handleConfigUpdate()`  
+**TopicBuilder:** `TopicBuilder::buildConfigTopic()`
 
 **Payload-Schema:**
 ```json
@@ -1597,7 +1624,9 @@ mosquitto_pub -h localhost \
 5. Sendet Config-Response (Success/Failure)
 6. Bei WiFi/Server-Änderung: Reconnect erforderlich
 
-**Config-Response-Topic:** `kaiser/god/esp/{esp_id}/config_response`
+**Config-Response-Topic:** `kaiser/god/esp/{esp_id}/config_response`  
+**TopicBuilder:** `TopicBuilder::buildConfigResponseTopic()`  
+**Module:** `services/config/config_response.cpp` → `ConfigResponseBuilder::publishSuccess()` / `publishError()`
 
 **Response-Payload (Success):**
 ```json

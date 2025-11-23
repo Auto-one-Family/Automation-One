@@ -6,12 +6,13 @@ Hierarchical zone management (Phase 7) allows God-Kaiser to organize ESPs into l
 
 ## Files Analyzed
 
-- `src/main.cpp` (lines 329-340, 415-489) - Zone assignment subscription and handler
-- `src/services/config/config_manager.cpp` (lines 170-286) - Zone config loading and updateZoneAssignment()
-- `src/models/system_types.h` (lines 23-48) - Zone data structures
-- `src/utils/topic_builder.cpp` (lines 19-22) - Topic reconfiguration
+- `src/main.cpp` (lines 247-248, 329-340, 415-489) - TopicBuilder initialization, zone assignment subscription and handler
+- `src/services/config/config_manager.cpp` (lines 170-286) - Zone config loading, saving, and updateZoneAssignment()
+- `src/models/system_types.h` (lines 23-48) - Zone data structures (KaiserZone, MasterZone)
+- `src/utils/topic_builder.cpp` (lines 9, 19-22) - TopicBuilder kaiser_id buffer and setKaiserId()
 - `src/services/communication/mqtt_client.cpp` (lines 380-408) - Heartbeat with zone info
-- `docs/NVS_KEYS.md` - Zone configuration keys
+- `src/services/communication/mqtt_client.h` (line 59) - publish() default QoS
+- `docs/NVS_KEYS.md` - Zone configuration keys documentation
 
 ## Prerequisites
 
@@ -138,7 +139,9 @@ LOG_INFO("Subscribed to system + actuator + zone assignment topics");
 - If `g_kaiser.kaiser_id` is set (assigned): Subscribe to `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
 - Subscription happens during Phase 2 (Communication Layer) initialization
 
-**Note:** The ESP subscribes to BOTH topics during boot if zone config is loaded from NVS. The handler checks both topics.
+**Note:** The ESP subscribes to ONE topic during boot based on loaded `g_kaiser.kaiser_id`:
+- If `kaiser_id` is empty: subscribes to `kaiser/god/esp/{esp_id}/zone/assign`
+- If `kaiser_id` is set: subscribes to `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
 
 ---
 
@@ -195,10 +198,23 @@ if (!error) {
   // Update zone configuration...
 } else {
   LOG_ERROR("Failed to parse zone assignment JSON");
+  // No acknowledgment sent on parse error
 }
 ```
 
 **JSON Buffer:** 512 bytes
+
+**Validation:**
+- No explicit validation of field presence (missing fields default to empty String)
+- No validation of zone_id format or length
+- No validation of kaiser_id format
+- Empty strings are accepted (will be stored as-is in NVS)
+- JSON parsing errors are logged but no acknowledgment is sent
+
+**Error Handling:**
+- If JSON parsing fails: Error logged, no acknowledgment sent, handler returns
+- If `updateZoneAssignment()` fails: Error acknowledgment sent with `status: "error"`
+- If NVS write fails: Error logged, error acknowledgment sent
 
 ---
 
@@ -245,6 +261,14 @@ if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaise
   
   // Send updated heartbeat
   mqttClient.publishHeartbeat();
+```
+
+**Heartbeat Behavior:**
+- `publishHeartbeat()` checks `HEARTBEAT_INTERVAL_MS` before publishing (line 383)
+- After zone assignment, `publishHeartbeat()` is called immediately (line 475)
+- If interval hasn't elapsed since last heartbeat, heartbeat is skipped (normal throttling)
+- Next scheduled heartbeat (via `mqttClient.loop()`) will include new zone info
+- Heartbeat topic uses `TopicBuilder::buildSystemHeartbeatTopic()` which uses updated kaiser_id
 } else {
   LOG_ERROR("❌ Failed to save zone configuration");
   
@@ -258,12 +282,19 @@ if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaise
 ```
 
 **Operations:**
-1. Persist zone config to NVS
-2. Update global zone variables
-3. Reconfigure TopicBuilder
-4. Update system state
-5. Send acknowledgment
-6. Send updated heartbeat
+1. Call `configManager.updateZoneAssignment()` to persist zone config to NVS
+2. Update global zone variables (`g_kaiser`)
+3. Reconfigure TopicBuilder with new kaiser_id (if provided)
+4. Update system state to `STATE_ZONE_CONFIGURED`
+5. Persist system state to NVS via `configManager.saveSystemConfig()`
+6. Send acknowledgment on acknowledgment topic
+7. Send updated heartbeat (immediately, bypassing heartbeat interval)
+
+**Order of Operations:**
+- NVS persistence happens FIRST (via `updateZoneAssignment()`)
+- Global variables updated AFTER successful NVS save
+- TopicBuilder updated AFTER global variables
+- Acknowledgment sent AFTER all updates complete
 
 ---
 
@@ -395,7 +426,9 @@ kaiser/kaiser_production_001/esp/ESP_AB12CD/system/heartbeat
 }
 ```
 
-**QoS:** 1 (at least once)
+**QoS:** 1 (at least once) - Default QoS for `mqttClient.publish()` is 1 (see `mqtt_client.h` line 59)
+
+**Note:** Acknowledgment topic is built using `g_kaiser.kaiser_id` AFTER it's updated (line 449), so it uses the NEW kaiser_id if provided in assignment payload. The acknowledgment is published on the new kaiser topic.
 
 ---
 
@@ -476,17 +509,19 @@ void MQTTClient::publishHeartbeat() {
 
 1. User changes ESP zone in God-Kaiser UI
 2. God-Kaiser publishes new zone assignment on current Kaiser topic (`kaiser/{current_kaiser_id}/esp/{esp_id}/zone/assign`)
-3. ESP receives and processes assignment
+3. ESP receives and processes assignment (ESP still subscribed to old topic)
 4. ESP updates configuration (NVS + globals + TopicBuilder)
-5. ESP acknowledges on new Kaiser topic (`kaiser/{new_kaiser_id}/esp/{esp_id}/zone/ack`)
-6. ESP publishes heartbeat with new zone info (on new Kaiser topic)
-7. ESP continues to listen on OLD subscription until MQTT reconnection
-8. After MQTT reconnection, ESP subscribes to new topics automatically
+5. ESP acknowledges on NEW Kaiser topic (`kaiser/{new_kaiser_id}/esp/{esp_id}/zone/ack`) - uses updated kaiser_id
+6. ESP publishes heartbeat with new zone info (on NEW Kaiser topic via TopicBuilder)
+7. ESP continues to listen on OLD subscription until reboot
+8. **Important:** ESP does NOT automatically resubscribe after reconnection - subscriptions only happen during `setup()` Phase 2
+9. After ESP reboot, subscriptions are re-established using new kaiser_id from NVS
 
 **Important:** MQTT subscriptions are NOT automatically updated when kaiser_id changes. The ESP will:
-- Continue receiving messages on old topic (if still subscribed)
+- Continue receiving messages on old topic (if still subscribed via broker's persistent session)
 - Publish new messages on new topic (via TopicBuilder)
-- Resubscribe to new topics only after MQTT reconnection (during `connectToBroker()`)
+- Resubscribe to new topics only after ESP reboot (during `setup()` Phase 2)
+- **Limitation:** If ESP doesn't reboot, it may miss zone assignment messages on new kaiser topic until reboot
 
 ---
 
@@ -527,9 +562,12 @@ void MQTTClient::publishHeartbeat() {
 - ESP will resubscribe to new topics only after MQTT reconnection
 
 **During MQTT Reconnection:**
-- `main.cpp` (lines 329-340) rebuilds subscription topics using current `g_kaiser.kaiser_id`
-- ESP automatically subscribes to new zone assignment topic
-- Old subscription is implicitly dropped (MQTT broker handles cleanup)
+- `mqttClient.loop()` detects disconnection and calls `reconnect()` → `connectToBroker()`
+- `connectToBroker()` only establishes connection, does NOT resubscribe
+- PubSubClient maintains subscriptions if broker supports persistent sessions
+- **Important:** Subscriptions are NOT automatically rebuilt after reconnection
+- If ESP reboots, subscriptions are re-established during `setup()` (lines 329-340) using current `g_kaiser.kaiser_id`
+- After zone assignment, ESP continues listening on old subscription until reboot or manual unsubscribe
 
 ---
 
@@ -700,8 +738,14 @@ enum SystemState {
 
 **Known Limitation:**
 - No automatic unsubscribe/resubscribe when kaiser_id changes
-- ESP must reconnect to MQTT to update subscriptions
+- ESP must reboot to update subscriptions (subscriptions only happen during `setup()` Phase 2, lines 329-340)
 - This is intentional to avoid subscription storms during zone reassignment
+- **Workaround:** God-Kaiser should publish zone assignments on BOTH old and new kaiser topics during transition period, or wait for ESP reboot
+
+**Subscription Persistence:**
+- PubSubClient uses clean session by default (subscriptions lost on disconnect)
+- Subscriptions are NOT maintained across MQTT reconnections
+- Subscriptions are only re-established during ESP boot (`setup()` Phase 2)
 
 ---
 
@@ -709,10 +753,14 @@ enum SystemState {
 
 **Zone Assignment Operation:**
 - Duration: 50-150ms (NVS writes + MQTT publish)
-- NVS Writes: 7-9 keys (zone_id, master_zone_id, zone_name, zone_assigned, kaiser_id, connected, legacy keys)
+- NVS Writes: 7-9 keys via `saveZoneConfig()`:
+  - Phase 7 keys: zone_id, master_zone_id, zone_name, zone_assigned
+  - Kaiser keys: kaiser_id, kaiser_name, connected, id_generated
+  - Legacy keys: legacy_master_zone_id, legacy_master_zone_name, is_master_esp
 - MQTT Messages: 2 (ack QoS 1 + heartbeat QoS 0)
-- Memory: ~1KB temporary (JSON buffers: 512 bytes + 256 bytes)
+- Memory: ~1KB temporary (JSON buffers: 512 bytes for parsing + 256 bytes for ack)
 - CPU: <1% (synchronous operation in loop context)
+- Blocking: Yes (blocks `loop()` during processing)
 
 **Ongoing Impact:**
 - Memory: Zone info cached in `g_kaiser` global (minimal overhead)

@@ -324,6 +324,46 @@ mqttClient.publish(topic, payload, 1);
 
 ---
 
+#### `void setTestPublishHook(std::function<void(const String&, const String&)> hook)`
+**Beschreibung:** Setzt einen Test-Hook für Unit-Tests (interceptiert `publish()` Aufrufe)  
+**Parameter:**
+- `hook`: Callback-Funktion die bei jedem `publish()` aufgerufen wird (topic, payload)
+
+**Verhalten:**
+- Hook wird vor tatsächlichem MQTT-Publish aufgerufen
+- Ermöglicht Unit-Tests ohne echten MQTT-Broker
+- Hook wird nur einmal pro `publish()` aufgerufen
+
+**Beispiel:**
+```cpp
+// In Unit-Test
+mqttClient.setTestPublishHook([](const String& topic, const String& payload) {
+    EXPECT_EQ(topic, "test/topic");
+    EXPECT_EQ(payload, "{\"test\": true}");
+});
+
+mqttClient.publish("test/topic", "{\"test\": true}", 1);
+// Hook wird aufgerufen, aber kein echter MQTT-Publish
+```
+
+**Hinweis:** Test-Hooks sind nur für Unit-Tests gedacht. In Produktions-Code nicht verwenden!
+
+---
+
+#### `void clearTestPublishHook()`
+**Beschreibung:** Entfernt Test-Hook (normaler Betrieb)  
+**Verhalten:**
+- Entfernt gesetzten Hook
+- Nachfolgende `publish()` Aufrufe gehen an echten MQTT-Broker
+
+**Beispiel:**
+```cpp
+mqttClient.clearTestPublishHook();
+mqttClient.publish("test/topic", "payload", 1);  // Echter MQTT-Publish
+```
+
+---
+
 ### Config JSON-Schemas
 
 #### Sensor-Config Payload
@@ -569,6 +609,46 @@ mqttClient.publish(topic, payload, 1);
 | **Success** | `LOG_INFO`, Apply | ACK (`success`) | UI-Update, Continue |
 
 **Note:** Bei NACK wird **keine Config angewendet** (Transactional Semantics).
+
+---
+
+### Test Hooks (Unit Testing)
+
+#### `void setTestPublishHook(std::function<void(const String&, const String&)> hook)`
+**Beschreibung:** Setzt einen Test-Hook für Unit-Tests (interceptiert `publish()` Aufrufe)  
+**Parameter:**
+- `hook`: Callback-Funktion die bei jedem `publish()` aufgerufen wird (topic, payload)
+
+**Verhalten:**
+- Hook wird vor tatsächlichem MQTT-Publish aufgerufen
+- Ermöglicht Unit-Tests ohne echten MQTT-Broker
+- Hook wird nur einmal pro `publish()` aufgerufen
+
+**Beispiel:**
+```cpp
+// In Unit-Test
+mqttClient.setTestPublishHook([](const String& topic, const String& payload) {
+    EXPECT_EQ(topic, "test/topic");
+    EXPECT_EQ(payload, "{\"test\": true}");
+});
+
+mqttClient.publish("test/topic", "{\"test\": true}", 1);
+// Hook wird aufgerufen, aber kein echter MQTT-Publish
+```
+
+#### `void clearTestPublishHook()`
+**Beschreibung:** Entfernt Test-Hook (normaler Betrieb)  
+**Verhalten:**
+- Entfernt gesetzten Hook
+- Nachfolgende `publish()` Aufrufe gehen an echten MQTT-Broker
+
+**Beispiel:**
+```cpp
+mqttClient.clearTestPublishHook();
+mqttClient.publish("test/topic", "payload", 1);  // Echter MQTT-Publish
+```
+
+**Hinweis:** Test-Hooks sind nur für Unit-Tests gedacht. In Produktions-Code nicht verwenden!
 
 ---
 

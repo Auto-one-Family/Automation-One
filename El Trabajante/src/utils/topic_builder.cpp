@@ -121,6 +121,14 @@ const char* TopicBuilder::buildSystemCommandTopic() {
   return validateTopicBuffer(written);
 }
 
+// Phase 7: kaiser/god/esp/{esp_id}/system/diagnostics
+const char* TopicBuilder::buildSystemDiagnosticsTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+                         "kaiser/%s/esp/%s/system/diagnostics",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // Pattern 7: kaiser/god/esp/{esp_id}/config
 const char* TopicBuilder::buildConfigTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
