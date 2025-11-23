@@ -1,47 +1,31 @@
-# Automation-One IoT Framework
+# Automation-One Framework
 
-> **Für Claude Code:** Optimierte Projekt-Dokumentation für AI-gestützte Entwicklung
-
-## 📋 Projekt-Übersicht
-
-**Typ:** Modulares IoT Framework für ESP32-basierte Sensor/Aktor-Netzwerke
-**Architektur:** 4-Schichten (God → God-Kaiser → Kaiser → ESP32)
-**Hauptkomponenten:** 2 Module
-**Sprachen:** C++ (Arduino/ESP-IDF), Python (FastAPI)
-**Build-Systeme:** PlatformIO, Poetry
-**Version:** El Servador 5.0.0, El Trabajante (siehe Roadmap)
+> **Für KI-Agenten:** Fokussierte Dokumentation für industrielle IoT-Entwicklung
 
 ---
 
-## 🚀 Schnellstart-Befehle
+## 1. Schnellstart
 
 ### El Trabajante (ESP32 Firmware)
 
 ```bash
 cd "El Trabajante"
 
-# Build für XIAO ESP32-C3 (10 Sensoren, 6 Aktoren)
+# Build für XIAO ESP32-C3
 pio run -e seeed_xiao_esp32c3
 
-# Build für ESP32 Dev Board (20 Sensoren, 12 Aktoren)
+# Build für ESP32 Dev Board
 pio run -e esp32_dev
 
-# Unit Tests ausführen
-pio test
+# Tests ausführen (KEIN Server nötig!)
+pio test -e esp32_dev
 
 # Flash auf Device
-pio run -e seeed_xiao_esp32c3 -t upload
+pio run -e esp32_dev -t upload
 
 # Serial Monitor
 pio device monitor
-
-# Code-Checks
-pio check --fail-on-defect=low
 ```
-
-**PlatformIO Environments:**
-- `seeed_xiao_esp32c3` - XIAO ESP32-C3 (kleineres Board, limitierter Speicher)
-- `esp32_dev` - ESP32-WROOM Development Board (mehr Ressourcen)
 
 ### El Servador (God-Kaiser Server)
 
@@ -52,334 +36,396 @@ cd "El Servador"
 poetry install
 
 # Tests ausführen
-poetry run pytest -v
+poetry run pytest -v --cov
 
-# Test Coverage
-poetry run pytest --cov=god_kaiser_server --cov-report=html
-
-# Server starten (Development)
-poetry run uvicorn god_kaiser_server.src.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Code Formatting
-poetry run black god_kaiser_server/
-poetry run ruff check god_kaiser_server/
-
-# Database Migrations
-poetry run alembic upgrade head
-
-# Admin User erstellen
-poetry run python god_kaiser_server/scripts/create_admin.py
+# Server starten
+poetry run uvicorn god_kaiser_server.src.main:app --reload
 ```
 
 ---
 
-## 🏗️ Architektur
+## 2. Architektur
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER 1: God (Raspberry Pi 5)                               │
 │ Rolle: KI/Analytics, Predictions, Model Training            │
-│ Port: 8001 (HTTP REST)                                      │
-│ Tech: Python, TensorFlow/PyTorch, Pandas                    │
 └─────────────────────────────────────────────────────────────┘
-                          ↕ HTTP REST API
+                          ↕ HTTP REST
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER 2: God-Kaiser (Raspberry Pi 5)                        │
 │ Rolle: Control Hub, MQTT Broker, Database, Logic Engine     │
-│ Ports: 8000 (HTTP/WebSocket), 8883 (MQTT TLS)              │
-│ Tech: FastAPI, PostgreSQL, Mosquitto, SQLAlchemy            │
 └─────────────────────────────────────────────────────────────┘
-                          ↕ MQTT Bridge (TLS)
+                          ↕ MQTT (TLS)
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER 3: Kaiser (Raspberry Pi Zero) - OPTIONAL              │
 │ Rolle: Relay Node für Skalierung (100+ ESPs)                │
-│ Ports: 1883 (Local MQTT), 8080 (HTTP)                      │
 └─────────────────────────────────────────────────────────────┘
-                          ↕ MQTT (TLS optional)
+                          ↕ MQTT
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER 4: ESP32-Agenten (WROOM/XIAO C3)                     │
 │ Rolle: Sensor-Auslesung, Aktor-Steuerung                    │
-│ Tech: C++/Arduino, WiFi, MQTT Client, NVS Storage           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Kern-Konzept: Pi-Enhanced Mode (Standard)**
+- ESP32 sendet RAW-Werte (analogRead/digitalRead)
+- God-Kaiser verarbeitet mit Python Sensor-Libraries
+- ESP32 empfängt verarbeitete Werte zurück
+- **Vorteil:** Sofort einsatzbereit, keine ESP-Code-Änderung nötig
+
 ---
 
-## 📂 Projektstruktur
+## 3. Test-Philosophie
 
-```
-Automation-One/
-├── El Trabajante/                    # ESP32 Firmware (C++/Arduino)
-│   ├── src/
-│   │   ├── core/                     # Application, MainLoop, SystemController
-│   │   ├── drivers/                  # GPIO, I2C, OneWire, PWM
-│   │   ├── services/
-│   │   │   ├── communication/        # MQTT, HTTP, WebServer, WiFi, Discovery
-│   │   │   ├── sensor/               # SensorManager, Factory, Drivers, Pi-Enhanced
-│   │   │   ├── actuator/             # ActuatorManager, Drivers, SafetyController
-│   │   │   ├── config/               # ConfigManager, StorageManager, LibraryManager
-│   │   │   └── provisioning/         # ProvisionManager (Dynamic Zones)
-│   │   ├── models/                   # Types, States, Messages, Error Codes
-│   │   ├── utils/                    # Logger, TimeManager, DataBuffer, Helpers
-│   │   ├── error_handling/           # ErrorTracker, CircuitBreaker, HealthMonitor
-│   │   └── config/                   # SystemConfig, HardwareConfig, FeatureFlags
-│   ├── test/                         # Unit Tests
-│   ├── docs/                         # ESP32-spezifische Dokumentation
-│   └── platformio.ini                # Build-Konfiguration
-│
-├── El Servador/                      # God-Kaiser Server (Python/FastAPI)
-│   └── god_kaiser_server/
-│       ├── src/
-│       │   ├── core/                 # Config, Security, Logging, Exceptions
-│       │   ├── api/v1/               # REST Endpoints
-│       │   ├── services/             # Business Logic Services
-│       │   ├── mqtt/                 # MQTT Client, Publisher, Subscriber, Handlers
-│       │   ├── websocket/            # Real-time Manager
-│       │   ├── db/
-│       │   │   ├── models/           # SQLAlchemy Models
-│       │   │   └── repositories/     # Repository Pattern
-│       │   ├── sensors/
-│       │   │   ├── library_loader.py # Dynamic Import
-│       │   │   └── sensor_libraries/active/  # Sensor Processing Libraries
-│       │   ├── schemas/              # Pydantic DTOs
-│       │   └── utils/                # Helpers
-│       ├── scripts/                  # DB Init, Admin, Certificates, Migrations
-│       ├── tests/                    # Unit, Integration, E2E Tests
-│       ├── docs/                     # Server-spezifische Docs
-│       ├── alembic/                  # Database Migrations
-│       └── pyproject.toml            # Poetry Dependencies
-│
-├── docs/                             # Übergreifende Dokumentation
-├── CLAUDE.md                         # Diese Datei (AI-optimiert)
-└── README.md                         # Hauptdokumentation (Mensch-lesbar)
+### 3.1 Server-unabhängige Tests
+
+**Alle ESP32-Tests laufen OHNE Server dank:**
+
+- **MockMQTTBroker** - Simuliert MQTT lokal im Test
+- **VirtualActuatorDriver** - Simuliert Hardware (Pump, Valve, PWM)
+- **TEST_IGNORE** - Graceful Degradation bei fehlenden GPIOs
+
+**Warum wichtig:**
+- Server-Entwickler können ESP-Code testen ohne Hardware
+- CI/CD läuft ohne physische ESPs
+- Schneller Feedback-Loop (keine MQTT-Broker-Setup nötig)
+
+### 3.2 Dual-Mode-Pattern (PFLICHT für jeden Test!)
+
+**Jeder Test muss Production-safe sein:**
+
+```cpp
+// MODE 1: Suche existierende Ressource (Production-System)
+uint8_t gpio = findExistingSensor("analog");
+
+// MODE 2: Falls nicht vorhanden → Erstelle temporäre (New System)
+if (gpio == 255) {
+    gpio = findFreeTestGPIO("analog");
+    TemporaryTestSensor temp(gpio, "TestAnalogSensor");
+
+    // Test-Logik hier...
+    int value = sensorManager.readSensor(gpio);
+    TEST_ASSERT_GREATER_THAN(0, value);
+
+}  // Auto-Cleanup durch RAII - kein manuelles delete!
 ```
 
+**Warum:**
+- **Production:** Nutzt vorhandene Konfiguration, ändert nichts
+- **New System:** Erstellt temporäre Config, räumt automatisch auf
+- **Kein Config-Chaos:** Tests hinterlassen keine Artefakte
+
+### 3.3 RAII-Cleanup (NIEMALS manuelles delete!)
+
+**RICHTIG - Auto-Cleanup durch RAII:**
+
+```cpp
+// Temporärer Sensor - Cleanup bei Scope-Ende
+TemporaryTestSensor temp(gpio, "TempSensor");
+
+// Smart Pointer für Actuators
+std::unique_ptr<TemporaryTestActuator> act =
+    std::make_unique<TemporaryTestActuator>(gpio, ActuatorTypeTokens::PUMP);
+
+// Destruktor räumt automatisch auf!
+```
+
+**FALSCH - Manuelles Memory-Management:**
+
+```cpp
+// ❌ VERBOTEN - Memory-Leak-Gefahr!
+SensorConfig* cfg = new SensorConfig();
+delete cfg;  // Vergessen? → Memory Leak!
+
+// ❌ VERBOTEN - Exception-unsafe!
+ActuatorConfig* act = new ActuatorConfig();
+// Exception hier? → Memory Leak!
+delete act;
+```
+
+**Regel:** Wenn du `new`/`delete` schreibst, machst du etwas falsch!
+
+### 3.4 Test-Output-Format (Unity)
+
+```
+test/test_sensor_manager.cpp:365:test_analog_sensor_raw_reading:PASS
+test/test_sensor_manager.cpp:457:test_digital_sensor_plausibility:PASS
+test/test_actuator_manager.cpp:123:test_pump_control:IGNORE
+-----------------------
+3 Tests 0 Failures 1 Ignored
+OK
+```
+
+**Format:** `<datei>:<zeile>:<test_name>:<status>`
+
+**Status-Codes:**
+- `PASS` - Test erfolgreich, alles OK
+- `FAIL` - Test fehlgeschlagen, Code ist kaputt!
+- `IGNORE` - Ressource fehlt (GPIO, Hardware), aber OK
+
 ---
 
-## 💡 Kern-Konzepte
+## 4. MQTT-Protokoll (Kurzreferenz)
 
-### 1. Pi-Enhanced Mode (STANDARD - empfohlen)
-- **ESP32 sendet:** Raw ADC-Werte (analogRead/digitalRead)
-- **God-Kaiser verarbeitet:** Mit Python Sensor-Libraries
-- **ESP32 empfängt:** Verarbeitete Werte zurück
-- **Vorteil:** Sofort einsatzbereit, komplexe Algorithmen möglich, zentrale Updates
-
-### 2. OTA Library Mode (OPTIONAL)
-- **ESP32 lädt:** C++-Library vom Server (einmalig)
-- **ESP32 verarbeitet:** Lokal auf dem Chip
-- **Vorteil:** Offline-fähig, schnellere Response
-- **Nachteil:** ESP Flash-Verbrauch, Setup-Zeit
-
-### 3. Dynamic Zones & Provisioning
-- Hierarchische Zone-Struktur (Master → Sub-Zones)
-- Runtime-Konfiguration ohne Code-Änderung
-- GPIO-Safe-Mode mit Conflict-Detection
-
-### 4. Cross-ESP Automation Engine
-- Multi-ESP Regeln: `IF ESP1.Sensor > X THEN ESP2.Actuator = Y`
-- Safety-Limits, Cooldown, Time-Constraints
-
-### 5. Health Monitoring (Phase 7)
-- HealthMonitor mit Watchdog-Pattern
-- Circuit Breaker für Pi-Enhanced Communication
-- MQTT Connection Manager mit Auto-Reconnect
-- Error-Tracking und Recovery-Strategien
-
----
-
-## 🔧 Wichtige Technologien
-
-### ESP32 (El Trabajante)
-- **Framework:** Arduino (ESP-IDF kompatibel)
-- **Build:** PlatformIO
-- **MQTT:** PubSubClient
-- **JSON:** ArduinoJson 6.x
-- **Storage:** NVS (encrypted)
-- **Sensor-Libs:** OneWire, DallasTemperature, Adafruit Unified Sensor
-
-### Server (El Servador)
-- **Framework:** FastAPI 0.104+
-- **ORM:** SQLAlchemy 2.0
-- **Database:** PostgreSQL (Prod) / SQLite (Dev)
-- **MQTT:** Paho-MQTT 1.6+
-- **Validation:** Pydantic 2.5+
-- **Auth:** python-jose + passlib (JWT, bcrypt)
-- **Async:** asyncio + asyncpg
-- **Testing:** pytest, pytest-asyncio, pytest-cov
-
----
-
-## 📡 MQTT Topics Schema
+### Topic-Schema
 
 **ESP → God-Kaiser:**
 ```
-kaiser/god/esp/{esp_id}/sensor/{gpio}/data          # Sensor-Daten
-kaiser/god/esp/{esp_id}/actuator/{gpio}/status      # Aktor-Status
-kaiser/god/esp/{esp_id}/health/status               # Health-Status
-kaiser/god/esp/{esp_id}/system/status               # System-Info
+kaiser/god/esp/{esp_id}/sensor/{gpio}/data
+kaiser/god/esp/{esp_id}/actuator/{gpio}/status
+kaiser/god/esp/{esp_id}/health/status
 ```
 
 **God-Kaiser → ESP:**
 ```
-kaiser/god/esp/{esp_id}/actuator/{gpio}/command     # Aktor-Befehle
-kaiser/god/esp/{esp_id}/config/sensor/{gpio}        # Sensor-Config
-kaiser/god/esp/{esp_id}/config/actuator/{gpio}      # Aktor-Config
-kaiser/god/esp/{esp_id}/system/command              # System-Befehle
+kaiser/god/esp/{esp_id}/actuator/{gpio}/command
+kaiser/god/esp/{esp_id}/config/sensor/{gpio}
+kaiser/god/esp/{esp_id}/system/command
+```
+
+**Details:** Siehe `El Trabajante/docs/Mqtt_Protocoll.md`
+
+---
+
+## 5. Safety-Constraints
+
+### 5.1 Aktor-Sicherheit
+
+**KRITISCHE Regeln - NIEMALS ignorieren:**
+
+1. **Emergency-Stop hat IMMER Priorität**
+   ```cpp
+   if (emergencyStop) {
+       actuatorManager.shutdownAll();
+       return;  // Keine weiteren Commands!
+   }
+   ```
+
+2. **PWM-Limits: 0.0 - 1.0**
+   ```cpp
+   // Wird intern auf 0-255 gemappt
+   actuatorManager.controlActuatorPWM(gpio, 0.75);  // 75% Power
+   ```
+
+3. **Timeout-Protection**
+   - Aktoren schalten nach `MAX_RUNTIME` Sekunden automatisch ab
+   - Verhindert Überhitzung, Überlauf, etc.
+
+4. **Safety-Controller prüft IMMER:**
+   ```cpp
+   // In actuator_manager.cpp:
+   if (!safetyController.checkConstraints(gpio, value)) {
+       return false;  // Command rejected!
+   }
+   ```
+
+### 5.2 GPIO-Konflikte
+
+**NIEMALS gleichen GPIO für Sensor UND Aktor:**
+
+```cpp
+// VOR jeder GPIO-Nutzung:
+if (!gpioManager.isPinAvailable(gpio)) {
+    return ERROR_GPIO_CONFLICT;
+}
+
+// Sensor reserviert Pin:
+gpioManager.reservePin(gpio, PinMode::ANALOG_INPUT);
+
+// Aktor kann diesen Pin NICHT mehr nutzen!
+```
+
+**Konflikt-Resolution:**
+- ConfigManager prüft bei jedem `addSensor`/`addActuator`
+- Safe-Mode verhindert Mehrfachnutzung
+- Factory-Pattern wirft Exception bei Konflikt
+
+---
+
+## 6. Fehlercode-Referenz
+
+**Wichtigste Error-Codes:**
+
+### Hardware (1000-1999)
+```cpp
+ERROR_GPIO_CONFLICT         1002   // GPIO bereits belegt
+ERROR_GPIO_INIT_FAILED      1003   // Hardware-Init fehlgeschlagen
+ERROR_SENSOR_READ_FAILED    1040   // Sensor antwortet nicht
+ERROR_ACTUATOR_SET_FAILED   1050   // Aktor-Command fehlgeschlagen
+```
+
+### Service (2000-2999)
+```cpp
+ERROR_CONFIG_INVALID        2001   // Ungültige Konfiguration
+ERROR_CONFIG_STORAGE_FULL   2002   // NVS voll
+ERROR_SENSOR_NOT_CONFIGURED 2010   // Sensor nicht konfiguriert
+```
+
+### Communication (3000-3999)
+```cpp
+ERROR_MQTT_NOT_CONNECTED    3001   // MQTT-Verbindung fehlt
+ERROR_MQTT_PUBLISH_FAILED   3002   // Publish fehlgeschlagen
+ERROR_WIFI_NOT_CONNECTED    3010   // WiFi offline
+```
+
+**Vollständige Liste:** `El Trabajante/src/models/error_codes.h`
+
+---
+
+## 7. Cursor/KI-Test-Integration
+
+### Tests starten (ohne Server)
+
+```bash
+cd "El Trabajante"
+
+# Alle Tests
+pio test -e esp32_dev 2>&1 | tee test_output.log
+
+# Einzelne Test-Datei
+pio test -e esp32_dev -f test_sensor_manager
+
+# Mit Serial-Monitor (Live-Output)
+pio test -e esp32_dev && pio device monitor
+```
+
+### Output-Parsing für KI
+
+**Erfolgreich:**
+```
+:PASS → Test erfolgreich
+```
+
+**Fehler analysieren:**
+```
+:FAIL → Code ist kaputt, analysiere Fehlermeldung
+```
+
+**Ressource fehlt (OK):**
+```
+:IGNORE → GPIO/Hardware fehlt, aber graceful degradation
+```
+
+### Automatisierte Auswertung
+
+```bash
+# Nur Fehler anzeigen
+grep ":FAIL" test_output.log
+
+# Zusammenfassung
+tail -5 test_output.log
+
+# Ignorierte Tests (optional prüfen)
+grep ":IGNORE" test_output.log
+```
+
+**Workflow:**
+1. Test-Command ausführen
+2. Output nach `:FAIL` greppen
+3. Falls FAIL: Zeile + Fehlermeldung analysieren
+4. Falls nur IGNORE/PASS: Code ist OK
+
+**Details:** Siehe `TEST_WORKFLOW.md`
+
+---
+
+## 8. Projektstruktur (Kurzübersicht)
+
+```
+El Trabajante/                    # ESP32 Firmware
+├── src/
+│   ├── core/                     # Application, MainLoop, SystemController
+│   ├── services/
+│   │   ├── sensor/               # SensorManager, Pi-Enhanced, Drivers
+│   │   ├── actuator/             # ActuatorManager, SafetyController
+│   │   ├── communication/        # MQTT, HTTP, WiFi
+│   │   └── config/               # ConfigManager, StorageManager
+│   ├── models/                   # Types, Error Codes, MQTT Messages
+│   └── error_handling/           # HealthMonitor, CircuitBreaker
+├── test/                         # Unit Tests (MockMQTT, VirtualDrivers)
+└── docs/                         # System Flows, API Reference
+
+El Servador/                      # God-Kaiser Server
+└── god_kaiser_server/
+    ├── src/
+    │   ├── api/v1/               # REST Endpoints
+    │   ├── mqtt/                 # MQTT Handlers
+    │   ├── sensors/              # Python Sensor Libraries
+    │   └── db/                   # SQLAlchemy Models
+    └── tests/                    # pytest Tests
 ```
 
 ---
 
-## 📖 Dokumentations-Navigation
+## 9. Wichtige Dokumentation
 
 ### ESP32 Development:
-- **System Flows:** `El Trabajante/docs/system-flows/` (8 Flows)
-  - 01: Boot Sequence
-  - 02: Sensor Reading Flow
-  - 03: Actuator Command Flow
-  - 04/05: Runtime Config Flows
-  - 06: MQTT Message Routing
-  - 07: Error Recovery Flow
-  - 08: Zone Assignment Flow
+- **Test-Patterns:** `El Trabajante/test/README.md` (31K Tokens - sehr detailliert!)
+- **System Flows:** `El Trabajante/docs/system-flows/`
 - **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
 - **API Reference:** `El Trabajante/docs/API_REFERENCE.md`
-- **NVS Keys:** `El Trabajante/docs/NVS_KEYS.md`
-- **Roadmap:** `El Trabajante/docs/Roadmap.md`
 
 ### Server Development:
 - **Architecture:** `El Servador/god_kaiser_server/docs/ARCHITECTURE.md`
 - **API Docs:** `El Servador/god_kaiser_server/docs/API.md`
-- **MQTT Topics:** `El Servador/god_kaiser_server/docs/MQTT_TOPICS.md`
-- **Security:** `El Servador/god_kaiser_server/docs/SECURITY.md`
 - **Testing:** `El Servador/god_kaiser_server/docs/TESTING.md`
-- **Deployment:** `El Servador/god_kaiser_server/docs/DEPLOYMENT.md`
 
 ### Provisioning & Zones:
 - **Design:** `El Trabajante/docs/Dynamic Zones and Provisioning/PROVISIONING_DESIGN.md`
-- **Analysis:** `El Trabajante/docs/Dynamic Zones and Provisioning/ANALYSIS.md`
 - **Implementation:** `El Trabajante/docs/Dynamic Zones and Provisioning/DYNAMIC_ZONES_IMPLEMENTATION.md`
-- **Integration:** `El Trabajante/docs/Dynamic Zones and Provisioning/INTEGRATION_GUIDE.md`
 
 ---
 
-## 🧪 Testing-Strategie
+## 10. Feature Flags (Build-Konfiguration)
 
-### ESP32 Tests:
-```bash
-cd "El Trabajante"
-pio test -e seeed_xiao_esp32c3  # XIAO Tests
-pio test -e esp32_dev           # ESP32 Dev Tests
+**Wichtige Flags in `platformio.ini`:**
+
+```ini
+-DDYNAMIC_LIBRARY_SUPPORT=1     # OTA Library Support
+-DHIERARCHICAL_ZONES=1          # Zone-System
+-DOTA_LIBRARY_ENABLED=1         # OTA Updates
+-DSAFE_MODE_PROTECTION=1        # GPIO Safe-Mode
+-DZONE_MASTER_ENABLED=1         # Zone-Master
+-DCONFIG_ENABLE_THREAD_SAFETY   # Mutex-Schutz (Phase 6+)
 ```
 
-**Test-Typen:**
-- Unit Tests für Core-Komponenten
-- Hardware-Mock-Tests
-- Integration Tests (MQTT, HTTP)
-
-### Server Tests:
-```bash
-cd "El Servador"
-poetry run pytest tests/unit/              # Unit Tests
-poetry run pytest tests/integration/       # Integration Tests
-poetry run pytest tests/e2e/               # E2E Tests (requires running server)
-poetry run pytest --cov                     # Mit Coverage
-```
+**Environment-spezifisch:**
+- `XIAO_ESP32C3_MODE=1` - MAX_SENSORS=10, MAX_ACTUATORS=6
+- `ESP32_DEV_MODE=1` - MAX_SENSORS=20, MAX_ACTUATORS=12
 
 ---
 
-## 🔐 Feature Flags (ESP32)
+## 11. Best Practices für KI-Agenten
 
-Wichtige Build-Flags in `platformio.ini`:
-- `DYNAMIC_LIBRARY_SUPPORT=1` - OTA Library Support
-- `HIERARCHICAL_ZONES=1` - Zone-System aktiviert
-- `OTA_LIBRARY_ENABLED=1` - OTA Updates erlaubt
-- `SAFE_MODE_PROTECTION=1` - GPIO Safe-Mode
-- `ZONE_MASTER_ENABLED=1` - Zone-Master-Funktionalität
-- `CONFIG_ENABLE_THREAD_SAFETY` - Mutex-Schutz (Phase 6+)
+### Bei neuen Features:
 
----
-
-## 🚨 Wichtige Hinweise für Claude
-
-### Code-Änderungen:
-1. **ESP32:** Immer Feature Flags beachten (`src/config/feature_flags.h`)
-2. **Server:** Pi-Enhanced Mode bevorzugen (Standard-Workflow)
-3. **MQTT:** Topic-Schema strikt einhalten
-4. **Safety:** Aktor-Safety-Constraints beachten
-5. **Tests:** Vor jedem Commit Tests ausführen
-
-### Neue Features:
 1. **Sensor hinzufügen:**
    - Pi-Enhanced: `El Servador/god_kaiser_server/src/sensors/sensor_libraries/active/`
-   - Keine ESP-Änderung nötig!
+   - **Keine ESP-Änderung nötig!**
+
 2. **Aktor hinzufügen:**
    - ESP Driver: `El Trabajante/src/services/actuator/actuator_drivers/`
    - Factory-Pattern nutzen
+   - Safety-Constraints definieren
 
-### Debugging:
-- **ESP32:** Serial Monitor mit `pio device monitor`
-- **MQTT:** `mosquitto_sub -h <ip> -p 8883 -t "kaiser/god/#"`
-- **Server:** Logs in FastAPI Console
+3. **Tests schreiben:**
+   - Dual-Mode-Pattern verwenden
+   - RAII-Cleanup nutzen
+   - MockMQTTBroker für MQTT-Tests
 
----
+### Vor jedem Commit:
 
-## 📊 Aktueller Entwicklungsstand
+```bash
+# Tests laufen lassen
+pio test -e esp32_dev
 
-**Abgeschlossene Phasen:**
-- ✅ Phase 1-6: Core System, Sensors, Actuators, Zones, Thread-Safety
-- ✅ Phase 7: Health Monitor Implementation
-
-**Aktuelle Phase:**
-- Siehe `El Trabajante/docs/Roadmap.md`
-- Siehe `El Trabajante/docs/PHASE_7_IMPLEMENTATION_STATUS.md`
-
----
-
-## 🎯 Workflow-Tipps
-
-### Typische Aufgaben:
-
-**Feature implementieren:**
-1. Relevante Docs lesen (siehe Navigation oben)
-2. System Flow verstehen
-3. Code-Änderungen in beiden Komponenten synchron
-4. Tests schreiben
-5. MQTT-Kompatibilität prüfen
-
-**Bug fixen:**
-1. Error Codes prüfen (`El Trabajante/src/models/error_codes.h`)
-2. Logs analysieren (ESP Serial + Server Logs)
-3. System Flow nachvollziehen
-4. Fix + Test
-
-**Refactoring:**
-1. Interface-Contracts beachten (z.B. `ISensorDriver`)
-2. Factory-Patterns nutzen
-3. Thread-Safety gewährleisten
-4. Tests aktualisieren
-
----
-
-## 🔗 Git Workflow
-
-**Branch-Naming:**
-- `feature/<name>` - Neue Features
-- `fix/<name>` - Bug-Fixes
-- `refactor/<name>` - Code-Refactoring
-- `docs/<name>` - Dokumentation
-- `claude/<session-id>` - Claude Code Sessions
-
-**Commit-Message-Format:**
+# Nur committen wenn:
+# - Keine :FAIL im Output
+# - :IGNORE ist OK (fehlende Hardware)
 ```
-<type>: <subject>
-
-<body>
-
-<footer>
-```
-
-**Types:** feat, fix, docs, refactor, test, chore
 
 ---
 
 **Letzte Aktualisierung:** 2025-11-23
-**Kontakt:** AutomationOne Team
+**Version:** 2.0 (Fokussiert auf Test-Integration)
