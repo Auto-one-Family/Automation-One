@@ -8,16 +8,34 @@
 
 ### El Trabajante (ESP32 Firmware)
 
+**WICHTIG:** PlatformIO-Commands funktionieren auf zwei Arten:
+
+#### Option A: Von Root-Verzeichnis (Auto-one) aus arbeiten
 ```bash
-cd "El Trabajante"
+# Build für ESP32 Dev Board
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
 
 # Build für XIAO ESP32-C3
-pio run -e seeed_xiao_esp32c3
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e seeed_xiao_esp32c3
+
+# Tests ausführen (KEIN Server nötig!)
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev
+
+# Flash auf Device
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev -t upload
+```
+
+#### Option B: Innerhalb El Trabajante Ordner (nur wenn NUR dieser Ordner in VSCode geöffnet ist)
+```bash
+cd "El Trabajante"
 
 # Build für ESP32 Dev Board
 pio run -e esp32_dev
 
-# Tests ausführen (KEIN Server nötig!)
+# Build für XIAO ESP32-C3
+pio run -e seeed_xiao_esp32c3
+
+# Tests ausführen
 pio test -e esp32_dev
 
 # Flash auf Device
@@ -26,6 +44,8 @@ pio run -e esp32_dev -t upload
 # Serial Monitor
 pio device monitor
 ```
+
+**Empfehlung für KI-Agenten:** Nutze Option A mit vollständigem Pfad - funktioniert immer!
 
 ### El Servador (God-Kaiser Server)
 
@@ -277,6 +297,19 @@ ERROR_WIFI_NOT_CONNECTED    3010   // WiFi offline
 
 ### Tests starten (ohne Server)
 
+**Von Root-Verzeichnis (empfohlen für KI-Agenten):**
+```bash
+# Alle Tests
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev 2>&1 | tee test_output.log
+
+# Einzelne Test-Datei
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev -f test_sensor_manager
+
+# Mit Serial-Monitor (Live-Output)
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev && ~/.platformio/penv/Scripts/platformio.exe device monitor
+```
+
+**Oder innerhalb El Trabajante Ordner (falls nur dieser in VSCode geöffnet):**
 ```bash
 cd "El Trabajante"
 
@@ -417,15 +450,31 @@ El Servador/                      # God-Kaiser Server
 ### Vor jedem Commit:
 
 ```bash
-# Tests laufen lassen
-pio test -e esp32_dev
+# Tests laufen lassen (von Root aus)
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev
 
 # Nur committen wenn:
 # - Keine :FAIL im Output
 # - :IGNORE ist OK (fehlende Hardware)
 ```
 
+### Build-Commands für KI-Agenten:
+
+**IMMER vollständigen Pfad nutzen** wenn vom Root-Verzeichnis aus gearbeitet wird:
+
+```bash
+# Clean Build
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev -t clean
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
+
+# Nur Fehler-Output anzeigen
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev 2>&1 | grep -E "(error:|FAILED)"
+
+# Build-Status prüfen
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev 2>&1 | grep -E "(SUCCESS|FAILED)"
+```
+
 ---
 
-**Letzte Aktualisierung:** 2025-11-23
-**Version:** 2.0 (Fokussiert auf Test-Integration)
+**Letzte Aktualisierung:** 2025-11-24
+**Version:** 2.1 (Build-Commands optimiert für Root-Verzeichnis-Workflow)
