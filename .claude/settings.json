@@ -1,0 +1,26 @@
+{
+  "model": "sonnet",
+  "permissions": {
+    "allow": ["Bash", "Read", "Write", "Edit", "Task", "Glob", "Grep"]
+  },
+  "context": {
+    "alwaysInclude": [
+      "CLAUDE.md",
+      "El Trabajante/platformio.ini",
+      "El Servador/pyproject.toml"
+    ],
+    "maxTokens": 150000
+  },
+  "taskManagement": {
+    "enabled": true,
+    "autoTrack": true
+  },
+  "git": {
+    "autoCommit": false,
+    "commitMessageTemplate": "<type>: <subject>\n\n<body>"
+  },
+  "testing": {
+    "autoRun": false,
+    "preCommitChecks": true
+  }
+}
