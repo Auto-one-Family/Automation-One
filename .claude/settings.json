@@ -1,0 +1,27 @@
+{
+  "model": "sonnet",
+  "permissions": {
+    "allow": ["Bash", "Read", "Write", "Edit", "Task", "Glob", "Grep"]
+  },
+  "context": {
+    "alwaysInclude": [
+      "CLAUDE.md",
+      "El Trabajante/test/README.md",
+      "El Trabajante/platformio.ini"
+    ],
+    "maxTokens": 150000
+  },
+  "taskManagement": {
+    "enabled": true,
+    "autoTrack": true
+  },
+  "testing": {
+    "defaultEnvironment": "esp32_dev",
+    "outputFile": "test_output.log",
+    "parseFormat": "unity"
+  },
+  "git": {
+    "autoCommit": false,
+    "commitMessageTemplate": "<type>: <subject>\n\n<body>"
+  }
+}
