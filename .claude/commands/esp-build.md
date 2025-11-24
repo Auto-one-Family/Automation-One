@@ -45,6 +45,32 @@ Beide Environments haben folgende Features aktiviert:
 - `ZONE_MASTER_ENABLED=1` - Zone-Master
 - `CONFIG_ENABLE_THREAD_SAFETY` - Thread-Safety (Phase 6+)
 
+## Environment-Spezifische Limits
+
+**Quelle:** `El Trabajante/platformio.ini`
+
+| Flag | XIAO ESP32-C3 | ESP32 Dev | Bedeutung |
+|------|---------------|-----------|-----------|
+| **MAX_SENSORS** | 10 | 20 | Max. Anzahl Sensoren gleichzeitig |
+| **MAX_ACTUATORS** | 6 | 12 | Max. Anzahl Aktoren gleichzeitig |
+| **MAX_LIBRARY_SIZE** | 32768 | 65536 | OTA Library Buffer-Größe |
+| **MQTT_MAX_PACKET_SIZE** | 1024 | 2048 | Max. MQTT-Message-Größe |
+| **CORE_DEBUG_LEVEL** | 2 | 3 | Arduino Core Debug-Level |
+
+**Warum unterschiedlich?**
+- XIAO ESP32-C3 hat weniger Flash/RAM → Konservativere Limits
+- ESP32 Dev hat mehr Ressourcen → Höhere Parallelität möglich
+
+**Anpassen:**
+```ini
+# platformio.ini - Environment-spezifisch
+[env:seeed_xiao_esp32c3]
+build_flags =
+    ${common.build_flags}
+    -DXIAO_ESP32C3_MODE=1
+    -DMAX_SENSORS=10  # ← Hier anpassen falls nötig
+```
+
 ## Bei Fehlern
 
 - Prüfe ob PlatformIO installiert ist: `pio --version`

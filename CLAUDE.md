@@ -4,6 +4,37 @@
 
 ---
 
+## 0. Quick Decision Tree - Welche Doku lesen?
+
+### 🔧 "Ich will Code ändern"
+1. **Welches Modul?** → [Section 9: Modul-Dokumentation Navigation](#9-modul-dokumentation-navigation)
+2. **Workflow folgen** → [Section 10: KI-Agenten Workflow](#10-ki-agenten-workflow)
+3. **Tests schreiben** → `El Trabajante/test/README.md`
+4. **Pattern-Beispiele** → `.claude/WORKFLOW_PATTERNS.md`
+
+### 🐛 "Ich habe einen Fehler"
+1. **Build-Fehler?** → `.claude/commands/esp-build.md` + `platformio.ini` prüfen
+2. **Test-Fehler?** → `.claude/TEST_WORKFLOW.md` Section 6: Troubleshooting
+3. **Runtime-Fehler?** → [Section 6: Fehlercode-Referenz](#6-fehlercode-referenz) + `El Trabajante/src/models/error_codes.h`
+4. **MQTT-Problem?** → `El Trabajante/docs/Mqtt_Protocoll.md`
+5. **GPIO-Konflikt?** → [Section 5.2: GPIO-Konflikte](#52-gpio-konflikte)
+
+### 📖 "Ich will verstehen wie X funktioniert"
+1. **System-Flow?** → `El Trabajante/docs/system-flows/` (Boot, Sensor-Reading, Actuator-Command)
+2. **MQTT-Protokoll?** → `El Trabajante/docs/Mqtt_Protocoll.md`
+3. **API einer Klasse?** → `El Trabajante/docs/API_REFERENCE.md`
+4. **Test-Infrastruktur?** → `El Trabajante/test/README.md`
+5. **Modul-Abhängigkeiten?** → `.claude/ARCHITECTURE_DEPENDENCIES.md`
+
+### ➕ "Ich will neues Feature hinzufügen"
+1. **Sensor?** → Pi-Enhanced: Server-side Library ([Section 12](#12-best-practices-für-ki-agenten))
+2. **Aktor?** → ESP Driver + Safety-Constraints (`.claude/WORKFLOW_PATTERNS.md`)
+3. **MQTT-Topic?** → MQTT-Protokoll aktualisieren ([Section 10, Schritt 6](#schritt-6-dokumentation-aktualisieren))
+4. **Error-Code?** → `El Trabajante/src/models/error_codes.h` erweitern + dokumentieren
+5. **Test?** → Dual-Mode-Pattern ([Section 3.2](#32-dual-mode-pattern-pflicht-für-jeden-test))
+
+---
+
 ## 1. Schnellstart
 
 ### El Trabajante (ESP32 Firmware)
@@ -111,78 +142,24 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload
 - CI/CD läuft ohne physische ESPs
 - Schneller Feedback-Loop (keine MQTT-Broker-Setup nötig)
 
+**Details:** Siehe `El Trabajante/test/README.md` für vollständige Code-Beispiele und API-Referenz.
+
 ### 3.2 Dual-Mode-Pattern (PFLICHT für jeden Test!)
 
 **Jeder Test muss Production-safe sein:**
 
-```cpp
-// MODE 1: Suche existierende Ressource (Production-System)
-uint8_t gpio = findExistingSensor("analog");
+- **Production-System:** Nutzt vorhandene Config, ändert NICHTS (read-only)
+- **New/Empty System:** Erstellt temporäre Config, räumt automatisch auf
+- **Kein Config-Chaos:** Tests hinterlassen keine Artefakte in NVS
+- **CI/CD-Ready:** Gleicher Test funktioniert auf deployed ESP32 UND leerer Hardware
 
-// MODE 2: Falls nicht vorhanden → Erstelle temporäre (New System)
-if (gpio == 255) {
-    gpio = findFreeTestGPIO("analog");
-    TemporaryTestSensor temp(gpio, "TestAnalogSensor");
+**Kern-Prinzipien:**
+1. Zuerst versuchen Production-Device zu finden (read-only Test)
+2. Falls nicht vorhanden: Temporäres Virtual Device erstellen
+3. RAII-Cleanup garantiert automatische Bereinigung
+4. `TEST_IGNORE` statt Failure bei fehlenden Ressourcen
 
-    // Test-Logik hier...
-    int value = sensorManager.readSensor(gpio);
-    TEST_ASSERT_GREATER_THAN(0, value);
-
-}  // Auto-Cleanup durch RAII - kein manuelles delete!
-```
-
-**Warum:**
-- **Production:** Nutzt vorhandene Konfiguration, ändert nichts
-- **New System:** Erstellt temporäre Config, räumt automatisch auf
-- **Kein Config-Chaos:** Tests hinterlassen keine Artefakte
-
-### 3.3 RAII-Cleanup (NIEMALS manuelles delete!)
-
-**RICHTIG - Auto-Cleanup durch RAII:**
-
-```cpp
-// Temporärer Sensor - Cleanup bei Scope-Ende
-TemporaryTestSensor temp(gpio, "TempSensor");
-
-// Smart Pointer für Actuators
-std::unique_ptr<TemporaryTestActuator> act =
-    std::make_unique<TemporaryTestActuator>(gpio, ActuatorTypeTokens::PUMP);
-
-// Destruktor räumt automatisch auf!
-```
-
-**FALSCH - Manuelles Memory-Management:**
-
-```cpp
-// ❌ VERBOTEN - Memory-Leak-Gefahr!
-SensorConfig* cfg = new SensorConfig();
-delete cfg;  // Vergessen? → Memory Leak!
-
-// ❌ VERBOTEN - Exception-unsafe!
-ActuatorConfig* act = new ActuatorConfig();
-// Exception hier? → Memory Leak!
-delete act;
-```
-
-**Regel:** Wenn du `new`/`delete` schreibst, machst du etwas falsch!
-
-### 3.4 Test-Output-Format (Unity)
-
-```
-test/test_sensor_manager.cpp:365:test_analog_sensor_raw_reading:PASS
-test/test_sensor_manager.cpp:457:test_digital_sensor_plausibility:PASS
-test/test_actuator_manager.cpp:123:test_pump_control:IGNORE
------------------------
-3 Tests 0 Failures 1 Ignored
-OK
-```
-
-**Format:** `<datei>:<zeile>:<test_name>:<status>`
-
-**Status-Codes:**
-- `PASS` - Test erfolgreich, alles OK
-- `FAIL` - Test fehlgeschlagen, Code ist kaputt!
-- `IGNORE` - Ressource fehlt (GPIO, Hardware), aber OK
+**Details:** Vollständige Code-Beispiele, Templates und Helper-Funktionen in `El Trabajante/test/README.md`.
 
 ---
 
@@ -204,7 +181,7 @@ kaiser/god/esp/{esp_id}/config/sensor/{gpio}
 kaiser/god/esp/{esp_id}/system/command
 ```
 
-**Details:** Siehe `El Trabajante/docs/Mqtt_Protocoll.md`
+**Details:** Siehe `El Trabajante/docs/Mqtt_Protocoll.md` für vollständige Topic-Spezifikation, Payload-Strukturen und QoS-Level.
 
 ---
 
@@ -284,82 +261,36 @@ ERROR_SENSOR_NOT_CONFIGURED 2010   // Sensor nicht konfiguriert
 
 ### Communication (3000-3999)
 ```cpp
-ERROR_MQTT_NOT_CONNECTED    3001   // MQTT-Verbindung fehlt
-ERROR_MQTT_PUBLISH_FAILED   3002   // Publish fehlgeschlagen
-ERROR_WIFI_NOT_CONNECTED    3010   // WiFi offline
+ERROR_WIFI_CONNECT_FAILED   3003   // WiFi-Verbindung fehlgeschlagen
+ERROR_MQTT_CONNECT_FAILED   3011   // MQTT-Verbindung fehlgeschlagen
+ERROR_MQTT_PUBLISH_FAILED   3012   // Publish fehlgeschlagen
+ERROR_MQTT_SUBSCRIBE_FAILED 3013   // Subscribe fehlgeschlagen
 ```
 
-**Vollständige Liste:** `El Trabajante/src/models/error_codes.h`
+**Vollständige Liste:** Siehe `El Trabajante/src/models/error_codes.h` für alle Error-Codes mit Beschreibungen und Severity-Levels.
 
 ---
 
-## 7. Cursor/KI-Test-Integration
+## 7. Test-Ausführung und Workflow
 
-### Tests starten (ohne Server)
+**Für detaillierte Test-Dokumentation konsultiere:**
 
-**Von Root-Verzeichnis (empfohlen für KI-Agenten):**
+- **Test-Patterns und Code-Beispiele:** `El Trabajante/test/README.md` (31K Tokens - vollständige Test-Dokumentation)
+- **KI-Agenten Test-Workflow:** `.claude/TEST_WORKFLOW.md` (Workflow für automatisierte Test-Ausführung)
+- **Command für Test-Ausführung:** Nutze `/esp-test` Command oder siehe `.claude/commands/esp-test.md`
+
+**Schnellstart für Tests:**
+
 ```bash
-# Alle Tests
+# Von Root-Verzeichnis (empfohlen für KI-Agenten)
 cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev 2>&1 | tee test_output.log
 
-# Einzelne Test-Datei
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev -f test_sensor_manager
-
-# Mit Serial-Monitor (Live-Output)
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev && ~/.platformio/penv/Scripts/platformio.exe device monitor
+# Output analysieren
+grep ":FAIL" test_output.log  # Nur Fehler anzeigen
+tail -5 test_output.log       # Zusammenfassung
 ```
 
-**Oder innerhalb El Trabajante Ordner (falls nur dieser in VSCode geöffnet):**
-```bash
-cd "El Trabajante"
-
-# Alle Tests
-pio test -e esp32_dev 2>&1 | tee test_output.log
-
-# Einzelne Test-Datei
-pio test -e esp32_dev -f test_sensor_manager
-
-# Mit Serial-Monitor (Live-Output)
-pio test -e esp32_dev && pio device monitor
-```
-
-### Output-Parsing für KI
-
-**Erfolgreich:**
-```
-:PASS → Test erfolgreich
-```
-
-**Fehler analysieren:**
-```
-:FAIL → Code ist kaputt, analysiere Fehlermeldung
-```
-
-**Ressource fehlt (OK):**
-```
-:IGNORE → GPIO/Hardware fehlt, aber graceful degradation
-```
-
-### Automatisierte Auswertung
-
-```bash
-# Nur Fehler anzeigen
-grep ":FAIL" test_output.log
-
-# Zusammenfassung
-tail -5 test_output.log
-
-# Ignorierte Tests (optional prüfen)
-grep ":IGNORE" test_output.log
-```
-
-**Workflow:**
-1. Test-Command ausführen
-2. Output nach `:FAIL` greppen
-3. Falls FAIL: Zeile + Fehlermeldung analysieren
-4. Falls nur IGNORE/PASS: Code ist OK
-
-**Details:** Siehe `TEST_WORKFLOW.md`
+**Wichtig:** Tests laufen OHNE Server dank MockMQTTBroker und VirtualActuatorDriver. Siehe Abschnitt 3.1 für Details.
 
 ---
 
@@ -391,26 +322,119 @@ El Servador/                      # God-Kaiser Server
 
 ---
 
-## 9. Wichtige Dokumentation
+## 9. Modul-Dokumentation Navigation
 
-### ESP32 Development:
-- **Test-Patterns:** `El Trabajante/test/README.md` (31K Tokens - sehr detailliert!)
-- **System Flows:** `El Trabajante/docs/system-flows/`
-- **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
-- **API Reference:** `El Trabajante/docs/API_REFERENCE.md`
+### Wann welche Dokumentation konsultieren?
 
-### Server Development:
-- **Architecture:** `El Servador/god_kaiser_server/docs/ARCHITECTURE.md`
-- **API Docs:** `El Servador/god_kaiser_server/docs/API.md`
-- **Testing:** `El Servador/god_kaiser_server/docs/TESTING.md`
+| Aufgabe | Primäre Dokumentation | Zusätzliche Ressourcen | Code-Location | Verantwortlichkeit |
+|---------|----------------------|------------------------|---------------|-------------------|
+| **Tests schreiben/ausführen** | `El Trabajante/test/README.md` | `.claude/TEST_WORKFLOW.md` | `El Trabajante/test/` | Test-Patterns, MockMQTTBroker, Templates |
+| **MQTT-Protokoll verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | `El Trabajante/docs/MQTT_CLIENT_API.md` | `El Trabajante/src/services/communication/mqtt_client.*` | Topics, Payloads, QoS, Wildcards |
+| **API-Referenz benötigt** | `El Trabajante/docs/API_REFERENCE.md` | `El Trabajante/src/services/[modul]/` | `El Trabajante/src/services/` | Methoden, Parameter, Return-Werte |
+| **System-Flow verstehen** | `El Trabajante/docs/system-flows/` | `El Trabajante/docs/System_Overview.md` | `El Trabajante/src/core/` | Boot-Sequence, Sensor-Reading, Actuator-Command |
+| **Sensor-System** | `El Trabajante/docs/API_REFERENCE.md` (SensorManager) | `El Trabajante/src/services/sensor/` | `El Trabajante/src/services/sensor/` | SensorManager, PiEnhancedProcessor, Sensor Drivers |
+| **Actuator-System** | `El Trabajante/docs/API_REFERENCE.md` (ActuatorManager) | `El Trabajante/src/services/actuator/` | `El Trabajante/src/services/actuator/` | ActuatorManager, SafetyController, Actuator Drivers |
+| **Config-System** | `El Trabajante/docs/NVS_KEYS.md` | `El Trabajante/docs/API_REFERENCE.md` (ConfigManager) | `El Trabajante/src/services/config/` | ConfigManager, StorageManager, WiFiConfig |
+| **Zone-Management** | `El Trabajante/docs/Dynamic Zones and Provisioning/` | `El Trabajante/src/services/provisioning/` | `El Trabajante/src/services/provisioning/` | ProvisionManager, Zone Assignment |
+| **Error-Handling** | `El Trabajante/src/models/error_codes.h` | `El Trabajante/src/error_handling/` | `El Trabajante/src/error_handling/` | Error Codes, ErrorTracker, CircuitBreaker, Recovery |
+| **Communication (WiFi/HTTP)** | `El Trabajante/docs/API_REFERENCE.md` | `El Trabajante/src/services/communication/` | `El Trabajante/src/services/communication/` | WiFiManager, HTTPClient, NetworkDiscovery |
 
-### Provisioning & Zones:
-- **Design:** `El Trabajante/docs/Dynamic Zones and Provisioning/PROVISIONING_DESIGN.md`
-- **Implementation:** `El Trabajante/docs/Dynamic Zones and Provisioning/DYNAMIC_ZONES_IMPLEMENTATION.md`
+### Service-Module Übersicht
+
+#### Config (`El Trabajante/src/services/config/`)
+- **ConfigManager:** Konfiguration laden/speichern (WiFi, Zone, System, Sensor, Actuator)
+- **StorageManager:** NVS-Abstraktion (Namespaces, Key-Value Storage)
+- **WiFiConfig:** WiFi-Konfigurationsstrukturen
+- **Dokumentation:** `El Trabajante/docs/API_REFERENCE.md` (ConfigManager, StorageManager), `El Trabajante/docs/NVS_KEYS.md`
+
+#### Sensor (`El Trabajante/src/services/sensor/`)
+- **SensorManager:** Sensor-Orchestrierung, RAW-Daten-Akquisition
+- **PiEnhancedProcessor:** Server-Centric Processing (RAW → Server → Processed)
+- **Sensor Drivers:** I2C, OneWire, Analog, Digital Sensoren
+- **SensorFactory:** Factory-Pattern für Sensor-Erstellung
+- **Dokumentation:** `El Trabajante/docs/API_REFERENCE.md` (SensorManager), `El Trabajante/docs/system-flows/02-sensor-reading-flow.md`
+
+#### Actuator (`El Trabajante/src/services/actuator/`)
+- **ActuatorManager:** Actuator-Control, Registry-Management, MQTT-Integration
+- **SafetyController:** Emergency-Stop, Safety-Constraints, Timeout-Protection
+- **Actuator Drivers:** Pump, Valve, PWM Actuators
+- **Dokumentation:** `El Trabajante/docs/API_REFERENCE.md` (ActuatorManager), `El Trabajante/docs/system-flows/03-actuator-command-flow.md`
+
+#### Communication (`El Trabajante/src/services/communication/`)
+- **MQTTClient:** MQTT-Broker-Verbindung, Publish/Subscribe, Topic-Building
+- **WiFiManager:** WiFi-Verbindungsmanagement, Reconnect-Logic
+- **HTTPClient:** HTTP-Requests für Pi-Enhanced Processing
+- **WebServer:** Provisioning-Webserver (optional)
+- **Dokumentation:** `El Trabajante/docs/Mqtt_Protocoll.md`, `El Trabajante/docs/MQTT_CLIENT_API.md`, `El Trabajante/docs/API_REFERENCE.md`
+
+#### Provisioning (`El Trabajante/src/services/provisioning/`)
+- **ProvisionManager:** Zone-Assignment, Dynamic Provisioning
+- **Dokumentation:** `El Trabajante/docs/Dynamic Zones and Provisioning/`
 
 ---
 
-## 10. Feature Flags (Build-Konfiguration)
+## 10. KI-Agenten Workflow
+
+### Schritt-für-Schritt Anleitung für Code-Änderungen
+
+**SCHRITT 1: Aufgabe identifizieren**
+- Was soll geändert/implementiert werden?
+- Welches Modul ist betroffen? (siehe Abschnitt 9: Modul-Dokumentation Navigation)
+- Ist es ein Bug-Fix, Feature oder Refactoring?
+
+**SCHRITT 2: Richtige Dokumentation konsultieren**
+- Nutze die Tabelle in Abschnitt 9, um die passende Dokumentation zu finden
+- **Immer zuerst lesen:** Relevante Dokumentation vollständig durcharbeiten
+- Verstehe bestehende Patterns und Constraints
+
+**SCHRITT 3: Code-Location finden**
+- Nutze Code-Location aus Abschnitt 9 oder durchsuche `El Trabajante/src/`
+- Verstehe Abhängigkeiten zwischen Modulen
+- Prüfe bestehende Implementierungen ähnlicher Features
+
+**SCHRITT 4: Änderungen implementieren**
+- **Regeln befolgen:**
+  - Test-Patterns: Dual-Mode, RAII-Cleanup (siehe Abschnitt 3.2)
+  - MQTT-Contracts nicht brechen (siehe Abschnitt 4)
+  - NVS-Keys konsistent nutzen (siehe `El Trabajante/docs/NVS_KEYS.md`)
+  - Error-Codes korrekt verwenden (siehe Abschnitt 6)
+  - Safety-Constraints beachten (siehe Abschnitt 5)
+- **Code-Stil:** Konsistent mit bestehendem Code
+- **Kommentare:** Wichtig für komplexe Logik
+
+**SCHRITT 5: Tests ausführen**
+- Tests schreiben für neue Features (siehe Abschnitt 3, `El Trabajante/test/README.md`)
+- Bestehende Tests ausführen: `cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev`
+- Output analysieren: `grep ":FAIL" test_output.log`
+- **Nur committen wenn:** Keine `:FAIL` im Output (`:IGNORE` ist OK)
+
+**SCHRITT 6: Dokumentation aktualisieren**
+- API-Referenz aktualisieren falls nötig (`El Trabajante/docs/API_REFERENCE.md`)
+- System-Flows aktualisieren falls Verhalten geändert (`El Trabajante/docs/system-flows/`)
+- MQTT-Protokoll aktualisieren falls Topics/Payloads geändert (`El Trabajante/docs/Mqtt_Protocoll.md`)
+- NVS-Keys dokumentieren falls neue Keys hinzugefügt (`El Trabajante/docs/NVS_KEYS.md`)
+
+### Regeln für Code-Änderungen
+
+**NIEMALS:**
+- ❌ Production-Config in Tests ändern (nur read-only!)
+- ❌ MQTT-Topic-Schema ohne Dokumentation ändern
+- ❌ NVS-Keys ohne Dokumentation hinzufügen
+- ❌ Error-Codes ohne Definition verwenden
+- ❌ Safety-Constraints umgehen
+- ❌ `new`/`delete` verwenden (RAII-Pattern!)
+
+**IMMER:**
+- ✅ Dual-Mode-Pattern in Tests verwenden
+- ✅ RAII für Ressourcen-Management
+- ✅ MockMQTTBroker für MQTT-Tests
+- ✅ Error-Codes aus `error_codes.h` verwenden
+- ✅ Safety-Controller prüfen lassen
+- ✅ Dokumentation konsultieren BEVOR Code-Änderung
+
+---
+
+## 11. Feature Flags (Build-Konfiguration)
 
 **Wichtige Flags in `platformio.ini`:**
 
@@ -429,7 +453,7 @@ El Servador/                      # God-Kaiser Server
 
 ---
 
-## 11. Best Practices für KI-Agenten
+## 12. Best Practices für KI-Agenten
 
 ### Bei neuen Features:
 
@@ -477,4 +501,4 @@ cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
 ---
 
 **Letzte Aktualisierung:** 2025-11-24
-**Version:** 2.1 (Build-Commands optimiert für Root-Verzeichnis-Workflow)
+**Version:** 3.0 (Master-Dokument für KI-Agenten: Modul-Navigation, KI-Workflow, strukturierte Verweise)
