@@ -8,28 +8,28 @@ Führe einen kompletten Test-Durchlauf für beide Hauptkomponenten aus.
 
 ## Aufgabe
 
-### 1. ESP32 Tests (El Trabajante)
+### 1. ESP32 Tests (Server-orchestriert)
 
 ```bash
-cd "El Trabajante"
+cd "El Servador"
 
-# Build-Check für beide Environments
+# ESP32 Tests via MockESP32Client
+echo "🧪 Running ESP32 Tests (server-orchestriert)..."
+poetry run pytest god_kaiser_server/tests/esp32/ -v
+
+# Firmware Build-Check
+cd "../El Trabajante"
 echo "🔨 Building XIAO ESP32-C3..."
 pio run -e seeed_xiao_esp32c3
 
 echo "🔨 Building ESP32 Dev..."
 pio run -e esp32_dev
-
-# Unit Tests
-echo "🧪 Running ESP32 Tests..."
-pio test
 ```
 
 **Ergebnisse:**
+- ESP32 Test Results (140+ Tests via pytest)
 - Build Status (beide Environments)
 - Binary-Größen und Flash-Auslastung
-- Test-Ergebnisse (passed/failed)
-- Memory-Leaks (falls erkannt)
 
 ### 2. Server Tests (El Servador)
 
@@ -98,7 +98,7 @@ ESP32 BUILDS:
 ✅ ESP32 Dev: 687KB / 3.0MB Flash (22%)
 
 ESP32 TESTS:
-✅ 24/24 tests passed
+✅ 140/140 tests passed (server-orchestriert)
 
 SERVER TESTS:
 ✅ 156/156 tests passed

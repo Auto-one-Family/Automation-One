@@ -6,7 +6,7 @@
   "context": {
     "alwaysInclude": [
       "CLAUDE.md",
-      "El Trabajante/test/README.md",
+      ".claude/README.md",
       "El Trabajante/platformio.ini"
     ],
     "maxTokens": 150000

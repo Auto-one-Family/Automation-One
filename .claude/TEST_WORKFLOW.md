@@ -1,10 +1,59 @@
-# Test-Workflow für KI-Agenten (Cursor, Claude Code)
+# Test-Workflow für KI-Agenten
 
-> **Zweck:** Automatisierte Test-Auswertung ohne manuelles Monitoring
+> **Zweck:** Test-Ausführung und Auswertung für AutoOne-Projekt  
+> **Themengebiet:** Test-Workflows (ESP32 + Server)  
+> **Verwandte Dokumente:** `El Servador/docs/ESP32_TESTING.md`, `El Trabajante/test/_archive/README.md`
 
 ---
 
-## 1. Voraussetzungen
+## Übersicht: Zwei Test-Systeme
+
+**AutoOne hat zwei getrennte Test-Systeme:**
+
+### 1. Server-Orchestrierte Tests (EMPFOHLEN)
+- **Location:** `El Servador/god_kaiser_server/tests/esp32/`
+- **Framework:** pytest (Python)
+- **Zweck:** ESP32-Funktionalität via MQTT testen
+- **Vorteile:** Hardware-unabhängig, CI/CD-ready, schnell
+- **Dokumentation:** `El Servador/docs/ESP32_TESTING.md` 👈 **VOLLSTÄNDIGE TEST-DOKU HIER**
+
+### 2. Legacy PlatformIO Tests (ARCHIVIERT)
+- **Location:** `El Trabajante/test/_archive/`
+- **Framework:** Unity (C++)
+- **Status:** Archiviert (PlatformIO-Linker-Probleme)
+- **Dokumentation:** `El Trabajante/test/_archive/README.md`
+
+**Dieser Workflow fokussiert auf PlatformIO Test-Management und verweist für Server-Tests auf `ESP32_TESTING.md`.**
+
+---
+
+## 1. Server-Tests (pytest) - Empfohlen
+
+**Vollständige Dokumentation:** `El Servador/docs/ESP32_TESTING.md`
+
+**Schnellstart:**
+```bash
+cd "El Servador"
+poetry install
+poetry run pytest god_kaiser_server/tests/esp32/ -v
+```
+
+**Test-Kategorien:**
+- Communication Tests (~20)
+- Infrastructure Tests (~30)
+- Actuator Tests (~40)
+- Sensor Tests (~30)
+- Integration Tests (~20)
+
+**GESAMT: ~140 Tests**
+
+Siehe: `El Servador/docs/ESP32_TESTING.md` für Details zu Fixtures, MockESP32Client API, Best Practices.
+
+---
+
+## 2. Legacy PlatformIO Tests - Archiviert
+
+### Voraussetzungen
 
 **Hardware:**
 - ESP32 via USB verbunden (optional - Tests laufen auch ohne!)
@@ -185,41 +234,14 @@ cd "El Trabajante"
 4. **Archive-State prüfen** - Bei Problemen: `ls test/_archive/*.cpp` sollte alle Tests enthalten
 5. **IGNORE ist OK** - Fehlende Hardware ist graceful degradation, kein Fehler
 
-### ✅ LÖSUNG IMPLEMENTIERT: Server-orchestrierte Tests (Option A)
+### Server-Tests Status ✅
 
-**Status (2025-11-26):** ✅ ABGESCHLOSSEN
+**Status:** ✅ Produktionsreif - Vollständig dokumentiert in `El Servador/docs/ESP32_TESTING.md`
 
-**Was wurde implementiert:**
-
-1. **Server-side MockESP32Client**
-   - Simuliert ESP32-MQTT-Verhalten auf Server-Seite
-   - Keine Hardware nötig für Tests
-   - Vollständige State-Management (Actuators, Sensors, Config)
-
-2. **Pytest Test Suites** (`El Servador/god_kaiser_server/tests/esp32/`)
-   - ✅ Communication Tests (~20 Tests)
-   - ✅ Infrastructure Tests (~30 Tests)
-   - ✅ Actuator Tests (~40 Tests)
-   - ✅ Sensor Tests (~30 Tests)
-   - ✅ Integration Tests (~20 Tests)
-   - **GESAMT: ~140 Tests**
-
-3. **Dokumentation**
-   - ✅ MQTT Test Protocol (`El Servador/docs/MQTT_TEST_PROTOCOL.md`)
-   - ✅ Mqtt_Protocoll.md aktualisiert (Version 2.2)
-   - ✅ ESP32 Testing Guide (`El Servador/docs/ESP32_TESTING.md`)
-
-**Tests ausführen:**
-```bash
-cd "El Servador"
-poetry install
-poetry run pytest god_kaiser_server/tests/esp32/ -v
-```
-
-**Legacy ESP32 Tests:**
-- Verschoben nach `El Trabajante/test/_archive/`
-- Als Referenz behalten
-- Siehe README.md im Archive-Verzeichnis
+**Für Server-Test-Details siehe:**
+- 📄 `El Servador/docs/ESP32_TESTING.md` - Vollständige Test-Dokumentation
+- 📄 `El Servador/docs/MQTT_TEST_PROTOCOL.md` - MQTT Command-Spezifikation
+- 📄 `El Trabajante/test/_archive/README.md` - Legacy Test Migration-Mapping
 
 ---
 
@@ -332,38 +354,13 @@ FAIL
 
 ---
 
-## 5. Test-Patterns (Kurzreferenz)
+## 5. Test-Pattern Referenzen
 
-**Für detaillierte Code-Beispiele siehe:** `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
+**Server-Tests (pytest):**
+- 📄 `El Servador/docs/ESP32_TESTING.md` - MockESP32Client API, Fixtures, Best Practices
 
-**Legacy Unity-Test-Patterns:** `El Trabajante/test/_archive/README.md` (archiviert)
-
-### MockMQTTBroker nutzen
-
-**Zweck:** Simuliert MQTT-Broker lokal (kein Server nötig)
-
-- `setUp()` installiert Hook
-- `tearDown()` räumt auf
-- `broker.clearPublished()` verhindert Interference zwischen Tests
-
-### VirtualActuatorDriver nutzen
-
-**Zweck:** Simuliert Hardware-Actuators (Pump, Valve, PWM)
-
-- `TemporaryTestActuator` nutzt RAII → kein manuelles delete
-- `getVirtualDriver()` gibt Mock-Driver zurück
-- `wasCommandCalled()` prüft ob Command ankam
-
-### Dual-Mode-Pattern
-
-**PFLICHT für jeden Test:**
-1. Zuerst Production-Device finden (read-only Test)
-2. Falls nicht vorhanden: Temporäres Virtual Device erstellen
-3. RAII-Cleanup garantiert automatische Bereinigung
-
-**Server-orchestrierte Tests:** Siehe `El Servador/docs/ESP32_TESTING.md` für vollständige Test-Dokumentation.
-
-**Legacy Unity-Tests:** Siehe `El Trabajante/test/_archive/README.md` für historische Unity-Test-Patterns.
+**Legacy Unity-Tests (archiviert):**
+- 📄 `El Trabajante/test/_archive/README.md` - Historische Test-Patterns, Migration-Mapping
 
 ---
 
@@ -464,6 +461,26 @@ cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_de
 
 ---
 
-**Letzte Aktualisierung:** 2025-11-24
-**Version:** 2.0 (Gekürzt, fokussiert auf KI-Agenten-Workflow)
+---
+
+## Dokumentations-Hierarchie
+
+**Dieser Workflow beschreibt:** PlatformIO Test-Ausführung und -Management
+
+**Für detaillierte Test-Dokumentation siehe:**
+1. 📄 `El Servador/docs/ESP32_TESTING.md` - **Server-Tests (VOLLSTÄNDIG)**
+   - MockESP32Client API
+   - Test-Kategorien (140+ Tests)
+   - Fixtures, Best Practices
+   - pytest Kommandos
+
+2. 📄 `El Trabajante/test/_archive/README.md` - Legacy Tests
+   - Migrations-Mapping
+   - Warum archiviert
+   - Historische Test-Patterns
+
+---
+
+**Letzte Aktualisierung:** 2025-11-26
+**Version:** 2.1 (Fokussiert auf PlatformIO, verweist auf Server-Test-Doku)
 

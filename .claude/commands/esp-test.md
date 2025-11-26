@@ -1,112 +1,133 @@
 ---
-description: Führe ESP32 Tests aus und analysiere Ergebnisse
+description: Führe ESP32 Tests aus (Server-orchestriert via pytest)
 ---
 
 # ESP32 Test Suite
 
-Führe die komplette Test-Suite für El Trabajante ESP32 Firmware aus und analysiere die Ergebnisse automatisch.
+Führe die server-orchestrierten ESP32-Tests aus. Diese Tests laufen via MQTT-Mock und benötigen **keine echte Hardware**.
 
-## Aufgabe
+## Empfohlener Ansatz: Server-Tests (pytest)
+
+```bash
+cd "El Servador"
+poetry install
+poetry run pytest god_kaiser_server/tests/esp32/ -v
+```
+
+**Vorteile:**
+- ✅ Hardware-unabhängig (MockESP32Client)
+- ✅ Schnell (~140 Tests in <10s)
+- ✅ CI/CD-ready
+- ✅ Keine PlatformIO Build-Zeit
+
+**Vollständige Dokumentation:** `El Servador/docs/ESP32_TESTING.md`
+
+---
+
+## Alternative: Legacy PlatformIO Tests (archiviert)
+
+**Status:** Archiviert wegen PlatformIO-Linker-Problemen
+
+**Für Legacy-Tests:**
+```bash
+cd "El Trabajante"
+.\scripts\run-test-category.ps1 -Category <category>
+```
+
+Siehe: `.claude/commands/esp-test-category.md`
+
+---
+
+## Aufgabe (Server-Tests)
 
 1. **Tests ausführen:**
    ```bash
-   cd "El Trabajante"
-   ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev 2>&1 | tee test_output.log
+   cd "El Servador"
+   poetry run pytest god_kaiser_server/tests/esp32/ -v
    ```
 
-2. **Output analysieren:**
-   ```bash
-   # Nur Fehler anzeigen
-   grep ":FAIL" test_output.log
-   
-   # Zusammenfassung
-   tail -5 test_output.log
-   ```
+2. **Ergebnisse interpretieren:**
+   - **Alle grün:** ✅ Code ist OK
+   - **Fehler vorhanden:** ❌ Fehler analysieren und fixen
 
-3. **Ergebnisse interpretieren:**
-   - **Keine FAIL:** ✅ Code ist OK, kann committed werden
-   - **FAIL vorhanden:** ❌ Fehler analysieren und fixen
-   - **IGNORE:** ✅ OK - Graceful Degradation (fehlende Hardware)
+## Test-Kategorien (~140 Tests)
 
-## Test-Status-Codes
+| Kategorie | Anzahl | Beschreibung |
+|-----------|--------|--------------|
+| **Communication** | ~20 | MQTT Connectivity, Ping/Pong |
+| **Infrastructure** | ~30 | Config, Topics, System Status |
+| **Actuator** | ~40 | Digital, PWM, Emergency Stop |
+| **Sensor** | ~30 | Sensor Reading, Pi-Enhanced |
+| **Integration** | ~20 | End-to-End Workflows |
 
-| Status | Bedeutung | Aktion |
-|--------|-----------|--------|
-| **PASS** | Test erfolgreich | Keine Aktion nötig |
-| **FAIL** | Test fehlgeschlagen | **Fehler analysieren!** |
-| **IGNORE** | Ressource fehlt | OK - Graceful Degradation |
+## Spezifische Test-Kategorie ausführen
 
-**WICHTIG:** IGNORE ist **KEIN Fehler**! Tests können auf Production-Systemen GPIOs nicht finden, das ist erwartet.
-
-## Output-Format
-
-Unity-Test-Format:
-```
-test/test_sensor_manager.cpp:365:test_analog_sensor_raw_reading:PASS
-test/test_actuator_manager.cpp:123:test_pump_control:IGNORE
------------------------
-3 Tests 0 Failures 1 Ignored
-OK
-```
-
-## Verfügbare Optionen
-
-### Einzelne Test-Datei ausführen:
 ```bash
-cd "El Trabajante"
-~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev -f test_sensor_manager
+cd "El Servador"
+
+# Communication Tests
+poetry run pytest god_kaiser_server/tests/esp32/test_communication.py -v
+
+# Actuator Tests
+poetry run pytest god_kaiser_server/tests/esp32/test_actuator.py -v
+
+# Sensor Tests
+poetry run pytest god_kaiser_server/tests/esp32/test_sensor.py -v
+
+# Integration Tests
+poetry run pytest god_kaiser_server/tests/esp32/test_integration.py -v
 ```
 
-### Mit Serial-Monitor (Live-Output):
-```bash
-cd "El Trabajante"
-~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev && ~/.platformio/penv/Scripts/platformio.exe device monitor
-```
+## Mit Coverage
 
-### Nur bestimmte Tests (Name-Filter):
 ```bash
-cd "El Trabajante"
-~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev --filter "*mqtt*"
+cd "El Servador"
+poetry run pytest god_kaiser_server/tests/esp32/ --cov=god_kaiser_server/tests/esp32/mocks --cov-report=html
 ```
 
 ## Bei Fehlern
 
 1. **Fehler analysieren:**
-   - Zeige fehlerhafte Tests mit `grep ":FAIL" test_output.log`
-   - Analysiere Test-Code in der angegebenen Datei/Zeile
-   - Prüfe Fehler-Message
+   - Pytest zeigt detaillierte Assertion-Fehler
+   - Prüfe Stack-Trace
+   - Check MockESP32Client State
 
 2. **Häufige Probleme:**
-   - Build-Fehler: Prüfe Includes, Dependencies
-   - Test-Failures: Prüfe Test-Logik, MockMQTTBroker Setup
-   - Timeout: Prüfe Serial-Port, ESP32-Verbindung
+   - Import-Errors: `poetry install`
+   - Fixture-Errors: Check conftest.py
+   - Assertion-Failures: Verifiziere MQTT-Protokoll
 
 3. **Details konsultieren:**
-   - **Test-Patterns:** `El Trabajante/test/README.md`
+   - **Vollständige Doku:** `El Servador/docs/ESP32_TESTING.md`
+   - **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
    - **Test-Workflow:** `.claude/TEST_WORKFLOW.md`
-   - **Test-Philosophie:** `CLAUDE.md` Abschnitt 3
-
-## Server-unabhängige Tests
-
-**Alle Tests laufen OHNE Server dank:**
-- MockMQTTBroker - Simuliert MQTT lokal
-- VirtualActuatorDriver - Simuliert Hardware
-- TEST_IGNORE - Graceful Degradation
-
-Siehe `CLAUDE.md` Abschnitt 3.1 für Details.
 
 ## Empfohlene Nutzung
 
 **Vor jedem Commit:**
 ```bash
 /esp-test
-# Bei PASS/IGNORE: Commit OK
-# Bei FAIL: Fixen und erneut testen
+# Bei allen Tests grün: Commit OK
+# Bei Fehlern: Fixen und erneut testen
 ```
 
-**Nach Code-Änderungen:**
+**Nach ESP32-Firmware-Änderungen:**
 ```bash
 /esp-test
-# Prüfe ob bestehende Tests noch funktionieren
+# Prüfe ob MQTT-Protokoll noch kompatibel ist
 ```
 
+**Nach Server-Änderungen (MQTT-Handler):**
+```bash
+/esp-test
+# Verifiziere dass ESP32-Kommunikation noch funktioniert
+```
+
+---
+
+## Related Documentation
+
+- **Vollständige Test-Doku:** `El Servador/docs/ESP32_TESTING.md`
+- **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
+- **Test Workflow:** `.claude/TEST_WORKFLOW.md`
+- **Legacy Tests:** `.claude/commands/esp-test-category.md`
