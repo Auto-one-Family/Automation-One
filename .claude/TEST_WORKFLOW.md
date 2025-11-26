@@ -56,7 +56,174 @@ pio test -e esp32_dev -f test_sensor_manager
 
 ---
 
-## 3. Output-Analyse
+## 3. Test-Kategorien (Dynamic File Management)
+
+### Problem: Multiple-Definition-Errors
+
+**Fundamentales PlatformIO-Limit:**
+- PlatformIO kompiliert ALLE `.cpp` Dateien im `test/` Ordner zusammen in EINE Firmware
+- Jeder Test hat eigene `setup()`/`loop()` Funktionen → Multiple-Definition-Error
+- `--filter` Parameter filtert nur AUSFÜHRUNG, nicht BUILD
+- `test_ignore` Parameter funktioniert NICHT (verhindert nur Test-Discovery, nicht Kompilierung)
+
+**Konsequenz:** Alle Tests gleichzeitig im `test/` Ordner funktioniert NICHT.
+
+### Lösung: Option C - Dynamic File Management Script
+
+**Konzept:** PowerShell-Script verschiebt Tests temporär in/aus dem `test/` Verzeichnis.
+
+**Workflow:**
+1. Script archiviert alle Tests nach `test/_archive/`
+2. Kopiert nur gewünschte Kategorie zurück nach `test/`
+3. Führt Tests aus mit `pio test -e esp32_dev`
+4. Räumt auf - alle Tests zurück ins Archiv
+5. Zeigt klare PASS/FAIL/IGNORE Zusammenfassung
+
+**Tests sind prefix-kategorisiert:**
+- `actuator_*.cpp` - Actuator-System (6 Tests)
+- `sensor_*.cpp` - Sensor-System (5 Tests)
+- `comm_*.cpp` - Communication (3 Tests)
+- `infra_*.cpp` - Infrastructure (5 Tests)
+- `integration_*.cpp` - Integration (2 Tests)
+
+### Test-Ausführung mit Script (EMPFOHLEN)
+
+**Via Slash-Command (einfachste Methode für KI-Agenten):**
+
+```bash
+/esp-test-category infra
+/esp-test-category actuator
+/esp-test-category sensor
+/esp-test-category comm
+/esp-test-category integration
+/esp-test-category all
+```
+
+**Direkter Script-Aufruf:**
+
+```powershell
+cd "El Trabajante"
+
+# Infrastructure-Tests (Error-Tracking, Config, Storage, Logger, Topics)
+.\scripts\run-test-category.ps1 -Category infra
+
+# Actuator-Tests (Manager, Safety, PWM, Integration)
+.\scripts\run-test-category.ps1 -Category actuator
+
+# Sensor-Tests (Manager, Pi-Enhanced, I2C, OneWire, Integration)
+.\scripts\run-test-category.ps1 -Category sensor
+
+# Communication-Tests (MQTT, WiFi, HTTP)
+.\scripts\run-test-category.ps1 -Category comm
+
+# Integration-Tests (Full-System, Phase2)
+.\scripts\run-test-category.ps1 -Category integration
+
+# ALLE Kategorien sequentiell
+.\scripts\run-test-category.ps1 -Category all
+```
+
+### Was das Script macht
+
+```
+┌─────────────────────────────────────────┐
+│ 1. Initialize Archive                   │
+│    test/_archive/ erstellen             │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│ 2. Move all *.cpp to _archive/          │
+│    (helpers/ bleibt unberührt)          │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│ 3. Copy category tests back             │
+│    z.B. infra_*.cpp → test/             │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│ 4. Run PlatformIO tests                 │
+│    pio test -e esp32_dev                │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│ 5. Cleanup - Move back to archive       │
+│    test/*.cpp → _archive/               │
+└─────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────┐
+│ 6. Report Results                        │
+│    PASS/FAIL/IGNORE Summary             │
+└─────────────────────────────────────────┘
+```
+
+### Script-Features
+
+- ✅ **Automatische Cleanup**: Tests werden IMMER zurück ins Archiv verschoben
+- ✅ **Fehler-Handling**: Emergency-Cleanup bei Script-Abbruch
+- ✅ **Colored Output**: Grün=PASS, Rot=FAIL, Gelb=IGNORE
+- ✅ **Logging**: Output geht nach `test/test_output.log`
+- ✅ **Summary**: Klare Zusammenfassung am Ende
+- ✅ **Exit Codes**: 0=Success, 1=Failure (CI/CD-ready)
+
+### Test-Mapping (Referenz für KI)
+
+| Kategorie | Slash-Command | Script Parameter | Test-Dateien |
+|-----------|---------------|------------------|--------------|
+| **Infrastructure** | `/esp-test-category infra` | `-Category infra` | `infra_config_manager.cpp`, `infra_storage_manager.cpp`, `infra_error_tracker.cpp`, `infra_logger.cpp`, `infra_topic_builder.cpp` |
+| **Actuator** | `/esp-test-category actuator` | `-Category actuator` | `actuator_config.cpp`, `actuator_manager.cpp`, `actuator_integration.cpp`, `actuator_models.cpp`, `actuator_safety_controller.cpp`, `actuator_pwm_controller.cpp` |
+| **Sensor** | `/esp-test-category sensor` | `-Category sensor` | `sensor_manager.cpp`, `sensor_integration.cpp`, `sensor_pi_enhanced.cpp`, `sensor_i2c_bus.cpp`, `sensor_onewire_bus.cpp` |
+| **Communication** | `/esp-test-category comm` | `-Category comm` | `comm_mqtt_client.cpp`, `comm_wifi_manager.cpp`, `comm_http_client.cpp` |
+| **Integration** | `/esp-test-category integration` | `-Category integration` | `integration_full.cpp`, `integration_phase2.cpp` |
+| **Alle** | `/esp-test-category all` | `-Category all` | Alle Kategorien sequentiell |
+
+### WICHTIG für KI-Agenten
+
+1. **IMMER Script nutzen** - Nicht direkt `pio test` ohne File-Management
+2. **Slash-Command bevorzugen** - Einfachster Workflow
+3. **ONE FILE AT A TIME** - Script läuft jeden Test einzeln (verhindert multiple-definition errors)
+4. **Archive-State prüfen** - Bei Problemen: `ls test/_archive/*.cpp` sollte alle Tests enthalten
+5. **IGNORE ist OK** - Fehlende Hardware ist graceful degradation, kein Fehler
+
+### ✅ LÖSUNG IMPLEMENTIERT: Server-orchestrierte Tests (Option A)
+
+**Status (2025-11-26):** ✅ ABGESCHLOSSEN
+
+**Was wurde implementiert:**
+
+1. **Server-side MockESP32Client**
+   - Simuliert ESP32-MQTT-Verhalten auf Server-Seite
+   - Keine Hardware nötig für Tests
+   - Vollständige State-Management (Actuators, Sensors, Config)
+
+2. **Pytest Test Suites** (`El Servador/god_kaiser_server/tests/esp32/`)
+   - ✅ Communication Tests (~20 Tests)
+   - ✅ Infrastructure Tests (~30 Tests)
+   - ✅ Actuator Tests (~40 Tests)
+   - ✅ Sensor Tests (~30 Tests)
+   - ✅ Integration Tests (~20 Tests)
+   - **GESAMT: ~140 Tests**
+
+3. **Dokumentation**
+   - ✅ MQTT Test Protocol (`El Servador/docs/MQTT_TEST_PROTOCOL.md`)
+   - ✅ Mqtt_Protocoll.md aktualisiert (Version 2.2)
+   - ✅ ESP32 Testing Guide (`El Servador/docs/ESP32_TESTING.md`)
+
+**Tests ausführen:**
+```bash
+cd "El Servador"
+poetry install
+poetry run pytest god_kaiser_server/tests/esp32/ -v
+```
+
+**Legacy ESP32 Tests:**
+- Verschoben nach `El Trabajante/test/_archive/`
+- Als Referenz behalten
+- Siehe README.md im Archive-Verzeichnis
+
+---
+
+## 4. Output-Analyse
 
 ### Unity-Format verstehen
 

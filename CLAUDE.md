@@ -273,24 +273,32 @@ ERROR_MQTT_SUBSCRIBE_FAILED 3013   // Subscribe fehlgeschlagen
 
 ## 7. Test-Ausführung und Workflow
 
-**Für detaillierte Test-Dokumentation konsultiere:**
+### ✅ NEUE TEST-ARCHITEKTUR: Server-orchestrierte Tests (2025-11-26)
 
-- **Test-Patterns und Code-Beispiele:** `El Trabajante/test/README.md` (31K Tokens - vollständige Test-Dokumentation)
-- **KI-Agenten Test-Workflow:** `.claude/TEST_WORKFLOW.md` (Workflow für automatisierte Test-Ausführung)
-- **Command für Test-Ausführung:** Nutze `/esp-test` Command oder siehe `.claude/commands/esp-test.md`
+**ESP32-Tests laufen jetzt auf God-Kaiser Server via MQTT!**
 
-**Schnellstart für Tests:**
-
+**Schnellstart:**
 ```bash
-# Von Root-Verzeichnis (empfohlen für KI-Agenten)
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev 2>&1 | tee test_output.log
-
-# Output analysieren
-grep ":FAIL" test_output.log  # Nur Fehler anzeigen
-tail -5 test_output.log       # Zusammenfassung
+cd "El Servador"
+poetry install
+poetry run pytest god_kaiser_server/tests/esp32/ -v
 ```
 
-**Wichtig:** Tests laufen OHNE Server dank MockMQTTBroker und VirtualActuatorDriver. Siehe Abschnitt 3.1 für Details.
+**Was ist neu:**
+- ✅ **~140 pytest Tests** (Communication, Infrastructure, Actuator, Sensor, Integration)
+- ✅ **MockESP32Client** - Simuliert ESP32 ohne Hardware
+- ✅ **CI/CD-ready** - Keine ESP32-Hardware nötig
+- ✅ **Schneller Feedback-Loop** - Keine PlatformIO Build-Wartezeit
+
+**Dokumentation:**
+- **ESP32 Testing Guide:** `El Servador/docs/ESP32_TESTING.md` (vollständige Test-Dokumentation)
+- **MQTT Test Protocol:** `El Servador/docs/MQTT_TEST_PROTOCOL.md` (Command-Spezifikation)
+- **Test Workflow:** `.claude/TEST_WORKFLOW.md` (Migration-Status)
+
+**Legacy ESP32 Tests:**
+- Verschoben nach `El Trabajante/test/_archive/`
+- Als Referenz behalten (enthält wertvolle Test-Logik)
+- Siehe `El Trabajante/test/_archive/README.md`
 
 ---
 
