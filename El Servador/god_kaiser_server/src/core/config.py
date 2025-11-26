@@ -22,6 +22,11 @@ class DatabaseSettings(BaseSettings):
     max_overflow: int = Field(default=20, alias="DATABASE_MAX_OVERFLOW", ge=0, le=100)
     pool_timeout: int = Field(default=30, alias="DATABASE_POOL_TIMEOUT", ge=1)
     echo: bool = Field(default=False, alias="DATABASE_ECHO")
+    auto_init: bool = Field(
+        default=True,
+        alias="DATABASE_AUTO_INIT",
+        description="Automatically initialize database tables on startup",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -251,6 +256,11 @@ class Settings(BaseSettings):
     """Master settings class combining all configuration sections"""
 
     environment: str = Field(default="development", alias="ENVIRONMENT")
+    log_level: str = Field(
+        default="INFO",
+        alias="LOG_LEVEL",
+        description="Global log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
 
     # Sub-settings
     database: DatabaseSettings = DatabaseSettings()
@@ -268,6 +278,11 @@ class Settings(BaseSettings):
     redis: RedisSettings = RedisSettings()
     external_services: ExternalServicesSettings = ExternalServicesSettings()
     development: DevelopmentSettings = DevelopmentSettings()
+    
+    @property
+    def cors_origins(self) -> list[str]:
+        """Get CORS allowed origins from CORSSettings"""
+        return self.cors.allowed_origins
 
     @field_validator("environment")
     @classmethod
@@ -277,6 +292,15 @@ class Settings(BaseSettings):
         if v.lower() not in allowed:
             raise ValueError(f"environment must be one of {allowed}")
         return v.lower()
+    
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level_global(cls, v: str) -> str:
+        """Validate global log level"""
+        allowed = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if v.upper() not in allowed:
+            raise ValueError(f"log_level must be one of {allowed}")
+        return v.upper()
 
     model_config = SettingsConfigDict(
         env_file=".env",
