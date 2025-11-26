@@ -1,5 +1,352 @@
 """
 MQTT Handler: Sensor Data Messages
-"""
-# TODO: Implement handle_sensor_data(), parse_message(), process_data()
 
+Processes incoming sensor data from ESP32 devices:
+- Parses sensor data topics
+- Validates payloads
+- Triggers Pi-Enhanced processing if enabled
+- Saves data to database
+"""
+
+import json
+from datetime import datetime
+from typing import Optional
+
+from ...core.logging_config import get_logger
+from ...db.repositories import ESPRepository, SensorRepository
+from ...db.session import get_session
+from ..publisher import Publisher
+from ..topics import TopicBuilder
+
+logger = get_logger(__name__)
+
+
+class SensorDataHandler:
+    """
+    Handles incoming sensor data messages from ESP32 devices.
+
+    Flow:
+    1. Parse topic → extract esp_id, gpio
+    2. Validate payload structure
+    3. Lookup ESP device and sensor config
+    4. Check Pi-Enhanced mode
+    5. Save data to database
+    6. Trigger Pi-Enhanced processing if needed
+    """
+
+    def __init__(self, publisher: Optional[Publisher] = None):
+        """
+        Initialize sensor data handler.
+
+        Args:
+            publisher: Publisher instance for Pi-Enhanced responses
+        """
+        self.publisher = publisher or Publisher()
+
+    async def handle_sensor_data(self, topic: str, payload: dict) -> bool:
+        """
+        Handle sensor data message.
+
+        Expected topic: kaiser/god/esp/{esp_id}/sensor/{gpio}/data
+
+        Expected payload:
+        {
+            "ts": 1735818000,
+            "esp_id": "ESP_12AB34CD",
+            "gpio": 34,
+            "sensor_type": "ph",
+            "raw": 2150,
+            "value": 0.0,
+            "unit": "",
+            "quality": "stale",
+            "raw_mode": true
+        }
+
+        Args:
+            topic: MQTT topic string
+            payload: Parsed JSON payload dict
+
+        Returns:
+            True if message processed successfully, False otherwise
+        """
+        try:
+            # Step 1: Parse topic
+            parsed_topic = TopicBuilder.parse_sensor_data_topic(topic)
+            if not parsed_topic:
+                logger.error(f"Failed to parse sensor data topic: {topic}")
+                return False
+
+            esp_id_str = parsed_topic["esp_id"]
+            gpio = parsed_topic["gpio"]
+
+            logger.debug(
+                f"Processing sensor data: esp_id={esp_id_str}, gpio={gpio}, "
+                f"sensor_type={payload.get('sensor_type')}"
+            )
+
+            # Step 2: Validate payload
+            validation_result = self._validate_payload(payload)
+            if not validation_result["valid"]:
+                logger.error(
+                    f"Invalid sensor data payload: {validation_result['error']}"
+                )
+                return False
+
+            # Step 3: Get database session and repositories
+            async for session in get_session():
+                esp_repo = ESPRepository(session)
+                sensor_repo = SensorRepository(session)
+
+                # Step 4: Lookup ESP device
+                esp_device = await esp_repo.get_by_device_id(esp_id_str)
+                if not esp_device:
+                    logger.error(f"ESP device not found: {esp_id_str}")
+                    return False
+
+                # Step 5: Lookup sensor config
+                sensor_config = await sensor_repo.get_by_esp_and_gpio(
+                    esp_device.id, gpio
+                )
+                if not sensor_config:
+                    logger.warning(
+                        f"Sensor config not found: esp_id={esp_id_str}, gpio={gpio}. "
+                        "Saving data without config."
+                    )
+
+                # Step 6: Extract data from payload
+                raw_value = float(payload["raw"])
+                sensor_type = payload.get("sensor_type", "unknown")
+                raw_mode = payload.get("raw_mode", False)
+                value = payload.get("value", 0.0)
+                unit = payload.get("unit", "")
+                quality = payload.get("quality", "unknown")
+
+                # Step 7: Determine processing mode
+                processing_mode = "raw"
+                processed_value = None
+
+                if sensor_config and sensor_config.pi_enhanced and raw_mode:
+                    # Pi-Enhanced processing needed
+                    processing_mode = "pi_enhanced"
+
+                    # Trigger Pi-Enhanced processing
+                    pi_result = await self._trigger_pi_enhanced_processing(
+                        esp_id_str,
+                        gpio,
+                        sensor_type,
+                        raw_value,
+                        sensor_config,
+                    )
+
+                    if pi_result:
+                        processed_value = pi_result["processed_value"]
+                        unit = pi_result["unit"]
+                        quality = pi_result["quality"]
+
+                        # Publish processed data back to ESP
+                        self.publisher.publish_pi_enhanced_response(
+                            esp_id_str,
+                            gpio,
+                            processed_value,
+                            unit,
+                            quality,
+                            retry=False,
+                        )
+
+                        logger.debug(
+                            f"Pi-Enhanced processing complete: raw={raw_value}, "
+                            f"processed={processed_value} {unit}"
+                        )
+                    else:
+                        # Processing failed, mark quality
+                        quality = "error"
+                        logger.error(
+                            f"Pi-Enhanced processing failed: esp_id={esp_id_str}, "
+                            f"gpio={gpio}, sensor_type={sensor_type}"
+                        )
+
+                elif not raw_mode:
+                    # ESP already processed locally
+                    processing_mode = "local"
+                    processed_value = value
+
+                # Step 8: Save data to database
+                sensor_data = await sensor_repo.save_data(
+                    esp_id=esp_device.id,
+                    gpio=gpio,
+                    sensor_type=sensor_type,
+                    raw_value=raw_value,
+                    processed_value=processed_value,
+                    unit=unit,
+                    processing_mode=processing_mode,
+                    quality=quality,
+                    metadata={
+                        "timestamp": payload.get("ts"),
+                        "raw_mode": raw_mode,
+                    },
+                )
+
+                # Commit transaction
+                await session.commit()
+
+                logger.info(
+                    f"Sensor data saved: id={sensor_data.id}, esp_id={esp_id_str}, "
+                    f"gpio={gpio}, processing_mode={processing_mode}"
+                )
+
+                return True
+
+        except Exception as e:
+            logger.error(
+                f"Error handling sensor data: {e}",
+                exc_info=True,
+            )
+            return False
+
+    def _validate_payload(self, payload: dict) -> dict:
+        """
+        Validate sensor data payload structure.
+
+        Required fields: ts, esp_id, gpio, sensor_type, raw, raw_mode
+
+        Args:
+            payload: Payload dict to validate
+
+        Returns:
+            {"valid": bool, "error": str}
+        """
+        required_fields = ["ts", "esp_id", "gpio", "sensor_type", "raw", "raw_mode"]
+
+        for field in required_fields:
+            if field not in payload:
+                return {
+                    "valid": False,
+                    "error": f"Missing required field: {field}",
+                }
+
+        # Type validation
+        if not isinstance(payload["ts"], int):
+            return {"valid": False, "error": "Field 'ts' must be integer (Unix timestamp)"}
+
+        if not isinstance(payload["gpio"], int):
+            return {"valid": False, "error": "Field 'gpio' must be integer"}
+
+        if not isinstance(payload["raw_mode"], bool):
+            return {"valid": False, "error": "Field 'raw_mode' must be boolean"}
+
+        # Validate raw value (should be numeric)
+        try:
+            float(payload["raw"])
+        except (ValueError, TypeError):
+            return {"valid": False, "error": "Field 'raw' must be numeric"}
+
+        return {"valid": True, "error": ""}
+
+    async def _trigger_pi_enhanced_processing(
+        self,
+        esp_id: str,
+        gpio: int,
+        sensor_type: str,
+        raw_value: float,
+        sensor_config,
+    ) -> Optional[dict]:
+        """
+        Trigger Pi-Enhanced sensor processing.
+
+        Uses library_loader to dynamically load sensor library
+        and process raw value.
+
+        Args:
+            esp_id: ESP device ID string
+            gpio: GPIO pin number
+            sensor_type: Sensor type (ph, temperature, etc.)
+            raw_value: Raw sensor value
+            sensor_config: SensorConfig instance with processing params
+
+        Returns:
+            {
+                "processed_value": float,
+                "unit": str,
+                "quality": str
+            }
+            or None if processing failed
+        """
+        try:
+            from ...sensors.library_loader import get_library_loader
+
+            # Get library loader instance
+            loader = get_library_loader()
+
+            # Get processor for sensor type
+            processor = loader.get_processor(sensor_type)
+
+            if not processor:
+                logger.error(
+                    f"No processor found for sensor type: {sensor_type}. "
+                    f"Available processors: {loader.get_available_sensors()}"
+                )
+                return None
+
+            # Process raw value using sensor library
+            # Extract processing params from metadata if available
+            processing_params = None
+            if sensor_config and sensor_config.metadata:
+                processing_params = sensor_config.metadata.get("processing_params")
+            
+            result = processor.process(
+                raw_value=raw_value,
+                calibration=sensor_config.calibration_data if sensor_config else None,
+                params=processing_params,
+            )
+
+            logger.debug(
+                f"Pi-Enhanced processing successful: {sensor_type}, "
+                f"raw={raw_value}, processed={result.value} {result.unit}, "
+                f"quality={result.quality}"
+            )
+
+            return {
+                "processed_value": result.value,
+                "unit": result.unit,
+                "quality": result.quality,
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Pi-Enhanced processing failed: sensor_type={sensor_type}, "
+                f"error={e}",
+                exc_info=True,
+            )
+            return None
+
+
+# Global handler instance
+_handler_instance: Optional[SensorDataHandler] = None
+
+
+def get_sensor_handler() -> SensorDataHandler:
+    """
+    Get singleton sensor data handler instance.
+
+    Returns:
+        SensorDataHandler instance
+    """
+    global _handler_instance
+    if _handler_instance is None:
+        _handler_instance = SensorDataHandler()
+    return _handler_instance
+
+
+async def handle_sensor_data(topic: str, payload: dict) -> bool:
+    """
+    Handle sensor data message (convenience function).
+
+    Args:
+        topic: MQTT topic string
+        payload: Parsed JSON payload dict
+
+    Returns:
+        True if message processed successfully
+    """
+    handler = get_sensor_handler()
+    return await handler.handle_sensor_data(topic, payload)
