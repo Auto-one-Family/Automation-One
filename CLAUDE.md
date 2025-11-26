@@ -9,7 +9,7 @@
 ### 🔧 "Ich will Code ändern"
 1. **Welches Modul?** → [Section 9: Modul-Dokumentation Navigation](#9-modul-dokumentation-navigation)
 2. **Workflow folgen** → [Section 10: KI-Agenten Workflow](#10-ki-agenten-workflow)
-3. **Tests schreiben** → `El Trabajante/test/README.md`
+3. **Tests schreiben** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
 4. **Pattern-Beispiele** → `.claude/WORKFLOW_PATTERNS.md`
 
 ### 🐛 "Ich habe einen Fehler"
@@ -23,7 +23,7 @@
 1. **System-Flow?** → `El Trabajante/docs/system-flows/` (Boot, Sensor-Reading, Actuator-Command)
 2. **MQTT-Protokoll?** → `El Trabajante/docs/Mqtt_Protocoll.md`
 3. **API einer Klasse?** → `El Trabajante/docs/API_REFERENCE.md`
-4. **Test-Infrastruktur?** → `El Trabajante/test/README.md`
+4. **Test-Infrastruktur?** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
 5. **Modul-Abhängigkeiten?** → `.claude/ARCHITECTURE_DEPENDENCIES.md`
 
 ### ➕ "Ich will neues Feature hinzufügen"
@@ -131,35 +131,39 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload
 
 ### 3.1 Server-unabhängige Tests
 
-**Alle ESP32-Tests laufen OHNE Server dank:**
+**Alle ESP32-Tests laufen OHNE ESP32-Hardware dank:**
 
-- **MockMQTTBroker** - Simuliert MQTT lokal im Test
-- **VirtualActuatorDriver** - Simuliert Hardware (Pump, Valve, PWM)
-- **TEST_IGNORE** - Graceful Degradation bei fehlenden GPIOs
+- **MockESP32Client** - Simuliert ESP32 auf Server-Seite (Python)
+- **RealESP32Client** - MQTT-Verbindung zu echter Hardware (optional)
+- **pytest Fixtures** - Vorkonfigurierte Test-ESPs (mock_esp32, multiple_mock_esp32)
 
 **Warum wichtig:**
-- Server-Entwickler können ESP-Code testen ohne Hardware
 - CI/CD läuft ohne physische ESPs
-- Schneller Feedback-Loop (keine MQTT-Broker-Setup nötig)
+- Schneller Feedback-Loop (keine PlatformIO Build-Wartezeit)
+- ~140 Tests (Communication, Infrastructure, Actuator, Sensor, Integration, Cross-ESP, Performance)
 
-**Details:** Siehe `El Trabajante/test/README.md` für vollständige Code-Beispiele und API-Referenz.
+**Details:** Siehe `El Servador/docs/ESP32_TESTING.md` für vollständige Test-Dokumentation.
 
-### 3.2 Dual-Mode-Pattern (PFLICHT für jeden Test!)
+**Legacy ESP32 Unity-Tests:** Archiviert in `El Trabajante/test/_archive/` (siehe README dort für Migration-Rationale).
 
-**Jeder Test muss Production-safe sein:**
+### 3.2 Server-orchestrierte Test-Infrastruktur
 
-- **Production-System:** Nutzt vorhandene Config, ändert NICHTS (read-only)
-- **New/Empty System:** Erstellt temporäre Config, räumt automatisch auf
-- **Kein Config-Chaos:** Tests hinterlassen keine Artefakte in NVS
-- **CI/CD-Ready:** Gleicher Test funktioniert auf deployed ESP32 UND leerer Hardware
+**Neue Test-Architektur (seit 2025-11-26):**
 
-**Kern-Prinzipien:**
-1. Zuerst versuchen Production-Device zu finden (read-only Test)
-2. Falls nicht vorhanden: Temporäres Virtual Device erstellen
-3. RAII-Cleanup garantiert automatische Bereinigung
-4. `TEST_IGNORE` statt Failure bei fehlenden Ressourcen
+- **MockESP32Client:** Server-seitige ESP32-Simulation in Python
+- **Production-identical Topics:** Tests verwenden echte MQTT-Topic-Struktur
+- **Mock + Real Hardware:** Identische API für Mock und Real ESP32
+- **CI/CD-Ready:** Tests laufen ohne Hardware, können aber gegen echte ESPs laufen
 
-**Details:** Vollständige Code-Beispiele, Templates und Helper-Funktionen in `El Trabajante/test/README.md`.
+**Test-Pattern:**
+1. pytest-Fixtures stellen vorkonfigurierte Mock-ESPs bereit
+2. Tests senden Commands via `handle_command()` (ping, actuator_set, sensor_read, etc.)
+3. Tests validieren Responses und MQTT-Message-Publishing
+4. Mock-ESPs simulieren Production-Topic-Struktur exakt
+
+**Details:** Vollständige Dokumentation in `El Servador/docs/ESP32_TESTING.md`.
+
+**Legacy Unity-Tests:** Archiviert in `El Trabajante/test/_archive/` (Dual-Mode-Pattern dokumentiert dort).
 
 ---
 
@@ -336,7 +340,7 @@ El Servador/                      # God-Kaiser Server
 
 | Aufgabe | Primäre Dokumentation | Zusätzliche Ressourcen | Code-Location | Verantwortlichkeit |
 |---------|----------------------|------------------------|---------------|-------------------|
-| **Tests schreiben/ausführen** | `El Trabajante/test/README.md` | `.claude/TEST_WORKFLOW.md` | `El Trabajante/test/` | Test-Patterns, MockMQTTBroker, Templates |
+| **Tests schreiben/ausführen** | `El Servador/docs/ESP32_TESTING.md` | `.claude/TEST_WORKFLOW.md` | `El Servador/god_kaiser_server/tests/esp32/` | pytest Tests, MockESP32Client, Fixtures |
 | **MQTT-Protokoll verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | `El Trabajante/docs/MQTT_CLIENT_API.md` | `El Trabajante/src/services/communication/mqtt_client.*` | Topics, Payloads, QoS, Wildcards |
 | **API-Referenz benötigt** | `El Trabajante/docs/API_REFERENCE.md` | `El Trabajante/src/services/[modul]/` | `El Trabajante/src/services/` | Methoden, Parameter, Return-Werte |
 | **System-Flow verstehen** | `El Trabajante/docs/system-flows/` | `El Trabajante/docs/System_Overview.md` | `El Trabajante/src/core/` | Boot-Sequence, Sensor-Reading, Actuator-Command |
@@ -411,10 +415,10 @@ El Servador/                      # God-Kaiser Server
 - **Kommentare:** Wichtig für komplexe Logik
 
 **SCHRITT 5: Tests ausführen**
-- Tests schreiben für neue Features (siehe Abschnitt 3, `El Trabajante/test/README.md`)
-- Bestehende Tests ausführen: `cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev`
-- Output analysieren: `grep ":FAIL" test_output.log`
-- **Nur committen wenn:** Keine `:FAIL` im Output (`:IGNORE` ist OK)
+- Tests schreiben für neue Features (siehe Abschnitt 7, `El Servador/docs/ESP32_TESTING.md`)
+- Server-Tests ausführen: `cd "El Servador" && poetry run pytest god_kaiser_server/tests/esp32/ -v`
+- ESP32-Firmware kompilieren: `cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev`
+- **Nur committen wenn:** Alle Tests PASS (keine Failures)
 
 **SCHRITT 6: Dokumentation aktualisieren**
 - API-Referenz aktualisieren falls nötig (`El Trabajante/docs/API_REFERENCE.md`)
@@ -433,9 +437,9 @@ El Servador/                      # God-Kaiser Server
 - ❌ `new`/`delete` verwenden (RAII-Pattern!)
 
 **IMMER:**
-- ✅ Dual-Mode-Pattern in Tests verwenden
+- ✅ Server-orchestrierte Tests verwenden (MockESP32Client)
 - ✅ RAII für Ressourcen-Management
-- ✅ MockMQTTBroker für MQTT-Tests
+- ✅ Production-identical MQTT-Topics in Tests
 - ✅ Error-Codes aus `error_codes.h` verwenden
 - ✅ Safety-Controller prüfen lassen
 - ✅ Dokumentation konsultieren BEVOR Code-Änderung
@@ -475,19 +479,24 @@ El Servador/                      # God-Kaiser Server
    - Safety-Constraints definieren
 
 3. **Tests schreiben:**
-   - Dual-Mode-Pattern verwenden
-   - RAII-Cleanup nutzen
-   - MockMQTTBroker für MQTT-Tests
+   - pytest mit MockESP32Client verwenden
+   - Production-identical MQTT-Topics
+   - Fixtures nutzen (mock_esp32, multiple_mock_esp32)
 
 ### Vor jedem Commit:
 
 ```bash
-# Tests laufen lassen (von Root aus)
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev
+# Server-Tests laufen lassen
+cd "El Servador"
+poetry run pytest god_kaiser_server/tests/esp32/ -v
+
+# ESP32-Firmware kompilieren (Build-Check)
+cd "El Trabajante"
+~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
 
 # Nur committen wenn:
-# - Keine :FAIL im Output
-# - :IGNORE ist OK (fehlende Hardware)
+# - Alle pytest Tests PASS
+# - ESP32 Firmware kompiliert ohne Errors
 ```
 
 ### Build-Commands für KI-Agenten:

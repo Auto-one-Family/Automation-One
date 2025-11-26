@@ -334,7 +334,9 @@ FAIL
 
 ## 5. Test-Patterns (Kurzreferenz)
 
-**Für detaillierte Code-Beispiele siehe:** `El Trabajante/test/README.md`
+**Für detaillierte Code-Beispiele siehe:** `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
+
+**Legacy Unity-Test-Patterns:** `El Trabajante/test/_archive/README.md` (archiviert)
 
 ### MockMQTTBroker nutzen
 
@@ -359,7 +361,9 @@ FAIL
 2. Falls nicht vorhanden: Temporäres Virtual Device erstellen
 3. RAII-Cleanup garantiert automatische Bereinigung
 
-**Details:** Siehe `El Trabajante/test/README.md` für vollständige Code-Beispiele.
+**Server-orchestrierte Tests:** Siehe `El Servador/docs/ESP32_TESTING.md` für vollständige Test-Dokumentation.
+
+**Legacy Unity-Tests:** Siehe `El Trabajante/test/_archive/README.md` für historische Unity-Test-Patterns.
 
 ---
 
