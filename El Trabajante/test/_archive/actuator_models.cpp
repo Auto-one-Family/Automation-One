@@ -33,11 +33,3 @@ void setup() {
 }
 
 void loop() {}
-
-
-
-
-<<<<<<< HEAD
-
-=======
->>>>>>> aa0dd964d5868fbf152c5b845c9348c6571a298f

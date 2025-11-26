@@ -195,13 +195,13 @@ static void initialize_integration_stack() {
     if (esp_id.isEmpty()) {
         esp_id = "ESP_TEST_NODE";
     }
-    TopicBuilder::setEspId(esp_id);
-    
+    TopicBuilder::setEspId(esp_id.c_str());
+
     String kaiser_id = configManager.getKaiserId();
     if (kaiser_id.isEmpty()) {
         kaiser_id = "god";
     }
-    TopicBuilder::setKaiserId(kaiser_id);
+    TopicBuilder::setKaiserId(kaiser_id.c_str());
 
     mqttClient.begin();
     sensorManager.begin();
@@ -220,7 +220,7 @@ void test_sensor_to_mqtt_flow(void) {
     
     if (existing_count > 0) {
         // Nutze ersten aktiven Sensor
-        for (uint8_t i = 0; i < sensorManager.MAX_SENSORS; i++) {
+        for (uint8_t i = 0; i < MAX_SENSORS; i++) {
             const SensorConfig& cfg = sensorManager.sensors_[i];
             if (cfg.active && cfg.gpio != 255) {
                 gpio = cfg.gpio;
@@ -240,7 +240,7 @@ void test_sensor_to_mqtt_flow(void) {
             );
             return;
         }
-        temp_sensor = std::make_unique<TemporaryTestSensor>(gpio, "Flow_Test");
+        temp_sensor = std::unique_ptr<TemporaryTestSensor>(new TemporaryTestSensor(gpio, "Flow_Test"));
         if (!temp_sensor->isValid()) {
             TEST_FAIL_MESSAGE("Failed to create temporary test sensor");
             return;  // ✅ Automatisches Cleanup via unique_ptr Destructor!
@@ -309,8 +309,8 @@ void test_boot_time_with_10_sensors(void) {
     for (size_t i = 0; i < SENSOR_TARGET_COUNT; i++) {
         char name[20];
         snprintf(name, sizeof(name), "BootSensor_%d", (int)i);
-        
-        auto sensor = std::make_unique<TemporaryTestSensor>(test_gpios[i], name);
+
+        std::unique_ptr<TemporaryTestSensor> sensor(new TemporaryTestSensor(test_gpios[i], name));
         if (!sensor->isValid()) {
             TEST_FAIL_MESSAGE("Failed to create temporary test sensor");
             return;  // ✅ Automatisches Cleanup via unique_ptr Destructor!
@@ -358,8 +358,8 @@ void test_memory_usage_10_sensors(void) {
     for (size_t i = 0; i < SENSOR_TARGET_COUNT; i++) {
         char name[20];
         snprintf(name, sizeof(name), "MemSensor_%d", (int)i);
-        
-        auto sensor = std::make_unique<TemporaryTestSensor>(test_gpios[i], name);
+
+        std::unique_ptr<TemporaryTestSensor> sensor(new TemporaryTestSensor(test_gpios[i], name));
         if (!sensor->isValid()) {
             TEST_FAIL_MESSAGE("Failed to create temporary test sensor");
             return;  // ✅ Automatisches Cleanup via unique_ptr Destructor!

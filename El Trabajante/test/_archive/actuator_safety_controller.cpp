@@ -35,7 +35,7 @@ std::vector<std::unique_ptr<TemporaryTestActuator>> createVirtualActuators(const
         if (gpio == 255) {
             continue;
         }
-        auto temp = std::make_unique<TemporaryTestActuator>(gpio, type);
+        std::unique_ptr<TemporaryTestActuator> temp(new TemporaryTestActuator(gpio, type));
         if (!temp->isValid()) {
             continue;
         }

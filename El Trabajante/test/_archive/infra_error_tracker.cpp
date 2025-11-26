@@ -34,12 +34,13 @@ void test_error_tracker_categories() {
 // ============================================
 void test_error_tracker_circular_buffer() {
   errorTracker.clearErrors();
-  
+
   // Add more than MAX_ERROR_ENTRIES (50)
   for (int i = 0; i < 60; i++) {
-    errorTracker.trackError(1000 + i, "Error " + String(i));
+    String msg = "Error " + String(i);
+    errorTracker.trackError(1000 + i, msg.c_str());
   }
-  
+
   // Should have exactly 50 entries (MAX_ERROR_ENTRIES)
   TEST_ASSERT_EQUAL(50, errorTracker.getErrorCount());
 }

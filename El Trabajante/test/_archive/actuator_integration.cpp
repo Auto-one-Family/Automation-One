@@ -122,7 +122,7 @@ void test_boot_time_with_10_actuators(void) {
     std::vector<VirtualActuatorDriver*> drivers;
 
     for (size_t i = 0; i < needed; i++) {
-        auto temp = std::make_unique<TemporaryTestActuator>(gpios[i], ActuatorTypeTokens::PUMP);
+        std::unique_ptr<TemporaryTestActuator> temp(new TemporaryTestActuator(gpios[i], ActuatorTypeTokens::PUMP));
         if (!temp->isValid()) {
             TEST_FAIL_MESSAGE("Failed to create temporary test actuator");
             return;
@@ -157,7 +157,7 @@ void test_memory_impact_10_actuators(void) {
 
     std::vector<std::unique_ptr<TemporaryTestActuator>> actuators;
     for (size_t i = 0; i < 10; i++) {
-        auto temp = std::make_unique<TemporaryTestActuator>(gpios[i], ActuatorTypeTokens::PUMP);
+        std::unique_ptr<TemporaryTestActuator> temp(new TemporaryTestActuator(gpios[i], ActuatorTypeTokens::PUMP));
         if (!temp->isValid()) {
             TEST_FAIL_MESSAGE("Failed to create temporary test actuator");
             return;
@@ -320,8 +320,10 @@ void test_cross_device_with_real_server_docker(void) {
     TEST_MESSAGE("2. Publish sensor data to trigger God-Kaiser rule:");
     TEST_MESSAGE("   mosquitto_pub -h localhost -t 'kaiser/god/esp/ESP_TEST_NODE/sensor/4/data' \\");
     TEST_MESSAGE("   -m '{\"sensor_type\":\"ph_sensor\",\"raw_value\":2000.0}'");
-    TEST_MESSAGE("3. Verify God-Kaiser sends actuator command to GPIO " + String(gpio));
-    TEST_MESSAGE("4. Expected topic: kaiser/god/esp/ESP_TEST_NODE/actuator/" + String(gpio) + "/command");
+    String msg3 = "3. Verify God-Kaiser sends actuator command to GPIO " + String(gpio);
+    TEST_MESSAGE(msg3.c_str());
+    String msg4 = "4. Expected topic: kaiser/god/esp/ESP_TEST_NODE/actuator/" + String(gpio) + "/command";
+    TEST_MESSAGE(msg4.c_str());
 }
 
 // ============================================
@@ -368,12 +370,14 @@ void test_multi_esp_emergency_coordination_docker(void) {
     TEST_ASSERT_TRUE(safetyController.emergencyStopActuator(gpio, "Test Emergency"));
 
     // Assert alert published
-    TEST_ASSERT_TRUE(broker.wasPublished("/actuator/" + String(gpio) + "/alert"));
+    String alertTopic = "/actuator/" + String(gpio) + "/alert";
+    TEST_ASSERT_TRUE(broker.wasPublished(alertTopic));
 
     // Docker verification
     TEST_MESSAGE("Docker Test Instructions:");
     TEST_MESSAGE("1. Verify God-Kaiser receives emergency alert");
-    TEST_MESSAGE("2. Expected topic: kaiser/god/esp/ESP_TEST_NODE/actuator/" + String(gpio) + "/alert");
+    String msg2 = "2. Expected topic: kaiser/god/esp/ESP_TEST_NODE/actuator/" + String(gpio) + "/alert";
+    TEST_MESSAGE(msg2.c_str());
     TEST_MESSAGE("3. Verify God-Kaiser broadcasts emergency to all ESPs");
     TEST_MESSAGE("4. Expected broadcast topic: kaiser/broadcast/emergency");
 

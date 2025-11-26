@@ -75,21 +75,25 @@ public:
 // HELPER FUNCTIONS
 // ============================================
 
+// Forward declarations
+static std::vector<uint8_t> getAvailableAnalogGPIOs();
+static std::vector<uint8_t> getAvailableDigitalGPIOs();
+
 /**
  * Findet einen unbenutzten GPIO für temporäre Tests
- * 
+ *
  * @param type - "analog" oder "digital"
  * @return GPIO-Nummer oder 255 wenn keine verfügbar
  */
 static uint8_t findFreeTestGPIO(const char* type) {
     std::vector<uint8_t> gpios;
-    
+
     if (strcmp(type, "analog") == 0) {
         gpios = getAvailableAnalogGPIOs();
     } else {
         gpios = getAvailableDigitalGPIOs();
     }
-    
+
     return gpios.empty() ? 255 : gpios[0];  // Erstes verfügbares GPIO
 }
 
@@ -101,9 +105,9 @@ static uint8_t findFreeTestGPIO(const char* type) {
  */
 static uint8_t findExistingSensor(const char* sensor_type) {
     uint8_t sensor_count = sensorManager.getActiveSensorCount();
-    
+
     // Access private sensors_ array (via #define private public)
-    for (uint8_t i = 0; i < sensor_count && i < sensorManager.MAX_SENSORS; i++) {
+    for (uint8_t i = 0; i < sensor_count && i < MAX_SENSORS; i++) {
         const SensorConfig& cfg = sensorManager.sensors_[i];
         
         if (!cfg.active || cfg.gpio == 255) {
@@ -253,11 +257,11 @@ static void printActiveSensors() {
         return;
     }
     
-    for (uint8_t i = 0; i < count && i < sensorManager.MAX_SENSORS; i++) {
+    for (uint8_t i = 0; i < count && i < MAX_SENSORS; i++) {
         const SensorConfig& cfg = sensorManager.sensors_[i];
         if (cfg.active && cfg.gpio != 255) {
-            Serial.printf("  - GPIO %d: %s (%s)\n", 
-                          cfg.gpio, 
+            Serial.printf("  - GPIO %d: %s (%s)\n",
+                          cfg.gpio,
                           cfg.sensor_name.c_str(),
                           cfg.sensor_type.c_str());
         }
@@ -289,13 +293,13 @@ static void initialize_sensor_stack() {
     if (esp_id.isEmpty()) {
         esp_id = "ESP_TEST_NODE";
     }
-    TopicBuilder::setEspId(esp_id);
+    TopicBuilder::setEspId(esp_id.c_str());
 
     String kaiser_id = configManager.getKaiserId();
     if (kaiser_id.isEmpty()) {
         kaiser_id = "god";
     }
-    TopicBuilder::setKaiserId(kaiser_id);
+    TopicBuilder::setKaiserId(kaiser_id.c_str());
 
     TEST_ASSERT_TRUE_MESSAGE(sensorManager.begin(), "SensorManager failed to initialize");
     infrastructure_initialized = true;
@@ -508,15 +512,15 @@ void test_mqtt_topic_generation(void) {
     // Hole ESP/Kaiser IDs aus Config
     String esp_id = configManager.getESPId();
     String kaiser_id = configManager.getKaiserId();
-    
+
     // Fallback für uninitialisierte Config
     if (esp_id.isEmpty()) {
         esp_id = "ESP_TEST_NODE";
-        TopicBuilder::setEspId(esp_id);
+        TopicBuilder::setEspId(esp_id.c_str());
     }
     if (kaiser_id.isEmpty()) {
         kaiser_id = "god";
-        TopicBuilder::setKaiserId(kaiser_id);
+        TopicBuilder::setKaiserId(kaiser_id.c_str());
     }
     
     // Generiere Topic
