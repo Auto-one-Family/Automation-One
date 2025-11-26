@@ -3332,14 +3332,145 @@ void testLatency() {
 
 ---
 
-**Status:** ✅ Spezifikation produktionsreif & vollständig  
-**Version:** 2.1  
-**Last Updated:** 2025-10-08  
+## Test Topics (Server-orchestrated Testing)
+
+> **Purpose:** MQTT topics for remote testing of ESP32 devices from God-Kaiser server
+
+**Status:** ✅ Implemented (MockESP32Client)
+**Documentation:** See `El Servador/docs/MQTT_TEST_PROTOCOL.md` for full specification
+
+### Topic Structure
+
+**Test Commands (God-Kaiser → ESP32):**
+```
+kaiser/god/esp/{esp_id}/test/command
+```
+
+**Test Responses (ESP32 → God-Kaiser):**
+```
+kaiser/god/esp/{esp_id}/test/response
+```
+
+### Purpose
+
+Server-orchestrated tests enable:
+- Automated pytest test suites for ESP32 functionality
+- Testing without physical hardware (MockESP32Client)
+- Real hardware integration tests via MQTT commands
+- CI/CD integration for ESP32 firmware validation
+
+### Available Test Commands
+
+| Command | Purpose | Mock Support | Real Hardware |
+|---------|---------|--------------|---------------|
+| `ping` | Test MQTT connectivity | ✅ | ⏳ (TODO) |
+| `actuator_set` | Control actuator | ✅ | ⏳ (TODO) |
+| `actuator_get` | Query actuator state | ✅ | ⏳ (TODO) |
+| `sensor_read` | Read sensor value | ✅ | ⏳ (TODO) |
+| `config_get` | Query configuration | ✅ | ⏳ (TODO) |
+| `config_set` | Set configuration (MOCK ONLY!) | ✅ | ❌ (Read-only) |
+| `emergency_stop` | Stop all actuators | ✅ | ⏳ (TODO) |
+| `reset` | Reset test state (MOCK ONLY!) | ✅ | ❌ (Not for prod) |
+
+### Payload Format
+
+**Command Payload:**
+```json
+{
+  "test_id": "unique-test-identifier",
+  "command": "ping|actuator_set|sensor_read|config_get|...",
+  "params": { ... },
+  "timestamp": 1700000000.0
+}
+```
+
+**Response Payload:**
+```json
+{
+  "test_id": "unique-test-identifier",
+  "status": "ok|error",
+  "command": "command_name",
+  "data": { ... },
+  "error": "error message (if status=error)",
+  "timestamp": 1700000000.1
+}
+```
+
+### Implementation Status
+
+**Server-side (God-Kaiser):**
+- ✅ MockESP32Client (`god_kaiser_server/tests/esp32/mocks/mock_esp32_client.py`)
+- ✅ Pytest fixtures (`god_kaiser_server/tests/esp32/conftest.py`)
+- ⏳ Real MQTT client integration (TODO)
+- ⏳ Test orchestration tests (TODO)
+
+**ESP32-side (El Trabajante):**
+- ⏳ MQTT handler for `test/command` topic (OPTIONAL)
+- ⏳ Test command dispatcher (OPTIONAL)
+- ⏳ Response publisher to `test/response` (OPTIONAL)
+
+**Note:** ESP32-side implementation is OPTIONAL if using existing production topics:
+- Actuator commands can use `actuator/{gpio}/command`
+- Sensor reads can trigger existing sensor reading loop
+- Config can use existing config MQTT handlers
+
+### Example Test (Pytest)
+
+```python
+def test_actuator_control(mock_esp32):
+    """Test actuator control via MQTT commands."""
+    response = mock_esp32.handle_command("actuator_set", {
+        "gpio": 5, "value": 1, "mode": "digital"
+    })
+
+    assert response["status"] == "ok"
+    assert response["data"]["state"] is True
+
+    # Verify MQTT message published
+    messages = mock_esp32.get_published_messages()
+    assert messages[0]["topic"] == "kaiser/god/esp/test-esp-001/actuator/5/status"
+```
+
+### See Also
+
+- Full test protocol specification: `El Servador/docs/MQTT_TEST_PROTOCOL.md`
+- Test implementation guide: `El Servador/docs/ESP32_TESTING.md` (TODO)
+- Test migration plan: `.claude/TEST_WORKFLOW.md` Section 3
+
+---
+
+**Status:** ✅ Spezifikation produktionsreif & vollständig
+**Version:** 2.2 (Test Topics hinzugefügt)
+**Last Updated:** 2025-11-26
 **Author:** System-Architektur-Team
 
 ---
 
 ## Changelog
+
+### Version 2.2 (2025-11-26) - TEST TOPICS HINZUGEFÜGT
+
+**Neu hinzugefügt:**
+1. ✅ **Test Topics für Server-orchestrierte Tests** (`kaiser/god/esp/{id}/test/command` + `response`)
+2. ✅ **MockESP32Client Implementation** (Server-side ESP32 Simulator für Hardware-unabhängige Tests)
+3. ✅ **Test-Command-Spezifikation** (ping, actuator_set/get, sensor_read, config_get/set, emergency_stop, reset)
+4. ✅ **Pytest Fixtures** (mock_esp32, mock_esp32_with_actuators, mock_esp32_with_sensors)
+5. ✅ **Test Protocol Documentation** (`El Servador/docs/MQTT_TEST_PROTOCOL.md`)
+
+**Zweck:**
+- Automatisierte Tests für ESP32-Firmware via MQTT-Commands
+- CI/CD-Integration ohne physische Hardware (MockESP32Client)
+- Real-Hardware Integration-Tests über MQTT
+- Migration von PlatformIO Unity Tests zu Server-orchestrierten Tests (Option A)
+
+**Auswirkung:**
+- ESP32-seitige Implementation OPTIONAL (kann bestehende Topics nutzen)
+- Keine Breaking Changes zu existierenden Topics
+- Kompatibel mit Production MQTT-Protokoll
+
+**Status:** ✅ MockESP32Client implementiert, Real-Hardware-Integration TODO
+
+---
 
 ### Version 2.1 (2025-10-08) - KRITISCHE KONFLIKTE BEHOBEN
 
