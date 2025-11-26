@@ -33,7 +33,7 @@ public:
         }
 
         if (mode_ == TestMode::VIRTUAL) {
-            auto driver = std::make_unique<VirtualActuatorDriver>();
+            std::unique_ptr<VirtualActuatorDriver> driver(new VirtualActuatorDriver());
             if (!driver->begin(cfg)) {
                 return;
             }
