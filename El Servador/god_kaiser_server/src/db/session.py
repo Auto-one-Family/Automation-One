@@ -1,6 +1,128 @@
 """
-⭐ Database Session Management
+Database Session Management
 Engine Creation, Connection Pool Config
 """
-# TODO: Implement get_engine(), get_session(), init_db()
 
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
+from ..core.config import get_settings
+from ..core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Global engine instance
+_engine: AsyncEngine | None = None
+
+
+def get_engine() -> AsyncEngine:
+    """
+    Get or create the async database engine.
+
+    Returns:
+        AsyncEngine: SQLAlchemy async engine with connection pooling
+
+    Note:
+        Engine is created as a singleton to prevent multiple connection pools
+    """
+    global _engine
+
+    if _engine is None:
+        settings = get_settings()
+
+        _engine = create_async_engine(
+            settings.database.url,
+            pool_size=settings.database.pool_size,
+            max_overflow=settings.database.max_overflow,
+            pool_timeout=settings.database.pool_timeout,
+            pool_pre_ping=True,  # Verify connections before using
+            echo=settings.database.echo,
+        )
+
+        logger.info(
+            f"Database engine created: pool_size={settings.database.pool_size}, "
+            f"max_overflow={settings.database.max_overflow}"
+        )
+
+    return _engine
+
+
+# Session factory
+async_session_maker = sessionmaker(
+    bind=get_engine(),
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Get an async database session.
+
+    Yields:
+        AsyncSession: SQLAlchemy async session
+
+    Usage:
+        async with get_session() as session:
+            # Use session here
+            pass
+    """
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def init_db() -> None:
+    """
+    Initialize the database by creating all tables.
+
+    This should be called on application startup in development.
+    In production, use Alembic migrations instead.
+    """
+    from .base import Base
+
+    logger.info("Initializing database...")
+
+    engine = get_engine()
+
+    async with engine.begin() as conn:
+        # Import all models to ensure they're registered
+        from .models import (  # noqa: F401
+            actuator,
+            ai,
+            esp,
+            kaiser,
+            library,
+            logic,
+            sensor,
+            system,
+            user,
+        )
+
+        # Create all tables
+        await conn.run_sync(Base.metadata.create_all)
+
+    logger.info("Database initialization complete")
+
+
+async def dispose_engine() -> None:
+    """
+    Dispose the database engine and close all connections.
+
+    Should be called on application shutdown.
+    """
+    global _engine
+
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        logger.info("Database engine disposed")
