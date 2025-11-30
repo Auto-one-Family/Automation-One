@@ -76,6 +76,7 @@ struct SystemConfig {
   SystemState current_state = STATE_BOOT;
   String safe_mode_reason = "";
   uint16_t boot_count = 0;
+  unsigned long last_boot_time = 0;  // Phase 2: Millis bei letztem Boot (overflow-safe)
 };
 
 // Utility Functions (Deklaration, Implementierung in .cpp später)

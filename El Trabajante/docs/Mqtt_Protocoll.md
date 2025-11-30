@@ -183,23 +183,37 @@ kaiser/
 **Module:** `services/communication/mqtt_client.cpp` → `publishHeartbeat()`  
 **TopicBuilder:** `TopicBuilder::buildSystemHeartbeatTopic()`
 
-**Payload-Schema:**
+**Payload-Schema (Current Implementation):**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
+  "esp_id": "ESP_12AB34CD",            // ESP Device ID - REQUIRED
+  "zone_id": "greenhouse",             // Zone-Zuordnung - REQUIRED
+  "master_zone_id": "greenhouse-master", // Master-Zone-ID (Legacy-Kompatibilität) - REQUIRED
+  "zone_assigned": true,               // Ob Zone zugewiesen wurde - REQUIRED
+  "ts": 1735818000,                    // Timestamp (Unix-Sekunden) - REQUIRED
   "uptime": 3600,                      // Sekunden seit Boot - REQUIRED
-  "state": "OPERATIONAL",              // SystemState - REQUIRED
-  "heap": 245760,                      // Freier Heap (Bytes) - REQUIRED
-  "wifi_rssi": -65,                    // WiFi Signal (dBm) - REQUIRED
-  "mqtt_connected": true,              // MQTT-Status - REQUIRED
-  "safe_mode": false,                  // Safe-Mode aktiv - REQUIRED
-  "zone_id": "greenhouse",             // Zone-Zuordnung - OPTIONAL
-  "sensors_active": 3,                 // Anzahl aktive Sensoren - REQUIRED
-  "actuators_active": 2,               // Anzahl aktive Aktoren - REQUIRED
-  "trigger": "forced"                  // "forced", "state_change", "rssi_change", "heap_change", "sensor_change", "actuator_change"
+  "heap_free": 245760,                 // Freier Heap-Speicher (Bytes) - REQUIRED
+  "wifi_rssi": -65,                    // WiFi Signal Strength (dBm) - REQUIRED
+  "sensor_count": 3,                   // Anzahl aktiver Sensoren - REQUIRED
+  "actuator_count": 2                  // Anzahl aktiver Aktoren - REQUIRED
 }
 ```
+
+**Code Location:** `services/communication/mqtt_client.cpp:420-431` (publishHeartbeat)
+
+**Future Enhancements (Planned, not yet implemented):**
+```json
+{
+  // ... all fields above, plus:
+  "state": "OPERATIONAL",              // SystemState enum (see State Machine below)
+  "mqtt_connected": true,              // MQTT connection status (redundant - if heartbeat arrives, MQTT is connected)
+  "safe_mode": false,                  // Safe-Mode active flag
+  "trigger": "forced"                  // Heartbeat trigger type: "forced", "state_change", "rssi_change", etc.
+}
+```
+
+**Note:** Change-detection logic (see section below) is PLANNED but not yet fully implemented.
+Current implementation sends heartbeat every 60 seconds (forced) only.
 
 **State-Values:**
 - `BOOT`: System startet
@@ -284,23 +298,28 @@ stateDiagram-v2
 
 ---
 
-### Heartbeat Change-Detection Rules
+### Heartbeat Change-Detection Rules (PLANNED - Not Fully Implemented)
+
+**Current Implementation:**
+- Heartbeat sent every 60 seconds (forced interval)
+- No change-detection logic yet
+- Future enhancement will add smart triggering
 
 **Forced Heartbeat (alle 60s):**
 - Immer, als Alive-Signal
 - Unabhängig von Änderungen
-- `trigger: "forced"`
+- `trigger: "forced"` (field not yet in payload)
 
-**Change-Detection Heartbeat (sofort):**
+**Change-Detection Heartbeat (PLANNED - sofort bei Änderung):**
 
-| Change-Type | Bedingung | Trigger-Value |
-|-------------|-----------|---------------|
-| **SystemState-Änderung** | `state` ändert sich | `state_change` |
-| **WiFi RSSI-Änderung** | Absolute Änderung > 10 dBm | `rssi_change` |
-| **Heap-Änderung** | Relative Änderung > 20% | `heap_change` |
-| **Safe-Mode-Änderung** | `safe_mode` ändert sich | `state_change` |
-| **Sensor-Count-Änderung** | `sensors_active` ändert sich | `sensor_change` |
-| **Actuator-Count-Änderung** | `actuators_active` ändert sich | `actuator_change` |
+| Change-Type | Bedingung | Trigger-Value | Implementation Status |
+|-------------|-----------|---------------|----------------------|
+| **SystemState-Änderung** | `state` ändert sich | `state_change` | ⏳ PLANNED (Phase 6) |
+| **WiFi RSSI-Änderung** | Absolute Änderung > 10 dBm | `rssi_change` | ⏳ PLANNED (Phase 6) |
+| **Heap-Änderung** | Relative Änderung > 20% | `heap_change` | ⏳ PLANNED (Phase 6) |
+| **Safe-Mode-Änderung** | `safe_mode` ändert sich | `state_change` | ⏳ PLANNED (Phase 7) |
+| **Sensor-Count-Änderung** | `sensor_count` ändert sich | `sensor_change` | ⏳ PLANNED (Phase 6) |
+| **Actuator-Count-Änderung** | `actuator_count` ändert sich | `actuator_change` | ⏳ PLANNED (Phase 6) |
 
 **Beispiel-Berechnung (RSSI-Change):**
 ```cpp

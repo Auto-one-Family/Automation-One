@@ -1,6 +1,2 @@
-"""
-⭐ Automation Execution Engine - Evaluiert Cross-ESP Logic Rules
-Singleton, läuft in Background-Thread
-"""
-# TODO: Implement LogicEngine class with evaluate_sensor_data(), execute_action()
-
+"""Cross-ESP Automation Engine (Background Task) - Phase 3 - Priority: 🔴 CRITICAL - Status: PLANNED
+Note: Evaluates logic rules in background, triggers actuator actions based on sensor conditions."""

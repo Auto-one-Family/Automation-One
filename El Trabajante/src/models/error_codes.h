@@ -190,6 +190,129 @@ inline ConfigErrorCode stringToConfigErrorCode(const String& code) {
   return ConfigErrorCode::UNKNOWN_ERROR;
 }
 
+// ============================================
+// ERROR CODE DESCRIPTIONS (Human-Readable)
+// ============================================
+inline const char* getErrorDescription(uint16_t error_code) {
+  switch (error_code) {
+    // HARDWARE (1000-1999)
+    case ERROR_GPIO_RESERVED: return "GPIO pin is reserved by system";
+    case ERROR_GPIO_CONFLICT: return "GPIO pin already in use by another component";
+    case ERROR_GPIO_INIT_FAILED: return "Failed to initialize GPIO pin";
+    case ERROR_GPIO_INVALID_MODE: return "Invalid GPIO pin mode specified";
+    case ERROR_GPIO_READ_FAILED: return "Failed to read GPIO pin value";
+    case ERROR_GPIO_WRITE_FAILED: return "Failed to write GPIO pin value";
+
+    case ERROR_I2C_INIT_FAILED: return "Failed to initialize I2C bus";
+    case ERROR_I2C_DEVICE_NOT_FOUND: return "I2C device not found on bus";
+    case ERROR_I2C_READ_FAILED: return "Failed to read from I2C device";
+    case ERROR_I2C_WRITE_FAILED: return "Failed to write to I2C device";
+    case ERROR_I2C_BUS_ERROR: return "I2C bus error (SDA/SCL stuck or timeout)";
+
+    case ERROR_ONEWIRE_INIT_FAILED: return "Failed to initialize OneWire bus";
+    case ERROR_ONEWIRE_NO_DEVICES: return "No OneWire devices found on bus";
+    case ERROR_ONEWIRE_READ_FAILED: return "Failed to read from OneWire device";
+
+    case ERROR_PWM_INIT_FAILED: return "Failed to initialize PWM controller";
+    case ERROR_PWM_CHANNEL_FULL: return "All PWM channels already in use";
+    case ERROR_PWM_SET_FAILED: return "Failed to set PWM duty cycle";
+
+    case ERROR_SENSOR_READ_FAILED: return "Failed to read sensor data";
+    case ERROR_SENSOR_INIT_FAILED: return "Failed to initialize sensor";
+    case ERROR_SENSOR_NOT_FOUND: return "Sensor not configured or not found";
+    case ERROR_SENSOR_TIMEOUT: return "Sensor read timeout (device not responding)";
+
+    case ERROR_ACTUATOR_SET_FAILED: return "Failed to set actuator state";
+    case ERROR_ACTUATOR_INIT_FAILED: return "Failed to initialize actuator";
+    case ERROR_ACTUATOR_NOT_FOUND: return "Actuator not configured or not found";
+    case ERROR_ACTUATOR_CONFLICT: return "Actuator GPIO conflict with sensor";
+
+    // SERVICE (2000-2999)
+    case ERROR_NVS_INIT_FAILED: return "Failed to initialize NVS (Non-Volatile Storage)";
+    case ERROR_NVS_READ_FAILED: return "Failed to read from NVS";
+    case ERROR_NVS_WRITE_FAILED: return "Failed to write to NVS (storage full or corrupted)";
+    case ERROR_NVS_NAMESPACE_FAILED: return "Failed to open NVS namespace";
+    case ERROR_NVS_CLEAR_FAILED: return "Failed to clear NVS namespace";
+
+    case ERROR_CONFIG_INVALID: return "Configuration data is invalid";
+    case ERROR_CONFIG_MISSING: return "Required configuration is missing";
+    case ERROR_CONFIG_LOAD_FAILED: return "Failed to load configuration from NVS";
+    case ERROR_CONFIG_SAVE_FAILED: return "Failed to save configuration to NVS";
+    case ERROR_CONFIG_VALIDATION: return "Configuration validation failed";
+
+    case ERROR_LOGGER_INIT_FAILED: return "Failed to initialize logger system";
+    case ERROR_LOGGER_BUFFER_FULL: return "Logger buffer is full (messages dropped)";
+
+    case ERROR_STORAGE_INIT_FAILED: return "Failed to initialize storage manager";
+    case ERROR_STORAGE_READ_FAILED: return "Failed to read from storage";
+    case ERROR_STORAGE_WRITE_FAILED: return "Failed to write to storage";
+
+    // COMMUNICATION (3000-3999)
+    case ERROR_WIFI_INIT_FAILED: return "Failed to initialize WiFi module";
+    case ERROR_WIFI_CONNECT_TIMEOUT: return "WiFi connection timeout";
+    case ERROR_WIFI_CONNECT_FAILED: return "WiFi connection failed (wrong password or SSID not found)";
+    case ERROR_WIFI_DISCONNECT: return "WiFi disconnected unexpectedly";
+    case ERROR_WIFI_NO_SSID: return "WiFi SSID not configured";
+
+    case ERROR_MQTT_INIT_FAILED: return "Failed to initialize MQTT client";
+    case ERROR_MQTT_CONNECT_FAILED: return "MQTT broker connection failed";
+    case ERROR_MQTT_PUBLISH_FAILED: return "Failed to publish MQTT message";
+    case ERROR_MQTT_SUBSCRIBE_FAILED: return "Failed to subscribe to MQTT topic";
+    case ERROR_MQTT_DISCONNECT: return "MQTT disconnected from broker";
+    case ERROR_MQTT_BUFFER_FULL: return "MQTT offline buffer is full (messages dropped)";
+    case ERROR_MQTT_PAYLOAD_INVALID: return "MQTT payload is invalid or malformed";
+
+    case ERROR_HTTP_INIT_FAILED: return "Failed to initialize HTTP client";
+    case ERROR_HTTP_REQUEST_FAILED: return "HTTP request failed (server unreachable)";
+    case ERROR_HTTP_RESPONSE_INVALID: return "HTTP response is invalid or malformed";
+    case ERROR_HTTP_TIMEOUT: return "HTTP request timeout";
+
+    case ERROR_NETWORK_UNREACHABLE: return "Network is unreachable";
+    case ERROR_DNS_FAILED: return "DNS lookup failed (hostname not resolved)";
+    case ERROR_CONNECTION_LOST: return "Network connection lost";
+
+    // APPLICATION (4000-4999)
+    case ERROR_STATE_INVALID: return "Invalid system state";
+    case ERROR_STATE_TRANSITION: return "Invalid state transition";
+    case ERROR_STATE_MACHINE_STUCK: return "State machine is stuck (no valid transitions)";
+
+    case ERROR_OPERATION_TIMEOUT: return "Operation timeout";
+    case ERROR_OPERATION_FAILED: return "Operation failed";
+    case ERROR_OPERATION_CANCELLED: return "Operation cancelled by user or system";
+
+    case ERROR_COMMAND_INVALID: return "Command is invalid or unknown";
+    case ERROR_COMMAND_PARSE_FAILED: return "Failed to parse command";
+    case ERROR_COMMAND_EXEC_FAILED: return "Command execution failed";
+
+    case ERROR_PAYLOAD_INVALID: return "Payload is invalid or malformed";
+    case ERROR_PAYLOAD_TOO_LARGE: return "Payload size exceeds maximum allowed";
+    case ERROR_PAYLOAD_PARSE_FAILED: return "Failed to parse payload (JSON syntax error)";
+
+    case ERROR_MEMORY_FULL: return "Memory is full (heap exhausted)";
+    case ERROR_MEMORY_ALLOCATION: return "Failed to allocate memory";
+    case ERROR_MEMORY_LEAK: return "Memory leak detected";
+
+    case ERROR_SYSTEM_INIT_FAILED: return "System initialization failed";
+    case ERROR_SYSTEM_RESTART: return "System restart requested";
+    case ERROR_SYSTEM_SAFE_MODE: return "System entered safe mode (errors detected)";
+
+    case ERROR_TASK_FAILED: return "FreeRTOS task failed";
+    case ERROR_TASK_TIMEOUT: return "FreeRTOS task timeout";
+    case ERROR_TASK_QUEUE_FULL: return "FreeRTOS task queue is full";
+
+    default: return "Unknown error code";
+  }
+}
+
+// Helper: Get error code range name
+inline const char* getErrorCodeRange(uint16_t error_code) {
+  if (error_code >= 1000 && error_code < 2000) return "HARDWARE";
+  if (error_code >= 2000 && error_code < 3000) return "SERVICE";
+  if (error_code >= 3000 && error_code < 4000) return "COMMUNICATION";
+  if (error_code >= 4000 && error_code < 5000) return "APPLICATION";
+  return "UNKNOWN";
+}
+
 #endif
 
 

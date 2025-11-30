@@ -61,9 +61,12 @@ private:
   Preferences preferences_;
   bool namespace_open_;
   char current_namespace_[16];
-  
+
   // Static buffer für getString (Guide-konform)
   static char string_buffer_[256];
+
+  // NVS Quota Check Helper
+  bool checkNVSQuota(const char* key);
 
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
   SemaphoreHandle_t nvs_mutex_;

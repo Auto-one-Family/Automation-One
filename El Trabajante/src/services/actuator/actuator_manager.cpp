@@ -362,7 +362,17 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
 
   bool success = actuator->driver->setValue(normalized_value);
   actuator->config = actuator->driver->getConfig();
+
+  // Phase 2: Runtime protection - track activation timestamp
   if (success) {
+    if (actuator->config.current_state) {
+      // Actuator activated - start timeout tracking
+      actuator->config.runtime_protection.activation_start_ms = millis();
+    } else {
+      // Actuator deactivated - reset timeout tracking
+      actuator->config.runtime_protection.activation_start_ms = 0;
+    }
+
     publishActuatorStatus(gpio);
   }
   return success;
@@ -381,7 +391,17 @@ bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
 
   bool success = actuator->driver->setBinary(state);
   actuator->config = actuator->driver->getConfig();
+
+  // Phase 2: Runtime protection - track activation timestamp
   if (success) {
+    if (actuator->config.current_state) {
+      // Actuator activated - start timeout tracking
+      actuator->config.runtime_protection.activation_start_ms = millis();
+    } else {
+      // Actuator deactivated - reset timeout tracking
+      actuator->config.runtime_protection.activation_start_ms = 0;
+    }
+
     publishActuatorStatus(gpio);
   }
   return success;
@@ -459,6 +479,37 @@ void ActuatorManager::processActuatorLoops() {
     if (!actuators_[i].in_use || !actuators_[i].driver) {
       continue;
     }
+
+    // ═══════════════════════════════════════════════════
+    // PHASE 2: TIMEOUT-PROTECTION (Robustness)
+    // ═══════════════════════════════════════════════════
+    // Check for actuator timeout (prevents continuous operation)
+    if (actuators_[i].config.runtime_protection.timeout_enabled &&
+        actuators_[i].config.current_state) {
+
+      // Only check if activation_start_ms is set (non-zero)
+      if (actuators_[i].config.runtime_protection.activation_start_ms > 0) {
+        unsigned long runtime = millis() - actuators_[i].config.runtime_protection.activation_start_ms;
+
+        if (runtime > actuators_[i].config.runtime_protection.max_runtime_ms) {
+          LOG_WARNING("Actuator timeout: GPIO " + String(actuators_[i].config.gpio) +
+                      " runtime " + String(runtime / 1000) + "s exceeded limit " +
+                      String(actuators_[i].config.runtime_protection.max_runtime_ms / 1000) + "s");
+
+          // Emergency stop this actuator
+          emergencyStopActuator(actuators_[i].config.gpio);
+
+          // Publish timeout alert
+          publishActuatorAlert(actuators_[i].config.gpio, "runtime_protection",
+                               "Actuator exceeded max runtime - emergency stopped");
+
+          // Reset activation timestamp
+          actuators_[i].config.runtime_protection.activation_start_ms = 0;
+        }
+      }
+    }
+
+    // Regular driver loop processing
     actuators_[i].driver->loop();
     actuators_[i].config = actuators_[i].driver->getConfig();
   }

@@ -3,6 +3,7 @@
 // ============================================
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
 #include "drivers/gpio_manager.h"
 #include "utils/logger.h"
 #include "services/config/storage_manager.h"
@@ -68,7 +69,19 @@ void setup() {
   Serial.printf("Chip Model: %s\n", ESP.getChipModel());
   Serial.printf("CPU Frequency: %d MHz\n", ESP.getCpuFreqMHz());
   Serial.printf("Free Heap: %d bytes\n\n", ESP.getFreeHeap());
-  
+
+  // ============================================
+  // STEP 2.3: WATCHDOG CONFIGURATION (CRITICAL!)
+  // ============================================
+  // Configure Watchdog to 30 seconds (no panic mode)
+  // This prevents watchdog resets during:
+  // - Factory Reset (10s button hold)
+  // - Provisioning (10min timeout)
+  // - Long-running operations
+  esp_task_wdt_init(30, false);  // 30s timeout, don't panic
+  esp_task_wdt_add(NULL);        // Add current task to watchdog
+  Serial.println("✅ Watchdog configured: 30s timeout, no panic");
+
   // ============================================
   // STEP 2.5: BOOT-BUTTON FACTORY RESET CHECK (Before GPIO init!)
   // ============================================
@@ -169,7 +182,56 @@ void setup() {
   configManager.loadSystemConfig(g_system_config);
   
   configManager.printConfigurationStatus();
-  
+
+  // ═══════════════════════════════════════════════════
+  // PHASE 2: BOOT-LOOP-DETECTION (Robustness + Overflow-Safe)
+  // ═══════════════════════════════════════════════════
+  // Calculate time since last boot (handles millis() overflow after 49.7 days)
+  unsigned long now = millis();
+  unsigned long time_since_last_boot = 0;
+
+  if (g_system_config.last_boot_time > 0) {
+    // Handle millis() overflow gracefully
+    if (now >= g_system_config.last_boot_time) {
+      time_since_last_boot = now - g_system_config.last_boot_time;
+    } else {
+      // Overflow occurred - treat as > 60s (boot is valid)
+      time_since_last_boot = 60001;
+    }
+  } else {
+    // First boot ever - treat as > 60s (boot is valid)
+    time_since_last_boot = 60001;
+  }
+
+  // Increment boot counter and update timestamp
+  g_system_config.boot_count++;
+  g_system_config.last_boot_time = now;
+  configManager.saveSystemConfig(g_system_config);
+
+  LOG_INFO("Boot count: " + String(g_system_config.boot_count) +
+           " (last boot " + String(time_since_last_boot / 1000) + "s ago)");
+
+  // Boot-Loop-Detection: 5 boots in <60s triggers Safe-Mode
+  if (g_system_config.boot_count > 5 && time_since_last_boot < 60000) {
+    LOG_CRITICAL("╔════════════════════════════════════════╗");
+    LOG_CRITICAL("║  BOOT LOOP DETECTED - SAFE MODE       ║");
+    LOG_CRITICAL("╚════════════════════════════════════════╝");
+    LOG_CRITICAL("Booted " + String(g_system_config.boot_count) + " times in <60s");
+    LOG_CRITICAL("System entering Safe-Mode (no WiFi/MQTT)");
+    LOG_CRITICAL("Reset required to exit Safe-Mode");
+
+    // Enter Safe-Mode: Disable WiFi/MQTT, only Serial log available
+    g_system_config.current_state = STATE_SAFE_MODE;
+    g_system_config.safe_mode_reason = "Boot loop detected (" + String(g_system_config.boot_count) + " boots)";
+    configManager.saveSystemConfig(g_system_config);
+
+    // Infinite loop - only watchdog can reset
+    while(true) {
+      delay(1000);
+      LOG_WARNING("SAFE MODE - Boot count: " + String(g_system_config.boot_count));
+    }
+  }
+
   // ═══════════════════════════════════════════════════
   // STEP 6.5: PROVISIONING CHECK (Phase 6)
   // ═══════════════════════════════════════════════════
@@ -363,17 +425,76 @@ void setup() {
         return;
       }
       
-      // ESP-specific emergency stop
+      // ESP-specific emergency stop (with auth check)
       String esp_emergency_topic = String(TopicBuilder::buildActuatorEmergencyTopic());
       if (topic == esp_emergency_topic) {
-        safetyController.emergencyStopAll("ESP emergency command");
+        // Parse JSON payload for auth_token
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (!error) {
+          String command = doc["command"].as<String>();
+          String auth_token = doc["auth_token"].as<String>();
+
+          // Validate auth_token (load from NVS or use default: ESP-ID)
+          String stored_token = storageManager.getStringObj("emergency_auth", g_system_config.esp_id);
+
+          if (auth_token != stored_token) {
+            LOG_ERROR("╔════════════════════════════════════════╗");
+            LOG_ERROR("║  UNAUTHORIZED EMERGENCY-STOP ATTEMPT  ║");
+            LOG_ERROR("╚════════════════════════════════════════╝");
+            LOG_ERROR("Invalid auth_token for emergency command");
+            mqttClient.publish(esp_emergency_topic + "/error",
+                              "{\"error\":\"unauthorized\",\"message\":\"Invalid auth_token\"}");
+            return;
+          }
+
+          if (command == "emergency_stop") {
+            LOG_WARNING("╔════════════════════════════════════════╗");
+            LOG_WARNING("║  AUTHORIZED EMERGENCY-STOP TRIGGERED  ║");
+            LOG_WARNING("╚════════════════════════════════════════╝");
+            safetyController.emergencyStopAll("ESP emergency command (authenticated)");
+          } else if (command == "clear_emergency") {
+            LOG_INFO("╔════════════════════════════════════════╗");
+            LOG_INFO("║  AUTHORIZED EMERGENCY-CLEAR TRIGGERED ║");
+            LOG_INFO("╚════════════════════════════════════════╝");
+            bool success = safetyController.clearEmergencyStop();
+            if (success) {
+              safetyController.resumeOperation();
+              mqttClient.publish(esp_emergency_topic + "/response",
+                                "{\"status\":\"emergency_cleared\",\"timestamp\":" + String(millis()) + "}");
+            } else {
+              mqttClient.publish(esp_emergency_topic + "/error",
+                                "{\"error\":\"clear_failed\",\"message\":\"Safety verification failed\"}");
+            }
+          }
+        } else {
+          LOG_ERROR("Failed to parse emergency command JSON");
+        }
         return;
       }
-      
-      // Broadcast emergency
+
+      // Broadcast emergency (with auth check)
       String broadcast_emergency_topic = String(TopicBuilder::buildBroadcastEmergencyTopic());
       if (topic == broadcast_emergency_topic) {
-        safetyController.emergencyStopAll("Broadcast emergency");
+        // Parse JSON payload for auth_token
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (!error) {
+          String auth_token = doc["auth_token"].as<String>();
+
+          // Validate auth_token (broadcast uses God-Kaiser's master token)
+          // For now, we accept any token for broadcast (God-Kaiser has authority)
+          // TODO: Validate against God-Kaiser's master emergency token
+
+          LOG_WARNING("╔════════════════════════════════════════╗");
+          LOG_WARNING("║  BROADCAST EMERGENCY-STOP RECEIVED    ║");
+          LOG_WARNING("╚════════════════════════════════════════╝");
+          safetyController.emergencyStopAll("Broadcast emergency (God-Kaiser)");
+        } else {
+          LOG_ERROR("Failed to parse broadcast emergency JSON");
+        }
         return;
       }
       
@@ -589,7 +710,10 @@ void setup() {
                            "SensorManager begin() failed");
   } else {
     LOG_INFO("Sensor Manager initialized");
-    
+
+    // Phase 2: Configure measurement interval (5 seconds)
+    sensorManager.setMeasurementInterval(5000);
+
     // Load sensor configs from NVS
     SensorConfig sensors[10];
     uint8_t loaded_count = 0;
@@ -649,6 +773,18 @@ void setup() {
 // LOOP - Phase 2 Communication Monitoring + Phase 4/5 Operations
 // ============================================
 void loop() {
+  // ═══════════════════════════════════════════════════
+  // PHASE 2: BOOT-COUNTER RESET (After 60s stable operation)
+  // ═══════════════════════════════════════════════════
+  static bool boot_count_reset = false;
+  if (!boot_count_reset && millis() > 60000 && g_system_config.boot_count > 1) {
+    g_system_config.boot_count = 0;
+    g_system_config.last_boot_time = 0;  // Reset timestamp too
+    configManager.saveSystemConfig(g_system_config);
+    boot_count_reset = true;
+    LOG_INFO("Boot counter reset - stable operation confirmed");
+  }
+
   // Phase 2: Communication monitoring (with Circuit Breaker - Phase 6+)
   wifiManager.loop();      // Monitor WiFi connection (Circuit Breaker integrated)
   mqttClient.loop();       // Process MQTT messages + heartbeat (Circuit Breaker integrated)

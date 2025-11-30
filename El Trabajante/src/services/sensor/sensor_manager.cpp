@@ -26,7 +26,9 @@ SensorManager::SensorManager()
       mqtt_client_(nullptr),
       i2c_bus_(nullptr),
       onewire_bus_(nullptr),
-      gpio_manager_(nullptr) {}
+      gpio_manager_(nullptr),
+      last_measurement_time_(0),
+      measurement_interval_(30000) {}  // 30s default interval
 
 SensorManager::~SensorManager() {
     end();
@@ -398,6 +400,14 @@ void SensorManager::performAllMeasurements() {
     }
     
     last_measurement_time_ = now;
+}
+
+// ============================================
+// MEASUREMENT INTERVAL CONFIGURATION (PHASE 2)
+// ============================================
+void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
+    measurement_interval_ = interval_ms;
+    LOG_INFO("Measurement interval set to " + String(interval_ms) + " ms");
 }
 
 // ============================================

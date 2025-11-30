@@ -1,5 +1,3 @@
-"""
-Kaiser Repository: Kaiser device queries
-"""
-# TODO: Implement KaiserRepository with get_by_kaiser_id(), update_status()
-
+"""Kaiser Node Repository - Phase 2 - Priority: 🟡 HIGH - Status: PLANNED
+Manages Kaiser relay nodes (for scaling beyond 50 ESPs).
+Reference: .claude/PI_SERVER_REFACTORING.md (Lines 456, Phase 2)"""

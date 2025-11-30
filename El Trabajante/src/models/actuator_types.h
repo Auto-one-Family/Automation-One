@@ -26,6 +26,15 @@ namespace ActuatorTypeTokens {
 // CORE DATA STRUCTURES
 // ============================================
 
+// ============================================
+// PHASE 2: RUNTIME PROTECTION (Robustness)
+// ============================================
+struct RuntimeProtection {
+  unsigned long max_runtime_ms = 3600000UL;  // 1h default (prevents continuous operation)
+  bool timeout_enabled = true;               // Enable/disable timeout protection
+  unsigned long activation_start_ms = 0;     // Timestamp when actuator was activated
+};
+
 struct ActuatorConfig {
   uint8_t gpio = 255;              // Primary hardware binding
   uint8_t aux_gpio = 255;          // Optional secondary pin (valves, H-bridges)
@@ -46,6 +55,9 @@ struct ActuatorConfig {
   uint8_t current_pwm = 0;         // PWM duty
   unsigned long last_command_ts = 0;
   unsigned long accumulated_runtime_ms = 0; // For pumps/duty-cycle analysis
+
+  // Phase 2: Runtime protection (timeout protection)
+  RuntimeProtection runtime_protection;
 };
 
 struct ActuatorCommand {

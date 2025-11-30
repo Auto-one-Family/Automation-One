@@ -98,8 +98,21 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     if (!circuit_breaker_.allowRequest()) {
         LOG_WARNING("PiEnhancedProcessor: Circuit breaker blocked request (Service DOWN)");
         LOG_DEBUG("  Circuit State: " + String(circuit_breaker_.isOpen() ? "OPEN" : "HALF_OPEN"));
-        processed_out.error_message = "Circuit breaker open - waiting for recovery";
-        return false;
+
+        // ═══════════════════════════════════════════════════
+        // PHASE 2: HTTP-FALLBACK-MODE (Robustness)
+        // ═══════════════════════════════════════════════════
+        // Server unavailable → use local fallback processing
+        LOG_INFO("Using local fallback processing - returning raw values");
+
+        processed_out.value = (float)data.raw_value;  // RAW value directly
+        processed_out.unit = "raw";                   // Mark as unprocessed
+        processed_out.quality = "fair";               // Medium quality (not calibrated)
+        processed_out.timestamp = data.timestamp;
+        processed_out.valid = true;
+        processed_out.error_message = "Local fallback - server unavailable (circuit breaker open)";
+
+        return true;  // Success with fallback data
     }
     
     // ============================================

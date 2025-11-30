@@ -1,5 +1,1 @@
-"""
-Automation Logic Service: Rule CRUD, Validation
-"""
-# TODO: Implement LogicService with create_rule(), validate_rule(), get_active_rules()
-
+"""Logic Rules Management Service - Phase 3 - Priority: 🟡 HIGH - Status: PLANNED"""

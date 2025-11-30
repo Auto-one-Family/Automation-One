@@ -117,17 +117,44 @@ bool MQTTClient::connect(const MQTTConfig& config) {
 
 bool MQTTClient::connectToBroker() {
     LOG_INFO("Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
-    
+
+    // ============================================
+    // LAST-WILL CONFIGURATION (Critical for ESP failure detection)
+    // ============================================
+    // Build Last-Will Topic: kaiser/{kaiser_id}/esp/{esp_id}/status/will
+    // Use Heartbeat topic and replace /heartbeat with /will
+    String last_will_topic = String(TopicBuilder::buildSystemHeartbeatTopic());
+    last_will_topic.replace("/heartbeat", "/will");
+
+    // Build Last-Will Message: JSON with offline status
+    String last_will_message = "{\"status\":\"offline\",\"reason\":\"unexpected_disconnect\",\"timestamp\":" +
+                               String(millis()) + "}";
+
+    LOG_INFO("Last-Will Topic: " + last_will_topic);
+    LOG_INFO("Last-Will Message: " + last_will_message);
+
     bool connected = false;
-    
+
     if (anonymous_mode_) {
-        // Anonymous connection
-        connected = mqtt_.connect(current_config_.client_id.c_str());
+        // Anonymous connection with Last-Will
+        connected = mqtt_.connect(
+            current_config_.client_id.c_str(),
+            last_will_topic.c_str(),
+            1,  // QoS 1 (At Least Once)
+            true,  // Retain flag (God-Kaiser kann offline-Status später abrufen)
+            last_will_message.c_str()
+        );
     } else {
-        // Authenticated connection
-        connected = mqtt_.connect(current_config_.client_id.c_str(),
-                                 current_config_.username.c_str(),
-                                 current_config_.password.c_str());
+        // Authenticated connection with Last-Will
+        connected = mqtt_.connect(
+            current_config_.client_id.c_str(),
+            current_config_.username.c_str(),
+            current_config_.password.c_str(),
+            last_will_topic.c_str(),
+            1,  // QoS 1 (At Least Once)
+            true,  // Retain flag
+            last_will_message.c_str()
+        );
     }
     
     if (connected) {

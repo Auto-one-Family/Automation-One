@@ -1,5 +1,3 @@
-"""
-System Config Repository: System settings and metrics
-"""
-# TODO: Implement SystemConfigRepository with get_config(), save_metrics()
-
+"""System Configuration Repository - Phase 2 - Priority: 🟡 HIGH - Status: PLANNED
+Stores system-wide configuration settings.
+Reference: .claude/PI_SERVER_REFACTORING.md (Lines 459, Phase 2)"""

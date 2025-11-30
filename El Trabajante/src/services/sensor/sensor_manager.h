@@ -84,10 +84,13 @@ public:
     // ============================================
     // Perform measurement for a specific GPIO-based sensor
     bool performMeasurement(uint8_t gpio, SensorReading& reading_out);
-    
+
     // Perform measurements for all active sensors
     // Publishes results via MQTT automatically
     void performAllMeasurements();
+
+    // Set measurement interval (Phase 2: Robustness)
+    void setMeasurementInterval(unsigned long interval_ms);
     
     // ============================================
     // RAW DATA READING METHODS (PHASE 4)

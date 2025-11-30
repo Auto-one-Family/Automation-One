@@ -125,6 +125,31 @@ void StorageManager::endNamespace() {
 }
 
 // ============================================
+// NVS QUOTA CHECK HELPER (Private)
+// ============================================
+bool StorageManager::checkNVSQuota(const char* key) {
+  if (!namespace_open_) {
+    return true;  // Skip check if no namespace open
+  }
+
+  size_t free_entries = preferences_.freeEntries();
+  if (free_entries == 0) {
+    LOG_ERROR("╔════════════════════════════════════════╗");
+    LOG_ERROR("║  NVS FULL - CANNOT SAVE DATA!         ║");
+    LOG_ERROR("╚════════════════════════════════════════╝");
+    LOG_ERROR("NVS namespace '" + String(current_namespace_) + "' has 0 free entries");
+    LOG_ERROR("Cannot write key: " + String(key));
+    return false;
+  } else if (free_entries < 10) {
+    LOG_WARNING("╔════════════════════════════════════════╗");
+    LOG_WARNING("║  NVS NEARLY FULL - " + String(free_entries) + " entries left        ║");
+    LOG_WARNING("╚════════════════════════════════════════╝");
+    LOG_WARNING("NVS namespace '" + String(current_namespace_) + "' low on space");
+  }
+  return true;
+}
+
+// ============================================
 // PRIMARY API: const char* (Guide-konform)
 // ============================================
 
@@ -140,13 +165,18 @@ bool StorageManager::putString(const char* key, const char* value) {
     LOG_ERROR("StorageManager: No namespace open for putString");
     return false;
   }
-  
+
+  // Check NVS quota before write
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
   size_t bytes = preferences_.putString(key, value);
   if (bytes == 0 && strlen(value) > 0) {
     LOG_ERROR("StorageManager: Failed to write string key: " + String(key));
     return false;
   }
-  
+
   LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value));
   return true;
 }
@@ -183,7 +213,11 @@ bool StorageManager::putInt(const char* key, int value) {
     LOG_ERROR("StorageManager: No namespace open for putInt");
     return false;
   }
-  
+
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
   size_t bytes = preferences_.putInt(key, value);
   if (bytes == 0) {
     LOG_ERROR("StorageManager: Failed to write int key: " + String(key));
@@ -223,7 +257,11 @@ bool StorageManager::putUInt8(const char* key, uint8_t value) {
     LOG_ERROR("StorageManager: No namespace open for putUInt8");
     return false;
   }
-  
+
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
   size_t bytes = preferences_.putUChar(key, value);
   if (bytes == 0) {
     LOG_ERROR("StorageManager: Failed to write uint8 key: " + String(key));
@@ -260,7 +298,11 @@ bool StorageManager::putUInt16(const char* key, uint16_t value) {
     LOG_ERROR("StorageManager: No namespace open for putUInt16");
     return false;
   }
-  
+
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
   size_t bytes = preferences_.putUShort(key, value);
   if (bytes == 0) {
     LOG_ERROR("StorageManager: Failed to write uint16 key: " + String(key));
@@ -297,7 +339,11 @@ bool StorageManager::putBool(const char* key, bool value) {
     LOG_ERROR("StorageManager: No namespace open for putBool");
     return false;
   }
-  
+
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
   size_t bytes = preferences_.putBool(key, value);
   if (bytes == 0) {
     LOG_ERROR("StorageManager: Failed to write bool key: " + String(key));
@@ -334,7 +380,11 @@ bool StorageManager::putULong(const char* key, unsigned long value) {
     LOG_ERROR("StorageManager: No namespace open for putULong");
     return false;
   }
-  
+
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
   size_t bytes = preferences_.putULong(key, value);
   if (bytes == 0) {
     LOG_ERROR("StorageManager: Failed to write ulong key: " + String(key));
