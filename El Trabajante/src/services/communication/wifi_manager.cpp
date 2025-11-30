@@ -6,7 +6,7 @@
 // ============================================
 const unsigned long RECONNECT_INTERVAL_MS = 30000;  // 30 seconds
 const uint16_t MAX_RECONNECT_ATTEMPTS = 10;
-const unsigned long WIFI_TIMEOUT_MS = 10000;  // 10 seconds
+const unsigned long WIFI_TIMEOUT_MS = 20000;  // ✅ IMPROVEMENT #1: 20 seconds (erhöht von 10s)
 
 // ============================================
 // GLOBAL WIFI MANAGER INSTANCE
@@ -83,39 +83,88 @@ bool WiFiManager::connect(const WiFiConfig& config) {
 
 bool WiFiManager::connectToNetwork() {
     LOG_INFO("Connecting to WiFi: " + current_config_.ssid);
-    
-    WiFi.begin(current_config_.ssid.c_str(), 
+
+    WiFi.begin(current_config_.ssid.c_str(),
                current_config_.password.c_str());
-    
+
     // Wait for connection with timeout
     unsigned long start_time = millis();
     while (WiFi.status() != WL_CONNECTED) {
         if (millis() - start_time > WIFI_TIMEOUT_MS) {
             // ❌ CONNECTION FAILED
-            LOG_ERROR("WiFi connection timeout");
-            errorTracker.logCommunicationError(ERROR_WIFI_CONNECT_TIMEOUT, 
-                                               "WiFi connection timeout");
+            // ✅ IMPROVEMENT #2: Detailed WiFi error messages
+            wl_status_t status = WiFi.status();
+            String error_message = getWiFiStatusMessage(status);
+
+            LOG_ERROR("╔════════════════════════════════════════╗");
+            LOG_ERROR("║  ❌ WIFI CONNECTION FAILED            ║");
+            LOG_ERROR("╚════════════════════════════════════════╝");
+            LOG_ERROR("SSID: " + current_config_.ssid);
+            LOG_ERROR("Status Code: " + String(status));
+            LOG_ERROR("Reason: " + error_message);
+            LOG_ERROR("");
+            LOG_ERROR("Possible solutions:");
+
+            // Status-specific recommendations
+            if (status == WL_NO_SSID_AVAIL) {
+                LOG_ERROR("  1. Check SSID spelling (case-sensitive!)");
+                LOG_ERROR("  2. Ensure router is powered on and broadcasting");
+                LOG_ERROR("  3. Check if ESP is within WiFi range");
+            } else if (status == WL_CONNECT_FAILED) {
+                LOG_ERROR("  1. Verify WiFi password is correct");
+                LOG_ERROR("  2. Check WiFi security mode (WPA2 recommended)");
+                LOG_ERROR("  3. Restart router if issues persist");
+            } else if (status == WL_IDLE_STATUS || status == WL_DISCONNECTED) {
+                LOG_ERROR("  1. WiFi signal too weak - move ESP closer to router");
+                LOG_ERROR("  2. Router may be overloaded - restart router");
+                LOG_ERROR("  3. Check for WiFi interference (2.4GHz congestion)");
+            }
+
+            errorTracker.logCommunicationError(ERROR_WIFI_CONNECT_TIMEOUT,
+                                               error_message.c_str());
             circuit_breaker_.recordFailure();  // Phase 6+
-            
+
             // Check if Circuit Breaker opened
             if (circuit_breaker_.isOpen()) {
                 LOG_WARNING("WiFi Circuit Breaker OPENED after failure threshold");
                 LOG_WARNING("  Will retry in 60 seconds");
             }
-            
+
             return false;
         }
         delay(100);
     }
-    
+
     // ✅ CONNECTION SUCCESS
     LOG_INFO("WiFi connected! IP: " + WiFi.localIP().toString());
     LOG_INFO("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
-    
+
     reconnect_attempts_ = 0;
     circuit_breaker_.recordSuccess();  // Phase 6+
-    
+
     return true;
+}
+
+// ✅ IMPROVEMENT #2: Helper function to translate WiFi status codes
+String WiFiManager::getWiFiStatusMessage(wl_status_t status) {
+    switch (status) {
+        case WL_IDLE_STATUS:
+            return "WiFi is idle (not attempting connection)";
+        case WL_NO_SSID_AVAIL:
+            return "SSID not found (network not in range or SSID incorrect)";
+        case WL_SCAN_COMPLETED:
+            return "WiFi scan completed";
+        case WL_CONNECTED:
+            return "WiFi connected";
+        case WL_CONNECT_FAILED:
+            return "Connection failed (wrong password or security mode mismatch)";
+        case WL_CONNECTION_LOST:
+            return "Connection lost (signal dropped or router disconnected)";
+        case WL_DISCONNECTED:
+            return "WiFi disconnected (timeout or signal issue)";
+        default:
+            return "Unknown WiFi status (code: " + String(status) + ")";
+    }
 }
 
 bool WiFiManager::disconnect() {

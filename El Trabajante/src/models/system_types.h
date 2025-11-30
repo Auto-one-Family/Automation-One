@@ -17,6 +17,7 @@ enum SystemState {
   STATE_OPERATIONAL,
   STATE_LIBRARY_DOWNLOADING,               // ⚠️ OPTIONAL - nur für OTA Library Mode (10%)
   STATE_SAFE_MODE,
+  STATE_SAFE_MODE_PROVISIONING,            // ✅ FIX #1: Safe-Mode mit aktivem Provisioning (Timeout)
   STATE_ERROR
 };
 

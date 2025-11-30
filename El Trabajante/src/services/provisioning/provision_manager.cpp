@@ -379,34 +379,56 @@ bool ProvisionManager::checkTimeouts() {
 
 void ProvisionManager::enterSafeMode() {
   LOG_CRITICAL("╔════════════════════════════════════════╗");
-  LOG_CRITICAL("║  ENTERING SAFE-MODE                   ║");
-  LOG_CRITICAL("║  Provisioning failed after retries    ║");
+  LOG_CRITICAL("║  ENTERING SAFE-MODE (PROVISIONING)    ║");
+  LOG_CRITICAL("║  AP-Mode remains active indefinitely  ║");
   LOG_CRITICAL("╚════════════════════════════════════════╝");
-  
+
   // Update system state
   SystemConfig sys_config = configManager.getSystemConfig();
-  sys_config.current_state = STATE_SAFE_MODE;
+  sys_config.current_state = STATE_SAFE_MODE_PROVISIONING;  // ✅ FIX #1: Neuer State!
   sys_config.safe_mode_reason = "Provisioning timeout after " + String(MAX_RETRY_COUNT) + " retries";
   configManager.saveSystemConfig(sys_config);
-  
+
   // Track error
   errorTracker.trackError(ERROR_SYSTEM_SAFE_MODE,
                          ERROR_SEVERITY_CRITICAL,
-                         "Provisioning failed - Safe-Mode active");
-  
-  // Keep AP-Mode active (unlimited timeout in Safe-Mode)
-  LOG_INFO("AP-Mode remains active for manual intervention");
-  LOG_INFO("Connect to: AutoOne-" + esp_id_ + " (password: provision)");
-  LOG_INFO("Use HTTP API or restart ESP with valid config");
-  
-  // Blink LED pattern (if GPIO 2 available)
-  pinMode(2, OUTPUT);
+                         "Provisioning timeout - Safe-Mode active with AP");
+
+  // User-Instructions (ERWEITERT)
+  LOG_INFO("");
+  LOG_INFO("╔═══════════════════════════════════════════════════════════╗");
+  LOG_INFO("║  MANUAL PROVISIONING REQUIRED                             ║");
+  LOG_INFO("╠═══════════════════════════════════════════════════════════╣");
+
+  // ESP-ID-abhängige SSID-Anzeige
+  String ssid_lower = esp_id_;
+  ssid_lower.toLowerCase();
+
+  LOG_INFO("║  1. Connect to WiFi: AutoOne-" + esp_id_ + "                  ");
+  LOG_INFO("║  2. Password: provision                                   ║");
+  LOG_INFO("║  3. Open: http://192.168.4.1                              ║");
+  LOG_INFO("║     OR:   http://" + ssid_lower + ".local                    ");
+  LOG_INFO("║  4. Use POST /provision endpoint                          ║");
+  LOG_INFO("║                                                           ║");
+  LOG_INFO("║  Alternative: Factory-Reset (Boot-Button 10s)             ║");
+  LOG_INFO("╚═══════════════════════════════════════════════════════════╝");
+  LOG_INFO("");
+
+  // Visual feedback (LED-Blink-Pattern)
+  const uint8_t LED_PIN = 2;  // ESP32 onboard LED
+  pinMode(LED_PIN, OUTPUT);
+
+  // Pattern: 10× kurzes Blinken (200ms on/off)
+  LOG_INFO("LED Pattern: 10× blink (GPIO 2)");
   for (int i = 0; i < 10; i++) {
-    digitalWrite(2, HIGH);
+    digitalWrite(LED_PIN, HIGH);
     delay(200);
-    digitalWrite(2, LOW);
+    digitalWrite(LED_PIN, LOW);
     delay(200);
   }
+
+  // Transition to WAITING state (AP bleibt aktiv)
+  transitionTo(PROVISION_WAITING_CONFIG);
 }
 
 // ============================================

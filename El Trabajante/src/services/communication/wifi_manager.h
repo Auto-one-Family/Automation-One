@@ -55,6 +55,7 @@ private:
     bool connectToNetwork();
     void handleDisconnection();
     bool shouldAttemptReconnect() const;
+    String getWiFiStatusMessage(wl_status_t status);  // ✅ IMPROVEMENT #2: WiFi error translation
 };
 
 // ============================================

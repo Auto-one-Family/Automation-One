@@ -36,6 +36,12 @@
 #include "services/provisioning/provision_manager.h"
 
 // ============================================
+// CONSTANTS
+// ============================================
+// ✅ FIX #3+#4: LED pin for hardware safe-mode feedback
+const uint8_t LED_PIN = 2;  // ESP32 onboard LED (GPIO2)
+
+// ============================================
 // GLOBAL VARIABLES
 // ============================================
 SystemConfig g_system_config;
@@ -244,9 +250,32 @@ void setup() {
     
     // Initialize Provision Manager
     if (!provisionManager.begin()) {
-      LOG_ERROR("ProvisionManager initialization failed!");
-      LOG_CRITICAL("Cannot provision ESP - check logs");
-      return;  // Stop setup
+      // ✅ FIX #3: CRITICAL FAILURE - Hardware Safe-Mode
+      LOG_CRITICAL("╔════════════════════════════════════════╗");
+      LOG_CRITICAL("║  ❌ PROVISION MANAGER INIT FAILED     ║");
+      LOG_CRITICAL("╚════════════════════════════════════════╝");
+      LOG_CRITICAL("ProvisionManager.begin() returned false");
+      LOG_CRITICAL("Possible causes:");
+      LOG_CRITICAL("  1. Storage/NVS initialization failed");
+      LOG_CRITICAL("  2. Memory allocation failed");
+      LOG_CRITICAL("  3. Hardware issue");
+      LOG_CRITICAL("");
+      LOG_CRITICAL("Entering HARDWARE SAFE-MODE (LED blink pattern)");
+      LOG_CRITICAL("Action: Check hardware, flash firmware again");
+
+      // ✅ Fallback: Continuous LED blink (industrial-grade feedback)
+      pinMode(LED_PIN, OUTPUT);
+      while (true) {
+        // Blink pattern: 3× schnell (Error-Code)
+        for (int i = 0; i < 3; i++) {
+          digitalWrite(LED_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED_PIN, LOW);
+          delay(200);
+        }
+        delay(2000);  // Pause between patterns
+      }
+      // ❌ NIEMALS return - ESP bleibt im Safe-Mode sichtbar!
     }
     
     // Start AP-Mode
@@ -276,27 +305,70 @@ void setup() {
         LOG_ERROR("║  ❌ PROVISIONING TIMEOUT              ║");
         LOG_ERROR("╚════════════════════════════════════════╝");
         LOG_ERROR("No configuration received within 10 minutes");
-        LOG_ERROR("ESP will enter Safe-Mode");
+        LOG_ERROR("ESP will enter Safe-Mode with active Provisioning");
         LOG_ERROR("Please check:");
         LOG_ERROR("  1. WiFi connection to ESP AP");
         LOG_ERROR("  2. God-Kaiser server status");
         LOG_ERROR("  3. Network connectivity");
-        
-        // Provisioning failed - stays in AP-Mode (handled by ProvisionManager)
-        // User can still manually configure via HTTP API
-        return;  // Stop setup - AP stays active
+
+        // ✅ FIX #1: provision_manager.cpp hat bereits enterSafeMode() gecallt!
+        // → STATE_SAFE_MODE_PROVISIONING ist gesetzt
+        // → AP-Mode bleibt aktiv, HTTP-Server läuft weiter
+        // → setup() darf NICHT abbrechen, damit loop() laufen kann
+        LOG_INFO("ProvisionManager.enterSafeMode() bereits ausgeführt");
+        LOG_INFO("State: STATE_SAFE_MODE_PROVISIONING");
+        LOG_INFO("AP-Mode bleibt aktiv - Warte auf Konfiguration...");
+
+        // ✅ setup() läuft weiter OHNE WiFi/MQTT zu initialisieren
+        // → loop() wird STATE_SAFE_MODE_PROVISIONING behandeln
       }
     } else {
-      // Failed to start AP-Mode
-      LOG_CRITICAL("Failed to start AP-Mode!");
-      LOG_CRITICAL("ESP cannot be provisioned - hardware issue?");
-      return;  // Stop setup
+      // ✅ FIX #4: CRITICAL FAILURE - Hardware Safe-Mode
+      LOG_CRITICAL("╔════════════════════════════════════════╗");
+      LOG_CRITICAL("║  ❌ AP-MODE START FAILED              ║");
+      LOG_CRITICAL("╚════════════════════════════════════════╝");
+      LOG_CRITICAL("ProvisionManager.startAPMode() returned false");
+      LOG_CRITICAL("Possible causes:");
+      LOG_CRITICAL("  1. WiFi hardware initialization failed");
+      LOG_CRITICAL("  2. AP configuration invalid");
+      LOG_CRITICAL("  3. Memory allocation failed");
+      LOG_CRITICAL("  4. Hardware issue (WiFi chip)");
+      LOG_CRITICAL("");
+      LOG_CRITICAL("Entering HARDWARE SAFE-MODE (LED blink pattern)");
+      LOG_CRITICAL("Action: Check hardware, flash firmware again");
+
+      // ✅ Fallback: Continuous LED blink (industrial-grade feedback)
+      pinMode(LED_PIN, OUTPUT);
+      while (true) {
+        // Blink pattern: 4× schnell (Error-Code für AP-Mode-Fehler)
+        for (int i = 0; i < 4; i++) {
+          digitalWrite(LED_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED_PIN, LOW);
+          delay(200);
+        }
+        delay(2000);  // Pause between patterns
+      }
+      // ❌ NIEMALS return - ESP bleibt im Safe-Mode sichtbar!
     }
   }
-  
+
   // ═══════════════════════════════════════════════════
   // NORMAL FLOW: Config vorhanden
   // ═══════════════════════════════════════════════════
+
+  // ✅ FIX #1: Skip WiFi/MQTT initialization when in provisioning safe-mode
+  if (g_system_config.current_state == STATE_SAFE_MODE_PROVISIONING) {
+    LOG_INFO("╔════════════════════════════════════════╗");
+    LOG_INFO("║  STATE_SAFE_MODE_PROVISIONING         ║");
+    LOG_INFO("╚════════════════════════════════════════╝");
+    LOG_INFO("Skipping WiFi/MQTT initialization");
+    LOG_INFO("AP-Mode bleibt aktiv - HTTP-Server läuft");
+    LOG_INFO("Warte auf Konfiguration via Provisioning-API...");
+    LOG_INFO("setup() abgeschlossen - loop() wird provisionManager.loop() ausführen");
+    return;  // ✅ ERLAUBT: setup() endet, aber loop() wird aufgerufen!
+  }
+
   LOG_INFO("Configuration found - starting normal flow");
   
   // ============================================
@@ -773,6 +845,32 @@ void setup() {
 // LOOP - Phase 2 Communication Monitoring + Phase 4/5 Operations
 // ============================================
 void loop() {
+  // ═══════════════════════════════════════════════════
+  // ✅ FIX #1: STATE_SAFE_MODE_PROVISIONING HANDLING
+  // ═══════════════════════════════════════════════════
+  // ESP ist im Provisioning Safe-Mode (nach 3× Timeout)
+  // → AP-Mode läuft, HTTP-Server wartet auf Konfiguration
+  // → Keine WiFi/MQTT-Verbindung aktiv
+  if (g_system_config.current_state == STATE_SAFE_MODE_PROVISIONING) {
+    // ProvisionManager.loop() für HTTP-Request-Handling
+    provisionManager.loop();
+
+    // ✅ CHECK: Wurde Konfiguration empfangen?
+    if (g_wifi_config.configured && g_wifi_config.ssid.length() > 0) {
+      // Config wurde via HTTP API empfangen und gespeichert!
+      LOG_INFO("╔════════════════════════════════════════╗");
+      LOG_INFO("║  ✅ KONFIGURATION EMPFANGEN!          ║");
+      LOG_INFO("╚════════════════════════════════════════╝");
+      LOG_INFO("WiFi SSID: " + g_wifi_config.ssid);
+      LOG_INFO("Rebooting to apply configuration...");
+      delay(2000);
+      ESP.restart();  // ✅ Reboot → Normal-Flow startet
+    }
+
+    delay(10);  // Prevent watchdog issues
+    return;     // ✅ Skip normal loop logic
+  }
+
   // ═══════════════════════════════════════════════════
   // PHASE 2: BOOT-COUNTER RESET (After 60s stable operation)
   // ═══════════════════════════════════════════════════

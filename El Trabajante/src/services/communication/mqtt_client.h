@@ -115,6 +115,7 @@ private:
     
     // Helper methods
     bool connectToBroker();
+    bool attemptMQTTConnection(const String& last_will_topic, const String& last_will_message);  // ✅ FIX #2: Port fallback helper
     void handleDisconnection();
     bool shouldAttemptReconnect() const;
     void processOfflineBuffer();

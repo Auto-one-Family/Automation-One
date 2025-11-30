@@ -133,11 +133,56 @@ bool MQTTClient::connectToBroker() {
     LOG_INFO("Last-Will Topic: " + last_will_topic);
     LOG_INFO("Last-Will Message: " + last_will_message);
 
-    bool connected = false;
+    // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
+    // Try configured port first (likely 8883 for TLS)
+    bool connected = attemptMQTTConnection(last_will_topic, last_will_message);
 
+    // If connection failed and port is 8883 (TLS), try fallback to 1883 (plain MQTT)
+    if (!connected && current_config_.port == 8883) {
+        LOG_WARNING("╔════════════════════════════════════════╗");
+        LOG_WARNING("║  ⚠️  MQTT PORT FALLBACK               ║");
+        LOG_WARNING("╚════════════════════════════════════════╝");
+        LOG_WARNING("Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
+        LOG_WARNING("Reason: Server may not support TLS on port 8883");
+        LOG_WARNING("Empfehlung: Update .env.example MQTT_BROKER_PORT=1883");
+
+        // Update port and retry
+        current_config_.port = 1883;
+        mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
+
+        LOG_INFO("Retrying MQTT connection with port 1883...");
+        connected = attemptMQTTConnection(last_will_topic, last_will_message);
+
+        if (connected) {
+            LOG_INFO("✅ Port-Fallback successful! Connected on port 1883");
+        }
+    }
+
+    if (connected) {
+        LOG_INFO("MQTT connected!");
+        reconnect_attempts_ = 0;
+        reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
+
+        // Reset Circuit Breaker on successful connection (Phase 6+)
+        circuit_breaker_.recordSuccess();
+
+        // Process offline buffer
+        processOfflineBuffer();
+
+        return true;
+    } else {
+        LOG_ERROR("MQTT connection failed, rc=" + String(mqtt_.state()));
+        errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
+                                           ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
+        return false;
+    }
+}
+
+// ✅ FIX #2: Helper function for connection attempts
+bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const String& last_will_message) {
     if (anonymous_mode_) {
         // Anonymous connection with Last-Will
-        connected = mqtt_.connect(
+        return mqtt_.connect(
             current_config_.client_id.c_str(),
             last_will_topic.c_str(),
             1,  // QoS 1 (At Least Once)
@@ -146,7 +191,7 @@ bool MQTTClient::connectToBroker() {
         );
     } else {
         // Authenticated connection with Last-Will
-        connected = mqtt_.connect(
+        return mqtt_.connect(
             current_config_.client_id.c_str(),
             current_config_.username.c_str(),
             current_config_.password.c_str(),
@@ -155,25 +200,6 @@ bool MQTTClient::connectToBroker() {
             true,  // Retain flag
             last_will_message.c_str()
         );
-    }
-    
-    if (connected) {
-        LOG_INFO("MQTT connected!");
-        reconnect_attempts_ = 0;
-        reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
-        
-        // Reset Circuit Breaker on successful connection (Phase 6+)
-        circuit_breaker_.recordSuccess();
-        
-        // Process offline buffer
-        processOfflineBuffer();
-        
-        return true;
-    } else {
-        LOG_ERROR("MQTT connection failed, rc=" + String(mqtt_.state()));
-        errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED, 
-                                           ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
-        return false;
     }
 }
 
@@ -210,28 +236,27 @@ void MQTTClient::reconnect() {
     
     reconnect_attempts_++;
     last_reconnect_attempt_ = millis();
-    
-    LOG_INFO("Attempting MQTT reconnection (attempt " + 
-             String(reconnect_attempts_) + "/" + 
-             String(MAX_RECONNECT_ATTEMPTS) + ")");
-    
+
+    // ✅ IMPROVEMENT #3: Keine Reconnect-Limit (Circuit Breaker regelt Fehlerbehandlung)
+    LOG_INFO("Attempting MQTT reconnection (attempt " +
+             String(reconnect_attempts_) + ")");
+
     if (!connectToBroker()) {
         // ❌ RECONNECT FAILED
         circuit_breaker_.recordFailure();
-        
+
         // Exponential backoff
         reconnect_delay_ms_ = calculateBackoffDelay();
-        
-        if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
-            LOG_CRITICAL("Max MQTT reconnection attempts reached");
-            errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED, 
-                                               "Max reconnection attempts reached");
-        }
-        
+
+        // ✅ IMPROVEMENT #3: MAX_RECONNECT_ATTEMPTS entfernt!
+        // Circuit Breaker übernimmt Schutz vor unendlichen Reconnects
+        // → Bei 5 Fehlern: 30s Pause automatisch
+
         // Check if Circuit Breaker opened
         if (circuit_breaker_.isOpen()) {
             LOG_WARNING("Circuit Breaker OPENED after reconnect failures");
             LOG_WARNING("  Will retry in 30 seconds");
+            LOG_WARNING("  Attempt count: " + String(reconnect_attempts_));
         }
     } else {
         // ✅ RECONNECT SUCCESS
