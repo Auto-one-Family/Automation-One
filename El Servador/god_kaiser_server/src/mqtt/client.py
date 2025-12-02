@@ -130,6 +130,11 @@ class MQTTClient:
             # Set keepalive
             keepalive = self.settings.mqtt.keepalive
 
+            # Configure auto-reconnect with exponential backoff
+            # Min delay: 1s, Max delay: 60s
+            self.client.reconnect_delay_set(min_delay=1, max_delay=60)
+            logger.debug("Auto-reconnect configured: min=1s, max=60s (exponential backoff)")
+
             # Connect to broker
             logger.info(f"Connecting to MQTT broker: {broker}:{port} (TLS: {use_tls})")
             self.client.connect(broker, port, keepalive)
@@ -314,14 +319,35 @@ class MQTTClient:
             logger.error(f"MQTT connection failed: {error_msg}")
 
     def _on_disconnect(self, client, userdata, rc):
-        """Callback when connection is lost."""
+        """
+        Callback when disconnected from MQTT broker.
+
+        Args:
+            client: MQTT client instance
+            userdata: User data
+            rc: Disconnect reason code
+        """
         self.connected = False
 
-        if rc != 0:
-            logger.warning(f"Unexpected MQTT disconnect (rc={rc}), attempting reconnect...")
-            self._attempt_reconnect()
+        # Disconnect reason codes
+        disconnect_reasons = {
+            0: "Clean disconnect",
+            1: "Connection refused - incorrect protocol version",
+            2: "Connection refused - invalid client identifier",
+            3: "Connection refused - server unavailable",
+            4: "Connection refused - bad username or password",
+            5: "Connection refused - not authorized",
+        }
+
+        reason = disconnect_reasons.get(rc, f"Unknown reason (code: {rc})")
+
+        if rc == 0:
+            logger.info(f"MQTT client disconnected: {reason}")
         else:
-            logger.info("MQTT disconnected cleanly")
+            logger.warning(
+                f"MQTT client disconnected unexpectedly: {reason}. "
+                "Auto-reconnect will attempt to restore connection..."
+            )
 
     def _on_message(self, client, userdata, msg):
         """Callback when message is received."""
@@ -347,19 +373,3 @@ class MQTTClient:
     def _on_publish(self, client, userdata, mid):
         """Callback when message is published."""
         logger.debug(f"Message published (mid={mid})")
-
-    def _attempt_reconnect(self):
-        """Attempt to reconnect with exponential backoff."""
-        while not self.connected:
-            try:
-                logger.info(f"Reconnecting in {self.reconnect_delay} seconds...")
-                time.sleep(self.reconnect_delay)
-
-                # Attempt reconnect
-                self.client.reconnect()
-
-                # Exponential backoff (double delay, max 60s)
-                self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
-
-            except Exception as e:
-                logger.error(f"Reconnection failed: {e}")

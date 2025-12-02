@@ -16,11 +16,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import sensor_processing
+from .api.v1 import actuators, esp, sensors
 from .core.config import get_settings
 from .core.logging_config import get_logger
 from .db.session import dispose_engine, get_engine, init_db
 from .mqtt.client import MQTTClient
-from .mqtt.handlers import actuator_handler, heartbeat_handler, sensor_handler
+from .mqtt.handlers import (
+    actuator_handler,
+    config_handler,
+    discovery_handler,
+    heartbeat_handler,
+    sensor_handler,
+)
 from .mqtt.subscriber import Subscriber
 
 logger = get_logger(__name__)
@@ -83,6 +90,14 @@ async def lifespan(app: FastAPI):
                 "kaiser/god/esp/+/heartbeat",
                 heartbeat_handler.handle_heartbeat
             )
+            _subscriber_instance.register_handler(
+                "kaiser/god/discovery/esp32_nodes",
+                discovery_handler.handle_discovery
+            )
+            _subscriber_instance.register_handler(
+                "kaiser/god/esp/+/config/ack",
+                config_handler.handle_config_ack
+            )
 
             logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 
@@ -111,7 +126,6 @@ async def lifespan(app: FastAPI):
 
     try:
         # Step 1: Shutdown MQTT subscriber (thread pool)
-        global _subscriber_instance
         if _subscriber_instance:
             logger.info("Shutting down MQTT subscriber thread pool...")
             _subscriber_instance.shutdown(wait=True, timeout=30.0)
@@ -198,11 +212,16 @@ app.include_router(
     tags=["sensors", "processing"],
 )
 
-# TODO: Additional routers when implemented
-# from .api import esp_devices, actuators, system
-# app.include_router(esp_devices.router)
-# app.include_router(actuators.router)
-# app.include_router(system.router)
+# ===== ADDITIONAL API ROUTERS =====
+
+# ESP Management API
+app.include_router(esp.router, prefix="/api", tags=["esp"])
+
+# Actuator Control API
+app.include_router(actuators.router, prefix="/api", tags=["actuators"])
+
+# Sensor Configuration API
+app.include_router(sensors.router, prefix="/api", tags=["sensors"])
 
 
 if __name__ == "__main__":

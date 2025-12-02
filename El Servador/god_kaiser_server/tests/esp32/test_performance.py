@@ -498,3 +498,5 @@ class TestResponseTimes:
         # Config can be slower but should still be reasonable
         assert avg_time < 200, f"Config get too slow: {avg_time:.1f}ms"
 
+
+

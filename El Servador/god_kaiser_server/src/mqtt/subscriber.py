@@ -75,28 +75,29 @@ class Subscriber:
 
     def subscribe_all(self) -> bool:
         """
-        Subscribe to all standard ESP topics.
+        Subscribe to all standard ESP topics with active handlers.
 
-        Subscribes to:
-        - Sensor data (kaiser/god/esp/+/sensor/+/data)
-        - Actuator status (kaiser/god/esp/+/actuator/+/status)
-        - Heartbeat (kaiser/god/esp/+/heartbeat)
-        - Health status (kaiser/god/esp/+/health/status)
-        - Config ACK (kaiser/god/esp/+/config/ack)
-        - Discovery (kaiser/god/discovery/esp32_nodes)
-        - Pi-Enhanced requests (kaiser/god/esp/+/pi_enhanced/request)
+        Currently subscribed topics:
+        - Sensor data (kaiser/god/esp/+/sensor/+/data) - QoS 1
+        - Actuator status (kaiser/god/esp/+/actuator/+/status) - QoS 1
+        - Heartbeat (kaiser/god/esp/+/heartbeat) - QoS 0
+        - Discovery (kaiser/god/discovery/esp32_nodes) - QoS 1
+        - Config ACK (kaiser/god/esp/+/config/ack) - QoS 2
 
         Returns:
             True if all subscriptions successful
         """
         subscription_patterns = [
-            (constants.MQTT_SUBSCRIBE_ESP_SENSORS, 1),      # QoS 1
-            (constants.MQTT_SUBSCRIBE_ESP_ACTUATORS, 1),    # QoS 1
-            (constants.MQTT_SUBSCRIBE_ESP_HEALTH, 1),       # QoS 1
-            ("kaiser/god/esp/+/heartbeat", 0),              # QoS 0 (best effort)
-            ("kaiser/god/esp/+/config/ack", 2),             # QoS 2
-            (constants.MQTT_SUBSCRIBE_ESP_DISCOVERY, 1),    # QoS 1
-            ("kaiser/god/esp/+/pi_enhanced/request", 1),    # QoS 1
+            # Active handlers
+            (constants.MQTT_SUBSCRIBE_ESP_SENSORS, 1),      # QoS 1 ✅ Handler: sensor_handler
+            (constants.MQTT_SUBSCRIBE_ESP_ACTUATORS, 1),    # QoS 1 ✅ Handler: actuator_handler
+            ("kaiser/god/esp/+/heartbeat", 0),              # QoS 0 ✅ Handler: heartbeat_handler
+            (constants.MQTT_SUBSCRIBE_ESP_DISCOVERY, 1),    # QoS 1 ✅ Handler: discovery_handler
+            ("kaiser/god/esp/+/config/ack", 2),             # QoS 2 ✅ Handler: config_handler
+
+            # REMOVED (no handler, no plan):
+            # (constants.MQTT_SUBSCRIBE_ESP_HEALTH, 1),     # Redundant to Heartbeat
+            # ("kaiser/god/esp/+/pi_enhanced/request", 1),  # Not used (sensor_handler sends directly)
         ]
 
         success = True

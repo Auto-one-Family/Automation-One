@@ -346,3 +346,5 @@ class RealESP32Client:
             self.connected = False
             logger.info(f"Disconnected from MQTT broker for ESP {self.esp_id}")
 
+
+
