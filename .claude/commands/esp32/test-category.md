@@ -1,6 +1,11 @@
-# ESP32 Test Category Runner
+# ESP32 Test Category Runner (Legacy PlatformIO Tests)
+
+> **⚠️ LEGACY:** Diese Tests sind archiviert. **EMPFOHLEN:** Nutze `/full-test` für Server-orchestrierte Tests.
 
 Führe ESP32-Tests für eine spezifische Kategorie aus. Nutzt dynamisches File-Management um PlatformIO's Multiple-Definition-Problem zu umgehen.
+
+**Status:** Archiviert wegen PlatformIO-Linker-Problemen  
+**Alternative:** Server-orchestrierte Tests (pytest) - siehe `/full-test`
 
 ## Usage
 
@@ -94,4 +99,4 @@ ls test/_archive/*.cpp
 
 - Test patterns: `El Trabajante/test/README.md`
 - Test workflow: `.claude/TEST_WORKFLOW.md`
-- Build commands: `.claude/commands/esp-build.md`
+- Build commands: `.claude/commands/esp32/build.md`

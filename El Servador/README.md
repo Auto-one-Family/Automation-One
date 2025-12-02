@@ -2,6 +2,8 @@
 
 FastAPI-basiertes Backend für AutomationOne IoT-Framework.
 
+> **Für KI-Agenten:** Siehe `.claude/commands/CLAUDE_SERVER.md` für vollständige Server-Dokumentation und Orientierung im Code.
+
 ## Features
 - REST API (FastAPI)
 - WebSocket Real-time Communication

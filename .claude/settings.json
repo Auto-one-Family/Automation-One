@@ -6,22 +6,59 @@
   "context": {
     "alwaysInclude": [
       "CLAUDE.md",
+      ".claude/CLAUDE_SERVER.md",
       ".claude/README.md",
+      ".claude/commands/README.md",
       "El Trabajante/platformio.ini"
     ],
-    "maxTokens": 150000
+    "maxTokens": 200000
   },
   "taskManagement": {
     "enabled": true,
     "autoTrack": true
   },
   "testing": {
-    "defaultEnvironment": "esp32_dev",
-    "outputFile": "test_output.log",
-    "parseFormat": "unity"
+    "esp32": {
+      "framework": "pytest",
+      "location": "El Servador/god_kaiser_server/tests/esp32/",
+      "command": "cd \"El Servador\" && poetry run pytest god_kaiser_server/tests/esp32/ -v"
+    },
+    "server": {
+      "framework": "pytest",
+      "location": "El Servador/god_kaiser_server/tests/",
+      "command": "cd \"El Servador\" && poetry run pytest -v --tb=short"
+    },
+    "legacy": {
+      "framework": "platformio",
+      "defaultEnvironment": "esp32_dev",
+      "outputFile": "test_output.log",
+      "parseFormat": "unity",
+      "status": "archived"
+    }
+  },
+  "build": {
+    "esp32": {
+      "environments": ["seeed_xiao_esp32c3", "esp32_dev"],
+      "defaultEnvironment": "esp32_dev",
+      "command": "cd \"El Trabajante\" && ~/.platformio/penv/Scripts/platformio.exe run -e"
+    }
   },
   "git": {
     "autoCommit": false,
-    "commitMessageTemplate": "<type>: <subject>\n\n<body>"
+    "commitMessageTemplate": "<type>: <subject>\n\n<body>",
+    "requireTests": true
+  },
+  "workflows": {
+    "preCommit": [
+      "/full-test"
+    ],
+    "afterESP32Change": [
+      "/esp-build",
+      "/esp-test"
+    ],
+    "afterServerChange": [
+      "/server-test",
+      "/esp-test"
+    ]
   }
 }

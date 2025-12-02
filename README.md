@@ -30,38 +30,130 @@ Standard-Workflow (90% der Anwendungen):
 
 ---
 
-## 🏗️ Systemarchitektur
+## 📊 Entwicklungsstand
 
-### 4-Schichten-Hierarchie
+> Dieses Dokument beschreibt die **vollständige Vision** des Systems.
+> Hier ist der aktuelle Implementierungsstand:
 
+| Komponente | Status | Details |
+|------------|--------|---------|
+| **ESP32 Firmware (El Trabajante)** | ✅ Production-Ready | Vollständig implementiert, 41+ Tests, dokumentiert |
+| **God-Kaiser Server (El Servador)** | 🚧 In Entwicklung | MQTT-Layer vollständig, REST API in Planung |
+| **Frontend (Vuetify)** | 📋 Konzept | Architektur definiert, Implementation geplant |
+| **Kaiser-Nodes** | 📋 Konzept | Database Models vorhanden, Implementation nach Server |
+| **God Layer** | 📋 Konzept | Plugin-Interface geplant |
+
+### Jetzt nutzbar:
+- ✅ ESP32 Firmware mit Sensor/Actuator-Support
+- ✅ MQTT-Kommunikation (ESP ↔ Server)
+- ✅ Provisioning via Captive Portal
+- ✅ Zone-System auf ESP-Seite
+- ✅ Umfangreiche Test-Suite (140+ Server-Tests, 41+ ESP-Tests)
+- ✅ Sensor-Datenverarbeitung (Pi-Enhanced Mode)
+- ✅ Database Layer (PostgreSQL/SQLite)
+
+### In aktiver Entwicklung:
+- 🚧 Server REST API Endpoints
+- 🚧 Sensor-Library-Loader (pH fertig, 8 weitere geplant)
+- 🚧 Cross-ESP Automation Engine
+- 🚧 Vuetify Dashboard
+
+### Roadmap:
+- 📋 Frontend Dashboard Builder
+- 📋 Kaiser Schema-Sync
+- 📋 God Layer Plugin-Interface
+- 📋 Mobile-optimiertes Frontend
+- 📋 Logic Engine für If-Then-Regeln
+
+---
+
+## 🏗️ System-Architektur
+
+### Das Gesamtbild
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ LAYER 1: God (Raspberry Pi 5)                               │
-│ Rolle: KI/Analytics, Predictions, Model Training, LLM zur einfachen Steuerung über Web-Interface            │
-│ Port: 8001 (HTTP REST)                                      │
-│ Tech: Python, TensorFlow/PyTorch, Pandas                    │
-└─────────────────────────────────────────────────────────────┘
-                          ↕ HTTP REST API
-┌─────────────────────────────────────────────────────────────┐
-│ LAYER 2: God-Kaiser (Raspberry Pi 5, shared Hardware)       │
-│ Rolle: Control Hub, MQTT Broker, Database, Logic Engine     │
-│ Ports: 8000 (HTTP/WebSocket), 8883 (MQTT TLS)              │
-│ Tech: FastAPI, PostgreSQL, Mosquitto, SQLAlchemy            │
-└─────────────────────────────────────────────────────────────┘
-                          ↕ MQTT Bridge (TLS)
-┌─────────────────────────────────────────────────────────────┐
-│ LAYER 3: Kaiser (Raspberry Pi Zero) - OPTIONAL              │
-│ Rolle: Relay Node für Skalierung (100+ ESPs)                │
-│ Ports: 1883 (Local MQTT), 8080 (HTTP)                      │
-│ Tech: Python, Mosquitto Bridge, Local Cache                 │
-└─────────────────────────────────────────────────────────────┘
-                          ↕ MQTT (TLS optional)
-┌─────────────────────────────────────────────────────────────┐
-│ LAYER 4: ESP32-Agenten (WROOM/XIAO C3)                     │
-│ Rolle: Sensor-Auslesung, Aktor-Steuerung                    │
-│ Tech: C++/Arduino, WiFi, MQTT Client, NVS Storage           │
-└─────────────────────────────────────────────────────────────┘
+                              ┌─────────────────────────┐
+                              │      GOD LAYER          │
+                              │  (Optional Plugin)      │
+                              │  ML · Predictions       │
+                              │  Analytics · Insights   │
+                              └───────────┬─────────────┘
+                                          │ Liest/Schreibt
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       GOD-KAISER SERVER (Raspberry Pi 5)                │
+│                                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
+│  │   FastAPI    │  │     MQTT     │  │  PostgreSQL  │  │   Vuetify   │ │
+│  │   REST API   │  │    Broker    │  │   TimeSeries │  │  Frontend   │ │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └─────────────┘ │
+│                                                                         │
+│  📊 Alle Daten        🔧 Volle Kontrolle       🎨 User baut eigene UI  │
+│  📝 Umfangreiche Logs 🔌 Modular/Plugin-fähig  🔐 Sicher & Industriell │
+│  🗂️ Zone-System       ⚡ Echtzeit-Events       🌐 Auch als Webseite    │
+└─────────────────────────────────────────────────────────────────────────┘
+              │                                           │
+              │ MQTT                                      │ Schema-Sync
+              ▼                                           ▼
+┌──────────────────────────┐                ┌──────────────────────────┐
+│     ESP32 AGENTEN        │                │    KAISER (Pi Zero/3)    │
+│    "El Trabajante"       │                │    Lightweight Client    │
+│                          │                │                          │
+│  • Sensor-Rohdaten       │                │  • Lädt User-Schemas     │
+│  • Actuator-Steuerung    │                │  • Lokales Dashboard     │
+│  • Provisioning          │                │  • Offline-fähig         │
+│  • Zone-Zuordnung        │                │  • Skalierung (100+ ESP) │
+└──────────────────────────┘                └──────────────────────────┘
 ```
+
+### Architektur-Prinzipien
+
+| Prinzip | Beschreibung |
+|---------|--------------|
+| **Server = Single Source of Truth** | Alle Daten, Configs, Logs landen zentral auf dem God-Kaiser |
+| **Frontend = Schlüssel** | User konfiguriert seine eigene Oberfläche, Server liefert die Funktionen |
+| **Modular & Erweiterbar** | Sensoren, Aktoren, Zonen, Logik - alles dynamisch hinzufügbar/entfernbar |
+| **Kaiser = Thin Client** | Holt sich nur die Schemas die er braucht, zeigt User-View |
+| **God = Optional Plugin** | KI-Layer kann geladen werden, konsumiert nur Server-Daten |
+
+### Komponenten-Details
+
+#### God-Kaiser Server (Zentrale)
+- **Hardware:** Raspberry Pi 5 (oder vergleichbar)
+- **Rolle:** Kontrollzentrum, Datenhub, API-Provider, Frontend-Host
+- **Verantwortlich für:**
+  - Empfang und Speicherung aller ESP-Daten
+  - Sensor-Datenverarbeitung mit Python-Libraries
+  - Cross-ESP Automationslogik
+  - User-Management und Sicherheit
+  - Frontend-Bereitstellung (Vuetify)
+  - Schema-Verteilung an Kaiser-Nodes
+
+#### ESP32-Agenten (El Trabajante)
+- **Hardware:** ESP32-WROOM-32 oder Seeed XIAO ESP32-C3
+- **Rolle:** Hardware-Interface, Datensammler, Aktor-Controller
+- **Verantwortlich für:**
+  - Sensor-Rohdaten lesen und via MQTT senden
+  - Actuator-Commands vom Server empfangen und ausführen
+  - Provisioning via Captive Portal
+  - Zone-Zuordnung speichern
+
+#### Kaiser-Nodes (Skalierung)
+- **Hardware:** Raspberry Pi Zero 2W oder Pi 3
+- **Rolle:** Lightweight Client, lokales Dashboard, ESP-Gruppierung
+- **Verantwortlich für:**
+  - User-konfigurierte Schemas vom Server laden
+  - Lokale Visualisierung der relevanten Daten
+  - Optionale Offline-Fähigkeit
+  - Skalierung bei großen Netzwerken (100+ ESPs)
+
+#### God Layer (KI-Plugin)
+- **Hardware:** Kann auf Pi 5 laufen oder extern (Cloud, Jetson)
+- **Rolle:** Intelligenz-Schicht, Datenanalyse, Vorhersagen
+- **Verantwortlich für:**
+  - Konsumiert Server-Daten (read-only oder via API)
+  - ML-Modelle für Predictions
+  - Empfehlungen an User (via Server)
+  - Optional: Auto-Actions mit User-Approval
 
 ### Kommunikations-Matrix
 
@@ -210,14 +302,30 @@ Auto-one/
 | Dynamic Import | importlib | Sensor-Library-Loader |
 | Async | asyncio + asyncpg | Non-blocking I/O |
 
-### Frontend (TBD)
-| Komponente | Technologie (Empfehlung) |
-|------------|--------------------------|
-| Framework | React / Vue.js |
-| State | Redux / Vuex |
-| Charts | Chart.js / Recharts |
-| WebSocket | Native WebSocket API |
-| HTTP | Axios |
+### Frontend (Vuetify 3)
+
+Das Frontend ist der **"Schlüssel"** zum System - der User konfiguriert hier seine individuelle Oberfläche.
+
+| Feature | Beschreibung |
+|---------|--------------|
+| **Dashboard Builder** | User erstellt eigene Dashboards mit Drag & Drop |
+| **Sensor-Widgets** | Live-Werte, Graphen, Gauges - frei kombinierbar |
+| **Actuator-Controls** | Buttons, Slider, Schedules - direkt im Dashboard |
+| **Zone-Visualisierung** | Hierarchische Ansicht aller Geräte und Bereiche |
+| **Logic Builder** | Visuelle Erstellung von If-Then-Regeln |
+| **User-Schemas** | Exportierbar für Kaiser-Nodes |
+
+**Technologie:**
+- Framework: Vue 3 + Vuetify 3
+- State: Pinia
+- Charts: Apache ECharts / Chart.js
+- Realtime: WebSocket
+- Build: Vite
+
+**Deployment:**
+- Läuft direkt auf God-Kaiser Server
+- Erreichbar als Webseite im lokalen Netz
+- Optional: Reverse Proxy für Internet-Zugang
 
 ---
 
@@ -500,16 +608,31 @@ pio run -t upload
 pio device monitor
 ```
 
-### 5. ESP Initial Setup (Captive Portal)
-```
-1. ESP startet AP-Mode: SSID "ESP32-Setup"
-2. Verbinde mit WiFi, öffne http://192.168.4.1
-3. Konfiguriere:
-   - WiFi SSID/Password
-   - MQTT Broker IP/Port (God-Kaiser: 192.168.x.x:8883)
-   - MQTT Username/Password (falls aktiviert)
-4. ESP rebootet, verbindet zu God-Kaiser
-```
+### 5. ESP32 Provisioning
+
+Neue ESPs werden über ein Captive Portal konfiguriert:
+
+1. **ESP startet im AP-Modus:**
+   - **SSID:** `AutoOne-ESP_{MAC}` (z.B. `AutoOne-ESP_AB12CD`)
+   - **Passwort:** `provision`
+   - **IP:** `192.168.4.1`
+   - **Timeout:** 10 Minuten
+
+2. **Konfiguration:**
+   ```
+   Browser: http://192.168.4.1
+
+   Oder API:
+   POST http://192.168.4.1/provision
+   {
+     "ssid": "MeinWiFi",
+     "password": "geheim",
+     "server": "192.168.0.100",
+     "mqtt_port": 8883
+   }
+   ```
+
+3. **ESP verbindet sich zum God-Kaiser und ist einsatzbereit**
 
 ### 6. Verify Setup
 ```bash
@@ -663,13 +786,24 @@ poetry run pytest tests/e2e/ -v
 
 ## 📚 Weitere Dokumentation
 
+### Für KI-Agenten (Empfohlen)
+- **ESP32 Code-Orientierung**: `.claude/commands/CLAUDE.md` - Vollständige ESP32-Dokumentation
+- **Server Code-Orientierung**: `.claude/commands/CLAUDE_SERVER.md` - Vollständige Server-Dokumentation
+
+### Projekt-Dokumentation
 - **ESP32 Firmware**: `El Trabajante/README.md`
 - **God-Kaiser Server**: `El Servador/README.md`
-- **Architecture Deep-Dive**: `El Servador/docs/ARCHITECTURE.md`
-- **API Reference**: `El Servador/docs/API.md`
-- **MQTT Topics**: `El Servador/docs/MQTT_TOPICS.md`
-- **Security**: `El Servador/docs/SECURITY.md`
-- **Deployment**: `El Servador/docs/DEPLOYMENT.md`
+- **ESP32 Testing**: `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
+- **MQTT Protocol**: `El Trabajante/docs/Mqtt_Protocoll.md`
+- **ESP32 System Flows**: `El Trabajante/docs/system-flows/`
+- **ESP32 API Reference**: `El Trabajante/docs/API_REFERENCE.md`
+
+### Geplante Dokumentation
+- **Architecture Deep-Dive**: `El Servador/docs/ARCHITECTURE.md` (⚠️ Zu erstellen)
+- **API Reference**: `El Servador/docs/API.md` (⚠️ Zu erstellen)
+- **MQTT Topics**: `El Servador/docs/MQTT_TOPICS.md` (⚠️ Zu erstellen)
+- **Security**: `El Servador/docs/SECURITY.md` (⚠️ Zu erstellen)
+- **Deployment**: `El Servador/docs/DEPLOYMENT.md` (⚠️ Zu erstellen)
 
 ---
 

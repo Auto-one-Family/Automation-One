@@ -465,22 +465,25 @@ cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_de
 
 ## Dokumentations-Hierarchie
 
-**Dieser Workflow beschreibt:** PlatformIO Test-Ausführung und -Management
+**Dieser Workflow beschreibt:** PlatformIO Test-Ausführung und -Management (Legacy)
+
+**⚠️ HINWEIS:** Dieser Workflow beschreibt die **Legacy PlatformIO Tests**, die archiviert wurden.  
+**✅ EMPFOHLEN:** Nutze die **Server-orchestrierten Tests** (pytest) - siehe `/full-test`
 
 **Für detaillierte Test-Dokumentation siehe:**
-1. 📄 `El Servador/docs/ESP32_TESTING.md` - **Server-Tests (VOLLSTÄNDIG)**
+1. 📄 `/full-test` - **EMPFOHLEN: Kompletter Test-Workflow** (ESP32 + Server)
+2. 📄 `El Servador/docs/ESP32_TESTING.md` - **Server-Tests (VOLLSTÄNDIG)**
    - MockESP32Client API
    - Test-Kategorien (140+ Tests)
    - Fixtures, Best Practices
    - pytest Kommandos
-
-2. 📄 `El Trabajante/test/_archive/README.md` - Legacy Tests
+3. 📄 `El Trabajante/test/_archive/README.md` - Legacy Tests
    - Migrations-Mapping
    - Warum archiviert
    - Historische Test-Patterns
 
 ---
 
-**Letzte Aktualisierung:** 2025-11-26
-**Version:** 2.1 (Fokussiert auf PlatformIO, verweist auf Server-Test-Doku)
+**Letzte Aktualisierung:** 2025-01  
+**Version:** 2.2 (Legacy PlatformIO Tests, verweist auf `/full-test` für empfohlene Tests)
 

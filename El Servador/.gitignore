@@ -14,6 +14,12 @@ eggs/
 venv/
 ENV/
 env/
+.venv/
+venv.bak/
+env.bak/
+
+# Poetry
+poetry.lock
 
 # IDE
 .vscode/
@@ -30,20 +36,26 @@ env/
 logs/
 *.log
 
-# Certificates (keep structure, ignore keys)
-certificates/*.key
-certificates/clients/*.key
-
 # Database
 *.db
 *.sqlite3
+*.sqlite
 
 # Testing
 .coverage
 htmlcov/
 .pytest_cache/
+.pytest_cache/
+coverage.xml
+*.cover
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*~
 
