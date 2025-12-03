@@ -98,7 +98,7 @@ class KaiserRegistry(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    kaiser_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,
@@ -181,7 +181,7 @@ class ESPOwnership(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    ownership_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,

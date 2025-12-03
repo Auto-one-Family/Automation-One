@@ -107,7 +107,7 @@ class AIPredictions(Base):
     )
 
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    prediction_metadata: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,
         doc="Additional prediction metadata (processing_time_ms, etc.)",

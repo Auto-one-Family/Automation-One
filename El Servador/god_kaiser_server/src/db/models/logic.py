@@ -103,7 +103,7 @@ class CrossESPLogic(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    rule_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,
@@ -198,7 +198,7 @@ class LogicExecutionHistory(Base):
     )
 
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    execution_metadata: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,
         doc="Additional execution metadata (retry_count, etc.)",

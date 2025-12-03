@@ -114,7 +114,7 @@ class LibraryMetadata(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    library_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,

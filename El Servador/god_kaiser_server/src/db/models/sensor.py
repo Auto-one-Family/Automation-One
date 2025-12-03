@@ -110,7 +110,7 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    sensor_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,
@@ -232,7 +232,7 @@ class SensorData(Base):
     )
 
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    sensor_metadata: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,
         doc="Additional reading metadata (warnings, errors, etc.)",

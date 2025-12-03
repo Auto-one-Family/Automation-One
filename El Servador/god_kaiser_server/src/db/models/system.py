@@ -82,7 +82,7 @@ class SystemConfig(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    system_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,
