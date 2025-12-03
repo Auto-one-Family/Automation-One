@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 import pytest_asyncio
 
-from god_kaiser_server.src.db.repositories.esp_repo import ESPRepository
+from src.db.repositories.esp_repo import ESPRepository
 
 
 @pytest.mark.asyncio

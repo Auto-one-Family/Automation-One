@@ -8,8 +8,8 @@ import uuid
 import pytest
 import pytest_asyncio
 
-from god_kaiser_server.src.db.models.esp import ESPDevice
-from god_kaiser_server.src.db.repositories.base_repo import BaseRepository
+from src.db.models.esp import ESPDevice
+from src.db.repositories.base_repo import BaseRepository
 
 
 @pytest_asyncio.fixture

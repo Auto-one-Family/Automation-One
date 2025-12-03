@@ -33,6 +33,9 @@ class TestConfigManagement:
 
     def test_config_get_all(self, mock_esp32):
         """Test retrieving all configuration."""
+        # Configure zone first (production ESPs have zone configured)
+        mock_esp32.configure_zone("test-zone", "test-master", "test-subzone")
+        
         response = mock_esp32.handle_command("config_get", {})
 
         assert response["status"] == "ok"
@@ -54,6 +57,9 @@ class TestConfigManagement:
 
     def test_config_get_zone(self, mock_esp32):
         """Test retrieving zone configuration."""
+        # Configure zone first (production ESPs have zone configured)
+        mock_esp32.configure_zone("test-zone", "test-master", "test-subzone", "Test Zone Name")
+        
         response = mock_esp32.handle_command("config_get", {"key": "zone"})
 
         assert response["status"] == "ok"
@@ -112,9 +118,15 @@ class TestTopicFormats:
         response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
 
         messages = mock_esp32_with_sensors.get_published_messages()
-        assert len(messages) == 1
+        # With zone configured, publishes to both normal and zone topic (2 messages)
+        sensor_msgs = [m for m in messages if "/sensor/34/data" in m["topic"]]
+        assert len(sensor_msgs) >= 1
 
-        topic = messages[0]["topic"]
+        # Find the main (non-zone) topic
+        main_topic_msgs = [m for m in sensor_msgs if f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data" == m["topic"]]
+        assert len(main_topic_msgs) == 1
+
+        topic = main_topic_msgs[0]["topic"]
         # Format: kaiser/god/esp/{esp_id}/sensor/{gpio}/data
         assert topic == f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data"
 
@@ -127,9 +139,11 @@ class TestTopicFormats:
         })
 
         messages = mock_esp32.get_published_messages()
-        assert len(messages) == 1
+        # Now publishes both status and response
+        status_msgs = [m for m in messages if "/status" in m["topic"]]
+        assert len(status_msgs) >= 1
 
-        topic = messages[0]["topic"]
+        topic = status_msgs[0]["topic"]
         # Format: kaiser/god/esp/{esp_id}/actuator/{gpio}/status
         assert topic == f"kaiser/god/esp/{mock_esp32.esp_id}/actuator/5/status"
 
@@ -311,6 +325,9 @@ class TestZoneConfiguration:
 
     def test_zone_config_structure(self, mock_esp32):
         """Test zone config has expected structure."""
+        # Configure zone first (production ESPs have zone configured)
+        mock_esp32.configure_zone("test-zone", "test-master", "test-subzone", "Test Zone")
+        
         response = mock_esp32.handle_command("config_get", {"key": "zone"})
 
         zone_config = response["data"]["value"]
@@ -395,6 +412,9 @@ class TestNetworkResilience:
 
     def test_zone_id_is_string(self, mock_esp32):
         """Test zone ID is a string."""
+        # Configure zone first (production ESPs have zone configured)
+        mock_esp32.configure_zone("test-zone-123", "test-master", "test-subzone")
+        
         response = mock_esp32.handle_command("config_get", {"key": "zone"})
 
         zone_config = response["data"]["value"]

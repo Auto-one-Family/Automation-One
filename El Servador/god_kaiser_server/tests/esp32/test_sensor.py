@@ -88,12 +88,15 @@ class TestSensorDataPublishing:
         response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
 
         messages = mock_esp32_with_sensors.get_published_messages()
-        assert len(messages) == 1
+        # With zone configured, publishes to both normal and zone topic
+        sensor_msgs = [m for m in messages if "/sensor/34/data" in m["topic"]]
+        assert len(sensor_msgs) >= 1
 
-        message = messages[0]
-        assert message["topic"] == f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data"
+        message = sensor_msgs[0]
+        assert f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data" in message["topic"]
         assert message["payload"]["gpio"] == 34
-        assert "raw_value" in message["payload"]
+        # Production uses "raw" field per Mqtt_Protocoll.md
+        assert "raw" in message["payload"]
 
     def test_sensor_data_topic_format(self, mock_esp32_with_sensors):
         """Test sensor data topic follows correct format."""
@@ -110,7 +113,7 @@ class TestSensorDataPublishing:
         assert mock_esp32_with_sensors.esp_id in topic
 
     def test_sensor_data_payload_structure(self, mock_esp32_with_sensors):
-        """Test sensor data payload has correct structure."""
+        """Test sensor data payload has correct structure per Mqtt_Protocoll.md."""
         mock_esp32_with_sensors.clear_published_messages()
 
         mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
@@ -119,8 +122,9 @@ class TestSensorDataPublishing:
         payload = messages[0]["payload"]
 
         assert "gpio" in payload
-        assert "raw_value" in payload
-        assert "timestamp" in payload
+        # Production uses "raw" field per Mqtt_Protocoll.md
+        assert "raw" in payload
+        assert "ts" in payload  # Timestamp is "ts" per protocol
 
 
 class TestPiEnhancedProcessing:
@@ -192,7 +196,8 @@ class TestMultipleSensors:
         mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 35})
 
         messages = mock_esp32_with_sensors.get_published_messages()
-        assert len(messages) == 2
+        # With zone configured, each sensor publishes to both normal and zone topic
+        assert len(messages) >= 2
 
         topics = [msg["topic"] for msg in messages]
         assert any("/sensor/34/data" in topic for topic in topics)

@@ -182,9 +182,10 @@ class TestCrossESPDataFlow:
         esp1_messages = esps["esp1"].get_published_messages()
         esp3_messages = esps["esp3"].get_published_messages()
         
-        # Verify ESP-001 published status
-        assert len(esp1_messages) == 1
-        assert "test-esp-001" in esp1_messages[0]["topic"]
+        # Verify ESP-001 published status + response (2 messages)
+        actuator_msgs = [m for m in esp1_messages if "/actuator/" in m["topic"]]
+        assert len(actuator_msgs) == 2  # status + response
+        assert "test-esp-001" in actuator_msgs[0]["topic"]
         
         # Verify ESP-003 did NOT publish anything
         assert len(esp3_messages) == 0
@@ -221,9 +222,17 @@ class TestCrossESPDataFlow:
         esp1_messages = esps["esp1"].get_published_messages()
         esp3_messages = esps["esp3"].get_published_messages()
         
-        assert len(esp2_messages) == 3  # 3 sensor reads
-        assert len(esp1_messages) == 2  # 2 actuator commands
-        assert len(esp3_messages) == 2  # 1 sensor + 1 actuator
+        # Count by type
+        esp2_sensor_msgs = [m for m in esp2_messages if "/sensor/" in m["topic"]]
+        esp1_actuator_msgs = [m for m in esp1_messages if "/actuator/" in m["topic"]]
+        esp3_sensor_msgs = [m for m in esp3_messages if "/sensor/" in m["topic"]]
+        esp3_actuator_msgs = [m for m in esp3_messages if "/actuator/" in m["topic"]]
+        
+        # 3 sensors × 2 (with zone) = 6, actuators × 2 (status + response)
+        assert len(esp2_sensor_msgs) == 6  # 3 sensors × 2 (zone topic)
+        assert len(esp1_actuator_msgs) == 4  # 2 actuators × 2 (status + response)
+        assert len(esp3_sensor_msgs) == 2  # 1 sensor × 2 (zone topic)
+        assert len(esp3_actuator_msgs) == 2  # 1 actuator × 2 (status + response)
     
     def test_message_ordering_across_esps(self, multiple_mock_esp32):
         """
@@ -246,15 +255,17 @@ class TestCrossESPDataFlow:
         for cmd in commands:
             esps["esp1"].handle_command("actuator_set", {**cmd, "mode": "digital"})
         
-        # Verify message order
+        # Verify message order (each command publishes status + response)
         messages = esps["esp1"].get_published_messages()
-        assert len(messages) == 4
+        status_msgs = [m for m in messages if "/status" in m["topic"]]
         
-        # Check GPIO order in topics
-        assert "actuator/5/status" in messages[0]["topic"]
-        assert "actuator/6/status" in messages[1]["topic"]
-        assert "actuator/5/status" in messages[2]["topic"]
-        assert "actuator/6/status" in messages[3]["topic"]
+        assert len(status_msgs) == 4  # 4 commands × 1 status each
+        
+        # Check GPIO order in status topics
+        assert "actuator/5/status" in status_msgs[0]["topic"]
+        assert "actuator/6/status" in status_msgs[1]["topic"]
+        assert "actuator/5/status" in status_msgs[2]["topic"]
+        assert "actuator/6/status" in status_msgs[3]["topic"]
 
 
 class TestCrossESPErrorHandling:

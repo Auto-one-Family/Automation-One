@@ -6,8 +6,8 @@ Tests for user authentication and management operations
 import pytest
 import pytest_asyncio
 
-from god_kaiser_server.src.core.security import verify_password
-from god_kaiser_server.src.db.repositories.user_repo import UserRepository
+from src.core.security import verify_password
+from src.db.repositories.user_repo import UserRepository
 
 
 @pytest.mark.asyncio

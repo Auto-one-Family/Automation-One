@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 import pytest_asyncio
 
-from god_kaiser_server.src.db.repositories.actuator_repo import ActuatorRepository
+from src.db.repositories.actuator_repo import ActuatorRepository
 
 
 @pytest.mark.asyncio
@@ -103,7 +103,7 @@ class TestActuatorRepositoryState:
         self, actuator_repo: ActuatorRepository, sample_esp_device
     ):
         """Test retrieval of actuator state."""
-        from god_kaiser_server.src.db.models.actuator import ActuatorState
+        from src.db.models.actuator import ActuatorState
 
         # Create state directly
         state = ActuatorState(

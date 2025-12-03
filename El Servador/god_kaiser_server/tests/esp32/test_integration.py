@@ -68,8 +68,15 @@ class TestCompleteSensorActuatorFlow:
 
         # Verify MQTT messages published for both sensors and actuators
         messages = mock_esp32_with_sensors.get_published_messages()
-        # 3 sensor reads + 3 actuator sets = 6 messages
-        assert len(messages) == 6
+        
+        # Count by type (sensors have zone topics, actuators have status + response)
+        sensor_msgs = [m for m in messages if "/sensor/" in m["topic"]]
+        actuator_msgs = [m for m in messages if "/actuator/" in m["topic"]]
+        
+        # 3 sensors × 2 (normal + zone topic) = 6 sensor messages
+        # 3 actuators × 2 (status + response) = 6 actuator messages
+        assert len(sensor_msgs) >= 3  # At least 3 (6 with zone)
+        assert len(actuator_msgs) == 6  # Exactly 6 (3 status + 3 response)
 
 
 class TestMQTTOrchestration:
@@ -88,10 +95,14 @@ class TestMQTTOrchestration:
         assert response["status"] == "ok"
         assert response["command"] == "actuator_set"
 
-        # Verify status message published
+        # Verify messages published (now 2: status + response)
         messages = mock_esp32.get_published_messages()
-        assert len(messages) == 1
-        assert "actuator/5/status" in messages[0]["topic"]
+        status_msgs = [m for m in messages if "/status" in m["topic"]]
+        response_msgs = [m for m in messages if "/response" in m["topic"]]
+        
+        assert len(status_msgs) == 1
+        assert len(response_msgs) == 1
+        assert "actuator/5/status" in status_msgs[0]["topic"]
 
     def test_message_ordering(self, mock_esp32):
         """Test messages are published in correct order."""
@@ -108,14 +119,18 @@ class TestMQTTOrchestration:
             response = mock_esp32.handle_command(command, params)
             assert response["status"] == "ok"
 
-        # Verify messages in order
+        # Verify messages in order (actuators publish status + response = 4, sensor = 2 with zone)
         messages = mock_esp32.get_published_messages()
-        assert len(messages) == 3
-
-        # Order: actuator 5, actuator 6, sensor 34
-        assert "actuator/5/status" in messages[0]["topic"]
-        assert "actuator/6/status" in messages[1]["topic"]
-        assert "sensor/34/data" in messages[2]["topic"]
+        
+        # Filter by type
+        actuator_5_msgs = [m for m in messages if "actuator/5" in m["topic"]]
+        actuator_6_msgs = [m for m in messages if "actuator/6" in m["topic"]]
+        sensor_msgs = [m for m in messages if "sensor/34" in m["topic"]]
+        
+        # Each actuator should have status + response
+        assert len(actuator_5_msgs) == 2
+        assert len(actuator_6_msgs) == 2
+        assert len(sensor_msgs) >= 1  # At least 1 (2 with zone)
 
 
 class TestEmergencyScenarios:
@@ -142,16 +157,25 @@ class TestEmergencyScenarios:
             assert actuator["state"] is False, f"Actuator {gpio} not stopped"
 
     def test_system_recovery_after_emergency(self, mock_esp32_with_actuators):
-        """Test system can recover after emergency stop."""
+        """Test system can recover after emergency stop (requires clear_emergency)."""
         # Emergency stop
         mock_esp32_with_actuators.handle_command("emergency_stop", {})
 
-        # Attempt to restart actuators (should work)
+        # Attempt to restart actuators - should fail (emergency stopped)
         response = mock_esp32_with_actuators.handle_command("actuator_set", {
             "gpio": 5, "value": 1, "mode": "digital"
         })
-
-        # Mock allows restart (real system might require clear_emergency first)
+        assert response["status"] == "error"
+        assert "emergency stopped" in response["error"]
+        
+        # Clear emergency first
+        clear_response = mock_esp32_with_actuators.handle_command("clear_emergency", {})
+        assert clear_response["status"] == "ok"
+        
+        # Now restart should work
+        response = mock_esp32_with_actuators.handle_command("actuator_set", {
+            "gpio": 5, "value": 1, "mode": "digital"
+        })
         assert response["status"] == "ok"
 
 

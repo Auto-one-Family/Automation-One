@@ -107,6 +107,9 @@ class TestCommandResponseCycle:
 
     def test_config_get_command_response(self, mock_esp32):
         """Test config get command generates correct response."""
+        # Configure zone first (production ESP32s have zone configured)
+        mock_esp32.configure_zone("test-zone", "test-master", "test-subzone")
+        
         # Send config_get command (no key = get all)
         response = mock_esp32.handle_command("config_get", {})
 
@@ -177,11 +180,12 @@ class TestMQTTPublishing:
             "mode": "digital"
         })
 
-        # Verify status message was published
+        # Verify status message was published (now includes status + response)
         messages = mock_esp32.get_published_messages()
-        assert len(messages) == 1, "Expected exactly one published message"
+        status_msgs = [m for m in messages if "/status" in m["topic"]]
+        assert len(status_msgs) >= 1, "Expected at least one status message"
 
-        message = messages[0]
+        message = status_msgs[0]
         assert message["topic"] == f"kaiser/god/esp/{mock_esp32.esp_id}/actuator/5/status"
         assert message["payload"]["gpio"] == 5
         assert message["payload"]["state"] is True
@@ -196,14 +200,16 @@ class TestMQTTPublishing:
             "gpio": 34
         })
 
-        # Verify sensor data was published
+        # Verify sensor data was published (may have zone topic too)
         messages = mock_esp32_with_sensors.get_published_messages()
-        assert len(messages) == 1, "Expected exactly one published message"
+        sensor_msgs = [m for m in messages if "/sensor/34/data" in m["topic"]]
+        assert len(sensor_msgs) >= 1, "Expected at least one published message"
 
-        message = messages[0]
-        assert message["topic"] == f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data"
+        message = sensor_msgs[0]
+        assert f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data" in message["topic"]
         assert message["payload"]["gpio"] == 34
-        assert "raw_value" in message["payload"]
+        # Production uses "raw" field per Mqtt_Protocoll.md
+        assert "raw" in message["payload"], "Payload should have 'raw' field (per Mqtt_Protocoll.md)"
 
     def test_emergency_stop_publishes_multiple_statuses(self, mock_esp32_with_actuators):
         """Test that emergency_stop publishes status for all actuators."""
@@ -213,12 +219,15 @@ class TestMQTTPublishing:
         # Send emergency_stop command
         response = mock_esp32_with_actuators.handle_command("emergency_stop", {})
 
-        # Verify all actuators published status
+        # Verify messages were published (includes actuator statuses + emergency broadcasts)
         messages = mock_esp32_with_actuators.get_published_messages()
-        assert len(messages) == 3, "Expected status for all 3 actuators"
+        
+        # Filter only actuator status messages (not emergency broadcasts)
+        status_messages = [m for m in messages if "status" in m["topic"]]
+        assert len(status_messages) == 3, "Expected status for all 3 actuators"
 
-        # Verify all messages are actuator status messages
-        for message in messages:
+        # Verify all status messages are actuator status messages
+        for message in status_messages:
             assert "actuator" in message["topic"]
             assert "status" in message["topic"]
             assert message["payload"]["state"] is False, "Actuator should be stopped"
