@@ -1,8 +1,13 @@
 # CLAUDE_SERVER.md - God-Kaiser Server Referenz für KI-Agenten
 
-**Version:** 2.0  
-**Letzte Aktualisierung:** 2025-01  
+**Version:** 2.1  
+**Letzte Aktualisierung:** 2025-12-03  
 **Zweck:** Zentrale Referenz für Claude, um bei jeder Server-Aufgabe die richtigen Dateien, Patterns und Konventionen zu finden.
+
+> **Letzte Änderungen (2025-12-03):**
+> - Alembic-Migration-System funktionsfähig gemacht
+> - Bug-Fixes in `actuator_handler.py` und `sensor_handler.py`
+> - 34 Integration-Tests für ESP32-Server-Kommunikation hinzugefügt
 
 ---
 
@@ -202,17 +207,21 @@ El Servador/
 │   │   │   ├── test_library_loader.py
 │   │   │   ├── test_logic_engine.py
 │   │   │   └── ...
-│   │   ├── integration/              # Integration Tests
-│   │   │   ├── test_mqtt_flow.py
-│   │   │   ├── test_api_esp.py
+│   │   ├── integration/              # ⭐ Integration Tests (34 Tests)
+│   │   │   ├── test_server_esp32_integration.py  # ESP32-Handler Tests
+│   │   │   ├── BUGS_FOUND.md         # Dokumentierte Bug-Fixes
+│   │   │   └── ...
+│   │   ├── esp32/                    # ESP32-spezifische Tests (~140 Tests)
+│   │   │   ├── mocks/mock_esp32_client.py
 │   │   │   └── ...
 │   │   └── e2e/                      # End-to-End Tests
 │   │       └── test_sensor_to_frontend.py
 │   │
 │   ├── alembic/                      # 🔄 DATABASE MIGRATIONS
-│   │   ├── env.py                    # Alembic Environment
-│   │   ├── script.py.mako            # Migration Template
+│   │   ├── env.py                    # ⭐ Alembic Environment (gefixt 2025-12-03)
+│   │   ├── script.py.mako            # ⭐ Migration Template (gefixt 2025-12-03)
 │   │   └── versions/                 # Migration Files
+│   │       └── c6fb9c8567b5_*.py     # ActuatorState Erweiterung
 │   │
 │   ├── docs/                         # 📚 SERVER-DOKUMENTATION
 │   │   ├── ARCHITECTURE.md           # ⚠️ [LEER - ZU ERSTELLEN]
@@ -786,18 +795,37 @@ poetry run mypy god_kaiser_server/
 ```
 
 ### 7.4 Database Migration
+
+**WICHTIG:** Alembic ist jetzt vollständig funktionsfähig (Stand: 2025-12-03).
+
 ```bash
-cd "El Servador"
+cd "El Servador/god_kaiser_server"
 
 # Neue Migration erstellen (nach Model-Änderung)
-poetry run alembic revision --autogenerate -m "Beschreibung"
+python -m alembic revision --autogenerate -m "Beschreibung"
 
 # Migrationen anwenden
-poetry run alembic upgrade head
+python -m alembic upgrade head
+
+# Aktuellen Status prüfen
+python -m alembic current
 
 # Migration rückgängig
-poetry run alembic downgrade -1
+python -m alembic downgrade -1
+
+# Migrations-History anzeigen
+python -m alembic history
 ```
+
+**Vorhandene Migrationen:**
+| Revision | Beschreibung | Datum |
+|----------|--------------|-------|
+| `c6fb9c8567b5` | Add last_command and error_message to ActuatorState | 2025-12-03 |
+
+**Bei Problemen:**
+- `alembic/env.py` verwendet relative Imports (`from src.db.base import Base`)
+- `alembic/script.py.mako` ist das Template für neue Migrationen
+- SQLite-Datenbank: `god_kaiser_dev.db` im Server-Root
 
 ---
 
@@ -883,6 +911,19 @@ poetry run alembic heads
 # Bei Konflikten: Merge
 poetry run alembic merge heads -m "merge"
 ```
+
+---
+
+## 10.4 Bekannte Bug-Fixes (Referenz)
+
+Diese Bugs wurden durch Integration-Tests entdeckt und gefixt (2025-12-03):
+
+| Bug | Datei | Problem | Fix |
+|-----|-------|---------|-----|
+| **#1** | `src/mqtt/handlers/actuator_handler.py` | Handler übergibt `last_command` aber `ActuatorState` hatte das Feld nicht | `last_command` und `error_message` zu `ActuatorState` Model hinzugefügt |
+| **#2** | `src/mqtt/handlers/sensor_handler.py` | Nutzte `sensor_config.metadata` statt `sensor_config.sensor_metadata` | Feldname korrigiert |
+
+**Dokumentation:** `tests/integration/BUGS_FOUND.md`
 
 ---
 
@@ -1034,7 +1075,9 @@ Vor jedem Commit prüfen:
 | **Sensor Processing** | ✅ | `src/sensors/library_loader.py`, `src/sensors/sensor_libraries/active/` | ✅ |
 | **Database Models** | ✅ | `src/db/models/` | ✅ |
 | **Database Repositories** | ✅ | `src/db/repositories/` | ✅ |
+| **Database Migrations** | ✅ | `alembic/versions/`, `alembic/env.py` | ✅ |
 | **ESP32 Testing** | ✅ | `tests/esp32/` (~140 Tests) | ✅ |
+| **Integration Tests** | ✅ | `tests/integration/test_server_esp32_integration.py` (34 Tests) | ✅ |
 | **Core Config** | ✅ | `src/core/config.py` | ✅ |
 
 ### 🟡 Teilweise implementiert (In Progress)
@@ -1116,6 +1159,39 @@ Vor jedem Commit prüfen:
 - **MockESP32Client:** `El Servador/god_kaiser_server/tests/esp32/mocks/mock_esp32_client.py`
 - **Test Fixtures:** `El Servador/god_kaiser_server/tests/conftest.py`
 - **Test Documentation:** `El Servador/docs/ESP32_TESTING.md`
+- **Integration Tests:** `El Servador/god_kaiser_server/tests/integration/test_server_esp32_integration.py` (34 Tests)
+- **Bug Documentation:** `El Servador/god_kaiser_server/tests/integration/BUGS_FOUND.md`
+
+### Database Migrations
+- **Alembic Config:** `El Servador/god_kaiser_server/alembic.ini`
+- **Alembic Environment:** `El Servador/god_kaiser_server/alembic/env.py`
+- **Migration Template:** `El Servador/god_kaiser_server/alembic/script.py.mako`
+- **Migrations:** `El Servador/god_kaiser_server/alembic/versions/`
+- **Dev Database:** `El Servador/god_kaiser_server/god_kaiser_dev.db` (SQLite)
+
+---
+
+## 17. SCHNELLREFERENZ: HÄUFIGE BEFEHLE
+
+```bash
+# Server-Verzeichnis
+cd "El Servador/god_kaiser_server"
+
+# Tests ausführen
+python -m pytest tests/integration/test_server_esp32_integration.py -v --no-cov
+
+# Migration erstellen
+python -m alembic revision --autogenerate -m "Beschreibung"
+
+# Migration anwenden
+python -m alembic upgrade head
+
+# Migration-Status
+python -m alembic current
+
+# Datenbank-Schema prüfen (SQLite)
+python -c "import sqlite3; conn = sqlite3.connect('god_kaiser_dev.db'); print([row for row in conn.execute('PRAGMA table_info(actuator_states)')])"
+```
 
 ---
 

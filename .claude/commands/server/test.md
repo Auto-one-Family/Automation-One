@@ -9,19 +9,27 @@ description: Führe El Servador Python Tests aus
 ## Schnellstart
 
 ```bash
-cd "El Servador"
-poetry install
-poetry run pytest -v --tb=short
+cd "El Servador/god_kaiser_server"
+python -m pytest tests/ --no-cov -q
 ```
 
 ## Test-Typen
 
-| Typ | Location | Beschreibung |
-|-----|----------|--------------|
-| **Unit Tests** | `tests/unit/` | Isolierte Komponenten-Tests |
-| **Integration Tests** | `tests/integration/` | Service-Integration |
-| **E2E Tests** | `tests/e2e/` | End-to-End (benötigt Server) |
-| **ESP32 Tests** | `tests/esp32/` | Server-orchestrierte ESP32-Tests |
+| Typ | Location | Tests | Beschreibung |
+|-----|----------|-------|--------------|
+| **Unit Tests** | `tests/unit/` | ~20 | Isolierte Komponenten-Tests |
+| **Integration Tests** | `tests/integration/` | **34** | Handler-Tests mit ESP32-Payloads |
+| **E2E Tests** | `tests/e2e/` | ~5 | End-to-End (benötigt Server) |
+| **ESP32 Tests** | `tests/esp32/` | ~100 | Server-orchestrierte ESP32-Tests |
+
+## Integration Tests (NEU 2025-12-03)
+
+```bash
+# Alle 34 Handler-Integration-Tests
+python -m pytest tests/integration/test_server_esp32_integration.py -v --no-cov
+```
+
+**Was sie testen:** SensorHandler, ActuatorHandler, HeartbeatHandler, Pi-Enhanced Flow
 
 ## Mit Coverage
 

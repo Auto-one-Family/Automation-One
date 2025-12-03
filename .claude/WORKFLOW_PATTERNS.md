@@ -580,5 +580,98 @@ if (gpio != 255) {
 
 ---
 
-**Letzte Aktualisierung:** 2025-11-24
-**Version:** 1.0 (Verifiziert gegen Code)
+## 8. Server-seitige Workflow-Patterns (God-Kaiser Server)
+
+### 8.1 Bug-Fix Workflow
+
+**Wenn ein Bug durch Tests entdeckt wird:**
+
+```
+1. Bug dokumentieren (tests/integration/BUGS_FOUND.md)
+2. Test als @pytest.mark.xfail markieren
+3. Bug im Code fixen
+4. xfail-Marker entfernen
+5. Tests ausführen: python -m pytest tests/integration/ -v --no-cov
+6. BUGS_FOUND.md aktualisieren (Status: GEFIXT)
+```
+
+**Beispiel (aus 2025-12-03):**
+```python
+# VORHER: Test als xfail markiert
+@pytest.mark.asyncio
+@pytest.mark.xfail(reason="BUG: ActuatorState hat kein last_command Feld")
+async def test_handle_actuator_status_success():
+    ...
+
+# NACHHER: xfail entfernt nach Fix
+@pytest.mark.asyncio
+async def test_handle_actuator_status_success():
+    ...
+```
+
+### 8.2 Database Migration Workflow
+
+**Wenn ein SQLAlchemy Model geändert wird:**
+
+```bash
+cd "El Servador/god_kaiser_server"
+
+# 1. Migration erstellen
+python -m alembic revision --autogenerate -m "Beschreibung der Änderung"
+
+# 2. Generierte Migration prüfen (alembic/versions/*.py)
+
+# 3. Migration anwenden
+python -m alembic upgrade head
+
+# 4. Status verifizieren
+python -m alembic current
+```
+
+**Beispiel Migration (c6fb9c8567b5):**
+```python
+def upgrade() -> None:
+    op.add_column('actuator_states', sa.Column('last_command', sa.String(50), nullable=True))
+    op.add_column('actuator_states', sa.Column('error_message', sa.String(500), nullable=True))
+
+def downgrade() -> None:
+    op.drop_column('actuator_states', 'error_message')
+    op.drop_column('actuator_states', 'last_command')
+```
+
+### 8.3 Integration Test Pattern
+
+**Test-Struktur für Handler-Tests:**
+
+```python
+@pytest.mark.asyncio
+async def test_handle_sensor_data_success(
+    test_session: AsyncSession,      # In-Memory SQLite
+    sample_esp_device: ESPDevice,    # Fixture
+    sample_sensor_config: SensorConfig,
+):
+    """Test-Docstring mit klarer Beschreibung."""
+    # 1. Handler setup
+    handler = SensorDataHandler()
+    handler.publisher = MagicMock()
+    
+    # 2. Topic und Payload (exakt wie ESP32 sendet)
+    topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
+    payload = {...}
+    
+    # 3. Mock get_session
+    async def mock_get_session():
+        yield test_session
+    
+    # 4. Execute mit Patch
+    with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+        result = await handler.handle_sensor_data(topic, payload)
+    
+    # 5. Assertions
+    assert result is True
+```
+
+---
+
+**Letzte Aktualisierung:** 2025-12-03
+**Version:** 1.1 (Erweitert um Server-Workflows)

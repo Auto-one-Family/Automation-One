@@ -37,7 +37,7 @@
 
 ### God-Kaiser Server (El Servador)
 
-**📄 `.claude/commands/CLAUDE_SERVER.md`** - ⭐ **HAUPTDOKUMENTATION SERVER**
+**📄 `.claude/CLAUDE_SERVER.md`** - ⭐ **HAUPTDOKUMENTATION SERVER**
 
 **Verwenden für:**
 - ✅ Server Code-Änderungen
@@ -79,6 +79,7 @@
 **Enthält:**
 - ESP32 Tests (Server-orchestriert, ~140 Tests)
 - Server Tests (Python, Unit/Integration/E2E)
+- **Integration Tests (34 Tests, 2025-12-03)** - Handler-Tests mit echten ESP32-Payloads
 - Cross-Component Validation (MQTT Topics, Payloads)
 - Dokumentations-Konsistenz-Prüfung
 - Report-Format
@@ -181,10 +182,11 @@
 4. **Pattern-Beispiele:** `.claude/WORKFLOW_PATTERNS.md`
 
 **Server Code:**
-1. **Erste Anlaufstelle:** `.claude/commands/CLAUDE_SERVER.md` - Section 0: Quick Decision Tree
+1. **Erste Anlaufstelle:** `.claude/CLAUDE_SERVER.md` - Section 0: Quick Decision Tree
 2. **Modul finden:** `CLAUDE_SERVER.md` Section 12: Modul-Dokumentation Navigation
 3. **Workflow folgen:** `CLAUDE_SERVER.md` Section 13: KI-Agenten Workflow
 4. **Aufgabentyp:** `CLAUDE_SERVER.md` Section 3: Kritische Dateien pro Aufgabentyp
+5. **Migration:** `CLAUDE_SERVER.md` Section 7.4: Database Migration
 
 #### 🧪 "Ich will Tests ausführen"
 
@@ -255,19 +257,30 @@ ROOT-LEVEL
 │
 └── .claude/
     ├── README.md (DIESE DATEI) ⭐ Dokumentations-Index
+    ├── CLAUDE_SERVER.md ⭐ Server Hauptdokumentation (v2.1)
     │
     ├── commands/
-    │   ├── CLAUDE_SERVER.md ⭐ Server Hauptdokumentation
     │   ├── full-test.md ⭐ Kompletter Test-Workflow
-    │   ├── esp-test.md (Kurz, verweist auf full-test.md)
-    │   ├── server-test.md (Kurz, verweist auf full-test.md)
-    │   ├── esp-test-category.md (Legacy PlatformIO)
-    │   └── esp-build.md (Build-Commands)
+    │   ├── esp32/ (ESP32-spezifische Commands)
+    │   ├── server/ (Server-spezifische Commands)
+    │   └── integration/ (Integration-Commands)
     │
-    ├── WORKFLOW_PATTERNS.md (ESP32 Development Workflows)
-    ├── ARCHITECTURE_DEPENDENCIES.md (ESP32 Dependencies)
-    ├── TEST_WORKFLOW.md (Legacy PlatformIO Tests)
+    ├── WORKFLOW_PATTERNS.md (Development Workflows v1.1)
+    ├── ARCHITECTURE_DEPENDENCIES.md (Dependencies)
+    ├── TEST_WORKFLOW.md (Test-Workflow v1.1)
     └── PI_SERVER_REFACTORING.md (Legacy Server Refactoring)
+
+El Servador/
+├── god_kaiser_server/
+│   ├── tests/integration/
+│   │   ├── test_server_esp32_integration.py (34 Tests)
+│   │   └── BUGS_FOUND.md (Bug-Dokumentation)
+│   ├── alembic/versions/
+│   │   └── c6fb9c8567b5_*.py (ActuatorState Migration)
+│   └── god_kaiser_dev.db (SQLite Dev-DB)
+└── docs/
+    ├── ESP32_TESTING.md (v1.1)
+    └── ...
 ```
 
 ---
@@ -324,6 +337,12 @@ ROOT-LEVEL
 - ✅ `pi_server_ALT/` gelöscht (alter ESP32-Code)
 - ✅ Doppelte Dateien entfernt
 
+**Hinzugefügt (2025-12-03):**
+- ✅ 34 Integration-Tests für MQTT-Handler
+- ✅ Alembic-Migration funktionsfähig (env.py, script.py.mako gefixt)
+- ✅ Bug-Fixes dokumentiert in `tests/integration/BUGS_FOUND.md`
+- ✅ Database-Migration dokumentiert in `CLAUDE_SERVER.md` Section 7.4
+
 ---
 
 ## 🎯 SCHNELLREFERENZ FÜR CLAUDE
@@ -347,5 +366,5 @@ ROOT-LEVEL
 
 ---
 
-**Letzte Aktualisierung:** 2025-01  
-**Version:** 2.0 (Konsolidiert mit neuen Hauptdokumentationen und Test-Struktur)
+**Letzte Aktualisierung:** 2025-12-03  
+**Version:** 2.1 (Aktualisiert mit Integration-Tests und Migration-Dokumentation)

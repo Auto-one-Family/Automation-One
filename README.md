@@ -154,6 +154,7 @@ Standard-Workflow (90% der Anwendungen):
   - ML-Modelle für Predictions
   - Empfehlungen an User (via Server)
   - Optional: Auto-Actions mit User-Approval
+  - KI-Modell können in Webinterface vuetify eingebunden werden um dieses zu steuern per sprachbefehl oder schnell an daten kommen durch einfache Textnachrichten an KI die dann an server sendet. Sie könnte dann auch Kontrolle über System nehmen
 
 ### Kommunikations-Matrix
 

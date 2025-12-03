@@ -90,3 +90,4 @@ Alle Tests sollten erfolgreich durchlaufen. Die Tests verwenden SQLite in-memory
 **Test-Coverage Ziel:** >80% für alle Repository-Module (Phase 2 Anforderung)
 
 
+

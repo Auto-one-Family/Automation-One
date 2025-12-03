@@ -8,6 +8,7 @@ description: Kompletter Test-Workflow für ESP32 + Server (EMPFOHLEN)
 
 **Vollständige Dokumentation:**
 - **ESP32 Tests:** `El Servador/docs/ESP32_TESTING.md` (Server-orchestriert, ~140 Tests)
+- **Integration Tests:** `tests/integration/test_server_esp32_integration.py` (34 Tests) - NEU 2025-12-03
 - **Server Tests:** Siehe Section 2 unten
 - **Legacy PlatformIO Tests:** `.claude/commands/esp32/test-category.md` (archiviert)
 
@@ -131,12 +132,23 @@ poetry run pytest -v --tb=short
 
 ### Test-Typen
 
-| Typ | Location | Beschreibung |
-|-----|----------|--------------|
-| **Unit Tests** | `tests/unit/` | Isolierte Komponenten-Tests (Repositories, Services, Core) |
-| **Integration Tests** | `tests/integration/` | Service-Integration (MQTT Flow, API Auth) |
-| **E2E Tests** | `tests/e2e/` | End-to-End (benötigt laufenden Server) |
-| **ESP32 Tests** | `tests/esp32/` | Server-orchestrierte ESP32-Tests (siehe Section 1) |
+| Typ | Location | Tests | Beschreibung |
+|-----|----------|-------|--------------|
+| **Unit Tests** | `tests/unit/` | ~20 | Isolierte Komponenten-Tests (Repositories, Services, Core) |
+| **Integration Tests** | `tests/integration/` | **34** | Handler-Tests mit ESP32-Payloads (NEU 2025-12-03) |
+| **E2E Tests** | `tests/e2e/` | ~5 | End-to-End (benötigt laufenden Server) |
+| **ESP32 Tests** | `tests/esp32/` | ~100 | Server-orchestrierte ESP32-Tests (siehe Section 1) |
+
+### Handler Integration Tests (NEU)
+
+**Location:** `tests/integration/test_server_esp32_integration.py`
+
+```bash
+cd "El Servador/god_kaiser_server"
+python -m pytest tests/integration/test_server_esp32_integration.py -v --no-cov
+```
+
+**Test-Klassen:** TopicParsing, SensorHandler, ActuatorHandler, HeartbeatHandler, PiEnhanced, CompleteWorkflows
 
 ### Mit Coverage
 
@@ -232,11 +244,12 @@ ESP32 TESTS (Server-orchestriert):
 ✅ Coverage: 85.2%
 
 SERVER TESTS:
-✅ 156/156 tests passed
+✅ 170+/170+ tests passed
 ✅ Coverage: 87.3%
-✅ Unit Tests: 89/89 passed
-✅ Integration Tests: 45/45 passed
-✅ E2E Tests: 22/22 passed
+✅ Unit Tests: ~20/20 passed
+✅ Handler Integration Tests: 34/34 passed (NEU 2025-12-03)
+✅ ESP32 Mock Tests: ~100/100 passed
+✅ E2E Tests: ~5/5 passed
 
 CODE QUALITY:
 ✅ Black: All files formatted
@@ -359,5 +372,5 @@ OVERALL: ✅ PASS
 
 ---
 
-**Letzte Aktualisierung:** 2025-01  
-**Version:** 2.0 (Konsolidiert)
+**Letzte Aktualisierung:** 2025-12-03  
+**Version:** 2.1 (Mit Handler Integration Tests)

@@ -2,9 +2,14 @@
 
 > **Dokumentation für server-orchestrierte ESP32-Tests via MQTT**
 
-**Version:** 1.0
-**Datum:** 2025-11-26
-**Status:** ✅ Implementiert
+**Version:** 1.1
+**Datum:** 2025-12-03
+**Status:** ✅ Implementiert & Erweitert
+
+> **Letzte Änderungen (2025-12-03):**
+> - 34 neue Integration-Tests für Handler hinzugefügt
+> - Bug-Fixes durch Tests entdeckt und dokumentiert
+> - Test-Location: `tests/integration/test_server_esp32_integration.py`
 
 ---
 
@@ -220,14 +225,76 @@ def test_greenhouse_automation_scenario(mock_esp32_with_sensors):
 
 ---
 
+### 6. Server Handler Integration Tests (`test_server_esp32_integration.py`) - NEU
+
+**Zweck:** Testen der Server-Handler mit echten ESP32-Payloads
+
+**Location:** `tests/integration/test_server_esp32_integration.py`
+
+**Test-Klassen (34 Tests):**
+- `TestTopicParsing` - MQTT Topic-Parser Validierung
+- `TestSensorHandlerValidation` - Payload-Struktur-Validierung
+- `TestSensorHandlerProcessing` - Vollständige Sensor-Datenverarbeitung
+- `TestActuatorHandlerValidation` - Actuator-Payload-Validierung
+- `TestActuatorHandlerProcessing` - Actuator-Status-Verarbeitung
+- `TestFullMessageFlow` - End-to-End MQTT → DB Flows
+- `TestEdgeCases` - Grenzfälle und Error-Handling
+- `TestPerformance` - 100 schnelle Updates
+- `TestHeartbeatHandlerValidation` - Heartbeat-Validierung
+- `TestHeartbeatHandlerProcessing` - Heartbeat-Verarbeitung
+- `TestPiEnhancedProcessing` - Pi-Enhanced Flow mit Library-Loader
+- `TestCompleteWorkflows` - Multi-Sensor Batch-Verarbeitung
+
+**Besonderheiten:**
+- Nutzt SQLite In-Memory (kein PostgreSQL nötig)
+- Payloads exakt wie ESP32 sie sendet (aus `Mqtt_Protocoll.md`)
+- Handler werden direkt aufgerufen (keine MQTT-Verbindung)
+- Bug-Dokumentation: `tests/integration/BUGS_FOUND.md`
+
+**Beispiel:**
+```python
+@pytest.mark.asyncio
+async def test_handle_sensor_data_success(test_session, sample_esp_device, sample_sensor_config):
+    handler = SensorDataHandler()
+    handler.publisher = MagicMock()
+    
+    topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
+    payload = {
+        "ts": int(time.time()),
+        "esp_id": "ESP_12AB34CD",
+        "gpio": 34,
+        "sensor_type": "ph",
+        "raw": 2150,
+        "value": 0.0,
+        "unit": "",
+        "quality": "good",
+        "raw_mode": False,
+    }
+    
+    async def mock_get_session():
+        yield test_session
+    
+    with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+        result = await handler.handle_sensor_data(topic, payload)
+    
+    assert result is True
+```
+
+**Ausführung:**
+```bash
+cd "El Servador/god_kaiser_server"
+python -m pytest tests/integration/test_server_esp32_integration.py -v --no-cov
+```
+
+---
+
 ## Test ausführen
 
 ### Alle Tests
 
 ```bash
-cd "El Servador"
-poetry install
-poetry run pytest god_kaiser_server/tests/esp32/ -v
+cd "El Servador/god_kaiser_server"
+python -m pytest tests/ --no-cov -q
 ```
 
 ### Spezifische Test-Kategorie
