@@ -156,10 +156,10 @@ class LibraryLoader:
             module_name = file_path.stem  # e.g., "ph_sensor"
 
             try:
-                # Import module dynamically
-                processor_instance = self._load_library(module_name)
+                # Import module dynamically - returns list of ALL processors
+                processor_instances = self._load_library(module_name)
 
-                if processor_instance:
+                for processor_instance in processor_instances:
                     sensor_type = processor_instance.get_sensor_type()
                     self.processors[sensor_type] = processor_instance
                     logger.debug(
@@ -173,38 +173,53 @@ class LibraryLoader:
                     exc_info=True,
                 )
 
-    def _load_library(self, module_name: str) -> Optional[BaseSensorProcessor]:
+    def _load_library(self, module_name: str) -> list[BaseSensorProcessor]:
         """
-        Load a single sensor library module.
+        Load all sensor processor classes from a library module.
 
         Args:
-            module_name: Module name (e.g., "ph_sensor")
+            module_name: Module name (e.g., "ph_sensor", "temperature")
 
         Returns:
-            BaseSensorProcessor instance or None if loading failed
+            List of BaseSensorProcessor instances (empty list if loading failed)
 
         Example:
-            processor = self._load_library("ph_sensor")
-            # Returns: PHSensorProcessor() instance
+            processors = self._load_library("temperature")
+            # Returns: [DS18B20Processor(), SHT31TemperatureProcessor()]
         """
         try:
-            # Construct full module path
-            # e.g., "god_kaiser_server.src.sensors.sensor_libraries.active.ph_sensor"
-            full_module_path = (
-                f"god_kaiser_server.src.sensors.sensor_libraries.active.{module_name}"
-            )
-
-            # Import module
-            module = importlib.import_module(full_module_path)
+            # Try multiple import paths for flexibility
+            # This supports both installed package and direct execution
+            import_paths = [
+                f"src.sensors.sensor_libraries.active.{module_name}",
+                f"sensors.sensor_libraries.active.{module_name}",
+                f"god_kaiser_server.src.sensors.sensor_libraries.active.{module_name}",
+            ]
+            
+            module = None
+            last_error = None
+            
+            for full_module_path in import_paths:
+                try:
+                    module = importlib.import_module(full_module_path)
+                    break  # Success - exit loop
+                except ImportError as e:
+                    last_error = e
+                    continue
+            
+            if module is None:
+                raise ImportError(f"Could not import {module_name} from any path. Last error: {last_error}")
 
             # Find all classes in module that extend BaseSensorProcessor
             processor_classes = []
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 # Check if class is a subclass of BaseSensorProcessor
                 # but NOT BaseSensorProcessor itself
+                # Also check that the class is defined in THIS module (not imported)
                 if (
                     issubclass(obj, BaseSensorProcessor)
                     and obj is not BaseSensorProcessor
+                    and obj.__module__ == module.__name__
                 ):
                     processor_classes.append(obj)
 
@@ -213,38 +228,43 @@ class LibraryLoader:
                     f"Module '{module_name}' has no BaseSensorProcessor subclass. "
                     "Skipping."
                 )
-                return None
+                return []
+
+            # Instantiate ALL processor classes from this module
+            processor_instances = []
+            for processor_class in processor_classes:
+                try:
+                    processor_instance = processor_class()
+                    processor_instances.append(processor_instance)
+                    logger.debug(
+                        f"Successfully loaded: {processor_class.__name__} from {module_name}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to instantiate {processor_class.__name__}: {e}"
+                    )
 
             if len(processor_classes) > 1:
-                logger.warning(
-                    f"Module '{module_name}' has multiple processor classes: "
-                    f"{[cls.__name__ for cls in processor_classes]}. "
-                    f"Using first one: {processor_classes[0].__name__}"
+                logger.info(
+                    f"Module '{module_name}' loaded {len(processor_instances)} processors: "
+                    f"{[inst.__class__.__name__ for inst in processor_instances]}"
                 )
 
-            # Instantiate processor
-            processor_class = processor_classes[0]
-            processor_instance = processor_class()
-
-            logger.debug(
-                f"Successfully loaded: {processor_class.__name__} from {module_name}"
-            )
-
-            return processor_instance
+            return processor_instances
 
         except ImportError as e:
             logger.error(
                 f"Failed to import module '{module_name}': {e}",
                 exc_info=True,
             )
-            return None
+            return []
 
         except Exception as e:
             logger.error(
-                f"Failed to instantiate processor from '{module_name}': {e}",
+                f"Failed to load processors from '{module_name}': {e}",
                 exc_info=True,
             )
-            return None
+            return []
 
 
 # Global loader instance

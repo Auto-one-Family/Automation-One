@@ -180,3 +180,146 @@ class ErrorResponse(BaseModel):
             }
         }
 
+
+# =============================================================================
+# Calibration Schemas
+# =============================================================================
+
+class CalibrationPoint(BaseModel):
+    """Single calibration point: measured raw value + known reference value."""
+    
+    raw: float = Field(
+        ...,
+        description="Raw sensor value (ADC or processed value from sensor)",
+        examples=[1500, 3000, 2048],
+    )
+    
+    reference: float = Field(
+        ...,
+        description="Known reference value (e.g., buffer pH, EC standard)",
+        examples=[7.0, 1413, 100.0],
+    )
+
+
+class SensorCalibrateRequest(BaseModel):
+    """
+    Request model for sensor calibration endpoint.
+    
+    Calibration methods by sensor type:
+    - pH: 2-point linear (buffers pH 4.0 + pH 7.0)
+    - EC: 2-point linear (buffers 1413 µS/cm + 12880 µS/cm)
+    - Moisture: 2-point linear (dry=0%, wet=100%)
+    - Temperature/Pressure/Humidity: 1-point offset
+    """
+    
+    esp_id: str = Field(
+        ...,
+        description="ESP device ID (format: ESP_XXXXXXXX)",
+        pattern=r"^ESP_[A-Z0-9]{8}$",
+        examples=["ESP_12AB34CD"],
+    )
+    
+    gpio: int = Field(
+        ...,
+        ge=0,
+        le=39,
+        description="GPIO pin number (0-39 for ESP32)",
+    )
+    
+    sensor_type: str = Field(
+        ...,
+        min_length=2,
+        max_length=50,
+        description="Sensor type (determines calibration method)",
+        examples=["ph", "ec", "moisture", "temperature"],
+    )
+    
+    calibration_points: list[CalibrationPoint] = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description="Calibration points (1 for offset, 2+ for linear)",
+    )
+    
+    method: Optional[str] = Field(
+        None,
+        description="Calibration method (auto-detected if not specified)",
+        examples=["linear", "offset"],
+    )
+    
+    save_to_config: bool = Field(
+        True,
+        description="Save calibration to sensor config in database",
+    )
+    
+    @field_validator("sensor_type")
+    @classmethod
+    def validate_sensor_type(cls, v: str) -> str:
+        """Normalize sensor type."""
+        return v.lower().strip()
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "esp_id": "ESP_12AB34CD",
+                "gpio": 34,
+                "sensor_type": "ec",
+                "calibration_points": [
+                    {"raw": 1500, "reference": 1413},
+                    {"raw": 3000, "reference": 12880}
+                ],
+                "method": "linear",
+                "save_to_config": True
+            }
+        }
+
+
+class SensorCalibrateResponse(BaseModel):
+    """Response model for sensor calibration endpoint."""
+    
+    success: bool = Field(
+        ...,
+        description="Whether calibration succeeded",
+    )
+    
+    calibration: Dict[str, Any] = Field(
+        ...,
+        description="Calculated calibration data (slope/offset, dry/wet, etc.)",
+    )
+    
+    sensor_type: str = Field(
+        ...,
+        description="Sensor type that was calibrated",
+    )
+    
+    method: str = Field(
+        ...,
+        description="Calibration method used",
+    )
+    
+    saved: bool = Field(
+        ...,
+        description="Whether calibration was saved to database",
+    )
+    
+    message: Optional[str] = Field(
+        None,
+        description="Additional information or warnings",
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "calibration": {
+                    "slope": 15210.9,
+                    "offset": -4876.2,
+                    "method": "linear",
+                    "points": 2
+                },
+                "sensor_type": "ec",
+                "method": "linear",
+                "saved": True,
+                "message": "Calibration saved. Apply temperature compensation for best accuracy."
+            }
+        }

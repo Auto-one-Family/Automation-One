@@ -192,3 +192,50 @@ class SensorRepository(BaseRepository[SensorConfig]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    # Calibration operations
+    async def update_calibration(
+        self,
+        esp_id: uuid.UUID,
+        gpio: int,
+        calibration_data: dict,
+    ) -> Optional[SensorConfig]:
+        """
+        Update calibration data for a sensor.
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number
+            calibration_data: Calibration parameters (sensor-specific)
+
+        Returns:
+            Updated SensorConfig or None if not found
+        """
+        sensor_config = await self.get_by_esp_and_gpio(esp_id, gpio)
+        if not sensor_config:
+            return None
+
+        sensor_config.calibration_data = calibration_data
+        await self.session.flush()
+        await self.session.refresh(sensor_config)
+        return sensor_config
+
+    async def get_calibration(
+        self,
+        esp_id: uuid.UUID,
+        gpio: int,
+    ) -> Optional[dict]:
+        """
+        Get calibration data for a sensor.
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number
+
+        Returns:
+            Calibration data dict or None if not found/not calibrated
+        """
+        sensor_config = await self.get_by_esp_and_gpio(esp_id, gpio)
+        if not sensor_config:
+            return None
+        return sensor_config.calibration_data
