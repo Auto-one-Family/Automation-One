@@ -13,9 +13,17 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
+# Add src to path for imports
+import sys
+from pathlib import Path
+
+# Add the project root to sys.path
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
 # Import Base and all models to ensure they're registered
-from god_kaiser_server.src.db.base import Base
-from god_kaiser_server.src.db.models import (  # noqa: F401
+from src.db.base import Base
+from src.db.models import (  # noqa: F401
     actuator,
     ai,
     esp,
@@ -28,7 +36,7 @@ from god_kaiser_server.src.db.models import (  # noqa: F401
 )
 
 # Import settings to get database URL
-from god_kaiser_server.src.core.config import get_settings
+from src.core.config import get_settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

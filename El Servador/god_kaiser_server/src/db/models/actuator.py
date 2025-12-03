@@ -118,7 +118,7 @@ class ActuatorConfig(Base, TimestampMixin):
     )
 
     # Metadata
-    metadata: Mapped[dict] = mapped_column(
+    actuator_metadata: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
         nullable=False,
@@ -231,8 +231,22 @@ class ActuatorState(Base):
         doc="Total runtime since last activation (seconds)",
     )
 
+    # Last Command
+    last_command: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Last command issued (on, off, pwm, etc.)",
+    )
+
+    # Error Message
+    error_message: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        doc="Error message if actuator is in error state",
+    )
+
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    state_metadata: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,
         doc="Additional state metadata (warnings, errors, etc.)",
@@ -348,7 +362,7 @@ class ActuatorHistory(Base):
     )
 
     # Metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    command_metadata: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,
         doc="Additional command metadata (request_id, retry_count, etc.)",

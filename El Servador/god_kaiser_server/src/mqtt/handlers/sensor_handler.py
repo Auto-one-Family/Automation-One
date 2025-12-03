@@ -273,12 +273,21 @@ class SensorDataHandler:
         """
         try:
             from ...sensors.library_loader import get_library_loader
+            from ...sensors.sensor_type_registry import normalize_sensor_type
 
             # Get library loader instance
             loader = get_library_loader()
 
-            # Get processor for sensor type
+            # Normalize sensor type (ESP32 → Server Processor)
+            normalized_type = normalize_sensor_type(sensor_type)
+            
+            # Get processor for sensor type (normalization happens in get_processor too)
             processor = loader.get_processor(sensor_type)
+            
+            if normalized_type != sensor_type.lower():
+                logger.debug(
+                    f"Normalized sensor type: '{sensor_type}' → '{normalized_type}'"
+                )
 
             if not processor:
                 logger.error(
@@ -290,8 +299,8 @@ class SensorDataHandler:
             # Process raw value using sensor library
             # Extract processing params from metadata if available
             processing_params = None
-            if sensor_config and sensor_config.metadata:
-                processing_params = sensor_config.metadata.get("processing_params")
+            if sensor_config and sensor_config.sensor_metadata:
+                processing_params = sensor_config.sensor_metadata.get("processing_params")
             
             result = processor.process(
                 raw_value=raw_value,
