@@ -4,15 +4,22 @@ Fixtures: test_db, test_client, mock_mqtt, sample_esp
 """
 
 import asyncio
+import sys
+from pathlib import Path
 from typing import AsyncGenerator
+
+# Add project root to Python path for imports
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from god_kaiser_server.src.db.base import Base
-from god_kaiser_server.src.db.models import (
+from src.db.base import Base
+from src.db.models import (
     actuator,
     ai,
     esp,
@@ -23,10 +30,10 @@ from god_kaiser_server.src.db.models import (
     system,
     user,
 )  # noqa: F401
-from god_kaiser_server.src.db.repositories.actuator_repo import ActuatorRepository
-from god_kaiser_server.src.db.repositories.esp_repo import ESPRepository
-from god_kaiser_server.src.db.repositories.sensor_repo import SensorRepository
-from god_kaiser_server.src.db.repositories.user_repo import UserRepository
+from src.db.repositories.actuator_repo import ActuatorRepository
+from src.db.repositories.esp_repo import ESPRepository
+from src.db.repositories.sensor_repo import SensorRepository
+from src.db.repositories.user_repo import UserRepository
 
 
 # Test database URL (SQLite in-memory for fast tests)
@@ -119,7 +126,7 @@ async def sample_esp_device(test_session: AsyncSession):
     Returns:
         ESPDevice instance
     """
-    from god_kaiser_server.src.db.models.esp import ESPDevice
+    from src.db.models.esp import ESPDevice
 
     device = ESPDevice(
         device_id="ESP_TEST_001",
@@ -145,7 +152,7 @@ async def sample_user(test_session: AsyncSession):
     Returns:
         User instance
     """
-    from god_kaiser_server.src.db.models.user import User
+    from src.db.models.user import User
 
     user = User(
         username="testuser",

@@ -3,15 +3,20 @@ Pytest fixtures for ESP32 orchestrated tests.
 
 Provides:
 - mock_esp32: MockESP32Client for hardware-independent tests
-- real_esp32: Connection to real ESP32 device (optional, skipped if unavailable)
-- mqtt_test_client: MQTT client for test orchestration
+- mock_esp32_with_actuators: Pre-configured with actuators
+- mock_esp32_with_sensors: Pre-configured with sensors
+- mock_esp32_with_zones: Pre-configured with zone management
+- mock_esp32_with_sht31: Pre-configured with multi-value SHT31
+- mock_esp32_greenhouse: Complete greenhouse setup
+- multiple_mock_esp32: Multiple ESPs for cross-ESP testing
+- real_esp32: Connection to real ESP32 device (optional)
 """
 
 import pytest
 import os
 from typing import Optional
 
-from .mocks.mock_esp32_client import MockESP32Client
+from .mocks.mock_esp32_client import MockESP32Client, SystemState
 
 
 @pytest.fixture
@@ -26,8 +31,11 @@ def mock_esp32():
     """
     mock = MockESP32Client(
         esp_id="test-esp-001",
-        kaiser_id="test-kaiser-001"
+        kaiser_id="god"
     )
+    
+    # Configure zone (required for actuator control)
+    mock.configure_zone("test-zone", "test-master", "test-subzone")
 
     yield mock
 
@@ -45,12 +53,15 @@ def mock_esp32_with_actuators():
     - GPIO 6: Valve (digital)
     - GPIO 7: PWM Motor (pwm)
     """
-    mock = MockESP32Client(esp_id="test-esp-002", kaiser_id="test-kaiser-001")
+    mock = MockESP32Client(esp_id="test-esp-002", kaiser_id="god")
+    
+    # Configure zone (required for actuator control)
+    mock.configure_zone("actuator-zone", "main-zone", "actuator-subzone")
 
-    # Pre-configure actuators
-    mock.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})
-    mock.handle_command("actuator_set", {"gpio": 6, "value": 0, "mode": "digital"})
-    mock.handle_command("actuator_set", {"gpio": 7, "value": 0.0, "mode": "pwm"})
+    # Pre-configure actuators using configure_actuator
+    mock.configure_actuator(gpio=5, actuator_type="pump", name="Main Pump")
+    mock.configure_actuator(gpio=6, actuator_type="valve", name="Main Valve")
+    mock.configure_actuator(gpio=7, actuator_type="pwm_motor", name="Ventilation Fan")
 
     # Clear published messages from setup
     mock.clear_published_messages()
@@ -70,15 +81,228 @@ def mock_esp32_with_sensors():
     - GPIO 35: Analog sensor (temperature)
     - GPIO 36: Digital sensor (flow)
     """
-    mock = MockESP32Client(esp_id="test-esp-003", kaiser_id="test-kaiser-001")
+    mock = MockESP32Client(esp_id="test-esp-003", kaiser_id="god")
+    
+    # Configure zone (required for actuator control)
+    mock.configure_zone("sensor-zone", "main-zone", "sensor-subzone")
 
-    # Pre-configure sensors with mock values
-    mock.set_sensor_value(gpio=34, raw_value=2048.0, sensor_type="analog")  # Moisture
-    mock.set_sensor_value(gpio=35, raw_value=1500.0, sensor_type="analog")  # Temperature
-    mock.set_sensor_value(gpio=36, raw_value=1.0, sensor_type="digital")     # Flow
+    # Pre-configure sensors with mock values using full params
+    mock.set_sensor_value(
+        gpio=34, 
+        raw_value=2048.0, 
+        sensor_type="analog",
+        name="Soil Moisture",
+        unit="raw",
+        quality="good"
+    )
+    mock.set_sensor_value(
+        gpio=35, 
+        raw_value=1500.0, 
+        sensor_type="analog",
+        name="Temperature Raw",
+        unit="raw",
+        quality="good"
+    )
+    mock.set_sensor_value(
+        gpio=36, 
+        raw_value=1.0, 
+        sensor_type="digital",
+        name="Flow Sensor",
+        unit="bool",
+        quality="good"
+    )
+    
+    # Clear published messages from setup
+    mock.clear_published_messages()
 
     yield mock
 
+    mock.reset()
+
+
+@pytest.fixture
+def mock_esp32_with_zones():
+    """
+    Provide a MockESP32Client with zone configuration.
+    
+    Zone configuration:
+    - zone_id: greenhouse
+    - master_zone_id: main-greenhouse
+    - subzone_id: zone-a
+    """
+    mock = MockESP32Client(esp_id="ESP_ZONE001", kaiser_id="god")
+    
+    # Configure zone
+    mock.configure_zone(
+        zone_id="greenhouse",
+        master_zone_id="main-greenhouse",
+        subzone_id="zone-a",
+        zone_name="Greenhouse Section",
+        subzone_name="Zone A - Tomatoes"
+    )
+    
+    # Add some sensors and actuators
+    mock.set_sensor_value(
+        gpio=4,
+        raw_value=23.5,
+        sensor_type="DS18B20",
+        name="Soil Temperature",
+        unit="°C",
+        subzone_id="zone-a",
+        library_name="dallas_temp"
+    )
+    
+    mock.configure_actuator(
+        gpio=5,
+        actuator_type="pump",
+        name="Irrigation Pump"
+    )
+    
+    mock.clear_published_messages()
+    
+    yield mock
+    
+    mock.reset()
+
+
+@pytest.fixture
+def mock_esp32_with_sht31():
+    """
+    Provide a MockESP32Client with multi-value SHT31 sensor.
+    
+    SHT31 provides:
+    - Primary: Temperature (°C)
+    - Secondary: Humidity (%RH)
+    """
+    mock = MockESP32Client(esp_id="ESP_SHT31001", kaiser_id="god")
+    
+    # Configure SHT31 as multi-value sensor
+    mock.set_multi_value_sensor(
+        gpio=21,
+        sensor_type="SHT31",
+        primary_value=23.5,  # Temperature
+        secondary_values={"humidity": 65.2},
+        name="SHT31 Temp/Humidity",
+        quality="good"
+    )
+    
+    # Also add a DS18B20 for comparison
+    mock.set_sensor_value(
+        gpio=4,
+        raw_value=24.0,
+        sensor_type="DS18B20",
+        name="Backup Temperature",
+        unit="°C",
+        library_name="dallas_temp"
+    )
+    
+    mock.clear_published_messages()
+    
+    yield mock
+    
+    mock.reset()
+
+
+@pytest.fixture
+def mock_esp32_greenhouse():
+    """
+    Provide a complete greenhouse setup for full workflow tests.
+    
+    Configuration:
+    - Zone: greenhouse / main-greenhouse / zone-a
+    - Sensors:
+      - GPIO 4: DS18B20 Temperature
+      - GPIO 21: SHT31 Temp+Humidity (multi-value)
+      - GPIO 34: Soil Moisture (analog)
+    - Actuators:
+      - GPIO 5: Irrigation Pump
+      - GPIO 6: Ventilation Valve
+      - GPIO 7: Fan (PWM)
+    - Libraries:
+      - dallas_temp
+      - sht31_combined
+    """
+    mock = MockESP32Client(esp_id="ESP_GH001", kaiser_id="god")
+    
+    # Configure zone
+    mock.configure_zone(
+        zone_id="greenhouse",
+        master_zone_id="main-greenhouse",
+        subzone_id="zone-a",
+        zone_name="Main Greenhouse",
+        subzone_name="Tomato Section A"
+    )
+    
+    # Install libraries
+    mock.handle_command("library_install", {
+        "name": "dallas_temp",
+        "version": "1.2.0",
+        "sensor_type": "DS18B20"
+    })
+    mock.handle_command("library_install", {
+        "name": "sht31_combined",
+        "version": "2.0.0",
+        "sensor_type": "SHT31"
+    })
+    
+    # Configure sensors
+    mock.set_sensor_value(
+        gpio=4,
+        raw_value=24.5,
+        sensor_type="DS18B20",
+        name="Soil Temperature",
+        unit="°C",
+        quality="good",
+        library_name="dallas_temp",
+        subzone_id="zone-a",
+        calibration={"offset": 0.0, "multiplier": 1.0}
+    )
+    
+    mock.set_multi_value_sensor(
+        gpio=21,
+        sensor_type="SHT31",
+        primary_value=25.0,
+        secondary_values={"humidity": 68.5},
+        name="Air Temp/Humidity",
+        quality="good"
+    )
+    
+    mock.set_sensor_value(
+        gpio=34,
+        raw_value=1800.0,
+        sensor_type="moisture",
+        name="Soil Moisture",
+        unit="raw",
+        quality="good",
+        subzone_id="zone-a"
+    )
+    
+    # Configure actuators
+    mock.configure_actuator(
+        gpio=5,
+        actuator_type="pump",
+        name="Irrigation Pump",
+        safety_timeout_ms=300000  # 5 minutes max
+    )
+    
+    mock.configure_actuator(
+        gpio=6,
+        actuator_type="valve",
+        name="Ventilation Valve"
+    )
+    
+    mock.configure_actuator(
+        gpio=7,
+        actuator_type="fan",
+        name="Ventilation Fan",
+        min_value=0.2,  # Minimum 20% speed
+        max_value=1.0
+    )
+    
+    mock.clear_published_messages()
+    
+    yield mock
+    
     mock.reset()
 
 
@@ -90,9 +314,11 @@ def multiple_mock_esp32():
     Uses REAL MQTT topic structure for authentic routing validation.
     
     Pre-configured ESPs:
-    - esp-001: 2 actuators (pump, valve) on GPIO 5, 6
-    - esp-002: 3 sensors (moisture, temp, flow) on GPIO 34, 35, 36
+    - esp-001: Actuator controller (pump, valve) on GPIO 5, 6
+    - esp-002: Sensor station (moisture, temp, flow) on GPIO 34, 35, 36
     - esp-003: Mixed (1 actuator, 2 sensors) on GPIO 5, 34, 35
+    
+    All use zone configuration for complete testing.
     
     Usage:
         def test_cross_esp(multiple_mock_esp32):
@@ -102,23 +328,28 @@ def multiple_mock_esp32():
             # Control actuator on ESP-001
             esps["esp1"].handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
     """
-    esp1 = MockESP32Client(esp_id="test-esp-001", kaiser_id="test-kaiser-001")
-    esp2 = MockESP32Client(esp_id="test-esp-002", kaiser_id="test-kaiser-001")
-    esp3 = MockESP32Client(esp_id="test-esp-003", kaiser_id="test-kaiser-001")
+    esp1 = MockESP32Client(esp_id="test-esp-001", kaiser_id="god")
+    esp2 = MockESP32Client(esp_id="test-esp-002", kaiser_id="god")
+    esp3 = MockESP32Client(esp_id="test-esp-003", kaiser_id="god")
+    
+    # Configure zones for all ESPs
+    esp1.configure_zone("irrigation", "main-zone", "pumps")
+    esp2.configure_zone("irrigation", "main-zone", "sensors")
+    esp3.configure_zone("irrigation", "main-zone", "mixed")
     
     # Pre-configure ESP-001 with actuators
-    esp1.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})  # Pump
-    esp1.handle_command("actuator_set", {"gpio": 6, "value": 0, "mode": "digital"})  # Valve
+    esp1.configure_actuator(gpio=5, actuator_type="pump", name="Main Pump")
+    esp1.configure_actuator(gpio=6, actuator_type="valve", name="Main Valve")
     
     # Pre-configure ESP-002 with sensors
-    esp2.set_sensor_value(gpio=34, raw_value=2048.0, sensor_type="analog")   # Moisture
-    esp2.set_sensor_value(gpio=35, raw_value=1500.0, sensor_type="analog")   # Temperature
-    esp2.set_sensor_value(gpio=36, raw_value=1.0, sensor_type="digital")     # Flow
+    esp2.set_sensor_value(gpio=34, raw_value=2048.0, sensor_type="moisture", name="Soil Moisture")
+    esp2.set_sensor_value(gpio=35, raw_value=1500.0, sensor_type="analog", name="Temperature Raw")
+    esp2.set_sensor_value(gpio=36, raw_value=1.0, sensor_type="digital", name="Flow Sensor")
     
     # Pre-configure ESP-003 with mixed (actuator + sensors)
-    esp3.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})  # Pump
-    esp3.set_sensor_value(gpio=34, raw_value=3000.0, sensor_type="analog")   # Moisture
-    esp3.set_sensor_value(gpio=35, raw_value=1800.0, sensor_type="analog")   # Temperature
+    esp3.configure_actuator(gpio=5, actuator_type="pump", name="Backup Pump")
+    esp3.set_sensor_value(gpio=34, raw_value=3000.0, sensor_type="moisture", name="Backup Moisture")
+    esp3.set_sensor_value(gpio=35, raw_value=1800.0, sensor_type="analog", name="Backup Temp")
     
     # Clear setup messages
     esp1.clear_published_messages()
@@ -131,6 +362,81 @@ def multiple_mock_esp32():
     esp1.reset()
     esp2.reset()
     esp3.reset()
+
+
+@pytest.fixture
+def multiple_mock_esp32_with_zones():
+    """
+    Provide multiple ESPs with complete zone configuration for zone-based testing.
+    
+    Zone structure:
+    - Master Zone: greenhouse-complex
+    - Subzones:
+      - zone-a: ESP-A (sensors) + ESP-B (actuators)
+      - zone-b: ESP-C (sensors) + ESP-D (actuators)
+    """
+    esps = {}
+    
+    # Zone A - Sensors
+    esp_a_sensors = MockESP32Client(esp_id="ESP_ZA_SENS", kaiser_id="god")
+    esp_a_sensors.configure_zone("greenhouse-a", "greenhouse-complex", "zone-a-sensors")
+    esp_a_sensors.set_sensor_value(gpio=4, raw_value=24.0, sensor_type="DS18B20", name="Zone A Temp")
+    esp_a_sensors.set_multi_value_sensor(gpio=21, sensor_type="SHT31", primary_value=25.0, 
+                                          secondary_values={"humidity": 70.0}, name="Zone A SHT31")
+    esps["zone_a_sensors"] = esp_a_sensors
+    
+    # Zone A - Actuators
+    esp_a_actuators = MockESP32Client(esp_id="ESP_ZA_ACT", kaiser_id="god")
+    esp_a_actuators.configure_zone("greenhouse-a", "greenhouse-complex", "zone-a-actuators")
+    esp_a_actuators.configure_actuator(gpio=5, actuator_type="pump", name="Zone A Pump")
+    esp_a_actuators.configure_actuator(gpio=6, actuator_type="fan", name="Zone A Fan")
+    esps["zone_a_actuators"] = esp_a_actuators
+    
+    # Zone B - Sensors
+    esp_b_sensors = MockESP32Client(esp_id="ESP_ZB_SENS", kaiser_id="god")
+    esp_b_sensors.configure_zone("greenhouse-b", "greenhouse-complex", "zone-b-sensors")
+    esp_b_sensors.set_sensor_value(gpio=4, raw_value=26.0, sensor_type="DS18B20", name="Zone B Temp")
+    esp_b_sensors.set_multi_value_sensor(gpio=21, sensor_type="SHT31", primary_value=27.0,
+                                          secondary_values={"humidity": 65.0}, name="Zone B SHT31")
+    esps["zone_b_sensors"] = esp_b_sensors
+    
+    # Zone B - Actuators
+    esp_b_actuators = MockESP32Client(esp_id="ESP_ZB_ACT", kaiser_id="god")
+    esp_b_actuators.configure_zone("greenhouse-b", "greenhouse-complex", "zone-b-actuators")
+    esp_b_actuators.configure_actuator(gpio=5, actuator_type="pump", name="Zone B Pump")
+    esp_b_actuators.configure_actuator(gpio=6, actuator_type="fan", name="Zone B Fan")
+    esps["zone_b_actuators"] = esp_b_actuators
+    
+    # Clear setup messages
+    for esp in esps.values():
+        esp.clear_published_messages()
+    
+    yield esps
+    
+    # Cleanup
+    for esp in esps.values():
+        esp.reset()
+
+
+@pytest.fixture
+def mock_esp32_safe_mode():
+    """
+    Provide a MockESP32Client that can be put into SAFE_MODE for testing.
+    """
+    mock = MockESP32Client(esp_id="ESP_SAFE001", kaiser_id="god")
+    
+    # Configure zone (required for actuator control)
+    mock.configure_zone("safe-mode-zone", "main-zone", "safe-subzone")
+    
+    # Configure some actuators
+    mock.configure_actuator(gpio=5, actuator_type="pump", name="Test Pump")
+    mock.configure_actuator(gpio=6, actuator_type="valve", name="Test Valve")
+    
+    mock.clear_published_messages()
+    
+    yield mock
+    
+    mock.reset()
 
 
 @pytest.fixture
@@ -229,13 +535,3 @@ def mqtt_test_client(mqtt_test_config):
     """
     # TODO: Implement MQTT test client when MQTT client is available
     pytest.skip("MQTT test client not yet implemented")
-
-    # Future implementation:
-    # from god_kaiser_server.src.mqtt.client import MQTTClient
-    #
-    # client = MQTTClient(**mqtt_test_config)
-    # client.connect()
-    #
-    # yield client
-    #
-    # client.disconnect()
