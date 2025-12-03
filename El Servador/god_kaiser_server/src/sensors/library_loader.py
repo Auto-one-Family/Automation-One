@@ -18,6 +18,7 @@ from typing import Dict, Optional
 
 from ..core.logging_config import get_logger
 from .base_processor import BaseSensorProcessor
+from .sensor_type_registry import normalize_sensor_type
 
 logger = get_logger(__name__)
 
@@ -76,22 +77,29 @@ class LibraryLoader:
         """
         Get processor instance for sensor type.
 
+        Automatically normalizes sensor type from ESP32 format to server processor format
+        using the sensor type registry.
+
         Args:
-            sensor_type: Sensor type identifier (e.g., "ph", "temperature")
+            sensor_type: Sensor type identifier (e.g., "ph", "temperature_sht31", "sht31_temp")
 
         Returns:
             BaseSensorProcessor instance or None if not found
 
         Example:
-            processor = loader.get_processor("ph")
+            processor = loader.get_processor("temperature_sht31")  # Auto-normalized to "sht31_temp"
             if processor:
                 result = processor.process(raw_value=2150, ...)
         """
-        processor = self.processors.get(sensor_type.lower())
+        # Normalize sensor type (ESP32 → Server Processor)
+        normalized_type = normalize_sensor_type(sensor_type)
+        
+        processor = self.processors.get(normalized_type)
 
         if processor is None:
             logger.warning(
-                f"No processor found for sensor type: {sensor_type}. "
+                f"No processor found for sensor type: {sensor_type} "
+                f"(normalized: {normalized_type}). "
                 f"Available processors: {list(self.processors.keys())}"
             )
 
