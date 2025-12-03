@@ -85,6 +85,10 @@ public:
     // Perform measurement for a specific GPIO-based sensor
     bool performMeasurement(uint8_t gpio, SensorReading& reading_out);
 
+    // Perform multi-value measurement (for sensors that provide multiple values)
+    // Returns number of readings created, or 0 if failed
+    uint8_t performMultiValueMeasurement(uint8_t gpio, SensorReading* readings_out, uint8_t max_readings);
+
     // Perform measurements for all active sensors
     // Publishes results via MQTT automatically
     void performAllMeasurements();

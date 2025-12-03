@@ -10,6 +10,7 @@
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
 #include "../../models/sensor_types.h"
+#include "../../models/sensor_registry.h"
 
 // ============================================
 // GLOBAL INSTANCE
@@ -308,44 +309,101 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
         return false;
     }
     
-    // Read raw value based on sensor type
+    // Read raw value based on sensor type (using registry for dynamic detection)
     uint32_t raw_value = 0;
     
-    if (config->sensor_type == "ph_sensor" || config->sensor_type == "ec_sensor") {
-        // Analog sensor
-        raw_value = readRawAnalog(gpio);
-    } else if (config->sensor_type == "temperature_ds18b20") {
-        // OneWire sensor (requires ROM code - simplified for now)
-        int16_t raw_temp = 0;
-        uint8_t rom[8] = {0};  // TODO: Store ROM code in SensorConfig
-        if (readRawOneWire(gpio, rom, raw_temp)) {
-            raw_value = (uint32_t)raw_temp;
+    // Get sensor capability from registry
+    const SensorCapability* capability = findSensorCapability(config->sensor_type);
+    
+    if (capability) {
+        // Known sensor type - use capability information
+        if (capability->is_i2c) {
+            // I2C sensor - read from I2C bus
+            uint8_t buffer[6] = {0};
+            uint8_t device_addr = capability->i2c_address;
+            
+            // For SHT31, read 6 bytes (temp MSB, temp LSB, CRC, hum MSB, hum LSB, CRC)
+            // For other I2C sensors, adjust buffer size as needed
+            if (readRawI2C(gpio, device_addr, 0x00, buffer, 6)) {
+                // Extract raw value based on sensor type
+                if (config->sensor_type.indexOf("sht31") >= 0) {
+                    // SHT31: First 2 bytes are temperature (for temp sensor)
+                    // For humidity, bytes 3-4 would be used (handled separately)
+                    raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
+                } else {
+                    // Generic I2C: Use first 2 bytes
+                    raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
+                }
+            } else {
+                reading_out.valid = false;
+                reading_out.error_message = "I2C read failed";
+                return false;
+            }
         } else {
-            reading_out.valid = false;
-            reading_out.error_message = "OneWire read failed";
-            return false;
-        }
-    } else if (config->sensor_type == "temperature_sht31" || 
-               config->sensor_type.startsWith("i2c_")) {
-        // I2C sensor (simplified - requires device address and register)
-        uint8_t buffer[6] = {0};
-        uint8_t device_addr = 0x44;  // Default SHT31 address
-        if (readRawI2C(gpio, device_addr, 0x00, buffer, 6)) {
-            raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
-        } else {
-            reading_out.valid = false;
-            reading_out.error_message = "I2C read failed";
-            return false;
+            // Non-I2C sensor - check device type
+            String device_type = String(capability->device_type);
+            
+            if (device_type == "ds18b20") {
+                // OneWire sensor (requires ROM code - simplified for now)
+                int16_t raw_temp = 0;
+                uint8_t rom[8] = {0};  // TODO: Store ROM code in SensorConfig
+                if (readRawOneWire(gpio, rom, raw_temp)) {
+                    raw_value = (uint32_t)raw_temp;
+                } else {
+                    reading_out.valid = false;
+                    reading_out.error_message = "OneWire read failed";
+                    return false;
+                }
+            } else {
+                // Analog sensor (pH, EC, Moisture, etc.)
+                raw_value = readRawAnalog(gpio);
+            }
         }
     } else {
-        // Unknown sensor type - try analog
-        raw_value = readRawAnalog(gpio);
+        // Unknown sensor type - try to infer from sensor_type string
+        String lower_type = config->sensor_type;
+        lower_type.toLowerCase();
+        
+        if (lower_type.indexOf("ph") >= 0 || lower_type.indexOf("ec") >= 0 || 
+            lower_type.indexOf("moisture") >= 0) {
+            // Likely analog sensor
+            raw_value = readRawAnalog(gpio);
+        } else if (lower_type.indexOf("ds18b20") >= 0 || lower_type.indexOf("onewire") >= 0) {
+            // Likely OneWire sensor
+            int16_t raw_temp = 0;
+            uint8_t rom[8] = {0};
+            if (readRawOneWire(gpio, rom, raw_temp)) {
+                raw_value = (uint32_t)raw_temp;
+            } else {
+                reading_out.valid = false;
+                reading_out.error_message = "OneWire read failed";
+                return false;
+            }
+        } else if (lower_type.indexOf("i2c") >= 0 || lower_type.indexOf("sht") >= 0 || 
+                   lower_type.indexOf("bmp") >= 0) {
+            // Likely I2C sensor - try default address
+            uint8_t buffer[6] = {0};
+            uint8_t device_addr = getI2CAddress(lower_type, 0x44);  // Default to SHT31 address
+            if (readRawI2C(gpio, device_addr, 0x00, buffer, 6)) {
+                raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
+            } else {
+                reading_out.valid = false;
+                reading_out.error_message = "I2C read failed";
+                return false;
+            }
+        } else {
+            // Fallback: try analog
+            raw_value = readRawAnalog(gpio);
+        }
     }
+    
+    // Normalize sensor type for server (ESP32 → Server Processor)
+    String server_sensor_type = getServerSensorType(config->sensor_type);
     
     // Send raw data to Pi for processing
     RawSensorData raw_data;
     raw_data.gpio = gpio;
-    raw_data.sensor_type = config->sensor_type;
+    raw_data.sensor_type = server_sensor_type;  // Use normalized type
     raw_data.raw_value = raw_value;
     raw_data.timestamp = millis();
     raw_data.metadata = "{}";
@@ -353,9 +411,9 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     ProcessedSensorData processed;
     bool success = pi_processor_->sendRawData(raw_data, processed);
     
-    // Fill reading output
+    // Fill reading output (use normalized sensor type)
     reading_out.gpio = gpio;
-    reading_out.sensor_type = config->sensor_type;
+    reading_out.sensor_type = server_sensor_type;  // Use normalized type
     reading_out.subzone_id = config->subzone_id;
     reading_out.raw_value = raw_value;
     reading_out.processed_value = processed.value;
@@ -370,6 +428,121 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     config->last_reading = millis();
     
     return success;
+}
+
+// ============================================
+// MULTI-VALUE SENSOR MEASUREMENT (PHASE 5)
+// ============================================
+uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading* readings_out, uint8_t max_readings) {
+    if (!initialized_ || readings_out == nullptr || max_readings == 0) {
+        return 0;
+    }
+    
+    // Find sensor config
+    SensorConfig* config = findSensorConfig(gpio);
+    if (!config || !config->active) {
+        LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " not found or inactive");
+        return 0;
+    }
+    
+    // Get sensor capability
+    const SensorCapability* capability = findSensorCapability(config->sensor_type);
+    if (!capability || !capability->is_multi_value) {
+        LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " is not a multi-value sensor");
+        return 0;
+    }
+    
+    // Get device type and all value types
+    String device_type = String(capability->device_type);
+    String value_types[4];
+    uint8_t value_count = getMultiValueTypes(device_type, value_types, 4);
+    
+    if (value_count == 0 || value_count > max_readings) {
+        LOG_ERROR("Sensor Manager: Invalid value count for multi-value sensor");
+        return 0;
+    }
+    
+    // Read raw data from sensor (I2C for SHT31/BMP280)
+    if (!capability->is_i2c) {
+        LOG_ERROR("Sensor Manager: Multi-value sensor must be I2C");
+        return 0;
+    }
+    
+    uint8_t buffer[6] = {0};
+    uint8_t device_addr = capability->i2c_address;
+    
+    // Read sensor data (6 bytes for SHT31: temp MSB, temp LSB, CRC, hum MSB, hum LSB, CRC)
+    if (!readRawI2C(gpio, device_addr, 0x00, buffer, 6)) {
+        LOG_ERROR("Sensor Manager: I2C read failed for multi-value sensor");
+        return 0;
+    }
+    
+    // Create readings for each value type
+    uint8_t created_count = 0;
+    
+    for (uint8_t i = 0; i < value_count; i++) {
+        SensorReading& reading = readings_out[created_count];
+        
+        // Extract raw value based on value type
+        uint32_t raw_value = 0;
+        String value_type = value_types[i];
+        
+        if (device_type == "sht31") {
+            if (value_type == "sht31_temp") {
+                // Temperature: bytes 0-1
+                raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
+            } else if (value_type == "sht31_humidity") {
+                // Humidity: bytes 3-4
+                raw_value = (uint32_t)(buffer[3] << 8 | buffer[4]);
+            }
+        } else if (device_type == "bmp280") {
+            // BMP280: Both values come from same register read
+            // For now, use first 2 bytes (pressure)
+            // TODO: Implement proper BMP280 register reading
+            raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
+        }
+        
+        // Normalize sensor type
+        String server_sensor_type = getServerSensorType(value_type);
+        
+        // Send raw data to Pi for processing
+        RawSensorData raw_data;
+        raw_data.gpio = gpio;
+        raw_data.sensor_type = server_sensor_type;
+        raw_data.raw_value = raw_value;
+        raw_data.timestamp = millis();
+        raw_data.metadata = "{}";
+        
+        ProcessedSensorData processed;
+        bool success = pi_processor_->sendRawData(raw_data, processed);
+        
+        // Fill reading output
+        reading.gpio = gpio;
+        reading.sensor_type = server_sensor_type;
+        reading.subzone_id = config->subzone_id;
+        reading.raw_value = raw_value;
+        reading.processed_value = processed.value;
+        reading.unit = processed.unit;
+        reading.quality = processed.quality;
+        reading.timestamp = millis();
+        reading.valid = processed.valid;
+        reading.error_message = processed.error_message;
+        
+        if (success && processed.valid) {
+            created_count++;
+            
+            // Publish reading via MQTT
+            publishSensorReading(reading);
+        }
+    }
+    
+    // Update config
+    config->last_raw_value = readings_out[0].raw_value;  // Use first reading
+    config->last_reading = millis();
+    
+    LOG_INFO("Sensor Manager: Multi-value measurement created " + String(created_count) + " readings");
+    
+    return created_count;
 }
 
 // Server-Centric Deviation (Autonomous Measurement Pattern):
@@ -392,10 +565,25 @@ void SensorManager::performAllMeasurements() {
             continue;
         }
         
-        SensorReading reading;
-        if (performMeasurement(sensors_[i].gpio, reading)) {
-            // Publish via MQTT
-            publishSensorReading(reading);
+        // Check if this is a multi-value sensor
+        const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
+        
+        if (capability && capability->is_multi_value) {
+            // Multi-value sensor - create multiple readings
+            SensorReading readings[4];  // Max 4 values per sensor
+            uint8_t count = performMultiValueMeasurement(sensors_[i].gpio, readings, 4);
+            
+            // Readings are already published by performMultiValueMeasurement
+            if (count == 0) {
+                LOG_WARNING("Sensor Manager: Multi-value measurement failed for GPIO " + String(sensors_[i].gpio));
+            }
+        } else {
+            // Single-value sensor - standard measurement
+            SensorReading reading;
+            if (performMeasurement(sensors_[i].gpio, reading)) {
+                // Publish via MQTT
+                publishSensorReading(reading);
+            }
         }
     }
     
