@@ -65,12 +65,12 @@ class BMP280PressureProcessor(BaseSensorProcessor):
     - Address: 0x76 (default) or 0x77
     """
 
-    # BMP280 Pressure Specifications
-    PRESSURE_MIN = 300.0  # hPa (sensor minimum)
-    PRESSURE_MAX = 1100.0  # hPa (sensor maximum)
-    PRESSURE_TYPICAL_MIN = 950.0  # hPa (typical sea-level minimum, low pressure system)
-    PRESSURE_TYPICAL_MAX = 1050.0  # hPa (typical sea-level maximum, high pressure system)
-    RESOLUTION = 0.01  # hPa (with oversampling x16)
+    # BMP280 Pressure Specifications (based on Bosch BMP280 datasheet)
+    PRESSURE_MIN = 300.0  # hPa (sensor minimum, ~9000m altitude)
+    PRESSURE_MAX = 1100.0  # hPa (sensor maximum, ~500m below sea level)
+    PRESSURE_TYPICAL_MIN = 950.0  # hPa (typical sea-level minimum, strong low pressure system)
+    PRESSURE_TYPICAL_MAX = 1050.0  # hPa (typical sea-level maximum, strong high pressure system)
+    RESOLUTION = 0.01  # hPa (with oversampling x16, 0.18 Pa RMS noise)
 
     def get_sensor_type(self) -> str:
         """Return sensor type identifier."""
@@ -282,8 +282,25 @@ class BMP280PressureProcessor(BaseSensorProcessor):
 
         Formula: P_sealevel = P_measured / (1 - altitude / 44330) ** 5.255
 
-        Note: Good accuracy for altitudes <3000m. For higher altitudes,
-        more complex formulas considering temperature are needed.
+        Physical Background:
+        - Atmospheric pressure decreases ~12 hPa per 100m altitude gain
+        - Standard atmosphere model assumes isothermal conditions (15°C)
+        - Barometric formula based on hydrostatic equilibrium
+
+        Constants:
+        - 44330m: Scale height of Earth's atmosphere
+        - 5.255: Adiabatic index (γ/(γ-1) where γ=1.4 for air)
+
+        Numerical Examples:
+        - Sea level (0m):     1013.25 hPa → 1013.25 hPa (no change)
+        - 500m altitude:      950.0 hPa → ~1008 hPa (realistic sea-level pressure)
+        - -50m (below sea):   1020.0 hPa → ~1024 hPa (higher than measured)
+        - 3000m (high alt):   ~700 hPa → ~1013 hPa (accuracy degrades)
+
+        Accuracy:
+        - Excellent: 0-1000m (±1 hPa error)
+        - Good: 1000-3000m (±3 hPa error)
+        - Poor: >3000m (temperature effects dominate, use full formula)
 
         Args:
             pressure: Measured pressure at altitude (hPa)
@@ -291,21 +308,30 @@ class BMP280PressureProcessor(BaseSensorProcessor):
 
         Returns:
             Sea-level corrected pressure (hPa)
-        """
-        # Barometric formula constants
-        ALTITUDE_CONSTANT = 44330.0  # meters
-        EXPONENT = 5.255
 
-        # Calculate sea-level pressure
+        Note:
+            - For high-accuracy applications >3000m, use full barometric formula
+              with actual temperature profile
+            - Negative altitudes (below sea level) are supported
+        """
+        # Barometric formula constants (Standard Atmosphere Model)
+        ALTITUDE_CONSTANT = 44330.0  # meters (scale height)
+        EXPONENT = 5.255  # adiabatic index
+
+        # Calculate correction factor
         factor = 1 - (altitude / ALTITUDE_CONSTANT)
 
-        # Avoid division by zero or negative values
+        # EDGE CASE: Avoid division by zero or negative values
+        # factor <= 0 occurs at altitude >= 44330m (edge of atmosphere)
+        # In practice: sensor range 300-1100 hPa limits altitude to ~9000m
         if factor <= 0:
-            return pressure
+            return pressure  # Return uncorrected (extreme altitude)
 
+        # Apply barometric formula
         pressure_sealevel = pressure / (factor ** EXPONENT)
 
-        # Clamp to sensor range
+        # Clamp to sensor physical range
+        # Important: Very high altitudes + correction can exceed sensor max
         pressure_sealevel = max(self.PRESSURE_MIN, min(self.PRESSURE_MAX, pressure_sealevel))
 
         return pressure_sealevel
@@ -314,24 +340,48 @@ class BMP280PressureProcessor(BaseSensorProcessor):
         """
         Convert pressure from hPa to other units.
 
+        Unit Conversion Details:
+
+        1. hPa → Pa (Pascal, SI unit):
+           - Conversion: multiply by 100
+           - 1 hPa = 100 Pa (exact)
+           - Example: 1013.25 hPa = 101325 Pa (standard atmosphere)
+           - Use case: Scientific applications, SI-standard compliance
+
+        2. hPa → mmHg (millimeters of mercury):
+           - Conversion: multiply by 0.750062
+           - 1 hPa = 0.750062 mmHg (based on mercury density at 0°C)
+           - Example: 1013.25 hPa ≈ 760 mmHg (standard atmosphere)
+           - Use case: Medical applications (blood pressure), meteorology (Europe/Asia)
+
+        3. hPa → inHg (inches of mercury):
+           - Conversion: multiply by 0.02953
+           - 1 hPa = 0.0295300 inHg (approximated to 0.02953)
+           - Example: 1013.25 hPa ≈ 29.92 inHg (standard atmosphere)
+           - Use case: Aviation, meteorology (USA)
+
         Args:
-            pressure_hpa: Pressure in hPa
+            pressure_hpa: Pressure in hPa (hectopascal, millibar)
             unit_type: "hpa", "pa", "mmhg", "inhg"
 
         Returns:
             Tuple of (converted_value, unit_string)
+
+        Note:
+            - hPa and mbar are equivalent (1 hPa = 1 mbar)
+            - Mercury-based units (mmHg, inHg) assume standard gravity and 0°C
         """
         if unit_type == "pa":
-            # Pascal = hPa * 100
+            # Pascal = hPa * 100 (exact SI conversion)
             return (pressure_hpa * 100.0, "Pa")
         elif unit_type == "mmhg":
-            # mmHg = hPa * 0.750062
+            # mmHg = hPa * 0.750062 (based on mercury density)
             return (pressure_hpa * 0.750062, "mmHg")
         elif unit_type == "inhg":
-            # inHg = hPa * 0.02953
+            # inHg = hPa * 0.02953 (approximation of 0.0295300)
             return (pressure_hpa * 0.02953, "inHg")
         else:
-            # Default: hPa
+            # Default: hPa (most common unit in meteorology)
             return (pressure_hpa, "hPa")
 
     def _assess_quality(self, pressure_hpa: float, calibrated: bool) -> str:

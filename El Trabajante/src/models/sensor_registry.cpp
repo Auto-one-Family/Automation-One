@@ -240,3 +240,4 @@ uint8_t getMultiValueTypes(const String& device_type, String* output, uint8_t ma
     return 0;
 }
 
+

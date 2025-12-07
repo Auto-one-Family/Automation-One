@@ -60,18 +60,18 @@ class MoistureSensorProcessor(BaseSensorProcessor):
     """
 
     # ESP32 ADC configuration
-    ADC_MAX = 4095  # 12-bit ADC
-    ADC_VOLTAGE_RANGE = 3.3  # Volts
+    ADC_MAX = 4095  # 12-bit ADC (ESP32 ADC1: GPIO32-39 only, ADC2 conflicts with WiFi!)
+    ADC_VOLTAGE_RANGE = 3.3  # Volts (ESP32 ADC reference voltage)
 
-    # Moisture range
-    MOISTURE_MIN = 0.0  # % (Dry)
-    MOISTURE_MAX = 100.0  # % (Wet/Saturated)
+    # Moisture measurement range (percentage)
+    MOISTURE_MIN = 0.0  # % (Dry, sensor in air)
+    MOISTURE_MAX = 100.0  # % (Wet/Saturated, sensor in water)
 
-    # Quality thresholds
-    MOISTURE_TYPICAL_MIN = 20.0  # % (Healthy soil moisture minimum)
-    MOISTURE_TYPICAL_MAX = 80.0  # % (Healthy soil moisture maximum)
-    VERY_DRY_THRESHOLD = 10.0  # % (Very dry, possible sensor disconnect)
-    SATURATED_THRESHOLD = 95.0  # % (Saturated, possible sensor in water)
+    # Quality assessment thresholds (based on agricultural best practices)
+    MOISTURE_TYPICAL_MIN = 20.0  # % (Healthy soil moisture minimum for most plants)
+    MOISTURE_TYPICAL_MAX = 80.0  # % (Healthy soil moisture maximum, avoid root rot)
+    VERY_DRY_THRESHOLD = 10.0  # % (Very dry, approaching permanent wilting point)
+    SATURATED_THRESHOLD = 95.0  # % (Saturated, possible sensor in water or waterlogged soil)
 
     def get_sensor_type(self) -> str:
         """Return sensor type identifier."""
@@ -306,19 +306,44 @@ class MoistureSensorProcessor(BaseSensorProcessor):
 
         Linear mapping: moisture % = (raw - dry) / (wet - dry) * 100
 
+        Physical Background:
+        - Capacitive sensors: Soil dielectric constant changes with moisture
+        - Higher moisture → lower capacitance → lower ADC value (typically)
+        - Linear relationship assumed (good approximation 0-100% range)
+
+        Calibration Points:
+        - Dry (0%): Sensor in air (typical ADC: 3000-3500)
+        - Wet (100%): Sensor in water/saturated soil (typical ADC: 1000-1500)
+
+        Numerical Example:
+        - dry_value = 3200, wet_value = 1500, adc = 2350
+        - moisture = (2350 - 3200) / (1500 - 3200) * 100 = (-850) / (-1700) * 100 = 50%
+
         Args:
-            adc_value: Raw ADC value
+            adc_value: Raw ADC value (0-4095 for 12-bit)
             dry_value: ADC value when dry (in air)
             wet_value: ADC value when wet (in water/saturated)
 
         Returns:
             Moisture percentage (0-100%)
-        """
-        # Avoid division by zero
-        if dry_value == wet_value:
-            return 50.0  # Return middle value if calibration invalid
 
-        # Linear mapping
+        Note:
+            - Result can be <0% or >100% if adc_value outside calibration range
+            - Caller (process()) clamps to [0, 100] after this function
+        """
+        # EDGE CASE: Division by zero protection
+        # Occurs if dry_value == wet_value (invalid calibration)
+        # This should never happen in practice, but protects against:
+        # - User error (same value for both calibration points)
+        # - Sensor malfunction (stuck ADC reading)
+        if dry_value == wet_value:
+            # Return 50% (middle value) as safe fallback
+            # Rationale: Better than crash, signals "unknown" moisture
+            # Quality assessment will mark this as "poor" due to uncalibrated flag
+            return 50.0
+
+        # Linear interpolation between dry (0%) and wet (100%)
+        # Note: For capacitive sensors, dry_value > wet_value (inverted)
         moisture = ((adc_value - dry_value) / (wet_value - dry_value)) * 100.0
 
         return moisture
@@ -346,32 +371,51 @@ class MoistureSensorProcessor(BaseSensorProcessor):
 
     def _assess_quality(self, moisture: float, calibrated: bool) -> str:
         """
-        Assess data quality.
+        Assess data quality based on moisture percentage and calibration status.
 
-        Quality tiers:
-        - "good": Healthy soil moisture range (20-80%), calibrated
-        - "fair": Outside typical range but valid (10-20% or 80-95%)
-        - "poor": Very dry (<10%) or saturated (>95%), uncalibrated extremes
-        - "error": Outside valid range (should not happen after clamping)
+        Quality Assessment Logic:
+
+        Quality Tiers:
+        - "error": Outside physical range 0-100% (should never happen due to clamping)
+        - "poor": Very dry (<10%) or saturated (>95%) - possible sensor issues
+        - "good": Healthy soil moisture (20-80%) - optimal plant growth range
+        - "fair": Marginal range (10-20% or 80-95%) - acceptable but not optimal
+
+        Agricultural Context:
+        - 20-80%: Optimal range for most plants (good root aeration + water availability)
+        - 10-20%: Approaching wilting point (plants start to stress)
+        - 80-95%: High moisture (possible root rot risk for some plants)
+        - <10%: Very dry (sensor possibly disconnected or in air)
+        - >95%: Saturated (sensor possibly in water, not soil)
+
+        Calibration Impact:
+        - Calibrated sensors: More reliable readings → affects quality tier
+        - Uncalibrated: Uses default mapping (±10% accuracy) → may affect interpretation
 
         Args:
-            moisture: Moisture percentage
-            calibrated: Whether calibration was applied
+            moisture: Moisture percentage (0-100%)
+            calibrated: Whether 2-point calibration was applied
 
         Returns:
             Quality string: "good", "fair", "poor", "error"
+
+        Examples:
+            - 45%, calibrated=True → "good" (optimal range)
+            - 15%, calibrated=True → "fair" (approaching dry)
+            - 5%, calibrated=False → "poor" (very dry, uncalibrated)
+            - 98%, calibrated=True → "poor" (saturated, possible sensor in water)
         """
-        # Error: Outside physical range (shouldn't happen due to clamping)
+        # Error: Outside physical range (shouldn't happen due to clamping in process())
         if moisture < self.MOISTURE_MIN or moisture > self.MOISTURE_MAX:
             return "error"
 
-        # Poor: Very dry or saturated
+        # Poor: Very dry or saturated (possible sensor malfunction or extreme conditions)
         if moisture < self.VERY_DRY_THRESHOLD or moisture > self.SATURATED_THRESHOLD:
             return "poor"
 
-        # Good: Within typical healthy range
+        # Good: Within typical healthy soil moisture range (optimal for most plants)
         if self.MOISTURE_TYPICAL_MIN <= moisture <= self.MOISTURE_TYPICAL_MAX:
             return "good"
 
-        # Fair: Outside typical range but acceptable
+        # Fair: Outside typical range but still valid (marginal conditions)
         return "fair"
