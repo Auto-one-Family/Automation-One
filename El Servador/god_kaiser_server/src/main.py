@@ -17,9 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import sensor_processing
 from .api.v1 import actuators, esp, sensors
+from .api.v1.websocket import realtime as websocket_realtime
 from .core.config import get_settings
 from .core.logging_config import get_logger
-from .db.session import dispose_engine, get_engine, init_db
+from .db.repositories import ActuatorRepository, ESPRepository, LogicRepository
+from .db.session import dispose_engine, get_engine, get_session, init_db
 from .mqtt.client import MQTTClient
 from .mqtt.handlers import (
     actuator_handler,
@@ -28,13 +30,20 @@ from .mqtt.handlers import (
     heartbeat_handler,
     sensor_handler,
 )
+from .mqtt.publisher import Publisher
 from .mqtt.subscriber import Subscriber
+from .services.actuator_service import ActuatorService
+from .services.logic_engine import LogicEngine
+from .services.safety_service import SafetyService
+from .websocket.manager import WebSocketManager
 
 logger = get_logger(__name__)
 settings = get_settings()
 
-# Global subscriber instance (for cleanup)
+# Global instances (for cleanup)
 _subscriber_instance: Subscriber = None
+_logic_engine: LogicEngine = None
+_websocket_manager: WebSocketManager = None
 
 
 @asynccontextmanager
@@ -106,6 +115,42 @@ async def lifespan(app: FastAPI):
             _subscriber_instance.subscribe_all()
             logger.info("MQTT subscriptions complete")
 
+        # Step 5: Initialize WebSocket Manager
+        logger.info("Initializing WebSocket Manager...")
+        global _websocket_manager
+        _websocket_manager = await WebSocketManager.get_instance()
+        await _websocket_manager.initialize()
+        logger.info("WebSocket Manager initialized")
+
+        # Step 6: Initialize Safety Service, Actuator Service, and Logic Engine
+        logger.info("Initializing services...")
+        async for session in get_session():
+            # Initialize repositories
+            actuator_repo = ActuatorRepository(session)
+            esp_repo = ESPRepository(session)
+            logic_repo = LogicRepository(session)
+            
+            # Initialize Safety Service
+            safety_service = SafetyService(actuator_repo, esp_repo)
+            
+            # Initialize Publisher
+            publisher = Publisher()
+            
+            # Initialize Actuator Service
+            actuator_service = ActuatorService(actuator_repo, safety_service, publisher)
+            
+            # Initialize Logic Engine
+            global _logic_engine
+            _logic_engine = LogicEngine(logic_repo, actuator_service, _websocket_manager)
+            await _logic_engine.start()
+            
+            # Set global instance for handlers
+            from .services.logic_engine import set_logic_engine
+            set_logic_engine(_logic_engine)
+            
+            logger.info("Services initialized successfully")
+            break  # Exit after first session
+
         logger.info("=" * 60)
         logger.info("God-Kaiser Server Started Successfully")
         logger.info(f"Environment: {settings.environment}")
@@ -125,20 +170,34 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
 
     try:
-        # Step 1: Shutdown MQTT subscriber (thread pool)
+        # Step 1: Stop Logic Engine
+        global _logic_engine
+        if _logic_engine:
+            logger.info("Stopping Logic Engine...")
+            await _logic_engine.stop()
+            logger.info("Logic Engine stopped")
+        
+        # Step 2: Shutdown WebSocket Manager
+        global _websocket_manager
+        if _websocket_manager:
+            logger.info("Shutting down WebSocket Manager...")
+            await _websocket_manager.shutdown()
+            logger.info("WebSocket Manager shutdown complete")
+        
+        # Step 3: Shutdown MQTT subscriber (thread pool)
         if _subscriber_instance:
             logger.info("Shutting down MQTT subscriber thread pool...")
             _subscriber_instance.shutdown(wait=True, timeout=30.0)
             logger.info("MQTT subscriber shutdown complete")
         
-        # Step 2: Disconnect MQTT client
+        # Step 4: Disconnect MQTT client
         logger.info("Disconnecting MQTT client...")
         mqtt_client = MQTTClient.get_instance()
         if mqtt_client.is_connected():
             mqtt_client.disconnect()
             logger.info("MQTT client disconnected")
 
-        # Step 3: Dispose database engine
+        # Step 5: Dispose database engine
         logger.info("Disposing database engine...")
         await dispose_engine()
         logger.info("Database engine disposed")
@@ -222,6 +281,9 @@ app.include_router(actuators.router, prefix="/api", tags=["actuators"])
 
 # Sensor Configuration API
 app.include_router(sensors.router, prefix="/api", tags=["sensors"])
+
+# WebSocket API
+app.include_router(websocket_realtime.router, prefix="/api/v1", tags=["websocket"])
 
 
 if __name__ == "__main__":

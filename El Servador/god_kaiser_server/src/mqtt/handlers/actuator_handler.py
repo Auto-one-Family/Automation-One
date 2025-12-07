@@ -152,6 +152,22 @@ class ActuatorStatusHandler:
                         f"gpio={gpio}, error={error}"
                     )
 
+                # WebSocket Broadcast
+                try:
+                    from ...websocket.manager import WebSocketManager
+                    ws_manager = await WebSocketManager.get_instance()
+                    await ws_manager.broadcast("actuator_status", {
+                        "esp_id": esp_id_str,
+                        "gpio": gpio,
+                        "actuator_type": actuator_type,
+                        "state": state,
+                        "value": value,
+                        "emergency": payload.get("emergency", "normal"),
+                        "timestamp": payload.get("ts")
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast actuator status via WebSocket: {e}")
+
                 return True
 
         except Exception as e:

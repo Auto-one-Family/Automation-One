@@ -1,3 +1,166 @@
-"""Logic Rules Repository - Phase 2 - Priority: 🟡 HIGH - Status: PLANNED
+"""
+Logic Rules Repository
+
 Stores cross-ESP automation rules + execution history.
-Reference: .claude/PI_SERVER_REFACTORING.md (Lines 456, Phase 2)"""
+"""
+
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models.logic import CrossESPLogic, LogicExecutionHistory
+from .base_repo import BaseRepository
+
+
+class LogicRepository(BaseRepository[CrossESPLogic]):
+    """
+    Logic Rules Repository with CrossESPLogic-specific queries.
+    
+    Provides methods for querying automation rules and logging execution history.
+    """
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(CrossESPLogic, session)
+
+    async def get_enabled_rules(self) -> list[CrossESPLogic]:
+        """
+        Get all enabled rules, sorted by priority (ASC - lower priority number = higher priority).
+        
+        Returns:
+            List of enabled CrossESPLogic rules sorted by priority
+        """
+        stmt = (
+            select(CrossESPLogic)
+            .where(CrossESPLogic.enabled == True)
+            .order_by(CrossESPLogic.priority.asc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_rules_by_trigger_sensor(
+        self, esp_id: str, gpio: int, sensor_type: str
+    ) -> list[CrossESPLogic]:
+        """
+        Find rules that trigger on a specific sensor.
+        
+        Matches rules where trigger_conditions contains:
+        - esp_id matching the provided esp_id
+        - gpio matching the provided gpio
+        - sensor_type matching the provided sensor_type
+        
+        Args:
+            esp_id: ESP device ID (e.g., "ESP_12AB34CD")
+            gpio: GPIO pin number
+            sensor_type: Sensor type (e.g., "temperature", "humidity")
+            
+        Returns:
+            List of matching CrossESPLogic rules
+        """
+        # Get all enabled rules first
+        all_rules = await self.get_enabled_rules()
+        
+        # Filter rules that match the trigger sensor
+        matching_rules = []
+        for rule in all_rules:
+            trigger = rule.trigger_conditions
+            
+            # Handle single condition or multiple conditions
+            conditions = []
+            if isinstance(trigger, dict):
+                # Check if it's a single condition or a compound condition
+                if trigger.get("type") == "sensor_threshold":
+                    conditions = [trigger]
+                elif trigger.get("logic") in ("AND", "OR"):
+                    # Compound condition with multiple sub-conditions
+                    conditions = trigger.get("conditions", [])
+                else:
+                    # Single condition without type field (legacy format)
+                    conditions = [trigger]
+            
+            # Check each condition for sensor match
+            for condition in conditions:
+                if condition.get("type") == "sensor_threshold":
+                    if (
+                        condition.get("esp_id") == esp_id
+                        and condition.get("gpio") == gpio
+                        and condition.get("sensor_type") == sensor_type
+                    ):
+                        matching_rules.append(rule)
+                        break  # Found match, no need to check other conditions for this rule
+        
+        return matching_rules
+
+    async def get_last_execution(self, rule_id: uuid.UUID) -> Optional[datetime]:
+        """
+        Get timestamp of the last execution for a rule (for cooldown check).
+        
+        Args:
+            rule_id: UUID of the logic rule
+            
+        Returns:
+            Timestamp of last execution, or None if rule has never been executed
+        """
+        stmt = (
+            select(func.max(LogicExecutionHistory.timestamp))
+            .where(LogicExecutionHistory.logic_rule_id == rule_id)
+        )
+        result = await self.session.execute(stmt)
+        max_timestamp = result.scalar_one_or_none()
+        return max_timestamp
+
+    async def log_execution(
+        self,
+        rule_id: uuid.UUID,
+        trigger_data: dict,
+        actions: list,
+        success: bool,
+        execution_ms: int,
+        error_message: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> LogicExecutionHistory:
+        """
+        Log rule execution to history.
+        
+        Args:
+            rule_id: UUID of the logic rule that was executed
+            trigger_data: Snapshot of sensor data that triggered the rule
+            actions: List of actions that were executed
+            success: Whether execution succeeded
+            execution_ms: Execution duration in milliseconds
+            error_message: Optional error message if execution failed
+            metadata: Optional additional execution metadata
+            
+        Returns:
+            Created LogicExecutionHistory instance
+        """
+        history = LogicExecutionHistory(
+            logic_rule_id=rule_id,
+            trigger_data=trigger_data,
+            actions_executed=actions,
+            success=success,
+            error_message=error_message,
+            execution_time_ms=execution_ms,
+            execution_metadata=metadata,
+        )
+        self.session.add(history)
+        await self.session.flush()
+        await self.session.refresh(history)
+        return history
+
+    async def update_rule_enabled(
+        self, rule_id: uuid.UUID, enabled: bool
+    ) -> Optional[CrossESPLogic]:
+        """
+        Enable or disable a rule.
+        
+        Args:
+            rule_id: UUID of the logic rule
+            enabled: True to enable, False to disable
+            
+        Returns:
+            Updated CrossESPLogic instance, or None if rule not found
+        """
+        return await self.update(rule_id, enabled=enabled)

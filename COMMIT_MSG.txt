@@ -1,0 +1,20 @@
+feat(server): Phase 3 & 4 - Cross-ESP Automation & WebSocket
+
+PHASE 3 - Cross-ESP Automation Engine:
+- LogicRepository: Rule-Queries, Execution-History, Cooldown-Check
+- SafetyService: EmergencyState Enum, Command-Validierung, E-Stop
+- ActuatorService: Command-Workflow mit Safety-Check, MQTT-Publishing
+- LogicEngine: Background Task, Sensor-Trigger, AND/OR Conditions
+
+PHASE 4 - Real-Time & Utils:
+- WebSocketManager: Singleton, Broadcast, Rate-Limiting (10 msg/sec)
+- Utils: time_helpers, data_helpers, network_helpers, mqtt_helpers
+- Sensor Libraries: CO2, Light, Flow mit Kalibrierung
+
+Infrastruktur:
+- main.py: Service-Lifecycle (Init/Shutdown)
+- WebSocket-Endpoint: /api/v1/ws/realtime/{client_id}
+- Alembic Migration umbenannt
+
+~1.900 neue LOC, Status: 100% implementiert
+

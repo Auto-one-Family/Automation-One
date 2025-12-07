@@ -194,6 +194,47 @@ class SensorDataHandler:
                     f"gpio={gpio}, processing_mode={processing_mode}"
                 )
 
+                # WebSocket Broadcast
+                try:
+                    from ...websocket.manager import WebSocketManager
+                    ws_manager = await WebSocketManager.get_instance()
+                    await ws_manager.broadcast("sensor_data", {
+                        "esp_id": esp_id_str,
+                        "gpio": gpio,
+                        "sensor_type": sensor_type,
+                        "value": processed_value or raw_value,
+                        "unit": unit,
+                        "quality": quality,
+                        "timestamp": payload.get("ts")
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")
+
+                # Logic Engine Trigger (non-blocking!)
+                try:
+                    import asyncio
+                    from ...services.logic_engine import get_logic_engine
+                    
+                    async def trigger_logic_evaluation():
+                        try:
+                            logic_engine = get_logic_engine()
+                            if logic_engine:
+                                await logic_engine.evaluate_sensor_data(
+                                    esp_id=esp_id_str,
+                                    gpio=gpio,
+                                    sensor_type=sensor_type,
+                                    value=processed_value or raw_value
+                                )
+                            else:
+                                logger.debug("Logic Engine not yet initialized, skipping evaluation")
+                        except Exception as e:
+                            logger.error(f"Error in logic evaluation: {e}", exc_info=True)
+                    
+                    # Create non-blocking task
+                    asyncio.create_task(trigger_logic_evaluation())
+                except Exception as e:
+                    logger.warning(f"Failed to trigger logic evaluation: {e}")
+
                 return True
 
         except Exception as e:
