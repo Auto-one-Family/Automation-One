@@ -3,7 +3,7 @@ Actuator Repository: Actuator Config, State, and History
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -66,7 +66,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         if existing:
             existing.current_value = current_value
             existing.state = state
-            existing.last_command_timestamp = datetime.utcnow()
+            existing.last_command_timestamp = datetime.now(timezone.utc)
             for key, value in kwargs.items():
                 if hasattr(existing, key):
                     setattr(existing, key, value)
@@ -80,7 +80,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
                 actuator_type=actuator_type,
                 current_value=current_value,
                 state=state,
-                last_command_timestamp=datetime.utcnow(),
+                last_command_timestamp=datetime.now(timezone.utc),
                 **kwargs,
             )
             self.session.add(new_state)

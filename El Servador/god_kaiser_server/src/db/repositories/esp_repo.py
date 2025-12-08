@@ -3,7 +3,7 @@ ESP Repository: Device Queries and Updates
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -126,7 +126,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
             return None
 
         device.status = status
-        device.last_seen = last_seen or datetime.utcnow()
+        device.last_seen = last_seen or datetime.now(timezone.utc)
 
         await self.session.flush()
         await self.session.refresh(device)

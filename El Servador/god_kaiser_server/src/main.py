@@ -8,6 +8,10 @@ Features:
 - Topic subscription and handler registration
 - Database initialization
 - Graceful shutdown
+- Complete REST API with JWT authentication
+
+Phase: 5 (Week 9-10) - API Layer
+Status: IMPLEMENTED
 """
 
 from contextlib import asynccontextmanager
@@ -16,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import sensor_processing
-from .api.v1 import actuators, esp, sensors
+from .api.v1 import api_v1_router
 from .api.v1.websocket import realtime as websocket_realtime
 from .core.config import get_settings
 from .core.logging_config import get_logger
@@ -96,7 +100,7 @@ async def lifespan(app: FastAPI):
                 actuator_handler.handle_actuator_status
             )
             _subscriber_instance.register_handler(
-                "kaiser/god/esp/+/heartbeat",
+                "kaiser/god/esp/+/system/heartbeat",
                 heartbeat_handler.handle_heartbeat
             )
             _subscriber_instance.register_handler(
@@ -156,6 +160,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"Environment: {settings.environment}")
         logger.info(f"Log Level: {settings.log_level}")
         logger.info(f"MQTT Broker: {settings.mqtt.broker_host}:{settings.mqtt.broker_port}")
+        logger.info("API Endpoints: /api/v1/auth, /api/v1/esp, /api/v1/sensors, /api/v1/actuators, /api/v1/logic, /api/v1/health")
         logger.info("=" * 60)
 
         yield  # Server runs here
@@ -171,14 +176,12 @@ async def lifespan(app: FastAPI):
 
     try:
         # Step 1: Stop Logic Engine
-        global _logic_engine
         if _logic_engine:
             logger.info("Stopping Logic Engine...")
             await _logic_engine.stop()
             logger.info("Logic Engine stopped")
         
         # Step 2: Shutdown WebSocket Manager
-        global _websocket_manager
         if _websocket_manager:
             logger.info("Shutting down WebSocket Manager...")
             await _websocket_manager.shutdown()
@@ -214,9 +217,34 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="God-Kaiser Server",
-    description="Central control hub for ESP32 automation nodes with Pi-Enhanced sensor processing",
+    description="""
+    Central control hub for ESP32 automation nodes with Pi-Enhanced sensor processing.
+    
+    ## Features
+    - **ESP32 Device Management**: Register, configure, and monitor ESP32 nodes
+    - **Sensor Processing**: Server-side Pi-Enhanced sensor data processing
+    - **Actuator Control**: Safe command execution with safety validation
+    - **Logic Automation**: Cross-ESP automation rules
+    - **Real-time Updates**: WebSocket support for live data
+    
+    ## Authentication
+    - JWT tokens for user authentication
+    - API keys for ESP32 devices
+    
+    ## API Versions
+    - v1: Current stable API
+    """,
     version="2.0.0",
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "auth", "description": "Authentication & Authorization"},
+        {"name": "esp", "description": "ESP32 Device Management"},
+        {"name": "sensors", "description": "Sensor Configuration & Data"},
+        {"name": "actuators", "description": "Actuator Control & Commands"},
+        {"name": "logic", "description": "Logic Rules & Automation"},
+        {"name": "health", "description": "Health Checks & Metrics"},
+        {"name": "websocket", "description": "WebSocket Real-time Updates"},
+    ],
 )
 
 # ===== MIDDLEWARE =====
@@ -233,7 +261,7 @@ app.add_middleware(
 # ===== ROUTES =====
 
 # Root endpoint
-@app.get("/")
+@app.get("/", tags=["root"])
 async def root():
     """Health check endpoint."""
     mqtt_client = MQTTClient.get_instance()
@@ -243,47 +271,31 @@ async def root():
         "status": "online",
         "mqtt_connected": mqtt_client.is_connected(),
         "environment": settings.environment,
+        "docs": "/docs",
+        "api_prefix": "/api/v1",
     }
 
 
-@app.get("/health")
-async def health_check():
-    """Detailed health check endpoint."""
-    mqtt_client = MQTTClient.get_instance()
+# ===== API v1 ROUTERS =====
 
-    return {
-        "status": "healthy",
-        "mqtt": {
-            "connected": mqtt_client.is_connected(),
-            "broker": f"{settings.mqtt.broker_host}:{settings.mqtt.broker_port}",
-        },
-        "database": {
-            "connected": True,  # If we got here, DB is accessible
-        },
-    }
+# Include all v1 API endpoints
+app.include_router(
+    api_v1_router,
+    prefix="/api",
+)
 
-
-# ===== API ROUTERS =====
-
-# Sensor Processing API (Real-Time HTTP)
+# Sensor Processing API (Real-Time HTTP) - keep at root for backward compatibility
 app.include_router(
     sensor_processing.router,
     tags=["sensors", "processing"],
 )
 
-# ===== ADDITIONAL API ROUTERS =====
-
-# ESP Management API
-app.include_router(esp.router, prefix="/api", tags=["esp"])
-
-# Actuator Control API
-app.include_router(actuators.router, prefix="/api", tags=["actuators"])
-
-# Sensor Configuration API
-app.include_router(sensors.router, prefix="/api", tags=["sensors"])
-
 # WebSocket API
-app.include_router(websocket_realtime.router, prefix="/api/v1", tags=["websocket"])
+app.include_router(
+    websocket_realtime.router,
+    prefix="/api/v1",
+    tags=["websocket"],
+)
 
 
 if __name__ == "__main__":
