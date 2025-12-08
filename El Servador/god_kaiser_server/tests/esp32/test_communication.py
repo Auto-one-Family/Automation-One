@@ -314,6 +314,29 @@ class TestConcurrentCommands:
         assert response4["data"]["state"] is False
 
 
+class TestInMemoryMQTTClient:
+    """Test in-memory MQTT test client for brokerless workflows."""
+
+    def test_publish_and_wait_for_message(self, mqtt_test_client):
+        mqtt_test_client.publish("kaiser/god/esp/test/command", {"cmd": "ping"})
+        message = mqtt_test_client.wait_for_message("kaiser/god/esp/test/command", timeout=1)
+
+        assert message["topic"] == "kaiser/god/esp/test/command"
+        assert message["payload"]["cmd"] == "ping"
+
+    def test_subscribe_callback_invoked(self, mqtt_test_client):
+        calls = []
+
+        def on_message(msg):
+            calls.append(msg)
+
+        mqtt_test_client.subscribe("kaiser/god/esp/test/response", callback=on_message)
+        mqtt_test_client.publish("kaiser/god/esp/test/response", {"ok": True})
+
+        assert len(calls) == 1
+        assert calls[0]["payload"]["ok"] is True
+
+
 # Skip real hardware tests for now (MQTT client not yet implemented)
 @pytest.mark.skip(reason="Real ESP32 MQTT client not yet implemented")
 class TestClientLifecycle:

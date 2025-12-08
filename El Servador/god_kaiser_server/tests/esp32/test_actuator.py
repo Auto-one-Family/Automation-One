@@ -131,7 +131,8 @@ class TestPWMActuatorControl:
             "value": 1.5,
             "mode": "pwm"
         })
-        assert response1["pwm_value"] == 1.5  # Mock accepts any value (real hardware would clamp)
+        assert response1["pwm_value"] == 1.0  # Clamped to max
+        assert response1["state"] is True
 
         # Test under min (should clamp to 0.0)
         response2 = mock_esp32.handle_command("actuator_set", {
@@ -139,7 +140,7 @@ class TestPWMActuatorControl:
             "value": -0.5,
             "mode": "pwm"
         })
-        # Mock converts negative to 0.0 for state
+        assert response2["pwm_value"] == 0.0
         assert response2["state"] is False
 
     def test_pwm_state_consistency(self, mock_esp32):
@@ -155,6 +156,14 @@ class TestPWMActuatorControl:
             "gpio": 7, "value": 0.1, "mode": "pwm"
         })
         assert response2["state"] is True
+
+    def test_pwm_respects_configured_limits(self, mock_esp32):
+        """Test PWM limits from actuator configuration are enforced."""
+        mock_esp32.configure_actuator(gpio=8, actuator_type="fan", min_value=0.2, max_value=0.8)
+        response = mock_esp32.handle_command("actuator_set", {"gpio": 8, "value": 1.0, "mode": "pwm"})
+
+        assert response["pwm_value"] == 0.8
+        assert response["state"] is True
 
     def test_pwm_get_value(self, mock_esp32_with_actuators):
         """Test retrieving PWM actuator value."""
@@ -414,6 +423,17 @@ class TestActuatorErrors:
 
         assert response["status"] == "error"
         assert "missing" in response["error"].lower() or "gpio" in response["error"].lower()
+
+
+class TestActuatorProvisioningSafety:
+    """Test safety behavior before an ESP is provisioned with a zone."""
+
+    def test_actuator_rejected_without_zone(self, mock_esp32_unconfigured):
+        """Actuator commands should be rejected when no zone is configured."""
+        response = mock_esp32_unconfigured.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
+
+        assert response["status"] == "error"
+        assert "zone not configured" in response["error"].lower()
 
 
 class TestActuatorConcurrency:

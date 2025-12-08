@@ -12,10 +12,12 @@ Provides:
 - real_esp32: Connection to real ESP32 device (optional)
 """
 
-import pytest
 import os
 from typing import Optional
 
+import pytest
+
+from .mocks.in_memory_mqtt_client import InMemoryMQTTTestClient
 from .mocks.mock_esp32_client import MockESP32Client, SystemState
 
 
@@ -40,6 +42,18 @@ def mock_esp32():
     yield mock
 
     # Cleanup
+    mock.reset()
+
+
+@pytest.fixture
+def mock_esp32_unconfigured():
+    """
+    Provide a MockESP32Client without zone provisioning.
+
+    Useful to validate pre-provisioning safety behavior (actuators should reject).
+    """
+    mock = MockESP32Client(esp_id="ESP_UNPROVISIONED", kaiser_id="god")
+    yield mock
     mock.reset()
 
 
@@ -514,24 +528,9 @@ def mqtt_test_config():
 @pytest.fixture
 def mqtt_test_client(mqtt_test_config):
     """
-    Provide MQTT client for test orchestration.
+    Provide an in-memory MQTT test client for offline publish/subscribe tests.
 
-    This fixture provides an MQTT client that can:
-    - Publish test commands to ESP32 devices
-    - Subscribe to ESP32 responses
-    - Verify message flow
-
-    Usage:
-        def test_mqtt_communication(mqtt_test_client):
-            mqtt_test_client.publish(
-                "kaiser/god/esp/test-001/test/command",
-                {"command": "ping"}
-            )
-            response = mqtt_test_client.wait_for_message(
-                "kaiser/god/esp/test-001/test/response",
-                timeout=5
-            )
-            assert response["command"] == "pong"
+    This avoids broker dependencies while keeping the API surface compatible
+    with a real MQTT client.
     """
-    # TODO: Implement MQTT test client when MQTT client is available
-    pytest.skip("MQTT test client not yet implemented")
+    return InMemoryMQTTTestClient()

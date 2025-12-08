@@ -440,6 +440,8 @@ class MockESP32Client:
             )
 
         actuator = self.actuators[gpio]
+        min_value = actuator.min_value if actuator.min_value is not None else 0.0
+        max_value = actuator.max_value if actuator.max_value is not None else 1.0
         
         # Check emergency stop
         if actuator.emergency_stopped:
@@ -449,13 +451,14 @@ class MockESP32Client:
 
         # Apply value
         if mode == "pwm":
-            actuator.pwm_value = float(value)
-            actuator.state = value > 0
-            actuator.target_value = float(value)
+            clamped_value = max(min_value, min(max_value, float(value)))
+            actuator.pwm_value = clamped_value
+            actuator.state = clamped_value > 0
+            actuator.target_value = clamped_value
         else:
             actuator.state = bool(value)
             actuator.pwm_value = 1.0 if actuator.state else 0.0
-            actuator.target_value = 1.0 if actuator.state else 0.0
+            actuator.target_value = actuator.pwm_value
 
         actuator.last_command = f"set_{mode}"
         actuator.last_command_id = command_id
