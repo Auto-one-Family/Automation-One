@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from ...core.logging_config import get_logger
-from ...db.repositories import ActuatorRepository, ESPRepository
+from ..core.logging_config import get_logger
+from ..db.repositories import ActuatorRepository, ESPRepository
 
 logger = get_logger(__name__)
 
