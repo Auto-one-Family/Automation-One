@@ -5,14 +5,15 @@ FastAPI-basiertes Backend für AutomationOne IoT-Framework.
 > **Für KI-Agenten:** Siehe `.claude/commands/CLAUDE_SERVER.md` für vollständige Server-Dokumentation und Orientierung im Code.
 
 ## Features
-- REST API (FastAPI)
+- REST API (FastAPI) mit vollständiger Test-Suite
 - WebSocket Real-time Communication
 - MQTT Integration (Mosquitto)
 - Dynamic Sensor Library Loading
-- Cross-ESP Automation Logic
-- PostgreSQL Database
+- Cross-ESP Automation Logic (UUID-basiert)
+- PostgreSQL Database (SQLAlchemy Async)
 - God AI Integration
 - **Comprehensive ESP32 Testing Framework** (140+ Tests)
+- **API Integration Tests** (13+ Logic Tests)
 
 ## Setup
 ```bash
@@ -46,16 +47,17 @@ Tests verwenden **bewusst die echte MQTT-Struktur** (nicht separate Test-Topics)
 - **Integration** (~20 Tests): Full system workflows
 - **Cross-ESP** (~15 Tests): Multi-device orchestration
 - **Performance** (~15 Tests): Load testing, throughput
+- **API Logic** (~13 Tests): Rules CRUD, toggle, test, execution history
 
-**Total:** 140+ Tests
+**Total:** 150+ Tests
 
 ---
 
 ### Tests ausführen
 
-**Mock-Tests (keine Hardware nötig):**
+**ESP32 Mock-Tests (keine Hardware nötig):**
 ```bash
-# Alle Tests außer Hardware-Tests (Standard)
+# Alle ESP32-Tests außer Hardware-Tests (Standard)
 poetry run pytest god_kaiser_server/tests/esp32/ -v
 
 # Nur bestimmte Kategorie
@@ -66,6 +68,15 @@ poetry run pytest god_kaiser_server/tests/esp32/ -m performance -v
 
 # Cross-ESP-Tests
 poetry run pytest god_kaiser_server/tests/esp32/test_cross_esp.py -v
+```
+
+**API Integration Tests:**
+```bash
+# Logic Rules API Tests
+poetry run pytest god_kaiser_server/tests/integration/test_api_logic.py -v --no-cov
+
+# Alle Integration Tests
+poetry run pytest god_kaiser_server/tests/integration/ -v --no-cov
 ```
 
 **Real-Hardware-Tests (benötigt ESP32):**

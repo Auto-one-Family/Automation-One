@@ -10,7 +10,7 @@
 
 ## Überblick: Aktuelle Test-Suite
 
-**Gesamt:** ~140+ Tests (117 bestehend + ~30 neu hinzugefügt)
+**Gesamt:** ~150+ Tests (117 ESP32 + ~30 Cross-ESP/Performance + 13 API Integration)
 
 ### Bestehende Tests (117)
 
@@ -93,7 +93,23 @@
 
 ---
 
-### Neu hinzugefügte Tests (~30 Tests) ✅
+### Neu hinzugefügte Tests (~43 Tests) ✅
+
+#### API Integration Tests (~13 Tests) ✅
+**Datei:** `tests/integration/test_api_logic.py` (NEU)
+
+**Coverage:**
+- Logic Rules CRUD (create, read, update, delete) ✅
+- Rule Toggle (enable/disable) ✅
+- Rule Simulation (test with mock data) ✅
+- Execution History (with filters) ✅
+- Authentication & Authorization ✅
+- UUID-based rule IDs ✅
+- ESP32-compatible condition types ✅
+
+**Bewertung:** Excellent
+
+---
 
 #### Cross-ESP Tests (~15 Tests) ✅
 **Datei:** `test_cross_esp.py` (NEU)
@@ -376,8 +392,9 @@ pytest god_kaiser_server/tests/esp32/test_performance.py -v -s
 | **Performance** | 75% | 15 |
 | **Network Resilience** | 40% | 5 (neu) |
 | **Error Recovery** | 50% | 10 |
+| **API Logic Rules** | 95% | 13 |
 
-**Gesamt-Coverage:** ~85% (sehr gut)
+**Gesamt-Coverage:** ~87% (sehr gut)
 
 ---
 
@@ -411,9 +428,9 @@ Mit den hinzugefügten Network Resilience Tests erreichen wir ~90% Coverage, was
 
 ---
 
-**Letzte Aktualisierung:** 2025-11-26
+**Letzte Aktualisierung:** 2025-12-08
 **Analysiert von:** ESP32 Test Enhancement Project
-**Status:** ✅ Analyse abgeschlossen, Recommendations definiert
+**Status:** ✅ Analyse abgeschlossen, API Integration Tests hinzugefügt
 
 
 

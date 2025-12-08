@@ -368,6 +368,19 @@ def test_example(mock_esp32_with_sensors):
     assert response["data"]["raw_value"] == 2048.0
 ```
 
+### `mock_esp32_unconfigured`
+
+Unprovisioned ESP32 ohne Zone-Konfiguration – ideal um Safety-Checks vor Anschluss
+an Produktionszonen zu testen.
+
+```python
+def test_unconfigured_rejects_actuator(mock_esp32_unconfigured):
+    response = mock_esp32_unconfigured.handle_command(
+        "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+    )
+    assert response["status"] == "error"
+```
+
 ### `real_esp32` (TODO)
 
 Placeholder für Real-Hardware-Tests.
@@ -380,6 +393,17 @@ def test_example(real_esp32):
 
     response = real_esp32.send_command("ping", {})
     assert response["status"] == "ok"
+```
+
+### `mqtt_test_client`
+
+Brokerloser, in-memory MQTT-Testclient für Publish/Subscribe-Flows ohne Hardware.
+
+```python
+def test_pub_sub(mqtt_test_client):
+    mqtt_test_client.publish("kaiser/god/esp/test/command", {"cmd": "ping"})
+    message = mqtt_test_client.wait_for_message("kaiser/god/esp/test/command")
+    assert message["payload"]["cmd"] == "ping"
 ```
 
 ---
