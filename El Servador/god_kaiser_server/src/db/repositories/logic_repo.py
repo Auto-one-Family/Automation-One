@@ -5,10 +5,10 @@ Stores cross-ESP automation rules + execution history.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.logic import CrossESPLogic, LogicExecutionHistory
@@ -24,6 +24,21 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
 
     def __init__(self, session: AsyncSession):
         super().__init__(CrossESPLogic, session)
+
+    async def create(self, rule: CrossESPLogic) -> CrossESPLogic:
+        """
+        Create a new rule from an instance.
+        
+        Args:
+            rule: CrossESPLogic instance to create
+            
+        Returns:
+            Created CrossESPLogic instance
+        """
+        self.session.add(rule)
+        await self.session.flush()
+        await self.session.refresh(rule)
+        return rule
 
     async def get_enabled_rules(self) -> list[CrossESPLogic]:
         """
@@ -93,7 +108,26 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         
         return matching_rules
 
-    async def get_last_execution(self, rule_id: uuid.UUID) -> Optional[datetime]:
+    async def get_last_execution(self, rule_id: uuid.UUID) -> Optional[LogicExecutionHistory]:
+        """
+        Get the last execution record for a rule.
+        
+        Args:
+            rule_id: UUID of the logic rule
+            
+        Returns:
+            LogicExecutionHistory instance or None if rule has never been executed
+        """
+        stmt = (
+            select(LogicExecutionHistory)
+            .where(LogicExecutionHistory.logic_rule_id == rule_id)
+            .order_by(LogicExecutionHistory.timestamp.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_last_execution_timestamp(self, rule_id: uuid.UUID) -> Optional[datetime]:
         """
         Get timestamp of the last execution for a rule (for cooldown check).
         
@@ -110,6 +144,65 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         result = await self.session.execute(stmt)
         max_timestamp = result.scalar_one_or_none()
         return max_timestamp
+
+    async def get_execution_count(self, rule_id: uuid.UUID) -> int:
+        """
+        Get total execution count for a rule.
+        
+        Args:
+            rule_id: UUID of the logic rule
+            
+        Returns:
+            Total number of executions
+        """
+        stmt = (
+            select(func.count())
+            .select_from(LogicExecutionHistory)
+            .where(LogicExecutionHistory.logic_rule_id == rule_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
+    async def get_execution_history(
+        self,
+        rule_id: Optional[uuid.UUID] = None,
+        success: Optional[bool] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 50,
+    ) -> list[LogicExecutionHistory]:
+        """
+        Get execution history with filters.
+        
+        Args:
+            rule_id: Optional filter by rule ID
+            success: Optional filter by success status
+            start_time: Start of time range
+            end_time: End of time range
+            limit: Maximum number of records
+            
+        Returns:
+            List of LogicExecutionHistory records
+        """
+        conditions = []
+        
+        if rule_id is not None:
+            conditions.append(LogicExecutionHistory.logic_rule_id == rule_id)
+        if success is not None:
+            conditions.append(LogicExecutionHistory.success == success)
+        if start_time is not None:
+            conditions.append(LogicExecutionHistory.timestamp >= start_time)
+        if end_time is not None:
+            conditions.append(LogicExecutionHistory.timestamp <= end_time)
+        
+        stmt = (
+            select(LogicExecutionHistory)
+            .where(and_(*conditions) if conditions else True)
+            .order_by(LogicExecutionHistory.timestamp.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def log_execution(
         self,

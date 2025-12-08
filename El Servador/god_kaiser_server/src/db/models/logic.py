@@ -3,7 +3,7 @@ Logic Models: CrossESPLogic, LogicExecutionHistory
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
@@ -22,13 +22,16 @@ class CrossESPLogic(Base, TimestampMixin):
 
     Attributes:
         id: Primary key (UUID)
-        rule_name: Unique rule name
+        rule_name: Unique rule name (also accessible as 'name' property)
         description: Human-readable rule description
         enabled: Whether rule is active
-        trigger_conditions: JSON conditions (sensor thresholds, time windows, etc.)
+        trigger_conditions: JSON conditions (also accessible as 'conditions' property)
+        logic_operator: Logic operator for multiple conditions (AND/OR)
         actions: JSON actions to execute (actuator commands, notifications, etc.)
         priority: Execution priority (lower = higher priority)
         cooldown_seconds: Minimum time between executions (prevents spam)
+        max_executions_per_hour: Maximum executions per hour (rate limit)
+        last_triggered: Timestamp of last execution
         metadata: Additional rule metadata
     """
 
@@ -77,6 +80,14 @@ class CrossESPLogic(Base, TimestampMixin):
         ),
     )
 
+    # Logic Operator for Multiple Conditions
+    logic_operator: Mapped[str] = mapped_column(
+        String(3),
+        default="AND",
+        nullable=False,
+        doc="Logic operator for multiple conditions (AND/OR)",
+    )
+
     # Actions (CRITICAL!)
     actions: Mapped[list] = mapped_column(
         JSON,
@@ -102,6 +113,18 @@ class CrossESPLogic(Base, TimestampMixin):
         doc="Minimum time between executions (prevents spam)",
     )
 
+    max_executions_per_hour: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Maximum executions per hour (rate limit)",
+    )
+
+    last_triggered: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        doc="Timestamp of last execution",
+    )
+
     # Metadata
     rule_metadata: Mapped[dict] = mapped_column(
         JSON,
@@ -112,6 +135,30 @@ class CrossESPLogic(Base, TimestampMixin):
 
     # Indices
     __table_args__ = (Index("idx_rule_enabled_priority", "enabled", "priority"),)
+
+    # Alias properties for API compatibility
+    @property
+    def name(self) -> str:
+        """Alias for rule_name (API compatibility)."""
+        return self.rule_name
+    
+    @name.setter
+    def name(self, value: str) -> None:
+        """Setter for name alias."""
+        self.rule_name = value
+
+    @property
+    def conditions(self) -> list:
+        """Return trigger_conditions as list format (API compatibility)."""
+        if isinstance(self.trigger_conditions, list):
+            return self.trigger_conditions
+        # Single condition dict -> wrap in list
+        return [self.trigger_conditions]
+    
+    @conditions.setter
+    def conditions(self, value: list) -> None:
+        """Setter for conditions - stores as trigger_conditions."""
+        self.trigger_conditions = value
 
     def __repr__(self) -> str:
         return f"<CrossESPLogic(rule_name='{self.rule_name}', enabled={self.enabled})>"
@@ -190,10 +237,10 @@ class LogicExecutionHistory(Base):
 
     # Timestamp (CRITICAL for Time-Series!)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         index=True,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
         doc="Execution timestamp",
     )
 
