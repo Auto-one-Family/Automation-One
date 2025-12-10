@@ -243,18 +243,53 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
   return success;
 }
 
+/**
+ * Validate zone configuration.
+ *
+ * Checks:
+ * - kaiser_id must be set and non-empty
+ * - kaiser_id length must be within limits (1-63 chars, MQTT topic limit)
+ * - If zone is assigned, zone_id must be set
+ *
+ * NOTE: Does NOT validate zone_id format (server-side responsibility)
+ */
 bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
-  // Kaiser ID should be set
+  // Kaiser ID required
   if (kaiser.kaiser_id.length() == 0) {
     LOG_WARNING("ConfigManager: Kaiser ID is empty");
     return false;
   }
-  
+
+  // Kaiser ID length check (MQTT topic limit)
+  if (kaiser.kaiser_id.length() > 63) {
+    LOG_WARNING("ConfigManager: Kaiser ID too long (max 63 chars)");
+    return false;
+  }
+
+  // If zone assigned, zone_id must be set
+  if (kaiser.zone_assigned && kaiser.zone_id.length() == 0) {
+    LOG_WARNING("ConfigManager: Zone assigned but zone_id is empty");
+    return false;
+  }
+
   return true;
 }
 
-// Phase 7: Dynamic Zone Assignment
-bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& master_zone_id, 
+/**
+ * Update zone assignment for this ESP.
+ *
+ * ARCHITECTURE NOTES:
+ * - Multiple ESPs can be assigned to the same zone_id
+ * - SubZones are assigned at sensor/actuator level, not ESP level
+ * - Kaiser_id identifies the parent Kaiser device (default: "god")
+ *
+ * @param zone_id Primary zone identifier (e.g., "greenhouse_zone_1")
+ * @param master_zone_id Parent zone for hierarchy (e.g., "greenhouse")
+ * @param zone_name Human-readable zone name
+ * @param kaiser_id ID of Kaiser managing this ESP (default: "god")
+ * @return true if zone assignment updated successfully
+ */
+bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& master_zone_id,
                                         const String& zone_name, const String& kaiser_id) {
   LOG_INFO("ConfigManager: Updating zone assignment...");
   LOG_INFO("  Zone ID: " + zone_id);

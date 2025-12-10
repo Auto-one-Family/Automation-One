@@ -219,7 +219,7 @@ grep -r "kaiser/god/esp" "El Servador/god_kaiser_server/src/mqtt/"
 Prüfe ob Dokumentation aktuell ist:
 
 - ✅ `CLAUDE.md` - Projekt-Übersicht
-- ✅ `CLAUDE_SERVER.md` - Server-Dokumentation
+- ✅ `.claude/CLAUDE_SERVER.md` - Server-Dokumentation
 - ✅ `El Trabajante/docs/Mqtt_Protocoll.md` - MQTT Topic-Schemas
 - ✅ `El Trabajante/docs/system-flows/` - System Flows
 - ✅ `El Servador/docs/ESP32_TESTING.md` - ESP32 Test-Dokumentation
@@ -368,7 +368,7 @@ OVERALL: ✅ PASS
 - **Test Workflow:** `.claude/TEST_WORKFLOW.md` - Detaillierter PlatformIO Test-Workflow (Legacy)
 - **Legacy PlatformIO Tests:** `.claude/commands/esp32/test-category.md` - Legacy Test-Kategorien
 - **ESP32 Build:** `.claude/commands/esp32/build.md` - Build-Commands
-- **Server Build:** `.claude/CLAUDE_SERVER.md` Section 7 - Server-Workflows
+- **Server Build:** `.claude/CLAUDE_SERVER.md` Section 7.1 - Server-Workflows
 
 ---
 

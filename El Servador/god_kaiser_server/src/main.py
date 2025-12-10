@@ -29,6 +29,8 @@ from .db.session import dispose_engine, get_engine, get_session, init_db
 from .mqtt.client import MQTTClient
 from .mqtt.handlers import (
     actuator_handler,
+    actuator_response_handler,
+    actuator_alert_handler,
     config_handler,
     discovery_handler,
     heartbeat_handler,
@@ -90,25 +92,39 @@ async def lifespan(app: FastAPI):
             global _subscriber_instance
             _subscriber_instance = Subscriber(mqtt_client, max_workers=10)
 
-            # Register handlers for each topic pattern
+            # Get KAISER_ID from config (default: "god")
+            kaiser_id = settings.hierarchy.kaiser_id
+            logger.info(f"Using KAISER_ID: {kaiser_id}")
+
+            # Register handlers for each topic pattern (dynamic kaiser_id)
             _subscriber_instance.register_handler(
-                "kaiser/god/esp/+/sensor/+/data",
+                f"kaiser/{kaiser_id}/esp/+/sensor/+/data",
                 sensor_handler.handle_sensor_data
             )
             _subscriber_instance.register_handler(
-                "kaiser/god/esp/+/actuator/+/status",
+                f"kaiser/{kaiser_id}/esp/+/actuator/+/status",
                 actuator_handler.handle_actuator_status
             )
+            # Phase 8: Actuator Response Handler (command confirmations)
             _subscriber_instance.register_handler(
-                "kaiser/god/esp/+/system/heartbeat",
+                f"kaiser/{kaiser_id}/esp/+/actuator/+/response",
+                actuator_response_handler.handle_actuator_response
+            )
+            # Phase 8: Actuator Alert Handler (emergency/timeout alerts)
+            _subscriber_instance.register_handler(
+                f"kaiser/{kaiser_id}/esp/+/actuator/+/alert",
+                actuator_alert_handler.handle_actuator_alert
+            )
+            _subscriber_instance.register_handler(
+                f"kaiser/{kaiser_id}/esp/+/system/heartbeat",
                 heartbeat_handler.handle_heartbeat
             )
             _subscriber_instance.register_handler(
-                "kaiser/god/discovery/esp32_nodes",
+                f"kaiser/{kaiser_id}/discovery/esp32_nodes",
                 discovery_handler.handle_discovery
             )
             _subscriber_instance.register_handler(
-                "kaiser/god/esp/+/config/ack",
+                f"kaiser/{kaiser_id}/esp/+/config_response",
                 config_handler.handle_config_ack
             )
 

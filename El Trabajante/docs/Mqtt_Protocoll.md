@@ -18,11 +18,18 @@
 ```
 
 **Kommunikations-Prinzipien:**
-1. **Alle ESP32-Agenten kommunizieren NUR mit God-Kaiser**
-2. **God-Kaiser Topic-Prefix:** `kaiser/god/...`
-3. **Broadcast-Topics:** `kaiser/broadcast/...` (alle ESPs empfangen)
-4. **ESP32-spezifische Topics:** `kaiser/god/esp/{esp_id}/...`
-5. **Zone-Master-Topics (optional):** `kaiser/god/zone/{master_zone_id}/...`
+1. **Alle ESP32-Agenten kommunizieren NUR mit God-Kaiser** (aktueller Stand)
+2. **Topic-Prefix:** `kaiser/{kaiser_id}/...` wobei `kaiser_id` den übergeordneten Pi identifiziert
+3. **Aktueller Stand:** `kaiser_id = "god"` (God-Kaiser Server) - alle ESPs verwenden `kaiser/god/...`
+4. **Zukunft:** `kaiser_id = "kaiser_XX"` für Kaiser-Nodes (geplant, noch nicht implementiert)
+5. **Broadcast-Topics:** `kaiser/broadcast/...` (alle ESPs empfangen)
+6. **ESP32-spezifische Topics:** `kaiser/{kaiser_id}/esp/{esp_id}/...`
+7. **Zone-Master-Topics (optional):** `kaiser/{kaiser_id}/zone/{master_zone_id}/...`
+
+**Kaiser-ID Bedeutung:**
+- `kaiser_id` identifiziert den **übergeordneten Pi** (God-Kaiser Server oder Kaiser-Node), **NICHT** den ESP
+- **Aktuell:** Alle ESPs verwenden `"god"` (God-Kaiser Server)
+- **Roadmap:** Kaiser-Nodes (`"kaiser_01"`, etc.) für Skalierung geplant
 
 ---
 
@@ -32,7 +39,7 @@
 
 ```
 kaiser/
-├── god/                           # God-Kaiser (zentrale Instanz)
+├── god/                           # God-Kaiser Server (aktuelle Implementierung)
 │   ├── esp/
 │   │   └── {esp_id}/             # Spezifischer ESP32
 │   │       ├── sensor/
@@ -48,6 +55,11 @@ kaiser/
 │   │       │   └── emergency      # Emergency-Stop (subscribe)
 │   │       ├── system/
 │   │       │   ├── command        # System-Befehle (subscribe)
+│   │       │   ├── heartbeat      # System-Heartbeat (publish)
+│   │       │   └── diagnostics   # System-Diagnostics (publish)
+│   │       ├── zone/
+│   │       │   ├── assign         # Zone Assignment (subscribe) - Phase 7
+│   │       │   └── ack            # Zone Assignment ACK (publish) - Phase 7
 │   │       │   ├── response       # System-Response (publish)
 │   │       │   ├── heartbeat      # Health-Heartbeat (publish)
 │   │       │   └── diagnostics    # Diagnostik (publish)
@@ -84,19 +96,19 @@ kaiser/
 **Payload-Schema:**
 ```json
 {
-  "ts": 1735818000,                    // Unix timestamp (seconds) - REQUIRED
+  "ts": 1735818000,                    // Unix timestamp (seconds) - REQUIRED (or "timestamp")
   "esp_id": "ESP_12AB34CD",            // ESP32 ID - REQUIRED
   "gpio": 4,                           // GPIO Pin - REQUIRED
   "sensor_type": "DS18B20",            // Sensor-Typ - REQUIRED
-  "raw": 2150,                         // Raw ADC/Sensor-Wert - REQUIRED
-  "value": 21.5,                       // Processed Value - REQUIRED
-  "unit": "°C",                        // Einheit - REQUIRED
-  "quality": "good",                   // "excellent", "good", "fair", "poor", "bad", "stale" - REQUIRED
+  "raw": 2150,                         // Raw ADC/Sensor-Wert - REQUIRED (or "raw_value")
+  "value": 21.5,                       // Processed Value - OPTIONAL (for local processing)
+  "unit": "°C",                        // Einheit - OPTIONAL
+  "quality": "good",                   // "excellent", "good", "fair", "poor", "bad", "stale" - OPTIONAL
   "subzone_id": "zone_a",              // Subzone-Zuordnung - OPTIONAL
-  "sensor_name": "Boden Temp",         // Display-Name - REQUIRED
+  "sensor_name": "Boden Temp",         // Display-Name - OPTIONAL
   "library_name": "dallas_temp",       // Library-Name - OPTIONAL
   "library_version": "1.0.0",          // Library-Version - OPTIONAL
-  "raw_mode": false,                   // Nur Rohdaten senden - REQUIRED
+  "raw_mode": true,                    // true = Server processes, false = ESP processed - OPTIONAL (default: true)
   "meta": {                            // Metadaten - OPTIONAL
     "vref": 3300,                      // ADC Reference (mV)
     "samples": 10,                     // Anzahl Samples
@@ -107,6 +119,15 @@ kaiser/
   }
 }
 ```
+
+**Server-Kompatibilität (Stand: 2025-12-08):**
+Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
+- `ts` ODER `timestamp` (Unix timestamp)
+- `raw` ODER `raw_value` (Rohwert)
+
+**⚠️ WICHTIG:** `raw_mode` ist jetzt ein **REQUIRED** Field!
+- Der Server validiert, dass `raw_mode` im Payload vorhanden ist
+- ESP32-Firmware sendet immer `"raw_mode": true` (siehe `sensor_manager.cpp:751`)
 
 **Payload-Beispiel:**
 ```json
@@ -187,19 +208,31 @@ kaiser/
 ```json
 {
   "esp_id": "ESP_12AB34CD",            // ESP Device ID - REQUIRED
-  "zone_id": "greenhouse",             // Zone-Zuordnung - REQUIRED
-  "master_zone_id": "greenhouse-master", // Master-Zone-ID (Legacy-Kompatibilität) - REQUIRED
-  "zone_assigned": true,               // Ob Zone zugewiesen wurde - REQUIRED
+  "zone_id": "greenhouse",             // Zone-Zuordnung - OPTIONAL
+  "master_zone_id": "greenhouse-master", // Master-Zone-ID - OPTIONAL
+  "zone_assigned": true,               // Ob Zone zugewiesen wurde - OPTIONAL
   "ts": 1735818000,                    // Timestamp (Unix-Sekunden) - REQUIRED
   "uptime": 3600,                      // Sekunden seit Boot - REQUIRED
-  "heap_free": 245760,                 // Freier Heap-Speicher (Bytes) - REQUIRED
+  "heap_free": 245760,                 // Freier Heap-Speicher (Bytes) - REQUIRED (or "free_heap")
   "wifi_rssi": -65,                    // WiFi Signal Strength (dBm) - REQUIRED
-  "sensor_count": 3,                   // Anzahl aktiver Sensoren - REQUIRED
-  "actuator_count": 2                  // Anzahl aktiver Aktoren - REQUIRED
+  "sensor_count": 3,                   // Anzahl aktiver Sensoren - OPTIONAL (or "active_sensors")
+  "actuator_count": 2                  // Anzahl aktiver Aktoren - OPTIONAL (or "active_actuators")
 }
 ```
 
-**Code Location:** `services/communication/mqtt_client.cpp:420-431` (publishHeartbeat)
+**Server-Kompatibilität (Stand: 2025-12-08):**
+Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
+- `heap_free` ODER `free_heap` (Heap-Speicher)
+- `sensor_count` ODER `active_sensors` (Sensor-Anzahl)
+- `actuator_count` ODER `active_actuators` (Actuator-Anzahl)
+
+**⚠️ WICHTIG: Gerätregistrierung erforderlich!**
+- Der Server **LEHNT** Heartbeats von unbekannten Geräten ab
+- ESPs müssen **ZUERST** über die REST-API registriert werden: `POST /api/v1/esp/register`
+- Auto-Discovery via Heartbeat ist **DEAKTIVIERT** (Stand: 2025-12-08)
+- Bei unbekanntem Gerät: Server loggt Warnung und gibt `False` zurück
+
+**Code Location:** `services/communication/mqtt_client.cpp:435-466` (publishHeartbeat)
 
 **Future Enhancements (Planned, not yet implemented):**
 ```json
@@ -402,14 +435,23 @@ if (heap_change_percent > 20.0) {
 ```json
 {
   "ts": 1735818000,                      // Timestamp (millis) - REQUIRED
+  "esp_id": "ESP_12AB34CD",              // ESP Device ID - REQUIRED
+  "zone_id": "greenhouse",               // Zone-Zuordnung - OPTIONAL
+  "subzone_id": "zone_a",                // Subzone-Zuordnung - OPTIONAL
   "gpio": 5,                             // GPIO Pin - REQUIRED
-  "type": "pump",                        // Actuator-Typ ("pump","pwm","valve","relay") - REQUIRED
-  "state": true,                         // Digital ON/OFF - REQUIRED
-  "pwm": 128,                            // PWM-Wert (0-255) - REQUIRED (0 bei Binary-Actuators)
+  "type": "pump",                        // Actuator-Typ ("pump","pwm","valve","relay") - REQUIRED (or "actuator_type")
+  "state": true,                         // Digital ON/OFF (boolean) - REQUIRED (or "on"/"off" string)
+  "pwm": 128,                            // PWM-Wert (0-255) - REQUIRED (or "value") (0 bei Binary-Actuators)
   "runtime_ms": 3600000,                 // Akkumulierte Laufzeit in ms - REQUIRED
   "emergency": "normal"                  // Emergency-Status ("normal","active","clearing","resuming") - REQUIRED
 }
 ```
+
+**Server-Kompatibilitat:**
+Der Server akzeptiert folgende Feld-Alternativen fur Backward-Compatibility:
+- `state`: Boolean (`true`/`false`) ODER String (`"on"`/`"off"`) - wird intern zu String konvertiert
+- `type` ODER `actuator_type` (Actuator-Typ)
+- `pwm` ODER `value` (PWM-Wert)
 
 **Payload-Beispiel (Pump):**
 ```json
@@ -1689,6 +1731,82 @@ mosquitto_pub -h localhost \
 - Bei Config-Apply-Failure: Automatischer Rollback zur letzten funktionierenden Config
 - Rollback-Config wird aus NVS geladen
 - Rollback-Status in Response-Payload
+
+---
+
+### 7. Zone Assignment (Phase 7)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
+
+**QoS:** 1 (at least once)  
+**Handler:** `src/main.cpp:612-687` (Zone Assignment Handler)  
+**TopicBuilder:** Manuell gebaut (nicht via TopicBuilder, da kaiser_id dynamisch)
+
+**Kaiser-ID Bedeutung:**
+- `kaiser_id` identifiziert den **übergeordneten Pi** (God-Kaiser Server oder Kaiser-Node)
+- **Aktuell:** Immer `"god"` (God-Kaiser Server)
+- **Zukunft:** `"kaiser_01"`, `"kaiser_02"`, etc. für Kaiser-Nodes (geplant)
+
+**Payload-Schema:**
+```json
+{
+  "zone_id": "greenhouse_zone_1",          // Primary zone identifier - REQUIRED
+  "master_zone_id": "greenhouse_master",  // Parent master zone ID - REQUIRED
+  "zone_name": "Greenhouse Zone 1",       // Human-readable zone name - REQUIRED
+  "kaiser_id": "god",                     // Overarching Pi identifier - REQUIRED
+  "timestamp": 1234567890                 // Assignment timestamp - OPTIONAL
+}
+```
+
+**ESP32-Verhalten:**
+1. Parse JSON payload (512-byte buffer)
+2. Validate fields (keine explizite Validierung, leere Strings werden akzeptiert)
+3. Update zone configuration via `configManager.updateZoneAssignment()`
+4. Persist to NVS (namespace `zone_config`)
+5. Update global variables (`g_kaiser`)
+6. Update TopicBuilder with new `kaiser_id` (falls geändert)
+7. Update system state to `STATE_ZONE_CONFIGURED`
+8. Send acknowledgment on `kaiser/{kaiser_id}/esp/{esp_id}/zone/ack`
+9. Publish updated heartbeat (sofort, bypassing interval)
+
+**Subscription-Verhalten:**
+- ESP subscribed zu `kaiser/god/esp/{esp_id}/zone/assign` wenn `kaiser_id` leer
+- ESP subscribed zu `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign` wenn `kaiser_id` gesetzt
+- **Wichtig:** Subscriptions werden NICHT automatisch aktualisiert nach Zone Assignment
+- ESP muss rebooten, um neue Subscription zu erhalten (Subscriptions nur während `setup()` Phase 2)
+
+**Acknowledgment Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/ack`
+
+**Success Payload:**
+```json
+{
+  "esp_id": "ESP_AB12CD",
+  "status": "zone_assigned",
+  "zone_id": "greenhouse_zone_1",
+  "master_zone_id": "greenhouse_master",
+  "ts": 1234567890
+}
+```
+
+**Error Payload:**
+```json
+{
+  "esp_id": "ESP_AB12CD",
+  "status": "error",
+  "message": "Failed to save zone config",
+  "ts": 1234567890
+}
+```
+
+**QoS:** 1 (at least once)
+
+**Wichtig:** 
+- Zone Assignment ist ein **Runtime-Flow**, nicht Initial-Provisioning
+- Für Initial-Setup siehe [Provisioning Documentation](Dynamic%20Zones%20and%20Provisioning/PROVISIONING.md)
+- ESP muss zuerst über REST API registriert werden (`POST /api/v1/esp/register`)
+- Auto-Discovery via Heartbeat ist deaktiviert
+
+**Siehe auch:** [Zone Assignment Flow](../system-flows/08-zone-assignment-flow.md) für detaillierten Flow
 
 ---
 

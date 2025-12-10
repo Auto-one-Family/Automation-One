@@ -9,7 +9,7 @@
 
 ### ESP32 Firmware (El Trabajante)
 
-**📄 `CLAUDE.md`** (Root-Verzeichnis) - ⭐ **HAUPTDOKUMENTATION ESP32**
+**📄 `CLAUDE.md`** (Root-Verzeichnis) - ⭐ **HAUPTDOKUMENTATION ESP32** (v4.3)
 
 **Verwenden für:**
 - ✅ ESP32 Code-Änderungen
@@ -17,6 +17,7 @@
 - ✅ ESP32 Architektur-Verständnis
 - ✅ ESP32 Modul-Navigation
 - ✅ ESP32 KI-Agenten Workflow
+- ✅ Server-Integration-Verständnis
 
 **Enthält:**
 - Quick Decision Tree
@@ -26,18 +27,26 @@
 - MQTT-Protokoll-Kurzreferenz
 - Safety-Constraints
 - Fehlercode-Referenz
+- **NEU:** Section 11.1 - Server-Integration Verhaltensregeln für ESP32-Code
+  - MQTT-Topic-Konventionen
+  - Payload-Struktur
+  - Device-Registration (kein Auto-Discovery)
+  - Safety-Constraints (Server-seitig)
+  - Pi-Enhanced-Processing-Integration
+  - Logic-Engine-Integration
 
 **Verweise auf:**
 - `El Trabajante/docs/API_REFERENCE.md` - API-Details
 - `El Trabajante/docs/Mqtt_Protocoll.md` - MQTT-Spezifikation
 - `El Trabajante/docs/system-flows/` - System-Flows
 - `El Servador/docs/ESP32_TESTING.md` - ESP32 Tests
+- `.claude/CLAUDE_SERVER.md` - Server-Dokumentation (Cross-Referenzen)
 
 ---
 
 ### God-Kaiser Server (El Servador)
 
-**📄 `.claude/CLAUDE_SERVER.md`** - ⭐ **HAUPTDOKUMENTATION SERVER**
+**📄 `.claude/CLAUDE_SERVER.md`** - ⭐ **HAUPTDOKUMENTATION SERVER** (v3.0)
 
 **Verwenden für:**
 - ✅ Server Code-Änderungen
@@ -45,22 +54,29 @@
 - ✅ Server Architektur-Verständnis
 - ✅ Server Modul-Navigation
 - ✅ Server KI-Agenten Workflow
+- ✅ MQTT-Handler-Implementierung
+- ✅ Sensor-Library-Erstellung
+- ✅ Automation-Rule-Implementierung
 
 **Enthält:**
 - Quick Decision Tree (Server-spezifisch)
+- Server-Startup-Sequenz (detailliert mit Code-Locations)
 - Modul-Dokumentation Navigation (Server)
 - KI-Agenten Workflow (Server-spezifisch)
-- Kritische Dateien pro Aufgabentyp
-- MQTT Topic-Referenz (Server-Perspektive)
-- Database Schema
+- Kritische Dateien pro Aufgabentyp (Section 3)
+- MQTT Topic-Referenz (Server-Perspektive) mit QoS-Levels
+- MQTT-Architektur-Details (Subscriber, Publisher, Client)
+- Database Schema & Migration
 - Coding Standards
 - Entwickler-Workflows
 - Implementierungs-Status
+- **NEU:** Detaillierte Abläufe (Section 18): Sensor-Daten, Actuator-Commands, Logic-Engine, Heartbeat
 
 **Verweise auf:**
 - `El Servador/docs/ESP32_TESTING.md` - ESP32 Tests
 - `El Trabajante/docs/Mqtt_Protocoll.md` - MQTT-Spezifikation
 - `El Servador/god_kaiser_server/src/` - Source Code
+- `.claude/CLAUDE.md` - ESP32-Firmware-Dokumentation (Cross-Referenzen)
 
 ---
 
@@ -148,7 +164,7 @@
 - ✅ Migrations-Strategie verstehen
 - ✅ Architektur-Transformation verstehen
 
-**⚠️ HINWEIS:** Für aktuelle Server-Dokumentation siehe `.claude/commands/CLAUDE_SERVER.md`
+**⚠️ HINWEIS:** Für aktuelle Server-Dokumentation siehe `.claude/CLAUDE_SERVER.md` (v3.0)
 
 ---
 
@@ -160,12 +176,13 @@
 
 | Command | Beschreibung | Hauptdokumentation |
 |---------|--------------|-------------------|
-| **`CLAUDE_SERVER.md`** | ⭐ Server-Hauptdokumentation | Vollständige Server-Referenz |
 | **`full-test.md`** | ⭐ Kompletter Test-Workflow | ESP32 + Server Tests |
 | **`esp-build.md`** | ESP32 Build-Command | Build-Workflows |
 | **`esp-test.md`** | ESP32 Test-Command (Kurz) | Verweist auf `/full-test` |
 | **`esp-test-category.md`** | Legacy PlatformIO Tests | Legacy Test-Kategorien |
 | **`server-test.md`** | Server-Test-Command (Kurz) | Verweist auf `/full-test` |
+
+**Hinweis:** `CLAUDE_SERVER.md` befindet sich jetzt direkt in `.claude/` (nicht in `commands/`)
 
 ---
 
@@ -183,17 +200,19 @@
 
 **Server Code:**
 1. **Erste Anlaufstelle:** `.claude/CLAUDE_SERVER.md` - Section 0: Quick Decision Tree
-2. **Modul finden:** `CLAUDE_SERVER.md` Section 12: Modul-Dokumentation Navigation
-3. **Workflow folgen:** `CLAUDE_SERVER.md` Section 13: KI-Agenten Workflow
-4. **Aufgabentyp:** `CLAUDE_SERVER.md` Section 3: Kritische Dateien pro Aufgabentyp
-5. **Migration:** `CLAUDE_SERVER.md` Section 7.4: Database Migration
+2. **Startup verstehen:** `CLAUDE_SERVER.md` Section 2: Server-Startup-Sequenz
+3. **Modul finden:** `CLAUDE_SERVER.md` Section 12: Modul-Dokumentation Navigation
+4. **Workflow folgen:** `CLAUDE_SERVER.md` Section 13: KI-Agenten Workflow
+5. **Aufgabentyp:** `CLAUDE_SERVER.md` Section 3: Kritische Dateien pro Aufgabentyp
+6. **Abläufe verstehen:** `CLAUDE_SERVER.md` Section 18: Kritische Funktionen & Abläufe
+7. **Migration:** `CLAUDE_SERVER.md` Section 7.4: Database Migration
 
 #### 🧪 "Ich will Tests ausführen"
 
 **Kompletter Test-Workflow:**
 1. **Hauptdatei:** `.claude/commands/full-test.md` - Kompletter Workflow
 2. **ESP32 Tests:** `El Servador/docs/ESP32_TESTING.md` - Vollständige Dokumentation
-3. **Server Tests:** `.claude/commands/CLAUDE_SERVER.md` Section 7.2
+3. **Server Tests:** `.claude/CLAUDE_SERVER.md` Section 7.2
 
 **Schnellstart:**
 - ESP32 Tests: `.claude/commands/esp-test.md`
@@ -209,11 +228,11 @@
 5. **GPIO-Konflikt:** `CLAUDE.md` Section 5.2
 
 **Server Fehler:**
-1. **Build-Fehler:** `.claude/commands/CLAUDE_SERVER.md` Section 7.1
+1. **Build-Fehler:** `.claude/CLAUDE_SERVER.md` Section 7.1
 2. **Test-Fehler:** `.claude/commands/full-test.md` Section "Bei Fehlern"
-3. **Runtime-Fehler:** `CLAUDE_SERVER.md` Section 10: Häufige Fehler
-4. **MQTT-Problem:** `El Trabajante/docs/Mqtt_Protocoll.md` + `CLAUDE_SERVER.md` Section 4
-5. **Database-Fehler:** `CLAUDE_SERVER.md` Section 7.4
+3. **Runtime-Fehler:** `.claude/CLAUDE_SERVER.md` Section 10: Häufige Fehler
+4. **MQTT-Problem:** `El Trabajante/docs/Mqtt_Protocoll.md` + `.claude/CLAUDE_SERVER.md` Section 4
+5. **Database-Fehler:** `.claude/CLAUDE_SERVER.md` Section 7.4
 
 #### 📖 "Ich will verstehen wie X funktioniert"
 
@@ -225,9 +244,11 @@
 
 **Server:**
 1. **System-Flow:** `El Trabajante/docs/system-flows/` (gilt für beide)
-2. **MQTT-Protokoll:** `El Trabajante/docs/Mqtt_Protocoll.md` + `CLAUDE_SERVER.md` Section 4
-3. **API-Endpunkte:** `CLAUDE_SERVER.md` Section 3.2
-4. **Architektur:** `CLAUDE_SERVER.md` Section 1-2
+2. **MQTT-Protokoll:** `El Trabajante/docs/Mqtt_Protocoll.md` + `.claude/CLAUDE_SERVER.md` Section 4
+3. **MQTT-Architektur:** `.claude/CLAUDE_SERVER.md` Section 4.4 (Subscriber, Publisher, Client)
+4. **API-Endpunkte:** `.claude/CLAUDE_SERVER.md` Section 3.2
+5. **Architektur:** `.claude/CLAUDE_SERVER.md` Section 1-2
+6. **Detaillierte Abläufe:** `.claude/CLAUDE_SERVER.md` Section 18 (Sensor, Actuator, Logic, Heartbeat)
 
 #### ➕ "Ich will neues Feature hinzufügen"
 
@@ -239,12 +260,13 @@
 5. **Test:** `CLAUDE.md` Section 3.2 (Dual-Mode-Pattern)
 
 **Server Feature:**
-1. **Sensor-Library:** `CLAUDE_SERVER.md` Section 3.1
-2. **API-Endpoint:** `CLAUDE_SERVER.md` Section 3.2
-3. **MQTT-Handler:** `CLAUDE_SERVER.md` Section 3.3
-4. **Database-Model:** `CLAUDE_SERVER.md` Section 3.4
-5. **Automation-Rule:** `CLAUDE_SERVER.md` Section 3.5
-6. **Test:** `El Servador/docs/ESP32_TESTING.md`
+1. **Sensor-Library:** `.claude/CLAUDE_SERVER.md` Section 3.1
+2. **API-Endpoint:** `.claude/CLAUDE_SERVER.md` Section 3.2
+3. **MQTT-Handler:** `.claude/CLAUDE_SERVER.md` Section 3.3 (mit Thread-Pool-Details)
+4. **Database-Model:** `.claude/CLAUDE_SERVER.md` Section 3.4
+5. **Automation-Rule:** `.claude/CLAUDE_SERVER.md` Section 3.5 (mit Logic-Engine-Flow)
+6. **Abläufe verstehen:** `.claude/CLAUDE_SERVER.md` Section 18 (für komplexe Features)
+7. **Test:** `El Servador/docs/ESP32_TESTING.md`
 
 ---
 
@@ -256,8 +278,11 @@ ROOT-LEVEL
 │   └── Verweist auf: El Trabajante/docs/, .claude/WORKFLOW_PATTERNS.md
 │
 └── .claude/
-    ├── README.md (DIESE DATEI) ⭐ Dokumentations-Index
-    ├── CLAUDE_SERVER.md ⭐ Server Hauptdokumentation (v2.1)
+    ├── README.md (DIESE DATEI) ⭐ Dokumentations-Index (v3.0)
+    ├── CLAUDE_SERVER.md ⭐ Server Hauptdokumentation (v3.0)
+    │   └── Enthält: Startup-Sequenz, MQTT-Architektur, Detaillierte Abläufe (Section 18)
+    ├── CLAUDE.md ⭐ ESP32 Hauptdokumentation (v4.3)
+    │   └── Enthält: Server-Integration Verhaltensregeln (Section 11.1)
     │
     ├── commands/
     │   ├── full-test.md ⭐ Kompletter Test-Workflow
@@ -265,10 +290,11 @@ ROOT-LEVEL
     │   ├── server/ (Server-spezifische Commands)
     │   └── integration/ (Integration-Commands)
     │
-    ├── WORKFLOW_PATTERNS.md (Development Workflows v1.1)
-    ├── ARCHITECTURE_DEPENDENCIES.md (Dependencies)
-    ├── TEST_WORKFLOW.md (Test-Workflow v1.1)
-    └── PI_SERVER_REFACTORING.md (Legacy Server Refactoring)
+    ├── WORKFLOW_PATTERNS.md (Development Workflows)
+    ├── ARCHITECTURE_DEPENDENCIES.md (ESP32 Dependencies)
+    ├── TEST_WORKFLOW.md (Test-Workflow)
+    ├── PHASE_3_4_IMPLEMENTATION_PLAN.md (Historisch - Phasen abgeschlossen)
+    └── PI_SERVER_REFACTORING.md (Historisch - Refactoring abgeschlossen)
 
 El Servador/
 ├── god_kaiser_server/
@@ -305,7 +331,7 @@ El Servador/
 
 1. **Identifiziere Themengebiet:**
    - ESP32 Code? → `CLAUDE.md`
-   - Server Code? → `.claude/commands/CLAUDE_SERVER.md`
+   - Server Code? → `.claude/CLAUDE_SERVER.md`
    - ESP32 Development Workflow? → `.claude/WORKFLOW_PATTERNS.md`
    - ESP32 Architektur? → `.claude/ARCHITECTURE_DEPENDENCIES.md`
    - Testing? → `.claude/commands/full-test.md`
@@ -343,28 +369,43 @@ El Servador/
 - ✅ Bug-Fixes dokumentiert in `tests/integration/BUGS_FOUND.md`
 - ✅ Database-Migration dokumentiert in `CLAUDE_SERVER.md` Section 7.4
 
+**Aktualisiert (2025-12-08):**
+- ✅ `CLAUDE_SERVER.md` auf v3.0 aktualisiert (Startup-Sequenz, MQTT-Architektur, Detaillierte Abläufe)
+- ✅ `CLAUDE.md` auf v4.3 aktualisiert (Server-Integration Verhaltensregeln)
+- ✅ Cross-Referenzen zwischen ESP32 und Server-Dokumentation verbessert
+- ✅ Alle Code-Locations und Abläufe dokumentiert
+
 ---
 
 ## 🎯 SCHNELLREFERENZ FÜR CLAUDE
 
 ### Bei ESP32-Aufgaben:
-1. **Erste Anlaufstelle:** `CLAUDE.md` (Root)
-2. **Workflow:** `CLAUDE.md` Section 10
-3. **Patterns:** `.claude/WORKFLOW_PATTERNS.md`
-4. **Tests:** `/full-test` oder `El Servador/docs/ESP32_TESTING.md`
+1. **Erste Anlaufstelle:** `CLAUDE.md` (Root) - Section 0: Quick Reference
+2. **Workflow:** `CLAUDE.md` Section 8: KI-Agenten Workflow
+3. **Server-Integration:** `CLAUDE.md` Section 11.1: Verhaltensregeln
+4. **Patterns:** `.claude/WORKFLOW_PATTERNS.md`
+5. **Tests:** `/full-test` oder `El Servador/docs/ESP32_TESTING.md`
 
 ### Bei Server-Aufgaben:
-1. **Erste Anlaufstelle:** `.claude/commands/CLAUDE_SERVER.md`
-2. **Workflow:** `CLAUDE_SERVER.md` Section 13
-3. **Aufgabentyp:** `CLAUDE_SERVER.md` Section 3
-4. **Tests:** `/full-test` oder `CLAUDE_SERVER.md` Section 7.2
+1. **Erste Anlaufstelle:** `.claude/CLAUDE_SERVER.md` - Section 0: Quick Decision Tree
+2. **Startup verstehen:** `CLAUDE_SERVER.md` Section 2: Server-Startup-Sequenz
+3. **Workflow:** `CLAUDE_SERVER.md` Section 13: KI-Agenten Workflow
+4. **Aufgabentyp:** `CLAUDE_SERVER.md` Section 3: Kritische Dateien pro Aufgabentyp
+5. **Abläufe:** `CLAUDE_SERVER.md` Section 18: Detaillierte Abläufe
+6. **Tests:** `/full-test` oder `CLAUDE_SERVER.md` Section 7.2
 
 ### Bei Test-Aufgaben:
 1. **Kompletter Workflow:** `.claude/commands/full-test.md`
 2. **ESP32 Tests:** `El Servador/docs/ESP32_TESTING.md`
-3. **Server Tests:** `.claude/commands/CLAUDE_SERVER.md` Section 7.2
+3. **Server Tests:** `.claude/CLAUDE_SERVER.md` Section 7.2
+
+### Bei MQTT-Aufgaben:
+1. **ESP32-Perspektive:** `CLAUDE.md` Section 4: MQTT-Protokoll
+2. **Server-Perspektive:** `CLAUDE_SERVER.md` Section 4: MQTT Topic-Referenz
+3. **Vollständige Spezifikation:** `El Trabajante/docs/Mqtt_Protocoll.md`
+4. **Architektur:** `CLAUDE_SERVER.md` Section 4.4: MQTT-Architektur-Details
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-03  
-**Version:** 2.1 (Aktualisiert mit Integration-Tests und Migration-Dokumentation)
+**Letzte Aktualisierung:** 2025-12-08  
+**Version:** 3.0 (Aktualisiert mit CLAUDE_SERVER.md v3.0, CLAUDE.md v4.3, Cross-Referenzen)

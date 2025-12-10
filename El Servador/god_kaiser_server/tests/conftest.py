@@ -72,11 +72,15 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
 
 
 @pytest_asyncio.fixture(scope="function")
-async def test_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     """
     Create a test database session.
 
-    Automatically rolls back after each test to ensure isolation.
+    Tests can use commit() freely - the in-memory database is
+    recreated for each test function anyway via test_engine.
+    
+    Note: Named 'db_session' for consistency across all test files.
+    Some tests may also use 'test_session' alias.
     """
     async_session_maker = sessionmaker(
         bind=test_engine,
@@ -87,39 +91,44 @@ async def test_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession,
     )
 
     async with async_session_maker() as session:
-        # Start a transaction
-        async with session.begin():
-            yield session
-            # Rollback after test (isolation)
-            await session.rollback()
+        yield session
+        # Rollback any uncommitted changes
+        await session.rollback()
+
+
+# Alias for backwards compatibility
+@pytest_asyncio.fixture(scope="function")
+async def test_session(db_session: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
+    """Alias for db_session - for backwards compatibility."""
+    yield db_session
 
 
 @pytest_asyncio.fixture
-async def esp_repo(test_session: AsyncSession) -> ESPRepository:
+async def esp_repo(db_session: AsyncSession) -> ESPRepository:
     """Create ESPRepository instance."""
-    return ESPRepository(test_session)
+    return ESPRepository(db_session)
 
 
 @pytest_asyncio.fixture
-async def sensor_repo(test_session: AsyncSession) -> SensorRepository:
+async def sensor_repo(db_session: AsyncSession) -> SensorRepository:
     """Create SensorRepository instance."""
-    return SensorRepository(test_session)
+    return SensorRepository(db_session)
 
 
 @pytest_asyncio.fixture
-async def actuator_repo(test_session: AsyncSession) -> ActuatorRepository:
+async def actuator_repo(db_session: AsyncSession) -> ActuatorRepository:
     """Create ActuatorRepository instance."""
-    return ActuatorRepository(test_session)
+    return ActuatorRepository(db_session)
 
 
 @pytest_asyncio.fixture
-async def user_repo(test_session: AsyncSession) -> UserRepository:
+async def user_repo(db_session: AsyncSession) -> UserRepository:
     """Create UserRepository instance."""
-    return UserRepository(test_session)
+    return UserRepository(db_session)
 
 
 @pytest_asyncio.fixture
-async def sample_esp_device(test_session: AsyncSession):
+async def sample_esp_device(db_session: AsyncSession):
     """
     Create a sample ESP device for testing.
 
@@ -138,14 +147,14 @@ async def sample_esp_device(test_session: AsyncSession):
         status="online",
         capabilities={"max_sensors": 20, "max_actuators": 12},
     )
-    test_session.add(device)
-    await test_session.flush()
-    await test_session.refresh(device)
+    db_session.add(device)
+    await db_session.flush()
+    await db_session.refresh(device)
     return device
 
 
 @pytest_asyncio.fixture
-async def sample_user(test_session: AsyncSession):
+async def sample_user(db_session: AsyncSession):
     """
     Create a sample user for testing.
 
@@ -161,7 +170,7 @@ async def sample_user(test_session: AsyncSession):
         role="operator",
         is_active=True,
     )
-    test_session.add(user)
-    await test_session.flush()
-    await test_session.refresh(user)
+    db_session.add(user)
+    await db_session.flush()
+    await db_session.refresh(user)
     return user

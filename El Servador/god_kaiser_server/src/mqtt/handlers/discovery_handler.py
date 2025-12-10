@@ -1,13 +1,23 @@
 """
-MQTT Handler: ESP32 Discovery Messages
+MQTT Handler: ESP32 Discovery Messages (DEPRECATED)
 
-Auto-registers new ESP devices when they send discovery messages.
+NOTE: This handler is kept for backwards compatibility.
+PRIMARY DISCOVERY MECHANISM: Heartbeat messages.
+
+ESP32 devices are now auto-discovered via their initial heartbeat
+(see heartbeat_handler.py). This separate discovery topic is no longer
+required but will still work if an ESP32 explicitly publishes to it.
 
 Topic: kaiser/god/discovery/esp32_nodes
 QoS: 1 (At Least Once)
+
+Migration Note:
+- ESP32 v4.0+ uses heartbeat for discovery
+- This handler processes legacy discovery messages
+- Both mechanisms can coexist safely
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from ...core.logging_config import get_logger
@@ -88,12 +98,12 @@ class DiscoveryHandler:
                         "ip_address": payload.get("ip_address"),
                         "mac_address": payload.get("mac_address"),
                         "firmware_version": payload.get("firmware_version"),
-                        "last_discovery": datetime.utcnow().isoformat(),
+                        "last_discovery": datetime.now(timezone.utc).isoformat(),
                     }
                     existing_esp.ip_address = payload.get("ip_address")
                     existing_esp.mac_address = payload.get("mac_address")
                     existing_esp.firmware_version = payload.get("firmware_version")
-                    existing_esp.last_seen = datetime.utcnow()
+                    existing_esp.last_seen = datetime.now(timezone.utc)
                     existing_esp.status = "online"
 
                     await session.commit()
@@ -111,10 +121,10 @@ class DiscoveryHandler:
                     status="online",
                     capabilities=payload.get("capabilities", {}),
                     metadata={
-                        "discovered_at": datetime.utcnow().isoformat(),
+                        "discovered_at": datetime.now(timezone.utc).isoformat(),
                         "auto_registered": True,  # Flag for manual review
                     },
-                    last_seen=datetime.utcnow(),
+                    last_seen=datetime.now(timezone.utc),
                 )
 
                 session.add(new_esp)

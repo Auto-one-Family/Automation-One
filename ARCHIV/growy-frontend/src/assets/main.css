@@ -1,0 +1,238 @@
+@import './base.css';
+
+/* ✅ NEU: Tailwind Base Styles (konsistent mit bestehenden Vuetify-Styles) */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  line-height: 1.15;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: inherit;
+}
+
+/* ✅ NEU: Tailwind Component Styles */
+.container {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* ✅ NEU: Tailwind Utility Classes (konsistent mit bestehenden Styles) */
+.w-full {
+  width: 100%;
+}
+.h-full {
+  height: 100%;
+}
+.relative {
+  position: relative;
+}
+.absolute {
+  position: absolute;
+}
+.overflow-hidden {
+  overflow: hidden;
+}
+.flex {
+  display: flex;
+}
+.flex-col {
+  flex-direction: column;
+}
+.items-center {
+  align-items: center;
+}
+.justify-center {
+  justify-content: center;
+}
+.space-y-6 > * + * {
+  margin-top: 1.5rem;
+}
+.transition-all {
+  transition: all 0.2s ease;
+}
+.duration-200 {
+  transition-duration: 200ms;
+}
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* Remove conflicting styles */
+#app {
+  width: 100%;
+  margin: 0 auto;
+  font-weight: normal;
+}
+
+a,
+.green {
+  text-decoration: none;
+  color: hsla(160, 100%, 37%, 1);
+  transition: 0.4s;
+}
+
+@media (hover: hover) {
+  a:hover {
+    background-color: hsla(160, 100%, 37%, 0.2);
+  }
+}
+
+/* Remove these conflicting styles that break the layout */
+/* @media (min-width: 1024px) {
+  body {
+    display: flex;
+    place-items: center;
+  }
+
+  #app {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 0 2rem;
+  }
+} */
+
+/* ✅ NEU: Blink-Animation für Zonenwechsel */
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0.3;
+  }
+}
+
+.blink-animation {
+  animation: blink 2s infinite;
+}
+
+/* ✅ NEU: Erweiterte Animationen */
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.pulse-animation {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.slide-in-animation {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fade-in-animation {
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes bounce {
+  0%,
+  20%,
+  53%,
+  80%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  40%,
+  43% {
+    transform: translate3d(0, -8px, 0);
+  }
+  70% {
+    transform: translate3d(0, -4px, 0);
+  }
+  90% {
+    transform: translate3d(0, -2px, 0);
+  }
+}
+
+.bounce-animation {
+  animation: bounce 1s ease-in-out;
+}
+
+/* ✅ NEU: Komponenten-Styles (konsistent mit bestehenden Vuetify-Styles) */
+.zone-card {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+}
+
+.actuator-btn {
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.actuator-btn:hover {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.sensor-reading {
+  background-color: rgb(249 250 251);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboard {
+  width: 100%;
+}
+
+.dashboard > * + * {
+  margin-top: 1.5rem;
+}
+
+.stat-card {
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.stat-card:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.quick-action-btn {
+  transition: all 0.2s ease;
+  width: 100%;
+  cursor: pointer;
+}
+
+.quick-action-btn:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}

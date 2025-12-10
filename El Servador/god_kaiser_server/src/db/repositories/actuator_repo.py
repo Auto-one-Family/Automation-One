@@ -59,14 +59,22 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         actuator_type: str,
         current_value: float,
         state: str,
+        timestamp: Optional[datetime] = None,
         **kwargs,
     ) -> ActuatorState:
-        """Update or create actuator state."""
+        """
+        Update or create actuator state.
+
+        Args:
+            timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
+        """
         existing = await self.get_state(esp_id, gpio)
+        command_timestamp = timestamp or datetime.now(timezone.utc)
+
         if existing:
             existing.current_value = current_value
             existing.state = state
-            existing.last_command_timestamp = datetime.now(timezone.utc)
+            existing.last_command_timestamp = command_timestamp
             for key, value in kwargs.items():
                 if hasattr(existing, key):
                     setattr(existing, key, value)
@@ -80,7 +88,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
                 actuator_type=actuator_type,
                 current_value=current_value,
                 state=state,
-                last_command_timestamp=datetime.now(timezone.utc),
+                last_command_timestamp=command_timestamp,
                 **kwargs,
             )
             self.session.add(new_state)
@@ -99,9 +107,15 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         success: bool,
         issued_by: Optional[str] = None,
         error_message: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
         metadata: Optional[dict] = None,
     ) -> ActuatorHistory:
-        """Log actuator command to history."""
+        """
+        Log actuator command to history.
+
+        Args:
+            timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
+        """
         history = ActuatorHistory(
             esp_id=esp_id,
             gpio=gpio,
@@ -111,6 +125,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             issued_by=issued_by,
             success=success,
             error_message=error_message,
+            timestamp=timestamp or datetime.utcnow(),
             metadata=metadata,
         )
         self.session.add(history)

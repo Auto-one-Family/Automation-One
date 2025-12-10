@@ -3,6 +3,7 @@
 #include "../../services/config/config_manager.h"
 #include "../../services/sensor/sensor_manager.h"
 #include "../../services/actuator/actuator_manager.h"
+#include "../../utils/time_manager.h"
 #include <WiFi.h>
 
 // ============================================
@@ -127,8 +128,10 @@ bool MQTTClient::connectToBroker() {
     last_will_topic.replace("/heartbeat", "/will");
 
     // Build Last-Will Message: JSON with offline status
+    // Phase 8: Use NTP-synchronized Unix timestamp
+    time_t will_timestamp = timeManager.getUnixTimestamp();
     String last_will_message = "{\"status\":\"offline\",\"reason\":\"unexpected_disconnect\",\"timestamp\":" +
-                               String(millis()) + "}";
+                               String((unsigned long)will_timestamp) + "}";
 
     LOG_INFO("Last-Will Topic: " + last_will_topic);
     LOG_INFO("Last-Will Message: " + last_will_message);
@@ -442,12 +445,15 @@ void MQTTClient::publishHeartbeat() {
     const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
     
     // Build heartbeat payload (JSON) - Phase 7: Enhanced with Zone Info
+    // Phase 8: Use NTP-synchronized Unix timestamp instead of millis()
+    time_t unix_timestamp = timeManager.getUnixTimestamp();
+    
     String payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
     payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
     payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
     payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
-    payload += "\"ts\":" + String(current_time) + ",";
+    payload += "\"ts\":" + String((unsigned long)unix_timestamp) + ",";
     payload += "\"uptime\":" + String(millis() / 1000) + ",";
     payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
@@ -466,6 +472,9 @@ void MQTTClient::loop() {
     if (!initialized_) {
         return;
     }
+    
+    // Phase 8: Maintain NTP time synchronization
+    timeManager.loop();
     
     // Process MQTT loop
     if (isConnected()) {

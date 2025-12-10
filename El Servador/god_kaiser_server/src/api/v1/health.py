@@ -19,7 +19,7 @@ References:
 
 import platform
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Response
 
@@ -84,7 +84,7 @@ async def health_check() -> HealthResponse:
         version="2.0.0",
         environment=settings.environment,
         uptime_seconds=uptime_seconds,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
 
@@ -195,7 +195,7 @@ async def detailed_health(
         environment=settings.environment,
         uptime_seconds=uptime_seconds,
         uptime_formatted=uptime_formatted,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         database=db_health,
         mqtt=mqtt_health,
         websocket=ws_health,

@@ -8,7 +8,7 @@ Processes actuator status updates from ESP32 devices:
 - Logs state changes to history
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from ...core.logging_config import get_logger
@@ -43,10 +43,10 @@ class ActuatorStatusHandler:
             "esp_id": "ESP_12AB34CD",
             "gpio": 18,
             "actuator_type": "pump",
-            "state": "on",
-            "value": 255,
+            "state": "on",               // or true/false (boolean) - both accepted
+            "value": 255,                // or "pwm": 255 - both accepted
             "last_command": "on",
-            "uptime": 3600,
+            "runtime_ms": 3600000,       // or "uptime": 3600
             "error": null
         }
 
@@ -102,11 +102,25 @@ class ActuatorStatusHandler:
                     )
 
                 # Step 6: Extract data from payload
-                actuator_type = payload.get("actuator_type", "unknown")
+                actuator_type = payload.get("actuator_type", payload.get("type", "unknown"))
+
+                # Convert boolean state to string (ESP32 sends true/false)
                 state = payload.get("state", "unknown")
-                value = float(payload.get("value", 0.0))
-                last_command = payload.get("last_command", "")
+                if isinstance(state, bool):
+                    state = "on" if state else "off"
+
+                # Accept both "value" and "pwm" for PWM value
+                value = float(payload.get("value", payload.get("pwm", 0.0)))
+                last_command = payload.get("last_command", payload.get("command", ""))
                 error = payload.get("error", None)
+
+                # Convert ESP32 timestamp (millis since boot) to UTC datetime
+                # Same pattern as heartbeat_handler: auto-detect millis vs seconds
+                esp32_timestamp_raw = payload.get("ts")
+                esp32_timestamp = datetime.fromtimestamp(
+                    esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
+                    tz=timezone.utc
+                )
 
                 # Step 7: Update actuator state
                 actuator_state = await actuator_repo.update_state(
@@ -115,6 +129,7 @@ class ActuatorStatusHandler:
                     actuator_type=actuator_type,
                     current_value=value,
                     state=state,
+                    timestamp=esp32_timestamp,
                     last_command=last_command,
                     error_message=error,
                 )
@@ -131,8 +146,8 @@ class ActuatorStatusHandler:
                         success=success,
                         issued_by="esp32",
                         error_message=error,
+                        timestamp=esp32_timestamp,
                         metadata={
-                            "timestamp": payload.get("ts"),
                             "uptime": payload.get("uptime"),
                         },
                     )
@@ -163,7 +178,7 @@ class ActuatorStatusHandler:
                         "state": state,
                         "value": value,
                         "emergency": payload.get("emergency", "normal"),
-                        "timestamp": payload.get("ts")
+                        "timestamp": esp32_timestamp_raw
                     })
                 except Exception as e:
                     logger.warning(f"Failed to broadcast actuator status via WebSocket: {e}")
@@ -181,7 +196,7 @@ class ActuatorStatusHandler:
         """
         Validate actuator status payload structure.
 
-        Required fields: ts, esp_id, gpio, actuator_type, state, value
+        Required fields: ts, esp_id, gpio, actuator_type OR type, state, value OR pwm
 
         Args:
             payload: Payload dict to validate
@@ -189,14 +204,26 @@ class ActuatorStatusHandler:
         Returns:
             {"valid": bool, "error": str}
         """
-        required_fields = ["ts", "esp_id", "gpio", "actuator_type", "state", "value"]
+        # Check required fields
+        if "ts" not in payload:
+            return {"valid": False, "error": "Missing required field: ts"}
 
-        for field in required_fields:
-            if field not in payload:
-                return {
-                    "valid": False,
-                    "error": f"Missing required field: {field}",
-                }
+        if "esp_id" not in payload:
+            return {"valid": False, "error": "Missing required field: esp_id"}
+
+        if "gpio" not in payload:
+            return {"valid": False, "error": "Missing required field: gpio"}
+
+        # Accept both "actuator_type" and "type"
+        if "actuator_type" not in payload and "type" not in payload:
+            return {"valid": False, "error": "Missing required field: actuator_type or type"}
+
+        if "state" not in payload:
+            return {"valid": False, "error": "Missing required field: state"}
+
+        # Accept both "value" and "pwm"
+        if "value" not in payload and "pwm" not in payload:
+            return {"valid": False, "error": "Missing required field: value or pwm"}
 
         # Type validation
         if not isinstance(payload["ts"], int):
@@ -209,17 +236,28 @@ class ActuatorStatusHandler:
             return {"valid": False, "error": "Field 'gpio' must be integer"}
 
         # Validate value (should be numeric)
+        value = payload.get("value", payload.get("pwm"))
         try:
-            float(payload["value"])
+            float(value)
         except (ValueError, TypeError):
-            return {"valid": False, "error": "Field 'value' must be numeric"}
+            return {"valid": False, "error": "Field 'value/pwm' must be numeric"}
 
-        # Validate state (should be string)
-        valid_states = ["on", "off", "pwm", "error", "unknown"]
-        if payload["state"] not in valid_states:
+        # Validate state (accepts boolean true/false OR string on/off/pwm/error/unknown)
+        state = payload["state"]
+        if isinstance(state, bool):
+            # Boolean is valid (will be converted to on/off in handler)
+            pass
+        elif isinstance(state, str):
+            valid_states = ["on", "off", "pwm", "error", "unknown"]
+            if state not in valid_states:
+                return {
+                    "valid": False,
+                    "error": f"Field 'state' must be boolean or one of: {valid_states}",
+                }
+        else:
             return {
                 "valid": False,
-                "error": f"Field 'state' must be one of: {valid_states}",
+                "error": "Field 'state' must be boolean or string",
             }
 
         return {"valid": True, "error": ""}

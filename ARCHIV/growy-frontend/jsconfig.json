@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/EspSetupGuide.vue",
+    "**/KaiserIdTestPanel.vue",
+    "**/PiIntegrationPanel.vue",
+    "**/DeviceCardBase.vue",
+    "**/DeviceManagement.vue",
+    "**/EspDeviceCard.vue",
+    "**/EspDevicePanel.vue",
+    "**/EspGrid.vue",
+    "**/SimpleServerSetup.vue",
+    "**/SystemExplanationCard.vue",
+    "**/TooltipHelp.vue",
+    "**/ConnectionStatus.vue"
+  ]
+}

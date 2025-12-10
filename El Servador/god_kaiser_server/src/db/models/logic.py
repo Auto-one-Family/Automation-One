@@ -6,11 +6,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from pydantic import ValidationError
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from ..base import Base, TimestampMixin
+from .logic_validation import validate_actions, validate_conditions
 
 
 class CrossESPLogic(Base, TimestampMixin):
@@ -159,6 +161,70 @@ class CrossESPLogic(Base, TimestampMixin):
     def conditions(self, value: list) -> None:
         """Setter for conditions - stores as trigger_conditions."""
         self.trigger_conditions = value
+
+    # =========================================================================
+    # VALIDATORS (Pydantic Validation for Production Safety)
+    # =========================================================================
+
+    @validates("trigger_conditions")
+    def validate_trigger_conditions(self, key, value):
+        """
+        Validate trigger_conditions using Pydantic models.
+
+        Ensures conditions are well-formed before saving to database.
+        Prevents runtime errors from malformed JSON.
+
+        Args:
+            key: Column name
+            value: Conditions (dict or list)
+
+        Returns:
+            Validated conditions (original format)
+
+        Raises:
+            ValidationError: If conditions are invalid
+        """
+        if value is None:
+            raise ValueError("trigger_conditions cannot be None")
+
+        try:
+            # Validate using Pydantic models
+            validate_conditions(value)
+            # Return original value (Pydantic validation doesn't modify)
+            return value
+        except ValidationError as e:
+            raise ValueError(f"Invalid trigger_conditions: {e}")
+
+    @validates("actions")
+    def validate_actions_field(self, key, value):
+        """
+        Validate actions using Pydantic models.
+
+        Ensures actions are well-formed before saving to database.
+        Prevents runtime errors from malformed JSON.
+
+        Args:
+            key: Column name
+            value: Actions list
+
+        Returns:
+            Validated actions (original format)
+
+        Raises:
+            ValidationError: If actions are invalid
+        """
+        if value is None:
+            raise ValueError("actions cannot be None")
+
+        try:
+            # Validate using Pydantic models
+            validate_actions(value)
+            # Return original value (Pydantic validation doesn't modify)
+            return value
+        except ValidationError as e:
+            raise ValueError(f"Invalid actions: {e}")
+
+    # =========================================================================
 
     def __repr__(self) -> str:
         return f"<CrossESPLogic(rule_name='{self.rule_name}', enabled={self.enabled})>"

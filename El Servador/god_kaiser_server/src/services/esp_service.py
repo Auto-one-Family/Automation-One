@@ -20,7 +20,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from ..core.logging_config import get_logger
@@ -106,7 +106,7 @@ class ESPService:
             if capabilities:
                 existing.capabilities = capabilities
             existing.status = "online"
-            existing.last_seen = datetime.utcnow()
+            existing.last_seen = datetime.now(timezone.utc)
             
             logger.info(f"ESP device updated: {device_id}")
             return existing
@@ -124,7 +124,7 @@ class ESPService:
                 is_zone_master=is_zone_master,
                 capabilities=capabilities or {},
                 status="online",
-                last_seen=datetime.utcnow(),
+                last_seen=datetime.now(timezone.utc),
                 metadata={},
             )
             created = await self.esp_repo.create(device)
@@ -189,8 +189,8 @@ class ESPService:
         
         # Update status and last_seen
         device.status = "online"
-        device.last_seen = datetime.utcnow()
-        
+        device.last_seen = datetime.now(timezone.utc)
+
         # Store health data in metadata
         health_data = {
             "uptime": uptime,
@@ -198,7 +198,7 @@ class ESPService:
             "wifi_rssi": wifi_rssi,
             "sensor_count": sensor_count,
             "actuator_count": actuator_count,
-            "timestamp": timestamp or int(datetime.utcnow().timestamp()),
+            "timestamp": timestamp or int(datetime.now(timezone.utc).timestamp()),
         }
         
         metadata = device.metadata or {}
@@ -222,7 +222,7 @@ class ESPService:
             Dictionary with lists of online, offline, and newly_offline devices
         """
         all_devices = await self.esp_repo.get_all()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         threshold = timedelta(seconds=offline_threshold_seconds)
         
         online = []

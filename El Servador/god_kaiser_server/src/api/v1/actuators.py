@@ -23,7 +23,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md (Actuator topics)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -630,7 +630,7 @@ async def emergency_stop(
         devices_stopped=devices_stopped,
         actuators_stopped=actuators_stopped,
         reason=request.reason,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
 

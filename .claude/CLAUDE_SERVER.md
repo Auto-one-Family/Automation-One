@@ -1,10 +1,29 @@
 # CLAUDE_SERVER.md - God-Kaiser Server Referenz für KI-Agenten
 
-**Version:** 2.1  
-**Letzte Aktualisierung:** 2025-12-03  
+**Version:** 3.0  
+**Letzte Aktualisierung:** 2025-12-08  
 **Zweck:** Zentrale Referenz für Claude, um bei jeder Server-Aufgabe die richtigen Dateien, Patterns und Konventionen zu finden.
 
-> **Letzte Änderungen (2025-12-03):**
+> **📖 ESP32-Firmware Dokumentation:** Siehe `.claude/CLAUDE.md` für ESP32-spezifische Details  
+> **🔄 Cross-Referenzen:** Beide Dokumentationen verweisen jetzt aufeinander für vollständigen Kontext
+
+> **Letzte Änderungen (2025-12-08 - v3.0):**
+> - **Vollständige Code-Analyse:** Alle kritischen Dateien analysiert und dokumentiert
+> - **MQTT-Architektur:** Subscriber mit Thread-Pool, Handler-Registrierung in main.py dokumentiert
+> - **Topic-Struktur:** Vollständige Topic-Referenz aus `constants.py` und `topics.py`
+> - **Publisher-Methoden:** Alle Publisher-Methoden mit QoS-Levels dokumentiert
+> - **Safety-Service:** Integration in ActuatorService dokumentiert
+> - **Logic-Engine:** Background-Task-Architektur und Evaluation-Flow dokumentiert
+> - **Heartbeat-Handler:** Unbekannte Geräte werden abgelehnt (kein Auto-Discovery)
+> - **Sensor-Validierung:** `raw_mode` ist Required Field
+> - **Verzeichnisstruktur:** Mit tatsächlichem Code vollständig abgeglichen
+>
+> **Frühere Änderungen (2025-12-08):**
+> - Logic-Engine: `sensor` und `actuator` als Aliase für condition/action types akzeptiert
+> - Test-Payloads: Aktualisiert auf ESP32-Standard (`heap_free` statt `free_heap`)
+> - db_session Fixture: Umbenannt für Konsistenz in allen Tests
+>
+> **Frühere Änderungen (2025-12-03):**
 > - Alembic-Migration-System funktionsfähig gemacht
 > - Bug-Fixes in `actuator_handler.py` und `sensor_handler.py`
 > - 34 Integration-Tests für ESP32-Server-Kommunikation hinzugefügt
@@ -14,24 +33,27 @@
 ## 0. QUICK DECISION TREE - Welche Doku lesen?
 
 ### 🔧 "Ich will Code ändern"
-1. **Welches Modul?** → [Section 9: Modul-Dokumentation Navigation](#9-modul-dokumentation-navigation)
-2. **Workflow folgen** → [Section 10: KI-Agenten Workflow](#10-ki-agenten-workflow)
-3. **Tests schreiben** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
-4. **Pattern-Beispiele** → `.claude/WORKFLOW_PATTERNS.md`
+1. **ESP32-Firmware?** → `.claude/CLAUDE.md` → [Section 8: Workflow](.claude/CLAUDE.md#8-ki-agenten-workflow)
+2. **Server-Code?** → [Section 13: KI-Agenten Workflow](#13-ki-agenten-workflow)
+3. **Welches Modul?** → [Section 12: Modul-Dokumentation Navigation](#12-modul-dokumentation-navigation)
+4. **Tests schreiben** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
+5. **Pattern-Beispiele** → `.claude/WORKFLOW_PATTERNS.md`
 
 ### 🐛 "Ich habe einen Fehler"
-1. **Build-Fehler?** → [Section 7: Entwickler-Workflows](#7-entwickler-workflows) + `pyproject.toml` prüfen
-2. **Test-Fehler?** → `El Servador/docs/ESP32_TESTING.md` Section Troubleshooting
-3. **Runtime-Fehler?** → [Section 10: Häufige Fehler](#10-häufige-fehler-und-lösungen)
-4. **MQTT-Problem?** → `El Trabajante/docs/Mqtt_Protocoll.md` + [Section 4: MQTT Topic-Referenz](#4-mqtt-topic-referenz-server-perspektive)
-5. **Database-Fehler?** → [Section 7.4: Database Migration](#74-database-migration)
+1. **ESP32 Build-Fehler?** → `.claude/CLAUDE.md` → [Section 1: Build & Commands](.claude/CLAUDE.md#1-build--commands)
+2. **Server Build-Fehler?** → [Section 7: Entwickler-Workflows](#7-entwickler-workflows) + `pyproject.toml` prüfen
+3. **Test-Fehler?** → `El Servador/docs/ESP32_TESTING.md` Section Troubleshooting
+4. **Runtime-Fehler?** → [Section 10: Häufige Fehler](#10-häufige-fehler-und-lösungen)
+5. **MQTT-Problem?** → `.claude/CLAUDE.md` → [Section 4: MQTT-Protokoll](.claude/CLAUDE.md#4-mqtt-protokoll-verifiziert) + [Section 4: MQTT Topic-Referenz](#4-mqtt-topic-referenz-server-perspektive)
+6. **Database-Fehler?** → [Section 7.4: Database Migration](#74-database-migration)
 
 ### 📖 "Ich will verstehen wie X funktioniert"
-1. **System-Flow?** → `El Trabajante/docs/system-flows/` (Boot, Sensor-Reading, Actuator-Command)
-2. **MQTT-Protokoll?** → `El Trabajante/docs/Mqtt_Protocoll.md` + [Section 4](#4-mqtt-topic-referenz-server-perspektive)
+1. **ESP32 System-Flow?** → `.claude/CLAUDE.md` → [Section 0: Quick Reference](.claude/CLAUDE.md#0-quick-reference---was-suche-ich) → System-Flow
+2. **MQTT-Protokoll?** → `.claude/CLAUDE.md` → [Section 4: MQTT-Protokoll](.claude/CLAUDE.md#4-mqtt-protokoll-verifiziert) + [Section 4: MQTT Topic-Referenz](#4-mqtt-topic-referenz-server-perspektive)
 3. **API-Endpunkte?** → [Section 3.2: REST API Endpoint hinzufügen](#32-aufgabe-rest-api-endpoint-hinzufügen) + `src/api/v1/`
 4. **Test-Infrastruktur?** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
 5. **Sensor-Processing?** → [Section 3.1: Neuen Sensor-Typ hinzufügen](#31-aufgabe-neuen-sensor-typ-hinzufügen)
+6. **ESP32 Error-Codes?** → `.claude/CLAUDE.md` → [Section 5: Error-Codes](.claude/CLAUDE.md#5-error-codes-verifiziert)
 
 ### ➕ "Ich will neues Feature hinzufügen"
 1. **Sensor-Library?** → [Section 3.1: Neuen Sensor-Typ hinzufügen](#31-aufgabe-neuen-sensor-typ-hinzufügen)
@@ -95,6 +117,48 @@ Server sendet:    Actuator-Commands, Config-Updates
 
 ---
 
+## 2. SERVER-STARTUP-SEQUENZ (KRITISCH)
+
+**Startup-Flow in `src/main.py` (lifespan startup):**
+
+1. **Database Initialization** (`init_db()`)
+   - Erstellt Tabellen wenn `settings.database.auto_init == True`
+   - Engine wird erstellt auch wenn auto_init=False
+
+2. **MQTT Client Connection** (`MQTTClient.get_instance().connect()`)
+   - Singleton-Pattern
+   - Auto-Reconnect mit Exponential Backoff
+   - TLS/SSL Support wenn konfiguriert
+
+3. **MQTT Handler Registration** (`Subscriber.register_handler()`)
+   - Handler werden für Topic-Patterns registriert
+   - `kaiser_id` wird dynamisch aus Config geladen
+   - Alle Handler in `main.py:99-129` registriert
+
+4. **MQTT Topic Subscription** (`Subscriber.subscribe_all()`)
+   - QoS wird automatisch basierend auf Topic-Typ gesetzt
+   - Heartbeat: QoS 0, Config: QoS 2, Rest: QoS 1
+
+5. **WebSocket Manager Initialization** (`WebSocketManager.get_instance()`)
+   - Singleton-Pattern
+   - Connection-Management für Realtime-Updates
+
+6. **Service Initialization** (in DB Session)
+   - `SafetyService` → `ActuatorService` → `LogicEngine`
+   - `LogicEngine.start()` startet Background-Task
+   - Global instance wird gesetzt via `set_logic_engine()`
+
+**Shutdown-Flow:**
+1. Logic Engine stoppen (`LogicEngine.stop()`)
+2. WebSocket Manager shutdown
+3. MQTT Subscriber Thread-Pool shutdown (wait=True, timeout=30s)
+4. MQTT Client disconnect
+5. Database Engine dispose
+
+**Code-Location:** `src/main.py:55-230`
+
+---
+
 ## 2. VERZEICHNISSTRUKTUR
 ```
 El Servador/
@@ -109,29 +173,35 @@ El Servador/
 │   │   │
 │   │   ├── api/                      # REST API Layer
 │   │   │   ├── deps.py               # ⭐ Dependency Injection (DB, Auth)
+│   │   │   ├── dependencies.py       # Alternative Dependency Injection
+│   │   │   ├── schemas.py            # Shared Schemas
+│   │   │   ├── sensor_processing.py  # Real-Time Sensor Processing API
 │   │   │   └── v1/                   # API Version 1
+│   │   │       ├── __init__.py       # Router-Aggregation
 │   │   │       ├── auth.py           # Login, Register, Token Refresh
 │   │   │       ├── esp.py            # ESP CRUD, Status
 │   │   │       ├── sensors.py        # Sensor Config, Data Query
 │   │   │       ├── actuators.py      # Actuator Control, Status
-│   │   │       ├── zones.py          # Zone Management
 │   │   │       ├── logic.py          # Automation Rules CRUD
+│   │   │       ├── health.py         # Health Checks, Metrics
+│   │   │       ├── kaiser.py         # Kaiser Node Management
 │   │   │       ├── library.py        # Sensor Library Management
-│   │   │       ├── system.py         # Health, Metrics, Logs
-│   │   │       └── kaiser.py         # Kaiser Node Management
+│   │   │       ├── ai.py             # AI Service Integration
+│   │   │       └── websocket/        # WebSocket Endpoints
+│   │   │           └── realtime.py   # Realtime Updates
 │   │   │
 │   │   ├── services/                 # 🧠 BUSINESS LOGIC
 │   │   │   ├── esp_service.py        # ⭐ ESP Registration, Discovery
 │   │   │   ├── sensor_service.py     # ⭐ Sensor Config, Data Processing
 │   │   │   ├── actuator_service.py   # ⭐ Command Validation, Execution
 │   │   │   ├── logic_engine.py       # ⭐ Cross-ESP Automation Engine
-│   │   │   ├── zone_service.py       # Zone Hierarchy Management
+│   │   │   ├── logic_service.py      # Automation Rule CRUD Service
 │   │   │   ├── library_service.py    # Sensor Library Management
-│   │   │   ├── auth_service.py       # User Authentication
-│   │   │   ├── mqtt_service.py       # MQTT Orchestration
-│   │   │   ├── websocket_service.py  # Realtime Broadcast
+│   │   │   ├── safety_service.py     # Safety Controller, Emergency Stop
+│   │   │   ├── health_service.py     # Health Checks, Metrics
+│   │   │   ├── kaiser_service.py     # Kaiser Node Management
 │   │   │   ├── ai_service.py         # God Layer Integration (Future)
-│   │   │   └── scheduler_service.py  # Periodic Tasks
+│   │   │   └── god_client.py         # HTTP Client für God-Layer
 │   │   │
 │   │   ├── mqtt/                     # 📡 MQTT LAYER
 │   │   │   ├── client.py             # ⭐ Paho-MQTT Singleton Wrapper
@@ -139,9 +209,13 @@ El Servador/
 │   │   │   ├── publisher.py          # Message Publishing
 │   │   │   └── handlers/             # ⭐ MESSAGE HANDLERS
 │   │   │       ├── sensor_handler.py # Sensor Data Processing
-│   │   │       ├── actuator_handler.py # Actuator Status/Response
-│   │   │       ├── system_handler.py # Heartbeat, Diagnostics
-│   │   │       └── config_handler.py # Config Responses
+│   │   │       ├── actuator_handler.py # Actuator Status Updates
+│   │   │       ├── actuator_response_handler.py # Actuator Command Responses
+│   │   │       ├── actuator_alert_handler.py # Actuator Alerts
+│   │   │       ├── heartbeat_handler.py # ESP Heartbeats, Registration
+│   │   │       ├── config_handler.py # Config Responses
+│   │   │       ├── discovery_handler.py # ESP Discovery (falls vorhanden)
+│   │   │       └── kaiser_handler.py # Kaiser Node Messages
 │   │   │
 │   │   ├── websocket/                # 🔴 REALTIME
 │   │   │   ├── manager.py            # Connection Management
@@ -150,15 +224,17 @@ El Servador/
 │   │   ├── db/                       # 💾 DATABASE LAYER
 │   │   │   ├── session.py            # ⭐ Engine, Session Factory
 │   │   │   ├── models/               # SQLAlchemy Models
+│   │   │   │   ├── __init__.py       # Model Exports
 │   │   │   │   ├── esp.py            # ESP Device Model
 │   │   │   │   ├── sensor.py         # SensorConfig, SensorData
-│   │   │   │   ├── actuator.py       # ActuatorConfig, ActuatorLog
-│   │   │   │   ├── zone.py           # Zone, MasterZone, SubZone
-│   │   │   │   ├── logic.py          # AutomationRule, Condition
+│   │   │   │   ├── actuator.py       # ActuatorConfig, ActuatorState
+│   │   │   │   ├── logic.py          # AutomationRule Model
+│   │   │   │   ├── logic_validation.py # Logic Validation Helpers
 │   │   │   │   ├── user.py           # User, Role, Permission
 │   │   │   │   ├── kaiser.py         # Kaiser Node Model
 │   │   │   │   ├── library.py        # SensorLibrary Model
-│   │   │   │   └── system.py         # SystemConfig, SystemLog
+│   │   │   │   ├── system.py         # SystemConfig, SystemLog
+│   │   │   │   └── ai.py             # AI Service Models
 │   │   │   └── repositories/         # Repository Pattern
 │   │   │       ├── base.py           # BaseRepository (CRUD)
 │   │   │       ├── esp_repo.py       # ESP-specific Queries
@@ -172,9 +248,13 @@ El Servador/
 │   │   │       └── active/           # ⭐ AKTIVE SENSOR-LIBRARIES
 │   │   │           ├── ph_sensor.py
 │   │   │           ├── ec_sensor.py
-│   │   │           ├── sht31.py
-│   │   │           ├── ds18b20.py
-│   │   │           ├── bmp280.py
+│   │   │           ├── temperature.py
+│   │   │           ├── humidity.py
+│   │   │           ├── moisture.py
+│   │   │           ├── pressure.py
+│   │   │           ├── light.py
+│   │   │           ├── flow.py
+│   │   │           ├── co2.py
 │   │   │           └── ...
 │   │   │
 │   │   ├── schemas/                  # 📋 PYDANTIC DTOs
@@ -382,10 +462,12 @@ app.include_router(dashboard.router, prefix="/api/v1")
 **Szenario:** Server soll auf neues Topic reagieren.
 
 **Zu analysierende Dateien:**
-1. `src/mqtt/client.py` - MQTT Client Setup
-2. `src/mqtt/subscriber.py` - Topic Subscriptions
-3. `src/mqtt/handlers/sensor_handler.py` - Beispiel Handler
-4. `El Trabajante/docs/Mqtt_Protocoll.md` - ⚠️ ESP32 Topic-Spezifikation!
+1. `src/mqtt/client.py` - MQTT Client Setup (Singleton)
+2. `src/mqtt/subscriber.py` - Topic Subscriptions, Thread-Pool
+3. `src/mqtt/handlers/sensor_handler.py` - Beispiel Handler (async)
+4. `src/mqtt/topics.py` - Topic-Parsing für neues Topic
+5. `src/core/constants.py` - Topic-Templates definieren
+6. `El Trabajante/docs/Mqtt_Protocoll.md` - ⚠️ ESP32 Topic-Spezifikation!
 
 **Pattern für neuen Handler:**
 ```python
@@ -394,16 +476,16 @@ app.include_router(dashboard.router, prefix="/api/v1")
 Handler für System-Diagnostics Messages
 Topic: kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics
 """
-import json
-import logging
 from typing import Dict, Any
 
-from ...services.esp_service import ESPService
+from ...core.logging_config import get_logger
+from ...db.repositories import ESPRepository
 from ...db.session import get_session
+from ..topics import TopicBuilder
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-async def handle_diagnostics(topic: str, payload: Dict[str, Any]) -> None:
+async def handle_diagnostics(topic: str, payload: Dict[str, Any]) -> bool:
     """
     Verarbeitet Diagnostics-Nachrichten von ESPs.
     
@@ -411,39 +493,78 @@ async def handle_diagnostics(topic: str, payload: Dict[str, Any]) -> None:
     {
         "esp_id": "ESP_12AB34CD",
         "timestamp": 1234567890,
-        "free_heap": 123456,
-        "uptime_seconds": 3600,
+        "heap_free": 123456,
+        "uptime": 3600,
         "wifi_rssi": -65,
         "mqtt_reconnects": 2,
         "sensor_errors": 0,
         "actuator_errors": 0
     }
+    
+    Returns:
+        True if processed successfully, False otherwise
     """
     try:
-        esp_id = payload.get("esp_id")
-        if not esp_id:
-            logger.warning("Diagnostics ohne esp_id: %s", payload)
-            return
+        # Parse topic
+        parsed = TopicBuilder.parse_diagnostics_topic(topic)  # Muss in topics.py hinzugefügt werden
+        if not parsed:
+            logger.error(f"Failed to parse diagnostics topic: {topic}")
+            return False
+        
+        esp_id = parsed["esp_id"]
+        
+        # Validate payload
+        if "esp_id" not in payload or "heap_free" not in payload:
+            logger.error(f"Invalid diagnostics payload: {payload}")
+            return False
+        
+        # Process diagnostics
+        async for session in get_session():
+            esp_repo = ESPRepository(session)
+            esp_device = await esp_repo.get_by_device_id(esp_id)
+            if not esp_device:
+                logger.warning(f"ESP device not found: {esp_id}")
+                return False
             
-        async with get_session() as db:
-            esp_service = ESPService(db)
-            await esp_service.update_diagnostics(esp_id, payload)
+            # Update diagnostics in metadata
+            metadata = esp_device.metadata or {}
+            metadata["diagnostics"] = payload
+            esp_device.metadata = metadata
             
-        logger.info("Diagnostics aktualisiert für %s", esp_id)
+            await session.commit()
+            break
+        
+        logger.info(f"Diagnostics updated for {esp_id}")
+        return True
         
     except Exception as e:
-        logger.exception("Fehler bei Diagnostics-Verarbeitung: %s", e)
+        logger.exception(f"Error processing diagnostics: {e}")
+        return False
 ```
 
-**Handler registrieren in `src/mqtt/subscriber.py`:**
+**Handler registrieren in `src/main.py` (lifespan startup):**
 ```python
-from .handlers.diagnostics_handler import handle_diagnostics
+# In lifespan() startup (nach MQTT-Client-Connection):
+from .mqtt.handlers import diagnostics_handler
 
-TOPIC_HANDLERS = {
-    "kaiser/+/esp/+/system/diagnostics": handle_diagnostics,
-    # ... andere Handler
-}
+# Get KAISER_ID from config
+kaiser_id = settings.hierarchy.kaiser_id
+
+# Register handler
+_subscriber_instance.register_handler(
+    f"kaiser/{kaiser_id}/esp/+/system/diagnostics",
+    diagnostics_handler.handle_diagnostics
+)
+
+# Subscribe to all topics (wird automatisch aufgerufen)
+_subscriber_instance.subscribe_all()
 ```
+
+**Wichtig:**
+- Handler werden in `src/main.py` während des FastAPI lifespan-Events registriert (nicht in `subscriber.py`)
+- Handler können sync oder async sein (Subscriber erkennt automatisch)
+- Handler-Fehler crashen nicht den Subscriber (Error-Isolation)
+- QoS wird automatisch basierend auf Topic-Typ gesetzt (Diagnostics: QoS 1)
 
 ---
 
@@ -499,19 +620,38 @@ poetry run alembic upgrade head
 **Szenario:** Wenn Sensor A > Threshold, dann Actuator B aktivieren.
 
 **Zu analysierende Dateien:**
-1. `src/services/logic_engine.py` - ⭐ Kernlogik
+1. `src/services/logic_engine.py` - ⭐ Kernlogik (Background-Task)
 2. `src/db/models/logic.py` - Rule/Condition Models
-3. `src/schemas/logic.py` - Rule Schemas
-4. `src/api/v1/logic.py` - Rule CRUD Endpoints
+3. `src/db/models/logic_validation.py` - Condition/Action Validation
+4. `src/schemas/logic.py` - Rule Schemas
+5. `src/api/v1/logic.py` - Rule CRUD Endpoints
+6. `src/services/actuator_service.py` - Command Execution
 
 **Datenfluss:**
 ```
-1. Sensor-Daten kommen via MQTT
-2. sensor_handler.py ruft logic_engine.evaluate() auf
-3. logic_engine lädt passende Rules aus DB
-4. Conditions werden evaluiert
-5. Bei Match: Actuator-Command via MQTT
+1. Sensor-Daten kommen via MQTT → sensor_handler.handle_sensor_data()
+2. Sensor-Daten werden in DB gespeichert
+3. sensor_handler ruft logic_engine.evaluate_sensor_data() auf (non-blocking via asyncio.create_task)
+4. LogicEngine lädt passende Rules aus DB (get_rules_by_trigger_sensor)
+5. Für jede Rule: Conditions werden evaluiert (_check_conditions)
+6. Bei Match: Actions werden ausgeführt (_execute_actions)
+7. Actuator-Command wird via ActuatorService.send_command() gesendet
+8. Safety-Checks erfolgen VOR Command-Publishing (SafetyService.validate_actuator_command)
+9. Command wird via MQTT Publisher gesendet (QoS 2)
+10. Execution wird in DB geloggt (log_execution)
 ```
+
+**Logic Engine Architektur:**
+- **Background-Task:** Läuft kontinuierlich im Hintergrund (`_evaluation_loop()`)
+- **Trigger-basiert:** Wird von `sensor_handler` getriggert wenn Sensor-Daten ankommen
+- **Non-blocking:** `evaluate_sensor_data()` sollte via `asyncio.create_task()` aufgerufen werden
+- **Cooldown:** Rules haben `cooldown_seconds` um zu häufige Ausführungen zu verhindern
+- **Error-Handling:** Rule-Fehler crashen nicht die Engine (isoliert)
+
+**Code-Location:**
+- Logic Engine: `src/services/logic_engine.py`
+- Sensor Handler Integration: `src/mqtt/handlers/sensor_handler.py:280-290`
+- Actuator Service: `src/services/actuator_service.py:44-193`
 
 **Rule-Struktur (Database):**
 ```python
@@ -521,22 +661,20 @@ poetry run alembic upgrade head
     "name": "Auto-Irrigation",
     "enabled": true,
     "priority": 1,
-    "conditions": [
-        {
-            "source_esp_id": "ESP_SENSOR_01",
-            "source_gpio": 4,
-            "source_type": "sensor",
-            "operator": ">",
-            "value": 30.0,
-            "logic_operator": "AND"
-        }
-    ],
+    "trigger_conditions": {
+        "type": "sensor",  # Akzeptiert: "sensor" oder "sensor_threshold"
+        "esp_id": "ESP_SENSOR_01",
+        "gpio": 4,
+        "sensor_type": "temperature",  # Optional bei "sensor" shorthand
+        "operator": ">",
+        "value": 30.0
+    },
     "actions": [
         {
-            "target_esp_id": "ESP_ACTUATOR_01",
-            "target_gpio": 5,
-            "target_type": "actuator",
-            "action": "ON",
+            "type": "actuator",  # Akzeptiert: "actuator" oder "actuator_command"
+            "esp_id": "ESP_ACTUATOR_01",
+            "gpio": 5,
+            "command": "ON",  # Optional bei "actuator" shorthand
             "value": 1.0
         }
     ],
@@ -546,59 +684,164 @@ poetry run alembic upgrade head
 }
 ```
 
+**Condition Types (akzeptiert):**
+- `sensor_threshold` - Standard (erfordert `sensor_type`)
+- `sensor` - Shorthand (optionaler `sensor_type`) - wird zu `sensor_threshold` gemappt
+- `time_window` - Zeit-basierte Bedingung
+
+**Action Types (akzeptiert):**
+- `actuator_command` - Standard (erfordert `command`)
+- `actuator` - Shorthand (optionaler `command`) - wird zu `actuator_command` gemappt
+
+**Validation:** `src/db/models/logic_validation.py` → `validate_condition_type()`, `validate_action_type()`
+
+**Safety-Integration:**
+- Jeder Actuator-Command wird VOR Publishing durch `SafetyService.validate_actuator_command()` geprüft
+- Emergency-Stop wird automatisch geprüft
+- Value-Validierung (PWM: 0.0-1.0, Binary: 0.0 oder 1.0)
+- Runtime-Protection wird getrackt
+
 ---
 
 ## 4. MQTT TOPIC-REFERENZ (Server-Perspektive)
 
 ### 4.1 Topics die der Server SUBSCRIBED
 
-| Topic Pattern | Handler | Beschreibung |
-|--------------|---------|--------------|
-| `kaiser/+/esp/+/sensor/+/data` | `sensor_handler.py` | Sensor-Rohdaten |
-| `kaiser/+/esp/+/actuator/+/status` | `actuator_handler.py` | Actuator-Status |
-| `kaiser/+/esp/+/actuator/+/response` | `actuator_handler.py` | Command-Responses |
-| `kaiser/+/esp/+/system/heartbeat` | `system_handler.py` | ESP Heartbeats |
-| `kaiser/+/esp/+/system/diagnostics` | `system_handler.py` | System-Diagnostics |
-| `kaiser/+/esp/+/config_response` | `config_handler.py` | Config-Bestätigungen |
+**Handler-Registrierung erfolgt in `src/main.py` während des FastAPI lifespan-Events (startup).**
+
+| Topic Pattern | Handler | QoS | Beschreibung | Code-Location |
+|--------------|---------|-----|--------------|---------------|
+| `kaiser/{kaiser_id}/esp/+/sensor/+/data` | `sensor_handler.handle_sensor_data` | 1 | Sensor-Rohdaten | `main.py:101` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/status` | `actuator_handler.handle_actuator_status` | 1 | Actuator-Status | `main.py:105` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/response` | `actuator_response_handler.handle_actuator_response` | 1 | Command-Responses | `main.py:109` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/alert` | `actuator_alert_handler.handle_actuator_alert` | 1 | Actuator-Alerts | `main.py:114` |
+| `kaiser/{kaiser_id}/esp/+/system/heartbeat` | `heartbeat_handler.handle_heartbeat` | 0 | ESP Heartbeats | `main.py:119` |
+| `kaiser/{kaiser_id}/discovery/esp32_nodes` | `discovery_handler.handle_discovery` | 1 | ESP Discovery (deprecated) | `main.py:123` |
+| `kaiser/{kaiser_id}/esp/+/config_response` | `config_handler.handle_config_ack` | 2 | Config-Bestätigungen | `main.py:127` |
+
+**Wichtig:**
+- `{kaiser_id}` wird dynamisch aus `settings.hierarchy.kaiser_id` geladen (Standard: `"god"`)
+- QoS-Level werden automatisch von `Subscriber.subscribe_all()` basierend auf Topic-Typ gesetzt
+- Handler werden in einem Thread-Pool ausgeführt (max_workers=10) für nicht-blockierende Verarbeitung
 
 ### 4.2 Topics auf die der Server PUBLISHED
 
-| Topic Pattern | Service | Beschreibung |
-|--------------|---------|--------------|
-| `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command` | `actuator_service.py` | Actuator-Commands |
-| `kaiser/{kaiser_id}/esp/{esp_id}/config` | `esp_service.py` | Config-Updates |
-| `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign` | `zone_service.py` | Zone-Zuweisung |
-| `kaiser/broadcast/emergency` | `actuator_service.py` | Emergency-Stop |
-| `kaiser/broadcast/system_update` | `mqtt_service.py` | System-Updates |
+**Publisher-Methoden in `src/mqtt/publisher.py`:**
+
+| Topic Pattern | Publisher-Methode | QoS | Beschreibung | Code-Location |
+|--------------|-------------------|-----|--------------|--------------|
+| `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command` | `publish_actuator_command()` | 2 | Actuator-Commands | `publisher.py:38` |
+| `kaiser/{kaiser_id}/esp/{esp_id}/config/sensor/{gpio}` | `publish_sensor_config()` | 2 | Sensor-Config | `publisher.py:74` |
+| `kaiser/{kaiser_id}/esp/{esp_id}/config/actuator/{gpio}` | `publish_actuator_config()` | 2 | Actuator-Config | `publisher.py:104` |
+| `kaiser/{kaiser_id}/esp/{esp_id}/system/command` | `publish_system_command()` | 2 | System-Commands | `publisher.py:134` |
+| `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/processed` | `publish_pi_enhanced_response()` | 1 | Pi-Enhanced Response | `publisher.py:165` |
+| `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign` | `publish_zone_assignment()` | 1 | Zone Assignment (Phase 7) | **ZU IMPLEMENTIEREN** |
+
+**Topic-Building:**
+- Topics werden via `TopicBuilder` aus `src/mqtt/topics.py` erstellt
+- `{kaiser_id}` wird automatisch aus Config ersetzt via `constants.get_topic_with_kaiser_id()`
+- Alle Topics sind in `src/core/constants.py` als Templates definiert
 
 ### 4.3 MQTT Payload-Schemas
 
 **Sensor Data (ESP → Server):**
 ```json
 {
-    "gpio": 4,
-    "sensor_type": "ph_sensor",
-    "sensor_name": "Tank pH",
-    "raw_value": 2048,
-    "timestamp": 1234567890,
-    "esp_id": "ESP_12AB34CD"
+    "esp_id": "ESP_12AB34CD",
+    "zone_id": "greenhouse",
+    "subzone_id": "zone_a",
+    "gpio": 34,
+    "sensor_type": "ph",
+    "raw": 2150,
+    "value": 0.0,
+    "unit": "",
+    "quality": "good",
+    "ts": 1735818000,
+    "raw_mode": true
 }
 ```
+**Required Fields:** `esp_id`, `gpio`, `sensor_type`, `raw` (oder `raw_value`), `ts` (oder `timestamp`), `raw_mode`  
+**Validierung:** `src/mqtt/handlers/sensor_handler.py` → `_validate_payload()`  
+**Processing:** Pi-Enhanced Processing wird automatisch getriggert wenn `sensor_config.pi_enhanced == True` und `raw_mode == True`
+
+**Heartbeat (ESP → Server):**
+```json
+{
+    "esp_id": "ESP_12AB34CD",
+    "zone_id": "greenhouse",
+    "master_zone_id": "greenhouse-master",
+    "zone_assigned": true,
+    "ts": 1735818000,
+    "uptime": 3600,
+    "heap_free": 245760,
+    "wifi_rssi": -65,
+    "sensor_count": 3,
+    "actuator_count": 2
+}
+```
+**Required Fields:** `ts`, `uptime`, `heap_free` (oder `free_heap`), `wifi_rssi`  
+**Validierung:** `src/mqtt/handlers/heartbeat_handler.py` → `_validate_payload()`  
+**KRITISCH:** Unbekannte Geräte werden abgelehnt (kein Auto-Discovery). ESPs müssen zuerst via API (`POST /api/v1/esp/register`) registriert werden.  
+**Code:** `heartbeat_handler.py:98-109` - Rejection-Logik
+
+**Zone Assignment (Server → ESP):**
+```json
+{
+    "zone_id": "greenhouse_zone_1",
+    "master_zone_id": "greenhouse_master",
+    "zone_name": "Greenhouse Zone 1",
+    "kaiser_id": "god",
+    "timestamp": 1234567890
+}
+```
+**Kaiser-ID Bedeutung:**
+- `kaiser_id` identifiziert den **übergeordneten Pi** (God-Kaiser Server oder Kaiser-Node), **NICHT** den ESP
+- **Aktuell:** Immer `"god"` (God-Kaiser Server)
+- **Zukunft:** `"kaiser_01"`, `"kaiser_02"`, etc. für Kaiser-Nodes (geplant, noch nicht implementiert)
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`  
+**QoS:** 1 (at least once)  
+**Publisher:** **ZU IMPLEMENTIEREN** - Sollte via `zone_service.py` oder REST API Endpoint gesendet werden  
+**ESP Response:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/ack` mit `status: "zone_assigned"` oder `status: "error"`  
+**Siehe:** `El Trabajante/docs/system-flows/08-zone-assignment-flow.md` für detaillierten Flow
 
 **Actuator Command (Server → ESP):**
 ```json
 {
-    "command": "SET",
+    "command": "ON",
     "value": 1.0,
-    "source": "automation",
-    "rule_id": 1,
+    "duration": 0,
     "timestamp": 1234567890
 }
 ```
+**Publisher:** `src/mqtt/publisher.py` → `publish_actuator_command()`  
+**Safety-Check:** Wird VOR Publishing in `ActuatorService.send_command()` via `SafetyService.validate_actuator_command()` geprüft  
+**Value-Range:** PWM: 0.0-1.0 (wird intern auf 0-255 gemappt), Binary: 0.0 oder 1.0
 
 **⚠️ KRITISCH:** Für vollständige Payload-Spezifikationen siehe:
-- `El Trabajante/docs/Mqtt_Protocoll.md`
-- `El Trabajante/test/README.md` (JSON Payload Specifications)
+- `.claude/CLAUDE.md` → [Section 4: MQTT-Protokoll](.claude/CLAUDE.md#4-mqtt-protokoll-verifiziert)
+- `El Trabajante/docs/Mqtt_Protocoll.md` (vollständige Spezifikation)
+- `El Trabajante/src/services/sensor/sensor_manager.cpp` (buildMQTTPayload)
+- `El Trabajante/src/services/communication/mqtt_client.cpp` (publishHeartbeat)
+
+### 4.4 MQTT-Architektur-Details
+
+**Subscriber-Architektur (`src/mqtt/subscriber.py`):**
+- **Thread-Pool:** Handler werden in einem `ThreadPoolExecutor` (max_workers=10) ausgeführt
+- **Async-Handler:** Unterstützt sowohl sync als auch async Handler (async werden in neuem Event-Loop ausgeführt)
+- **Error-Isolation:** Handler-Fehler crashen nicht den Subscriber
+- **Performance-Metriken:** `messages_processed`, `messages_failed`, `success_rate`
+
+**MQTT-Client (`src/mqtt/client.py`):**
+- **Singleton-Pattern:** `MQTTClient.get_instance()`
+- **Auto-Reconnect:** Exponential Backoff (min=1s, max=60s)
+- **TLS/SSL:** Unterstützt via `use_tls`, `ca_cert_path`, `client_cert_path`, `client_key_path`
+- **Connection-State:** `is_connected()` für Status-Checks
+
+**Topic-Builder (`src/mqtt/topics.py`):**
+- **Build-Methoden:** `build_actuator_command_topic()`, `build_sensor_config_topic()`, etc.
+- **Parse-Methoden:** `parse_sensor_data_topic()`, `parse_heartbeat_topic()`, etc.
+- **Wildcard-Matching:** `matches_subscription()` für Topic-Pattern-Matching
+- **Validation:** `validate_esp_id()`, `validate_gpio()` für Input-Validierung
 
 ---
 
@@ -845,11 +1088,12 @@ python -m alembic history
 
 Wenn du Server-seitig etwas implementierst, das mit ESP32 interagiert, lies IMMER:
 
-1. **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
-2. **System Flows:** `El Trabajante/docs/system-flows/`
-3. **Test Contract:** `El Trabajante/test/README.md`
-4. **Sensor Types:** `El Trabajante/src/models/sensor_types.h`
-5. **Actuator Types:** `El Trabajante/src/models/actuator_types.h`
+1. **ESP32 Hauptdokumentation:** `.claude/CLAUDE.md` (ESP32 Firmware-Referenz)
+2. **MQTT Protocol:** `.claude/CLAUDE.md` → [Section 4: MQTT-Protokoll](.claude/CLAUDE.md#4-mqtt-protokoll-verifiziert) + `El Trabajante/docs/Mqtt_Protocoll.md`
+3. **System Flows:** `.claude/CLAUDE.md` → [Section 0: Quick Reference](.claude/CLAUDE.md#0-quick-reference---was-suche-ich) → System-Flow → `El Trabajante/docs/system-flows/`
+4. **Error Codes:** `.claude/CLAUDE.md` → [Section 5: Error-Codes](.claude/CLAUDE.md#5-error-codes-verifiziert) → `El Trabajante/src/models/error_codes.h`
+5. **Sensor Types:** `.claude/CLAUDE.md` → [Section 3: Verzeichnisstruktur](.claude/CLAUDE.md#3-el-trabajante---verzeichnisstruktur) → `El Trabajante/src/models/sensor_types.h`
+6. **Actuator Types:** `.claude/CLAUDE.md` → [Section 3: Verzeichnisstruktur](.claude/CLAUDE.md#3-el-trabajante---verzeichnisstruktur) → `El Trabajante/src/models/actuator_types.h`
 
 ---
 
@@ -916,7 +1160,17 @@ poetry run alembic merge heads -m "merge"
 
 ## 10.4 Bekannte Bug-Fixes (Referenz)
 
-Diese Bugs wurden durch Integration-Tests entdeckt und gefixt (2025-12-03):
+### Fixes vom 2025-12-08:
+
+| Bug | Datei | Problem | Fix |
+|-----|-------|---------|-----|
+| **#3** | `tests/conftest.py` | Fixture hieß `test_session` aber Tests verwendeten `db_session` | Fixture zu `db_session` umbenannt + Alias `test_session` |
+| **#4** | `src/db/models/logic_validation.py` | `sensor` und `actuator` als condition/action types nicht akzeptiert | Als Aliase für `sensor_threshold`/`actuator_command` hinzugefügt |
+| **#5** | `src/mqtt/handlers/heartbeat_handler.py` | Auto-Discovery registrierte unbekannte Geräte | Deaktiviert - unbekannte Geräte werden jetzt abgelehnt |
+| **#6** | `src/mqtt/handlers/sensor_handler.py` | `raw_mode` war optional | Als Required Field hinzugefügt |
+| **#7** | `tests/integration/test_server_esp32_integration.py` | Tests verwendeten `free_heap` statt ESP32-Standard `heap_free` | Auf ESP32-Format aktualisiert |
+
+### Fixes vom 2025-12-03:
 
 | Bug | Datei | Problem | Fix |
 |-----|-------|---------|-----|
@@ -959,6 +1213,7 @@ Vor jedem Commit prüfen:
 | **Database-Models** | [Section 3.4: Database Model](#34-aufgabe-database-model-hinzufügen) | `El Servador/god_kaiser_server/src/db/models/` | `El Servador/god_kaiser_server/src/db/models/` | SQLAlchemy Models, Relationships, Migrations |
 | **ESP-Management** | `El Servador/god_kaiser_server/src/services/esp_service.py` | `El Servador/god_kaiser_server/src/db/repositories/esp_repo.py` | `El Servador/god_kaiser_server/src/services/esp_service.py` | ESP Registration, Discovery, Health Monitoring |
 | **Zone-Management** | `El Trabajante/docs/Dynamic Zones and Provisioning/` | `El Servador/god_kaiser_server/src/services/zone_service.py` | `El Servador/god_kaiser_server/src/services/zone_service.py` | Zone Hierarchy, Assignment, Master/Sub Zones |
+| **Zone Assignment** | `El Trabajante/docs/system-flows/08-zone-assignment-flow.md` | **ZU IMPLEMENTIEREN** | **ZU IMPLEMENTIEREN** | MQTT Zone Assignment Publisher, REST API Endpoint |
 
 ### Service-Module Übersicht
 
@@ -1124,31 +1379,36 @@ Vor jedem Commit prüfen:
 
 ### Entry Points
 - **FastAPI App:** `El Servador/god_kaiser_server/src/main.py`
-- **MQTT Startup:** `El Servador/god_kaiser_server/src/main.py` (lifespan)
+- **MQTT Startup:** `El Servador/god_kaiser_server/src/main.py` (lifespan:55-230)
 - **Database Init:** `El Servador/god_kaiser_server/src/db/session.py`
 
 ### Core Configuration
-- **Settings:** `El Servador/god_kaiser_server/src/core/config.py`
+- **Settings:** `El Servador/god_kaiser_server/src/core/config.py` (Pydantic BaseSettings)
+- **Constants:** `El Servador/god_kaiser_server/src/core/constants.py` (MQTT Topics, Sensor Types, GPIO Ranges)
 - **Logging:** `El Servador/god_kaiser_server/src/core/logging_config.py`
-- **Security:** `El Servador/god_kaiser_server/src/core/security.py`
+- **Security:** `El Servador/god_kaiser_server/src/core/security.py` (JWT, Password Hashing)
 
 ### MQTT Layer
-- **Client:** `El Servador/god_kaiser_server/src/mqtt/client.py`
-- **Subscriber:** `El Servador/god_kaiser_server/src/mqtt/subscriber.py`
-- **Publisher:** `El Servador/god_kaiser_server/src/mqtt/publisher.py`
-- **Sensor Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py`
-- **Actuator Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/actuator_handler.py`
+- **Client:** `El Servador/god_kaiser_server/src/mqtt/client.py` (Singleton, Paho-MQTT Wrapper)
+- **Subscriber:** `El Servador/god_kaiser_server/src/mqtt/subscriber.py` (Thread-Pool, Handler-Routing)
+- **Publisher:** `El Servador/god_kaiser_server/src/mqtt/publisher.py` (High-Level Publishing, Retry-Logic)
+- **Topics:** `El Servador/god_kaiser_server/src/mqtt/topics.py` (Topic-Builder, Parser, Validation)
+- **Sensor Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py` (Pi-Enhanced Processing)
+- **Actuator Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/actuator_handler.py` (Status Updates)
+- **Heartbeat Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` (Device Registration)
 
 ### Business Logic
-- **ESP Service:** `El Servador/god_kaiser_server/src/services/esp_service.py`
-- **Sensor Service:** `El Servador/god_kaiser_server/src/services/sensor_service.py`
-- **Actuator Service:** `El Servador/god_kaiser_server/src/services/actuator_service.py`
-- **Logic Engine:** `El Servador/god_kaiser_server/src/services/logic_engine.py`
+- **ESP Service:** `El Servador/god_kaiser_server/src/services/esp_service.py` (Registration, Health Tracking)
+- **Sensor Service:** `El Servador/god_kaiser_server/src/services/sensor_service.py` (Config, Data Processing)
+- **Actuator Service:** `El Servador/god_kaiser_server/src/services/actuator_service.py` (Command Execution, Safety Integration)
+- **Safety Service:** `El Servador/god_kaiser_server/src/services/safety_service.py` (Emergency Stop, Validation)
+- **Logic Engine:** `El Servador/god_kaiser_server/src/services/logic_engine.py` (Background-Task, Rule Evaluation)
 
 ### Sensor Processing
-- **Library Loader:** `El Servador/god_kaiser_server/src/sensors/library_loader.py`
-- **Base Processor:** `El Servador/god_kaiser_server/src/sensors/base_processor.py`
+- **Library Loader:** `El Servador/god_kaiser_server/src/sensors/library_loader.py` (Dynamic Import via importlib)
+- **Base Processor:** `El Servador/god_kaiser_server/src/sensors/base_processor.py` (Abstract Base Class)
 - **pH Sensor:** `El Servador/god_kaiser_server/src/sensors/sensor_libraries/active/ph_sensor.py` (Referenz-Implementation)
+- **Sensor Type Registry:** `El Servador/god_kaiser_server/src/sensors/sensor_type_registry.py` (Type-Mapping)
 
 ### Database
 - **Session:** `El Servador/god_kaiser_server/src/db/session.py`
@@ -1192,6 +1452,158 @@ python -m alembic current
 # Datenbank-Schema prüfen (SQLite)
 python -c "import sqlite3; conn = sqlite3.connect('god_kaiser_dev.db'); print([row for row in conn.execute('PRAGMA table_info(actuator_states)')])"
 ```
+
+---
+
+---
+
+## 18. KRITISCHE FUNKTIONEN & ABLÄUFE (Detailliert)
+
+### 18.1 Sensor-Daten-Verarbeitungs-Flow
+
+**Kompletter Ablauf von ESP32 → Server → ESP32:**
+
+1. **ESP32 sendet Sensor-Daten** (`El Trabajante/src/services/sensor/sensor_manager.cpp`)
+   - Topic: `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data`
+   - Payload: `{"raw": 2150, "raw_mode": true, "sensor_type": "ph", ...}`
+   - QoS: 1 (At least once)
+
+2. **Server empfängt** (`src/mqtt/subscriber.py`)
+   - Thread-Pool führt Handler aus (non-blocking)
+   - Handler: `sensor_handler.handle_sensor_data()`
+
+3. **Sensor-Handler verarbeitet** (`src/mqtt/handlers/sensor_handler.py`)
+   - Topic-Parsing via `TopicBuilder.parse_sensor_data_topic()`
+   - Payload-Validierung (`_validate_payload()`)
+   - ESP-Device-Lookup (muss registriert sein)
+   - Sensor-Config-Lookup
+
+4. **Pi-Enhanced Processing** (wenn aktiviert)
+   - Trigger: `sensor_config.pi_enhanced == True` und `raw_mode == true`
+   - Library-Loader: `src/sensors/library_loader.py` → Dynamic Import
+   - Processing: Sensor-Library in `src/sensors/sensor_libraries/active/`
+   - Response: `publisher.publish_pi_enhanced_response()` → Topic: `.../sensor/{gpio}/processed`
+
+5. **Datenbank-Speicherung**
+   - Sensor-Daten werden in `SensorData` Tabelle gespeichert
+   - Timestamp, raw_value, processed_value, unit, quality
+
+6. **Logic-Engine Trigger** (non-blocking)
+   - `logic_engine.evaluate_sensor_data()` wird via `asyncio.create_task()` aufgerufen
+   - Rules werden evaluiert, Actions ausgeführt
+
+**Code-Locations:**
+- Handler: `src/mqtt/handlers/sensor_handler.py:46-280`
+- Processing: `src/mqtt/handlers/sensor_handler.py:130-150`
+- Logic Trigger: `src/mqtt/handlers/sensor_handler.py:280-290`
+
+### 18.2 Actuator-Command-Flow
+
+**Kompletter Ablauf von Server → ESP32:**
+
+1. **Command-Request** (API oder Logic-Engine)
+   - API: `POST /api/v1/actuators/{esp_id}/{gpio}/command`
+   - Logic-Engine: `ActuatorService.send_command()`
+
+2. **Safety-Validation** (`src/services/safety_service.py`)
+   - `SafetyService.validate_actuator_command()` wird aufgerufen
+   - Prüft: Emergency-Stop, Value-Range, Runtime-Protection
+   - Returns: `SafetyResult` mit `valid`, `error`, `warnings`
+
+3. **Command-Publishing** (`src/mqtt/publisher.py`)
+   - `publisher.publish_actuator_command()`
+   - Topic: `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command`
+   - QoS: 2 (Exactly once)
+   - Retry-Logic: 3 Versuche bei Fehler
+
+4. **ESP32 empfängt** (`El Trabajante/src/services/actuator/actuator_manager.cpp`)
+   - ActuatorManager verarbeitet Command
+   - Safety-Checks auf ESP32-Seite
+   - Status-Update wird zurückgesendet
+
+5. **Status-Update** (ESP32 → Server)
+   - Topic: `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status`
+   - Handler: `actuator_handler.handle_actuator_status()`
+   - Database-Update: `ActuatorState` wird aktualisiert
+
+**Code-Locations:**
+- Service: `src/services/actuator_service.py:44-193`
+- Safety: `src/services/safety_service.py:validate_actuator_command()`
+- Publisher: `src/mqtt/publisher.py:38-72`
+
+### 18.3 Logic-Engine Evaluation-Flow
+
+**Kompletter Ablauf der Automation-Rule-Evaluation:**
+
+1. **Trigger** (Sensor-Daten empfangen)
+   - `sensor_handler` ruft `logic_engine.evaluate_sensor_data()` auf
+   - Non-blocking via `asyncio.create_task()`
+
+2. **Rule-Matching** (`src/services/logic_engine.py`)
+   - `LogicRepository.get_rules_by_trigger_sensor()` lädt passende Rules
+   - Filter: `esp_id`, `gpio`, `sensor_type`
+
+3. **Condition-Evaluation**
+   - Für jede Rule: `_check_conditions()` wird aufgerufen
+   - Condition-Types: `sensor_threshold`, `sensor` (Shorthand), `time_window`
+   - Validation: `src/db/models/logic_validation.py`
+
+4. **Cooldown-Check**
+   - `LogicRepository.get_last_execution()` prüft letzte Ausführung
+   - Wenn `time_since_last < cooldown_seconds`: Rule wird übersprungen
+
+5. **Action-Execution**
+   - Wenn Conditions erfüllt: `_execute_actions()` wird aufgerufen
+   - Action-Types: `actuator_command`, `actuator` (Shorthand)
+   - `ActuatorService.send_command()` wird für jede Action aufgerufen
+
+6. **Execution-Logging**
+   - `LogicRepository.log_execution()` speichert Execution-History
+   - Loggt: trigger_data, actions, success, execution_time_ms
+
+**Code-Locations:**
+- Engine: `src/services/logic_engine.py:84-137`
+- Evaluation: `src/services/logic_engine.py:139-200`
+- Actions: `src/services/logic_engine.py:202-250`
+
+### 18.4 Heartbeat & Device-Registration-Flow
+
+**Kompletter Ablauf der Device-Registration:**
+
+1. **ESP32 sendet Heartbeat** (`El Trabajante/src/services/communication/mqtt_client.cpp`)
+   - Topic: `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat`
+   - QoS: 0 (At most once)
+   - Payload: `{"ts": ..., "uptime": ..., "heap_free": ..., "wifi_rssi": ...}`
+
+2. **Server empfängt** (`src/mqtt/handlers/heartbeat_handler.py`)
+   - Handler: `handle_heartbeat()`
+   - Topic-Parsing: `TopicBuilder.parse_heartbeat_topic()`
+   - Payload-Validierung: `_validate_payload()`
+
+3. **Device-Lookup**
+   - `ESPRepository.get_by_device_id()` prüft ob ESP registriert ist
+   - **KRITISCH:** Wenn nicht registriert → Rejection (kein Auto-Discovery)
+
+4. **Status-Update**
+   - `ESPRepository.update_status()` setzt Status auf "online"
+   - `last_seen` wird aktualisiert
+   - Metadata wird mit Health-Metrics aktualisiert
+
+5. **Health-Metrics-Logging**
+   - Low Memory Warning: `heap_free < 10000`
+   - Weak WiFi Warning: `wifi_rssi < -70`
+   - Error-Count Tracking
+
+**Device-Registration (via API):**
+- Endpoint: `POST /api/v1/esp/register`
+- Service: `ESPService.register_device()`
+- Database: `ESPDevice` wird erstellt
+- Nach Registration: Heartbeats werden akzeptiert
+
+**Code-Locations:**
+- Handler: `src/mqtt/handlers/heartbeat_handler.py:45-139`
+- Rejection: `src/mqtt/handlers/heartbeat_handler.py:98-109`
+- Service: `src/services/esp_service.py:60-133`
 
 ---
 

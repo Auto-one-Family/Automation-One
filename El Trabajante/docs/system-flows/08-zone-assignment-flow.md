@@ -4,6 +4,8 @@
 
 Hierarchical zone management (Phase 7) allows God-Kaiser to organize ESPs into logical zones representing physical locations (greenhouses, sections, rows). This enables zone-based automation, monitoring, and control across large deployments.
 
+**Important:** This flow describes **runtime zone assignment** via MQTT. For initial provisioning (first-time setup), see [Provisioning Documentation](../Dynamic%20Zones%20and%20Provisioning/PROVISIONING.md) and [Boot Sequence](01-boot-sequence.md).
+
 ## Files Analyzed
 
 - `src/main.cpp` (lines 247-248, 329-340, 415-489) - TopicBuilder initialization, zone assignment subscription and handler
@@ -29,24 +31,42 @@ MQTT message on: `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
 
 ## Zone Hierarchy
 
+**System Architecture:**
 ```
-God-Kaiser (Top Level)
+God-Kaiser/Kaiser (Pi) → ESP → zone_id → master_zone_id → subzone_id → Sensor/Actuator
+```
+
+**Kaiser-ID Bedeutung:**
+- `kaiser_id` identifiziert den **übergeordneten Pi** (God-Kaiser Server oder Kaiser-Node), **NICHT** den ESP
+- **Aktueller Stand (2025):** System funktioniert nur mit God-Kaiser Server (`kaiser_id = "god"`)
+- **Roadmap:** Kaiser-Nodes (Raspberry Pi Zero/3) sind geplant für Skalierung, aber noch nicht implementiert
+
+**Hierarchie-Details:**
+```
+God-Kaiser Server (Raspberry Pi 5)
   │
-  ├─► Kaiser Instance (e.g., "kaiser_production_001")
+  ├─► kaiser_id = "god" (aktuelle Implementierung)
   │     │
-  │     ├─► Master Zone (e.g., "greenhouse_master")
+  │     ├─► ESP: ESP_AB12CD
   │     │     │
-  │     │     ├─► Zone (e.g., "greenhouse_zone_1")
+  │     │     ├─► zone_id: "greenhouse_zone_1"
   │     │     │     │
-  │     │     │     └─► Subzone (e.g., "section_A")
-  │     │     │           └─► Sensor/Actuator
+  │     │     │     ├─► master_zone_id: "greenhouse_master"
+  │     │     │     │
+  │     │     │     └─► subzone_id: "section_A" (Sensor/Actuator-Level)
   │     │     │
-  │     │     └─► Zone (e.g., "greenhouse_zone_2")
+  │     │     └─► zone_id: "greenhouse_zone_2" (anderer ESP)
   │     │
-  │     └─► Master Zone (e.g., "irrigation_master")
+  │     └─► ESP: ESP_CD34EF (unassigned, kaiser_id = "god")
   │
-  └─► Default: "god" (Unassigned ESPs)
+  └─► kaiser_id = "kaiser_01" (geplant, noch nicht implementiert)
+        └─► ESP: ESP_EF56GH (zukünftig über Kaiser-Node)
 ```
+
+**Wichtig:** 
+- Alle ESPs kommunizieren aktuell direkt mit God-Kaiser (`kaiser/god/...`)
+- Kaiser-Nodes sind ein zukünftiges Feature für Skalierung (100+ ESPs)
+- Die Topic-Struktur `kaiser/{kaiser_id}/...` ist bereits vorbereitet für zukünftige Kaiser-Nodes
 
 ---
 
@@ -66,7 +86,7 @@ struct KaiserZone {
   bool zone_assigned = false;       // Zone configuration status
   
   // Kaiser Communication (Existing)
-  String kaiser_id = "";            // God-Kaiser identifier
+  String kaiser_id = "";            // Overarching Pi identifier ("god" = God-Kaiser Server, "kaiser_XX" = Kaiser-Node)
   String kaiser_name = "";          // Kaiser name (optional)
   String system_name = "";          // System name (optional)
   bool connected = false;           // MQTT connection status
@@ -109,7 +129,7 @@ struct MasterZone {
 | `zone_id` | String | Yes | Unique zone identifier |
 | `master_zone_id` | String | Yes | Parent master zone ID |
 | `zone_name` | String | Yes | Human-readable zone name |
-| `kaiser_id` | String | Yes | Kaiser instance ID |
+| `kaiser_id` | String | Yes | Overarching Pi identifier ("god" = God-Kaiser Server, "kaiser_XX" = Kaiser-Node for future use) |
 | `timestamp` | Number | No | Assignment timestamp |
 
 ---
@@ -142,6 +162,11 @@ LOG_INFO("Subscribed to system + actuator + zone assignment topics");
 **Note:** The ESP subscribes to ONE topic during boot based on loaded `g_kaiser.kaiser_id`:
 - If `kaiser_id` is empty: subscribes to `kaiser/god/esp/{esp_id}/zone/assign`
 - If `kaiser_id` is set: subscribes to `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
+
+**Aktueller Stand:**
+- Alle ESPs kommunizieren aktuell mit God-Kaiser Server (`kaiser_id = "god"`)
+- Kaiser-Nodes sind geplant, aber noch nicht implementiert
+- Die Topic-Struktur ist bereits zukunftsfähig vorbereitet
 
 ---
 
@@ -495,15 +520,18 @@ void MQTTClient::publishHeartbeat() {
 
 ### Initial Assignment
 
-1. ESP boots with no zone assignment
-2. ESP subscribes to: `kaiser/god/esp/{esp_id}/zone/assign`
-3. ESP publishes heartbeat with `zone_assigned: false`
-4. God-Kaiser detects new ESP
-5. User assigns ESP to zone in UI
-6. God-Kaiser publishes zone assignment
-7. ESP receives, configures, and acknowledges
-8. ESP republishes heartbeat with zone info
-9. God-Kaiser confirms in UI
+1. ESP boots with no zone assignment (after provisioning, see [Boot Sequence](01-boot-sequence.md))
+2. ESP subscribes to: `kaiser/god/esp/{esp_id}/zone/assign` (default when `kaiser_id` is empty)
+3. ESP publishes initial heartbeat with `zone_assigned: false`
+4. **Wichtig:** Server lehnt unbekannte ESPs ab - ESP muss zuerst über REST API registriert werden
+5. God-Kaiser erkennt registrierten ESP (nicht via Auto-Discovery)
+6. User assigns ESP to zone in UI
+7. God-Kaiser publishes zone assignment via MQTT
+8. ESP receives, configures, and acknowledges
+9. ESP republishes heartbeat with zone info
+10. God-Kaiser confirms in UI
+
+**Hinweis:** Auto-Discovery via Heartbeat ist deaktiviert. ESPs müssen zuerst über `POST /api/v1/esp/register` registriert werden, bevor sie Zone Assignments erhalten können.
 
 ### Reassignment
 
@@ -522,6 +550,11 @@ void MQTTClient::publishHeartbeat() {
 - Publish new messages on new topic (via TopicBuilder)
 - Resubscribe to new topics only after ESP reboot (during `setup()` Phase 2)
 - **Limitation:** If ESP doesn't reboot, it may miss zone assignment messages on new kaiser topic until reboot
+
+**Aktueller Stand:**
+- Alle ESPs verwenden aktuell `kaiser_id = "god"` (God-Kaiser Server)
+- Topic-Migration zu anderen `kaiser_id` Werten ist für zukünftige Kaiser-Nodes vorbereitet
+- Bei Zone Assignment wird `kaiser_id` im Payload mitgesendet, aber aktuell immer `"god"`
 
 ---
 
@@ -603,13 +636,15 @@ void MQTTClient::publishHeartbeat() {
 **Hierarchy:**
 
 ```
-Kaiser: kaiser_production_001
+Kaiser: god (God-Kaiser Server - aktueller Stand)
   └─► Master Zone: greenhouse_master
       └─► Zone: greenhouse_zone_1
           └─► ESP: ESP_AB12CD
               └─► Subzone: section_A
                   └─► Sensor: GPIO 4 (Temperature)
 ```
+
+**Hinweis:** `kaiser_id = "god"` identifiziert den God-Kaiser Server. Kaiser-Nodes (`kaiser_01`, etc.) sind geplant, aber noch nicht implementiert.
 
 ---
 
@@ -660,10 +695,12 @@ enum SystemState {
 
 ### Zone Management Features
 
-1. **Automatic Discovery**
-   - God-Kaiser subscribes to `kaiser/god/esp/+/system/heartbeat`
-   - Detects new ESPs automatically
-   - Displays unassigned ESPs in UI
+1. **ESP Registration (Required)**
+   - **Wichtig:** Auto-Discovery via Heartbeat ist deaktiviert
+   - ESPs müssen zuerst über REST API registriert werden: `POST /api/v1/esp/register`
+   - God-Kaiser lehnt Heartbeats von unbekannten ESPs ab
+   - Nach Registrierung: God-Kaiser subscribes to `kaiser/god/esp/{esp_id}/system/heartbeat`
+   - Displays registered ESPs in UI (unassigned ESPs zeigen `zone_assigned: false`)
 
 2. **Zone Assignment UI**
    - Drag-and-drop ESP assignment
@@ -859,12 +896,19 @@ bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
 
 ---
 
-## Next Flows
+## Related Documentation
 
-→ [Boot Sequence](01-boot-sequence.md) - Zone loading during boot (lines 170-190, 247-248)  
-→ [Sensor Reading Flow](02-sensor-reading-flow.md) - Zone info in sensor data  
-→ [MQTT Message Routing](06-mqtt-message-routing-flow.md) - Zone assignment handler (lines 800-876)  
-→ [Error Recovery Flow](07-error-recovery-flow.md) - Circuit breaker protection for MQTT
+**ESP32 (El Trabajante):**
+- → [Boot Sequence](01-boot-sequence.md) - Zone loading during boot, Provisioning integration
+- → [Provisioning Documentation](../Dynamic%20Zones%20and%20Provisioning/PROVISIONING.md) - Initial WiFi/Server setup
+- → [Dynamic Zones Implementation](../Dynamic%20Zones%20and%20Provisioning/DYNAMIC_ZONES_IMPLEMENTATION.md) - Implementation summary
+- → [MQTT Protocol](../Mqtt_Protocoll.md) - Zone Assignment Topics specification
+- → [Sensor Reading Flow](02-sensor-reading-flow.md) - Zone info in sensor data
+- → [MQTT Message Routing](06-mqtt-message-routing-flow.md) - Zone assignment handler integration
+
+**Server (El Servador):**
+- → `.claude/CLAUDE_SERVER.md` - Server documentation, Zone Assignment Publisher (to be implemented)
+- → `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` - Heartbeat processing, ESP registration
 
 ---
 

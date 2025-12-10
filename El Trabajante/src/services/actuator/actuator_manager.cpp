@@ -13,6 +13,7 @@
 #include "../../utils/json_helpers.h"
 #include "../../utils/logger.h"
 #include "../../utils/topic_builder.h"
+#include "../../utils/time_manager.h"
 #include "actuator_drivers/pump_actuator.h"
 #include "actuator_drivers/pwm_actuator.h"
 #include "actuator_drivers/valve_actuator.h"
@@ -749,11 +750,14 @@ String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const A
   extern KaiserZone g_kaiser;
   extern SystemConfig g_system_config;
   
+  // Phase 8: Use NTP-synchronized Unix timestamp
+  time_t unix_ts = timeManager.getUnixTimestamp();
+  
   String payload = "{";
   payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
   payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
   payload += "\"subzone_id\":\"" + config.subzone_id + "\",";
-  payload += "\"ts\":" + String(millis()) + ",";
+  payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
   payload += "\"gpio\":" + String(status.gpio) + ",";
   payload += "\"type\":\"" + config.actuator_type + "\",";
   payload += "\"state\":" + String(status.current_state ? "true" : "false") + ",";
@@ -792,10 +796,13 @@ String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,
   extern KaiserZone g_kaiser;
   extern SystemConfig g_system_config;
   
+  // Phase 8: Use NTP-synchronized Unix timestamp
+  time_t unix_ts = timeManager.getUnixTimestamp();
+  
   String payload = "{";
   payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
   payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
-  payload += "\"ts\":" + String(millis()) + ",";
+  payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
   payload += "\"gpio\":" + String(command.gpio) + ",";
   payload += "\"command\":\"" + command.command + "\",";
   payload += "\"value\":" + String(command.value, 3) + ",";
@@ -817,11 +824,20 @@ void ActuatorManager::publishActuatorResponse(const ActuatorCommand& command,
 void ActuatorManager::publishActuatorAlert(uint8_t gpio,
                                            const String& alert_type,
                                            const String& message) {
+  // Phase 8: Use NTP-synchronized Unix timestamp
+  time_t unix_ts = timeManager.getUnixTimestamp();
+  
+  // Phase 7: Get zone information from global variables
+  extern KaiserZone g_kaiser;
+  extern SystemConfig g_system_config;
+  
   const char* topic = TopicBuilder::buildActuatorAlertTopic(gpio);
   String payload = "{";
-  payload += "\"ts\":" + String(millis()) + ",";
+  payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
+  payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
   payload += "\"gpio\":" + String(gpio) + ",";
-  payload += "\"type\":\"" + alert_type + "\",";
+  payload += "\"alert_type\":\"" + alert_type + "\",";
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
   mqttClient.safePublish(String(topic), payload, 1);

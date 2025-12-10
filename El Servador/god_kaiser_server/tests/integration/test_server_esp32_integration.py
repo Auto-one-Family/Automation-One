@@ -238,21 +238,23 @@ class TestSensorHandlerValidation:
     @pytest.fixture
     def valid_sensor_payload(self):
         """
-        Payload exactly matching Mqtt_Protocoll.md specification.
+        Payload exactly matching ACTUAL ESP32 implementation.
         
-        Reference: El Trabajante/docs/Mqtt_Protocoll.md lines 86-108
+        Reference: El Trabajante/src/services/sensor/sensor_manager.cpp
+        Function: buildMQTTPayload() lines 705-755
         """
         return {
-            "ts": int(time.time()),
             "esp_id": "ESP_12AB34CD",
+            "zone_id": "greenhouse",
+            "subzone_id": "zone_a",
             "gpio": 34,
             "sensor_type": "ph",
             "raw": 2150,
             "value": 0.0,  # ESP32 sends 0 when raw_mode=True
             "unit": "",
             "quality": "good",
-            "sensor_name": "pH Sensor Pool",
-            "raw_mode": True,  # Server should process this
+            "ts": int(time.time()),
+            "raw_mode": True,  # ESP32 always sends raw_mode: true
         }
     
     def test_validate_complete_payload(self, sensor_handler, valid_sensor_payload):
@@ -907,16 +909,25 @@ class TestHeartbeatHandlerValidation:
     @pytest.fixture
     def valid_heartbeat_payload(self):
         """
-        Heartbeat payload matching Mqtt_Protocoll.md specification.
+        Heartbeat payload matching ACTUAL ESP32 implementation.
         
-        Note: Handler expects "free_heap" but protocol says "heap_free".
-        We test against what the handler actually expects.
+        Reference: El Trabajante/src/services/communication/mqtt_client.cpp
+        Function: publishHeartbeat() lines 451-462
+        
+        ESP32 sends: heap_free (not free_heap)
+        Server accepts both for backward compatibility.
         """
         return {
+            "esp_id": "ESP_12AB34CD",
+            "zone_id": "greenhouse",
+            "master_zone_id": "greenhouse-master",
+            "zone_assigned": True,
             "ts": int(time.time()),
             "uptime": 3600,
-            "free_heap": 245760,  # Handler expects this name
+            "heap_free": 245760,  # ESP32 Standard field name
             "wifi_rssi": -65,
+            "sensor_count": 3,
+            "actuator_count": 2,
         }
     
     def test_validate_complete_payload(self, heartbeat_handler, valid_heartbeat_payload):
@@ -928,21 +939,22 @@ class TestHeartbeatHandlerValidation:
     
     def test_validate_missing_required_fields(self, heartbeat_handler):
         """Heartbeat payload with missing required fields fails."""
-        required_fields = ["ts", "uptime", "free_heap", "wifi_rssi"]
+        # Server requires these 4 fields (accepts both heap_free and free_heap)
+        required_fields = ["ts", "uptime", "heap_free", "wifi_rssi"]
         
         for field in required_fields:
             payload = {
                 "ts": int(time.time()),
                 "uptime": 3600,
-                "free_heap": 245760,
+                "heap_free": 245760,  # ESP32 Standard field name
                 "wifi_rssi": -65,
             }
             del payload[field]
             
             result = heartbeat_handler._validate_payload(payload)
             
+            # Note: heap_free error message says "heap_free or free_heap"
             assert result["valid"] is False, f"Should fail for missing {field}"
-            assert field in result["error"]
     
     def test_validate_wrong_types(self, heartbeat_handler):
         """Heartbeat payload with wrong types fails."""

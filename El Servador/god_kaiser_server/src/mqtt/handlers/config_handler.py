@@ -1,10 +1,13 @@
 """
-MQTT Handler: ESP32 Configuration ACK Messages
+MQTT Handler: ESP32 Configuration Response Messages
 
 Logs configuration acknowledgements from ESP devices.
 
-Topic: kaiser/god/esp/{esp_id}/config/ack
+Topic: kaiser/god/esp/{esp_id}/config_response
 QoS: 2 (Exactly Once)
+
+Note: ESP32 uses 'config_response' topic (not 'config/ack').
+Server adapts to ESP32 protocol.
 """
 
 from datetime import datetime
@@ -31,16 +34,18 @@ class ConfigHandler:
 
     async def handle_config_ack(self, topic: str, payload: dict) -> bool:
         """
-        Handle config ACK message.
+        Handle config response message from ESP32.
 
-        Expected topic: kaiser/god/esp/{esp_id}/config/ack
+        Expected topic: kaiser/god/esp/{esp_id}/config_response
 
-        Expected payload:
+        Expected payload (from ESP32 ConfigResponseBuilder):
         {
-            "config_type": "sensor" | "actuator" | "zone" | "system",
-            "gpio": 5,  # Optional (nur für sensor/actuator)
-            "status": "success" | "failed",
-            "error": "Optional error message"  # Nur wenn status=failed
+            "status": "success" | "error",
+            "type": "sensor" | "actuator" | "zone" | "system",
+            "count": 3,
+            "message": "Configured 3 sensor(s) successfully",
+            "error_code": "NONE" | "MISSING_FIELD" | "TYPE_MISMATCH" | ...,  # Only on error
+            "failed_item": {...}  # Only on error, contains the failed config item
         }
 
         Args:
@@ -52,7 +57,7 @@ class ConfigHandler:
         """
         try:
             # Step 1: Parse topic
-            parsed_topic = TopicBuilder.parse_config_ack_topic(topic)
+            parsed_topic = TopicBuilder.parse_config_response_topic(topic)
             if not parsed_topic:
                 logger.error(f"Failed to parse config ACK topic: {topic}")
                 return False
@@ -62,25 +67,26 @@ class ConfigHandler:
             # Step 2: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
-                logger.error(f"Invalid config ACK payload: {validation_result['error']}")
+                logger.error(f"Invalid config response payload: {validation_result['error']}")
                 return False
 
-            # Step 3: Log ACK
-            config_type = payload["config_type"]
+            # Step 3: Log response
+            # ESP32 uses "type" not "config_type"
+            config_type = payload.get("type", payload.get("config_type", "unknown"))
             status = payload["status"]
-            gpio = payload.get("gpio")
-            error = payload.get("error")
+            count = payload.get("count", 0)
+            message = payload.get("message", "")
+            error_code = payload.get("error_code", "")
 
             if status == "success":
                 logger.info(
-                    f"✅ Config ACK from {esp_id}: {config_type}"
-                    + (f" GPIO {gpio}" if gpio else "")
+                    f"✅ Config Response from {esp_id}: {config_type} "
+                    f"({count} items) - {message}"
                 )
             else:
                 logger.error(
-                    f"❌ Config FAILED on {esp_id}: {config_type}"
-                    + (f" GPIO {gpio}" if gpio else "")
-                    + (f" - Error: {error}" if error else "")
+                    f"❌ Config FAILED on {esp_id}: {config_type} "
+                    f"- {message} (Error: {error_code})"
                 )
 
             # TODO: Optional - Store in audit_log table for history
@@ -101,22 +107,35 @@ class ConfigHandler:
             return False
 
     def _validate_payload(self, payload: dict) -> dict:
-        """Validate config ACK payload structure."""
-        required_fields = ["config_type", "status"]
-
-        for field in required_fields:
-            if field not in payload:
-                return {"valid": False, "error": f"Missing required field: {field}"}
+        """Validate config response payload structure.
+        
+        ESP32 ConfigResponseBuilder sends:
+        - status: "success" or "error"
+        - type: "sensor", "actuator", "zone", "system"
+        - count: number of configured items
+        - message: human-readable message
+        - error_code: (on error) error code string
+        - failed_item: (on error) the failed config item
+        """
+        # Required fields: status and type
+        if "status" not in payload:
+            return {"valid": False, "error": "Missing required field: status"}
+        
+        # Accept both "type" (ESP32) and "config_type" (legacy)
+        if "type" not in payload and "config_type" not in payload:
+            return {"valid": False, "error": "Missing required field: type"}
 
         # Type validation
         valid_config_types = ["sensor", "actuator", "zone", "system"]
-        if payload["config_type"] not in valid_config_types:
+        config_type = payload.get("type", payload.get("config_type"))
+        if config_type not in valid_config_types:
             return {
                 "valid": False,
-                "error": f"Invalid config_type. Must be one of: {valid_config_types}",
+                "error": f"Invalid type. Must be one of: {valid_config_types}",
             }
 
-        valid_statuses = ["success", "failed"]
+        # Status validation - ESP32 sends "success" or "error" (not "failed")
+        valid_statuses = ["success", "error", "failed"]  # Accept all variants
         if payload["status"] not in valid_statuses:
             return {
                 "valid": False,

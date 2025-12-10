@@ -39,9 +39,10 @@ class TopicBuilder:
             gpio: GPIO pin number
 
         Returns:
-            kaiser/god/esp/{esp_id}/actuator/{gpio}/command
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command
         """
-        return constants.MQTT_TOPIC_ESP_ACTUATOR_COMMAND.format(
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_ACTUATOR_COMMAND,
             esp_id=esp_id, gpio=gpio
         )
 
@@ -55,9 +56,10 @@ class TopicBuilder:
             gpio: GPIO pin number
 
         Returns:
-            kaiser/god/esp/{esp_id}/config/sensor/{gpio}
+            kaiser/{kaiser_id}/esp/{esp_id}/config/sensor/{gpio}
         """
-        return constants.MQTT_TOPIC_ESP_CONFIG_SENSOR.format(
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_CONFIG_SENSOR,
             esp_id=esp_id, gpio=gpio
         )
 
@@ -71,9 +73,10 @@ class TopicBuilder:
             gpio: GPIO pin number
 
         Returns:
-            kaiser/god/esp/{esp_id}/config/actuator/{gpio}
+            kaiser/{kaiser_id}/esp/{esp_id}/config/actuator/{gpio}
         """
-        return constants.MQTT_TOPIC_ESP_CONFIG_ACTUATOR.format(
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_CONFIG_ACTUATOR,
             esp_id=esp_id, gpio=gpio
         )
 
@@ -86,9 +89,12 @@ class TopicBuilder:
             esp_id: ESP device ID
 
         Returns:
-            kaiser/god/esp/{esp_id}/system/command
+            kaiser/{kaiser_id}/esp/{esp_id}/system/command
         """
-        return constants.MQTT_TOPIC_ESP_SYSTEM_COMMAND.format(esp_id=esp_id)
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_SYSTEM_COMMAND,
+            esp_id=esp_id
+        )
 
     @staticmethod
     def build_pi_enhanced_response_topic(esp_id: str, gpio: int) -> str:
@@ -100,9 +106,10 @@ class TopicBuilder:
             gpio: GPIO pin number
 
         Returns:
-            kaiser/god/esp/{esp_id}/sensor/{gpio}/processed
+            kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/processed
         """
-        return f"kaiser/god/esp/{esp_id}/sensor/{gpio}/processed"
+        kaiser_id = constants.get_kaiser_id()
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/processed"
 
     # ====================================================================
     # PARSE METHODS (ESP → God-Kaiser)
@@ -114,7 +121,7 @@ class TopicBuilder:
         Parse sensor data topic.
 
         Args:
-            topic: kaiser/god/esp/ESP_12AB34CD/sensor/34/data
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/sensor/34/data
 
         Returns:
             {
@@ -124,14 +131,16 @@ class TopicBuilder:
             }
             or None if parse fails
         """
-        # Pattern: kaiser/god/esp/{esp_id}/sensor/{gpio}/data
-        pattern = r"kaiser/god/esp/([A-Z0-9_]+)/sensor/(\d+)/data"
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/sensor/{gpio}/data
+        # Accepts any kaiser_id (filtering happens at subscription level)
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/sensor/(\d+)/data"
         match = re.match(pattern, topic)
 
         if match:
             return {
-                "esp_id": match.group(1),
-                "gpio": int(match.group(2)),
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "gpio": int(match.group(3)),
                 "type": "sensor_data",
             }
         return None
@@ -142,7 +151,7 @@ class TopicBuilder:
         Parse actuator status topic.
 
         Args:
-            topic: kaiser/god/esp/ESP_12AB34CD/actuator/18/status
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/actuator/18/status
 
         Returns:
             {
@@ -152,15 +161,76 @@ class TopicBuilder:
             }
             or None if parse fails
         """
-        # Pattern: kaiser/god/esp/{esp_id}/actuator/{gpio}/status
-        pattern = r"kaiser/god/esp/([A-Z0-9_]+)/actuator/(\d+)/status"
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/actuator/{gpio}/status
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/(\d+)/status"
         match = re.match(pattern, topic)
 
         if match:
             return {
-                "esp_id": match.group(1),
-                "gpio": int(match.group(2)),
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "gpio": int(match.group(3)),
                 "type": "actuator_status",
+            }
+        return None
+
+    @staticmethod
+    def parse_actuator_response_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse actuator response topic.
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/actuator/18/response
+
+        Returns:
+            {
+                "kaiser_id": str,
+                "esp_id": "ESP_12AB34CD",
+                "gpio": 18,
+                "type": "actuator_response"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/actuator/{gpio}/response
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/(\d+)/response"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "gpio": int(match.group(3)),
+                "type": "actuator_response",
+            }
+        return None
+
+    @staticmethod
+    def parse_actuator_alert_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse actuator alert topic.
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/actuator/18/alert
+
+        Returns:
+            {
+                "kaiser_id": str,
+                "esp_id": "ESP_12AB34CD",
+                "gpio": 18,
+                "type": "actuator_alert"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/(\d+)/alert"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "gpio": int(match.group(3)),
+                "type": "actuator_alert",
             }
         return None
 
@@ -170,7 +240,8 @@ class TopicBuilder:
         Parse heartbeat topic.
 
         Args:
-            topic: kaiser/god/esp/ESP_12AB34CD/heartbeat
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/system/heartbeat
+                   or kaiser/{kaiser_id}/esp/ESP_12AB34CD/heartbeat (legacy)
 
         Returns:
             {
@@ -179,13 +250,15 @@ class TopicBuilder:
             }
             or None if parse fails
         """
-        # Pattern: kaiser/god/esp/{esp_id}/heartbeat
-        pattern = r"kaiser/god/esp/([A-Z0-9_]+)/heartbeat"
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/system/heartbeat (ESP32 v4.0+)
+        # Also accepts: kaiser/{any_kaiser_id}/esp/{esp_id}/heartbeat (legacy)
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/(system/)?heartbeat"
         match = re.match(pattern, topic)
 
         if match:
             return {
-                "esp_id": match.group(1),
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
                 "type": "heartbeat",
             }
         return None
@@ -196,7 +269,7 @@ class TopicBuilder:
         Parse health status topic.
 
         Args:
-            topic: kaiser/god/esp/ESP_12AB34CD/health/status
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/health/status
 
         Returns:
             {
@@ -205,40 +278,42 @@ class TopicBuilder:
             }
             or None if parse fails
         """
-        # Pattern: kaiser/god/esp/{esp_id}/health/status
-        pattern = r"kaiser/god/esp/([A-Z0-9_]+)/health/status"
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/health/status
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/health/status"
         match = re.match(pattern, topic)
 
         if match:
             return {
-                "esp_id": match.group(1),
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
                 "type": "health_status",
             }
         return None
 
     @staticmethod
-    def parse_config_ack_topic(topic: str) -> Optional[Dict[str, any]]:
+    def parse_config_response_topic(topic: str) -> Optional[Dict[str, any]]:
         """
-        Parse config ACK topic.
+        Parse config response topic.
 
         Args:
-            topic: kaiser/god/esp/ESP_12AB34CD/config/ack
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/config_response
 
         Returns:
             {
                 "esp_id": "ESP_12AB34CD",
-                "type": "config_ack"
+                "type": "config_response"
             }
             or None if parse fails
         """
-        # Pattern: kaiser/god/esp/{esp_id}/config/ack
-        pattern = r"kaiser/god/esp/([A-Z0-9_]+)/config/ack"
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/config_response
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/config_response"
         match = re.match(pattern, topic)
 
         if match:
             return {
-                "esp_id": match.group(1),
-                "type": "config_ack",
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "config_response",
             }
         return None
 
@@ -248,7 +323,7 @@ class TopicBuilder:
         Parse discovery topic.
 
         Args:
-            topic: kaiser/god/discovery/esp32_nodes
+            topic: kaiser/{kaiser_id}/discovery/esp32_nodes
 
         Returns:
             {
@@ -256,8 +331,15 @@ class TopicBuilder:
             }
             or None if parse fails
         """
-        if topic == constants.MQTT_TOPIC_ESP_DISCOVERY:
-            return {"type": "discovery"}
+        # Pattern: kaiser/{any_kaiser_id}/discovery/esp32_nodes
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/discovery/esp32_nodes"
+        match = re.match(pattern, topic)
+        
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "type": "discovery",
+            }
         return None
 
     @staticmethod
@@ -266,7 +348,7 @@ class TopicBuilder:
         Parse Pi-Enhanced request topic.
 
         Args:
-            topic: kaiser/god/esp/ESP_12AB34CD/pi_enhanced/request
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/pi_enhanced/request
 
         Returns:
             {
@@ -275,13 +357,14 @@ class TopicBuilder:
             }
             or None if parse fails
         """
-        # Pattern: kaiser/god/esp/{esp_id}/pi_enhanced/request
-        pattern = r"kaiser/god/esp/([A-Z0-9_]+)/pi_enhanced/request"
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/pi_enhanced/request
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/pi_enhanced/request"
         match = re.match(pattern, topic)
 
         if match:
             return {
-                "esp_id": match.group(1),
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
                 "type": "pi_enhanced_request",
             }
         return None
@@ -307,9 +390,11 @@ class TopicBuilder:
         parsers = [
             cls.parse_sensor_data_topic,
             cls.parse_actuator_status_topic,
+            cls.parse_actuator_response_topic,
+            cls.parse_actuator_alert_topic,
             cls.parse_heartbeat_topic,
             cls.parse_health_status_topic,
-            cls.parse_config_ack_topic,
+            cls.parse_config_response_topic,
             cls.parse_discovery_topic,
             cls.parse_pi_enhanced_request_topic,
         ]

@@ -4,7 +4,7 @@ description: Führe El Servador Python Tests aus
 
 # El Servador Test Suite
 
-> **Kurze Anleitung** - Für vollständige Dokumentation siehe `/full-test` oder `.claude/CLAUDE_SERVER.md` Section 7
+> **Kurze Anleitung** - Für vollständige Dokumentation siehe `/full-test` oder `.claude/CLAUDE_SERVER.md` Section 7.2
 
 ## Schnellstart
 
@@ -59,5 +59,5 @@ poetry run ruff check god_kaiser_server/
 
 ## Related Documentation
 
-- **Vollständige Doku:** `/full-test` oder `.claude/CLAUDE_SERVER.md` Section 7
+- **Vollständige Doku:** `/full-test` oder `.claude/CLAUDE_SERVER.md` Section 7.2
 - **ESP32 Tests:** `El Servador/docs/ESP32_TESTING.md`

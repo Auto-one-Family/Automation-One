@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include "../../models/error_codes.h"
+#include "../../utils/time_manager.h"
 
 // ============================================
 // CONSTANTS
@@ -141,6 +142,19 @@ bool WiFiManager::connectToNetwork() {
 
     reconnect_attempts_ = 0;
     circuit_breaker_.recordSuccess();  // Phase 6+
+
+    // ============================================
+    // NTP TIME SYNCHRONIZATION (Phase 8)
+    // ============================================
+    // Initialize TimeManager after WiFi connection for accurate timestamps
+    LOG_INFO("Initializing NTP time synchronization...");
+    if (timeManager.begin()) {
+        LOG_INFO("NTP sync successful - Unix timestamp: " + 
+                 String((unsigned long)timeManager.getUnixTimestamp()));
+    } else {
+        LOG_WARNING("NTP sync failed - timestamps may be inaccurate");
+        LOG_WARNING("TimeManager will retry in background");
+    }
 
     return true;
 }

@@ -1,27 +1,31 @@
 """
 System Constants: MQTT Topics, Sensor Types, GPIO Ranges, Timeouts
+
+IMPORTANT: All topics use {kaiser_id} placeholder which must be replaced
+with the actual KAISER_ID from config (default: "god").
+Use get_topic_with_kaiser_id() helper function for runtime topic building.
 """
 
 # =============================================================================
-# MQTT TOPIC PATTERNS
+# MQTT TOPIC PATTERNS (with {kaiser_id} placeholder)
 # =============================================================================
 
 # ESP → God-Kaiser (Incoming)
-MQTT_TOPIC_ESP_SENSOR_DATA = "kaiser/god/esp/{esp_id}/sensor/{gpio}/data"
-MQTT_TOPIC_ESP_ACTUATOR_STATUS = "kaiser/god/esp/{esp_id}/actuator/{gpio}/status"
-MQTT_TOPIC_ESP_HEALTH_STATUS = "kaiser/god/esp/{esp_id}/health/status"
-MQTT_TOPIC_ESP_CONFIG_ACK = "kaiser/god/esp/{esp_id}/config/ack"
-MQTT_TOPIC_ESP_RESPONSE = "kaiser/god/esp/{esp_id}/response"
-MQTT_TOPIC_ESP_PI_ENHANCED_REQUEST = "kaiser/god/esp/{esp_id}/pi_enhanced/request"
-MQTT_TOPIC_ESP_DISCOVERY = "kaiser/god/discovery/esp32_nodes"
-MQTT_TOPIC_ESP_HEARTBEAT = "kaiser/god/esp/{esp_id}/heartbeat"
+MQTT_TOPIC_ESP_SENSOR_DATA = "kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data"
+MQTT_TOPIC_ESP_ACTUATOR_STATUS = "kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status"
+MQTT_TOPIC_ESP_HEALTH_STATUS = "kaiser/{kaiser_id}/esp/{esp_id}/health/status"
+MQTT_TOPIC_ESP_CONFIG_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/config_response"
+MQTT_TOPIC_ESP_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/response"
+MQTT_TOPIC_ESP_PI_ENHANCED_REQUEST = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/request"
+MQTT_TOPIC_ESP_DISCOVERY = "kaiser/{kaiser_id}/discovery/esp32_nodes"  # DEPRECATED: Use heartbeat
+MQTT_TOPIC_ESP_HEARTBEAT = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
 
 # God-Kaiser → ESP (Outgoing)
-MQTT_TOPIC_ESP_ACTUATOR_COMMAND = "kaiser/god/esp/{esp_id}/actuator/{gpio}/command"
-MQTT_TOPIC_ESP_CONFIG_SENSOR = "kaiser/god/esp/{esp_id}/config/sensor/{gpio}"
-MQTT_TOPIC_ESP_CONFIG_ACTUATOR = "kaiser/god/esp/{esp_id}/config/actuator/{gpio}"
-MQTT_TOPIC_ESP_SYSTEM_COMMAND = "kaiser/god/esp/{esp_id}/system/command"
-MQTT_TOPIC_ESP_PI_ENHANCED_RESPONSE = "kaiser/god/esp/{esp_id}/pi_enhanced/response"
+MQTT_TOPIC_ESP_ACTUATOR_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command"
+MQTT_TOPIC_ESP_CONFIG_SENSOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/sensor/{gpio}"
+MQTT_TOPIC_ESP_CONFIG_ACTUATOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/actuator/{gpio}"
+MQTT_TOPIC_ESP_SYSTEM_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/system/command"
+MQTT_TOPIC_ESP_PI_ENHANCED_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/response"
 
 # Broadcast Topics
 MQTT_TOPIC_BROADCAST_ALL = "kaiser/broadcast/all"
@@ -31,12 +35,39 @@ MQTT_TOPIC_BROADCAST_ZONE = "kaiser/broadcast/zone/{zone_id}"
 MQTT_TOPIC_KAISER_COMMAND = "kaiser/{kaiser_id}/command"
 MQTT_TOPIC_KAISER_STATUS = "kaiser/{kaiser_id}/status"
 
-# Subscription Patterns (with wildcards)
-MQTT_SUBSCRIBE_ESP_ALL = "kaiser/god/esp/+/#"
-MQTT_SUBSCRIBE_ESP_SENSORS = "kaiser/god/esp/+/sensor/+/data"
-MQTT_SUBSCRIBE_ESP_ACTUATORS = "kaiser/god/esp/+/actuator/+/status"
-MQTT_SUBSCRIBE_ESP_HEALTH = "kaiser/god/esp/+/health/status"
-MQTT_SUBSCRIBE_ESP_DISCOVERY = "kaiser/god/discovery/esp32_nodes"
+# Subscription Patterns (with wildcards) - use {kaiser_id} placeholder
+MQTT_SUBSCRIBE_ESP_ALL = "kaiser/{kaiser_id}/esp/+/#"
+MQTT_SUBSCRIBE_ESP_SENSORS = "kaiser/{kaiser_id}/esp/+/sensor/+/data"
+MQTT_SUBSCRIBE_ESP_ACTUATORS = "kaiser/{kaiser_id}/esp/+/actuator/+/status"
+MQTT_SUBSCRIBE_ESP_HEALTH = "kaiser/{kaiser_id}/esp/+/health/status"
+MQTT_SUBSCRIBE_ESP_DISCOVERY = "kaiser/{kaiser_id}/discovery/esp32_nodes"
+
+# Default Kaiser ID (can be overridden via KAISER_ID env var)
+DEFAULT_KAISER_ID = "god"
+
+
+def get_kaiser_id() -> str:
+    """Get KAISER_ID from config or return default."""
+    try:
+        from .config import get_settings
+        return get_settings().hierarchy.kaiser_id
+    except Exception:
+        return DEFAULT_KAISER_ID
+
+
+def get_topic_with_kaiser_id(topic_template: str, **kwargs) -> str:
+    """
+    Replace {kaiser_id} placeholder in topic template with actual value.
+    
+    Args:
+        topic_template: Topic template with {kaiser_id} and other placeholders
+        **kwargs: Additional placeholders to replace (esp_id, gpio, etc.)
+    
+    Returns:
+        Topic string with all placeholders replaced
+    """
+    kaiser_id = get_kaiser_id()
+    return topic_template.format(kaiser_id=kaiser_id, **kwargs)
 
 # =============================================================================
 # GPIO RANGES (Board-Specific)

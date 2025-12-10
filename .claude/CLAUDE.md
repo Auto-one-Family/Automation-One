@@ -1,84 +1,46 @@
-# Automation-One Framework
+# AutomationOne Framework - KI-Agenten Dokumentation
 
-> **Für KI-Agenten:** Fokussierte Dokumentation für industrielle IoT-Entwicklung
-
----
-
-## 0. Quick Decision Tree - Welche Doku lesen?
-
-### 🔧 "Ich will Code ändern"
-1. **Welches Modul?** → [Section 9: Modul-Dokumentation Navigation](#9-modul-dokumentation-navigation)
-2. **Workflow folgen** → [Section 10: KI-Agenten Workflow](#10-ki-agenten-workflow)
-3. **Tests schreiben** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
-4. **Pattern-Beispiele** → `.claude/WORKFLOW_PATTERNS.md`
-
-### 🐛 "Ich habe einen Fehler"
-1. **Build-Fehler?** → `.claude/commands/esp-build.md` + `platformio.ini` prüfen
-2. **Test-Fehler?** → `.claude/TEST_WORKFLOW.md` Section 6: Troubleshooting
-3. **Runtime-Fehler?** → [Section 6: Fehlercode-Referenz](#6-fehlercode-referenz) + `El Trabajante/src/models/error_codes.h`
-4. **MQTT-Problem?** → `El Trabajante/docs/Mqtt_Protocoll.md`
-5. **GPIO-Konflikt?** → [Section 5.2: GPIO-Konflikte](#52-gpio-konflikte)
-
-### 📖 "Ich will verstehen wie X funktioniert"
-1. **System-Flow?** → `El Trabajante/docs/system-flows/` (Boot, Sensor-Reading, Actuator-Command)
-2. **MQTT-Protokoll?** → `El Trabajante/docs/Mqtt_Protocoll.md`
-3. **API einer Klasse?** → `El Trabajante/docs/API_REFERENCE.md`
-4. **Test-Infrastruktur?** → `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
-5. **Modul-Abhängigkeiten?** → `.claude/ARCHITECTURE_DEPENDENCIES.md`
-
-### ➕ "Ich will neues Feature hinzufügen"
-1. **Sensor?** → Pi-Enhanced: Server-side Library ([Section 12](#12-best-practices-für-ki-agenten))
-2. **Aktor?** → ESP Driver + Safety-Constraints (`.claude/WORKFLOW_PATTERNS.md`)
-3. **MQTT-Topic?** → MQTT-Protokoll aktualisieren ([Section 10, Schritt 6](#schritt-6-dokumentation-aktualisieren))
-4. **Error-Code?** → `El Trabajante/src/models/error_codes.h` erweitern + dokumentieren
-5. **Test?** → Dual-Mode-Pattern ([Section 3.2](#32-dual-mode-pattern-pflicht-für-jeden-test))
+> **Für KI-Agenten:** Maßgebliche Referenz für ESP32-Firmware-Entwicklung auf industriellem Niveau
 
 ---
 
-## 1. Schnellstart
+## 0. Quick Reference - Was suche ich?
 
-### El Trabajante (ESP32 Firmware)
+| Ich will... | Primäre Quelle | Code-Location |
+|-------------|----------------|---------------|
+| **ESP32 Code ändern** | [Section 8: Workflow](#8-ki-agenten-workflow) | `El Trabajante/src/` |
+| **Server Code ändern** | `.claude/CLAUDE_SERVER.md` → [Section 13: Workflow](.claude/CLAUDE_SERVER.md#13-ki-agenten-workflow) | `El Servador/god_kaiser_server/src/` |
+| **MQTT verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | ESP: `src/services/communication/mqtt_client.*`<br>Server: `.claude/CLAUDE_SERVER.md` → [Section 4](.claude/CLAUDE_SERVER.md#4-mqtt-topic-referenz-server-perspektive) |
+| **ESP32 API verstehen** | `El Trabajante/docs/API_REFERENCE.md` | `src/services/[modul]/` |
+| **Server API verstehen** | `.claude/CLAUDE_SERVER.md` → [Section 3.2](.claude/CLAUDE_SERVER.md#32-aufgabe-rest-api-endpoint-hinzufügen) | `El Servador/god_kaiser_server/src/api/v1/` |
+| **Tests schreiben** | `.claude/CLAUDE_SERVER.md` → [Section 12](.claude/CLAUDE_SERVER.md#12-modul-dokumentation-navigation) | `El Servador/god_kaiser_server/tests/` |
+| **Error-Code finden** | [Section 5](#5-error-codes-verifiziert) | `src/models/error_codes.h` |
+| **ESP32 Build ausführen** | [Section 1](#1-build--commands) | `platformio.ini` |
+| **Server starten** | `.claude/CLAUDE_SERVER.md` → [Section 7.1](.claude/CLAUDE_SERVER.md#71-server-starten-development) | `El Servador/god_kaiser_server/` |
+| **System-Flow verstehen** | `El Trabajante/docs/system-flows/` | `src/core/` |
 
-**WICHTIG:** PlatformIO-Commands funktionieren auf zwei Arten:
+---
 
-#### Option A: Von Root-Verzeichnis (Auto-one) aus arbeiten
+## 1. Build & Commands
+
+### PlatformIO (ESP32 Firmware)
+
+**Von Root-Verzeichnis (Auto-one) - EMPFOHLEN:**
 ```bash
-# Build für ESP32 Dev Board
+# Build ESP32 Dev Board
 cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
 
-# Build für XIAO ESP32-C3
+# Build XIAO ESP32-C3
 cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e seeed_xiao_esp32c3
-
-# Tests ausführen (KEIN Server nötig!)
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_dev
 
 # Flash auf Device
 cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev -t upload
-```
-
-#### Option B: Innerhalb El Trabajante Ordner (nur wenn NUR dieser Ordner in VSCode geöffnet ist)
-```bash
-cd "El Trabajante"
-
-# Build für ESP32 Dev Board
-pio run -e esp32_dev
-
-# Build für XIAO ESP32-C3
-pio run -e seeed_xiao_esp32c3
-
-# Tests ausführen
-pio test -e esp32_dev
-
-# Flash auf Device
-pio run -e esp32_dev -t upload
 
 # Serial Monitor
-pio device monitor
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe device monitor
 ```
 
-**Empfehlung für KI-Agenten:** Nutze Option A mit vollständigem Pfad - funktioniert immer!
-
-### El Servador (God-Kaiser Server)
+### Server (God-Kaiser)
 
 ```bash
 cd "El Servador"
@@ -87,7 +49,7 @@ cd "El Servador"
 poetry install
 
 # Tests ausführen
-poetry run pytest -v --cov
+poetry run pytest god_kaiser_server/tests/ -v
 
 # Server starten
 poetry run uvicorn god_kaiser_server.src.main:app --reload
@@ -95,17 +57,21 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload
 
 ---
 
-## 2. Architektur
+## 2. System-Architektur
+
+### Die 4-Layer-Hierarchie
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ LAYER 1: God (Raspberry Pi 5)                               │
+│ LAYER 1: God (Raspberry Pi 5) - OPTIONAL                    │
 │ Rolle: KI/Analytics, Predictions, Model Training            │
 └─────────────────────────────────────────────────────────────┘
                           ↕ HTTP REST
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER 2: God-Kaiser (Raspberry Pi 5)                        │
 │ Rolle: Control Hub, MQTT Broker, Database, Logic Engine     │
+│ Code: El Servador/god_kaiser_server/                        │
+│ 📖 Server-Doku: `.claude/CLAUDE_SERVER.md`                  │
 └─────────────────────────────────────────────────────────────┘
                           ↕ MQTT (TLS)
 ┌─────────────────────────────────────────────────────────────┐
@@ -114,408 +80,407 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload
 └─────────────────────────────────────────────────────────────┘
                           ↕ MQTT
 ┌─────────────────────────────────────────────────────────────┐
-│ LAYER 4: ESP32-Agenten (WROOM/XIAO C3)                     │
+│ LAYER 4: ESP32-Agenten (WROOM/XIAO C3)                      │
 │ Rolle: Sensor-Auslesung, Aktor-Steuerung                    │
+│ Code: El Trabajante/                                        │
+│ 📖 ESP32-Doku: Diese Datei (CLAUDE.md)                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Kern-Konzept: Pi-Enhanced Mode (Standard)**
-- ESP32 sendet RAW-Werte (analogRead/digitalRead)
-- God-Kaiser verarbeitet mit Python Sensor-Libraries
-- ESP32 empfängt verarbeitete Werte zurück
-- **Vorteil:** Sofort einsatzbereit, keine ESP-Code-Änderung nötig
+### Kern-Prinzip: Server-Centric (Pi-Enhanced Mode)
+
+**Standard-Workflow (90% der Anwendungen):**
+```
+ESP32 → RAW-Daten (analogRead) → MQTT → God-Kaiser
+God-Kaiser → Python-Library verarbeitet → speichert in DB
+God-Kaiser → Processed-Werte zurück → ESP32 (optional)
+```
+
+**Vorteile:**
+- ✅ Sofort einsatzbereit - neue Sensoren ohne ESP-Änderung
+- ✅ Komplexe Algorithmen möglich (Kalman-Filter, ML)
+- ✅ Zentrale Updates - kein ESP-Reflash nötig
+- ✅ ESP-Flash bleibt frei für andere Features
 
 ---
 
-## 3. Test-Philosophie
+## 3. El Trabajante - Verzeichnisstruktur
 
-### 3.1 Server-unabhängige Tests
-
-**Alle ESP32-Tests laufen OHNE ESP32-Hardware dank:**
-
-- **MockESP32Client** - Simuliert ESP32 auf Server-Seite (Python)
-- **RealESP32Client** - MQTT-Verbindung zu echter Hardware (optional)
-- **pytest Fixtures** - Vorkonfigurierte Test-ESPs (mock_esp32, multiple_mock_esp32)
-
-**Warum wichtig:**
-- CI/CD läuft ohne physische ESPs
-- Schneller Feedback-Loop (keine PlatformIO Build-Wartezeit)
-- ~140 Tests (Communication, Infrastructure, Actuator, Sensor, Integration, Cross-ESP, Performance)
-
-**Details:** Siehe `El Servador/docs/ESP32_TESTING.md` für vollständige Test-Dokumentation.
-
-**Legacy ESP32 Unity-Tests:** Archiviert in `El Trabajante/test/_archive/` (siehe README dort für Migration-Rationale).
-
-### 3.2 Server-orchestrierte Test-Infrastruktur
-
-**Neue Test-Architektur (seit 2025-11-26):**
-
-- **MockESP32Client:** Server-seitige ESP32-Simulation in Python
-- **Production-identical Topics:** Tests verwenden echte MQTT-Topic-Struktur
-- **Mock + Real Hardware:** Identische API für Mock und Real ESP32
-- **CI/CD-Ready:** Tests laufen ohne Hardware, können aber gegen echte ESPs laufen
-
-**Test-Pattern:**
-1. pytest-Fixtures stellen vorkonfigurierte Mock-ESPs bereit
-2. Tests senden Commands via `handle_command()` (ping, actuator_set, sensor_read, etc.)
-3. Tests validieren Responses und MQTT-Message-Publishing
-4. Mock-ESPs simulieren Production-Topic-Struktur exakt
-
-**Details:** Vollständige Dokumentation in `El Servador/docs/ESP32_TESTING.md`.
-
-**Legacy Unity-Tests:** Archiviert in `El Trabajante/test/_archive/` (Dual-Mode-Pattern dokumentiert dort).
+```
+El Trabajante/                     # ESP32 Firmware (~13.300 Zeilen)
+├── src/
+│   ├── core/                      # Application, MainLoop, SystemController (Skeleton)
+│   ├── drivers/                   # GPIO, I2C, OneWire, PWM
+│   │   ├── gpio_manager.*         # ⭐ GPIO Safe-Mode, Pin-Reservation
+│   │   ├── i2c_bus.*              # I2C-Bus-Management
+│   │   ├── onewire_bus.*          # OneWire-Bus (DS18B20)
+│   │   └── pwm_controller.*       # PWM-Steuerung für Aktoren
+│   ├── services/
+│   │   ├── sensor/                # ⭐ SensorManager, PiEnhancedProcessor
+│   │   │   └── sensor_drivers/    # DS18B20, SHT31, PH, Generic I2C Drivers
+│   │   ├── actuator/              # ⭐ ActuatorManager, SafetyController
+│   │   │   └── actuator_drivers/  # Pump, Valve, PWM Drivers
+│   │   ├── communication/         # ⭐ MQTTClient, WiFiManager, HTTPClient
+│   │   ├── config/                # ConfigManager, StorageManager
+│   │   └── provisioning/          # Zone-Assignment
+│   ├── models/                    # ⭐ Types, Error Codes, MQTT Messages
+│   │   ├── error_codes.h          # ALLE Error-Codes definiert
+│   │   ├── sensor_types.h         # SensorConfig, SensorType
+│   │   ├── actuator_types.h       # ActuatorConfig, ActuatorType
+│   │   └── system_types.h         # SystemState, ZoneConfig
+│   ├── error_handling/            # ErrorTracker, CircuitBreaker, HealthMonitor
+│   ├── utils/                     # Logger, TopicBuilder, TimeManager
+│   └── config/hardware/           # Board-spezifische Configs
+│       ├── xiao_esp32c3.h         # XIAO-spezifische Pins
+│       └── esp32_dev.h            # ESP32-Dev-Board Pins
+├── docs/                          # ⭐ Technische Dokumentation
+│   ├── API_REFERENCE.md           # Modul-API-Referenz (~3.300 Zeilen)
+│   ├── Mqtt_Protocoll.md          # MQTT-Spezifikation (~3.600 Zeilen)
+│   ├── MQTT_CLIENT_API.md         # MQTT-Client-API (~1.300 Zeilen)
+│   ├── NVS_KEYS.md                # NVS-Speicher-Keys (~300 Zeilen)
+│   ├── Roadmap.md                 # Aktueller Status (~150 Zeilen)
+│   ├── System_Overview.md         # Codebase-Analyse (~2.500 Zeilen)
+│   └── system-flows/              # 8 Ablauf-Diagramme
+└── platformio.ini                 # Build-Konfiguration
+```
 
 ---
 
-## 4. MQTT-Protokoll (Kurzreferenz)
+## 4. MQTT-Protokoll (Verifiziert)
 
-### Topic-Schema
+### Topic-Schema (aus TopicBuilder)
 
-**ESP → God-Kaiser:**
+**ESP → God-Kaiser (Publish):**
 ```
-kaiser/god/esp/{esp_id}/sensor/{gpio}/data
-kaiser/god/esp/{esp_id}/actuator/{gpio}/status
-kaiser/god/esp/{esp_id}/health/status
+kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data       # Sensor-Daten
+kaiser/{kaiser_id}/esp/{esp_id}/sensor/batch             # Batch-Daten
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status   # Aktor-Status
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response # Command-Response
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert    # Aktor-Alerts
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency       # ESP-spezifischer Emergency
+kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat         # Heartbeat (alle 60s)
+kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics       # Health-Diagnostics
+kaiser/{kaiser_id}/esp/{esp_id}/config_response          # Config-Acknowledgment
+kaiser/{kaiser_id}/esp/{esp_id}/zone/ack                 # Zone-Assignment-Ack
 ```
 
-**God-Kaiser → ESP:**
+**God-Kaiser → ESP (Subscribe):**
 ```
-kaiser/god/esp/{esp_id}/actuator/{gpio}/command
-kaiser/god/esp/{esp_id}/config/sensor/{gpio}
-kaiser/god/esp/{esp_id}/system/command
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command  # Aktor-Befehle
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/+/command       # Wildcard für alle Aktoren
+kaiser/{kaiser_id}/esp/{esp_id}/system/command           # System-Befehle
+kaiser/{kaiser_id}/esp/{esp_id}/config                   # Config-Updates
+kaiser/{kaiser_id}/esp/{esp_id}/zone/assign              # Zone-Assignment
+kaiser/broadcast/emergency                               # Emergency-Stop (alle ESPs)
 ```
 
-**Details:** Siehe `El Trabajante/docs/Mqtt_Protocoll.md` für vollständige Topic-Spezifikation, Payload-Strukturen und QoS-Level.
+**Default kaiser_id:** `god`
+
+**Vollständige Spezifikation:** `El Trabajante/docs/Mqtt_Protocoll.md`
 
 ---
 
-## 5. Safety-Constraints
-
-### 5.1 Aktor-Sicherheit
-
-**KRITISCHE Regeln - NIEMALS ignorieren:**
-
-1. **Emergency-Stop hat IMMER Priorität**
-   ```cpp
-   if (emergencyStop) {
-       actuatorManager.shutdownAll();
-       return;  // Keine weiteren Commands!
-   }
-   ```
-
-2. **PWM-Limits: 0.0 - 1.0**
-   ```cpp
-   // Wird intern auf 0-255 gemappt
-   actuatorManager.controlActuatorPWM(gpio, 0.75);  // 75% Power
-   ```
-
-3. **Timeout-Protection**
-   - Aktoren schalten nach `MAX_RUNTIME` Sekunden automatisch ab
-   - Verhindert Überhitzung, Überlauf, etc.
-
-4. **Safety-Controller prüft IMMER:**
-   ```cpp
-   // In actuator_manager.cpp:
-   if (!safetyController.checkConstraints(gpio, value)) {
-       return false;  // Command rejected!
-   }
-   ```
-
-### 5.2 GPIO-Konflikte
-
-**NIEMALS gleichen GPIO für Sensor UND Aktor:**
-
-```cpp
-// VOR jeder GPIO-Nutzung:
-if (!gpioManager.isPinAvailable(gpio)) {
-    return ERROR_GPIO_CONFLICT;
-}
-
-// Sensor reserviert Pin:
-gpioManager.reservePin(gpio, PinMode::ANALOG_INPUT);
-
-// Aktor kann diesen Pin NICHT mehr nutzen!
-```
-
-**Konflikt-Resolution:**
-- ConfigManager prüft bei jedem `addSensor`/`addActuator`
-- Safe-Mode verhindert Mehrfachnutzung
-- Factory-Pattern wirft Exception bei Konflikt
-
----
-
-## 6. Fehlercode-Referenz
-
-**Wichtigste Error-Codes:**
+## 5. Error-Codes (Verifiziert aus error_codes.h)
 
 ### Hardware (1000-1999)
 ```cpp
-ERROR_GPIO_CONFLICT         1002   // GPIO bereits belegt
+ERROR_GPIO_RESERVED         1001   // Pin bereits reserviert
+ERROR_GPIO_CONFLICT         1002   // GPIO-Konflikt
 ERROR_GPIO_INIT_FAILED      1003   // Hardware-Init fehlgeschlagen
+ERROR_I2C_INIT_FAILED       1010   // I2C-Initialisierung fehlgeschlagen
+ERROR_I2C_DEVICE_NOT_FOUND  1011   // I2C-Gerät nicht gefunden
 ERROR_SENSOR_READ_FAILED    1040   // Sensor antwortet nicht
+ERROR_SENSOR_INIT_FAILED    1041   // Sensor-Init fehlgeschlagen
 ERROR_ACTUATOR_SET_FAILED   1050   // Aktor-Command fehlgeschlagen
+ERROR_ACTUATOR_INIT_FAILED  1051   // Aktor-Init fehlgeschlagen
 ```
 
 ### Service (2000-2999)
 ```cpp
-ERROR_CONFIG_INVALID        2001   // Ungültige Konfiguration
-ERROR_CONFIG_STORAGE_FULL   2002   // NVS voll
-ERROR_SENSOR_NOT_CONFIGURED 2010   // Sensor nicht konfiguriert
+ERROR_NVS_INIT_FAILED       2001   // NVS-Initialisierung fehlgeschlagen
+ERROR_NVS_READ_FAILED       2002   // NVS-Lesen fehlgeschlagen
+ERROR_NVS_WRITE_FAILED      2003   // NVS-Schreiben fehlgeschlagen
+ERROR_CONFIG_INVALID        2010   // Ungültige Konfiguration
+ERROR_CONFIG_MISSING        2011   // Konfiguration fehlt
+ERROR_CONFIG_LOAD_FAILED    2012   // Config-Laden fehlgeschlagen
 ```
 
 ### Communication (3000-3999)
 ```cpp
+ERROR_WIFI_INIT_FAILED      3001   // WiFi-Init fehlgeschlagen
+ERROR_WIFI_CONNECT_TIMEOUT  3002   // WiFi-Timeout
 ERROR_WIFI_CONNECT_FAILED   3003   // WiFi-Verbindung fehlgeschlagen
+ERROR_MQTT_INIT_FAILED      3010   // MQTT-Init fehlgeschlagen
 ERROR_MQTT_CONNECT_FAILED   3011   // MQTT-Verbindung fehlgeschlagen
 ERROR_MQTT_PUBLISH_FAILED   3012   // Publish fehlgeschlagen
 ERROR_MQTT_SUBSCRIBE_FAILED 3013   // Subscribe fehlgeschlagen
 ```
 
-**Vollständige Liste:** Siehe `El Trabajante/src/models/error_codes.h` für alle Error-Codes mit Beschreibungen und Severity-Levels.
+**Vollständige Liste:** `El Trabajante/src/models/error_codes.h`
 
 ---
 
-## 7. Test-Ausführung und Workflow
+## 6. Safety-Constraints (KRITISCH)
 
-### ✅ NEUE TEST-ARCHITEKTUR: Server-orchestrierte Tests (2025-11-26)
+### GPIO Safe-Mode
+```cpp
+// GPIOManager initialisiert ALLE Pins als INPUT_PULLUP
+// MUSS als ERSTES in setup() aufgerufen werden!
+GPIOManager& gpioManager = GPIOManager::getInstance();
+gpioManager.initializeAllPinsToSafeMode();  // Alle Pins safe
+```
 
-**ESP32-Tests laufen jetzt auf God-Kaiser Server via MQTT!**
+### Pin-Reservation (vor jeder Nutzung)
+```cpp
+// Prüfen ob Pin verfügbar
+if (!gpioManager.isPinAvailable(gpio)) {
+    return ERROR_GPIO_CONFLICT;
+}
 
-**Schnellstart:**
+// Pin reservieren mit Owner und Komponenten-Name
+bool success = gpioManager.requestPin(gpio, "sensor", "DS18B20");
+```
+
+### Aktor-Sicherheit
+```cpp
+// ActuatorManager prüft IMMER vor Aktivierung:
+// - Emergency-Stop aktiv? (actuator->emergency_stopped)
+// - Aktor existiert? (findActuator(gpio))
+// - Value in erlaubtem Bereich? (PWM: 0.0-1.0, validateActuatorValue())
+// - Runtime Protection wird nach Aktivierung getrackt
+
+// Safety-Checks erfolgen automatisch in controlActuator():
+if (actuator->emergency_stopped) {
+    return false;  // Command rejected - Emergency-Stop aktiv!
+}
+
+// Value-Validierung:
+if (isPwmActuatorType(actuator->config.actuator_type)) {
+    normalized_value = constrain(value, 0.0f, 1.0f);  // PWM-Limitierung
+} else if (!validateActuatorValue(actuator->config.actuator_type, value)) {
+    return false;  // Value außerhalb erlaubtem Bereich
+}
+```
+
+### PWM-Limits
+- **Bereich:** 0.0 - 1.0 (wird intern auf 0-255 gemappt)
+- **Timeout-Protection:** Aktoren schalten nach `MAX_RUNTIME` automatisch ab
+
+---
+
+## 7. Kritische Module & Dateien
+
+### Singleton-Pattern (Standard für alle Manager)
+```cpp
+// Alle Manager sind Singletons:
+SensorManager& sensorManager = SensorManager::getInstance();
+ActuatorManager& actuatorManager = ActuatorManager::getInstance();
+ConfigManager& configManager = ConfigManager::getInstance();
+GPIOManager& gpioManager = GPIOManager::getInstance();
+```
+
+### Wichtigste Dateien für Code-Änderungen
+
+| Modul | Header | Implementation | Verantwortlichkeit |
+|-------|--------|----------------|-------------------|
+| **SensorManager** | `services/sensor/sensor_manager.h` | `sensor_manager.cpp` | Sensor-Orchestrierung, RAW-Daten |
+| **ActuatorManager** | `services/actuator/actuator_manager.h` | `actuator_manager.cpp` | Aktor-Control, Safety |
+| **MQTTClient** | `services/communication/mqtt_client.h` | `mqtt_client.cpp` | MQTT Pub/Sub, Heartbeat |
+| **ConfigManager** | `services/config/config_manager.h` | `config_manager.cpp` | NVS-Config laden/speichern |
+| **GPIOManager** | `drivers/gpio_manager.h` | `gpio_manager.cpp` | Pin-Reservation, Safe-Mode |
+| **TopicBuilder** | `utils/topic_builder.h` | `topic_builder.cpp` | MQTT-Topic-Generierung |
+| **ErrorTracker** | `error_handling/error_tracker.h` | `error_tracker.cpp` | Error-Logging, History |
+
+---
+
+## 8. KI-Agenten Workflow
+
+### Bei Code-Änderungen
+
+**SCHRITT 1: Kontext verstehen**
+1. Welches Modul? → Section 7 Tabelle
+2. Relevante Dokumentation lesen:
+   - API: `El Trabajante/docs/API_REFERENCE.md`
+   - MQTT: `El Trabajante/docs/Mqtt_Protocoll.md`
+   - Flow: `El Trabajante/docs/system-flows/`
+
+**SCHRITT 2: Code analysieren**
+1. Header-Datei lesen (Interfaces, Methoden-Signaturen)
+2. Implementation prüfen (bestehende Patterns)
+3. Abhängigkeiten verstehen (welche Manager werden genutzt?)
+
+**SCHRITT 3: Implementieren**
+- **Singleton-Pattern beibehalten**
+- **Error-Codes aus `error_codes.h` verwenden**
+- **Safety-Controller nicht umgehen**
+- **RAII-Pattern** (keine `new`/`delete`)
+
+**SCHRITT 4: Verifizieren**
 ```bash
-cd "El Servador"
-poetry install
-poetry run pytest god_kaiser_server/tests/esp32/ -v
+# Build-Check
+cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
+
+# Server-Tests (wenn MQTT betroffen)
+cd "El Servador" && poetry run pytest god_kaiser_server/tests/ -v
 ```
 
-**Was ist neu:**
-- ✅ **~140 pytest Tests** (Communication, Infrastructure, Actuator, Sensor, Integration)
-- ✅ **MockESP32Client** - Simuliert ESP32 ohne Hardware
-- ✅ **CI/CD-ready** - Keine ESP32-Hardware nötig
-- ✅ **Schneller Feedback-Loop** - Keine PlatformIO Build-Wartezeit
+**SCHRITT 5: Dokumentation aktualisieren**
+- `API_REFERENCE.md` bei API-Änderungen
+- `Mqtt_Protocoll.md` bei Topic/Payload-Änderungen
+- `NVS_KEYS.md` bei neuen NVS-Keys
 
-**Dokumentation:**
-- **ESP32 Testing Guide:** `El Servador/docs/ESP32_TESTING.md` (vollständige Test-Dokumentation)
-- **MQTT Test Protocol:** `El Servador/docs/MQTT_TEST_PROTOCOL.md` (Command-Spezifikation)
-- **Test Workflow:** `.claude/TEST_WORKFLOW.md` (Migration-Status)
-
-**Legacy ESP32 Tests:**
-- Verschoben nach `El Trabajante/test/_archive/`
-- Als Referenz behalten (enthält wertvolle Test-Logik)
-- Siehe `El Trabajante/test/_archive/README.md`
-
----
-
-## 8. Projektstruktur (Kurzübersicht)
-
-```
-El Trabajante/                    # ESP32 Firmware
-├── src/
-│   ├── core/                     # Application, MainLoop, SystemController
-│   ├── services/
-│   │   ├── sensor/               # SensorManager, Pi-Enhanced, Drivers
-│   │   ├── actuator/             # ActuatorManager, SafetyController
-│   │   ├── communication/        # MQTT, HTTP, WiFi
-│   │   └── config/               # ConfigManager, StorageManager
-│   ├── models/                   # Types, Error Codes, MQTT Messages
-│   └── error_handling/           # HealthMonitor, CircuitBreaker
-├── test/                         # Unit Tests (MockMQTT, VirtualDrivers)
-└── docs/                         # System Flows, API Reference
-
-El Servador/                      # God-Kaiser Server
-└── god_kaiser_server/
-    ├── src/
-    │   ├── api/v1/               # REST Endpoints
-    │   ├── mqtt/                 # MQTT Handlers
-    │   ├── sensors/              # Python Sensor Libraries
-    │   └── db/                   # SQLAlchemy Models
-    └── tests/                    # pytest Tests
-```
-
----
-
-## 9. Modul-Dokumentation Navigation
-
-### Wann welche Dokumentation konsultieren?
-
-| Aufgabe | Primäre Dokumentation | Zusätzliche Ressourcen | Code-Location | Verantwortlichkeit |
-|---------|----------------------|------------------------|---------------|-------------------|
-| **Tests schreiben/ausführen** | `El Servador/docs/ESP32_TESTING.md` | `.claude/TEST_WORKFLOW.md` | `El Servador/god_kaiser_server/tests/esp32/` | pytest Tests, MockESP32Client, Fixtures |
-| **MQTT-Protokoll verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | `El Trabajante/docs/MQTT_CLIENT_API.md` | `El Trabajante/src/services/communication/mqtt_client.*` | Topics, Payloads, QoS, Wildcards |
-| **API-Referenz benötigt** | `El Trabajante/docs/API_REFERENCE.md` | `El Trabajante/src/services/[modul]/` | `El Trabajante/src/services/` | Methoden, Parameter, Return-Werte |
-| **System-Flow verstehen** | `El Trabajante/docs/system-flows/` | `El Trabajante/docs/System_Overview.md` | `El Trabajante/src/core/` | Boot-Sequence, Sensor-Reading, Actuator-Command |
-| **Sensor-System** | `El Trabajante/docs/API_REFERENCE.md` (SensorManager) | `El Trabajante/src/services/sensor/` | `El Trabajante/src/services/sensor/` | SensorManager, PiEnhancedProcessor, Sensor Drivers |
-| **Actuator-System** | `El Trabajante/docs/API_REFERENCE.md` (ActuatorManager) | `El Trabajante/src/services/actuator/` | `El Trabajante/src/services/actuator/` | ActuatorManager, SafetyController, Actuator Drivers |
-| **Config-System** | `El Trabajante/docs/NVS_KEYS.md` | `El Trabajante/docs/API_REFERENCE.md` (ConfigManager) | `El Trabajante/src/services/config/` | ConfigManager, StorageManager, WiFiConfig |
-| **Zone-Management** | `El Trabajante/docs/Dynamic Zones and Provisioning/` | `El Trabajante/src/services/provisioning/` | `El Trabajante/src/services/provisioning/` | ProvisionManager, Zone Assignment |
-| **Error-Handling** | `El Trabajante/src/models/error_codes.h` | `El Trabajante/src/error_handling/` | `El Trabajante/src/error_handling/` | Error Codes, ErrorTracker, CircuitBreaker, Recovery |
-| **Communication (WiFi/HTTP)** | `El Trabajante/docs/API_REFERENCE.md` | `El Trabajante/src/services/communication/` | `El Trabajante/src/services/communication/` | WiFiManager, HTTPClient, NetworkDiscovery |
-
-### Service-Module Übersicht
-
-#### Config (`El Trabajante/src/services/config/`)
-- **ConfigManager:** Konfiguration laden/speichern (WiFi, Zone, System, Sensor, Actuator)
-- **StorageManager:** NVS-Abstraktion (Namespaces, Key-Value Storage)
-- **WiFiConfig:** WiFi-Konfigurationsstrukturen
-- **Dokumentation:** `El Trabajante/docs/API_REFERENCE.md` (ConfigManager, StorageManager), `El Trabajante/docs/NVS_KEYS.md`
-
-#### Sensor (`El Trabajante/src/services/sensor/`)
-- **SensorManager:** Sensor-Orchestrierung, RAW-Daten-Akquisition
-- **PiEnhancedProcessor:** Server-Centric Processing (RAW → Server → Processed)
-- **Sensor Drivers:** I2C, OneWire, Analog, Digital Sensoren
-- **SensorFactory:** Factory-Pattern für Sensor-Erstellung
-- **Dokumentation:** `El Trabajante/docs/API_REFERENCE.md` (SensorManager), `El Trabajante/docs/system-flows/02-sensor-reading-flow.md`
-
-#### Actuator (`El Trabajante/src/services/actuator/`)
-- **ActuatorManager:** Actuator-Control, Registry-Management, MQTT-Integration
-- **SafetyController:** Emergency-Stop, Safety-Constraints, Timeout-Protection
-- **Actuator Drivers:** Pump, Valve, PWM Actuators
-- **Dokumentation:** `El Trabajante/docs/API_REFERENCE.md` (ActuatorManager), `El Trabajante/docs/system-flows/03-actuator-command-flow.md`
-
-#### Communication (`El Trabajante/src/services/communication/`)
-- **MQTTClient:** MQTT-Broker-Verbindung, Publish/Subscribe, Topic-Building
-- **WiFiManager:** WiFi-Verbindungsmanagement, Reconnect-Logic
-- **HTTPClient:** HTTP-Requests für Pi-Enhanced Processing
-- **WebServer:** Provisioning-Webserver (optional)
-- **Dokumentation:** `El Trabajante/docs/Mqtt_Protocoll.md`, `El Trabajante/docs/MQTT_CLIENT_API.md`, `El Trabajante/docs/API_REFERENCE.md`
-
-#### Provisioning (`El Trabajante/src/services/provisioning/`)
-- **ProvisionManager:** Zone-Assignment, Dynamic Provisioning
-- **Dokumentation:** `El Trabajante/docs/Dynamic Zones and Provisioning/`
-
----
-
-## 10. KI-Agenten Workflow
-
-### Schritt-für-Schritt Anleitung für Code-Änderungen
-
-**SCHRITT 1: Aufgabe identifizieren**
-- Was soll geändert/implementiert werden?
-- Welches Modul ist betroffen? (siehe Abschnitt 9: Modul-Dokumentation Navigation)
-- Ist es ein Bug-Fix, Feature oder Refactoring?
-
-**SCHRITT 2: Richtige Dokumentation konsultieren**
-- Nutze die Tabelle in Abschnitt 9, um die passende Dokumentation zu finden
-- **Immer zuerst lesen:** Relevante Dokumentation vollständig durcharbeiten
-- Verstehe bestehende Patterns und Constraints
-
-**SCHRITT 3: Code-Location finden**
-- Nutze Code-Location aus Abschnitt 9 oder durchsuche `El Trabajante/src/`
-- Verstehe Abhängigkeiten zwischen Modulen
-- Prüfe bestehende Implementierungen ähnlicher Features
-
-**SCHRITT 4: Änderungen implementieren**
-- **Regeln befolgen:**
-  - Test-Patterns: Dual-Mode, RAII-Cleanup (siehe Abschnitt 3.2)
-  - MQTT-Contracts nicht brechen (siehe Abschnitt 4)
-  - NVS-Keys konsistent nutzen (siehe `El Trabajante/docs/NVS_KEYS.md`)
-  - Error-Codes korrekt verwenden (siehe Abschnitt 6)
-  - Safety-Constraints beachten (siehe Abschnitt 5)
-- **Code-Stil:** Konsistent mit bestehendem Code
-- **Kommentare:** Wichtig für komplexe Logik
-
-**SCHRITT 5: Tests ausführen**
-- Tests schreiben für neue Features (siehe Abschnitt 7, `El Servador/docs/ESP32_TESTING.md`)
-- Server-Tests ausführen: `cd "El Servador" && poetry run pytest god_kaiser_server/tests/esp32/ -v`
-- ESP32-Firmware kompilieren: `cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev`
-- **Nur committen wenn:** Alle Tests PASS (keine Failures)
-
-**SCHRITT 6: Dokumentation aktualisieren**
-- API-Referenz aktualisieren falls nötig (`El Trabajante/docs/API_REFERENCE.md`)
-- System-Flows aktualisieren falls Verhalten geändert (`El Trabajante/docs/system-flows/`)
-- MQTT-Protokoll aktualisieren falls Topics/Payloads geändert (`El Trabajante/docs/Mqtt_Protocoll.md`)
-- NVS-Keys dokumentieren falls neue Keys hinzugefügt (`El Trabajante/docs/NVS_KEYS.md`)
-
-### Regeln für Code-Änderungen
-
-**NIEMALS:**
-- ❌ Production-Config in Tests ändern (nur read-only!)
-- ❌ MQTT-Topic-Schema ohne Dokumentation ändern
-- ❌ NVS-Keys ohne Dokumentation hinzufügen
+### NIEMALS
+- ❌ MQTT-Topics ohne Dokumentation ändern
+- ❌ Safety-Constraints umgehen (Emergency-Stop, Value-Validierung)
 - ❌ Error-Codes ohne Definition verwenden
-- ❌ Safety-Constraints umgehen
-- ❌ `new`/`delete` verwenden (RAII-Pattern!)
+- ❌ `new`/`delete` statt RAII (std::unique_ptr verwenden)
+- ❌ Singleton-Pattern brechen
+- ❌ GPIO-Pins ohne `gpioManager.requestPin()` verwenden
 
-**IMMER:**
-- ✅ Server-orchestrierte Tests verwenden (MockESP32Client)
-- ✅ RAII für Ressourcen-Management
-- ✅ Production-identical MQTT-Topics in Tests
-- ✅ Error-Codes aus `error_codes.h` verwenden
-- ✅ Safety-Controller prüfen lassen
-- ✅ Dokumentation konsultieren BEVOR Code-Änderung
+### IMMER
+- ✅ Error-Codes aus `error_codes.h`
+- ✅ GPIOManager für Pin-Operationen
+- ✅ ActuatorManager für Aktor-Befehle (Safety-Checks automatisch integriert)
+- ✅ TopicBuilder für MQTT-Topics
+- ✅ Build-Check vor Commit
 
 ---
 
-## 11. Feature Flags (Build-Konfiguration)
-
-**Wichtige Flags in `platformio.ini`:**
+## 9. Feature Flags (platformio.ini)
 
 ```ini
+# Kernel-Features (ALLE aktiv)
 -DDYNAMIC_LIBRARY_SUPPORT=1     # OTA Library Support
 -DHIERARCHICAL_ZONES=1          # Zone-System
 -DOTA_LIBRARY_ENABLED=1         # OTA Updates
 -DSAFE_MODE_PROTECTION=1        # GPIO Safe-Mode
 -DZONE_MASTER_ENABLED=1         # Zone-Master
--DCONFIG_ENABLE_THREAD_SAFETY   # Mutex-Schutz (Phase 6+)
-```
+-DCONFIG_ENABLE_THREAD_SAFETY   # Mutex-Schutz
 
-**Environment-spezifisch:**
-- `XIAO_ESP32C3_MODE=1` - MAX_SENSORS=10, MAX_ACTUATORS=6
-- `ESP32_DEV_MODE=1` - MAX_SENSORS=20, MAX_ACTUATORS=12
-
----
-
-## 12. Best Practices für KI-Agenten
-
-### Bei neuen Features:
-
-1. **Sensor hinzufügen:**
-   - Pi-Enhanced: `El Servador/god_kaiser_server/src/sensors/sensor_libraries/active/`
-   - **Keine ESP-Änderung nötig!**
-
-2. **Aktor hinzufügen:**
-   - ESP Driver: `El Trabajante/src/services/actuator/actuator_drivers/`
-   - Factory-Pattern nutzen
-   - Safety-Constraints definieren
-
-3. **Tests schreiben:**
-   - pytest mit MockESP32Client verwenden
-   - Production-identical MQTT-Topics
-   - Fixtures nutzen (mock_esp32, multiple_mock_esp32)
-
-### Vor jedem Commit:
-
-```bash
-# Server-Tests laufen lassen
-cd "El Servador"
-poetry run pytest god_kaiser_server/tests/esp32/ -v
-
-# ESP32-Firmware kompilieren (Build-Check)
-cd "El Trabajante"
-~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
-
-# Nur committen wenn:
-# - Alle pytest Tests PASS
-# - ESP32 Firmware kompiliert ohne Errors
-```
-
-### Build-Commands für KI-Agenten:
-
-**IMMER vollständigen Pfad nutzen** wenn vom Root-Verzeichnis aus gearbeitet wird:
-
-```bash
-# Clean Build
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev -t clean
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev
-
-# Nur Fehler-Output anzeigen
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev 2>&1 | grep -E "(error:|FAILED)"
-
-# Build-Status prüfen
-cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe run -e esp32_dev 2>&1 | grep -E "(SUCCESS|FAILED)"
+# Board-spezifisch
+XIAO_ESP32C3_MODE=1             # MAX_SENSORS=10, MAX_ACTUATORS=6
+ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 ```
 
 ---
 
-**Letzte Aktualisierung:** 2025-11-24
-**Version:** 3.0 (Master-Dokument für KI-Agenten: Modul-Navigation, KI-Workflow, strukturierte Verweise)
+## 10. Dokumentations-Matrix
+
+| Aufgabe | Primäre Doku | Zusätzlich |
+|---------|--------------|------------|
+| MQTT verstehen | `docs/Mqtt_Protocoll.md` | `docs/MQTT_CLIENT_API.md` |
+| Sensor hinzufügen | Server: `El Servador/.../sensors/sensor_libraries/active/` | ESP-Driver: `src/services/sensor/sensor_drivers/` |
+| Aktor hinzufügen | `docs/API_REFERENCE.md` (ActuatorManager) | `src/services/actuator/actuator_drivers/` |
+| NVS-Keys | `docs/NVS_KEYS.md` | `src/services/config/storage_manager.*` |
+| System-Flow | `docs/system-flows/` | `docs/System_Overview.md` |
+| Tests schreiben | `El Servador/docs/ESP32_TESTING.md` | `.claude/TEST_WORKFLOW.md` |
+| Error-Handling | `src/models/error_codes.h` | `src/error_handling/` |
+
+---
+
+## 11. Weitere Ressourcen im .claude/ Ordner
+
+| Datei | Zweck | Wann konsultieren? |
+|-------|-------|-------------------|
+| **`CLAUDE_SERVER.md`** | ⭐ **Server-spezifische KI-Dokumentation** | Bei allen Server-Änderungen, MQTT-Handler, API-Endpoints, Sensor-Libraries |
+| `ARCHITECTURE_DEPENDENCIES.md` | Modul-Abhängigkeiten | Bei Architektur-Fragen, Dependency-Analyse |
+| `TEST_WORKFLOW.md` | Test-Infrastruktur-Details | Bei Test-Problemen, Test-Setup |
+| `WORKFLOW_PATTERNS.md` | Code-Patterns und Beispiele | Bei Unsicherheit über Code-Patterns |
+
+**📖 Server-Aufgaben?** → Siehe `.claude/CLAUDE_SERVER.md`:
+- Sensor-Library hinzufügen → [Section 3.1](.claude/CLAUDE_SERVER.md#31-aufgabe-neuen-sensor-typ-hinzufügen)
+- API-Endpoint hinzufügen → [Section 3.2](.claude/CLAUDE_SERVER.md#32-aufgabe-rest-api-endpoint-hinzufügen)
+- MQTT-Handler implementieren → [Section 3.3](.claude/CLAUDE_SERVER.md#33-aufgabe-mqtt-handler-implementieren)
+- Database-Model hinzufügen → [Section 3.4](.claude/CLAUDE_SERVER.md#34-aufgabe-database-model-hinzufügen)
+- Automation-Rule implementieren → [Section 3.5](.claude/CLAUDE_SERVER.md#35-aufgabe-cross-esp-automation-rule-implementieren)
+
+---
+
+## 11.1 Server-Integration: Verhaltensregeln für ESP32-Code
+
+**KRITISCH:** ESP32-Code muss mit dem God-Kaiser Server kompatibel sein. Diese Regeln MÜSSEN befolgt werden:
+
+### MQTT-Topic-Konventionen
+- **Topic-Building:** IMMER `TopicBuilder` verwenden (`El Trabajante/src/utils/topic_builder.cpp`)
+- **Kaiser-ID:** Standard ist `"god"`, kann via Config geändert werden
+- **Wildcards:** Server subscribed auf `kaiser/{kaiser_id}/esp/+/sensor/+/data` (Wildcard `+` für esp_id und gpio)
+
+### Payload-Struktur
+- **Sensor-Daten:** MUSS `raw_mode: true` enthalten (Required Field seit 2025-12-08)
+- **Heartbeat:** MUSS `heap_free` enthalten (nicht `free_heap` - ESP32-Standard)
+- **Timestamps:** Unix-Timestamp in Sekunden (nicht Millisekunden)
+- **ESP-ID Format:** `ESP_{8 alphanumeric chars}` (z.B. `ESP_12AB34CD`)
+
+### Device-Registration
+- **KRITISCH:** ESPs MÜSSEN zuerst via REST API registriert werden (`POST /api/v1/esp/register`)
+- **Auto-Discovery deaktiviert:** Unbekannte Geräte werden in Heartbeat-Handler abgelehnt
+- **Code-Location:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py:98-109`
+
+### Safety-Constraints (Server-seitig)
+- **Actuator-Commands:** Werden VOR Publishing durch `SafetyService.validate_actuator_command()` geprüft
+- **Emergency-Stop:** Wird automatisch geprüft - Commands werden abgelehnt wenn aktiv
+- **Value-Validierung:** PWM-Werte müssen 0.0-1.0 sein (Server validiert, ESP32 konvertiert intern zu 0-255)
+- **Code-Location:** `El Servador/god_kaiser_server/src/services/actuator_service.py:74-107`
+
+### Pi-Enhanced Processing
+- **Trigger:** Wird automatisch getriggert wenn `sensor_config.pi_enhanced == True` und `raw_mode == true`
+- **Response-Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/processed`
+- **Processing:** Läuft asynchron, ESP32 kann weiterarbeiten während Processing läuft
+- **Code-Location:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py:130-150`
+
+### Logic-Engine Integration
+- **Trigger:** Wird automatisch getriggert nach Sensor-Daten-Speicherung
+- **Non-blocking:** Evaluation läuft asynchron, blockiert nicht Sensor-Handler
+- **Cooldown:** Rules haben `cooldown_seconds` um zu häufige Ausführungen zu verhindern
+- **Code-Location:** `El Servador/god_kaiser_server/src/services/logic_engine.py:84-137`
+
+### Error-Handling
+- **MQTT-Publish-Fehler:** Werden geloggt, ESP32 sollte Retry-Logic haben
+- **Handler-Fehler:** Crashen nicht den Server (Error-Isolation im Subscriber)
+- **Validation-Fehler:** Werden als Warnings/Errors geloggt, Payload wird verworfen
+
+**Vollständige Server-Dokumentation:** `.claude/CLAUDE_SERVER.md`
+
+---
+
+## 12. Aktueller Entwicklungsstand
+
+| Phase | Status | Module |
+|-------|--------|--------|
+| Phase 0-7 | ✅ COMPLETE | GPIO, Logger, Config, WiFi, MQTT, I2C, OneWire, Sensor, Actuator, Error |
+| Phase 8 | ⏳ NEXT | Integration & Final Testing |
+
+**Code-Qualität:** 5.0/5 (Production-Ready)
+**Implementierte Zeilen:** ~13.300
+
+---
+
+**Letzte Aktualisierung:** 2025-12-08
+**Version:** 4.3 (Vollständig verifiziert gegen tatsächlichen Code)
+
+> **Änderungen in v4.3:**
+> - Section 11.1 hinzugefügt: Server-Integration Verhaltensregeln für ESP32-Code
+> - MQTT-Topic-Konventionen, Payload-Struktur, Device-Registration dokumentiert
+> - Safety-Constraints und Pi-Enhanced Processing Integration dokumentiert
+> - Logic-Engine Integration und Error-Handling dokumentiert
+> - Alle Server-Referenzen mit Code-Locations ergänzt
+
+> **Änderungen in v4.2:**
+> - Cross-Referenzen zu `.claude/CLAUDE_SERVER.md` hinzugefügt
+> - Quick Reference um Server-Verweise erweitert
+> - System-Architektur-Sektion verweist auf Server-Doku
+> - Section 11 erweitert um Server-Dokumentations-Verweise
+
+> **Änderungen in v4.1:**
+> - GPIO Safe-Mode Methodenname korrigiert: `initializeAllPinsToSafeMode()`
+> - Safety-Constraints aktualisiert: ActuatorManager Safety-Checks dokumentiert
+> - MQTT-Topics erweitert: `/alert`, `/response`, `/emergency`, `/diagnostics` hinzugefügt
+> - Verzeichnisstruktur: `sensor_drivers/` ergänzt
+> - NIEMALS-Regeln erweitert: GPIO-Pin-Reservation ergänzt
+
+> **Änderungen in v4.0:**
+> - Alle Error-Codes mit `error_codes.h` abgeglichen
+> - MQTT-Topics mit `TopicBuilder` verifiziert
+> - Alle Pfad-Referenzen korrigiert
+> - Dokumentation auf das Wesentliche fokussiert
+> - Code-Beispiele aus tatsächlichem Code

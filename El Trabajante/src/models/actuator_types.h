@@ -40,7 +40,7 @@ struct ActuatorConfig {
   uint8_t aux_gpio = 255;          // Optional secondary pin (valves, H-bridges)
   String actuator_type = "";       // "pump", "valve", "pwm", "relay"
   String actuator_name = "";       // Human-readable label
-  String subzone_id = "";          // Optional grouping
+  String subzone_id = "";          // Subzone assignment (optional, sensor/actuator level)
   bool active = false;             // Enabled flag
   bool critical = false;           // Safety priority (e.g. irrigation pump)
 

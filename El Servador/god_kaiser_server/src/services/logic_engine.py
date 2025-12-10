@@ -7,7 +7,7 @@ Evaluates logic rules in background, triggers actuator actions based on sensor c
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..core.logging_config import get_logger
@@ -154,7 +154,7 @@ class LogicEngine:
             if rule.cooldown_seconds:
                 last_execution = await logic_repo.get_last_execution(rule.id)
                 if last_execution:
-                    time_since_last = datetime.utcnow() - last_execution
+                    time_since_last = datetime.now(timezone.utc) - last_execution
                     if time_since_last.total_seconds() < rule.cooldown_seconds:
                         logger.debug(
                             f"Rule {rule.rule_name} in cooldown: "
@@ -267,13 +267,15 @@ class LogicEngine:
         """
         cond_type = condition.get("type")
         
-        if cond_type == "sensor_threshold":
-            # Match on ESP + GPIO + Sensor Type
-            if (
-                condition.get("esp_id") != sensor_data.get("esp_id")
-                or condition.get("gpio") != sensor_data.get("gpio")
-                or condition.get("sensor_type") != sensor_data.get("sensor_type")
-            ):
+        # Accept both "sensor_threshold" and "sensor" as valid condition types
+        if cond_type in ("sensor_threshold", "sensor"):
+            # Match on ESP + GPIO + optionally Sensor Type
+            if condition.get("esp_id") != sensor_data.get("esp_id"):
+                return False
+            if condition.get("gpio") != sensor_data.get("gpio"):
+                return False
+            # sensor_type is optional for "sensor" shorthand
+            if condition.get("sensor_type") and condition.get("sensor_type") != sensor_data.get("sensor_type"):
                 return False
             
             operator = condition.get("operator")

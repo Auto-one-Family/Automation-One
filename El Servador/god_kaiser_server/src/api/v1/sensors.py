@@ -19,7 +19,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md (Sensor topics)
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -449,9 +449,9 @@ async def query_sensor_data(
     
     # Default time range to last 24 hours
     if not start_time:
-        start_time = datetime.utcnow() - timedelta(hours=24)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_time:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
     
     # Get ESP device ID if specified
     esp_db_id = None
@@ -551,9 +551,9 @@ async def get_sensor_stats(
     
     # Default time range
     if not start_time:
-        start_time = datetime.utcnow() - timedelta(hours=24)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_time:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
     
     # Get statistics
     stats = await sensor_repo.get_stats(

@@ -3,7 +3,7 @@ Sensor Repository: Sensor Config and Data Queries
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -103,6 +103,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         unit: Optional[str] = None,
         processing_mode: str = "raw",
         quality: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
         metadata: Optional[dict] = None,
     ) -> SensorData:
         """
@@ -117,6 +118,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             unit: Measurement unit (optional)
             processing_mode: Processing mode (raw, pi_enhanced, local)
             quality: Data quality (good, fair, poor, error)
+            timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
             metadata: Additional metadata
 
         Returns:
@@ -131,6 +133,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             unit=unit,
             processing_mode=processing_mode,
             quality=quality,
+            timestamp=timestamp or datetime.utcnow(),
             metadata=metadata,
         )
         self.session.add(sensor_data)

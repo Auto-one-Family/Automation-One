@@ -3,7 +3,7 @@ Security utilities for God-Kaiser Server
 JWT Token generation/verification and password hashing
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import bcrypt
@@ -68,16 +68,16 @@ def create_access_token(
     settings = get_settings()
 
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(
+        expire = datetime.now(timezone.utc) + timedelta(
             minutes=settings.security.jwt_access_token_expire_minutes
         )
 
     to_encode = {
         "sub": str(user_id),
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": datetime.now(timezone.utc),
         "type": "access",
     }
 
@@ -110,16 +110,16 @@ def create_refresh_token(
     settings = get_settings()
 
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(
+        expire = datetime.now(timezone.utc) + timedelta(
             days=settings.security.jwt_refresh_token_expire_days
         )
 
     to_encode = {
         "sub": str(user_id),
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": datetime.now(timezone.utc),
         "type": "refresh",
     }
 

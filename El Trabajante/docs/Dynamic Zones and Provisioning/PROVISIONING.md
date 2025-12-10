@@ -20,7 +20,14 @@ Ein brandneuer ESP32 kennt noch nicht:
 **Nach dem Provisioning weiß der ESP:**
 - ✅ WiFi-Zugangsdaten → verbindet sich automatisch
 - ✅ Server-IP → sendet Daten an God-Kaiser
-- ✅ Zone-Zuordnung → ist Teil deines Systems
+- ✅ Optional: Zone-Config (`kaiser_id`, `master_zone_id`) → kann während Provisioning gesetzt werden
+
+**Wichtig:** Zone-Zuordnung kann auch **nach** Provisioning via MQTT erfolgen (siehe [Zone Assignment Flow](../system-flows/08-zone-assignment-flow.md)). Provisioning konfiguriert nur WiFi und Server-Verbindung.
+
+**Siehe auch:**
+- → [Zone Assignment Flow](../system-flows/08-zone-assignment-flow.md) - Runtime zone assignment via MQTT
+- → [Dynamic Zones Implementation](DYNAMIC_ZONES_IMPLEMENTATION.md) - Implementation summary
+- → [Boot Sequence](../system-flows/01-boot-sequence.md) - Provisioning integration
 
 ---
 
@@ -85,7 +92,7 @@ curl -X POST http://192.168.4.1/provision \
     "mqtt_port": 8883,
     "mqtt_username": "",
     "mqtt_password": "",
-    "kaiser_id": "god_kaiser_01",
+    "kaiser_id": "god",
     "master_zone_id": "greenhouse_zone_1"
   }'
 ```
@@ -97,7 +104,10 @@ curl -X POST http://192.168.4.1/provision \
 - ✅ Speichert sie im NVS (persistenter Speicher)
 - ✅ **Rebootet automatisch** (nach 2 Sekunden)
 - ✅ Verbindet sich mit Production-WiFi
-- ✅ Meldet sich bei God-Kaiser
+- ✅ Verbindet sich mit MQTT Broker
+- ✅ Sendet initial Heartbeat
+- ✅ **Wichtig:** ESP muss zuerst über REST API registriert werden (`POST /api/v1/esp/register`)
+- ✅ God-Kaiser kann dann Zone Assignment senden (siehe [Zone Assignment Flow](../system-flows/08-zone-assignment-flow.md))
 - ✅ **Ist jetzt OPERATIONAL!**
 
 **Du siehst:**
@@ -464,9 +474,9 @@ ESP will enter Safe-Mode
 | `mqtt_port` | Number | `8883` | MQTT Broker Port (1-65535) |
 | `mqtt_username` | String | `""` | MQTT Username (leer = Anonymous) |
 | `mqtt_password` | String | `""` | MQTT Password |
-| `kaiser_id` | String | `""` | God-Kaiser ID (vom Server zugewiesen) |
-| `master_zone_id` | String | `""` | Master Zone ID (z.B. `greenhouse_zone_1`) |
-| `subzone_id` | String | `""` | Subzone ID (z.B. `section_A`) |
+| `kaiser_id` | String | `""` | Overarching Pi identifier (`"god"` = God-Kaiser Server, aktuell immer "god") |
+| `master_zone_id` | String | `""` | Master Zone ID (z.B. `greenhouse_master`) - optional |
+| `subzone_id` | String | `""` | Subzone ID (z.B. `section_A`) - optional |
 
 ### Beispiel: Minimale Config
 
@@ -488,8 +498,8 @@ ESP will enter Safe-Mode
   "mqtt_port": 8883,
   "mqtt_username": "",
   "mqtt_password": "",
-  "kaiser_id": "god_kaiser_01",
-  "master_zone_id": "greenhouse_zone_1",
+  "kaiser_id": "god",
+  "master_zone_id": "greenhouse_master",
   "subzone_id": "section_A"
 }
 ```

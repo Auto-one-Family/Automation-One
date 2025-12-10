@@ -19,7 +19,7 @@ References:
 - .claude/PI_SERVER_REFACTORING.md (Lines 135-145)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ..core.logging_config import get_logger
@@ -294,7 +294,7 @@ class SensorService:
             processed_value=processed_value,
             unit=unit,
             quality=quality,
-            timestamp=datetime.fromtimestamp(timestamp) if timestamp else datetime.utcnow(),
+            timestamp=datetime.fromtimestamp(timestamp) if timestamp else datetime.now(timezone.utc),
         )
         
         await self.sensor_repo.store_reading(reading)

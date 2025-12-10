@@ -1,0 +1,6 @@
+src/components/dashboard/ActuatorLogicCard.vue
+src/components/dashboard/ActuatorMonitor.vue
+src/components/dashboard/ActuatorLogicEditor.vue
+src/components/dashboard/ActuatorCard.vue
+src/components/dashboard/SubZoneCard.vue
+src/components/dashboard/ZoneCard.vue

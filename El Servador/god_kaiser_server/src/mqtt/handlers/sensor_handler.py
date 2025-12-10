@@ -9,7 +9,7 @@ Processes incoming sensor data from ESP32 devices:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from ...core.logging_config import get_logger
@@ -51,15 +51,15 @@ class SensorDataHandler:
 
         Expected payload:
         {
-            "ts": 1735818000,
+            "ts": 1735818000,            // or "timestamp" - both accepted
             "esp_id": "ESP_12AB34CD",
             "gpio": 34,
             "sensor_type": "ph",
-            "raw": 2150,
+            "raw": 2150,                 // or "raw_value" - both accepted
             "value": 0.0,
             "unit": "",
             "quality": "stale",
-            "raw_mode": true
+            "raw_mode": true             // optional, defaults to True
         }
 
         Args:
@@ -114,9 +114,11 @@ class SensorDataHandler:
                     )
 
                 # Step 6: Extract data from payload
-                raw_value = float(payload["raw"])
+                # Accept both "raw" and "raw_value" for compatibility
+                raw_value = float(payload.get("raw", payload.get("raw_value")))
                 sensor_type = payload.get("sensor_type", "unknown")
-                raw_mode = payload.get("raw_mode", False)
+                # raw_mode defaults to True (ESP32 always works in raw mode)
+                raw_mode = payload.get("raw_mode", True)
                 value = payload.get("value", 0.0)
                 unit = payload.get("unit", "")
                 quality = payload.get("quality", "unknown")
@@ -171,6 +173,14 @@ class SensorDataHandler:
                     processed_value = value
 
                 # Step 8: Save data to database
+                # Convert ESP32 timestamp (millis since boot) to UTC datetime
+                # Same pattern as heartbeat_handler: auto-detect millis vs seconds
+                esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
+                esp32_timestamp = datetime.fromtimestamp(
+                    esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
+                    tz=timezone.utc
+                )
+
                 sensor_data = await sensor_repo.save_data(
                     esp_id=esp_device.id,
                     gpio=gpio,
@@ -180,8 +190,8 @@ class SensorDataHandler:
                     unit=unit,
                     processing_mode=processing_mode,
                     quality=quality,
+                    timestamp=esp32_timestamp,
                     metadata={
-                        "timestamp": payload.get("ts"),
                         "raw_mode": raw_mode,
                     },
                 )
@@ -205,7 +215,7 @@ class SensorDataHandler:
                         "value": processed_value or raw_value,
                         "unit": unit,
                         "quality": quality,
-                        "timestamp": payload.get("ts")
+                        "timestamp": esp32_timestamp_raw
                     })
                 except Exception as e:
                     logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")
@@ -248,7 +258,7 @@ class SensorDataHandler:
         """
         Validate sensor data payload structure.
 
-        Required fields: ts, esp_id, gpio, sensor_type, raw, raw_mode
+        Required fields: ts OR timestamp, esp_id, gpio, sensor_type, raw OR raw_value, raw_mode
 
         Args:
             payload: Payload dict to validate
@@ -256,30 +266,46 @@ class SensorDataHandler:
         Returns:
             {"valid": bool, "error": str}
         """
-        required_fields = ["ts", "esp_id", "gpio", "sensor_type", "raw", "raw_mode"]
+        # Check required fields (with alternatives for compatibility)
+        # Accept both "ts" and "timestamp"
+        if "ts" not in payload and "timestamp" not in payload:
+            return {"valid": False, "error": "Missing required field: ts or timestamp"}
 
-        for field in required_fields:
-            if field not in payload:
-                return {
-                    "valid": False,
-                    "error": f"Missing required field: {field}",
-                }
+        if "esp_id" not in payload:
+            return {"valid": False, "error": "Missing required field: esp_id"}
+
+        if "gpio" not in payload:
+            return {"valid": False, "error": "Missing required field: gpio"}
+
+        if "sensor_type" not in payload:
+            return {"valid": False, "error": "Missing required field: sensor_type"}
+
+        # Accept both "raw" and "raw_value"
+        if "raw" not in payload and "raw_value" not in payload:
+            return {"valid": False, "error": "Missing required field: raw or raw_value"}
+
+        # raw_mode is required
+        if "raw_mode" not in payload:
+            return {"valid": False, "error": "Missing required field: raw_mode"}
 
         # Type validation
-        if not isinstance(payload["ts"], int):
-            return {"valid": False, "error": "Field 'ts' must be integer (Unix timestamp)"}
+        ts_value = payload.get("ts", payload.get("timestamp"))
+        if not isinstance(ts_value, int):
+            return {"valid": False, "error": "Field 'ts/timestamp' must be integer (Unix timestamp)"}
 
         if not isinstance(payload["gpio"], int):
             return {"valid": False, "error": "Field 'gpio' must be integer"}
 
+        # raw_mode validation (must be boolean)
         if not isinstance(payload["raw_mode"], bool):
             return {"valid": False, "error": "Field 'raw_mode' must be boolean"}
 
         # Validate raw value (should be numeric)
+        raw_value = payload.get("raw", payload.get("raw_value"))
         try:
-            float(payload["raw"])
+            float(raw_value)
         except (ValueError, TypeError):
-            return {"valid": False, "error": "Field 'raw' must be numeric"}
+            return {"valid": False, "error": "Field 'raw/raw_value' must be numeric"}
 
         return {"valid": True, "error": ""}
 

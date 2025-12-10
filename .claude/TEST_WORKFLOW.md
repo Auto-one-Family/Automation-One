@@ -31,9 +31,15 @@
 
 **Vollständige Dokumentation:** `El Servador/docs/ESP32_TESTING.md`
 
-### 1.1 Aktuelles Setup (Stand: 2025-12-03)
+### 1.1 Aktuelles Setup (Stand: 2025-12-08)
 
 **Status:** ✅ **VOLLSTÄNDIG GETESTET & PRODUKTIONSREIF**
+
+> **Letzte Änderungen (2025-12-08):**
+> - `db_session` Fixture für Konsistenz umbenannt
+> - Heartbeat-Handler: Unbekannte Geräte werden abgelehnt
+> - Sensor-Validierung: `raw_mode` ist jetzt Required
+> - Test-Payloads auf ESP32-Standard aktualisiert (`heap_free` statt `free_heap`)
 
 Das Server-Test-System ist **ohne Hardware, ohne PostgreSQL, ohne MQTT-Broker** lauffähig:
 

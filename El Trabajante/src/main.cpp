@@ -35,6 +35,9 @@
 // Phase 6: Provisioning System
 #include "services/provisioning/provision_manager.h"
 
+// Phase 8: NTP Time Management
+#include "utils/time_manager.h"
+
 // ============================================
 // CONSTANTS
 // ============================================
@@ -626,12 +629,24 @@ void setup() {
           String master_zone_id = doc["master_zone_id"].as<String>();
           String zone_name = doc["zone_name"].as<String>();
           String kaiser_id = doc["kaiser_id"].as<String>();
-          
+
+          // Validate critical fields
+          if (zone_id.length() == 0) {
+            LOG_ERROR("Zone assignment failed: zone_id is empty");
+            return;
+          }
+
+          // Kaiser_id optional (if empty, use default "god")
+          if (kaiser_id.length() == 0) {
+            LOG_WARNING("Kaiser_id empty, using default 'god'");
+            kaiser_id = "god";
+          }
+
           LOG_INFO("Zone ID: " + zone_id);
           LOG_INFO("Master Zone: " + master_zone_id);
           LOG_INFO("Zone Name: " + zone_name);
           LOG_INFO("Kaiser ID: " + kaiser_id);
-          
+
           // Update zone configuration
           if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaiser_id)) {
             // Update global variables
@@ -652,7 +667,7 @@ void setup() {
             ack_doc["status"] = "zone_assigned";
             ack_doc["zone_id"] = zone_id;
             ack_doc["master_zone_id"] = master_zone_id;
-            ack_doc["timestamp"] = millis();
+            ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
             
             String ack_payload;
             serializeJson(ack_doc, ack_payload);
@@ -673,7 +688,8 @@ void setup() {
             // Send error acknowledgment
             String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
             String error_response = "{\"esp_id\":\"" + g_system_config.esp_id + 
-                                   "\",\"status\":\"error\",\"message\":\"Failed to save zone config\"}";
+                                   "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
+                                   ",\"message\":\"Failed to save zone config\"}";
             mqttClient.publish(ack_topic, error_response);
           }
         } else {

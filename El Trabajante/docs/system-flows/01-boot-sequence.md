@@ -497,9 +497,14 @@ LOG_INFO("Configuration found - starting normal flow");
 2. If not configured → Start Access Point mode
 3. ESP creates AP: `AutoOne-{ESP_ID}` with password `provision`
 4. User connects to AP and opens `http://192.168.4.1`
-5. Web interface requests config from God-Kaiser
+5. Web interface requests config from God-Kaiser (or direct HTTP POST)
 6. Config received → Save to NVS → Reboot
-7. On timeout (10 min) → Stay in AP mode for manual config
+7. On timeout (10 min) → Enter Safe-Mode (`STATE_SAFE_MODE_PROVISIONING`), AP stays active
+
+**Nach Provisioning:**
+- ESP rebootet → WiFi-Connect → MQTT-Connect → Initial Heartbeat
+- **Wichtig:** ESP muss zuerst über REST API registriert werden (`POST /api/v1/esp/register`)
+- God-Kaiser kann dann Zone Assignment via MQTT senden (siehe [Zone Assignment Flow](08-zone-assignment-flow.md))
 
 **AP Mode Details:**
 - SSID: `AutoOne-{ESP_ID}` (e.g., `AutoOne-ESP_AB12CD`)
@@ -510,8 +515,14 @@ LOG_INFO("Configuration found - starting normal flow");
 
 **Exit Conditions:**
 - Config received → Reboot with new config
-- Timeout → Stay in AP mode (no normal operation)
+- Timeout → Enter Safe-Mode (`STATE_SAFE_MODE_PROVISIONING`), AP stays active (unbegrenzt)
 - AP start failed → Stop setup (error state)
+
+**State Machine:**
+- Provisioning Timeout → `STATE_SAFE_MODE_PROVISIONING` (State 20, dokumentiert in `src/models/system_types.h`)
+- AP bleibt aktiv für manuelles Provisioning (unbegrenzt)
+- LED blinkt Fehler-Pattern (10× blink auf GPIO 2)
+- System State wird in NVS gespeichert mit `safe_mode_reason`
 
 **Provision Manager internals (`provision_manager.cpp`):**
 - HTTP endpoints hosted by the embedded `WebServer`:
@@ -1184,7 +1195,8 @@ After boot sequence completes successfully:
 → [MQTT Message Routing](06-mqtt-message-routing-flow.md) - For incoming commands  
 → [Sensor Reading Flow](02-sensor-reading-flow.md) - For periodic measurements  
 → [Actuator Command Flow](03-actuator-command-flow.md) - For actuator control  
-→ [Zone Assignment Flow](08-zone-assignment-flow.md) - For zone configuration
+→ [Zone Assignment Flow](08-zone-assignment-flow.md) - For runtime zone configuration  
+→ [Provisioning Documentation](../Dynamic%20Zones%20and%20Provisioning/PROVISIONING.md) - Initial WiFi/Server setup
 
 ---
 

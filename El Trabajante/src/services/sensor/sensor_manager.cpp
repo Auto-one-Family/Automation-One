@@ -7,6 +7,7 @@
 #include "../../drivers/onewire_bus.h"
 #include "../../utils/topic_builder.h"
 #include "../../utils/logger.h"
+#include "../../utils/time_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
 #include "../../models/sensor_types.h"
@@ -712,6 +713,9 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     // Phase 7: Get zone information from global variables (extern from main.cpp)
     extern KaiserZone g_kaiser;
     
+    // Phase 8: Use NTP-synchronized Unix timestamp
+    time_t unix_ts = timeManager.getUnixTimestamp();
+    
     // Build JSON payload with zone information
     payload = "{";
     payload += "\"esp_id\":\"";
@@ -729,10 +733,10 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     payload += "\"sensor_type\":\"";
     payload += reading.sensor_type;
     payload += "\",";
-    payload += "\"raw_value\":";
+    payload += "\"raw\":";
     payload += String(reading.raw_value);
     payload += ",";
-    payload += "\"processed_value\":";
+    payload += "\"value\":";
     payload += String(reading.processed_value);
     payload += ",";
     payload += "\"unit\":\"";
@@ -741,8 +745,10 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     payload += "\"quality\":\"";
     payload += reading.quality;
     payload += "\",";
-    payload += "\"timestamp\":";
-    payload += String(reading.timestamp);
+    payload += "\"ts\":";
+    payload += String((unsigned long)unix_ts);
+    payload += ",";
+    payload += "\"raw_mode\":true";  // Always true - ESP32 sends raw data for server processing
     payload += "}";
     
     return payload;

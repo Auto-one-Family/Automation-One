@@ -24,15 +24,20 @@ enum SystemState {
 // Kaiser Zone - ENHANCED (Phase 7: Dynamic Zones)
 // Migration aus: main.cpp:390-413
 // Enhanced with hierarchical zone support
+//
+// ARCHITECTURE NOTES:
+// - Multiple ESPs can share the same zone_id for grouping purposes
+// - SubZones are assigned at sensor/actuator level, not ESP level
+// - Kaiser_id identifies the parent Kaiser device managing this ESP
 struct KaiserZone {
   // Primary Zone Identification (NEW - Phase 7)
-  String zone_id = "";              // Primary zone identifier (e.g., "greenhouse_zone_1")
+  String zone_id = "";              // Primary zone identifier (shared by multiple ESPs, e.g., "greenhouse_zone_1")
   String master_zone_id = "";       // Parent zone for hierarchy (e.g., "greenhouse")
   String zone_name = "";            // Human-readable zone name
   bool zone_assigned = false;       // Zone configuration status
-  
+
   // Kaiser Communication (Existing)
-  String kaiser_id = "";            // God-Kaiser identifier
+  String kaiser_id = "";            // ID of the parent Kaiser device managing this ESP (default: "god")
   String kaiser_name = "";          // Kaiser name (optional)
   String system_name = "";          // System name (optional)
   bool connected = false;           // MQTT connection status
@@ -72,7 +77,7 @@ struct WiFiConfig {
 
 // System Configuration (Phase 1 - NEU)
 struct SystemConfig {
-  String esp_id = "";
+  String esp_id = "";               // Unique identifier of THIS ESP device (format: ESP_XXXXXXXX)
   String device_name = "ESP32";
   SystemState current_state = STATE_BOOT;
   String safe_mode_reason = "";

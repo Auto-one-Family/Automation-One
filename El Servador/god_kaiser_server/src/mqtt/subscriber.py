@@ -75,36 +75,36 @@ class Subscriber:
 
     def subscribe_all(self) -> bool:
         """
-        Subscribe to all standard ESP topics with active handlers.
+        Subscribe to all registered handler topic patterns.
 
-        Currently subscribed topics:
-        - Sensor data (kaiser/god/esp/+/sensor/+/data) - QoS 1
-        - Actuator status (kaiser/god/esp/+/actuator/+/status) - QoS 1
-        - Heartbeat (kaiser/god/esp/+/heartbeat) - QoS 0
-        - Discovery (kaiser/god/discovery/esp32_nodes) - QoS 1
-        - Config ACK (kaiser/god/esp/+/config/ack) - QoS 2
+        Subscribes to all patterns that have handlers registered via register_handler().
+        QoS levels are determined by topic type:
+        - Sensor data: QoS 1 (at least once)
+        - Actuator status: QoS 1 (at least once)
+        - Heartbeat: QoS 0 (at most once - fire and forget)
+        - Discovery: QoS 1 (at least once)
+        - Config Response: QoS 2 (exactly once)
 
         Returns:
             True if all subscriptions successful
         """
-        subscription_patterns = [
-            # Active handlers
-            (constants.MQTT_SUBSCRIBE_ESP_SENSORS, 1),      # QoS 1 ✅ Handler: sensor_handler
-            (constants.MQTT_SUBSCRIBE_ESP_ACTUATORS, 1),    # QoS 1 ✅ Handler: actuator_handler
-            ("kaiser/god/esp/+/heartbeat", 0),              # QoS 0 ✅ Handler: heartbeat_handler
-            (constants.MQTT_SUBSCRIBE_ESP_DISCOVERY, 1),    # QoS 1 ✅ Handler: discovery_handler
-            ("kaiser/god/esp/+/config/ack", 2),             # QoS 2 ✅ Handler: config_handler
-
-            # REMOVED (no handler, no plan):
-            # (constants.MQTT_SUBSCRIBE_ESP_HEALTH, 1),     # Redundant to Heartbeat
-            # ("kaiser/god/esp/+/pi_enhanced/request", 1),  # Not used (sensor_handler sends directly)
-        ]
-
         success = True
-        for topic, qos in subscription_patterns:
-            if not self.client.subscribe(topic, qos):
-                logger.error(f"Failed to subscribe to: {topic}")
+        
+        # Subscribe to all registered handler patterns
+        for pattern in self.handlers.keys():
+            # Determine QoS based on topic type
+            if "heartbeat" in pattern:
+                qos = 0  # Heartbeat: QoS 0
+            elif "config_response" in pattern or "config/ack" in pattern:
+                qos = 2  # Config: QoS 2 (exactly once)
+            else:
+                qos = 1  # Default: QoS 1 (at least once)
+            
+            if not self.client.subscribe(pattern, qos):
+                logger.error(f"Failed to subscribe to: {pattern}")
                 success = False
+            else:
+                logger.debug(f"Subscribed to: {pattern} (QoS {qos})")
 
         return success
 
