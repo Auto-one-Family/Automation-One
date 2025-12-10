@@ -1813,9 +1813,2529 @@ poetry run pytest god_kaiser_server/tests/ai/ -v
 
 ---
 
-## 🎉 MVP-Fertigstellung
+## Phase 10: Context-System (ERWEITERT)
 
-Nach Phase 9 ist das KI-Integration-System **einsatzbereit**:
+### 🎯 Ziel
+AI-System mit **stateful Context** ausstatten: User-Präferenzen, Zone-Zustand, Conversation-History für intelligente Multi-Step-Interaktionen.
+
+### 📝 Kern-Problem
+**Ohne Context:** AI behandelt jede Anfrage isoliert - keine Kontinuität, keine Anpassung an User/Zone.
+
+**Mit Context:** AI "erinnert sich" an User-Einstellungen, aktuelle Zonen-Zustände, laufende Conversations → intelligentere Entscheidungen.
+
+### 📁 Neue Dateien
+
+1. `src/ai/context/__init__.py`
+2. `src/ai/context/context_manager.py`
+3. `src/ai/context/conversation_state.py`
+4. `src/db/repositories/context_repo.py`
+
+### 📄 Database-Models (ERWEITERN)
+
+**Datei:** `db/models/ai.py` (hinzufügen)
+
+```python
+"""
+Context-System Models (Phase 10)
+"""
+
+class AIContext(Base):
+    """
+    Speichert Kontext für AI-Entscheidungen
+
+    Generisch für beliebige Use Cases:
+    - Produktions-Umgebungen (Anbau, Fertigung, etc.)
+    - Monitoring-Szenarien (Klimaüberwachung, Maschinen-Überwachung)
+    - Optimization-Tasks (Energie, Ressourcen, etc.)
+
+    NICHT festgelegt auf spezifische Use Cases!
+    """
+    __tablename__ = "ai_contexts"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    zone_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("zones.id"), nullable=True)
+
+    # Generischer Kontext-Typ (user-definiert)
+    context_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Beispiele: "production_cycle", "monitoring_session", "optimization_task"
+
+    # Aktueller Zustand (flexibles JSON)
+    current_state: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiele:
+    # {"phase": "vegetative", "day": 42, "target_params": {...}}
+    # {"monitoring_mode": "anomaly_detection", "baseline_established": true}
+    # {"optimization_target": "energy_cost", "constraints": {...}}
+
+    # Historische Daten (für Trend-Analyse)
+    history: Mapped[list] = mapped_column(JSON, default=[])
+    # Beispiel: [{"timestamp": "...", "event": "state_change", "data": {...}}, ...]
+
+    # User-Präferenzen (für diesen Kontext)
+    preferences: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiele:
+    # {"alert_threshold": 0.8, "auto_control_enabled": false, "preferred_response_format": "detailed"}
+    # {"update_frequency": "hourly", "notification_channels": ["email", "websocket"]}
+
+    # Metadaten
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (
+        Index('idx_context_user_zone', 'user_id', 'zone_id'),
+        Index('idx_context_type', 'context_type', 'is_active'),
+    )
+
+
+class ConversationState(Base):
+    """
+    Multi-Step-Conversation-State für dialogbasierte AI-Interaktionen
+
+    Ermöglicht:
+    - AI stellt Follow-up-Fragen
+    - User antwortet schrittweise
+    - AI sammelt Information über mehrere Interaktionen
+    - Workflow-basierte Dialoge
+    """
+    __tablename__ = "conversation_states"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    context_id: Mapped[UUID] = mapped_column(ForeignKey("ai_contexts.id"), nullable=False)
+
+    # Workflow-Identifikation
+    workflow_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Beispiele: "context_change", "troubleshooting", "optimization_setup"
+
+    # Aktueller Workflow-Schritt
+    current_step: Mapped[int] = mapped_column(Integer, default=0)
+    total_steps: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Gesammelte Daten
+    collected_data: Mapped[dict] = mapped_column(JSON, default={})
+    # Key = Field-Name, Value = User-Antwort
+    # Beispiel: {"target_parameter": "temperature", "desired_value": 22.5, "tolerance": 1.0}
+
+    # Pending Questions (was AI als nächstes fragen will)
+    pending_questions: Mapped[list] = mapped_column(JSON, default=[])
+    # Beispiel: [
+    #   {"field": "time_horizon", "question": "For how long should this optimization run?", "type": "duration"},
+    #   {"field": "priority", "question": "What's more important: cost or speed?", "type": "choice"}
+    # ]
+
+    # Conversation-History
+    messages: Mapped[list] = mapped_column(JSON, default=[])
+    # Beispiel: [
+    #   {"role": "ai", "content": "Question...", "timestamp": "..."},
+    #   {"role": "user", "content": "Answer...", "timestamp": "..."}
+    # ]
+
+    # Status
+    status: Mapped[str] = mapped_column(String(50), default="active")
+    # "active", "completed", "cancelled", "timeout"
+
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_conversation_context', 'context_id', 'status'),
+        Index('idx_conversation_workflow', 'workflow_type', 'status'),
+    )
+```
+
+### 📄 Implementation: Context-Manager
+
+**Datei:** `ai/context/context_manager.py`
+
+**Vorbild:** ConfigManager (NVS-Config-Management)
+**Referenz:** `El Trabajante/src/services/config/config_manager.cpp`
+
+```python
+"""
+Context-Manager: Verwaltet AI-Kontext für User/Zones
+
+Ähnlich zu: ConfigManager (ESP32)
+Referenz: El Trabajante/src/services/config/config_manager.cpp
+"""
+
+from typing import Optional, Dict, List
+from uuid import UUID
+from ...db.repositories.context_repo import ContextRepository
+from ...db.models.ai import AIContext, ConversationState
+from ...core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class ContextManager:
+    """
+    Verwaltet AI-Kontext für intelligente Entscheidungen
+
+    Use Cases:
+    - AI berücksichtigt aktuelle Zone-Situation
+    - AI passt Antworten an User-Präferenzen an
+    - AI nutzt historische Daten für Predictions
+    """
+
+    def __init__(self, context_repo: ContextRepository):
+        self.context_repo = context_repo
+
+    async def get_or_create_context(
+        self,
+        user_id: UUID,
+        zone_id: Optional[UUID],
+        context_type: str
+    ) -> AIContext:
+        """
+        Holt existierenden Kontext oder erstellt neuen
+
+        Args:
+            user_id: User-UUID
+            zone_id: Zone-UUID (optional - kann None sein für globale Kontexte)
+            context_type: Kontext-Typ (user-definiert)
+
+        Returns:
+            AIContext-Objekt
+        """
+        # Versuche existierenden Kontext zu finden
+        context = await self.context_repo.get_active_context(
+            user_id=user_id,
+            zone_id=zone_id,
+            context_type=context_type
+        )
+
+        if context:
+            logger.debug(f"Context gefunden: {context.id} ({context_type})")
+            return context
+
+        # Erstelle neuen Kontext
+        context = await self.context_repo.create(
+            user_id=user_id,
+            zone_id=zone_id,
+            context_type=context_type,
+            current_state={},
+            preferences={}
+        )
+
+        logger.info(f"Neuer Context erstellt: {context.id} ({context_type})")
+        return context
+
+    async def update_state(
+        self,
+        context_id: UUID,
+        state_updates: Dict,
+        add_to_history: bool = True
+    ) -> bool:
+        """
+        Aktualisiert Context-State
+
+        Args:
+            context_id: Context-UUID
+            state_updates: Neue State-Werte (wird gemerged)
+            add_to_history: Soll Update in History gespeichert werden?
+
+        Returns:
+            True wenn erfolgreich
+        """
+        context = await self.context_repo.get(context_id)
+        if not context:
+            logger.error(f"Context {context_id} nicht gefunden")
+            return False
+
+        # Merge state
+        current_state = context.current_state or {}
+        current_state.update(state_updates)
+
+        # Add to history if requested
+        history = context.history or []
+        if add_to_history:
+            history.append({
+                "timestamp": datetime.utcnow().isoformat(),
+                "event": "state_update",
+                "updates": state_updates
+            })
+
+        # Update DB
+        await self.context_repo.update(
+            context_id,
+            current_state=current_state,
+            history=history
+        )
+
+        logger.debug(f"Context {context_id} aktualisiert: {state_updates}")
+        return True
+
+    async def set_preference(
+        self,
+        context_id: UUID,
+        key: str,
+        value: any
+    ) -> bool:
+        """
+        Setzt User-Präferenz für Context
+
+        Args:
+            context_id: Context-UUID
+            key: Präferenz-Key
+            value: Präferenz-Value
+        """
+        context = await self.context_repo.get(context_id)
+        if not context:
+            return False
+
+        preferences = context.preferences or {}
+        preferences[key] = value
+
+        await self.context_repo.update(context_id, preferences=preferences)
+        logger.debug(f"Präferenz gesetzt: {key} = {value}")
+        return True
+
+    async def get_context_for_ai_request(
+        self,
+        user_id: UUID,
+        zone_id: Optional[UUID],
+        context_type: str
+    ) -> Dict:
+        """
+        Holt vollständigen Kontext für AI-Request
+
+        Returns:
+            Dict mit allen relevanten Context-Daten für AI-Prompt
+        """
+        context = await self.get_or_create_context(user_id, zone_id, context_type)
+
+        return {
+            "context_id": str(context.id),
+            "context_type": context.context_type,
+            "current_state": context.current_state,
+            "preferences": context.preferences,
+            "history_summary": self._summarize_history(context.history),
+            "zone_id": str(zone_id) if zone_id else None
+        }
+
+    def _summarize_history(self, history: List[Dict], max_entries: int = 10) -> List[Dict]:
+        """Gibt letzte N History-Einträge zurück"""
+        return history[-max_entries:] if history else []
+
+
+# Global accessor
+_context_manager_instance: Optional[ContextManager] = None
+
+def get_context_manager() -> ContextManager:
+    global _context_manager_instance
+    if not _context_manager_instance:
+        raise RuntimeError("ContextManager nicht initialisiert")
+    return _context_manager_instance
+
+def set_context_manager(manager: ContextManager):
+    global _context_manager_instance
+    _context_manager_instance = manager
+```
+
+### 📄 Integration in Pipeline-Engine
+
+**Datei:** `ai/pipeline/pipeline_engine.py` (ERWEITERN)
+
+```python
+# In PipelineEngine._execute_pipeline():
+
+async def _execute_pipeline(self, pipeline: AIPipeline, trigger_data: Dict):
+    """Führt Pipeline aus: Plugin → Actions (MIT CONTEXT)"""
+
+    # NEU: Hole Context für Zone/User
+    context_manager = get_context_manager()
+    context_data = await context_manager.get_context_for_ai_request(
+        user_id=pipeline.user_id,  # Annahme: Pipeline hat User-Relation
+        zone_id=trigger_data.get("zone_id"),
+        context_type=pipeline.plugin_config.get("context_type", "default")
+    )
+
+    # AI-Request mit Context
+    result = await self.ai_service.process_request(
+        plugin_id=pipeline.plugin_id,
+        input_data={
+            "trigger_data": trigger_data,
+            "context": context_data,  # NEU: Context für AI
+            **pipeline.plugin_config
+        },
+        target_esp_id=trigger_data.get("esp_id")
+    )
+
+    # ... rest of method ...
+```
+
+### ✅ Phase 10 Prüfkriterien
+
+**Tests:** `tests/ai/test_context_manager.py`
+
+```python
+@pytest.mark.asyncio
+async def test_context_creation():
+    """Context kann erstellt werden"""
+    context = await context_manager.get_or_create_context(
+        user_id=user_uuid,
+        zone_id=zone_uuid,
+        context_type="test_context"
+    )
+    assert context.id is not None
+    assert context.context_type == "test_context"
+
+
+@pytest.mark.asyncio
+async def test_state_update():
+    """State kann aktualisiert werden"""
+    success = await context_manager.update_state(
+        context_id=context.id,
+        state_updates={"test_param": "value"},
+        add_to_history=True
+    )
+    assert success is True
+
+    # Verify
+    updated = await context_repo.get(context.id)
+    assert updated.current_state["test_param"] == "value"
+    assert len(updated.history) > 0
+
+
+@pytest.mark.asyncio
+async def test_context_in_pipeline():
+    """Pipeline nutzt Context für AI-Request"""
+    # Trigger pipeline
+    await pipeline_engine.trigger_pipeline_by_sensor_data(...)
+
+    # Verify: AI-Request enthielt Context-Daten
+    # (Mock AI-Service und prüfe Request-Params)
+```
+
+**Erfolgskriterium:**
+- Contexts können erstellt/aktualisiert werden
+- State-History wird gespeichert
+- Pipelines nutzen Context für AI-Requests
+- Tests sind grün
+
+---
+
+## Phase 11: Knowledge-Base-System (ERWEITERT)
+
+### 🎯 Ziel
+Strukturierte **Wissensdatenbank** für AI-Entscheidungen: Wissenschaftliche Daten, Best-Practices, Referenz-Werte, Regelwerke.
+
+### 📝 Kern-Problem
+**Ohne Knowledge-Base:** AI nutzt nur Training-Daten → kann nicht auf domänen-spezifisches Wissen zugreifen.
+
+**Mit Knowledge-Base:** AI kann auf strukturierte, verifizierte Daten zugreifen → fundierte Empfehlungen.
+
+### 📁 Neue Dateien
+
+1. `src/ai/knowledge/__init__.py`
+2. `src/ai/knowledge/knowledge_manager.py`
+3. `src/ai/knowledge/knowledge_loader.py`
+4. `src/db/repositories/knowledge_repo.py`
+
+### 📄 Database-Models (ERWEITERN)
+
+**Datei:** `db/models/ai.py` (hinzufügen)
+
+```python
+"""
+Knowledge-Base Models (Phase 11)
+"""
+
+class KnowledgeCategory(Base):
+    """
+    Kategorisierung von Wissen
+
+    Hierarchische Struktur möglich (parent_id)
+    Beispiele:
+    - "Agriculture" → "Fertilization" → "Organic"
+    - "Manufacturing" → "Quality Control" → "Visual Inspection"
+    - "Energy" → "Optimization" → "Peak Shaving"
+    """
+    __tablename__ = "knowledge_categories"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    parent_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("knowledge_categories.id"), nullable=True)
+
+    # Relationships
+    children: Mapped[List["KnowledgeCategory"]] = relationship(
+        "KnowledgeCategory",
+        back_populates="parent",
+        cascade="all, delete-orphan"
+    )
+    parent: Mapped[Optional["KnowledgeCategory"]] = relationship(
+        "KnowledgeCategory",
+        back_populates="children",
+        remote_side=[id]
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_knowledge_category_parent', 'parent_id'),
+    )
+
+
+class KnowledgeBase(Base):
+    """
+    Strukturierte Wissensdaten für AI
+
+    Flexibles Schema für beliebige Domänen:
+    - Agriculture: Düngungs-Tabellen, Klimadaten, Schädlings-Bekämpfung
+    - Manufacturing: Maschinen-Parameter, Qualitäts-Standards
+    - Energy: Preis-Modelle, Effizienz-Richtwerte
+    - Monitoring: Schwellwerte, Normalbereiche
+    """
+    __tablename__ = "knowledge_base"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    category_id: Mapped[UUID] = mapped_column(ForeignKey("knowledge_categories.id"), nullable=False)
+
+    # Titel & Beschreibung
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
+
+    # Anwendbarkeit (Filter)
+    applicable_to: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiele:
+    # {"entity_type": "crop", "entity_name": "tomato", "growth_stage": "vegetative"}
+    # {"machine_type": "cnc_mill", "material": "aluminum"}
+    # {"zone_type": "greenhouse", "climate_zone": "temperate"}
+
+    # Strukturierte Daten
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Schema ist domänen-abhängig!
+    # Agriculture-Beispiel:
+    # {
+    #   "nutrient_requirements": {
+    #     "N": {"min": 150, "max": 250, "unit": "ppm"},
+    #     "P": {"min": 40, "max": 80, "unit": "ppm"}
+    #   },
+    #   "optimal_conditions": {
+    #     "temperature": {"day": 24, "night": 18, "unit": "celsius"},
+    #     "humidity": {"min": 60, "max": 80, "unit": "percent"}
+    #   }
+    # }
+    # Manufacturing-Beispiel:
+    # {
+    #   "cutting_parameters": {
+    #     "speed": {"min": 2000, "max": 4000, "unit": "rpm"},
+    #     "feed_rate": {"min": 100, "max": 300, "unit": "mm/min"}
+    #   }
+    # }
+
+    # Quellen & Verifikation
+    sources: Mapped[list] = mapped_column(JSON, default=[])
+    # Beispiel: [
+    #   {"type": "research_paper", "doi": "10.1234/xyz", "authors": "Smith et al."},
+    #   {"type": "industry_standard", "standard_id": "ISO 9001", "year": 2021}
+    # ]
+
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_by: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Version-Control
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    superseded_by: Mapped[Optional[UUID]] = mapped_column(ForeignKey("knowledge_base.id"), nullable=True)
+
+    # Metadaten
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    category: Mapped["KnowledgeCategory"] = relationship("KnowledgeCategory")
+
+    __table_args__ = (
+        Index('idx_knowledge_category', 'category_id', 'verified'),
+        Index('idx_knowledge_applicable', 'applicable_to'),  # GIN-Index für JSON-Queries
+    )
+```
+
+### 📄 Implementation: Knowledge-Manager
+
+**Datei:** `ai/knowledge/knowledge_manager.py`
+
+```python
+"""
+Knowledge-Manager: Zugriff auf strukturierte Wissensdaten
+
+Vorbild: LibraryLoader (Sensor-Libraries)
+Referenz: El Servador/god_kaiser_server/src/sensors/library_loader.py
+"""
+
+from typing import List, Dict, Optional
+from uuid import UUID
+from ...db.repositories.knowledge_repo import KnowledgeRepository
+from ...db.models.ai import KnowledgeBase
+from ...core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class KnowledgeManager:
+    """
+    Verwaltet Knowledge-Base für AI-Entscheidungen
+
+    Use Cases:
+    - AI holt Referenz-Werte für Empfehlungen
+    - AI validiert User-Input gegen Best-Practices
+    - AI nutzt wissenschaftliche Daten für Berechnungen
+    """
+
+    def __init__(self, knowledge_repo: KnowledgeRepository):
+        self.knowledge_repo = knowledge_repo
+        self._cache: Dict[str, List[KnowledgeBase]] = {}  # category_name → entries
+
+    async def query(
+        self,
+        category_name: str,
+        filters: Optional[Dict] = None,
+        verified_only: bool = True
+    ) -> List[KnowledgeBase]:
+        """
+        Query Knowledge-Base
+
+        Args:
+            category_name: Kategorie-Name (z.B. "fertilization", "quality_control")
+            filters: Optionale Filter für applicable_to (JSON-Query)
+            verified_only: Nur verifizierte Einträge?
+
+        Returns:
+            Liste von Knowledge-Einträgen
+        """
+        # Check cache
+        cache_key = f"{category_name}_{filters}_{verified_only}"
+        if cache_key in self._cache:
+            logger.debug(f"Knowledge-Cache-Hit: {cache_key}")
+            return self._cache[cache_key]
+
+        # Query DB
+        entries = await self.knowledge_repo.query_by_category(
+            category_name=category_name,
+            filters=filters,
+            verified_only=verified_only
+        )
+
+        # Cache result
+        self._cache[cache_key] = entries
+        logger.debug(f"Knowledge gefunden: {len(entries)} Einträge ({category_name})")
+
+        return entries
+
+    async def get_for_context(
+        self,
+        context_data: Dict
+    ) -> List[KnowledgeBase]:
+        """
+        Holt relevante Knowledge-Einträge für gegebenen Kontext
+
+        Args:
+            context_data: Context-Dict aus ContextManager
+
+        Returns:
+            Liste relevanter Knowledge-Einträge
+        """
+        # Extract context-type
+        context_type = context_data.get("context_type", "")
+        current_state = context_data.get("current_state", {})
+
+        # Build filters from context
+        filters = {}
+        # Beispiel: Wenn context_type = "production_cycle" und state enthält "entity_type": "crop"
+        # dann filter nach {"entity_type": "crop"}
+        if "entity_type" in current_state:
+            filters["entity_type"] = current_state["entity_type"]
+        if "entity_name" in current_state:
+            filters["entity_name"] = current_state["entity_name"]
+
+        # Query knowledge
+        category = self._map_context_to_category(context_type)
+        return await self.query(category, filters=filters if filters else None)
+
+    def _map_context_to_category(self, context_type: str) -> str:
+        """
+        Mappt Context-Type zu Knowledge-Category
+
+        User-definierbar via Config!
+        """
+        # Default-Mappings (können via DB konfiguriert werden)
+        mappings = {
+            "production_cycle": "production_parameters",
+            "monitoring_session": "baseline_values",
+            "optimization_task": "optimization_strategies",
+            # ... weitere Mappings ...
+        }
+        return mappings.get(context_type, "general")
+
+    async def add_entry(
+        self,
+        category_name: str,
+        title: str,
+        data: Dict,
+        applicable_to: Dict,
+        sources: List[Dict],
+        created_by: UUID
+    ) -> UUID:
+        """
+        Fügt neuen Knowledge-Eintrag hinzu
+
+        User kann via Web-UI eigene Knowledge-Einträge erstellen!
+        """
+        # Get category
+        category = await self.knowledge_repo.get_category_by_name(category_name)
+        if not category:
+            raise ValueError(f"Category '{category_name}' nicht gefunden")
+
+        # Create entry
+        entry = await self.knowledge_repo.create_entry(
+            category_id=category.id,
+            title=title,
+            data=data,
+            applicable_to=applicable_to,
+            sources=sources,
+            created_by=created_by
+        )
+
+        # Clear cache
+        self._cache.clear()
+
+        logger.info(f"Knowledge-Entry erstellt: {entry.title} ({category_name})")
+        return entry.id
+
+
+# Global accessor
+_knowledge_manager_instance: Optional[KnowledgeManager] = None
+
+def get_knowledge_manager() -> KnowledgeManager:
+    global _knowledge_manager_instance
+    if not _knowledge_manager_instance:
+        raise RuntimeError("KnowledgeManager nicht initialisiert")
+    return _knowledge_manager_instance
+
+def set_knowledge_manager(manager: KnowledgeManager):
+    global _knowledge_manager_instance
+    _knowledge_manager_instance = manager
+```
+
+### 📄 Integration in AIService
+
+**Datei:** `services/ai_service.py` (ERWEITERN)
+
+```python
+# In AIService.process_request():
+
+async def process_request(
+    self,
+    plugin_id: str,
+    input_data: Dict,
+    target_esp_id: Optional[UUID] = None
+) -> Dict:
+    """Verarbeitet AI-Request MIT KNOWLEDGE-BASE"""
+
+    # ... existing code ...
+
+    # NEU: Hole relevante Knowledge-Einträge
+    knowledge_manager = get_knowledge_manager()
+    if "context" in input_data:
+        knowledge_entries = await knowledge_manager.get_for_context(input_data["context"])
+
+        # Add to prompt
+        enriched_prompt = self._build_prompt_with_knowledge(
+            base_prompt=plugin_config.get("prompt"),
+            input_data=input_data,
+            knowledge_entries=knowledge_entries
+        )
+    else:
+        enriched_prompt = plugin_config.get("prompt")
+
+    # ... send to AI service ...
+
+
+def _build_prompt_with_knowledge(
+    self,
+    base_prompt: str,
+    input_data: Dict,
+    knowledge_entries: List[KnowledgeBase]
+) -> str:
+    """Baut Prompt mit Knowledge-Base-Daten"""
+
+    if not knowledge_entries:
+        return base_prompt
+
+    # Format knowledge for prompt
+    knowledge_text = "\n\n## Verfügbare Wissensdaten:\n"
+    for entry in knowledge_entries:
+        knowledge_text += f"\n### {entry.title}\n"
+        knowledge_text += f"{entry.description}\n"
+        knowledge_text += f"Daten: {entry.data}\n"
+        knowledge_text += f"Quellen: {entry.sources}\n"
+
+    return f"{base_prompt}\n{knowledge_text}\n\n## Aufgabe:\nNutze die obigen Wissensdaten für deine Entscheidung."
+```
+
+### ✅ Phase 11 Prüfkriterien
+
+**Tests:** `tests/ai/test_knowledge_manager.py`
+
+```python
+@pytest.mark.asyncio
+async def test_knowledge_query():
+    """Knowledge kann abgefragt werden"""
+    entries = await knowledge_manager.query(
+        category_name="test_category",
+        filters={"entity_type": "test"},
+        verified_only=True
+    )
+    assert isinstance(entries, list)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_in_ai_request():
+    """AI-Request nutzt Knowledge-Base"""
+    # Create knowledge entry
+    await knowledge_manager.add_entry(...)
+
+    # Trigger AI-Request
+    result = await ai_service.process_request(
+        plugin_id="test_plugin",
+        input_data={"context": {...}}
+    )
+
+    # Verify: AI-Prompt enthielt Knowledge-Daten
+    # (Mock AI-Adapter und prüfe Prompt)
+```
+
+**Erfolgskriterium:**
+- Knowledge-Einträge können erstellt werden
+- Knowledge kann abgefragt werden (mit Filtern)
+- AI-Requests nutzen Knowledge für Prompts
+- Tests sind grün
+
+---
+
+## Phase 12: External-Data-Connectors (ERWEITERT)
+
+### 🎯 Ziel
+**Live-Daten** von externen APIs für AI-Entscheidungen: Energiepreise, Wetter, Marktdaten, etc.
+
+### 📝 Kern-Problem
+**Ohne External Data:** AI kann nur auf interne Sensor-Daten zugreifen.
+
+**Mit External Data:** AI kann externe Faktoren berücksichtigen → bessere Optimierungen.
+
+### 📁 Neue Dateien
+
+1. `src/ai/connectors/__init__.py`
+2. `src/ai/connectors/base_connector.py`
+3. `src/ai/connectors/energy_price_connector.py`
+4. `src/ai/connectors/weather_connector.py`
+5. `src/ai/connectors/generic_api_connector.py`
+
+### 📄 Database-Models (ERWEITERN)
+
+**Datei:** `db/models/ai.py` (hinzufügen)
+
+```python
+"""
+External-Data-Source Models (Phase 12)
+"""
+
+class ExternalDataSource(Base):
+    """
+    Konfiguration für externe Datenquellen
+
+    User kann beliebige APIs einbinden!
+    """
+    __tablename__ = "external_data_sources"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # "energy_price", "weather", "market_data", "generic_api"
+
+    endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
+    api_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Encrypted!
+
+    # Request-Config
+    request_config: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiel:
+    # {
+    #   "method": "GET",
+    #   "params": {"location": "{zone.location}", "units": "metric"},
+    #   "headers": {"Authorization": "Bearer {api_key}"}
+    # }
+
+    # Response-Parsing
+    response_mapping: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiel:
+    # {
+    #   "price": "data.prices.0.value",
+    #   "timestamp": "data.timestamp",
+    #   "unit": "data.unit"
+    # }
+
+    # Update-Frequenz
+    update_interval_seconds: Mapped[int] = mapped_column(Integer, default=3600)  # 1h default
+    last_update: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Cache
+    cached_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_external_source_type', 'source_type', 'is_enabled'),
+    )
+```
+
+### 📄 Implementation: Base-Connector
+
+**Datei:** `ai/connectors/base_connector.py`
+
+**Vorbild:** BaseAIServiceAdapter
+**Referenz:** Phase 1
+
+```python
+"""
+Base-Connector für externe Datenquellen
+
+Ähnlich zu: BaseAIServiceAdapter
+"""
+
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+
+
+@dataclass
+class ExternalDataRequest:
+    """Request für externe Daten"""
+    params: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.params is None:
+            self.params = {}
+
+
+@dataclass
+class ExternalDataResponse:
+    """Response von externer Datenquelle"""
+    data: Dict[str, Any]
+    timestamp: datetime
+    source: str
+    raw_response: Dict = None
+
+    def __post_init__(self):
+        if self.raw_response is None:
+            self.raw_response = {}
+
+
+class BaseExternalDataConnector(ABC):
+    """
+    Abstract Base Class für External-Data-Connectors
+
+    Ähnlich zu: BaseAIServiceAdapter
+    """
+
+    def __init__(self, source_config: "ExternalDataSource"):
+        self.config = source_config
+        self.is_initialized = False
+
+    @abstractmethod
+    async def initialize(self) -> bool:
+        """Initialisiert Connector"""
+        pass
+
+    @abstractmethod
+    async def fetch_data(self, request: ExternalDataRequest) -> ExternalDataResponse:
+        """
+        Holt Daten von externer Quelle
+
+        Args:
+            request: Request-Parameter
+
+        Returns:
+            ExternalDataResponse mit Daten
+        """
+        pass
+
+    async def get_cached_or_fetch(self, request: ExternalDataRequest) -> ExternalDataResponse:
+        """
+        Holt Daten aus Cache oder fetched neu (basierend auf update_interval)
+        """
+        # Check cache
+        if self.config.cached_data and self.config.last_update:
+            age_seconds = (datetime.utcnow() - self.config.last_update).total_seconds()
+            if age_seconds < self.config.update_interval_seconds:
+                logger.debug(f"External-Data-Cache-Hit: {self.config.name}")
+                return ExternalDataResponse(
+                    data=self.config.cached_data,
+                    timestamp=self.config.last_update,
+                    source=self.config.name
+                )
+
+        # Fetch new data
+        response = await self.fetch_data(request)
+
+        # Update cache (via repository)
+        # TODO: Update cached_data und last_update in DB
+
+        return response
+```
+
+### 📄 Implementation: Generic-API-Connector
+
+**Datei:** `ai/connectors/generic_api_connector.py`
+
+```python
+"""
+Generic REST-API-Connector für User-definierte Datenquellen
+
+WICHTIG: Ermöglicht User, beliebige APIs einzubinden!
+"""
+
+import httpx
+from typing import Dict, Any
+from .base_connector import BaseExternalDataConnector, ExternalDataRequest, ExternalDataResponse
+from ...core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class GenericAPIConnector(BaseExternalDataConnector):
+    """
+    Generic Connector für REST-APIs
+
+    User konfiguriert via Web-UI:
+    - Endpoint
+    - Request-Format (Params, Headers, Method)
+    - Response-Mapping (JSON-Path)
+    """
+
+    def __init__(self, source_config):
+        super().__init__(source_config)
+        self.client: Optional[httpx.AsyncClient] = None
+
+    async def initialize(self) -> bool:
+        """Initialisiert HTTP-Client"""
+        self.client = httpx.AsyncClient(timeout=30.0)
+        self.is_initialized = True
+        logger.info(f"Generic-API-Connector '{self.config.name}' initialisiert")
+        return True
+
+    async def fetch_data(self, request: ExternalDataRequest) -> ExternalDataResponse:
+        """Holt Daten von Generic REST-API"""
+
+        # Build request from config
+        method = self.config.request_config.get("method", "GET")
+        params = self._build_params(request.params)
+        headers = self._build_headers()
+
+        # Send request
+        if method == "GET":
+            response = await self.client.get(
+                self.config.endpoint,
+                params=params,
+                headers=headers
+            )
+        elif method == "POST":
+            response = await self.client.post(
+                self.config.endpoint,
+                json=params,
+                headers=headers
+            )
+        else:
+            raise ValueError(f"Unsupported method: {method}")
+
+        response.raise_for_status()
+        data = response.json()
+
+        # Parse response using mapping
+        parsed_data = self._parse_response(data, self.config.response_mapping)
+
+        return ExternalDataResponse(
+            data=parsed_data,
+            timestamp=datetime.utcnow(),
+            source=self.config.name,
+            raw_response=data
+        )
+
+    def _build_params(self, user_params: Dict) -> Dict:
+        """Baut Request-Params aus Config + User-Params"""
+        params = self.config.request_config.get("params", {}).copy()
+
+        # Replace placeholders
+        # Beispiel: "{zone.location}" → aus user_params["zone"]["location"]
+        for key, value in params.items():
+            if isinstance(value, str) and value.startswith("{"):
+                # Simple placeholder replacement
+                placeholder = value.strip("{}")
+                params[key] = user_params.get(placeholder, value)
+
+        return params
+
+    def _build_headers(self) -> Dict:
+        """Baut Headers (mit API-Key wenn vorhanden)"""
+        headers = self.config.request_config.get("headers", {}).copy()
+
+        if self.config.api_key:
+            # Replace {api_key} placeholder
+            for key, value in headers.items():
+                if isinstance(value, str) and "{api_key}" in value:
+                    headers[key] = value.replace("{api_key}", self.config.api_key)
+
+        return headers
+
+    def _parse_response(self, data: Dict, mapping: Dict) -> Dict:
+        """
+        Parst Response basierend auf User-definiertem Mapping
+
+        Mapping-Beispiel:
+        {
+            "price": "data.prices.0.value",
+            "timestamp": "data.timestamp"
+        }
+        """
+        result = {}
+        for result_key, json_path in mapping.items():
+            # Extract value from JSON using path
+            value = data
+            for key in json_path.split("."):
+                if key.isdigit():
+                    value = value[int(key)]
+                else:
+                    value = value[key]
+            result[result_key] = value
+
+        return result
+```
+
+### 📄 Integration in Pipeline-Engine
+
+**Datei:** `ai/pipeline/pipeline_engine.py` (ERWEITERN)
+
+```python
+# In Pipeline-Model (Phase 3):
+# AIPipeline erhält neues Feld:
+
+class AIPipeline(Base):
+    # ... existing fields ...
+
+    # NEU: External-Data-Sources
+    external_data_sources: Mapped[list] = mapped_column(JSON, default=[])
+    # Beispiel: [
+    #   {"source_id": "energy_price_api", "params": {"location": "zone.location"}},
+    #   {"source_id": "weather_api", "params": {"lat": "zone.latitude", "lon": "zone.longitude"}}
+    # ]
+
+
+# In PipelineEngine._execute_pipeline():
+
+async def _execute_pipeline(self, pipeline: AIPipeline, trigger_data: Dict):
+    """Führt Pipeline aus MIT EXTERNAL DATA"""
+
+    # ... existing code (Context) ...
+
+    # NEU: Hole externe Daten wenn konfiguriert
+    external_data = {}
+    if pipeline.external_data_sources:
+        for source_config in pipeline.external_data_sources:
+            source = await self._get_external_source(source_config["source_id"])
+            connector = self._create_connector(source)
+
+            response = await connector.get_cached_or_fetch(
+                ExternalDataRequest(params=source_config.get("params", {}))
+            )
+
+            external_data[source_config["source_id"]] = response.data
+
+    # AI-Request mit Context + External Data
+    result = await self.ai_service.process_request(
+        plugin_id=pipeline.plugin_id,
+        input_data={
+            "trigger_data": trigger_data,
+            "context": context_data,
+            "external_data": external_data,  # NEU
+            **pipeline.plugin_config
+        }
+    )
+```
+
+### ✅ Phase 12 Prüfkriterien
+
+**Tests:** `tests/ai/test_external_connectors.py`
+
+```python
+@pytest.mark.asyncio
+async def test_generic_api_connector():
+    """Generic-Connector kann Daten holen"""
+    connector = GenericAPIConnector(source_config)
+    await connector.initialize()
+
+    response = await connector.fetch_data(
+        ExternalDataRequest(params={"test": "value"})
+    )
+
+    assert response.data is not None
+
+
+@pytest.mark.asyncio
+async def test_external_data_in_pipeline():
+    """Pipeline nutzt External Data"""
+    # Configure pipeline with external source
+    pipeline.external_data_sources = [{"source_id": "test_api", "params": {}}]
+
+    # Trigger pipeline
+    await pipeline_engine._execute_pipeline(pipeline, trigger_data)
+
+    # Verify: AI-Request enthielt External Data
+```
+
+**Erfolgskriterium:**
+- External-Data-Sources können konfiguriert werden
+- Connectors können Daten holen (mit Caching)
+- Pipelines nutzen External Data für AI-Requests
+- Tests sind grün
+
+---
+
+## Phase 13: Digital-Twin-Schema (ERWEITERT)
+
+### 🎯 Ziel
+**Virtuelle 3D-Repräsentation** von physischen Räumen und Maschinen für Visualisierung und Simulation.
+
+### 📝 Kern-Problem
+**Ohne Digital Twin:** User sieht nur abstrakte Daten (Listen, Graphen).
+
+**Mit Digital Twin:** User sieht realitätsgetreue 3D-Darstellung → besseres Verständnis, intuitive Steuerung.
+
+### 📁 Neue Dateien
+
+1. `src/db/repositories/digital_twin_repo.py`
+
+### 📄 Database-Models (ERWEITERN)
+
+**Datei:** `db/models/ai.py` (hinzufügen)
+
+```python
+"""
+Digital-Twin Models (Phase 13)
+"""
+
+class ZoneGeometry(Base):
+    """
+    3D-Geometrie für Zonen (Digital Twin)
+
+    Ermöglicht realitätsgetreue Visualisierung
+    """
+    __tablename__ = "zone_geometry"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    zone_id: Mapped[UUID] = mapped_column(ForeignKey("zones.id"), nullable=False, unique=True)
+
+    # 3D-Koordinaten (Vertices)
+    vertices: Mapped[list] = mapped_column(JSON, nullable=False)
+    # Beispiel: [[x, y, z], [x, y, z], ...]  (Meter)
+
+    # Dimensionen (Bounding Box)
+    dimensions: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Beispiel: {"length": 10.0, "width": 5.0, "height": 3.0, "unit": "meter"}
+
+    # Sensor/Aktor-Positionen
+    sensor_positions: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiel: {
+    #   "sensor_uuid_1": {"x": 2.5, "y": 1.0, "z": 1.5},
+    #   "sensor_uuid_2": {"x": 7.5, "y": 4.0, "z": 1.5}
+    # }
+
+    actuator_positions: Mapped[dict] = mapped_column(JSON, default={})
+    # Analog zu sensor_positions
+
+    # 3D-Model-Referenz (optional)
+    model_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # URL zu 3D-Model-Datei (.gltf, .obj, etc.)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_zone_geometry', 'zone_id'),
+    )
+
+
+class MachineProperties(Base):
+    """
+    Maschineneigenschaften für Aktoren (z.B. Fenster-Motor, Pumpe, Ventil)
+
+    Ermöglicht realistische Simulation und Animation
+    """
+    __tablename__ = "machine_properties"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    actuator_id: Mapped[UUID] = mapped_column(ForeignKey("actuator_configs.id"), nullable=False, unique=True)
+
+    # Physikalische Eigenschaften
+    properties: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Schema ist maschinen-abhängig!
+    # Fenster-Motor-Beispiel:
+    # {
+    #   "type": "window_actuator",
+    #   "opening_angle_max": 90,  # degrees
+    #   "opening_speed": 5,  # degrees/second
+    #   "torque": 10,  # Nm
+    #   "power_consumption": 50,  # Watt
+    #   "dimensions": {"width": 1.2, "height": 0.8, "unit": "meter"}
+    # }
+    # Pumpe-Beispiel:
+    # {
+    #   "type": "pump",
+    #   "flow_rate_max": 100,  # liters/minute
+    #   "pressure_max": 3,  # bar
+    #   "power_consumption": 200,  # Watt
+    # }
+
+    # 3D-Visualisierung
+    visualization: Mapped[dict] = mapped_column(JSON, default={})
+    # Beispiel:
+    # {
+    #   "model_type": "window",
+    #   "animation": "rotate",
+    #   "axis": "horizontal",
+    #   "color": "#808080"
+    # }
+
+    # 3D-Model-Referenz (optional)
+    model_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_machine_props_actuator', 'actuator_id'),
+    )
+```
+
+### 📄 API-Endpoints
+
+**Datei:** `api/v1/digital_twin.py` (NEU)
+
+```python
+"""
+API-Endpoints für Digital-Twin-Daten
+
+Frontend: 3D-Visualisierung (Three.js, Babylon.js)
+"""
+
+from fastapi import APIRouter, Depends
+from typing import Dict
+from uuid import UUID
+from ...db.repositories.digital_twin_repo import DigitalTwinRepository
+from ...db.repositories.sensor_repo import SensorRepository
+from ...db.repositories.actuator_repo import ActuatorRepository
+from ...schemas.digital_twin import DigitalTwinResponse
+from ..deps import DBSession, ActiveUser
+
+router = APIRouter(prefix="/v1/digital-twin", tags=["digital-twin"])
+
+
+@router.get("/zones/{zone_id}", response_model=DigitalTwinResponse)
+async def get_digital_twin(
+    zone_id: UUID,
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """
+    Liefert alle Daten für 3D-Visualisierung einer Zone
+
+    Frontend nutzt dies für:
+    - Three.js Scene-Aufbau
+    - Sensor/Aktor-Positionierung
+    - Live-Daten-Overlay
+    """
+    digital_twin_repo = DigitalTwinRepository(db)
+    sensor_repo = SensorRepository(db)
+    actuator_repo = ActuatorRepository(db)
+
+    # Get geometry
+    geometry = await digital_twin_repo.get_zone_geometry(zone_id)
+    if not geometry:
+        raise HTTPException(404, "Zone geometry not found")
+
+    # Get sensors with positions
+    sensors = await sensor_repo.get_by_zone(zone_id)
+    sensors_with_positions = []
+    for sensor in sensors:
+        position = geometry.sensor_positions.get(str(sensor.id))
+        sensors_with_positions.append({
+            "id": sensor.id,
+            "gpio": sensor.gpio,
+            "sensor_type": sensor.sensor_type,
+            "position": position,
+            "current_value": sensor.last_value  # Live-Data
+        })
+
+    # Get actuators with positions + machine properties
+    actuators = await actuator_repo.get_by_zone(zone_id)
+    actuators_with_positions = []
+    for actuator in actuators:
+        position = geometry.actuator_positions.get(str(actuator.id))
+        machine_props = await digital_twin_repo.get_machine_properties(actuator.id)
+
+        actuators_with_positions.append({
+            "id": actuator.id,
+            "gpio": actuator.gpio,
+            "actuator_type": actuator.actuator_type,
+            "position": position,
+            "machine_properties": machine_props.properties if machine_props else {},
+            "visualization": machine_props.visualization if machine_props else {},
+            "current_state": actuator.current_value  # Live-Data
+        })
+
+    return DigitalTwinResponse(
+        zone_id=zone_id,
+        geometry=geometry,
+        sensors=sensors_with_positions,
+        actuators=actuators_with_positions
+    )
+
+
+@router.post("/zones/{zone_id}/geometry")
+async def update_zone_geometry(
+    zone_id: UUID,
+    geometry_data: Dict,
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """
+    Aktualisiert Zone-Geometrie
+
+    User kann via Frontend:
+    - Vertices anpassen
+    - Sensor/Aktor-Positionen setzen (Drag&Drop in 3D-View)
+    """
+    digital_twin_repo = DigitalTwinRepository(db)
+
+    geometry = await digital_twin_repo.update_zone_geometry(
+        zone_id=zone_id,
+        vertices=geometry_data.get("vertices"),
+        dimensions=geometry_data.get("dimensions"),
+        sensor_positions=geometry_data.get("sensor_positions"),
+        actuator_positions=geometry_data.get("actuator_positions")
+    )
+
+    return {"status": "success", "geometry_id": geometry.id}
+```
+
+### 📄 Frontend-Integration-Konzept
+
+**3D-Visualisierung mit Three.js:**
+
+```javascript
+// Frontend: src/components/DigitalTwin3DView.vue
+
+<template>
+  <div ref="threeContainer" class="digital-twin-container"></div>
+</template>
+
+<script setup>
+import * as THREE from 'three';
+import { onMounted, ref } from 'vue';
+import { useDigitalTwinStore } from '@/stores/digitalTwin';
+
+const threeContainer = ref(null);
+const digitalTwinStore = useDigitalTwinStore();
+
+onMounted(async () => {
+  // Fetch Digital-Twin-Daten
+  const data = await digitalTwinStore.fetchDigitalTwin(zoneId);
+
+  // Setup Three.js Scene
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, width/height, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer();
+
+  // Render Zone-Geometrie
+  const geometry = new THREE.BoxGeometry(
+    data.geometry.dimensions.length,
+    data.geometry.dimensions.height,
+    data.geometry.dimensions.width
+  );
+  const material = new THREE.MeshBasicMaterial({ color: 0x808080, transparent: true, opacity: 0.3 });
+  const zoneMesh = new THREE.Mesh(geometry, material);
+  scene.add(zoneMesh);
+
+  // Render Sensoren
+  data.sensors.forEach(sensor => {
+    const sensorMesh = createSensorMesh(sensor);
+    sensorMesh.position.set(sensor.position.x, sensor.position.z, sensor.position.y);
+    scene.add(sensorMesh);
+
+    // Live-Data-Label
+    const label = createTextLabel(sensor.current_value + " °C");
+    label.position.copy(sensorMesh.position);
+    scene.add(label);
+  });
+
+  // Render Aktoren (mit Animation)
+  data.actuators.forEach(actuator => {
+    const actuatorMesh = createActuatorMesh(actuator);
+    actuatorMesh.position.set(actuator.position.x, actuator.position.z, actuator.position.y);
+    scene.add(actuatorMesh);
+
+    // Animation basierend auf current_state
+    animateActuator(actuatorMesh, actuator);
+  });
+
+  // Render-Loop
+  function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // WebSocket: Live-Updates
+  digitalTwinStore.subscribeToUpdates(zoneId, (update) => {
+    // Update Sensor-Labels
+    // Update Actuator-Animations
+  });
+});
+</script>
+```
+
+### ✅ Phase 13 Prüfkriterien
+
+**Tests:** `tests/api/test_digital_twin.py`
+
+```python
+@pytest.mark.asyncio
+async def test_get_digital_twin():
+    """Digital-Twin-Daten können abgerufen werden"""
+    response = client.get(f"/api/v1/digital-twin/zones/{zone_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert "geometry" in data
+    assert "sensors" in data
+    assert "actuators" in data
+
+
+@pytest.mark.asyncio
+async def test_update_geometry():
+    """Zone-Geometrie kann aktualisiert werden"""
+    response = client.post(
+        f"/api/v1/digital-twin/zones/{zone_id}/geometry",
+        json={
+            "vertices": [[0,0,0], [10,0,0], [10,5,0], [0,5,0]],
+            "dimensions": {"length": 10, "width": 5, "height": 3}
+        }
+    )
+    assert response.status_code == 200
+```
+
+**Erfolgskriterium:**
+- Zone-Geometrie kann gespeichert werden
+- Sensor/Aktor-Positionen können gesetzt werden
+- API liefert vollständige Digital-Twin-Daten
+- Frontend kann 3D-Scene rendern
+- Tests sind grün
+
+---
+
+## Phase 14: UI-Schema-Management (ERWEITERT)
+
+### 🎯 Ziel
+User kann **eigene Dashboards** erstellen: Tabs, Widgets, Layouts vollständig konfigurierbar.
+
+### 📝 Kern-Problem
+**Ohne UI-Schema:** Frontend ist statisch - User kann Layout nicht anpassen.
+
+**Mit UI-Schema:** User erstellt eigene Dashboards - maximale Flexibilität.
+
+### 📁 Neue Dateien
+
+Keine neuen Backend-Dateien - hauptsächlich Database-Models und API-Endpoints.
+
+### 📄 Database-Models (ERWEITERN)
+
+**Datei:** `db/models/ai.py` (hinzufügen)
+
+```python
+"""
+UI-Schema Models (Phase 14)
+"""
+
+class UILayout(Base):
+    """
+    User-definierte Frontend-Layouts
+
+    User kann via Drag&Drop-Interface Dashboards erstellen
+    """
+    __tablename__ = "ui_layouts"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    layout_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    layout_type: Mapped[str] = mapped_column(String(50), default="dashboard")
+    # "dashboard", "monitoring_view", "control_panel"
+
+    # Layout-Schema (JSON-basiert)
+    schema: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Beispiel:
+    # {
+    #   "tabs": [
+    #     {
+    #       "name": "Overview",
+    #       "widgets": [
+    #         {
+    #           "type": "sensor_graph",
+    #           "config": {"sensor_id": "uuid", "timerange": "24h"},
+    #           "position": {"x": 0, "y": 0, "w": 6, "h": 4}
+    #         },
+    #         {
+    #           "type": "actuator_control",
+    #           "config": {"actuator_id": "uuid"},
+    #           "position": {"x": 6, "y": 0, "w": 6, "h": 4}
+    #         },
+    #         {
+    #           "type": "digital_twin_3d",
+    #           "config": {"zone_id": "uuid"},
+    #           "position": {"x": 0, "y": 4, "w": 12, "h": 8}
+    #         },
+    #         {
+    #           "type": "ai_chat",
+    #           "config": {"pipeline_id": "uuid"},
+    #           "position": {"x": 0, "y": 12, "w": 12, "h": 6}
+    #         }
+    #       ]
+    #     }
+    #   ]
+    # }
+
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_ui_layout_user', 'user_id'),
+    )
+
+
+class WidgetTemplate(Base):
+    """
+    Vordefinierte Widget-Templates für User
+
+    System liefert Widget-Typen, User konfiguriert Instanzen
+    """
+    __tablename__ = "widget_templates"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    widget_type: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    # "sensor_graph", "actuator_control", "digital_twin_3d", "ai_chat", etc.
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=True)
+
+    # Config-Schema (definiert welche Parameter User konfigurieren kann)
+    config_schema: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Beispiel für "sensor_graph":
+    # {
+    #   "properties": {
+    #     "sensor_id": {"type": "uuid", "required": true, "label": "Sensor"},
+    #     "timerange": {"type": "select", "options": ["1h", "24h", "7d"], "default": "24h"},
+    #     "chart_type": {"type": "select", "options": ["line", "bar"], "default": "line"}
+    #   }
+    # }
+
+    # Default-Größe
+    default_size: Mapped[dict] = mapped_column(JSON, default={"w": 6, "h": 4})
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+```
+
+### 📄 API-Endpoints
+
+**Datei:** `api/v1/ui_layouts.py` (NEU)
+
+```python
+"""
+API-Endpoints für UI-Layout-Management
+
+User erstellt Dashboards via Drag&Drop-Interface
+"""
+
+from fastapi import APIRouter, Depends
+from typing import List
+from uuid import UUID
+from ...db.repositories.ui_layout_repo import UILayoutRepository
+from ...schemas.ui_layout import (
+    UILayoutCreate,
+    UILayoutResponse,
+    WidgetTemplateResponse
+)
+from ..deps import DBSession, ActiveUser
+
+router = APIRouter(prefix="/v1/ui/layouts", tags=["ui-layouts"])
+
+
+@router.get("/templates", response_model=List[WidgetTemplateResponse])
+async def list_widget_templates(
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """
+    Liste verfügbarer Widget-Typen
+
+    Frontend zeigt diese in Widget-Palette an
+    """
+    ui_repo = UILayoutRepository(db)
+    templates = await ui_repo.get_all_widget_templates()
+    return [WidgetTemplateResponse.from_db(t) for t in templates]
+
+
+@router.post("/", response_model=UILayoutResponse)
+async def create_layout(
+    request: UILayoutCreate,
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """
+    Erstellt neues UI-Layout
+
+    Frontend: User speichert Dashboard-Konfiguration
+    """
+    ui_repo = UILayoutRepository(db)
+
+    layout = await ui_repo.create_layout(
+        user_id=current_user.id,
+        layout_name=request.name,
+        layout_type=request.layout_type,
+        schema=request.schema
+    )
+
+    return UILayoutResponse.from_db(layout)
+
+
+@router.get("/", response_model=List[UILayoutResponse])
+async def list_layouts(
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """Liste aller User-Layouts"""
+    ui_repo = UILayoutRepository(db)
+    layouts = await ui_repo.get_by_user(current_user.id)
+    return [UILayoutResponse.from_db(l) for l in layouts]
+
+
+@router.get("/{layout_id}", response_model=UILayoutResponse)
+async def get_layout(
+    layout_id: UUID,
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """Holt einzelnes Layout"""
+    ui_repo = UILayoutRepository(db)
+    layout = await ui_repo.get(layout_id)
+
+    if not layout or layout.user_id != current_user.id:
+        raise HTTPException(404, "Layout not found")
+
+    return UILayoutResponse.from_db(layout)
+
+
+@router.put("/{layout_id}", response_model=UILayoutResponse)
+async def update_layout(
+    layout_id: UUID,
+    schema_update: Dict,
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """
+    Aktualisiert Layout-Schema
+
+    Frontend: User verschiebt/löscht Widgets, Layout wird gespeichert
+    """
+    ui_repo = UILayoutRepository(db)
+
+    layout = await ui_repo.update(layout_id, schema=schema_update)
+    return UILayoutResponse.from_db(layout)
+```
+
+### 📄 Frontend-Integration-Konzept
+
+**Dashboard-Builder mit Vuetify + GridLayout:**
+
+```vue
+<!-- Frontend: src/components/DashboardBuilder.vue -->
+
+<template>
+  <v-container fluid>
+    <!-- Widget-Palette (Drag-Source) -->
+    <v-navigation-drawer permanent>
+      <v-list>
+        <v-list-item
+          v-for="template in widgetTemplates"
+          :key="template.widget_type"
+          draggable="true"
+          @dragstart="onDragStart(template)"
+        >
+          <v-list-item-title>{{ template.name }}</v-list-item-title>
+          <v-list-item-subtitle>{{ template.description }}</v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-navigation-drawer>
+
+    <!-- Grid-Layout (Drop-Target) -->
+    <grid-layout
+      :layout="currentLayout"
+      :col-num="12"
+      :row-height="30"
+      @layout-updated="onLayoutUpdated"
+    >
+      <grid-item
+        v-for="widget in currentLayout"
+        :key="widget.i"
+        :x="widget.x"
+        :y="widget.y"
+        :w="widget.w"
+        :h="widget.h"
+      >
+        <!-- Dynamisches Widget-Rendering -->
+        <component
+          :is="getWidgetComponent(widget.type)"
+          :config="widget.config"
+          @delete="removeWidget(widget.i)"
+        />
+      </grid-item>
+    </grid-layout>
+
+    <!-- Speichern-Button -->
+    <v-btn @click="saveLayout">Layout speichern</v-btn>
+  </v-container>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue';
+import GridLayout from 'vue-grid-layout';
+import { useUILayoutStore } from '@/stores/uiLayout';
+
+// Widget-Components (dynamisch importiert)
+import SensorGraphWidget from './widgets/SensorGraphWidget.vue';
+import ActuatorControlWidget from './widgets/ActuatorControlWidget.vue';
+import DigitalTwin3DWidget from './widgets/DigitalTwin3DWidget.vue';
+import AIChatWidget from './widgets/AIChatWidget.vue';
+
+const uiLayoutStore = useUILayoutStore();
+const widgetTemplates = ref([]);
+const currentLayout = ref([]);
+
+onMounted(async () => {
+  // Load Widget-Templates
+  widgetTemplates.value = await uiLayoutStore.fetchWidgetTemplates();
+
+  // Load User-Layout (oder default)
+  const layout = await uiLayoutStore.fetchUserLayout(userId);
+  currentLayout.value = layout.schema.tabs[0].widgets;
+});
+
+function onDragStart(template) {
+  // Store template for drop-handler
+  draggedTemplate = template;
+}
+
+function onLayoutUpdated(newLayout) {
+  currentLayout.value = newLayout;
+}
+
+async function saveLayout() {
+  await uiLayoutStore.updateLayout(layoutId, {
+    schema: {
+      tabs: [{ name: "Main", widgets: currentLayout.value }]
+    }
+  });
+}
+
+function getWidgetComponent(widgetType) {
+  const components = {
+    'sensor_graph': SensorGraphWidget,
+    'actuator_control': ActuatorControlWidget,
+    'digital_twin_3d': DigitalTwin3DWidget,
+    'ai_chat': AIChatWidget
+  };
+  return components[widgetType];
+}
+</script>
+```
+
+### ✅ Phase 14 Prüfkriterien
+
+**Tests:** `tests/api/test_ui_layouts.py`
+
+```python
+@pytest.mark.asyncio
+async def test_create_layout():
+    """UI-Layout kann erstellt werden"""
+    response = client.post(
+        "/api/v1/ui/layouts",
+        json={
+            "name": "My Dashboard",
+            "layout_type": "dashboard",
+            "schema": {"tabs": [{"name": "Main", "widgets": []}]}
+        }
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_layout():
+    """Layout kann aktualisiert werden"""
+    response = client.put(
+        f"/api/v1/ui/layouts/{layout_id}",
+        json={
+            "schema": {"tabs": [{"name": "Main", "widgets": [...]}]}
+        }
+    )
+    assert response.status_code == 200
+```
+
+**Erfolgskriterium:**
+- Widget-Templates können abgerufen werden
+- User-Layouts können erstellt/aktualisiert werden
+- Frontend kann Dashboards rendern
+- Drag&Drop-Interface funktioniert
+- Tests sind grün
+
+---
+
+## Phase 15: Conversation-Workflows (ERWEITERT)
+
+### 🎯 Ziel
+**Multi-Step AI-Interaktionen**: AI stellt Follow-up-Fragen, sammelt Informationen über mehrere Schritte, führt komplexe Workflows aus.
+
+### 📝 Kern-Problem
+**Ohne Conversations:** AI kann nur single-shot Requests verarbeiten - keine Dialoge.
+
+**Mit Conversations:** AI führt intelligente Dialoge - sammelt Kontext, stellt Rückfragen, leitet User durch Prozesse.
+
+### 📁 Neue Dateien
+
+1. `src/ai/workflows/__init__.py`
+2. `src/ai/workflows/workflow_engine.py`
+3. `src/ai/workflows/workflow_templates/base_workflow.py`
+4. `src/ai/workflows/workflow_templates/context_change_workflow.py`
+
+### 📄 Implementation: Workflow-Engine
+
+**Datei:** `ai/workflows/workflow_engine.py`
+
+**Vorbild:** PipelineEngine
+**Referenz:** Phase 6
+
+```python
+"""
+Workflow-Engine für Multi-Step AI-Conversations
+
+Ähnlich zu: PipelineEngine
+Referenz: ai/pipeline/pipeline_engine.py
+"""
+
+from typing import Dict, Optional, List
+from uuid import UUID
+from ...db.repositories.context_repo import ContextRepository
+from ...db.models.ai import ConversationState, AIContext
+from ...services.ai_service import AIService
+from ...websocket.manager import WebSocketManager
+from ...core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class WorkflowEngine:
+    """
+    Orchestrator für Multi-Step AI-Conversations
+
+    Ähnlich zu: PipelineEngine (aber für dialogbasierte Workflows)
+    """
+
+    def __init__(
+        self,
+        context_repo: ContextRepository,
+        ai_service: AIService,
+        websocket_manager: WebSocketManager
+    ):
+        self.context_repo = context_repo
+        self.ai_service = ai_service
+        self.websocket_manager = websocket_manager
+        self._workflows: Dict[str, "BaseWorkflow"] = {}  # workflow_type → workflow_class
+
+    def register_workflow(self, workflow_type: str, workflow_class):
+        """
+        Registriert Workflow-Template
+
+        Ähnlich zu: Plugin-Registry
+        """
+        self._workflows[workflow_type] = workflow_class
+        logger.info(f"Workflow registriert: {workflow_type}")
+
+    async def start_workflow(
+        self,
+        user_id: UUID,
+        zone_id: Optional[UUID],
+        workflow_type: str,
+        initial_data: Dict
+    ) -> UUID:
+        """
+        Startet neuen Conversation-Workflow
+
+        Args:
+            user_id: User-UUID
+            zone_id: Zone-UUID (optional)
+            workflow_type: Workflow-Typ (z.B. "context_change")
+            initial_data: Initial-Daten (z.B. {"new_context": "..."}
+
+        Returns:
+            Conversation-UUID
+        """
+        # Get/Create Context
+        context = await self.context_repo.get_or_create_context(
+            user_id=user_id,
+            zone_id=zone_id,
+            context_type=workflow_type
+        )
+
+        # Get Workflow-Template
+        if workflow_type not in self._workflows:
+            raise ValueError(f"Unknown workflow type: {workflow_type}")
+
+        workflow_class = self._workflows[workflow_type]
+        workflow = workflow_class(self.ai_service, self.websocket_manager)
+
+        # Create Conversation-State
+        conversation = await self.context_repo.create_conversation(
+            context_id=context.id,
+            workflow_type=workflow_type,
+            total_steps=workflow.get_total_steps(),
+            collected_data=initial_data
+        )
+
+        # Start Workflow: Generate first questions
+        questions = await workflow.generate_questions(
+            step=0,
+            collected_data=initial_data,
+            context=context
+        )
+
+        # Update Conversation
+        await self.context_repo.update_conversation(
+            conversation.id,
+            pending_questions=questions,
+            messages=[
+                {
+                    "role": "ai",
+                    "content": questions,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            ]
+        )
+
+        # Send to User via WebSocket
+        await self.websocket_manager.send_to_user(user_id, {
+            "type": "conversation_started",
+            "conversation_id": str(conversation.id),
+            "workflow_type": workflow_type,
+            "questions": questions
+        })
+
+        logger.info(f"Workflow gestartet: {workflow_type} (Conversation: {conversation.id})")
+        return conversation.id
+
+    async def handle_user_answer(
+        self,
+        conversation_id: UUID,
+        answers: Dict[str, any]
+    ):
+        """
+        Verarbeitet User-Antworten
+
+        Args:
+            conversation_id: Conversation-UUID
+            answers: User-Antworten (field_name → value)
+        """
+        # Get Conversation
+        conversation = await self.context_repo.get_conversation(conversation_id)
+        if not conversation or conversation.status != "active":
+            logger.error(f"Conversation {conversation_id} nicht gefunden oder nicht aktiv")
+            return
+
+        # Get Workflow
+        workflow_class = self._workflows[conversation.workflow_type]
+        workflow = workflow_class(self.ai_service, self.websocket_manager)
+
+        # Update collected data
+        collected_data = conversation.collected_data or {}
+        collected_data.update(answers)
+
+        # Update messages
+        messages = conversation.messages or []
+        messages.append({
+            "role": "user",
+            "content": answers,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        # Check if workflow is complete
+        current_step = conversation.current_step + 1
+
+        if current_step >= conversation.total_steps:
+            # Workflow complete: Execute final action
+            context = await self.context_repo.get_context(conversation.context_id)
+            result = await workflow.execute_final_action(collected_data, context)
+
+            # Update Conversation
+            await self.context_repo.update_conversation(
+                conversation.id,
+                status="completed",
+                completed_at=datetime.utcnow(),
+                collected_data=collected_data,
+                messages=messages
+            )
+
+            # Notify User
+            await self.websocket_manager.send_to_user(conversation.user_id, {
+                "type": "conversation_completed",
+                "conversation_id": str(conversation.id),
+                "result": result
+            })
+
+            logger.info(f"Workflow abgeschlossen: {conversation.workflow_type}")
+
+        else:
+            # Generate next questions
+            context = await self.context_repo.get_context(conversation.context_id)
+            next_questions = await workflow.generate_questions(
+                step=current_step,
+                collected_data=collected_data,
+                context=context
+            )
+
+            # Update Conversation
+            messages.append({
+                "role": "ai",
+                "content": next_questions,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+            await self.context_repo.update_conversation(
+                conversation.id,
+                current_step=current_step,
+                pending_questions=next_questions,
+                collected_data=collected_data,
+                messages=messages
+            )
+
+            # Send to User
+            await self.websocket_manager.send_to_user(conversation.user_id, {
+                "type": "conversation_update",
+                "conversation_id": str(conversation.id),
+                "questions": next_questions,
+                "step": current_step,
+                "total_steps": conversation.total_steps
+            })
+
+            logger.debug(f"Workflow-Schritt {current_step}/{conversation.total_steps}")
+
+
+# Global accessor
+_workflow_engine_instance: Optional[WorkflowEngine] = None
+
+def get_workflow_engine() -> WorkflowEngine:
+    global _workflow_engine_instance
+    if not _workflow_engine_instance:
+        raise RuntimeError("WorkflowEngine nicht initialisiert")
+    return _workflow_engine_instance
+
+def set_workflow_engine(engine: WorkflowEngine):
+    global _workflow_engine_instance
+    _workflow_engine_instance = engine
+```
+
+### 📄 Implementation: Base-Workflow
+
+**Datei:** `ai/workflows/workflow_templates/base_workflow.py`
+
+```python
+"""
+Base-Workflow für Multi-Step-Conversations
+
+Ähnlich zu: BaseAIPlugin
+"""
+
+from abc import ABC, abstractmethod
+from typing import Dict, List
+
+
+class BaseWorkflow(ABC):
+    """
+    Abstract Base Class für Conversation-Workflows
+
+    Subclasses definieren:
+    - Anzahl Schritte
+    - Fragen pro Schritt
+    - Final-Action
+    """
+
+    def __init__(self, ai_service, websocket_manager):
+        self.ai_service = ai_service
+        self.websocket_manager = websocket_manager
+
+    @abstractmethod
+    def get_total_steps(self) -> int:
+        """Anzahl Workflow-Schritte"""
+        pass
+
+    @abstractmethod
+    async def generate_questions(
+        self,
+        step: int,
+        collected_data: Dict,
+        context: "AIContext"
+    ) -> List[Dict]:
+        """
+        Generiert Fragen für aktuellen Schritt
+
+        Args:
+            step: Aktueller Schritt (0-indexed)
+            collected_data: Bereits gesammelte Daten
+            context: AI-Context
+
+        Returns:
+            Liste von Questions:
+            [
+                {
+                    "field": "field_name",
+                    "question": "Question text?",
+                    "type": "text|number|select|date",
+                    "options": [...],  # Nur bei type="select"
+                    "validation": {...}
+                }
+            ]
+        """
+        pass
+
+    @abstractmethod
+    async def execute_final_action(
+        self,
+        collected_data: Dict,
+        context: "AIContext"
+    ) -> Dict:
+        """
+        Führt Final-Action aus (nach allen Schritten)
+
+        Args:
+            collected_data: Alle gesammelten Daten
+            context: AI-Context
+
+        Returns:
+            Result-Dict (wird an User gesendet)
+        """
+        pass
+```
+
+### 📄 Implementation: Context-Change-Workflow (Beispiel)
+
+**Datei:** `ai/workflows/workflow_templates/context_change_workflow.py`
+
+**Generisches Beispiel - NICHT spezifisch für Anbau!**
+
+```python
+"""
+Context-Change-Workflow: User ändert Context-Parameter
+
+Generisches Beispiel für Workflow-Implementierung
+"""
+
+from typing import Dict, List
+from .base_workflow import BaseWorkflow
+from ....db.models.ai import AIContext
+
+
+class ContextChangeWorkflow(BaseWorkflow):
+    """
+    Multi-Step-Workflow für Context-Änderungen
+
+    Schritte:
+    1. AI fragt nach neuen Context-Parametern
+    2. AI fragt nach Präferenzen/Constraints
+    3. AI berechnet optimale Konfiguration
+    4. AI präsentiert Empfehlung, User bestätigt
+    """
+
+    def get_total_steps(self) -> int:
+        return 3
+
+    async def generate_questions(
+        self,
+        step: int,
+        collected_data: Dict,
+        context: AIContext
+    ) -> List[Dict]:
+        """Generiert Fragen basierend auf Schritt"""
+
+        if step == 0:
+            # Step 1: Neue Context-Parameter
+            return [
+                {
+                    "field": "new_context_type",
+                    "question": "What type of context change do you want to make?",
+                    "type": "text",
+                    "validation": {"required": True}
+                },
+                {
+                    "field": "target_parameters",
+                    "question": "Which parameters should be adjusted?",
+                    "type": "multiselect",
+                    "options": self._get_available_parameters(context)
+                }
+            ]
+
+        elif step == 1:
+            # Step 2: Präferenzen/Constraints
+            # AI analysiert collected_data und generiert spezifische Fragen
+            target_params = collected_data.get("target_parameters", [])
+            questions = []
+
+            for param in target_params:
+                questions.append({
+                    "field": f"{param}_target_value",
+                    "question": f"What's your target value for {param}?",
+                    "type": "number"
+                })
+                questions.append({
+                    "field": f"{param}_constraints",
+                    "question": f"Any constraints for {param}? (e.g., max, min, range)",
+                    "type": "text"
+                })
+
+            return questions
+
+        elif step == 2:
+            # Step 3: AI berechnet Empfehlung (via Knowledge-Base + AI-Service)
+            recommendation = await self._calculate_recommendation(collected_data, context)
+
+            return [
+                {
+                    "field": "confirmation",
+                    "question": f"Based on your input, I recommend: {recommendation}. Proceed?",
+                    "type": "select",
+                    "options": ["yes", "no", "modify"]
+                }
+            ]
+
+        return []
+
+    async def execute_final_action(
+        self,
+        collected_data: Dict,
+        context: AIContext
+    ) -> Dict:
+        """Führt Context-Änderung aus"""
+
+        if collected_data.get("confirmation") != "yes":
+            return {"status": "cancelled", "message": "User cancelled workflow"}
+
+        # Update Context
+        new_state = self._build_new_state(collected_data, context)
+
+        from ....ai.context.context_manager import get_context_manager
+        context_manager = get_context_manager()
+
+        await context_manager.update_state(
+            context_id=context.id,
+            state_updates=new_state,
+            add_to_history=True
+        )
+
+        # Optionally: Trigger actuator updates, notifications, etc.
+
+        return {
+            "status": "success",
+            "message": "Context successfully updated",
+            "new_state": new_state
+        }
+
+    def _get_available_parameters(self, context: AIContext) -> List[str]:
+        """Holt verfügbare Parameter aus Context"""
+        # Generisch: Schau in current_state welche Keys existieren
+        return list(context.current_state.keys()) if context.current_state else []
+
+    async def _calculate_recommendation(self, collected_data: Dict, context: AIContext) -> str:
+        """Nutzt AI + Knowledge-Base für Empfehlung"""
+
+        # Get Knowledge-Base
+        from ....ai.knowledge.knowledge_manager import get_knowledge_manager
+        knowledge_manager = get_knowledge_manager()
+
+        knowledge = await knowledge_manager.get_for_context(
+            {"context_type": context.context_type, "current_state": context.current_state}
+        )
+
+        # Build AI-Prompt
+        prompt = f"""
+        User wants to change context parameters.
+        Current Context: {context.current_state}
+        Requested Changes: {collected_data}
+        Available Knowledge: {knowledge}
+
+        Please recommend optimal configuration.
+        """
+
+        # AI-Request
+        result = await self.ai_service.process_request(
+            plugin_id="chat_interface",
+            input_data={"prompt": prompt}
+        )
+
+        return result.get("text", "No recommendation available")
+
+    def _build_new_state(self, collected_data: Dict, context: AIContext) -> Dict:
+        """Baut neuen State aus collected_data"""
+        new_state = context.current_state.copy() if context.current_state else {}
+
+        # Update mit target_values
+        for key, value in collected_data.items():
+            if key.endswith("_target_value"):
+                param_name = key.replace("_target_value", "")
+                new_state[param_name] = value
+
+        return new_state
+```
+
+### 📄 API-Endpoints
+
+**Datei:** `api/v1/conversations.py` (NEU)
+
+```python
+"""
+API-Endpoints für Conversation-Workflows
+
+Frontend: Chat-Interface, Wizard-Dialoge
+"""
+
+from fastapi import APIRouter, Depends
+from typing import Dict
+from uuid import UUID
+from ...ai.workflows.workflow_engine import get_workflow_engine
+from ...schemas.conversation import (
+    ConversationStartRequest,
+    ConversationAnswerRequest,
+    ConversationResponse
+)
+from ..deps import DBSession, ActiveUser
+
+router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
+
+
+@router.post("/start", response_model=ConversationResponse)
+async def start_conversation(
+    request: ConversationStartRequest,
+    db: DBSession,
+    current_user: ActiveUser
+):
+    """
+    Startet neuen Conversation-Workflow
+
+    Frontend: User triggert Workflow (z.B. "Change Context" Button)
+    """
+    workflow_engine = get_workflow_engine()
+
+    conversation_id = await workflow_engine.start_workflow(
+        user_id=current_user.id,
+        zone_id=request.zone_id,
+        workflow_type=request.workflow_type,
+        initial_data=request.initial_data
+    )
+
+    return ConversationResponse(
+        conversation_id=conversation_id,
+        status="active"
+    )
+
+
+@router.post("/{conversation_id}/answer")
+async def answer_questions(
+    conversation_id: UUID,
+    request: ConversationAnswerRequest,
+    current_user: ActiveUser
+):
+    """
+    User beantwortet AI-Fragen
+
+    Frontend: User füllt Formular aus, sendet Antworten
+    """
+    workflow_engine = get_workflow_engine()
+
+    await workflow_engine.handle_user_answer(
+        conversation_id=conversation_id,
+        answers=request.answers
+    )
+
+    return {"status": "success"}
+```
+
+### ✅ Phase 15 Prüfkriterien
+
+**Tests:** `tests/ai/test_workflow_engine.py`
+
+```python
+@pytest.mark.asyncio
+async def test_start_workflow():
+    """Workflow kann gestartet werden"""
+    conversation_id = await workflow_engine.start_workflow(
+        user_id=user_uuid,
+        zone_id=zone_uuid,
+        workflow_type="context_change",
+        initial_data={"new_context": "test"}
+    )
+    assert conversation_id is not None
+
+
+@pytest.mark.asyncio
+async def test_multi_step_conversation():
+    """Multi-Step-Conversation funktioniert"""
+    # Start
+    conv_id = await workflow_engine.start_workflow(...)
+
+    # Step 1: Answer questions
+    await workflow_engine.handle_user_answer(conv_id, {"field1": "value1"})
+
+    # Verify: Conversation updated, next questions generated
+    conv = await context_repo.get_conversation(conv_id)
+    assert conv.current_step == 1
+    assert len(conv.pending_questions) > 0
+
+    # Step 2: Complete workflow
+    await workflow_engine.handle_user_answer(conv_id, {"field2": "value2", "confirmation": "yes"})
+
+    # Verify: Workflow completed
+    conv = await context_repo.get_conversation(conv_id)
+    assert conv.status == "completed"
+```
+
+**Erfolgskriterium:**
+- Workflows können gestartet werden
+- AI generiert dynamische Fragen
+- User-Antworten werden verarbeitet
+- Final-Action wird ausgeführt
+- WebSocket-Updates funktionieren
+- Tests sind grün
+
+---
+
+## 🎉 MVP-Fertigstellung (Phase 1-9)
+
+Nach Phase 9 ist das **Kern-System** einsatzbereit:
 
 ✅ User kann beliebige AI-Services einbinden (OpenAI, Ollama, Custom)
 ✅ User kann Pipelines via Web-UI erstellen
@@ -1823,11 +4343,44 @@ Nach Phase 9 ist das KI-Integration-System **einsatzbereit**:
 ✅ Permission-System schützt vor ungewollten AI-Aktionen
 ✅ Modular, industrietauglich, flexibel, robust
 
+**Nächste Schritte:** Erweiterte Features (Phasen 10-15) für fortgeschrittene Use Cases.
+
+---
+
+## 🚀 Erweiterte Features (Phase 10-15)
+
+Nach Phase 15 ist das System **vollständig ausgebaut**:
+
+### Phase 10-11: Intelligente AI
+✅ **Context-System**: AI "erinnert sich" an User-Präferenzen, Zone-Zustände, Historien
+✅ **Knowledge-Base**: AI nutzt strukturierte Wissensdaten für fundierte Empfehlungen
+- AI-Entscheidungen sind kontextabhängig und wissenschaftlich fundiert
+- User kann eigene Knowledge-Einträge erstellen
+
+### Phase 12: Live-Daten-Integration
+✅ **External-Data-Connectors**: AI berücksichtigt Energiepreise, Wetter, Marktdaten
+- User kann beliebige REST-APIs einbinden
+- Automatisches Caching für Performance
+- Use Case: Optimierung basierend auf Energie-Preis-Prognosen
+
+### Phase 13-14: Moderne UI
+✅ **Digital Twin**: Realitätsgetreue 3D-Visualisierung von Räumen und Maschinen
+✅ **UI-Schema-Management**: User erstellt eigene Dashboards via Drag&Drop
+- Three.js-basierte 3D-Darstellung mit Live-Daten
+- Vollständig konfigurierbare Layouts und Widgets
+
+### Phase 15: Dialogbasierte AI
+✅ **Conversation-Workflows**: Multi-Step AI-Interaktionen mit Follow-up-Fragen
+- AI leitet User durch komplexe Prozesse
+- Workflow-basierte Dialoge für Context-Änderungen, Troubleshooting, Setup
+
+**Status:** System ist **production-ready** mit allen Advanced-Features!
+
 ---
 
 ## Anhang: main.py Integration
 
-**Wo wird alles initialisiert?**
+### MVP-Version (Phasen 1-9)
 
 **Datei:** `src/main.py` (lifespan-Funktion erweitern)
 
@@ -1838,8 +4391,8 @@ async def lifespan(app: FastAPI):
 
     # ... bestehender Code (Database, MQTT, WebSocket) ...
 
-    # ===== AI-INTEGRATION (NEU) =====
-    logger.info("Initialisiere AI-Integration...")
+    # ===== AI-INTEGRATION (MVP) =====
+    logger.info("Initialisiere AI-Integration (MVP)...")
 
     # Step 1: Service-Registry
     async for session in get_session():
@@ -1870,7 +4423,7 @@ async def lifespan(app: FastAPI):
 
         break
 
-    logger.info("AI-Integration vollständig initialisiert")
+    logger.info("AI-Integration (MVP) vollständig initialisiert")
 
     yield  # Server runs
 
@@ -1881,8 +4434,78 @@ async def lifespan(app: FastAPI):
     # ... bestehender Shutdown-Code ...
 ```
 
+### Erweiterte Version (Phasen 10-15)
+
+**Zusätzliche Initialisierung für erweiterte Features:**
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ===== STARTUP =====
+
+    # ... MVP-Code (siehe oben) ...
+
+    # ===== ERWEITERTE FEATURES (Phasen 10-15) =====
+    logger.info("Initialisiere erweiterte AI-Features...")
+
+    async for session in get_session():
+        context_repo = ContextRepository(session)
+        knowledge_repo = KnowledgeRepository(session)
+
+        # Phase 10: Context-Manager
+        context_manager = ContextManager(context_repo)
+        set_context_manager(context_manager)
+
+        # Phase 11: Knowledge-Manager
+        knowledge_manager = KnowledgeManager(knowledge_repo)
+        set_knowledge_manager(knowledge_manager)
+
+        # Phase 15: Workflow-Engine
+        workflow_engine = WorkflowEngine(context_repo, ai_service, _websocket_manager)
+
+        # Register Workflows
+        from src.ai.workflows.workflow_templates.context_change_workflow import ContextChangeWorkflow
+        workflow_engine.register_workflow("context_change", ContextChangeWorkflow)
+        # ... weitere Workflows registrieren ...
+
+        set_workflow_engine(workflow_engine)
+
+        break
+
+    logger.info("Erweiterte AI-Features vollständig initialisiert")
+
+    yield  # Server runs
+
+    # ===== SHUTDOWN =====
+    # ... MVP-Shutdown + keine zusätzlichen Shutdowns nötig ...
+```
+
+### Router-Registrierung (Erweitert)
+
+**Datei:** `src/main.py` (nach API-Router-Setup)
+
+```python
+# MVP-Routers
+app.include_router(ai_services_router, prefix="/api")  # Phase 8
+app.include_router(pipelines_router, prefix="/api")    # Phase 8
+
+# Erweiterte Routers (Phasen 10-15)
+if ENABLE_ADVANCED_FEATURES:  # Feature-Flag
+    app.include_router(digital_twin_router, prefix="/api")  # Phase 13
+    app.include_router(ui_layouts_router, prefix="/api")    # Phase 14
+    app.include_router(conversations_router, prefix="/api") # Phase 15
+```
+
 ---
 
-**Version:** 2.0
-**Status:** Ready for Implementation
-**Letzte Änderung:** 2025-12-09
+**Version:** 3.0 (Komplett)
+**Status:** Production-Ready with Advanced Features
+**Letzte Änderung:** 2025-12-10
+
+> **Änderungen in v3.0:**
+> - Phasen 10-15 hinzugefügt (Context, Knowledge-Base, External-Data, Digital-Twin, UI-Schema, Conversations)
+> - Generische Formulierung für beliebige Use Cases (keine spezifischen Beispiele wie "Gurke→Tomate")
+> - Vollständige Code-Beispiele für alle erweiterten Phasen
+> - main.py Integration für MVP und erweiterte Version
+> - Prüfkriterien und Tests für alle Phasen
+> - Gesamtdauer: 38-51 Tage (MVP: 23-30 Tage, Erweitert: 15-21 Tage)
