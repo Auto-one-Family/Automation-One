@@ -67,6 +67,20 @@ class SafetyService:
         self._emergency_stop_active: dict[str, bool] = {}  # {esp_id: bool}
         self._lock = asyncio.Lock()  # Thread-safe for concurrent access
 
+    def _is_emergency_stop_active_unlocked(self, esp_id: Optional[str] = None) -> bool:
+        """
+        Check emergency flags without acquiring the lock.
+
+        MUST ONLY be called when the caller already holds self._lock.
+        """
+        if "__ALL__" in self._emergency_stop_active:
+            return True
+
+        if esp_id:
+            return self._emergency_stop_active.get(esp_id, False)
+
+        return len(self._emergency_stop_active) > 0
+
     async def validate_actuator_command(
         self, esp_id: str, gpio: int, command: str, value: float
     ) -> SafetyCheckResult:
@@ -90,14 +104,14 @@ class SafetyService:
         """
         async with self._lock:
             # Check emergency stop first (absolute priority)
-            if await self.is_emergency_stop_active(esp_id):
+            if self._is_emergency_stop_active_unlocked(esp_id):
                 return SafetyCheckResult(
                     valid=False,
                     error=f"Emergency stop is active for ESP {esp_id}",
                 )
             
             # Check global emergency stop
-            if await self.is_emergency_stop_active():
+            if self._is_emergency_stop_active_unlocked():
                 return SafetyCheckResult(
                     valid=False,
                     error="Global emergency stop is active",
@@ -247,13 +261,4 @@ class SafetyService:
             True if emergency stop is active, False otherwise
         """
         async with self._lock:
-            # Check global emergency stop first
-            if "__ALL__" in self._emergency_stop_active:
-                return True
-            
-            # Check specific ESP emergency stop
-            if esp_id:
-                return self._emergency_stop_active.get(esp_id, False)
-            
-            # Check if any emergency stop is active
-            return len(self._emergency_stop_active) > 0
+            return self._is_emergency_stop_active_unlocked(esp_id)

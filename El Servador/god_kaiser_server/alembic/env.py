@@ -26,6 +26,7 @@ from src.db.base import Base
 from src.db.models import (  # noqa: F401
     actuator,
     ai,
+    auth,
     esp,
     kaiser,
     library,

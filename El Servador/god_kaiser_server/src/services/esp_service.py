@@ -201,9 +201,9 @@ class ESPService:
             "timestamp": timestamp or int(datetime.now(timezone.utc).timestamp()),
         }
         
-        metadata = device.metadata or {}
+        metadata = device.device_metadata or {}
         metadata["health"] = health_data
-        device.metadata = metadata
+        device.device_metadata = metadata
         
         logger.debug(f"Health updated for {device_id}: uptime={uptime}s, heap={heap_free}, rssi={wifi_rssi}")
         return True
@@ -423,8 +423,8 @@ class ESPService:
         rssi_values = []
         
         for device in devices:
-            if device.status == "online" and device.metadata:
-                health = device.metadata.get("health", {})
+            if device.status == "online" and device.device_metadata:
+                health = device.device_metadata.get("health", {})
                 if "heap_free" in health:
                     heap_values.append(health["heap_free"])
                 if "wifi_rssi" in health:
@@ -463,9 +463,9 @@ class ESPService:
         if not device:
             return False
         
-        metadata = device.metadata or {}
+        metadata = device.device_metadata or {}
         metadata["kaiser_id"] = kaiser_id
-        device.metadata = metadata
+        device.device_metadata = metadata
         
         logger.info(f"ESP {device_id} assigned to Kaiser {kaiser_id}")
         return True
@@ -486,5 +486,5 @@ class ESPService:
         all_devices = await self.esp_repo.get_all()
         return [
             d for d in all_devices
-            if d.metadata and d.metadata.get("kaiser_id") == kaiser_id
+            if d.device_metadata and d.device_metadata.get("kaiser_id") == kaiser_id
         ]

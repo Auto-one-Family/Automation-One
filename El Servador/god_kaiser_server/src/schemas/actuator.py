@@ -32,6 +32,7 @@ References:
 - db/models/actuator.py
 """
 
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -130,7 +131,7 @@ class ActuatorConfigCreate(ActuatorConfigBase):
     
     esp_id: str = Field(
         ...,
-        pattern=r"^ESP_[A-F0-9]{8}$",
+        pattern=r"^ESP_[A-Z0-9]{8}$",
         description="ESP device ID",
         examples=["ESP_12AB34CD"],
     )
@@ -207,14 +208,18 @@ class ActuatorConfigUpdate(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None)
 
 
-class ActuatorConfigResponse(ActuatorConfigBase, IDMixin, TimestampMixin):
+class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     """
     Actuator configuration response.
     """
     
-    esp_id: int = Field(
+    id: uuid.UUID = Field(
         ...,
-        description="ESP device database ID",
+        description="Unique identifier (UUID)",
+    )
+    esp_id: uuid.UUID = Field(
+        ...,
+        description="ESP device database ID (UUID)",
     )
     esp_device_id: Optional[str] = Field(
         None,
@@ -248,8 +253,8 @@ class ActuatorConfigResponse(ActuatorConfigBase, IDMixin, TimestampMixin):
         from_attributes=True,
         json_schema_extra={
             "example": {
-                "id": 1,
-                "esp_id": 1,
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "esp_id": "440e8400-e29b-41d4-a716-446655440000",
                 "esp_device_id": "ESP_12AB34CD",
                 "gpio": 5,
                 "actuator_type": "digital",
@@ -437,7 +442,7 @@ class EmergencyStopRequest(BaseModel):
     
     esp_id: Optional[str] = Field(
         None,
-        pattern=r"^ESP_[A-F0-9]{8}$",
+        pattern=r"^ESP_[A-Z0-9]{8}$",
         description="Specific ESP to stop (None = all ESPs)",
     )
     gpio: Optional[int] = Field(

@@ -30,7 +30,7 @@ async def test_esp(db_session: AsyncSession):
         hardware_type="ESP32_WROOM",
         capabilities={"gpio_count": 39},
         status="online",
-        metadata={},
+        device_metadata={},
     )
     db_session.add(esp)
     await db_session.commit()
@@ -41,7 +41,7 @@ async def test_esp(db_session: AsyncSession):
 @pytest.fixture
 async def operator_user(db_session: AsyncSession):
     """Create an operator user."""
-    from ...src.core.security import get_password_hash
+    from src.core.security import get_password_hash
     
     user = User(
         username="operator",

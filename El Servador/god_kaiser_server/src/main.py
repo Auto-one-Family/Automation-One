@@ -39,7 +39,18 @@ from .mqtt.handlers import (
 from .mqtt.publisher import Publisher
 from .mqtt.subscriber import Subscriber
 from .services.actuator_service import ActuatorService
+from .services.logic.actions import (
+    ActuatorActionExecutor,
+    DelayActionExecutor,
+    NotificationActionExecutor,
+)
+from .services.logic.conditions import (
+    CompoundConditionEvaluator,
+    SensorConditionEvaluator,
+    TimeConditionEvaluator,
+)
 from .services.logic_engine import LogicEngine
+from .services.logic_scheduler import LogicScheduler
 from .services.safety_service import SafetyService
 from .websocket.manager import WebSocketManager
 
@@ -49,6 +60,7 @@ settings = get_settings()
 # Global instances (for cleanup)
 _subscriber_instance: Subscriber = None
 _logic_engine: LogicEngine = None
+_logic_scheduler: LogicScheduler = None
 _websocket_manager: WebSocketManager = None
 
 
@@ -67,6 +79,36 @@ async def lifespan(app: FastAPI):
 
     # ===== STARTUP =====
     try:
+        # Step 0: Security Validation
+        logger.info("Validating security configuration...")
+        
+        # Check JWT secret key
+        if settings.security.jwt_secret_key == "change-this-secret-key-in-production":
+            if settings.environment == "production":
+                logger.critical(
+                    "SECURITY CRITICAL: Using default JWT secret key in production! "
+                    "This is a severe security risk. Set JWT_SECRET_KEY environment variable."
+                )
+                raise SystemExit(
+                    "Cannot start server: Default JWT secret key detected in production. "
+                    "Set JWT_SECRET_KEY environment variable to a secure random value."
+                )
+            else:
+                logger.warning(
+                    "SECURITY: Using default JWT secret key (OK for development only). "
+                    "Change JWT_SECRET_KEY in production!"
+                )
+        
+        # Check MQTT TLS if auth is enabled
+        # Note: We can't check if auth is enabled yet (DB not initialized), but we can warn
+        if not settings.mqtt.use_tls:
+            logger.warning(
+                "MQTT TLS is disabled. MQTT authentication credentials will be sent in plain text. "
+                "Enable MQTT_USE_TLS for secure credential distribution."
+            )
+        
+        logger.info("Security validation complete")
+        
         # Step 1: Initialize database
         if settings.database.auto_init:
             logger.info("Initializing database...")
@@ -159,10 +201,34 @@ async def lifespan(app: FastAPI):
             # Initialize Actuator Service
             actuator_service = ActuatorService(actuator_repo, safety_service, publisher)
             
+            # Initialize Logic Engine with modular evaluators and executors
+            global _logic_engine, _logic_scheduler
+            
+            # Setup condition evaluators
+            sensor_evaluator = SensorConditionEvaluator()
+            time_evaluator = TimeConditionEvaluator()
+            compound_evaluator = CompoundConditionEvaluator([sensor_evaluator, time_evaluator])
+            condition_evaluators = [sensor_evaluator, time_evaluator, compound_evaluator]
+            
+            # Setup action executors
+            actuator_executor = ActuatorActionExecutor(actuator_service)
+            delay_executor = DelayActionExecutor()
+            notification_executor = NotificationActionExecutor(_websocket_manager)
+            action_executors = [actuator_executor, delay_executor, notification_executor]
+            
             # Initialize Logic Engine
-            global _logic_engine
-            _logic_engine = LogicEngine(logic_repo, actuator_service, _websocket_manager)
+            _logic_engine = LogicEngine(
+                logic_repo=logic_repo,
+                actuator_service=actuator_service,
+                websocket_manager=_websocket_manager,
+                condition_evaluators=condition_evaluators,
+                action_executors=action_executors,
+            )
             await _logic_engine.start()
+            
+            # Initialize Logic Scheduler
+            _logic_scheduler = LogicScheduler(_logic_engine, interval_seconds=60)
+            await _logic_scheduler.start()
             
             # Set global instance for handlers
             from .services.logic_engine import set_logic_engine
@@ -191,32 +257,38 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
 
     try:
-        # Step 1: Stop Logic Engine
+        # Step 1: Stop Logic Scheduler
+        if _logic_scheduler:
+            logger.info("Stopping Logic Scheduler...")
+            await _logic_scheduler.stop()
+            logger.info("Logic Scheduler stopped")
+        
+        # Step 2: Stop Logic Engine
         if _logic_engine:
             logger.info("Stopping Logic Engine...")
             await _logic_engine.stop()
             logger.info("Logic Engine stopped")
         
-        # Step 2: Shutdown WebSocket Manager
+        # Step 3: Shutdown WebSocket Manager
         if _websocket_manager:
             logger.info("Shutting down WebSocket Manager...")
             await _websocket_manager.shutdown()
             logger.info("WebSocket Manager shutdown complete")
         
-        # Step 3: Shutdown MQTT subscriber (thread pool)
+        # Step 4: Shutdown MQTT subscriber (thread pool)
         if _subscriber_instance:
             logger.info("Shutting down MQTT subscriber thread pool...")
             _subscriber_instance.shutdown(wait=True, timeout=30.0)
             logger.info("MQTT subscriber shutdown complete")
         
-        # Step 4: Disconnect MQTT client
+        # Step 5: Disconnect MQTT client
         logger.info("Disconnecting MQTT client...")
         mqtt_client = MQTTClient.get_instance()
         if mqtt_client.is_connected():
             mqtt_client.disconnect()
             logger.info("MQTT client disconnected")
 
-        # Step 5: Dispose database engine
+        # Step 6: Dispose database engine
         logger.info("Disposing database engine...")
         await dispose_engine()
         logger.info("Database engine disposed")

@@ -19,10 +19,12 @@ References:
 """
 
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+
+from datetime import datetime, timezone
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
@@ -32,8 +34,13 @@ from ...core.security import (
     verify_password,
     verify_token,
 )
+from ...db.repositories.esp_repo import ESPRepository
+from ...db.repositories.system_config_repo import SystemConfigRepository
+from ...db.repositories.token_blacklist_repo import TokenBlacklistRepository
 from ...db.repositories.user_repo import UserRepository
+from ...services.mqtt_auth_service import MQTTAuthService
 from ...schemas import (
+    AuthStatusResponse,
     LoginRequest,
     LoginResponse,
     LogoutRequest,
@@ -45,6 +52,8 @@ from ...schemas import (
     RefreshTokenResponse,
     RegisterRequest,
     RegisterResponse,
+    SetupRequest,
+    SetupResponse,
     TokenResponse,
     UserResponse,
 )
@@ -53,12 +62,153 @@ from ..deps import (
     ActiveUser,
     DBSession,
     check_auth_rate_limit,
+    oauth2_scheme,
 )
 
 logger = get_logger(__name__)
 settings = get_settings()
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
+
+
+# =============================================================================
+# Initial Setup (First-Run)
+# =============================================================================
+
+
+@router.get(
+    "/status",
+    response_model=AuthStatusResponse,
+    summary="Get auth system status",
+    description="Get authentication system status. Used by frontend to check if setup is needed.",
+)
+async def get_auth_status(
+    db: DBSession,
+) -> AuthStatusResponse:
+    """
+    Get authentication system status.
+
+    This endpoint is always public (no auth required).
+    Used by frontend to determine if initial setup is needed.
+
+    Returns:
+        AuthStatusResponse with setup status
+    """
+    user_repo = UserRepository(db)
+    user_count = await user_repo.count()
+
+    # Get MQTT status from system config
+    system_config_repo = SystemConfigRepository(db)
+    mqtt_config = await system_config_repo.get_mqtt_auth_config()
+    mqtt_auth_enabled = mqtt_config.get("enabled", False)
+
+    return AuthStatusResponse(
+        setup_required=(user_count == 0),
+        users_exist=(user_count > 0),
+        mqtt_auth_enabled=mqtt_auth_enabled,
+        mqtt_tls_enabled=settings.mqtt.use_tls,
+    )
+
+
+@router.post(
+    "/setup",
+    response_model=SetupResponse,
+    responses={
+        200: {"description": "Setup successful"},
+        403: {"description": "Setup already completed"},
+        400: {"description": "Invalid request"},
+    },
+    summary="Initial admin setup",
+    description="Create first admin user. ONLY available when no users exist.",
+)
+async def initial_setup(
+    request: SetupRequest,
+    db: DBSession,
+) -> SetupResponse:
+    """
+    Initial admin setup endpoint.
+
+    ONLY available when no users exist in database!
+    Creates the first admin user without authentication.
+
+    Args:
+        request: Setup request with admin credentials
+        db: Database session
+
+    Returns:
+        SetupResponse with tokens and user info
+
+    Raises:
+        HTTPException: 403 if users already exist
+    """
+    user_repo = UserRepository(db)
+
+    # Check if users already exist
+    user_count = await user_repo.count()
+    if user_count > 0:
+        logger.warning("Setup attempted but users already exist")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Setup already completed. Use /register endpoint instead.",
+        )
+
+    # Check if username or email already exists (safety check)
+    existing_user = await user_repo.get_by_username(request.username)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Username '{request.username}' already exists",
+        )
+
+    existing_email = await user_repo.get_by_email(request.email)
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Email '{request.email}' already registered",
+        )
+
+    # Create first admin user
+    admin = await user_repo.create_user(
+        username=request.username,
+        email=request.email,
+        password=request.password,
+        role="admin",
+        full_name=request.full_name,
+    )
+    await db.commit()
+
+    # Generate tokens for immediate login
+    access_token = create_access_token(
+        user_id=admin.id,
+        additional_claims={
+            "role": admin.role,
+            "token_version": admin.token_version,
+        },
+    )
+    refresh_token = create_refresh_token(user_id=admin.id)
+
+    logger.info(f"Initial setup completed: Admin '{admin.username}' created")
+
+    return SetupResponse(
+        success=True,
+        message="Admin account created successfully",
+        tokens=TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=settings.security.jwt_access_token_expire_minutes * 60,
+        ),
+        user=UserResponse(
+            id=admin.id,
+            username=admin.username,
+            email=admin.email,
+            full_name=admin.full_name,
+            role=admin.role,
+            is_active=admin.is_active,
+            created_at=admin.created_at,
+            updated_at=admin.updated_at,
+        ),
+    )
 
 
 # =============================================================================
@@ -126,11 +276,14 @@ async def login(
             detail="User account is disabled",
         )
     
-    # Generate tokens
+    # Generate tokens (include token_version for logout-all functionality)
     expires_delta = timedelta(days=7) if credentials.remember_me else None
     access_token = create_access_token(
         user_id=user.id,
-        additional_claims={"role": user.role},
+        additional_claims={
+            "role": user.role,
+            "token_version": user.token_version,
+        },
         expires_delta=expires_delta,
     )
     refresh_token = create_refresh_token(user_id=user.id)
@@ -190,10 +343,17 @@ async def login_form(
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    access_token = create_access_token(user_id=user.id)
+
+    # FIX: Include token_version for logout-all functionality (same as /login)
+    access_token = create_access_token(
+        user_id=user.id,
+        additional_claims={
+            "role": user.role,
+            "token_version": user.token_version,
+        },
+    )
     refresh_token = create_refresh_token(user_id=user.id)
-    
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -308,6 +468,7 @@ async def refresh_token(
     Token refresh endpoint.
     
     Uses valid refresh token to get new access and refresh tokens.
+    Implements token rotation: old refresh token is blacklisted before issuing new ones.
     
     Args:
         request: Refresh token
@@ -319,10 +480,22 @@ async def refresh_token(
     Raises:
         HTTPException: 401 if refresh token invalid
     """
+    old_refresh_token = request.refresh_token
+    
+    # Check if token is blacklisted BEFORE verification
+    blacklist_repo = TokenBlacklistRepository(db)
+    if await blacklist_repo.is_blacklisted(old_refresh_token):
+        logger.warning("Refresh token is blacklisted")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked",
+        )
+    
     try:
         # Verify refresh token
-        payload = verify_token(request.refresh_token, expected_type="refresh")
+        payload = verify_token(old_refresh_token, expected_type="refresh")
         user_id = int(payload.get("sub"))
+        expires_at = datetime.fromtimestamp(payload.get("exp"), tz=timezone.utc)
         
     except Exception as e:
         logger.warning(f"Refresh token verification failed: {e}")
@@ -341,14 +514,31 @@ async def refresh_token(
             detail="User not found or inactive",
         )
     
-    # Generate new tokens
+    # TOKEN ROTATION: Blacklist old refresh token BEFORE creating new ones
+    try:
+        await blacklist_repo.add_token(
+            token=old_refresh_token,
+            token_type="refresh",
+            user_id=user.id,
+            expires_at=expires_at,
+            reason="token_rotation",
+        )
+        logger.debug(f"Old refresh token blacklisted for user: {user.username}")
+    except Exception as e:
+        logger.warning(f"Failed to blacklist old refresh token: {e}")
+        # Continue anyway - token rotation is best effort
+    
+    # Generate new tokens (include token_version)
     new_access_token = create_access_token(
         user_id=user.id,
-        additional_claims={"role": user.role},
+        additional_claims={
+            "role": user.role,
+            "token_version": user.token_version,
+        },
     )
     new_refresh_token = create_refresh_token(user_id=user.id)
     
-    logger.debug(f"Token refreshed for user: {user.username}")
+    logger.info(f"Token rotated for user: {user.username}")
     
     return RefreshTokenResponse(
         success=True,
@@ -379,42 +569,73 @@ async def refresh_token(
 async def logout(
     request: LogoutRequest,
     current_user: ActiveUser,
+    token: Annotated[Optional[str], Depends(oauth2_scheme)],
     db: DBSession,
 ) -> LogoutResponse:
     """
     User logout endpoint.
     
-    Invalidates user tokens. Token blacklisting is handled via short
-    expiration times and token rotation on refresh.
-    
-    For full token blacklisting, implement a token blacklist table.
+    Invalidates user tokens by adding them to the token blacklist.
     
     Args:
         request: Logout request
         current_user: Current user
+        token: JWT access token from Authorization header
         db: Database session
         
     Returns:
-        LogoutResponse
+        LogoutResponse with number of tokens invalidated
     """
-    # In a full implementation, you would:
-    # 1. Add refresh token to blacklist table
-    # 2. If all_devices=True, invalidate all user tokens
+    tokens_invalidated = 0
     
-    # For now, just log the logout
-    logger.info(f"User logged out: {current_user.username}")
+    # Blacklist the current access token
+    if token:
+        try:
+            # Verify token to extract expiration
+            payload = verify_token(token, expected_type="access")
+            expires_at = datetime.fromtimestamp(payload.get("exp"), tz=timezone.utc)
+            
+            # Add token to blacklist
+            blacklist_repo = TokenBlacklistRepository(db)
+            await blacklist_repo.add_token(
+                token=token,
+                token_type="access",
+                user_id=current_user.id,
+                expires_at=expires_at,
+                reason="logout",
+            )
+            tokens_invalidated = 1
+            logger.info(f"Access token blacklisted for user: {current_user.username}")
+        except Exception as e:
+            logger.warning(f"Failed to blacklist access token: {e}")
     
-    tokens_invalidated = 1
+    # Handle "logout all devices" request (TOKEN VERSIONING)
     if request.all_devices:
-        # Would invalidate all tokens for user
-        tokens_invalidated = 1  # Placeholder
-        logger.info(f"All devices logged out for: {current_user.username}")
+        # Increment token_version to invalidate all existing tokens
+        user_repo = UserRepository(db)
+        current_user.token_version += 1
+        await db.commit()
+        
+        logger.info(
+            f"All devices logged out for user: {current_user.username} "
+            f"(token_version incremented to {current_user.token_version})"
+        )
+        tokens_invalidated = -1  # -1 indicates "all tokens" (not countable)
     
-    return LogoutResponse(
-        success=True,
-        message="Logged out successfully",
-        tokens_invalidated=tokens_invalidated,
-    )
+    if request.all_devices:
+        logger.info(f"User logged out from all devices: {current_user.username}")
+        return LogoutResponse(
+            success=True,
+            message="Logged out from all devices successfully",
+            tokens_invalidated=0,  # 0 = all tokens invalidated (not countable)
+        )
+    else:
+        logger.info(f"User logged out: {current_user.username} (tokens_invalidated={tokens_invalidated})")
+        return LogoutResponse(
+            success=True,
+            message="Logged out successfully",
+            tokens_invalidated=tokens_invalidated,
+        )
 
 
 # =============================================================================
@@ -485,24 +706,70 @@ async def configure_mqtt_auth(
         
     Returns:
         MQTTAuthConfigResponse
+        
+    Raises:
+        HTTPException: 500 if configuration fails
     """
-    # In a full implementation:
-    # 1. Hash password for Mosquitto
-    # 2. Update password file (/etc/mosquitto/passwd)
-    # 3. Reload Mosquitto (mosquitto_ctrl reload)
-    
-    logger.info(f"MQTT auth configured by {current_user.username}: user={request.username}, enabled={request.enabled}")
-    
-    # Store config in system settings
-    # This would update database and trigger broker reload
-    
-    return MQTTAuthConfigResponse(
-        success=True,
-        message="MQTT authentication configured",
-        username=request.username,
-        enabled=request.enabled,
-        broker_reloaded=True,  # Would be actual reload status
-    )
+    try:
+        # Initialize repositories and service
+        system_config_repo = SystemConfigRepository(db)
+        esp_repo = ESPRepository(db)
+        mqtt_auth_service = MQTTAuthService(system_config_repo, esp_repo)
+        
+        # Configure credentials
+        if request.enabled:
+            broker_reloaded = await mqtt_auth_service.configure_credentials(
+                username=request.username,
+                password=request.password,
+                enabled=True,
+            )
+            
+            # Broadcast auth_update to all ESPs (only if TLS enabled)
+            try:
+                broadcast_count = await mqtt_auth_service.broadcast_auth_update(
+                    username=request.username,
+                    password=request.password,
+                    esp_ids=None,  # Broadcast to all
+                    action="update",
+                )
+                logger.info(f"Auth update broadcasted to {broadcast_count} ESP devices")
+            except RuntimeError as e:
+                # TLS not enabled - log warning but don't fail
+                logger.warning(f"Cannot broadcast auth_update: {e}")
+        else:
+            # Disable authentication
+            await mqtt_auth_service.disable_authentication()
+            broker_reloaded = True
+        
+        # Commit database changes
+        await db.commit()
+        
+        logger.info(
+            f"MQTT auth configured by {current_user.username}: "
+            f"username={request.username}, enabled={request.enabled}"
+        )
+        
+        return MQTTAuthConfigResponse(
+            success=True,
+            message="MQTT authentication configured successfully",
+            username=request.username if request.enabled else None,
+            enabled=request.enabled,
+            broker_reloaded=broker_reloaded,
+        )
+        
+    except ValueError as e:
+        logger.error(f"MQTT auth configuration failed (validation): {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Configuration failed: {str(e)}",
+        )
+    except Exception as e:
+        logger.error(f"MQTT auth configuration failed: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MQTT authentication configuration failed. Check server logs for details.",
+        )
 
 
 @router.get(
@@ -513,6 +780,7 @@ async def configure_mqtt_auth(
 )
 async def get_mqtt_auth_status(
     current_user: ActiveUser,
+    db: DBSession,
 ) -> MQTTAuthStatusResponse:
     """
     Get MQTT authentication status.
@@ -521,19 +789,31 @@ async def get_mqtt_auth_status(
     
     Args:
         current_user: Authenticated user
+        db: Database session
         
     Returns:
         MQTTAuthStatusResponse
     """
     from ...mqtt.client import MQTTClient
+    import os
     
+    # Get configuration from database
+    system_config_repo = SystemConfigRepository(db)
+    config = await system_config_repo.get_mqtt_auth_config()
+    
+    # Check password file existence
+    passwd_file_path = settings.mqtt.passwd_file_path
+    password_file_exists = os.path.exists(passwd_file_path)
+    
+    # Check MQTT client connection
     mqtt_client = MQTTClient.get_instance()
+    broker_connected = mqtt_client.is_connected()
     
     return MQTTAuthStatusResponse(
         success=True,
-        enabled=True,  # Would check actual config
-        username="esp_user",  # Would get from config
-        password_file_exists=True,  # Would check file
-        broker_connected=mqtt_client.is_connected(),
-        last_configured=None,  # Would get from DB
+        enabled=config.get("enabled", False),
+        username=config.get("username"),
+        password_file_exists=password_file_exists,
+        broker_connected=broker_connected,
+        last_configured=config.get("last_configured"),
     )

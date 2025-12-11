@@ -92,9 +92,9 @@ class DiscoveryHandler:
                         f"ESP {esp_id_str} already registered. Updating metadata."
                     )
 
-                    # Update metadata (IP, Firmware, etc.)
-                    existing_esp.metadata = {
-                        **(existing_esp.metadata or {}),
+                    # Update device_metadata (IP, Firmware, etc.)
+                    existing_esp.device_metadata = {
+                        **(existing_esp.device_metadata or {}),
                         "ip_address": payload.get("ip_address"),
                         "mac_address": payload.get("mac_address"),
                         "firmware_version": payload.get("firmware_version"),

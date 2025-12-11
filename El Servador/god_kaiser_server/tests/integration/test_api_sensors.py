@@ -21,7 +21,7 @@ from src.main import app
 async def test_esp(db_session: AsyncSession):
     """Create a test ESP device."""
     esp = ESPDevice(
-        device_id="ESP_SENSOR00",
+        device_id="ESP_12345678",  # Must match pattern ^ESP_[A-F0-9]{8}$
         name="Sensor Test ESP",
         ip_address="192.168.1.120",
         mac_address="AA:BB:CC:DD:EE:02",
@@ -43,16 +43,13 @@ async def test_sensor(db_session: AsyncSession, test_esp: ESPDevice):
         esp_id=test_esp.id,
         gpio=34,
         sensor_type="ph",
-        name="Test pH Sensor",
+        sensor_name="Test pH Sensor",
         enabled=True,
-        interval_ms=30000,
-        processing_mode="pi_enhanced",
-        calibration={"slope": -3.5, "offset": 21.34},
-        threshold_min=0.0,
-        threshold_max=14.0,
-        warning_min=5.5,
-        warning_max=7.5,
-        metadata={},
+        sample_interval_ms=30000,
+        pi_enhanced=True,
+        calibration_data={"slope": -3.5, "offset": 21.34},
+        thresholds={"min": 0.0, "max": 14.0, "warning_min": 5.5, "warning_max": 7.5},
+        sensor_metadata={},  # Model field is sensor_metadata, not metadata
     )
     db_session.add(sensor)
     await db_session.commit()

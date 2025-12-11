@@ -5,8 +5,13 @@ Provides WebSocket endpoint for real-time updates from the server.
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from jose import JWTError
 
 from ....core.logging_config import get_logger
+from ....core.security import verify_token
+from ....db.repositories.token_blacklist_repo import TokenBlacklistRepository
+from ....db.repositories.user_repo import UserRepository
+from ....db.session import get_session
 from ....websocket.manager import WebSocketManager
 
 logger = get_logger(__name__)
@@ -26,6 +31,11 @@ async def websocket_realtime(websocket: WebSocket, client_id: str):
     - esp_health: ESP device health updates
     - system_event: System events
     
+    Authentication:
+    - Token must be provided as query parameter: ?token=<jwt_token>
+    - Token is validated before connection is accepted
+    - User must be active to connect
+    
     Example subscribe message:
     {
         "action": "subscribe",
@@ -40,6 +50,68 @@ async def websocket_realtime(websocket: WebSocket, client_id: str):
         websocket: WebSocket connection
         client_id: Unique client identifier
     """
+    # Extract token from query parameters
+    query_params = dict(websocket.query_params)
+    token = query_params.get("token")
+    
+    if not token:
+        logger.warning(f"WebSocket connection rejected: Missing token (client_id={client_id})")
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    
+    # Verify token
+    try:
+        payload = verify_token(token, expected_type="access")
+        user_id_str = payload.get("sub")
+        
+        if user_id_str is None:
+            logger.warning(f"WebSocket connection rejected: Token missing 'sub' claim (client_id={client_id})")
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+        
+        try:
+            user_id = int(user_id_str)
+        except ValueError:
+            logger.warning(f"WebSocket connection rejected: Invalid user_id in token (client_id={client_id})")
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+            
+    except JWTError as e:
+        logger.warning(f"WebSocket connection rejected: JWT verification failed (client_id={client_id}): {e}")
+        await websocket.close(code=4001, reason="Authentication failed")
+        return
+    except ValueError as e:
+        logger.warning(f"WebSocket connection rejected: Token validation error (client_id={client_id}): {e}")
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+    
+    # Check if token is blacklisted and validate user
+    # Note: Session cleanup is handled automatically by the async generator
+    async for session in get_session():
+        blacklist_repo = TokenBlacklistRepository(session)
+        if await blacklist_repo.is_blacklisted(token):
+            logger.warning(f"WebSocket connection rejected: Blacklisted token (client_id={client_id}, user_id={user_id})")
+            await websocket.close(code=4001, reason="Token has been revoked")
+            return
+        
+        # Get user from database and check if active
+        user_repo = UserRepository(session)
+        user = await user_repo.get_by_id(user_id)
+        
+        if user is None:
+            logger.warning(f"WebSocket connection rejected: User not found (client_id={client_id}, user_id={user_id})")
+            await websocket.close(code=4001, reason="Invalid user")
+            return
+        
+        if not user.is_active:
+            logger.warning(f"WebSocket connection rejected: User inactive (client_id={client_id}, user_id={user_id})")
+            await websocket.close(code=4001, reason="User account is disabled")
+            return
+        
+        # Authentication successful - proceed with connection
+        # Break out of session context (session will be cleaned up automatically)
+        break
+    
     manager = await WebSocketManager.get_instance()
     await manager.connect(websocket, client_id)
     

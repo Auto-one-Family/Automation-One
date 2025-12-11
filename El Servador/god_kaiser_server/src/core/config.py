@@ -51,6 +51,13 @@ class MQTTSettings(BaseSettings):
     ca_cert_path: Optional[str] = Field(default=None, alias="MQTT_CA_CERT_PATH")
     client_cert_path: Optional[str] = Field(default=None, alias="MQTT_CLIENT_CERT_PATH")
     client_key_path: Optional[str] = Field(default=None, alias="MQTT_CLIENT_KEY_PATH")
+    
+    # Mosquitto Password File
+    passwd_file_path: str = Field(
+        default="/etc/mosquitto/passwd",
+        alias="MQTT_PASSWD_FILE_PATH",
+        description="Path to Mosquitto password file",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

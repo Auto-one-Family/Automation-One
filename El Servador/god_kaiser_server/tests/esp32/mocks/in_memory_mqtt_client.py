@@ -74,3 +74,5 @@ class InMemoryMQTTTestClient:
             return len(self._messages)
         return sum(1 for msg in self._messages if msg["topic"] == topic)
 
+
+

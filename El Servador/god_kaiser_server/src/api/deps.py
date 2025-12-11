@@ -31,6 +31,7 @@ from ..core.config import get_settings
 from ..core.logging_config import get_logger
 from ..core.security import verify_token
 from ..db.models.user import User
+from ..db.repositories.token_blacklist_repo import TokenBlacklistRepository
 from ..db.repositories.user_repo import UserRepository
 from ..db.session import get_session
 
@@ -105,11 +106,21 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    # Development mode bypass
+    # Development mode bypass (SECURITY: Never in production!)
     if settings.development.debug_mode and not token:
-        # In debug mode, allow requests without token for testing
-        # Return a mock admin user
-        logger.warning("Auth bypass in debug mode - returning mock admin user")
+        # CRITICAL: Prevent auth bypass in production environment
+        if settings.environment == "production":
+            logger.error(
+                "SECURITY: Auth bypass attempted in production mode! "
+                "DEBUG_MODE should NEVER be enabled in production."
+            )
+            raise credentials_exception
+
+        # In debug mode (non-production only), allow requests without token
+        logger.warning(
+            "Auth bypass in debug mode - returning mock admin user. "
+            "This is only allowed in development environment."
+        )
         user_repo = UserRepository(db)
         admin_user = await user_repo.get_by_username("admin")
         if admin_user:
@@ -125,32 +136,64 @@ async def get_current_user(
         # Verify and decode token
         payload = verify_token(token, expected_type="access")
         user_id_str = payload.get("sub")
-        
+
         if user_id_str is None:
             logger.warning("Token missing 'sub' claim")
             raise credentials_exception
-        
+
         try:
             user_id = int(user_id_str)
         except ValueError:
             logger.warning(f"Invalid user_id in token: {user_id_str}")
             raise credentials_exception
-            
+
     except JWTError as e:
         logger.warning(f"JWT verification failed: {e}")
         raise credentials_exception
     except ValueError as e:
         logger.warning(f"Token validation error: {e}")
         raise credentials_exception
-    
+
+    # Check if token is blacklisted (revoked)
+    blacklist_repo = TokenBlacklistRepository(db)
+    if await blacklist_repo.is_blacklisted(token):
+        logger.warning(f"Blacklisted token used for user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     # Get user from database
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(user_id)
-    
+
     if user is None:
         logger.warning(f"User {user_id} not found in database")
         raise credentials_exception
-    
+
+    # TOKEN VERSIONING: Check if token version matches user's current version
+    token_version = payload.get("token_version")
+    if token_version is not None:
+        # Token has version claim - validate it
+        if token_version < user.token_version:
+            logger.warning(
+                f"Token version mismatch for user {user.username}: "
+                f"token_version={token_version}, user.token_version={user.token_version}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been invalidated (logout all devices)",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    # If token doesn't have version claim, it's an old token - allow it for backward compatibility
+    # but log a warning
+    elif user.token_version > 0:
+        logger.debug(
+            f"Token without version claim for user {user.username} "
+            f"(user.token_version={user.token_version})"
+        )
+
     return user
 
 
@@ -277,9 +320,20 @@ async def verify_api_key(
     Raises:
         HTTPException: 401 if invalid or missing
     """
-    # Development mode: Allow without API key
+    # Development mode: Allow without API key (SECURITY: Never in production!)
     if settings.development.debug_mode:
-        logger.debug("API key verification DISABLED (debug mode)")
+        # CRITICAL: Prevent API key bypass in production environment
+        if settings.environment == "production":
+            logger.error(
+                "SECURITY: API key bypass attempted in production mode! "
+                "DEBUG_MODE should NEVER be enabled in production."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key required",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+        logger.debug("API key verification DISABLED (debug mode - non-production only)")
         return "debug-mode"
     
     if not x_api_key:

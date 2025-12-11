@@ -10,7 +10,7 @@ Note: ESP32 uses 'config_response' topic (not 'config/ack').
 Server adapts to ESP32 protocol.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from ...core.logging_config import get_logger
@@ -99,6 +99,21 @@ class ConfigHandler:
             #     )
             #     session.add(audit_entry)
             #     await session.commit()
+
+            # WebSocket Broadcast
+            try:
+                from ...websocket.manager import WebSocketManager
+                ws_manager = await WebSocketManager.get_instance()
+                await ws_manager.broadcast("config_response", {
+                    "esp_id": esp_id,
+                    "config_type": config_type,
+                    "status": status,
+                    "count": count,
+                    "message": message,
+                    "timestamp": int(datetime.now(timezone.utc).timestamp())
+                })
+            except Exception as e:
+                logger.warning(f"Failed to broadcast config response via WebSocket: {e}")
 
             return True
 

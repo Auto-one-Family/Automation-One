@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from ...core.logging_config import get_logger
 from ...db.models.logic import CrossESPLogic, LogicExecutionHistory
 from ...db.repositories import LogicRepository
+from ...services.logic_service import LogicService
 from ...schemas import (
     ActionResult,
     ConditionResult,
@@ -224,24 +225,21 @@ async def create_rule(
         Created rule
     """
     logic_repo = LogicRepository(db)
+    logic_service = LogicService(logic_repo)
     
-    # Create rule (using CrossESPLogic model field names)
-    rule = CrossESPLogic(
-        rule_name=request.name,
-        description=request.description,
-        trigger_conditions=request.conditions,
-        actions=request.actions,
-        logic_operator=request.logic_operator,
-        enabled=request.enabled,
-        priority=request.priority,
-        cooldown_seconds=request.cooldown_seconds,
-        max_executions_per_hour=request.max_executions_per_hour,
-    )
-    
-    created = await logic_repo.create(rule)
-    await db.commit()
+    # Create rule using LogicService (with validation)
+    try:
+        created = await logic_service.create_rule(request)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     
     logger.info(f"Logic rule created: '{created.name}' (ID: {created.id}) by {current_user.username}")
+    
+    exec_count = await logic_repo.get_execution_count(created.id)
+    last_exec = await logic_repo.get_last_execution(created.id)
     
     return LogicRuleResponse(
         id=created.id,
@@ -254,9 +252,9 @@ async def create_rule(
         priority=created.priority,
         cooldown_seconds=created.cooldown_seconds,
         max_executions_per_hour=created.max_executions_per_hour,
-        last_triggered=None,
-        execution_count=0,
-        last_execution_success=None,
+        last_triggered=created.last_triggered,
+        execution_count=exec_count,
+        last_execution_success=last_exec.success if last_exec else None,
         created_at=created.created_at,
         updated_at=created.updated_at,
     )
@@ -296,21 +294,22 @@ async def update_rule(
         Updated rule
     """
     logic_repo = LogicRepository(db)
+    logic_service = LogicService(logic_repo)
     
-    rule = await logic_repo.get_by_id(rule_id)
+    # Update rule using LogicService (with validation)
+    try:
+        rule = await logic_service.update_rule(rule_id, request)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Logic rule {rule_id} not found",
         )
-    
-    # Update fields
-    update_data = request.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(rule, field, value)
-    
-    await db.flush()
-    await db.commit()
     
     exec_count = await logic_repo.get_execution_count(rule.id)
     last_exec = await logic_repo.get_last_execution(rule.id)
@@ -499,6 +498,7 @@ async def test_rule(
         Test results
     """
     logic_repo = LogicRepository(db)
+    logic_service = LogicService(logic_repo)
     
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
@@ -507,116 +507,15 @@ async def test_rule(
             detail=f"Logic rule {rule_id} not found",
         )
     
-    # Evaluate conditions with mock data
-    condition_results = []
-    all_conditions_met = True
-    
-    for idx, condition in enumerate(rule.conditions):
-        cond_type = condition.get("type", "unknown")
-        result = False
-        details = ""
-        actual_value = None
-        
-        if cond_type == "sensor":
-            esp_id = condition.get("esp_id", "")
-            gpio = condition.get("gpio", 0)
-            operator = condition.get("operator", "==")
-            threshold = condition.get("value", 0)
-            
-            # Get mock value or actual value
-            mock_key = f"{esp_id}:{gpio}"
-            if request.mock_sensor_values and mock_key in request.mock_sensor_values:
-                actual_value = request.mock_sensor_values[mock_key]
-            else:
-                actual_value = 0  # Would get from DB
-            
-            # Evaluate
-            if operator == ">":
-                result = actual_value > threshold
-            elif operator == "<":
-                result = actual_value < threshold
-            elif operator == ">=":
-                result = actual_value >= threshold
-            elif operator == "<=":
-                result = actual_value <= threshold
-            elif operator == "==":
-                result = actual_value == threshold
-            elif operator == "!=":
-                result = actual_value != threshold
-            
-            details = f"{esp_id}:{gpio} ({actual_value}) {operator} {threshold}"
-            
-        elif cond_type == "time":
-            start_time = condition.get("start_time", "00:00")
-            end_time = condition.get("end_time", "23:59")
-            
-            # Use mock time or current time
-            if request.mock_time:
-                current_time = request.mock_time
-            else:
-                current_time = datetime.now().strftime("%H:%M")
-            
-            result = start_time <= current_time <= end_time
-            details = f"Time {current_time} in [{start_time}, {end_time}]"
-        
-        if not result:
-            all_conditions_met = False
-        
-        condition_results.append(ConditionResult(
-            condition_index=idx,
-            condition_type=cond_type,
-            result=result,
-            details=details,
-            actual_value=actual_value,
-        ))
-    
-    # Check logic operator
-    if rule.logic_operator == "OR":
-        would_trigger = any(c.result for c in condition_results)
-    else:  # AND
-        would_trigger = all_conditions_met
-    
-    # Evaluate actions (dry run)
-    action_results = []
-    if would_trigger:
-        for idx, action in enumerate(rule.actions):
-            action_type = action.get("type", "unknown")
-            details = ""
-            
-            if action_type == "actuator":
-                esp_id = action.get("esp_id", "")
-                gpio = action.get("gpio", 0)
-                command = action.get("command", "OFF")
-                details = f"{esp_id}:{gpio} {command}"
-            elif action_type == "notification":
-                channel = action.get("channel", "")
-                details = f"Notify via {channel}"
-            elif action_type == "delay":
-                seconds = action.get("seconds", 0)
-                details = f"Wait {seconds}s"
-            
-            action_results.append(ActionResult(
-                action_index=idx,
-                action_type=action_type,
-                would_execute=True,
-                details=details,
-                dry_run=request.dry_run,
-            ))
+    # Test rule using LogicService
+    test_result = await logic_service.test_rule(rule, request)
     
     logger.info(
         f"Logic rule tested: '{rule.name}' (ID: {rule.id}) by {current_user.username} - "
-        f"Would trigger: {would_trigger}, Dry run: {request.dry_run}"
+        f"Would trigger: {test_result.would_trigger}, Dry run: {request.dry_run}"
     )
     
-    return RuleTestResponse(
-        success=True,
-        rule_id=rule.id,
-        rule_name=rule.name,
-        would_trigger=would_trigger,
-        condition_results=condition_results,
-        action_results=action_results,
-        dry_run=request.dry_run,
-    )
+    return test_result
 
 
 # =============================================================================

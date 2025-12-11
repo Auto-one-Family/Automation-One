@@ -126,7 +126,7 @@ async def list_devices(
             capabilities=device.capabilities,
             status=device.status,
             last_seen=device.last_seen,
-            metadata=device.metadata,
+            metadata=device.device_metadata,
             sensor_count=sensor_count,
             actuator_count=actuator_count,
             created_at=device.created_at,
@@ -202,7 +202,7 @@ async def get_device(
         capabilities=device.capabilities,
         status=device.status,
         last_seen=device.last_seen,
-        metadata=device.metadata,
+        metadata=device.device_metadata,
         sensor_count=sensor_count,
         actuator_count=actuator_count,
         created_at=device.created_at,
@@ -270,33 +270,35 @@ async def register_device(
         hardware_type=request.hardware_type,
         capabilities=request.capabilities or {},
         status="unknown",
-        metadata={},
+        device_metadata={},
     )
     
-    created = await esp_repo.create(device)
+    db.add(device)
+    await db.flush()
+    await db.refresh(device)
     await db.commit()
     
-    logger.info(f"ESP device registered: {created.device_id} by {current_user.username}")
+    logger.info(f"ESP device registered: {device.device_id} by {current_user.username}")
     
     return ESPDeviceResponse(
-        id=created.id,
-        device_id=created.device_id,
-        name=created.name,
-        zone_id=created.zone_id,
-        zone_name=created.zone_name,
-        is_zone_master=created.is_zone_master,
-        ip_address=created.ip_address,
-        mac_address=created.mac_address,
-        firmware_version=created.firmware_version,
-        hardware_type=created.hardware_type,
-        capabilities=created.capabilities,
-        status=created.status,
-        last_seen=created.last_seen,
-        metadata=created.metadata,
+        id=device.id,
+        device_id=device.device_id,
+        name=device.name,
+        zone_id=device.zone_id,
+        zone_name=device.zone_name,
+        is_zone_master=device.is_zone_master,
+        ip_address=device.ip_address,
+        mac_address=device.mac_address,
+        firmware_version=device.firmware_version,
+        hardware_type=device.hardware_type,
+        capabilities=device.capabilities,
+        status=device.status,
+        last_seen=device.last_seen,
+        metadata=device.device_metadata,
         sensor_count=0,
         actuator_count=0,
-        created_at=created.created_at,
-        updated_at=created.updated_at,
+        created_at=device.created_at,
+        updated_at=device.updated_at,
     )
 
 
@@ -371,7 +373,7 @@ async def update_device(
         capabilities=device.capabilities,
         status=device.status,
         last_seen=device.last_seen,
-        metadata=device.metadata,
+        metadata=device.device_metadata,
         sensor_count=sensor_count,
         actuator_count=actuator_count,
         created_at=device.created_at,
@@ -625,8 +627,8 @@ async def get_device_health(
             detail=f"ESP device '{esp_id}' not found",
         )
     
-    # Get latest health from metadata (populated by heartbeat handler)
-    health_data = device.metadata.get("health", {}) if device.metadata else {}
+    # Get latest health from device_metadata (populated by heartbeat handler)
+    health_data = device.device_metadata.get("health", {}) if device.device_metadata else {}
     
     # Format uptime
     uptime_formatted = None
@@ -702,12 +704,12 @@ async def assign_kaiser(
             detail=f"ESP device '{esp_id}' not found",
         )
     
-    previous_kaiser = device.metadata.get("kaiser_id") if device.metadata else None
+    previous_kaiser = device.device_metadata.get("kaiser_id") if device.device_metadata else None
     
-    # Update metadata with Kaiser assignment
-    metadata = device.metadata or {}
+    # Update device_metadata with Kaiser assignment
+    metadata = device.device_metadata or {}
     metadata["kaiser_id"] = request.kaiser_id
-    device.metadata = metadata
+    device.device_metadata = metadata
     
     await db.flush()
     await db.commit()

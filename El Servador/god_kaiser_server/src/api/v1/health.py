@@ -252,8 +252,8 @@ async def esp_health_summary(
         total_sensors += sensor_count
         total_actuators += actuator_count
         
-        # Get health data from metadata
-        health_data = device.metadata.get("health", {}) if device.metadata else {}
+        # Get health data from device_metadata
+        health_data = device.device_metadata.get("health", {}) if device.device_metadata else {}
         heap_free = health_data.get("heap_free")
         wifi_rssi = health_data.get("wifi_rssi")
         uptime = health_data.get("uptime")

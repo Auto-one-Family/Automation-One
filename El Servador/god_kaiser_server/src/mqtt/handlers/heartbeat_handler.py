@@ -129,6 +129,23 @@ class HeartbeatHandler:
                     f"heap_free={payload.get('heap_free', payload.get('free_heap'))} bytes"
                 )
 
+                # WebSocket Broadcast
+                try:
+                    from ...websocket.manager import WebSocketManager
+                    ws_manager = await WebSocketManager.get_instance()
+                    await ws_manager.broadcast("esp_health", {
+                        "esp_id": esp_id_str,
+                        "status": "online",
+                        "heap_free": payload.get("heap_free", payload.get("free_heap")),
+                        "wifi_rssi": payload.get("wifi_rssi"),
+                        "uptime": payload.get("uptime"),
+                        "sensor_count": payload.get("sensor_count", payload.get("active_sensors", 0)),
+                        "actuator_count": payload.get("actuator_count", payload.get("active_actuators", 0)),
+                        "timestamp": payload.get("ts")
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast ESP health via WebSocket: {e}")
+
                 return True
 
         except Exception as e:
@@ -220,8 +237,8 @@ class HeartbeatHandler:
             session: Database session
         """
         try:
-            # Update metadata with latest values
-            current_metadata = esp_device.metadata or {}
+            # Update device_metadata with latest values
+            current_metadata = esp_device.device_metadata or {}
             
             # Update zone info if provided
             if "zone_id" in payload:
@@ -245,7 +262,7 @@ class HeartbeatHandler:
             )
             current_metadata["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
             
-            esp_device.metadata = current_metadata
+            esp_device.device_metadata = current_metadata
             
         except Exception as e:
             logger.warning(f"Failed to update ESP metadata: {e}")

@@ -21,12 +21,13 @@ References:
 - db/models/esp.py (ESPDevice model)
 """
 
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .common import BaseResponse, IDMixin, PaginatedResponse, TimestampMixin
+from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
 
 # =============================================================================
@@ -159,12 +160,17 @@ class ESPDeviceUpdate(BaseModel):
     )
 
 
-class ESPDeviceResponse(ESPDeviceBase, IDMixin, TimestampMixin):
+class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
     """
     ESP device response model.
     
     Full device information including status and health.
     """
+    
+    id: uuid.UUID = Field(
+        ...,
+        description="Unique identifier (UUID)",
+    )
     
     ip_address: str = Field(
         ...,
@@ -214,7 +220,7 @@ class ESPDeviceResponse(ESPDeviceBase, IDMixin, TimestampMixin):
         from_attributes=True,
         json_schema_extra={
             "example": {
-                "id": 1,
+                "id": "123e4567-e89b-12d3-a456-426614174000",
                 "device_id": "ESP_12AB34CD",
                 "name": "Greenhouse Node 1",
                 "zone_id": "greenhouse-a",

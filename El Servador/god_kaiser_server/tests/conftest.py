@@ -1,12 +1,25 @@
 """
-⭐ Pytest Configuration
-Fixtures: test_db, test_client, mock_mqtt, sample_esp
+Pytest Configuration for God-Kaiser Server Tests.
+
+FIX 2025-12-11: Test infrastructure overhaul
+- Environment variables set BEFORE any src imports (prevents eager engine loading)
+- In-memory SQLite with StaticPool for Windows compatibility
+- override_get_db with autouse=True for proper DB isolation
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import AsyncGenerator
+
+# =============================================================================
+# FIX 6: Set test environment variables BEFORE any src imports
+# This prevents eager engine loading in session.py
+# =============================================================================
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["DATABASE_AUTO_INIT"] = "false"
+os.environ["TESTING"] = "true"
 
 # Add project root to Python path for imports
 project_root = Path(__file__).parent.parent
@@ -15,13 +28,17 @@ if str(project_root) not in sys.path:
 
 import pytest
 import pytest_asyncio
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from src.api.deps import get_db
 from src.db.base import Base
-from src.db.models import (
+from src.db.models import (  # noqa: F401 - imports needed for SQLAlchemy model registration
     actuator,
     ai,
+    auth,
     esp,
     kaiser,
     library,
@@ -29,14 +46,17 @@ from src.db.models import (
     sensor,
     system,
     user,
-)  # noqa: F401
+)
 from src.db.repositories.actuator_repo import ActuatorRepository
 from src.db.repositories.esp_repo import ESPRepository
 from src.db.repositories.sensor_repo import SensorRepository
 from src.db.repositories.user_repo import UserRepository
 
 
-# Test database URL (SQLite in-memory for fast tests)
+# =============================================================================
+# FIX 3: In-memory SQLite with StaticPool for Windows compatibility
+# StaticPool ensures all connections share the same in-memory database
+# =============================================================================
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
@@ -53,12 +73,15 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
     """
     Create a test database engine.
 
-    Uses SQLite in-memory database for fast, isolated tests.
+    Uses in-memory SQLite with StaticPool for Windows compatibility.
+    All connections share the same in-memory database.
     """
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
 
     # Create all tables
@@ -78,9 +101,6 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
 
     Tests can use commit() freely - the in-memory database is
     recreated for each test function anyway via test_engine.
-    
-    Note: Named 'db_session' for consistency across all test files.
-    Some tests may also use 'test_session' alias.
     """
     async_session_maker = sessionmaker(
         bind=test_engine,
@@ -92,11 +112,9 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
 
     async with async_session_maker() as session:
         yield session
-        # Rollback any uncommitted changes
         await session.rollback()
 
 
-# Alias for backwards compatibility
 @pytest_asyncio.fixture(scope="function")
 async def test_session(db_session: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
     """Alias for db_session - for backwards compatibility."""
@@ -129,12 +147,7 @@ async def user_repo(db_session: AsyncSession) -> UserRepository:
 
 @pytest_asyncio.fixture
 async def sample_esp_device(db_session: AsyncSession):
-    """
-    Create a sample ESP device for testing.
-
-    Returns:
-        ESPDevice instance
-    """
+    """Create a sample ESP device for testing."""
     from src.db.models.esp import ESPDevice
 
     device = ESPDevice(
@@ -155,12 +168,7 @@ async def sample_esp_device(db_session: AsyncSession):
 
 @pytest_asyncio.fixture
 async def sample_user(db_session: AsyncSession):
-    """
-    Create a sample user for testing.
-
-    Returns:
-        User instance
-    """
+    """Create a sample user for testing."""
     from src.db.models.user import User
 
     user = User(
@@ -174,3 +182,136 @@ async def sample_user(db_session: AsyncSession):
     await db_session.flush()
     await db_session.refresh(user)
     return user
+
+
+# =============================================================================
+# FIX 2: App Dependency Override with autouse=True
+# This ensures ALL tests use the test database, not the production database
+# =============================================================================
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def override_get_db(test_engine: AsyncEngine):
+    """
+    Override the app's get_db dependency with the test database.
+
+    AUTOUSE=True: This fixture is automatically loaded for ALL tests.
+    This ensures FastAPI always uses the test database.
+    """
+    from src.main import app
+    from src.api.deps import get_db
+
+    # Create session maker for test engine
+    test_session_maker = sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+    async def override_get_db_func():
+        async with test_session_maker() as session:
+            try:
+                yield session
+            finally:
+                pass
+
+    # Apply override
+    app.dependency_overrides[get_db] = override_get_db_func
+
+    yield
+
+    # Cleanup - remove override
+    app.dependency_overrides.pop(get_db, None)
+
+
+# =============================================================================
+# Mock MQTT Publisher and ActuatorService for Tests
+# This prevents tests from hanging on MQTT connection attempts
+# =============================================================================
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def override_mqtt_publisher(test_engine: AsyncEngine):
+    """
+    Override the app's get_mqtt_publisher dependency with a mock.
+
+    AUTOUSE=True: This fixture is automatically loaded for ALL tests.
+    This prevents tests from hanging on MQTT connection attempts.
+    """
+    from unittest.mock import MagicMock
+    
+    from src.main import app
+    from src.api.deps import get_mqtt_publisher
+
+    # Create mock publisher
+    mock_publisher = MagicMock()
+    mock_publisher.publish_actuator_command.return_value = True
+    mock_publisher.publish_sensor_config.return_value = True
+    mock_publisher.publish_actuator_config.return_value = True
+    mock_publisher.publish_system_command.return_value = True
+    mock_publisher.publish_pi_enhanced_response.return_value = True
+    mock_publisher._publish_with_retry.return_value = True
+
+    def override_get_mqtt_publisher_func():
+        return mock_publisher
+
+    # Apply override
+    app.dependency_overrides[get_mqtt_publisher] = override_get_mqtt_publisher_func
+
+    yield mock_publisher
+
+    # Cleanup - remove override
+    app.dependency_overrides.pop(get_mqtt_publisher, None)
+
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def override_actuator_service(test_engine: AsyncEngine):
+    """
+    Override the app's get_actuator_service dependency with a test instance.
+
+    AUTOUSE=True: This fixture is automatically loaded for ALL tests.
+    This ensures ActuatorService uses mocked Publisher in tests.
+    """
+    from unittest.mock import MagicMock
+    
+    from src.main import app
+    from src.api.deps import get_actuator_service
+    from src.db.repositories import ActuatorRepository, ESPRepository
+    from src.services.actuator_service import ActuatorService
+    from src.services.safety_service import SafetyService
+
+    def override_get_actuator_service_func(db: AsyncSession = Depends(get_db)):
+        """
+        Override function that receives db session from FastAPI dependency injection.
+        
+        Args:
+            db: Database session (injected by FastAPI from override_get_db)
+        """
+        # Create repositories with the injected session
+        actuator_repo = ActuatorRepository(db)
+        esp_repo = ESPRepository(db)
+        
+        # Create safety service
+        safety_service = SafetyService(actuator_repo, esp_repo)
+        
+        # Create mocked publisher
+        mock_publisher = MagicMock()
+        mock_publisher.publish_actuator_command.return_value = True
+        mock_publisher._publish_with_retry.return_value = True
+        
+        # Create ActuatorService with mocked publisher
+        actuator_service = ActuatorService(
+            actuator_repo=actuator_repo,
+            safety_service=safety_service,
+            publisher=mock_publisher,
+        )
+        
+        return actuator_service
+
+    # Apply override
+    app.dependency_overrides[get_actuator_service] = override_get_actuator_service_func
+
+    yield
+
+    # Cleanup - remove override
+    app.dependency_overrides.pop(get_actuator_service, None)

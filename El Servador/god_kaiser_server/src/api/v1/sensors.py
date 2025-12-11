@@ -47,6 +47,89 @@ router = APIRouter(prefix="/v1/sensors", tags=["sensors"])
 
 
 # =============================================================================
+# Helper Functions: Model <-> Schema Conversion
+# =============================================================================
+
+
+def _model_to_response(sensor: SensorConfig, esp_device_id: Optional[str] = None) -> SensorConfigResponse:
+    """
+    Convert SensorConfig model to SensorConfigResponse schema.
+    
+    Handles field name mapping between model and schema:
+    - sensor_name (model) -> name (schema)
+    - sample_interval_ms (model) -> interval_ms (schema)
+    - pi_enhanced (model) -> processing_mode (schema)
+    - calibration_data (model) -> calibration (schema)
+    - thresholds dict (model) -> threshold_min/max/warning_min/max (schema)
+    - sensor_metadata (model) -> metadata (schema)
+    """
+    # Extract thresholds from dict
+    thresholds = sensor.thresholds or {}
+    threshold_min = thresholds.get("min")
+    threshold_max = thresholds.get("max")
+    warning_min = thresholds.get("warning_min")
+    warning_max = thresholds.get("warning_max")
+    
+    # Convert pi_enhanced boolean to processing_mode string
+    processing_mode = "pi_enhanced" if sensor.pi_enhanced else "raw"
+    
+    return SensorConfigResponse(
+        id=sensor.id,
+        esp_id=sensor.esp_id,
+        esp_device_id=esp_device_id,
+        gpio=sensor.gpio,
+        sensor_type=sensor.sensor_type,
+        name=sensor.sensor_name,  # Model: sensor_name -> Schema: name
+        enabled=sensor.enabled,
+        interval_ms=sensor.sample_interval_ms,  # Model: sample_interval_ms -> Schema: interval_ms
+        processing_mode=processing_mode,  # Model: pi_enhanced -> Schema: processing_mode
+        calibration=sensor.calibration_data,  # Model: calibration_data -> Schema: calibration
+        threshold_min=threshold_min,
+        threshold_max=threshold_max,
+        warning_min=warning_min,
+        warning_max=warning_max,
+        metadata=sensor.sensor_metadata,  # Model: sensor_metadata -> Schema: metadata
+        latest_value=None,  # Will be set by caller if available
+        latest_quality=None,
+        latest_timestamp=None,
+        created_at=sensor.created_at,
+        updated_at=sensor.updated_at,
+    )
+
+
+def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
+    """
+    Convert SensorConfigCreate schema fields to SensorConfig model fields.
+    
+    Returns dict with model field names for direct model creation.
+    """
+    # Convert processing_mode string to pi_enhanced boolean
+    pi_enhanced = request.processing_mode == "pi_enhanced"
+    
+    # Build thresholds dict from individual fields
+    thresholds = {}
+    if request.threshold_min is not None:
+        thresholds["min"] = request.threshold_min
+    if request.threshold_max is not None:
+        thresholds["max"] = request.threshold_max
+    if request.warning_min is not None:
+        thresholds["warning_min"] = request.warning_min
+    if request.warning_max is not None:
+        thresholds["warning_max"] = request.warning_max
+    
+    return {
+        "sensor_type": request.sensor_type,
+        "sensor_name": request.name or "",  # Schema: name -> Model: sensor_name
+        "enabled": request.enabled,
+        "sample_interval_ms": request.interval_ms,  # Schema: interval_ms -> Model: sample_interval_ms
+        "pi_enhanced": pi_enhanced,  # Schema: processing_mode -> Model: pi_enhanced
+        "calibration_data": request.calibration,  # Schema: calibration -> Model: calibration_data
+        "thresholds": thresholds if thresholds else None,
+        "sensor_metadata": request.metadata or {},  # Schema: metadata -> Model: sensor_metadata
+    }
+
+
+# =============================================================================
 # List Sensors
 # =============================================================================
 
@@ -118,28 +201,13 @@ async def list_sensors(
         # Get latest reading
         latest = await sensor_repo.get_latest_reading(sensor.esp_id, sensor.gpio)
         
-        responses.append(SensorConfigResponse(
-            id=sensor.id,
-            esp_id=sensor.esp_id,
-            esp_device_id=esp_device_id,
-            gpio=sensor.gpio,
-            sensor_type=sensor.sensor_type,
-            name=sensor.name,
-            enabled=sensor.enabled,
-            interval_ms=sensor.interval_ms,
-            processing_mode=sensor.processing_mode,
-            calibration=sensor.calibration,
-            threshold_min=sensor.threshold_min,
-            threshold_max=sensor.threshold_max,
-            warning_min=sensor.warning_min,
-            warning_max=sensor.warning_max,
-            metadata=sensor.metadata,
-            latest_value=latest.processed_value if latest else None,
-            latest_quality=latest.quality if latest else None,
-            latest_timestamp=latest.timestamp if latest else None,
-            created_at=sensor.created_at,
-            updated_at=sensor.updated_at,
-        ))
+        # Convert model to response schema
+        response = _model_to_response(sensor, esp_device_id)
+        response.latest_value = latest.processed_value if latest else None
+        response.latest_quality = latest.quality if latest else None
+        response.latest_timestamp = latest.timestamp if latest else None
+        
+        responses.append(response)
     
     return SensorConfigListResponse(
         success=True,
@@ -200,28 +268,13 @@ async def get_sensor(
     
     latest = await sensor_repo.get_latest_reading(esp_device.id, gpio)
     
-    return SensorConfigResponse(
-        id=sensor.id,
-        esp_id=sensor.esp_id,
-        esp_device_id=esp_id,
-        gpio=sensor.gpio,
-        sensor_type=sensor.sensor_type,
-        name=sensor.name,
-        enabled=sensor.enabled,
-        interval_ms=sensor.interval_ms,
-        processing_mode=sensor.processing_mode,
-        calibration=sensor.calibration,
-        threshold_min=sensor.threshold_min,
-        threshold_max=sensor.threshold_max,
-        warning_min=sensor.warning_min,
-        warning_max=sensor.warning_max,
-        metadata=sensor.metadata,
-        latest_value=latest.processed_value if latest else None,
-        latest_quality=latest.quality if latest else None,
-        latest_timestamp=latest.timestamp if latest else None,
-        created_at=sensor.created_at,
-        updated_at=sensor.updated_at,
-    )
+    # Convert model to response schema
+    response = _model_to_response(sensor, esp_id)
+    response.latest_value = latest.processed_value if latest else None
+    response.latest_quality = latest.quality if latest else None
+    response.latest_timestamp = latest.timestamp if latest else None
+    
+    return response
 
 
 # =============================================================================
@@ -272,57 +325,40 @@ async def create_or_update_sensor(
     # Check if sensor exists
     existing = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     
+    # Convert schema fields to model fields
+    model_fields = _schema_to_model_fields(request)
+    
     if existing:
-        # Update existing
-        update_data = request.model_dump(exclude={"esp_id"}, exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(existing, field, value)
+        # Update existing sensor
+        existing.sensor_type = model_fields["sensor_type"]
+        if request.name is not None:
+            existing.sensor_name = model_fields["sensor_name"]
+        existing.enabled = model_fields["enabled"]
+        existing.sample_interval_ms = model_fields["sample_interval_ms"]
+        existing.pi_enhanced = model_fields["pi_enhanced"]
+        if request.calibration is not None:
+            existing.calibration_data = model_fields["calibration_data"]
+        if model_fields["thresholds"]:
+            existing.thresholds = model_fields["thresholds"]
+        if request.metadata is not None:
+            existing.sensor_metadata = model_fields["sensor_metadata"]
         sensor = existing
         logger.info(f"Sensor updated: {esp_id} GPIO {gpio} by {current_user.username}")
     else:
-        # Create new
+        # Create new sensor
         sensor = SensorConfig(
             esp_id=esp_device.id,
             gpio=gpio,
-            sensor_type=request.sensor_type,
-            name=request.name,
-            enabled=request.enabled,
-            interval_ms=request.interval_ms,
-            processing_mode=request.processing_mode,
-            calibration=request.calibration or {},
-            threshold_min=request.threshold_min,
-            threshold_max=request.threshold_max,
-            warning_min=request.warning_min,
-            warning_max=request.warning_max,
-            metadata=request.metadata or {},
+            **model_fields,
         )
         await sensor_repo.create(sensor)
         logger.info(f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username}")
     
     await db.commit()
+    await db.refresh(sensor)
     
-    return SensorConfigResponse(
-        id=sensor.id,
-        esp_id=sensor.esp_id,
-        esp_device_id=esp_id,
-        gpio=sensor.gpio,
-        sensor_type=sensor.sensor_type,
-        name=sensor.name,
-        enabled=sensor.enabled,
-        interval_ms=sensor.interval_ms,
-        processing_mode=sensor.processing_mode,
-        calibration=sensor.calibration,
-        threshold_min=sensor.threshold_min,
-        threshold_max=sensor.threshold_max,
-        warning_min=sensor.warning_min,
-        warning_max=sensor.warning_max,
-        metadata=sensor.metadata,
-        latest_value=None,
-        latest_quality=None,
-        latest_timestamp=None,
-        created_at=sensor.created_at,
-        updated_at=sensor.updated_at,
-    )
+    # Convert model to response schema
+    return _model_to_response(sensor, esp_id)
 
 
 # =============================================================================
@@ -381,28 +417,8 @@ async def delete_sensor(
     
     logger.info(f"Sensor deleted: {esp_id} GPIO {gpio} by {current_user.username}")
     
-    return SensorConfigResponse(
-        id=sensor.id,
-        esp_id=sensor.esp_id,
-        esp_device_id=esp_id,
-        gpio=sensor.gpio,
-        sensor_type=sensor.sensor_type,
-        name=sensor.name,
-        enabled=sensor.enabled,
-        interval_ms=sensor.interval_ms,
-        processing_mode=sensor.processing_mode,
-        calibration=sensor.calibration,
-        threshold_min=sensor.threshold_min,
-        threshold_max=sensor.threshold_max,
-        warning_min=sensor.warning_min,
-        warning_max=sensor.warning_max,
-        metadata=sensor.metadata,
-        latest_value=None,
-        latest_quality=None,
-        latest_timestamp=None,
-        created_at=sensor.created_at,
-        updated_at=sensor.updated_at,
-    )
+    # Convert model to response schema
+    return _model_to_response(sensor, esp_id)
 
 
 # =============================================================================

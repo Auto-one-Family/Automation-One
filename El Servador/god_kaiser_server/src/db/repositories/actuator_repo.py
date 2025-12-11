@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.actuator import ActuatorConfig, ActuatorHistory, ActuatorState
@@ -18,6 +18,21 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
 
     def __init__(self, session: AsyncSession):
         super().__init__(ActuatorConfig, session)
+
+    async def create(self, actuator: ActuatorConfig) -> ActuatorConfig:
+        """
+        Create a new actuator config from an instance.
+        
+        Args:
+            actuator: ActuatorConfig instance to create
+            
+        Returns:
+            Created ActuatorConfig instance
+        """
+        self.session.add(actuator)
+        await self.session.flush()
+        await self.session.refresh(actuator)
+        return actuator
 
     async def get_by_esp_and_gpio(
         self, esp_id: uuid.UUID, gpio: int
@@ -34,6 +49,14 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         stmt = select(ActuatorConfig).where(ActuatorConfig.esp_id == esp_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count_by_esp(self, esp_id: uuid.UUID) -> int:
+        """Count actuators for an ESP device."""
+        stmt = select(func.count()).select_from(ActuatorConfig).where(
+            ActuatorConfig.esp_id == esp_id
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
 
     async def get_enabled(self) -> list[ActuatorConfig]:
         """Get all enabled actuators."""

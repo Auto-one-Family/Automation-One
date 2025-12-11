@@ -60,6 +60,16 @@ class WebSocketManager:
         self._loop = asyncio.get_event_loop()
         logger.info("WebSocket Manager initialized")
 
+    @property
+    def connection_count(self) -> int:
+        """
+        Get number of active WebSocket connections.
+        
+        Returns:
+            Number of active connections
+        """
+        return len(self._connections)
+
     async def connect(self, websocket: WebSocket, client_id: str) -> None:
         """
         Accept WebSocket connection.

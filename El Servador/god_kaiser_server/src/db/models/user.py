@@ -4,7 +4,7 @@ User Model: Authentication, Roles, Permissions
 
 from typing import Optional
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, TimestampMixin
@@ -81,6 +81,14 @@ class User(Base, TimestampMixin):
         String(100),
         nullable=True,
         doc="User's full name",
+    )
+
+    # Token Versioning (for logout all devices)
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        doc="Token version (incremented on logout all devices)",
     )
 
     def __repr__(self) -> str:

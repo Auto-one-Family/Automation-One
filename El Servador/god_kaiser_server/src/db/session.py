@@ -49,14 +49,33 @@ def get_engine() -> AsyncEngine:
     return _engine
 
 
-# Session factory
-async_session_maker = sessionmaker(
-    bind=get_engine(),
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+# =============================================================================
+# FIX 5: Lazy Loading for Session Maker
+# Session maker is created on first use, not at module import time
+# This prevents eager engine creation which can fail in test environments
+# =============================================================================
+_async_session_maker: sessionmaker | None = None
+
+
+def get_session_maker() -> sessionmaker:
+    """
+    Get or create the async session maker (lazy loading).
+
+    Returns:
+        sessionmaker: SQLAlchemy async session maker
+    """
+    global _async_session_maker
+
+    if _async_session_maker is None:
+        _async_session_maker = sessionmaker(
+            bind=get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+
+    return _async_session_maker
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -71,7 +90,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             # Use session here
             pass
     """
-    async with async_session_maker() as session:
+    session_maker = get_session_maker()  # Lazy loading
+    async with session_maker() as session:
         try:
             yield session
         except Exception:
@@ -99,6 +119,7 @@ async def init_db() -> None:
         from .models import (  # noqa: F401
             actuator,
             ai,
+            auth,  # TokenBlacklist model
             esp,
             kaiser,
             library,

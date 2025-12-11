@@ -42,11 +42,10 @@ async def test_actuator(db_session: AsyncSession, test_esp: ESPDevice):
         esp_id=test_esp.id,
         gpio=5,
         actuator_type="digital",
-        name="Test Pump",
+        actuator_name="Test Pump",
         enabled=True,
-        max_runtime_seconds=1800,
-        cooldown_seconds=300,
-        metadata={},
+        safety_constraints={"max_runtime": 1800, "cooldown_period": 300},
+        actuator_metadata={},
     )
     db_session.add(actuator)
     await db_session.commit()
@@ -210,7 +209,7 @@ class TestSendCommand:
             esp_id=test_esp.id,
             gpio=7,
             actuator_type="digital",
-            name="Disabled Actuator",
+            actuator_name="Disabled Actuator",
             enabled=False,
             metadata={},
         )

@@ -1,0 +1,99 @@
+warning: in the working copy of 'El Servador/god_kaiser_server/alembic/env.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/pyproject.toml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/scripts/init_db.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/deps.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/actuators.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/auth.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/esp.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/health.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/logic.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/sensors.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/api/v1/websocket/realtime.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/core/config.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/db/models/user.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/db/repositories/__init__.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/db/repositories/actuator_repo.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/db/repositories/sensor_repo.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/db/repositories/system_config_repo.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/db/session.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/main.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/mqtt/handlers/config_handler.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/mqtt/handlers/discovery_handler.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/mqtt/topics.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/schemas/__init__.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/schemas/actuator.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/schemas/auth.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/schemas/esp.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/schemas/sensor.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/services/esp_service.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/services/logic_engine.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/services/logic_service.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/services/safety_service.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/src/websocket/manager.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/tests/conftest.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/tests/integration/test_api_actuators.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/tests/integration/test_api_auth.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/tests/integration/test_api_esp.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/tests/integration/test_api_health.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Servador/god_kaiser_server/tests/integration/test_api_sensors.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Trabajante/docs/Dynamic Zones and Provisioning/DYNAMIC_ZONES_IMPLEMENTATION.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Trabajante/docs/Dynamic Zones and Provisioning/PROVISIONING.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Trabajante/docs/system-flows/01-boot-sequence.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'El Trabajante/docs/system-flows/08-zone-assignment-flow.md', LF will be replaced by CRLF the next time Git touches it
+ El Servador/TEST_SETUP.md                          |   2 [32m+[m
+ El Servador/god_kaiser_server/alembic/env.py       |   1 [32m+[m
+ .../god_kaiser_server/interactive_test_esp32.py    |   2 [32m+[m
+ El Servador/god_kaiser_server/pyproject.toml       |   1 [32m+[m
+ El Servador/god_kaiser_server/run_tests_batch.py   |   2 [32m+[m
+ El Servador/god_kaiser_server/scripts/init_db.py   | 197 [32m++++[m[31m-[m
+ El Servador/god_kaiser_server/src/api/deps.py      |  78 [32m+[m[31m-[m
+ .../god_kaiser_server/src/api/v1/__init__.py       |   2 [32m+[m
+ .../god_kaiser_server/src/api/v1/actuators.py      | 227 [32m+++[m[31m--[m
+ El Servador/god_kaiser_server/src/api/v1/auth.py   | 384 [32m+++++++[m[31m--[m
+ El Servador/god_kaiser_server/src/api/v1/esp.py    |  58 [32m+[m[31m-[m
+ El Servador/god_kaiser_server/src/api/v1/health.py |   4 [32m+[m[31m-[m
+ El Servador/god_kaiser_server/src/api/v1/logic.py  | 163 [32m+[m[31m---[m
+ .../god_kaiser_server/src/api/v1/sensors.py        | 224 [32m++[m[31m---[m
+ .../src/api/v1/websocket/__init__.py               |   2 [32m+[m
+ .../src/api/v1/websocket/realtime.py               |  72 [32m++[m
+ El Servador/god_kaiser_server/src/core/config.py   |   7 [32m+[m
+ .../god_kaiser_server/src/db/models/__init__.py    |  63 [32m++[m
+ .../god_kaiser_server/src/db/models/user.py        |  10 [32m+[m[31m-[m
+ .../src/db/repositories/__init__.py                |   4 [32m+[m
+ .../src/db/repositories/actuator_repo.py           |  25 [32m+[m[31m-[m
+ .../src/db/repositories/sensor_repo.py             | 183 [32m+++[m[31m-[m
+ .../src/db/repositories/system_config_repo.py      | 207 [32m++++[m[31m-[m
+ El Servador/god_kaiser_server/src/db/session.py    |  39 [32m+[m[31m-[m
+ El Servador/god_kaiser_server/src/main.py          |  86 [32m+[m[31m-[m
+ .../src/mqtt/handlers/config_handler.py            |  17 [32m+[m[31m-[m
+ .../src/mqtt/handlers/discovery_handler.py         |   6 [32m+[m[31m-[m
+ .../src/mqtt/handlers/heartbeat_handler.py         |  23 [32m+[m[31m-[m
+ El Servador/god_kaiser_server/src/mqtt/topics.py   |  16 [32m+[m
+ .../god_kaiser_server/src/schemas/__init__.py      |   6 [32m+[m
+ .../god_kaiser_server/src/schemas/actuator.py      |  19 [32m+[m[31m-[m
+ El Servador/god_kaiser_server/src/schemas/auth.py  | 122 [32m+++[m
+ El Servador/god_kaiser_server/src/schemas/esp.py   |  12 [32m+[m[31m-[m
+ .../god_kaiser_server/src/schemas/sensor.py        |  15 [32m+[m[31m-[m
+ .../src/sensors/sensor_type_registry.py            |   2 [32m+[m
+ .../god_kaiser_server/src/services/esp_service.py  |  14 [32m+[m[31m-[m
+ .../god_kaiser_server/src/services/logic_engine.py | 331 [32m+++++[m[31m--[m
+ .../src/services/logic_service.py                  | 427 [32m++++++++[m[31m-[m
+ .../src/services/safety_service.py                 |  29 [32m+[m[31m-[m
+ .../god_kaiser_server/src/websocket/manager.py     |  10 [32m+[m
+ .../god_kaiser_server/test_interactive_session.py  |   2 [32m+[m
+ El Servador/god_kaiser_server/tests/conftest.py    | 187 [32m+++[m[31m-[m
+ .../tests/esp32/mocks/in_memory_mqtt_client.py     |   2 [32m+[m
+ .../tests/esp32/mocks/real_esp32_client.py         |   2 [32m+[m
+ .../tests/esp32/test_production_accuracy.py        |   2 [32m+[m
+ .../tests/integration/BUGS_FOUND.md                | 127 [31m---[m
+ .../tests/integration/test_api_actuators.py        |   9 [32m+[m[31m-[m
+ .../tests/integration/test_api_auth.py             | 148 [32m+++[m[31m-[m
+ .../tests/integration/test_api_esp.py              |   4 [32m+[m[31m-[m
+ .../tests/integration/test_api_sensors.py          |  17 [32m+[m[31m-[m
+ El Trabajante/src/error_handling/health_monitor.h  |   2 [32m+[m
+ El Trabajante/src/models/sensor_registry.cpp       |   2 [32m+[m
+ El Trabajante/src/models/sensor_registry.h         |   2 [32m+[m
+ KI_INTEGRATION_CODEBASE_ANALYSIS_TASK.md           | 649 [31m--------------[m
+ ...NTEGRATION_CODEBASE_ANALYSIS_TASK_PHASES_4-8.md | 959 [31m---------------------[m
+ 55 files changed, 2861 insertions(+), 2345 deletions(-)

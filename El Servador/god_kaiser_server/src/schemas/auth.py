@@ -25,6 +25,127 @@ from .common import BaseResponse, IDMixin, TimestampMixin
 
 
 # =============================================================================
+# Initial Setup (First-Run)
+# =============================================================================
+
+
+class SetupRequest(BaseModel):
+    """
+    Initial admin setup request.
+
+    Used for first-run setup when no users exist in database.
+    Creates the first admin user without requiring authentication.
+    """
+
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=50,
+        pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$",
+        description="Admin username (alphanumeric, starts with letter)",
+        examples=["admin", "system_admin"],
+    )
+    email: EmailStr = Field(
+        ...,
+        description="Admin email address",
+        examples=["admin@example.com"],
+    )
+    password: str = Field(
+        ...,
+        min_length=8,
+        max_length=128,
+        description="Admin password (min 8 chars, must include upper, lower, digit, special)",
+    )
+    full_name: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Admin's full name",
+        examples=["System Administrator"],
+    )
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """Validate password meets security requirements."""
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+        if not any(c in special_chars for c in v):
+            raise ValueError("Password must contain at least one special character")
+        return v
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "username": "admin",
+                "email": "admin@example.com",
+                "password": "SecureP@ss123!",
+                "full_name": "System Administrator",
+            }
+        }
+    )
+
+
+class SetupResponse(BaseResponse):
+    """
+    Initial setup response with tokens and user info.
+
+    Returned after successful first admin creation.
+    """
+
+    tokens: "TokenResponse" = Field(
+        ...,
+        description="JWT access and refresh tokens for immediate login",
+    )
+    user: "UserResponse" = Field(
+        ...,
+        description="Created admin user information",
+    )
+
+
+class AuthStatusResponse(BaseModel):
+    """
+    Authentication system status response.
+
+    Used by frontend to determine if initial setup is needed.
+    """
+
+    setup_required: bool = Field(
+        ...,
+        description="True if no users exist and setup is needed",
+    )
+    users_exist: bool = Field(
+        ...,
+        description="True if at least one user exists",
+    )
+    mqtt_auth_enabled: bool = Field(
+        ...,
+        description="True if MQTT authentication is enabled",
+    )
+    mqtt_tls_enabled: bool = Field(
+        ...,
+        description="True if MQTT TLS is enabled",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "setup_required": False,
+                "users_exist": True,
+                "mqtt_auth_enabled": True,
+                "mqtt_tls_enabled": True,
+            }
+        }
+    )
+
+
+# =============================================================================
 # Login
 # =============================================================================
 
@@ -566,3 +687,4 @@ class APIKeyInfo(BaseModel):
 # Update forward references
 LoginResponse.model_rebuild()
 RegisterResponse.model_rebuild()
+SetupResponse.model_rebuild()

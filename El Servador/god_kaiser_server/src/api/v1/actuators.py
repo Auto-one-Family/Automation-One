@@ -47,12 +47,104 @@ from ...schemas import (
 )
 from ...schemas.common import PaginationMeta
 from ...services.actuator_service import ActuatorService
-from ...services.safety_service import SafetyService
 from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service, get_mqtt_publisher
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/actuators", tags=["actuators"])
+
+TECH_METADATA_KEYS = {"pwm_frequency", "servo_min_pulse", "servo_max_pulse"}
+
+
+def _model_to_schema_response(
+    actuator: ActuatorConfig,
+    esp_device_id: Optional[str] = None,
+    state: Optional[ActuatorStateModel] = None,
+) -> ActuatorConfigResponse:
+    """
+    Map DB model fields to public API schema.
+    - actuator_name -> name
+    - safety_constraints -> max_runtime_seconds, cooldown_seconds
+    - actuator_metadata -> metadata + technical PWM/servo fields split out
+    """
+    safety = actuator.safety_constraints or {}
+    max_runtime_seconds = safety.get("max_runtime") or safety.get("max_runtime_seconds")
+    cooldown_seconds = safety.get("cooldown_period") or safety.get("cooldown_seconds")
+
+    # Normalize possible millisecond storage to seconds (future proof)
+    if isinstance(max_runtime_seconds, (int, float)) and max_runtime_seconds:
+        if max_runtime_seconds > 86400 * 10:
+            max_runtime_seconds = int(max_runtime_seconds // 1000)
+
+    metadata = actuator.actuator_metadata or {}
+    pwm_frequency = metadata.get("pwm_frequency")
+    servo_min_pulse = metadata.get("servo_min_pulse")
+    servo_max_pulse = metadata.get("servo_max_pulse")
+
+    # Expose only user-facing metadata; keep technical fields separate
+    user_metadata = {k: v for k, v in metadata.items() if k not in TECH_METADATA_KEYS}
+
+    return ActuatorConfigResponse(
+        id=actuator.id,
+        esp_id=actuator.esp_id,
+        esp_device_id=esp_device_id,
+        gpio=actuator.gpio,
+        actuator_type=actuator.actuator_type,
+        name=actuator.actuator_name,
+        enabled=actuator.enabled,
+        max_runtime_seconds=max_runtime_seconds,
+        cooldown_seconds=cooldown_seconds,
+        pwm_frequency=pwm_frequency,
+        servo_min_pulse=servo_min_pulse,
+        servo_max_pulse=servo_max_pulse,
+        metadata=user_metadata or None,
+        current_value=state.value if state else None,
+        is_active=state.is_active if state else False,
+        last_command_at=state.last_command_at if state else None,
+        created_at=actuator.created_at,
+        updated_at=actuator.updated_at,
+    )
+
+
+def _schema_to_model_fields(
+    request: ActuatorConfigCreate,
+    existing: Optional[ActuatorConfig] = None,
+) -> dict:
+    """
+    Convert request schema into model field names.
+    """
+    # Start with existing for partial updates to avoid dropping data
+    safety_constraints = dict(existing.safety_constraints) if existing and existing.safety_constraints else {}
+    metadata = dict(existing.actuator_metadata) if existing and existing.actuator_metadata else {}
+
+    if request.max_runtime_seconds is not None:
+        safety_constraints["max_runtime"] = request.max_runtime_seconds
+    if request.cooldown_seconds is not None:
+        safety_constraints["cooldown_period"] = request.cooldown_seconds
+
+    if request.metadata is not None:
+        metadata.update(request.metadata)
+    if request.pwm_frequency is not None:
+        metadata["pwm_frequency"] = request.pwm_frequency
+    if request.servo_min_pulse is not None:
+        metadata["servo_min_pulse"] = request.servo_min_pulse
+    if request.servo_max_pulse is not None:
+        metadata["servo_max_pulse"] = request.servo_max_pulse
+
+    fields = {}
+    if request.actuator_type is not None:
+        fields["actuator_type"] = request.actuator_type
+    if request.name is not None or existing is None:
+        # fallback to empty string to satisfy NOT NULL on create
+        fields["actuator_name"] = request.name or ""
+    if request.enabled is not None:
+        fields["enabled"] = request.enabled
+    if safety_constraints:
+        fields["safety_constraints"] = safety_constraints
+    if metadata:
+        fields["actuator_metadata"] = metadata
+
+    return fields
 
 
 # =============================================================================
@@ -127,26 +219,7 @@ async def list_actuators(
         # Get current state
         state = await actuator_repo.get_state(actuator.esp_id, actuator.gpio)
         
-        responses.append(ActuatorConfigResponse(
-            id=actuator.id,
-            esp_id=actuator.esp_id,
-            esp_device_id=esp_device_id,
-            gpio=actuator.gpio,
-            actuator_type=actuator.actuator_type,
-            name=actuator.name,
-            enabled=actuator.enabled,
-            max_runtime_seconds=actuator.max_runtime_seconds,
-            cooldown_seconds=actuator.cooldown_seconds,
-            pwm_frequency=actuator.pwm_frequency,
-            servo_min_pulse=actuator.servo_min_pulse,
-            servo_max_pulse=actuator.servo_max_pulse,
-            metadata=actuator.metadata,
-            current_value=state.value if state else None,
-            is_active=state.is_active if state else False,
-            last_command_at=state.last_command_at if state else None,
-            created_at=actuator.created_at,
-            updated_at=actuator.updated_at,
-        ))
+        responses.append(_model_to_schema_response(actuator, esp_device_id, state))
     
     return ActuatorConfigListResponse(
         success=True,
@@ -207,26 +280,7 @@ async def get_actuator(
     
     state = await actuator_repo.get_state(esp_device.id, gpio)
     
-    return ActuatorConfigResponse(
-        id=actuator.id,
-        esp_id=actuator.esp_id,
-        esp_device_id=esp_id,
-        gpio=actuator.gpio,
-        actuator_type=actuator.actuator_type,
-        name=actuator.name,
-        enabled=actuator.enabled,
-        max_runtime_seconds=actuator.max_runtime_seconds,
-        cooldown_seconds=actuator.cooldown_seconds,
-        pwm_frequency=actuator.pwm_frequency,
-        servo_min_pulse=actuator.servo_min_pulse,
-        servo_max_pulse=actuator.servo_max_pulse,
-        metadata=actuator.metadata,
-        current_value=state.value if state else None,
-        is_active=state.is_active if state else False,
-        last_command_at=state.last_command_at if state else None,
-        created_at=actuator.created_at,
-        updated_at=actuator.updated_at,
-    )
+    return _model_to_schema_response(actuator, esp_id, state)
 
 
 # =============================================================================
@@ -279,51 +333,25 @@ async def create_or_update_actuator(
     
     if existing:
         # Update existing
-        update_data = request.model_dump(exclude={"esp_id"}, exclude_unset=True)
-        for field, value in update_data.items():
+        model_fields = _schema_to_model_fields(request, existing=existing)
+        for field, value in model_fields.items():
             setattr(existing, field, value)
         actuator = existing
         logger.info(f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username}")
     else:
         # Create new
+        model_fields = _schema_to_model_fields(request)
         actuator = ActuatorConfig(
             esp_id=esp_device.id,
             gpio=gpio,
-            actuator_type=request.actuator_type,
-            name=request.name,
-            enabled=request.enabled,
-            max_runtime_seconds=request.max_runtime_seconds,
-            cooldown_seconds=request.cooldown_seconds,
-            pwm_frequency=request.pwm_frequency,
-            servo_min_pulse=request.servo_min_pulse,
-            servo_max_pulse=request.servo_max_pulse,
-            metadata=request.metadata or {},
+            **model_fields,
         )
         await actuator_repo.create(actuator)
         logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username}")
     
     await db.commit()
     
-    return ActuatorConfigResponse(
-        id=actuator.id,
-        esp_id=actuator.esp_id,
-        esp_device_id=esp_id,
-        gpio=actuator.gpio,
-        actuator_type=actuator.actuator_type,
-        name=actuator.name,
-        enabled=actuator.enabled,
-        max_runtime_seconds=actuator.max_runtime_seconds,
-        cooldown_seconds=actuator.cooldown_seconds,
-        pwm_frequency=actuator.pwm_frequency,
-        servo_min_pulse=actuator.servo_min_pulse,
-        servo_max_pulse=actuator.servo_max_pulse,
-        metadata=actuator.metadata,
-        current_value=None,
-        is_active=False,
-        last_command_at=None,
-        created_at=actuator.created_at,
-        updated_at=actuator.updated_at,
-    )
+    return _model_to_schema_response(actuator, esp_id, None)
 
 
 # =============================================================================
@@ -348,6 +376,7 @@ async def send_command(
     command: ActuatorCommand,
     db: DBSession,
     current_user: OperatorUser,
+    actuator_service: Annotated[ActuatorService, Depends(get_actuator_service)],
 ) -> ActuatorCommandResponse:
     """
     Send actuator command.
@@ -360,6 +389,7 @@ async def send_command(
         command: Actuator command (ON, OFF, PWM, TOGGLE)
         db: Database session
         current_user: Operator or admin user
+        actuator_service: ActuatorService instance (dependency injected)
         
     Returns:
         Command response
@@ -386,11 +416,6 @@ async def send_command(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Actuator is disabled",
         )
-    
-    # Initialize services
-    safety_service = SafetyService(actuator_repo, esp_repo)
-    publisher = Publisher()
-    actuator_service = ActuatorService(actuator_repo, safety_service, publisher)
     
     # Send command via service (includes safety validation)
     success = await actuator_service.send_command(
@@ -494,26 +519,7 @@ async def get_status(
     # Optionally include config
     config = None
     if include_config:
-        config = ActuatorConfigResponse(
-            id=actuator.id,
-            esp_id=actuator.esp_id,
-            esp_device_id=esp_id,
-            gpio=actuator.gpio,
-            actuator_type=actuator.actuator_type,
-            name=actuator.name,
-            enabled=actuator.enabled,
-            max_runtime_seconds=actuator.max_runtime_seconds,
-            cooldown_seconds=actuator.cooldown_seconds,
-            pwm_frequency=actuator.pwm_frequency,
-            servo_min_pulse=actuator.servo_min_pulse,
-            servo_max_pulse=actuator.servo_max_pulse,
-            metadata=actuator.metadata,
-            current_value=state.value if state else None,
-            is_active=state.is_active if state else False,
-            last_command_at=state.last_command_at if state else None,
-            created_at=actuator.created_at,
-            updated_at=actuator.updated_at,
-        )
+        config = _model_to_schema_response(actuator, esp_id, state)
     
     return ActuatorStatusResponse(
         success=True,
@@ -542,6 +548,7 @@ async def emergency_stop(
     request: EmergencyStopRequest,
     db: DBSession,
     current_user: OperatorUser,
+    publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
 ) -> EmergencyStopResponse:
     """
     Emergency stop all actuators.
@@ -552,13 +559,13 @@ async def emergency_stop(
         request: Emergency stop request
         db: Database session
         current_user: Operator or admin user
+        publisher: MQTT publisher (dependency injected)
         
     Returns:
         Emergency stop response
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    publisher = Publisher()
     
     devices_stopped = 0
     actuators_stopped = 0
@@ -654,6 +661,7 @@ async def delete_actuator(
     gpio: int,
     db: DBSession,
     current_user: OperatorUser,
+    publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
 ) -> ActuatorConfigResponse:
     """
     Delete actuator configuration.
@@ -663,13 +671,13 @@ async def delete_actuator(
         gpio: GPIO pin number
         db: Database session
         current_user: Operator or admin user
+        publisher: MQTT publisher (dependency injected)
         
     Returns:
         Deleted actuator config
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    publisher = Publisher()
     
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
@@ -701,26 +709,7 @@ async def delete_actuator(
     
     logger.info(f"Actuator deleted: {esp_id} GPIO {gpio} by {current_user.username}")
     
-    return ActuatorConfigResponse(
-        id=actuator.id,
-        esp_id=actuator.esp_id,
-        esp_device_id=esp_id,
-        gpio=actuator.gpio,
-        actuator_type=actuator.actuator_type,
-        name=actuator.name,
-        enabled=actuator.enabled,
-        max_runtime_seconds=actuator.max_runtime_seconds,
-        cooldown_seconds=actuator.cooldown_seconds,
-        pwm_frequency=actuator.pwm_frequency,
-        servo_min_pulse=actuator.servo_min_pulse,
-        servo_max_pulse=actuator.servo_max_pulse,
-        metadata=actuator.metadata,
-        current_value=None,
-        is_active=False,
-        last_command_at=None,
-        created_at=actuator.created_at,
-        updated_at=actuator.updated_at,
-    )
+    return _model_to_schema_response(actuator, esp_id, None)
 
 
 # =============================================================================

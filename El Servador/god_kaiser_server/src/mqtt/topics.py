@@ -111,6 +111,22 @@ class TopicBuilder:
         kaiser_id = constants.get_kaiser_id()
         return f"kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/processed"
 
+    @staticmethod
+    def build_mqtt_auth_update_topic(esp_id: str) -> str:
+        """
+        Build MQTT authentication update topic.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/mqtt/auth_update
+        """
+        return constants.get_topic_with_kaiser_id(
+            "kaiser/{kaiser_id}/esp/{esp_id}/mqtt/auth_update",
+            esp_id=esp_id
+        )
+
     # ====================================================================
     # PARSE METHODS (ESP → God-Kaiser)
     # ====================================================================

@@ -7,6 +7,8 @@ from .base_repo import BaseRepository
 from .esp_repo import ESPRepository
 from .logic_repo import LogicRepository
 from .sensor_repo import SensorRepository
+from .system_config_repo import SystemConfigRepository
+from .token_blacklist_repo import TokenBlacklistRepository
 from .user_repo import UserRepository
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "ActuatorRepository",
     "UserRepository",
     "LogicRepository",
+    "TokenBlacklistRepository",
+    "SystemConfigRepository",
 ]
