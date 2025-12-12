@@ -1,0 +1,193 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-dark-950 text-dark-100 min-h-screen;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-dark-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-dark-600 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-dark-500;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Button base */
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium
+           transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
+           focus:ring-offset-dark-900 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500;
+  }
+
+  .btn-secondary {
+    @apply btn bg-dark-700 text-dark-100 hover:bg-dark-600 focus:ring-dark-500;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+
+  .btn-success {
+    @apply btn bg-green-600 text-white hover:bg-green-700 focus:ring-green-500;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-dark-300 hover:bg-dark-800 hover:text-dark-100;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-lg;
+  }
+
+  /* Card */
+  .card {
+    @apply bg-dark-900 border border-dark-700 rounded-xl;
+  }
+
+  .card-header {
+    @apply px-6 py-4 border-b border-dark-700;
+  }
+
+  .card-body {
+    @apply p-6;
+  }
+
+  /* Input */
+  .input {
+    @apply w-full px-4 py-2.5 bg-dark-800 border border-dark-600 rounded-lg
+           text-dark-100 placeholder-dark-400
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+           transition-all duration-200;
+  }
+
+  .input-error {
+    @apply border-red-500 focus:ring-red-500;
+  }
+
+  /* Label */
+  .label {
+    @apply block text-sm font-medium text-dark-300 mb-1.5;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-green-500/20 text-green-400;
+  }
+
+  .badge-warning {
+    @apply badge bg-yellow-500/20 text-yellow-400;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-500/20 text-red-400;
+  }
+
+  .badge-info {
+    @apply badge bg-blue-500/20 text-blue-400;
+  }
+
+  .badge-gray {
+    @apply badge bg-dark-600 text-dark-300;
+  }
+
+  /* Status dot */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-online {
+    @apply status-dot bg-green-500;
+  }
+
+  .status-offline {
+    @apply status-dot bg-gray-500;
+  }
+
+  .status-error {
+    @apply status-dot bg-red-500;
+  }
+
+  .status-warning {
+    @apply status-dot bg-yellow-500;
+  }
+
+  /* Sidebar */
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-dark-300
+           hover:bg-dark-800 hover:text-dark-100 transition-all duration-200;
+  }
+
+  .sidebar-link-active {
+    @apply sidebar-link bg-dark-800 text-white;
+  }
+
+  /* JSON viewer */
+  .json-key {
+    @apply text-purple-400;
+  }
+
+  .json-string {
+    @apply text-green-400;
+  }
+
+  .json-number {
+    @apply text-blue-400;
+  }
+
+  .json-boolean {
+    @apply text-yellow-400;
+  }
+
+  .json-null {
+    @apply text-red-400;
+  }
+}
+
+/* Utility classes */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Animation for live indicators */
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* Gradient text */
+  .text-gradient {
+    @apply bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent;
+  }
+}

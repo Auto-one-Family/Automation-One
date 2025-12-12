@@ -154,6 +154,9 @@ class HeartbeatHandler:
                 exc_info=True,
             )
             return False
+        
+        # If processing fell through without explicit return, treat as failure
+        return False
     
     async def _auto_register_esp(
         self, 

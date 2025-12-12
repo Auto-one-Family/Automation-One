@@ -22,7 +22,7 @@ References:
 
 from typing import Annotated, AsyncGenerator, Optional
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,19 +107,19 @@ async def get_current_user(
     )
     
     # Development mode bypass (SECURITY: Never in production!)
-    if settings.development.debug_mode and not token:
+    if settings.development.debug_mode and settings.development.allow_auth_bypass and not token:
         # CRITICAL: Prevent auth bypass in production environment
         if settings.environment == "production":
             logger.error(
                 "SECURITY: Auth bypass attempted in production mode! "
-                "DEBUG_MODE should NEVER be enabled in production."
+                "DEBUG_AUTH_BYPASS_ENABLED should NEVER be enabled in production."
             )
             raise credentials_exception
 
         # In debug mode (non-production only), allow requests without token
         logger.warning(
             "Auth bypass in debug mode - returning mock admin user. "
-            "This is only allowed in development environment."
+            "This is only allowed in non-production environments when explicitly enabled."
         )
         user_repo = UserRepository(db)
         admin_user = await user_repo.get_by_username("admin")
@@ -378,59 +378,160 @@ APIKey = Annotated[str, Depends(verify_api_key)]
 # For production: Use Redis-based implementation
 import time
 from collections import defaultdict
+from dataclasses import dataclass
+
+try:
+    import redis.asyncio as redis  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    redis = None
 
 
-class RateLimiter:
+@dataclass
+class RateLimitResult:
+    allowed: bool
+    remaining: int
+    reset_seconds: int
+
+
+class InMemoryRateLimiter:
     """
-    Simple in-memory rate limiter with sliding window.
+    In-memory rate limiter with TTL cleanup.
     
-    For production, replace with Redis-based implementation.
+    Used as fallback when Redis is unavailable/disabled.
     """
     
-    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
+    def __init__(
+        self,
+        max_requests: int = 100,
+        window_seconds: int = 60,
+        max_keys: int = 10_000,
+    ):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
+        self.max_keys = max_keys
         self.requests: dict[str, list[float]] = defaultdict(list)
     
-    def is_allowed(self, key: str) -> bool:
-        """Check if request is allowed for key."""
+    async def check(self, key: str) -> RateLimitResult:
         now = time.time()
         window_start = now - self.window_seconds
         
-        # Clean old requests
-        self.requests[key] = [
+        # Clean old timestamps
+        entries = [
             req_time for req_time in self.requests[key]
             if req_time > window_start
         ]
+        self.requests[key] = entries
         
-        # Check limit
-        if len(self.requests[key]) >= self.max_requests:
-            return False
+        allowed = len(entries) < self.max_requests
+        if allowed:
+            entries.append(now)
+            self.requests[key] = entries
         
-        # Record request
-        self.requests[key].append(now)
-        return True
-    
-    def get_remaining(self, key: str) -> int:
-        """Get remaining requests for key."""
-        return max(0, self.max_requests - len(self.requests[key]))
-    
-    def get_reset_time(self, key: str) -> int:
-        """Get seconds until rate limit resets."""
-        if not self.requests[key]:
-            return 0
-        oldest = min(self.requests[key])
-        reset_at = oldest + self.window_seconds
-        return max(0, int(reset_at - time.time()))
+        # Compact dict if too many keys (drop oldest)
+        if len(self.requests) > self.max_keys:
+            # Drop keys with oldest activity first
+            ranked = []
+            for k, vals in self.requests.items():
+                last_ts = max(vals) if vals else 0
+                ranked.append((last_ts, k))
+            ranked.sort(key=lambda x: x[0])
+            for _, k in ranked[: len(self.requests) - self.max_keys]:
+                self.requests.pop(k, None)
+        
+        remaining = max(0, self.max_requests - len(self.requests[key]))
+        reset_seconds = 0
+        if self.requests[key]:
+            oldest = min(self.requests[key])
+            reset_at = oldest + self.window_seconds
+            reset_seconds = max(0, int(reset_at - now))
+        
+        return RateLimitResult(
+            allowed=allowed,
+            remaining=remaining,
+            reset_seconds=reset_seconds,
+        )
 
 
-# Global rate limiter instances
-_rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
-_auth_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)  # Stricter for auth
+class RedisRateLimiter:
+    """
+    Redis-backed sliding window rate limiter (shared across processes).
+    """
+    
+    def __init__(
+        self,
+        client,
+        max_requests: int = 100,
+        window_seconds: int = 60,
+        prefix: str = "rate_limit",
+    ):
+        self.client = client
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.prefix = prefix
+    
+    async def check(self, key: str) -> RateLimitResult:
+        now = int(time.time())
+        window_start = now - self.window_seconds
+        redis_key = f"{self.prefix}:{key}"
+        
+        pipe = self.client.pipeline()
+        pipe.zremrangebyscore(redis_key, 0, window_start)
+        pipe.zadd(redis_key, {str(now): now})
+        pipe.zcard(redis_key)
+        pipe.zrange(redis_key, 0, 0, withscores=True)
+        pipe.expire(redis_key, self.window_seconds)
+        try:
+            _, _, count, oldest_entry, _ = await pipe.execute()
+        except Exception as exc:  # pragma: no cover - operational fallback
+            logger.warning(f"Redis rate limit failed, falling back to allow: {exc}")
+            return RateLimitResult(True, self.max_requests, 0)
+        
+        remaining = max(0, self.max_requests - count)
+        reset_seconds = 0
+        if oldest_entry:
+            # oldest_entry is list of (member, score)
+            _, oldest_score = oldest_entry[0]
+            reset_seconds = max(0, int(self.window_seconds - (now - int(oldest_score))))
+        
+        allowed = count <= self.max_requests
+        return RateLimitResult(
+            allowed=allowed,
+            remaining=remaining,
+            reset_seconds=reset_seconds,
+        )
+
+
+def _build_rate_limiter(max_requests: int, window_seconds: int, prefix: str):
+    if settings.redis.enabled and redis:
+        try:
+            client = redis.Redis(
+                host=settings.redis.host,
+                port=settings.redis.port,
+                db=settings.redis.db,
+                password=settings.redis.password,
+                decode_responses=False,
+            )
+            return RedisRateLimiter(
+                client=client,
+                max_requests=max_requests,
+                window_seconds=window_seconds,
+                prefix=prefix,
+            )
+        except Exception as exc:  # pragma: no cover - fallback path
+            logger.warning(f"Redis init failed, using in-memory rate limiter: {exc}")
+    
+    return InMemoryRateLimiter(max_requests=max_requests, window_seconds=window_seconds)
+
+
+# Global rate limiter instances (shared for reuse)
+_rate_limiter = _build_rate_limiter(max_requests=100, window_seconds=60, prefix="rl")
+_auth_rate_limiter = _build_rate_limiter(max_requests=10, window_seconds=60, prefix="rl_auth")
 
 
 async def check_rate_limit(
+    request: Request,
     x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
+    x_forwarded_for: Annotated[Optional[str], Header(alias="X-Forwarded-For")] = None,
 ) -> None:
     """
     Check rate limit for API requests.
@@ -444,44 +545,59 @@ async def check_rate_limit(
         HTTPException: 429 if rate limit exceeded
     """
     # Use API key as rate limit key, or "anonymous" if none
-    key = x_api_key[:20] if x_api_key else "anonymous"
+    key = x_api_key[:20] if x_api_key else None
+    if not key:
+        if x_forwarded_for:
+            key = x_forwarded_for.split(",")[0].strip()
+        elif request.client and request.client.host:
+            key = request.client.host
+        else:
+            key = "anonymous"
     
-    if not _rate_limiter.is_allowed(key):
-        remaining = _rate_limiter.get_remaining(key)
-        reset_time = _rate_limiter.get_reset_time(key)
-        
+    result = await _rate_limiter.check(key)
+    
+    if not result.allowed:
         logger.warning(f"Rate limit exceeded for key: {key}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Rate limit exceeded. Max {_rate_limiter.max_requests} requests per {_rate_limiter.window_seconds}s.",
             headers={
-                "Retry-After": str(reset_time),
+                "Retry-After": str(result.reset_seconds),
                 "X-RateLimit-Limit": str(_rate_limiter.max_requests),
-                "X-RateLimit-Remaining": str(remaining),
-                "X-RateLimit-Reset": str(reset_time),
+                "X-RateLimit-Remaining": str(result.remaining),
+                "X-RateLimit-Reset": str(result.reset_seconds),
             },
         )
 
 
 async def check_auth_rate_limit(
+    request: Request,
     x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
+    x_forwarded_for: Annotated[Optional[str], Header(alias="X-Forwarded-For")] = None,
 ) -> None:
     """
     Stricter rate limit for authentication endpoints.
     
     Limits to 10 requests per minute to prevent brute force.
     """
-    key = x_api_key[:20] if x_api_key else "anonymous"
+    key = x_api_key[:20] if x_api_key else None
+    if not key:
+        if x_forwarded_for:
+            key = x_forwarded_for.split(",")[0].strip()
+        elif request.client and request.client.host:
+            key = request.client.host
+        else:
+            key = "anonymous"
     
-    if not _auth_rate_limiter.is_allowed(key):
-        reset_time = _auth_rate_limiter.get_reset_time(key)
-        
+    result = await _auth_rate_limiter.check(key)
+    
+    if not result.allowed:
         logger.warning(f"Auth rate limit exceeded for key: {key}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many authentication attempts. Please wait before trying again.",
             headers={
-                "Retry-After": str(reset_time),
+                "Retry-After": str(result.reset_seconds),
             },
         )
 
@@ -528,7 +644,16 @@ OptionalUser = Annotated[Optional[User], Depends(get_optional_user)]
 def get_mqtt_publisher():
     """Get MQTT Publisher instance."""
     from ..mqtt.publisher import Publisher
-    return Publisher()
+    
+    global _publisher_singleton
+    try:
+        return _publisher_singleton
+    except NameError:
+        _publisher_singleton = None  # type: ignore
+    
+    if _publisher_singleton is None:
+        _publisher_singleton = Publisher()
+    return _publisher_singleton
 
 
 def get_safety_service(db: DBSession):
@@ -551,6 +676,6 @@ def get_actuator_service(db: DBSession):
     actuator_repo = ActuatorRepository(db)
     esp_repo = ESPRepository(db)
     safety_service = SafetyService(actuator_repo, esp_repo)
-    publisher = Publisher()
+    publisher = get_mqtt_publisher()
     
     return ActuatorService(actuator_repo, safety_service, publisher)

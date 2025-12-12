@@ -1,0 +1,257 @@
+// =============================================================================
+// Auth Types
+// =============================================================================
+export interface User {
+  id: string
+  username: string
+  email: string
+  full_name: string | null
+  role: 'admin' | 'operator' | 'viewer'
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LoginRequest {
+  username: string
+  password: string
+  remember_me?: boolean
+}
+
+export interface SetupRequest {
+  username: string
+  email: string
+  password: string
+  full_name?: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+}
+
+export interface LoginResponse {
+  success: boolean
+  message: string
+  tokens: TokenResponse
+  user: User
+}
+
+export interface SetupResponse {
+  success: boolean
+  message: string
+  tokens: TokenResponse
+  user: User
+}
+
+export interface RefreshResponse {
+  success: boolean
+  message: string
+  tokens: TokenResponse
+}
+
+export interface AuthStatusResponse {
+  setup_required: boolean
+  users_exist: boolean
+  mqtt_auth_enabled: boolean
+  mqtt_tls_enabled: boolean
+}
+
+// =============================================================================
+// Mock ESP Types
+// =============================================================================
+export type MockSystemState =
+  | 'BOOT'
+  | 'WIFI_SETUP'
+  | 'WIFI_CONNECTED'
+  | 'MQTT_CONNECTING'
+  | 'MQTT_CONNECTED'
+  | 'AWAITING_USER_CONFIG'
+  | 'ZONE_CONFIGURED'
+  | 'SENSORS_CONFIGURED'
+  | 'OPERATIONAL'
+  | 'LIBRARY_DOWNLOADING'
+  | 'SAFE_MODE'
+  | 'ERROR'
+
+export type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad' | 'stale'
+
+export interface MockSensor {
+  gpio: number
+  sensor_type: string
+  name: string | null
+  subzone_id?: string | null
+  raw_value: number
+  unit: string
+  quality: QualityLevel
+  raw_mode: boolean
+  last_read: string | null
+}
+
+export interface MockActuator {
+  gpio: number
+  actuator_type: string
+  name: string | null
+  state: boolean
+  pwm_value: number
+  emergency_stopped: boolean
+  last_command: string | null
+}
+
+export interface MockESP {
+  esp_id: string
+  zone_id: string | null
+  master_zone_id: string | null
+  subzone_id: string | null
+  system_state: MockSystemState
+  sensors: MockSensor[]
+  actuators: MockActuator[]
+  auto_heartbeat: boolean
+  heap_free: number
+  wifi_rssi: number
+  uptime: number
+  last_heartbeat: string | null
+  created_at: string
+  connected: boolean
+}
+
+export interface MockESPCreate {
+  esp_id: string
+  zone_id?: string
+  master_zone_id?: string
+  subzone_id?: string
+  sensors?: MockSensorConfig[]
+  actuators?: MockActuatorConfig[]
+  auto_heartbeat?: boolean
+  heartbeat_interval_seconds?: number
+}
+
+export interface MockSensorConfig {
+  gpio: number
+  sensor_type: string
+  name?: string
+  subzone_id?: string
+  raw_value?: number
+  unit?: string
+  quality?: QualityLevel
+  raw_mode?: boolean
+}
+
+export interface MockActuatorConfig {
+  gpio: number
+  actuator_type: string
+  name?: string
+  state?: boolean
+  pwm_value?: number
+  min_value?: number
+  max_value?: number
+}
+
+// =============================================================================
+// WebSocket Message Types
+// =============================================================================
+export type MessageType =
+  | 'sensor_data'
+  | 'actuator_status'
+  | 'logic_execution'
+  | 'esp_health'
+  | 'system_event'
+
+export interface MqttMessage {
+  id: string
+  timestamp: string
+  type: MessageType
+  topic: string
+  payload: Record<string, unknown>
+  esp_id?: string
+}
+
+export interface WebSocketFilters {
+  types: MessageType[]
+  esp_ids: string[]
+  topicPattern: string
+}
+
+// =============================================================================
+// API Response Types
+// =============================================================================
+export interface ApiResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
+}
+
+export interface PaginatedResponse<T> {
+  success: boolean
+  data: T[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface CommandResponse {
+  success: boolean
+  esp_id: string
+  command: string
+  result?: Record<string, unknown>
+  error?: string
+}
+
+// =============================================================================
+// Logic Types
+// =============================================================================
+export interface LogicRule {
+  id: string
+  name: string
+  description: string | null
+  enabled: boolean
+  priority: number
+  conditions: LogicCondition[]
+  actions: LogicAction[]
+  cooldown_seconds: number
+  last_triggered: string | null
+  trigger_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface LogicCondition {
+  type: 'sensor' | 'time' | 'compound'
+  sensor_gpio?: number
+  sensor_esp_id?: string
+  operator?: string
+  value?: number
+  time_start?: string
+  time_end?: string
+  days?: number[]
+  logic?: 'AND' | 'OR'
+  conditions?: LogicCondition[]
+}
+
+export interface LogicAction {
+  type: 'actuator' | 'delay' | 'notification'
+  actuator_gpio?: number
+  actuator_esp_id?: string
+  command?: string
+  value?: number
+  duration?: number
+  delay_seconds?: number
+  notification_type?: string
+  notification_target?: string
+  notification_message?: string
+}
+
+export interface LogicExecution {
+  id: string
+  rule_id: string
+  rule_name: string
+  triggered_at: string
+  conditions_met: boolean
+  actions_executed: number
+  execution_time_ms: number
+  error: string | null
+}

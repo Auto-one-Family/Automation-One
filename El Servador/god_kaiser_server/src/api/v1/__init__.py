@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from .actuators import router as actuators_router
 from .auth import router as auth_router
+from .debug import router as debug_router
 from .esp import router as esp_router
 from .health import router as health_router
 from .logic import router as logic_router
@@ -26,11 +27,13 @@ api_v1_router.include_router(sensors_router)
 api_v1_router.include_router(actuators_router)
 api_v1_router.include_router(health_router)
 api_v1_router.include_router(logic_router)
+api_v1_router.include_router(debug_router)
 
 # Export individual routers for direct access if needed
 __all__ = [
     "api_v1_router",
     "auth_router",
+    "debug_router",
     "esp_router",
     "sensors_router",
     "actuators_router",

@@ -59,6 +59,15 @@ class MQTTSettings(BaseSettings):
         description="Path to Mosquitto password file",
     )
 
+    # Subscriber worker pool
+    subscriber_max_workers: int = Field(
+        default=10,
+        alias="MQTT_SUBSCRIBER_MAX_WORKERS",
+        ge=1,
+        le=128,
+        description="Max concurrent MQTT handler threads",
+    )
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
@@ -136,6 +145,13 @@ class PerformanceSettings(BaseSettings):
     )
     metrics_export_enabled: bool = Field(default=True, alias="METRICS_EXPORT_ENABLED")
     prometheus_port: int = Field(default=9090, alias="PROMETHEUS_PORT", ge=1, le=65535)
+    logic_scheduler_interval_seconds: int = Field(
+        default=60,
+        alias="LOGIC_SCHEDULER_INTERVAL_SECONDS",
+        ge=1,
+        le=3600,
+        description="Interval for timer-triggered logic evaluation",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -249,12 +265,39 @@ class ExternalServicesSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
+class NotificationSettings(BaseSettings):
+    """Notification (email/webhook) settings"""
+
+    smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
+    smtp_host: str = Field(default="localhost", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT", ge=1, le=65535)
+    smtp_username: Optional[str] = Field(default=None, alias="SMTP_USERNAME")
+    smtp_password: Optional[str] = Field(default=None, alias="SMTP_PASSWORD")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+    smtp_from: str = Field(default="noreply@god-kaiser.local", alias="SMTP_FROM")
+
+    webhook_timeout_seconds: int = Field(
+        default=5,
+        alias="WEBHOOK_TIMEOUT_SECONDS",
+        ge=1,
+        le=60,
+        description="Timeout for webhook notifications (seconds)",
+    )
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
 class DevelopmentSettings(BaseSettings):
     """Development and testing settings"""
 
     debug_mode: bool = Field(default=False, alias="DEBUG_MODE")
     testing_mode: bool = Field(default=False, alias="TESTING_MODE")
     mock_esp32_enabled: bool = Field(default=False, alias="MOCK_ESP32_ENABLED")
+    allow_auth_bypass: bool = Field(
+        default=False,
+        alias="DEBUG_AUTH_BYPASS_ENABLED",
+        description="Allow auth bypass in debug (never enable in production).",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -284,6 +327,7 @@ class Settings(BaseSettings):
     websocket: WebSocketSettings = WebSocketSettings()
     redis: RedisSettings = RedisSettings()
     external_services: ExternalServicesSettings = ExternalServicesSettings()
+    notification: NotificationSettings = NotificationSettings()
     development: DevelopmentSettings = DevelopmentSettings()
     
     @property

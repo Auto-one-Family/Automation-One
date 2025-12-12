@@ -1264,9 +1264,9 @@ class MockESP32Client:
         return self.actuators.get(gpio)
 
     def set_sensor_value(
-        self, 
-        gpio: int, 
-        raw_value: float, 
+        self,
+        gpio: int,
+        raw_value: float,
         sensor_type: str = "analog",
         name: str = "",
         unit: str = "",
@@ -1276,7 +1276,8 @@ class MockESP32Client:
         calibration: Optional[Dict[str, float]] = None,
         processed_value: Optional[float] = None,
         is_multi_value: bool = False,
-        secondary_values: Optional[Dict[str, float]] = None
+        secondary_values: Optional[Dict[str, float]] = None,
+        raw_mode: bool = False
     ):
         """Set sensor value for testing with full configuration."""
         if gpio not in self.sensors:
@@ -1292,7 +1293,8 @@ class MockESP32Client:
                 calibration=calibration,
                 processed_value=processed_value,
                 is_multi_value=is_multi_value,
-                secondary_values=secondary_values
+                secondary_values=secondary_values,
+                raw_mode=raw_mode
             )
         else:
             sensor = self.sensors[gpio]
@@ -1312,6 +1314,7 @@ class MockESP32Client:
             sensor.is_multi_value = is_multi_value
             if secondary_values:
                 sensor.secondary_values = secondary_values
+            sensor.raw_mode = raw_mode
             sensor.last_read = time.time()
 
     def set_multi_value_sensor(

@@ -4,8 +4,14 @@ Notification Action Executor
 Executes notification actions (email, webhook, websocket).
 """
 
+import asyncio
+import smtplib
+from email.message import EmailMessage
 from typing import Dict, Optional
 
+import httpx
+
+from ....core.config import get_settings
 from ....core.logging_config import get_logger
 from ....websocket.manager import WebSocketManager
 from .base import ActionResult, BaseActionExecutor
@@ -94,15 +100,15 @@ class NotificationActionExecutor(BaseActionExecutor):
         # Execute based on channel
         if channel == "websocket":
             return await self._send_websocket_notification(target, message, context)
-        elif channel == "email":
+        if channel == "email":
             return await self._send_email_notification(target, message, context)
-        elif channel == "webhook":
+        if channel == "webhook":
             return await self._send_webhook_notification(target, message, context)
-        else:
-            return ActionResult(
-                success=False,
-                message=f"Unsupported notification channel: {channel}",
-            )
+
+        return ActionResult(
+            success=False,
+            message=f"Unsupported notification channel: {channel}",
+        )
 
     async def _send_websocket_notification(
         self, target: str, message: str, context: Dict
@@ -146,40 +152,98 @@ class NotificationActionExecutor(BaseActionExecutor):
     async def _send_email_notification(
         self, target: str, message: str, context: Dict
     ) -> ActionResult:
-        """Send email notification (placeholder for future implementation)."""
-        logger.warning(
-            f"Email notification not yet implemented: target={target}, message={message[:50]}..."
-        )
-        
-        # TODO: Implement email sending
-        # - Integration with email service (SMTP, SendGrid, etc.)
-        # - HTML template support
-        # - Attachments support
-        
-        return ActionResult(
-            success=False,
-            message="Email notifications are not yet implemented",
-            data={"channel": "email", "target": target},
-        )
+        """Send email notification via SMTP (blocking call executed in thread)."""
+        settings = get_settings()
+
+        if not settings.notification.smtp_enabled:
+            return ActionResult(
+                success=False,
+                message="SMTP is disabled (enable SMTP_ENABLED to send emails)",
+            )
+
+        smtp_host = settings.notification.smtp_host
+        smtp_port = settings.notification.smtp_port
+        smtp_user = settings.notification.smtp_username
+        smtp_pass = settings.notification.smtp_password
+        use_tls = settings.notification.smtp_use_tls
+        sender = settings.notification.smtp_from
+
+        subject = f"Logic notification - {context.get('rule_name', 'Rule')}"
+
+        def _send_email_sync() -> None:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                if use_tls:
+                    server.starttls()
+                if smtp_user and smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+
+                msg = EmailMessage()
+                msg["Subject"] = subject
+                msg["From"] = sender
+                msg["To"] = target
+                msg.set_content(message)
+
+                server.send_message(msg)
+
+        try:
+            await asyncio.to_thread(_send_email_sync)
+            return ActionResult(
+                success=True,
+                message=f"Email sent to {target}",
+                data={"channel": "email", "target": target},
+            )
+        except Exception as e:
+            logger.error(f"Error sending email notification: {e}", exc_info=True)
+            return ActionResult(
+                success=False,
+                message=f"Error sending email notification: {str(e)}",
+            )
 
     async def _send_webhook_notification(
         self, target: str, message: str, context: Dict
     ) -> ActionResult:
-        """Send webhook notification (placeholder for future implementation)."""
-        logger.warning(
-            f"Webhook notification not yet implemented: target={target}, message={message[:50]}..."
-        )
-        
-        # TODO: Implement webhook sending
-        # - HTTP POST request to target URL
-        # - Retry logic
-        # - Authentication support
-        
-        return ActionResult(
-            success=False,
-            message="Webhook notifications are not yet implemented",
-            data={"channel": "webhook", "target": target},
-        )
+        """Send webhook notification via HTTP POST."""
+        settings = get_settings()
+        timeout = settings.notification.webhook_timeout_seconds
+
+        payload = {
+            "message": message,
+            "rule_name": context.get("rule_name"),
+            "rule_id": str(context.get("rule_id")) if context.get("rule_id") else None,
+            "trigger": context.get("trigger_data", {}),
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(target, json=payload)
+                response.raise_for_status()
+
+            return ActionResult(
+                success=True,
+                message=f"Webhook sent to {target}",
+                data={"channel": "webhook", "target": target, "status": response.status_code},
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Webhook returned HTTP error {e.response.status_code} for {target}",
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Webhook HTTP error: {e.response.status_code}",
+            )
+        except httpx.RequestError as e:
+            logger.error(f"Webhook request failed for {target}: {e}", exc_info=True)
+            return ActionResult(
+                success=False,
+                message=f"Webhook request failed: {str(e)}",
+            )
+        except Exception as e:
+            logger.error(f"Error sending webhook notification: {e}", exc_info=True)
+            return ActionResult(
+                success=False,
+                message=f"Error sending webhook notification: {str(e)}",
+            )
 
 
 

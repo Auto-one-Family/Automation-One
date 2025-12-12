@@ -470,6 +470,27 @@ class EmergencyStopRequest(BaseModel):
     )
 
 
+class EmergencyStopActuatorResult(BaseModel):
+    """Result of an emergency stop command for a single actuator."""
+
+    esp_id: str = Field(..., description="ESP device ID (external)")
+    gpio: int = Field(..., description="GPIO pin")
+    success: bool = Field(..., description="Whether OFF command was published")
+    message: Optional[str] = Field(
+        None, description="Error or status information for this actuator"
+    )
+
+
+class EmergencyStopDeviceResult(BaseModel):
+    """Aggregated emergency stop results per device."""
+
+    esp_id: str = Field(..., description="ESP device ID (external)")
+    actuators: List[EmergencyStopActuatorResult] = Field(
+        default_factory=list,
+        description="Actuator-level results for this device",
+    )
+
+
 class EmergencyStopResponse(BaseResponse):
     """
     Emergency stop response.
@@ -487,6 +508,10 @@ class EmergencyStopResponse(BaseResponse):
     )
     reason: str = Field(..., description="Emergency stop reason")
     timestamp: datetime = Field(..., description="Stop command timestamp")
+    details: List[EmergencyStopDeviceResult] = Field(
+        default_factory=list,
+        description="Per-device actuator stop results",
+    )
     
     model_config = ConfigDict(
         json_schema_extra={
@@ -496,7 +521,16 @@ class EmergencyStopResponse(BaseResponse):
                 "devices_stopped": 5,
                 "actuators_stopped": 12,
                 "reason": "Manual safety override",
-                "timestamp": "2025-01-01T10:00:00Z"
+                "timestamp": "2025-01-01T10:00:00Z",
+                "details": [
+                    {
+                        "esp_id": "ESP_12345678",
+                        "actuators": [
+                            {"esp_id": "ESP_12345678", "gpio": 5, "success": True},
+                            {"esp_id": "ESP_12345678", "gpio": 6, "success": False, "message": "MQTT publish failed"},
+                        ],
+                    }
+                ],
             }
         }
     )

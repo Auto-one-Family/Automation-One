@@ -5,6 +5,7 @@ JWT Token generation/verification and password hashing
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 import bcrypt
 from jose import JWTError, jwt
@@ -120,6 +121,7 @@ def create_refresh_token(
         "sub": str(user_id),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
+        "jti": str(uuid4()),  # ensure uniqueness to support rotation
         "type": "refresh",
     }
 

@@ -1,64 +1,75 @@
-# AutomationOne Frontend
+# El Frontend - AutomationOne Debug Dashboard
 
-> **Vuetify 3 Frontend für das AutomationOne Framework**  
-> **Status:** 📋 In Entwicklung
+> **Vue 3 + TypeScript + Tailwind CSS Debug Dashboard**
+> **Status:** Ready for Development
 
-## Übersicht
+## Features
 
-Modernes, responsives Frontend für die Steuerung und Überwachung von ESP32-basierten IoT-Geräten.
+- **Authentication**: Login, Setup, JWT Token Auto-Refresh
+- **Mock ESP Management**: Virtuelle ESP32-Geräte erstellen und steuern
+- **Sensor Simulation**: Sensor-Werte simulieren und MQTT-Messages triggern
+- **Actuator Control**: Aktoren steuern mit Emergency Stop
+- **MQTT Live Log**: Echtzeit-Anzeige aller MQTT-Messages via WebSocket
+- **Logic Engine**: Automation-Rules testen
 
 ## Technologie-Stack
 
-- **Vue 3** (Composition API)
-- **Vuetify 3** (Material Design)
+- **Vue 3** (Composition API + `<script setup>`)
+- **TypeScript** (Type Safety)
+- **Tailwind CSS** (Dark Theme)
 - **Pinia** (State Management)
 - **Vite** (Build Tool)
-- **Axios** (REST API Client)
-- **WebSocket** (Real-time Updates)
-- **Chart.js** (Datenvisualisierung)
+- **Axios** (REST API mit JWT Interceptors)
+- **Lucide Vue** (Icons)
 
-## Projekt-Setup
+## Setup
 
 ```bash
-# Dependencies installieren
+# 1. Node.js installieren (falls nicht vorhanden)
+# https://nodejs.org/ (LTS Version empfohlen)
+
+# 2. Dependencies installieren
+cd "El Frontend"
 npm install
 
-# Development-Server starten
+# 3. Development-Server starten
 npm run dev
 
-# Production-Build
-npm run build
-
-# Preview Production-Build
-npm run preview
+# 4. Browser öffnen: http://localhost:5173
 ```
 
-## Projekt-Struktur
+## Server Requirements
 
-Siehe `FRONTEND_PLAN.md` für detaillierte Dokumentation.
+Der God-Kaiser Server muss laufen:
 
-## Entwicklung
+```bash
+cd "El Servador/god_kaiser_server"
+poetry run uvicorn src.main:app --reload
+```
 
-### Phasen
+**Endpoints:**
+- REST API: `http://localhost:8000/api/v1/`
+- WebSocket: `ws://localhost:8000/ws/realtime/{client_id}`
+- Debug API: `http://localhost:8000/api/v1/debug/mock-esp/`
 
-1. **Phase 1:** Grundlagen (Authentifizierung, API-Setup)
-2. **Phase 2:** ESP-Verwaltung
-3. **Phase 3:** Sensor-Management
-4. **Phase 4:** Actuator-Steuerung
-5. **Phase 5:** Dashboard
-6. **Phase 6:** Logic Builder
-7. **Phase 7:** Zone-Verwaltung
-8. **Phase 8:** Settings & Polish
+## Views
 
-### API-Integration
-
-- **REST API:** `http://localhost:8000/api/v1/`
-- **WebSocket:** `ws://localhost:8000/ws/realtime`
+| Route | Beschreibung |
+|-------|-------------|
+| `/login` | Login-Seite |
+| `/setup` | Initial Admin Setup |
+| `/` | Dashboard |
+| `/mock-esp` | Mock ESP Manager |
+| `/mock-esp/:id` | Mock ESP Details |
+| `/sensors` | Sensor Overview |
+| `/actuators` | Actuator Control |
+| `/mqtt-log` | MQTT Live Log |
+| `/logic` | Logic Rules |
+| `/settings` | Settings |
 
 ## Dokumentation
 
-- **Vollständiger Plan:** `../FRONTEND_PLAN.md`
-- **Backend-Doku:** `../Hierarchie.md`
-- **ESP32-Doku:** `../.claude/CLAUDE.md`
-- **Server-Doku:** `../.claude/CLAUDE_SERVER.md`
-
+- **Server API:** `../.claude/CLAUDE_SERVER.md`
+- **ESP32 Firmware:** `../.claude/CLAUDE.md`
+- **MQTT Protocol:** `../El Trabajante/docs/Mqtt_Protocoll.md`
+- **Frontend Debug Architektur & Flows:** `./Docs/DEBUG_ARCHITECTURE.md` (Auth, REST/WS-Flows, Mock-ESP-Pfade, Lasttests, Logic-Placeholder)

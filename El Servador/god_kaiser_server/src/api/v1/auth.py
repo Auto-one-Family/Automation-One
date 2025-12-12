@@ -523,6 +523,7 @@ async def refresh_token(
             expires_at=expires_at,
             reason="token_rotation",
         )
+        await db.commit()
         logger.debug(f"Old refresh token blacklisted for user: {user.username}")
     except Exception as e:
         logger.warning(f"Failed to blacklist old refresh token: {e}")
@@ -605,6 +606,7 @@ async def logout(
                 reason="logout",
             )
             tokens_invalidated = 1
+            await db.commit()
             logger.info(f"Access token blacklisted for user: {current_user.username}")
         except Exception as e:
             logger.warning(f"Failed to blacklist access token: {e}")
@@ -627,7 +629,7 @@ async def logout(
         return LogoutResponse(
             success=True,
             message="Logged out from all devices successfully",
-            tokens_invalidated=0,  # 0 = all tokens invalidated (not countable)
+            tokens_invalidated=max(tokens_invalidated, 1),
         )
     else:
         logger.info(f"User logged out: {current_user.username} (tokens_invalidated={tokens_invalidated})")

@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.actuator import ActuatorConfig, ActuatorHistory, ActuatorState
+from ..models.esp import ESPDevice
 from .base_repo import BaseRepository
 
 
@@ -19,16 +20,14 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
     def __init__(self, session: AsyncSession):
         super().__init__(ActuatorConfig, session)
 
-    async def create(self, actuator: ActuatorConfig) -> ActuatorConfig:
+    async def create(self, actuator: Optional[ActuatorConfig] = None, **fields) -> ActuatorConfig:
         """
-        Create a new actuator config from an instance.
+        Create a new actuator config.
         
-        Args:
-            actuator: ActuatorConfig instance to create
-            
-        Returns:
-            Created ActuatorConfig instance
+        Accepts either an ActuatorConfig instance or model field kwargs.
         """
+        if actuator is None:
+            actuator = ActuatorConfig(**fields)
         self.session.add(actuator)
         await self.session.flush()
         await self.session.refresh(actuator)
@@ -43,6 +42,61 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def query_paginated(
+        self,
+        esp_device_id: Optional[str] = None,
+        actuator_type: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[tuple[ActuatorConfig, Optional[str], Optional[ActuatorState]]], int]:
+        """
+        Query actuators with DB-side filtering and pagination.
+
+        Returns list of (ActuatorConfig, esp_device_id, ActuatorState) and total count.
+        """
+        base_filters = []
+
+        if esp_device_id:
+            base_filters.append(ESPDevice.device_id == esp_device_id)
+        if actuator_type:
+            base_filters.append(ActuatorConfig.actuator_type == actuator_type)
+        if enabled is not None:
+            base_filters.append(ActuatorConfig.enabled == enabled)
+
+        # Count total with filters
+        count_stmt = (
+            select(func.count(ActuatorConfig.id))
+            .select_from(ActuatorConfig)
+            .join(ESPDevice, ActuatorConfig.esp_id == ESPDevice.id)
+        )
+        if base_filters:
+            count_stmt = count_stmt.where(and_(*base_filters))
+        total_result = await self.session.execute(count_stmt)
+        total = total_result.scalar() or 0
+
+        # Fetch page with ESP device id and current state
+        stmt = (
+            select(ActuatorConfig, ESPDevice.device_id, ActuatorState)
+            .join(ESPDevice, ActuatorConfig.esp_id == ESPDevice.id)
+            .outerjoin(
+                ActuatorState,
+                and_(
+                    ActuatorState.esp_id == ActuatorConfig.esp_id,
+                    ActuatorState.gpio == ActuatorConfig.gpio,
+                ),
+            )
+        )
+        if base_filters:
+            stmt = stmt.where(and_(*base_filters))
+        stmt = stmt.order_by(
+            ActuatorConfig.created_at.desc(), ActuatorConfig.id.desc()
+        ).offset(offset).limit(limit)
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return rows, total
 
     async def get_by_esp(self, esp_id: uuid.UUID) -> list[ActuatorConfig]:
         """Get all actuators for an ESP device."""

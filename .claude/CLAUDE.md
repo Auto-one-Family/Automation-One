@@ -10,6 +10,9 @@
 |-------------|----------------|---------------|
 | **ESP32 Code ändern** | [Section 8: Workflow](#8-ki-agenten-workflow) | `El Trabajante/src/` |
 | **Server Code ändern** | `.claude/CLAUDE_SERVER.md` → [Section 13: Workflow](.claude/CLAUDE_SERVER.md#13-ki-agenten-workflow) | `El Servador/god_kaiser_server/src/` |
+| **Frontend Code ändern** | `.claude/CLAUDE_FRONTEND.md` | `El Frontend/src/` |
+| **Frontend + Server starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
+| **Frontend Bug debuggen** | `El Frontend/Docs/Bugs_Found.md` | Workflow + Fix dokumentiert |
 | **MQTT verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | ESP: `src/services/communication/mqtt_client.*`<br>Server: `.claude/CLAUDE_SERVER.md` → [Section 4](.claude/CLAUDE_SERVER.md#4-mqtt-topic-referenz-server-perspektive) |
 | **ESP32 API verstehen** | `El Trabajante/docs/API_REFERENCE.md` | `src/services/[modul]/` |
 | **Server API verstehen** | `.claude/CLAUDE_SERVER.md` → [Section 3.2](.claude/CLAUDE_SERVER.md#32-aufgabe-rest-api-endpoint-hinzufügen) | `El Servador/god_kaiser_server/src/api/v1/` |
@@ -383,9 +386,15 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 | Datei | Zweck | Wann konsultieren? |
 |-------|-------|-------------------|
 | **`CLAUDE_SERVER.md`** | ⭐ **Server-spezifische KI-Dokumentation** | Bei allen Server-Änderungen, MQTT-Handler, API-Endpoints, Sensor-Libraries |
+| **`CLAUDE_FRONTEND.md`** | ⭐ **Frontend-spezifische KI-Dokumentation** | Bei allen Frontend-Änderungen, Vue Components, Auth-Flow, WebSocket |
 | `ARCHITECTURE_DEPENDENCIES.md` | Modul-Abhängigkeiten | Bei Architektur-Fragen, Dependency-Analyse |
 | `TEST_WORKFLOW.md` | Test-Infrastruktur-Details | Bei Test-Problemen, Test-Setup |
 | `WORKFLOW_PATTERNS.md` | Code-Patterns und Beispiele | Bei Unsicherheit über Code-Patterns |
+
+**📖 Frontend-Aufgaben?** → Siehe `.claude/CLAUDE_FRONTEND.md` + `El Frontend/Docs/`:
+- Server + Frontend starten → `DEBUG_ARCHITECTURE.md` Section 0
+- Bug debuggen → `Bugs_Found.md`
+- API verstehen → `APIs.md`
 
 **📖 Server-Aufgaben?** → Siehe `.claude/CLAUDE_SERVER.md`:
 - Sensor-Library hinzufügen → [Section 3.1](.claude/CLAUDE_SERVER.md#31-aufgabe-neuen-sensor-typ-hinzufügen)

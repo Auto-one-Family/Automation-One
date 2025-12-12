@@ -183,44 +183,21 @@ async def list_actuators(
         Paginated list of actuator configs
     """
     actuator_repo = ActuatorRepository(db)
-    esp_repo = ESPRepository(db)
-    
-    # Get all actuators
-    all_actuators = await actuator_repo.get_all()
-    
-    # Apply filters
-    filtered = all_actuators
-    
-    if esp_id:
-        esp_device = await esp_repo.get_by_device_id(esp_id)
-        if esp_device:
-            filtered = [a for a in filtered if a.esp_id == esp_device.id]
-        else:
-            filtered = []
-    
-    if actuator_type:
-        filtered = [a for a in filtered if a.actuator_type == actuator_type]
-    
-    if enabled is not None:
-        filtered = [a for a in filtered if a.enabled == enabled]
-    
-    # Pagination
-    total_items = len(filtered)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated = filtered[start_idx:end_idx]
-    
-    # Build responses with ESP device IDs
-    responses = []
-    for actuator in paginated:
-        esp_device = await esp_repo.get_by_id(actuator.esp_id)
-        esp_device_id = esp_device.device_id if esp_device else None
-        
-        # Get current state
-        state = await actuator_repo.get_state(actuator.esp_id, actuator.gpio)
-        
-        responses.append(_model_to_schema_response(actuator, esp_device_id, state))
-    
+
+    offset = (page - 1) * page_size
+    rows, total_items = await actuator_repo.query_paginated(
+        esp_device_id=esp_id,
+        actuator_type=actuator_type,
+        enabled=enabled,
+        offset=offset,
+        limit=page_size,
+    )
+
+    responses = [
+        _model_to_schema_response(actuator, device_id, state)
+        for actuator, device_id, state in rows
+    ]
+
     return ActuatorConfigListResponse(
         success=True,
         data=responses,
@@ -569,6 +546,7 @@ async def emergency_stop(
     
     devices_stopped = 0
     actuators_stopped = 0
+    details = []
     
     # Get target devices
     if request.esp_id:
@@ -585,6 +563,7 @@ async def emergency_stop(
     # Stop actuators on each device
     for device in devices:
         device_actuators_stopped = 0
+        device_result = {"esp_id": device.device_id, "actuators": []}
         
         # Get actuators for this device
         actuators = await actuator_repo.get_by_esp(device.id)
@@ -595,17 +574,32 @@ async def emergency_stop(
                 continue
             
             # Send OFF command
-            success = publisher.publish_actuator_command(
-                esp_id=device.device_id,
-                gpio=actuator.gpio,
-                command="OFF",
-                value=0.0,
-                duration=0,
-                retry=True,
-            )
+            try:
+                success = publisher.publish_actuator_command(
+                    esp_id=device.device_id,
+                    gpio=actuator.gpio,
+                    command="OFF",
+                    value=0.0,
+                    duration=0,
+                    retry=True,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"Emergency stop publish failed for {device.device_id} gpio {actuator.gpio}: {exc}",
+                    exc_info=True,
+                )
+                success = False
             
             if success:
                 device_actuators_stopped += 1
+                device_result["actuators"].append(
+                    {
+                        "esp_id": device.device_id,
+                        "gpio": actuator.gpio,
+                        "success": True,
+                        "message": None,
+                    }
+                )
                 
                 # Log command
                 await actuator_repo.log_command(
@@ -618,10 +612,22 @@ async def emergency_stop(
                     issued_by=f"emergency:{current_user.username}",
                     metadata={"reason": request.reason},
                 )
+            else:
+                device_result["actuators"].append(
+                    {
+                        "esp_id": device.device_id,
+                        "gpio": actuator.gpio,
+                        "success": False,
+                        "message": "MQTT publish failed",
+                    }
+                )
         
         if device_actuators_stopped > 0:
             devices_stopped += 1
             actuators_stopped += device_actuators_stopped
+        
+        if device_result["actuators"]:
+            details.append(device_result)
     
     await db.commit()
     
@@ -638,6 +644,7 @@ async def emergency_stop(
         actuators_stopped=actuators_stopped,
         reason=request.reason,
         timestamp=datetime.now(timezone.utc),
+        details=details,
     )
 
 

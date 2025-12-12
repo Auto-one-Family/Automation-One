@@ -2,8 +2,8 @@
 
 > **Zweck:** Server-ESP32-Abhängigkeiten verstehen für sichere Server-Code-Änderungen
 
-**Version:** 1.0
-**Letzte Aktualisierung:** 2025-01
+**Version:** 1.1
+**Letzte Aktualisierung:** 2025-12
 
 ---
 
@@ -81,6 +81,7 @@ Der God-Kaiser Server **MUSS** folgende ESP32-Dokumentation kennen, um korrekt m
 | `kaiser/{kaiser_id}/esp/{esp_id}/config` | `src/services/esp_service.py` | `El Trabajante/src/services/config/config_manager.cpp` | `Mqtt_Protocoll.md` Line 401-430 |
 | `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign` | `src/services/zone_service.py` | `El Trabajante/src/services/provisioning/provision_manager.cpp` | `Mqtt_Protocoll.md` Line 465-485 |
 | `kaiser/broadcast/emergency` | `src/services/actuator_service.py` | `El Trabajante/src/services/actuator/actuator_manager.cpp` | `Mqtt_Protocoll.md` Line 529-547 |
+| `kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/response` | `src/mqtt/publisher.py::publish_pi_enhanced_response` | ESP32 SensorManager | `Mqtt_Protocoll.md` Line 550-565 |
 
 **KRITISCH:** ESP32 erwartet exakte Payload-Struktur!
 
@@ -120,6 +121,7 @@ Der God-Kaiser Server **MUSS** folgende ESP32-Dokumentation kennen, um korrekt m
 - `sensor_handler.py` MUSS `Mqtt_Protocoll.md` Line 84-100 implementieren
 - `library_loader.py` MUSS sensor_types aus `El Trabajante/src/models/sensor_types.h` kennen
 - Sensor Processors MÜSSEN `raw_value` aus ESP32 verarbeiten können
+- `SensorRepository.get_stats` nutzt DB-Aggregation (min/max/avg/stddev, Qualitätsverteilung) – große Zeiträume erfordern keine RAM-Last mehr
 
 ### Actuator Control Layer
 
@@ -153,6 +155,7 @@ Der God-Kaiser Server **MUSS** folgende ESP32-Dokumentation kennen, um korrekt m
 - `actuator_service.py` MUSS `Mqtt_Protocoll.md` Line 143-161 implementieren
 - Server MUSS Safety-Constraints respektieren (Emergency Stop, Timeout)
 - `actuator_handler.py` MUSS Response-Payloads parsen können
+- MQTT Subscriber-Threadpool ist konfigurierbar (`MQTT_SUBSCRIBER_MAX_WORKERS`), sollte bei Lastanpassungen berücksichtigt werden
 
 ### ESP Management Layer
 
@@ -179,6 +182,7 @@ Der God-Kaiser Server **MUSS** folgende ESP32-Dokumentation kennen, um korrekt m
 **Abhängigkeiten:**
 - `heartbeat_handler.py` MUSS Heartbeat-Payload aus `Mqtt_Protocoll.md` Line 316-335 parsen
 - `esp_service.py` MUSS ESP-Capabilities verstehen (MAX_SENSORS, MAX_ACTUATORS)
+- Timeout/Online-Erkennung folgt `HEARTBEAT_TIMEOUT` und prüft `last_seen`; keine Auto-Registration aktiv (Registration required)
 
 ---
 

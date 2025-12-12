@@ -14,6 +14,9 @@ FastAPI-basiertes Backend für AutomationOne IoT-Framework.
 - God AI Integration
 - **Comprehensive ESP32 Testing Framework** (140+ Tests)
 - **API Integration Tests** (13+ Logic Tests)
+- **MQTT/Logic konfigurierbar:** Worker-Pool (`MQTT_SUBSCRIBER_MAX_WORKERS`) und Logic-Scheduler-Intervall (`LOGIC_SCHEDULER_INTERVAL_SECONDS`) per Settings steuerbar
+- **DB-aggregierte Sensor-Statistiken:** min/max/avg/stddev + Qualitätsverteilung ohne Voll-Load ins RAM
+- **Notifications erweitert:** WebSocket + SMTP (optional) + Webhook mit Timeout/Status-Checks
 
 ## Setup
 ```bash
@@ -24,6 +27,14 @@ poetry run uvicorn src.main:app --reload
 
 ## Architecture
 Siehe `/docs/ARCHITECTURE.md`
+
+---
+
+## Konfiguration (Auszug)
+- `MQTT_SUBSCRIBER_MAX_WORKERS` (default 10): Threadpool-Größe für MQTT-Handler
+- `LOGIC_SCHEDULER_INTERVAL_SECONDS` (default 60): Intervall für zeitbasierte Rule-Evaluierung
+- SMTP (optional): `SMTP_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM`
+- Webhook: `WEBHOOK_TIMEOUT_SECONDS` (default 5)
 
 ---
 

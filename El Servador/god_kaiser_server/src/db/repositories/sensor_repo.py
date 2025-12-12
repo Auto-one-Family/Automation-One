@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.sensor import SensorConfig, SensorData
+from ..models.esp import ESPDevice
 from .base_repo import BaseRepository
 
 
@@ -23,16 +24,14 @@ class SensorRepository(BaseRepository[SensorConfig]):
     def __init__(self, session: AsyncSession):
         super().__init__(SensorConfig, session)
 
-    async def create(self, sensor: SensorConfig) -> SensorConfig:
+    async def create(self, sensor: Optional[SensorConfig] = None, **fields) -> SensorConfig:
         """
-        Create a new sensor config from an instance.
+        Create a new sensor config.
         
-        Args:
-            sensor: SensorConfig instance to create
-            
-        Returns:
-            Created SensorConfig instance
+        Accepts either a SensorConfig instance or model field kwargs.
         """
+        if sensor is None:
+            sensor = SensorConfig(**fields)
         self.session.add(sensor)
         await self.session.flush()
         await self.session.refresh(sensor)
@@ -122,6 +121,51 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(SensorConfig.sensor_type == sensor_type)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def query_paginated(
+        self,
+        esp_device_id: Optional[str] = None,
+        sensor_type: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[tuple[SensorConfig, Optional[str]]], int]:
+        """
+        Query sensors with DB-side filtering and pagination.
+
+        Returns list of (SensorConfig, esp_device_id) and total count.
+        """
+        filters = []
+        if esp_device_id:
+            filters.append(ESPDevice.device_id == esp_device_id)
+        if sensor_type:
+            filters.append(SensorConfig.sensor_type == sensor_type.lower())
+        if enabled is not None:
+            filters.append(SensorConfig.enabled == enabled)
+
+        count_stmt = (
+            select(func.count(SensorConfig.id))
+            .select_from(SensorConfig)
+            .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
+        )
+        if filters:
+            count_stmt = count_stmt.where(and_(*filters))
+        total_result = await self.session.execute(count_stmt)
+        total = total_result.scalar() or 0
+
+        stmt = (
+            select(SensorConfig, ESPDevice.device_id)
+            .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
+        )
+        if filters:
+            stmt = stmt.where(and_(*filters))
+        stmt = stmt.order_by(
+            SensorConfig.created_at.desc(), SensorConfig.id.desc()
+        ).offset(offset).limit(limit)
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return rows, total
 
     # SensorData operations
     async def save_data(
@@ -360,23 +404,41 @@ class SensorRepository(BaseRepository[SensorConfig]):
             - reading_count: Total number of readings
             - quality_distribution: Dict with quality level counts
         """
-        from sqlalchemy import case
-
-        stmt = select(SensorData).where(
-            SensorData.esp_id == esp_id,
-            SensorData.gpio == gpio,
-        )
+        filters = [SensorData.esp_id == esp_id, SensorData.gpio == gpio]
 
         if start_time:
-            stmt = stmt.where(SensorData.timestamp >= start_time)
+            filters.append(SensorData.timestamp >= start_time)
         if end_time:
-            stmt = stmt.where(SensorData.timestamp <= end_time)
+            filters.append(SensorData.timestamp <= end_time)
 
-        # Get all data for statistics
-        result = await self.session.execute(stmt)
-        data = list(result.scalars().all())
+        # DB-side aggregation to avoid loading large datasets into memory where supported.
+        # SQLite lacks stddev_pop, so we conditionally compute std_dev in Python for SQLite.
+        bind = self.session.get_bind()
+        dialect_name = bind.dialect.name if bind is not None else ""
+        supports_stddev = dialect_name not in ("sqlite",)
 
-        if not data:
+        agg_columns = [
+            func.count().label("reading_count"),
+            func.min(SensorData.processed_value).label("min_value"),
+            func.max(SensorData.processed_value).label("max_value"),
+            func.avg(SensorData.processed_value).label("avg_value"),
+        ]
+        if supports_stddev:
+            agg_columns.append(func.stddev_pop(SensorData.processed_value).label("std_dev"))
+
+        agg_stmt = select(*agg_columns).where(*filters)
+
+        quality_stmt = (
+            select(SensorData.quality, func.count().label("count"))
+            .where(*filters)
+            .group_by(SensorData.quality)
+        )
+
+        agg_result = await self.session.execute(agg_stmt)
+        agg_row = agg_result.one()
+
+        # If no readings, return empty stats
+        if agg_row.reading_count == 0:
             return {
                 "min_value": None,
                 "max_value": None,
@@ -386,38 +448,37 @@ class SensorRepository(BaseRepository[SensorConfig]):
                 "quality_distribution": {},
             }
 
-        # Filter out None processed values for statistics
-        processed_values = [
-            d.processed_value for d in data if d.processed_value is not None
-        ]
+        quality_distribution: dict[str, int] = {}
+        q_result = await self.session.execute(quality_stmt)
+        for quality, count in q_result.all():
+            key = quality or "unknown"
+            quality_distribution[key] = count
 
-        stats = {
-            "reading_count": len(data),
-            "quality_distribution": {},
-        }
-
-        # Calculate statistics on processed values
-        if processed_values:
-            import statistics
-
-            stats["min_value"] = min(processed_values)
-            stats["max_value"] = max(processed_values)
-            stats["avg_value"] = statistics.mean(processed_values)
-            if len(processed_values) > 1:
-                stats["std_dev"] = statistics.stdev(processed_values)
-            else:
-                stats["std_dev"] = 0.0
+        # std_dev handling: if DB supports stddev_pop use it; otherwise compute in Python (SQLite)
+        std_dev = None
+        if supports_stddev:
+            std_dev = agg_row.std_dev if agg_row.reading_count > 1 else 0.0
         else:
-            stats["min_value"] = None
-            stats["max_value"] = None
-            stats["avg_value"] = None
-            stats["std_dev"] = None
-
-        # Count quality distribution
-        for reading in data:
-            quality = reading.quality or "unknown"
-            stats["quality_distribution"][quality] = (
-                stats["quality_distribution"].get(quality, 0) + 1
+            # Fetch processed values (non-null) for Python-side stddev; small test datasets are acceptable.
+            values_stmt = (
+                select(SensorData.processed_value)
+                .where(*filters)
+                .where(SensorData.processed_value.isnot(None))
             )
+            values_result = await self.session.execute(values_stmt)
+            values = [v for (v,) in values_result.all() if v is not None]
+            if len(values) > 1:
+                import statistics
 
-        return stats
+                std_dev = statistics.pstdev(values)  # population stddev to mirror stddev_pop
+            elif len(values) == 1:
+                std_dev = 0.0
+
+        return {
+            "min_value": agg_row.min_value,
+            "max_value": agg_row.max_value,
+            "avg_value": agg_row.avg_value,
+            "std_dev": std_dev,
+            "reading_count": agg_row.reading_count,
+            "quality_distribution": quality_distribution,
+        }

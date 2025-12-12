@@ -165,48 +165,24 @@ async def list_sensors(
         Paginated list of sensor configs
     """
     sensor_repo = SensorRepository(db)
-    esp_repo = ESPRepository(db)
-    
-    # Get all sensors
-    all_sensors = await sensor_repo.get_all()
-    
-    # Apply filters
-    filtered = all_sensors
-    
-    if esp_id:
-        esp_device = await esp_repo.get_by_device_id(esp_id)
-        if esp_device:
-            filtered = [s for s in filtered if s.esp_id == esp_device.id]
-        else:
-            filtered = []
-    
-    if sensor_type:
-        filtered = [s for s in filtered if s.sensor_type == sensor_type.lower()]
-    
-    if enabled is not None:
-        filtered = [s for s in filtered if s.enabled == enabled]
-    
-    # Pagination
-    total_items = len(filtered)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated = filtered[start_idx:end_idx]
-    
-    # Build responses
+    offset = (page - 1) * page_size
+    rows, total_items = await sensor_repo.query_paginated(
+        esp_device_id=esp_id,
+        sensor_type=sensor_type,
+        enabled=enabled,
+        offset=offset,
+        limit=page_size,
+    )
+
     responses = []
-    for sensor in paginated:
-        esp_device = await esp_repo.get_by_id(sensor.esp_id)
-        esp_device_id = esp_device.device_id if esp_device else None
-        
-        # Get latest reading
+    for sensor, esp_device_id in rows:
         latest = await sensor_repo.get_latest_reading(sensor.esp_id, sensor.gpio)
-        
-        # Convert model to response schema
+
         response = _model_to_response(sensor, esp_device_id)
         response.latest_value = latest.processed_value if latest else None
         response.latest_quality = latest.quality if latest else None
         response.latest_timestamp = latest.timestamp if latest else None
-        
+
         responses.append(response)
     
     return SensorConfigListResponse(

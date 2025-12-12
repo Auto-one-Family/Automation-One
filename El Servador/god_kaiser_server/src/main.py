@@ -132,7 +132,10 @@ async def lifespan(app: FastAPI):
             # Step 3: Register MQTT handlers
             logger.info("Registering MQTT handlers...")
             global _subscriber_instance
-            _subscriber_instance = Subscriber(mqtt_client, max_workers=10)
+            _subscriber_instance = Subscriber(
+                mqtt_client,
+                max_workers=settings.mqtt.subscriber_max_workers,
+            )
 
             # Get KAISER_ID from config (default: "god")
             kaiser_id = settings.hierarchy.kaiser_id
@@ -227,7 +230,10 @@ async def lifespan(app: FastAPI):
             await _logic_engine.start()
             
             # Initialize Logic Scheduler
-            _logic_scheduler = LogicScheduler(_logic_engine, interval_seconds=60)
+            _logic_scheduler = LogicScheduler(
+                _logic_engine,
+                interval_seconds=settings.performance.logic_scheduler_interval_seconds,
+            )
             await _logic_scheduler.start()
             
             # Set global instance for handlers
