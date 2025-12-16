@@ -129,9 +129,9 @@ MQTT_BROKER_PORT=1883
 ## 1) Architektur-Überblick
 - **Vue 3 + Pinia + Vite + TypeScript** – State in Pinia, Routing via `vue-router`.
 - **Axios mit JWT-Interceptor** – Refresh bei 401, Retry des Original-Requests; Logout & Redirect bei fehlgeschlagenem Refresh.
-- **REST**: Proxy `/api` → `http://localhost:8000/api/v1`. Debug-API spiegelt FastAPI-Endpunkte (`/debug/mock-esp/...`) 1:1.
-- **WebSocket**: Proxy `/ws` → `ws://localhost:8000`. MQTT-Log läuft über `/ws/realtime/{client_id}?token=...`.
-- **Styling**: Tailwind Dark Theme, Utility-Klassen in `src/style.css`.
+- **REST**: Proxy `/api` → `http://localhost:8000/api/v1`. Vollständige API-Abdeckung (Auth, Debug, Database, Logs, Users, Config, LoadTest).
+- **WebSocket**: Proxy `/ws` → `ws://localhost:8000`. MQTT-Log über `/ws/realtime/{client_id}?token=...`.
+- **Styling**: Tailwind CSS Dark Theme, Utility-Klassen in `src/style.css`.
 
 ## 2) Auth Flow (Frontend ↔ Server)
 - Initial: `authStore.checkAuthStatus()` prüft `/auth/status` → entscheidet `/setup` vs. `/login`.
@@ -182,4 +182,5 @@ UI-Abbildung:
 - Server API & MQTT: `../.claude/CLAUDE_SERVER.md`
 - ESP32 Firmware: `../.claude/CLAUDE.md`
 - MQTT Protokoll: `../El Trabajante/docs/Mqtt_Protocoll.md`
+
 
