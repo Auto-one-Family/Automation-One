@@ -40,7 +40,7 @@
 │ OPTION A: Raspberry Pi 5 (✅ Aktuell implementiert)                    │
 │ OPTION B: Jetson Nano/Orin (📋 Geplant - mit integrierter KI)          │
 │                                                                          │
-│ Status: ✅ Implementiert (MQTT-Layer vollständig, REST API in Entwicklung)│
+│ Status: 🚧 In Entwicklung (MQTT-Layer vollständig, REST API teilweise implementiert)│
 │ Rolle: Control Hub, MQTT Broker, Database, Logic Engine, Library Storage │
 │ Code-Location: El Servador/god_kaiser_server/                            │
 │ Dokumentation: .claude/CLAUDE_SERVER.md                                  │
@@ -265,7 +265,8 @@
   - Integriert (wenn God-Kaiser auf Jetson) - KI direkt im God-Kaiser
 - **Hardware-Detection:** Automatische Erkennung ob God-Kaiser auf Pi5 oder Jetson läuft
 - **Chat-Interface:** Natural Language Processing für System-Kontrolle
-- **Vuetify Frontend:** User-Interface für alle Funktionen
+- **Debug Frontend (Vue 3 + Tailwind):** Vollständiges Debug-Dashboard implementiert
+- **Production Frontend:** User-Interface für alle Funktionen (geplant)
 
 ### 3.2 Kaiser-Nodes - Selektives Download-System (OPTIONAL)
 
@@ -406,11 +407,33 @@
   - Graceful Degradation: Fallback auf Logik-Engine
   - Optional-Flag: KI-Plugins können deaktiviert werden
 
-### 3.4 Vuetify Frontend - User-Interface
+### 3.4 Frontend - User-Interface
 
-**Konzept:** Vuetify 3 Frontend als zentrale Steuerungsoberfläche für alle System-Funktionen.
+**Status:** Debug-Dashboard ✅ implementiert, Production Frontend 📋 geplant
 
-#### Funktionen (Geplant):
+#### Debug-Dashboard (✅ Implementiert)
+**Technologie:** Vue 3 + TypeScript + Tailwind CSS (Dark Theme)
+
+**Funktionen:**
+- **Mock-ESP Management:** Vollständige Simulation echter ESP32-Geräte
+- **Database Explorer:** Live-Abfragen aller Tabellen mit Filtern/Pagination
+- **MQTT Live-Log:** Real-time MQTT-Nachrichten-Anzeige mit WebSocket
+- **System Logs:** Server-Logs mit Filter- und Suchfunktionen
+- **User Management:** CRUD-Operationen für Benutzer (Admin-only)
+- **Load Testing:** Performance-Tests mit vielen Mock-ESPs
+- **System Config:** Key-Value Konfiguration bearbeiten
+
+**Code-Location:** `El Frontend/` (vollständig implementiert)
+- Vue 3 + TypeScript + Tailwind CSS
+- Pinia für State-Management
+- Axios mit JWT-Interceptor
+- WebSocket-Client für Real-time Updates
+- Dokumentation: `El Frontend/Docs/Developer_Onboarding.md`
+
+#### Production Frontend (📋 Geplant)
+**Konzept:** Vollständiges User-Interface für alle System-Funktionen.
+
+**Funktionen (Geplant):**
 - **Dashboard Builder:** User erstellt eigene Dashboards mit Drag & Drop
 - **Sensor-Widgets:** Live-Werte, Graphen, Gauges
 - **Actuator-Controls:** Buttons, Slider, Schedules
@@ -419,15 +442,7 @@
 - **KI-Chat-Interface:** Chat für System-Kontrolle
 - **Kaiser-Node-Manager:** Verwaltung von Kaiser-Nodes und ESP-Zuordnungen
 
-#### Code-Location (Geplant):
-- **Frontend-Projekt:** Noch nicht implementiert
-  - Soll sein: `El Frontend/` (separates Projekt)
-  - Vue 3 + Vuetify 3
-  - Pinia für State-Management
-  - WebSocket-Client für Real-time Updates
-  - Axios für REST API
-
-#### Integration:
+**Integration:**
 - **REST API:** Frontend kommuniziert mit God-Kaiser via REST API
 - **WebSocket:** Real-time Updates für Live-Daten
 - **Authentication:** JWT-basiert (bereits implementiert in Server)
@@ -596,10 +611,11 @@
 - Database-Layer (PostgreSQL/SQLite)
 - WebSocket (Real-time Updates)
 - Heartbeat-System
+- Debug Frontend (Vue 3 + Tailwind)
 
 ### 🚧 In Entwicklung:
-- REST API Endpoints (teilweise implementiert)
-- Frontend (Vuetify) - noch nicht gestartet
+- Vollständige REST API Endpoints
+- Production User Frontend
 
 ### 📋 Geplant:
 - Kaiser-Node-Client (selektives Download-System, optional für Skalierung)
@@ -652,26 +668,12 @@
   - Gehören zu einzelnen Sensoren/Aktoren, nicht zum ESP
   - Werden in MQTT-Payloads übertragen (sensor_manager.cpp, actuator_manager.cpp)
 
-### 9.3 ID-Formate & Validierung
-
-**ESP-ID:**
+### 9.3 ESP-ID Format
 - **Format:** `ESP_{8 alphanumeric chars}` (z.B. `ESP_12AB34CD`)
 - **Generierung:** Aus MAC-Adresse beim ersten Boot
 - **Speicherung:** NVS Namespace `system_config`, Key `esp_id`
 - **Code-Location (ESP32):** `El Trabajante/src/services/config/config_manager.cpp:299`
 - **Code-Location (Server):** `El Servador/god_kaiser_server/src/db/models/esp.py:52`
-
-**Kaiser-ID:**
-- **Format:** Alphanumeric String, 1-63 Zeichen (MQTT-Topic-Limit)
-- **Default:** `"god"` (God-Kaiser als direkter Kaiser)
-- **Validierung:** Wird in `ConfigManager::validateZoneConfig()` geprüft
-- **Code-Location:** `El Trabajante/src/services/config/config_manager.cpp:256-276`
-
-**Zone-ID:**
-- **Format:** Alphanumeric String + Underscore, empfohlen 1-50 Zeichen
-- **Beispiel:** `"greenhouse_zone_1"`, `"zone_north"`
-- **Validierung:** Server-seitig (ESP32 prüft nur ob nicht leer)
-- **Code-Location:** Zone-Assignment-Handler in `main.cpp:633-643`
 
 ### 9.4 God-Kaiser Hardware-Flexibilität
 
@@ -713,12 +715,7 @@
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-09
-**Version:** 1.2
-**Basiert auf:** Code-Analyse von `El Trabajante/` und `El Servador/` (Stand: 2025-12-09)
-
-**Änderungen in v1.2:**
-- Section 9.2: Klarstellung zu Zone-System (mehrere ESPs pro Zone, SubZones auf Sensor/Aktor-Level)
-- Section 9.3: Erweitert zu "ID-Formate & Validierung" mit Kaiser-ID und Zone-ID Constraints
-- Alle Code-Locations aktualisiert nach Hierarchie-Review
+**Letzte Aktualisierung:** 2025-12  
+**Version:** 1.1  
+**Basiert auf:** Code-Analyse von `El Trabajante/` und `El Servador/` (Stand: 2025-01)
 
