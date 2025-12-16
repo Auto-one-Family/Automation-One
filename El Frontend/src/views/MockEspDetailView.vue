@@ -157,7 +157,15 @@ function formatUptime(seconds: number): string {
         <ArrowLeft class="w-5 h-5" />
       </button>
       <div class="flex-1">
-        <h1 class="text-2xl font-bold text-dark-100 font-mono">{{ espId }}</h1>
+        <h1 class="text-2xl font-bold text-dark-100 font-mono flex items-center gap-2">
+          {{ espId }}
+          <span
+            v-if="esp?.hardware_type?.startsWith('MOCK_')"
+            class="px-2 py-0.5 text-xs font-semibold bg-purple-500/20 text-purple-400 rounded"
+          >
+            MOCK
+          </span>
+        </h1>
           <div class="flex flex-wrap gap-3 mt-1 text-sm">
             <span class="text-dark-400">Mock ESP32 Device Details</span>
             <span class="badge badge-gray">{{ zoneLabel }}</span>

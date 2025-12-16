@@ -149,6 +149,12 @@ function getStateColor(state: MockSystemState): string {
             >
               {{ esp.esp_id }}
             </RouterLink>
+            <span
+              v-if="esp.hardware_type?.startsWith('MOCK_')"
+              class="px-1.5 py-0.5 text-[10px] font-semibold bg-purple-500/20 text-purple-400 rounded"
+            >
+              MOCK
+            </span>
           </div>
           <span :class="['badge', getStateColor(esp.system_state)]">
             {{ esp.system_state }}
