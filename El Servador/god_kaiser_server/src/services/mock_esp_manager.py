@@ -519,7 +519,8 @@ class MockESPManager:
             uptime=int(time.time() - mock.boot_time),
             last_heartbeat=datetime.fromtimestamp(mock.last_heartbeat, tz=timezone.utc) if mock.last_heartbeat else None,
             created_at=self._created_at[esp_id],
-            connected=mock.connected
+            connected=mock.connected,
+            hardware_type="MOCK_ESP32"  # Identifies this as a mock device
         )
 
     def _sensor_to_response(self, sensor) -> MockSensorResponse:

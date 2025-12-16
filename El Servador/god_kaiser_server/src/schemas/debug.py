@@ -210,6 +210,7 @@ class MockESPResponse(BaseModel):
     last_heartbeat: Optional[datetime]
     created_at: datetime
     connected: bool
+    hardware_type: str = Field(default="MOCK_ESP32", description="Hardware type identifier")
 
     model_config = ConfigDict(
         json_schema_extra={

@@ -374,3 +374,4 @@ class TestBroadcastAuthUpdate:
             assert count == 3, "Should broadcast to all 3 ESPs"
             assert mock_publisher._publish_with_retry.call_count == 3
 
+

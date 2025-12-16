@@ -115,6 +115,7 @@ export interface MockESP {
   last_heartbeat: string | null
   created_at: string
   connected: boolean
+  hardware_type: string
 }
 
 export interface MockESPCreate {
