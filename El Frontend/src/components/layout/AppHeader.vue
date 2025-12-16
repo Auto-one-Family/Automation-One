@@ -2,7 +2,12 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { LogOut, User, ChevronDown } from 'lucide-vue-next'
+import { LogOut, User, ChevronDown, Menu } from 'lucide-vue-next'
+
+// Emit for sidebar toggle
+const emit = defineEmits<{
+  'toggle-sidebar': []
+}>()
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -15,10 +20,19 @@ async function handleLogout() {
 </script>
 
 <template>
-  <header class="h-16 bg-dark-900 border-b border-dark-700 flex items-center justify-between px-6">
-    <!-- Page Title (can be dynamic via route meta) -->
-    <div>
-      <h2 class="text-lg font-semibold text-dark-100">
+  <header class="h-16 bg-dark-900 border-b border-dark-700 flex items-center justify-between px-4 md:px-6">
+    <!-- Left Side: Hamburger + Title -->
+    <div class="flex items-center gap-3">
+      <!-- Hamburger Menu Button - Mobile Only -->
+      <button
+        class="md:hidden p-2 rounded-lg hover:bg-dark-800 transition-colors touch-target"
+        @click="emit('toggle-sidebar')"
+      >
+        <Menu class="w-6 h-6 text-dark-300" />
+      </button>
+
+      <!-- Page Title (can be dynamic via route meta) -->
+      <h2 class="text-base md:text-lg font-semibold text-dark-100">
         {{ $route.meta.title || 'Debug Dashboard' }}
       </h2>
     </div>

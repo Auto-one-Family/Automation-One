@@ -1,23 +1,59 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { RouterView } from 'vue-router'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
+
+// Mobile sidebar state
+const sidebarOpen = ref(false)
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
+}
+
+function closeSidebar() {
+  sidebarOpen.value = false
+}
 </script>
 
 <template>
   <div class="min-h-screen flex bg-dark-950">
+    <!-- Mobile Overlay -->
+    <Transition name="fade">
+      <div
+        v-if="sidebarOpen"
+        class="fixed inset-0 bg-black/50 z-30 md:hidden"
+        @click="closeSidebar"
+      />
+    </Transition>
+
     <!-- Sidebar -->
-    <AppSidebar />
+    <AppSidebar
+      :is-open="sidebarOpen"
+      @close="closeSidebar"
+    />
 
     <!-- Main Content -->
-    <div class="flex-1 flex flex-col ml-64">
+    <div class="flex-1 flex flex-col ml-0 md:ml-64 transition-[margin] duration-300">
       <!-- Header -->
-      <AppHeader />
+      <AppHeader @toggle-sidebar="toggleSidebar" />
 
       <!-- Page Content -->
-      <main class="flex-1 p-6 overflow-auto">
+      <main class="flex-1 p-4 md:p-6 overflow-auto">
         <RouterView />
       </main>
     </div>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

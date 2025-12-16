@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { X } from 'lucide-vue-next'
 import {
   LayoutDashboard,
   Cpu,
+  Database,
+  FileText,
+  Users,
+  Settings as SettingsIcon,
+  Zap,
   Thermometer,
   Power,
   MessageSquare,
@@ -11,12 +17,26 @@ import {
   Settings,
 } from 'lucide-vue-next'
 
+// Props & Emits for mobile responsive
+defineProps<{
+  isOpen: boolean
+}>()
+
+const emit = defineEmits<{
+  close: []
+}>()
+
 const route = useRoute()
 const authStore = useAuthStore()
 
 const navigation = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
   { name: 'Mock ESPs', to: '/mock-esp', icon: Cpu, requiresAdmin: true },
+  { name: 'Database', to: '/database', icon: Database, requiresAdmin: true },
+  { name: 'Server Logs', to: '/logs', icon: FileText, requiresAdmin: true },
+  { name: 'Users', to: '/users', icon: Users, requiresAdmin: true },
+  { name: 'System Config', to: '/system-config', icon: SettingsIcon, requiresAdmin: true },
+  { name: 'Load Test', to: '/load-test', icon: Zap, requiresAdmin: true },
   { name: 'Sensors', to: '/sensors', icon: Thermometer },
   { name: 'Actuators', to: '/actuators', icon: Power },
   { name: 'MQTT Log', to: '/mqtt-log', icon: MessageSquare },
@@ -34,13 +54,34 @@ function isActive(to: string): boolean {
   }
   return route.path.startsWith(to)
 }
+
+function handleNavClick() {
+  // Close sidebar on mobile after navigation
+  emit('close')
+}
 </script>
 
 <template>
-  <aside class="fixed left-0 top-0 h-screen w-64 bg-dark-900 border-r border-dark-700 flex flex-col z-40">
-    <!-- Logo -->
-    <div class="h-16 flex items-center px-6 border-b border-dark-700">
+  <aside
+    :class="[
+      'fixed left-0 top-0 h-screen w-64 bg-dark-900 border-r border-dark-700 flex flex-col z-40',
+      'transition-transform duration-300 ease-in-out',
+      // Mobile: hidden by default, show when isOpen
+      isOpen ? 'translate-x-0' : '-translate-x-full',
+      // Desktop: always visible
+      'md:translate-x-0'
+    ]"
+  >
+    <!-- Logo & Close Button -->
+    <div class="h-16 flex items-center justify-between px-6 border-b border-dark-700">
       <h1 class="text-xl font-bold text-gradient">El Frontend</h1>
+      <!-- Close button - mobile only -->
+      <button
+        class="md:hidden p-2 rounded-lg hover:bg-dark-800 transition-colors"
+        @click="emit('close')"
+      >
+        <X class="w-5 h-5 text-dark-400" />
+      </button>
     </div>
 
     <!-- Navigation -->
@@ -51,7 +92,9 @@ function isActive(to: string): boolean {
         :to="item.to"
         :class="[
           isActive(item.to) ? 'sidebar-link-active' : 'sidebar-link',
+          'touch-target' // Touch-friendly tap target (44px min)
         ]"
+        @click="handleNavClick"
       >
         <component :is="item.icon" class="w-5 h-5" />
         <span>{{ item.name }}</span>

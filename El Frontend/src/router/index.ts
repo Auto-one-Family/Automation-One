@@ -42,6 +42,36 @@ const router = createRouter({
           meta: { requiresAdmin: true },
         },
         {
+          path: 'database',
+          name: 'database',
+          component: () => import('@/views/DatabaseExplorerView.vue'),
+          meta: { requiresAdmin: true },
+        },
+        {
+          path: 'logs',
+          name: 'logs',
+          component: () => import('@/views/LogViewerView.vue'),
+          meta: { requiresAdmin: true },
+        },
+        {
+          path: 'users',
+          name: 'users',
+          component: () => import('@/views/UserManagementView.vue'),
+          meta: { requiresAdmin: true },
+        },
+        {
+          path: 'system-config',
+          name: 'system-config',
+          component: () => import('@/views/SystemConfigView.vue'),
+          meta: { requiresAdmin: true },
+        },
+        {
+          path: 'load-test',
+          name: 'load-test',
+          component: () => import('@/views/LoadTestView.vue'),
+          meta: { requiresAdmin: true },
+        },
+        {
           path: 'mqtt-log',
           name: 'mqtt-log',
           component: () => import('@/views/MqttLogView.vue'),
