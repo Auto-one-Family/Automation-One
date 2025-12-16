@@ -38,8 +38,8 @@ Standard-Workflow (90% der Anwendungen):
 | Komponente | Status | Details |
 |------------|--------|---------|
 | **ESP32 Firmware (El Trabajante)** | ✅ Production-Ready | Vollständig implementiert, 41+ Tests, dokumentiert |
-| **God-Kaiser Server (El Servador)** | 🚧 In Entwicklung | MQTT-Layer vollständig, REST API in Planung |
-| **Frontend (Vuetify)** | 📋 Konzept | Architektur definiert, Implementation geplant |
+| **God-Kaiser Server (El Servador)** | 🚧 In Entwicklung | MQTT-Layer vollständig, REST API teilweise implementiert, Database Layer fertig |
+| **Frontend (Vue 3 + Tailwind)** | ✅ Debug-Dashboard | Vollständiges Debug-Tool implementiert, Production-Ready |
 | **Kaiser-Nodes** | 📋 Konzept | Database Models vorhanden, Implementation nach Server |
 | **God Layer** | 📋 Konzept | Plugin-Interface geplant |
 
@@ -51,19 +51,24 @@ Standard-Workflow (90% der Anwendungen):
 - ✅ Umfangreiche Test-Suite (140+ Server-Tests, 41+ ESP-Tests)
 - ✅ Sensor-Datenverarbeitung (Pi-Enhanced Mode)
 - ✅ Database Layer (PostgreSQL/SQLite)
+- ✅ Debug-Dashboard Frontend (Vue 3 + Tailwind)
+- ✅ REST API Endpoints (Auth, Debug, Database, Logs, Users)
+- ✅ Cross-ESP Automation Engine
+- ✅ Sensor-Library-Loader (pH, Temperature, Humidity, EC, etc.)
 
 ### In aktiver Entwicklung:
-- 🚧 Server REST API Endpoints
-- 🚧 Sensor-Library-Loader (pH fertig, 8 weitere geplant)
-- 🚧 Cross-ESP Automation Engine
-- 🚧 Vuetify Dashboard
+- 🚧 Vollständige REST API (Sensors, Actuators, Logic)
+- 🚧 Production-Frontend (User Dashboard)
+- 🚧 Kaiser-Node-System (optional für Skalierung)
+- 🚧 KI-Integration (God Layer)
 
 ### Roadmap:
-- 📋 Frontend Dashboard Builder
-- 📋 Kaiser Schema-Sync
+- 📋 Production User Dashboard (ersetzt Debug-Dashboard)
+- 📋 Dashboard Builder für individuelle Oberflächen
+- 📋 Kaiser-Node-System (optional für Skalierung)
 - 📋 God Layer Plugin-Interface
 - 📋 Mobile-optimiertes Frontend
-- 📋 Logic Engine für If-Then-Regeln
+- 📋 KI-Integration und Chat-Interface
 
 ---
 
@@ -303,10 +308,22 @@ Auto-one/
 | Dynamic Import | importlib | Sensor-Library-Loader |
 | Async | asyncio + asyncpg | Non-blocking I/O |
 
-### Frontend (Vuetify 3)
+### Frontend (Vue 3 + Tailwind CSS)
 
 Das Frontend ist der **"Schlüssel"** zum System - der User konfiguriert hier seine individuelle Oberfläche.
 
+#### Debug-Dashboard (✅ Implementiert)
+| Feature | Beschreibung |
+|---------|--------------|
+| **Mock-ESP Management** | Vollständige Simulation echter ESP32-Geräte |
+| **Database Explorer** | Live-Abfragen aller Tabellen mit Filtern |
+| **MQTT Live-Log** | Real-time MQTT-Nachrichten-Anzeige |
+| **System Logs** | Server-Logs mit Filter- und Suchfunktionen |
+| **User Management** | CRUD-Operationen für Benutzer |
+| **Load Testing** | Performance-Tests mit vielen Mock-ESPs |
+| **System Config** | Key-Value Konfiguration bearbeiten |
+
+#### Geplante Features:
 | Feature | Beschreibung |
 |---------|--------------|
 | **Dashboard Builder** | User erstellt eigene Dashboards mit Drag & Drop |
@@ -317,11 +334,14 @@ Das Frontend ist der **"Schlüssel"** zum System - der User konfiguriert hier se
 | **User-Schemas** | Exportierbar für Kaiser-Nodes |
 
 **Technologie:**
-- Framework: Vue 3 + Vuetify 3
+- Framework: Vue 3 + TypeScript
+- UI: Tailwind CSS (Dark Theme)
 - State: Pinia
-- Charts: Apache ECharts / Chart.js
+- Charts: Chart.js + vue-chartjs
+- HTTP: Axios mit JWT-Interceptor
 - Realtime: WebSocket
 - Build: Vite
+- Icons: Lucide Vue
 
 **Deployment:**
 - Läuft direkt auf God-Kaiser Server
@@ -794,17 +814,17 @@ poetry run pytest tests/e2e/ -v
 ### Projekt-Dokumentation
 - **ESP32 Firmware**: `El Trabajante/README.md`
 - **God-Kaiser Server**: `El Servador/README.md`
+- **Frontend**: `El Frontend/Docs/Developer_Onboarding.md`
 - **ESP32 Testing**: `El Servador/docs/ESP32_TESTING.md` (Server-orchestrierte Tests)
 - **MQTT Protocol**: `El Trabajante/docs/Mqtt_Protocoll.md`
 - **ESP32 System Flows**: `El Trabajante/docs/system-flows/`
 - **ESP32 API Reference**: `El Trabajante/docs/API_REFERENCE.md`
+- **Frontend APIs**: `El Frontend/Docs/APIs.md`
+- **Debug Architecture**: `El Frontend/Docs/DEBUG_ARCHITECTURE.md`
 
-### Geplante Dokumentation
-- **Architecture Deep-Dive**: `El Servador/docs/ARCHITECTURE.md` (⚠️ Zu erstellen)
-- **API Reference**: `El Servador/docs/API.md` (⚠️ Zu erstellen)
-- **MQTT Topics**: `El Servador/docs/MQTT_TOPICS.md` (⚠️ Zu erstellen)
-- **Security**: `El Servador/docs/SECURITY.md` (⚠️ Zu erstellen)
-- **Deployment**: `El Servador/docs/DEPLOYMENT.md` (⚠️ Zu erstellen)
+### Architektur-Dokumentation
+- **System-Hierarchie**: `Hierarchie.md` (vollständige Architektur-Übersicht)
+- **Entwickler-Onboarding**: `El Frontend/Docs/Developer_Onboarding.md`
 
 ---
 
