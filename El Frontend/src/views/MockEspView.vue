@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+/**
+ * MockEspView
+ * 
+ * List view for all Mock ESP devices.
+ * Uses ESPCard component for consistent display.
+ */
+
+import { ref, onMounted, computed } from 'vue'
 import { useMockEspStore } from '@/stores/mockEsp'
 import type { MockESPCreate, MockSystemState } from '@/types'
-import { Plus, Trash2, Heart, RefreshCw, AlertTriangle, X } from 'lucide-vue-next'
+import { Plus, RefreshCw, AlertTriangle, X, Filter } from 'lucide-vue-next'
+
+// Components
+import ESPCard from '@/components/esp/ESPCard.vue'
+import { LoadingState, EmptyState, ErrorState } from '@/components/common'
 
 const mockEspStore = useMockEspStore()
 
+// Modal state
 const showCreateModal = ref(false)
 const newEsp = ref<MockESPCreate>({
   esp_id: '',
@@ -16,14 +28,57 @@ const newEsp = ref<MockESPCreate>({
   actuators: [],
 })
 
+// Filter state
+const filterType = ref<'all' | 'mock' | 'real'>('all')
+const filterStatus = ref<'all' | 'online' | 'offline'>('all')
+
 onMounted(() => {
   mockEspStore.fetchAll()
 })
 
+// Filtered ESPs
+const filteredEsps = computed(() => {
+  let esps = mockEspStore.mockEsps
+  
+  // Filter by type
+  if (filterType.value === 'mock') {
+    esps = esps.filter(e => 
+      e.hardware_type?.startsWith('MOCK_') || e.esp_id?.startsWith('ESP_MOCK_')
+    )
+  } else if (filterType.value === 'real') {
+    esps = esps.filter(e => 
+      !e.hardware_type?.startsWith('MOCK_') && !e.esp_id?.startsWith('ESP_MOCK_')
+    )
+  }
+  
+  // Filter by status
+  if (filterStatus.value === 'online') {
+    esps = esps.filter(e => e.connected)
+  } else if (filterStatus.value === 'offline') {
+    esps = esps.filter(e => !e.connected)
+  }
+  
+  return esps
+})
+
+// Counts for filter badges
+const counts = computed(() => ({
+  all: mockEspStore.mockEsps.length,
+  mock: mockEspStore.mockEsps.filter(e => 
+    e.hardware_type?.startsWith('MOCK_') || e.esp_id?.startsWith('ESP_MOCK_')
+  ).length,
+  real: mockEspStore.mockEsps.filter(e => 
+    !e.hardware_type?.startsWith('MOCK_') && !e.esp_id?.startsWith('ESP_MOCK_')
+  ).length,
+  online: mockEspStore.mockEsps.filter(e => e.connected).length,
+  offline: mockEspStore.mockEsps.filter(e => !e.connected).length,
+}))
+
+// Generate random ESP ID
 function generateEspId(): string {
   const chars = 'ABCDEF0123456789'
-  let id = 'ESP_'
-  for (let i = 0; i < 8; i++) {
+  let id = 'ESP_MOCK_'
+  for (let i = 0; i < 6; i++) {
     id += chars.charAt(Math.floor(Math.random() * chars.length))
   }
   return id
@@ -50,27 +105,20 @@ async function createEsp() {
   }
 }
 
-async function deleteEsp(espId: string) {
-  if (confirm(`Delete mock ESP ${espId}?`)) {
-    await mockEspStore.remove(espId)
-  }
-}
-
-async function triggerHeartbeat(espId: string) {
+async function handleHeartbeat(espId: string) {
   await mockEspStore.triggerHeartbeat(espId)
 }
 
-async function toggleState(espId: string, currentState: MockSystemState) {
-  const newState: MockSystemState = currentState === 'SAFE_MODE' ? 'OPERATIONAL' : 'SAFE_MODE'
-  await mockEspStore.setState(espId, newState, 'Manual toggle from UI')
+async function handleToggleSafeMode(espId: string) {
+  const esp = mockEspStore.mockEsps.find(e => e.esp_id === espId)
+  if (!esp) return
+  const newState: MockSystemState = esp.system_state === 'SAFE_MODE' ? 'OPERATIONAL' : 'SAFE_MODE'
+  await mockEspStore.setState(espId, newState, 'Manueller Wechsel')
 }
 
-function getStateColor(state: MockSystemState): string {
-  switch (state) {
-    case 'OPERATIONAL': return 'badge-success'
-    case 'SAFE_MODE': return 'badge-warning'
-    case 'ERROR': return 'badge-danger'
-    default: return 'badge-gray'
+async function handleDelete(espId: string) {
+  if (confirm(`Mock ESP "${espId}" wirklich löschen?`)) {
+    await mockEspStore.remove(espId)
   }
 }
 </script>
@@ -78,227 +126,327 @@ function getStateColor(state: MockSystemState): string {
 <template>
   <div class="space-y-6">
     <!-- Header -->
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h1 class="text-2xl font-bold text-dark-100">Mock ESP Manager</h1>
-        <p class="text-dark-400 mt-1">Create and manage virtual ESP32 devices</p>
+        <h1 class="text-2xl font-bold" style="color: var(--color-text-primary)">ESP-Geräte</h1>
+        <p style="color: var(--color-text-muted)" class="mt-1">
+          Mock-ESP32-Geräte erstellen und verwalten
+        </p>
       </div>
       <div class="flex gap-3">
-        <button class="btn-secondary" @click="mockEspStore.fetchAll">
-          <RefreshCw class="w-4 h-4 mr-2" />
-          Refresh
+        <button class="btn-secondary" @click="mockEspStore.fetchAll" :disabled="mockEspStore.isLoading">
+          <RefreshCw :class="['w-4 h-4', mockEspStore.isLoading ? 'animate-spin' : '']" />
+          <span class="hidden sm:inline ml-1">Aktualisieren</span>
         </button>
         <button class="btn-primary" @click="openCreateModal">
-          <Plus class="w-4 h-4 mr-2" />
-          Create Mock ESP
+          <Plus class="w-4 h-4" />
+          <span class="hidden sm:inline ml-1">Mock ESP erstellen</span>
         </button>
       </div>
     </div>
 
     <!-- Error Alert -->
-    <div
+    <ErrorState
       v-if="mockEspStore.error"
-      class="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl"
-    >
-      <AlertTriangle class="w-5 h-5 text-red-400" />
-      <span class="text-red-400">{{ mockEspStore.error }}</span>
-      <button class="ml-auto text-red-400 hover:text-red-300" @click="mockEspStore.clearError">
-        <X class="w-4 h-4" />
-      </button>
+      :message="mockEspStore.error"
+      show-dismiss
+      @retry="mockEspStore.fetchAll"
+      @dismiss="mockEspStore.clearError"
+    />
+
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-4">
+      <!-- Type Filter -->
+      <div class="filter-group">
+        <span class="filter-label">Typ:</span>
+        <div class="filter-buttons">
+          <button 
+            :class="['filter-btn', filterType === 'all' ? 'filter-btn--active' : '']"
+            @click="filterType = 'all'"
+          >
+            Alle ({{ counts.all }})
+          </button>
+          <button 
+            :class="['filter-btn', filterType === 'mock' ? 'filter-btn--active filter-btn--mock' : '']"
+            @click="filterType = 'mock'"
+          >
+            Mock ({{ counts.mock }})
+          </button>
+          <button 
+            :class="['filter-btn', filterType === 'real' ? 'filter-btn--active filter-btn--real' : '']"
+            @click="filterType = 'real'"
+          >
+            Real ({{ counts.real }})
+          </button>
+        </div>
+      </div>
+      
+      <!-- Status Filter -->
+      <div class="filter-group">
+        <span class="filter-label">Status:</span>
+        <div class="filter-buttons">
+          <button 
+            :class="['filter-btn', filterStatus === 'all' ? 'filter-btn--active' : '']"
+            @click="filterStatus = 'all'"
+          >
+            Alle
+          </button>
+          <button 
+            :class="['filter-btn', filterStatus === 'online' ? 'filter-btn--active filter-btn--success' : '']"
+            @click="filterStatus = 'online'"
+          >
+            Online ({{ counts.online }})
+          </button>
+          <button 
+            :class="['filter-btn', filterStatus === 'offline' ? 'filter-btn--active' : '']"
+            @click="filterStatus = 'offline'"
+          >
+            Offline ({{ counts.offline }})
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Loading -->
-    <div v-if="mockEspStore.isLoading" class="text-center py-12 text-dark-400">
-      Loading mock ESPs...
-    </div>
+    <LoadingState v-if="mockEspStore.isLoading && mockEspStore.mockEsps.length === 0" text="Lade ESP-Geräte..." />
 
     <!-- Empty State -->
-    <div
+    <EmptyState
       v-else-if="mockEspStore.mockEsps.length === 0"
-      class="card p-12 text-center"
+      :icon="Plus"
+      title="Keine Mock-ESPs"
+      description="Erstellen Sie Ihr erstes virtuelles ESP32-Gerät, um mit dem Testen zu beginnen."
+      action-text="Mock ESP erstellen"
+      @action="openCreateModal"
+    />
+
+    <!-- No Results (with filters) -->
+    <div 
+      v-else-if="filteredEsps.length === 0" 
+      class="card p-8 text-center"
     >
-      <div class="w-16 h-16 bg-dark-800 rounded-full flex items-center justify-center mx-auto mb-4">
-        <Plus class="w-8 h-8 text-dark-400" />
-      </div>
-      <h3 class="text-lg font-medium text-dark-200 mb-2">No Mock ESPs</h3>
-      <p class="text-dark-400 mb-4">Create your first virtual ESP32 device to start testing</p>
-      <button class="btn-primary" @click="openCreateModal">
-        <Plus class="w-4 h-4 mr-2" />
-        Create Mock ESP
+      <Filter class="w-12 h-12 mx-auto mb-4" style="color: var(--color-text-muted)" />
+      <h3 class="font-semibold mb-2" style="color: var(--color-text-secondary)">
+        Keine Ergebnisse
+      </h3>
+      <p style="color: var(--color-text-muted)" class="mb-4">
+        Keine Geräte entsprechen den aktuellen Filtern.
+      </p>
+      <button class="btn-secondary" @click="filterType = 'all'; filterStatus = 'all'">
+        Filter zurücksetzen
       </button>
     </div>
 
     <!-- ESP Grid -->
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <div
-        v-for="esp in mockEspStore.mockEsps"
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <ESPCard
+        v-for="esp in filteredEsps"
         :key="esp.esp_id"
-        class="card hover:border-dark-600 transition-colors"
-      >
-        <div class="card-header flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <span
-              :class="[
-                'status-dot',
-                esp.connected ? 'status-online' : 'status-offline'
-              ]"
-            />
-            <RouterLink
-              :to="`/mock-esp/${esp.esp_id}`"
-              class="font-mono font-medium text-dark-100 hover:text-blue-400"
-            >
-              {{ esp.esp_id }}
-            </RouterLink>
-            <span
-              v-if="esp.hardware_type?.startsWith('MOCK_')"
-              class="px-1.5 py-0.5 text-[10px] font-semibold bg-purple-500/20 text-purple-400 rounded"
-            >
-              MOCK
-            </span>
-          </div>
-          <span :class="['badge', getStateColor(esp.system_state)]">
-            {{ esp.system_state }}
-          </span>
-        </div>
-
-        <div class="card-body space-y-4">
-          <!-- Stats -->
-          <div class="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p class="text-dark-400">Sensors</p>
-              <p class="text-dark-100 font-medium">{{ esp.sensors.length }}</p>
-            </div>
-            <div>
-              <p class="text-dark-400">Actuators</p>
-              <p class="text-dark-100 font-medium">{{ esp.actuators.length }}</p>
-            </div>
-            <div>
-              <p class="text-dark-400">Uptime</p>
-              <p class="text-dark-100 font-medium">{{ Math.floor(esp.uptime / 60) }}m</p>
-            </div>
-            <div>
-              <p class="text-dark-400">Heap</p>
-              <p class="text-dark-100 font-medium">{{ Math.round(esp.heap_free / 1024) }}KB</p>
-            </div>
-          </div>
-
-          <!-- Zone -->
-          <div v-if="esp.zone_id" class="text-sm">
-            <span class="text-dark-400">Zone:</span>
-            <span class="text-dark-200 ml-1">{{ esp.zone_id }}</span>
-          </div>
-
-          <!-- Auto Heartbeat -->
-          <div class="flex items-center gap-2 text-sm">
-            <span
-              :class="[
-                'w-2 h-2 rounded-full',
-                esp.auto_heartbeat ? 'bg-green-500' : 'bg-dark-600'
-              ]"
-            />
-            <span class="text-dark-400">
-              Auto-heartbeat {{ esp.auto_heartbeat ? 'enabled' : 'disabled' }}
-            </span>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex gap-2 pt-2 border-t border-dark-700">
-            <button
-              class="btn-ghost btn-sm flex-1"
-              @click="triggerHeartbeat(esp.esp_id)"
-              title="Send Heartbeat"
-            >
-              <Heart class="w-4 h-4" />
-            </button>
-            <button
-              class="btn-ghost btn-sm flex-1"
-              :class="esp.system_state === 'SAFE_MODE' ? 'text-yellow-400' : ''"
-              @click="toggleState(esp.esp_id, esp.system_state)"
-              :title="esp.system_state === 'SAFE_MODE' ? 'Exit Safe Mode' : 'Enter Safe Mode'"
-            >
-              <AlertTriangle class="w-4 h-4" />
-            </button>
-            <RouterLink
-              :to="`/mock-esp/${esp.esp_id}`"
-              class="btn-secondary btn-sm flex-1 justify-center"
-            >
-              Details
-            </RouterLink>
-            <button
-              class="btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10"
-              @click="deleteEsp(esp.esp_id)"
-              title="Delete"
-            >
-              <Trash2 class="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
+        :esp="esp"
+        @heartbeat="handleHeartbeat"
+        @toggle-safe-mode="handleToggleSafeMode"
+        @delete="handleDelete"
+      />
     </div>
 
     <!-- Create Modal -->
-    <div
-      v-if="showCreateModal"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      @click.self="showCreateModal = false"
-    >
-      <div class="card w-full max-w-md">
-        <div class="card-header flex items-center justify-between">
-          <h3 class="text-lg font-semibold text-dark-100">Create Mock ESP</h3>
-          <button class="text-dark-400 hover:text-dark-200" @click="showCreateModal = false">
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-        <div class="card-body space-y-4">
-          <div>
-            <label class="label">ESP ID</label>
-            <div class="flex gap-2">
-              <input v-model="newEsp.esp_id" class="input flex-1 font-mono" />
-              <button class="btn-secondary" @click="newEsp.esp_id = generateEspId()">
-                <RefreshCw class="w-4 h-4" />
-              </button>
+    <Teleport to="body">
+      <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3 class="modal-title">Mock ESP erstellen</h3>
+            <button class="modal-close" @click="showCreateModal = false">
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div>
+              <label class="label">ESP ID</label>
+              <div class="flex gap-2">
+                <input v-model="newEsp.esp_id" class="input flex-1 font-mono" />
+                <button class="btn-secondary" @click="newEsp.esp_id = generateEspId()" title="Neue ID generieren">
+                  <RefreshCw class="w-4 h-4" />
+                </button>
+              </div>
+              <p class="text-xs mt-1" style="color: var(--color-text-muted)">
+                Format: ESP_MOCK_XXXXXX
+              </p>
             </div>
-            <p class="text-xs text-dark-400 mt-1">Format: ESP_XXXXXXXX</p>
-          </div>
 
-          <div>
-            <label class="label">Zone ID (optional)</label>
-            <input v-model="newEsp.zone_id" class="input" placeholder="e.g., greenhouse" />
-          </div>
+            <div>
+              <label class="label">Zone (optional)</label>
+              <input v-model="newEsp.zone_id" class="input" placeholder="z.B. gewächshaus" />
+            </div>
 
-          <div class="flex items-center gap-3">
-            <input
-              id="autoHeartbeat"
-              v-model="newEsp.auto_heartbeat"
-              type="checkbox"
-              class="w-4 h-4 rounded border-dark-600 bg-dark-800 text-blue-600"
-            />
-            <label for="autoHeartbeat" class="text-sm text-dark-200">
-              Enable auto-heartbeat
-            </label>
-          </div>
+            <div class="flex items-center gap-3">
+              <input
+                id="autoHeartbeat"
+                v-model="newEsp.auto_heartbeat"
+                type="checkbox"
+                class="checkbox"
+              />
+              <label for="autoHeartbeat" style="color: var(--color-text-secondary)">
+                Auto-Heartbeat aktivieren
+              </label>
+            </div>
 
-          <div v-if="newEsp.auto_heartbeat">
-            <label class="label">Heartbeat Interval (seconds)</label>
-            <input
-              v-model.number="newEsp.heartbeat_interval_seconds"
-              type="number"
-              min="5"
-              max="300"
-              class="input"
-            />
+            <div v-if="newEsp.auto_heartbeat">
+              <label class="label">Heartbeat-Intervall (Sekunden)</label>
+              <input
+                v-model.number="newEsp.heartbeat_interval_seconds"
+                type="number"
+                min="5"
+                max="300"
+                class="input"
+              />
+            </div>
           </div>
-
-          <div class="flex gap-3 pt-4">
+          <div class="modal-footer">
             <button class="btn-secondary flex-1" @click="showCreateModal = false">
-              Cancel
+              Abbrechen
             </button>
             <button class="btn-primary flex-1" @click="createEsp">
-              Create
+              Erstellen
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+/* Filter group */
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-label {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 0.25rem;
+  background-color: var(--color-bg-tertiary);
+  padding: 0.25rem;
+  border-radius: 0.5rem;
+}
+
+.filter-btn {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 0.375rem;
+  color: var(--color-text-muted);
+  transition: all 0.2s;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.filter-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.filter-btn--active {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.filter-btn--mock.filter-btn--active {
+  color: var(--color-mock);
+}
+
+.filter-btn--real.filter-btn--active {
+  color: var(--color-real);
+}
+
+.filter-btn--success.filter-btn--active {
+  color: var(--color-success);
+}
+
+/* Checkbox */
+.checkbox {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--glass-border);
+  background-color: var(--color-bg-tertiary);
+  cursor: pointer;
+}
+
+.checkbox:checked {
+  background-color: var(--color-iridescent-1);
+  border-color: var(--color-iridescent-1);
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background-color: rgba(10, 10, 15, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  width: 100%;
+  max-width: 28rem;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--glass-shadow);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.modal-close {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  color: var(--color-text-muted);
+  transition: all 0.2s;
+}
+
+.modal-close:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-tertiary);
+}
+
+.modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+</style>

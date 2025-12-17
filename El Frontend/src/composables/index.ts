@@ -2,7 +2,7 @@
  * Composables
  *
  * Usage:
- * import { useModal, useSwipeNavigation } from '@/composables'
+ * import { useModal, useSwipeNavigation, useRealTimeData } from '@/composables'
  */
 
 export { useModal, useModals } from './useModal'
@@ -11,6 +11,10 @@ export {
   useSidebarSwipe,
   useEdgeSwipe,
 } from './useSwipeNavigation'
+export {
+  useRealTimeData,
+  useGlobalRealTimeData,
+} from './useRealTimeData'
 
 // Future composables to be added:
 // export { useFilter } from './useFilter'

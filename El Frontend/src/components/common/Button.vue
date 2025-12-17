@@ -1,7 +1,18 @@
 <script setup lang="ts">
+/**
+ * Button Component
+ * 
+ * A versatile button component with support for:
+ * - Multiple variants including primary with iridescent gradient
+ * - Multiple sizes
+ * - Loading state with spinner
+ * - Icon slots
+ * - Full width option
+ */
+
 import { computed } from 'vue'
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'success' | 'ghost'
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'success' | 'ghost' | 'outline'
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 interface Props {
@@ -28,45 +39,53 @@ const props = withDefaults(defineProps<Props>(), {
   type: 'button',
 })
 
-const classes = computed(() => {
-  const base = [
-    'inline-flex items-center justify-center font-medium rounded-lg',
-    'transition-all duration-200',
-    'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-dark-900',
-    'disabled:opacity-50 disabled:cursor-not-allowed',
-    'touch-target', // Accessibility: 44px min touch target
-  ]
+const buttonClasses = computed(() => {
+  const classes: string[] = []
 
-  // Variant styles
+  // Variant classes
   const variantClasses: Record<ButtonVariant, string> = {
-    primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
-    secondary: 'bg-dark-700 text-dark-100 hover:bg-dark-600 focus:ring-dark-500',
-    danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
-    success: 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500',
-    ghost: 'bg-transparent text-dark-300 hover:bg-dark-800 hover:text-dark-100',
+    primary: 'btn-primary',
+    secondary: 'btn-secondary',
+    danger: 'btn-danger',
+    success: 'btn-success',
+    ghost: 'btn-ghost',
+    outline: 'btn-secondary', // Alias for secondary with border
   }
 
-  // Size styles
+  classes.push(variantClasses[props.variant])
+
+  // Size classes
   const sizeClasses: Record<ButtonSize, string> = {
-    sm: 'px-3 py-1.5 text-sm gap-1.5',
-    md: 'px-4 py-2 text-base gap-2',
-    lg: 'px-6 py-3 text-lg gap-2.5',
+    sm: 'btn-sm',
+    md: '', // Default size in btn base
+    lg: 'btn-lg',
   }
 
-  return [
-    ...base,
-    variantClasses[props.variant],
-    sizeClasses[props.size],
-    props.fullWidth ? 'w-full' : '',
-    props.loading ? 'cursor-wait' : '',
-  ].filter(Boolean).join(' ')
+  if (sizeClasses[props.size]) {
+    classes.push(sizeClasses[props.size])
+  }
+
+  // Full width
+  if (props.fullWidth) {
+    classes.push('w-full')
+  }
+
+  // Loading cursor
+  if (props.loading) {
+    classes.push('cursor-wait')
+  }
+
+  // Touch target for accessibility
+  classes.push('touch-target')
+
+  return classes.filter(Boolean).join(' ')
 })
 </script>
 
 <template>
   <button
     :type="type"
-    :class="classes"
+    :class="buttonClasses"
     :disabled="disabled || loading"
   >
     <!-- Loading Spinner -->

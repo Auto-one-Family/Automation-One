@@ -3,6 +3,28 @@ import { ref, computed } from 'vue'
 import { debugApi } from '@/api/debug'
 import type { MockESP, MockESPCreate, MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel } from '@/types'
 
+/**
+ * Extract error message from Axios error response.
+ * Handles both string and array (FastAPI validation) formats.
+ */
+function extractErrorMessage(err: unknown, fallback: string): string {
+  const axiosError = err as { response?: { data?: { detail?: string | Array<{ msg?: string; loc?: string[] }> } } }
+  const detail = axiosError.response?.data?.detail
+  
+  if (!detail) return fallback
+  
+  // FastAPI validation errors return an array
+  if (Array.isArray(detail)) {
+    return detail.map(d => {
+      const field = d.loc?.slice(1).join('.') || 'unknown'
+      return `${field}: ${d.msg || 'validation error'}`
+    }).join('; ')
+  }
+  
+  // Standard string error
+  return detail
+}
+
 export const useMockEspStore = defineStore('mockEsp', () => {
   // State
   const mockEsps = ref<MockESP[]>([])
@@ -29,8 +51,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
     try {
       mockEsps.value = await debugApi.listMockEsps()
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to fetch mock ESPs'
+      error.value = extractErrorMessage(err, 'Failed to fetch mock ESPs')
       throw err
     } finally {
       isLoading.value = false
@@ -46,8 +67,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       mockEsps.value.push(esp)
       return esp
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to create mock ESP'
+      error.value = extractErrorMessage(err, 'Failed to create mock ESP')
       throw err
     } finally {
       isLoading.value = false
@@ -66,8 +86,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
         selectedEspId.value = null
       }
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to delete mock ESP'
+      error.value = extractErrorMessage(err, 'Failed to delete mock ESP')
       throw err
     } finally {
       isLoading.value = false
@@ -83,8 +102,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to trigger heartbeat'
+      error.value = extractErrorMessage(err, 'Failed to trigger heartbeat')
       throw err
     }
   }
@@ -98,8 +116,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to set state'
+      error.value = extractErrorMessage(err, 'Failed to set state')
       throw err
     }
   }
@@ -113,8 +130,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to configure auto-heartbeat'
+      error.value = extractErrorMessage(err, 'Failed to configure auto-heartbeat')
       throw err
     }
   }
@@ -128,8 +144,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to add sensor'
+      error.value = extractErrorMessage(err, 'Failed to add sensor')
       throw err
     }
   }
@@ -149,8 +164,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to set sensor value'
+      error.value = extractErrorMessage(err, 'Failed to set sensor value')
       throw err
     }
   }
@@ -167,8 +181,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to set batch sensor values'
+      error.value = extractErrorMessage(err, 'Failed to set batch sensor values')
       throw err
     }
   }
@@ -181,8 +194,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to remove sensor'
+      error.value = extractErrorMessage(err, 'Failed to remove sensor')
       throw err
     }
   }
@@ -196,8 +208,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to add actuator'
+      error.value = extractErrorMessage(err, 'Failed to add actuator')
       throw err
     }
   }
@@ -216,8 +227,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to set actuator state'
+      error.value = extractErrorMessage(err, 'Failed to set actuator state')
       throw err
     }
   }
@@ -231,8 +241,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to trigger emergency stop'
+      error.value = extractErrorMessage(err, 'Failed to trigger emergency stop')
       throw err
     }
   }
@@ -246,8 +255,7 @@ export const useMockEspStore = defineStore('mockEsp', () => {
       const updated = await debugApi.getMockEsp(espId)
       updateEsp(espId, updated)
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Failed to clear emergency'
+      error.value = extractErrorMessage(err, 'Failed to clear emergency')
       throw err
     }
   }

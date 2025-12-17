@@ -1,51 +1,99 @@
 <script setup lang="ts">
+/**
+ * Card Component
+ * 
+ * A versatile card component with support for:
+ * - Different border color variants
+ * - Glass morphism effect
+ * - Water reflection shimmer
+ * - Hoverable state
+ * - Header, body, footer slots
+ */
+
 interface Props {
   /** Whether to add hover effect */
   hoverable?: boolean
-  /** Whether to add padding to the card body (use slots for custom layout) */
+  /** Whether to add padding to the card body */
   noPadding?: boolean
   /** Border color variant */
-  borderColor?: 'default' | 'success' | 'warning' | 'danger' | 'info'
+  variant?: 'default' | 'success' | 'warning' | 'danger' | 'info' | 'mock' | 'real'
+  /** Enable glass morphism effect */
+  glass?: boolean
+  /** Enable water reflection shimmer */
+  shimmer?: boolean
+  /** Iridescent border effect */
+  iridescent?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   hoverable: false,
   noPadding: false,
-  borderColor: 'default',
+  variant: 'default',
+  glass: false,
+  shimmer: false,
+  iridescent: false,
 })
+
+// Compute card classes
+const cardClasses = computed(() => {
+  const classes: string[] = ['card']
+  
+  // Variant border colors
+  const variantClasses: Record<string, string> = {
+    'default': '',
+    'success': 'border-success/30',
+    'warning': 'border-warning/30',
+    'danger': 'border-danger/30',
+    'info': 'border-info/30',
+    'mock': 'border-mock/30',
+    'real': 'border-real/30',
+  }
+  
+  if (variantClasses[props.variant]) {
+    classes.push(variantClasses[props.variant])
+  }
+  
+  if (props.hoverable) {
+    classes.push('cursor-pointer', 'hover:shadow-card-hover', 'hover:-translate-y-0.5')
+  }
+  
+  if (props.glass) {
+    classes.push('card-glass')
+  }
+  
+  if (props.shimmer) {
+    classes.push('water-reflection')
+  }
+  
+  if (props.iridescent) {
+    classes.push('iridescent-border')
+  }
+  
+  return classes
+})
+
+import { computed } from 'vue'
 </script>
 
 <template>
-  <div
-    :class="[
-      'bg-dark-900 border rounded-xl transition-colors',
-      hoverable ? 'hover:border-dark-600 cursor-pointer' : '',
-      {
-        'border-dark-700': borderColor === 'default',
-        'border-green-500/30': borderColor === 'success',
-        'border-yellow-500/30': borderColor === 'warning',
-        'border-red-500/30': borderColor === 'danger',
-        'border-blue-500/30': borderColor === 'info',
-      }
-    ]"
-  >
+  <div :class="cardClasses">
     <!-- Header slot -->
     <div
       v-if="$slots.header"
-      class="px-4 sm:px-6 py-3 sm:py-4 border-b border-dark-700"
+      class="card-header"
     >
       <slot name="header" />
     </div>
 
     <!-- Default slot (body) -->
-    <div :class="noPadding ? '' : 'p-4 sm:p-6'">
+    <div :class="noPadding ? '' : 'card-body'">
       <slot />
     </div>
 
     <!-- Footer slot -->
     <div
       v-if="$slots.footer"
-      class="px-4 sm:px-6 py-3 sm:py-4 border-t border-dark-700"
+      class="card-footer"
     >
       <slot name="footer" />
     </div>

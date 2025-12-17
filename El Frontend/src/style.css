@@ -2,6 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   DESIGN SYSTEM - CSS VARIABLES
+   AutomationOne Frontend - Dark Theme + Iridescent Accents
+   ============================================================================ */
+
+:root {
+  /* === DARK THEME BASIS === */
+  --color-bg-primary: #0a0a0f;
+  --color-bg-secondary: #12121a;
+  --color-bg-tertiary: #1a1a24;
+  --color-bg-hover: #22222e;
+  
+  /* === TEXT === */
+  --color-text-primary: #f0f0f5;
+  --color-text-secondary: #a0a0b0;
+  --color-text-muted: #606070;
+  
+  /* === IRIDESCENT AKZENTE (Wasser-Reflexion) === */
+  --color-iridescent-1: #60a5fa;
+  --color-iridescent-2: #818cf8;
+  --color-iridescent-3: #a78bfa;
+  --color-iridescent-4: #c084fc;
+  
+  /* === STATUS-FARBEN === */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-info: #60a5fa;
+  
+  /* === MOCK/REAL UNTERSCHEIDUNG === */
+  --color-mock: #a78bfa;
+  --color-real: #22d3ee;
+  
+  /* === GLASMORPHISM === */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
 /* Base styles */
 @layer base {
   html {
@@ -9,7 +48,9 @@
   }
 
   body {
-    @apply bg-dark-950 text-dark-100 min-h-screen;
+    @apply min-h-screen;
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
   }
 
   /* Custom scrollbar */
@@ -18,177 +59,553 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-dark-900;
+    background-color: var(--color-bg-secondary);
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-dark-600 rounded-full;
+    @apply rounded-full;
+    background-color: var(--color-text-muted);
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-dark-500;
+    background-color: var(--color-text-secondary);
   }
 }
 
 /* Component styles */
 @layer components {
-  /* Button base */
+  /* ============================================================================
+     BUTTONS
+     ============================================================================ */
+  
   .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
            transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
-           focus:ring-offset-dark-900 disabled:opacity-50 disabled:cursor-not-allowed;
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    focus-ring-offset-color: var(--color-bg-primary);
   }
 
+  /* Primary - Iridescent Gradient */
   .btn-primary {
-    @apply btn bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500;
+    @apply btn text-white;
+    background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  }
+  
+  .btn-primary:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+  
+  .btn-primary:focus {
+    --tw-ring-color: var(--color-iridescent-1);
   }
 
+  /* Secondary */
   .btn-secondary {
-    @apply btn bg-dark-700 text-dark-100 hover:bg-dark-600 focus:ring-dark-500;
+    @apply btn;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    border: 1px solid var(--glass-border);
+  }
+  
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-bg-hover);
+    border-color: rgba(96, 165, 250, 0.3);
   }
 
-  .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
-  }
-
-  .btn-success {
-    @apply btn bg-green-600 text-white hover:bg-green-700 focus:ring-green-500;
-  }
-
+  /* Ghost */
   .btn-ghost {
-    @apply btn bg-transparent text-dark-300 hover:bg-dark-800 hover:text-dark-100;
+    @apply btn;
+    background-color: transparent;
+    color: var(--color-text-secondary);
+  }
+  
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
   }
 
+  /* Danger */
+  .btn-danger {
+    @apply btn;
+    background-color: rgba(248, 113, 113, 0.2);
+    color: var(--color-error);
+  }
+  
+  .btn-danger:hover:not(:disabled) {
+    background-color: rgba(248, 113, 113, 0.3);
+  }
+  
+  .btn-danger:focus {
+    --tw-ring-color: var(--color-error);
+  }
+
+  /* Success */
+  .btn-success {
+    @apply btn text-white;
+    background-color: var(--color-success);
+  }
+  
+  .btn-success:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  /* Button Sizes */
   .btn-sm {
-    @apply px-3 py-1.5 text-sm;
+    @apply px-3 py-1.5 text-xs;
   }
 
   .btn-lg {
-    @apply px-6 py-3 text-lg;
+    @apply px-6 py-3 text-base;
   }
 
-  /* Card */
+  /* ============================================================================
+     CARDS
+     ============================================================================ */
+  
   .card {
-    @apply bg-dark-900 border border-dark-700 rounded-xl;
+    @apply rounded-xl transition-all duration-200;
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--glass-border);
+  }
+  
+  .card:hover {
+    border-color: rgba(96, 165, 250, 0.2);
   }
 
   .card-header {
-    @apply px-6 py-4 border-b border-dark-700;
+    @apply px-5 py-4;
+    border-bottom: 1px solid var(--glass-border);
   }
 
   .card-body {
-    @apply p-6;
+    @apply p-5;
+  }
+  
+  .card-footer {
+    @apply px-5 py-3;
+    border-top: 1px solid var(--glass-border);
+    background-color: rgba(26, 26, 36, 0.5);
   }
 
-  /* Input */
+  /* Glass Card Variant */
+  .card-glass {
+    @apply card;
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    box-shadow: var(--glass-shadow);
+  }
+
+  /* ============================================================================
+     INPUTS
+     ============================================================================ */
+  
   .input {
-    @apply w-full px-4 py-2.5 bg-dark-800 border border-dark-600 rounded-lg
-           text-dark-100 placeholder-dark-400
-           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-           transition-all duration-200;
+    @apply w-full px-4 py-2.5 rounded-lg transition-all duration-200;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--glass-border);
+    color: var(--color-text-primary);
+  }
+  
+  .input::placeholder {
+    color: var(--color-text-muted);
+  }
+  
+  .input:focus {
+    @apply outline-none ring-2;
+    --tw-ring-color: var(--color-iridescent-1);
+    border-color: transparent;
   }
 
   .input-error {
-    @apply border-red-500 focus:ring-red-500;
+    border-color: var(--color-error);
+  }
+  
+  .input-error:focus {
+    --tw-ring-color: var(--color-error);
   }
 
-  /* Label */
   .label {
-    @apply block text-sm font-medium text-dark-300 mb-1.5;
+    @apply block text-sm font-medium mb-1.5;
+    color: var(--color-text-secondary);
   }
 
-  /* Badge */
+  /* ============================================================================
+     BADGES
+     ============================================================================ */
+  
   .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
   }
 
   .badge-success {
-    @apply badge bg-green-500/20 text-green-400;
+    @apply badge;
+    background-color: rgba(52, 211, 153, 0.15);
+    color: var(--color-success);
   }
 
   .badge-warning {
-    @apply badge bg-yellow-500/20 text-yellow-400;
+    @apply badge;
+    background-color: rgba(251, 191, 36, 0.15);
+    color: var(--color-warning);
   }
 
   .badge-danger {
-    @apply badge bg-red-500/20 text-red-400;
+    @apply badge;
+    background-color: rgba(248, 113, 113, 0.15);
+    color: var(--color-error);
   }
 
   .badge-info {
-    @apply badge bg-blue-500/20 text-blue-400;
+    @apply badge;
+    background-color: rgba(96, 165, 250, 0.15);
+    color: var(--color-info);
   }
 
   .badge-gray {
-    @apply badge bg-dark-600 text-dark-300;
+    @apply badge;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+  }
+  
+  /* Mock ESP Badge */
+  .badge-mock {
+    @apply badge;
+    background-color: rgba(167, 139, 250, 0.15);
+    color: var(--color-mock);
+    border: 1px solid rgba(167, 139, 250, 0.3);
+  }
+  
+  /* Real ESP Badge */
+  .badge-real {
+    @apply badge;
+    background-color: rgba(34, 211, 238, 0.15);
+    color: var(--color-real);
+    border: 1px solid rgba(34, 211, 238, 0.3);
   }
 
-  /* Status dot */
+  /* ============================================================================
+     STATUS INDICATORS
+     ============================================================================ */
+  
   .status-dot {
     @apply w-2 h-2 rounded-full;
   }
 
   .status-online {
-    @apply status-dot bg-green-500;
+    @apply status-dot;
+    background-color: var(--color-success);
   }
 
   .status-offline {
-    @apply status-dot bg-gray-500;
+    @apply status-dot;
+    background-color: var(--color-text-muted);
   }
 
   .status-error {
-    @apply status-dot bg-red-500;
+    @apply status-dot;
+    background-color: var(--color-error);
   }
 
   .status-warning {
-    @apply status-dot bg-yellow-500;
+    @apply status-dot;
+    background-color: var(--color-warning);
+  }
+  
+  /* Pulsing dot for live indicators */
+  .status-dot-pulse {
+    @apply status-dot;
+    animation: pulse-dot 2s infinite;
   }
 
-  /* Sidebar */
+  /* ============================================================================
+     SIDEBAR
+     ============================================================================ */
+  
   .sidebar-link {
-    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-dark-300
-           hover:bg-dark-800 hover:text-dark-100 transition-all duration-200;
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-200;
+    color: var(--color-text-secondary);
+  }
+  
+  .sidebar-link:hover {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
   }
 
   .sidebar-link-active {
-    @apply sidebar-link bg-dark-800 text-white;
+    @apply sidebar-link;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    border-left: 2px solid var(--color-iridescent-1);
+  }
+  
+  /* Sidebar Group Header */
+  .sidebar-group-header {
+    @apply flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-all duration-200;
+    color: var(--color-text-muted);
+  }
+  
+  .sidebar-group-header:hover {
+    color: var(--color-text-secondary);
+    background-color: var(--color-bg-tertiary);
   }
 
-  /* JSON viewer */
+  /* ============================================================================
+     TABLES
+     ============================================================================ */
+  
+  .data-table {
+    @apply w-full text-sm;
+  }
+  
+  .data-table thead {
+    @apply sticky top-0;
+    background-color: var(--color-bg-tertiary);
+  }
+  
+  .data-table th {
+    @apply px-4 py-3 text-left font-medium;
+    color: var(--color-text-secondary);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  
+  .data-table th.sortable {
+    @apply cursor-pointer;
+  }
+  
+  .data-table th.sortable:hover {
+    color: var(--color-text-primary);
+  }
+  
+  .data-table th.sorted {
+    color: var(--color-iridescent-1);
+  }
+  
+  .data-table tbody tr {
+    @apply transition-colors duration-150;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  
+  .data-table tbody tr:last-child {
+    border-bottom: none;
+  }
+  
+  .data-table tbody tr:nth-child(even) {
+    background-color: rgba(18, 18, 26, 0.5);
+  }
+  
+  .data-table tbody tr:hover {
+    background-color: var(--color-bg-hover);
+  }
+  
+  .data-table td {
+    @apply px-4 py-3;
+    color: var(--color-text-primary);
+  }
+
+  /* ============================================================================
+     TABS
+     ============================================================================ */
+  
+  .tabs {
+    @apply flex gap-1;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  
+  .tab {
+    @apply flex items-center gap-2 px-4 py-3 text-sm font-medium -mb-px transition-all duration-200;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid transparent;
+  }
+  
+  .tab:hover {
+    color: var(--color-text-primary);
+  }
+  
+  .tab-active {
+    color: var(--color-iridescent-1);
+    border-bottom-color: var(--color-iridescent-1);
+  }
+  
+  .tab-count {
+    @apply px-1.5 py-0.5 rounded-full text-xs;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-muted);
+  }
+  
+  .tab-active .tab-count {
+    background-color: rgba(96, 165, 250, 0.2);
+    color: var(--color-iridescent-1);
+  }
+
+  /* ============================================================================
+     JSON VIEWER
+     ============================================================================ */
+  
   .json-key {
-    @apply text-purple-400;
+    color: var(--color-mock);
   }
 
   .json-string {
-    @apply text-green-400;
+    color: var(--color-success);
   }
 
   .json-number {
-    @apply text-blue-400;
+    color: var(--color-iridescent-1);
   }
 
   .json-boolean {
-    @apply text-yellow-400;
+    color: var(--color-warning);
   }
 
   .json-null {
-    @apply text-red-400;
+    color: var(--color-error);
+  }
+
+  /* ============================================================================
+     IRIDESCENT EFFECTS
+     ============================================================================ */
+  
+  /* Iridescent Border - für wichtige aktive Elemente */
+  .iridescent-border {
+    position: relative;
+    border: 1px solid transparent;
+    background: 
+      linear-gradient(var(--color-bg-secondary), var(--color-bg-secondary)) padding-box,
+      linear-gradient(
+        135deg, 
+        var(--color-iridescent-1) 0%, 
+        var(--color-iridescent-2) 25%,
+        var(--color-iridescent-3) 50%,
+        var(--color-iridescent-4) 75%,
+        var(--color-iridescent-1) 100%
+      ) border-box;
+  }
+  
+  /* Water Reflection / Shimmer Effect */
+  .water-reflection {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .water-reflection::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.03),
+      transparent
+    );
+    animation: shimmer 4s infinite;
+    pointer-events: none;
+  }
+
+  /* ============================================================================
+     GLASSMORPHISM
+     ============================================================================ */
+  
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  
+  /* Glass Modal Overlay */
+  .glass-overlay {
+    background: rgba(10, 10, 15, 0.8);
+    backdrop-filter: blur(4px);
+  }
+
+  /* ============================================================================
+     LOADING STATES
+     ============================================================================ */
+  
+  .skeleton {
+    @apply rounded;
+    background: linear-gradient(
+      90deg,
+      var(--color-bg-tertiary) 25%,
+      var(--color-bg-hover) 50%,
+      var(--color-bg-tertiary) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+  }
+  
+  .skeleton-text {
+    @apply skeleton h-4 w-full;
+  }
+  
+  .skeleton-text-sm {
+    @apply skeleton h-3 w-3/4;
+  }
+  
+  .skeleton-circle {
+    @apply skeleton rounded-full;
+  }
+  
+  .skeleton-card {
+    @apply skeleton rounded-xl h-32;
+  }
+
+  /* ============================================================================
+     EMPTY & ERROR STATES
+     ============================================================================ */
+  
+  .empty-state {
+    @apply text-center py-12;
+  }
+  
+  .empty-state-icon {
+    @apply w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-muted);
+  }
+  
+  .empty-state-title {
+    @apply text-lg font-medium mb-2;
+    color: var(--color-text-secondary);
+  }
+  
+  .empty-state-description {
+    @apply mb-4;
+    color: var(--color-text-muted);
+  }
+  
+  .error-state {
+    @apply flex items-center gap-3 p-4 rounded-xl;
+    background-color: rgba(248, 113, 113, 0.1);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+  }
+  
+  .error-state-icon {
+    color: var(--color-error);
+  }
+  
+  .error-state-message {
+    color: var(--color-error);
   }
 }
 
-/* Utility classes */
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
 
-  /* Animation for live indicators */
-  .animate-pulse-slow {
-    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  /* Gradient text */
+  /* Gradient text - Iridescent */
   .text-gradient {
-    @apply bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent;
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-3));
   }
 
   /* Touch-friendly minimum target size (44x44px - WCAG 2.1) */
@@ -244,4 +661,96 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+  
+  /* Text colors using CSS variables */
+  .text-primary {
+    color: var(--color-text-primary);
+  }
+  
+  .text-secondary {
+    color: var(--color-text-secondary);
+  }
+  
+  .text-muted {
+    color: var(--color-text-muted);
+  }
+  
+  /* Background colors using CSS variables */
+  .bg-primary {
+    background-color: var(--color-bg-primary);
+  }
+  
+  .bg-secondary {
+    background-color: var(--color-bg-secondary);
+  }
+  
+  .bg-tertiary {
+    background-color: var(--color-bg-tertiary);
+  }
+  
+  /* Status text colors */
+  .text-success {
+    color: var(--color-success);
+  }
+  
+  .text-warning {
+    color: var(--color-warning);
+  }
+  
+  .text-error {
+    color: var(--color-error);
+  }
+  
+  /* Mock/Real colors */
+  .text-mock {
+    color: var(--color-mock);
+  }
+  
+  .text-real {
+    color: var(--color-real);
+  }
+  
+  .border-mock {
+    border-color: var(--color-mock);
+  }
+  
+  .border-real {
+    border-color: var(--color-real);
+  }
+}
+
+/* ============================================================================
+   ANIMATIONS
+   ============================================================================ */
+
+@keyframes shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 200%;
+  }
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Animation for live indicators */
+.animate-pulse-slow {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

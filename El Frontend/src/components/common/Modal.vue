@@ -1,4 +1,15 @@
 <script setup lang="ts">
+/**
+ * Modal Component
+ * 
+ * A dialog modal with:
+ * - Glass morphism backdrop
+ * - Smooth transitions
+ * - Escape key and overlay click to close
+ * - Body scroll lock
+ * - Responsive sizing
+ */
+
 import { X } from 'lucide-vue-next'
 import { onMounted, onUnmounted, watch } from 'vue'
 
@@ -75,16 +86,16 @@ onUnmounted(() => {
         aria-modal="true"
         :aria-labelledby="title"
       >
-        <!-- Overlay -->
+        <!-- Glass Overlay -->
         <div
-          class="absolute inset-0 bg-black/50"
+          class="glass-overlay absolute inset-0"
           @click="handleOverlayClick"
         />
 
         <!-- Modal Content -->
         <div
           :class="[
-            'card relative w-full',
+            'modal-content relative w-full',
             maxWidth,
             'max-h-[90vh] overflow-hidden flex flex-col',
             'transform transition-all duration-200'
@@ -92,27 +103,27 @@ onUnmounted(() => {
           @click.stop
         >
           <!-- Header -->
-          <div class="card-header flex items-center justify-between flex-shrink-0">
-            <h3 class="font-semibold text-dark-100 text-responsive-lg">
+          <div class="modal-header">
+            <h3 class="modal-title">
               {{ title }}
             </h3>
             <button
               v-if="showClose"
-              class="p-2 rounded-lg text-dark-400 hover:text-dark-200 hover:bg-dark-800 transition-colors touch-target"
+              class="modal-close-btn"
               @click="close"
-              aria-label="Close modal"
+              aria-label="Schließen"
             >
               <X class="w-5 h-5" />
             </button>
           </div>
 
           <!-- Body (scrollable) -->
-          <div class="card-body overflow-y-auto flex-1">
+          <div class="modal-body">
             <slot />
           </div>
 
           <!-- Footer (optional slot) -->
-          <div v-if="$slots.footer" class="px-4 sm:px-6 py-4 border-t border-dark-700 flex-shrink-0">
+          <div v-if="$slots.footer" class="modal-footer">
             <slot name="footer" />
           </div>
         </div>
@@ -122,14 +133,67 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* Modal content with glass effect */
+.modal-content {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--glass-shadow);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.modal-close-btn {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  color: var(--color-text-muted);
+  transition: all 0.2s;
+  min-height: 44px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close-btn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-tertiary);
+}
+
+.modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--glass-border);
+  flex-shrink: 0;
+  background-color: rgba(26, 26, 36, 0.5);
+}
+
 /* Modal enter/leave transitions */
 .modal-enter-active,
 .modal-leave-active {
   transition: opacity 0.2s ease;
 }
 
-.modal-enter-active .card,
-.modal-leave-active .card {
+.modal-enter-active .modal-content,
+.modal-leave-active .modal-content {
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
@@ -138,9 +202,24 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-.modal-enter-from .card,
-.modal-leave-to .card {
-  transform: scale(0.95);
+.modal-enter-from .modal-content,
+.modal-leave-to .modal-content {
+  transform: scale(0.95) translateY(-10px);
   opacity: 0;
+}
+
+/* Responsive */
+@media (min-width: 640px) {
+  .modal-header {
+    padding: 1.25rem 1.5rem;
+  }
+  
+  .modal-body {
+    padding: 1.5rem;
+  }
+  
+  .modal-footer {
+    padding: 1rem 1.5rem;
+  }
 }
 </style>
