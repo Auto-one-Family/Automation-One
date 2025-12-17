@@ -263,3 +263,4 @@ export function formatSensorValueWithUnit(value: number | null, sensorType: stri
   return `${value.toFixed(config.decimals)} ${config.unit}`
 }
 
+

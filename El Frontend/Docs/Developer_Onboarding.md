@@ -866,3 +866,4 @@ mosquitto -v
 **Bei Fragen:** Zuerst in der Dokumentation suchen (CLAUDE.md → weitere .md Dateien), dann fragen.
 
 **Dokumentation aktualisieren:** Wenn du etwas lernst das nicht dokumentiert ist, füge es hinzu!
+

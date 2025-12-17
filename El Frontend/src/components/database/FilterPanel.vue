@@ -235,3 +235,4 @@ const hasActiveFilters = computed(() =>
   </div>
 </template>
 
+

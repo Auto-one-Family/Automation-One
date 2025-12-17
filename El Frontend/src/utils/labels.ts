@@ -297,3 +297,4 @@ export const MESSAGE_LABELS: Record<string, string> = {
   'confirm_delete': 'Wirklich löschen?',
 }
 
+

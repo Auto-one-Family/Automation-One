@@ -103,3 +103,4 @@ function getTypeColor(type: string): string {
   </div>
 </template>
 
+

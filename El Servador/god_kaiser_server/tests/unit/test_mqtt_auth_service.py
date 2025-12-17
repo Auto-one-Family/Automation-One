@@ -375,3 +375,4 @@ class TestBroadcastAuthUpdate:
             assert mock_publisher._publish_with_retry.call_count == 3
 
 
+

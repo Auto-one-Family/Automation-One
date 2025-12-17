@@ -159,3 +159,4 @@ MASKED_FIELDS = {
 # Default time limit for time-series tables (24 hours in seconds)
 DEFAULT_TIME_SERIES_LIMIT_HOURS = 24
 
+

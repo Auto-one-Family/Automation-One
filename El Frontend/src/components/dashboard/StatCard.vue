@@ -194,3 +194,4 @@ const trendClasses = computed(() => {
 }
 </style>
 
+

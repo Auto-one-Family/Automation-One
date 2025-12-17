@@ -218,3 +218,4 @@ async function handleNavigateToForeignKey(table: string, id: string): Promise<vo
   </div>
 </template>
 
+
