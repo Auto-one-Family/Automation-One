@@ -19,6 +19,8 @@ const selectedLevel = ref<LogLevel | ''>('')
 const moduleFilter = ref('')
 const searchQuery = ref('')
 const selectedFile = ref('')
+const startTime = ref<string>('')
+const endTime = ref<string>('')
 const page = ref(1)
 const pageSize = ref(100)
 
@@ -46,6 +48,8 @@ const currentQueryParams = computed<LogQueryParams>(() => ({
   module: moduleFilter.value || undefined,
   search: searchQuery.value || undefined,
   file: selectedFile.value || undefined,
+  start_time: startTime.value || undefined,
+  end_time: endTime.value || undefined,
   page: page.value,
   page_size: pageSize.value
 }))
@@ -118,6 +122,8 @@ function clearFilters(): void {
   selectedLevel.value = ''
   moduleFilter.value = ''
   searchQuery.value = ''
+  startTime.value = ''
+  endTime.value = ''
   page.value = 1
   loadLogs()
 }
@@ -260,6 +266,31 @@ watch(selectedFile, () => {
             />
             <Search class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
           </div>
+        </div>
+      </div>
+
+      <!-- Time Range Filters (Second Row) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <!-- Start Time -->
+        <div>
+          <label class="label text-sm text-dark-400 mb-1">Start Time</label>
+          <input
+            v-model="startTime"
+            type="datetime-local"
+            class="input w-full"
+            @change="applyFilters"
+          />
+        </div>
+
+        <!-- End Time -->
+        <div>
+          <label class="label text-sm text-dark-400 mb-1">End Time</label>
+          <input
+            v-model="endTime"
+            type="datetime-local"
+            class="input w-full"
+            @change="applyFilters"
+          />
         </div>
       </div>
 

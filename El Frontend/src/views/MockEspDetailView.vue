@@ -16,6 +16,17 @@ const espId = computed(() => route.params.espId as string)
 const esp = computed(() => mockEspStore.mockEsps.find(e => e.esp_id === espId.value))
 const zoneLabel = computed(() => esp.value?.zone_id ? `Zone: ${esp.value.zone_id}` : 'Zone: –')
 
+// =============================================================================
+// Sensor Type Defaults - Maps sensor types to their correct default units
+// =============================================================================
+const SENSOR_TYPE_DEFAULTS: Record<string, { unit: string; initialValue: number }> = {
+  'DS18B20': { unit: '°C', initialValue: 20.0 },
+  'SHT31': { unit: '°C', initialValue: 22.0 },
+  'pH': { unit: 'pH', initialValue: 7.0 },
+  'EC': { unit: 'µS/cm', initialValue: 1200 },
+  'analog': { unit: 'raw', initialValue: 2048 },
+}
+
 // Modals
 const showAddSensorModal = ref(false)
 const showAddActuatorModal = ref(false)
@@ -27,10 +38,19 @@ const newSensor = ref<MockSensorConfig>({
   sensor_type: 'DS18B20',
   name: '',
   subzone_id: '',
-  raw_value: 0,
+  raw_value: 20.0,
   unit: '°C',
   quality: 'good',
   raw_mode: true,
+})
+
+// Watch for sensor type changes and update unit/initial value accordingly
+watch(() => newSensor.value.sensor_type, (newType) => {
+  const defaults = SENSOR_TYPE_DEFAULTS[newType]
+  if (defaults) {
+    newSensor.value.unit = defaults.unit
+    newSensor.value.raw_value = defaults.initialValue
+  }
 })
 
 // New actuator form
@@ -86,7 +106,18 @@ async function clearEmergency() {
 async function addSensor() {
   await mockEspStore.addSensor(espId.value, newSensor.value)
   showAddSensorModal.value = false
-  newSensor.value = { gpio: 0, sensor_type: 'DS18B20', name: '', subzone_id: '', raw_value: 0, unit: '°C', quality: 'good', raw_mode: true }
+  // Reset with correct defaults for the default sensor type
+  const defaults = SENSOR_TYPE_DEFAULTS['DS18B20']
+  newSensor.value = { 
+    gpio: 0, 
+    sensor_type: 'DS18B20', 
+    name: '', 
+    subzone_id: '', 
+    raw_value: defaults.initialValue, 
+    unit: defaults.unit, 
+    quality: 'good', 
+    raw_mode: true 
+  }
 }
 
 async function addActuator() {
