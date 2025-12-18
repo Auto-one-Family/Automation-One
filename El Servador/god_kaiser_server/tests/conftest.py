@@ -44,12 +44,14 @@ from src.db.models import (  # noqa: F401 - imports needed for SQLAlchemy model 
     library,
     logic,
     sensor,
+    subzone,
     system,
     user,
 )
 from src.db.repositories.actuator_repo import ActuatorRepository
 from src.db.repositories.esp_repo import ESPRepository
 from src.db.repositories.sensor_repo import SensorRepository
+from src.db.repositories.subzone_repo import SubzoneRepository
 from src.db.repositories.user_repo import UserRepository
 
 
@@ -146,6 +148,12 @@ async def user_repo(db_session: AsyncSession) -> UserRepository:
 
 
 @pytest_asyncio.fixture
+async def subzone_repo(db_session: AsyncSession) -> SubzoneRepository:
+    """Create SubzoneRepository instance."""
+    return SubzoneRepository(db_session)
+
+
+@pytest_asyncio.fixture
 async def sample_esp_device(db_session: AsyncSession):
     """Create a sample ESP device for testing."""
     from src.db.models.esp import ESPDevice
@@ -182,6 +190,65 @@ async def sample_user(db_session: AsyncSession):
     await db_session.flush()
     await db_session.refresh(user)
     return user
+
+
+@pytest_asyncio.fixture
+async def sample_esp_with_zone(db_session: AsyncSession):
+    """Create a sample ESP device with zone assigned for subzone testing."""
+    from src.db.models.esp import ESPDevice
+
+    device = ESPDevice(
+        device_id="ESP_WITH_ZONE",
+        name="Test ESP with Zone",
+        ip_address="192.168.1.101",
+        mac_address="AA:BB:CC:DD:EE:01",
+        firmware_version="1.0.0",
+        hardware_type="ESP32_WROOM",
+        status="online",
+        zone_id="test_zone",
+        master_zone_id="master_test",
+        capabilities={"max_sensors": 20, "max_actuators": 12},
+    )
+    db_session.add(device)
+    await db_session.flush()
+    await db_session.refresh(device)
+    return device
+
+
+@pytest_asyncio.fixture
+async def sample_esp_no_zone(db_session: AsyncSession):
+    """Create a sample ESP device without zone assigned."""
+    from src.db.models.esp import ESPDevice
+
+    device = ESPDevice(
+        device_id="ESP_NO_ZONE",
+        name="Test ESP No Zone",
+        ip_address="192.168.1.102",
+        mac_address="AA:BB:CC:DD:EE:02",
+        firmware_version="1.0.0",
+        hardware_type="ESP32_WROOM",
+        status="online",
+        capabilities={"max_sensors": 20, "max_actuators": 12},
+    )
+    db_session.add(device)
+    await db_session.flush()
+    await db_session.refresh(device)
+    return device
+
+
+@pytest.fixture
+def mock_mqtt_publisher_for_subzone():
+    """
+    Create a mock MQTT publisher for subzone service tests.
+    
+    Provides mock client with publish method for testing.
+    """
+    from unittest.mock import MagicMock
+    
+    mock_publisher = MagicMock()
+    mock_publisher.client = MagicMock()
+    mock_publisher.client.publish = MagicMock(return_value=MagicMock(rc=0))
+    return mock_publisher
 
 
 # =============================================================================

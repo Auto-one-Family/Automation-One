@@ -534,3 +534,133 @@ def mqtt_test_client(mqtt_test_config):
     with a real MQTT client.
     """
     return InMemoryMQTTTestClient()
+
+
+# =============================================================================
+# Subzone Management Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_esp32_with_zone_for_subzones():
+    """
+    Provide a MockESP32Client with zone configured for subzone testing.
+    
+    Zone configuration:
+    - zone_id: greenhouse_zone_1
+    - master_zone_id: greenhouse_master
+    
+    No actuators/sensors pre-configured - allows subzone tests to assign GPIOs.
+    """
+    from .test_subzone_management import MockESP32WithSubzones
+    
+    esp = MockESP32WithSubzones(esp_id="ESP_SUBZONE001", kaiser_id="god")
+    esp.configure_zone(
+        zone_id="greenhouse_zone_1",
+        master_zone_id="greenhouse_master",
+        zone_name="Greenhouse Zone 1",
+    )
+    
+    yield esp
+    
+    esp.reset()
+
+
+@pytest.fixture
+def mock_esp32_no_zone_for_subzones():
+    """
+    Provide a MockESP32WithSubzones without zone configured.
+    
+    Useful for testing validation (subzone assignment should fail).
+    """
+    from .test_subzone_management import MockESP32WithSubzones
+    
+    esp = MockESP32WithSubzones(esp_id="ESP_NO_ZONE", kaiser_id="god")
+    
+    yield esp
+    
+    esp.reset()
+
+
+@pytest.fixture
+def mock_esp32_with_actuators_for_subzones():
+    """
+    Provide a MockESP32WithSubzones with pre-configured actuators.
+    
+    Pre-configured actuators:
+    - GPIO 5: Pump (digital)
+    - GPIO 6: Valve (digital)
+    - GPIO 18: Fan (PWM)
+    
+    Zone configured for subzone assignment.
+    """
+    from .test_subzone_management import MockESP32WithSubzones
+    
+    esp = MockESP32WithSubzones(esp_id="ESP_ACTUATOR_SUBZONE", kaiser_id="god")
+    esp.configure_zone(
+        zone_id="greenhouse_zone_1",
+        master_zone_id="greenhouse_master",
+    )
+    
+    # Pre-configure actuators
+    esp.configure_actuator(gpio=5, actuator_type="pump", name="Water Pump")
+    esp.configure_actuator(gpio=6, actuator_type="valve", name="Water Valve")
+    esp.configure_actuator(gpio=18, actuator_type="fan", name="Fan Control")
+    
+    esp.clear_published_messages()
+    
+    yield esp
+    
+    esp.reset()
+
+
+@pytest.fixture
+def multiple_mock_esp32_for_subzones():
+    """
+    Provide multiple MockESP32WithSubzones for cross-ESP subzone testing.
+    
+    Structure:
+    - zone_a_sensors: ESP with sensors in greenhouse_zone_a
+    - zone_a_actuators: ESP with actuators in greenhouse_zone_a
+    - zone_b: ESP in greenhouse_zone_b (isolated)
+    """
+    from .test_subzone_management import MockESP32WithSubzones
+    
+    esps = {}
+    
+    # ESP-A: Sensors station in zone A
+    esp_a = MockESP32WithSubzones(esp_id="ESP_ZONE_A_SENSORS", kaiser_id="god")
+    esp_a.configure_zone(
+        zone_id="greenhouse_zone_a",
+        master_zone_id="greenhouse_master",
+    )
+    esp_a.set_sensor_value(gpio=4, raw_value=23.5, sensor_type="DS18B20")
+    esp_a.set_sensor_value(gpio=21, raw_value=65.2, sensor_type="SHT31")
+    esps["zone_a_sensors"] = esp_a
+    
+    # ESP-B: Actuators station in zone A
+    esp_b = MockESP32WithSubzones(esp_id="ESP_ZONE_A_ACTUATORS", kaiser_id="god")
+    esp_b.configure_zone(
+        zone_id="greenhouse_zone_a",
+        master_zone_id="greenhouse_master",
+    )
+    esp_b.configure_actuator(gpio=5, actuator_type="pump")
+    esp_b.configure_actuator(gpio=6, actuator_type="fan")
+    esps["zone_a_actuators"] = esp_b
+    
+    # ESP-C: Different zone
+    esp_c = MockESP32WithSubzones(esp_id="ESP_ZONE_B", kaiser_id="god")
+    esp_c.configure_zone(
+        zone_id="greenhouse_zone_b",
+        master_zone_id="greenhouse_master",
+    )
+    esps["zone_b"] = esp_c
+    
+    # Clear setup messages
+    for esp in esps.values():
+        esp.clear_published_messages()
+    
+    yield esps
+    
+    # Cleanup
+    for esp in esps.values():
+        esp.reset()
