@@ -28,6 +28,13 @@ MQTT_TOPIC_ESP_CONFIG = "kaiser/{kaiser_id}/esp/{esp_id}/config"  # Combined sen
 MQTT_TOPIC_ESP_SYSTEM_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/system/command"
 MQTT_TOPIC_ESP_PI_ENHANCED_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/response"
 
+# Zone Assignment (Phase 7 - Hierarchical Zones)
+MQTT_TOPIC_ESP_ZONE_ASSIGN = "kaiser/{kaiser_id}/esp/{esp_id}/zone/assign"  # God-Kaiser → ESP
+MQTT_TOPIC_ESP_ZONE_ACK = "kaiser/{kaiser_id}/esp/{esp_id}/zone/ack"  # ESP → God-Kaiser
+
+# Zone Assignment Subscription Pattern
+MQTT_SUBSCRIBE_ESP_ZONE_ACK = "kaiser/{kaiser_id}/esp/+/zone/ack"
+
 # Broadcast Topics
 MQTT_TOPIC_BROADCAST_ALL = "kaiser/broadcast/all"
 MQTT_TOPIC_BROADCAST_ZONE = "kaiser/broadcast/zone/{zone_id}"

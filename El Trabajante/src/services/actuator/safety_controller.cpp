@@ -1,6 +1,9 @@
 #include "safety_controller.h"
 
 #include "../../utils/logger.h"
+#include "../../drivers/gpio_manager.h"
+#include "../../error_handling/error_tracker.h"
+#include "../../models/error_codes.h"
 #include "actuator_manager.h"
 
 SafetyController& safetyController = SafetyController::getInstance();
@@ -58,6 +61,28 @@ bool SafetyController::emergencyStopActuator(uint8_t gpio, const String& reason)
     logEmergencyEvent(reason, gpio);
 
     return actuatorManager.emergencyStopActuator(gpio);
+}
+
+bool SafetyController::isolateSubzone(const String& subzone_id, const String& reason) {
+  LOG_WARNING("SafetyController: Emergency isolation of subzone: " + subzone_id);
+  LOG_WARNING("Reason: " + reason);
+  
+  // Enable safe-mode for all pins in subzone
+  if (!gpioManager.enableSafeModeForSubzone(subzone_id)) {
+    LOG_ERROR("SafetyController: Failed to isolate subzone " + subzone_id);
+    errorTracker.trackError(ERROR_SUBZONE_SAFE_MODE_FAILED,
+                           ERROR_SEVERITY_CRITICAL,
+                           ("Subzone isolation failed: " + subzone_id).c_str());
+    return false;
+  }
+  
+  // Track error
+  errorTracker.trackError(ERROR_SUBZONE_SAFE_MODE_FAILED,
+                         ERROR_SEVERITY_CRITICAL,
+                         ("Subzone isolated: " + subzone_id + " - " + reason).c_str());
+  
+  LOG_INFO("SafetyController: Subzone " + subzone_id + " isolated successfully");
+  return true;
 }
 
 bool SafetyController::clearEmergencyStop() {

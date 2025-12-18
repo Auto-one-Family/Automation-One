@@ -37,9 +37,18 @@ export interface HeartbeatUpdate {
   timestamp: string
 }
 
+export interface ZoneUpdate {
+  esp_id: string
+  status: 'zone_assigned' | 'error'
+  zone_id: string
+  master_zone_id?: string
+  timestamp: number
+  message?: string
+}
+
 export interface RealTimeMessage {
-  type: 'sensor' | 'actuator' | 'heartbeat' | 'state_change' | 'error'
-  data: SensorUpdate | ActuatorUpdate | HeartbeatUpdate | Record<string, unknown>
+  type: 'sensor' | 'actuator' | 'heartbeat' | 'state_change' | 'error' | 'zone_assignment'
+  data: SensorUpdate | ActuatorUpdate | HeartbeatUpdate | ZoneUpdate | Record<string, unknown>
 }
 
 export interface UseRealTimeDataOptions {
@@ -79,6 +88,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
   const lastSensorUpdate = ref<SensorUpdate | null>(null)
   const lastActuatorUpdate = ref<ActuatorUpdate | null>(null)
   const lastHeartbeat = ref<HeartbeatUpdate | null>(null)
+  const lastZoneUpdate = ref<ZoneUpdate | null>(null)
 
   // Event handlers (to be set by consumers)
   const eventHandlers = {
@@ -87,6 +97,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     onHeartbeat: null as ((update: HeartbeatUpdate) => void) | null,
     onStateChange: null as ((data: Record<string, unknown>) => void) | null,
     onError: null as ((error: string) => void) | null,
+    onZoneUpdate: null as ((update: ZoneUpdate) => void) | null,
   }
 
   // WebSocket instance
@@ -249,6 +260,11 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
           eventHandlers.onError?.((message.data as { message?: string })?.message ?? 'Unbekannter Fehler')
           break
 
+        case 'zone_assignment':
+          lastZoneUpdate.value = message.data as ZoneUpdate
+          eventHandlers.onZoneUpdate?.(message.data as ZoneUpdate)
+          break
+
         default:
           console.warn('[WebSocket] Unknown message type:', message.type)
       }
@@ -299,6 +315,10 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     eventHandlers.onError = handler
   }
 
+  function onZoneUpdate(handler: (update: ZoneUpdate) => void) {
+    eventHandlers.onZoneUpdate = handler
+  }
+
   // =============================================================================
   // LIFECYCLE
   // =============================================================================
@@ -327,6 +347,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     lastSensorUpdate,
     lastActuatorUpdate,
     lastHeartbeat,
+    lastZoneUpdate,
     reconnectAttempts,
 
     // Actions
@@ -340,6 +361,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     onHeartbeat,
     onStateChange,
     onError,
+    onZoneUpdate,
   }
 }
 

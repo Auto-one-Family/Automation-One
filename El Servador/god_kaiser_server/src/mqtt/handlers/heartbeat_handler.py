@@ -175,24 +175,33 @@ class HeartbeatHandler:
         return False
     
     async def _auto_register_esp(
-        self, 
-        session, 
-        esp_repo: ESPRepository, 
-        esp_id: str, 
+        self,
+        session,
+        esp_repo: ESPRepository,
+        esp_id: str,
         payload: dict
     ) -> Optional[ESPDevice]:
         """
         Auto-register a new ESP device from heartbeat data.
-        
+
         This implements "Discovery via Heartbeat" - ESP32 sends initial
         heartbeat on startup, server auto-registers if unknown.
-        
+
+        CURRENTLY UNUSED: Auto-discovery is disabled for security reasons.
+        ESPs must be manually registered via REST API first.
+
+        FUTURE USE CASE: Could be used for Auto-Reconnect scenarios where:
+        - ESP loses connection temporarily
+        - Server database is reset but ESP is still running
+        - ESP sends heartbeat with stored configuration
+        - Server re-registers ESP automatically
+
         Args:
             session: Database session
             esp_repo: ESP repository
             esp_id: ESP device ID
             payload: Heartbeat payload
-            
+
         Returns:
             Created ESPDevice or None on failure
         """

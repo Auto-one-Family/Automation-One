@@ -1,6 +1,7 @@
 #include "config_manager.h"
 #include "storage_manager.h"
 #include "../../utils/logger.h"
+#include "../../drivers/gpio_manager.h"
 #include <WiFi.h>
 
 // ============================================
@@ -318,6 +319,278 @@ bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& ma
   }
   
   return success;
+}
+
+// ============================================
+// SUBZONE CONFIGURATION (Phase 9)
+// ============================================
+
+bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
+  LOG_INFO("ConfigManager: Saving subzone config: " + config.subzone_id);
+  
+  if (!storageManager.beginNamespace("subzone_config", false)) {
+    LOG_ERROR("ConfigManager: Failed to open subzone_config namespace");
+    return false;
+  }
+  
+  String key_base = "subzone_" + config.subzone_id;
+  
+  bool success = true;
+  success &= storageManager.putString((key_base + "_id").c_str(), config.subzone_id);
+  success &= storageManager.putString((key_base + "_name").c_str(), config.subzone_name);
+  success &= storageManager.putString((key_base + "_parent").c_str(), config.parent_zone_id);
+  success &= storageManager.putBool((key_base + "_safe_mode").c_str(), config.safe_mode_active);
+  success &= storageManager.putULong((key_base + "_timestamp").c_str(), config.created_timestamp);
+  
+  // GPIO-Array als komma-separierte String speichern
+  String gpio_string = "";
+  for (size_t i = 0; i < config.assigned_gpios.size(); i++) {
+    if (i > 0) gpio_string += ",";
+    gpio_string += String(config.assigned_gpios[i]);
+  }
+  success &= storageManager.putString((key_base + "_gpios").c_str(), gpio_string);
+  
+  // ============================================
+  // ROBUSTE VARIANTE: Subzone-ID-Liste aktualisieren
+  // ============================================
+  // Füge subzone_id zur Liste hinzu (wenn noch nicht vorhanden)
+  String subzone_ids_str = storageManager.getStringObj("subzone_ids", "");
+  
+  // Prüfe ob subzone_id bereits in Liste
+  bool already_in_list = false;
+  if (subzone_ids_str.length() > 0) {
+    int start_idx = 0;
+    while (start_idx < (int)subzone_ids_str.length()) {
+      int comma_idx = subzone_ids_str.indexOf(',', start_idx);
+      if (comma_idx == -1) comma_idx = subzone_ids_str.length();
+      
+      String existing_id = subzone_ids_str.substring(start_idx, comma_idx);
+      existing_id.trim();
+      
+      if (existing_id == config.subzone_id) {
+        already_in_list = true;
+        break;
+      }
+      start_idx = comma_idx + 1;
+    }
+  }
+  
+  // Füge hinzu wenn noch nicht vorhanden
+  if (!already_in_list) {
+    if (subzone_ids_str.length() > 0) {
+      subzone_ids_str += ",";
+    }
+    subzone_ids_str += config.subzone_id;
+    success &= storageManager.putString("subzone_ids", subzone_ids_str);
+    LOG_DEBUG("ConfigManager: Added " + config.subzone_id + " to subzone_ids list");
+  }
+  
+  storageManager.endNamespace();
+  
+  if (success) {
+    LOG_INFO("ConfigManager: Subzone config saved successfully");
+  } else {
+    LOG_ERROR("ConfigManager: Failed to save subzone config");
+  }
+  
+  return success;
+}
+
+bool ConfigManager::loadSubzoneConfig(const String& subzone_id, SubzoneConfig& config) {
+  if (!storageManager.beginNamespace("subzone_config", true)) {
+    return false;
+  }
+  
+  String key_base = "subzone_" + subzone_id;
+  
+  config.subzone_id = storageManager.getStringObj((key_base + "_id").c_str(), "");
+  config.subzone_name = storageManager.getStringObj((key_base + "_name").c_str(), "");
+  config.parent_zone_id = storageManager.getStringObj((key_base + "_parent").c_str(), "");
+  config.safe_mode_active = storageManager.getBool((key_base + "_safe_mode").c_str(), true);
+  config.created_timestamp = storageManager.getULong((key_base + "_timestamp").c_str(), 0);
+  
+  // GPIO-Array aus komma-separiertem String laden
+  String gpio_string = storageManager.getStringObj((key_base + "_gpios").c_str(), "");
+  config.assigned_gpios.clear();
+  if (gpio_string.length() > 0) {
+    int start_idx = 0;
+    while (start_idx < gpio_string.length()) {
+      int comma_idx = gpio_string.indexOf(',', start_idx);
+      if (comma_idx == -1) comma_idx = gpio_string.length();
+      
+      String gpio_str = gpio_string.substring(start_idx, comma_idx);
+      gpio_str.trim();
+      if (gpio_str.length() > 0) {
+        uint8_t gpio = (uint8_t)gpio_str.toInt();
+        config.assigned_gpios.push_back(gpio);
+      }
+      start_idx = comma_idx + 1;
+    }
+  }
+  
+  storageManager.endNamespace();
+  return config.subzone_id.length() > 0;
+}
+
+bool ConfigManager::loadAllSubzoneConfigs(SubzoneConfig configs[], uint8_t max_configs, uint8_t& loaded_count) {
+  loaded_count = 0;
+  
+  if (!storageManager.beginNamespace("subzone_config", true)) {
+    LOG_WARNING("ConfigManager: No subzone_config namespace found");
+    return false;
+  }
+  
+  // ============================================
+  // ROBUSTE VARIANTE: Subzone-ID-Liste laden
+  // ============================================
+  // Pattern: "subzone_ids" enthält komma-separierte Liste aller aktiven Subzone-IDs
+  // Beispiel: "irr_A,irr_B,clim_1"
+  // Dies ist konsistent mit dem Server-Authoritative Pattern
+  
+  String subzone_ids_str = storageManager.getStringObj("subzone_ids", "");
+  storageManager.endNamespace();
+  
+  if (subzone_ids_str.length() == 0) {
+    LOG_INFO("ConfigManager: No subzones configured");
+    return false;
+  }
+  
+  // Parse komma-separierte Subzone-ID-Liste
+  int start_idx = 0;
+  while (start_idx < (int)subzone_ids_str.length() && loaded_count < max_configs) {
+    int comma_idx = subzone_ids_str.indexOf(',', start_idx);
+    if (comma_idx == -1) comma_idx = subzone_ids_str.length();
+    
+    String subzone_id = subzone_ids_str.substring(start_idx, comma_idx);
+    subzone_id.trim();
+    
+    if (subzone_id.length() > 0) {
+      SubzoneConfig config;
+      if (loadSubzoneConfig(subzone_id, config) && config.subzone_id.length() > 0) {
+        configs[loaded_count++] = config;
+        LOG_DEBUG("ConfigManager: Loaded subzone: " + subzone_id);
+      }
+    }
+    
+    start_idx = comma_idx + 1;
+  }
+  
+  LOG_INFO("ConfigManager: Loaded " + String(loaded_count) + " subzone configs");
+  return loaded_count > 0;
+}
+
+bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
+  LOG_INFO("ConfigManager: Removing subzone config: " + subzone_id);
+  
+  if (!storageManager.beginNamespace("subzone_config", false)) {
+    return false;
+  }
+  
+  String key_base = "subzone_" + subzone_id;
+  
+  // Einzelne Keys löschen durch Leeren
+  storageManager.putString((key_base + "_id").c_str(), "");
+  storageManager.putString((key_base + "_name").c_str(), "");
+  storageManager.putString((key_base + "_parent").c_str(), "");
+  storageManager.putString((key_base + "_gpios").c_str(), "");
+  storageManager.putBool((key_base + "_safe_mode").c_str(), true);
+  storageManager.putULong((key_base + "_timestamp").c_str(), 0);
+  
+  // ============================================
+  // ROBUSTE VARIANTE: Aus Subzone-ID-Liste entfernen
+  // ============================================
+  String subzone_ids_str = storageManager.getStringObj("subzone_ids", "");
+  
+  if (subzone_ids_str.length() > 0) {
+    String new_ids_str = "";
+    int start_idx = 0;
+    
+    while (start_idx < (int)subzone_ids_str.length()) {
+      int comma_idx = subzone_ids_str.indexOf(',', start_idx);
+      if (comma_idx == -1) comma_idx = subzone_ids_str.length();
+      
+      String existing_id = subzone_ids_str.substring(start_idx, comma_idx);
+      existing_id.trim();
+      
+      // Nur behalten wenn nicht die zu löschende ID
+      if (existing_id.length() > 0 && existing_id != subzone_id) {
+        if (new_ids_str.length() > 0) {
+          new_ids_str += ",";
+        }
+        new_ids_str += existing_id;
+      }
+      
+      start_idx = comma_idx + 1;
+    }
+    
+    storageManager.putString("subzone_ids", new_ids_str);
+    LOG_DEBUG("ConfigManager: Updated subzone_ids list after removal");
+  }
+  
+  storageManager.endNamespace();
+  LOG_INFO("ConfigManager: Subzone " + subzone_id + " removed");
+  return true;
+}
+
+bool ConfigManager::validateSubzoneConfig(const SubzoneConfig& config) const {
+  // Validation 1: subzone_id Format (1-32 chars, alphanumeric + underscore)
+  if (config.subzone_id.length() == 0 || config.subzone_id.length() > 32) {
+    LOG_WARNING("ConfigManager: Invalid subzone_id length");
+    return false;
+  }
+  
+  // Validation 2: parent_zone_id muss mit ESP-Zone übereinstimmen
+  if (config.parent_zone_id.length() > 0 && config.parent_zone_id != kaiser_.zone_id) {
+    LOG_WARNING("ConfigManager: parent_zone_id doesn't match ESP zone");
+    return false;
+  }
+  
+  // Validation 3: GPIOs müssen in safe pins list sein
+  // Externe GPIO-Manager-Referenz wird benötigt
+  extern GPIOManager& gpioManager;
+  for (uint8_t gpio : config.assigned_gpios) {
+    // Prüfe ob Pin verfügbar oder reserviert ist (dann ist es gültig)
+    if (!gpioManager.isPinAvailable(gpio) && !gpioManager.isPinReserved(gpio)) {
+      // Prüfe ob Pin überhaupt existiert (in pins_ vector)
+      GPIOPinInfo pin_info = gpioManager.getPinInfo(gpio);
+      if (pin_info.pin == 255) {  // Invalid pin marker
+        LOG_WARNING("ConfigManager: GPIO " + String(gpio) + " not in safe pins list");
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
+
+uint8_t ConfigManager::getSubzoneCount() const {
+  // Zähle Subzones durch Parsen der subzone_ids Liste
+  // Diese Methode ist const-safe und nutzt nur read-only Zugriff
+  
+  // Wir müssen einen temporären non-const Zugriff machen (ESP32 Preferences Limitation)
+  // Alternativ: Cache die Anzahl beim Laden
+  // Für jetzt: Zähle Kommas + 1 (oder 0 wenn leer)
+  
+  if (!storageManager.beginNamespace("subzone_config", true)) {
+    return 0;
+  }
+  
+  String subzone_ids_str = storageManager.getStringObj("subzone_ids", "");
+  storageManager.endNamespace();
+  
+  if (subzone_ids_str.length() == 0) {
+    return 0;
+  }
+  
+  // Zähle Einträge (Kommas + 1)
+  uint8_t count = 1;
+  for (size_t i = 0; i < subzone_ids_str.length(); i++) {
+    if (subzone_ids_str[i] == ',') {
+      count++;
+    }
+  }
+  
+  return count;
 }
 
 // ============================================

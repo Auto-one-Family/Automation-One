@@ -52,6 +52,20 @@ class ESPRepository(BaseRepository[ESPDevice]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_by_master_zone(self, master_zone_id: str) -> list[ESPDevice]:
+        """
+        Get all ESP devices in a master zone hierarchy.
+
+        Args:
+            master_zone_id: Master zone identifier
+
+        Returns:
+            List of ESPDevice instances
+        """
+        stmt = select(ESPDevice).where(ESPDevice.master_zone_id == master_zone_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_zone_masters(self, zone_id: Optional[str] = None) -> list[ESPDevice]:
         """
         Get zone master devices.

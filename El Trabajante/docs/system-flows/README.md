@@ -53,6 +53,7 @@ Each flow document provides:
 |---|------|-------------|----------|
 | [07](07-error-recovery-flow.md) | **Error Recovery** | Auto-recovery mechanisms and circuit breakers | High |
 | [08](08-zone-assignment-flow.md) | **Zone Assignment** | Hierarchical zone management (Phase 7) | Medium |
+| [09](09-subzone-management-flow.md) | **Subzone Management** | ⭐ **NEW** Pin-level subzone management with Safe-Mode integration | Medium |
 
 ## How to Read These Documents
 

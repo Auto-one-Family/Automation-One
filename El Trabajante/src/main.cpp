@@ -60,6 +60,28 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj);
 void handleActuatorConfig(const String& payload);
 
 // ============================================
+// HELPER FUNCTIONS
+// ============================================
+// Helper: Send Subzone ACK
+void sendSubzoneAck(const String& subzone_id, const String& status, const String& error_message) {
+  String ack_topic = TopicBuilder::buildSubzoneAckTopic();
+  DynamicJsonDocument ack_doc(512);
+  ack_doc["esp_id"] = g_system_config.esp_id;
+  ack_doc["status"] = status;
+  ack_doc["subzone_id"] = subzone_id;
+  ack_doc["timestamp"] = millis() / 1000;
+  
+  if (status == "error" && error_message.length() > 0) {
+    ack_doc["error_code"] = ERROR_SUBZONE_CONFIG_SAVE_FAILED;
+    ack_doc["message"] = error_message;
+  }
+  
+  String ack_payload;
+  serializeJson(ack_doc, ack_payload);
+  mqttClient.publish(ack_topic, ack_payload, 1);
+}
+
+// ============================================
 // SETUP - INITIALIZATION ORDER (Guide-konform)
 // ============================================
 void setup() {
@@ -477,7 +499,13 @@ void setup() {
     mqttClient.subscribe(esp_emergency_topic);
     mqttClient.subscribe(zone_assign_topic);
     
-    LOG_INFO("Subscribed to system + actuator + zone assignment topics");
+    // Phase 9: Subzone management topics
+    String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
+    String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
+    mqttClient.subscribe(subzone_assign_topic);
+    mqttClient.subscribe(subzone_remove_topic);
+    
+    LOG_INFO("Subscribed to system + actuator + zone assignment + subzone management topics");
     
     // Set MQTT callback for message routing (Phase 4)
     mqttClient.setCallback([](const String& topic, const String& payload) {
@@ -694,6 +722,154 @@ void setup() {
           }
         } else {
           LOG_ERROR("Failed to parse zone assignment JSON");
+        }
+        return;
+      }
+      
+      // Phase 9: Subzone Assignment Handler
+      String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
+      if (topic == subzone_assign_topic) {
+        LOG_INFO("╔════════════════════════════════════════╗");
+        LOG_INFO("║  SUBZONE ASSIGNMENT RECEIVED          ║");
+        LOG_INFO("╚════════════════════════════════════════╝");
+        
+        DynamicJsonDocument doc(1024);  // Größerer Buffer für GPIO-Array
+        DeserializationError error = deserializeJson(doc, payload);
+        
+        if (!error) {
+          String subzone_id = doc["subzone_id"].as<String>();
+          String subzone_name = doc["subzone_name"].as<String>();
+          String parent_zone_id = doc["parent_zone_id"].as<String>();
+          JsonArray gpios_array = doc["assigned_gpios"];
+          bool safe_mode_active = doc["safe_mode_active"] | true;
+          
+          // Validation 1: subzone_id required
+          if (subzone_id.length() == 0) {
+            LOG_ERROR("Subzone assignment failed: subzone_id is empty");
+            sendSubzoneAck(subzone_id, "error", "subzone_id is required");
+            return;
+          }
+          
+          // Validation 2: parent_zone_id muss mit ESP-Zone übereinstimmen
+          if (parent_zone_id.length() > 0 && parent_zone_id != g_kaiser.zone_id) {
+            LOG_ERROR("Subzone assignment failed: parent_zone_id doesn't match ESP zone");
+            sendSubzoneAck(subzone_id, "error", "parent_zone_id mismatch");
+            return;
+          }
+          
+          // Validation 3: Zone muss zugewiesen sein
+          if (!g_kaiser.zone_assigned) {
+            LOG_ERROR("Subzone assignment failed: ESP zone not assigned");
+            sendSubzoneAck(subzone_id, "error", "ESP zone not assigned");
+            return;
+          }
+          
+          // Build SubzoneConfig
+          SubzoneConfig subzone_config;
+          subzone_config.subzone_id = subzone_id;
+          subzone_config.subzone_name = subzone_name;
+          subzone_config.parent_zone_id = parent_zone_id.length() > 0 ? parent_zone_id : g_kaiser.zone_id;
+          subzone_config.safe_mode_active = safe_mode_active;
+          subzone_config.created_timestamp = doc["timestamp"] | millis() / 1000;
+          
+          // Parse GPIO-Array
+          for (JsonVariant gpio_value : gpios_array) {
+            uint8_t gpio = gpio_value.as<uint8_t>();
+            subzone_config.assigned_gpios.push_back(gpio);
+          }
+          
+          // Validate config
+          if (!configManager.validateSubzoneConfig(subzone_config)) {
+            LOG_ERROR("Subzone assignment failed: validation failed");
+            sendSubzoneAck(subzone_id, "error", "subzone config validation failed");
+            return;
+          }
+          
+          // Assign GPIOs to subzone via GPIO-Manager
+          bool all_assigned = true;
+          for (uint8_t gpio : subzone_config.assigned_gpios) {
+            if (!gpioManager.assignPinToSubzone(gpio, subzone_id)) {
+              LOG_ERROR("Failed to assign GPIO " + String(gpio) + " to subzone");
+              all_assigned = false;
+              // Rollback: Entferne bereits zugewiesene GPIOs
+              for (uint8_t assigned_gpio : subzone_config.assigned_gpios) {
+                if (assigned_gpio != gpio) {
+                  gpioManager.removePinFromSubzone(assigned_gpio);
+                }
+              }
+              break;
+            }
+          }
+          
+          if (!all_assigned) {
+            sendSubzoneAck(subzone_id, "error", "GPIO assignment failed");
+            return;
+          }
+          
+          // Safe-Mode aktivieren wenn requested
+          if (safe_mode_active) {
+            if (!gpioManager.enableSafeModeForSubzone(subzone_id)) {
+              LOG_WARNING("Failed to enable safe-mode for subzone, but assignment continues");
+            }
+          }
+          
+          // Save to NVS
+          if (!configManager.saveSubzoneConfig(subzone_config)) {
+            LOG_ERROR("Failed to save subzone config to NVS");
+            sendSubzoneAck(subzone_id, "error", "NVS save failed");
+            return;
+          }
+          
+          // Calculate sensor/actuator counts
+          subzone_config.sensor_count = 0;
+          subzone_config.actuator_count = 0;
+          // TODO: Iterate through sensors/actuators and count those with matching subzone_id
+          
+          // Success ACK
+          sendSubzoneAck(subzone_id, "subzone_assigned", "");
+          
+          LOG_INFO("✅ Subzone assignment successful: " + subzone_id);
+        } else {
+          LOG_ERROR("Failed to parse subzone assignment JSON");
+          sendSubzoneAck("", "error", "JSON parse failed");
+        }
+        return;
+      }
+      
+      // Phase 9: Subzone Removal Handler
+      String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
+      if (topic == subzone_remove_topic) {
+        LOG_INFO("╔════════════════════════════════════════╗");
+        LOG_INFO("║  SUBZONE REMOVAL RECEIVED             ║");
+        LOG_INFO("╚════════════════════════════════════════╝");
+        
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+        
+        if (!error) {
+          String subzone_id = doc["subzone_id"].as<String>();
+          
+          if (subzone_id.length() == 0) {
+            LOG_ERROR("Subzone removal failed: subzone_id is empty");
+            return;
+          }
+          
+          // Load config to get GPIOs
+          SubzoneConfig config;
+          if (!configManager.loadSubzoneConfig(subzone_id, config)) {
+            LOG_WARNING("Subzone " + subzone_id + " not found for removal");
+            return;
+          }
+          
+          // Remove GPIOs from subzone
+          for (uint8_t gpio : config.assigned_gpios) {
+            gpioManager.removePinFromSubzone(gpio);
+          }
+          
+          // Remove from NVS
+          configManager.removeSubzoneConfig(subzone_id);
+          
+          LOG_INFO("✅ Subzone removed: " + subzone_id);
         }
         return;
       }

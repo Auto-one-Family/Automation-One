@@ -77,6 +77,13 @@ class ESPDevice(Base, TimestampMixin):
         doc="Human-readable zone name",
     )
 
+    master_zone_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        doc="Parent master zone ID for hierarchical organization",
+    )
+
     is_zone_master: Mapped[bool] = mapped_column(
         Boolean,
         default=False,

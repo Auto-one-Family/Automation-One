@@ -35,6 +35,7 @@ from .mqtt.handlers import (
     discovery_handler,
     heartbeat_handler,
     sensor_handler,
+    zone_ack_handler,
 )
 from .mqtt.publisher import Publisher
 from .mqtt.subscriber import Subscriber
@@ -171,6 +172,11 @@ async def lifespan(app: FastAPI):
             _subscriber_instance.register_handler(
                 f"kaiser/{kaiser_id}/esp/+/config_response",
                 config_handler.handle_config_ack
+            )
+            # Phase 7: Zone ACK Handler (zone assignment confirmations)
+            _subscriber_instance.register_handler(
+                f"kaiser/{kaiser_id}/esp/+/zone/ack",
+                zone_ack_handler.handle_zone_ack
             )
 
             logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")

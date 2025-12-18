@@ -90,6 +90,46 @@ storageManager.putBool("connected", kaiser.connected);
 storageManager.putBool("id_generated", kaiser.id_generated);
 ```
 
+#### Subzone Configuration (Namespace: `subzone_config`)
+
+**Phase 9 Keys:**
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `subzone_ids` | String | `""` | Comma-separated | **Master list** of all subzone IDs (e.g., "irr_A,irr_B,clim_1") |
+| `subzone_{subzone_id}_id` | String | `""` | Max 32 chars | Subzone identifier |
+| `subzone_{subzone_id}_name` | String | `""` | Max 64 chars | Human-readable name |
+| `subzone_{subzone_id}_parent` | String | `""` | Max 64 chars | Parent zone ID |
+| `subzone_{subzone_id}_gpios` | String | `""` | Comma-separated | GPIO list (e.g., "4,5,6") |
+| `subzone_{subzone_id}_safe_mode` | bool | `true` | - | Safe-mode status |
+| `subzone_{subzone_id}_timestamp` | uint32 | `0` | - | Creation timestamp |
+
+**Hinweis:** Der `subzone_ids` Key ist der Master-Index für alle konfigurierten Subzones. Er wird automatisch bei `saveSubzoneConfig()` und `removeSubzoneConfig()` aktualisiert.
+
+**Implementation:**
+
+```cpp
+// Saving (config_manager.cpp:450-484)
+storageManager.putString("subzone_" + subzone_id + "_id", config.subzone_id);
+storageManager.putString("subzone_" + subzone_id + "_name", config.subzone_name);
+storageManager.putString("subzone_" + subzone_id + "_parent", config.parent_zone_id);
+storageManager.putBool("subzone_" + subzone_id + "_safe_mode", config.safe_mode_active);
+storageManager.putULong("subzone_" + subzone_id + "_timestamp", config.created_timestamp);
+// GPIO-Array als komma-separierte String
+String gpio_string = "4,5,6";  // Beispiel
+storageManager.putString("subzone_" + subzone_id + "_gpios", gpio_string);
+
+// Loading (config_manager.cpp:486-520)
+config.subzone_id = storageManager.getStringObj("subzone_" + subzone_id + "_id", "");
+config.subzone_name = storageManager.getStringObj("subzone_" + subzone_id + "_name", "");
+config.parent_zone_id = storageManager.getStringObj("subzone_" + subzone_id + "_parent", "");
+config.safe_mode_active = storageManager.getBool("subzone_" + subzone_id + "_safe_mode", true);
+config.created_timestamp = storageManager.getULong("subzone_" + subzone_id + "_timestamp", 0);
+// GPIO-Array aus komma-separiertem String laden
+String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpios", "");
+// Parse comma-separated string to vector
+```
+
 #### System Configuration (Namespace: `system_config`)
 
 | Key | Type | Default | Constraint | Description |

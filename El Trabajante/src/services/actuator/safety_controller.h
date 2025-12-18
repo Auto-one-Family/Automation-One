@@ -14,6 +14,9 @@ public:
   bool emergencyStopAll(const String& reason);
   bool emergencyStopActuator(uint8_t gpio, const String& reason);
 
+  // Subzone Emergency Isolation (Phase 9)
+  bool isolateSubzone(const String& subzone_id, const String& reason);
+
   bool clearEmergencyStop();
   bool clearEmergencyStopActuator(uint8_t gpio);
   bool resumeOperation();

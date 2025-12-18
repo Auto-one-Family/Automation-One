@@ -151,3 +151,40 @@ const char* TopicBuilder::buildBroadcastEmergencyTopic() {
                          "kaiser/broadcast/emergency");
   return validateTopicBuffer(written);
 }
+
+// Phase 9: Subzone Management Topics
+
+const char* TopicBuilder::buildSubzoneAssignTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/subzone/assign",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+const char* TopicBuilder::buildSubzoneRemoveTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/subzone/remove",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+const char* TopicBuilder::buildSubzoneAckTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/subzone/ack",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+const char* TopicBuilder::buildSubzoneStatusTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/subzone/status",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+const char* TopicBuilder::buildSubzoneSafeTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/subzone/safe",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}

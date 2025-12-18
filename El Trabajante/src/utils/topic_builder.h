@@ -27,6 +27,13 @@ public:
   static const char* buildConfigResponseTopic();
   static const char* buildBroadcastEmergencyTopic();            // Pattern 8
   
+  // Phase 9: Subzone Management Topics
+  static const char* buildSubzoneAssignTopic();      // kaiser/{kaiser_id}/esp/{esp_id}/subzone/assign
+  static const char* buildSubzoneRemoveTopic();      // kaiser/{kaiser_id}/esp/{esp_id}/subzone/remove
+  static const char* buildSubzoneAckTopic();         // kaiser/{kaiser_id}/esp/{esp_id}/subzone/ack
+  static const char* buildSubzoneStatusTopic();      // kaiser/{kaiser_id}/esp/{esp_id}/subzone/status
+  static const char* buildSubzoneSafeTopic();        // kaiser/{kaiser_id}/esp/{esp_id}/subzone/safe
+  
 private:
   static char topic_buffer_[256];
   static char esp_id_[32];

@@ -18,6 +18,7 @@ from .health import router as health_router
 from .logic import router as logic_router
 from .sensors import router as sensors_router
 from .users import router as users_router
+from .zone import router as zone_router
 
 # Create main v1 router
 api_v1_router = APIRouter()
@@ -32,6 +33,7 @@ api_v1_router.include_router(health_router)
 api_v1_router.include_router(logic_router)
 api_v1_router.include_router(debug_router)
 api_v1_router.include_router(users_router)
+api_v1_router.include_router(zone_router)
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -45,6 +47,7 @@ __all__ = [
     "health_router",
     "logic_router",
     "users_router",
+    "zone_router",
 ]
 
 

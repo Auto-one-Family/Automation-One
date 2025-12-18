@@ -2,6 +2,7 @@
 #define MODELS_SYSTEM_TYPES_H
 
 #include <Arduino.h>
+#include <vector>
 
 // ✅ System States - UNVERÄNDERT
 // Migration aus: main.cpp:96-113 (SystemState Enum)
@@ -53,14 +54,18 @@ struct MasterZone {
   bool is_master_esp = false;
 };
 
-// Sub Zone - UNVERÄNDERT
+// Sub Zone - ENHANCED für Pin-Level Management
 // Migration aus: main.cpp:390-413
-struct SubZone {
-  String subzone_id = "";
-  String subzone_name = "";
-  String description = "";
-  bool active = false;
-  uint8_t sensor_count = 0;
+// Enhanced with GPIO mapping and safe-mode support (Phase 9)
+struct SubzoneConfig {
+  String subzone_id = "";           // Eindeutiger Subzone-Identifier (z.B. "irrigation_section_A")
+  String subzone_name = "";         // Menschlich lesbarer Name
+  String parent_zone_id = "";       // Verknüpfung zur übergeordneten Zone (muss mit g_kaiser.zone_id übereinstimmen)
+  std::vector<uint8_t> assigned_gpios;  // GPIO-Pins in dieser Subzone
+  bool safe_mode_active = true;     // Safe-Mode Status der gesamten Subzone
+  uint32_t created_timestamp = 0;   // Erstellungszeitpunkt
+  uint8_t sensor_count = 0;         // Anzahl Sensoren in Subzone (auto-calculated)
+  uint8_t actuator_count = 0;       // Anzahl Aktoren in Subzone (auto-calculated)
 };
 
 // WiFi Configuration - UNVERÄNDERT

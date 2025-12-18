@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <vector>
+#include <map>
 
 // ============================================
 // GPIO Manager - Hardware Safety System
@@ -115,6 +116,61 @@ public:
     // WARNING: Only call if you're certain I2C will never be used!
     void releaseI2CPins();
 
+    // ============================================
+    // SUBZONE MANAGEMENT (Phase 9)
+    // ============================================
+
+    /**
+     * Weist einen GPIO-Pin einer Subzone zu
+     * @param gpio GPIO-Pin Nummer
+     * @param subzone_id Ziel-Subzone
+     * @return true bei Erfolg, false bei Konflikt oder Fehler
+     */
+    bool assignPinToSubzone(uint8_t gpio, const String& subzone_id);
+
+    /**
+     * Entfernt einen GPIO-Pin aus seiner Subzone
+     * @param gpio GPIO-Pin Nummer
+     * @return true bei Erfolg
+     */
+    bool removePinFromSubzone(uint8_t gpio);
+
+    /**
+     * Gibt alle GPIO-Pins einer Subzone zurück
+     * @param subzone_id Subzone-Identifier
+     * @return Vector mit GPIO-Pin Nummern
+     */
+    std::vector<uint8_t> getSubzonePins(const String& subzone_id) const;
+
+    /**
+     * Prüft ob ein Pin einer Subzone zugewiesen ist
+     * @param gpio GPIO-Pin Nummer
+     * @param subzone_id Subzone-Identifier (optional, wenn leer: prüft ob Pin überhaupt zugewiesen)
+     * @return true wenn Pin der Subzone zugewiesen ist
+     */
+    bool isPinAssignedToSubzone(uint8_t gpio, const String& subzone_id = "") const;
+
+    /**
+     * Prüft ob eine Subzone im Safe-Mode ist
+     * @param subzone_id Subzone-Identifier
+     * @return true wenn alle Pins der Subzone im Safe-Mode sind
+     */
+    bool isSubzoneSafe(const String& subzone_id) const;
+
+    /**
+     * Aktiviert Safe-Mode für alle Pins einer Subzone
+     * @param subzone_id Subzone-Identifier
+     * @return true bei Erfolg
+     */
+    bool enableSafeModeForSubzone(const String& subzone_id);
+
+    /**
+     * Deaktiviert Safe-Mode für eine Subzone (Pins werden freigegeben)
+     * @param subzone_id Subzone-Identifier
+     * @return true bei Erfolg
+     */
+    bool disableSafeModeForSubzone(const String& subzone_id);
+
 private:
     // ============================================
     // PRIVATE CONSTRUCTOR (SINGLETON)
@@ -127,6 +183,9 @@ private:
     // ============================================
     // Vector storing information about all GPIO pins
     std::vector<GPIOPinInfo> pins_;
+
+    // Subzone-Pin-Mapping: subzone_id → vector<gpio>
+    std::map<String, std::vector<uint8_t>> subzone_pin_map_;
 
     // ============================================
     // HELPER METHODS

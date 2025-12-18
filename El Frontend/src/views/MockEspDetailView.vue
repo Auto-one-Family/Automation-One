@@ -40,6 +40,7 @@ import {
 // Components
 import Badge from '@/components/common/Badge.vue'
 import { LoadingState, EmptyState } from '@/components/common'
+import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,6 +210,16 @@ async function removeSensor(gpio: number) {
 
 // Helper to get state info
 const stateInfo = computed(() => esp.value ? getStateInfo(esp.value.system_state) : null)
+
+// Handle zone updates from ZoneAssignmentPanel
+function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string; master_zone_id?: string }) {
+  // Update the local ESP data (will be refreshed on next poll)
+  if (esp.value) {
+    esp.value.zone_id = zoneData.zone_id
+    esp.value.zone_name = zoneData.zone_name
+    esp.value.master_zone_id = zoneData.master_zone_id
+  }
+}
 </script>
 
 <template>
@@ -301,6 +312,15 @@ const stateInfo = computed(() => esp.value ? getStateInfo(esp.value.system_state
           </p>
         </div>
       </div>
+
+      <!-- Zone Assignment Panel -->
+      <ZoneAssignmentPanel
+        :esp-id="esp.id"
+        :current-zone-id="esp.zone_id"
+        :current-zone-name="esp.zone_name"
+        :current-master-zone-id="esp.master_zone_id"
+        @zone-updated="handleZoneUpdate"
+      />
 
       <!-- Sensors Section -->
       <div class="card">

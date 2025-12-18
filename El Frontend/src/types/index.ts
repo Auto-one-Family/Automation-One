@@ -348,3 +348,64 @@ export interface ConfigResponse {
   error_code?: string
   timestamp: number
 }
+
+// =============================================================================
+// Zone Assignment Types
+// =============================================================================
+
+/**
+ * Zone assignment request to assign ESP to a zone.
+ */
+export interface ZoneAssignRequest {
+  zone_id: string
+  master_zone_id?: string
+  zone_name?: string
+}
+
+/**
+ * Zone assignment response from server.
+ */
+export interface ZoneAssignResponse {
+  success: boolean
+  message: string
+  device_id: string
+  zone_id: string
+  master_zone_id?: string
+  zone_name?: string
+  mqtt_topic: string
+  mqtt_sent: boolean
+}
+
+/**
+ * Zone removal response from server.
+ */
+export interface ZoneRemoveResponse {
+  success: boolean
+  message: string
+  device_id: string
+  mqtt_topic: string
+  mqtt_sent: boolean
+}
+
+/**
+ * Zone info for display.
+ */
+export interface ZoneInfo {
+  zone_id: string | null
+  master_zone_id: string | null
+  zone_name: string | null
+  is_zone_master: boolean
+  kaiser_id: string | null
+}
+
+/**
+ * Zone update from WebSocket (ESP ACK confirmation).
+ */
+export interface ZoneUpdate {
+  esp_id: string
+  status: 'zone_assigned' | 'error'
+  zone_id: string
+  master_zone_id?: string
+  timestamp: number
+  message?: string
+}

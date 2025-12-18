@@ -45,6 +45,15 @@
 #define ERROR_ACTUATOR_NOT_FOUND    1052
 #define ERROR_ACTUATOR_CONFLICT     1053
 
+// Subzone Management Errors (2500-2599) - SERVICE RANGE
+#define ERROR_SUBZONE_INVALID_ID          2500  // Invalid subzone_id format
+#define ERROR_SUBZONE_GPIO_CONFLICT       2501  // GPIO already assigned to different subzone
+#define ERROR_SUBZONE_PARENT_MISMATCH     2502  // parent_zone_id doesn't match ESP zone
+#define ERROR_SUBZONE_NOT_FOUND           2503  // Subzone doesn't exist
+#define ERROR_SUBZONE_GPIO_INVALID        2504  // GPIO not in safe pins list
+#define ERROR_SUBZONE_SAFE_MODE_FAILED    2505  // Safe-mode activation failed
+#define ERROR_SUBZONE_CONFIG_SAVE_FAILED  2506  // Persistence failed
+
 // ============================================
 // SERVICE ERROR CODES (2000-2999)
 // ============================================
@@ -226,6 +235,15 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_ACTUATOR_INIT_FAILED: return "Failed to initialize actuator";
     case ERROR_ACTUATOR_NOT_FOUND: return "Actuator not configured or not found";
     case ERROR_ACTUATOR_CONFLICT: return "Actuator GPIO conflict with sensor";
+
+    // Subzone Management Errors (2500-2599)
+    case ERROR_SUBZONE_INVALID_ID: return "Invalid subzone_id format (must be 1-32 chars, alphanumeric + underscore)";
+    case ERROR_SUBZONE_GPIO_CONFLICT: return "GPIO already assigned to different subzone";
+    case ERROR_SUBZONE_PARENT_MISMATCH: return "parent_zone_id doesn't match ESP zone assignment";
+    case ERROR_SUBZONE_NOT_FOUND: return "Subzone doesn't exist";
+    case ERROR_SUBZONE_GPIO_INVALID: return "GPIO not in safe pins list";
+    case ERROR_SUBZONE_SAFE_MODE_FAILED: return "Safe-mode activation failed for subzone";
+    case ERROR_SUBZONE_CONFIG_SAVE_FAILED: return "Failed to save subzone configuration to NVS";
 
     // SERVICE (2000-2999)
     case ERROR_NVS_INIT_FAILED: return "Failed to initialize NVS (Non-Volatile Storage)";

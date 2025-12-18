@@ -143,6 +143,34 @@ class TopicBuilder:
             esp_id=esp_id
         )
 
+    @staticmethod
+    def build_zone_assign_topic(esp_id: str) -> str:
+        """
+        Build zone assignment topic.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/zone/assign
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_ZONE_ASSIGN,
+            esp_id=esp_id
+        )
+
+    @staticmethod
+    def get_zone_ack_subscription_pattern() -> str:
+        """
+        Get zone ACK subscription pattern with wildcard.
+
+        Returns:
+            kaiser/{kaiser_id}/esp/+/zone/ack
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_SUBSCRIBE_ESP_ZONE_ACK
+        )
+
     # ====================================================================
     # PARSE METHODS (ESP → God-Kaiser)
     # ====================================================================
@@ -401,6 +429,34 @@ class TopicBuilder:
             }
         return None
 
+    @staticmethod
+    def parse_zone_ack_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse zone ACK topic.
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/zone/ack
+
+        Returns:
+            {
+                "kaiser_id": "god",
+                "esp_id": "ESP_12AB34CD",
+                "type": "zone_ack"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/zone/ack
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/zone/ack"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "zone_ack",
+            }
+        return None
+
     # ====================================================================
     # GENERIC PARSE METHOD
     # ====================================================================
@@ -429,6 +485,7 @@ class TopicBuilder:
             cls.parse_config_response_topic,
             cls.parse_discovery_topic,
             cls.parse_pi_enhanced_request_topic,
+            cls.parse_zone_ack_topic,
         ]
 
         for parser in parsers:

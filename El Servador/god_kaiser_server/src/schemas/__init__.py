@@ -145,6 +145,15 @@ from .logic import (
     TimeCondition,
 )
 
+# Zone schemas
+from .zone import (
+    ZoneAckPayload,
+    ZoneAssignRequest,
+    ZoneAssignResponse,
+    ZoneInfo,
+    ZoneRemoveResponse,
+)
+
 # Health schemas
 from .health import (
     ComponentHealth,
@@ -282,6 +291,12 @@ __all__ = [
     "RuleToggleResponse",
     "SensorCondition",
     "TimeCondition",
+    # Zone
+    "ZoneAckPayload",
+    "ZoneAssignRequest",
+    "ZoneAssignResponse",
+    "ZoneInfo",
+    "ZoneRemoveResponse",
     # Health
     "ComponentHealth",
     "DatabaseHealth",

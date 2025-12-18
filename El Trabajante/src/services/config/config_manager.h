@@ -32,6 +32,14 @@ public:
   bool updateZoneAssignment(const String& zone_id, const String& master_zone_id, 
                             const String& zone_name, const String& kaiser_id);
   
+  // Subzone Configuration (Phase 9)
+  bool saveSubzoneConfig(const SubzoneConfig& config);
+  bool loadSubzoneConfig(const String& subzone_id, SubzoneConfig& config);
+  bool loadAllSubzoneConfigs(SubzoneConfig configs[], uint8_t max_configs, uint8_t& loaded_count);
+  bool removeSubzoneConfig(const String& subzone_id);
+  bool validateSubzoneConfig(const SubzoneConfig& config) const;
+  uint8_t getSubzoneCount() const;  // Returns count of configured subzones
+  
   // System Configuration (NEU für Phase 1)
   bool loadSystemConfig(SystemConfig& config);
   bool saveSystemConfig(const SystemConfig& config);

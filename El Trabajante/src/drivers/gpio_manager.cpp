@@ -1,5 +1,6 @@
 #include "gpio_manager.h"
 #include "../utils/logger.h"
+#include <algorithm>
 
 // ============================================
 // CONDITIONAL HARDWARE CONFIGURATION INCLUDES
@@ -397,5 +398,202 @@ bool GPIOManager::verifyPinState(uint8_t pin, uint8_t expected_mode) {
     // (reading pin value doesn't tell us if OUTPUT is working)
     
     return true;  // Verification passed or not applicable
+}
+
+// ============================================
+// SUBZONE MANAGEMENT IMPLEMENTATION (Phase 9)
+// ============================================
+
+bool GPIOManager::assignPinToSubzone(uint8_t gpio, const String& subzone_id) {
+  // Validation 1: Pin muss verfügbar oder bereits dieser Subzone zugewiesen sein
+  if (isReservedPin(gpio)) {
+    LOG_ERROR("GPIOManager: Cannot assign reserved pin " + String(gpio) + " to subzone");
+    return false;
+  }
+
+  // Validation 2: Pin muss in safe pins list sein
+  bool pin_in_safe_list = false;
+  for (const auto& pin_info : pins_) {
+    if (pin_info.pin == gpio) {
+      pin_in_safe_list = true;
+      break;
+    }
+  }
+  if (!pin_in_safe_list) {
+    LOG_ERROR("GPIOManager: Pin " + String(gpio) + " not in safe pins list");
+    return false;
+  }
+
+  // Validation 3: Prüfe ob Pin bereits anderer Subzone zugewiesen (gleiche Subzone ist OK für Updates)
+  for (const auto& entry : subzone_pin_map_) {
+    if (entry.first != subzone_id) {
+      // Prüfe ob Pin bereits einer anderen Subzone zugewiesen ist
+      for (uint8_t assigned_gpio : entry.second) {
+        if (assigned_gpio == gpio) {
+          LOG_ERROR("GPIOManager: Pin " + String(gpio) + " already assigned to subzone " + entry.first);
+          return false;
+        }
+      }
+    } else {
+      // Gleiche Subzone: Prüfe ob Pin bereits zugewiesen (Update ist OK)
+      for (uint8_t assigned_gpio : entry.second) {
+        if (assigned_gpio == gpio) {
+          LOG_INFO("GPIOManager: Pin " + String(gpio) + " already assigned to subzone " + subzone_id + " (update)");
+          return true;  // Bereits zugewiesen, kein Fehler
+        }
+      }
+    }
+  }
+
+  // Assignment: Pin zu Subzone hinzufügen
+  subzone_pin_map_[subzone_id].push_back(gpio);
+  
+  // Update pin_info component_name für Tracking
+  for (auto& pin_info : pins_) {
+    if (pin_info.pin == gpio) {
+      strncpy(pin_info.component_name, subzone_id.c_str(), sizeof(pin_info.component_name) - 1);
+      pin_info.component_name[sizeof(pin_info.component_name) - 1] = '\0';
+      break;
+    }
+  }
+
+  LOG_INFO("GPIOManager: Pin " + String(gpio) + " assigned to subzone: " + subzone_id);
+  return true;
+}
+
+bool GPIOManager::removePinFromSubzone(uint8_t gpio) {
+  // Finde Subzone die diesen Pin hat
+  for (auto& entry : subzone_pin_map_) {
+    auto& gpios = entry.second;
+    auto it = std::find(gpios.begin(), gpios.end(), gpio);
+    if (it != gpios.end()) {
+      gpios.erase(it);
+      LOG_INFO("GPIOManager: Pin " + String(gpio) + " removed from subzone: " + entry.first);
+      
+      // Wenn Subzone leer ist, entferne sie aus Map
+      if (gpios.empty()) {
+        subzone_pin_map_.erase(entry.first);
+      }
+      
+      // Update pin_info
+      for (auto& pin_info : pins_) {
+        if (pin_info.pin == gpio) {
+          pin_info.component_name[0] = '\0';
+          break;
+        }
+      }
+      
+      return true;
+    }
+  }
+  
+  LOG_WARNING("GPIOManager: Pin " + String(gpio) + " not found in any subzone");
+  return false;
+}
+
+std::vector<uint8_t> GPIOManager::getSubzonePins(const String& subzone_id) const {
+  auto it = subzone_pin_map_.find(subzone_id);
+  if (it != subzone_pin_map_.end()) {
+    return it->second;
+  }
+  return std::vector<uint8_t>();  // Empty vector
+}
+
+bool GPIOManager::isPinAssignedToSubzone(uint8_t gpio, const String& subzone_id) const {
+  if (subzone_id.length() == 0) {
+    // Prüfe ob Pin überhaupt einer Subzone zugewiesen ist
+    for (const auto& entry : subzone_pin_map_) {
+      for (uint8_t assigned_gpio : entry.second) {
+        if (assigned_gpio == gpio) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  
+  // Prüfe spezifische Subzone
+  auto it = subzone_pin_map_.find(subzone_id);
+  if (it != subzone_pin_map_.end()) {
+    for (uint8_t assigned_gpio : it->second) {
+      if (assigned_gpio == gpio) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool GPIOManager::isSubzoneSafe(const String& subzone_id) const {
+  auto pins = getSubzonePins(subzone_id);
+  if (pins.empty()) {
+    return true;  // Leere Subzone ist "safe"
+  }
+  
+  for (uint8_t gpio : pins) {
+    if (!isPinInSafeMode(gpio)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool GPIOManager::enableSafeModeForSubzone(const String& subzone_id) {
+  auto pins = getSubzonePins(subzone_id);
+  if (pins.empty()) {
+    LOG_WARNING("GPIOManager: Subzone " + subzone_id + " has no pins");
+    return false;
+  }
+  
+  bool success = true;
+  for (uint8_t gpio : pins) {
+    // De-energize outputs BEFORE mode change
+    for (auto& pin_info : pins_) {
+      if (pin_info.pin == gpio && pin_info.mode == OUTPUT) {
+        digitalWrite(gpio, LOW);
+        delayMicroseconds(10);
+      }
+    }
+    
+    // Set to safe mode
+    pinMode(gpio, INPUT_PULLUP);
+    
+    // Update tracking
+    for (auto& pin_info : pins_) {
+      if (pin_info.pin == gpio) {
+        pin_info.in_safe_mode = true;
+        pin_info.mode = INPUT_PULLUP;
+        if (!verifyPinState(gpio, INPUT_PULLUP)) {
+          LOG_WARNING("GPIOManager: Pin " + String(gpio) + " safe-mode verification failed");
+          success = false;
+        }
+      }
+    }
+  }
+  
+  if (success) {
+    LOG_INFO("GPIOManager: Safe-Mode activated for subzone: " + subzone_id);
+  }
+  return success;
+}
+
+bool GPIOManager::disableSafeModeForSubzone(const String& subzone_id) {
+  // Disable safe-mode bedeutet nur Tracking-Update, nicht automatische Pin-Freigabe
+  // Pins bleiben in Subzone-Zuweisung, aber safe_mode Flag wird entfernt
+  auto pins = getSubzonePins(subzone_id);
+  if (pins.empty()) {
+    return false;
+  }
+  
+  for (uint8_t gpio : pins) {
+    for (auto& pin_info : pins_) {
+      if (pin_info.pin == gpio) {
+        pin_info.in_safe_mode = false;
+      }
+    }
+  }
+  
+  LOG_INFO("GPIOManager: Safe-Mode disabled for subzone: " + subzone_id);
+  return true;
 }
 
