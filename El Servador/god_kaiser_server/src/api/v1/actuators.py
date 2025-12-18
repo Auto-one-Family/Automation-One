@@ -47,7 +47,9 @@ from ...schemas import (
 )
 from ...schemas.common import PaginationMeta
 from ...services.actuator_service import ActuatorService
-from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service, get_mqtt_publisher
+from ...services.config_builder import ConfigPayloadBuilder
+from ...services.esp_service import ESPService
+from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service, get_config_builder, get_esp_service, get_mqtt_publisher
 
 logger = get_logger(__name__)
 
@@ -327,6 +329,22 @@ async def create_or_update_actuator(
         logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username}")
     
     await db.commit()
+    
+    # Publish config to ESP32 via MQTT (using dependency-injected services)
+    try:
+        config_builder: ConfigPayloadBuilder = get_config_builder(db)
+        combined_config = await config_builder.build_combined_config(esp_id, db)
+        
+        esp_service: ESPService = get_esp_service(db)
+        config_sent = await esp_service.send_config(esp_id, combined_config)
+        
+        if config_sent:
+            logger.info(f"Config published to ESP {esp_id} after actuator create/update")
+        else:
+            logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
+    except Exception as e:
+        # Log error but don't fail the request (DB save was successful)
+        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
     
     return _model_to_schema_response(actuator, esp_id, None)
 
@@ -715,6 +733,22 @@ async def delete_actuator(
     await db.commit()
     
     logger.info(f"Actuator deleted: {esp_id} GPIO {gpio} by {current_user.username}")
+    
+    # Publish updated config to ESP32 via MQTT (actuator removed from payload)
+    try:
+        config_builder: ConfigPayloadBuilder = get_config_builder(db)
+        combined_config = await config_builder.build_combined_config(esp_id, db)
+        
+        esp_service: ESPService = get_esp_service(db)
+        config_sent = await esp_service.send_config(esp_id, combined_config)
+        
+        if config_sent:
+            logger.info(f"Config published to ESP {esp_id} after actuator delete")
+        else:
+            logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")
+    except Exception as e:
+        # Log error but don't fail the request (DB delete was successful)
+        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
     
     return _model_to_schema_response(actuator, esp_id, None)
 

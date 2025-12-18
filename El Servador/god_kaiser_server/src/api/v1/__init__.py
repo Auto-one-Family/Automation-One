@@ -10,6 +10,7 @@ Status: IMPLEMENTED
 from fastapi import APIRouter
 
 from .actuators import router as actuators_router
+from .audit import router as audit_router
 from .auth import router as auth_router
 from .debug import router as debug_router
 from .esp import router as esp_router
@@ -23,6 +24,7 @@ api_v1_router = APIRouter()
 
 # Include all sub-routers
 api_v1_router.include_router(auth_router)
+api_v1_router.include_router(audit_router)
 api_v1_router.include_router(esp_router)
 api_v1_router.include_router(sensors_router)
 api_v1_router.include_router(actuators_router)
@@ -34,6 +36,7 @@ api_v1_router.include_router(users_router)
 # Export individual routers for direct access if needed
 __all__ = [
     "api_v1_router",
+    "audit_router",
     "auth_router",
     "debug_router",
     "esp_router",

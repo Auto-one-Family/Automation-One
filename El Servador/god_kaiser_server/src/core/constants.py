@@ -24,6 +24,7 @@ MQTT_TOPIC_ESP_HEARTBEAT = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
 MQTT_TOPIC_ESP_ACTUATOR_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command"
 MQTT_TOPIC_ESP_CONFIG_SENSOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/sensor/{gpio}"
 MQTT_TOPIC_ESP_CONFIG_ACTUATOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/actuator/{gpio}"
+MQTT_TOPIC_ESP_CONFIG = "kaiser/{kaiser_id}/esp/{esp_id}/config"  # Combined sensor/actuator config
 MQTT_TOPIC_ESP_SYSTEM_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/system/command"
 MQTT_TOPIC_ESP_PI_ENHANCED_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/response"
 

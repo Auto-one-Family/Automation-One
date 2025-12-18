@@ -3,15 +3,26 @@ MQTT Handler: Sensor Data Messages
 
 Processes incoming sensor data from ESP32 devices:
 - Parses sensor data topics
-- Validates payloads
+- Validates payloads (with structured error codes)
 - Triggers Pi-Enhanced processing if enabled
 - Saves data to database
+
+Error Codes:
+- Uses ValidationErrorCode for payload validation errors
+- Uses ConfigErrorCode for ESP device lookup errors
+- Uses ServiceErrorCode for processing failures
 """
 
 import json
 from datetime import datetime, timezone
 from typing import Optional
 
+from ...core.error_codes import (
+    ConfigErrorCode,
+    ServiceErrorCode,
+    ValidationErrorCode,
+    get_error_code_description,
+)
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository, SensorRepository
 from ...db.session import get_session
@@ -73,7 +84,10 @@ class SensorDataHandler:
             # Step 1: Parse topic
             parsed_topic = TopicBuilder.parse_sensor_data_topic(topic)
             if not parsed_topic:
-                logger.error(f"Failed to parse sensor data topic: {topic}")
+                logger.error(
+                    f"[{ValidationErrorCode.MISSING_REQUIRED_FIELD}] "
+                    f"Failed to parse sensor data topic: {topic}"
+                )
                 return False
 
             esp_id_str = parsed_topic["esp_id"]
@@ -87,8 +101,10 @@ class SensorDataHandler:
             # Step 2: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
+                error_code = validation_result.get("error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD)
                 logger.error(
-                    f"Invalid sensor data payload: {validation_result['error']}"
+                    f"[{error_code}] Invalid sensor data payload from {esp_id_str}: "
+                    f"{validation_result['error']}"
                 )
                 return False
 
@@ -100,7 +116,11 @@ class SensorDataHandler:
                 # Step 4: Lookup ESP device
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
                 if not esp_device:
-                    logger.error(f"ESP device not found: {esp_id_str}")
+                    logger.error(
+                        f"[{ConfigErrorCode.ESP_DEVICE_NOT_FOUND}] "
+                        f"ESP device not found: {esp_id_str} - "
+                        f"{get_error_code_description(ConfigErrorCode.ESP_DEVICE_NOT_FOUND)}"
+                    )
                     return False
 
                 # Step 5: Lookup sensor config
@@ -163,8 +183,10 @@ class SensorDataHandler:
                         # Processing failed, mark quality
                         quality = "error"
                         logger.error(
+                            f"[{ServiceErrorCode.OPERATION_TIMEOUT}] "
                             f"Pi-Enhanced processing failed: esp_id={esp_id_str}, "
-                            f"gpio={gpio}, sensor_type={sensor_type}"
+                            f"gpio={gpio}, sensor_type={sensor_type} - "
+                            f"{get_error_code_description(ServiceErrorCode.OPERATION_TIMEOUT)}"
                         )
 
                 elif not raw_mode:
@@ -264,50 +286,90 @@ class SensorDataHandler:
             payload: Payload dict to validate
 
         Returns:
-            {"valid": bool, "error": str}
+            {"valid": bool, "error": str, "error_code": int}
         """
         # Check required fields (with alternatives for compatibility)
         # Accept both "ts" and "timestamp"
         if "ts" not in payload and "timestamp" not in payload:
-            return {"valid": False, "error": "Missing required field: ts or timestamp"}
+            return {
+                "valid": False,
+                "error": "Missing required field: ts or timestamp",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         if "esp_id" not in payload:
-            return {"valid": False, "error": "Missing required field: esp_id"}
+            return {
+                "valid": False,
+                "error": "Missing required field: esp_id",
+                "error_code": ValidationErrorCode.INVALID_ESP_ID,
+            }
 
         if "gpio" not in payload:
-            return {"valid": False, "error": "Missing required field: gpio"}
+            return {
+                "valid": False,
+                "error": "Missing required field: gpio",
+                "error_code": ValidationErrorCode.INVALID_GPIO,
+            }
 
         if "sensor_type" not in payload:
-            return {"valid": False, "error": "Missing required field: sensor_type"}
+            return {
+                "valid": False,
+                "error": "Missing required field: sensor_type",
+                "error_code": ValidationErrorCode.INVALID_SENSOR_TYPE,
+            }
 
         # Accept both "raw" and "raw_value"
         if "raw" not in payload and "raw_value" not in payload:
-            return {"valid": False, "error": "Missing required field: raw or raw_value"}
+            return {
+                "valid": False,
+                "error": "Missing required field: raw or raw_value",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         # raw_mode is required
         if "raw_mode" not in payload:
-            return {"valid": False, "error": "Missing required field: raw_mode"}
+            return {
+                "valid": False,
+                "error": "Missing required field: raw_mode",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         # Type validation
         ts_value = payload.get("ts", payload.get("timestamp"))
         if not isinstance(ts_value, int):
-            return {"valid": False, "error": "Field 'ts/timestamp' must be integer (Unix timestamp)"}
+            return {
+                "valid": False,
+                "error": "Field 'ts/timestamp' must be integer (Unix timestamp)",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
         if not isinstance(payload["gpio"], int):
-            return {"valid": False, "error": "Field 'gpio' must be integer"}
+            return {
+                "valid": False,
+                "error": "Field 'gpio' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
         # raw_mode validation (must be boolean)
         if not isinstance(payload["raw_mode"], bool):
-            return {"valid": False, "error": "Field 'raw_mode' must be boolean"}
+            return {
+                "valid": False,
+                "error": "Field 'raw_mode' must be boolean",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
         # Validate raw value (should be numeric)
         raw_value = payload.get("raw", payload.get("raw_value"))
         try:
             float(raw_value)
         except (ValueError, TypeError):
-            return {"valid": False, "error": "Field 'raw/raw_value' must be numeric"}
+            return {
+                "valid": False,
+                "error": "Field 'raw/raw_value' must be numeric",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
-        return {"valid": True, "error": ""}
+        return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
 
     async def _trigger_pi_enhanced_processing(
         self,

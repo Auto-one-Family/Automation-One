@@ -1,24 +1,55 @@
 """
 MQTT Handler: ESP32 Configuration Response Messages
 
-Logs configuration acknowledgements from ESP devices.
+Logs configuration acknowledgements from ESP devices and stores in audit log.
 
 Topic: kaiser/god/esp/{esp_id}/config_response
 QoS: 2 (Exactly Once)
 
 Note: ESP32 uses 'config_response' topic (not 'config/ack').
 Server adapts to ESP32 protocol.
+
+Error Codes (ESP32 → Server):
+- NONE: Success
+- JSON_PARSE_ERROR: Invalid JSON received
+- VALIDATION_FAILED: Config validation failed
+- GPIO_CONFLICT: GPIO already in use
+- NVS_WRITE_FAILED: NVS storage full or corrupted
+- TYPE_MISMATCH: Wrong data type
+- MISSING_FIELD: Required field missing
+- OUT_OF_RANGE: Value out of valid range
+- UNKNOWN_ERROR: Unexpected error
+
+Audit Logging:
+- All config responses are stored in audit_logs table
+- Provides history tracking for debugging and compliance
 """
 
 from datetime import datetime, timezone
 from typing import Optional
 
+from ...core.error_codes import ConfigErrorCode, get_error_code_description
 from ...core.logging_config import get_logger
+from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.esp_repo import ESPRepository
 from ...db.session import get_session
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
+
+
+# ESP32 Config Error Code mapping (from error_codes.h)
+ESP32_ERROR_CODES = {
+    "NONE": "Success",
+    "JSON_PARSE_ERROR": "Invalid JSON format received",
+    "VALIDATION_FAILED": "Config validation failed on ESP32",
+    "GPIO_CONFLICT": "GPIO already in use by another sensor/actuator",
+    "NVS_WRITE_FAILED": "NVS storage full or corrupted",
+    "TYPE_MISMATCH": "Field type mismatch",
+    "MISSING_FIELD": "Required field missing",
+    "OUT_OF_RANGE": "Value out of valid range",
+    "UNKNOWN_ERROR": "Unexpected error on ESP32",
+}
 
 
 class ConfigHandler:
@@ -84,34 +115,64 @@ class ConfigHandler:
                     f"({count} items) - {message}"
                 )
             else:
+                # Get human-readable error description
+                error_description = ESP32_ERROR_CODES.get(error_code, f"Unknown error: {error_code}")
+                failed_item = payload.get("failed_item", {})
+                
                 logger.error(
                     f"❌ Config FAILED on {esp_id}: {config_type} "
-                    f"- {message} (Error: {error_code})"
+                    f"- {message} (Error: {error_code} - {error_description})"
                 )
+                
+                # Log additional details for debugging
+                if failed_item:
+                    logger.error(
+                        f"   Failed item details: GPIO={failed_item.get('gpio', 'N/A')}, "
+                        f"Type={failed_item.get('sensor_type', failed_item.get('actuator_type', 'N/A'))}"
+                    )
 
-            # TODO: Optional - Store in audit_log table for history
-            # async for session in get_session():
-            #     audit_entry = AuditLog(
-            #         esp_id=esp_id,
-            #         event_type="config_ack",
-            #         status=status,
-            #         details=payload
-            #     )
-            #     session.add(audit_entry)
-            #     await session.commit()
+            # Store in audit_log table for history tracking
+            try:
+                async for session in get_session():
+                    audit_repo = AuditLogRepository(session)
+                    await audit_repo.log_config_response(
+                        esp_id=esp_id,
+                        config_type=config_type,
+                        status=status,
+                        count=count,
+                        message=message,
+                        error_code=error_code if status != "success" else None,
+                        error_description=ESP32_ERROR_CODES.get(error_code) if error_code else None,
+                        failed_item=payload.get("failed_item") if status != "success" else None,
+                    )
+                    await session.commit()
+                    logger.debug(f"Config response stored in audit log: {esp_id}")
+            except Exception as audit_error:
+                # Don't fail the handler if audit logging fails
+                logger.warning(f"Failed to store config response in audit log: {audit_error}")
 
             # WebSocket Broadcast
             try:
                 from ...websocket.manager import WebSocketManager
                 ws_manager = await WebSocketManager.get_instance()
-                await ws_manager.broadcast("config_response", {
+                
+                broadcast_payload = {
                     "esp_id": esp_id,
                     "config_type": config_type,
                     "status": status,
                     "count": count,
                     "message": message,
                     "timestamp": int(datetime.now(timezone.utc).timestamp())
-                })
+                }
+                
+                # Include error details for failed configs
+                if status != "success":
+                    broadcast_payload["error_code"] = error_code
+                    broadcast_payload["error_description"] = ESP32_ERROR_CODES.get(error_code, "Unknown error")
+                    if payload.get("failed_item"):
+                        broadcast_payload["failed_item"] = payload["failed_item"]
+                
+                await ws_manager.broadcast("config_response", broadcast_payload)
             except Exception as e:
                 logger.warning(f"Failed to broadcast config response via WebSocket: {e}")
 

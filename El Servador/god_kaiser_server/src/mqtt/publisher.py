@@ -131,6 +131,68 @@ class Publisher:
         logger.info(f"Publishing actuator config to {esp_id} GPIO {gpio}")
         return self._publish_with_retry(topic, payload, qos, retry)
 
+    def publish_config(
+        self,
+        esp_id: str,
+        config: Dict[str, Any],
+        retry: bool = True,
+    ) -> bool:
+        """
+        Publish combined sensor/actuator configuration to ESP32.
+
+        Publishes configuration in ESP32-compatible format:
+        {
+            "sensors": [...],
+            "actuators": [...],
+            "timestamp": int
+        }
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            config: Configuration dict with "sensors" and/or "actuators" arrays
+            retry: Enable retry on failure
+
+        Returns:
+            True if publish successful
+
+        Note:
+            Uses combined config topic: kaiser/{kaiser_id}/esp/{esp_id}/config
+            This is the topic ESP32 expects (not individual GPIO topics).
+        """
+        topic = TopicBuilder.build_config_topic(esp_id)
+        
+        # Build payload with timestamp
+        payload = {
+            **config,
+            "timestamp": int(time.time()),
+        }
+
+        qos = constants.QOS_CONFIG  # QoS 2 (Exactly once)
+
+        # Extract counts for logging
+        sensor_count = len(config.get("sensors", []))
+        actuator_count = len(config.get("actuators", []))
+        
+        logger.info(
+            f"Publishing config to {esp_id}: "
+            f"{sensor_count} sensor(s), {actuator_count} actuator(s)"
+        )
+        
+        success = self._publish_with_retry(topic, payload, qos, retry)
+        
+        if success:
+            logger.info(
+                f"✅ Config published successfully to {esp_id}: "
+                f"{sensor_count} sensor(s), {actuator_count} actuator(s)"
+            )
+        else:
+            logger.error(
+                f"❌ Config publish failed for {esp_id}: "
+                f"{sensor_count} sensor(s), {actuator_count} actuator(s)"
+            )
+        
+        return success
+
     def publish_system_command(
         self,
         esp_id: str,

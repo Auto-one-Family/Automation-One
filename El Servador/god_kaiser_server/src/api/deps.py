@@ -679,3 +679,56 @@ def get_actuator_service(db: DBSession):
     publisher = get_mqtt_publisher()
     
     return ActuatorService(actuator_repo, safety_service, publisher)
+
+
+def get_config_builder(db: DBSession):
+    """Get ConfigPayloadBuilder instance."""
+    from ..db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+    from ..services.config_builder import ConfigPayloadBuilder
+    
+    sensor_repo = SensorRepository(db)
+    actuator_repo = ActuatorRepository(db)
+    esp_repo = ESPRepository(db)
+    
+    return ConfigPayloadBuilder(
+        sensor_repo=sensor_repo,
+        actuator_repo=actuator_repo,
+        esp_repo=esp_repo,
+    )
+
+
+def get_esp_service(db: DBSession):
+    """Get ESPService instance."""
+    from ..db.repositories import ESPRepository
+    from ..services.esp_service import ESPService
+    
+    esp_repo = ESPRepository(db)
+    publisher = get_mqtt_publisher()
+    
+    return ESPService(esp_repo, publisher)
+
+
+def get_audit_log_repo(db: DBSession):
+    """Get AuditLogRepository instance."""
+    from ..db.repositories import AuditLogRepository
+    
+    return AuditLogRepository(db)
+
+
+# Type aliases for service dependencies (for consistent usage)
+MQTTPublisher = Annotated["Publisher", Depends(get_mqtt_publisher)]  # type: ignore
+
+
+async def get_config_builder_dep(db: DBSession):
+    """Async dependency for ConfigPayloadBuilder."""
+    return get_config_builder(db)
+
+
+async def get_esp_service_dep(db: DBSession):
+    """Async dependency for ESPService."""
+    return get_esp_service(db)
+
+
+async def get_audit_log_repo_dep(db: DBSession):
+    """Async dependency for AuditLogRepository."""
+    return get_audit_log_repo(db)

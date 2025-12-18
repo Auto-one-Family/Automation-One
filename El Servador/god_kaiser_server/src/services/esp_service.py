@@ -257,33 +257,102 @@ class ESPService:
         self,
         device_id: str,
         config: Dict[str, Any],
-    ) -> bool:
+        offline_behavior: str = "warn",
+        require_online: bool = False,
+    ) -> Dict[str, Any]:
         """
         Send configuration update to ESP via MQTT.
+        
+        Supports configurable behavior for offline devices:
+        - "warn": Log warning but send anyway (default, MQTT will queue)
+        - "skip": Skip sending, return success with warning
+        - "fail": Return failure if device is offline
         
         Args:
             device_id: ESP device ID
             config: Configuration data
+            offline_behavior: How to handle offline devices ("warn", "skip", "fail")
+            require_online: Deprecated, use offline_behavior="fail" instead
             
         Returns:
-            True if sent successfully
+            Dict with:
+            - success: bool
+            - sent: bool (whether MQTT publish was attempted)
+            - device_status: str
+            - message: str
+            - error_code: int (if failed)
         """
+        from ..core.error_codes import ConfigErrorCode
+        
+        result = {
+            "success": False,
+            "sent": False,
+            "device_status": "unknown",
+            "message": "",
+            "error_code": None,
+        }
+        
+        # Get device
         device = await self.esp_repo.get_by_device_id(device_id)
         if not device:
             logger.error(f"Cannot send config: device {device_id} not found")
-            return False
+            result["message"] = f"Device {device_id} not found"
+            result["error_code"] = ConfigErrorCode.ESP_DEVICE_NOT_FOUND
+            return result
         
+        result["device_status"] = device.status or "unknown"
+        
+        # Handle require_online legacy parameter
+        if require_online:
+            offline_behavior = "fail"
+        
+        # Check if device is online
+        is_online = device.status == "online"
+        
+        if not is_online:
+            if offline_behavior == "fail":
+                logger.error(f"Cannot send config: device {device_id} is {device.status}")
+                result["message"] = f"Device {device_id} is {device.status} (offline_behavior=fail)"
+                result["error_code"] = ConfigErrorCode.ESP_OFFLINE
+                return result
+            
+            elif offline_behavior == "skip":
+                logger.warning(
+                    f"Skipping config send to {device_id}: device is {device.status}"
+                )
+                result["success"] = True
+                result["sent"] = False
+                result["message"] = (
+                    f"Config not sent: device {device_id} is {device.status}. "
+                    "Config will be sent when device reconnects."
+                )
+                return result
+            
+            else:  # "warn" (default)
+                logger.warning(
+                    f"Sending config to offline device {device_id} ({device.status}). "
+                    "MQTT broker will queue message until device reconnects."
+                )
+        
+        # Publish config via MQTT
         success = self.publisher.publish_config(
             esp_id=device_id,
             config=config,
         )
         
+        result["sent"] = True
+        
         if success:
+            result["success"] = True
+            status_note = "" if is_online else f" (device is {device.status}, message queued)"
+            result["message"] = f"Config sent to {device_id}{status_note}"
             logger.info(f"Config sent to {device_id}: {list(config.keys())}")
         else:
+            result["message"] = f"Failed to publish config to {device_id}"
+            result["error_code"] = ConfigErrorCode.CONFIG_PUBLISH_FAILED
             logger.error(f"Failed to send config to {device_id}")
         
-        return success
+        return result
     
     async def send_restart(
         self,

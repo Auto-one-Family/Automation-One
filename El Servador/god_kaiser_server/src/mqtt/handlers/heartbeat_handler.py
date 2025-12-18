@@ -4,18 +4,27 @@ MQTT Handler: Device Heartbeat Messages
 Processes heartbeat messages from ESP32 devices:
 - Updates device status (online/offline)
 - Tracks last_seen timestamp
-- Logs device health metrics
+- Logs device health metrics (with structured error codes)
 - Detects stale connections
 - AUTO-DISCOVERY: Automatically registers unknown ESP devices
 
 Note: Heartbeat is the primary discovery mechanism.
 ESP32 sends initial heartbeat on startup for registration.
 Separate discovery topic (kaiser/god/discovery/esp32_nodes) is deprecated.
+
+Error Codes:
+- Uses ValidationErrorCode for payload validation errors
+- Uses ConfigErrorCode for ESP device lookup errors
 """
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from ...core.error_codes import (
+    ConfigErrorCode,
+    ValidationErrorCode,
+    get_error_code_description,
+)
 from ...core.logging_config import get_logger
 from ...db.models.esp import ESPDevice
 from ...db.repositories import ESPRepository
@@ -73,7 +82,10 @@ class HeartbeatHandler:
             # Step 1: Parse topic
             parsed_topic = TopicBuilder.parse_heartbeat_topic(topic)
             if not parsed_topic:
-                logger.error(f"Failed to parse heartbeat topic: {topic}")
+                logger.error(
+                    f"[{ValidationErrorCode.MISSING_REQUIRED_FIELD}] "
+                    f"Failed to parse heartbeat topic: {topic}"
+                )
                 return False
 
             esp_id_str = parsed_topic["esp_id"]
@@ -83,8 +95,10 @@ class HeartbeatHandler:
             # Step 2: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
+                error_code = validation_result.get("error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD)
                 logger.error(
-                    f"Invalid heartbeat payload: {validation_result['error']}"
+                    f"[{error_code}] Invalid heartbeat payload from {esp_id_str}: "
+                    f"{validation_result['error']}"
                 )
                 return False
 
@@ -103,8 +117,10 @@ class HeartbeatHandler:
                     # registered via the REST API before sending heartbeats.
                     # Use POST /api/v1/esp/register to register new devices.
                     logger.warning(
+                        f"[{ConfigErrorCode.ESP_DEVICE_NOT_FOUND}] "
                         f"❌ Heartbeat rejected: Unknown device {esp_id_str}. "
-                        f"Device must be registered first via API."
+                        f"Device must be registered first via API. - "
+                        f"{get_error_code_description(ConfigErrorCode.ESP_DEVICE_NOT_FOUND)}"
                     )
                     return False
 
@@ -280,41 +296,70 @@ class HeartbeatHandler:
             payload: Payload dict to validate
 
         Returns:
-            {"valid": bool, "error": str}
+            {"valid": bool, "error": str, "error_code": int}
         """
         # Check required fields (with alternatives for compatibility)
         if "ts" not in payload:
-            return {"valid": False, "error": "Missing required field: ts"}
+            return {
+                "valid": False,
+                "error": "Missing required field: ts",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         if "uptime" not in payload:
-            return {"valid": False, "error": "Missing required field: uptime"}
+            return {
+                "valid": False,
+                "error": "Missing required field: uptime",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         # Accept both heap_free (ESP32) and free_heap (legacy)
         if "heap_free" not in payload and "free_heap" not in payload:
-            return {"valid": False, "error": "Missing required field: heap_free or free_heap"}
+            return {
+                "valid": False,
+                "error": "Missing required field: heap_free or free_heap",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         if "wifi_rssi" not in payload:
-            return {"valid": False, "error": "Missing required field: wifi_rssi"}
+            return {
+                "valid": False,
+                "error": "Missing required field: wifi_rssi",
+                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+            }
 
         # Type validation
         if not isinstance(payload["ts"], int):
             return {
                 "valid": False,
                 "error": "Field 'ts' must be integer (Unix timestamp)",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
             }
 
         if not isinstance(payload["uptime"], int):
-            return {"valid": False, "error": "Field 'uptime' must be integer"}
+            return {
+                "valid": False,
+                "error": "Field 'uptime' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
         # Validate heap field (whichever is present)
         heap_value = payload.get("heap_free", payload.get("free_heap"))
         if not isinstance(heap_value, int):
-            return {"valid": False, "error": "Field 'heap_free/free_heap' must be integer"}
+            return {
+                "valid": False,
+                "error": "Field 'heap_free/free_heap' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
         if not isinstance(payload["wifi_rssi"], int):
-            return {"valid": False, "error": "Field 'wifi_rssi' must be integer"}
+            return {
+                "valid": False,
+                "error": "Field 'wifi_rssi' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
 
-        return {"valid": True, "error": ""}
+        return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
 
     def _log_health_metrics(self, esp_id: str, payload: dict):
         """

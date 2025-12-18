@@ -256,3 +256,95 @@ export interface LogicExecution {
   execution_time_ms: number
   error: string | null
 }
+
+// =============================================================================
+// Sensor & Actuator Config Types (Real ESPs)
+// =============================================================================
+
+export interface SensorConfigCreate {
+  esp_id: string
+  gpio: number
+  sensor_type: string
+  name?: string | null
+  enabled?: boolean
+  interval_ms?: number
+  processing_mode?: 'pi_enhanced' | 'local' | 'raw'
+  calibration?: Record<string, unknown> | null
+  threshold_min?: number | null
+  threshold_max?: number | null
+  warning_min?: number | null
+  warning_max?: number | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface SensorConfigResponse {
+  id: string
+  esp_id: string
+  esp_device_id?: string
+  gpio: number
+  sensor_type: string
+  name: string
+  enabled: boolean
+  interval_ms: number
+  processing_mode: string
+  calibration: Record<string, unknown> | null
+  threshold_min: number | null
+  threshold_max: number | null
+  warning_min: number | null
+  warning_max: number | null
+  metadata: Record<string, unknown> | null
+  latest_value?: number | null
+  latest_quality?: QualityLevel | null
+  latest_timestamp?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ActuatorConfigCreate {
+  esp_id: string
+  gpio: number
+  actuator_type: string
+  name?: string | null
+  enabled?: boolean
+  max_runtime_seconds?: number | null
+  cooldown_seconds?: number | null
+  pwm_frequency?: number | null
+  servo_min_pulse?: number | null
+  servo_max_pulse?: number | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface ActuatorConfigResponse {
+  id: string
+  esp_id: string
+  esp_device_id?: string
+  gpio: number
+  actuator_type: string
+  name: string
+  enabled: boolean
+  max_runtime_seconds: number | null
+  cooldown_seconds: number | null
+  pwm_frequency: number | null
+  servo_min_pulse: number | null
+  servo_max_pulse: number | null
+  metadata: Record<string, unknown> | null
+  current_value?: number | null
+  is_active?: boolean
+  last_command_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+// =============================================================================
+// Config Response Types (WebSocket Events)
+// =============================================================================
+
+export interface ConfigResponse {
+  esp_id: string
+  config_type: 'sensor' | 'actuator'
+  status: 'success' | 'error'
+  count: number
+  message: string
+  error_code?: string
+  timestamp: number
+}

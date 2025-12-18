@@ -81,6 +81,22 @@ class TopicBuilder:
         )
 
     @staticmethod
+    def build_config_topic(esp_id: str) -> str:
+        """
+        Build combined config topic for sensors and actuators.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/config
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_CONFIG,
+            esp_id=esp_id
+        )
+
+    @staticmethod
     def build_system_command_topic(esp_id: str) -> str:
         """
         Build system command topic.

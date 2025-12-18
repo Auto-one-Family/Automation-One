@@ -39,7 +39,9 @@ from ...schemas import (
     SensorStatsResponse,
 )
 from ...schemas.common import PaginationMeta
-from ..deps import ActiveUser, DBSession, OperatorUser
+from ...services.config_builder import ConfigPayloadBuilder
+from ...services.esp_service import ESPService
+from ..deps import ActiveUser, DBSession, OperatorUser, get_config_builder, get_esp_service, get_mqtt_publisher
 
 logger = get_logger(__name__)
 
@@ -333,6 +335,22 @@ async def create_or_update_sensor(
     await db.commit()
     await db.refresh(sensor)
     
+    # Publish config to ESP32 via MQTT (using dependency-injected services)
+    try:
+        config_builder: ConfigPayloadBuilder = get_config_builder(db)
+        combined_config = await config_builder.build_combined_config(esp_id, db)
+        
+        esp_service: ESPService = get_esp_service(db)
+        config_sent = await esp_service.send_config(esp_id, combined_config)
+        
+        if config_sent:
+            logger.info(f"Config published to ESP {esp_id} after sensor create/update")
+        else:
+            logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
+    except Exception as e:
+        # Log error but don't fail the request (DB save was successful)
+        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+    
     # Convert model to response schema
     return _model_to_response(sensor, esp_id)
 
@@ -392,6 +410,22 @@ async def delete_sensor(
     await db.commit()
     
     logger.info(f"Sensor deleted: {esp_id} GPIO {gpio} by {current_user.username}")
+    
+    # Publish updated config to ESP32 via MQTT (sensor removed from payload)
+    try:
+        config_builder: ConfigPayloadBuilder = get_config_builder(db)
+        combined_config = await config_builder.build_combined_config(esp_id, db)
+        
+        esp_service: ESPService = get_esp_service(db)
+        config_sent = await esp_service.send_config(esp_id, combined_config)
+        
+        if config_sent:
+            logger.info(f"Config published to ESP {esp_id} after sensor delete")
+        else:
+            logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")
+    except Exception as e:
+        # Log error but don't fail the request (DB delete was successful)
+        logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
     
     # Convert model to response schema
     return _model_to_response(sensor, esp_id)
