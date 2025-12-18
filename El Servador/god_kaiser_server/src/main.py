@@ -35,6 +35,7 @@ from .mqtt.handlers import (
     discovery_handler,
     heartbeat_handler,
     sensor_handler,
+    subzone_ack_handler,
     zone_ack_handler,
 )
 from .mqtt.publisher import Publisher
@@ -177,6 +178,11 @@ async def lifespan(app: FastAPI):
             _subscriber_instance.register_handler(
                 f"kaiser/{kaiser_id}/esp/+/zone/ack",
                 zone_ack_handler.handle_zone_ack
+            )
+            # Phase 9: Subzone ACK Handler (subzone assignment confirmations)
+            _subscriber_instance.register_handler(
+                f"kaiser/{kaiser_id}/esp/+/subzone/ack",
+                subzone_ack_handler.handle_subzone_ack
             )
 
             logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
@@ -342,6 +348,8 @@ app = FastAPI(
         {"name": "sensors", "description": "Sensor Configuration & Data"},
         {"name": "actuators", "description": "Actuator Control & Commands"},
         {"name": "logic", "description": "Logic Rules & Automation"},
+        {"name": "zone", "description": "Zone Assignment & Management"},
+        {"name": "subzone", "description": "Subzone Management & Safe-Mode Control"},
         {"name": "health", "description": "Health Checks & Metrics"},
         {"name": "websocket", "description": "WebSocket Real-time Updates"},
     ],

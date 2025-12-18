@@ -409,3 +409,100 @@ export interface ZoneUpdate {
   timestamp: number
   message?: string
 }
+
+// =============================================================================
+// Subzone Management Types (Phase 9)
+// =============================================================================
+
+/**
+ * Subzone information for display.
+ */
+export interface SubzoneInfo {
+  subzone_id: string
+  subzone_name: string | null
+  parent_zone_id: string
+  assigned_gpios: number[]
+  safe_mode_active: boolean
+  sensor_count: number
+  actuator_count: number
+  created_at?: string
+}
+
+/**
+ * Subzone assignment request.
+ */
+export interface SubzoneAssignRequest {
+  subzone_id: string
+  subzone_name?: string
+  parent_zone_id?: string
+  assigned_gpios: number[]
+  safe_mode_active?: boolean
+}
+
+/**
+ * Subzone assignment response from server.
+ */
+export interface SubzoneAssignResponse {
+  success: boolean
+  message: string
+  device_id: string
+  subzone_id: string
+  assigned_gpios: number[]
+  mqtt_topic: string
+  mqtt_sent: boolean
+}
+
+/**
+ * Subzone removal response from server.
+ */
+export interface SubzoneRemoveResponse {
+  success: boolean
+  message: string
+  device_id: string
+  subzone_id: string
+  mqtt_topic: string
+  mqtt_sent: boolean
+}
+
+/**
+ * Subzone list response from server.
+ */
+export interface SubzoneListResponse {
+  success: boolean
+  message: string
+  device_id: string
+  zone_id: string | null
+  subzones: SubzoneInfo[]
+  total_count: number
+}
+
+/**
+ * Subzone update from WebSocket (ESP ACK confirmation).
+ */
+export interface SubzoneUpdate {
+  device_id: string
+  subzone_id: string
+  status: 'subzone_assigned' | 'subzone_removed' | 'error'
+  timestamp: number
+  error_code?: number
+  message?: string
+}
+
+/**
+ * Safe-mode control request.
+ */
+export interface SafeModeRequest {
+  reason?: string
+}
+
+/**
+ * Safe-mode control response.
+ */
+export interface SafeModeResponse {
+  success: boolean
+  message: string
+  device_id: string
+  subzone_id: string
+  safe_mode_active: boolean
+  mqtt_sent: boolean
+}

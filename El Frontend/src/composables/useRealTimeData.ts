@@ -46,9 +46,22 @@ export interface ZoneUpdate {
   message?: string
 }
 
+/**
+ * Subzone update from WebSocket (ESP ACK confirmation).
+ * Phase: 9 - Subzone Management
+ */
+export interface SubzoneUpdate {
+  device_id: string
+  subzone_id: string
+  status: 'subzone_assigned' | 'subzone_removed' | 'error'
+  timestamp: number
+  error_code?: number
+  message?: string
+}
+
 export interface RealTimeMessage {
-  type: 'sensor' | 'actuator' | 'heartbeat' | 'state_change' | 'error' | 'zone_assignment'
-  data: SensorUpdate | ActuatorUpdate | HeartbeatUpdate | ZoneUpdate | Record<string, unknown>
+  type: 'sensor' | 'actuator' | 'heartbeat' | 'state_change' | 'error' | 'zone_assignment' | 'subzone_assignment'
+  data: SensorUpdate | ActuatorUpdate | HeartbeatUpdate | ZoneUpdate | SubzoneUpdate | Record<string, unknown>
 }
 
 export interface UseRealTimeDataOptions {
@@ -89,6 +102,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
   const lastActuatorUpdate = ref<ActuatorUpdate | null>(null)
   const lastHeartbeat = ref<HeartbeatUpdate | null>(null)
   const lastZoneUpdate = ref<ZoneUpdate | null>(null)
+  const lastSubzoneUpdate = ref<SubzoneUpdate | null>(null)
 
   // Event handlers (to be set by consumers)
   const eventHandlers = {
@@ -98,6 +112,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     onStateChange: null as ((data: Record<string, unknown>) => void) | null,
     onError: null as ((error: string) => void) | null,
     onZoneUpdate: null as ((update: ZoneUpdate) => void) | null,
+    onSubzoneUpdate: null as ((update: SubzoneUpdate) => void) | null,
   }
 
   // WebSocket instance
@@ -265,6 +280,11 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
           eventHandlers.onZoneUpdate?.(message.data as ZoneUpdate)
           break
 
+        case 'subzone_assignment':
+          lastSubzoneUpdate.value = message.data as SubzoneUpdate
+          eventHandlers.onSubzoneUpdate?.(message.data as SubzoneUpdate)
+          break
+
         default:
           console.warn('[WebSocket] Unknown message type:', message.type)
       }
@@ -319,6 +339,10 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     eventHandlers.onZoneUpdate = handler
   }
 
+  function onSubzoneUpdate(handler: (update: SubzoneUpdate) => void) {
+    eventHandlers.onSubzoneUpdate = handler
+  }
+
   // =============================================================================
   // LIFECYCLE
   // =============================================================================
@@ -348,6 +372,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     lastActuatorUpdate,
     lastHeartbeat,
     lastZoneUpdate,
+    lastSubzoneUpdate,
     reconnectAttempts,
 
     // Actions
@@ -362,6 +387,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
     onStateChange,
     onError,
     onZoneUpdate,
+    onSubzoneUpdate,
   }
 }
 

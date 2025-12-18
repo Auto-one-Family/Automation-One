@@ -154,6 +154,18 @@ from .zone import (
     ZoneRemoveResponse,
 )
 
+# Subzone schemas (Phase 9)
+from .subzone import (
+    SafeModeRequest,
+    SafeModeResponse,
+    SubzoneAckPayload,
+    SubzoneAssignRequest,
+    SubzoneAssignResponse,
+    SubzoneInfo,
+    SubzoneListResponse,
+    SubzoneRemoveResponse,
+)
+
 # Health schemas
 from .health import (
     ComponentHealth,
@@ -297,6 +309,15 @@ __all__ = [
     "ZoneAssignResponse",
     "ZoneInfo",
     "ZoneRemoveResponse",
+    # Subzone (Phase 9)
+    "SafeModeRequest",
+    "SafeModeResponse",
+    "SubzoneAckPayload",
+    "SubzoneAssignRequest",
+    "SubzoneAssignResponse",
+    "SubzoneInfo",
+    "SubzoneListResponse",
+    "SubzoneRemoveResponse",
     # Health
     "ComponentHealth",
     "DatabaseHealth",

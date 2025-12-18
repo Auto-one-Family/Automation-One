@@ -178,6 +178,14 @@ class ESPDevice(Base, TimestampMixin):
         doc="Actuator configurations for this device",
     )
 
+    # Subzone Configurations (Phase 9)
+    subzones: Mapped[list["SubzoneConfig"]] = relationship(
+        "SubzoneConfig",
+        back_populates="esp",
+        cascade="all, delete-orphan",
+        doc="Subzone configurations for this device",
+    )
+
     def __repr__(self) -> str:
         return (
             f"<ESPDevice(device_id='{self.device_id}', "

@@ -16,6 +16,7 @@ from . import (  # noqa: F401
     library,
     logic,
     sensor,
+    subzone,  # Subzone configuration model (Phase 9)
     system,
     user,
 )
@@ -30,6 +31,7 @@ from .kaiser import KaiserRegistry, ESPOwnership  # noqa: F401
 from .library import LibraryMetadata  # noqa: F401
 from .logic import CrossESPLogic, LogicExecutionHistory  # noqa: F401
 from .sensor import SensorConfig, SensorData  # noqa: F401
+from .subzone import SubzoneConfig  # noqa: F401
 from .system import SystemConfig  # noqa: F401
 from .user import User  # noqa: F401
 
@@ -44,6 +46,7 @@ __all__ = [
     "library",
     "logic",
     "sensor",
+    "subzone",
     "system",
     "user",
     # Models
@@ -64,6 +67,7 @@ __all__ = [
     "LogicExecutionHistory",
     "SensorConfig",
     "SensorData",
+    "SubzoneConfig",
     "SystemConfig",
     "User",
 ]

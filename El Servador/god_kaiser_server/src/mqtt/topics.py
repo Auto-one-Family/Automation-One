@@ -458,6 +458,98 @@ class TopicBuilder:
         return None
 
     # ====================================================================
+    # SUBZONE TOPIC METHODS (Phase 9)
+    # ====================================================================
+
+    @staticmethod
+    def build_subzone_assign_topic(esp_id: str) -> str:
+        """
+        Build subzone assignment topic.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/subzone/assign
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_SUBZONE_ASSIGN,
+            esp_id=esp_id
+        )
+
+    @staticmethod
+    def build_subzone_remove_topic(esp_id: str) -> str:
+        """
+        Build subzone removal topic.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/subzone/remove
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_SUBZONE_REMOVE,
+            esp_id=esp_id
+        )
+
+    @staticmethod
+    def build_subzone_safe_topic(esp_id: str) -> str:
+        """
+        Build subzone safe-mode topic.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/subzone/safe
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_SUBZONE_SAFE,
+            esp_id=esp_id
+        )
+
+    @staticmethod
+    def get_subzone_ack_subscription_pattern() -> str:
+        """
+        Get subzone ACK subscription pattern with wildcard.
+
+        Returns:
+            kaiser/{kaiser_id}/esp/+/subzone/ack
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_SUBSCRIBE_SUBZONE_ACK
+        )
+
+    @staticmethod
+    def parse_subzone_ack_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse subzone ACK topic.
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/subzone/ack
+
+        Returns:
+            {
+                "kaiser_id": "god",
+                "esp_id": "ESP_12AB34CD",
+                "type": "subzone_ack"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/subzone/ack
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/subzone/ack"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "subzone_ack",
+            }
+        return None
+
+    # ====================================================================
     # GENERIC PARSE METHOD
     # ====================================================================
 
@@ -486,6 +578,7 @@ class TopicBuilder:
             cls.parse_discovery_topic,
             cls.parse_pi_enhanced_request_topic,
             cls.parse_zone_ack_topic,
+            cls.parse_subzone_ack_topic,
         ]
 
         for parser in parsers:

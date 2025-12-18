@@ -35,6 +35,22 @@ MQTT_TOPIC_ESP_ZONE_ACK = "kaiser/{kaiser_id}/esp/{esp_id}/zone/ack"  # ESP → 
 # Zone Assignment Subscription Pattern
 MQTT_SUBSCRIBE_ESP_ZONE_ACK = "kaiser/{kaiser_id}/esp/+/zone/ack"
 
+# =============================================================================
+# Subzone Management Topics (Phase 9)
+# =============================================================================
+
+# Server → ESP (Outgoing)
+MQTT_TOPIC_SUBZONE_ASSIGN = "kaiser/{kaiser_id}/esp/{esp_id}/subzone/assign"
+MQTT_TOPIC_SUBZONE_REMOVE = "kaiser/{kaiser_id}/esp/{esp_id}/subzone/remove"
+MQTT_TOPIC_SUBZONE_SAFE = "kaiser/{kaiser_id}/esp/{esp_id}/subzone/safe"
+
+# ESP → Server (Incoming)
+MQTT_TOPIC_SUBZONE_ACK = "kaiser/{kaiser_id}/esp/{esp_id}/subzone/ack"
+MQTT_TOPIC_SUBZONE_STATUS = "kaiser/{kaiser_id}/esp/{esp_id}/subzone/status"
+
+# Subzone Subscription Pattern (with wildcard)
+MQTT_SUBSCRIBE_SUBZONE_ACK = "kaiser/{kaiser_id}/esp/+/subzone/ack"
+
 # Broadcast Topics
 MQTT_TOPIC_BROADCAST_ALL = "kaiser/broadcast/all"
 MQTT_TOPIC_BROADCAST_ZONE = "kaiser/broadcast/zone/{zone_id}"
