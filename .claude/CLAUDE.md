@@ -465,9 +465,32 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 ---
 
 **Letzte Aktualisierung:** 2025-12-08
-**Version:** 4.3 (Vollständig verifiziert gegen tatsächlichen Code)
+**Version:** 4.4 (Industrial Production Implementation)
 
-> **Änderungen in v4.3:**
+> **Änderungen in v4.4 (Industrial Production Implementation):**
+> - **Vollständiges Audit-Log-System implementiert:**
+>   - Performance-Indizes auf `created_at` für Time-Range Queries
+>   - `AuditRetentionService` mit konfigurierbaren Retention-Policies
+>   - REST API `/api/v1/audit/` mit Filter, Statistics, Manual Cleanup
+>   - Frontend-Dashboard `AuditLogView.vue` mit Retention-Konfiguration
+> - **Konfigurierbares Field-Mapping-System:**
+>   - `ConfigMappingEngine` für Runtime-konfigurierbare ESP32-Payload-Mappings
+>   - JSON-Schema-Validation für Mapping-Definitions
+>   - Ersetzt hardcodiertes Mapping in `ConfigPayloadBuilder`
+> - **Synchronisiertes Error-Code-System:**
+>   - Unified Error Codes (1000-5999) mit einheitlichen Beschreibungen
+>   - ESP32 Hardware/Service/Communication/Application Error Ranges
+>   - Server Config/MQTT/Validation/Database/Service/Audit Error Ranges
+> - **ESP Online-Check mit konfigurierbarem Verhalten:**
+>   - `ESPService.send_config()` mit `offline_behavior` Parameter ("warn", "skip", "fail")
+>   - Industrietaugliche Offline-Handling für große und kleine Systeme
+> - **Base MQTT Handler-Klasse:**
+>   - Abstrakte `BaseMQTTHandler`-Klasse reduziert Code-Duplizierung
+>   - Standardisierte Topic-Parsing, Payload-Validation, ESP-Lookup
+>   - Konsistente Error-Handling und Audit-Logging
+> - **Alembic Migration:** `add_audit_log_indexes.py` für Performance-Optimierung
+
+**Änderungen in v4.3:**
 > - Section 11.1 hinzugefügt: Server-Integration Verhaltensregeln für ESP32-Code
 > - MQTT-Topic-Konventionen, Payload-Struktur, Device-Registration dokumentiert
 > - Safety-Constraints und Pi-Enhanced Processing Integration dokumentiert

@@ -1,6 +1,11 @@
 ## Zweck
 Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScript + Vite + Pinia + Tailwind). Ziel: sofort relevante Dateien finden, Flows verstehen, Bugs lokalisieren.
 
+> **Letzte Aktualisierung (2025-12-18):** Audit-Log-System komplett implementiert
+> - `AuditLogView.vue`: Vollständiges Dashboard mit Filter, Statistics, Retention-Konfiguration
+> - `audit.ts`: API-Client für Audit-Logs und Retention-Management
+> - Route: `/audit` hinzugefügt
+
 ---
 
 ## 0. Quick Reference - Was suche ich?
@@ -10,6 +15,7 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
 | **Server + Frontend starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
 | **Bug debuggen** | `El Frontend/Docs/Bugs_Found.md` | Workflow + Fix dokumentiert |
 | **API-Endpoint finden** | `El Frontend/Docs/APIs.md` | `src/api/` |
+| **Audit-Logs verwalten** | Neu: `AuditLogView.vue` | `src/views/AuditLogView.vue` + `src/api/audit.ts` |
 | **Auth-Flow verstehen** | `El Frontend/Docs/Admin oder user erstellen...md` | `src/stores/auth.ts` |
 | **Mock ESP testen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 3 | `src/views/MockEsp*.vue` |
 | **WebSocket verbinden** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 4 | `src/views/MqttLogView.vue` |
@@ -40,19 +46,21 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
   - Response-Interceptor: 401 → `refreshTokens()` → Retry, sonst Logout + Redirect `/login`.
   - Exporte: `get/post/put/patch/del` Helper.
 - Auth API: `src/api/auth.ts` (Status, Setup, Login, Refresh, Me, Logout).
+- Audit API: `src/api/audit.ts` (Audit Logs, Statistics, Retention Management).
 - Debug API: `src/api/debug.ts` (Mock ESP CRUD, Heartbeats, Sensor/Actuator set, E-Stop, Message History).
-- Typen für API: `src/types/index.ts` (Auth, MockESP, Logic, WebSocket, Responses).
+- Typen für API: `src/types/index.ts` (Auth, MockESP, Logic, Audit, WebSocket, Responses).
 - Siehe auch `El Frontend/Docs/APIs.md` für Endpoint-Tabelle.
 
 ## Routing & Guards
 - Datei: `src/router/index.ts`
-  - Routen: `/login`, `/setup`, geschützter Root `/` mit Kindern `dashboard`, `mock-esp`, `mock-esp/:espId`, `mqtt-log`, `sensors`, `actuators`, `logic`, `settings`.
+  - Routen: `/login`, `/setup`, geschützter Root `/` mit Kindern `dashboard`, `audit`, `mock-esp`, `mock-esp/:espId`, `mqtt-log`, `sensors`, `actuators`, `logic`, `settings`.
   - Meta: `requiresAuth`, `requiresAdmin`.
   - Guard-Flow: Wenn `setupRequired === null` → `checkAuthStatus()`; `setup_required` true → Redirect `/setup`; fehlende Auth → `/login?redirect=...`; fehlende Admin-Rolle → Dashboard.
 
 ## Views (Seiten)
 - Auth: `views/LoginView.vue`, `views/SetupView.vue`.
 - Dashboard: `views/DashboardView.vue`.
+- Audit Logs: `views/AuditLogView.vue` (Audit Log Dashboard mit Retention-Konfiguration).
 - Sensors/Actuators/Logic/Settings: jeweilige Views unter `views/`.
 - Mock/Debug: `views/MockEspView.vue`, `MockEspDetailView.vue`, `MqttLogView.vue` (nutzen `debugApi`).
 - Layout: `components/layout/MainLayout.vue` (Wrapper), `AppHeader.vue`, `AppSidebar.vue`.
@@ -101,6 +109,7 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
 | **Bug-Dokumentation** | `El Frontend/Docs/Bugs_Found.md` | Alle gefundenen Bugs mit Workflows & Fixes |
 | **API-Referenz** | `El Frontend/Docs/APIs.md` | REST-Endpunkte, Payloads, Response-Typen |
 | **Auth-Flow** | `El Frontend/Docs/Admin oder user erstellen...md` | Token-Handling, Guards, Login/Setup |
+| **Audit-System** | Neu: `AuditLogView.vue` + `src/api/audit.ts` | Audit-Log-Dashboard mit Retention-Management |
 
 ### System-übergreifende Dokumentation
 | Dokument | Pfad | Inhalt |

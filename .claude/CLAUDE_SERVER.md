@@ -18,10 +18,32 @@
 > - **Sensor-Validierung:** `raw_mode` ist Required Field
 > - **Verzeichnisstruktur:** Mit tatsächlichem Code vollständig abgeglichen
 >
-> **Frühere Änderungen (2025-12-08):**
-> - Logic-Engine: `sensor` und `actuator` als Aliase für condition/action types akzeptiert
-> - Test-Payloads: Aktualisiert auf ESP32-Standard (`heap_free` statt `free_heap`)
-> - db_session Fixture: Umbenannt für Konsistenz in allen Tests
+> **Frühere Änderungen (2025-12-18 - Industrial Production Implementation):**
+> - **Audit-Log System:** Vollständiges Retention-System mit Frontend-Steuerung
+>   - Neue Performance-Indizes auf `created_at` für Time-Range Queries
+>   - `AuditRetentionService` mit konfigurierbaren Retention-Policies
+>   - REST API `/api/v1/audit/` mit Filter, Statistics, Manual Cleanup
+>   - Frontend-Dashboard in `AuditLogView.vue` mit Retention-Konfiguration
+> - **Konfigurierbares Field-Mapping:** `ConfigMappingEngine` für ESP32-Payload-Mapping
+>   - Runtime-konfigurierbare Field-Mappings via SystemConfig
+>   - JSON-Schema-Validation für Mapping-Definitions
+>   - Ersetzt hardcodiertes Mapping in `ConfigPayloadBuilder`
+> - **Synchronisiertes Error-Code-System:** Vollständige ESP32-Server-Synchronisation
+>   - Unified Error Codes (1000-5999) mit einheitlichen Beschreibungen
+>   - ESP32 Hardware/Service/Communication/Application Error Ranges
+>   - Server Config/MQTT/Validation/Database/Service/Audit Error Ranges
+> - **ESP Online-Check:** Konfigurierbares Verhalten in `ESPService.send_config()`
+>   - `offline_behavior`: "warn" (default), "skip", "fail"
+>   - Industrietaugliche Offline-Handling für große und kleine Systeme
+> - **Base MQTT Handler:** Abstrakte `BaseMQTTHandler`-Klasse
+>   - Standardisierte Topic-Parsing, Payload-Validation, ESP-Lookup
+>   - Reduzierte Code-Duplizierung in allen Handler-Klassen
+>   - Konsistente Error-Handling und Audit-Logging
+> - **Alembic Migration:** `add_audit_log_indexes.py` für Performance-Optimierung
+> - **Frontend Audit-Dashboard:** Vollständige Audit-Log-Verwaltung
+>   - Filterbare Log-Tabelle mit Pagination
+>   - Statistics-Cards (Gesamt, Fehler, Speicher, Pending Cleanup)
+>   - Retention-Policy-Konfiguration mit Dry-Run-Vorschau
 >
 > **Frühere Änderungen (2025-12-03):**
 > - Alembic-Migration-System funktionsfähig gemacht
@@ -167,8 +189,10 @@ El Servador/
 │   │   ├── main.py                   # FastAPI App Entry Point
 │   │   ├── core/                     # Zentrale Konfiguration
 │   │   │   ├── config.py             # ⭐ Settings (Pydantic BaseSettings)
+│   │   │   ├── config_mapping.py     # ⭐ Field-Mapping System für ESP32-Payloads
+│   │   │   ├── error_codes.py        # ⭐ Unified Error Codes (Server + ESP32)
 │   │   │   ├── security.py           # JWT, Password Hashing
-│   │   │   ├── logging.py            # Structured Logging
+│   │   │   │   ├── logging_config.py # Structured Logging
 │   │   │   └── exceptions.py         # Custom Exceptions
 │   │   │
 │   │   ├── api/                      # REST API Layer
@@ -178,6 +202,7 @@ El Servador/
 │   │   │   ├── sensor_processing.py  # Real-Time Sensor Processing API
 │   │   │   └── v1/                   # API Version 1
 │   │   │       ├── __init__.py       # Router-Aggregation
+│   │   │       ├── audit.py          # ⭐ Audit Log Management & Retention
 │   │   │       ├── auth.py           # Login, Register, Token Refresh
 │   │   │       ├── esp.py            # ESP CRUD, Status
 │   │   │       ├── sensors.py        # Sensor Config, Data Query
@@ -191,7 +216,8 @@ El Servador/
 │   │   │           └── realtime.py   # Realtime Updates
 │   │   │
 │   │   ├── services/                 # 🧠 BUSINESS LOGIC
-│   │   │   ├── esp_service.py        # ⭐ ESP Registration, Discovery
+│   │   │   ├── audit_retention_service.py # ⭐ Audit Log Retention & Cleanup
+│   │   │   ├── esp_service.py        # ⭐ ESP Registration, Discovery, Config Publishing
 │   │   │   ├── sensor_service.py     # ⭐ Sensor Config, Data Processing
 │   │   │   ├── actuator_service.py   # ⭐ Command Validation, Execution
 │   │   │   ├── logic_engine.py       # ⭐ Cross-ESP Automation Engine
@@ -208,6 +234,7 @@ El Servador/
 │   │   │   ├── subscriber.py         # Topic Subscriptions
 │   │   │   ├── publisher.py          # Message Publishing
 │   │   │   └── handlers/             # ⭐ MESSAGE HANDLERS
+│   │   │       ├── base_handler.py   # ⭐ Abstract Base Handler (reduziert Code-Duplizierung)
 │   │   │       ├── sensor_handler.py # Sensor Data Processing
 │   │   │       ├── actuator_handler.py # Actuator Status Updates
 │   │   │       ├── actuator_response_handler.py # Actuator Command Responses
@@ -1333,7 +1360,8 @@ Vor jedem Commit prüfen:
 | **Database Migrations** | ✅ | `alembic/versions/`, `alembic/env.py` | ✅ |
 | **ESP32 Testing** | ✅ | `tests/esp32/` (~140 Tests) | ✅ |
 | **Integration Tests** | ✅ | `tests/integration/test_server_esp32_integration.py` (34 Tests) | ✅ |
-| **Core Config** | ✅ | `src/core/config.py` | ✅ |
+| **Core Config** | ✅ | `src/core/config.py`, `src/core/config_mapping.py`, `src/core/error_codes.py` | ✅ |
+| **Audit System** | ✅ | `src/services/audit_retention_service.py`, `src/api/v1/audit.py`, `src/db/models/audit_log.py` | ✅ |
 
 ### 🟡 Teilweise implementiert (In Progress)
 
@@ -1384,6 +1412,8 @@ Vor jedem Commit prüfen:
 
 ### Core Configuration
 - **Settings:** `El Servador/god_kaiser_server/src/core/config.py` (Pydantic BaseSettings)
+- **Config Mapping:** `El Servador/god_kaiser_server/src/core/config_mapping.py` (Field Mapping Engine für ESP32 Payloads)
+- **Error Codes:** `El Servador/god_kaiser_server/src/core/error_codes.py` (Unified Error Codes Server + ESP32)
 - **Constants:** `El Servador/god_kaiser_server/src/core/constants.py` (MQTT Topics, Sensor Types, GPIO Ranges)
 - **Logging:** `El Servador/god_kaiser_server/src/core/logging_config.py`
 - **Security:** `El Servador/god_kaiser_server/src/core/security.py` (JWT, Password Hashing)
@@ -1398,7 +1428,8 @@ Vor jedem Commit prüfen:
 - **Heartbeat Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` (Device Registration)
 
 ### Business Logic
-- **ESP Service:** `El Servador/god_kaiser_server/src/services/esp_service.py` (Registration, Health Tracking)
+- **Audit Retention:** `El Servador/god_kaiser_server/src/services/audit_retention_service.py` (Log Cleanup, Retention Policies)
+- **ESP Service:** `El Servador/god_kaiser_server/src/services/esp_service.py` (Registration, Health Tracking, Config Publishing)
 - **Sensor Service:** `El Servador/god_kaiser_server/src/services/sensor_service.py` (Config, Data Processing)
 - **Actuator Service:** `El Servador/god_kaiser_server/src/services/actuator_service.py` (Command Execution, Safety Integration)
 - **Safety Service:** `El Servador/god_kaiser_server/src/services/safety_service.py` (Emergency Stop, Validation)
