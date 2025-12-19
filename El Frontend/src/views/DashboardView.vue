@@ -11,7 +11,7 @@
 
 import { onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useMockEspStore } from '@/stores/mockEsp'
+import { useEspStore } from '@/stores/esp'
 import { 
   Cpu, 
   Thermometer, 
@@ -32,24 +32,37 @@ import { LoadingState, EmptyState, ErrorState } from '@/components/common'
 import { getStateInfo } from '@/utils/labels'
 import { formatRelativeTime, formatUptimeShort } from '@/utils/formatters'
 
-const mockEspStore = useMockEspStore()
+const espStore = useEspStore()
 
 onMounted(() => {
-  mockEspStore.fetchAll()
+  espStore.fetchAll()
 })
 
 // Stats computed from store
 const stats = computed(() => {
-  const esps = mockEspStore.mockEsps
-  const onlineCount = esps.filter(e => e.connected).length
-  const totalSensors = esps.reduce((sum, e) => sum + (e.sensors?.length ?? 0), 0)
-  const totalActuators = esps.reduce((sum, e) => sum + (e.actuators?.length ?? 0), 0)
-  const activeActuators = esps.reduce((sum, e) => 
-    sum + (e.actuators?.filter(a => a.state)?.length ?? 0), 0
-  )
+  const devices = espStore.devices
+  const onlineCount = espStore.onlineDevices.length
+  const totalSensors = devices.reduce((sum, e) => {
+    if (espStore.isMock(espStore.getDeviceId(e))) {
+      return sum + ((e as any).sensors?.length ?? 0)
+    }
+    return sum + (e.sensor_count ?? 0)
+  }, 0)
+  const totalActuators = devices.reduce((sum, e) => {
+    if (espStore.isMock(espStore.getDeviceId(e))) {
+      return sum + ((e as any).actuators?.length ?? 0)
+    }
+    return sum + (e.actuator_count ?? 0)
+  }, 0)
+  const activeActuators = devices.reduce((sum, e) => {
+    if (espStore.isMock(espStore.getDeviceId(e))) {
+      return sum + (((e as any).actuators?.filter((a: any) => a.state)?.length ?? 0))
+    }
+    return sum // Real ESPs don't have actuator state in device object
+  }, 0)
   
   return {
-    devices: esps.length,
+    devices: devices.length,
     online: onlineCount,
     sensors: totalSensors,
     actuators: totalActuators,
@@ -59,22 +72,22 @@ const stats = computed(() => {
 
 // Emergency count
 const emergencyCount = computed(() =>
-  mockEspStore.mockEsps.filter(esp =>
-    esp.system_state === 'SAFE_MODE' || 
-    esp.system_state === 'ERROR' ||
-    esp.actuators?.some(a => a.emergency_stopped)
-  ).length
+  espStore.devices.filter(device => {
+    const deviceId = espStore.getDeviceId(device)
+    if (espStore.isMock(deviceId)) {
+      const mockDevice = device as any
+      return mockDevice.system_state === 'SAFE_MODE' || 
+        mockDevice.system_state === 'ERROR' ||
+        mockDevice.actuators?.some((a: any) => a.emergency_stopped)
+    }
+    return device.status === 'error'
+  }).length
 )
 
 // Recent devices (last 5)
 const recentDevices = computed(() => 
-  mockEspStore.mockEsps.slice(0, 5)
+  espStore.devices.slice(0, 5)
 )
-
-// Check if device is mock
-const isMock = (esp: any) => 
-  esp.hardware_type?.startsWith('MOCK_') || 
-  esp.esp_id?.startsWith('ESP_MOCK_')
 </script>
 
 <template>
@@ -149,9 +162,9 @@ const isMock = (esp: any) =>
           </div>
           <div class="card-body">
             <div class="flex flex-wrap gap-3">
-              <RouterLink to="/mock-esp" class="btn-primary">
+              <RouterLink to="/devices" class="btn-primary">
                 <Cpu class="w-4 h-4" />
-                Mock ESPs verwalten
+                ESP-Geräte verwalten
               </RouterLink>
               <RouterLink to="/mqtt-log" class="btn-secondary">
                 <Activity class="w-4 h-4" />
@@ -173,49 +186,51 @@ const isMock = (esp: any) =>
         <div class="card water-reflection">
           <div class="card-header flex items-center justify-between">
             <h3 class="font-semibold" style="color: var(--color-text-primary)">Aktive Geräte</h3>
-            <RouterLink to="/mock-esp" class="text-link">
+            <RouterLink to="/devices" class="text-link">
               Alle anzeigen
               <ArrowRight class="w-4 h-4 inline ml-1" />
             </RouterLink>
           </div>
           <div class="card-body">
             <!-- Loading -->
-            <LoadingState v-if="mockEspStore.isLoading" text="Lade Geräte..." />
+            <LoadingState v-if="espStore.isLoading" text="Lade Geräte..." />
             
             <!-- Error -->
             <ErrorState 
-              v-else-if="mockEspStore.error" 
-              :message="mockEspStore.error"
-              @retry="mockEspStore.fetchAll"
+              v-else-if="espStore.error" 
+              :message="espStore.error"
+              @retry="espStore.fetchAll"
             />
             
             <!-- Empty -->
             <EmptyState
-              v-else-if="mockEspStore.mockEsps.length === 0"
+              v-else-if="espStore.devices.length === 0"
               :icon="Plus"
               title="Keine Geräte"
-              description="Erstellen Sie Ihr erstes Mock-ESP-Gerät, um mit dem Testen zu beginnen."
-              action-text="Mock ESP erstellen"
-              @action="$router.push('/mock-esp')"
+              description="Erstellen Sie Ihr erstes ESP-Gerät, um mit dem Testen zu beginnen."
+              action-text="ESP erstellen"
+              @action="$router.push('/devices')"
             />
             
             <!-- Device List -->
             <div v-else class="space-y-3">
               <RouterLink
-                v-for="esp in recentDevices"
-                :key="esp.esp_id"
-                :to="`/mock-esp/${esp.esp_id}`"
+                v-for="device in recentDevices"
+                :key="espStore.getDeviceId(device)"
+                :to="`/devices/${espStore.getDeviceId(device)}`"
                 class="device-row"
               >
                 <div class="flex items-center gap-3">
                   <span
                     :class="[
                       'status-dot',
-                      esp.connected && esp.system_state === 'OPERATIONAL'
+                      (device.status === 'online' || device.connected) && 
+                        ((espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'OPERATIONAL') || 
+                         (!espStore.isMock(espStore.getDeviceId(device)) && device.status === 'online'))
                         ? 'status-online'
-                        : esp.system_state === 'SAFE_MODE'
+                        : (espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'SAFE_MODE')
                         ? 'status-warning'
-                        : esp.system_state === 'ERROR'
+                        : (espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'ERROR') || device.status === 'error'
                         ? 'status-error'
                         : 'status-offline'
                     ]"
@@ -223,32 +238,41 @@ const isMock = (esp: any) =>
                   <div>
                     <div class="flex items-center gap-2">
                       <span class="font-medium font-mono" style="color: var(--color-text-primary)">
-                        {{ esp.esp_id }}
+                        {{ espStore.getDeviceId(device) }}
                       </span>
-                      <Badge :variant="isMock(esp) ? 'mock' : 'real'" size="sm">
-                        {{ isMock(esp) ? 'MOCK' : 'REAL' }}
+                      <Badge :variant="espStore.isMock(espStore.getDeviceId(device)) ? 'mock' : 'real'" size="sm">
+                        {{ espStore.isMock(espStore.getDeviceId(device)) ? 'MOCK' : 'REAL' }}
                       </Badge>
                     </div>
                     <p class="text-xs" style="color: var(--color-text-muted)">
-                      {{ esp.sensors?.length ?? 0 }} Sensoren · {{ esp.actuators?.length ?? 0 }} Aktoren
-                      <span v-if="esp.zone_id"> · {{ esp.zone_id }}</span>
+                      {{ device.sensor_count ?? (device as any).sensors?.length ?? 0 }} Sensoren · 
+                      {{ device.actuator_count ?? (device as any).actuators?.length ?? 0 }} Aktoren
+                      <span v-if="device.zone_id"> · {{ device.zone_id }}</span>
                     </p>
                   </div>
                 </div>
                 <Badge 
-                  :variant="getStateInfo(esp.system_state).variant as any"
-                  :pulse="esp.connected && esp.system_state === 'OPERATIONAL'"
+                  :variant="espStore.isMock(espStore.getDeviceId(device)) 
+                    ? (getStateInfo((device as any).system_state).variant as any)
+                    : (device.status === 'online' ? 'success' : device.status === 'error' ? 'danger' : 'gray')"
+                  :pulse="(device.status === 'online' || device.connected) && 
+                    ((espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'OPERATIONAL') || 
+                     (!espStore.isMock(espStore.getDeviceId(device)) && device.status === 'online'))"
                   dot
                   size="sm"
                 >
-                  {{ getStateInfo(esp.system_state).label }}
+                  {{
+                    espStore.isMock(espStore.getDeviceId(device))
+                      ? getStateInfo((device as any).system_state).label
+                      : device.status || 'unknown'
+                  }}
                 </Badge>
               </RouterLink>
             </div>
           </div>
-          <div v-if="mockEspStore.mockEsps.length > 5" class="card-footer">
-            <RouterLink to="/mock-esp" class="text-link text-sm">
-              {{ mockEspStore.mockEsps.length - 5 }} weitere Geräte anzeigen →
+          <div v-if="espStore.devices.length > 5" class="card-footer">
+            <RouterLink to="/devices" class="text-link text-sm">
+              {{ espStore.devices.length - 5 }} weitere Geräte anzeigen →
             </RouterLink>
           </div>
         </div>
@@ -294,21 +318,30 @@ const isMock = (esp: any) =>
           <div class="card-body">
             <div class="space-y-2">
               <div 
-                v-for="esp in mockEspStore.mockEsps.filter(e => 
-                  e.system_state === 'SAFE_MODE' || 
-                  e.system_state === 'ERROR' ||
-                  e.actuators?.some(a => a.emergency_stopped)
-                )"
-                :key="esp.esp_id"
+                v-for="device in espStore.devices.filter(d => {
+                  const deviceId = espStore.getDeviceId(d)
+                  if (espStore.isMock(deviceId)) {
+                    const mockDevice = d as any
+                    return mockDevice.system_state === 'SAFE_MODE' || 
+                      mockDevice.system_state === 'ERROR' ||
+                      mockDevice.actuators?.some((a: any) => a.emergency_stopped)
+                  }
+                  return d.status === 'error'
+                })"
+                :key="espStore.getDeviceId(device)"
                 class="warning-item"
               >
-                <RouterLink :to="`/mock-esp/${esp.esp_id}`" class="warning-link">
-                  <span class="font-mono text-sm">{{ esp.esp_id }}</span>
+                <RouterLink :to="`/devices/${espStore.getDeviceId(device)}`" class="warning-link">
+                  <span class="font-mono text-sm">{{ espStore.getDeviceId(device) }}</span>
                   <Badge 
-                    :variant="esp.system_state === 'ERROR' ? 'danger' : 'warning'" 
+                    :variant="(espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'ERROR') || device.status === 'error' ? 'danger' : 'warning'" 
                     size="sm"
                   >
-                    {{ getStateInfo(esp.system_state).label }}
+                    {{
+                      espStore.isMock(espStore.getDeviceId(device))
+                        ? getStateInfo((device as any).system_state).label
+                        : device.status || 'unknown'
+                    }}
                   </Badge>
                 </RouterLink>
               </div>

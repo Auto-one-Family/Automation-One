@@ -30,16 +30,23 @@ const router = createRouter({
           component: () => import('@/views/DashboardView.vue'),
         },
         {
+          path: 'devices',
+          name: 'devices',
+          component: () => import('@/views/DevicesView.vue'),
+        },
+        {
+          path: 'devices/:espId',
+          name: 'device-detail',
+          component: () => import('@/views/DeviceDetailView.vue'),
+        },
+        // Backward compatibility redirects
+        {
           path: 'mock-esp',
-          name: 'mock-esp',
-          component: () => import('@/views/MockEspView.vue'),
-          meta: { requiresAdmin: true },
+          redirect: { name: 'devices' },
         },
         {
           path: 'mock-esp/:espId',
-          name: 'mock-esp-detail',
-          component: () => import('@/views/MockEspDetailView.vue'),
-          meta: { requiresAdmin: true },
+          redirect: (to) => ({ name: 'device-detail', params: { espId: to.params.espId } }),
         },
         {
           path: 'database',

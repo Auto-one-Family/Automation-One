@@ -1,0 +1,551 @@
+/**
+ * Unified ESP Store
+ * 
+ * Manages both Mock and Real ESP devices in a unified way.
+ * Automatically routes API calls based on ESP type detection.
+ */
+
+import { defineStore } from 'pinia'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
+import { debugApi } from '@/api/debug'
+import { useWebSocket } from '@/composables/useWebSocket'
+import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType } from '@/types'
+
+/**
+ * Extract error message from Axios error response.
+ */
+function extractErrorMessage(err: unknown, fallback: string): string {
+  const axiosError = err as { response?: { data?: { detail?: string | Array<{ msg?: string; loc?: string[] }> } } }
+  const detail = axiosError.response?.data?.detail
+  
+  if (!detail) return fallback
+  
+  if (Array.isArray(detail)) {
+    return detail.map(d => {
+      const field = d.loc?.slice(1).join('.') || 'unknown'
+      return `${field}: ${d.msg || 'validation error'}`
+    }).join('; ')
+  }
+  
+  return detail
+}
+
+export const useEspStore = defineStore('esp', () => {
+  // State
+  const devices = ref<ESPDevice[]>([])
+  const selectedDeviceId = ref<string | null>(null)
+  const isLoading = ref(false)
+  const error = ref<string | null>(null)
+
+  // WebSocket integration
+  const ws = useWebSocket({
+    autoConnect: true,
+    autoReconnect: true,
+    filters: {
+      types: ['esp_health', 'esp_status'] as MessageType[],
+    },
+  })
+
+  // Getters
+  const selectedDevice = computed(() =>
+    devices.value.find(device => 
+      (device.device_id || device.esp_id) === selectedDeviceId.value
+    ) || null
+  )
+
+  const deviceCount = computed(() => devices.value.length)
+
+  const onlineDevices = computed(() =>
+    devices.value.filter(device => 
+      device.status === 'online' || device.connected === true
+    )
+  )
+
+  const offlineDevices = computed(() =>
+    devices.value.filter(device => 
+      device.status === 'offline' || device.connected === false
+    )
+  )
+
+  const mockDevices = computed(() =>
+    devices.value.filter(device => 
+      espApi.isMockEsp(device.device_id || device.esp_id || '')
+    )
+  )
+
+  const realDevices = computed(() =>
+    devices.value.filter(device => 
+      !espApi.isMockEsp(device.device_id || device.esp_id || '')
+    )
+  )
+
+  const devicesByZone = computed(() => (zoneId: string) =>
+    devices.value.filter(device => device.zone_id === zoneId)
+  )
+
+  const masterZoneDevices = computed(() =>
+    devices.value.filter(device => device.is_zone_master === true)
+  )
+
+  /**
+   * Check if device is Mock ESP
+   */
+  function isMock(deviceId: string): boolean {
+    return espApi.isMockEsp(deviceId)
+  }
+
+  /**
+   * Get normalized device ID
+   */
+  function getDeviceId(device: ESPDevice): string {
+    return device.device_id || device.esp_id || ''
+  }
+
+  // Actions
+  async function fetchAll(params?: {
+    zone_id?: string
+    status?: string
+    hardware_type?: string
+    page?: number
+    page_size?: number
+  }): Promise<void> {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      devices.value = await espApi.listDevices(params)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to fetch ESP devices')
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function fetchDevice(deviceId: string): Promise<ESPDevice> {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const device = await espApi.getDevice(deviceId)
+      
+      // Update device in list if exists, otherwise add
+      const index = devices.value.findIndex(d => 
+        getDeviceId(d) === getDeviceId(device)
+      )
+      if (index !== -1) {
+        devices.value[index] = device
+      } else {
+        devices.value.push(device)
+      }
+      
+      return device
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to fetch device ${deviceId}`)
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function createDevice(config: ESPDeviceCreate): Promise<ESPDevice> {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const device = await espApi.createDevice(config)
+      devices.value.push(device)
+      return device
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to create ESP device')
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function updateDevice(deviceId: string, update: ESPDeviceUpdate): Promise<ESPDevice> {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      const device = await espApi.updateDevice(deviceId, update)
+      
+      // Update device in list
+      const index = devices.value.findIndex(d => 
+        getDeviceId(d) === getDeviceId(device)
+      )
+      if (index !== -1) {
+        devices.value[index] = device
+      }
+      
+      return device
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to update device ${deviceId}`)
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function deleteDevice(deviceId: string): Promise<void> {
+    isLoading.value = true
+    error.value = null
+
+    try {
+      await espApi.deleteDevice(deviceId)
+      devices.value = devices.value.filter(d => getDeviceId(d) !== deviceId)
+
+      if (selectedDeviceId.value === deviceId) {
+        selectedDeviceId.value = null
+      }
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to delete device ${deviceId}`)
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function getHealth(deviceId: string) {
+    error.value = null
+
+    try {
+      return await espApi.getHealth(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to get health for ${deviceId}`)
+      throw err
+    }
+  }
+
+  async function restartDevice(deviceId: string, delaySeconds?: number, reason?: string) {
+    error.value = null
+
+    try {
+      return await espApi.restartDevice(deviceId, delaySeconds, reason)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to restart device ${deviceId}`)
+      throw err
+    }
+  }
+
+  async function resetDevice(deviceId: string, preserveWifi: boolean = false) {
+    error.value = null
+
+    try {
+      return await espApi.resetDevice(deviceId, preserveWifi)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to reset device ${deviceId}`)
+      throw err
+    }
+  }
+
+  // Mock ESP specific actions (for backward compatibility)
+  async function triggerHeartbeat(deviceId: string): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Heartbeat trigger is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.triggerHeartbeat(deviceId)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to trigger heartbeat')
+      throw err
+    }
+  }
+
+  async function setState(deviceId: string, state: MockSystemState, reason?: string): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Set state is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.setState(deviceId, state, reason)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to set state')
+      throw err
+    }
+  }
+
+  async function setAutoHeartbeat(deviceId: string, enabled: boolean, interval: number = 60): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Auto-heartbeat is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.setAutoHeartbeat(deviceId, enabled, interval)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to configure auto-heartbeat')
+      throw err
+    }
+  }
+
+  async function addSensor(deviceId: string, config: MockSensorConfig): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Add sensor is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.addSensor(deviceId, config)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to add sensor')
+      throw err
+    }
+  }
+
+  async function setSensorValue(
+    deviceId: string,
+    gpio: number,
+    rawValue: number,
+    quality?: QualityLevel,
+    publish: boolean = true
+  ): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Set sensor value is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.setSensorValue(deviceId, gpio, rawValue, quality, publish)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to set sensor value')
+      throw err
+    }
+  }
+
+  async function removeSensor(deviceId: string, gpio: number): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Remove sensor is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.removeSensor(deviceId, gpio)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to remove sensor')
+      throw err
+    }
+  }
+
+  async function addActuator(deviceId: string, config: MockActuatorConfig): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Add actuator is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.addActuator(deviceId, config)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to add actuator')
+      throw err
+    }
+  }
+
+  async function setActuatorState(
+    deviceId: string,
+    gpio: number,
+    state: boolean,
+    pwmValue?: number
+  ): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Set actuator state is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.setActuatorState(deviceId, gpio, state, pwmValue)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to set actuator state')
+      throw err
+    }
+  }
+
+  async function emergencyStop(deviceId: string, reason: string = 'manual'): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Emergency stop is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.emergencyStop(deviceId, reason)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to trigger emergency stop')
+      throw err
+    }
+  }
+
+  async function clearEmergency(deviceId: string): Promise<void> {
+    if (!isMock(deviceId)) {
+      throw new Error('Clear emergency is only available for Mock ESPs')
+    }
+
+    error.value = null
+
+    try {
+      await debugApi.clearEmergency(deviceId)
+      // Refresh device data
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to clear emergency')
+      throw err
+    }
+  }
+
+  function selectDevice(deviceId: string | null): void {
+    selectedDeviceId.value = deviceId
+  }
+
+  function clearError(): void {
+    error.value = null
+  }
+
+  function updateDeviceInList(device: ESPDevice): void {
+    const index = devices.value.findIndex(d => 
+      getDeviceId(d) === getDeviceId(device)
+    )
+    if (index !== -1) {
+      devices.value[index] = device
+    }
+  }
+
+  // =============================================================================
+  // WebSocket Event Handlers
+  // =============================================================================
+
+  /**
+   * Handle esp_health WebSocket event
+   */
+  function handleEspHealth(message: any): void {
+    const data = message.data
+    const espId = data.esp_id || data.device_id
+    
+    if (!espId) return
+
+    const device = devices.value.find(d => getDeviceId(d) === espId)
+    if (device) {
+      // Update device health metrics
+      if (data.uptime !== undefined) device.uptime = data.uptime
+      if (data.heap_free !== undefined) device.heap_free = data.heap_free
+      if (data.wifi_rssi !== undefined) device.wifi_rssi = data.wifi_rssi
+      if (data.sensor_count !== undefined) device.sensor_count = data.sensor_count
+      if (data.actuator_count !== undefined) device.actuator_count = data.actuator_count
+      if (data.timestamp) device.last_seen = new Date(data.timestamp * 1000).toISOString()
+    }
+  }
+
+  /**
+   * Handle esp_status WebSocket event
+   */
+  function handleEspStatus(message: any): void {
+    const data = message.data
+    const espId = data.esp_id || data.device_id
+    
+    if (!espId) return
+
+    const device = devices.value.find(d => getDeviceId(d) === espId)
+    if (device) {
+      // Update device status
+      if (data.status) device.status = data.status
+      if (data.connected !== undefined) device.connected = data.connected
+      if (data.last_seen) device.last_seen = data.last_seen
+      
+      // For Mock ESPs, update system_state
+      if (isMock(espId) && data.system_state) {
+        (device as any).system_state = data.system_state
+      }
+    }
+  }
+
+  // Subscribe to WebSocket events
+  onMounted(() => {
+    // Subscribe to esp_health events
+    ws.on('esp_health' as MessageType, handleEspHealth)
+    
+    // Subscribe to esp_status events
+    ws.on('esp_status' as MessageType, handleEspStatus)
+  })
+
+  onUnmounted(() => {
+    ws.disconnect()
+  })
+
+  return {
+    // State
+    devices,
+    selectedDeviceId,
+    isLoading,
+    error,
+
+    // Getters
+    selectedDevice,
+    deviceCount,
+    onlineDevices,
+    offlineDevices,
+    mockDevices,
+    realDevices,
+    devicesByZone,
+    masterZoneDevices,
+    isMock,
+    getDeviceId,
+
+    // Actions
+    fetchAll,
+    fetchDevice,
+    createDevice,
+    updateDevice,
+    deleteDevice,
+    getHealth,
+    restartDevice,
+    resetDevice,
+    
+    // Mock ESP specific actions
+    triggerHeartbeat,
+    setState,
+    setAutoHeartbeat,
+    addSensor,
+    setSensorValue,
+    removeSensor,
+    addActuator,
+    setActuatorState,
+    emergencyStop,
+    clearEmergency,
+    
+    // Utility
+    selectDevice,
+    clearError,
+    updateDeviceInList,
+  }
+})
+

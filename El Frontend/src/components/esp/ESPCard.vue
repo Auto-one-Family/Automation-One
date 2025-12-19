@@ -17,23 +17,10 @@ import { Heart, AlertTriangle, Trash2, Settings, ExternalLink } from 'lucide-vue
 import Badge from '@/components/common/Badge.vue'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize } from '@/utils/formatters'
 import { getStateLabel, getStateInfo } from '@/utils/labels'
+import { espApi, type ESPDevice } from '@/api/esp'
 
-interface ESPDevice {
-  esp_id: string
-  device_id?: string
-  hardware_type?: string
-  zone_id?: string
-  zone_name?: string
-  connected?: boolean
-  is_online?: boolean
-  system_state: string
-  uptime: number
-  heap_free: number
-  wifi_rssi?: number
-  sensors: Array<{ gpio: number }>
-  actuators: Array<{ gpio: number; emergency_stopped?: boolean }>
-  auto_heartbeat?: boolean
-  last_heartbeat?: string
+interface ESPDeviceProps {
+  esp: ESPDevice
 }
 
 interface Props {
@@ -41,7 +28,7 @@ interface Props {
   esp: ESPDevice
 }
 
-const props = defineProps<Props>()
+const props = defineProps<ESPDeviceProps>()
 
 const emit = defineEmits<{
   heartbeat: [espId: string]
@@ -50,25 +37,46 @@ const emit = defineEmits<{
 }>()
 
 // Computed properties
-const isMock = computed(() => 
-  props.esp.hardware_type?.startsWith('MOCK_') || 
-  props.esp.esp_id?.startsWith('ESP_MOCK_') ||
-  props.esp.device_id?.startsWith('ESP_MOCK_')
-)
+const isMock = computed(() => {
+  const deviceId = props.esp.device_id || props.esp.esp_id || ''
+  return espApi.isMockEsp(deviceId)
+})
 
 const isOnline = computed(() => 
-  props.esp.connected ?? props.esp.is_online ?? false
+  props.esp.status === 'online' || props.esp.connected === true
 )
 
 const espId = computed(() => 
-  props.esp.device_id ?? props.esp.esp_id
+  props.esp.device_id || props.esp.esp_id || ''
 )
 
-const hasEmergencyStopped = computed(() =>
-  props.esp.actuators?.some(a => a.emergency_stopped)
-)
+const hasEmergencyStopped = computed(() => {
+  if (!props.esp.actuators) return false
+  return props.esp.actuators.some((a: any) => a.emergency_stopped)
+})
 
-const stateInfo = computed(() => getStateInfo(props.esp.system_state))
+const systemState = computed(() => {
+  if (isMock.value && 'system_state' in props.esp) {
+    return (props.esp as any).system_state
+  }
+  return props.esp.status || 'unknown'
+})
+
+const stateInfo = computed(() => {
+  if (isMock.value) {
+    return getStateInfo(systemState.value)
+  }
+  // For real ESPs, map status to state info
+  const status = props.esp.status || 'unknown'
+  if (status === 'online') {
+    return { label: 'Online', variant: 'success' }
+  } else if (status === 'offline') {
+    return { label: 'Offline', variant: 'gray' }
+  } else if (status === 'error') {
+    return { label: 'Error', variant: 'danger' }
+  }
+  return { label: 'Unknown', variant: 'gray' }
+})
 
 // Card classes based on mock/real and online/offline
 const cardClasses = computed(() => {
@@ -95,8 +103,8 @@ const cardClasses = computed(() => {
 const statusBarClasses = computed(() => {
   if (hasEmergencyStopped.value) return 'esp-card__status-bar--emergency'
   if (!isOnline.value) return 'esp-card__status-bar--offline'
-  if (props.esp.system_state === 'SAFE_MODE') return 'esp-card__status-bar--warning'
-  if (props.esp.system_state === 'ERROR') return 'esp-card__status-bar--error'
+  if (systemState.value === 'SAFE_MODE') return 'esp-card__status-bar--warning'
+  if (systemState.value === 'ERROR' || props.esp.status === 'error') return 'esp-card__status-bar--error'
   if (isMock.value) return 'esp-card__status-bar--mock'
   return 'esp-card__status-bar--real'
 })
@@ -111,12 +119,12 @@ const statusBarClasses = computed(() => {
       <!-- Header: ID + Badges -->
       <div class="esp-card__header">
         <div class="esp-card__id-group">
-          <RouterLink
-            :to="`/mock-esp/${espId}`"
-            class="esp-card__id"
-          >
-            {{ espId }}
-          </RouterLink>
+        <RouterLink
+          :to="`/devices/${espId}`"
+          class="esp-card__id"
+        >
+          {{ espId }}
+        </RouterLink>
           
           <Badge :variant="isMock ? 'mock' : 'real'" size="sm">
             {{ isMock ? 'MOCK' : 'REAL' }}
@@ -126,7 +134,7 @@ const statusBarClasses = computed(() => {
         <div class="esp-card__status-badges">
           <Badge 
             :variant="stateInfo.variant as any" 
-            :pulse="isOnline && esp.system_state === 'OPERATIONAL'"
+            :pulse="isOnline && (systemState === 'OPERATIONAL' || props.esp.status === 'online')"
             :dot="true"
             size="sm"
           >
@@ -150,37 +158,41 @@ const statusBarClasses = computed(() => {
         
         <div class="esp-card__info-row">
           <span class="esp-card__info-label">Sensoren</span>
-          <span class="esp-card__info-value">{{ esp.sensors?.length ?? 0 }}</span>
+          <span class="esp-card__info-value">
+            {{ esp.sensor_count ?? esp.sensors?.length ?? 0 }}
+          </span>
         </div>
         
         <div class="esp-card__info-row">
           <span class="esp-card__info-label">Aktoren</span>
-          <span class="esp-card__info-value">{{ esp.actuators?.length ?? 0 }}</span>
+          <span class="esp-card__info-value">
+            {{ esp.actuator_count ?? esp.actuators?.length ?? 0 }}
+          </span>
         </div>
         
-        <div class="esp-card__info-row">
+        <div v-if="esp.uptime !== undefined" class="esp-card__info-row">
           <span class="esp-card__info-label">Uptime</span>
-          <span class="esp-card__info-value">{{ formatUptimeShort(esp.uptime) }}</span>
+          <span class="esp-card__info-value">{{ formatUptimeShort(esp.uptime || 0) }}</span>
         </div>
         
-        <div class="esp-card__info-row">
+        <div v-if="esp.heap_free !== undefined" class="esp-card__info-row">
           <span class="esp-card__info-label">Heap</span>
-          <span class="esp-card__info-value">{{ formatHeapSize(esp.heap_free) }}</span>
+          <span class="esp-card__info-value">{{ formatHeapSize(esp.heap_free || 0) }}</span>
         </div>
         
-        <div v-if="esp.last_heartbeat" class="esp-card__info-row">
+        <div v-if="esp.last_heartbeat || esp.last_seen" class="esp-card__info-row">
           <span class="esp-card__info-label">Letzter Heartbeat</span>
-          <span class="esp-card__info-value" :title="esp.last_heartbeat">
-            {{ formatRelativeTime(esp.last_heartbeat) }}
+          <span class="esp-card__info-value" :title="esp.last_heartbeat || esp.last_seen || ''">
+            {{ formatRelativeTime(esp.last_heartbeat || esp.last_seen || '') }}
           </span>
         </div>
       </div>
       
-      <!-- Auto-heartbeat indicator -->
-      <div v-if="isMock" class="esp-card__auto-heartbeat">
-        <span :class="['esp-card__auto-heartbeat-dot', esp.auto_heartbeat ? 'active' : '']" />
+      <!-- Auto-heartbeat indicator (Mock ESP only) -->
+      <div v-if="isMock && 'auto_heartbeat' in esp" class="esp-card__auto-heartbeat">
+        <span :class="['esp-card__auto-heartbeat-dot', (esp as any).auto_heartbeat ? 'active' : '']" />
         <span class="esp-card__auto-heartbeat-text">
-          Auto-Heartbeat {{ esp.auto_heartbeat ? 'aktiv' : 'inaktiv' }}
+          Auto-Heartbeat {{ (esp as any).auto_heartbeat ? 'aktiv' : 'inaktiv' }}
         </span>
       </div>
       
@@ -188,7 +200,7 @@ const statusBarClasses = computed(() => {
       <div class="esp-card__actions">
         <!-- Always available: Details -->
         <RouterLink
-          :to="`/mock-esp/${espId}`"
+          :to="`/devices/${espId}`"
           class="btn-secondary btn-sm"
         >
           <ExternalLink class="w-4 h-4" />
@@ -206,9 +218,9 @@ const statusBarClasses = computed(() => {
           </button>
           
           <button
-            :class="['btn-ghost btn-sm', esp.system_state === 'SAFE_MODE' ? 'text-warning' : '']"
+            :class="['btn-ghost btn-sm', systemState === 'SAFE_MODE' ? 'text-warning' : '']"
             @click="emit('toggleSafeMode', espId)"
-            :title="esp.system_state === 'SAFE_MODE' ? 'Sicherheitsmodus beenden' : 'Sicherheitsmodus aktivieren'"
+            :title="systemState === 'SAFE_MODE' ? 'Sicherheitsmodus beenden' : 'Sicherheitsmodus aktivieren'"
           >
             <AlertTriangle class="w-4 h-4" />
           </button>
@@ -222,11 +234,12 @@ const statusBarClasses = computed(() => {
           </button>
         </template>
         
-        <!-- Real ESP specific actions (for future use) -->
+        <!-- Real ESP specific actions -->
         <template v-else>
           <button
             class="btn-ghost btn-sm"
             title="Konfigurieren"
+            @click="$router.push(`/devices/${espId}`)"
           >
             <Settings class="w-4 h-4" />
           </button>

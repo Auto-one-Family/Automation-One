@@ -112,7 +112,7 @@ const navigationGroups: NavGroup[] = [
     label: 'Geräte',
     icon: Cpu,
     items: [
-      { name: 'Alle ESPs', to: '/mock-esp', icon: Cpu },
+      { name: 'Alle ESPs', to: '/devices', icon: Cpu },
       { name: 'Sensoren', to: '/sensors', icon: Thermometer },
       { name: 'Aktoren', to: '/actuators', icon: Power },
     ]

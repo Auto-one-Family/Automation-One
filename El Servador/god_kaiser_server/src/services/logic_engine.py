@@ -263,7 +263,7 @@ class LogicEngine:
             if rule.cooldown_seconds:
                 last_execution = await logic_repo.get_last_execution(rule.id)
                 if last_execution:
-                    time_since_last = datetime.now(timezone.utc) - last_execution
+                    time_since_last = datetime.now(timezone.utc) - last_execution.timestamp
                     if time_since_last.total_seconds() < rule.cooldown_seconds:
                         logger.debug(
                             f"Rule {rule.rule_name} in cooldown: "
