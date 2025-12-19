@@ -56,3 +56,5 @@ def downgrade() -> None:
     op.drop_index('ix_audit_logs_created_at', table_name='audit_logs')
 
 
+
+
