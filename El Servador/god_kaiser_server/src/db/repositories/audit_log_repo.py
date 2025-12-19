@@ -455,3 +455,4 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             "error_rate_percent": round(error_rate, 2),
         }
 
+

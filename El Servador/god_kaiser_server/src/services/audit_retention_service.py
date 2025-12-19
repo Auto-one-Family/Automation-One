@@ -465,3 +465,4 @@ class AuditRetentionService:
         result = await self.session.execute(stmt)
         return result.scalar_one()
 
+

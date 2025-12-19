@@ -661,3 +661,4 @@ class TestSubzoneEdgeCases:
         # Pydantic validation should reject too many GPIOs
         assert response.status_code in [400, 422]
 
+

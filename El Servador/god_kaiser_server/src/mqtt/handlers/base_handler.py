@@ -564,3 +564,4 @@ class BaseMQTTHandler(ABC):
         except Exception as e:
             logger.warning(f"Failed to log device event: {e}")
 
+

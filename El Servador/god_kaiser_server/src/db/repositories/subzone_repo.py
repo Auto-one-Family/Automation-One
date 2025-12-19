@@ -343,3 +343,4 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
                 total += len(subzone.assigned_gpios)
         return total
 
+
