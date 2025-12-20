@@ -147,17 +147,19 @@ function handleClick() {
   gap: 0.75rem;
   padding: 0.75rem;
   background-color: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border: 2px solid var(--glass-border);
+  border-radius: 0.75rem;
   cursor: pointer;
   transition: all 0.2s;
   min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
 }
 
 .sensor-satellite:hover {
   border-color: var(--color-iridescent-1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(167, 139, 250, 0.4);
+  transform: translateY(-2px);
 }
 
 .sensor-satellite--selected {

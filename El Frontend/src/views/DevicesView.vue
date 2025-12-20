@@ -2,8 +2,8 @@
 /**
  * DevicesView
  * 
- * Unified list view for all ESP devices (Mock + Real).
- * Uses ESPCard component for consistent display.
+ * Dashboard view for all ESP devices (Mock + Real).
+ * Shows ESPs with orbital satellite layout for quick overview.
  */
 
 import { ref, onMounted, computed } from 'vue'
@@ -13,7 +13,7 @@ import type { MockESPCreate, MockSystemState } from '@/types'
 import { Plus, RefreshCw, X, Filter } from 'lucide-vue-next'
 
 // Components
-import ESPCard from '@/components/esp/ESPCard.vue'
+import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
 import { LoadingState, EmptyState, ErrorState } from '@/components/common'
 
 const espStore = useEspStore()
@@ -316,16 +316,21 @@ async function handleDelete(espId: string) {
       </button>
     </div>
 
-    <!-- ESP Grid -->
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      <ESPCard
+    <!-- ESP Orbital Grid -->
+    <div v-else class="esp-orbital-grid">
+      <div 
         v-for="esp in filteredEsps"
         :key="espStore.getDeviceId(esp)"
-        :esp="esp"
-        @heartbeat="handleHeartbeat"
-        @toggle-safe-mode="handleToggleSafeMode"
-        @delete="handleDelete"
-      />
+        class="esp-orbital-grid__item"
+      >
+        <ESPOrbitalLayout
+          :device="esp"
+          :show-connections="false"
+          :compact-mode="true"
+          @sensor-click="(gpio) => {}"
+          @actuator-click="(gpio) => {}"
+        />
+      </div>
     </div>
 
     <!-- Create Modal -->
@@ -437,6 +442,32 @@ async function handleDelete(espId: string) {
 </template>
 
 <style scoped>
+/* ESP Orbital Grid */
+.esp-orbital-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+  gap: 2rem;
+}
+
+@media (max-width: 768px) {
+  .esp-orbital-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.esp-orbital-grid__item {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.esp-orbital-grid__item:hover {
+  border-color: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
 /* Filter group */
 .filter-group {
   display: flex;

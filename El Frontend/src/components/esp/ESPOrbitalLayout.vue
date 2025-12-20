@@ -13,23 +13,33 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { ExternalLink, Wifi, Activity } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
 import SensorSatellite from './SensorSatellite.vue'
 import ActuatorSatellite from './ActuatorSatellite.vue'
 import ConnectionLines from './ConnectionLines.vue'
+import Badge from '@/components/common/Badge.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, QualityLevel } from '@/types'
+import { espApi } from '@/api/esp'
+import { getStateInfo } from '@/utils/labels'
 
 interface Props {
   /** The ESP device data */
   device: ESPDevice
   /** Whether to show connection lines (default: true) */
   showConnections?: boolean
+  /** Compact mode for dashboard view (default: false) */
+  compactMode?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  showConnections: true
+  showConnections: true,
+  compactMode: false
 })
+
+const router = useRouter()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
@@ -62,9 +72,40 @@ const espId = computed(() => {
   return props.device?.esp_id || props.device?.device_id || ''
 })
 
+const isMock = computed(() => {
+  return espApi.isMockEsp(espId.value)
+})
+
+const isOnline = computed(() => {
+  return props.device?.status === 'online' || props.device?.connected === true
+})
+
+const systemState = computed(() => {
+  if (isMock.value && 'system_state' in props.device) {
+    return (props.device as any).system_state
+  }
+  return props.device?.status || 'unknown'
+})
+
+const stateInfo = computed(() => {
+  if (isMock.value) {
+    return getStateInfo(systemState.value)
+  }
+  const status = props.device?.status || 'unknown'
+  if (status === 'online') return { label: 'Online', variant: 'success' }
+  if (status === 'offline') return { label: 'Offline', variant: 'gray' }
+  if (status === 'error') return { label: 'Error', variant: 'danger' }
+  return { label: 'Unknown', variant: 'gray' }
+})
+
 const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
+
+// Navigation to detail view
+function goToDetails() {
+  router.push(`/devices/${espId.value}`)
+}
 
 // =============================================================================
 // Computed: Orbital Layout
@@ -72,16 +113,16 @@ const totalItems = computed(() => {
 
 /**
  * Dynamic orbital radius based on number of items
- * - ≤4 items: 150px
- * - ≤8 items: 200px
- * - >8 items: 250px
- * - >12 items: 300px
+ * In compact mode, use larger radius to prevent overlap
  */
 const orbitalRadius = computed(() => {
-  if (totalItems.value <= 4) return 150
-  if (totalItems.value <= 8) return 200
-  if (totalItems.value <= 12) return 250
-  return 300
+  // Compact mode needs MORE space, not less, to avoid overlap
+  const baseRadius = props.compactMode ? 1.4 : 1.0
+  if (totalItems.value <= 2) return 180 * baseRadius
+  if (totalItems.value <= 4) return 200 * baseRadius
+  if (totalItems.value <= 8) return 240 * baseRadius
+  if (totalItems.value <= 12) return 280 * baseRadius
+  return 320 * baseRadius
 })
 
 /**
@@ -330,9 +371,50 @@ watch(isDesktop, () => {
       class="esp-orbital-layout__connections"
     />
     
-    <!-- Central ESP Card -->
+    <!-- Central ESP Info -->
     <div ref="centerRef" class="esp-orbital-layout__center">
-      <ESPCard :esp="device" />
+      <!-- Compact Mode: Simple Info Card -->
+      <div v-if="compactMode" class="esp-info-compact">
+        <div class="esp-info-compact__header">
+          <div class="esp-info-compact__title-group">
+            <h3 class="esp-info-compact__title">{{ espId }}</h3>
+            <Badge :variant="isMock ? 'mock' : 'real'" size="xs">
+              {{ isMock ? 'MOCK' : 'REAL' }}
+            </Badge>
+          </div>
+          <Badge 
+            :variant="stateInfo.variant as any" 
+            :pulse="isOnline && (systemState === 'OPERATIONAL' || device.status === 'online')"
+            dot
+            size="sm"
+          >
+            {{ stateInfo.label }}
+          </Badge>
+        </div>
+        
+        <div class="esp-info-compact__stats">
+          <div class="esp-info-compact__stat">
+            <span class="esp-info-compact__stat-label">Zone</span>
+            <span class="esp-info-compact__stat-value">{{ device.zone_name || device.zone_id || '-' }}</span>
+          </div>
+          <div class="esp-info-compact__stat">
+            <Activity class="w-3 h-3" style="color: var(--color-text-muted)" />
+            <span class="esp-info-compact__stat-value">{{ sensors.length }} / {{ actuators.length }}</span>
+          </div>
+          <div v-if="device.wifi_rssi !== undefined" class="esp-info-compact__stat">
+            <Wifi class="w-3 h-3" style="color: var(--color-text-muted)" />
+            <span class="esp-info-compact__stat-value">{{ device.wifi_rssi }} dBm</span>
+          </div>
+        </div>
+        
+        <button class="esp-info-compact__details-btn" @click="goToDetails">
+          <ExternalLink class="w-4 h-4" />
+          <span>Details & Management</span>
+        </button>
+      </div>
+      
+      <!-- Full Mode: Full ESP Card (for detail view) -->
+      <ESPCard v-else :esp="device" />
     </div>
     
     <!-- Sensor Satellites -->
@@ -400,6 +482,105 @@ watch(isDesktop, () => {
 
 <style scoped>
 /* =============================================================================
+   Compact ESP Info Card
+   ============================================================================= */
+.esp-info-compact {
+  width: 100%;
+  max-width: 280px;
+  background-color: var(--color-bg-secondary);
+  border: 3px solid var(--glass-border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: all 0.2s;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+}
+
+.esp-info-compact:hover {
+  border-color: var(--color-iridescent-1);
+  box-shadow: 0 12px 32px rgba(167, 139, 250, 0.5);
+  transform: scale(1.02);
+}
+
+.esp-info-compact__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.esp-info-compact__title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.esp-info-compact__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+.esp-info-compact__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background-color: var(--color-bg-tertiary);
+  border-radius: 0.5rem;
+}
+
+.esp-info-compact__stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.esp-info-compact__stat-label {
+  color: var(--color-text-muted);
+  min-width: 50px;
+}
+
+.esp-info-compact__stat-value {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.esp-info-compact__details-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(167, 139, 250, 0.3);
+}
+
+.esp-info-compact__details-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.4);
+}
+
+.esp-info-compact__details-btn:active {
+  transform: translateY(0);
+}
+
+/* =============================================================================
    Base Layout (Mobile-First)
    ============================================================================= */
 .esp-orbital-layout {
@@ -410,13 +591,15 @@ watch(isDesktop, () => {
   gap: 1.5rem;
   padding: 1rem;
   min-height: 300px;
+  isolation: isolate; /* Create stacking context */
 }
 
 .esp-orbital-layout__center {
   position: relative;
-  z-index: 2;
+  z-index: 5;
   width: 100%;
   max-width: 400px;
+  pointer-events: auto;
 }
 
 .esp-orbital-layout__satellites {
@@ -437,10 +620,13 @@ watch(isDesktop, () => {
 
 .esp-orbital-layout__satellite {
   flex-shrink: 0;
+  z-index: 10;
+  position: relative;
 }
 
 .esp-orbital-layout__connections {
   display: none; /* Hidden on mobile */
+  z-index: 1;
 }
 
 .esp-orbital-layout__empty {
@@ -463,18 +649,19 @@ watch(isDesktop, () => {
     justify-content: center;
     align-items: center;
     min-height: calc(var(--container-size, 500px) + 2rem);
-    padding: 2rem;
+    padding: 3rem;
     gap: 0;
   }
 
   .esp-orbital-layout--has-items {
     /* When we have satellites, position relatively for orbital layout */
     position: relative;
+    min-height: calc(var(--container-size, 600px) + 4rem);
   }
 
   .esp-orbital-layout__center {
     position: relative;
-    z-index: 2;
+    z-index: 5;
     max-width: none;
     width: auto;
   }
@@ -484,9 +671,11 @@ watch(isDesktop, () => {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: auto;
+    width: 100%;
+    height: 100%;
     pointer-events: none;
     display: block;
+    z-index: 10;
   }
 
   .esp-orbital-layout__satellites--sensors,
@@ -503,11 +692,16 @@ watch(isDesktop, () => {
       calc(-50% + var(--orbital-y, 0px))
     );
     pointer-events: auto;
-    transition: transform 0.3s ease, box-shadow 0.2s ease;
+    transition: transform 0.3s ease, box-shadow 0.2s ease, z-index 0s;
+    z-index: 10;
   }
 
   .esp-orbital-layout__satellite--orbital:hover {
-    z-index: 10;
+    z-index: 20;
+    transform: translate(
+      calc(-50% + var(--orbital-x, 0px)),
+      calc(-50% + var(--orbital-y, 0px))
+    ) scale(1.05);
   }
 
   .esp-orbital-layout__connections {
