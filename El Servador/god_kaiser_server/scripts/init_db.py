@@ -25,7 +25,7 @@ from sqlalchemy import text
 from src.core.config import get_settings
 from src.core.logging_config import get_logger
 from src.core.security import hash_password
-from src.db.models import Base
+from src.db.base import Base
 from src.db.repositories.system_config_repo import SystemConfigRepository
 from src.db.repositories.user_repo import UserRepository
 from src.db.session import get_engine, get_session, init_db

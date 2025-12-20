@@ -41,6 +41,7 @@ import {
 import Badge from '@/components/common/Badge.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
+import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -242,6 +243,21 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
     zone_name: zoneData.zone_name,
   })
 }
+
+// Handle clicks from ESPOrbitalLayout
+function handleSensorClickFromOrbital(gpio: number) {
+  // Could open edit modal or show details
+  console.log('[DeviceDetailView] Sensor clicked:', gpio)
+}
+
+function handleActuatorClickFromOrbital(gpio: number) {
+  // Toggle actuator on click
+  if (!isMock.value || !mockEsp.value) return
+  const actuator = mockEsp.value.actuators.find((a: any) => a.gpio === gpio)
+  if (actuator && !actuator.emergency_stopped) {
+    toggleActuator(gpio, actuator.state)
+  }
+}
 </script>
 
 <template>
@@ -353,134 +369,56 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
         @zone-updated="handleZoneUpdate"
       />
 
-      <!-- Sensors Section (Mock ESP only for now) -->
-      <div class="card" v-if="isMock && mockEsp">
+      <!-- Orbital Satellite Layout (Sensors & Actuators) -->
+      <div class="card orbital-layout-card" v-if="isMock && mockEsp && (mockEsp.sensors.length > 0 || mockEsp.actuators.length > 0)">
         <div class="card-header flex items-center justify-between flex-wrap gap-2">
           <h3 class="font-semibold flex items-center gap-2" style="color: var(--color-text-primary)">
-            <Thermometer class="w-5 h-5" style="color: var(--color-mock)" />
-            Sensoren ({{ mockEsp.sensors.length }})
+            <Gauge class="w-5 h-5" style="color: var(--color-iridescent-1)" />
+            Sensoren & Aktoren
           </h3>
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             <button v-if="mockEsp.sensors.length > 0" class="btn-secondary btn-sm" @click="openBatchModal">
               <RefreshCw class="w-4 h-4" />
               <span class="hidden sm:inline ml-1">Batch Update</span>
             </button>
             <button class="btn-primary btn-sm" @click="showAddSensorModal = true">
               <Plus class="w-4 h-4" />
-              <span class="hidden sm:inline ml-1">Sensor hinzufügen</span>
+              <span class="hidden sm:inline ml-1">Sensor</span>
             </button>
-          </div>
-        </div>
-        <div class="card-body">
-          <EmptyState 
-            v-if="mockEsp.sensors.length === 0"
-            title="Keine Sensoren"
-            description="Fügen Sie einen Sensor hinzu, um Messwerte zu simulieren."
-            action-text="Sensor hinzufügen"
-            @action="showAddSensorModal = true"
-          />
-          <div v-else class="space-y-3">
-            <div
-              v-for="sensor in mockEsp.sensors"
-              :key="sensor.gpio"
-              class="sensor-row"
-            >
-              <div class="flex items-center gap-3">
-                <div class="sensor-icon">
-                  <Gauge class="w-5 h-5" />
-                </div>
-                <div>
-                  <p class="font-medium" style="color: var(--color-text-primary)">
-                    {{ sensor.name || getSensorLabel(sensor.sensor_type) }}
-                  </p>
-                  <p class="text-xs" style="color: var(--color-text-muted)">
-                    {{ getSensorLabel(sensor.sensor_type) }} · GPIO {{ sensor.gpio }}
-                  </p>
-                </div>
-              </div>
-              
-              <div class="flex items-center gap-4 flex-wrap justify-end">
-                <!-- Editing mode -->
-                <div v-if="editingSensorGpio === sensor.gpio" class="flex items-center gap-2 flex-wrap">
-                  <input
-                    v-model.number="editingSensorValue"
-                    type="number"
-                    step="0.1"
-                    class="input w-24 text-sm"
-                  />
-                  <select v-model="editingSensorQuality" class="input text-sm w-32">
-                    <option v-for="opt in qualityOptions" :key="opt.value" :value="opt.value">
-                      {{ opt.label }}
-                    </option>
-                  </select>
-                  <label class="flex items-center gap-2 text-sm" style="color: var(--color-text-secondary)">
-                    <input type="checkbox" v-model="editingSensorPublish" />
-                    Publizieren
-                  </label>
-                  <button class="btn-primary btn-sm" @click="saveSensorValue">Speichern</button>
-                  <button class="btn-ghost btn-sm" @click="editingSensorGpio = null">
-                    <X class="w-4 h-4" />
-                  </button>
-                </div>
-                
-                <!-- Display mode -->
-                <template v-else>
-                  <div class="text-right">
-                    <p class="text-lg font-mono" style="color: var(--color-text-primary)">
-                      {{ formatNumber(sensor.raw_value, SENSOR_TYPE_CONFIG[sensor.sensor_type]?.decimals ?? 2) }}
-                      <span class="text-sm" style="color: var(--color-text-secondary)">
-                        {{ getSensorUnit(sensor.sensor_type) }}
-                      </span>
-                    </p>
-                    <div class="flex justify-end gap-2 mt-1">
-                      <Badge 
-                        :variant="sensor.quality === 'good' || sensor.quality === 'excellent' ? 'success' : 'warning'" 
-                        size="sm"
-                      >
-                        {{ getQualityLabel(sensor.quality) }}
-                      </Badge>
-                      <Badge v-if="sensor.subzone_id" variant="gray" size="sm">
-                        {{ sensor.subzone_id }}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div class="flex gap-1">
-                    <button
-                      class="btn-ghost btn-sm"
-                      @click="startEditSensor(sensor.gpio, sensor.raw_value, sensor.quality)"
-                      title="Bearbeiten"
-                    >
-                      Bearbeiten
-                    </button>
-                    <button
-                      class="btn-ghost btn-sm text-error"
-                      @click="removeSensor(sensor.gpio)"
-                      title="Entfernen"
-                    >
-                      <Trash2 class="w-4 h-4" />
-                    </button>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Actuators Section (Mock ESP only for now) -->
-      <div class="card" v-if="isMock && mockEsp">
-        <div class="card-header flex items-center justify-between flex-wrap gap-2">
-          <h3 class="font-semibold flex items-center gap-2" style="color: var(--color-text-primary)">
-            <Power class="w-5 h-5" style="color: var(--color-warning)" />
-            Aktoren ({{ mockEsp.actuators.length }})
-          </h3>
-          <div class="flex gap-2">
+            <button class="btn-primary btn-sm" @click="showAddActuatorModal = true">
+              <Plus class="w-4 h-4" />
+              <span class="hidden sm:inline ml-1">Aktor</span>
+            </button>
             <button
               v-if="mockEsp.actuators.some((a: any) => a.emergency_stopped)"
               class="btn-secondary btn-sm text-warning"
               @click="clearEmergency"
             >
               Notfall aufheben
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <ESPOrbitalLayout
+            :device="device"
+            :show-connections="true"
+            @sensor-click="handleSensorClickFromOrbital"
+            @actuator-click="handleActuatorClickFromOrbital"
+          />
+        </div>
+      </div>
+
+      <!-- Empty State: No Sensors or Actuators (Mock ESP) -->
+      <div class="card" v-else-if="isMock && mockEsp">
+        <div class="card-header flex items-center justify-between flex-wrap gap-2">
+          <h3 class="font-semibold flex items-center gap-2" style="color: var(--color-text-primary)">
+            <Gauge class="w-5 h-5" style="color: var(--color-iridescent-1)" />
+            Sensoren & Aktoren
+          </h3>
+          <div class="flex gap-2">
+            <button class="btn-primary btn-sm" @click="showAddSensorModal = true">
+              <Plus class="w-4 h-4" />
+              <span class="hidden sm:inline ml-1">Sensor hinzufügen</span>
             </button>
             <button class="btn-primary btn-sm" @click="showAddActuatorModal = true">
               <Plus class="w-4 h-4" />
@@ -490,52 +428,145 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
         </div>
         <div class="card-body">
           <EmptyState 
-            v-if="mockEsp.actuators.length === 0"
-            title="Keine Aktoren"
-            description="Fügen Sie einen Aktor hinzu, um Ausgänge zu simulieren."
-            action-text="Aktor hinzufügen"
-            @action="showAddActuatorModal = true"
+            title="Keine Sensoren oder Aktoren"
+            description="Fügen Sie Sensoren oder Aktoren hinzu, um Ihr ESP-Gerät zu konfigurieren."
+            action-text="Sensor hinzufügen"
+            @action="showAddSensorModal = true"
           />
-          <div v-else class="space-y-3">
-            <div
-              v-for="actuator in mockEsp.actuators"
-              :key="actuator.gpio"
-              class="actuator-row"
-              :class="{ 'actuator-row--emergency': actuator.emergency_stopped }"
-            >
-              <div class="flex items-center gap-3">
-                <div :class="['actuator-icon', actuator.state ? 'actuator-icon--on' : '']">
-                  <Power class="w-5 h-5" />
-                </div>
-                <div>
-                  <p class="font-medium" style="color: var(--color-text-primary)">
-                    {{ actuator.name || `GPIO ${actuator.gpio}` }}
-                  </p>
-                  <p class="text-xs" style="color: var(--color-text-muted)">
-                    {{ getActuatorTypeLabel(actuator.actuator_type) }} · GPIO {{ actuator.gpio }}
-                  </p>
+        </div>
+      </div>
+
+      <!-- Sensor/Actuator Management Panel (Collapsible, for editing) -->
+      <div class="card" v-if="isMock && mockEsp && (mockEsp.sensors.length > 0 || mockEsp.actuators.length > 0)">
+        <details class="management-details">
+          <summary class="card-header cursor-pointer flex items-center justify-between">
+            <h3 class="font-semibold flex items-center gap-2" style="color: var(--color-text-primary)">
+              <Settings class="w-5 h-5" style="color: var(--color-text-muted)" />
+              Verwaltung
+            </h3>
+            <span class="text-xs" style="color: var(--color-text-muted)">Klicken zum Erweitern</span>
+          </summary>
+          <div class="card-body space-y-6">
+            <!-- Sensors Management -->
+            <div v-if="mockEsp.sensors.length > 0">
+              <h4 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color: var(--color-text-secondary)">
+                <Thermometer class="w-4 h-4" style="color: var(--color-mock)" />
+                Sensoren ({{ mockEsp.sensors.length }})
+              </h4>
+              <div class="space-y-2">
+                <div
+                  v-for="sensor in mockEsp.sensors"
+                  :key="sensor.gpio"
+                  class="sensor-row"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="sensor-icon sensor-icon--small">
+                      <Gauge class="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p class="font-medium text-sm" style="color: var(--color-text-primary)">
+                        {{ sensor.name || getSensorLabel(sensor.sensor_type) }}
+                      </p>
+                      <p class="text-xs" style="color: var(--color-text-muted)">
+                        GPIO {{ sensor.gpio }} · {{ formatNumber(sensor.raw_value, SENSOR_TYPE_CONFIG[sensor.sensor_type]?.decimals ?? 2) }} {{ getSensorUnit(sensor.sensor_type) }}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div class="flex items-center gap-2 flex-wrap justify-end">
+                    <!-- Editing mode -->
+                    <div v-if="editingSensorGpio === sensor.gpio" class="flex items-center gap-2 flex-wrap">
+                      <input
+                        v-model.number="editingSensorValue"
+                        type="number"
+                        step="0.1"
+                        class="input w-20 text-sm"
+                      />
+                      <select v-model="editingSensorQuality" class="input text-sm w-28">
+                        <option v-for="opt in qualityOptions" :key="opt.value" :value="opt.value">
+                          {{ opt.label }}
+                        </option>
+                      </select>
+                      <button class="btn-primary btn-sm" @click="saveSensorValue">OK</button>
+                      <button class="btn-ghost btn-sm" @click="editingSensorGpio = null">
+                        <X class="w-4 h-4" />
+                      </button>
+                    </div>
+                    
+                    <!-- Display mode -->
+                    <template v-else>
+                      <Badge 
+                        :variant="sensor.quality === 'good' || sensor.quality === 'excellent' ? 'success' : 'warning'" 
+                        size="xs"
+                      >
+                        {{ getQualityLabel(sensor.quality) }}
+                      </Badge>
+                      <button
+                        class="btn-ghost btn-sm"
+                        @click="startEditSensor(sensor.gpio, sensor.raw_value, sensor.quality)"
+                        title="Bearbeiten"
+                      >
+                        Bearbeiten
+                      </button>
+                      <button
+                        class="btn-ghost btn-sm text-error"
+                        @click="removeSensor(sensor.gpio)"
+                        title="Entfernen"
+                      >
+                        <Trash2 class="w-4 h-4" />
+                      </button>
+                    </template>
+                  </div>
                 </div>
               </div>
-              <div class="flex items-center gap-4">
-                <div class="flex gap-2">
-                  <Badge :variant="actuator.state ? 'success' : 'gray'" size="sm">
-                    {{ actuator.state ? 'Ein' : 'Aus' }}
-                  </Badge>
-                  <Badge v-if="actuator.emergency_stopped" variant="danger" size="sm">
-                    E-STOP
-                  </Badge>
-                </div>
-                <button
-                  class="btn-secondary btn-sm"
-                  :disabled="actuator.emergency_stopped"
-                  @click="toggleActuator(actuator.gpio, actuator.state)"
+            </div>
+
+            <!-- Actuators Management -->
+            <div v-if="mockEsp.actuators.length > 0">
+              <h4 class="text-sm font-semibold mb-3 flex items-center gap-2" style="color: var(--color-text-secondary)">
+                <Power class="w-4 h-4" style="color: var(--color-warning)" />
+                Aktoren ({{ mockEsp.actuators.length }})
+              </h4>
+              <div class="space-y-2">
+                <div
+                  v-for="actuator in mockEsp.actuators"
+                  :key="actuator.gpio"
+                  class="actuator-row"
+                  :class="{ 'actuator-row--emergency': actuator.emergency_stopped }"
                 >
-                  {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
-                </button>
+                  <div class="flex items-center gap-3">
+                    <div :class="['actuator-icon actuator-icon--small', actuator.state ? 'actuator-icon--on' : '']">
+                      <Power class="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p class="font-medium text-sm" style="color: var(--color-text-primary)">
+                        {{ actuator.name || `GPIO ${actuator.gpio}` }}
+                      </p>
+                      <p class="text-xs" style="color: var(--color-text-muted)">
+                        {{ getActuatorTypeLabel(actuator.actuator_type) }} · GPIO {{ actuator.gpio }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <Badge :variant="actuator.state ? 'success' : 'gray'" size="xs">
+                      {{ actuator.state ? 'Ein' : 'Aus' }}
+                    </Badge>
+                    <Badge v-if="actuator.emergency_stopped" variant="danger" size="xs">
+                      E-STOP
+                    </Badge>
+                    <button
+                      class="btn-secondary btn-sm"
+                      :disabled="actuator.emergency_stopped"
+                      @click="toggleActuator(actuator.gpio, actuator.state)"
+                    >
+                      {{ actuator.state ? 'Aus' : 'Ein' }}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </details>
       </div>
 
       <!-- Real ESP Info (if not Mock) -->
@@ -723,15 +754,34 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
 </template>
 
 <style scoped>
+/* Orbital Layout Card */
+.orbital-layout-card .card-body {
+  overflow: visible;
+}
+
+/* Management Details (collapsible) */
+.management-details summary {
+  list-style: none;
+  user-select: none;
+}
+
+.management-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.management-details[open] summary {
+  border-bottom: 1px solid var(--glass-border);
+}
+
 /* Sensor row */
 .sensor-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;
   background-color: var(--color-bg-tertiary);
   border-radius: 0.5rem;
-  gap: 1rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
@@ -747,15 +797,20 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
   flex-shrink: 0;
 }
 
+.sensor-icon--small {
+  width: 2rem;
+  height: 2rem;
+}
+
 /* Actuator row */
 .actuator-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;
   background-color: var(--color-bg-tertiary);
   border-radius: 0.5rem;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .actuator-row--emergency {
@@ -773,6 +828,11 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
   color: var(--color-text-muted);
   flex-shrink: 0;
   transition: all 0.2s;
+}
+
+.actuator-icon--small {
+  width: 2rem;
+  height: 2rem;
 }
 
 .actuator-icon--on {

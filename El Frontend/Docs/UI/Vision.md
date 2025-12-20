@@ -1,40 +1,47 @@
 # Vision - UI-Ziele und Roadmap
 
 > **Dokument-Typ:** Strategische Roadmap & Implementierungsübersicht  
-> **Letzte Aktualisierung:** Dezember 2025  
+> **Letzte Aktualisierung:** 20. Dezember 2025 (Code-verifiziert)  
 > **Verknüpfte System Flows:** [Alle Flows](../System%20Flows/)
 
 ---
 
 ## 🎯 Quick Status Overview
 
+> ⚠️ **HINWEIS:** Diese Übersicht wurde am 20.12.2025 gegen den aktuellen Code verifiziert.
+> Status-Angaben sind mit `[IST]` für implementiert und `[SOLL]` für geplant markiert.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                    AUTOMATIONONE - IMPLEMENTIERUNGSSTAND                     │
+│                        (Code-verifiziert: 20.12.2025)                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  KERN-SYSTEM           ████████████████████░░░░  85%  ✅ Production-Ready   │
-│  ├─ Boot & Discovery   ██████████████████████████  100%  ✅                 │
-│  ├─ Sensor Reading     ██████████████████████████  100%  ✅                 │
-│  ├─ Actuator Control   ██████████████████████████  100%  ✅                 │
-│  ├─ Zone Management    ██████████████████████████  100%  ✅                 │
-│  └─ Error Recovery     ████████████████████░░░░░░  80%   ✅                 │
+│  ├─ Boot & Discovery   ██████████████████████████  100%  ✅ [IST]           │
+│  ├─ Sensor Reading     ██████████████████████████  100%  ✅ [IST]           │
+│  ├─ Actuator Control   ██████████████████████████  100%  ✅ [IST]           │
+│  ├─ Zone Management    ██████████████████████████  100%  ✅ [IST]           │
+│  └─ Error Recovery     ████████████████████░░░░░░  80%   ✅ [IST]           │
 │                                                                             │
-│  FRONTEND-UI           ██████████████████░░░░░░░░  70%  🔄 In Progress      │
-│  ├─ Unified Device View████████████████████████████  100%  ✅                │
-│  ├─ Satellite Cards    ██████████████████████░░░░  85%   ✅                 │
-│  ├─ Connection Lines   ██████████████░░░░░░░░░░░░  50%   🔄                 │
-│  ├─ Zone Drag & Drop   ░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    📋 Geplant        │
-│  └─ Logic Builder UI   ████████░░░░░░░░░░░░░░░░░░  30%   🔄                 │
+│  FRONTEND-UI           ████████████████░░░░░░░░░░  65%  🔄 In Progress      │
+│  ├─ Views (15/16)      ██████████████████████████  94%   ✅ [IST]           │
+│  ├─ Unified Device View██████████████████████████  100%  ✅ [IST]           │
+│  ├─ Satellite Kompon.  ██████████████████████████  100%  ✅ [IST]           │
+│  ├─ Satellite Layout   ░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    📋 [SOLL]         │
+│  ├─ Connection Lines   ██████████████░░░░░░░░░░░░  50%   🔄 [IST: SVG]     │
+│  ├─ Zone Drag & Drop   ░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    📋 [SOLL]         │
+│  └─ Logic Builder UI   ░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    📋 [SOLL: Placeholder] │
 │                                                                             │
 │  SICHERHEIT            ██████████████████████████  100%  ✅ Production-Ready │
-│  ├─ Authentication     ██████████████████████████  100%  ✅                 │
-│  ├─ Authorization      ██████████████████████████  100%  ✅                 │
-│  └─ User Management    ██████████████████████████  100%  ✅                 │
+│  ├─ Authentication     ██████████████████████████  100%  ✅ [IST]           │
+│  ├─ Authorization      ██████████████████████████  100%  ✅ [IST]           │
+│  └─ User Management    ██████████████████████████  100%  ✅ [IST]           │
 │                                                                             │
 │  AUTOMATION            ██████████████████░░░░░░░░  70%  🔄 In Progress      │
-│  ├─ Logic Engine       ████████████████████░░░░░░  80%   ✅                 │
-│  └─ Cross-ESP Rules    ████████████░░░░░░░░░░░░░░  45%   🔄                 │
+│  ├─ Logic Engine (BE)  ████████████████████░░░░░░  80%   ✅ [IST: Backend]  │
+│  ├─ Logic Engine (FE)  ░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    📋 [SOLL]         │
+│  └─ Cross-ESP Rules    ████████████░░░░░░░░░░░░░░  45%   🔄 [IST: Backend] │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -80,22 +87,27 @@
 | **Subzone & Safe-Mode** | ✅ 100% | ✅ | [10-subzone-safemode](../System%20Flows/10-subzone-safemode-pin-assignment-flow-server-frontend.md) | 🟡 Wichtig |
 | **Authentication** | ✅ 100% | ✅ | [11-authentication](../System%20Flows/11-authentication-authorization-flow-server-frontend.md) | 🔴 Kritisch |
 | **User Management** | ✅ 100% | ✅ | [12-user-management](../System%20Flows/12-user-management-flow-server-frontend.md) | 🟡 Wichtig |
-| **Logic Engine** | 🔄 70% | ✅ | [13-logic-engine](../System%20Flows/13-logic-engine-flow-server-frontend.md) | 🟡 Wichtig |
-| **Satellite Cards** | ✅ 85% | ✅ | [14-satellite-cards](../System%20Flows/14-satellite-cards-flow-server-frontend.md) | 🟡 Wichtig |
+| **Logic Engine** | 🔄 70% (nur Backend) | ✅ | [13-logic-engine](../System%20Flows/13-logic-engine-flow-server-frontend.md) | 🟡 Wichtig |
+| **Satellite Cards** | 🔄 50% (Komp.✅ Layout❌) | ✅ | [14-satellite-cards](../System%20Flows/14-satellite-cards-flow-server-frontend.md) | 🟡 Wichtig |
 
 ### Frontend UI-Features
 
-| Feature | IST-Zustand | SOLL-Zustand | Gap | Aufwand |
-|---------|-------------|--------------|-----|---------|
-| **Unified Device View** | ✅ Mock+Real kombiniert | ✅ | - | - |
-| **ESP Card Design** | ✅ Basis-Cards | ✅ Satelliten-Layout | ⚠️ Layout | 2d |
-| **Sensor Satellite** | ✅ Komponente fertig | ✅ | - | - |
-| **Actuator Satellite** | ✅ Komponente fertig | ✅ | - | - |
-| **Connection Lines** | 🔄 SVG-Basis | ✅ Logic-Parsing | ⚠️ Logic | 3d |
-| **Zone Drag & Drop** | 📋 Nicht implementiert | ✅ | ❌ Komplett | 5d |
-| **Mock→ESP Transfer** | 📋 Nicht implementiert | ✅ | ❌ Komplett | 3d |
-| **Sanfte Übergänge** | 📋 Nicht implementiert | ✅ | ❌ Komplett | 2d |
-| **Custom Sensor Libraries** | 📋 Nicht implementiert | ✅ Phase 7 | ❌ | 5d |
+> ⚠️ **Code-Verifiziert am 20.12.2025** - Jeder Status wurde gegen den tatsächlichen Code geprüft.
+
+| Feature | IST-Zustand | SOLL-Zustand | Gap | Aufwand | Code-Quelle |
+|---------|-------------|--------------|-----|---------|-------------|
+| **Unified Device View** | ✅ Mock+Real kombiniert | ✅ | - | - | `DevicesView.vue` |
+| **ESP Card Design** | ✅ Basis-Cards (ohne Satelliten) | ✅ Mit Satelliten-Layout | ⚠️ **Layout fehlt** | 3d | `ESPCard.vue` |
+| **Sensor Satellite** | ✅ Komponente fertig | ✅ | - | - | `SensorSatellite.vue` |
+| **Actuator Satellite** | ✅ Komponente fertig | ✅ | - | - | `ActuatorSatellite.vue` |
+| **Satelliten-Integration** | ❌ **0% - Nicht integriert** | ✅ In ESPCard | ⚠️ **Komplett** | 2d | fehlt in `ESPCard.vue` |
+| **Connection Lines** | 🔄 SVG-Basis fertig | ✅ + Logic-Parsing | ⚠️ Logic fehlt | 2d | `ConnectionLines.vue` |
+| **WebSocket Sensor-Live** | ❌ Nur esp_health/status | ✅ + sensor_data | ⚠️ **Fehlt** | 1d | `esp.ts` Store |
+| **Zone Drag & Drop** | 📋 Nicht implementiert | ✅ | ❌ Komplett | 5d | - |
+| **Mock→ESP Transfer** | 📋 Nicht implementiert | ✅ | ❌ Komplett | 3d | - |
+| **Sanfte Übergänge** | 📋 Nicht implementiert | ✅ | ❌ Komplett | 2d | - |
+| **Logic Builder UI** | ⚠️ **Nur Placeholder** | ✅ Visueller Builder | ❌ **Komplett** | 8d | `LogicView.vue` |
+| **Custom Sensor Libraries** | 📋 Nicht implementiert | ✅ Phase 7 | ❌ | 5d | - |
 
 ---
 
@@ -217,22 +229,26 @@ Die Seitenleiste (`AppSidebar.vue`) ist in kollabierbare Gruppen organisiert.
 
 ### Implementierungsstand Satelliten-System
 
-| Komponente | Status | Code-Location | Features |
-|------------|--------|---------------|----------|
-| **SensorSatellite** | ✅ 100% | `src/components/esp/SensorSatellite.vue` | Live-Werte, Quality-Badge, Icons |
-| **ActuatorSatellite** | ✅ 100% | `src/components/esp/ActuatorSatellite.vue` | AN/AUS, PWM%, E-STOP |
-| **ConnectionLines** | 🔄 50% | `src/components/esp/ConnectionLines.vue` | SVG-Linien, Hover, **Logic-Parsing fehlt** |
-| **ESPCard Integration** | 🔄 30% | `src/components/esp/ESPCard.vue` | Basis-Card, **Satelliten-Layout fehlt** |
-| **Position Tracking** | 📋 0% | — | Dynamische Positionierung |
+> ⚠️ **Code-Verifiziert am 20.12.2025**
 
-### Verhalten (Vision)
+| Komponente | Status | Code-Location | LOC | Features |
+|------------|--------|---------------|-----|----------|
+| **SensorSatellite** | ✅ 100% | `src/components/esp/SensorSatellite.vue` | 271 | Live-Werte, Quality-Badge, Icons |
+| **ActuatorSatellite** | ✅ 100% | `src/components/esp/ActuatorSatellite.vue` | 289 | AN/AUS, PWM%, E-STOP |
+| **ConnectionLines** | 🔄 50% | `src/components/esp/ConnectionLines.vue` | 268 | SVG-Linien, Hover, **Logic-Parsing fehlt** |
+| **ESPCard Integration** | ❌ **0%** | `src/components/esp/ESPCard.vue` | 413 | **Keine Satelliten-Imports!** |
+| **Position Tracking** | 📋 0% | — | - | Dynamische Positionierung |
+| **WebSocket sensor_data** | ❌ **0%** | `src/stores/esp.ts` | - | **Nicht subscribed!** |
 
-| Aktion | IST | SOLL | Gap |
-|--------|-----|------|-----|
-| Satelliten-Cards schweben um ESP-Card | ❌ Row-Layout | ✅ Orbital-Layout | 🔄 CSS-Arbeit |
-| Live-Werte der Sensoren | ✅ WebSocket | ✅ | - |
-| Aktor-Status | ✅ WebSocket | ✅ | - |
-| **Klick auf Satellit** | ❌ Nichts | ✅ Connection Lines | 🔄 Event-Handler |
+### Verhalten (Vision vs. Code-Realität)
+
+| Aktion | IST (Code-verifiziert) | SOLL | Gap |
+|--------|------------------------|------|-----|
+| Satelliten-Cards schweben um ESP-Card | ❌ **Nicht implementiert** | ✅ Orbital-Layout | ❌ **Komplett** |
+| Live-Werte der Sensoren | ❌ **Nur via API-Refresh** | ✅ WebSocket sensor_data | ⚠️ WebSocket fehlt |
+| ESP Health/Status | ✅ WebSocket esp_health | ✅ | - |
+| Aktor-Status Live | ❌ **Nicht subscribed** | ✅ WebSocket actuator_status | ⚠️ Subscription fehlt |
+| **Klick auf Satellit** | ❌ Nicht möglich (keine Satellites) | ✅ Connection Lines | ❌ |
 | Grüne Linien = Logic-Verbindung | ❌ | ✅ | 🔄 Logic-Parsing |
 | Gestrichelte Linien = Intern | ❌ | ✅ | 🔄 |
 | Cross-ESP Linien | ❌ | ✅ | 🔄 |

@@ -153,11 +153,31 @@ export interface MockActuatorConfig {
 // =============================================================================
 // WebSocket Message Types
 // =============================================================================
+/**
+ * All WebSocket message types from server broadcasts.
+ * 
+ * Server-side origins (handler → message_type):
+ * - sensor_handler.py       → sensor_data
+ * - actuator_handler.py     → actuator_status
+ * - actuator_response.py    → actuator_response
+ * - actuator_alert.py       → actuator_alert
+ * - config_handler.py       → config_response
+ * - zone_ack_handler.py     → zone_assignment
+ * - heartbeat_handler.py    → esp_health
+ */
 export type MessageType =
+  // Core sensor/actuator events
   | 'sensor_data'
   | 'actuator_status'
-  | 'logic_execution'
+  | 'actuator_response'
+  | 'actuator_alert'
+  // Device health & status
   | 'esp_health'
+  // Configuration events
+  | 'config_response'
+  | 'zone_assignment'
+  // System events (future use)
+  | 'logic_execution'
   | 'system_event'
 
 export interface MqttMessage {

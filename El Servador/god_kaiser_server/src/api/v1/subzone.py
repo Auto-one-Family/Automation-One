@@ -25,8 +25,8 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, status
 
 from ...core.logging_config import get_logger
-from ...db.database import DBSession
 from ...db.repositories import ESPRepository
+from ..deps import DBSession, OperatorUser
 from ...schemas.common import ErrorResponse
 from ...schemas.subzone import (
     SafeModeRequest,
@@ -38,7 +38,6 @@ from ...schemas.subzone import (
     SubzoneRemoveResponse,
 )
 from ...services.subzone_service import SubzoneService
-from ..dependencies import OperatorUser
 
 logger = get_logger(__name__)
 

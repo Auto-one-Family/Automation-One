@@ -30,7 +30,7 @@ from typing import Any, Dict, Optional
 from pydantic import ValidationError
 
 from ...core.logging_config import get_logger
-from ...db.database import get_async_session_context
+from ...db.session import get_session
 from ...db.repositories import ESPRepository
 from ...schemas.subzone import SubzoneAckPayload
 from ...services.subzone_service import SubzoneService
@@ -89,7 +89,7 @@ class SubzoneAckHandler:
         )
 
         # Process ACK with database session
-        async with get_async_session_context() as session:
+        async for session in get_session():
             esp_repo = ESPRepository(session)
             service = SubzoneService(esp_repo=esp_repo, session=session)
 

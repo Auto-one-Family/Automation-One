@@ -39,13 +39,21 @@ export const useEspStore = defineStore('esp', () => {
   const error = ref<string | null>(null)
 
   // WebSocket integration
+  // Note: Server broadcasts these types from MQTT handlers:
+  // - esp_health (heartbeat_handler.py)
+  // - sensor_data (sensor_handler.py)
+  // - actuator_status (actuator_handler.py)
+  // - actuator_alert (actuator_alert_handler.py)
   const ws = useWebSocket({
     autoConnect: true,
     autoReconnect: true,
     filters: {
-      types: ['esp_health', 'esp_status'] as MessageType[],
+      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert'] as MessageType[],
     },
   })
+
+  // Store unsubscribe functions for cleanup
+  const wsUnsubscribers: (() => void)[] = []
 
   // Getters
   const selectedDevice = computed(() =>
@@ -466,39 +474,117 @@ export const useEspStore = defineStore('esp', () => {
   }
 
   /**
-   * Handle esp_status WebSocket event
+   * Handle actuator_alert WebSocket event
+   * Updates actuator emergency state on alerts
    */
-  function handleEspStatus(message: any): void {
+  function handleActuatorAlert(message: { data: Record<string, unknown> }): void {
     const data = message.data
-    const espId = data.esp_id || data.device_id
-    
-    if (!espId) return
+    const espId = data.esp_id as string || data.device_id as string
+    const gpio = data.gpio as number
+    const alertType = data.alert_type as string
+
+    if (!espId || gpio === undefined) {
+      console.warn('[ESP Store] actuator_alert missing esp_id or gpio')
+      return
+    }
 
     const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (device) {
-      // Update device status
-      if (data.status) device.status = data.status
-      if (data.connected !== undefined) device.connected = data.connected
-      if (data.last_seen) device.last_seen = data.last_seen
-      
-      // For Mock ESPs, update system_state
-      if (isMock(espId) && data.system_state) {
-        (device as any).system_state = data.system_state
-      }
+    if (!device?.actuators) {
+      console.debug(`[ESP Store] Device ${espId} not found or has no actuators`)
+      return
     }
+
+    const actuator = (device.actuators as { gpio: number; emergency_stopped?: boolean; state?: boolean }[])
+      .find(a => a.gpio === gpio)
+    if (!actuator) {
+      console.debug(`[ESP Store] Actuator GPIO ${gpio} not found on ${espId}`)
+      return
+    }
+
+    // Emergency alerts set emergency_stopped flag
+    if (alertType === 'emergency_stop' || alertType === 'runtime_protection' || alertType === 'safety_violation') {
+      actuator.emergency_stopped = true
+      actuator.state = false
+    }
+
+    console.info(`[ESP Store] Actuator alert: ${espId} GPIO ${gpio} - ${alertType}`)
   }
 
-  // Subscribe to WebSocket events
+  /**
+   * Handle sensor_data WebSocket event
+   * Updates sensor value in corresponding device for live updates
+   */
+  function handleSensorData(message: any): void {
+    const data = message.data
+    const espId = data.esp_id || data.device_id
+    const gpio = data.gpio
+
+    if (!espId || gpio === undefined) return
+
+    const device = devices.value.find(d => getDeviceId(d) === espId)
+    if (!device?.sensors) return
+
+    const sensor = (device.sensors as any[]).find(s => s.gpio === gpio)
+    if (!sensor) return
+
+    // Map server payload → frontend MockSensor
+    if (data.value !== undefined) sensor.raw_value = data.value
+    if (data.quality) sensor.quality = data.quality
+    if (data.unit) sensor.unit = data.unit
+    sensor.last_read = data.timestamp
+      ? new Date(data.timestamp * 1000).toISOString()
+      : new Date().toISOString()
+  }
+
+  /**
+   * Handle actuator_status WebSocket event
+   * Updates actuator state in corresponding device for live updates
+   */
+  function handleActuatorStatus(message: any): void {
+    const data = message.data
+    const espId = data.esp_id || data.device_id
+    const gpio = data.gpio
+
+    if (!espId || gpio === undefined) return
+
+    const device = devices.value.find(d => getDeviceId(d) === espId)
+    if (!device?.actuators) return
+
+    const actuator = (device.actuators as any[]).find(a => a.gpio === gpio)
+    if (!actuator) return
+
+    // Map server payload → frontend MockActuator
+    // Server: state="on"|"off"|"pwm" → Frontend: state=boolean
+    if (data.state !== undefined) {
+      actuator.state = data.state === 'on' || data.state === 'pwm'
+    }
+    if (data.value !== undefined) actuator.pwm_value = data.value
+    if (data.emergency !== undefined) {
+      actuator.emergency_stopped = data.emergency !== 'normal'
+    }
+    actuator.last_command = data.timestamp
+      ? new Date(data.timestamp * 1000).toISOString()
+      : new Date().toISOString()
+  }
+
+  // Subscribe to WebSocket events with proper cleanup
   onMounted(() => {
-    // Subscribe to esp_health events
-    ws.on('esp_health' as MessageType, handleEspHealth)
-    
-    // Subscribe to esp_status events
-    ws.on('esp_status' as MessageType, handleEspStatus)
+    // Each ws.on() returns an unsubscribe function - store for cleanup
+    wsUnsubscribers.push(
+      ws.on('esp_health', handleEspHealth),
+      ws.on('sensor_data', handleSensorData),
+      ws.on('actuator_status', handleActuatorStatus),
+      ws.on('actuator_alert', handleActuatorAlert),
+    )
+    console.debug('[ESP Store] WebSocket handlers registered')
   })
 
   onUnmounted(() => {
+    // Unsubscribe all handlers to prevent memory leaks
+    wsUnsubscribers.forEach(unsub => unsub())
+    wsUnsubscribers.length = 0
     ws.disconnect()
+    console.debug('[ESP Store] WebSocket handlers unregistered')
   })
 
   return {

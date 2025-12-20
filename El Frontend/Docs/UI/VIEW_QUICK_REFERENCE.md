@@ -1,20 +1,26 @@
 # Frontend Views - Quick Reference
 
-**Erstellt:** 2025-12-19
+**Erstellt:** 2025-12-19  
+**Letzte Aktualisierung:** 2025-12-20 (WebSocket-Integration verifiziert)  
 **Zweck:** Schnelle Übersicht aller Views mit Status & API-Endpoints
 
 ---
 
 ## View-Übersicht (16 Total)
 
+> ⚠️ **HINWEIS:** Am 20.12.2025 wurden die Routes refactored:  
+> - `MockEspView` → `DevicesView` (Route `/devices`)  
+> - `MockEspDetailView` → `DeviceDetailView` (Route `/devices/:espId`)  
+> - Alte Routes (`/mock-esp/*`) redirecten automatisch.
+
 | # | View | Route | Auth | Admin | Status | API Endpoints | Komponenten |
 |---|------|-------|------|-------|--------|---------------|-------------|
 | 1 | **DashboardView** | `/` | ✅ | ❌ | ✅ Implementiert | - | StatCard, LoadingState, EmptyState |
-| 2 | **MockEspView** | `/mock-esp` | ✅ | ✅ | ✅ Implementiert | `/debug/mock-esp` | ESPCard, LoadingState, EmptyState, ErrorState |
-| 3 | **MockEspDetailView** | `/mock-esp/:espId` | ✅ | ✅ | ✅ Implementiert | `/debug/mock-esp/:espId/*` | Badge, LoadingState, EmptyState, ZoneAssignmentPanel |
+| 2 | **DevicesView** | `/devices` | ✅ | ❌ | ✅ Implementiert | `/debug/mock-esp`, `/v1/esp/devices` | ESPCard, LoadingState, EmptyState, ErrorState |
+| 3 | **DeviceDetailView** | `/devices/:espId` | ✅ | ❌ | ✅ Implementiert | Unified: Mock+Real APIs | Badge, LoadingState, EmptyState, ZoneAssignmentPanel |
 | 4 | **SensorsView** | `/sensors` | ✅ | ❌ | ✅ Implementiert | - (Store-only) | - |
 | 5 | **ActuatorsView** | `/actuators` | ✅ | ❌ | ✅ Implementiert | - (Store-only) | - |
-| 6 | **LogicView** | `/logic` | ✅ | ❌ | ⚠️ Placeholder | `/v1/logic` (geplant) | - |
+| 6 | **LogicView** | `/logic` | ✅ | ❌ | ⚠️ **Placeholder (53 LOC)** | `/v1/logic` (geplant) | - |
 | 7 | **MqttLogView** | `/mqtt-log` | ✅ | ❌ | ✅ Implementiert | WebSocket `/api/v1/ws/realtime` | - |
 | 8 | **DatabaseExplorerView** | `/database` | ✅ | ✅ | ✅ Implementiert | `/debug/db/*` | DataTable, FilterPanel, Pagination, SchemaInfoPanel, RecordDetailModal, TableSelector |
 | 9 | **LogViewerView** | `/logs` | ✅ | ✅ | ✅ Implementiert | `/debug/logs/*` | LoadingState |
@@ -28,31 +34,46 @@
 
 **Legende:**
 - ✅ Auth: Login erforderlich
-- ✅ Admin: Admin-Rolle erforderlich
+- ✅ Admin: Admin-Rolle erforderlich  
 - ⚠️ Placeholder: UI vorhanden, aber nicht funktional
+
+### Legacy Route Redirects (aus `router/index.ts`)
+
+| Alt | Neu | Status |
+|-----|-----|--------|
+| `/mock-esp` | `/devices` | ✅ Redirect |
+| `/mock-esp/:espId` | `/devices/:espId` | ✅ Redirect |
 
 ---
 
 ## API-Endpoint-Mapping
 
-### Debug-APIs (Admin-only)
+### Unified ESP APIs (DevicesView/DeviceDetailView)
 
-| View | Methode | Endpoint | Beschreibung |
-|------|---------|----------|--------------|
-| MockEspView | GET | `/debug/mock-esp` | Liste aller Mock-ESPs |
-| MockEspView | POST | `/debug/mock-esp` | Mock-ESP erstellen |
-| MockEspView | DELETE | `/debug/mock-esp/:espId` | Mock-ESP löschen |
-| MockEspDetailView | GET | `/debug/mock-esp/:espId` | ESP-Details |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/heartbeat` | Heartbeat triggern |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/state` | System-State setzen |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/sensors` | Sensor hinzufügen |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/sensors/:gpio` | Sensor-Wert setzen |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/sensors/batch` | Batch-Sensor-Update |
-| MockEspDetailView | DELETE | `/debug/mock-esp/:espId/sensors/:gpio` | Sensor entfernen |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/actuators` | Aktor hinzufügen |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/actuators/:gpio` | Aktor-State setzen |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/emergency-stop` | Emergency-Stop |
-| MockEspDetailView | POST | `/debug/mock-esp/:espId/clear-emergency` | Emergency aufheben |
+> ⚠️ Der `espStore` routet automatisch basierend auf ESP-ID-Präfix:  
+> - `ESP_MOCK_*` → Debug-APIs  
+> - Andere → V1-APIs
+
+| View | Methode | Endpoint | Beschreibung | Mock/Real |
+|------|---------|----------|--------------|-----------|
+| DevicesView | GET | `/debug/mock-esp` | Liste Mock-ESPs | Mock |
+| DevicesView | GET | `/v1/esp/devices` | Liste Real-ESPs | Real |
+| DevicesView | POST | `/debug/mock-esp` | Mock-ESP erstellen | Mock |
+| DevicesView | DELETE | `/debug/mock-esp/:espId` | Mock-ESP löschen | Mock |
+| DeviceDetailView | GET | `/debug/mock-esp/:espId` | Mock-ESP Details | Mock |
+| DeviceDetailView | GET | `/v1/esp/devices/:espId` | Real-ESP Details | Real |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/heartbeat` | Heartbeat triggern | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/state` | System-State setzen | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/sensors` | Sensor hinzufügen | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/sensors/:gpio` | Sensor-Wert setzen | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/sensors/batch` | Batch-Sensor-Update | Mock |
+| DeviceDetailView | DELETE | `/debug/mock-esp/:espId/sensors/:gpio` | Sensor entfernen | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/actuators` | Aktor hinzufügen | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/actuators/:gpio` | Aktor-State setzen | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/emergency-stop` | Emergency-Stop | Mock |
+| DeviceDetailView | POST | `/debug/mock-esp/:espId/clear-emergency` | Emergency aufheben | Mock |
+
+### Debug-APIs (Admin-only, andere Views)
 | DatabaseExplorerView | GET | `/debug/db/tables` | Tabellen-Liste |
 | DatabaseExplorerView | GET | `/debug/db/tables/:tableName/schema` | Tabellen-Schema |
 | DatabaseExplorerView | GET | `/debug/db/tables/:tableName/data` | Tabellen-Daten |
@@ -94,13 +115,15 @@
 
 ## Store-Nutzung
 
+> ⚠️ **Refactored:** `mockEspStore` wurde durch **`espStore`** ersetzt (Unified Store für Mock+Real).
+
 | View | Store | Verwendung |
 |------|-------|------------|
-| DashboardView | `authStore`, `mockEspStore` | User-Info, ESP-Count |
-| MockEspView | `mockEspStore` | CRUD-Operationen |
-| MockEspDetailView | `mockEspStore` | Sensor/Aktor-Management |
-| SensorsView | `mockEspStore` | Aggregierte Sensor-Daten |
-| ActuatorsView | `mockEspStore` | Aggregierte Aktor-Daten |
+| DashboardView | `authStore`, `espStore` | User-Info, ESP-Count |
+| **DevicesView** | `espStore` | Unified CRUD (Mock+Real) |
+| **DeviceDetailView** | `espStore` | Sensor/Aktor-Management (Unified) |
+| SensorsView | `espStore` | Aggregierte Sensor-Daten |
+| ActuatorsView | `espStore` | Aggregierte Aktor-Daten |
 | MqttLogView | `authStore` | Token-Refresh für WebSocket |
 | DatabaseExplorerView | `databaseStore` | Table-Selection, Pagination |
 | LoginView | `authStore` | Login |
@@ -120,17 +143,20 @@
 
 | Komponente | Verwendung (Views) | Props |
 |------------|-------------------|-------|
-| `LoadingState.vue` | DashboardView, MockEspView, MockEspDetailView, DatabaseExplorerView, LogViewerView, SystemConfigView, AuditLogView | `text?: string` |
-| `EmptyState.vue` | DashboardView, MockEspView, MockEspDetailView | `icon, title, description, actionText?, @action` |
-| `ErrorState.vue` | MockEspView | `message, showRetry?, showDismiss?, @retry, @dismiss` |
-| `Badge.vue` | MockEspView, MockEspDetailView | `variant, size?, pulse?, dot?` |
+| `LoadingState.vue` | DashboardView, DevicesView, DeviceDetailView, DatabaseExplorerView, LogViewerView, SystemConfigView, AuditLogView | `text?: string` |
+| `EmptyState.vue` | DashboardView, DevicesView, DeviceDetailView | `icon, title, description, actionText?, @action` |
+| `ErrorState.vue` | DevicesView | `message, showRetry?, showDismiss?, @retry, @dismiss` |
+| `Badge.vue` | DevicesView, DeviceDetailView | `variant, size?, pulse?, dot?` |
 
 ### ESP-Komponenten
 
-| Komponente | Verwendung (Views) | Props |
-|------------|-------------------|-------|
-| `ESPCard.vue` | MockEspView | `esp: MockESP, @heartbeat, @toggle-safe-mode, @delete` |
-| `SensorValueCard.vue` | - (optional für SensorsView) | `sensor, @edit` |
+| Komponente | Verwendung (Views) | Props | Status |
+|------------|-------------------|-------|--------|
+| `ESPCard.vue` | DevicesView | `esp: ESPDevice, @heartbeat, @toggle-safe-mode, @delete` | ✅ |
+| `SensorSatellite.vue` | ❌ **Nicht verwendet** | `espId, gpio, sensorType, value, quality...` | ⚠️ Fertig, nicht integriert |
+| `ActuatorSatellite.vue` | ❌ **Nicht verwendet** | `espId, gpio, actuatorType, state, pwmValue...` | ⚠️ Fertig, nicht integriert |
+| `ConnectionLines.vue` | ❌ **Nicht verwendet** | `connections, positions, showTooltips...` | ⚠️ Fertig, nicht integriert |
+| `SensorValueCard.vue` | - (optional für SensorsView) | `sensor, @edit` | ✅ |
 
 ### Dashboard-Komponenten
 
@@ -153,45 +179,75 @@
 
 | Komponente | Verwendung (Views) | Props |
 |------------|-------------------|-------|
-| `ZoneAssignmentPanel.vue` | MockEspDetailView | `espId, currentZoneId?, currentZoneName?, currentMasterZoneId?, @zone-updated` |
+| `ZoneAssignmentPanel.vue` | DeviceDetailView | `espId, currentZoneId?, currentZoneName?, currentMasterZoneId?, @zone-updated` |
 
 ---
 
 ## Feature-Status
 
+> ⚠️ **Code-verifiziert am 20.12.2025**
+
 | Feature | Status | View | Notizen |
 |---------|--------|------|---------|
-| Mock-ESP CRUD | ✅ Done | MockEspView, MockEspDetailView | Voll funktional |
-| Sensor-Management | ✅ Done | MockEspDetailView | Inkl. Batch-Update |
-| Actuator-Management | ✅ Done | MockEspDetailView | Inkl. Emergency-Stop |
-| Zone-Assignment | ✅ Done | MockEspDetailView | Via ZoneAssignmentPanel |
-| WebSocket Real-time | ✅ Done | MqttLogView | Auto-Reconnect funktioniert |
+| Unified ESP CRUD | ✅ Done | DevicesView, DeviceDetailView | Mock+Real in einer View |
+| Sensor-Management | ✅ Done | DeviceDetailView | Inkl. Batch-Update (nur Mock) |
+| Actuator-Management | ✅ Done | DeviceDetailView | Inkl. Emergency-Stop (nur Mock) |
+| Zone-Assignment | ✅ Done | DeviceDetailView | Via ZoneAssignmentPanel |
+| WebSocket MQTT-Log | ✅ Done | MqttLogView | Auto-Reconnect, **alle 9 Message-Types** |
+| WebSocket ESP-Updates | ✅ Done | DevicesView | esp_health, sensor_data, actuator_status, actuator_alert |
+| **Satelliten-Layout** | ❌ **0%** | - | Komponenten fertig, **nicht in ESPCard integriert** |
 | Database-Explorer | ✅ Done | DatabaseExplorerView | Filter, Pagination, Schema |
 | Log-Viewer | ✅ Done | LogViewerView | Real-time-Modus, Filter |
 | User-Management | ✅ Done | UserManagementView | CRUD, Password-Reset |
 | Load-Testing | ✅ Done | LoadTestView | Bulk-Create, Simulation |
 | System-Config | ✅ Done | SystemConfigView | Inline-Editing |
 | Audit-Log | ✅ Done | AuditLogView | Filter, Statistics, Retention |
-| Logic-Engine | ⚠️ Placeholder | LogicView | Nur UI-Template |
+| **Logic-Engine UI** | ⚠️ **Placeholder** | LogicView | Nur statisches Template (53 LOC) |
 | Auth-System | ✅ Done | LoginView, SetupView | JWT + Refresh-Token |
 
-**Implementiert:** 15/16 Views (93.75%)
-**Placeholder:** 1/16 Views (6.25%)
+**Implementiert:** 15/16 Views (93.75%)  
+**Placeholder:** 1/16 Views (6.25%)  
+**Satelliten-Integration:** 0% (Komponenten ✅, Layout ❌)
 
 ---
 
-## Next Steps (für LogicView)
+## Next Steps (Priorisiert)
 
-1. **Backend:** Logic-API implementieren (`/v1/logic/rules`)
-2. **Frontend:** Rule-Builder-Komponente erstellen
-   - Condition-Builder (Sensor-Werte, Zeit-Trigger)
-   - Action-Builder (Actuator-Commands)
-   - Cooldown-Konfiguration
-3. **Store:** `logicStore` für Rule-Management
-4. **Testing:** Rule-Execution-Flow testen
+### 🔴 Priorität 1: Satelliten-Layout Integration (3-4 Tage)
 
-**Geschätzte Zeit:** 8-12h (Backend + Frontend)
+| Schritt | Datei | Aufwand |
+|---------|-------|---------|
+| 1. Import Satelliten-Komponenten | `ESPCard.vue` | 0.5d |
+| 2. CSS Orbital-Layout | `ESPCard.vue` | 1d |
+| 3. Positions-Berechnung | `ESPCard.vue` | 1d |
+| 4. ConnectionLines einbinden | `ESPCard.vue` | 0.5d |
+
+### ✅ Priorität 2: WebSocket Live-Updates (ERLEDIGT 20.12.2025)
+
+| Schritt | Datei | Status |
+|---------|-------|--------|
+| 1. MessageType erweitern | `types/index.ts` | ✅ Done |
+| 2. sensor_data Handler | `esp.ts` Store | ✅ Done |
+| 3. actuator_alert Handler | `esp.ts` Store | ✅ Done |
+| 4. Handler-Cleanup (Memory Leak Fix) | `esp.ts` Store | ✅ Done |
+| 5. MqttLogView alle Types | `MqttLogView.vue` | ✅ Done |
+
+**Implementierte WebSocket-Handler im ESP-Store:**
+- `handleEspHealth` - Device Health-Updates (uptime, heap, rssi)
+- `handleSensorData` - Live Sensor-Wert-Updates
+- `handleActuatorStatus` - Live Aktor-Status-Updates  
+- `handleActuatorAlert` - Emergency-Stop und Safety-Alerts
+
+### 🟢 Priorität 3: LogicView (8+ Tage)
+
+| Schritt | Aufwand |
+|---------|---------|
+| 1. Backend: Logic-API (`/v1/logic/rules`) | 3d |
+| 2. Frontend: logicStore | 1d |
+| 3. Frontend: Rule-Builder-Komponente | 3d |
+| 4. Testing | 1d |
 
 ---
 
-**Ende Quick Reference**
+**Ende Quick Reference**  
+**Letzte Aktualisierung:** 20.12.2025

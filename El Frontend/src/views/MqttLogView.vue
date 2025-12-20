@@ -32,7 +32,18 @@ const filteredMessages = computed(() => {
   })
 })
 
-const messageTypes: MessageType[] = ['sensor_data', 'actuator_status', 'logic_execution', 'esp_health', 'system_event']
+// All message types from server broadcasts (see MessageType in types/index.ts)
+const messageTypes: MessageType[] = [
+  'sensor_data',
+  'actuator_status',
+  'actuator_response',
+  'actuator_alert',
+  'esp_health',
+  'config_response',
+  'zone_assignment',
+  'logic_execution',
+  'system_event',
+]
 
 async function ensureAuthToken(): Promise<string | null> {
   if (authStore.accessToken) {
@@ -153,8 +164,12 @@ function getTypeColor(type: MessageType): string {
   switch (type) {
     case 'sensor_data': return 'badge-info'
     case 'actuator_status': return 'badge-success'
-    case 'logic_execution': return 'badge-warning'
+    case 'actuator_response': return 'badge-success'
+    case 'actuator_alert': return 'badge-danger'
     case 'esp_health': return 'badge-gray'
+    case 'config_response': return 'badge-warning'
+    case 'zone_assignment': return 'badge-info'
+    case 'logic_execution': return 'badge-warning'
     case 'system_event': return 'badge-danger'
     default: return 'badge-gray'
   }

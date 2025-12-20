@@ -4,8 +4,30 @@
 
 Das Satelliten-Cards System visualisiert Sensoren und Aktoren als **kompakte Karten**, die um die zentrale ESP-Card angeordnet werden. Ergänzt durch **Connection Lines** werden logische Verbindungen zwischen Komponenten dargestellt.
 
-**Status:** ✅ Implementiert (Phase 2)
 **Basiert auf:** `El Frontend/Docs/UI/Vision.md` (Satelliten-Konzept)
+
+---
+
+## ⚠️ IST-Zustand vs. SOLL-Zustand (Code-verifiziert: 20.12.2025)
+
+| Komponente | IST-Zustand | SOLL-Zustand | Gap |
+|------------|-------------|--------------|-----|
+| **SensorSatellite.vue** | ✅ 100% fertig (271 LOC) | ✅ | - |
+| **ActuatorSatellite.vue** | ✅ 100% fertig (289 LOC) | ✅ | - |
+| **ConnectionLines.vue** | ✅ 100% fertig (268 LOC) | ✅ | Logic-Parsing fehlt |
+| **ESPCard.vue Integration** | ❌ **0%** | ✅ Satellites um Card | ⚠️ **Komplett fehlt** |
+| **Orbital-Layout CSS** | ❌ **0%** | ✅ Positions-System | ⚠️ **Nicht implementiert** |
+| **WebSocket sensor_data** | ❌ **Nicht subscribed** | ✅ Live-Updates | ⚠️ **Fehlt in esp.ts Store** |
+
+### Status-Zusammenfassung
+
+```
+Komponenten:     ████████████████████████████  100%  ✅ Fertig
+Integration:     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    ❌ Nicht implementiert
+WebSocket:       ████████░░░░░░░░░░░░░░░░░░░░  30%   🔄 Nur esp_health/status
+```
+
+**Fazit:** Die Satelliten-Komponenten existieren und sind funktionsfähig, werden aber **nirgendwo verwendet**. `ESPCard.vue` enthält keine Satelliten-Imports.
 
 ---
 
@@ -863,7 +885,62 @@ Mock ESPs können:
 
 ---
 
-**Letzte Verifizierung:** Dezember 2025
-**Dokumentation basiert auf:** Git master branch
-**Code-Analyse durchgeführt:** 19.12.2025
+## ⚠️ Anhang B: Implementierungs-Gaps (Code-Audit 20.12.2025)
+
+### B.1 Fehlende Integration in ESPCard.vue
+
+Die `ESPCard.vue` (413 LOC) enthält **keine Satelliten-Komponenten**:
+
+```typescript
+// NICHT vorhanden in ESPCard.vue:
+import SensorSatellite from './SensorSatellite.vue'    // ❌ FEHLT
+import ActuatorSatellite from './ActuatorSatellite.vue'  // ❌ FEHLT
+import ConnectionLines from './ConnectionLines.vue'     // ❌ FEHLT
+```
+
+**Aktueller ESPCard-Inhalt:**
+- Header mit ID + Badges
+- Info-Rows (Zone, Sensoren, Aktoren - nur Counts)
+- Action-Buttons (Details, Heartbeat, Safe-Mode, Delete)
+
+**Kein Orbital-Layout, keine Satelliten!**
+
+### B.2 Fehlende WebSocket Subscriptions
+
+In `src/stores/esp.ts` (551 LOC):
+
+```typescript
+// IST (Zeile 42-48):
+const ws = useWebSocket({
+  filters: {
+    types: ['esp_health', 'esp_status'],  // ❌ sensor_data fehlt!
+  },
+})
+
+// SOLL:
+const ws = useWebSocket({
+  filters: {
+    types: ['esp_health', 'esp_status', 'sensor_data', 'actuator_status'],
+  },
+})
+```
+
+### B.3 Nächste Schritte für Vollständige Integration
+
+| Priorität | Task | Datei | Geschätzte Zeit |
+|-----------|------|-------|-----------------|
+| 🔴 1 | Satelliten-Import in ESPCard | `ESPCard.vue` | 0.5d |
+| 🔴 2 | Orbital-Layout CSS | `ESPCard.vue` | 1d |
+| 🔴 3 | Positions-Berechnung | `ESPCard.vue` | 1d |
+| 🟡 4 | WebSocket sensor_data | `esp.ts` | 0.5d |
+| 🟡 5 | WebSocket actuator_status | `esp.ts` | 0.5d |
+| 🟢 6 | ConnectionLines Integration | `ESPCard.vue` | 1d |
+
+**Gesamtaufwand:** ~4-5 Tage
+
+---
+
+**Letzte Verifizierung:** 20. Dezember 2025  
+**Dokumentation basiert auf:** Git master branch  
+**Code-Analyse durchgeführt:** 20.12.2025 (aktualisiert)
 

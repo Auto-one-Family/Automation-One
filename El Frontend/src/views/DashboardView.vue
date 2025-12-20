@@ -121,7 +121,7 @@ const recentDevices = computed(() =>
         :icon="Cpu"
         icon-color="text-iridescent-1"
         icon-bg-color="bg-iridescent-1/10"
-        :loading="mockEspStore.isLoading"
+        :loading="espStore.isLoading"
       />
       <StatCard
         title="Sensoren"
@@ -130,7 +130,7 @@ const recentDevices = computed(() =>
         :icon="Thermometer"
         icon-color="text-mock"
         icon-bg-color="bg-mock/10"
-        :loading="mockEspStore.isLoading"
+        :loading="espStore.isLoading"
       />
       <StatCard
         title="Aktoren"
@@ -139,7 +139,7 @@ const recentDevices = computed(() =>
         :icon="Power"
         icon-color="text-warning"
         icon-bg-color="bg-warning/10"
-        :loading="mockEspStore.isLoading"
+        :loading="espStore.isLoading"
       />
       <StatCard
         title="Automation"
