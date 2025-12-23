@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Path, status
 
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
-from ..deps import DBSession, OperatorUser
+from ..deps import DBSession, MQTTPublisher, OperatorUser
 from ...schemas.common import ErrorResponse
 from ...schemas.subzone import (
     SafeModeRequest,
@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 
 # Router with prefix and tags
 router = APIRouter(
-    prefix="/subzone",
+    prefix="/v1/subzone",
     tags=["subzone"],
 )
 
@@ -97,13 +97,14 @@ async def assign_subzone(
     ],
     request: SubzoneAssignRequest,
     session: DBSession,
+    publisher: MQTTPublisher,
     user: OperatorUser,  # Requires operator permission
 ) -> SubzoneAssignResponse:
     """Assign GPIO pins to a subzone."""
     logger.info(f"Subzone assignment request for {esp_id} by {user.username}")
 
     esp_repo = ESPRepository(session)
-    service = SubzoneService(esp_repo=esp_repo, session=session)
+    service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
         response = await service.assign_subzone(
@@ -167,6 +168,7 @@ async def remove_subzone(
         ),
     ],
     session: DBSession,
+    publisher: MQTTPublisher,
     user: OperatorUser,
 ) -> SubzoneRemoveResponse:
     """Remove a subzone from ESP device."""
@@ -175,7 +177,7 @@ async def remove_subzone(
     )
 
     esp_repo = ESPRepository(session)
-    service = SubzoneService(esp_repo=esp_repo, session=session)
+    service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
         return await service.remove_subzone(
@@ -324,6 +326,7 @@ async def enable_safe_mode(
     ],
     request: SafeModeRequest,
     session: DBSession,
+    publisher: MQTTPublisher,
     user: OperatorUser,
 ) -> SafeModeResponse:
     """Enable safe-mode for subzone."""
@@ -333,7 +336,7 @@ async def enable_safe_mode(
     )
 
     esp_repo = ESPRepository(session)
-    service = SubzoneService(esp_repo=esp_repo, session=session)
+    service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
         return await service.enable_safe_mode(
@@ -389,6 +392,7 @@ async def disable_safe_mode(
         ),
     ],
     session: DBSession,
+    publisher: MQTTPublisher,
     user: OperatorUser,
     request: SafeModeRequest = SafeModeRequest(reason="manual"),
 ) -> SafeModeResponse:
@@ -399,7 +403,7 @@ async def disable_safe_mode(
     )
 
     esp_repo = ESPRepository(session)
-    service = SubzoneService(esp_repo=esp_repo, session=session)
+    service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
         return await service.disable_safe_mode(

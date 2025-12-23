@@ -519,6 +519,9 @@ class SubzoneService:
     ) -> None:
         """
         Create or update subzone configuration in DB.
+
+        Note: Flushes to make changes visible for subsequent queries.
+        Caller is responsible for commit() or rollback().
         """
         # Check if subzone exists
         result = await self.session.execute(
@@ -547,11 +550,17 @@ class SubzoneService:
             )
             self.session.add(new_config)
 
+        # Flush to make changes visible for subsequent queries
+        await self.session.flush()
+
     async def _confirm_subzone_assignment(
         self, device_id: str, subzone_id: str
     ) -> None:
         """
         Confirm subzone assignment (update last_ack_at).
+
+        Note: Flushes to make changes visible for subsequent queries.
+        Caller is responsible for commit() or rollback().
         """
         result = await self.session.execute(
             select(SubzoneConfig).where(
@@ -563,10 +572,14 @@ class SubzoneService:
 
         if config:
             config.last_ack_at = datetime.now(timezone.utc)
+            await self.session.flush()
 
     async def _delete_subzone_config(self, device_id: str, subzone_id: str) -> None:
         """
         Delete subzone configuration from DB.
+
+        Note: Flushes to make changes visible for subsequent queries.
+        Caller is responsible for commit() or rollback().
         """
         result = await self.session.execute(
             select(SubzoneConfig).where(
@@ -578,4 +591,5 @@ class SubzoneService:
 
         if config:
             await self.session.delete(config)
+            await self.session.flush()
 

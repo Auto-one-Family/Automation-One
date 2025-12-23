@@ -103,9 +103,11 @@ export interface MockActuator {
 export interface MockESP {
   esp_id: string
   zone_id: string | null
+  zone_name: string | null  // User-friendly zone name (allows spaces)
   master_zone_id: string | null
   subzone_id: string | null
   system_state: MockSystemState
+  status: 'online' | 'offline'  // Connection status for consistent display
   sensors: MockSensor[]
   actuators: MockActuator[]
   auto_heartbeat: boolean
@@ -120,7 +122,8 @@ export interface MockESP {
 
 export interface MockESPCreate {
   esp_id: string
-  zone_id?: string
+  zone_id?: string  // Technical zone ID (auto-generated from zone_name if not provided)
+  zone_name?: string  // User-friendly zone name (allows spaces, e.g., "Zelt 1")
   master_zone_id?: string
   subzone_id?: string
   sensors?: MockSensorConfig[]

@@ -38,9 +38,12 @@ from src.core.security import get_password_hash, create_access_token
 
 @pytest_asyncio.fixture
 async def test_esp_with_zone(db_session: AsyncSession) -> ESPDevice:
-    """Create ESP device with assigned zone for API tests."""
+    """Create ESP device with assigned zone for API tests.
+
+    Note: device_id must match API pattern: ^ESP_[A-Z0-9]{6,8}$
+    """
     device = ESPDevice(
-        device_id="ESP_API_TEST",
+        device_id="ESP_APITEST1",  # 8 chars after ESP_, valid format
         name="API Test ESP",
         ip_address="192.168.1.200",
         mac_address="AA:BB:CC:DD:EE:FF",
@@ -60,9 +63,12 @@ async def test_esp_with_zone(db_session: AsyncSession) -> ESPDevice:
 
 @pytest_asyncio.fixture
 async def test_esp_no_zone(db_session: AsyncSession) -> ESPDevice:
-    """Create ESP device without zone for API tests."""
+    """Create ESP device without zone for API tests.
+
+    Note: device_id must match API pattern: ^ESP_[A-Z0-9]{6,8}$
+    """
     device = ESPDevice(
-        device_id="ESP_NOZONE",
+        device_id="ESP_NOZONE01",  # 8 chars after ESP_, valid format
         name="No Zone ESP",
         ip_address="192.168.1.201",
         mac_address="AA:BB:CC:DD:EE:EE",
@@ -113,14 +119,20 @@ async def viewer_user(db_session: AsyncSession) -> User:
 @pytest_asyncio.fixture
 async def auth_headers(operator_user: User) -> dict:
     """Create authentication headers with operator token."""
-    token = create_access_token(data={"sub": operator_user.username})
+    token = create_access_token(
+        user_id=operator_user.id,
+        additional_claims={"role": operator_user.role}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest_asyncio.fixture
 async def viewer_headers(viewer_user: User) -> dict:
     """Create authentication headers with viewer token."""
-    token = create_access_token(data={"sub": viewer_user.username})
+    token = create_access_token(
+        user_id=viewer_user.id,
+        additional_claims={"role": viewer_user.role}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -660,6 +672,7 @@ class TestSubzoneEdgeCases:
 
         # Pydantic validation should reject too many GPIOs
         assert response.status_code in [400, 422]
+
 
 
 
