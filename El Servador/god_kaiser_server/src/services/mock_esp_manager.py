@@ -50,6 +50,7 @@ class MockESPManager:
     def __init__(self):
         self._mock_esps: Dict[str, MockESP32Client] = {}
         self._created_at: Dict[str, datetime] = {}
+        self._zone_names: Dict[str, str] = {}  # Store zone_name separately
         self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
         self._heartbeat_intervals: Dict[str, int] = {}
         self._mqtt_client: Optional[MQTTClient] = None
@@ -94,12 +95,32 @@ class MockESPManager:
         )
 
         # Configure zone if provided
-        if config.zone_id or config.master_zone_id:
+        # Auto-generate zone_id from zone_name if zone_name is provided but zone_id is not
+        zone_id = config.zone_id
+        zone_name = config.zone_name
+
+        if zone_name and not zone_id:
+            # Generate technical zone_id from user-friendly zone_name
+            # "Zelt 1" -> "zelt_1", "Gewächshaus Nord" -> "gewaechshaus_nord"
+            import re
+            zone_id = zone_name.lower()
+            # Replace German umlauts
+            zone_id = zone_id.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+            # Replace spaces and special chars with underscores
+            zone_id = re.sub(r'[^a-z0-9]+', '_', zone_id)
+            # Remove leading/trailing underscores
+            zone_id = zone_id.strip('_')
+
+        if zone_id or config.master_zone_id:
             mock.configure_zone(
-                zone_id=config.zone_id or "default",
+                zone_id=zone_id or "default",
                 master_zone_id=config.master_zone_id or "god",
                 subzone_id=config.subzone_id
             )
+
+        # Store zone_name for display
+        if zone_name:
+            self._zone_names[config.esp_id] = zone_name
 
         # Add sensors
         for sensor_cfg in config.sensors:
@@ -179,6 +200,8 @@ class MockESPManager:
         del self._created_at[esp_id]
         if esp_id in self._heartbeat_intervals:
             del self._heartbeat_intervals[esp_id]
+        if esp_id in self._zone_names:
+            del self._zone_names[esp_id]
 
         logger.info(f"Deleted mock ESP: {esp_id}")
         return True
@@ -505,9 +528,13 @@ class MockESPManager:
         """Convert mock ESP to response schema."""
         mock = self._mock_esps[esp_id]
 
+        # Determine connection status for consistent display
+        status = "online" if mock.connected else "offline"
+
         return MockESPResponse(
             esp_id=esp_id,
             zone_id=mock.zone.zone_id if mock.zone else None,
+            zone_name=self._zone_names.get(esp_id),  # User-friendly zone name
             master_zone_id=mock.zone.master_zone_id if mock.zone else None,
             subzone_id=mock.zone.subzone_id if mock.zone else None,
             system_state=mock.system_state.name,
@@ -520,7 +547,8 @@ class MockESPManager:
             last_heartbeat=datetime.fromtimestamp(mock.last_heartbeat, tz=timezone.utc) if mock.last_heartbeat else None,
             created_at=self._created_at[esp_id],
             connected=mock.connected,
-            hardware_type="MOCK_ESP32"  # Identifies this as a mock device
+            hardware_type="MOCK_ESP32",  # Identifies this as a mock device
+            status=status  # Connection status (online/offline) for consistent display
         )
 
     def _sensor_to_response(self, sensor) -> MockSensorResponse:

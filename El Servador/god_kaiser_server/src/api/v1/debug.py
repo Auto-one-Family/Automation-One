@@ -57,6 +57,7 @@ from ...schemas.debug_db import (
     TableSchema,
 )
 from ...services.mock_esp_manager import MockESPManager
+from ...db.repositories import ESPRepository
 from ..deps import AdminUser, DBSession
 
 logger = get_logger(__name__)
@@ -82,6 +83,7 @@ async def get_mock_esp_manager() -> MockESPManager:
 async def create_mock_esp(
     config: MockESPCreate,
     current_user: AdminUser,
+    db: DBSession,
     manager: MockESPManager = Depends(get_mock_esp_manager)
 ) -> MockESPResponse:
     """
@@ -92,9 +94,58 @@ async def create_mock_esp(
     - State machine transitions
     - Sensor readings
     - Actuator control
+
+    Also registers the mock ESP in the database so Zone/Subzone APIs work.
     """
     try:
         result = await manager.create_mock_esp(config)
+
+        # Also register in the database for Zone/Subzone API compatibility
+        esp_repo = ESPRepository(db)
+        existing = await esp_repo.get_by_device_id(config.esp_id)
+
+        if not existing:
+            # Generate unique MAC address from ESP ID (e.g., ESP_MOCK_00B7EF -> MO:CK:00:00:B7:EF)
+            esp_suffix = config.esp_id.replace("ESP_MOCK_", "").upper()
+            # Pad to 6 chars if needed
+            esp_suffix = esp_suffix.zfill(6)[-6:]
+            mock_mac = f"MO:CK:{esp_suffix[0:2]}:{esp_suffix[2:4]}:{esp_suffix[4:6]}:00"
+
+            # Auto-generate zone_id from zone_name if needed
+            zone_id = config.zone_id
+            zone_name = config.zone_name
+            if zone_name and not zone_id:
+                # Generate technical zone_id from user-friendly zone_name
+                zone_id = zone_name.lower()
+                zone_id = zone_id.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+                zone_id = re.sub(r'[^a-z0-9]+', '_', zone_id).strip('_')
+
+            # Create descriptive name for database
+            # Use zone_name if provided for better identification
+            short_id = config.esp_id.replace("ESP_MOCK_", "")
+            if zone_name:
+                db_name = f"Mock ESP ({zone_name}) [{short_id}]"
+            else:
+                db_name = f"Mock ESP {short_id}"
+
+            await esp_repo.create(
+                device_id=config.esp_id,
+                name=db_name,
+                hardware_type="MOCK_ESP32",
+                zone_id=zone_id,
+                zone_name=zone_name,  # Store user-friendly name
+                master_zone_id=config.master_zone_id,
+                kaiser_id="god",
+                status="online",
+                ip_address="127.0.0.1",
+                mac_address=mock_mac,
+                firmware_version="MOCK_1.0.0",
+                capabilities={"max_sensors": 20, "max_actuators": 12, "mock": True},
+                device_metadata={"created_by": current_user.username, "mock": True},
+            )
+            await db.commit()
+            logger.info(f"Mock ESP {config.esp_id} registered in database with name: {db_name}")
+
         logger.info(f"Admin {current_user.username} created mock ESP: {config.esp_id}")
         return result
     except ValueError as e:
@@ -159,15 +210,25 @@ async def get_mock_esp(
 async def delete_mock_esp(
     esp_id: str,
     current_user: AdminUser,
+    db: DBSession,
     manager: MockESPManager = Depends(get_mock_esp_manager)
 ):
-    """Delete a mock ESP32 instance."""
+    """Delete a mock ESP32 instance and remove from database."""
     deleted = await manager.delete_mock_esp(esp_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
+
+    # Also delete from database if it exists there
+    esp_repo = ESPRepository(db)
+    db_esp = await esp_repo.get_by_device_id(esp_id)
+    if db_esp:
+        await esp_repo.delete(db_esp.id)
+        await db.commit()
+        logger.info(f"Mock ESP {esp_id} also removed from database")
+
     logger.info(f"Admin {current_user.username} deleted mock ESP: {esp_id}")
 
 
@@ -1668,4 +1729,82 @@ async def get_load_test_metrics(
         total_actuators=total_actuators,
         messages_published=total_messages,
         uptime_seconds=uptime_seconds
+    )
+
+
+# =============================================================================
+# Cleanup Operations
+# =============================================================================
+
+class CleanupResponse(BaseModel):
+    """Response for cleanup operations."""
+    success: bool = True
+    deleted_count: int
+    deleted_ids: List[str]
+    message: str
+
+
+@router.delete(
+    "/cleanup/orphaned-mocks",
+    response_model=CleanupResponse,
+    summary="Cleanup Orphaned Mock ESPs",
+    description="Delete mock ESP entries from database that are not in the in-memory manager."
+)
+async def cleanup_orphaned_mocks(
+    current_user: AdminUser,
+    db: DBSession,
+    manager: MockESPManager = Depends(get_mock_esp_manager)
+) -> CleanupResponse:
+    """
+    Clean up orphaned mock ESP entries from the database.
+
+    This removes database entries for mock ESPs that:
+    - Have device_id matching 'ESP_MOCK_%'
+    - Are not currently active in the in-memory MockESPManager
+    - Or have NULL values for required fields (ip_address, mac_address, etc.)
+    """
+    deleted_ids = []
+
+    # Get all mock ESPs from database
+    result = await db.execute(
+        text("SELECT id, device_id, ip_address, mac_address, firmware_version FROM esp_devices WHERE device_id LIKE 'ESP_MOCK_%'")
+    )
+    mock_esps = result.fetchall()
+
+    # Get active mock ESPs from manager
+    active_mocks = await manager.list_mock_esps()
+    active_ids = {mock.esp_id for mock in active_mocks}
+
+    for esp in mock_esps:
+        esp_id = esp[1]  # device_id
+        ip_address = esp[2]
+        mac_address = esp[3]
+        firmware_version = esp[4]
+
+        # Delete if:
+        # 1. Not in active mocks, OR
+        # 2. Has NULL required fields (orphaned from before fix)
+        should_delete = (
+            esp_id not in active_ids or
+            ip_address is None or
+            mac_address is None or
+            firmware_version is None
+        )
+
+        if should_delete:
+            await db.execute(
+                text("DELETE FROM esp_devices WHERE id = :id"),
+                {"id": str(esp[0])}
+            )
+            deleted_ids.append(esp_id)
+
+    if deleted_ids:
+        await db.commit()
+        logger.info(f"Admin {current_user.username} cleaned up {len(deleted_ids)} orphaned mock ESPs: {deleted_ids}")
+
+    return CleanupResponse(
+        success=True,
+        deleted_count=len(deleted_ids),
+        deleted_ids=deleted_ids,
+        message=f"Cleaned up {len(deleted_ids)} orphaned mock ESP entries from database"
     )

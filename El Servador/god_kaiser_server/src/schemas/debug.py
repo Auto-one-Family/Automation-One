@@ -109,7 +109,8 @@ class MockESPCreate(BaseModel):
         pattern=r"^ESP_([A-Za-z0-9]{8}|MOCK_[A-Za-z0-9]{6})$",
         description="ESP device ID (format: ESP_XXXXXXXX or ESP_MOCK_XXXXXX)"
     )
-    zone_id: Optional[str] = Field(None, description="Zone assignment")
+    zone_id: Optional[str] = Field(None, description="Zone ID (technical, auto-generated from zone_name if not provided)")
+    zone_name: Optional[str] = Field(None, description="Human-readable zone name (e.g., 'Zelt 1', 'Gewächshaus')")
     master_zone_id: Optional[str] = Field(None, description="Master zone ID")
     subzone_id: Optional[str] = Field(None, description="Subzone ID")
     sensors: List[MockSensorConfig] = Field(
@@ -198,6 +199,7 @@ class MockESPResponse(BaseModel):
     """Full mock ESP state response."""
     esp_id: str
     zone_id: Optional[str]
+    zone_name: Optional[str] = None
     master_zone_id: Optional[str]
     subzone_id: Optional[str]
     system_state: str
@@ -211,6 +213,7 @@ class MockESPResponse(BaseModel):
     created_at: datetime
     connected: bool
     hardware_type: str = Field(default="MOCK_ESP32", description="Hardware type identifier")
+    status: str = Field(default="online", description="Connection status (online/offline)")
 
     model_config = ConfigDict(
         json_schema_extra={

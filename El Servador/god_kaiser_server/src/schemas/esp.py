@@ -37,12 +37,12 @@ from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
 class ESPDeviceBase(BaseModel):
     """Base ESP device fields."""
-    
+
     device_id: str = Field(
         ...,
-        pattern=r"^ESP_[A-F0-9]{8}$",
-        description="ESP device ID (format: ESP_XXXXXXXX)",
-        examples=["ESP_12AB34CD"],
+        pattern=r"^ESP_([A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        description="ESP device ID (format: ESP_XXXXXXXX or ESP_MOCK_XXX for mock devices)",
+        examples=["ESP_12AB34CD", "ESP_MOCK_TEST01"],
     )
     name: Optional[str] = Field(
         None,
@@ -163,30 +163,33 @@ class ESPDeviceUpdate(BaseModel):
 class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
     """
     ESP device response model.
-    
+
     Full device information including status and health.
+
+    Note: ip_address, mac_address, firmware_version are Optional to support
+    Mock ESP devices that may not have these hardware-specific values.
     """
-    
+
     id: uuid.UUID = Field(
         ...,
         description="Unique identifier (UUID)",
     )
-    
-    ip_address: str = Field(
-        ...,
-        description="Device IP address",
+
+    ip_address: Optional[str] = Field(
+        None,
+        description="Device IP address (None for Mock ESPs without network)",
     )
-    mac_address: str = Field(
-        ...,
-        description="Device MAC address",
+    mac_address: Optional[str] = Field(
+        None,
+        description="Device MAC address (None for Mock ESPs without hardware)",
     )
-    firmware_version: str = Field(
-        ...,
-        description="Firmware version",
+    firmware_version: Optional[str] = Field(
+        None,
+        description="Firmware version (None for Mock ESPs)",
     )
     hardware_type: str = Field(
         ...,
-        description="Hardware type",
+        description="Hardware type (ESP32_WROOM, XIAO_ESP32_C3, MOCK_ESP32)",
     )
     capabilities: Optional[Dict[str, Any]] = Field(
         None,
