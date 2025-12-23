@@ -1,8 +1,21 @@
 # Individual Views - Detailübersicht
 
-**Erstellt:** 2025-12-19
-**Letztes Update:** 2025-12-19
+**Erstellt:** 2025-12-19  
+**Letztes Update:** 2025-12-20 (WebSocket-Integration verifiziert)  
 **Status:** ✅ Schnellereferenz für alle 16 Views
+
+---
+
+## ⚠️ WICHTIG: Refactoring-Hinweis (20.12.2025)
+
+Die Views wurden refactored zu einem **Unified Device System**:
+
+| Alt | Neu | Neue Route |
+|-----|-----|------------|
+| `MockEspView.vue` | **`DevicesView.vue`** | `/devices` |
+| `MockEspDetailView.vue` | **`DeviceDetailView.vue`** | `/devices/:espId` |
+
+**Alte Routes (`/mock-esp/*`) redirecten automatisch zu neuen Routes.**
 
 ---
 
@@ -12,19 +25,19 @@
 
 | View | Route | Status | Detaildoku | Backend-Dateien |
 |------|-------|--------|-----------|-----------------|
-| MockEspView | `/mock-esp` | ✅ Impl. | ➜ `01-MockEspView.md` | `El Servador/.../api/v1/debug.py` |
-| MockEspDetailView | `/mock-esp/:espId` | ✅ Impl. | ➜ siehe unten | `El Servador/.../api/v1/debug.py` |
+| **DevicesView** | `/devices` | ✅ Impl. | ➜ `01-MockEspView.md` (veraltet) | `El Servador/.../api/v1/debug.py`, `esp.py` |
+| **DeviceDetailView** | `/devices/:espId` | ✅ Impl. | ➜ siehe unten | `El Servador/.../api/v1/debug.py`, `esp.py` |
 | MqttLogView | `/mqtt-log` | ✅ Impl. | ➜ siehe unten | `El Servador/.../api/v1/websocket/realtime.py` |
-| LogicView | `/logic` | ⚠️ Placeholder | ➜ siehe unten | `El Servador/.../api/v1/logic.py` |
+| LogicView | `/logic` | ⚠️ **Placeholder (53 LOC)** | ➜ siehe unten | `El Servador/.../api/v1/logic.py` |
 
 ---
 
-## 02. MockEspDetailView - Detailanalyse
+## 02. DeviceDetailView - Detailanalyse (ehem. MockEspDetailView)
 
-**Datei:** `src/views/MockEspDetailView.vue`
-**Route:** `/mock-esp/:espId`
-**Status:** ✅ Vollständig implementiert
-**Auth:** ✅ Admin-only (über Route)
+**Datei:** `src/views/DeviceDetailView.vue`  
+**Route:** `/devices/:espId`  
+**Status:** ✅ Vollständig implementiert  
+**Auth:** ✅ Login erforderlich (nicht mehr Admin-only)
 
 ### Zweck
 
@@ -165,10 +178,11 @@ Detail-View für **einzelnes Mock-ESP-Gerät**. Zeigt:
 
 **Real-time WebSocket Stream** von MQTT-Nachrichten. Zeigt:
 - Live-Nachrichten-Stream (max 500 messages)
-- Message-Types (sensor_data, actuator_status, logic_execution, esp_health, system_event)
-- Expandable Payload-Anzeige
+- **9 Message-Types:** sensor_data, actuator_status, actuator_response, actuator_alert, esp_health, config_response, zone_assignment, logic_execution, system_event
+- Expandable Payload-Anzeige (JSON)
 - Filter nach Type, ESP-ID, Topic
 - Pause/Resume, Clear
+- Auto-Reconnect (3s)
 
 ### WebSocket-Integration
 
@@ -235,7 +249,9 @@ Detail-View für **einzelnes Mock-ESP-Gerät**. Zeigt:
 └──────────────────────────────────────────────────────┘
 ```
 
-### Message-Types
+### Message-Types (9 Types - Server-definiert)
+
+> **Stand:** 20.12.2025 - Verifiziert gegen Server-Handler
 
 ```json
 {
@@ -243,26 +259,70 @@ Detail-View für **einzelnes Mock-ESP-Gerät**. Zeigt:
     "esp_id": "ESP_12AB",
     "gpio": 34,
     "sensor_type": "DS18B20",
-    "raw_value": 25.5,
+    "value": 25.5,
+    "unit": "°C",
     "quality": "good",
-    "timestamp": "2025-12-19T10:30:42Z"
+    "timestamp": 1734690642
   },
   "actuator_status": {
     "esp_id": "ESP_5678",
     "gpio": 25,
-    "state": true,
-    "pwm_value": 0.8
+    "actuator_type": "pump",
+    "state": "on",
+    "value": 0.8,
+    "emergency": "normal",
+    "timestamp": 1734690642
   },
-  "logic_execution": {
-    "rule_id": "rule_123",
-    "condition_result": true,
-    "actions_executed": 2
+  "actuator_response": {
+    "esp_id": "ESP_5678",
+    "gpio": 25,
+    "command": "ON",
+    "value": 1.0,
+    "success": true,
+    "message": "Command executed",
+    "timestamp": 1734690642
+  },
+  "actuator_alert": {
+    "esp_id": "ESP_5678",
+    "gpio": 25,
+    "alert_type": "emergency_stop",
+    "severity": "critical",
+    "message": "Manual emergency stop triggered",
+    "zone_id": "greenhouse",
+    "timestamp": 1734690642
   },
   "esp_health": {
     "esp_id": "ESP_12AB",
-    "uptime": 3600,
+    "status": "online",
     "heap_free": 150000,
-    "wifi_rssi": -65
+    "wifi_rssi": -65,
+    "uptime": 3600,
+    "sensor_count": 5,
+    "actuator_count": 3,
+    "timestamp": 1734690642
+  },
+  "config_response": {
+    "esp_id": "ESP_12AB",
+    "config_type": "sensor",
+    "status": "success",
+    "count": 3,
+    "message": "Configured 3 sensor(s) successfully",
+    "timestamp": 1734690642
+  },
+  "zone_assignment": {
+    "esp_id": "ESP_12AB",
+    "zone_id": "greenhouse",
+    "status": "zone_assigned",
+    "message": "Zone assigned successfully",
+    "timestamp": 1734690642
+  },
+  "logic_execution": {
+    "rule_id": "rule_123",
+    "rule_name": "Temperature Control",
+    "triggered_at": "2025-12-20T10:30:42Z",
+    "conditions_met": true,
+    "actions_executed": 2,
+    "execution_time_ms": 15
   },
   "system_event": {
     "event_type": "ERROR",
@@ -517,17 +577,28 @@ Backend-Basis: El Servador/god_kaiser_server/src/
 
 ### 8.3 View → Server-Datei Mapping
 
-#### MockEspView / MockEspDetailView
+#### DevicesView / DeviceDetailView (Unified ESP-Views)
+
+> ⚠️ **Refactored:** Ehemals MockEspView/MockEspDetailView. Jetzt Unified für Mock+Real.
+
 ```
 Frontend:
-  - src/views/MockEspView.vue
-  - src/views/MockEspDetailView.vue
-  - src/stores/mockEsp.ts
-  - src/api/debug.ts
+  - src/views/DevicesView.vue        # Unified Liste (Mock+Real)
+  - src/views/DeviceDetailView.vue   # Unified Details (Mock+Real)
+  - src/stores/esp.ts                # Unified Store (ersetzt mockEsp.ts)
+  - src/api/esp.ts                   # Unified API Client
+  - src/api/debug.ts                 # Mock-spezifische Debug-Endpoints
+
+Komponenten (fertig, NICHT integriert):
+  - src/components/esp/SensorSatellite.vue     # ✅ 271 LOC
+  - src/components/esp/ActuatorSatellite.vue   # ✅ 289 LOC
+  - src/components/esp/ConnectionLines.vue     # ✅ 268 LOC
 
 Backend:
-  - api/v1/debug.py              # Alle Mock-ESP-Endpoints
-  - services/mock_esp_manager.py  # Mock-ESP-Logik, Heartbeat, Sensor-Werte
+  - api/v1/debug.py              # Mock-ESP-Endpoints
+  - api/v1/esp.py                # Real-ESP-Endpoints
+  - services/mock_esp_manager.py # Mock-ESP-Logik, Heartbeat, Sensor-Werte
+  - services/esp_service.py      # Real-ESP-Logik
   - schemas/debug.py             # Request/Response Schemas
   - mqtt/publisher.py            # MQTT-Nachrichtenpublizierung
 ```

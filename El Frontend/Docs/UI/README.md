@@ -1,7 +1,7 @@
 # Frontend UI Documentation
 
 **Erstellt:** 2025-12-19
-**Letztes Update:** 2025-12-19
+**Letztes Update:** 2025-12-20 (WebSocket-Integration verifiziert)
 **Projekt:** Auto-one El Frontend (Vue3 + TypeScript + Vite)
 
 ---
