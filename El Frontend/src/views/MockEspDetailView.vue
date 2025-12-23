@@ -13,7 +13,7 @@ import { useMockEspStore } from '@/stores/mockEsp'
 import type { MockSensorConfig, MockActuatorConfig, MockSystemState, QualityLevel } from '@/types'
 import {
   ArrowLeft, Heart, AlertTriangle, Plus, Trash2, Power, X,
-  Thermometer, Gauge, RefreshCw, Settings, Wifi
+  Thermometer, Gauge, RefreshCw
 } from 'lucide-vue-next'
 
 // Import utilities
@@ -30,11 +30,10 @@ import {
   QUALITY_LABELS,
   getActuatorTypeLabel 
 } from '@/utils/labels'
-import { 
-  formatUptime, 
-  formatHeapSize, 
-  formatRssi,
-  formatNumber 
+import {
+  formatUptime,
+  formatHeapSize,
+  formatNumber
 } from '@/utils/formatters'
 
 // Components
@@ -140,6 +139,19 @@ async function clearEmergency() {
   await mockEspStore.clearEmergency(espId.value)
 }
 
+async function deleteEsp() {
+  if (!esp.value) return
+  const name = esp.value.zone_name || esp.value.zone_id || esp.value.esp_id
+  if (confirm(`Mock ESP "${name}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`)) {
+    try {
+      await mockEspStore.remove(espId.value)
+      router.push('/mock-esp')
+    } catch {
+      // Error is handled by store
+    }
+  }
+}
+
 async function addSensor() {
   await mockEspStore.addSensor(espId.value, newSensor.value)
   showAddSensorModal.value = false
@@ -211,14 +223,24 @@ async function removeSensor(gpio: number) {
 // Helper to get state info
 const stateInfo = computed(() => esp.value ? getStateInfo(esp.value.system_state) : null)
 
-// Handle zone updates from ZoneAssignmentPanel
+// Handle zone updates from ZoneAssignmentPanel (after successful ESP ACK)
 function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string; master_zone_id?: string }) {
-  // Update the local ESP data (will be refreshed on next poll)
+  console.log('[MockEspDetailView] Zone updated:', zoneData)
+
+  // Update the local ESP data after successful ACK from ESP
+  // MockESP uses null for empty values, not undefined
   if (esp.value) {
-    esp.value.zone_id = zoneData.zone_id
-    esp.value.zone_name = zoneData.zone_name
-    esp.value.master_zone_id = zoneData.master_zone_id
+    esp.value.zone_id = zoneData.zone_id || null
+    esp.value.master_zone_id = zoneData.master_zone_id || null
+    // Note: MockESP doesn't have zone_name - it's stored on server but not in MockESP
   }
+}
+
+// Handle zone errors from ZoneAssignmentPanel
+function handleZoneError(error: string) {
+  console.error('[MockEspDetailView] Zone error:', error)
+  // Error is already displayed in ZoneAssignmentPanel
+  // Could add toast notification here if desired
 }
 </script>
 
@@ -273,6 +295,10 @@ function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string; maste
           <span class="hidden sm:inline">Notfall-Stopp</span>
           <span class="sm:hidden">E-Stop</span>
         </button>
+        <button class="btn-ghost btn-sm text-error hover:bg-danger/10" @click="deleteEsp" title="Gerät löschen">
+          <Trash2 class="w-4 h-4" />
+          <span class="hidden sm:inline ml-1">Löschen</span>
+        </button>
       </div>
     </div>
 
@@ -315,11 +341,12 @@ function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string; maste
 
       <!-- Zone Assignment Panel -->
       <ZoneAssignmentPanel
-        :esp-id="esp.id"
-        :current-zone-id="esp.zone_id"
-        :current-zone-name="esp.zone_name"
-        :current-master-zone-id="esp.master_zone_id"
+        :esp-id="esp.esp_id"
+        :current-zone-id="esp.zone_id ?? undefined"
+        :current-zone-name="esp.zone_id ?? undefined"
+        :current-master-zone-id="esp.master_zone_id ?? undefined"
         @zone-updated="handleZoneUpdate"
+        @zone-error="handleZoneError"
       />
 
       <!-- Sensors Section -->

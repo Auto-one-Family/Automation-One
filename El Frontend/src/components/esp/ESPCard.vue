@@ -55,27 +55,54 @@ const hasEmergencyStopped = computed(() => {
   return props.esp.actuators.some((a: any) => a.emergency_stopped)
 })
 
+// System state (FSM) for Mock ESPs - only shown when relevant (SAFE_MODE, ERROR)
 const systemState = computed(() => {
   if (isMock.value && 'system_state' in props.esp) {
     return (props.esp as any).system_state
   }
+  return null
+})
+
+// Connection status - consistent for ALL devices (online/offline)
+const connectionStatus = computed(() => {
+  // Use 'status' field if available (Mock ESPs now include this)
+  if ('status' in props.esp && props.esp.status) {
+    return props.esp.status
+  }
+  // Fallback to 'connected' for Mock ESPs
+  if ('connected' in props.esp) {
+    return props.esp.connected ? 'online' : 'offline'
+  }
   return props.esp.status || 'unknown'
 })
 
+// Primary status info - ALWAYS shows connection status (Online/Offline)
 const stateInfo = computed(() => {
-  if (isMock.value) {
-    return getStateInfo(systemState.value)
-  }
-  // For real ESPs, map status to state info
-  const status = props.esp.status || 'unknown'
+  const status = connectionStatus.value
   if (status === 'online') {
     return { label: 'Online', variant: 'success' }
   } else if (status === 'offline') {
     return { label: 'Offline', variant: 'gray' }
   } else if (status === 'error') {
-    return { label: 'Error', variant: 'danger' }
+    return { label: 'Fehler', variant: 'danger' }
   }
-  return { label: 'Unknown', variant: 'gray' }
+  return { label: 'Unbekannt', variant: 'gray' }
+})
+
+// Secondary state info for Mock ESPs - only shown for notable states (SAFE_MODE, ERROR)
+const mockStateInfo = computed(() => {
+  if (!isMock.value || !systemState.value) return null
+  // Only show system_state badge for notable states, not for OPERATIONAL
+  const state = systemState.value
+  if (state === 'SAFE_MODE') {
+    return { label: 'Sicherheitsmodus', variant: 'warning' }
+  } else if (state === 'ERROR') {
+    return { label: 'Fehler', variant: 'danger' }
+  } else if (state === 'BOOT' || state === 'WIFI_SETUP' || state === 'MQTT_CONNECTING') {
+    return { label: 'Startet...', variant: 'info' }
+  }
+  // Don't show badge for OPERATIONAL - connection status is sufficient
+  return null
 })
 
 // Card classes based on mock/real and online/offline
@@ -104,7 +131,7 @@ const statusBarClasses = computed(() => {
   if (hasEmergencyStopped.value) return 'esp-card__status-bar--emergency'
   if (!isOnline.value) return 'esp-card__status-bar--offline'
   if (systemState.value === 'SAFE_MODE') return 'esp-card__status-bar--warning'
-  if (systemState.value === 'ERROR' || props.esp.status === 'error') return 'esp-card__status-bar--error'
+  if (systemState.value === 'ERROR' || connectionStatus.value === 'error') return 'esp-card__status-bar--error'
   if (isMock.value) return 'esp-card__status-bar--mock'
   return 'esp-card__status-bar--real'
 })
@@ -132,15 +159,25 @@ const statusBarClasses = computed(() => {
         </div>
         
         <div class="esp-card__status-badges">
-          <Badge 
-            :variant="stateInfo.variant as any" 
-            :pulse="isOnline && (systemState === 'OPERATIONAL' || props.esp.status === 'online')"
+          <!-- Primary: Connection status (Online/Offline) - consistent for ALL devices -->
+          <Badge
+            :variant="stateInfo.variant as any"
+            :pulse="isOnline"
             :dot="true"
             size="sm"
           >
             {{ stateInfo.label }}
           </Badge>
-          
+
+          <!-- Secondary: Mock ESP system state (only for SAFE_MODE, ERROR, etc.) -->
+          <Badge
+            v-if="mockStateInfo"
+            :variant="mockStateInfo.variant as any"
+            size="sm"
+          >
+            {{ mockStateInfo.label }}
+          </Badge>
+
           <Badge v-if="hasEmergencyStopped" variant="danger" size="sm">
             E-STOP
           </Badge>
@@ -152,7 +189,7 @@ const statusBarClasses = computed(() => {
         <div class="esp-card__info-row">
           <span class="esp-card__info-label">Zone</span>
           <span class="esp-card__info-value">
-            {{ esp.zone_name || esp.zone_id || 'Nicht zugewiesen' }}
+            {{ (esp as any).zone_name || esp.zone_name || esp.zone_id || 'Nicht zugewiesen' }}
           </span>
         </div>
         
@@ -218,7 +255,7 @@ const statusBarClasses = computed(() => {
           </button>
           
           <button
-            :class="['btn-ghost btn-sm', systemState === 'SAFE_MODE' ? 'text-warning' : '']"
+            :class="['btn-ghost btn-sm', mockStateInfo?.variant === 'warning' ? 'text-warning' : '']"
             @click="emit('toggleSafeMode', espId)"
             :title="systemState === 'SAFE_MODE' ? 'Sicherheitsmodus beenden' : 'Sicherheitsmodus aktivieren'"
           >

@@ -21,7 +21,7 @@ const mockEspStore = useMockEspStore()
 const showCreateModal = ref(false)
 const newEsp = ref<MockESPCreate>({
   esp_id: '',
-  zone_id: '',
+  zone_name: '',  // Use zone_name for user-friendly input (allows spaces)
   auto_heartbeat: false,
   heartbeat_interval_seconds: 60,
   sensors: [],
@@ -87,7 +87,7 @@ function generateEspId(): string {
 function openCreateModal() {
   newEsp.value = {
     esp_id: generateEspId(),
-    zone_id: '',
+    zone_name: '',  // User-friendly zone name (allows spaces)
     auto_heartbeat: false,
     heartbeat_interval_seconds: 60,
     sensors: [],
@@ -274,8 +274,11 @@ async function handleDelete(espId: string) {
             </div>
 
             <div>
-              <label class="label">Zone (optional)</label>
-              <input v-model="newEsp.zone_id" class="input" placeholder="z.B. gewächshaus" />
+              <label class="label">Zone-Name</label>
+              <input v-model="newEsp.zone_name" class="input" placeholder="z.B. Zelt 1, Gewächshaus Nord, Outdoor" />
+              <p class="text-xs mt-1" style="color: var(--color-text-muted)">
+                Benutzerfreundlicher Name der Zone (Leerzeichen erlaubt)
+              </p>
             </div>
 
             <div class="flex items-center gap-3">
