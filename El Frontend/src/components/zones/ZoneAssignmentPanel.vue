@@ -1,130 +1,102 @@
 <template>
-  <div class="zone-assignment-panel">
-    <v-card class="card">
-      <v-card-title class="d-flex align-center">
-        <v-icon class="mr-2">mdi-map-marker-radius</v-icon>
-        Zone Assignment
-        <v-spacer />
-        <v-chip
-          :color="currentZoneId ? 'success' : 'warning'"
-          size="small"
-          variant="flat"
-        >
-          {{ currentZoneId ? 'Assigned' : 'Unassigned' }}
-        </v-chip>
-      </v-card-title>
-
-      <v-card-text>
-        <!-- Current Zone Info -->
-        <div v-if="currentZoneId" class="current-zone mb-4">
-          <v-alert type="info" variant="tonal" density="compact">
-            <div class="d-flex flex-column">
-              <span class="text-subtitle-2">Current Zone</span>
-              <span class="text-h6">{{ currentZoneName || currentZoneId }}</span>
-              <span class="text-caption text-medium-emphasis" v-if="currentMasterZoneId">
-                Master: {{ currentMasterZoneId }}
-              </span>
-              <span class="text-caption text-medium-emphasis" v-if="pendingAssignment">
-                Waiting for ESP confirmation...
-              </span>
-            </div>
-          </v-alert>
+  <div class="zone-panel">
+    <Card>
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <MapPin class="w-5 h-5 text-dark-300" />
+            <span class="font-medium">Zone</span>
+          </div>
+          <!-- Status Badge -->
+          <Badge v-if="saving" variant="warning" size="sm" pulse>
+            Speichern...
+          </Badge>
+          <Badge v-else-if="currentZoneId" variant="success" size="sm">
+            {{ currentZoneId }}
+          </Badge>
+          <Badge v-else variant="gray" size="sm">
+            Nicht zugewiesen
+          </Badge>
         </div>
+      </template>
 
-        <!-- Assignment Form -->
-        <v-form ref="formRef" v-model="formValid" @submit.prevent="assignZone">
-          <v-text-field
-            v-model="form.zone_id"
-            label="Zone ID"
-            placeholder="e.g., greenhouse_zone_1"
-            :rules="[rules.required, rules.zoneIdFormat]"
-            variant="outlined"
-            density="comfortable"
-            hint="Unique identifier for this zone"
-            persistent-hint
-            class="mb-3"
-          />
+      <!-- Error Message -->
+      <div v-if="errorMessage" class="error-banner">
+        <AlertCircle class="w-4 h-4 flex-shrink-0" />
+        <span>{{ errorMessage }}</span>
+        <button class="ml-auto" @click="errorMessage = ''">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
 
-          <v-text-field
-            v-model="form.master_zone_id"
-            label="Master Zone ID (optional)"
-            placeholder="e.g., greenhouse_master"
-            variant="outlined"
-            density="comfortable"
-            hint="Parent zone for hierarchy"
-            persistent-hint
-            class="mb-3"
-          />
+      <!-- Success Message -->
+      <div v-if="successMessage" class="success-banner">
+        <CheckCircle class="w-4 h-4 flex-shrink-0" />
+        <span>{{ successMessage }}</span>
+        <button class="ml-auto" @click="successMessage = ''">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
 
-          <v-text-field
-            v-model="form.zone_name"
-            label="Zone Name (optional)"
-            placeholder="e.g., Greenhouse Section 1"
-            :rules="[rules.maxLength(100)]"
-            variant="outlined"
-            density="comfortable"
-            hint="Human-readable name"
-            persistent-hint
-            class="mb-3"
-          />
-        </v-form>
+      <!-- Simple Zone Input -->
+      <div class="space-y-3">
+        <Input
+          v-model="zoneInput"
+          label="Zone"
+          placeholder="z.B. Zelt 1, Gewächshaus, Outdoor"
+          helper="Name der Zone in der dieses Gerät arbeitet"
+          :disabled="saving"
+        />
 
-        <!-- ACK Status -->
-        <div v-if="ackStatus" class="ack-feedback mb-3">
-          <v-alert
-            :type="ackStatus === 'success' ? 'success' : ackStatus === 'error' ? 'error' : 'info'"
-            variant="tonal"
-            density="compact"
-            class="mb-2"
+        <div class="flex gap-2">
+          <Button
+            v-if="currentZoneId && zoneInput !== currentZoneId"
+            variant="secondary"
+            size="sm"
+            :disabled="saving"
+            @click="zoneInput = currentZoneId"
           >
-            <div class="d-flex align-center">
-              <v-icon v-if="ackStatus === 'success'" class="mr-2">mdi-check-circle</v-icon>
-              <v-icon v-else-if="ackStatus === 'error'" class="mr-2">mdi-alert-circle</v-icon>
-              <v-icon v-else class="mr-2">mdi-clock-outline</v-icon>
-              <span>
-                {{ ackStatus === 'pending' ? 'Waiting for ESP confirmation...' :
-                   ackStatus === 'success' ? 'Zone assignment confirmed by ESP' :
-                   `Zone assignment failed: ${ackMessage || 'Unknown error'}` }}
-              </span>
-            </div>
-          </v-alert>
+            Zurücksetzen
+          </Button>
+
+          <Button
+            v-if="currentZoneId"
+            variant="danger"
+            size="sm"
+            :loading="saving && isRemoving"
+            :disabled="saving"
+            @click="removeZone"
+          >
+            <X class="w-4 h-4 mr-1" />
+            Entfernen
+          </Button>
+
+          <div class="flex-1"></div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            :loading="saving && !isRemoving"
+            :disabled="!zoneInput || zoneInput === currentZoneId || saving"
+            @click="saveZone"
+          >
+            <Check class="w-4 h-4 mr-1" />
+            {{ currentZoneId ? 'Ändern' : 'Zuweisen' }}
+          </Button>
         </div>
-      </v-card-text>
-
-      <v-card-actions>
-        <v-btn
-          v-if="currentZoneId"
-          color="error"
-          variant="text"
-          :loading="removing"
-          :disabled="assigning"
-          @click="removeZone"
-        >
-          <v-icon class="mr-1">mdi-map-marker-off</v-icon>
-          Remove Zone
-        </v-btn>
-
-        <v-spacer />
-
-        <v-btn
-          color="primary"
-          variant="flat"
-          :loading="assigning"
-          :disabled="!formValid || removing"
-          @click="assignZone"
-        >
-          <v-icon class="mr-1">mdi-map-marker-check</v-icon>
-          {{ currentZoneId ? 'Update Zone' : 'Assign Zone' }}
-        </v-btn>
-      </v-card-actions>
-    </v-card>
+      </div>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch } from 'vue'
+import { MapPin, Check, X, AlertCircle, CheckCircle } from 'lucide-vue-next'
+import Card from '@/components/common/Card.vue'
+import Input from '@/components/common/Input.vue'
+import Button from '@/components/common/Button.vue'
+import Badge from '@/components/common/Badge.vue'
 import { zonesApi } from '@/api/zones'
-import { useRealTimeData } from '@/composables/useRealTimeData'
 
 // Props
 interface Props {
@@ -139,150 +111,154 @@ const props = defineProps<Props>()
 // Emits
 const emit = defineEmits<{
   (e: 'zone-updated', zoneData: { zone_id: string; zone_name?: string; master_zone_id?: string }): void
+  (e: 'zone-error', error: string): void
 }>()
 
-// Form state
-const formRef = ref()
-const formValid = ref(false)
-const form = reactive({
-  zone_id: props.currentZoneId || '',
-  master_zone_id: props.currentMasterZoneId || '',
-  zone_name: props.currentZoneName || ''
-})
+// State
+const zoneInput = ref(props.currentZoneId || '')
+const saving = ref(false)
+const isRemoving = ref(false)
+const errorMessage = ref('')
+const successMessage = ref('')
 
-// Loading states
-const assigning = ref(false)
-const removing = ref(false)
-
-// ACK status
-const ackStatus = ref<'pending' | 'success' | 'error' | null>(null)
-const ackMessage = ref<string>('')
-
-// Validation rules
-const rules = {
-  required: (v: string) => !!v || 'Required',
-  zoneIdFormat: (v: string) => /^[a-z0-9_]+$/.test(v) || 'Only lowercase letters, numbers, underscores',
-  maxLength: (max: number) => (v: string) => v.length <= max || `Max ${max} characters`
-}
-
-// Real-time data for zone updates
-const { onZoneUpdate, lastZoneUpdate } = useRealTimeData({
-  espId: props.espId,
-  autoConnect: true
-})
-
-// Handle zone assignment confirmations
-function handleZoneUpdate(update: any) {
-  if (update.esp_id === props.espId) {
-    if (update.status === 'zone_assigned') {
-      ackStatus.value = 'success'
-      ackMessage.value = ''
-      emit('zone-updated', {
-        zone_id: update.zone_id,
-        zone_name: form.zone_name,
-        master_zone_id: update.master_zone_id
-      })
-    } else if (update.status === 'error') {
-      ackStatus.value = 'error'
-      ackMessage.value = update.message || 'Unknown error'
-    }
+// Watch for prop changes
+watch(() => props.currentZoneId, (newVal) => {
+  if (!saving.value) {
+    zoneInput.value = newVal || ''
   }
-}
-
-onMounted(() => {
-  onZoneUpdate(handleZoneUpdate)
 })
 
-onUnmounted(() => {
-  // Cleanup handled by useRealTimeData
-})
+async function saveZone() {
+  if (!zoneInput.value) return
 
-async function assignZone() {
-  if (!formRef.value?.validate()) return
-
-  assigning.value = true
-  ackStatus.value = 'pending'
-  ackMessage.value = ''
+  saving.value = true
+  isRemoving.value = false
+  errorMessage.value = ''
+  successMessage.value = ''
 
   try {
-    const result = await zonesApi.assignZone(props.espId, {
-      zone_id: form.zone_id,
-      master_zone_id: form.master_zone_id || undefined,
-      zone_name: form.zone_name || undefined
-    })
-
-    if (result.success) {
-      // Success - wait for WebSocket confirmation
-      console.log('Zone assignment sent, waiting for ESP confirmation...')
-    } else {
-      throw new Error(result.message || 'Failed to send zone assignment')
+    // Call the Zone API - only send defined fields
+    const request: { zone_id: string; zone_name?: string; master_zone_id?: string } = {
+      zone_id: zoneInput.value,
+      zone_name: zoneInput.value,
     }
-  } catch (error: any) {
-    console.error('Zone assignment error:', error)
-    ackStatus.value = 'error'
-    ackMessage.value = error.message || 'Failed to assign zone'
+    // Only add master_zone_id if it exists
+    if (props.currentMasterZoneId) {
+      request.master_zone_id = props.currentMasterZoneId
+    }
+
+    const response = await zonesApi.assignZone(props.espId, request)
+
+    console.log('[ZoneAssignmentPanel] API response:', response)
+
+    if (response.success) {
+      // Server has updated the zone - emit success
+      // Note: The server updates the database directly, and MQTT is sent to ESP
+      // ESP will confirm via heartbeat - we don't need to wait for ACK here
+      successMessage.value = response.mqtt_sent
+        ? `Zone "${zoneInput.value}" zugewiesen (MQTT gesendet)`
+        : `Zone "${zoneInput.value}" in Datenbank gespeichert`
+
+      emit('zone-updated', {
+        zone_id: zoneInput.value,
+        zone_name: zoneInput.value,
+        master_zone_id: undefined
+      })
+
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 3000)
+    } else {
+      errorMessage.value = response.message || 'Zone-Zuweisung fehlgeschlagen'
+      emit('zone-error', errorMessage.value)
+    }
+  } catch (error: unknown) {
+    console.error('[ZoneAssignmentPanel] API error:', error)
+    const axiosError = error as { response?: { data?: { detail?: string } } }
+    const message = axiosError.response?.data?.detail
+      || (error instanceof Error ? error.message : 'Unbekannter Fehler')
+    errorMessage.value = `Fehler: ${message}`
+    emit('zone-error', errorMessage.value)
   } finally {
-    assigning.value = false
+    saving.value = false
   }
 }
 
 async function removeZone() {
-  removing.value = true
-  ackStatus.value = 'pending'
-  ackMessage.value = ''
+  saving.value = true
+  isRemoving.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
 
   try {
-    const result = await zonesApi.removeZone(props.espId)
+    // Call the Zone API to remove assignment
+    const response = await zonesApi.removeZone(props.espId)
 
-    if (result.success) {
-      // Clear form on successful removal request
-      form.zone_id = ''
-      form.master_zone_id = ''
-      form.zone_name = ''
-      console.log('Zone removal sent, waiting for ESP confirmation...')
+    console.log('[ZoneAssignmentPanel] Remove response:', response)
+
+    if (response.success) {
+      // Server has removed the zone
+      successMessage.value = 'Zone-Zuweisung entfernt'
+      zoneInput.value = ''
+
+      emit('zone-updated', {
+        zone_id: '',
+        zone_name: undefined,
+        master_zone_id: undefined
+      })
+
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 3000)
     } else {
-      throw new Error(result.message || 'Failed to remove zone')
+      errorMessage.value = response.message || 'Zone-Entfernung fehlgeschlagen'
+      emit('zone-error', errorMessage.value)
     }
-  } catch (error: any) {
-    console.error('Zone removal error:', error)
-    ackStatus.value = 'error'
-    ackMessage.value = error.message || 'Failed to remove zone'
+  } catch (error: unknown) {
+    console.error('[ZoneAssignmentPanel] Remove error:', error)
+    const axiosError = error as { response?: { data?: { detail?: string } } }
+    const message = axiosError.response?.data?.detail
+      || (error instanceof Error ? error.message : 'Unbekannter Fehler')
+    errorMessage.value = `Fehler: ${message}`
+    emit('zone-error', errorMessage.value)
   } finally {
-    removing.value = false
+    saving.value = false
+    isRemoving.value = false
   }
 }
-
-// Update form when props change
-watch(() => props.currentZoneId, (newZoneId) => {
-  form.zone_id = newZoneId || ''
-})
-
-watch(() => props.currentZoneName, (newZoneName) => {
-  form.zone_name = newZoneName || ''
-})
-
-watch(() => props.currentMasterZoneId, (newMasterZoneId) => {
-  form.master_zone_id = newMasterZoneId || ''
-})
 </script>
 
 <style scoped>
-.zone-assignment-panel {
+.zone-panel {
   margin-bottom: 16px;
 }
 
-.current-zone .v-alert {
-  border-radius: 8px;
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 0.5rem;
+  color: var(--color-error, #ef4444);
+  font-size: 0.875rem;
 }
 
-.ack-feedback .v-alert {
-  border-radius: 8px;
-}
-
-.v-card-actions {
-  padding: 16px;
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  background-color: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 0.5rem;
+  color: var(--color-success, #22c55e);
+  font-size: 0.875rem;
 }
 </style>
-
-
 
