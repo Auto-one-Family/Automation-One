@@ -26,7 +26,7 @@ from ..deps import ActiveUser, AdminUser, DBSession
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/audit", tags=["Audit Logs"])
+router = APIRouter(prefix="/v1/audit", tags=["Audit Logs"])
 
 
 # =============================================================================
@@ -615,6 +615,7 @@ async def list_source_types() -> List[str]:
         AuditSourceType.MQTT,
         AuditSourceType.SCHEDULER,
     ]
+
 
 
 

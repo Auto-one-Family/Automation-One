@@ -146,3 +146,4 @@ Get-Service mosquitto
 - Mosquitto Logs prüfen (nach Aktivierung): `C:\Program Files\mosquitto\mosquitto.log`
 - Verbindungen prüfen: `netstat -ano | findstr ":1883"`
 
+

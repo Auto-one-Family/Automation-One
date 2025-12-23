@@ -35,7 +35,7 @@ from ..deps import DBSession, OperatorUser
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/zone", tags=["zone"])
+router = APIRouter(prefix="/v1/zone", tags=["zone"])
 
 
 # =============================================================================

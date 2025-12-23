@@ -310,7 +310,7 @@ async def override_mqtt_publisher(test_engine: AsyncEngine):
     from src.main import app
     from src.api.deps import get_mqtt_publisher
 
-    # Create mock publisher
+    # Create mock publisher with all methods used across services
     mock_publisher = MagicMock()
     mock_publisher.publish_actuator_command.return_value = True
     mock_publisher.publish_sensor_config.return_value = True
@@ -318,6 +318,9 @@ async def override_mqtt_publisher(test_engine: AsyncEngine):
     mock_publisher.publish_system_command.return_value = True
     mock_publisher.publish_pi_enhanced_response.return_value = True
     mock_publisher._publish_with_retry.return_value = True
+    # SubzoneService uses publisher.client.publish() directly
+    mock_publisher.client = MagicMock()
+    mock_publisher.client.publish.return_value = True
 
     def override_get_mqtt_publisher_func():
         return mock_publisher

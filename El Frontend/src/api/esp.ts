@@ -155,7 +155,7 @@ export const espApi = {
     const [mockEsps, realEspsResponse] = await Promise.all([
       debugApi.listMockEsps().catch(() => [] as MockESP[]),
       api
-        .get<ESPDeviceListResponse>('/v1/esp/devices', { params })
+        .get<ESPDeviceListResponse>('/esp/devices', { params })
         .catch(() => ({ data: { success: true, data: [] } }))
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])
@@ -225,7 +225,7 @@ export const espApi = {
         created_at: mockEsp.created_at,
       }
     } else {
-      const response = await api.get<ESPDevice>(`/v1/esp/devices/${normalizedId}`)
+      const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
       return response.data
     }
   },
@@ -265,7 +265,7 @@ export const espApi = {
       }
     } else {
       const realConfig = config as ESPDeviceCreate
-      const response = await api.post<ESPDevice>('/v1/esp/devices', realConfig)
+      const response = await api.post<ESPDevice>('/esp/devices', realConfig)
       return response.data
     }
   },
@@ -315,7 +315,7 @@ export const espApi = {
       }
     } else {
       const response = await api.patch<ESPDevice>(
-        `/v1/esp/devices/${normalizedId}`,
+        `/esp/devices/${normalizedId}`,
         update
       )
       return response.data
@@ -361,7 +361,7 @@ export const espApi = {
       }
     } else {
       const response = await api.get<ESPHealthResponse>(
-        `/v1/esp/devices/${normalizedId}/health`
+        `/esp/devices/${normalizedId}/health`
       )
       return response.data
     }
@@ -388,7 +388,7 @@ export const espApi = {
       }
     } else {
       const response = await api.post<ESPCommandResponse>(
-        `/v1/esp/devices/${normalizedId}/restart`,
+        `/esp/devices/${normalizedId}/restart`,
         { delay_seconds: delaySeconds || 0, reason }
       )
       return response.data
@@ -414,7 +414,7 @@ export const espApi = {
       }
     } else {
       const response = await api.post<ESPCommandResponse>(
-        `/v1/esp/devices/${normalizedId}/reset`,
+        `/esp/devices/${normalizedId}/reset`,
         { confirm: true, preserve_wifi: preserveWifi }
       )
       return response.data
@@ -440,7 +440,7 @@ export const espApi = {
       }
     } else {
       const response = await api.post<ESPConfigResponse>(
-        `/v1/esp/devices/${normalizedId}/config`,
+        `/esp/devices/${normalizedId}/config`,
         config
       )
       return response.data
