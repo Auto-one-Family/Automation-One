@@ -80,16 +80,19 @@ class WebSocketService {
   private getWebSocketUrl(): string {
     const authStore = useAuthStore()
     const token = authStore.accessToken
-    
+
     if (!token) {
       throw new Error('No access token available')
     }
 
+    // In development, use localhost:8000 directly for WebSocket
+    // In production, use the same host as the page
+    const isDev = import.meta.env.DEV
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = import.meta.env.VITE_API_BASE_URL?.replace(/^https?:\/\//, '') || window.location.host
-    
-    // Backend endpoint: /ws/realtime/{client_id}
-    return `${protocol}//${host}/ws/realtime/${this.clientId}?token=${encodeURIComponent(token)}`
+    const host = isDev ? 'localhost:8000' : window.location.host
+
+    // Backend endpoint: /api/v1/ws/realtime/{client_id}
+    return `${protocol}//${host}/api/v1/ws/realtime/${this.clientId}?token=${encodeURIComponent(token)}`
   }
 
   /**
@@ -407,6 +410,7 @@ class WebSocketService {
 
 // Export singleton instance
 export const websocketService = WebSocketService.getInstance()
+
 
 
 

@@ -7,6 +7,7 @@
  */
 
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 
 // =============================================================================
 // TYPES
@@ -133,18 +134,35 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
 
   /**
    * Get WebSocket URL based on current location
+   *
+   * Server expects: /api/v1/ws/realtime/{client_id}?token=<jwt>
    */
   function getWebSocketUrl(): string {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    
-    // Build URL with optional ESP filter
-    let url = `${protocol}//${host}/api/v1/ws/live`
-    if (espId) {
-      url += `?esp_id=${encodeURIComponent(espId)}`
+    const authStore = useAuthStore()
+    const token = authStore.accessToken
+
+    if (!token) {
+      console.error('[WebSocket] No auth token available')
+      throw new Error('Authentication required for WebSocket connection')
     }
-    
-    return url
+
+    // In development, use localhost:8000 directly for WebSocket
+    // In production, use the same host as the page
+    const isDev = import.meta.env.DEV
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = isDev ? 'localhost:8000' : window.location.host
+
+    // Generate unique client ID
+    const clientId = `web_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+
+    // Build URL with token and optional ESP filter
+    const params = new URLSearchParams()
+    params.append('token', token)
+    if (espId) {
+      params.append('esp_id', espId)
+    }
+
+    return `${protocol}//${host}/api/v1/ws/realtime/${clientId}?${params.toString()}`
   }
 
   /**
@@ -156,13 +174,21 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
       return
     }
 
+    // Check authentication before attempting connection
+    const authStore = useAuthStore()
+    if (!authStore.isAuthenticated) {
+      console.log('[WebSocket] Not authenticated, skipping connection')
+      connectionError.value = 'Nicht authentifiziert'
+      return
+    }
+
     isConnecting.value = true
     connectionError.value = null
 
     try {
       const url = getWebSocketUrl()
-      console.log('[WebSocket] Connecting to:', url)
-      
+      console.log('[WebSocket] Connecting to:', url.replace(/token=[^&]+/, 'token=***'))
+
       ws = new WebSocket(url)
 
       ws.onopen = () => {
@@ -177,9 +203,16 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
         console.log('[WebSocket] Disconnected:', event.code, event.reason)
         isConnected.value = false
         isConnecting.value = false
-        
-        // Attempt reconnect if enabled
-        if (autoReconnect && (maxReconnectAttempts === 0 || reconnectAttempts.value < maxReconnectAttempts)) {
+
+        // Handle auth rejection (code 4001)
+        if (event.code === 4001) {
+          connectionError.value = event.reason || 'Authentifizierung fehlgeschlagen'
+          // Don't auto-reconnect on auth failure
+          return
+        }
+
+        // Attempt reconnect if enabled and still authenticated
+        if (autoReconnect && authStore.isAuthenticated && (maxReconnectAttempts === 0 || reconnectAttempts.value < maxReconnectAttempts)) {
           scheduleReconnect()
         }
       }
@@ -196,7 +229,7 @@ export function useRealTimeData(options: UseRealTimeDataOptions = {}) {
       }
     } catch (error) {
       console.error('[WebSocket] Connection error:', error)
-      connectionError.value = 'Verbindung fehlgeschlagen'
+      connectionError.value = error instanceof Error ? error.message : 'Verbindung fehlgeschlagen'
       isConnecting.value = false
     }
   }

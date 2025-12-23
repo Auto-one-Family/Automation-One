@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Set
 
 from fastapi import WebSocket
+from starlette.websockets import WebSocketState
 
 from ..core.logging_config import get_logger
 from ..utils.time_helpers import unix_timestamp_s
@@ -88,22 +89,39 @@ class WebSocketManager:
     async def disconnect(self, client_id: str) -> None:
         """
         Close WebSocket connection.
-        
+
+        Handles race conditions where WebSocket may already be closed
+        (e.g., client disconnected while server was processing).
+
         Args:
             client_id: Client identifier
         """
         async with self._lock:
-            if client_id in self._connections:
-                websocket = self._connections[client_id]
-                try:
+            if client_id not in self._connections:
+                # Already disconnected (race condition handled)
+                return
+
+            websocket = self._connections.pop(client_id)
+            self._subscriptions.pop(client_id, None)
+            self._rate_limiter.pop(client_id, None)
+
+            # Try to close WebSocket gracefully
+            try:
+                # Check if WebSocket is still open before closing
+                # WebSocketState: CONNECTING=0, CONNECTED=1, DISCONNECTED=2
+                if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.close()
-                except Exception as e:
-                    logger.warning(f"Error closing WebSocket for {client_id}: {e}")
-                
-                del self._connections[client_id]
-                self._subscriptions.pop(client_id, None)
-                self._rate_limiter.pop(client_id, None)
-                logger.info(f"WebSocket client disconnected: {client_id}")
+            except RuntimeError as e:
+                # WebSocket already closed by client - expected in race conditions
+                if "after sending 'websocket.close'" in str(e) or "already completed" in str(e):
+                    logger.debug(f"WebSocket {client_id} already closed by client")
+                else:
+                    logger.warning(f"RuntimeError closing WebSocket for {client_id}: {e}")
+            except Exception as e:
+                # Log other unexpected errors but continue cleanup
+                logger.warning(f"Error closing WebSocket for {client_id}: {e}")
+
+            logger.info(f"WebSocket client disconnected: {client_id}")
 
     async def subscribe(self, client_id: str, filters: dict) -> None:
         """
