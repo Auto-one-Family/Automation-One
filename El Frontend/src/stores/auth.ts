@@ -22,25 +22,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   // Actions
   async function checkAuthStatus(): Promise<void> {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/9afc79e6-8353-43ae-a99b-a341b0632397',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'El Frontend/src/stores/auth.ts:24',message:'Starting auth status check',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
-
     isLoading.value = true
     error.value = null
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9afc79e6-8353-43ae-a99b-a341b0632397',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'El Frontend/src/stores/auth.ts:30',message:'Calling authApi.getStatus()',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-
       // First check if setup is required
       const status = await authApi.getStatus()
-
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9afc79e6-8353-43ae-a99b-a341b0632397',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'El Frontend/src/stores/auth.ts:31',message:'authApi.getStatus() returned',data:{setup_required:status.setup_required},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-
       setupRequired.value = status.setup_required
 
       // If setup is required, clear any stale tokens from previous sessions
@@ -68,17 +55,9 @@ export const useAuthStore = defineStore('auth', () => {
         }
       }
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9afc79e6-8353-43ae-a99b-a341b0632397',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'El Frontend/src/stores/auth.ts:57',message:'checkAuthStatus failed',data:{error:String(err)},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-
       console.error('Failed to check auth status:', err)
       error.value = 'Failed to check authentication status'
     } finally {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9afc79e6-8353-43ae-a99b-a341b0632397',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'El Frontend/src/stores/auth.ts:62',message:'checkAuthStatus completed',data:{setupRequired:setupRequired.value},timestamp:Date.now(),sessionId:'debug-session',runId:'initial',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
-
       isLoading.value = false
     }
   }
