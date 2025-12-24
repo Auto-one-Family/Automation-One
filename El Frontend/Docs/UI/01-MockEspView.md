@@ -1,23 +1,40 @@
 # MockEspView - UI Dokumentation
 
-**Erstellt:** 2025-12-19
-**Status:** ✅ Vollständig implementiert
-**Priorität:** 🔴 KRITISCH - Basis für Mock-ESP Ausbau
+> ⚠️ **VERALTET - Stand 23.12.2025**
+>
+> Diese Dokumentation bezieht sich auf die **alte** `MockEspView`. Diese wurde refactored zu:
+>
+> | Alt | Neu | Route |
+> |-----|-----|-------|
+> | `MockEspView` | **`DevicesView`** | `/devices` |
+> | `MockEspDetailView` | **`DeviceDetailView`** | `/devices/:espId` |
+>
+> **Für aktuelle Dokumentation siehe:**
+> - [02-Individual-Views-Summary.md](02-Individual-Views-Summary.md) - DevicesView & DeviceDetailView
+> - [VIEW_QUICK_REFERENCE.md](VIEW_QUICK_REFERENCE.md) - Schnellreferenz
+>
+> Die alte Route `/mock-esp` funktioniert weiterhin (Redirect zu `/devices`).
 
 ---
 
-## 1. Metadaten
+**Erstellt:** 2025-12-19
+**Status:** ⚠️ VERALTET - Redirect zu DevicesView
+**Priorität:** 🟢 Legacy
+
+---
+
+## 1. Metadaten (Legacy)
 
 | Attribut | Wert |
 |----------|------|
-| **Route** | `/mock-esp` |
-| **Datei** | `src/views/MockEspView.vue` |
-| **Auth erforderlich** | ✅ Admin-only (implizit via Route) |
-| **Admin erforderlich** | ✅ |
-| **Status** | ✅ Implementiert |
-| **Komponenten** | ESPCard, LoadingState, EmptyState, ErrorState |
-| **Stores** | `useMockEspStore` |
-| **WebSocket** | ❌ |
+| **Route** | `/mock-esp` → **Redirect zu `/devices`** |
+| **Datei** | `src/views/MockEspView.vue` → **Jetzt `DevicesView.vue`** |
+| **Auth erforderlich** | ✅ Login (nicht mehr Admin-only) |
+| **Admin erforderlich** | ❌ |
+| **Status** | ⚠️ Legacy - Redirect |
+| **Komponenten** | ESPCard, ESPOrbitalLayout, LoadingState, EmptyState, ErrorState |
+| **Stores** | `useEspStore` (Unified Store, ersetzt `useMockEspStore`) |
+| **WebSocket** | ✅ Live-Updates via esp_health, sensor_data, actuator_status |
 
 ---
 

@@ -1,34 +1,58 @@
 <script setup lang="ts">
 /**
  * ESPCard Component
- * 
+ *
  * Displays an ESP device card with:
  * - Mock/Real visual distinction (purple vs cyan border)
  * - Online/Offline status indicator
+ * - Orphaned mock warning badge
  * - Quick stats (sensors, actuators)
- * - Different actions for Mock vs Real devices
+ * - Different actions for Mock vs Real devices with loading states
  * - Zone information
  * - Last heartbeat time
  */
 
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Heart, AlertTriangle, Trash2, Settings, ExternalLink } from 'lucide-vue-next'
+import {
+  Heart,
+  AlertTriangle,
+  Trash2,
+  Settings,
+  ExternalLink,
+  AlertOctagon,
+  Loader2,
+  Thermometer,
+  Zap,
+  Clock,
+  HardDrive,
+  MapPin,
+  Wifi,
+  Database,
+  MemoryStick,
+  Radio,
+  TimerOff,
+} from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
-import { formatRelativeTime, formatUptimeShort, formatHeapSize } from '@/utils/formatters'
-import { getStateLabel, getStateInfo } from '@/utils/labels'
+import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
 import { espApi, type ESPDevice } from '@/api/esp'
-
-interface ESPDeviceProps {
-  esp: ESPDevice
-}
 
 interface Props {
   /** The ESP device data */
   esp: ESPDevice
+  /** Loading state for heartbeat action */
+  heartbeatLoading?: boolean
+  /** Loading state for safe-mode toggle action */
+  safeModeLoading?: boolean
+  /** Loading state for delete action */
+  deleteLoading?: boolean
 }
 
-const props = defineProps<ESPDeviceProps>()
+const props = withDefaults(defineProps<Props>(), {
+  heartbeatLoading: false,
+  safeModeLoading: false,
+  deleteLoading: false,
+})
 
 const emit = defineEmits<{
   heartbeat: [espId: string]
@@ -54,6 +78,19 @@ const hasEmergencyStopped = computed(() => {
   if (!props.esp.actuators) return false
   return props.esp.actuators.some((a: any) => a.emergency_stopped)
 })
+
+// Orphaned mock detection - Mock ESP exists in DB but not in debug store
+const isOrphanedMock = computed(() => {
+  if (!isMock.value) return false
+  // Check if metadata contains orphaned_mock flag (set by esp.ts API)
+  const metadata = props.esp.metadata as Record<string, unknown> | undefined
+  return metadata?.orphaned_mock === true
+})
+
+// Check if any action is currently loading
+const isAnyActionLoading = computed(() =>
+  props.heartbeatLoading || props.safeModeLoading || props.deleteLoading
+)
 
 // System state (FSM) for Mock ESPs - only shown when relevant (SAFE_MODE, ERROR)
 const systemState = computed(() => {
@@ -108,32 +145,87 @@ const mockStateInfo = computed(() => {
 // Card classes based on mock/real and online/offline
 const cardClasses = computed(() => {
   const classes = ['esp-card']
-  
+
   if (isMock.value) {
     classes.push('esp-card--mock')
   } else {
     classes.push('esp-card--real')
   }
-  
+
   if (!isOnline.value) {
     classes.push('esp-card--offline')
   }
-  
+
   if (hasEmergencyStopped.value) {
     classes.push('esp-card--emergency')
   }
-  
+
+  if (isOrphanedMock.value) {
+    classes.push('esp-card--orphaned')
+  }
+
   return classes
 })
 
 // Status bar color based on state
 const statusBarClasses = computed(() => {
+  if (isOrphanedMock.value) return 'esp-card__status-bar--orphaned'
   if (hasEmergencyStopped.value) return 'esp-card__status-bar--emergency'
   if (!isOnline.value) return 'esp-card__status-bar--offline'
   if (systemState.value === 'SAFE_MODE') return 'esp-card__status-bar--warning'
   if (systemState.value === 'ERROR' || connectionStatus.value === 'error') return 'esp-card__status-bar--error'
   if (isMock.value) return 'esp-card__status-bar--mock'
   return 'esp-card__status-bar--real'
+})
+
+// =============================================================================
+// Data Source & Freshness Indicators
+// =============================================================================
+
+// Data source: where is this data coming from?
+// Mock ESPs from debug store have rich data (sensors array, system_state, etc.)
+// Orphaned mocks or real ESPs from DB may have less data
+const dataSource = computed<'memory' | 'database'>(() => {
+  // If it has sensors array with full data, it's from memory (debug store)
+  if (isMock.value && !isOrphanedMock.value && props.esp.sensors && Array.isArray(props.esp.sensors)) {
+    return 'memory'
+  }
+  // If it's a real ESP or orphaned mock, it's from database
+  return 'database'
+})
+
+const dataSourceInfo = computed(() => {
+  if (dataSource.value === 'memory') {
+    return { label: 'Live-Speicher', icon: 'memory', colorClass: 'text-success' }
+  }
+  return { label: 'Datenbank', icon: 'database', colorClass: 'text-info' }
+})
+
+// Data freshness based on last heartbeat
+const dataFreshness = computed<FreshnessLevel>(() => {
+  const timestamp = props.esp.last_heartbeat || props.esp.last_seen
+  return getDataFreshness(timestamp)
+})
+
+const freshnessInfo = computed(() => {
+  switch (dataFreshness.value) {
+    case 'live':
+      return { label: 'Live', colorClass: 'freshness--live', title: 'Daten sind aktuell (< 30s)' }
+    case 'recent':
+      return { label: 'Aktuell', colorClass: 'freshness--recent', title: 'Daten sind aktuell (< 2min)' }
+    case 'stale':
+      return { label: 'Veraltet', colorClass: 'freshness--stale', title: 'Daten sind veraltet (> 2min)' }
+    default:
+      return { label: 'Unbekannt', colorClass: 'freshness--unknown', title: 'Kein Heartbeat empfangen' }
+  }
+})
+
+// Check if important data might be stale or missing
+const hasIncompleteData = computed(() => {
+  // Check if uptime/heap/rssi are undefined (might indicate stale DB data)
+  return props.esp.uptime === undefined &&
+         props.esp.heap_free === undefined &&
+         props.esp.wifi_rssi === undefined
 })
 </script>
 
@@ -159,8 +251,20 @@ const statusBarClasses = computed(() => {
         </div>
         
         <div class="esp-card__status-badges">
+          <!-- Orphaned Mock Warning - highest priority indicator -->
+          <Badge
+            v-if="isOrphanedMock"
+            variant="warning"
+            size="sm"
+            :dot="true"
+          >
+            <AlertOctagon class="w-3 h-3 mr-1" />
+            Verwaist
+          </Badge>
+
           <!-- Primary: Connection status (Online/Offline) - consistent for ALL devices -->
           <Badge
+            v-if="!isOrphanedMock"
             :variant="stateInfo.variant as any"
             :pulse="isOnline"
             :dot="true"
@@ -171,7 +275,7 @@ const statusBarClasses = computed(() => {
 
           <!-- Secondary: Mock ESP system state (only for SAFE_MODE, ERROR, etc.) -->
           <Badge
-            v-if="mockStateInfo"
+            v-if="mockStateInfo && !isOrphanedMock"
             :variant="mockStateInfo.variant as any"
             size="sm"
           >
@@ -184,45 +288,82 @@ const statusBarClasses = computed(() => {
         </div>
       </div>
       
-      <!-- Info rows -->
-      <div class="esp-card__info">
-        <div class="esp-card__info-row">
-          <span class="esp-card__info-label">Zone</span>
-          <span class="esp-card__info-value">
-            {{ (esp as any).zone_name || esp.zone_name || esp.zone_id || 'Nicht zugewiesen' }}
-          </span>
+      <!-- Zone info (prominent) - shows zone_name (human-readable) with zone_id fallback -->
+      <div class="esp-card__zone">
+        <MapPin class="w-4 h-4 text-muted" />
+        <span class="esp-card__zone-name">
+          {{ esp.zone_name || esp.zone_id || 'Keine Zone' }}
+        </span>
+        <!-- Show technical zone_id as tooltip if zone_name differs -->
+        <span
+          v-if="esp.zone_name && esp.zone_id && esp.zone_name !== esp.zone_id"
+          class="esp-card__zone-id"
+          :title="`Zone ID: ${esp.zone_id}`"
+        >
+          ({{ esp.zone_id }})
+        </span>
+      </div>
+
+      <!-- Data Source & Freshness Indicators -->
+      <div class="esp-card__data-info">
+        <!-- Data Source -->
+        <div :class="['esp-card__data-source', dataSourceInfo.colorClass]" :title="dataSource === 'memory' ? 'Daten aus Debug-Store (RAM)' : 'Daten aus PostgreSQL'">
+          <MemoryStick v-if="dataSource === 'memory'" class="w-3.5 h-3.5" />
+          <Database v-else class="w-3.5 h-3.5" />
+          <span>{{ dataSourceInfo.label }}</span>
         </div>
-        
-        <div class="esp-card__info-row">
-          <span class="esp-card__info-label">Sensoren</span>
-          <span class="esp-card__info-value">
-            {{ esp.sensor_count ?? esp.sensors?.length ?? 0 }}
-          </span>
+
+        <!-- Separator -->
+        <span class="esp-card__data-separator">•</span>
+
+        <!-- Freshness -->
+        <div :class="['esp-card__freshness', freshnessInfo.colorClass]" :title="freshnessInfo.title">
+          <Radio v-if="dataFreshness === 'live'" class="w-3.5 h-3.5" />
+          <Clock v-else-if="dataFreshness === 'recent'" class="w-3.5 h-3.5" />
+          <TimerOff v-else class="w-3.5 h-3.5" />
+          <span>{{ freshnessInfo.label }}</span>
         </div>
-        
-        <div class="esp-card__info-row">
-          <span class="esp-card__info-label">Aktoren</span>
-          <span class="esp-card__info-value">
-            {{ esp.actuator_count ?? esp.actuators?.length ?? 0 }}
-          </span>
+
+        <!-- Incomplete Data Warning -->
+        <template v-if="hasIncompleteData && dataSource === 'database'">
+          <span class="esp-card__data-separator">•</span>
+          <div class="esp-card__incomplete-data" title="Keine Uptime/Heap/RSSI Daten - letzter Heartbeat fehlt">
+            <AlertTriangle class="w-3.5 h-3.5" />
+            <span>Unvollständig</span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Quick stats (compact grid) -->
+      <div class="esp-card__stats">
+        <div class="esp-card__stat" title="Sensoren">
+          <Thermometer class="w-4 h-4" />
+          <span>{{ esp.sensor_count ?? esp.sensors?.length ?? 0 }}</span>
         </div>
-        
-        <div v-if="esp.uptime !== undefined" class="esp-card__info-row">
-          <span class="esp-card__info-label">Uptime</span>
-          <span class="esp-card__info-value">{{ formatUptimeShort(esp.uptime || 0) }}</span>
+        <div class="esp-card__stat" title="Aktoren">
+          <Zap class="w-4 h-4" />
+          <span>{{ esp.actuator_count ?? esp.actuators?.length ?? 0 }}</span>
         </div>
-        
-        <div v-if="esp.heap_free !== undefined" class="esp-card__info-row">
-          <span class="esp-card__info-label">Heap</span>
-          <span class="esp-card__info-value">{{ formatHeapSize(esp.heap_free || 0) }}</span>
+        <div v-if="esp.uptime !== undefined" class="esp-card__stat" title="Uptime">
+          <Clock class="w-4 h-4" />
+          <span>{{ formatUptimeShort(esp.uptime || 0) }}</span>
         </div>
-        
-        <div v-if="esp.last_heartbeat || esp.last_seen" class="esp-card__info-row">
-          <span class="esp-card__info-label">Letzter Heartbeat</span>
-          <span class="esp-card__info-value" :title="esp.last_heartbeat || esp.last_seen || ''">
-            {{ formatRelativeTime(esp.last_heartbeat || esp.last_seen || '') }}
-          </span>
+        <div v-if="esp.heap_free !== undefined" class="esp-card__stat" title="Heap">
+          <HardDrive class="w-4 h-4" />
+          <span>{{ formatHeapSize(esp.heap_free || 0) }}</span>
         </div>
+        <div v-if="esp.wifi_rssi !== undefined" class="esp-card__stat" title="WiFi RSSI">
+          <Wifi class="w-4 h-4" />
+          <span>{{ esp.wifi_rssi }} dBm</span>
+        </div>
+      </div>
+
+      <!-- Last heartbeat (separate row for visibility) -->
+      <div v-if="esp.last_heartbeat || esp.last_seen" class="esp-card__heartbeat-info">
+        <Heart class="w-3.5 h-3.5" />
+        <span :title="esp.last_heartbeat || esp.last_seen || ''">
+          {{ formatRelativeTime(esp.last_heartbeat || esp.last_seen || '') }}
+        </span>
       </div>
       
       <!-- Auto-heartbeat indicator (Mock ESP only) -->
@@ -233,6 +374,14 @@ const statusBarClasses = computed(() => {
         </span>
       </div>
       
+      <!-- Orphaned Mock Warning Message -->
+      <div v-if="isOrphanedMock" class="esp-card__orphaned-warning">
+        <AlertOctagon class="w-4 h-4 flex-shrink-0" />
+        <span>
+          Verwaist: Nur in DB, nicht im Debug-Store. Bitte löschen und neu erstellen.
+        </span>
+      </div>
+
       <!-- Actions -->
       <div class="esp-card__actions">
         <!-- Always available: Details -->
@@ -243,36 +392,54 @@ const statusBarClasses = computed(() => {
           <ExternalLink class="w-4 h-4" />
           Details
         </RouterLink>
-        
+
         <!-- Mock ESP specific actions -->
         <template v-if="isMock">
+          <!-- Heartbeat Button with Loading -->
           <button
             class="btn-ghost btn-sm"
+            :disabled="heartbeatLoading || isOrphanedMock || isAnyActionLoading"
+            :title="isOrphanedMock ? 'Nicht verfügbar für verwaiste Mocks' : 'Heartbeat senden'"
             @click="emit('heartbeat', espId)"
-            title="Heartbeat senden"
           >
-            <Heart class="w-4 h-4" />
+            <Loader2 v-if="heartbeatLoading" class="w-4 h-4 animate-spin" />
+            <Heart v-else class="w-4 h-4" />
           </button>
-          
+
+          <!-- Safe Mode Toggle with Loading -->
           <button
             :class="['btn-ghost btn-sm', mockStateInfo?.variant === 'warning' ? 'text-warning' : '']"
+            :disabled="safeModeLoading || isOrphanedMock || isAnyActionLoading"
+            :title="isOrphanedMock ? 'Nicht verfügbar für verwaiste Mocks' : (systemState === 'SAFE_MODE' ? 'Sicherheitsmodus beenden' : 'Sicherheitsmodus aktivieren')"
             @click="emit('toggleSafeMode', espId)"
-            :title="systemState === 'SAFE_MODE' ? 'Sicherheitsmodus beenden' : 'Sicherheitsmodus aktivieren'"
           >
-            <AlertTriangle class="w-4 h-4" />
+            <Loader2 v-if="safeModeLoading" class="w-4 h-4 animate-spin" />
+            <AlertTriangle v-else class="w-4 h-4" />
           </button>
-          
+
+          <!-- Delete Button with Loading -->
           <button
             class="btn-ghost btn-sm text-error hover:bg-danger/10"
-            @click="emit('delete', espId)"
+            :disabled="deleteLoading || isAnyActionLoading"
             title="Löschen"
+            @click="emit('delete', espId)"
           >
-            <Trash2 class="w-4 h-4" />
+            <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
+            <Trash2 v-else class="w-4 h-4" />
           </button>
         </template>
-        
+
         <!-- Real ESP specific actions -->
         <template v-else>
+          <button
+            class="btn-ghost btn-sm"
+            :disabled="deleteLoading"
+            title="Löschen"
+            @click="emit('delete', espId)"
+          >
+            <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
+            <Trash2 v-else class="w-4 h-4" />
+          </button>
           <button
             class="btn-ghost btn-sm"
             title="Konfigurieren"
@@ -348,36 +515,52 @@ const statusBarClasses = computed(() => {
   border-color: rgba(248, 113, 113, 0.3);
 }
 
+/* Orphaned mock state */
+.esp-card--orphaned {
+  border-color: rgba(251, 191, 36, 0.4);
+  background-color: rgba(251, 191, 36, 0.03);
+}
+
+.esp-card__status-bar--orphaned {
+  background-color: var(--color-warning);
+  animation: pulse-bar 1.5s infinite;
+}
+
 /* Content area */
 .esp-card__content {
   flex: 1;
-  padding: 1rem;
+  padding: 1rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.875rem;
+  min-width: 0;
 }
 
 /* Header */
 .esp-card__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
 
 .esp-card__id-group {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .esp-card__id {
   font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--color-text-primary);
   text-decoration: none;
   transition: color 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .esp-card__id:hover {
@@ -387,30 +570,123 @@ const statusBarClasses = computed(() => {
 .esp-card__status-badges {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem;
+  flex-shrink: 0;
 }
 
-/* Info rows */
-.esp-card__info {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
-}
-
-.esp-card__info-row {
+/* Zone info */
+.esp-card__zone {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-size: 0.875rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-bg-tertiary);
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
 }
 
-.esp-card__info-label {
+.esp-card__zone-name {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.esp-card__zone-id {
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: help;
+}
+
+.text-muted {
   color: var(--color-text-muted);
 }
 
-.esp-card__info-value {
-  color: var(--color-text-primary);
+/* Data Source & Freshness Indicators */
+.esp-card__data-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
   font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.esp-card__data-source,
+.esp-card__freshness,
+.esp-card__incomplete-data {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.esp-card__data-separator {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+/* Freshness color states */
+.freshness--live {
+  color: var(--color-success);
+}
+
+.freshness--recent {
+  color: var(--color-info);
+}
+
+.freshness--stale {
+  color: var(--color-warning);
+}
+
+.freshness--unknown {
+  color: var(--color-text-muted);
+}
+
+.esp-card__incomplete-data {
+  color: var(--color-warning);
+}
+
+.text-success {
+  color: var(--color-success);
+}
+
+.text-info {
+  color: var(--color-info);
+}
+
+/* Quick stats grid */
+.esp-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.esp-card__stat {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.esp-card__stat span {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Heartbeat info */
+.esp-card__heartbeat-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.esp-card__heartbeat-info span {
+  color: var(--color-text-secondary);
 }
 
 /* Auto-heartbeat indicator */
@@ -434,6 +710,23 @@ const statusBarClasses = computed(() => {
   animation: pulse-dot 2s infinite;
 }
 
+/* Orphaned mock warning message */
+.esp-card__orphaned-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-warning);
+  background-color: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 0.375rem;
+}
+
+.esp-card__orphaned-warning span {
+  line-height: 1.4;
+}
+
 /* Actions */
 .esp-card__actions {
   display: flex;
@@ -442,6 +735,12 @@ const statusBarClasses = computed(() => {
   padding-top: 0.75rem;
   border-top: 1px solid var(--glass-border);
   margin-top: auto;
+}
+
+/* Disabled button state */
+.esp-card__actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
 

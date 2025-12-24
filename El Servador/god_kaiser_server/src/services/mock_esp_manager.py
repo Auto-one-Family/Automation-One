@@ -206,6 +206,57 @@ class MockESPManager:
         logger.info(f"Deleted mock ESP: {esp_id}")
         return True
 
+    async def update_zone(
+        self,
+        esp_id: str,
+        zone_id: Optional[str],
+        zone_name: Optional[str] = None,
+        master_zone_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Update zone assignment for a mock ESP.
+
+        This method is called by ZoneService when a zone is assigned via the Zone API.
+        It ensures the in-memory store stays in sync with the database.
+
+        Args:
+            esp_id: ESP device ID
+            zone_id: Zone ID (None or empty string to clear)
+            zone_name: Human-readable zone name
+            master_zone_id: Parent master zone ID
+
+        Returns:
+            True if updated, False if ESP not found
+        """
+        mock = self._mock_esps.get(esp_id)
+        if not mock:
+            return False
+
+        # Update zone configuration
+        if zone_id:
+            mock.configure_zone(
+                zone_id=zone_id,
+                master_zone_id=master_zone_id or "god",
+                subzone_id=None
+            )
+            # Store zone_name for display
+            if zone_name:
+                self._zone_names[esp_id] = zone_name
+            elif esp_id in self._zone_names:
+                del self._zone_names[esp_id]
+        else:
+            # Clear zone assignment
+            mock.zone = None
+            if esp_id in self._zone_names:
+                del self._zone_names[esp_id]
+
+        logger.info(f"Updated zone for mock ESP {esp_id}: zone_id={zone_id}, zone_name={zone_name}")
+        return True
+
+    def has_mock_esp(self, esp_id: str) -> bool:
+        """Check if a mock ESP exists in the manager."""
+        return esp_id in self._mock_esps
+
     # =========================================================================
     # Sensor Operations
     # =========================================================================

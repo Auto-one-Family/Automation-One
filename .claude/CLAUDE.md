@@ -448,7 +448,27 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 - **Handler-Fehler:** Crashen nicht den Server (Error-Isolation im Subscriber)
 - **Validation-Fehler:** Werden als Warnings/Errors geloggt, Payload wird verworfen
 
+### Zone Naming Konventionen (Frontend + Server)
+- **zone_id:** Technische Zone-ID (lowercase, no spaces, z.B. `zelt_1`, `gewaechshaus_nord`)
+  - Wird in MQTT Topics verwendet: `kaiser/{kaiser_id}/zone/{zone_id}/...`
+  - Validierung: nur `[a-z0-9_-]` erlaubt
+- **zone_name:** Menschenlesbarer Name (z.B. `Zelt 1`, `Gewächshaus Nord`)
+  - Wird in UI angezeigt
+  - Frontend generiert automatisch `zone_id` aus `zone_name`
+- **Auto-Generierung:** `"Zelt 1"` → `"zelt_1"`, `"Gewächshaus Nord"` → `"gewaechshaus_nord"`
+- **Code-Locations:**
+  - Server: `El Servador/god_kaiser_server/src/schemas/zone.py:65-71` (Validierung)
+  - Frontend: `El Frontend/src/components/zones/ZoneAssignmentPanel.vue:130-140` (Generierung)
+
+### Mock ESP Architektur
+- **Dual-Storage:** Mock ESPs existieren sowohl im In-Memory Store als auch in PostgreSQL
+- **Erstellung:** `POST /v1/debug/mock-esp` → MockESPManager + ESPRepository
+- **Updates:** `PATCH /v1/esp/devices/{id}` → Normale ESP API (DB)
+- **Zone-Zuweisung:** `POST /v1/zone/devices/{id}/assign` → Funktioniert für Mock + Real ESPs
+- **Code-Location:** `El Servador/god_kaiser_server/src/api/v1/debug.py:98-147`
+
 **Vollständige Server-Dokumentation:** `.claude/CLAUDE_SERVER.md`
+**Frontend-Dokumentation:** `.claude/CLAUDE_FRONTEND.md`
 
 ---
 
@@ -464,8 +484,14 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-08
-**Version:** 4.4 (Industrial Production Implementation)
+**Letzte Aktualisierung:** 2025-12-24
+**Version:** 4.5 (Zone Naming & Mock ESP Updates)
+
+> **Änderungen in v4.5 (Zone Naming & Mock ESP Updates):**
+> - **Zone Naming Konventionen:** Zwei-Feld-System (`zone_id` technisch, `zone_name` menschenlesbar)
+> - **Mock ESP Architektur:** Dual-Storage (In-Memory + PostgreSQL) dokumentiert
+> - **Frontend-Integration:** Auto-Generierung von `zone_id` aus `zone_name`
+> - **Verweis auf CLAUDE_FRONTEND.md** hinzugefügt
 
 > **Änderungen in v4.4 (Industrial Production Implementation):**
 > - **Vollständiges Audit-Log-System implementiert:**

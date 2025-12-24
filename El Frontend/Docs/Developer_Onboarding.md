@@ -39,6 +39,7 @@ Auto-one/                           # Projekt-Root
 | **Datenbank-Models** | `Hierarchie.md` Section 2.1 | `El Servador/.../src/db/models/` |
 | **Auth-Flow verstehen** | `El Frontend/Docs/Admin_oder_user...md` | `El Frontend/src/stores/auth.ts` |
 | **MQTT-Protokoll** | `El Trabajante/docs/Mqtt_Protocoll.md` | - |
+| **Mock ESP Zone-Sync verstehen** | Section 8 | Server + Frontend Code |
 
 ---
 
@@ -703,9 +704,266 @@ await debugApi.setBatchSensorValues(espId, {
 
 ---
 
-## 8. WebSocket-Integration
+## 8. Mock ESP System & Zone-Sync Architektur
 
-### 8.1 MQTT Live-Log
+> **Kernkonzept:** Dieses Kapitel erklärt das Zusammenspiel zwischen Mock ESPs, Real ESPs und dem Server.
+> Es ist essentiell für jeden Entwickler, der an Zone-Features oder ESP-Management arbeitet.
+
+### 8.1 Das Grundprinzip: Server ist die einzige Wahrheit
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        GOD-KAISER SERVER                                    │
+│                    (PostgreSQL + In-Memory Stores)                          │
+│                                                                             │
+│   ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐  │
+│   │   PostgreSQL    │       │ MockESPManager  │       │   MQTT Broker   │  │
+│   │   (Persistenz)  │  <->  │  (In-Memory)    │       │   (Echtzeit)    │  │
+│   └─────────────────┘       └─────────────────┘       └─────────────────┘  │
+│          ↑                         ↑                         ↑             │
+│          │                         │                         │             │
+│   ═══════╪═════════════════════════╪═════════════════════════╪══════════   │
+│          │      REST API           │                   MQTT Protocol       │
+└──────────┼─────────────────────────┼─────────────────────────┼─────────────┘
+           │                         │                         │
+           ▼                         ▼                         ▼
+    ┌─────────────┐           ┌─────────────┐           ┌─────────────┐
+    │  Frontend   │           │  Frontend   │           │   ESP32     │
+    │  (Vue.js)   │           │  Debug API  │           │  (Hardware) │
+    └─────────────┘           └─────────────┘           └─────────────┘
+```
+
+**Kernregel:** Das Frontend hat KEINE eigene Datenbank. Es fragt IMMER den Server.
+
+### 8.2 Die zwei ESP-Typen: Real vs. Mock
+
+**Real ESP32 (Hardware)**
+| Eigenschaft | Wert |
+|-------------|------|
+| Speicherort | PostgreSQL (via Heartbeat-Handler registriert) |
+| Kommunikation | MQTT (bidirektional) |
+| Zone-Updates | Server → MQTT → ESP32 → ACK → Server → DB |
+| Datenfluss | ESP32 sendet Sensor-Daten → Server verarbeitet → speichert in DB |
+
+**Mock ESP32 (Simulation)**
+| Eigenschaft | Wert |
+|-------------|------|
+| Speicherort | PostgreSQL + MockESPManager (In-Memory) ← **DUAL STORAGE!** |
+| Kommunikation | REST API (kein echtes MQTT) |
+| Zone-Updates | Server → DB + MockESPManager (synchron) |
+| Datenfluss | Debug-API manipuliert Mock → publiziert via Server-MQTT |
+
+**Warum Dual Storage für Mocks?**
+
+| Speicher | Zweck | Daten |
+|----------|-------|-------|
+| PostgreSQL | Persistenz, Zone-APIs, Queries | zone_id, zone_name, status, device_id |
+| MockESPManager | Simulation, Debug-Features | Sensoren, Aktoren, system_state, heap_free |
+
+**Problem das wir gelöst haben:** Zone-Updates gingen nur an die DB, nicht an den MockESPManager.
+Das Frontend lud Mock-Daten aus dem In-Memory-Store → alte Zonen wurden angezeigt.
+
+### 8.3 Der Zone-Assignment Flow (Schritt für Schritt)
+
+**Frontend: Drag & Drop**
+
+```typescript
+// El Frontend/src/composables/useZoneDragDrop.ts
+async function handleDeviceDrop(event: ZoneDropEvent) {
+    const { device, toZoneId } = event
+    const deviceId = device.device_id || device.esp_id
+
+    // 1. API-Call an Server
+    const response = await zonesApi.assignZone(deviceId, {
+        zone_id: toZoneId,
+        zone_name: zoneIdToDisplayName(toZoneId)
+    })
+
+    // 2. Frontend refresht IMMER vom Server
+    await espStore.fetchAll()  // ← Holt neue Daten vom Server
+}
+```
+
+**Server: ZoneService**
+
+```python
+# El Servador/.../services/zone_service.py
+async def assign_zone(self, device_id, zone_id, zone_name, master_zone_id):
+    # 1. Device aus DB holen
+    device = await self.esp_repo.get_by_device_id(device_id)
+
+    # 2. DB aktualisieren (Source of Truth)
+    device.zone_id = zone_id
+    device.zone_name = zone_name
+    device.master_zone_id = master_zone_id
+
+    # 3. MQTT publizieren (für echte ESPs)
+    mqtt_sent = self._publish_zone_assignment(topic, payload)
+
+    # 4. NEU: MockESPManager synchronisieren (für Mock ESPs)
+    if _is_mock_esp(device_id):
+        await self._update_mock_esp_zone(device_id, zone_id, zone_name, master_zone_id)
+
+    return ZoneAssignResponse(success=True, ...)
+```
+
+**Server: MockESPManager Update**
+
+```python
+# El Servador/.../services/mock_esp_manager.py
+async def update_zone(self, esp_id, zone_id, zone_name, master_zone_id):
+    mock = self._mock_esps.get(esp_id)
+    if not mock:
+        return False
+
+    # In-Memory Zone aktualisieren
+    if zone_id:
+        mock.configure_zone(zone_id=zone_id, master_zone_id=master_zone_id)
+        self._zone_names[esp_id] = zone_name
+    else:
+        mock.zone = None
+        del self._zone_names[esp_id]
+
+    return True
+```
+
+**Frontend: Daten laden**
+
+```typescript
+// El Frontend/src/api/esp.ts
+async listDevices(): Promise<ESPDevice[]> {
+    // Parallel: Mock ESPs + DB Devices holen
+    const [mockEsps, dbDevices] = await Promise.all([
+        debugApi.listMockEsps(),      // In-Memory (mit zone_id, zone_name)
+        api.get('/esp/devices')        // PostgreSQL
+    ])
+
+    // Mocks haben Vorrang (reichere Daten: Sensoren, Aktoren, System-State)
+    const mockEspIds = new Set(mockEsps.map(m => m.esp_id))
+
+    // DB-Geräte filtern (keine Duplikate)
+    const filteredDbDevices = dbDevices.filter(d => !mockEspIds.has(d.device_id))
+
+    return [...normalizedMockEsps, ...filteredDbDevices]
+}
+```
+
+### 8.4 Datenfluss-Diagramm: Wer fragt wen?
+
+```
+                        ┌───────────────────────────────────────┐
+                        │           USER ACTION                 │
+                        │    (Drag ESP to Zone "Zelt 1")        │
+                        └───────────────────┬───────────────────┘
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│ FRONTEND (Vue.js)                                                          │
+│                                                                            │
+│  1. useZoneDragDrop.handleDeviceDrop()                                     │
+│     └─→ zonesApi.assignZone("ESP_MOCK_001", {zone_id: "zelt_1"})          │
+│                                                                            │
+│  2. Nach Erfolg: espStore.fetchAll()                                       │
+│     └─→ Alle Geräte neu vom Server laden                                   │
+└────────────────────────────────────────────────────────────────────────────┘
+                                            │
+                          POST /v1/zone/devices/ESP_MOCK_001/assign
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│ SERVER (FastAPI)                                                           │
+│                                                                            │
+│  ZoneService.assign_zone()                                                 │
+│  ├── 1. ESPRepository.get_by_device_id() → Device aus PostgreSQL          │
+│  ├── 2. device.zone_id = "zelt_1"       → DB Update                       │
+│  ├── 3. MQTT publish (für Real ESPs)    → mqtt_sent = False (Mock)        │
+│  └── 4. MockESPManager.update_zone()    → In-Memory Update ✓              │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+                                            │
+                        HTTP 200 { success: true, zone_id: "zelt_1" }
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│ FRONTEND (Vue.js) - REFRESH                                                │
+│                                                                            │
+│  espStore.fetchAll()                                                       │
+│  ├── GET /v1/debug/mock-esp  → MockESPManager (zone_id = "zelt_1" ✓)      │
+│  └── GET /v1/esp/devices     → PostgreSQL (zone_id = "zelt_1" ✓)          │
+│                                                                            │
+│  → UI zeigt jetzt korrekte Zone an                                         │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 8.5 Die goldenen Regeln für Entwickler
+
+**Regel 1: Server ist IMMER die Wahrheit**
+```
+❌ FALSCH: Frontend speichert Zone lokal und zeigt sie an
+✓ RICHTIG: Frontend ruft Server-API → wartet auf Erfolg → lädt neu vom Server
+```
+
+**Regel 2: Nach jeder Mutation → Refresh**
+```typescript
+// Nach CREATE, UPDATE, DELETE immer:
+await espStore.fetchAll()  // oder fetchDevice(id)
+```
+
+**Regel 3: Mock ESP = Dual Storage**
+
+Wenn du Mock-Daten änderst, musst du BEIDE aktualisieren:
+
+| Änderung | PostgreSQL | MockESPManager |
+|----------|------------|----------------|
+| Zone zuweisen | ✓ ZoneService | ✓ _update_mock_esp_zone() |
+| Sensor hinzufügen | ❌ (nicht in DB) | ✓ debug.py endpoint |
+| Status ändern | ✓ esp_repo | ✓ MockESPManager.set_state() |
+
+**Regel 4: API-Endpunkte kennen**
+
+| Daten | Endpoint | Speicher |
+|-------|----------|----------|
+| Alle ESPs | GET /v1/esp/devices | PostgreSQL |
+| Mock ESPs (reich) | GET /v1/debug/mock-esp | In-Memory |
+| Zone zuweisen | POST /v1/zone/devices/{id}/assign | DB + In-Memory |
+| Mock ESP erstellen | POST /v1/debug/mock-esp | DB + In-Memory |
+
+### 8.6 Typische Fehler und ihre Ursachen
+
+| Problem | Ursache | Lösung |
+|---------|---------|--------|
+| Zone wird nicht angezeigt nach Drag & Drop | MockESPManager wurde nicht aktualisiert | ZoneService muss `_update_mock_esp_zone()` aufrufen (bereits implementiert) |
+| Mock ESP verschwindet nach Server-Restart | MockESPManager ist In-Memory (nicht persistent) | Mock ESPs müssen nach Restart neu erstellt werden. DB-Eintrag bleibt (wird als "orphaned" markiert) |
+| Frontend zeigt veraltete Daten | `fetchAll()` wurde nicht aufgerufen nach Mutation | IMMER nach API-Calls den Store refreshen |
+
+### 8.7 Code-Locations Quick Reference
+
+| Komponente | Pfad |
+|------------|------|
+| Zone API (Server) | `El Servador/god_kaiser_server/src/api/v1/zone.py` |
+| Zone Service | `El Servador/god_kaiser_server/src/services/zone_service.py` |
+| MockESPManager | `El Servador/god_kaiser_server/src/services/mock_esp_manager.py` |
+| Debug API | `El Servador/god_kaiser_server/src/api/v1/debug.py` |
+| Frontend Zone API | `El Frontend/src/api/zones.ts` |
+| Frontend ESP API | `El Frontend/src/api/esp.ts` |
+| ESP Store | `El Frontend/src/stores/esp.ts` |
+| Drag & Drop | `El Frontend/src/composables/useZoneDragDrop.ts` |
+
+### 8.8 Test-Checkliste für neue Features
+
+Wenn du Features implementierst, die ESPs betreffen:
+
+- [ ] Funktioniert es mit Real ESPs? (DB + MQTT)
+- [ ] Funktioniert es mit Mock ESPs? (DB + MockESPManager)
+- [ ] Wird das Frontend nach der Änderung refresht?
+- [ ] Ist der Server die einzige Quelle der Wahrheit?
+- [ ] Werden bei Mocks beide Speicher synchron gehalten?
+
+---
+
+## 9. WebSocket-Integration
+
+### 9.1 MQTT Live-Log
 
 **Endpoint:** `/ws/realtime/{client_id}?token={jwt}`
 
@@ -734,7 +992,7 @@ ws.onmessage = (event) => {
 
 **Referenz-Implementation:** `El Frontend/src/views/MqttLogView.vue`
 
-### 8.2 Log-Stream (optional)
+### 9.2 Log-Stream (optional)
 
 **Endpoint:** `/ws/logs?token={jwt}&level={min_level}`
 
@@ -742,9 +1000,9 @@ Gleicher Connection Flow, aber für Server-Logs statt MQTT.
 
 ---
 
-## 9. Typische Aufgaben
+## 10. Typische Aufgaben
 
-### 9.1 Neue View hinzufügen
+### 10.1 Neue View hinzufügen
 
 1. **View erstellen:** `src/views/NewFeatureView.vue`
 2. **Route registrieren:** `src/router/index.ts`
@@ -758,14 +1016,14 @@ Gleicher Connection Flow, aber für Server-Logs statt MQTT.
    ```
 3. **Navigation hinzufügen:** In Sidebar-Komponente
 
-### 9.2 Neuen API-Endpoint anbinden
+### 10.2 Neuen API-Endpoint anbinden
 
 1. **API-Modul:** `src/api/newfeature.ts` erstellen
 2. **Types:** In `src/types/index.ts` oder eigene Datei
 3. **Store (optional):** `src/stores/newfeature.ts` wenn State-Management nötig
 4. **View:** Store/API in View importieren und nutzen
 
-### 9.3 Backend-Endpoint erweitern
+### 10.3 Backend-Endpoint erweitern
 
 1. **Schema:** `src/schemas/[resource].py`
 2. **Router:** `src/api/v1/[resource].py`
@@ -774,9 +1032,9 @@ Gleicher Connection Flow, aber für Server-Logs statt MQTT.
 
 ---
 
-## 10. Debugging & Troubleshooting
+## 11. Debugging & Troubleshooting
 
-### 10.1 System starten
+### 11.1 System starten
 
 ```bash
 # Terminal 1: Backend
@@ -791,7 +1049,7 @@ npm run dev
 mosquitto -v
 ```
 
-### 10.2 Häufige Probleme
+### 11.2 Häufige Probleme
 
 | Problem | Ursache | Lösung |
 |---------|---------|--------|
@@ -801,7 +1059,7 @@ mosquitto -v
 | Sensor-Wert nicht verarbeitet | Library fehlt | `sensor_libraries/active/` prüfen |
 | Logic Rule triggert nicht | Cooldown aktiv | `logic_execution_history` prüfen |
 
-### 10.3 Wichtige Logs
+### 11.3 Wichtige Logs
 
 **Server-Logs prüfen:**
 ```bash
@@ -822,29 +1080,29 @@ mosquitto -v
 
 ---
 
-## 11. Code-Qualitäts-Standards
+## 12. Code-Qualitäts-Standards
 
-### 11.1 TypeScript
+### 12.1 TypeScript
 
 - **Immer typisieren:** Keine `any` außer wenn unvermeidbar
 - **Interfaces vor Types:** `interface User {}` statt `type User = {}`
 - **Enums für feste Werte:** `enum UserRole { ADMIN = 'admin', ... }`
 
-### 11.2 Vue Components
+### 12.2 Vue Components
 
 - **Composition API:** Kein Options API
 - **`<script setup>`:** Immer verwenden
 - **Props typisieren:** `defineProps<{ userId: number }>()`
 - **Emits typisieren:** `defineEmits<{ (e: 'select', id: number): void }>()`
 
-### 11.3 Python/FastAPI
+### 12.3 Python/FastAPI
 
 - **Pydantic für alles:** Request/Response Bodies
 - **Type Hints:** Alle Funktionen typisieren
 - **Async:** Alle DB-Operationen async
 - **Dependency Injection:** `Depends()` für Auth, DB-Session
 
-### 11.4 Commits
+### 12.4 Commits
 
 - **Präfix:** `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
 - **Scope:** `feat(frontend):`, `fix(api):`
@@ -852,9 +1110,9 @@ mosquitto -v
 
 ---
 
-## 12. Nächste Schritte nach Onboarding
+## 13. Nächste Schritte nach Onboarding
 
-1. **System lokal starten** (Section 10.1)
+1. **System lokal starten** (Section 11.1)
 2. **Mit Setup-Flow vertraut machen** (ersten Admin erstellen)
 3. **Mock-ESP erstellen und testen**
 4. **Database Explorer durchklicken**

@@ -8,26 +8,27 @@ Das Satelliten-Cards System visualisiert Sensoren und Aktoren als **kompakte Kar
 
 ---
 
-## ⚠️ IST-Zustand vs. SOLL-Zustand (Code-verifiziert: 20.12.2025)
+## ✅ IST-Zustand vs. SOLL-Zustand (Code-verifiziert: 23.12.2025)
 
-| Komponente | IST-Zustand | SOLL-Zustand | Gap |
-|------------|-------------|--------------|-----|
-| **SensorSatellite.vue** | ✅ 100% fertig (271 LOC) | ✅ | - |
-| **ActuatorSatellite.vue** | ✅ 100% fertig (289 LOC) | ✅ | - |
-| **ConnectionLines.vue** | ✅ 100% fertig (268 LOC) | ✅ | Logic-Parsing fehlt |
-| **ESPCard.vue Integration** | ❌ **0%** | ✅ Satellites um Card | ⚠️ **Komplett fehlt** |
-| **Orbital-Layout CSS** | ❌ **0%** | ✅ Positions-System | ⚠️ **Nicht implementiert** |
-| **WebSocket sensor_data** | ❌ **Nicht subscribed** | ✅ Live-Updates | ⚠️ **Fehlt in esp.ts Store** |
+| Komponente | IST-Zustand | SOLL-Zustand | Status |
+|------------|-------------|--------------|--------|
+| **SensorSatellite.vue** | ✅ 100% fertig (273 LOC) | ✅ | ✅ Implementiert |
+| **ActuatorSatellite.vue** | ✅ 100% fertig (292 LOC) | ✅ | ✅ Implementiert |
+| **ConnectionLines.vue** | ✅ 100% fertig (271 LOC) | ✅ | ✅ Implementiert (Logic-Parsing TODO) |
+| **ESPOrbitalLayout.vue** | ✅ 100% fertig (794 LOC) | ✅ | ✅ Vollständig implementiert |
+| **Orbital-Layout CSS** | ✅ 100% | ✅ Positions-System | ✅ Responsive mit Mobile/Tablet/Desktop |
+| **WebSocket sensor_data** | ✅ Implementiert | ✅ Live-Updates | ✅ In esp.ts Store aktiv |
+| **DevicesView Integration** | ✅ Verwendet | ✅ | ✅ Zeile 16+326 |
 
 ### Status-Zusammenfassung
 
 ```
 Komponenten:     ████████████████████████████  100%  ✅ Fertig
-Integration:     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  0%    ❌ Nicht implementiert
-WebSocket:       ████████░░░░░░░░░░░░░░░░░░░░  30%   🔄 Nur esp_health/status
+Integration:     ████████████████████████████  100%  ✅ In DevicesView.vue aktiv
+WebSocket:       ████████████████████████████  100%  ✅ sensor_data, actuator_status
 ```
 
-**Fazit:** Die Satelliten-Komponenten existieren und sind funktionsfähig, werden aber **nirgendwo verwendet**. `ESPCard.vue` enthält keine Satelliten-Imports.
+**Fazit:** Das Satelliten-System ist **vollständig implementiert**. `ESPOrbitalLayout.vue` integriert alle Satellites und wird in `DevicesView.vue` für die kompakte Kartenansicht verwendet.
 
 ---
 
@@ -885,62 +886,69 @@ Mock ESPs können:
 
 ---
 
-## ⚠️ Anhang B: Implementierungs-Gaps (Code-Audit 20.12.2025)
+## ✅ Anhang B: Implementierungs-Status (Code-Audit 23.12.2025)
 
-### B.1 Fehlende Integration in ESPCard.vue
+### B.1 ESPOrbitalLayout Integration
 
-Die `ESPCard.vue` (413 LOC) enthält **keine Satelliten-Komponenten**:
+Die `ESPOrbitalLayout.vue` (794 LOC) enthält **alle Satelliten-Komponenten**:
 
 ```typescript
-// NICHT vorhanden in ESPCard.vue:
-import SensorSatellite from './SensorSatellite.vue'    // ❌ FEHLT
-import ActuatorSatellite from './ActuatorSatellite.vue'  // ❌ FEHLT
-import ConnectionLines from './ConnectionLines.vue'     // ❌ FEHLT
+// VORHANDEN in ESPOrbitalLayout.vue (Zeile 18-21):
+import ESPCard from './ESPCard.vue'              // ✅ Zentrale ESP-Karte
+import SensorSatellite from './SensorSatellite.vue'    // ✅ Sensor-Satelliten
+import ActuatorSatellite from './ActuatorSatellite.vue'  // ✅ Aktor-Satelliten
+import ConnectionLines from './ConnectionLines.vue'     // ✅ Verbindungslinien
 ```
 
-**Aktueller ESPCard-Inhalt:**
-- Header mit ID + Badges
-- Info-Rows (Zone, Sensoren, Aktoren - nur Counts)
-- Action-Buttons (Details, Heartbeat, Safe-Mode, Delete)
+**Features:**
+- Responsive Orbital-Layout (Mobile: Linear Stack, Tablet+: Orbital)
+- CSS Custom Properties für dynamische Positionierung
+- Sensor-Satelitten links (180°-360°), Aktor-Satelliten rechts (0°-180°)
+- Cubic-Bezier Animationen für Desktop
 
-**Kein Orbital-Layout, keine Satelliten!**
+### B.2 WebSocket Subscriptions - KORREKT
 
-### B.2 Fehlende WebSocket Subscriptions
-
-In `src/stores/esp.ts` (551 LOC):
+In `src/stores/esp.ts` (Zeile 47-52):
 
 ```typescript
-// IST (Zeile 42-48):
+// AKTUELL IMPLEMENTIERT:
 const ws = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
   filters: {
-    types: ['esp_health', 'esp_status'],  // ❌ sensor_data fehlt!
-  },
-})
-
-// SOLL:
-const ws = useWebSocket({
-  filters: {
-    types: ['esp_health', 'esp_status', 'sensor_data', 'actuator_status'],
-  },
+    types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert']  // ✅ Vollständig
+  }
 })
 ```
 
-### B.3 Nächste Schritte für Vollständige Integration
+### B.3 DevicesView Integration
 
-| Priorität | Task | Datei | Geschätzte Zeit |
-|-----------|------|-------|-----------------|
-| 🔴 1 | Satelliten-Import in ESPCard | `ESPCard.vue` | 0.5d |
-| 🔴 2 | Orbital-Layout CSS | `ESPCard.vue` | 1d |
-| 🔴 3 | Positions-Berechnung | `ESPCard.vue` | 1d |
-| 🟡 4 | WebSocket sensor_data | `esp.ts` | 0.5d |
-| 🟡 5 | WebSocket actuator_status | `esp.ts` | 0.5d |
-| 🟢 6 | ConnectionLines Integration | `ESPCard.vue` | 1d |
+In `src/views/DevicesView.vue`:
+- Import: Zeile 16
+- Verwendung: Zeile 326 (compactMode: true)
 
-**Gesamtaufwand:** ~4-5 Tage
+### B.4 Exports in index.ts
+
+Alle Komponenten werden korrekt exportiert (`src/components/esp/index.ts`, Zeile 8-13):
+```typescript
+export { default as ESPCard } from './ESPCard.vue'
+export { default as SensorValueCard } from './SensorValueCard.vue'
+export { default as ESPOrbitalLayout } from './ESPOrbitalLayout.vue'
+export { default as SensorSatellite } from './SensorSatellite.vue'
+export { default as ActuatorSatellite } from './ActuatorSatellite.vue'
+export { default as ConnectionLines } from './ConnectionLines.vue'
+```
+
+### B.5 Verbleibende TODOs
+
+| Priorität | Task | Status |
+|-----------|------|--------|
+| 🟢 | Logic-Rules Parsing für ConnectionLines | Vorbereitet (Zeile 217-221) |
+| 🟢 | Cross-ESP Connection Visualization | Infrastruktur vorhanden |
 
 ---
 
-**Letzte Verifizierung:** 20. Dezember 2025  
-**Dokumentation basiert auf:** Git master branch  
-**Code-Analyse durchgeführt:** 20.12.2025 (aktualisiert)
+**Letzte Verifizierung:** 23. Dezember 2025
+**Dokumentation basiert auf:** Git master branch
+**Code-Analyse durchgeführt:** 23.12.2025 (vollständige Revision)
 

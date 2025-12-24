@@ -127,6 +127,12 @@ export default {
         'xl': '0.75rem',
         '2xl': '1rem',
       },
+
+      // === CUSTOM BREAKPOINTS FOR LARGER SCREENS ===
+      screens: {
+        '3xl': '1600px',
+        '4xl': '1920px',
+      },
     },
   },
   plugins: [],

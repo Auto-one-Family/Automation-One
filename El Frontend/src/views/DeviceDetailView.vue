@@ -288,7 +288,9 @@ function quickEditSensor(gpio: number) {
         </div>
         <div class="flex flex-wrap gap-2 mt-1 text-sm" style="color: var(--color-text-muted)">
           <span>ESP32 Geräte-Details</span>
-          <span v-if="device?.zone_id">• Zone: {{ device.zone_id }}</span>
+          <span v-if="device?.zone_name || device?.zone_id" :title="device.zone_id ? `Zone-ID: ${device.zone_id}` : undefined">
+            • Zone: {{ device.zone_name || device.zone_id }}
+          </span>
           <span v-if="device?.hardware_type">• Hardware: {{ device.hardware_type }}</span>
         </div>
       </div>
@@ -396,6 +398,7 @@ function quickEditSensor(gpio: number) {
         :current-zone-id="device.zone_id || undefined"
         :current-zone-name="device.zone_name || undefined"
         :current-master-zone-id="(device as any).master_zone_id || undefined"
+        :is-mock="isMock"
         @zone-updated="handleZoneUpdate"
       />
 

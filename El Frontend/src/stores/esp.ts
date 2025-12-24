@@ -122,7 +122,23 @@ export const useEspStore = defineStore('esp', () => {
     error.value = null
 
     try {
-      devices.value = await espApi.listDevices(params)
+      const fetchedDevices = await espApi.listDevices(params)
+
+      // Deduplicate by device ID (safety net for API-level deduplication failures)
+      const seen = new Set<string>()
+      const dedupedDevices: ESPDevice[] = []
+
+      for (const device of fetchedDevices) {
+        const id = getDeviceId(device)
+        if (id && !seen.has(id)) {
+          seen.add(id)
+          dedupedDevices.push(device)
+        } else if (id) {
+          console.warn(`[ESP Store] Duplicate device filtered: ${id}`)
+        }
+      }
+
+      devices.value = dedupedDevices
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch ESP devices')
       throw err
@@ -163,7 +179,18 @@ export const useEspStore = defineStore('esp', () => {
 
     try {
       const device = await espApi.createDevice(config)
-      devices.value.push(device)
+      const deviceId = getDeviceId(device)
+
+      // Check if device already exists (prevent duplicates)
+      const existingIndex = devices.value.findIndex(d => getDeviceId(d) === deviceId)
+      if (existingIndex !== -1) {
+        // Replace existing with new data
+        devices.value[existingIndex] = device
+        console.debug(`[ESP Store] Device ${deviceId} already exists, updated`)
+      } else {
+        devices.value.push(device)
+      }
+
       return device
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to create ESP device')
@@ -203,15 +230,24 @@ export const useEspStore = defineStore('esp', () => {
 
     try {
       await espApi.deleteDevice(deviceId)
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { status?: number } }
+
+      // If 404, device is already gone - still remove from local list
+      if (axiosError.response?.status === 404) {
+        console.warn(`[ESP Store] Device ${deviceId} not found on server, removing from local list`)
+      } else {
+        error.value = extractErrorMessage(err, `Fehler beim Löschen von ${deviceId}`)
+        throw err
+      }
+    } finally {
+      // Always remove from local list (handles orphaned devices)
       devices.value = devices.value.filter(d => getDeviceId(d) !== deviceId)
 
       if (selectedDeviceId.value === deviceId) {
         selectedDeviceId.value = null
       }
-    } catch (err: unknown) {
-      error.value = extractErrorMessage(err, `Failed to delete device ${deviceId}`)
-      throw err
-    } finally {
+
       isLoading.value = false
     }
   }
@@ -262,7 +298,14 @@ export const useEspStore = defineStore('esp', () => {
       // Refresh device data
       await fetchDevice(deviceId)
     } catch (err: unknown) {
-      error.value = extractErrorMessage(err, 'Failed to trigger heartbeat')
+      const axiosError = err as { response?: { status?: number } }
+
+      // Special handling for orphaned mock devices
+      if (axiosError.response?.status === 404) {
+        error.value = `Mock ESP "${deviceId}" ist verwaist (nur in DB, nicht im Debug-Store). Bitte löschen und neu erstellen.`
+      } else {
+        error.value = extractErrorMessage(err, 'Failed to trigger heartbeat')
+      }
       throw err
     }
   }
@@ -279,7 +322,14 @@ export const useEspStore = defineStore('esp', () => {
       // Refresh device data
       await fetchDevice(deviceId)
     } catch (err: unknown) {
-      error.value = extractErrorMessage(err, 'Failed to set state')
+      const axiosError = err as { response?: { status?: number } }
+
+      // Special handling for orphaned mock devices
+      if (axiosError.response?.status === 404) {
+        error.value = `Mock ESP "${deviceId}" ist verwaist (nur in DB, nicht im Debug-Store). Bitte löschen und neu erstellen.`
+      } else {
+        error.value = extractErrorMessage(err, 'Failed to set state')
+      }
       throw err
     }
   }

@@ -16,11 +16,12 @@ export type SortOrder = 'asc' | 'desc'
 export type ColumnType = 'string' | 'integer' | 'float' | 'boolean' | 'datetime' | 'json' | 'uuid'
 
 export interface ColumnSchema {
-  name: string
+  name: string            // Technical column name (used for data access)
+  label?: string          // Human-readable label (optional, defaults to name)
   type: ColumnType
   nullable: boolean
   primary_key: boolean
-  foreign_key: string | null
+  foreign_key?: string | null
 }
 
 export interface TableSchema {

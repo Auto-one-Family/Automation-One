@@ -1,8 +1,8 @@
 # Individual Views - Detailübersicht
 
-**Erstellt:** 2025-12-19  
-**Letztes Update:** 2025-12-20 (WebSocket-Integration verifiziert)  
-**Status:** ✅ Schnellereferenz für alle 16 Views
+**Erstellt:** 2025-12-19
+**Letztes Update:** 2025-12-23 (Vollständige Synchronisation mit Code)
+**Status:** ✅ Schnellereferenz für alle 18 Views (inkl. 2 Legacy-Redirects)
 
 ---
 

@@ -22,6 +22,10 @@ MQTT Protocol:
 References:
 - El Trabajante/docs/system-flows/08-zone-assignment-flow.md
 - .claude/README.md (Developer Briefing)
+
+Mock ESP Integration:
+- Zone assignments also update the in-memory MockESPManager
+- This ensures consistency between DB and the mock device store
 """
 
 import time
@@ -35,6 +39,15 @@ from ..mqtt.publisher import Publisher
 from ..schemas.zone import ZoneAssignResponse, ZoneRemoveResponse
 
 logger = get_logger(__name__)
+
+
+def _is_mock_esp(device_id: str) -> bool:
+    """Check if device ID indicates a mock ESP."""
+    return (
+        device_id.startswith('ESP_MOCK_') or
+        device_id.startswith('MOCK_') or
+        'MOCK' in device_id
+    )
 
 
 class ZoneService:
@@ -111,36 +124,49 @@ class ZoneService:
             "timestamp": int(time.time()),
         }
 
-        # 4. Publish via MQTT (QoS 1 - At least once)
+        # 4. Update ESP record with zone assignment
+        # NOTE: We update DB regardless of MQTT status because:
+        # - Mock ESPs don't have MQTT connections
+        # - Real ESPs will confirm via zone/ack topic
+        device.zone_id = zone_id
+        device.master_zone_id = master_zone_id
+        device.zone_name = zone_name
+        device.kaiser_id = self.kaiser_id
+
+        # Store pending assignment in metadata for tracking
+        if device.device_metadata is None:
+            device.device_metadata = {}
+        device.device_metadata["pending_zone_assignment"] = {
+            "zone_id": zone_id,
+            "master_zone_id": master_zone_id,
+            "zone_name": zone_name,
+            "sent_at": int(time.time()),
+        }
+
+        # 5. Publish via MQTT (QoS 1 - At least once)
         mqtt_sent = self._publish_zone_assignment(topic, payload)
 
         if mqtt_sent:
-            # 5. Update ESP record with pending zone assignment
-            device.zone_id = zone_id
-            device.master_zone_id = master_zone_id
-            device.zone_name = zone_name
-            device.kaiser_id = self.kaiser_id
-
-            # Store pending assignment in metadata for tracking
-            if device.device_metadata is None:
-                device.device_metadata = {}
-            device.device_metadata["pending_zone_assignment"] = {
-                "zone_id": zone_id,
-                "master_zone_id": master_zone_id,
-                "zone_name": zone_name,
-                "sent_at": int(time.time()),
-            }
-
             logger.info(
                 f"Zone assignment sent to {device_id}: "
                 f"zone_id={zone_id}, master_zone_id={master_zone_id}"
             )
         else:
-            logger.error(f"Zone assignment MQTT publish failed for {device_id}")
+            logger.warning(
+                f"Zone assignment MQTT publish failed for {device_id} "
+                f"(DB updated, ESP may be offline or mock device)"
+            )
 
+        # 6. Update MockESPManager if this is a mock device
+        # This ensures the in-memory store stays in sync with the database
+        if _is_mock_esp(device_id):
+            await self._update_mock_esp_zone(device_id, zone_id, zone_name, master_zone_id)
+
+        # Return success=True since DB was updated
+        # mqtt_sent indicates whether ESP received the assignment via MQTT
         return ZoneAssignResponse(
-            success=mqtt_sent,
-            message="Zone assignment sent to ESP" if mqtt_sent else "MQTT publish failed",
+            success=True,  # DB update succeeded
+            message="Zone assignment saved" if mqtt_sent else "Zone assignment saved (MQTT offline)",
             device_id=device_id,
             zone_id=zone_id,
             master_zone_id=master_zone_id,
@@ -185,17 +211,38 @@ class ZoneService:
             "timestamp": int(time.time()),
         }
 
-        # 4. Publish via MQTT
+        # 4. Update ESP record to clear zone assignment
+        # NOTE: We update DB regardless of MQTT status because:
+        # - Mock ESPs don't have MQTT connections
+        # - Real ESPs will confirm via zone/ack topic
+        device.zone_id = None
+        device.master_zone_id = None
+        device.zone_name = None
+
+        # Clear pending assignment from metadata
+        if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
+            del device.device_metadata["pending_zone_assignment"]
+
+        # 5. Publish via MQTT
         mqtt_sent = self._publish_zone_assignment(topic, payload)
 
         if mqtt_sent:
             logger.info(f"Zone removal sent to {device_id}")
         else:
-            logger.error(f"Zone removal MQTT publish failed for {device_id}")
+            logger.warning(
+                f"Zone removal MQTT publish failed for {device_id} "
+                f"(DB updated, ESP may be offline or mock device)"
+            )
 
+        # 6. Update MockESPManager if this is a mock device
+        # This ensures the in-memory store stays in sync with the database
+        if _is_mock_esp(device_id):
+            await self._update_mock_esp_zone(device_id, None, None, None)
+
+        # Return success=True since DB was updated
         return ZoneRemoveResponse(
-            success=mqtt_sent,
-            message="Zone removal sent to ESP" if mqtt_sent else "MQTT publish failed",
+            success=True,  # DB update succeeded
+            message="Zone removed" if mqtt_sent else "Zone removed (MQTT offline)",
             device_id=device_id,
             mqtt_topic=topic,
             mqtt_sent=mqtt_sent,
@@ -339,3 +386,44 @@ class ZoneService:
             logger.error(f"Zone assignment publish failed to {topic}")
 
         return success
+
+    async def _update_mock_esp_zone(
+        self,
+        device_id: str,
+        zone_id: Optional[str],
+        zone_name: Optional[str],
+        master_zone_id: Optional[str],
+    ) -> None:
+        """
+        Update zone in MockESPManager for mock devices.
+
+        This ensures the in-memory mock ESP store stays synchronized
+        with the database when zones are assigned via the Zone API.
+
+        Args:
+            device_id: ESP device ID
+            zone_id: Zone ID (None to clear)
+            zone_name: Human-readable zone name
+            master_zone_id: Parent master zone ID
+        """
+        try:
+            from .mock_esp_manager import MockESPManager
+            manager = await MockESPManager.get_instance()
+
+            if manager.has_mock_esp(device_id):
+                await manager.update_zone(
+                    esp_id=device_id,
+                    zone_id=zone_id,
+                    zone_name=zone_name,
+                    master_zone_id=master_zone_id,
+                )
+                logger.debug(f"Updated MockESPManager zone for {device_id}")
+            else:
+                logger.debug(
+                    f"Mock ESP {device_id} not found in MockESPManager "
+                    "(may be orphaned or server restarted)"
+                )
+        except Exception as e:
+            # Don't fail the zone assignment if mock update fails
+            # The DB update is the source of truth
+            logger.warning(f"Failed to update MockESPManager for {device_id}: {e}")

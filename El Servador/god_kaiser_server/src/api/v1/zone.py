@@ -63,9 +63,8 @@ router = APIRouter(prefix="/v1/zone", tags=["zone"])
     for WebSocket `zone_assignment` events for confirmation.
     """,
     responses={
-        200: {"description": "Zone assignment sent to ESP"},
+        200: {"description": "Zone assignment saved (check mqtt_sent for MQTT status)"},
         404: {"description": "ESP device not found"},
-        500: {"description": "MQTT publish failed"},
     },
 )
 async def assign_zone(
@@ -101,18 +100,20 @@ async def assign_zone(
             zone_name=request.zone_name,
         )
 
-        # Commit the pending zone assignment to DB
+        # Commit the zone assignment to DB
         await db.commit()
 
-        logger.info(
-            f"Zone assignment initiated for {esp_id} by {current_user.username}: "
-            f"zone_id={request.zone_id}"
-        )
-
-        if not result.mqtt_sent:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="MQTT publish failed. ESP may be offline.",
+        if result.mqtt_sent:
+            logger.info(
+                f"Zone assignment for {esp_id} by {current_user.username}: "
+                f"zone_id={request.zone_id} (MQTT sent)"
+            )
+        else:
+            # Log warning but don't fail - DB was updated, MQTT can be retried
+            # This is expected for Mock ESPs or offline devices
+            logger.warning(
+                f"Zone assignment for {esp_id} by {current_user.username}: "
+                f"zone_id={request.zone_id} (MQTT offline - DB updated)"
             )
 
         return result
@@ -137,9 +138,8 @@ async def assign_zone(
     **Note:** ESP confirmation is asynchronous.
     """,
     responses={
-        200: {"description": "Zone removal sent to ESP"},
+        200: {"description": "Zone removed (check mqtt_sent for MQTT status)"},
         404: {"description": "ESP device not found"},
-        500: {"description": "MQTT publish failed"},
     },
 )
 async def remove_zone(
@@ -164,14 +164,18 @@ async def remove_zone(
     try:
         result = await zone_service.remove_zone(device_id=esp_id)
 
-        logger.info(
-            f"Zone removal initiated for {esp_id} by {current_user.username}"
-        )
+        # Commit the zone removal to DB
+        await db.commit()
 
-        if not result.mqtt_sent:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="MQTT publish failed. ESP may be offline.",
+        if result.mqtt_sent:
+            logger.info(
+                f"Zone removal for {esp_id} by {current_user.username} (MQTT sent)"
+            )
+        else:
+            # Log warning but don't fail - DB was updated, MQTT can be retried
+            # This is expected for Mock ESPs or offline devices
+            logger.warning(
+                f"Zone removal for {esp_id} by {current_user.username} (MQTT offline - DB updated)"
             )
 
         return result

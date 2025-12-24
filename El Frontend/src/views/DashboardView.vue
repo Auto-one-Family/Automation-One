@@ -1,38 +1,40 @@
 <script setup lang="ts">
 /**
  * DashboardView
- * 
+ *
  * Main dashboard with:
  * - StatCards for key metrics
- * - Device overview with ESPCards
- * - Quick actions
- * - System status
+ * - Zone-grouped ESP overview with drag & drop
+ * - ESPOrbitalLayout for visual device display (within zones)
  */
 
-import { onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
-import { 
-  Cpu, 
-  Thermometer, 
-  Power, 
-  Activity, 
+import { useZoneDragDrop } from '@/composables'
+import {
+  Cpu,
+  Thermometer,
+  Power,
   AlertTriangle,
   Workflow,
-  ArrowRight,
-  Plus
+  Plus,
+  Filter,
+  Layers
 } from 'lucide-vue-next'
 
 // Components
 import StatCard from '@/components/dashboard/StatCard.vue'
-import Badge from '@/components/common/Badge.vue'
-import { LoadingState, EmptyState, ErrorState } from '@/components/common'
-
-// Utils
-import { getStateInfo } from '@/utils/labels'
-import { formatRelativeTime, formatUptimeShort } from '@/utils/formatters'
+import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
+import ZoneGroup from '@/components/zones/ZoneGroup.vue'
+import { LoadingState, EmptyState } from '@/components/common'
 
 const espStore = useEspStore()
+const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
+
+// Filter state
+const filterType = ref<'all' | 'mock' | 'real'>('all')
+const filterStatus = ref<'all' | 'online' | 'offline'>('all')
 
 onMounted(() => {
   espStore.fetchAll()
@@ -60,7 +62,7 @@ const stats = computed(() => {
     }
     return sum // Real ESPs don't have actuator state in device object
   }, 0)
-  
+
   return {
     devices: devices.length,
     online: onlineCount,
@@ -76,7 +78,7 @@ const emergencyCount = computed(() =>
     const deviceId = espStore.getDeviceId(device)
     if (espStore.isMock(deviceId)) {
       const mockDevice = device as any
-      return mockDevice.system_state === 'SAFE_MODE' || 
+      return mockDevice.system_state === 'SAFE_MODE' ||
         mockDevice.system_state === 'ERROR' ||
         mockDevice.actuators?.some((a: any) => a.emergency_stopped)
     }
@@ -84,10 +86,51 @@ const emergencyCount = computed(() =>
   }).length
 )
 
-// Recent devices (last 5)
-const recentDevices = computed(() => 
-  espStore.devices.slice(0, 5)
-)
+// Filtered ESPs
+const filteredEsps = computed(() => {
+  let esps = espStore.devices
+
+  // Filter by type
+  if (filterType.value === 'mock') {
+    esps = esps.filter(e => espStore.isMock(espStore.getDeviceId(e)))
+  } else if (filterType.value === 'real') {
+    esps = esps.filter(e => !espStore.isMock(espStore.getDeviceId(e)))
+  }
+
+  // Filter by status
+  if (filterStatus.value === 'online') {
+    esps = esps.filter(e => e.status === 'online' || e.connected === true)
+  } else if (filterStatus.value === 'offline') {
+    esps = esps.filter(e => e.status === 'offline' || e.connected === false)
+  }
+
+  return esps
+})
+
+// Counts for filter badges
+const counts = computed(() => ({
+  all: espStore.devices.length,
+  mock: espStore.mockDevices.length,
+  real: espStore.realDevices.length,
+  online: espStore.onlineDevices.length,
+  offline: espStore.offlineDevices.length,
+}))
+
+// Group filtered ESPs by zone
+const zoneGroups = computed(() => {
+  return groupDevicesByZone(filteredEsps.value)
+})
+
+// Handle zone drop event
+async function onDeviceDropped(payload: {
+  device: any
+  fromZoneId: string | null
+  toZoneId: string
+}) {
+  await handleDeviceDrop(payload)
+  // Refresh devices after zone change
+  await espStore.fetchAll()
+}
 </script>
 
 <template>
@@ -151,220 +194,127 @@ const recentDevices = computed(() =>
       />
     </div>
 
-    <!-- Main Content Grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Left Column: Devices -->
-      <div class="lg:col-span-2 space-y-6">
-        <!-- Quick Actions -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="font-semibold" style="color: var(--color-text-primary)">Schnellzugriff</h3>
-          </div>
-          <div class="card-body">
-            <div class="flex flex-wrap gap-3">
-              <RouterLink to="/devices" class="btn-primary">
-                <Cpu class="w-4 h-4" />
-                ESP-Geräte verwalten
-              </RouterLink>
-              <RouterLink to="/mqtt-log" class="btn-secondary">
-                <Activity class="w-4 h-4" />
-                MQTT-Log
-              </RouterLink>
-              <RouterLink to="/sensors" class="btn-secondary">
-                <Thermometer class="w-4 h-4" />
-                Sensoren
-              </RouterLink>
-              <RouterLink to="/actuators" class="btn-secondary">
-                <Power class="w-4 h-4" />
-                Aktoren
-              </RouterLink>
-            </div>
-          </div>
-        </div>
-
-        <!-- Active Devices -->
-        <div class="card water-reflection">
-          <div class="card-header flex items-center justify-between">
-            <h3 class="font-semibold" style="color: var(--color-text-primary)">Aktive Geräte</h3>
-            <RouterLink to="/devices" class="text-link">
-              Alle anzeigen
-              <ArrowRight class="w-4 h-4 inline ml-1" />
-            </RouterLink>
-          </div>
-          <div class="card-body">
-            <!-- Loading -->
-            <LoadingState v-if="espStore.isLoading" text="Lade Geräte..." />
-            
-            <!-- Error -->
-            <ErrorState 
-              v-else-if="espStore.error" 
-              :message="espStore.error"
-              @retry="espStore.fetchAll"
-            />
-            
-            <!-- Empty -->
-            <EmptyState
-              v-else-if="espStore.devices.length === 0"
-              :icon="Plus"
-              title="Keine Geräte"
-              description="Erstellen Sie Ihr erstes ESP-Gerät, um mit dem Testen zu beginnen."
-              action-text="ESP erstellen"
-              @action="$router.push('/devices')"
-            />
-            
-            <!-- Device List -->
-            <div v-else class="space-y-3">
-              <RouterLink
-                v-for="device in recentDevices"
-                :key="espStore.getDeviceId(device)"
-                :to="`/devices/${espStore.getDeviceId(device)}`"
-                class="device-row"
-              >
-                <div class="flex items-center gap-3">
-                  <span
-                    :class="[
-                      'status-dot',
-                      (device.status === 'online' || device.connected) && 
-                        ((espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'OPERATIONAL') || 
-                         (!espStore.isMock(espStore.getDeviceId(device)) && device.status === 'online'))
-                        ? 'status-online'
-                        : (espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'SAFE_MODE')
-                        ? 'status-warning'
-                        : (espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'ERROR') || device.status === 'error'
-                        ? 'status-error'
-                        : 'status-offline'
-                    ]"
-                  />
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium font-mono" style="color: var(--color-text-primary)">
-                        {{ espStore.getDeviceId(device) }}
-                      </span>
-                      <Badge :variant="espStore.isMock(espStore.getDeviceId(device)) ? 'mock' : 'real'" size="sm">
-                        {{ espStore.isMock(espStore.getDeviceId(device)) ? 'MOCK' : 'REAL' }}
-                      </Badge>
-                    </div>
-                    <p class="text-xs" style="color: var(--color-text-muted)">
-                      {{ device.sensor_count ?? (device as any).sensors?.length ?? 0 }} Sensoren · 
-                      {{ device.actuator_count ?? (device as any).actuators?.length ?? 0 }} Aktoren
-                      <span v-if="device.zone_id"> · {{ device.zone_id }}</span>
-                    </p>
-                  </div>
-                </div>
-                <Badge 
-                  :variant="espStore.isMock(espStore.getDeviceId(device)) 
-                    ? (getStateInfo((device as any).system_state).variant as any)
-                    : (device.status === 'online' ? 'success' : device.status === 'error' ? 'danger' : 'gray')"
-                  :pulse="(device.status === 'online' || device.connected) && 
-                    ((espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'OPERATIONAL') || 
-                     (!espStore.isMock(espStore.getDeviceId(device)) && device.status === 'online'))"
-                  dot
-                  size="sm"
-                >
-                  {{
-                    espStore.isMock(espStore.getDeviceId(device))
-                      ? getStateInfo((device as any).system_state).label
-                      : device.status || 'unknown'
-                  }}
-                </Badge>
-              </RouterLink>
-            </div>
-          </div>
-          <div v-if="espStore.devices.length > 5" class="card-footer">
-            <RouterLink to="/devices" class="text-link text-sm">
-              {{ espStore.devices.length - 5 }} weitere Geräte anzeigen →
-            </RouterLink>
-          </div>
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-4">
+      <!-- Type Filter -->
+      <div class="filter-group">
+        <span class="filter-label">Typ:</span>
+        <div class="filter-buttons">
+          <button
+            :class="['filter-btn', filterType === 'all' ? 'filter-btn--active' : '']"
+            @click="filterType = 'all'"
+          >
+            Alle ({{ counts.all }})
+          </button>
+          <button
+            :class="['filter-btn', filterType === 'mock' ? 'filter-btn--active filter-btn--mock' : '']"
+            @click="filterType = 'mock'"
+          >
+            Mock ({{ counts.mock }})
+          </button>
+          <button
+            :class="['filter-btn', filterType === 'real' ? 'filter-btn--active filter-btn--real' : '']"
+            @click="filterType = 'real'"
+          >
+            Real ({{ counts.real }})
+          </button>
         </div>
       </div>
 
-      <!-- Right Column: Status & Info -->
-      <div class="space-y-6">
-        <!-- System Status -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="font-semibold" style="color: var(--color-text-primary)">System-Status</h3>
-          </div>
-          <div class="card-body space-y-4">
-            <div class="status-row">
-              <span style="color: var(--color-text-secondary)">Backend</span>
-              <Badge variant="success" dot pulse size="sm">Verbunden</Badge>
-            </div>
-            <div class="status-row">
-              <span style="color: var(--color-text-secondary)">MQTT Broker</span>
-              <Badge variant="success" dot pulse size="sm">Aktiv</Badge>
-            </div>
-            <div class="status-row">
-              <span style="color: var(--color-text-secondary)">Datenbank</span>
-              <Badge variant="success" dot size="sm">OK</Badge>
-            </div>
-            <div class="status-row">
-              <span style="color: var(--color-text-secondary)">Geräte Online</span>
-              <span style="color: var(--color-text-primary)" class="font-medium">
-                {{ stats.online }} / {{ stats.devices }}
-              </span>
-            </div>
-          </div>
+      <!-- Status Filter -->
+      <div class="filter-group">
+        <span class="filter-label">Status:</span>
+        <div class="filter-buttons">
+          <button
+            :class="['filter-btn', filterStatus === 'all' ? 'filter-btn--active' : '']"
+            @click="filterStatus = 'all'"
+          >
+            Alle
+          </button>
+          <button
+            :class="['filter-btn', filterStatus === 'online' ? 'filter-btn--active filter-btn--success' : '']"
+            @click="filterStatus = 'online'"
+          >
+            Online ({{ counts.online }})
+          </button>
+          <button
+            :class="['filter-btn', filterStatus === 'offline' ? 'filter-btn--active' : '']"
+            @click="filterStatus = 'offline'"
+          >
+            Offline ({{ counts.offline }})
+          </button>
         </div>
+      </div>
 
-        <!-- Warnings -->
-        <div v-if="emergencyCount > 0" class="card" style="border-color: rgba(251, 191, 36, 0.3)">
-          <div class="card-header">
-            <h3 class="font-semibold flex items-center gap-2" style="color: var(--color-warning)">
-              <AlertTriangle class="w-5 h-5" />
-              Warnungen
-            </h3>
-          </div>
-          <div class="card-body">
-            <div class="space-y-2">
-              <div 
-                v-for="device in espStore.devices.filter(d => {
-                  const deviceId = espStore.getDeviceId(d)
-                  if (espStore.isMock(deviceId)) {
-                    const mockDevice = d as any
-                    return mockDevice.system_state === 'SAFE_MODE' || 
-                      mockDevice.system_state === 'ERROR' ||
-                      mockDevice.actuators?.some((a: any) => a.emergency_stopped)
-                  }
-                  return d.status === 'error'
-                })"
-                :key="espStore.getDeviceId(device)"
-                class="warning-item"
-              >
-                <RouterLink :to="`/devices/${espStore.getDeviceId(device)}`" class="warning-link">
-                  <span class="font-mono text-sm">{{ espStore.getDeviceId(device) }}</span>
-                  <Badge 
-                    :variant="(espStore.isMock(espStore.getDeviceId(device)) && (device as any).system_state === 'ERROR') || device.status === 'error' ? 'danger' : 'warning'" 
-                    size="sm"
-                  >
-                    {{
-                      espStore.isMock(espStore.getDeviceId(device))
-                        ? getStateInfo((device as any).system_state).label
-                        : device.status || 'unknown'
-                    }}
-                  </Badge>
-                </RouterLink>
-              </div>
-            </div>
-          </div>
-        </div>
+      <!-- Link to Devices for management -->
+      <div class="ml-auto">
+        <RouterLink to="/devices" class="btn-secondary">
+          <Cpu class="w-4 h-4" />
+          Geräte verwalten
+        </RouterLink>
+      </div>
+    </div>
 
-        <!-- Info Card -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="font-semibold" style="color: var(--color-text-primary)">Info</h3>
+    <!-- Loading -->
+    <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
+
+    <!-- Empty State -->
+    <EmptyState
+      v-else-if="espStore.devices.length === 0"
+      :icon="Plus"
+      title="Keine ESP-Geräte"
+      description="Erstellen Sie Ihr erstes Mock-ESP32-Gerät, um mit dem Testen zu beginnen."
+      action-text="Gerät erstellen"
+      @action="$router.push('/devices')"
+    />
+
+    <!-- No Results (with filters) -->
+    <div
+      v-else-if="filteredEsps.length === 0"
+      class="card p-8 text-center"
+    >
+      <Filter class="w-12 h-12 mx-auto mb-4" style="color: var(--color-text-muted)" />
+      <h3 class="font-semibold mb-2" style="color: var(--color-text-secondary)">
+        Keine Ergebnisse
+      </h3>
+      <p style="color: var(--color-text-muted)" class="mb-4">
+        Keine Geräte entsprechen den aktuellen Filtern.
+      </p>
+      <button class="btn-secondary" @click="filterType = 'all'; filterStatus = 'all'">
+        Filter zurücksetzen
+      </button>
+    </div>
+
+    <!-- Zone-Grouped ESP Grid -->
+    <div v-else class="zone-groups-container">
+      <ZoneGroup
+        v-for="group in zoneGroups"
+        :key="group.zoneId"
+        :zone-id="group.zoneId"
+        :zone-name="group.zoneName"
+        :devices="group.devices"
+        :is-unassigned="group.zoneId === '__unassigned__'"
+        :compact-mode="true"
+        :enable-drag-drop="true"
+        :default-expanded="true"
+        @device-dropped="onDeviceDropped"
+      >
+        <!-- Use ESPOrbitalLayout for Dashboard (compact view with sensors/actuators) -->
+        <template #device="{ device }">
+          <div class="esp-orbital-grid__item">
+            <ESPOrbitalLayout
+              :device="device"
+              :show-connections="false"
+              :compact-mode="true"
+            />
           </div>
-          <div class="card-body text-sm" style="color: var(--color-text-secondary)">
-            <p>
-              <strong>AutomationOne</strong> ist ein modulares Automatisierungssystem 
-              für ESP32-basierte IoT-Geräte.
-            </p>
-            <p class="mt-2">
-              Verwenden Sie Mock-ESPs, um Sensoren und Aktoren zu simulieren, 
-              bevor echte Hardware verbunden wird.
-            </p>
-          </div>
-        </div>
+        </template>
+      </ZoneGroup>
+
+      <!-- Hint for drag & drop -->
+      <div v-if="zoneGroups.length > 1" class="drag-hint">
+        <Layers class="w-4 h-4" />
+        <span>Tipp: Geräte zwischen Zonen verschieben per Drag & Drop</span>
       </div>
     </div>
   </div>
@@ -383,52 +333,103 @@ const recentDevices = computed(() =>
   color: var(--color-error);
 }
 
-/* Device row */
-.device-row {
+/* ESP Orbital Grid */
+.esp-orbital-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+  gap: 2rem;
+}
+
+@media (max-width: 768px) {
+  .esp-orbital-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.esp-orbital-grid__item {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.esp-orbital-grid__item:hover {
+  border-color: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Filter group */
+.filter-group {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.filter-label {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 0.25rem;
+  background-color: var(--color-bg-tertiary);
+  padding: 0.25rem;
+  border-radius: 0.5rem;
+}
+
+.filter-btn {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 0.375rem;
+  color: var(--color-text-muted);
+  transition: all 0.2s;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.filter-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.filter-btn--active {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.filter-btn--mock.filter-btn--active {
+  color: var(--color-mock);
+}
+
+.filter-btn--real.filter-btn--active {
+  color: var(--color-real);
+}
+
+.filter-btn--success.filter-btn--active {
+  color: var(--color-success);
+}
+
+/* Zone groups container */
+.zone-groups-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Drag hint */
+.drag-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   padding: 0.75rem 1rem;
   background-color: var(--color-bg-tertiary);
+  border: 1px dashed var(--glass-border);
   border-radius: 0.5rem;
-  transition: all 0.2s;
-  text-decoration: none;
-}
-
-.device-row:hover {
-  background-color: var(--color-bg-hover);
-}
-
-/* Status row */
-.status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-/* Warning item */
-.warning-item {
-  padding: 0.5rem;
-  background-color: rgba(251, 191, 36, 0.1);
-  border-radius: 0.375rem;
-}
-
-.warning-link {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  text-decoration: none;
-  color: inherit;
-}
-
-/* Text link */
-.text-link {
-  color: var(--color-iridescent-1);
-  text-decoration: none;
-  transition: color 0.2s;
-}
-
-.text-link:hover {
-  color: var(--color-iridescent-2);
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
 }
 </style>

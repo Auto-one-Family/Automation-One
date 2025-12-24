@@ -1,10 +1,11 @@
 ## Zweck
 Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScript + Vite + Pinia + Tailwind). Ziel: sofort relevante Dateien finden, Flows verstehen, Bugs lokalisieren.
 
-> **Letzte Aktualisierung (2025-12-18):** Audit-Log-System komplett implementiert
-> - `AuditLogView.vue`: Vollständiges Dashboard mit Filter, Statistics, Retention-Konfiguration
-> - `audit.ts`: API-Client für Audit-Logs und Retention-Management
-> - Route: `/audit` hinzugefügt
+> **Letzte Aktualisierung (2025-12-24):** Zone Naming & Mock ESP Updates
+> - **Zone Naming Konventionen:** `zone_id` (technisch) vs `zone_name` (menschenlesbar) klar getrennt
+> - **Mock ESP DB-Integration:** Mock ESPs werden in Server-DB registriert und können normal aktualisiert werden
+> - **ZoneAssignmentPanel:** Generiert automatisch `zone_id` aus `zone_name` (z.B. "Zelt 1" → "zelt_1")
+> - **esp.ts updateDevice:** Mock ESPs nutzen jetzt die normale ESP API (nicht mehr blockiert)
 
 ---
 
@@ -15,7 +16,9 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
 | **Server + Frontend starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
 | **Bug debuggen** | `El Frontend/Docs/Bugs_Found.md` | Workflow + Fix dokumentiert |
 | **API-Endpoint finden** | `El Frontend/Docs/APIs.md` | `src/api/` |
-| **Audit-Logs verwalten** | Neu: `AuditLogView.vue` | `src/views/AuditLogView.vue` + `src/api/audit.ts` |
+| **Zone zuweisen** | Section "Zone Naming" unten | `src/components/zones/ZoneAssignmentPanel.vue` |
+| **ESP-Gerät updaten** | Section "Mock ESP Architektur" unten | `src/api/esp.ts` |
+| **Audit-Logs verwalten** | `AuditLogView.vue` | `src/views/AuditLogView.vue` + `src/api/audit.ts` |
 | **Auth-Flow verstehen** | `El Frontend/Docs/Admin oder user erstellen...md` | `src/stores/auth.ts` |
 | **Mock ESP testen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 3 | `src/views/MockEsp*.vue` |
 | **WebSocket verbinden** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 4 | `src/views/MqttLogView.vue` |
@@ -117,3 +120,101 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
 | **Backend-Architektur** | `.claude/CLAUDE_SERVER.md` | Server API, MQTT-Handler, Database |
 | **ESP32 Firmware** | `.claude/CLAUDE.md` | ESP32 Code, MQTT Topics, Error Codes |
 | **MQTT Protokoll** | `El Trabajante/docs/Mqtt_Protocoll.md` | Topic-Schema, Payload-Struktur |
+
+---
+
+## Zone Naming Konventionen
+
+### Zwei-Feld-System
+Das System verwendet zwei Felder für Zonen:
+
+| Feld | Typ | Beispiel | Verwendung |
+|------|-----|----------|------------|
+| `zone_id` | Technisch | `zelt_1`, `gewaechshaus_nord` | MQTT Topics, DB Keys, API URLs |
+| `zone_name` | Menschenlesbar | `Zelt 1`, `Gewächshaus Nord` | UI-Anzeige, Benutzer-Eingabe |
+
+### Automatische ID-Generierung
+`ZoneAssignmentPanel.vue` generiert `zone_id` automatisch aus `zone_name`:
+
+```typescript
+// Beispiel: "Zelt 1" → "zelt_1"
+function generateZoneId(zoneName: string): string {
+  let zoneId = zoneName.toLowerCase()
+  // Deutsche Umlaute ersetzen
+  zoneId = zoneId.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+  // Sonderzeichen durch Unterstriche ersetzen
+  zoneId = zoneId.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return zoneId
+}
+```
+
+### UI-Anzeige
+- **Eingabefelder:** Nur `zone_name` (menschenfreundlich)
+- **Anzeige:** `zone_name` mit `zone_id` als Tooltip
+- **Server-Validierung:** `zone_id` darf nur `[a-z0-9_-]` enthalten
+
+### Relevante Dateien
+| Datei | Funktion |
+|-------|----------|
+| `src/components/zones/ZoneAssignmentPanel.vue` | Zone-Zuweisung mit ID-Generierung |
+| `src/views/DeviceDetailView.vue` | Zone-Anzeige in Geräte-Details |
+| `src/views/DevicesView.vue` | Zone-Eingabe bei ESP-Erstellung |
+| `src/api/zones.ts` | Zone API (assignZone, removeZone) |
+
+---
+
+## Mock ESP Architektur
+
+### Dual-Storage-Prinzip
+Mock ESPs existieren an **zwei Orten**:
+
+```
+Mock ESP erstellen (POST /v1/debug/mock-esp)
+        │
+        ├── MockESPManager (In-Memory)
+        │   └── Live-Simulation: Sensoren, Aktoren, State Machine
+        │
+        └── ESPRepository (PostgreSQL)
+            └── Persistenz: Zone, Name, Metadata, Status
+```
+
+### API-Routing
+| Operation | Endpoint | Beschreibung |
+|-----------|----------|--------------|
+| **Create** | `POST /v1/debug/mock-esp` | Erstellt in Memory + DB |
+| **Read** | `GET /v1/debug/mock-esp/{id}` | Liest aus Memory (Live-Daten) |
+| **Update** | `PATCH /v1/esp/devices/{id}` | Aktualisiert in DB (normale ESP API!) |
+| **Delete** | `DELETE /v1/debug/mock-esp/{id}` | Löscht aus Memory + DB |
+| **Zone** | `POST /v1/zone/devices/{id}/assign` | Zone-Zuweisung via DB |
+
+### Wichtig: Updates über normale API
+Mock ESPs können über die **normale** `/esp/devices/{id}` API aktualisiert werden:
+
+```typescript
+// esp.ts - updateDevice() funktioniert für Mock UND Real ESPs
+async updateDevice(espId: string, update: ESPDeviceUpdate): Promise<ESPDevice> {
+  // Beide Typen nutzen dieselbe DB-API
+  const response = await api.patch<ESPDevice>(`/esp/devices/${normalizedId}`, update)
+  return response.data
+}
+```
+
+### Fallback bei Server-Neustart
+Wenn der Server neu startet, ist der In-Memory Store leer, aber die DB-Einträge bleiben. Das Frontend behandelt diesen Fall:
+
+```typescript
+// esp.ts - 404 Fallback für Mock ESPs
+if (axiosError.response?.status === 404 && isMockEsp(normalizedId)) {
+  // Versuche Debug-Store als Fallback
+  const current = await debugApi.getMockEsp(normalizedId)
+  return { ...current, metadata: { db_sync_required: true } }
+}
+```
+
+### Relevante Dateien
+| Datei | Funktion |
+|-------|----------|
+| `src/api/esp.ts` | Unified ESP API (Mock + Real) |
+| `src/api/debug.ts` | Debug-spezifische API (Heartbeat, Sensors, Actuators) |
+| `src/stores/esp.ts` | ESP Pinia Store |
+| `src/views/DeviceDetailView.vue` | Geräte-Detailansicht |

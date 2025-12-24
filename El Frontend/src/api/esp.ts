@@ -13,35 +13,58 @@ import type { MockESP, MockESPCreate } from '@/types'
 // Type Definitions
 // =============================================================================
 
+/**
+ * Unified ESP Device interface.
+ *
+ * ID Naming Convention (aligned with Server and ESP32 Firmware):
+ * - `device_id`: Primary identifier (format: ESP_XXXXXXXX or ESP_MOCK_XXX)
+ *   - Used by Server API and Database
+ *   - Always present in all ESP types
+ * - `esp_id`: Alias for device_id (backward compatibility with Mock ESPs)
+ *   - Mock ESPs originally used esp_id as primary key
+ *   - When present, should equal device_id
+ * - `id`: Database UUID (optional, only from Server DB responses)
+ *
+ * Zone Naming Convention:
+ * - `zone_id`: Technical zone identifier (lowercase, no spaces, e.g., "zelt_1")
+ *   - Auto-generated from zone_name if not provided
+ *   - Used in MQTT topics and API calls
+ * - `zone_name`: Human-readable zone name (allows spaces, e.g., "Zelt 1")
+ *   - Displayed in UI
+ *   - Falls back to zone_id if not set
+ *
+ * @see El Servador/god_kaiser_server/src/schemas/esp.py - ESPDeviceResponse
+ * @see El Trabajante/src/utils/topic_builder.cpp - MQTT topic format
+ */
 export interface ESPDevice {
-  id?: string
-  device_id: string
-  esp_id?: string // Alias for device_id (for Mock ESP compatibility)
-  name?: string | null
-  zone_id?: string | null
-  zone_name?: string | null
-  master_zone_id?: string | null
-  is_zone_master?: boolean
+  id?: string                         // Database UUID (from Server)
+  device_id: string                   // Primary ID: ESP_XXXXXXXX or ESP_MOCK_XXX
+  esp_id?: string                     // Alias for device_id (Mock ESP compatibility)
+  name?: string | null                // Human-readable device name
+  zone_id?: string | null             // Technical zone ID (lowercase, no spaces)
+  zone_name?: string | null           // Human-readable zone name (UI display)
+  master_zone_id?: string | null      // Parent zone for hierarchical zones
+  is_zone_master?: boolean            // Whether this ESP is zone master
   ip_address?: string
   mac_address?: string
   firmware_version?: string
-  hardware_type?: string
+  hardware_type?: string              // ESP32_WROOM, XIAO_ESP32_C3, MOCK_ESP32
   capabilities?: Record<string, unknown>
-  status?: string // online, offline, error, unknown
-  last_seen?: string | null
+  status?: string                     // online, offline, error, unknown
+  last_seen?: string | null           // ISO timestamp of last heartbeat
   metadata?: Record<string, unknown>
   sensor_count?: number
   actuator_count?: number
-  // Mock ESP specific fields
-  system_state?: string
-  sensors?: unknown[]
-  actuators?: unknown[]
+  // Mock ESP specific fields (from debug API in-memory store)
+  system_state?: string               // MockSystemState (BOOT, OPERATIONAL, etc.)
+  sensors?: unknown[]                 // MockSensor[]
+  actuators?: unknown[]               // MockActuator[]
   auto_heartbeat?: boolean
-  heap_free?: number
-  wifi_rssi?: number
-  uptime?: number
-  last_heartbeat?: string | null
-  connected?: boolean
+  heap_free?: number                  // Free heap memory in bytes
+  wifi_rssi?: number                  // WiFi signal strength in dBm
+  uptime?: number                     // Uptime in seconds
+  last_heartbeat?: string | null      // ISO timestamp
+  connected?: boolean                 // MQTT connection status
   created_at?: string
   updated_at?: string
 }
@@ -143,6 +166,10 @@ function normalizeEspId(device: ESPDevice | string): string {
 export const espApi = {
   /**
    * List all ESP devices (Mock + Real)
+   *
+   * IMPORTANT: Mock ESPs exist in both in-memory store AND database.
+   * This function deduplicates by preferring the in-memory mock data
+   * (which has richer state like sensors, actuators, system_state).
    */
   async listDevices(params?: {
     zone_id?: string
@@ -152,22 +179,33 @@ export const espApi = {
     page_size?: number
   }): Promise<ESPDevice[]> {
     // Fetch both Mock and Real ESPs in parallel
-    const [mockEsps, realEspsResponse] = await Promise.all([
-      debugApi.listMockEsps().catch(() => [] as MockESP[]),
+    const [mockEsps, dbDevices] = await Promise.all([
+      debugApi.listMockEsps().catch((err) => {
+        console.warn('[ESP API] Failed to fetch mock ESPs:', err)
+        return [] as MockESP[]
+      }),
       api
         .get<ESPDeviceListResponse>('/esp/devices', { params })
-        .catch(() => ({ data: { success: true, data: [] } }))
+        .catch((err) => {
+          console.warn('[ESP API] Failed to fetch DB devices:', err)
+          return { data: { success: true, data: [] } }
+        })
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])
 
-    // Normalize Mock ESPs to unified format
+    console.debug(`[ESP API] listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
+
+    // Create Set of mock ESP IDs for fast lookup
+    const mockEspIds = new Set(mockEsps.map((m) => m.esp_id))
+
+    // Normalize Mock ESPs to unified format (rich data from in-memory store)
     const normalizedMockEsps: ESPDevice[] = mockEsps.map((mock) => ({
       id: mock.esp_id,
       device_id: mock.esp_id,
       esp_id: mock.esp_id,
       name: null,
       zone_id: mock.zone_id || null,
-      zone_name: null,
+      zone_name: mock.zone_name || null,
       master_zone_id: mock.master_zone_id || null,
       is_zone_master: false,
       hardware_type: mock.hardware_type || 'MOCK_ESP32',
@@ -187,42 +225,88 @@ export const espApi = {
       created_at: mock.created_at,
     }))
 
-    // Combine and return
-    return [...normalizedMockEsps, ...realEspsResponse]
+    // Filter DB devices: exclude those that exist in mock store (prevent duplicates)
+    // But mark mock IDs that only exist in DB as "orphaned"
+    const filteredDbDevices = dbDevices
+      .filter((device) => {
+        const deviceId = device.device_id || device.esp_id || ''
+        // If it's in the mock store, skip it (we already have richer data)
+        if (mockEspIds.has(deviceId)) {
+          console.debug(`[ESP API] Filtering out DB device ${deviceId} (exists in mock store)`)
+          return false
+        }
+        return true
+      })
+      .map((device) => {
+        const deviceId = device.device_id || device.esp_id || ''
+        // Mark mock-pattern IDs that aren't in mock store as orphaned
+        if (isMockEsp(deviceId)) {
+          console.debug(`[ESP API] Marking ${deviceId} as orphaned mock (not in mock store)`)
+          return {
+            ...device,
+            metadata: { ...device.metadata, orphaned_mock: true },
+          }
+        }
+        return device
+      })
+
+    const result = [...normalizedMockEsps, ...filteredDbDevices]
+    console.debug(`[ESP API] Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
+
+    // Combine: Mock ESPs first (active), then real/orphaned
+    return result
   },
 
   /**
    * Get a specific ESP device (Mock or Real)
+   *
+   * Handles orphaned mock devices by falling back to database if debug API returns 404
    */
   async getDevice(espId: string): Promise<ESPDevice> {
     const normalizedId = normalizeEspId(espId)
 
     if (isMockEsp(normalizedId)) {
-      const mockEsp = await debugApi.getMockEsp(normalizedId)
-      return {
-        id: mockEsp.esp_id,
-        device_id: mockEsp.esp_id,
-        esp_id: mockEsp.esp_id,
-        name: null,
-        zone_id: mockEsp.zone_id || null,
-        zone_name: null,
-        master_zone_id: mockEsp.master_zone_id || null,
-        is_zone_master: false,
-        hardware_type: mockEsp.hardware_type || 'MOCK_ESP32',
-        status: mockEsp.connected ? 'online' : 'offline',
-        system_state: mockEsp.system_state,
-        sensors: mockEsp.sensors,
-        actuators: mockEsp.actuators,
-        auto_heartbeat: mockEsp.auto_heartbeat,
-        heap_free: mockEsp.heap_free,
-        wifi_rssi: mockEsp.wifi_rssi,
-        uptime: mockEsp.uptime,
-        last_heartbeat: mockEsp.last_heartbeat,
-        last_seen: mockEsp.last_heartbeat,
-        connected: mockEsp.connected,
-        sensor_count: mockEsp.sensors?.length || 0,
-        actuator_count: mockEsp.actuators?.length || 0,
-        created_at: mockEsp.created_at,
+      try {
+        const mockEsp = await debugApi.getMockEsp(normalizedId)
+        return {
+          id: mockEsp.esp_id,
+          device_id: mockEsp.esp_id,
+          esp_id: mockEsp.esp_id,
+          name: null,
+          zone_id: mockEsp.zone_id || null,
+          zone_name: mockEsp.zone_name || null, // Map zone_name from Mock ESP
+          master_zone_id: mockEsp.master_zone_id || null,
+          is_zone_master: false,
+          hardware_type: mockEsp.hardware_type || 'MOCK_ESP32',
+          status: mockEsp.connected ? 'online' : 'offline',
+          system_state: mockEsp.system_state,
+          sensors: mockEsp.sensors,
+          actuators: mockEsp.actuators,
+          auto_heartbeat: mockEsp.auto_heartbeat,
+          heap_free: mockEsp.heap_free,
+          wifi_rssi: mockEsp.wifi_rssi,
+          uptime: mockEsp.uptime,
+          last_heartbeat: mockEsp.last_heartbeat,
+          last_seen: mockEsp.last_heartbeat,
+          connected: mockEsp.connected,
+          sensor_count: mockEsp.sensors?.length || 0,
+          actuator_count: mockEsp.actuators?.length || 0,
+          created_at: mockEsp.created_at,
+        }
+      } catch (err: unknown) {
+        const axiosError = err as { response?: { status?: number } }
+
+        // If 404: device might exist in DB only (orphaned mock)
+        if (axiosError.response?.status === 404) {
+          console.warn(`[ESP API] Mock ESP ${normalizedId} not in debug store, trying database...`)
+          const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
+          // Mark as orphaned mock for UI indication
+          return {
+            ...response.data,
+            metadata: { ...response.data.metadata, orphaned_mock: true },
+          }
+        }
+        throw err
       }
     } else {
       const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
@@ -244,7 +328,7 @@ export const espApi = {
         esp_id: mockEsp.esp_id,
         name: null,
         zone_id: mockEsp.zone_id || null,
-        zone_name: null,
+        zone_name: mockEsp.zone_name || null, // Map zone_name from Mock ESP
         master_zone_id: mockEsp.master_zone_id || null,
         is_zone_master: false,
         hardware_type: mockEsp.hardware_type || 'MOCK_ESP32',
@@ -272,6 +356,9 @@ export const espApi = {
 
   /**
    * Update an ESP device (Mock or Real)
+   *
+   * Mock ESPs are registered in the database (see debug.py:create_mock_esp)
+   * and can be updated via the normal ESP API.
    */
   async updateDevice(
     espId: string,
@@ -279,61 +366,104 @@ export const espApi = {
   ): Promise<ESPDevice> {
     const normalizedId = normalizeEspId(espId)
 
-    if (isMockEsp(normalizedId)) {
-      // Mock ESPs don't have a direct update endpoint
-      // We need to get the current device and recreate if needed
-      // For now, we'll use the state endpoint for system_state changes
-      const current = await debugApi.getMockEsp(normalizedId)
-      
-      // If zone_id changed, we can't update Mock ESPs directly via API
-      // This would require backend support
-      // For now, return the current device
-      return {
-        id: current.esp_id,
-        device_id: current.esp_id,
-        esp_id: current.esp_id,
-        name: null,
-        zone_id: update.zone_id !== undefined ? update.zone_id : current.zone_id || null,
-        zone_name: update.zone_name !== undefined ? update.zone_name : null,
-        master_zone_id: current.master_zone_id || null,
-        is_zone_master: update.is_zone_master !== undefined ? update.is_zone_master : false,
-        hardware_type: current.hardware_type || 'MOCK_ESP32',
-        status: current.connected ? 'online' : 'offline',
-        system_state: current.system_state,
-        sensors: current.sensors,
-        actuators: current.actuators,
-        auto_heartbeat: current.auto_heartbeat,
-        heap_free: current.heap_free,
-        wifi_rssi: current.wifi_rssi,
-        uptime: current.uptime,
-        last_heartbeat: current.last_heartbeat,
-        last_seen: current.last_heartbeat,
-        connected: current.connected,
-        sensor_count: current.sensors?.length || 0,
-        actuator_count: current.actuators?.length || 0,
-        created_at: current.created_at,
-      }
-    } else {
+    // Both Mock and Real ESPs are in the database and can be updated via the normal API
+    // Mock ESPs are registered in DB when created (debug.py lines 104-146)
+    try {
       const response = await api.patch<ESPDevice>(
         `/esp/devices/${normalizedId}`,
         update
       )
+      console.debug(`[ESP API] Updated device ${normalizedId}:`, update)
       return response.data
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { status?: number } }
+
+      // If 404 and it's a Mock ESP, it might only exist in the debug store
+      // This can happen if the server was restarted (DB cleared) but UI still has cached data
+      if (axiosError.response?.status === 404 && isMockEsp(normalizedId)) {
+        console.warn(
+          `[ESP API] Mock ESP ${normalizedId} not found in database. ` +
+          `It may need to be recreated. Fetching current state from debug store...`
+        )
+
+        // Try to get current state from debug store
+        try {
+          const current = await debugApi.getMockEsp(normalizedId)
+          return {
+            id: current.esp_id,
+            device_id: current.esp_id,
+            esp_id: current.esp_id,
+            name: null,
+            zone_id: current.zone_id || null,
+            zone_name: current.zone_name || null,
+            master_zone_id: current.master_zone_id || null,
+            is_zone_master: false,
+            hardware_type: current.hardware_type || 'MOCK_ESP32',
+            status: current.connected ? 'online' : 'offline',
+            system_state: current.system_state,
+            sensors: current.sensors,
+            actuators: current.actuators,
+            auto_heartbeat: current.auto_heartbeat,
+            heap_free: current.heap_free,
+            wifi_rssi: current.wifi_rssi,
+            uptime: current.uptime,
+            last_heartbeat: current.last_heartbeat,
+            last_seen: current.last_heartbeat,
+            connected: current.connected,
+            sensor_count: current.sensors?.length || 0,
+            actuator_count: current.actuators?.length || 0,
+            created_at: current.created_at,
+            metadata: { db_sync_required: true, message: 'Mock ESP exists in debug store but not in database' },
+          }
+        } catch {
+          // Not in debug store either - device truly doesn't exist
+          throw err
+        }
+      }
+      throw err
     }
   },
 
   /**
    * Delete an ESP device (Mock or Real)
+   *
+   * Handles orphaned mock devices that exist in DB but not in debug store:
+   * - First tries debug API for mock devices
+   * - Falls back to database deletion if debug API returns 404
    */
   async deleteDevice(espId: string): Promise<void> {
     const normalizedId = normalizeEspId(espId)
 
     if (isMockEsp(normalizedId)) {
-      await debugApi.deleteMockEsp(normalizedId)
+      try {
+        // Try debug API first (in-memory mock store)
+        await debugApi.deleteMockEsp(normalizedId)
+      } catch (err: unknown) {
+        const axiosError = err as { response?: { status?: number } }
+
+        // If 404: device exists in DB but not in mock store (orphaned)
+        // Try to delete from database directly
+        if (axiosError.response?.status === 404) {
+          console.warn(`[ESP API] Mock ESP ${normalizedId} not found in debug store, trying database deletion...`)
+          try {
+            await api.delete(`/esp/devices/${normalizedId}`)
+            console.info(`[ESP API] Successfully deleted orphaned mock ESP ${normalizedId} from database`)
+            return
+          } catch (dbErr: unknown) {
+            const dbAxiosError = dbErr as { response?: { status?: number } }
+            // If also 404 in DB, device is already gone - consider success
+            if (dbAxiosError.response?.status === 404) {
+              console.info(`[ESP API] Mock ESP ${normalizedId} already deleted from database`)
+              return
+            }
+            throw new Error(`Konnte verwaisten Mock ESP nicht löschen: ${normalizedId}. Das Gerät existiert möglicherweise nur noch im UI-Cache.`)
+          }
+        }
+        throw err
+      }
     } else {
-      // Real ESPs might not have a delete endpoint
-      // Check if endpoint exists, otherwise throw error
-      throw new Error('Deleting real ESP devices is not supported via API')
+      // Real ESP - delete from database
+      await api.delete(`/esp/devices/${normalizedId}`)
     }
   },
 
@@ -369,6 +499,9 @@ export const espApi = {
 
   /**
    * Restart an ESP device
+   *
+   * Note: Mock ESPs don't support restart commands. The response will indicate
+   * that no command was sent.
    */
   async restartDevice(
     espId: string,
@@ -378,13 +511,14 @@ export const espApi = {
     const normalizedId = normalizeEspId(espId)
 
     if (isMockEsp(normalizedId)) {
-      // Mock ESPs don't have restart endpoint
-      // Return success response
+      // Mock ESPs don't have restart endpoint - be honest about it
+      console.info(`[ESP API] Restart command not available for Mock ESP ${normalizedId}`)
       return {
-        success: true,
+        success: false, // Changed to false - command wasn't actually executed
         device_id: normalizedId,
         command: 'restart',
         command_sent: false,
+        error: 'Mock ESPs unterstützen keine Restart-Befehle. Dies ist ein simuliertes Gerät.',
       }
     } else {
       const response = await api.post<ESPCommandResponse>(
@@ -397,6 +531,9 @@ export const espApi = {
 
   /**
    * Factory reset an ESP device
+   *
+   * Note: Mock ESPs don't support factory reset. The response will indicate
+   * that no command was sent.
    */
   async resetDevice(
     espId: string,
@@ -405,12 +542,14 @@ export const espApi = {
     const normalizedId = normalizeEspId(espId)
 
     if (isMockEsp(normalizedId)) {
-      // Mock ESPs don't have reset endpoint
+      // Mock ESPs don't have reset endpoint - be honest about it
+      console.info(`[ESP API] Factory reset command not available for Mock ESP ${normalizedId}`)
       return {
-        success: true,
+        success: false, // Changed to false - command wasn't actually executed
         device_id: normalizedId,
         command: 'reset',
         command_sent: false,
+        error: 'Mock ESPs unterstützen keine Reset-Befehle. Zum Zurücksetzen bitte löschen und neu erstellen.',
       }
     } else {
       const response = await api.post<ESPCommandResponse>(
@@ -423,6 +562,9 @@ export const espApi = {
 
   /**
    * Update ESP configuration via MQTT
+   *
+   * Note: Mock ESPs don't support MQTT config updates. Use the debug API
+   * for Mock ESP state changes.
    */
   async updateConfig(
     espId: string,
@@ -431,9 +573,10 @@ export const espApi = {
     const normalizedId = normalizeEspId(espId)
 
     if (isMockEsp(normalizedId)) {
-      // Mock ESPs don't support config updates via this endpoint
+      // Mock ESPs don't support config updates via MQTT
+      console.info(`[ESP API] Config updates via MQTT not available for Mock ESP ${normalizedId}`)
       return {
-        success: true,
+        success: false, // Changed to false - config wasn't actually sent
         device_id: normalizedId,
         config_sent: false,
         config_acknowledged: false,

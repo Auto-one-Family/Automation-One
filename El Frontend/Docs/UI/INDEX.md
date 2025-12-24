@@ -2,7 +2,7 @@
 
 **Vollständige Übersicht aller Frontend-Dokumentationen**
 **Erstellt:** 2025-12-19
-**Letztes Update:** 2025-12-20 (WebSocket-Integration verifiziert)
+**Letztes Update:** 2025-12-23 (Vollständige Synchronisation mit Code)
 **Status:** ✅ Produktionsreife Dokumentation
 
 ---
@@ -17,10 +17,10 @@ El Frontend/Docs/UI/
 ├── VIEW_QUICK_REFERENCE.md          # Schnellreferenz-Tabellen
 ├── API_PAYLOAD_EXAMPLES.md          # Request/Response-Beispiele
 │
-├── 01-MockEspView.md                # ✅ Mock-ESP-Verwaltung - KRITISCH
-├── 02-Individual-Views-Summary.md   # ✅ Kompakte Übersicht aller 16 Views
+├── 01-MockEspView.md                # ⚠️ Legacy - siehe DevicesView in 02-Individual
+├── 02-Individual-Views-Summary.md   # ✅ Kompakte Übersicht aller 18 Views
 │
-└── 06-Components-Library.md         # ✅ Komponenten-Katalog (14 Komponenten)
+└── 06-Components-Library.md         # ✅ Komponenten-Katalog (27 Komponenten)
 ```
 
 ## 🔗 Backend-Zusammenhänge (Server-Dateien)
@@ -114,12 +114,13 @@ El Frontend/Docs/UI/
 
 | View | Route | Dokumentation | Status | Priorität |
 |------|-------|------------------|--------|-----------|
-| MockEspView | `/mock-esp` | 01-MockEspView.md + 02 | ✅ Impl. | 🔴 KRITISCH |
-| MockEspDetailView | `/mock-esp/:id` | 02-Individual | ✅ Impl. | 🔴 KRITISCH |
-| MqttLogView | `/mqtt-log` | 02-Individual | ✅ Impl. | 🟠 Hoch |
 | DashboardView | `/` | VIEW_ANALYSIS.md | ✅ Impl. | 🟠 Hoch |
+| **DevicesView** | `/devices` | 02-Individual | ✅ Impl. | 🔴 KRITISCH |
+| **DeviceDetailView** | `/devices/:espId` | 02-Individual | ✅ Impl. | 🔴 KRITISCH |
 | SensorsView | `/sensors` | VIEW_ANALYSIS.md | ✅ Impl. | 🟠 Hoch |
 | ActuatorsView | `/actuators` | VIEW_ANALYSIS.md | ✅ Impl. | 🟠 Hoch |
+| LogicView | `/logic` | 02-Individual | ⚠️ Placeholder | 🔴 KRITISCH |
+| MqttLogView | `/mqtt-log` | 02-Individual | ✅ Impl. | 🟠 Hoch |
 | DatabaseExplorerView | `/database` | VIEW_ANALYSIS.md + 02 | ✅ Impl. | 🟠 Hoch |
 | LogViewerView | `/logs` | VIEW_ANALYSIS.md | ✅ Impl. | 🟠 Hoch |
 | UserManagementView | `/users` | VIEW_ANALYSIS.md | ✅ Impl. | 🟠 Hoch |
@@ -127,35 +128,71 @@ El Frontend/Docs/UI/
 | SystemConfigView | `/system-config` | VIEW_ANALYSIS.md | ✅ Impl. | 🟡 Mittel |
 | AuditLogView | `/audit` | VIEW_ANALYSIS.md | ✅ Impl. | 🟡 Mittel |
 | SettingsView | `/settings` | VIEW_ANALYSIS.md | ✅ Impl. | 🟡 Mittel |
-| LogicView | `/logic` | 02-Individual | ⚠️ Placeholder | 🔴 KRITISCH |
 | LoginView | `/login` | VIEW_ANALYSIS.md | ✅ Impl. | 🟢 Niedrig |
 | SetupView | `/setup` | VIEW_ANALYSIS.md | ✅ Impl. | 🟢 Niedrig |
+| MockEspView | `/mock-esp` | ⚠️ Legacy → DevicesView | Redirect | 🟢 Legacy |
+| MockEspDetailView | `/mock-esp/:id` | ⚠️ Legacy → DeviceDetailView | Redirect | 🟢 Legacy |
 
 **Summary:**
-- ✅ **15 Views** vollständig implementiert
+- ✅ **17 Views** vollständig implementiert (inkl. 2 Legacy-Redirects)
 - ⚠️ **1 View** (LogicView) Placeholder
 - 📚 **100% Dokumentation**
 
 ---
 
-## 🧩 Komponenten-Katalog
+## 🧩 Komponenten-Katalog (27 Total)
 
-| Komponente | Kategorie | Komplexität | Reusable |
-|-----------|-----------|------------|----------|
-| LoadingState | Common | ⭐ | ✅ 10+ |
-| EmptyState | Common | ⭐ | ✅ 8+ |
-| ErrorState | Common | ⭐ | ✅ 5+ |
-| Badge | Common | ⭐⭐ | ✅ 15+ |
-| ESPCard | ESP | ⭐⭐⭐ | ✅ MockEspView |
-| SensorValueCard | ESP | ⭐⭐ | ✅ SensorsView |
-| StatCard | Dashboard | ⭐⭐ | ✅ Dashboard |
-| DataTable | Database | ⭐⭐⭐⭐ | ✅ DatabaseExplorer |
-| FilterPanel | Database | ⭐⭐⭐ | ✅ DatabaseExplorer |
-| TableSelector | Database | ⭐⭐ | ✅ DatabaseExplorer |
-| Pagination | Database | ⭐⭐ | ✅ DatabaseExplorer |
-| RecordDetailModal | Database | ⭐⭐⭐ | ✅ DatabaseExplorer |
-| SchemaInfoPanel | Database | ⭐⭐ | ✅ DatabaseExplorer |
-| ZoneAssignmentPanel | Zones | ⭐⭐⭐ | ✅ MockEspDetailView |
+### Common Components (11)
+| Komponente | Komplexität | Verwendung |
+|-----------|------------|----------|
+| Badge | ⭐⭐ | Status-Badges überall (15+ Stellen) |
+| Button | ⭐⭐ | Primary/Secondary/Danger/Ghost Buttons |
+| Card | ⭐⭐ | Container mit Glass/Shimmer/Iridescent Effekten |
+| EmptyState | ⭐ | Keine-Daten-Anzeige (8+ Views) |
+| ErrorState | ⭐ | Fehler-Banner mit Retry (5+ Views) |
+| Input | ⭐⭐ | Form-Inputs mit Label/Error/Clearable |
+| LoadingState | ⭐ | Lade-Spinner (10+ Views) |
+| Modal | ⭐⭐⭐ | Dialog mit Glassmorphism, Escape/Overlay-Close |
+| Select | ⭐⭐ | Dropdown-Select mit Label/Error |
+| Spinner | ⭐ | Animierter Spinner (sm/md/lg/xl) |
+| Toggle | ⭐⭐ | Switch mit Label/Description |
+
+### Layout Components (3)
+| Komponente | Komplexität | Verwendung |
+|-----------|------------|----------|
+| MainLayout | ⭐⭐⭐ | App-Rahmen mit Header/Sidebar |
+| AppHeader | ⭐⭐ | Toolbar mit Hamburger/User-Menu |
+| AppSidebar | ⭐⭐⭐ | Collapsible Navigation mit Admin-Sections |
+
+### ESP Components (6)
+| Komponente | Komplexität | Verwendung |
+|-----------|------------|----------|
+| ESPCard | ⭐⭐⭐ | ESP-Karte in DevicesView |
+| ESPOrbitalLayout | ⭐⭐⭐⭐ | Orbital-Visualisierung mit Satelliten |
+| SensorSatellite | ⭐⭐ | Sensor als Orbit-Karte |
+| ActuatorSatellite | ⭐⭐ | Aktor als Orbit-Karte |
+| SensorValueCard | ⭐⭐ | Sensor-Wert mit Quality-Badge |
+| ConnectionLines | ⭐⭐⭐ | SVG-Verbindungslinien für Logic-Rules |
+
+### Dashboard Components (1)
+| Komponente | Komplexität | Verwendung |
+|-----------|------------|----------|
+| StatCard | ⭐⭐ | KPI-Karte mit Icon/Trend |
+
+### Database Components (6)
+| Komponente | Komplexität | Verwendung |
+|-----------|------------|----------|
+| DataTable | ⭐⭐⭐⭐ | Dynamische Datentabelle |
+| FilterPanel | ⭐⭐⭐ | Dynamische Filter-UI |
+| Pagination | ⭐⭐ | Pagination-Controls |
+| RecordDetailModal | ⭐⭐⭐ | Record-Detail-Modal mit FK-Navigation |
+| SchemaInfoPanel | ⭐⭐ | DB-Schema-Anzeige |
+| TableSelector | ⭐⭐ | Tabellen-Dropdown |
+
+### Zone Components (1)
+| Komponente | Komplexität | Verwendung |
+|-----------|------------|----------|
+| ZoneAssignmentPanel | ⭐⭐⭐ | Zone-Zuweisung in DeviceDetailView |
 
 ---
 
@@ -222,19 +259,19 @@ El Frontend/Docs/UI/
 
 Diese Dokumentation deckt ab:
 
-- ✅ **16 Views** - Alle Views vollständig dokumentiert
-- ✅ **14 Komponenten** - Komponenten-Katalog mit Props/Events
-- ✅ **41 API-Endpoints** - Mit Request/Response-Beispielen
+- ✅ **18 Views** - Alle Views vollständig dokumentiert (inkl. 2 Legacy-Redirects)
+- ✅ **27 Komponenten** - Komponenten-Katalog mit Props/Events
+- ✅ **41+ API-Endpoints** - Mit Request/Response-Beispielen
 - ✅ **ASCII-Wireframes** - Layout-Struktur visuell
 - ✅ **User-Flows** - Interaktions-Ablauf pro View
-- ✅ **Type-Definitionen** - TypeScript Interfaces
+- ✅ **Type-Definitionen** - TypeScript Interfaces (50+)
 - ✅ **WebSocket-Integration** - Real-time Messaging (9 Message-Types, Live-Updates)
 - ✅ **Error-Handling** - Fehler-Szenarien dokumentiert
 - ✅ **Filter-Logik** - Wie Filter funktionieren
 - ✅ **Best Practices** - Do's und Don'ts
 - ✅ **Deployment** - Produktions-Checkliste
 - ✅ **Performance** - Optimierungs-Tipps
-- ✅ **Security** - Auth, Token-Handling
+- ✅ **Security** - Auth, Token-Handling, RBAC
 - ✅ **Testing** - Kritische Flows zu testen
 
 ---
@@ -305,9 +342,9 @@ Diese Dokumentation deckt ab:
 ```
 ├── Dateien: 10+
 ├── Zeilen Code/Doku: ~5,000+
-├── Views dokumentiert: 16/16 (100%)
-├── Komponenten dokumentiert: 14/14 (100%)
-├── API-Endpoints dokumentiert: 41/41 (100%)
+├── Views dokumentiert: 18/18 (100%)
+├── Komponenten dokumentiert: 27/27 (100%)
+├── API-Endpoints dokumentiert: 41+ (100%)
 ├── ASCII-Wireframes: 8+
 ├── Code-Beispiele: 50+
 └── Cross-References: 100+
@@ -317,18 +354,18 @@ Diese Dokumentation deckt ab:
 
 ## 🎯 Nächste Schritte
 
-**Nach dieser Dokumentation:**
+**Prioritäten:**
 1. ✅ WebSocket Live-Updates - ERLEDIGT (20.12.2025)
-2. ⏳ Mock-ESP-Ausbau (Config-Export, Bulk-Import) - Siehe `01-MockEspView.md` Section 8
-3. ⏳ LogicView-Implementierung - Siehe `02-Individual` Section 04
-4. ⏳ Satelliten-Layout Integration - Siehe `VIEW_QUICK_REFERENCE.md` Priorität 1
-5. ⏳ Advanced Sensor-Simulation (Ramping, Sine-Wave) - NEW DOC
-6. ⏳ Performance-Optimierung - Siehe `VIEW_ANALYSIS.md` Section 11
+2. ⏳ **Satelliten-Layout Integration** - Komponenten fertig, Layout-Integration in ESPCard ausstehend
+3. ⏳ **LogicView-Implementierung** - Siehe `02-Individual` Section 04
+4. ⏳ ConnectionLines Logic-Parsing - SVG-Basis fertig, Rule-Parsing ausstehend
+5. ⏳ Zone Drag & Drop - Backend-API fertig, Frontend-DnD ausstehend
+6. ⏳ Mock→ESP Config Transfer - Nicht implementiert
 
 ---
 
 **Dokumentation erstellt:** 2025-12-19
-**Letzte Aktualisierung:** 2025-12-20
-**Version:** 1.1 (WebSocket-Integration verifiziert)
+**Letzte Aktualisierung:** 2025-12-23
+**Version:** 2.0 (Vollständige Synchronisation mit Code)
 **Status:** ✅ Vollständig & aktuell
 

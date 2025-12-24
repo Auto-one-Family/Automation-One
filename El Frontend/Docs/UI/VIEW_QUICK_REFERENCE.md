@@ -1,12 +1,12 @@
 # Frontend Views - Quick Reference
 
-**Erstellt:** 2025-12-19  
-**Letzte Aktualisierung:** 2025-12-20 (WebSocket-Integration verifiziert)  
+**Erstellt:** 2025-12-19
+**Letzte Aktualisierung:** 2025-12-23 (Vollständige Synchronisation mit Code)
 **Zweck:** Schnelle Übersicht aller Views mit Status & API-Endpoints
 
 ---
 
-## View-Übersicht (16 Total)
+## View-Übersicht (18 Total)
 
 > ⚠️ **HINWEIS:** Am 20.12.2025 wurden die Routes refactored:  
 > - `MockEspView` → `DevicesView` (Route `/devices`)  
@@ -137,49 +137,65 @@
 
 ---
 
-## Komponenten-Übersicht
+## Komponenten-Übersicht (27 Total)
 
-### Common-Komponenten
+### Common-Komponenten (11)
 
-| Komponente | Verwendung (Views) | Props |
-|------------|-------------------|-------|
-| `LoadingState.vue` | DashboardView, DevicesView, DeviceDetailView, DatabaseExplorerView, LogViewerView, SystemConfigView, AuditLogView | `text?: string` |
-| `EmptyState.vue` | DashboardView, DevicesView, DeviceDetailView | `icon, title, description, actionText?, @action` |
-| `ErrorState.vue` | DevicesView | `message, showRetry?, showDismiss?, @retry, @dismiss` |
-| `Badge.vue` | DevicesView, DeviceDetailView | `variant, size?, pulse?, dot?` |
+| Komponente | Verwendung | Props |
+|------------|------------|-------|
+| `Badge.vue` | 15+ Stellen | `variant, size?, pulse?, dot?, bordered?` |
+| `Button.vue` | Alle Views mit Forms | `variant, size?, disabled?, loading?, fullWidth?, type?` |
+| `Card.vue` | 10+ Views | `hoverable?, noPadding?, variant?, glass?, shimmer?, iridescent?` |
+| `EmptyState.vue` | 8+ Views | `icon?, title, description?, actionText?, showAction?, @action` |
+| `ErrorState.vue` | 5+ Views | `message, title?, showRetry?, showDismiss?, retryText?, @retry, @dismiss` |
+| `Input.vue` | 15+ Views | `modelValue, type?, label?, placeholder?, disabled?, error?, helper?, clearable?` |
+| `LoadingState.vue` | 10+ Views | `text?, fullHeight?, size?` |
+| `Modal.vue` | 8+ Views | `open, title, maxWidth?, showClose?, closeOnOverlay?, closeOnEscape?` |
+| `Select.vue` | 10+ Views | `modelValue, options, label?, placeholder?, disabled?, error?, helper?` |
+| `Spinner.vue` | 5+ Views | `size?, color?, label?, center?` |
+| `Toggle.vue` | 5+ Views | `modelValue, size?, disabled?, label?, description?, activeColor?` |
 
-### ESP-Komponenten
+### Layout-Komponenten (3)
 
-| Komponente | Verwendung (Views) | Props | Status |
-|------------|-------------------|-------|--------|
-| `ESPCard.vue` | DevicesView | `esp: ESPDevice, @heartbeat, @toggle-safe-mode, @delete` | ✅ |
-| `SensorSatellite.vue` | ❌ **Nicht verwendet** | `espId, gpio, sensorType, value, quality...` | ⚠️ Fertig, nicht integriert |
-| `ActuatorSatellite.vue` | ❌ **Nicht verwendet** | `espId, gpio, actuatorType, state, pwmValue...` | ⚠️ Fertig, nicht integriert |
-| `ConnectionLines.vue` | ❌ **Nicht verwendet** | `connections, positions, showTooltips...` | ⚠️ Fertig, nicht integriert |
-| `SensorValueCard.vue` | - (optional für SensorsView) | `sensor, @edit` | ✅ |
+| Komponente | Verwendung | Beschreibung |
+|------------|------------|--------------|
+| `MainLayout.vue` | App Root | Header, Sidebar, Content Container |
+| `AppHeader.vue` | MainLayout | Toolbar, User Menu, Hamburger |
+| `AppSidebar.vue` | MainLayout | Collapsible Navigation, Admin Sections |
 
-### Dashboard-Komponenten
+### ESP-Komponenten (6)
 
-| Komponente | Verwendung (Views) | Props |
-|------------|-------------------|-------|
-| `StatCard.vue` | DashboardView | `title, value, icon?, trend?, variant?` |
+| Komponente | Verwendung | Status |
+|------------|------------|--------|
+| `ESPCard.vue` | DevicesView | ✅ Aktiv |
+| `ESPOrbitalLayout.vue` | DevicesView | ✅ Orbital Visualization |
+| `SensorSatellite.vue` | ESPOrbitalLayout | ⚠️ Fertig, Integration ausstehend |
+| `ActuatorSatellite.vue` | ESPOrbitalLayout | ⚠️ Fertig, Integration ausstehend |
+| `SensorValueCard.vue` | DeviceDetailView | ✅ Aktiv |
+| `ConnectionLines.vue` | ESPOrbitalLayout | ⚠️ SVG-Basis fertig, Logic-Parsing ausstehend |
 
-### Database-Komponenten
+### Dashboard-Komponenten (1)
 
-| Komponente | Verwendung (Views) | Props |
-|------------|-------------------|-------|
-| `DataTable.vue` | DatabaseExplorerView | `columns, data, @sort` |
-| `FilterPanel.vue` | DatabaseExplorerView | `columns, @filter` |
-| `Pagination.vue` | DatabaseExplorerView | `page, pageSize, total, @change` |
-| `RecordDetailModal.vue` | DatabaseExplorerView | `record, @close` |
+| Komponente | Verwendung | Props |
+|------------|------------|-------|
+| `StatCard.vue` | DashboardView | `title, value, subtitle?, icon, iconColor?, iconBgColor?, trend?, loading?, highlighted?` |
+
+### Database-Komponenten (6)
+
+| Komponente | Verwendung | Props |
+|------------|------------|-------|
+| `DataTable.vue` | DatabaseExplorerView | `columns, data, loading?, sortBy?, sortOrder?, @sort, @rowClick` |
+| `FilterPanel.vue` | DatabaseExplorerView | `columns, currentFilters, @apply, @clear` |
+| `Pagination.vue` | DatabaseExplorerView | `page, totalPages, totalCount, pageSize, @pageChange, @pageSizeChange` |
+| `RecordDetailModal.vue` | DatabaseExplorerView | `tableName, record, @close, @navigateToForeignKey` |
 | `SchemaInfoPanel.vue` | DatabaseExplorerView | `schema` |
-| `TableSelector.vue` | DatabaseExplorerView | `tables, @select` |
+| `TableSelector.vue` | DatabaseExplorerView | `tables, selectedTable, loading?, @select` |
 
-### Zone-Komponenten
+### Zone-Komponenten (1)
 
-| Komponente | Verwendung (Views) | Props |
-|------------|-------------------|-------|
-| `ZoneAssignmentPanel.vue` | DeviceDetailView | `espId, currentZoneId?, currentZoneName?, currentMasterZoneId?, @zone-updated` |
+| Komponente | Verwendung | Props |
+|------------|------------|-------|
+| `ZoneAssignmentPanel.vue` | DeviceDetailView | `espId, currentZoneId?, currentZoneName?, currentMasterZoneId?, @zone-updated, @zone-error` |
 
 ---
 
@@ -249,5 +265,6 @@
 
 ---
 
-**Ende Quick Reference**  
-**Letzte Aktualisierung:** 20.12.2025
+**Ende Quick Reference**
+**Letzte Aktualisierung:** 23.12.2025
+**Version:** 2.0 (27 Komponenten, 18 Views)

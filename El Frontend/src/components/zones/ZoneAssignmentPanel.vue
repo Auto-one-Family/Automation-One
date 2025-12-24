@@ -7,12 +7,12 @@
             <MapPin class="w-5 h-5 text-dark-300" />
             <span class="font-medium">Zone</span>
           </div>
-          <!-- Status Badge -->
+          <!-- Status Badge - show zone_name (human-readable) with zone_id as tooltip -->
           <Badge v-if="saving" variant="warning" size="sm" pulse>
             Speichern...
           </Badge>
-          <Badge v-else-if="currentZoneId" variant="success" size="sm">
-            {{ currentZoneId }}
+          <Badge v-else-if="currentZoneName || currentZoneId" variant="success" size="sm" :title="currentZoneId ? `Zone-ID: ${currentZoneId}` : undefined">
+            {{ currentZoneName || currentZoneId }}
           </Badge>
           <Badge v-else variant="gray" size="sm">
             Nicht zugewiesen
@@ -42,19 +42,24 @@
       <div class="space-y-3">
         <Input
           v-model="zoneInput"
-          label="Zone"
+          label="Zonenname"
           placeholder="z.B. Zelt 1, Gewächshaus, Outdoor"
-          helper="Name der Zone in der dieses Gerät arbeitet"
+          helper="Menschenfreundlicher Name. Die technische Zone-ID wird automatisch generiert."
           :disabled="saving"
         />
 
+        <!-- Show generated zone_id preview -->
+        <div v-if="zoneInput && generatedZoneId" class="text-xs" style="color: var(--color-text-muted)">
+          Technische Zone-ID: <code class="font-mono bg-dark-800 px-1 rounded">{{ generatedZoneId }}</code>
+        </div>
+
         <div class="flex gap-2">
           <Button
-            v-if="currentZoneId && zoneInput !== currentZoneId"
+            v-if="(currentZoneName || currentZoneId) && zoneInput !== (currentZoneName || currentZoneId)"
             variant="secondary"
             size="sm"
             :disabled="saving"
-            @click="zoneInput = currentZoneId"
+            @click="zoneInput = currentZoneName || currentZoneId || ''"
           >
             Zurücksetzen
           </Button>
@@ -77,7 +82,7 @@
             variant="primary"
             size="sm"
             :loading="saving && !isRemoving"
-            :disabled="!zoneInput || zoneInput === currentZoneId || saving"
+            :disabled="!zoneInput || !generatedZoneId || generatedZoneId === currentZoneId || saving"
             @click="saveZone"
           >
             <Check class="w-4 h-4 mr-1" />
@@ -90,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { MapPin, Check, X, AlertCircle, CheckCircle } from 'lucide-vue-next'
 import Card from '@/components/common/Card.vue'
 import Input from '@/components/common/Input.vue'
@@ -104,6 +109,7 @@ interface Props {
   currentZoneId?: string
   currentZoneName?: string
   currentMasterZoneId?: string
+  isMock?: boolean  // Whether this is a Mock ESP (no server API call needed)
 }
 
 const props = defineProps<Props>()
@@ -114,22 +120,50 @@ const emit = defineEmits<{
   (e: 'zone-error', error: string): void
 }>()
 
-// State
-const zoneInput = ref(props.currentZoneId || '')
+// State - use zone_name for display (human-readable), zone_id is technical
+const zoneInput = ref(props.currentZoneName || props.currentZoneId || '')
 const saving = ref(false)
 const isRemoving = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 
-// Watch for prop changes
-watch(() => props.currentZoneId, (newVal) => {
+/**
+ * Generate technical zone_id from human-readable zone_name
+ * Mirrors server-side logic in debug.py and mock_esp_manager.py
+ * "Zelt 1" -> "zelt_1", "Gewächshaus Nord" -> "gewaechshaus_nord"
+ */
+function generateZoneId(zoneName: string): string {
+  if (!zoneName) return ''
+  let zoneId = zoneName.toLowerCase()
+  // Replace German umlauts
+  zoneId = zoneId.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+  // Replace spaces and special chars with underscores
+  zoneId = zoneId.replace(/[^a-z0-9]+/g, '_')
+  // Remove leading/trailing underscores
+  zoneId = zoneId.replace(/^_+|_+$/g, '')
+  return zoneId
+}
+
+// Computed zone_id from user input
+const generatedZoneId = computed(() => generateZoneId(zoneInput.value))
+
+// Watch for prop changes - prefer zone_name for input
+watch([() => props.currentZoneName, () => props.currentZoneId], ([newName, newId]) => {
   if (!saving.value) {
-    zoneInput.value = newVal || ''
+    zoneInput.value = newName || newId || ''
   }
 })
 
 async function saveZone() {
   if (!zoneInput.value) return
+
+  const zoneName = zoneInput.value
+  const zoneId = generatedZoneId.value
+
+  if (!zoneId) {
+    errorMessage.value = 'Ungültiger Zonenname - bitte alphanumerische Zeichen verwenden'
+    return
+  }
 
   saving.value = true
   isRemoving.value = false
@@ -137,16 +171,17 @@ async function saveZone() {
   successMessage.value = ''
 
   try {
-    // Call the Zone API - only send defined fields
+    // Build request with generated zone_id and user-provided zone_name
     const request: { zone_id: string; zone_name?: string; master_zone_id?: string } = {
-      zone_id: zoneInput.value,
-      zone_name: zoneInput.value,
+      zone_id: zoneId,        // Technical ID (lowercase, no spaces)
+      zone_name: zoneName,     // Human-readable name
     }
     // Only add master_zone_id if it exists
     if (props.currentMasterZoneId) {
       request.master_zone_id = props.currentMasterZoneId
     }
 
+    console.log('[ZoneAssignmentPanel] Sending request:', request)
     const response = await zonesApi.assignZone(props.espId, request)
 
     console.log('[ZoneAssignmentPanel] API response:', response)
@@ -156,13 +191,13 @@ async function saveZone() {
       // Note: The server updates the database directly, and MQTT is sent to ESP
       // ESP will confirm via heartbeat - we don't need to wait for ACK here
       successMessage.value = response.mqtt_sent
-        ? `Zone "${zoneInput.value}" zugewiesen (MQTT gesendet)`
-        : `Zone "${zoneInput.value}" in Datenbank gespeichert`
+        ? `Zone "${zoneName}" zugewiesen (MQTT gesendet)`
+        : `Zone "${zoneName}" in Datenbank gespeichert`
 
       emit('zone-updated', {
-        zone_id: zoneInput.value,
-        zone_name: zoneInput.value,
-        master_zone_id: undefined
+        zone_id: zoneId,
+        zone_name: zoneName,
+        master_zone_id: props.currentMasterZoneId
       })
 
       // Clear success message after 3 seconds

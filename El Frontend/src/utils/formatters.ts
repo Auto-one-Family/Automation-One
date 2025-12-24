@@ -428,6 +428,69 @@ export function formatCount(count: number, singular: string, plural: string): st
   return `${count} ${count === 1 ? singular : plural}`
 }
 
+// =============================================================================
+// DATA FRESHNESS UTILITIES
+// =============================================================================
+
+/**
+ * Freshness level for data
+ */
+export type FreshnessLevel = 'live' | 'recent' | 'stale' | 'unknown'
+
+/**
+ * Get data freshness level based on timestamp
+ * - live: < 30 seconds ago
+ * - recent: < 2 minutes ago
+ * - stale: > 2 minutes ago
+ * - unknown: no timestamp
+ */
+export function getDataFreshness(
+  timestamp: string | Date | null | undefined,
+  thresholds: { live?: number; recent?: number } = {}
+): FreshnessLevel {
+  if (!timestamp) return 'unknown'
+
+  const { live = 30, recent = 120 } = thresholds
+  const now = Date.now()
+  const then = new Date(timestamp).getTime()
+  const diffSec = Math.floor((now - then) / 1000)
+
+  if (diffSec < 0) return 'live' // Future = just received
+  if (diffSec <= live) return 'live'
+  if (diffSec <= recent) return 'recent'
+  return 'stale'
+}
+
+/**
+ * Get freshness info with label and color class
+ */
+export function getFreshnessInfo(freshness: FreshnessLevel): {
+  label: string
+  colorClass: string
+  icon: 'live' | 'recent' | 'stale' | 'unknown'
+} {
+  switch (freshness) {
+    case 'live':
+      return { label: 'Live', colorClass: 'text-success', icon: 'live' }
+    case 'recent':
+      return { label: 'Aktuell', colorClass: 'text-info', icon: 'recent' }
+    case 'stale':
+      return { label: 'Veraltet', colorClass: 'text-warning', icon: 'stale' }
+    default:
+      return { label: 'Unbekannt', colorClass: 'text-muted', icon: 'unknown' }
+  }
+}
+
+/**
+ * Calculate age in seconds from timestamp
+ */
+export function getAgeSeconds(timestamp: string | Date | null | undefined): number | null {
+  if (!timestamp) return null
+  const now = Date.now()
+  const then = new Date(timestamp).getTime()
+  return Math.floor((now - then) / 1000)
+}
+
 
 
 

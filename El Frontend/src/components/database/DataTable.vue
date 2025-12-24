@@ -109,7 +109,7 @@ function getPrimaryKeyValue(record: Record<string, unknown>): string {
               @click="emit('sort', column.name)"
             >
               <div class="flex items-center gap-1">
-                <span>{{ column.name }}</span>
+                <span :title="column.label ? column.name : undefined">{{ column.label || column.name }}</span>
                 <component
                   :is="getSortIcon(column.name)"
                   :class="[

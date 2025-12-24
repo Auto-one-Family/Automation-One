@@ -1,7 +1,7 @@
 # Frontend UI Documentation
 
 **Erstellt:** 2025-12-19
-**Letztes Update:** 2025-12-20 (WebSocket-Integration verifiziert)
+**Letztes Update:** 2025-12-23 (Vollständige Synchronisation mit Code)
 **Projekt:** Auto-one El Frontend (Vue3 + TypeScript + Vite)
 
 ---
@@ -85,9 +85,9 @@ Diese Dokumentation bietet eine vollständige Analyse aller Frontend-Views, API-
 
 ### Views
 
-- **Total:** 16 Views
-- **Implementiert:** 15 Views (93.75%)
-- **Placeholder:** 1 View (LogicView - 6.25%)
+- **Total:** 18 Views (inkl. 2 Legacy-Redirects)
+- **Implementiert:** 17 Views (94.4%)
+- **Placeholder:** 1 View (LogicView - 5.6%)
 
 ### API-Endpoints
 
@@ -95,21 +95,22 @@ Diese Dokumentation bietet eine vollständige Analyse aller Frontend-Views, API-
 - **Public-APIs:** 12 Endpoints
 - **WebSocket:** 1 Endpoint
 - **Auth:** 3 Endpoints
-- **Total:** 42 Endpoints
+- **Total:** 42+ Endpoints
 
 ### Komponenten
 
-- **Common:** 4 Komponenten (LoadingState, EmptyState, ErrorState, Badge)
-- **ESP:** 2 Komponenten (ESPCard, SensorValueCard)
+- **Common:** 11 Komponenten (Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Spinner, Toggle)
+- **Layout:** 3 Komponenten (MainLayout, AppHeader, AppSidebar)
+- **ESP:** 6 Komponenten (ESPCard, ESPOrbitalLayout, SensorSatellite, ActuatorSatellite, SensorValueCard, ConnectionLines)
 - **Dashboard:** 1 Komponente (StatCard)
-- **Database:** 6 Komponenten (DataTable, FilterPanel, Pagination, etc.)
+- **Database:** 6 Komponenten (DataTable, FilterPanel, Pagination, RecordDetailModal, SchemaInfoPanel, TableSelector)
 - **Zones:** 1 Komponente (ZoneAssignmentPanel)
-- **Total:** 14 Komponenten
+- **Total:** 27 Komponenten
 
 ### Stores
 
 - **authStore** - Authentication & User-Management
-- **mockEspStore** - Mock-ESP CRUD & State-Management
+- **espStore** - Unified ESP CRUD (Mock + Real) & State-Management
 - **databaseStore** - Database-Explorer State
 
 ---
@@ -139,13 +140,13 @@ Diese Dokumentation bietet eine vollständige Analyse aller Frontend-Views, API-
 ```
 El Frontend/
 ├── src/
-│   ├── views/                    # 16 Views (15 implementiert, 1 Placeholder)
+│   ├── views/                    # 18 Views (17 implementiert, 1 Placeholder)
 │   │   ├── DashboardView.vue
-│   │   ├── MockEspView.vue
-│   │   ├── MockEspDetailView.vue
+│   │   ├── DevicesView.vue       # ✅ Unified ESP-Liste (Mock+Real)
+│   │   ├── DeviceDetailView.vue  # ✅ Unified ESP-Details
 │   │   ├── SensorsView.vue
 │   │   ├── ActuatorsView.vue
-│   │   ├── LogicView.vue         ⚠️ Placeholder
+│   │   ├── LogicView.vue         # ⚠️ Placeholder
 │   │   ├── MqttLogView.vue
 │   │   ├── DatabaseExplorerView.vue
 │   │   ├── LogViewerView.vue
@@ -155,10 +156,13 @@ El Frontend/
 │   │   ├── AuditLogView.vue
 │   │   ├── SettingsView.vue
 │   │   ├── LoginView.vue
-│   │   └── SetupView.vue
-│   ├── components/               # 14 Wiederverwendbare Komponenten
-│   │   ├── common/               # 4 Basis-Komponenten
-│   │   ├── esp/                  # 2 ESP-Komponenten
+│   │   ├── SetupView.vue
+│   │   ├── MockEspView.vue       # → Redirect zu /devices
+│   │   └── MockEspDetailView.vue # → Redirect zu /devices/:espId
+│   ├── components/               # 27 Wiederverwendbare Komponenten
+│   │   ├── common/               # 11 Basis-Komponenten
+│   │   ├── layout/               # 3 Layout-Komponenten
+│   │   ├── esp/                  # 6 ESP-Komponenten
 │   │   ├── dashboard/            # 1 Dashboard-Komponente
 │   │   ├── database/             # 6 Database-Komponenten
 │   │   └── zones/                # 1 Zone-Komponente
@@ -166,6 +170,7 @@ El Frontend/
 │   │   ├── index.ts              # Axios-Instance + Interceptors
 │   │   ├── auth.ts
 │   │   ├── debug.ts              # Mock-ESP-APIs
+│   │   ├── esp.ts                # Real-ESP-APIs
 │   │   ├── database.ts
 │   │   ├── logs.ts
 │   │   ├── users.ts
@@ -178,7 +183,7 @@ El Frontend/
 │   │   └── subzones.ts
 │   ├── stores/                   # 3 Pinia-Stores
 │   │   ├── auth.ts
-│   │   ├── mockEsp.ts
+│   │   ├── esp.ts                # Unified Store (Mock + Real)
 │   │   └── database.ts
 │   ├── utils/                    # Helper-Funktionen
 │   │   ├── sensorDefaults.ts     # Sensor-Type-Config
@@ -486,6 +491,8 @@ NODE_ENV=production
 | Datum | Version | Änderungen | Autor |
 |-------|---------|------------|-------|
 | 2025-12-19 | 1.0 | Initial-Dokumentation erstellt | Claude Sonnet 4.5 |
+| 2025-12-20 | 1.1 | WebSocket-Integration verifiziert | Claude Sonnet 4.5 |
+| 2025-12-23 | 2.0 | Vollständige Synchronisation mit Code: 18 Views, 27 Komponenten, Unified ESP-Store | Claude Opus 4.5 |
 
 ---
 

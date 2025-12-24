@@ -8,6 +8,9 @@ Status: IMPLEMENTED
 Provides:
 - GET /devices - List all ESPs
 - GET /devices/{esp_id} - ESP details
+- POST /devices - Register new ESP
+- PATCH /devices/{esp_id} - Update ESP
+- DELETE /devices/{esp_id} - Delete ESP (for orphaned mocks/decommissioned HW)
 - POST /devices/{esp_id}/config - Update config via MQTT
 - POST /devices/{esp_id}/restart - Restart command
 - POST /devices/{esp_id}/reset - Factory reset
@@ -379,6 +382,70 @@ async def update_device(
         created_at=device.created_at,
         updated_at=device.updated_at,
     )
+
+
+# =============================================================================
+# Delete Device
+# =============================================================================
+
+
+@router.delete(
+    "/devices/{esp_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        204: {"description": "Device deleted"},
+        404: {"description": "Device not found"},
+    },
+    summary="Delete ESP device",
+    description="Remove an ESP device from the database. Use for orphaned mock devices or decommissioned hardware.",
+)
+async def delete_device(
+    esp_id: str,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> None:
+    """
+    Delete ESP device from database.
+
+    WARNING: This also deletes associated sensors and actuators.
+    Use primarily for:
+    - Orphaned mock devices
+    - Decommissioned hardware
+    - Cleaning up test data
+
+    Args:
+        esp_id: ESP device ID (e.g., ESP_MOCK_E92BAA)
+        db: Database session
+        current_user: Operator or admin user
+
+    Raises:
+        HTTPException: 404 if not found
+    """
+    esp_repo = ESPRepository(db)
+    sensor_repo = SensorRepository(db)
+    actuator_repo = ActuatorRepository(db)
+
+    device = await esp_repo.get_by_device_id(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ESP device '{esp_id}' not found",
+        )
+
+    # Delete associated sensors and actuators first
+    sensors = await sensor_repo.get_by_esp(device.id)
+    for sensor in sensors:
+        await sensor_repo.delete(sensor.id)
+
+    actuators = await actuator_repo.get_by_esp(device.id)
+    for actuator in actuators:
+        await actuator_repo.delete(actuator.id)
+
+    # Delete the device
+    await db.delete(device)
+    await db.commit()
+
+    logger.warning(f"ESP device deleted: {esp_id} (including {len(sensors)} sensors, {len(actuators)} actuators) by {current_user.username}")
 
 
 # =============================================================================
