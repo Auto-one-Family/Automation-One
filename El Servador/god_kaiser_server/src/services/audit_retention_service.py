@@ -31,6 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.logging_config import get_logger
 from ..db.models.audit_log import AuditLog, AuditSeverity
+from ..db.models.enums import DataSource
+from ..db.models.sensor import SensorData
+from ..db.models.actuator import ActuatorHistory
 from ..db.repositories.system_config_repo import SystemConfigRepository
 
 logger = get_logger(__name__)
@@ -464,6 +467,234 @@ class AuditRetentionService:
         stmt = select(func.count(AuditLog.id))
         result = await self.session.execute(stmt)
         return result.scalar_one()
+
+    # =========================================================================
+    # Test Data Cleanup (Phase 6)
+    # =========================================================================
+
+    # Retention policies for test data (shorter than production)
+    TEST_DATA_RETENTION = {
+        DataSource.TEST: timedelta(hours=24),       # 24 hours
+        DataSource.MOCK: timedelta(days=7),         # 7 days
+        DataSource.SIMULATION: timedelta(days=30), # 30 days
+        DataSource.PRODUCTION: None,               # Never auto-delete
+    }
+
+    async def cleanup_test_sensor_data(
+        self,
+        dry_run: bool = False,
+        include_mock: bool = True,
+        include_simulation: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Delete old test/mock/simulation sensor data.
+
+        Cleans up sensor data based on data_source field and retention periods.
+        Production data is never deleted.
+
+        Args:
+            dry_run: If True, calculate but don't delete
+            include_mock: Include mock data in cleanup
+            include_simulation: Include simulation data in cleanup
+
+        Returns:
+            Dict with cleanup results per data source
+        """
+        start_time = datetime.now(timezone.utc)
+        results = {
+            "deleted": {},
+            "total_deleted": 0,
+            "dry_run": dry_run,
+            "errors": [],
+        }
+
+        now = datetime.now(timezone.utc)
+
+        for source, retention in self.TEST_DATA_RETENTION.items():
+            # Skip production data (never auto-delete)
+            if retention is None:
+                continue
+
+            # Check if this source should be included
+            if source == DataSource.MOCK and not include_mock:
+                continue
+            if source == DataSource.SIMULATION and not include_simulation:
+                continue
+
+            cutoff = now - retention
+
+            try:
+                conditions = [
+                    SensorData.data_source == source.value,
+                    SensorData.timestamp < cutoff,
+                ]
+
+                if dry_run:
+                    # Count what would be deleted
+                    count_stmt = select(func.count(SensorData.id)).where(and_(*conditions))
+                    result = await self.session.execute(count_stmt)
+                    count = result.scalar_one()
+                else:
+                    # Delete records
+                    delete_stmt = delete(SensorData).where(and_(*conditions))
+                    result = await self.session.execute(delete_stmt)
+                    count = result.rowcount
+                    await self.session.flush()
+
+                if count > 0:
+                    results["deleted"][source.value] = count
+                    results["total_deleted"] += count
+
+            except Exception as e:
+                error_msg = f"Error cleaning up {source.value} sensor data: {str(e)}"
+                results["errors"].append(error_msg)
+                logger.error(error_msg)
+
+        end_time = datetime.now(timezone.utc)
+        results["duration_ms"] = int((end_time - start_time).total_seconds() * 1000)
+
+        if not dry_run and results["total_deleted"] > 0:
+            logger.info(
+                f"Test sensor data cleanup: {results['total_deleted']} records deleted "
+                f"in {results['duration_ms']}ms"
+            )
+
+        return results
+
+    async def cleanup_test_actuator_data(
+        self,
+        dry_run: bool = False,
+        include_mock: bool = True,
+        include_simulation: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Delete old test/mock/simulation actuator history.
+
+        Cleans up actuator history based on data_source field and retention periods.
+        Production data is never deleted.
+
+        Args:
+            dry_run: If True, calculate but don't delete
+            include_mock: Include mock data in cleanup
+            include_simulation: Include simulation data in cleanup
+
+        Returns:
+            Dict with cleanup results per data source
+        """
+        start_time = datetime.now(timezone.utc)
+        results = {
+            "deleted": {},
+            "total_deleted": 0,
+            "dry_run": dry_run,
+            "errors": [],
+        }
+
+        now = datetime.now(timezone.utc)
+
+        for source, retention in self.TEST_DATA_RETENTION.items():
+            # Skip production data (never auto-delete)
+            if retention is None:
+                continue
+
+            # Check if this source should be included
+            if source == DataSource.MOCK and not include_mock:
+                continue
+            if source == DataSource.SIMULATION and not include_simulation:
+                continue
+
+            cutoff = now - retention
+
+            try:
+                conditions = [
+                    ActuatorHistory.data_source == source.value,
+                    ActuatorHistory.timestamp < cutoff,
+                ]
+
+                if dry_run:
+                    # Count what would be deleted
+                    count_stmt = select(func.count(ActuatorHistory.id)).where(and_(*conditions))
+                    result = await self.session.execute(count_stmt)
+                    count = result.scalar_one()
+                else:
+                    # Delete records
+                    delete_stmt = delete(ActuatorHistory).where(and_(*conditions))
+                    result = await self.session.execute(delete_stmt)
+                    count = result.rowcount
+                    await self.session.flush()
+
+                if count > 0:
+                    results["deleted"][source.value] = count
+                    results["total_deleted"] += count
+
+            except Exception as e:
+                error_msg = f"Error cleaning up {source.value} actuator history: {str(e)}"
+                results["errors"].append(error_msg)
+                logger.error(error_msg)
+
+        end_time = datetime.now(timezone.utc)
+        results["duration_ms"] = int((end_time - start_time).total_seconds() * 1000)
+
+        if not dry_run and results["total_deleted"] > 0:
+            logger.info(
+                f"Test actuator history cleanup: {results['total_deleted']} records deleted "
+                f"in {results['duration_ms']}ms"
+            )
+
+        return results
+
+    async def run_full_test_cleanup(
+        self,
+        dry_run: bool = False,
+        include_mock: bool = True,
+        include_simulation: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Run complete test data cleanup (sensor data + actuator history).
+
+        Combines cleanup of sensor data and actuator history in one operation.
+        Production data is never affected.
+
+        Args:
+            dry_run: If True, calculate but don't delete
+            include_mock: Include mock data in cleanup
+            include_simulation: Include simulation data in cleanup
+
+        Returns:
+            Combined cleanup results
+        """
+        start_time = datetime.now(timezone.utc)
+
+        sensor_result = await self.cleanup_test_sensor_data(
+            dry_run=dry_run,
+            include_mock=include_mock,
+            include_simulation=include_simulation,
+        )
+
+        actuator_result = await self.cleanup_test_actuator_data(
+            dry_run=dry_run,
+            include_mock=include_mock,
+            include_simulation=include_simulation,
+        )
+
+        # Commit changes
+        if not dry_run:
+            await self.session.commit()
+
+        end_time = datetime.now(timezone.utc)
+
+        return {
+            "sensor_data": sensor_result,
+            "actuator_history": actuator_result,
+            "total_deleted": (
+                sensor_result["total_deleted"] + actuator_result["total_deleted"]
+            ),
+            "dry_run": dry_run,
+            "include_mock": include_mock,
+            "include_simulation": include_simulation,
+            "duration_ms": int((end_time - start_time).total_seconds() * 1000),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
 
 
 

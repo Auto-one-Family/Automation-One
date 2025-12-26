@@ -17,8 +17,11 @@ from typing import Optional
 
 import pytest
 
+import socket
+import time
+
 from .mocks.in_memory_mqtt_client import InMemoryMQTTTestClient
-from .mocks.mock_esp32_client import MockESP32Client, SystemState
+from .mocks.mock_esp32_client import BrokerMode, MockESP32Client, SystemState
 
 
 @pytest.fixture
@@ -534,6 +537,126 @@ def mqtt_test_client(mqtt_test_config):
     with a real MQTT client.
     """
     return InMemoryMQTTTestClient()
+
+
+# =============================================================================
+# MQTT Broker Mode Fixtures (Phase 3)
+# =============================================================================
+
+def is_mqtt_broker_available(host: str = "localhost", port: int = 1883) -> bool:
+    """
+    Check if MQTT broker is available at given host:port.
+
+    Args:
+        host: MQTT broker hostname
+        port: MQTT broker port
+
+    Returns:
+        True if broker is reachable
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+@pytest.fixture
+def mock_esp32_with_broker(mqtt_test_config):
+    """
+    Provide a MockESP32Client with real MQTT broker connection.
+
+    Automatically skips if MQTT broker is not available.
+    Useful for end-to-end integration tests.
+
+    Usage:
+        def test_mqtt_publish(mock_esp32_with_broker):
+            mock = mock_esp32_with_broker
+            mock.set_sensor_value(gpio=4, raw_value=23.5, sensor_type="DS18B20")
+            # Message is published to real broker
+            assert mock.is_broker_connected()
+    """
+    host = mqtt_test_config.get("broker_host", "localhost")
+    port = mqtt_test_config.get("broker_port", 1883)
+
+    if not is_mqtt_broker_available(host, port):
+        pytest.skip(f"MQTT Broker nicht erreichbar auf {host}:{port}")
+
+    # Generate unique ESP ID to avoid conflicts
+    esp_id = f"MOCK_BROKER_{int(time.time() * 1000) % 100000:05d}"
+
+    mock = MockESP32Client(
+        esp_id=esp_id,
+        kaiser_id="god",
+        broker_mode=BrokerMode.MQTT,
+        mqtt_config={
+            "host": host,
+            "port": port,
+            "username": mqtt_test_config.get("username"),
+            "password": mqtt_test_config.get("password"),
+        }
+    )
+
+    # Configure zone for full functionality
+    mock.configure_zone("broker_test_zone", "broker_master", "broker_subzone")
+
+    yield mock
+
+    # Cleanup: Disconnect from broker
+    mock.disconnect_mqtt()
+    mock.reset()
+
+
+@pytest.fixture
+def mock_esp32_broker_fallback(mqtt_test_config):
+    """
+    Provide a MockESP32Client that tries broker mode but falls back to direct.
+
+    Always succeeds - uses broker if available, otherwise direct mode.
+    Useful for tests that work in both modes.
+
+    Usage:
+        def test_sensor_publish(mock_esp32_broker_fallback):
+            mock = mock_esp32_broker_fallback
+            mock.set_sensor_value(gpio=4, raw_value=23.5, sensor_type="DS18B20")
+            # Works regardless of broker availability
+    """
+    host = mqtt_test_config.get("broker_host", "localhost")
+    port = mqtt_test_config.get("broker_port", 1883)
+
+    broker_available = is_mqtt_broker_available(host, port)
+    esp_id = f"MOCK_FALLBACK_{int(time.time() * 1000) % 100000:05d}"
+
+    if broker_available:
+        mock = MockESP32Client(
+            esp_id=esp_id,
+            kaiser_id="god",
+            broker_mode=BrokerMode.MQTT,
+            mqtt_config={
+                "host": host,
+                "port": port,
+                "username": mqtt_test_config.get("username"),
+                "password": mqtt_test_config.get("password"),
+            }
+        )
+    else:
+        # Fallback to direct mode
+        mock = MockESP32Client(
+            esp_id=esp_id,
+            kaiser_id="god",
+            broker_mode=BrokerMode.DIRECT
+        )
+
+    mock.configure_zone("fallback_zone", "fallback_master", "fallback_subzone")
+
+    yield mock
+
+    if broker_available:
+        mock.disconnect_mqtt()
+    mock.reset()
 
 
 # =============================================================================

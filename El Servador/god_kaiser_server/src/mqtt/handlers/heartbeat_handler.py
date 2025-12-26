@@ -26,6 +26,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...db.models.enums import DataSource
 from ...db.models.esp import ESPDevice
 from ...db.repositories import ESPRepository
 from ...db.session import get_session
@@ -139,8 +140,12 @@ class HeartbeatHandler:
                 # Commit transaction
                 await session.commit()
 
+                # Determine device source for logging
+                device_source = self._detect_device_source(esp_device, payload)
+                source_indicator = f"[{device_source.upper()}]" if device_source != DataSource.PRODUCTION.value else ""
+
                 logger.debug(
-                    f"Heartbeat processed: esp_id={esp_id_str}, "
+                    f"Heartbeat processed{source_indicator}: esp_id={esp_id_str}, "
                     f"uptime={payload.get('uptime')}s, "
                     f"heap_free={payload.get('heap_free', payload.get('free_heap'))} bytes"
                 )
@@ -369,6 +374,77 @@ class HeartbeatHandler:
             }
 
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
+
+    def _detect_device_source(self, esp_device: ESPDevice, payload: dict) -> str:
+        """
+        Detect the device source for logging purposes.
+
+        Detection priority:
+        1. Explicit _source field in payload → use value
+        2. Device hardware_type == "MOCK_ESP32" → MOCK
+        3. Device capabilities.mock == True → MOCK
+        4. ESP ID starts with "MOCK_" or "ESP_MOCK" → MOCK
+        5. ESP ID starts with "TEST_" → TEST
+        6. ESP ID starts with "SIM_" → SIMULATION
+        7. Default → PRODUCTION
+
+        Args:
+            esp_device: ESPDevice instance
+            payload: MQTT payload dict
+
+        Returns:
+            Data source string value
+        """
+        esp_id = esp_device.device_id or "unknown"
+        detection_reason = None
+
+        # Priority 1: Explicit source field
+        if "_source" in payload:
+            source_value = payload["_source"].lower()
+            try:
+                result = DataSource(source_value).value
+                detection_reason = f"payload._source='{source_value}'"
+                logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                return result
+            except ValueError:
+                return DataSource.PRODUCTION.value
+
+        # Priority 2: Device hardware_type
+        if esp_device.hardware_type == "MOCK_ESP32":
+            detection_reason = "esp_device.hardware_type='MOCK_ESP32'"
+            result = DataSource.MOCK.value
+            logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+
+        # Priority 3: Device capabilities flag
+        if esp_device.capabilities and esp_device.capabilities.get("mock"):
+            detection_reason = "esp_device.capabilities.mock=True"
+            result = DataSource.MOCK.value
+            logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+
+        # Priority 4-6: ESP ID prefix detection
+        if esp_id.startswith("MOCK_") or esp_id.startswith("ESP_MOCK"):
+            detection_reason = f"esp_id prefix 'MOCK_' or 'ESP_MOCK'"
+            result = DataSource.MOCK.value
+            logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+        if esp_id.startswith("TEST_"):
+            detection_reason = f"esp_id prefix 'TEST_'"
+            result = DataSource.TEST.value
+            logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+        if esp_id.startswith("SIM_"):
+            detection_reason = f"esp_id prefix 'SIM_'"
+            result = DataSource.SIMULATION.value
+            logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+
+        # Default
+        detection_reason = "default (no matching criteria)"
+        result = DataSource.PRODUCTION.value
+        logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+        return result
 
     def _log_health_metrics(self, esp_id: str, payload: dict):
         """

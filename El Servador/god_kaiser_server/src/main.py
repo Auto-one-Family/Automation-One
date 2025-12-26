@@ -41,6 +41,7 @@ from .mqtt.handlers import (
 from .mqtt.publisher import Publisher
 from .mqtt.subscriber import Subscriber
 from .services.actuator_service import ActuatorService
+from .services.mock_esp_manager import MockESPManager
 from .services.logic.actions import (
     ActuatorActionExecutor,
     DelayActionExecutor,
@@ -187,6 +188,14 @@ async def lifespan(app: FastAPI):
 
             logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 
+            # Step 3.5: Configure MockESPManager with MQTT client
+            # This enables Mock ESPs to publish messages through the real MQTT broker
+            # so they are received and processed by the sensor/actuator handlers
+            logger.info("Configuring MockESPManager with MQTT client...")
+            mock_esp_manager = await MockESPManager.get_instance()
+            mock_esp_manager.set_mqtt_client(mqtt_client)
+            logger.info("MockESPManager configured - Mock ESPs can now publish via MQTT")
+
             # Step 4: Subscribe to all topics
             logger.info("Subscribing to MQTT topics...")
             _subscriber_instance.subscribe_all()
@@ -299,12 +308,11 @@ async def lifespan(app: FastAPI):
             _subscriber_instance.shutdown(wait=True, timeout=30.0)
             logger.info("MQTT subscriber shutdown complete")
         
-        # Step 5: Disconnect MQTT client
+        # Step 5: Disconnect MQTT client (always stop loop, even if not connected)
         logger.info("Disconnecting MQTT client...")
         mqtt_client = MQTTClient.get_instance()
-        if mqtt_client.is_connected():
-            mqtt_client.disconnect()
-            logger.info("MQTT client disconnected")
+        mqtt_client.disconnect()  # Always call - stops background thread even if not connected
+        logger.info("MQTT client disconnected")
 
         # Step 6: Dispose database engine
         logger.info("Disposing database engine...")

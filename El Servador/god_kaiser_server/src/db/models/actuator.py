@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin
+from .enums import DataSource
 
 
 class ActuatorConfig(Base, TimestampMixin):
@@ -252,6 +253,14 @@ class ActuatorState(Base):
         doc="Additional state metadata (warnings, errors, etc.)",
     )
 
+    # Data Source Tracking (for mock/test/production distinction)
+    data_source: Mapped[str] = mapped_column(
+        String(20),
+        default=DataSource.PRODUCTION.value,
+        nullable=False,
+        doc="Data source: production, mock, test, simulation",
+    )
+
     # Optimized Indices for State Queries
     __table_args__ = (
         Index("idx_esp_gpio_state", "esp_id", "gpio"),
@@ -368,12 +377,22 @@ class ActuatorHistory(Base):
         doc="Additional command metadata (request_id, retry_count, etc.)",
     )
 
+    # Data Source Tracking (for mock/test/production distinction)
+    data_source: Mapped[str] = mapped_column(
+        String(20),
+        default=DataSource.PRODUCTION.value,
+        nullable=False,
+        index=True,
+        doc="Data source: production, mock, test, simulation",
+    )
+
     # Time-Series Optimized Indices
     __table_args__ = (
         Index("idx_esp_gpio_timestamp_hist", "esp_id", "gpio", "timestamp"),
         Index("idx_command_type_timestamp", "command_type", "timestamp"),
         Index("idx_timestamp_desc_hist", "timestamp", postgresql_ops={"timestamp": "DESC"}),
         Index("idx_success_timestamp", "success", "timestamp"),
+        Index("idx_actuator_data_source_timestamp", "data_source", "timestamp"),
     )
 
     def __repr__(self) -> str:

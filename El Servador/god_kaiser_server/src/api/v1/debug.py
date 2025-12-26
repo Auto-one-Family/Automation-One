@@ -57,6 +57,7 @@ from ...schemas.debug_db import (
     TableSchema,
 )
 from ...services.mock_esp_manager import MockESPManager
+from ...services.audit_retention_service import AuditRetentionService
 from ...db.repositories import ESPRepository
 from ..deps import AdminUser, DBSession
 
@@ -1807,4 +1808,378 @@ async def cleanup_orphaned_mocks(
         deleted_count=len(deleted_ids),
         deleted_ids=deleted_ids,
         message=f"Cleaned up {len(deleted_ids)} orphaned mock ESP entries from database"
+    )
+
+
+class TestDataCleanupResponse(BaseModel):
+    """Response for test data cleanup operations."""
+    success: bool = True
+    dry_run: bool
+    sensor_data: Dict[str, Any]
+    actuator_data: Dict[str, Any]
+    total_deleted: int
+    message: str
+
+
+@router.delete(
+    "/test-data/cleanup",
+    response_model=TestDataCleanupResponse,
+    summary="Cleanup Test Data",
+    description="Delete test/mock/simulation data from sensor_data and actuator_history tables."
+)
+async def cleanup_test_data(
+    current_user: AdminUser,
+    db: DBSession,
+    dry_run: bool = Query(default=True, description="Preview deletions without actually deleting"),
+    include_mock: bool = Query(default=True, description="Include MOCK data in cleanup"),
+    include_simulation: bool = Query(default=True, description="Include SIMULATION data in cleanup")
+) -> TestDataCleanupResponse:
+    """
+    Clean up test data from the database.
+
+    This deletes sensor_data and actuator_history entries based on their data_source:
+    - TEST: Always included, retention = 24 hours
+    - MOCK: Optional (include_mock), retention = 7 days
+    - SIMULATION: Optional (include_simulation), retention = 30 days
+    - PRODUCTION: Never deleted
+
+    Use dry_run=true (default) to preview what would be deleted without actually deleting.
+    """
+    retention_service = AuditRetentionService(db)
+
+    try:
+        result = await retention_service.run_full_test_cleanup(
+            dry_run=dry_run,
+            include_mock=include_mock,
+            include_simulation=include_simulation
+        )
+
+        # Service returns "total_deleted" in sub-dicts, not "deleted_count"
+        total_deleted = result.get("total_deleted", 0)
+
+        action = "Would delete" if dry_run else "Deleted"
+        logger.info(
+            f"Admin {current_user.username} ran test data cleanup "
+            f"(dry_run={dry_run}, mock={include_mock}, sim={include_simulation}): "
+            f"{total_deleted} records affected"
+        )
+
+        # Map service result keys to API response format
+        sensor_result = result.get("sensor_data", {})
+        actuator_result = result.get("actuator_history", {})
+
+        return TestDataCleanupResponse(
+            success=True,
+            dry_run=dry_run,
+            sensor_data={
+                "deleted_count": sensor_result.get("total_deleted", 0),
+                "deleted_by_source": sensor_result.get("deleted", {}),
+                "duration_ms": sensor_result.get("duration_ms", 0),
+                "errors": sensor_result.get("errors", []),
+            },
+            actuator_data={
+                "deleted_count": actuator_result.get("total_deleted", 0),
+                "deleted_by_source": actuator_result.get("deleted", {}),
+                "duration_ms": actuator_result.get("duration_ms", 0),
+                "errors": actuator_result.get("errors", []),
+            },
+            total_deleted=total_deleted,
+            message=f"{action} {total_deleted} test data records"
+        )
+
+    except Exception as e:
+        logger.error(f"Error during test data cleanup: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cleanup test data: {str(e)}"
+        )
+
+
+# =============================================================================
+# Library Management Endpoints
+# =============================================================================
+
+class LibraryReloadResponse(BaseModel):
+    """Response for library reload operations."""
+    success: bool = True
+    processors_before: int
+    processors_after: int
+    available_types: List[str]
+    message: str
+
+
+@router.post(
+    "/libraries/reload",
+    response_model=LibraryReloadResponse,
+    summary="Reload Sensor Libraries",
+    description="Hot-reload sensor processing libraries without server restart."
+)
+async def reload_sensor_libraries(
+    current_user: AdminUser,
+) -> LibraryReloadResponse:
+    """
+    Reload all sensor processing libraries.
+
+    This is useful when:
+    - New sensor libraries are added to sensor_libraries/active/
+    - Existing libraries are modified
+    - Libraries need to be refreshed without server restart
+
+    Returns the count of processors before and after reload.
+    """
+    from ...sensors.library_loader import LibraryLoader
+
+    loader = LibraryLoader.get_instance()
+
+    # Count before reload
+    processors_before = len(loader.processors)
+
+    # Reload libraries
+    loader.reload_libraries()
+
+    # Count after reload
+    processors_after = len(loader.processors)
+    available_types = loader.get_available_sensors()
+
+    logger.info(
+        f"Admin {current_user.username} reloaded sensor libraries: "
+        f"{processors_before} → {processors_after} processors"
+    )
+
+    return LibraryReloadResponse(
+        success=True,
+        processors_before=processors_before,
+        processors_after=processors_after,
+        available_types=available_types,
+        message=f"Reloaded sensor libraries: {processors_after} processors available"
+    )
+
+
+class LibraryInfoResponse(BaseModel):
+    """Response for library info."""
+    available_types: List[str]
+    count: int
+    library_path: str
+
+
+@router.get(
+    "/libraries/info",
+    response_model=LibraryInfoResponse,
+    summary="Get Library Info",
+    description="Get information about loaded sensor processing libraries."
+)
+async def get_library_info(
+    current_user: AdminUser,
+) -> LibraryInfoResponse:
+    """
+    Get information about loaded sensor processing libraries.
+
+    Returns list of available sensor types and library path.
+    """
+    from ...sensors.library_loader import LibraryLoader
+
+    loader = LibraryLoader.get_instance()
+    available_types = loader.get_available_sensors()
+
+    return LibraryInfoResponse(
+        available_types=available_types,
+        count=len(available_types),
+        library_path=str(loader.library_path)
+    )
+
+
+# =============================================================================
+# Mock ESP Sync Status Endpoints
+# =============================================================================
+
+class MockESPSyncStatusResponse(BaseModel):
+    """Response for Mock ESP sync status."""
+    in_memory_count: int
+    in_database_count: int
+    synced_count: int
+    orphaned_count: int
+    orphaned_ids: List[str]
+    memory_only_ids: List[str]
+    is_synced: bool
+    message: str
+
+
+@router.get(
+    "/mock-esp/sync-status",
+    response_model=MockESPSyncStatusResponse,
+    summary="Get Mock ESP Sync Status",
+    description="Check synchronization between in-memory Mock ESPs and database entries."
+)
+async def get_mock_esp_sync_status(
+    current_user: AdminUser,
+    db: DBSession,
+) -> MockESPSyncStatusResponse:
+    """
+    Get synchronization status between in-memory Mock ESPs and database.
+
+    This helps identify:
+    - Orphaned database entries (Mock ESPs from previous server runs)
+    - Memory-only Mock ESPs (unlikely, indicates a bug)
+
+    Returns sync status with details about discrepancies.
+    """
+    from ...db.repositories import ESPRepository
+
+    manager = await MockESPManager.get_instance()
+    esp_repo = ESPRepository(db)
+
+    # Get all Mock ESPs from database
+    db_mock_esps = await esp_repo.get_by_hardware_type("MOCK_ESP32")
+    db_mock_ids = [esp.device_id for esp in db_mock_esps]
+
+    # Get sync status
+    sync_status = manager.get_sync_status(db_mock_ids)
+
+    if sync_status["is_synced"]:
+        message = "All Mock ESPs are synchronized between memory and database."
+    else:
+        parts = []
+        if sync_status["orphaned_count"] > 0:
+            parts.append(f"{sync_status['orphaned_count']} orphaned DB entries")
+        if len(sync_status["memory_only_ids"]) > 0:
+            parts.append(f"{len(sync_status['memory_only_ids'])} memory-only entries")
+        message = f"Sync issues detected: {', '.join(parts)}"
+
+    return MockESPSyncStatusResponse(
+        **sync_status,
+        message=message
+    )
+
+
+class DataSourceDetectionRequest(BaseModel):
+    """Request for data source detection test."""
+    esp_id: str
+    hardware_type: Optional[str] = None
+    capabilities_mock: Optional[bool] = None
+    payload_test_mode: Optional[bool] = None
+    payload_source: Optional[str] = None
+
+
+class DataSourceDetectionResponse(BaseModel):
+    """Response for data source detection test."""
+    esp_id: str
+    detected_source: str
+    detection_reason: str
+    checks_performed: List[Dict[str, Any]]
+
+
+@router.post(
+    "/data-source/detect",
+    response_model=DataSourceDetectionResponse,
+    summary="Test Data Source Detection",
+    description="Test data source detection logic with custom parameters."
+)
+async def test_data_source_detection(
+    request: DataSourceDetectionRequest,
+    current_user: AdminUser,
+) -> DataSourceDetectionResponse:
+    """
+    Test the data source detection logic.
+
+    This endpoint simulates the detection logic with custom parameters
+    to help debug data source classification issues.
+
+    Returns the detected source and which check triggered the detection.
+    """
+    from ...db.models.enums import DataSource
+
+    esp_id = request.esp_id
+    checks = []
+    detected_source = None
+    detection_reason = None
+
+    # Build mock payload
+    payload = {"esp_id": esp_id}
+    if request.payload_test_mode:
+        payload["_test_mode"] = True
+    if request.payload_source:
+        payload["_source"] = request.payload_source
+
+    # Check 1: _test_mode
+    checks.append({
+        "priority": 1,
+        "check": "payload._test_mode",
+        "value": payload.get("_test_mode"),
+        "matched": bool(payload.get("_test_mode")),
+    })
+    if payload.get("_test_mode") and detected_source is None:
+        detected_source = DataSource.TEST.value
+        detection_reason = "payload._test_mode=True"
+
+    # Check 2: _source
+    checks.append({
+        "priority": 2,
+        "check": "payload._source",
+        "value": payload.get("_source"),
+        "matched": "_source" in payload and detected_source is None,
+    })
+    if "_source" in payload and detected_source is None:
+        try:
+            detected_source = DataSource(payload["_source"].lower()).value
+            detection_reason = f"payload._source='{payload['_source']}'"
+        except ValueError:
+            pass
+
+    # Check 3: hardware_type
+    checks.append({
+        "priority": 3,
+        "check": "hardware_type='MOCK_ESP32'",
+        "value": request.hardware_type,
+        "matched": request.hardware_type == "MOCK_ESP32" and detected_source is None,
+    })
+    if request.hardware_type == "MOCK_ESP32" and detected_source is None:
+        detected_source = DataSource.MOCK.value
+        detection_reason = "hardware_type='MOCK_ESP32'"
+
+    # Check 4: capabilities.mock
+    checks.append({
+        "priority": 4,
+        "check": "capabilities.mock=True",
+        "value": request.capabilities_mock,
+        "matched": request.capabilities_mock is True and detected_source is None,
+    })
+    if request.capabilities_mock is True and detected_source is None:
+        detected_source = DataSource.MOCK.value
+        detection_reason = "capabilities.mock=True"
+
+    # Check 5-7: ESP ID prefix
+    prefixes = [
+        (5, "MOCK_", DataSource.MOCK.value),
+        (6, "TEST_", DataSource.TEST.value),
+        (7, "SIM_", DataSource.SIMULATION.value),
+    ]
+    for priority, prefix, source in prefixes:
+        matched = esp_id.startswith(prefix) and detected_source is None
+        checks.append({
+            "priority": priority,
+            "check": f"esp_id.startswith('{prefix}')",
+            "value": esp_id,
+            "matched": matched,
+        })
+        if matched:
+            detected_source = source
+            detection_reason = f"esp_id prefix '{prefix}'"
+
+    # Default
+    if detected_source is None:
+        detected_source = DataSource.PRODUCTION.value
+        detection_reason = "default (no matching criteria)"
+
+    checks.append({
+        "priority": 8,
+        "check": "default",
+        "value": None,
+        "matched": detection_reason == "default (no matching criteria)",
+    })
+
+    return DataSourceDetectionResponse(
+        esp_id=esp_id,
+        detected_source=detected_source,
+        detection_reason=detection_reason,
+        checks_performed=checks
     )

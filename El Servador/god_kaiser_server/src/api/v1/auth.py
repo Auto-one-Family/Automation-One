@@ -515,31 +515,41 @@ async def refresh_token(
         )
     
     # TOKEN ROTATION: Blacklist old refresh token BEFORE creating new ones
+    # Cache user data before any DB operations that might fail
+    user_id = user.id
+    user_role = user.role
+    user_token_version = user.token_version
+    user_username = user.username
+    
     try:
         await blacklist_repo.add_token(
             token=old_refresh_token,
             token_type="refresh",
-            user_id=user.id,
+            user_id=user_id,
             expires_at=expires_at,
             reason="token_rotation",
         )
         await db.commit()
-        logger.debug(f"Old refresh token blacklisted for user: {user.username}")
+        logger.debug(f"Old refresh token blacklisted for user: {user_username}")
     except Exception as e:
-        logger.warning(f"Failed to blacklist old refresh token: {e}")
+        # Rollback the failed transaction to allow further DB operations
+        await db.rollback()
+        logger.warning(f"Failed to blacklist old refresh token (might be already blacklisted): {e}")
         # Continue anyway - token rotation is best effort
+        # Token might already be blacklisted by concurrent request (race condition)
     
     # Generate new tokens (include token_version)
+    # Use cached values to avoid accessing expired/rolled-back session objects
     new_access_token = create_access_token(
-        user_id=user.id,
+        user_id=user_id,
         additional_claims={
-            "role": user.role,
-            "token_version": user.token_version,
+            "role": user_role,
+            "token_version": user_token_version,
         },
     )
-    new_refresh_token = create_refresh_token(user_id=user.id)
+    new_refresh_token = create_refresh_token(user_id=user_id)
     
-    logger.info(f"Token rotated for user: {user.username}")
+    logger.info(f"Token rotated for user: {user_username}")
     
     return RefreshTokenResponse(
         success=True,

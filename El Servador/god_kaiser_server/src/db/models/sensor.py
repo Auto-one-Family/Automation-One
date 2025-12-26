@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin
+from .enums import DataSource
 
 
 class SensorConfig(Base, TimestampMixin):
@@ -238,11 +239,21 @@ class SensorData(Base):
         doc="Additional reading metadata (warnings, errors, etc.)",
     )
 
+    # Data Source Tracking (for mock/test/production distinction)
+    data_source: Mapped[str] = mapped_column(
+        String(20),
+        default=DataSource.PRODUCTION.value,
+        nullable=False,
+        index=True,
+        doc="Data source: production, mock, test, simulation",
+    )
+
     # Time-Series Optimized Indices
     __table_args__ = (
         Index("idx_esp_gpio_timestamp", "esp_id", "gpio", "timestamp"),
         Index("idx_sensor_type_timestamp", "sensor_type", "timestamp"),
         Index("idx_timestamp_desc", "timestamp", postgresql_ops={"timestamp": "DESC"}),
+        Index("idx_data_source_timestamp", "data_source", "timestamp"),
     )
 
     def __repr__(self) -> str:

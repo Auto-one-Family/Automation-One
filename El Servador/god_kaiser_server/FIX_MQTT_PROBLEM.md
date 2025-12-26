@@ -147,3 +147,4 @@ Get-Service mosquitto
 - Verbindungen prüfen: `netstat -ano | findstr ":1883"`
 
 
+

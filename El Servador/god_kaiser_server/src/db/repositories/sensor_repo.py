@@ -3,14 +3,15 @@ Sensor Repository: Sensor Config and Data Queries
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.sensor import SensorConfig, SensorData
 from ..models.esp import ESPDevice
+from ..models.enums import DataSource
 from .base_repo import BaseRepository
 
 
@@ -180,6 +181,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         quality: Optional[str] = None,
         timestamp: Optional[datetime] = None,
         metadata: Optional[dict] = None,
+        data_source: str = DataSource.PRODUCTION.value,
     ) -> SensorData:
         """
         Save sensor data.
@@ -195,6 +197,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             quality: Data quality (good, fair, poor, error)
             timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
             metadata: Additional metadata
+            data_source: Data source (production, mock, test, simulation)
 
         Returns:
             Created SensorData instance
@@ -210,6 +213,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             quality=quality,
             timestamp=timestamp or datetime.utcnow(),
             sensor_metadata=metadata,  # Model field is sensor_metadata
+            data_source=data_source,
         )
         self.session.add(sensor_data)
         await self.session.flush()
@@ -263,6 +267,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         quality: Optional[str] = None,
+        data_source: Optional[DataSource] = None,
         limit: int = 100,
     ) -> list[SensorData]:
         """
@@ -275,6 +280,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             start_time: Optional start timestamp
             end_time: Optional end timestamp
             quality: Optional quality filter
+            data_source: Optional data source filter (production, mock, test, simulation)
             limit: Maximum number of records (default: 100)
 
         Returns:
@@ -295,6 +301,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
             stmt = stmt.where(SensorData.timestamp <= end_time)
         if quality:
             stmt = stmt.where(SensorData.quality == quality.lower())
+        if data_source:
+            stmt = stmt.where(SensorData.data_source == data_source.value)
 
         stmt = stmt.order_by(SensorData.timestamp.desc()).limit(limit)
         result = await self.session.execute(stmt)
@@ -482,3 +490,77 @@ class SensorRepository(BaseRepository[SensorConfig]):
             "reading_count": agg_row.reading_count,
             "quality_distribution": quality_distribution,
         }
+
+    # Data source filtering operations
+    async def get_by_source(
+        self,
+        source: DataSource,
+        limit: int = 100,
+        esp_id: Optional[uuid.UUID] = None,
+    ) -> list[SensorData]:
+        """
+        Get sensor data filtered by data source.
+
+        Args:
+            source: Data source (production, mock, test, simulation)
+            limit: Maximum number of records
+            esp_id: Optional ESP device UUID filter
+
+        Returns:
+            List of SensorData instances
+        """
+        stmt = select(SensorData).where(SensorData.data_source == source.value)
+        if esp_id:
+            stmt = stmt.where(SensorData.esp_id == esp_id)
+        stmt = stmt.order_by(SensorData.timestamp.desc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_production_only(self, limit: int = 100) -> list[SensorData]:
+        """
+        Get only production sensor data (excludes mock/test/simulation).
+
+        Args:
+            limit: Maximum number of records
+
+        Returns:
+            List of production SensorData instances
+        """
+        return await self.get_by_source(DataSource.PRODUCTION, limit)
+
+    async def cleanup_test_data(self, older_than_hours: int = 24) -> int:
+        """
+        Delete test sensor data older than specified hours.
+
+        Only deletes data with data_source='test'. Does not affect
+        mock, simulation, or production data.
+
+        Args:
+            older_than_hours: Delete data older than this many hours
+
+        Returns:
+            Number of deleted records
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+        stmt = delete(SensorData).where(
+            SensorData.data_source == DataSource.TEST.value,
+            SensorData.timestamp < cutoff,
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount
+
+    async def count_by_source(self) -> dict[str, int]:
+        """
+        Count sensor data entries grouped by data source.
+
+        Returns:
+            Dictionary mapping data source to count
+            Example: {"production": 1000, "mock": 50, "test": 25}
+        """
+        stmt = (
+            select(SensorData.data_source, func.count(SensorData.id))
+            .group_by(SensorData.data_source)
+        )
+        result = await self.session.execute(stmt)
+        return {source: count for source, count in result.all()}

@@ -38,12 +38,24 @@ See: El Trabajante/docs/Mqtt_Protocoll.md for full specification.
 """
 
 import json
+import logging
 import time
 import random
 from typing import Dict, Any, Optional, Callable, List, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Broker Mode (Phase 3: MQTT Broker Integration)
+# =============================================================================
+class BrokerMode(str, Enum):
+    """Mode for MQTT message handling."""
+    DIRECT = "direct"  # Default: In-memory storage only (fast, no broker needed)
+    MQTT = "mqtt"      # Publish to real MQTT broker (for end-to-end tests)
 
 
 # =============================================================================
@@ -161,7 +173,9 @@ class MockESP32Client:
         self,
         esp_id: str = "ESP_TEST001",
         kaiser_id: str = "god",
-        auto_heartbeat: bool = False
+        auto_heartbeat: bool = False,
+        broker_mode: BrokerMode = BrokerMode.DIRECT,
+        mqtt_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize Mock ESP32 Client.
@@ -170,28 +184,35 @@ class MockESP32Client:
             esp_id: ESP32 device ID (format: ESP_XXXXXXXX)
             kaiser_id: Kaiser/God-Kaiser ID
             auto_heartbeat: Automatically publish heartbeat
+            broker_mode: DIRECT (in-memory) or MQTT (real broker)
+            mqtt_config: MQTT broker configuration (host, port, username, password)
         """
         self.esp_id = esp_id
         self.kaiser_id = kaiser_id
         self.auto_heartbeat = auto_heartbeat
         self.boot_time = time.time()
 
+        # Broker mode (Phase 3)
+        self.broker_mode = broker_mode
+        self._mqtt_client: Optional[Any] = None  # paho.mqtt.client.Client
+        self._mqtt_connected = False
+
         # State management
         self.actuators: Dict[int, ActuatorState] = {}
         self.sensors: Dict[int, SensorState] = {}
         self.libraries: Dict[str, LibraryInfo] = {}
-        
+
         # Zone configuration
         self.zone: Optional[ZoneConfig] = None
-        
+
         # System state machine
         self.system_state = SystemState.OPERATIONAL
         self.previous_state = SystemState.BOOT
-        
+
         # System metrics (for heartbeat)
         self.heap_free = 245760  # Simulated heap
         self.wifi_rssi = -65  # Simulated WiFi strength
-        
+
         # Config storage
         self.config: Dict[str, Any] = {
             "wifi": {"ssid": "MockWiFi", "connected": True, "ip": "192.168.1.100"},
@@ -213,7 +234,7 @@ class MockESP32Client:
         self.last_response: Optional[Dict[str, Any]] = None
         self.published_messages: List[Dict[str, Any]] = []
         self.subscribed_topics: List[str] = []
-        
+
         # Command tracking
         self.command_counter = 0
         self.pending_commands: Dict[str, Dict[str, Any]] = {}
@@ -222,6 +243,141 @@ class MockESP32Client:
         self.on_command: Optional[Callable] = None
         self.on_publish: Optional[Callable] = None
         self.on_state_change: Optional[Callable] = None
+
+        # Connect to MQTT broker if in MQTT mode
+        if broker_mode == BrokerMode.MQTT:
+            self._connect_mqtt(mqtt_config or {"host": "localhost", "port": 1883})
+
+    # =========================================================================
+    # MQTT Broker Connection (Phase 3)
+    # =========================================================================
+    def _connect_mqtt(self, config: Dict[str, Any]) -> bool:
+        """
+        Connect to real MQTT broker.
+
+        Args:
+            config: Broker configuration with host, port, username, password
+
+        Returns:
+            True if connection successful
+        """
+        try:
+            import paho.mqtt.client as mqtt
+        except ImportError:
+            logger.warning("paho-mqtt not installed. Install with: pip install paho-mqtt")
+            return False
+
+        try:
+            client_id = f"mock_{self.esp_id}_{int(time.time() * 1000) % 100000}"
+            self._mqtt_client = mqtt.Client(client_id=client_id)
+
+            # Set credentials if provided
+            if config.get("username"):
+                self._mqtt_client.username_pw_set(
+                    config["username"],
+                    config.get("password", "")
+                )
+
+            # Connection callbacks
+            def on_connect(client, userdata, flags, rc):
+                if rc == 0:
+                    self._mqtt_connected = True
+                    logger.info(f"MockESP32Client {self.esp_id} connected to MQTT broker")
+                else:
+                    logger.error(f"MockESP32Client {self.esp_id} MQTT connect failed: rc={rc}")
+
+            def on_disconnect(client, userdata, rc):
+                self._mqtt_connected = False
+                logger.info(f"MockESP32Client {self.esp_id} disconnected from MQTT broker")
+
+            self._mqtt_client.on_connect = on_connect
+            self._mqtt_client.on_disconnect = on_disconnect
+
+            # Connect
+            self._mqtt_client.connect(
+                config.get("host", "localhost"),
+                config.get("port", 1883),
+                keepalive=60
+            )
+            self._mqtt_client.loop_start()
+
+            # Wait briefly for connection
+            time.sleep(0.1)
+            return self._mqtt_connected
+
+        except Exception as e:
+            logger.error(f"MockESP32Client {self.esp_id} MQTT connection failed: {e}")
+            return False
+
+    def _publish_to_broker(self, topic: str, payload: Dict[str, Any], qos: int = 1, retain: bool = False):
+        """
+        Publish message to real MQTT broker if connected.
+
+        This is called after storing in published_messages list.
+        Messages are always stored locally for test assertions.
+
+        Args:
+            topic: MQTT topic
+            payload: Message payload (will be JSON serialized)
+            qos: Quality of Service level (0, 1, or 2)
+            retain: Retain flag
+        """
+        if self.broker_mode == BrokerMode.MQTT and self._mqtt_client and self._mqtt_connected:
+            try:
+                result = self._mqtt_client.publish(
+                    topic,
+                    json.dumps(payload),
+                    qos=qos,
+                    retain=retain
+                )
+                if result.rc != 0:
+                    logger.warning(f"MQTT publish to {topic} failed: rc={result.rc}")
+            except Exception as e:
+                logger.error(f"MQTT publish error: {e}")
+
+    def disconnect_mqtt(self):
+        """Disconnect from MQTT broker and clean up."""
+        if self._mqtt_client:
+            try:
+                self._mqtt_client.loop_stop()
+                self._mqtt_client.disconnect()
+            except Exception as e:
+                logger.warning(f"MQTT disconnect error: {e}")
+            finally:
+                self._mqtt_client = None
+                self._mqtt_connected = False
+
+    def is_broker_connected(self) -> bool:
+        """Check if connected to MQTT broker."""
+        return self._mqtt_connected
+
+    def _store_and_publish(self, topic: str, payload: Dict[str, Any], qos: int = 1, retain: bool = False):
+        """
+        Store message locally and publish to broker if connected.
+
+        This is the primary method for all publish operations.
+        Messages are always stored in published_messages for test assertions.
+        If in MQTT mode, also publishes to the real broker.
+
+        Args:
+            topic: MQTT topic
+            payload: Message payload
+            qos: Quality of Service (0, 1, 2)
+            retain: Retain flag
+        """
+        message = {
+            "topic": topic,
+            "payload": payload,
+            "qos": qos,
+            "retain": retain
+        }
+        self.published_messages.append(message)
+        self._publish_to_broker(topic, payload, qos, retain)
+
+        # Also call on_publish callback if set (for server-side MQTT integration)
+        # This allows the MockESPManager to route messages through the real MQTT client
+        if self.on_publish:
+            self.on_publish(topic, payload, qos)
 
     # =========================================================================
     # Zone Management
@@ -978,27 +1134,14 @@ class MockESP32Client:
 
         # Primary topic
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/sensor/{gpio}/data"
-        message = {
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        }
-        self.published_messages.append(message)
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
         # Zone-based topic (if configured)
         if self.zone and self.zone.subzone_id:
             zone_topic = f"kaiser/{self.kaiser_id}/zone/{self.zone.master_zone_id}/esp/{self.esp_id}/subzone/{self.zone.subzone_id}/sensor/{gpio}/data"
-            zone_message = {
-                "topic": zone_topic,
-                "payload": payload,
-                "qos": 1,
-                "retain": False
-            }
-            self.published_messages.append(zone_message)
+            self._store_and_publish(zone_topic, payload, qos=1, retain=False)
 
-        if self.on_publish:
-            self.on_publish(topic, payload)
+        # Note: on_publish is now called by _store_and_publish()
 
     def _publish_sensor_batch(self, readings: List[Dict[str, Any]]):
         """Publish batch sensor data."""
@@ -1007,14 +1150,9 @@ class MockESP32Client:
             "esp_id": self.esp_id,
             "sensors": readings
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/sensor/batch"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_actuator_status(self, gpio: int):
         """Publish actuator status with full payload."""
@@ -1037,15 +1175,9 @@ class MockESP32Client:
         }
 
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/{gpio}/status"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": True
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=True)
 
-        if self.on_publish:
-            self.on_publish(topic, payload)
+        # Note: on_publish is now called by _store_and_publish()
 
     def _publish_actuator_response(self, gpio: int, command_id: str, success: bool, message: str):
         """Publish actuator command response."""
@@ -1057,14 +1189,9 @@ class MockESP32Client:
             "success": success,
             "message": message
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/{gpio}/response"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_actuator_alert(self, gpio: int, alert_type: str, message: str):
         """Publish actuator alert."""
@@ -1076,14 +1203,9 @@ class MockESP32Client:
             "message": message,
             "severity": "warning" if alert_type != "emergency_stop" else "critical"
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/{gpio}/alert"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_heartbeat(self):
         """Publish system heartbeat with all fields."""
@@ -1102,14 +1224,9 @@ class MockESP32Client:
             "mqtt_connected": self.connected,
             "safe_mode": self.system_state == SystemState.SAFE_MODE
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/system/heartbeat"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 0,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=0, retain=False)
 
     def _publish_system_response(self, command_id: str, action: str, success: bool):
         """Publish system command response."""
@@ -1120,14 +1237,9 @@ class MockESP32Client:
             "action": action,
             "success": success
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/system/response"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_system_diagnostics(self, diagnostics: Dict[str, Any]):
         """Publish system diagnostics."""
@@ -1136,14 +1248,9 @@ class MockESP32Client:
             "esp_id": self.esp_id,
             **diagnostics
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/system/diagnostics"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_config_update(self, key: str, value: Any):
         """Publish config update (bidirectional)."""
@@ -1154,14 +1261,9 @@ class MockESP32Client:
             "value": value,
             "action": "updated"
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/config"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": True
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=True)
 
     def _publish_library_event(self, event: str, library_name: str, version: str):
         """Publish library event (ready, installed, error)."""
@@ -1171,14 +1273,9 @@ class MockESP32Client:
             "library_name": library_name,
             "version": version
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/library/{event}"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": False
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_safe_mode_status(self, reason: str):
         """Publish safe mode status."""
@@ -1189,14 +1286,9 @@ class MockESP32Client:
             "reason": reason,
             "actuators_disabled": list(self.actuators.keys())
         }
-        
+
         topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/safe_mode"
-        self.published_messages.append({
-            "topic": topic,
-            "payload": payload,
-            "qos": 1,
-            "retain": True
-        })
+        self._store_and_publish(topic, payload, qos=1, retain=True)
 
     # =========================================================================
     # Helper Methods

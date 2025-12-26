@@ -9,3 +9,4 @@ FastAPI-based backend for AutomationOne IoT framework.
 - PostgreSQL database
 - ESP32 device management
 
+

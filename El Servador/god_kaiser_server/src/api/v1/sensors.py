@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig, SensorData
+from ...db.models.enums import DataSource
 from ...db.repositories import ESPRepository, SensorRepository
 from ...schemas import (
     SensorConfigCreate,
@@ -523,6 +524,116 @@ async def query_sensor_data(
         aggregation=None,
         time_range={"start": start_time, "end": end_time},
     )
+
+
+# =============================================================================
+# Query Sensor Data by Source
+# =============================================================================
+
+
+@router.get(
+    "/data/by-source/{source}",
+    response_model=SensorDataResponse,
+    summary="Query sensor data by source",
+    description="Query sensor data filtered by data source (production, mock, test, simulation).",
+)
+async def get_sensor_data_by_source(
+    source: str,
+    db: DBSession,
+    current_user: ActiveUser,
+    esp_id: Annotated[Optional[str], Query(description="Filter by ESP device ID")] = None,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Max results")] = 100,
+) -> SensorDataResponse:
+    """
+    Query sensor data filtered by data source.
+
+    Args:
+        source: Data source (production, mock, test, simulation)
+        db: Database session
+        current_user: Authenticated user
+        esp_id: Optional ESP filter
+        limit: Max results
+
+    Returns:
+        Sensor data readings from specified source
+    """
+    # Validate source
+    try:
+        data_source = DataSource(source.lower())
+    except ValueError:
+        valid_sources = [e.value for e in DataSource]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid source '{source}'. Valid sources: {valid_sources}",
+        )
+
+    esp_repo = ESPRepository(db)
+    sensor_repo = SensorRepository(db)
+
+    # Get ESP device ID if specified
+    esp_db_id = None
+    if esp_id:
+        esp_device = await esp_repo.get_by_device_id(esp_id)
+        if not esp_device:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"ESP device '{esp_id}' not found",
+            )
+        esp_db_id = esp_device.id
+
+    # Query data by source
+    readings = await sensor_repo.get_by_source(
+        source=data_source,
+        limit=limit,
+        esp_id=esp_db_id,
+    )
+
+    # Convert to response format
+    reading_responses = [
+        SensorReading(
+            timestamp=r.timestamp,
+            raw_value=r.raw_value,
+            processed_value=r.processed_value,
+            unit=r.unit,
+            quality=r.quality,
+        )
+        for r in readings
+    ]
+
+    return SensorDataResponse(
+        success=True,
+        esp_id=esp_id,
+        gpio=None,
+        sensor_type=None,
+        readings=reading_responses,
+        count=len(reading_responses),
+        aggregation=None,
+        time_range=None,
+    )
+
+
+@router.get(
+    "/data/stats/by-source",
+    summary="Get sensor data count by source",
+    description="Get count of sensor data entries grouped by data source.",
+)
+async def get_sensor_data_stats_by_source(
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """
+    Get sensor data count by data source.
+
+    Returns count of sensor data entries for each source type.
+    """
+    sensor_repo = SensorRepository(db)
+    counts = await sensor_repo.count_by_source()
+
+    return {
+        "success": True,
+        "counts": counts,
+        "total": sum(counts.values()),
+    }
 
 
 # =============================================================================

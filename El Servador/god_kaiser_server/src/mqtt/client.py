@@ -10,6 +10,7 @@ Provides singleton MQTT client with:
 """
 
 import ssl
+import threading
 import time
 from typing import Callable, Optional
 
@@ -18,7 +19,56 @@ import paho.mqtt.client as mqtt
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
 
+
+class _MQTTDisconnectRateLimiter(logging.Filter):
+    """
+    Logging filter that rate-limits MQTT disconnect warnings.
+    
+    Allows only one "MQTT broker unavailable" message per 60 seconds.
+    This prevents log spam when the broker is down.
+    """
+    
+    def __init__(self, interval_seconds: float = 60.0):
+        super().__init__()
+        self._interval = interval_seconds
+        self._last_log_time: float = 0.0
+        self._suppressed_count: int = 0
+        self._lock = threading.Lock()
+        self._marker = "MQTT broker unavailable"
+    
+    def filter(self, record: logging.LogRecord) -> bool:
+        """
+        Filter log records, rate-limiting MQTT disconnect warnings.
+        
+        Returns True if the record should be logged.
+        """
+        # Only filter warnings containing our marker
+        if self._marker not in str(record.msg):
+            return True
+        
+        with self._lock:
+            current_time = time.time()
+            elapsed = current_time - self._last_log_time
+            
+            if elapsed >= self._interval:
+                # Time to log - include suppressed count if any
+                if self._suppressed_count > 0:
+                    record.msg = f"{record.msg} [{self._suppressed_count} identical messages suppressed]"
+                self._last_log_time = current_time
+                self._suppressed_count = 0
+                return True
+            else:
+                # Suppress this message
+                self._suppressed_count += 1
+                return False
+
+
+# Create module-level rate limiter (survives instance recreation)
+_disconnect_rate_limiter = _MQTTDisconnectRateLimiter(interval_seconds=60.0)
+
 logger = get_logger(__name__)
+# Add the rate limiter filter to the logger
+logger.addFilter(_disconnect_rate_limiter)
 
 
 class MQTTClient:
@@ -58,6 +108,12 @@ class MQTTClient:
         self.reconnect_delay = 1  # seconds
         self.max_reconnect_delay = 60  # seconds
         self.on_message_callback: Optional[Callable] = None
+        
+        # Rate-limiting for disconnect warnings (thread-safe)
+        self._disconnect_lock = threading.Lock()
+        self._last_disconnect_log_time: float = 0.0
+        self._disconnect_suppressed_count: int = 0
+        self._DISCONNECT_LOG_INTERVAL: float = 60.0  # Log at most once per minute
 
         self._initialized = True
         logger.info("MQTTClient singleton initialized")
@@ -305,6 +361,10 @@ class MQTTClient:
         if rc == 0:
             self.connected = True
             self.reconnect_delay = 1  # Reset reconnect delay
+            # Reset rate-limiting on successful connect
+            with self._disconnect_lock:
+                self._last_disconnect_log_time = 0.0
+                self._disconnect_suppressed_count = 0
             logger.info(f"MQTT connected with result code: {rc}")
         else:
             self.connected = False
@@ -321,6 +381,9 @@ class MQTTClient:
     def _on_disconnect(self, client, userdata, rc):
         """
         Callback when disconnected from MQTT broker.
+        
+        Implements time-based rate-limiting for disconnect logs to prevent log spam
+        when broker is unavailable (logs max once per minute).
 
         Args:
             client: MQTT client instance
@@ -337,17 +400,45 @@ class MQTTClient:
             3: "Connection refused - server unavailable",
             4: "Connection refused - bad username or password",
             5: "Connection refused - not authorized",
+            7: "Connection refused - broker unavailable",
         }
 
         reason = disconnect_reasons.get(rc, f"Unknown reason (code: {rc})")
 
         if rc == 0:
             logger.info(f"MQTT client disconnected: {reason}")
+            with self._disconnect_lock:
+                self._last_disconnect_log_time = 0.0
+                self._disconnect_suppressed_count = 0
         else:
-            logger.warning(
-                f"MQTT client disconnected unexpectedly: {reason}. "
-                "Auto-reconnect will attempt to restore connection..."
-            )
+            # Thread-safe time-based rate-limiting to prevent log spam
+            with self._disconnect_lock:
+                current_time = time.time()
+                time_since_last = current_time - self._last_disconnect_log_time
+                
+                if time_since_last >= self._DISCONNECT_LOG_INTERVAL:
+                    suppressed = self._disconnect_suppressed_count
+                    self._last_disconnect_log_time = current_time
+                    self._disconnect_suppressed_count = 0
+                    should_log = True
+                else:
+                    self._disconnect_suppressed_count += 1
+                    should_log = False
+                    suppressed = 0
+            
+            if should_log:
+                if suppressed > 0:
+                    logger.warning(
+                        f"MQTT broker unavailable: {reason}. "
+                        f"Auto-reconnect active (exponential backoff, max 60s). "
+                        f"[{suppressed} identical messages suppressed]"
+                    )
+                else:
+                    logger.warning(
+                        f"MQTT broker unavailable: {reason}. "
+                        "Auto-reconnect active (exponential backoff, max 60s)."
+                    )
+            # Else: silent - no log output to prevent spam
 
     def _on_message(self, client, userdata, msg):
         """Callback when message is received."""

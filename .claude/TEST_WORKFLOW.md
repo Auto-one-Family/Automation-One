@@ -1,8 +1,11 @@
 # Test-Workflow für KI-Agenten
 
-> **Zweck:** Test-Ausführung und Auswertung für AutoOne-Projekt  
-> **Themengebiet:** Test-Workflows (ESP32 + Server)  
-> **Verwandte Dokumente:** `El Servador/docs/ESP32_TESTING.md`, `El Trabajante/test/_archive/README.md`
+> **Zweck:** Test-Ausführung und Auswertung für AutoOne-Projekt
+> **Themengebiet:** Test-Workflows (ESP32 + Server)
+> **Verwandte Dokumente:**
+> - `El Servador/docs/ESP32_TESTING.md` - Server-Test-Dokumentation
+> - `El Trabajante/test/_archive/README.md` - Legacy PlatformIO Tests
+> - **`.claude/Test_PLAN.md`** - Test-Infrastruktur Roadmap (Phase 3-6)
 
 ---
 
@@ -842,6 +845,235 @@ cd "El Trabajante" && ~/.platformio/penv/Scripts/platformio.exe test -e esp32_de
 
 ---
 
-**Letzte Aktualisierung:** 2025-01  
-**Version:** 2.2 (Legacy PlatformIO Tests, verweist auf `/full-test` für empfohlene Tests)
+---
+
+## 9. Test-Infrastruktur (Phase 1-6 COMPLETE ✅)
+
+**Status:** Alle 6 Phasen erfolgreich implementiert (2025-12-24)
+
+### Phase 1-2: Data Source Tracking ✅
+
+- **DataSource Enum:** `production`, `mock`, `test`, `simulation`
+- **data_source Spalten:** SensorData, ActuatorState, ActuatorHistory
+- **Detection-Logic:** In allen MQTT-Handlern implementiert
+- **MockESP32Client:** Vollständige ESP32-Simulation (1433 Zeilen)
+- **Debug API:** Mock ESP CRUD mit DB-Registration
+
+### Phase 3: MockESP32Client MQTT Broker-Mode ✅
+
+**Neue Features in `tests/esp32/mocks/mock_esp32_client.py`:**
+
+```python
+from tests.esp32.mocks.mock_esp32_client import MockESP32Client, BrokerMode
+
+# Standard: In-Memory (schnell, keine Dependencies)
+mock = MockESP32Client(esp_id="MOCK_TEST_001")
+assert mock.broker_mode == BrokerMode.DIRECT
+
+# Optional: Echte MQTT-Messages an Broker senden
+mock = MockESP32Client(
+    esp_id="MOCK_TEST_001",
+    broker_mode=BrokerMode.MQTT,
+    mqtt_config={
+        "host": "localhost",
+        "port": 1883,
+        "username": None,
+        "password": None
+    }
+)
+
+# Prüfen ob verbunden
+if mock.is_broker_connected():
+    mock.handle_command("heartbeat", {})  # Wird an echten Broker gesendet
+```
+
+**Neue Fixtures in `tests/esp32/conftest.py`:**
+
+```python
+@pytest.fixture
+def mock_esp32_with_broker(mqtt_test_config):
+    """Mock ESP mit echter MQTT-Verbindung (skippt wenn kein Broker)."""
+    # Skippt automatisch wenn kein Broker erreichbar
+
+@pytest.fixture
+def mock_esp32_broker_fallback(mqtt_test_config):
+    """Mock ESP - MQTT wenn möglich, sonst DIRECT-Modus."""
+    # Fällt auf DIRECT zurück wenn kein Broker
+```
+
+**Helper-Funktion:**
+```python
+from tests.esp32.conftest import is_mqtt_broker_available
+
+if is_mqtt_broker_available("localhost", 1883):
+    # Broker-Tests laufen
+else:
+    # Fallback auf In-Memory
+```
+
+### Phase 4: Repository Data Source Filtering ✅
+
+**SensorRepository (`src/db/repositories/sensor_repo.py`):**
+
+```python
+from src.db.models.enums import DataSource
+
+# query_data() mit data_source Filter
+data = await sensor_repo.query_data(
+    esp_id=esp_uuid,
+    data_source=DataSource.PRODUCTION,  # Neu!
+    limit=100
+)
+
+# Neue Methoden:
+await sensor_repo.get_by_source(DataSource.MOCK, limit=50)
+await sensor_repo.get_production_only(limit=100)
+deleted = await sensor_repo.cleanup_test_data(older_than_hours=24)
+stats = await sensor_repo.count_by_source()  # {"production": 1000, "mock": 50, ...}
+```
+
+**ActuatorRepository (`src/db/repositories/actuator_repo.py`):**
+
+```python
+# update_state() mit data_source
+await actuator_repo.update_state(
+    actuator_id=uuid,
+    state=True,
+    data_source=DataSource.MOCK.value  # Neu!
+)
+
+# get_history() mit Filter
+history = await actuator_repo.get_history(
+    actuator_id=uuid,
+    data_source=DataSource.PRODUCTION
+)
+
+# Neue Methoden (analog zu SensorRepository):
+await actuator_repo.get_history_by_source(DataSource.TEST)
+await actuator_repo.cleanup_test_history(older_than_hours=48)
+await actuator_repo.count_history_by_source()
+```
+
+**API Endpoints (`src/api/v1/sensors.py`):**
+
+```bash
+# Sensor-Daten nach Source filtern
+GET /api/v1/sensors/data/by-source/mock?limit=50&esp_id=<uuid>
+
+# Statistiken abrufen
+GET /api/v1/sensors/data/stats/by-source
+# Response: {"production": 1234, "mock": 56, "test": 12, "simulation": 0}
+```
+
+### Phase 5: Modulare Integration Tests ✅
+
+**Neue Test-Datei:** `tests/integration/test_modular_esp_integration.py`
+
+```python
+from tests.esp32.mocks.mock_esp32_client import MockESP32Client, BrokerMode
+
+class TestModularSensorIntegration:
+    def test_add_sensor_and_publish(self):
+        mock = MockESP32Client(esp_id="MOCK_MODULAR_001")
+        mock.configure_zone("test_zone", "master_zone", "subzone_a")
+
+        mock.set_sensor_value(
+            gpio=4, raw_value=23.5, sensor_type="DS18B20",
+            name="Boden Temperatur", unit="C", quality="good"
+        )
+
+        response = mock.handle_command("sensor_read", {"gpio": 4})
+        assert response["data"]["value"] == 23.5
+
+class TestModularActuatorIntegration:
+    def test_actuator_with_sensor_feedback(self):
+        mock = MockESP32Client(esp_id="MOCK_FEEDBACK")
+        mock.configure_actuator(gpio=5, actuator_type="pump", name="Pump")
+
+        response = mock.handle_command("actuator_set", {
+            "gpio": 5, "value": 1, "mode": "digital"
+        })
+        assert response["data"]["state"] is True
+
+class TestDataSourceTracking:
+    def test_mock_esp_id_prefix(self):
+        # MOCK_, TEST_, SIM_ Prefixes werden erkannt
+        mock = MockESP32Client(esp_id="MOCK_TEST_001")
+        assert mock.esp_id.startswith("MOCK_")
+```
+
+**Test-Kategorien:**
+- `TestModularSensorIntegration` - Dynamische Sensor-Erstellung
+- `TestModularActuatorIntegration` - PWM, Emergency Stop
+- `TestDataSourceTracking` - Prefix-Erkennung
+- `TestMessageTracking` - Published Messages prüfen
+- `TestZoneConfiguration` - Zone-Config in Payloads
+
+### Phase 6: Test Data Cleanup Service ✅
+
+**AuditRetentionService erweitert (`src/services/audit_retention_service.py`):**
+
+```python
+# Retention-Policies:
+# TEST: 24 Stunden
+# MOCK: 7 Tage
+# SIMULATION: 30 Tage
+# PRODUCTION: Nie löschen
+
+from src.services.audit_retention_service import AuditRetentionService
+
+service = AuditRetentionService(db_session)
+
+# Sensor-Daten cleanup
+result = await service.cleanup_test_sensor_data(
+    dry_run=True,  # Preview ohne Löschen
+    include_mock=True,
+    include_simulation=False
+)
+# {"deleted_count": 123, "by_source": {"test": 100, "mock": 23}}
+
+# Actuator-History cleanup
+result = await service.cleanup_test_actuator_data(dry_run=False)
+
+# Kompletter Cleanup
+result = await service.run_full_test_cleanup(
+    dry_run=False,
+    include_mock=True,
+    include_simulation=True
+)
+```
+
+**Debug API Endpoint (`src/api/v1/debug.py`):**
+
+```bash
+# Preview (dry_run=true ist default)
+DELETE /api/v1/debug/test-data/cleanup?dry_run=true&include_mock=true
+
+# Tatsächlich löschen
+DELETE /api/v1/debug/test-data/cleanup?dry_run=false&include_mock=true&include_simulation=false
+
+# Response:
+{
+  "success": true,
+  "dry_run": false,
+  "sensor_data": {"deleted_count": 150, "by_source": {...}},
+  "actuator_data": {"deleted_count": 25, "by_source": {...}},
+  "total_deleted": 175,
+  "message": "Deleted 175 test data records"
+}
+```
+
+### Zusammenfassung der Änderungen
+
+| Phase | Dateien | Neue Features |
+|-------|---------|---------------|
+| 3 | `mock_esp32_client.py`, `conftest.py` | BrokerMode, MQTT-Verbindung, Fixtures |
+| 4 | `sensor_repo.py`, `actuator_repo.py`, `sensors.py` | data_source Filter, Cleanup-Methoden, API |
+| 5 | `test_modular_esp_integration.py` (NEU) | 5 Test-Klassen, 20+ Tests |
+| 6 | `audit_retention_service.py`, `debug.py` | Retention-Policies, Cleanup-Endpoint |
+
+---
+
+**Letzte Aktualisierung:** 2025-12-24
+**Version:** 3.0 (Alle Phasen 1-6 implementiert)
 

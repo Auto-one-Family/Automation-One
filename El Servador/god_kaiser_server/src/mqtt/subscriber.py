@@ -266,8 +266,14 @@ class Subscriber:
         
         Args:
             wait: Wait for pending tasks to complete
-            timeout: Max wait time in seconds
+            timeout: Max wait time in seconds (ignored in Python 3.14+)
         """
         logger.info("Shutting down MQTT subscriber...")
-        self.executor.shutdown(wait=wait, timeout=timeout)
+        # Python 3.9-3.13 supports timeout parameter, Python 3.14+ removed it
+        # Use cancel_futures instead for faster shutdown
+        try:
+            self.executor.shutdown(wait=wait, cancel_futures=True)
+        except TypeError:
+            # Fallback for older Python versions without cancel_futures
+            self.executor.shutdown(wait=wait)
         logger.info(f"Subscriber stats: {self.get_stats()}")

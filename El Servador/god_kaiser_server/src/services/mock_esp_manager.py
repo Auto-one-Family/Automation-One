@@ -627,3 +627,54 @@ class MockESPManager:
             emergency_stopped=actuator.emergency_stopped,
             last_command=actuator.last_command
         )
+
+    # =========================================================================
+    # Dual-Storage Sync Operations
+    # =========================================================================
+    def get_orphaned_mock_ids(self, db_mock_ids: List[str]) -> List[str]:
+        """
+        Find Mock ESP IDs that exist in DB but not in memory.
+
+        These are "orphaned" entries from previous server runs.
+
+        Args:
+            db_mock_ids: List of Mock ESP IDs from database
+
+        Returns:
+            List of orphaned Mock ESP IDs
+        """
+        in_memory_ids = set(self._mock_esps.keys())
+        db_ids = set(db_mock_ids)
+        orphaned = db_ids - in_memory_ids
+        return list(orphaned)
+
+    def get_sync_status(self, db_mock_ids: List[str]) -> Dict[str, Any]:
+        """
+        Get synchronization status between memory and database.
+
+        Args:
+            db_mock_ids: List of Mock ESP IDs from database
+
+        Returns:
+            Dict with sync status information
+        """
+        in_memory_ids = set(self._mock_esps.keys())
+        db_ids = set(db_mock_ids)
+
+        orphaned = db_ids - in_memory_ids
+        memory_only = in_memory_ids - db_ids  # Unlikely, but possible
+        synced = in_memory_ids & db_ids
+
+        return {
+            "in_memory_count": len(in_memory_ids),
+            "in_database_count": len(db_ids),
+            "synced_count": len(synced),
+            "orphaned_count": len(orphaned),
+            "orphaned_ids": list(orphaned),
+            "memory_only_ids": list(memory_only),
+            "is_synced": len(orphaned) == 0 and len(memory_only) == 0,
+        }
+
+    def is_mock_in_memory(self, esp_id: str) -> bool:
+        """Check if a Mock ESP exists in memory."""
+        return esp_id in self._mock_esps

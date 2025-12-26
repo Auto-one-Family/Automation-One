@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     ai,
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
+    enums,  # Shared enums (DataSource, etc.)
     esp,
     kaiser,
     library,
@@ -26,6 +27,7 @@ from .actuator import ActuatorConfig, ActuatorState, ActuatorHistory  # noqa: F4
 from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
+from .enums import DataSource  # noqa: F401
 from .esp import ESPDevice  # noqa: F401
 from .kaiser import KaiserRegistry, ESPOwnership  # noqa: F401
 from .library import LibraryMetadata  # noqa: F401
@@ -41,6 +43,7 @@ __all__ = [
     "ai",
     "audit_log",
     "auth",
+    "enums",
     "esp",
     "kaiser",
     "library",
@@ -49,6 +52,8 @@ __all__ = [
     "subzone",
     "system",
     "user",
+    # Enums
+    "DataSource",
     # Models
     "ActuatorConfig",
     "ActuatorState",

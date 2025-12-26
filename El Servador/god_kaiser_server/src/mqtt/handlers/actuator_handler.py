@@ -21,6 +21,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...db.models.enums import DataSource
 from ...db.repositories import ActuatorRepository, ESPRepository
 from ...db.session import get_session
 from ..topics import TopicBuilder
@@ -140,7 +141,10 @@ class ActuatorStatusHandler:
                     tz=timezone.utc
                 )
 
-                # Step 7: Update actuator state
+                # Step 7: Detect data source (mock/test/production)
+                data_source = self._detect_data_source(esp_device, payload)
+
+                # Step 8: Update actuator state
                 actuator_state = await actuator_repo.update_state(
                     esp_id=esp_device.id,
                     gpio=gpio,
@@ -150,9 +154,10 @@ class ActuatorStatusHandler:
                     timestamp=esp32_timestamp,
                     last_command=last_command,
                     error_message=error,
+                    data_source=data_source,
                 )
 
-                # Step 8: Log to history if command was executed
+                # Step 9: Log to history if command was executed
                 if last_command:
                     success = error is None
                     await actuator_repo.log_command(
@@ -168,6 +173,7 @@ class ActuatorStatusHandler:
                         metadata={
                             "uptime": payload.get("uptime"),
                         },
+                        data_source=data_source,
                     )
 
                 # Commit transaction
@@ -314,6 +320,87 @@ class ActuatorStatusHandler:
             }
 
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
+
+    def _detect_data_source(self, esp_device, payload: dict) -> str:
+        """
+        Detect the data source based on device and payload.
+
+        Detection priority:
+        1. Explicit _test_mode flag in payload → TEST
+        2. Explicit _source field in payload → use value
+        3. Device hardware_type == "MOCK_ESP32" → MOCK
+        4. Device capabilities.mock == True → MOCK
+        5. ESP ID starts with "MOCK_" → MOCK
+        6. ESP ID starts with "TEST_" → TEST
+        7. ESP ID starts with "SIM_" → SIMULATION
+        8. Default → PRODUCTION
+
+        Args:
+            esp_device: ESPDevice instance
+            payload: MQTT payload dict
+
+        Returns:
+            Data source string value
+        """
+        esp_id = payload.get("esp_id", getattr(esp_device, "device_id", "unknown"))
+        detection_reason = None
+
+        # Priority 1: Explicit test mode flag
+        if payload.get("_test_mode"):
+            detection_reason = "payload._test_mode=True"
+            result = DataSource.TEST.value
+            logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+
+        # Priority 2: Explicit source field
+        if "_source" in payload:
+            source_value = payload["_source"].lower()
+            try:
+                result = DataSource(source_value).value
+                detection_reason = f"payload._source='{source_value}'"
+                logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                return result
+            except ValueError:
+                logger.warning(f"Unknown data source: {source_value}, defaulting to production")
+                return DataSource.PRODUCTION.value
+
+        # Priority 3: Device hardware_type
+        if hasattr(esp_device, "hardware_type") and esp_device.hardware_type == "MOCK_ESP32":
+            detection_reason = "esp_device.hardware_type='MOCK_ESP32'"
+            result = DataSource.MOCK.value
+            logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+
+        # Priority 4: Device capabilities flag
+        if hasattr(esp_device, "capabilities") and esp_device.capabilities:
+            if esp_device.capabilities.get("mock"):
+                detection_reason = "esp_device.capabilities.mock=True"
+                result = DataSource.MOCK.value
+                logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                return result
+
+        # Priority 5-7: ESP ID prefix detection
+        if esp_id.startswith("MOCK_"):
+            detection_reason = f"esp_id prefix 'MOCK_'"
+            result = DataSource.MOCK.value
+            logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+        if esp_id.startswith("TEST_"):
+            detection_reason = f"esp_id prefix 'TEST_'"
+            result = DataSource.TEST.value
+            logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+        if esp_id.startswith("SIM_"):
+            detection_reason = f"esp_id prefix 'SIM_'"
+            result = DataSource.SIMULATION.value
+            logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+            return result
+
+        # Default
+        detection_reason = "default (no matching criteria)"
+        result = DataSource.PRODUCTION.value
+        logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+        return result
 
 
 # Global handler instance

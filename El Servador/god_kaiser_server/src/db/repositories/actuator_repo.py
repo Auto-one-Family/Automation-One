@@ -3,14 +3,15 @@ Actuator Repository: Actuator Config, State, and History
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.actuator import ActuatorConfig, ActuatorHistory, ActuatorState
 from ..models.esp import ESPDevice
+from ..models.enums import DataSource
 from .base_repo import BaseRepository
 
 
@@ -137,6 +138,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         current_value: float,
         state: str,
         timestamp: Optional[datetime] = None,
+        data_source: str = DataSource.PRODUCTION.value,
         **kwargs,
     ) -> ActuatorState:
         """
@@ -144,6 +146,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
 
         Args:
             timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
+            data_source: Data source (production, mock, test, simulation)
         """
         existing = await self.get_state(esp_id, gpio)
         command_timestamp = timestamp or datetime.now(timezone.utc)
@@ -152,6 +155,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             existing.current_value = current_value
             existing.state = state
             existing.last_command_timestamp = command_timestamp
+            existing.data_source = data_source
             for key, value in kwargs.items():
                 if hasattr(existing, key):
                     setattr(existing, key, value)
@@ -166,6 +170,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
                 current_value=current_value,
                 state=state,
                 last_command_timestamp=command_timestamp,
+                data_source=data_source,
                 **kwargs,
             )
             self.session.add(new_state)
@@ -186,12 +191,14 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         error_message: Optional[str] = None,
         timestamp: Optional[datetime] = None,
         metadata: Optional[dict] = None,
+        data_source: str = DataSource.PRODUCTION.value,
     ) -> ActuatorHistory:
         """
         Log actuator command to history.
 
         Args:
             timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
+            data_source: Data source (production, mock, test, simulation)
         """
         history = ActuatorHistory(
             esp_id=esp_id,
@@ -203,7 +210,8 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             success=success,
             error_message=error_message,
             timestamp=timestamp or datetime.utcnow(),
-            metadata=metadata,
+            command_metadata=metadata,
+            data_source=data_source,
         )
         self.session.add(history)
         await self.session.flush()
@@ -215,13 +223,86 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         esp_id: uuid.UUID,
         gpio: int,
         limit: int = 100,
+        data_source: Optional[DataSource] = None,
     ) -> list[ActuatorHistory]:
-        """Get actuator command history."""
-        stmt = (
-            select(ActuatorHistory)
-            .where(ActuatorHistory.esp_id == esp_id, ActuatorHistory.gpio == gpio)
-            .order_by(ActuatorHistory.timestamp.desc())
-            .limit(limit)
+        """
+        Get actuator command history.
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number
+            limit: Maximum number of records
+            data_source: Optional data source filter
+        """
+        stmt = select(ActuatorHistory).where(
+            ActuatorHistory.esp_id == esp_id, ActuatorHistory.gpio == gpio
         )
+        if data_source:
+            stmt = stmt.where(ActuatorHistory.data_source == data_source.value)
+        stmt = stmt.order_by(ActuatorHistory.timestamp.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    # Data source filtering operations
+    async def get_history_by_source(
+        self,
+        source: DataSource,
+        limit: int = 100,
+        esp_id: Optional[uuid.UUID] = None,
+    ) -> list[ActuatorHistory]:
+        """
+        Get actuator history filtered by data source.
+
+        Args:
+            source: Data source (production, mock, test, simulation)
+            limit: Maximum number of records
+            esp_id: Optional ESP device UUID filter
+
+        Returns:
+            List of ActuatorHistory instances
+        """
+        stmt = select(ActuatorHistory).where(
+            ActuatorHistory.data_source == source.value
+        )
+        if esp_id:
+            stmt = stmt.where(ActuatorHistory.esp_id == esp_id)
+        stmt = stmt.order_by(ActuatorHistory.timestamp.desc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def cleanup_test_history(self, older_than_hours: int = 24) -> int:
+        """
+        Delete test actuator history older than specified hours.
+
+        Only deletes data with data_source='test'. Does not affect
+        mock, simulation, or production data.
+
+        Args:
+            older_than_hours: Delete data older than this many hours
+
+        Returns:
+            Number of deleted records
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+        stmt = delete(ActuatorHistory).where(
+            ActuatorHistory.data_source == DataSource.TEST.value,
+            ActuatorHistory.timestamp < cutoff,
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount
+
+    async def count_history_by_source(self) -> dict[str, int]:
+        """
+        Count actuator history entries grouped by data source.
+
+        Returns:
+            Dictionary mapping data source to count
+            Example: {"production": 1000, "mock": 50, "test": 25}
+        """
+        stmt = (
+            select(ActuatorHistory.data_source, func.count(ActuatorHistory.id))
+            .group_by(ActuatorHistory.data_source)
+        )
+        result = await self.session.execute(stmt)
+        return {source: count for source, count in result.all()}

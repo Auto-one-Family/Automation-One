@@ -252,4 +252,80 @@ export const debugApi = {
   async clearMessages(espId: string): Promise<void> {
     await api.delete(`/debug/mock-esp/${espId}/messages`)
   },
+
+  // ==========================================================================
+  // Test Data Cleanup
+  // ==========================================================================
+
+  /**
+   * Cleanup test data from database (sensor_data + actuator_history).
+   *
+   * Retention periods:
+   * - TEST: 24 hours
+   * - MOCK: 7 days
+   * - SIMULATION: 30 days
+   * - PRODUCTION: Never deleted
+   *
+   * @param dryRun - If true, preview what would be deleted without actually deleting
+   * @param includeMock - Include MOCK data in cleanup
+   * @param includeSimulation - Include SIMULATION data in cleanup
+   *
+   * @see El Servador/god_kaiser_server/src/api/v1/debug.py:1824 - Server endpoint
+   * @see El Servador/god_kaiser_server/src/services/audit_retention_service.py:476 - Retention policies
+   */
+  async cleanupTestData(
+    dryRun: boolean = true,
+    includeMock: boolean = true,
+    includeSimulation: boolean = true
+  ): Promise<TestDataCleanupResponse> {
+    const response = await api.delete<TestDataCleanupResponse>(
+      '/debug/test-data/cleanup',
+      {
+        params: {
+          dry_run: dryRun,
+          include_mock: includeMock,
+          include_simulation: includeSimulation,
+        },
+      }
+    )
+    return response.data
+  },
+
+  /**
+   * Preview test data cleanup (dry run only)
+   */
+  async previewTestDataCleanup(
+    includeMock: boolean = true,
+    includeSimulation: boolean = true
+  ): Promise<TestDataCleanupResponse> {
+    return this.cleanupTestData(true, includeMock, includeSimulation)
+  },
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Response from test data cleanup operation.
+ *
+ * @see El Servador/god_kaiser_server/src/api/v1/debug.py:1814 - TestDataCleanupResponse
+ */
+export interface TestDataCleanupResponse {
+  success: boolean
+  dry_run: boolean
+  sensor_data: {
+    deleted_count: number
+    deleted_by_source: Record<string, number>
+    duration_ms: number
+    errors: string[]
+  }
+  actuator_data: {
+    deleted_count: number
+    deleted_by_source: Record<string, number>
+    duration_ms: number
+    errors: string[]
+  }
+  total_deleted: number
+  message: string
 }
