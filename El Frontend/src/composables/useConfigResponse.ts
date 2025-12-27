@@ -3,10 +3,13 @@
  * 
  * Handles WebSocket events for configuration responses from ESP32 devices.
  * Listens for 'config_response' events and provides notifications and state management.
+ * Uses WebSocket singleton service for efficient connection management.
  */
 
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useWebSocket } from '@/composables/useWebSocket'
 import type { ConfigResponse } from '@/types'
+import type { WebSocketMessage } from '@/services/websocket'
 
 // =============================================================================
 // COMPOSABLE
@@ -14,111 +17,46 @@ import type { ConfigResponse } from '@/types'
 
 export function useConfigResponse() {
   const lastResponse = ref<ConfigResponse | null>(null)
-  const isConnected = ref(false)
-  const ws = ref<WebSocket | null>(null)
   
   // Event handlers
   const onSuccessHandler = ref<((response: ConfigResponse) => void) | null>(null)
   const onErrorHandler = ref<((response: ConfigResponse) => void) | null>(null)
 
+  // WebSocket for live updates (singleton)
+  const { subscribe, unsubscribe, isConnected } = useWebSocket({
+    autoConnect: true,
+    autoReconnect: true,
+  })
+
   /**
-   * Connect to WebSocket for config responses
-   * Uses the same WebSocket endpoint as MqttLogView
+   * Handle WebSocket messages for config responses
    */
-  async function connect() {
-    if (ws.value && (ws.value.readyState === WebSocket.CONNECTING || ws.value.readyState === WebSocket.OPEN)) {
-      return
-    }
-
+  function handleWebSocketMessage(message: WebSocketMessage) {
     try {
-      // Get auth token (similar to MqttLogView)
-      const authStore = (await import('@/stores/auth')).useAuthStore()
-      let token = authStore.accessToken
-      
-      if (!token && authStore.refreshToken) {
-        try {
-          await authStore.refreshTokens()
-          token = authStore.accessToken
-        } catch (err) {
-          console.error('[ConfigResponse] Token refresh failed:', err)
-          return
+      // Handle config_response events (server sends type: 'config_response')
+      if (message.type === 'config_response') {
+        const response: ConfigResponse = {
+          esp_id: (message.data.esp_id as string) || '',
+          config_type: (message.data.config_type as string) || 'sensor',
+          status: (message.data.status as 'success' | 'error') || 'error',
+          count: (message.data.count as number) || 0,
+          message: (message.data.message as string) || '',
+          error_code: message.data.error_code as number | undefined,
+          timestamp: (message.data.timestamp as number) || Date.now(),
         }
-      }
-
-      if (!token) {
-        console.error('[ConfigResponse] No auth token available')
-        return
-      }
-
-      const clientId = `config_response_${Date.now()}`
-      const apiHost = import.meta.env.VITE_API_HOST || 'localhost:8000'
-      const wsUrl = `ws://${apiHost}/api/v1/ws/realtime/${clientId}?token=${token}`
-
-      ws.value = new WebSocket(wsUrl)
-
-      ws.value.onopen = () => {
-        isConnected.value = true
-        console.log('[ConfigResponse] WebSocket connected')
         
-        // Subscribe to config_response events
-        ws.value?.send(JSON.stringify({
-          action: 'subscribe',
-          filters: { types: ['config_response'] }
-        }))
-      }
-
-      ws.value.onclose = () => {
-        isConnected.value = false
-        console.log('[ConfigResponse] WebSocket disconnected')
-      }
-
-      ws.value.onerror = (error) => {
-        console.error('[ConfigResponse] WebSocket error:', error)
-      }
-
-      ws.value.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          
-          // Handle config_response events (server sends type: 'config_response')
-          if (data.type === 'config_response') {
-            const response: ConfigResponse = {
-              esp_id: data.esp_id || '',
-              config_type: data.config_type || 'sensor',
-              status: data.status || 'error',
-              count: data.count || 0,
-              message: data.message || '',
-              error_code: data.error_code,
-              timestamp: data.timestamp || Date.now(),
-            }
-            
-            lastResponse.value = response
-            
-            // Call appropriate handler
-            if (response.status === 'success') {
-              onSuccessHandler.value?.(response)
-            } else {
-              onErrorHandler.value?.(response)
-            }
-          }
-        } catch (error) {
-          console.error('[ConfigResponse] Failed to parse message:', error)
+        lastResponse.value = response
+        
+        // Call appropriate handler
+        if (response.status === 'success') {
+          onSuccessHandler.value?.(response)
+        } else {
+          onErrorHandler.value?.(response)
         }
       }
     } catch (error) {
-      console.error('[ConfigResponse] Connection error:', error)
+      console.error('[ConfigResponse] Failed to parse message:', error)
     }
-  }
-
-  /**
-   * Disconnect from WebSocket
-   */
-  function disconnect() {
-    if (ws.value) {
-      ws.value.close()
-      ws.value = null
-    }
-    isConnected.value = false
   }
 
   /**
@@ -135,21 +73,24 @@ export function useConfigResponse() {
     onErrorHandler.value = handler
   }
 
-  // Auto-connect on mount
+  // Subscribe to config_response events on mount
   onMounted(() => {
-    connect()
+    subscribe(
+      {
+        types: ['config_response'],
+      },
+      handleWebSocketMessage
+    )
   })
 
-  // Disconnect on unmount
+  // Unsubscribe on unmount
   onUnmounted(() => {
-    disconnect()
+    unsubscribe()
   })
 
   return {
     lastResponse,
     isConnected,
-    connect,
-    disconnect,
     onSuccess,
     onError,
   }

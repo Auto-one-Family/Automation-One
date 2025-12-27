@@ -1,6 +1,17 @@
 /**
  * Real-Time Data Composable
  * 
+ * @deprecated This composable is deprecated. Use `useWebSocket` from '@/composables/useWebSocket' instead.
+ * 
+ * This composable creates its own WebSocket connection, which is inefficient.
+ * The new `useWebSocket` composable uses the singleton WebSocket service for
+ * better performance and resource management.
+ * 
+ * Migration guide:
+ * - Replace `useRealTimeData()` with `useWebSocket()`
+ * - Use `subscribe()` method with filters instead of event handlers
+ * - See `useWebSocket.ts` for API documentation
+ * 
  * Provides WebSocket-based real-time updates for ESP data.
  * Connects to the server's WebSocket endpoint and distributes
  * updates to listening components.
