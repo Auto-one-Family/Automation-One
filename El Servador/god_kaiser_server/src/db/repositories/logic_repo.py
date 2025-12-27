@@ -248,12 +248,40 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     ) -> Optional[CrossESPLogic]:
         """
         Enable or disable a rule.
-        
+
         Args:
             rule_id: UUID of the logic rule
             enabled: True to enable, False to disable
-            
+
         Returns:
             Updated CrossESPLogic instance, or None if rule not found
         """
         return await self.update(rule_id, enabled=enabled)
+
+    async def get_execution_count_last_hour(self, rule_id: uuid.UUID) -> int:
+        """
+        Zählt erfolgreiche Executions der letzten Stunde für Rate-Limiting.
+
+        Args:
+            rule_id: UUID of the logic rule
+
+        Returns:
+            Count of successful executions in the last hour
+        """
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy import func, select
+        from ..models.logic import LogicExecutionHistory
+
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        stmt = (
+            select(func.count(LogicExecutionHistory.id))
+            .where(
+                LogicExecutionHistory.logic_rule_id == rule_id,
+                LogicExecutionHistory.timestamp >= one_hour_ago,
+                LogicExecutionHistory.success == True
+            )
+        )
+
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
