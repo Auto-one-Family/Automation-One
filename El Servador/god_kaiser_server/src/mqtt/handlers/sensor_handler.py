@@ -7,16 +7,22 @@ Processes incoming sensor data from ESP32 devices:
 - Triggers Pi-Enhanced processing if enabled
 - Saves data to database
 
+Resilience Patterns:
+- Uses resilient_session() with circuit breaker protection
+- Timeout handling for overall operation
+- Best-effort WebSocket broadcast
+
 Error Codes:
 - Uses ValidationErrorCode for payload validation errors
 - Uses ConfigErrorCode for ESP device lookup errors
 - Uses ServiceErrorCode for processing failures
 """
 
-import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
+from ...core.config import get_settings
 from ...core.error_codes import (
     ConfigErrorCode,
     ServiceErrorCode,
@@ -24,9 +30,14 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...core.resilience import (
+    ServiceUnavailableError,
+    with_timeout_fallback,
+    Timeouts,
+)
 from ...db.models.enums import DataSource
 from ...db.repositories import ESPRepository, SensorRepository
-from ...db.session import get_session
+from ...db.session import get_session, resilient_session
 from ..publisher import Publisher
 from ..topics import TopicBuilder
 
@@ -40,10 +51,15 @@ class SensorDataHandler:
     Flow:
     1. Parse topic → extract esp_id, gpio
     2. Validate payload structure
-    3. Lookup ESP device and sensor config
+    3. Lookup ESP device and sensor config (with resilience)
     4. Check Pi-Enhanced mode
-    5. Save data to database
+    5. Save data to database (with resilience)
     6. Trigger Pi-Enhanced processing if needed
+    
+    Resilience:
+    - Uses resilient_session() for database operations (circuit breaker)
+    - Timeout protection for overall handler operation
+    - Best-effort WebSocket broadcast (no retry)
     """
 
     def __init__(self, publisher: Optional[Publisher] = None):
@@ -54,6 +70,10 @@ class SensorDataHandler:
             publisher: Publisher instance for Pi-Enhanced responses
         """
         self.publisher = publisher or Publisher()
+        
+        # Load resilience settings
+        settings = get_settings()
+        self._handler_timeout = settings.resilience.timeout_sensor_processing
 
     async def handle_sensor_data(self, topic: str, payload: dict) -> bool:
         """
@@ -109,10 +129,11 @@ class SensorDataHandler:
                 )
                 return False
 
-            # Step 3: Get database session and repositories
-            async for session in get_session():
-                esp_repo = ESPRepository(session)
-                sensor_repo = SensorRepository(session)
+            # Step 3: Get database session and repositories (with resilience)
+            try:
+                async with resilient_session() as session:
+                    esp_repo = ESPRepository(session)
+                    sensor_repo = SensorRepository(session)
 
                 # Step 4: Lookup ESP device
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
@@ -272,7 +293,15 @@ class SensorDataHandler:
                 except Exception as e:
                     logger.warning(f"Failed to trigger logic evaluation: {e}")
 
-                return True
+                    return True
+                    
+            except ServiceUnavailableError as e:
+                # Database circuit breaker is OPEN
+                logger.warning(
+                    f"[resilience] Sensor data handling blocked: {e.service_name} unavailable. "
+                    f"Data from {esp_id_str} GPIO {gpio} will be dropped."
+                )
+                return False
 
         except Exception as e:
             logger.error(

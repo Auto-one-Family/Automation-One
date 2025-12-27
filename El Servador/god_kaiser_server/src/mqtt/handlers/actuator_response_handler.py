@@ -29,7 +29,7 @@ from typing import Optional
 
 from ...core.logging_config import get_logger
 from ...db.repositories import ActuatorRepository, ESPRepository
-from ...db.session import get_session
+from ...db.session import resilient_session
 
 logger = get_logger(__name__)
 
@@ -87,7 +87,7 @@ class ActuatorResponseHandler:
             esp32_timestamp = self._convert_timestamp(payload.get("ts", 0))
 
             # Step 3: Get database session and repositories
-            async for session in get_session():
+            async with resilient_session() as session:
                 esp_repo = ESPRepository(session)
                 actuator_repo = ActuatorRepository(session)
 

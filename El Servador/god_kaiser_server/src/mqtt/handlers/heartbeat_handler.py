@@ -29,7 +29,7 @@ from ...core.logging_config import get_logger
 from ...db.models.enums import DataSource
 from ...db.models.esp import ESPDevice
 from ...db.repositories import ESPRepository
-from ...db.session import get_session
+from ...db.session import resilient_session
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -104,7 +104,7 @@ class HeartbeatHandler:
                 return False
 
             # Step 3: Get database session and repositories
-            async for session in get_session():
+            async with resilient_session() as session:
                 esp_repo = ESPRepository(session)
 
                 # Step 4: Lookup ESP device
@@ -502,7 +502,7 @@ class HeartbeatHandler:
             }
         """
         try:
-            async for session in get_session():
+            async with resilient_session() as session:
                 esp_repo = ESPRepository(session)
 
                 # Get all online devices

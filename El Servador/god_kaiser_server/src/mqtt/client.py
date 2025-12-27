@@ -7,8 +7,12 @@ Provides singleton MQTT client with:
 - Auto-reconnect with exponential backoff
 - Connection state management
 - Callback handling
+- Circuit Breaker integration for resilience
+- Offline buffer for graceful degradation
 """
 
+import asyncio
+import logging
 import ssl
 import threading
 import time
@@ -18,6 +22,12 @@ import paho.mqtt.client as mqtt
 
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
+from ..core.resilience import (
+    CircuitBreaker,
+    CircuitState,
+    ResilienceRegistry,
+    CircuitBreakerOpenError,
+)
 
 
 class _MQTTDisconnectRateLimiter(logging.Filter):
@@ -108,15 +118,59 @@ class MQTTClient:
         self.reconnect_delay = 1  # seconds
         self.max_reconnect_delay = 60  # seconds
         self.on_message_callback: Optional[Callable] = None
-        
+        self._subscriber: Optional[object] = None  # Subscriber instance for re-subscription on reconnect
+
         # Rate-limiting for disconnect warnings (thread-safe)
         self._disconnect_lock = threading.Lock()
         self._last_disconnect_log_time: float = 0.0
         self._disconnect_suppressed_count: int = 0
         self._DISCONNECT_LOG_INTERVAL: float = 60.0  # Log at most once per minute
 
+        # Circuit Breaker for MQTT operations
+        self._circuit_breaker: Optional[CircuitBreaker] = None
+        self._init_circuit_breaker()
+        
+        # Offline buffer for graceful degradation
+        self._offline_buffer = None
+        self._init_offline_buffer()
+
         self._initialized = True
-        logger.info("MQTTClient singleton initialized")
+        logger.info("MQTTClient singleton initialized (with resilience patterns)")
+    
+    def _init_circuit_breaker(self) -> None:
+        """Initialize and register the MQTT circuit breaker."""
+        try:
+            resilience_settings = self.settings.resilience
+            
+            self._circuit_breaker = CircuitBreaker(
+                name="mqtt",
+                failure_threshold=resilience_settings.circuit_breaker_mqtt_failure_threshold,
+                recovery_timeout=float(resilience_settings.circuit_breaker_mqtt_recovery_timeout),
+                half_open_timeout=float(resilience_settings.circuit_breaker_mqtt_half_open_timeout),
+            )
+            
+            # Register in global registry
+            registry = ResilienceRegistry.get_instance()
+            registry.register_circuit_breaker("mqtt", self._circuit_breaker)
+            
+            logger.info(
+                f"[resilience] MQTT CircuitBreaker registered: "
+                f"threshold={resilience_settings.circuit_breaker_mqtt_failure_threshold}, "
+                f"recovery={resilience_settings.circuit_breaker_mqtt_recovery_timeout}s"
+            )
+        except Exception as e:
+            logger.warning(f"[resilience] Failed to initialize MQTT circuit breaker: {e}")
+            self._circuit_breaker = None
+    
+    def _init_offline_buffer(self) -> None:
+        """Initialize the offline buffer for graceful degradation."""
+        try:
+            from .offline_buffer import MQTTOfflineBuffer
+            self._offline_buffer = MQTTOfflineBuffer()
+            logger.info("[resilience] MQTT OfflineBuffer initialized")
+        except Exception as e:
+            logger.warning(f"[resilience] Failed to initialize offline buffer: {e}")
+            self._offline_buffer = None
 
     @classmethod
     def get_instance(cls) -> "MQTTClient":
@@ -307,7 +361,7 @@ class MQTTClient:
         retain: bool = False,
     ) -> bool:
         """
-        Publish message to MQTT topic.
+        Publish message to MQTT topic with circuit breaker protection.
 
         Args:
             topic: MQTT topic
@@ -316,10 +370,34 @@ class MQTTClient:
             retain: Retain flag
 
         Returns:
-            True if publish successful
+            True if publish successful, False if failed or circuit breaker rejected
+        
+        Note:
+            If circuit breaker is OPEN, message is buffered for later delivery
         """
+        # Circuit Breaker check
+        if self._circuit_breaker and not self._circuit_breaker.allow_request():
+            logger.warning(
+                f"[resilience] MQTT publish blocked by Circuit Breaker: {topic}"
+            )
+            # Buffer the message for later
+            if self._offline_buffer:
+                asyncio.create_task(
+                    self._offline_buffer.add(topic, payload, qos, retain)
+                )
+                logger.debug(f"[resilience] Message buffered: {topic}")
+            return False
+        
         if not self.client or not self.connected:
             logger.error("Cannot publish: MQTT client not connected")
+            # Record failure for circuit breaker
+            if self._circuit_breaker:
+                self._circuit_breaker.record_failure()
+            # Buffer the message
+            if self._offline_buffer:
+                asyncio.create_task(
+                    self._offline_buffer.add(topic, payload, qos, retain)
+                )
             return False
 
         try:
@@ -327,13 +405,22 @@ class MQTTClient:
 
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
                 logger.debug(f"Published to {topic} (QoS {qos}): {payload[:100]}...")
+                # Record success for circuit breaker
+                if self._circuit_breaker:
+                    self._circuit_breaker.record_success()
                 return True
             else:
                 logger.error(f"Publish failed for topic {topic}: {result.rc}")
+                # Record failure for circuit breaker
+                if self._circuit_breaker:
+                    self._circuit_breaker.record_failure()
                 return False
 
         except Exception as e:
             logger.error(f"Publish exception for topic {topic}: {e}", exc_info=True)
+            # Record failure for circuit breaker
+            if self._circuit_breaker:
+                self._circuit_breaker.record_failure()
             return False
 
     def set_on_message_callback(self, callback: Callable):
@@ -345,6 +432,16 @@ class MQTTClient:
         """
         self.on_message_callback = callback
         logger.debug("Global message callback registered")
+
+    def set_subscriber(self, subscriber: object):
+        """
+        Set Subscriber instance for auto re-subscription on reconnect.
+
+        Args:
+            subscriber: Subscriber instance with subscribe_all() method
+        """
+        self._subscriber = subscriber
+        logger.debug("Subscriber instance registered for auto re-subscription")
 
     def is_connected(self) -> bool:
         """
@@ -366,6 +463,24 @@ class MQTTClient:
                 self._last_disconnect_log_time = 0.0
                 self._disconnect_suppressed_count = 0
             logger.info(f"MQTT connected with result code: {rc}")
+            
+            # Reset circuit breaker on successful connection
+            if self._circuit_breaker:
+                self._circuit_breaker.reset()
+                logger.info("[resilience] MQTT CircuitBreaker reset on connect")
+
+            # Auto re-subscribe to all topics if this is a reconnection
+            if self._subscriber and hasattr(self._subscriber, 'subscribe_all'):
+                logger.info("Reconnected to MQTT broker - re-subscribing to all topics...")
+                try:
+                    self._subscriber.subscribe_all()
+                    logger.info("Re-subscription complete")
+                except Exception as e:
+                    logger.error(f"Failed to re-subscribe after reconnect: {e}", exc_info=True)
+            
+            # Flush offline buffer on reconnect
+            if self._offline_buffer and not self._offline_buffer.is_empty:
+                asyncio.create_task(self._flush_offline_buffer())
         else:
             self.connected = False
             error_messages = {
@@ -377,6 +492,18 @@ class MQTTClient:
             }
             error_msg = error_messages.get(rc, f"Unknown error code: {rc}")
             logger.error(f"MQTT connection failed: {error_msg}")
+    
+    async def _flush_offline_buffer(self) -> None:
+        """Flush offline buffer after reconnection."""
+        if not self._offline_buffer:
+            return
+        
+        try:
+            count = await self._offline_buffer.flush_all(self)
+            if count > 0:
+                logger.info(f"[resilience] Flushed {count} messages from offline buffer")
+        except Exception as e:
+            logger.error(f"[resilience] Failed to flush offline buffer: {e}")
 
     def _on_disconnect(self, client, userdata, rc):
         """
@@ -464,3 +591,37 @@ class MQTTClient:
     def _on_publish(self, client, userdata, mid):
         """Callback when message is published."""
         logger.debug(f"Message published (mid={mid})")
+    
+    # Resilience-related methods
+    def get_circuit_breaker(self) -> Optional[CircuitBreaker]:
+        """Get the MQTT circuit breaker instance."""
+        return self._circuit_breaker
+    
+    def get_offline_buffer_metrics(self) -> dict:
+        """Get offline buffer metrics."""
+        if self._offline_buffer:
+            return self._offline_buffer.get_metrics()
+        return {"enabled": False}
+    
+    def get_resilience_status(self) -> dict:
+        """
+        Get combined resilience status for MQTT client.
+        
+        Returns:
+            Dictionary with circuit breaker and buffer status
+        """
+        status = {
+            "connected": self.connected,
+        }
+        
+        if self._circuit_breaker:
+            status["circuit_breaker"] = self._circuit_breaker.get_metrics()
+        else:
+            status["circuit_breaker"] = {"enabled": False}
+        
+        if self._offline_buffer:
+            status["offline_buffer"] = self._offline_buffer.get_metrics()
+        else:
+            status["offline_buffer"] = {"enabled": False}
+        
+        return status

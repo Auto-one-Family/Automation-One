@@ -37,7 +37,7 @@ from ...core.error_codes import (
 )
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
-from ...db.session import get_session
+from ...db.session import resilient_session
 from ...websocket.manager import WebSocketManager
 from ..topics import TopicBuilder
 
@@ -113,7 +113,7 @@ class ZoneAckHandler:
             error_message = payload.get("message", "")
 
             # Step 3: Process ACK via database session
-            async for session in get_session():
+            async with resilient_session() as session:
                 esp_repo = ESPRepository(session)
 
                 # Step 4: Get ESP device

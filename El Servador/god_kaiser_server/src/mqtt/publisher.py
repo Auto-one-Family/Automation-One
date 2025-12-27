@@ -2,6 +2,11 @@
 MQTT Publisher
 
 High-level publishing interface with QoS management and retry logic.
+
+Includes resilience patterns:
+- Circuit Breaker integration via MQTTClient
+- Exponential backoff retry
+- Configurable timeouts
 """
 
 import json
@@ -9,7 +14,12 @@ import time
 from typing import Any, Dict, Optional
 
 from ..core import constants
+from ..core.config import get_settings
 from ..core.logging_config import get_logger
+from ..core.resilience import (
+    ResilienceRegistry,
+    calculate_backoff_delay,
+)
 from .client import MQTTClient
 from .topics import TopicBuilder
 
@@ -22,6 +32,11 @@ class Publisher:
 
     Provides convenience methods for publishing common message types
     with appropriate QoS levels and retry logic.
+    
+    Includes resilience patterns:
+    - Uses MQTTClient's circuit breaker
+    - Exponential backoff retry with configurable parameters
+    - Metrics for monitoring
     """
 
     def __init__(self, mqtt_client: Optional[MQTTClient] = None):
@@ -32,8 +47,19 @@ class Publisher:
             mqtt_client: MQTT client instance (uses singleton if None)
         """
         self.client = mqtt_client or MQTTClient.get_instance()
-        self.max_retries = 3
-        self.retry_delay = 1  # seconds
+        
+        # Load resilience settings
+        settings = get_settings()
+        self.max_retries = settings.resilience.retry_max_attempts
+        self.base_delay = settings.resilience.retry_base_delay
+        self.max_delay = settings.resilience.retry_max_delay
+        self.exponential_base = settings.resilience.retry_exponential_base
+        self.jitter_enabled = settings.resilience.retry_jitter_enabled
+        
+        # Metrics
+        self._publish_attempts = 0
+        self._publish_successes = 0
+        self._publish_failures = 0
 
     def publish_actuator_command(
         self,
@@ -268,7 +294,7 @@ class Publisher:
         retry: bool,
     ) -> bool:
         """
-        Publish message with retry logic.
+        Publish message with exponential backoff retry logic.
 
         Args:
             topic: MQTT topic
@@ -278,29 +304,74 @@ class Publisher:
 
         Returns:
             True if publish successful
+        
+        Note:
+            Uses exponential backoff with optional jitter to prevent thundering herd.
+            Circuit breaker protection is handled by MQTTClient.publish()
         """
         # Convert payload to JSON string
         try:
             payload_str = json.dumps(payload)
         except Exception as e:
             logger.error(f"Failed to serialize payload: {e}", exc_info=True)
+            self._publish_failures += 1
             return False
 
-        # Attempt publish
+        # Attempt publish with exponential backoff
         attempts = self.max_retries if retry else 1
 
         for attempt in range(1, attempts + 1):
+            self._publish_attempts += 1
             success = self.client.publish(topic, payload_str, qos)
 
             if success:
+                self._publish_successes += 1
                 return True
 
-            # Retry logic
+            # Retry logic with exponential backoff
             if attempt < attempts:
-                logger.warning(f"Publish failed (attempt {attempt}/{attempts}), retrying in {self.retry_delay}s...")
-                time.sleep(self.retry_delay)
+                delay = calculate_backoff_delay(
+                    attempt=attempt - 1,  # 0-indexed
+                    base_delay=self.base_delay,
+                    max_delay=self.max_delay,
+                    exponential_base=self.exponential_base,
+                    jitter=self.jitter_enabled,
+                )
+                logger.warning(
+                    f"[resilience] Publisher: Publish failed "
+                    f"(attempt {attempt}/{attempts}), retrying in {delay:.2f}s..."
+                )
+                time.sleep(delay)
             else:
-                logger.error(f"Publish failed after {attempts} attempts")
+                logger.error(
+                    f"[resilience] Publisher: Publish failed after {attempts} attempts: {topic}"
+                )
+                self._publish_failures += 1
                 return False
 
+        self._publish_failures += 1
         return False
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """
+        Get publisher metrics.
+        
+        Returns:
+            Dictionary with publish statistics
+        """
+        return {
+            "publish_attempts": self._publish_attempts,
+            "publish_successes": self._publish_successes,
+            "publish_failures": self._publish_failures,
+            "success_rate": (
+                self._publish_successes / self._publish_attempts * 100
+                if self._publish_attempts > 0 else 0.0
+            ),
+            "config": {
+                "max_retries": self.max_retries,
+                "base_delay": self.base_delay,
+                "max_delay": self.max_delay,
+                "exponential_base": self.exponential_base,
+                "jitter_enabled": self.jitter_enabled,
+            },
+        }

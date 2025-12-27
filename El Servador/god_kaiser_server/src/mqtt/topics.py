@@ -172,6 +172,76 @@ class TopicBuilder:
         )
 
     # ====================================================================
+    # BUILD METHODS (ESP → God-Kaiser - used by Mock ESPs)
+    # ====================================================================
+
+    @staticmethod
+    def build_heartbeat_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build heartbeat topic for ESP.
+
+        Used by Mock ESPs to publish heartbeat messages.
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
+
+    @staticmethod
+    def build_sensor_data_topic(esp_id: str, gpio: int, kaiser_id: str = "god") -> str:
+        """
+        Build sensor data topic for ESP.
+
+        Used by Mock ESPs to publish sensor data messages.
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            gpio: GPIO pin number
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data"
+
+    @staticmethod
+    def build_sensor_batch_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build sensor batch data topic for ESP.
+
+        Used by Mock ESPs to publish batch sensor data messages.
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/sensor/batch
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/sensor/batch"
+
+    @staticmethod
+    def build_actuator_status_topic(esp_id: str, gpio: int, kaiser_id: str = "god") -> str:
+        """
+        Build actuator status topic for ESP.
+
+        Used by Mock ESPs to publish actuator status messages.
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            gpio: GPIO pin number
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status"
+
+    # ====================================================================
     # PARSE METHODS (ESP → God-Kaiser)
     # ====================================================================
 
@@ -548,6 +618,150 @@ class TopicBuilder:
                 "type": "subzone_ack",
             }
         return None
+
+    # ====================================================================
+    # ADDITIONAL BUILD METHODS (for Mock-ESP and Testing)
+    # ====================================================================
+
+    @staticmethod
+    def build_actuator_response_topic(esp_id: str, gpio: int, kaiser_id: str = "god") -> str:
+        """
+        Build actuator command response topic.
+
+        Used by ESPs to acknowledge actuator commands.
+
+        Args:
+            esp_id: ESP device ID
+            gpio: GPIO pin number
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response"
+
+    @staticmethod
+    def build_actuator_alert_topic(esp_id: str, gpio: int, kaiser_id: str = "god") -> str:
+        """
+        Build actuator alert topic.
+
+        Used by ESPs to publish actuator alerts (warnings, errors).
+
+        Args:
+            esp_id: ESP device ID
+            gpio: GPIO pin number
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert"
+
+    @staticmethod
+    def build_actuator_emergency_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build actuator emergency stop topic.
+
+        Used by ESPs to publish emergency stop events.
+
+        Args:
+            esp_id: ESP device ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency"
+
+    @staticmethod
+    def build_system_response_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build system command response topic.
+
+        Used by ESPs to acknowledge system commands.
+
+        Args:
+            esp_id: ESP device ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/response
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/system/response"
+
+    @staticmethod
+    def build_system_diagnostics_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build system diagnostics topic.
+
+        Used by ESPs to publish diagnostic information.
+
+        Args:
+            esp_id: ESP device ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics"
+
+    @staticmethod
+    def build_library_event_topic(esp_id: str, event: str, kaiser_id: str = "god") -> str:
+        """
+        Build library event topic.
+
+        Used by ESPs to publish library management events (ready, installed, error).
+
+        Args:
+            esp_id: ESP device ID
+            event: Event type ("ready", "installed", "error", "request")
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/library/{event}
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/library/{event}"
+
+    @staticmethod
+    def build_safe_mode_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build safe mode status topic.
+
+        Used by ESPs to publish safe mode entry/exit events.
+
+        Args:
+            esp_id: ESP device ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/safe_mode
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/safe_mode"
+
+    @staticmethod
+    def build_subzone_sensor_data_topic(
+        esp_id: str,
+        gpio: int,
+        master_zone_id: str,
+        subzone_id: str,
+        kaiser_id: str = "god"
+    ) -> str:
+        """
+        Build subzone sensor data topic.
+
+        Used by ESPs to publish sensor data within a subzone context.
+
+        Args:
+            esp_id: ESP device ID
+            gpio: GPIO pin number
+            master_zone_id: Master zone ID
+            subzone_id: Subzone ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/zone/{master_zone_id}/esp/{esp_id}/subzone/{subzone_id}/sensor/{gpio}/data
+        """
+        return f"kaiser/{kaiser_id}/zone/{master_zone_id}/esp/{esp_id}/subzone/{subzone_id}/sensor/{gpio}/data"
 
     # ====================================================================
     # GENERIC PARSE METHOD

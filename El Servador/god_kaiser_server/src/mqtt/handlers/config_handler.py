@@ -32,7 +32,7 @@ from ...core.error_codes import ConfigErrorCode, get_error_code_description
 from ...core.logging_config import get_logger
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.esp_repo import ESPRepository
-from ...db.session import get_session
+from ...db.session import resilient_session
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -133,7 +133,7 @@ class ConfigHandler:
 
             # Store in audit_log table for history tracking
             try:
-                async for session in get_session():
+                async with resilient_session() as session:
                     audit_repo = AuditLogRepository(session)
                     await audit_repo.log_config_response(
                         esp_id=esp_id,
