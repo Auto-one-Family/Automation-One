@@ -234,11 +234,47 @@ class ServiceErrorCode(IntEnum):
 
 class AuditErrorCode(IntEnum):
     """Server audit error codes (5500-5599)."""
-    
+
     NONE = 0
     AUDIT_LOG_FAILED = 5501
     RETENTION_CLEANUP_FAILED = 5502
     STATISTICS_FAILED = 5503
+
+
+class SequenceErrorCode(IntEnum):
+    """Server sequence error codes (5600-5699)."""
+
+    # Validation Errors (5600-5609)
+    SEQ_INVALID_DEFINITION = 5600
+    SEQ_EMPTY_STEPS = 5601
+    SEQ_INVALID_STEP = 5602
+    SEQ_INVALID_ACTION_TYPE = 5603
+    SEQ_STEP_MISSING_ACTION = 5604
+    SEQ_INVALID_DELAY = 5605
+    SEQ_TOO_MANY_STEPS = 5606
+    SEQ_DURATION_EXCEEDED = 5607
+
+    # Runtime Errors (5610-5629)
+    SEQ_ALREADY_RUNNING = 5610
+    SEQ_NOT_FOUND = 5611
+    SEQ_CANCELLED = 5612
+    SEQ_TIMEOUT = 5613
+    SEQ_STEP_FAILED = 5614
+    SEQ_STEP_TIMEOUT = 5615
+    SEQ_MAX_DURATION_EXCEEDED = 5616
+    SEQ_EXECUTOR_NOT_FOUND = 5617
+    SEQ_CIRCULAR_REFERENCE = 5618
+
+    # System Errors (5630-5639)
+    SEQ_TASK_CREATION_FAILED = 5630
+    SEQ_INTERNAL_ERROR = 5631
+    SEQ_CLEANUP_FAILED = 5632
+    SEQ_STATE_CORRUPTION = 5633
+
+    # Conflict Errors (5640-5649)
+    SEQ_ACTUATOR_LOCKED = 5640
+    SEQ_RATE_LIMITED = 5641
+    SEQ_SAFETY_BLOCKED = 5642
 
 
 # =============================================================================
@@ -415,6 +451,32 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5501: "Failed to write audit log",
     5502: "Retention cleanup failed",
     5503: "Failed to compute audit statistics",
+
+    # Sequence errors (5600-5699)
+    5600: "Invalid sequence definition",
+    5601: "Sequence must have at least one step",
+    5602: "Invalid step configuration",
+    5603: "Unknown action type in step",
+    5604: "Step requires either 'action' or 'delay_seconds'",
+    5605: "Invalid delay value (must be 0-3600 seconds)",
+    5606: "Too many steps (max 50)",
+    5607: "Sequence duration exceeds maximum allowed",
+    5610: "Sequence with this ID is already running",
+    5611: "Sequence not found",
+    5612: "Sequence was cancelled",
+    5613: "Sequence timed out",
+    5614: "Step execution failed",
+    5615: "Step timed out",
+    5616: "Maximum sequence duration exceeded",
+    5617: "No executor found for action type",
+    5618: "Circular sequence reference detected",
+    5630: "Failed to create sequence task",
+    5631: "Internal sequence error",
+    5632: "Failed to cleanup completed sequence",
+    5633: "Sequence state corruption detected",
+    5640: "Actuator locked by another sequence/rule",
+    5641: "Rate limit exceeded",
+    5642: "Action blocked by safety system",
 }
 
 
@@ -494,6 +556,8 @@ def get_error_code_range(code: int) -> str:
         return "SERVER_SERVICE"
     elif 5500 <= code < 5600:
         return "SERVER_AUDIT"
+    elif 5600 <= code < 5700:
+        return "SERVER_SEQUENCE"
     return "UNKNOWN"
 
 
