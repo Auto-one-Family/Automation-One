@@ -1,5 +1,7 @@
 # God-Kaiser Server
 
+[![Server Tests](https://github.com/Auto-one-Family/Automation-One/actions/workflows/server-tests.yml/badge.svg)](https://github.com/Auto-one-Family/Automation-One/actions/workflows/server-tests.yml)
+
 FastAPI-based backend for AutomationOne IoT framework.
 
 ## Features
@@ -8,5 +10,8 @@ FastAPI-based backend for AutomationOne IoT framework.
 - MQTT integration
 - PostgreSQL database
 - ESP32 device management
+
+
+
 
 
