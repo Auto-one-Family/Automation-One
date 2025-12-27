@@ -17,6 +17,7 @@ from .esp import router as esp_router
 from .health import router as health_router
 from .logic import router as logic_router
 from .sensors import router as sensors_router
+from .sequences import router as sequences_router
 from .subzone import router as subzone_router
 from .users import router as users_router
 from .zone import router as zone_router
@@ -36,6 +37,7 @@ api_v1_router.include_router(debug_router)
 api_v1_router.include_router(users_router)
 api_v1_router.include_router(zone_router)
 api_v1_router.include_router(subzone_router)  # Phase 9 - Subzone Management
+api_v1_router.include_router(sequences_router)  # Phase 3 - Sequence Actions
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -48,6 +50,7 @@ __all__ = [
     "actuators_router",
     "health_router",
     "logic_router",
+    "sequences_router",
     "subzone_router",
     "users_router",
     "zone_router",

@@ -732,3 +732,37 @@ async def get_esp_service_dep(db: DBSession):
 async def get_audit_log_repo_dep(db: DBSession):
     """Async dependency for AuditLogRepository."""
     return get_audit_log_repo(db)
+
+
+# =============================================================================
+# Simulation Scheduler Dependency (Paket X)
+# =============================================================================
+
+
+def get_simulation_scheduler():
+    """
+    Get SimulationScheduler singleton instance.
+    
+    Paket X: Code Consolidation - Unified dependency for mock ESP simulation.
+    
+    Returns:
+        SimulationScheduler instance
+        
+    Raises:
+        HTTPException: 503 if scheduler not initialized
+    """
+    from ..services.simulation import get_simulation_scheduler as _get_scheduler
+    
+    try:
+        scheduler = _get_scheduler()
+        return scheduler
+    except RuntimeError as e:
+        logger.error(f"SimulationScheduler not initialized: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Simulation service not initialized"
+        )
+
+
+# Type alias for simulation scheduler dependency
+SimulationScheduler = Annotated["SimulationScheduler", Depends(get_simulation_scheduler)]  # type: ignore

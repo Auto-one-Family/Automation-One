@@ -46,16 +46,48 @@ class QualityLevel(str, Enum):
 # =============================================================================
 # Sensor Schemas
 # =============================================================================
+class VariationPattern(str, Enum):
+    """Sensor value variation patterns."""
+    CONSTANT = "constant"
+    RANDOM = "random"
+    DRIFT = "drift"
+
+
 class MockSensorConfig(BaseModel):
     """Configuration for a mock sensor."""
     gpio: int = Field(..., ge=0, le=39, description="GPIO pin number")
     sensor_type: str = Field(..., description="Sensor type (DS18B20, SHT31, pH, etc.)")
     name: Optional[str] = Field(None, description="Human-readable sensor name")
     subzone_id: Optional[str] = Field(None, description="Subzone assignment for this sensor")
-    raw_value: float = Field(0.0, description="Current raw sensor value")
+    raw_value: float = Field(0.0, description="Base sensor value (used as base_value for simulation)")
     unit: str = Field("", description="Unit of measurement")
     quality: QualityLevel = Field(QualityLevel.GOOD, description="Data quality")
     raw_mode: bool = Field(True, description="Send raw values (Pi-Enhanced processing)")
+
+    # Simulation Parameters (NEW - Paket B.1)
+    interval_seconds: float = Field(
+        30.0,
+        ge=1.0,
+        le=3600.0,
+        description="Sensor publishing interval in seconds"
+    )
+    variation_pattern: VariationPattern = Field(
+        VariationPattern.CONSTANT,
+        description="Value variation pattern: constant, random, drift"
+    )
+    variation_range: float = Field(
+        0.0,
+        ge=0.0,
+        description="Variation range (for random/drift patterns)"
+    )
+    min_value: Optional[float] = Field(
+        None,
+        description="Minimum allowed value (defaults to raw_value - 10)"
+    )
+    max_value: Optional[float] = Field(
+        None,
+        description="Maximum allowed value (defaults to raw_value + 10)"
+    )
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -99,6 +131,50 @@ class SetActuatorStateRequest(BaseModel):
     publish: bool = Field(True, description="Publish MQTT status after setting")
 
 
+class ActuatorCommandType(str, Enum):
+    """Actuator command types - matches ESP32 actuator protocol."""
+    ON = "ON"
+    OFF = "OFF"
+    PWM = "PWM"
+    TOGGLE = "TOGGLE"
+
+
+class ActuatorCommandRequest(BaseModel):
+    """
+    Request to simulate an actuator command via MQTT flow (Paket G).
+    
+    This simulates the full MQTT command flow as if sent by the Logic Engine:
+    1. Server publishes command to MQTT
+    2. Mock-ESP receives and processes command
+    3. Mock-ESP publishes response and status
+    """
+    command: ActuatorCommandType = Field(..., description="Command type: ON, OFF, PWM, TOGGLE")
+    value: float = Field(1.0, ge=0.0, le=1.0, description="Value for PWM command (0.0-1.0)")
+    duration: int = Field(0, ge=0, description="Auto-off duration in seconds (0 = unlimited)")
+
+    model_config = ConfigDict(
+        use_enum_values=True,
+        json_schema_extra={
+            "example": {
+                "command": "ON",
+                "value": 1.0,
+                "duration": 60
+            }
+        }
+    )
+
+
+class ActuatorCommandResponse(BaseModel):
+    """Response from actuator command execution."""
+    success: bool = Field(..., description="Whether command was executed successfully")
+    esp_id: str = Field(..., description="ESP device ID")
+    gpio: int = Field(..., description="GPIO pin number")
+    command: str = Field(..., description="Executed command")
+    state: bool = Field(..., description="Current actuator state after command")
+    pwm_value: int = Field(..., description="Current PWM value (0-255)")
+    message: str = Field("", description="Response message")
+
+
 # =============================================================================
 # Mock ESP CRUD Schemas
 # =============================================================================
@@ -106,8 +182,8 @@ class MockESPCreate(BaseModel):
     """Request to create a new mock ESP32."""
     esp_id: str = Field(
         ...,
-        pattern=r"^ESP_([A-Za-z0-9]{8}|MOCK_[A-Za-z0-9]{6})$",
-        description="ESP device ID (format: ESP_XXXXXXXX or ESP_MOCK_XXXXXX)"
+        pattern=r"^(ESP_[A-Za-z0-9]{8}|MOCK_[A-Za-z0-9]+)$",
+        description="ESP device ID (format: ESP_XXXXXXXX or MOCK_XXXXXX)"
     )
     zone_id: Optional[str] = Field(None, description="Zone ID (technical, auto-generated from zone_name if not provided)")
     zone_name: Optional[str] = Field(None, description="Human-readable zone name (e.g., 'Zelt 1', 'Gewächshaus')")

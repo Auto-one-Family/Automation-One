@@ -6,6 +6,11 @@ mock ESP32 devices for testing and debugging without real hardware.
 
 Also includes Database Explorer endpoints for inspecting database tables.
 
+ARCHITECTURE (Paket B - Database as Single Source of Truth):
+- Database is the Single Source of Truth for Mock-ESP configuration
+- SimulationScheduler manages runtime state (heartbeats, sensor jobs)
+- MockESPManager is DEPRECATED and only kept for backward compatibility
+
 All endpoints require admin authentication.
 """
 
@@ -13,6 +18,8 @@ import json
 import math
 import os
 import re
+import uuid
+import warnings
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -28,6 +35,8 @@ from ...core.logging_config import get_logger
 from ...db.base import Base
 from ...db.session import get_session
 from ...schemas.debug import (
+    ActuatorCommandRequest,
+    ActuatorCommandResponse,
     BatchSensorValueRequest,
     CommandResponse,
     HeartbeatResponse,
@@ -38,6 +47,8 @@ from ...schemas.debug import (
     MockESPResponse,
     MockESPUpdate,
     MockSensorConfig,
+    MockSensorResponse,
+    MockActuatorResponse,
     SetActuatorStateRequest,
     SetSensorValueRequest,
     StateTransitionRequest,
@@ -56,23 +67,104 @@ from ...schemas.debug_db import (
     TableListResponse,
     TableSchema,
 )
-from ...services.mock_esp_manager import MockESPManager
+from ...schemas.api_response import APIResponse
+from ...core.exceptions import (
+    ESPNotFoundError,
+    SimulationNotRunningError,
+    ValidationException,
+)
 from ...services.audit_retention_service import AuditRetentionService
 from ...db.repositories import ESPRepository
-from ..deps import AdminUser, DBSession
+from ..deps import AdminUser, DBSession, SimulationScheduler, get_simulation_scheduler
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/debug", tags=["Debug"])
 
-# Dependency to get MockESPManager
-async def get_mock_esp_manager() -> MockESPManager:
-    """Get MockESPManager singleton instance."""
-    return await MockESPManager.get_instance()
+
+# =========================================================================
+# Helper Functions for DB-First Mock ESP Management
+# =========================================================================
+
+def _build_mock_esp_response(
+    device,
+    simulation_active: bool = False,
+    runtime_status: Optional[Dict[str, Any]] = None
+) -> MockESPResponse:
+    """
+    Build MockESPResponse from ESPDevice model.
+    
+    Combines database state with optional runtime status from SimulationScheduler.
+    """
+    sim_config = device.device_metadata.get("simulation_config", {}) if device.device_metadata else {}
+    sensors_config = sim_config.get("sensors", {})
+    actuators_config = sim_config.get("actuators", {})
+    
+    # Build sensor responses
+    sensors = []
+    for gpio_str, config in sensors_config.items():
+        sensors.append(MockSensorResponse(
+            gpio=int(gpio_str),
+            sensor_type=config.get("sensor_type", "GENERIC"),
+            name=config.get("name"),
+            subzone_id=config.get("subzone_id"),
+            raw_value=config.get("raw_value", 0.0),
+            unit=config.get("unit", ""),
+            quality=config.get("quality", "good"),
+            raw_mode=config.get("raw_mode", True),
+            last_read=None,
+        ))
+    
+    # Build actuator responses
+    actuators = []
+    for gpio_str, config in actuators_config.items():
+        actuators.append(MockActuatorResponse(
+            gpio=int(gpio_str),
+            actuator_type=config.get("actuator_type", "relay"),
+            name=config.get("name"),
+            state=config.get("state", False),
+            pwm_value=config.get("pwm_value", 0.0),
+            emergency_stopped=False,
+            last_command=None,
+        ))
+    
+    # Get uptime from runtime if available
+    uptime = 0
+    if runtime_status:
+        uptime = int(runtime_status.get("uptime_seconds", 0))
+    
+    # Get simulation state
+    simulation_state = "stopped"
+    if device.device_metadata:
+        simulation_state = device.device_metadata.get("simulation_state", "stopped")
+    
+    return MockESPResponse(
+        esp_id=device.device_id,
+        zone_id=device.zone_id,
+        zone_name=device.zone_name,
+        master_zone_id=device.master_zone_id,
+        subzone_id=None,
+        system_state="OPERATIONAL" if simulation_active else "OFFLINE",
+        sensors=sensors,
+        actuators=actuators,
+        auto_heartbeat=simulation_active,
+        heap_free=45000 if simulation_active else 0,
+        wifi_rssi=-50 if simulation_active else -100,
+        uptime=uptime,
+        last_heartbeat=datetime.now(timezone.utc) if simulation_active else None,
+        created_at=device.created_at or datetime.now(timezone.utc),
+        connected=simulation_active,
+        hardware_type="MOCK_ESP32",
+        status="online" if simulation_active else "offline",
+    )
+
+
+# DEPRECATED: MockESPManager dependency removed (Paket X)
+# Use SimulationScheduler from deps.py instead
 
 
 # =============================================================================
-# Mock ESP CRUD
+# Mock ESP CRUD (DB-First Architecture)
 # =============================================================================
 @router.post(
     "/mock-esp",
@@ -85,70 +177,95 @@ async def create_mock_esp(
     config: MockESPCreate,
     current_user: AdminUser,
     db: DBSession,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
 ) -> MockESPResponse:
     """
     Create a new mock ESP32 instance.
 
+    DB-FIRST ARCHITECTURE:
+    1. Create device in database (Single Source of Truth)
+    2. Start simulation via SimulationScheduler if auto_heartbeat=True
+    
     The mock ESP will simulate real ESP32 behavior including:
-    - MQTT message publishing
-    - State machine transitions
+    - MQTT message publishing (via SimulationScheduler)
     - Sensor readings
     - Actuator control
-
-    Also registers the mock ESP in the database so Zone/Subzone APIs work.
     """
+    esp_repo = ESPRepository(db)
+    
     try:
-        result = await manager.create_mock_esp(config)
+        # Build simulation config for DB storage
+        simulation_config = {
+            "sensors": {
+                str(sensor.gpio): {
+                    "sensor_type": sensor.sensor_type,
+                    "raw_value": sensor.raw_value,
+                    "unit": sensor.unit,
+                    "quality": sensor.quality,
+                    "name": sensor.name,
+                    "subzone_id": sensor.subzone_id,
+                    "raw_mode": sensor.raw_mode,
+                }
+                for sensor in config.sensors
+            },
+            "actuators": {
+                str(actuator.gpio): {
+                    "actuator_type": actuator.actuator_type,
+                    "name": actuator.name,
+                    "state": actuator.state,
+                    "pwm_value": actuator.pwm_value,
+                }
+                for actuator in config.actuators
+            },
+            "heartbeat_interval": config.heartbeat_interval_seconds,
+            "auto_heartbeat": config.auto_heartbeat,
+        }
 
-        # Also register in the database for Zone/Subzone API compatibility
-        esp_repo = ESPRepository(db)
-        existing = await esp_repo.get_by_device_id(config.esp_id)
-
-        if not existing:
-            # Generate unique MAC address from ESP ID (e.g., ESP_MOCK_00B7EF -> MO:CK:00:00:B7:EF)
-            esp_suffix = config.esp_id.replace("ESP_MOCK_", "").upper()
-            # Pad to 6 chars if needed
-            esp_suffix = esp_suffix.zfill(6)[-6:]
-            mock_mac = f"MO:CK:{esp_suffix[0:2]}:{esp_suffix[2:4]}:{esp_suffix[4:6]}:00"
-
-            # Auto-generate zone_id from zone_name if needed
-            zone_id = config.zone_id
-            zone_name = config.zone_name
-            if zone_name and not zone_id:
-                # Generate technical zone_id from user-friendly zone_name
-                zone_id = zone_name.lower()
-                zone_id = zone_id.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
-                zone_id = re.sub(r'[^a-z0-9]+', '_', zone_id).strip('_')
-
-            # Create descriptive name for database
-            # Use zone_name if provided for better identification
-            short_id = config.esp_id.replace("ESP_MOCK_", "")
-            if zone_name:
-                db_name = f"Mock ESP ({zone_name}) [{short_id}]"
-            else:
-                db_name = f"Mock ESP {short_id}"
-
-            await esp_repo.create(
-                device_id=config.esp_id,
-                name=db_name,
-                hardware_type="MOCK_ESP32",
-                zone_id=zone_id,
-                zone_name=zone_name,  # Store user-friendly name
-                master_zone_id=config.master_zone_id,
-                kaiser_id="god",
-                status="online",
-                ip_address="127.0.0.1",
-                mac_address=mock_mac,
-                firmware_version="MOCK_1.0.0",
-                capabilities={"max_sensors": 20, "max_actuators": 12, "mock": True},
-                device_metadata={"created_by": current_user.username, "mock": True},
-            )
-            await db.commit()
-            logger.info(f"Mock ESP {config.esp_id} registered in database with name: {db_name}")
+        # 1. Create device in database (Single Source of Truth)
+        device = await esp_repo.create_mock_device(
+            device_id=config.esp_id,
+            kaiser_id="god",
+            zone_id=config.zone_id,
+            zone_name=config.zone_name,
+            master_zone_id=config.master_zone_id,
+            heartbeat_interval=float(config.heartbeat_interval_seconds),
+            simulation_config=simulation_config,
+            auto_start=config.auto_heartbeat,
+        )
+        
+        # Update metadata with creator info
+        if device.device_metadata:
+            device.device_metadata["created_by"] = current_user.username
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(device, "device_metadata")
+        
+        await db.commit()
+        await db.refresh(device)
+        
+        # 2. Start simulation if auto_heartbeat is True
+        simulation_started = False
+        if config.auto_heartbeat:
+            try:
+                sim_scheduler = get_simulation_scheduler()
+                simulation_started = await sim_scheduler.start_mock(
+                    esp_id=config.esp_id,
+                    kaiser_id="god",
+                    zone_id=config.zone_id or "",
+                    heartbeat_interval=float(config.heartbeat_interval_seconds)
+                )
+                
+                if simulation_started:
+                    # Update status to online
+                    device.status = "online"
+                    await db.commit()
+                    logger.info(f"Simulation started for {config.esp_id}")
+            except RuntimeError as e:
+                logger.warning(f"SimulationScheduler not available: {e}")
 
         logger.info(f"Admin {current_user.username} created mock ESP: {config.esp_id}")
-        return result
+        
+        # Build response
+        return _build_mock_esp_response(device, simulation_active=simulation_started)
+        
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -166,18 +283,50 @@ async def create_mock_esp(
     "/mock-esp",
     response_model=MockESPListResponse,
     summary="List Mock ESPs",
-    description="Get all active mock ESP32 devices."
+    description="Get all mock ESP32 devices from database."
 )
 async def list_mock_esps(
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> MockESPListResponse:
-    """List all active mock ESP32 instances."""
-    esps = await manager.list_mock_esps()
+    """
+    List all mock ESP32 instances from database.
+    
+    DB-FIRST: Loads all Mock-ESPs from database and combines with
+    runtime status from SimulationScheduler.
+    """
+    esp_repo = ESPRepository(db)
+    
+    # Load all mocks from database
+    devices = await esp_repo.get_all_mock_devices()
+    
+    # Get active simulation IDs
+    active_ids: List[str] = []
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        active_ids = sim_scheduler.get_active_mocks()
+    except RuntimeError:
+        pass  # Scheduler not initialized
+    
+    # Build responses
+    responses = []
+    for device in devices:
+        is_active = device.device_id in active_ids
+        runtime_status = None
+        
+        if is_active:
+            try:
+                sim_scheduler = get_simulation_scheduler()
+                runtime_status = sim_scheduler.get_mock_status(device.device_id)
+            except RuntimeError:
+                pass
+        
+        responses.append(_build_mock_esp_response(device, is_active, runtime_status))
+    
     return MockESPListResponse(
         success=True,
-        data=esps,
-        total=len(esps)
+        data=responses,
+        total=len(responses)
     )
 
 
@@ -185,21 +334,40 @@ async def list_mock_esps(
     "/mock-esp/{esp_id}",
     response_model=MockESPResponse,
     summary="Get Mock ESP",
-    description="Get details of a specific mock ESP32 device."
+    description="Get details of a specific mock ESP32 device from database."
 )
 async def get_mock_esp(
     esp_id: str,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> MockESPResponse:
-    """Get mock ESP32 details by ID."""
-    result = await manager.get_mock_esp(esp_id)
-    if not result:
+    """
+    Get mock ESP32 details by ID from database.
+    
+    DB-FIRST: Loads Mock-ESP configuration from database and combines
+    with runtime status from SimulationScheduler.
+    """
+    esp_repo = ESPRepository(db)
+    
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
-    return result
+    
+    # Get runtime status
+    is_active = False
+    runtime_status = None
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        is_active = sim_scheduler.is_mock_active(esp_id)
+        if is_active:
+            runtime_status = sim_scheduler.get_mock_status(esp_id)
+    except RuntimeError:
+        pass
+    
+    return _build_mock_esp_response(device, is_active, runtime_status)
 
 
 @router.delete(
@@ -212,25 +380,161 @@ async def delete_mock_esp(
     esp_id: str,
     current_user: AdminUser,
     db: DBSession,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
 ):
-    """Delete a mock ESP32 instance and remove from database."""
-    deleted = await manager.delete_mock_esp(esp_id)
-    if not deleted:
+    """
+    Delete a mock ESP32 instance.
+    
+    DB-FIRST FLOW:
+    1. Stop simulation if running
+    2. Delete from database
+    """
+    esp_repo = ESPRepository(db)
+    
+    # Check if mock exists in DB
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
 
-    # Also delete from database if it exists there
-    esp_repo = ESPRepository(db)
-    db_esp = await esp_repo.get_by_device_id(esp_id)
-    if db_esp:
-        await esp_repo.delete(db_esp.id)
-        await db.commit()
-        logger.info(f"Mock ESP {esp_id} also removed from database")
+    # 1. Stop simulation if running
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        if sim_scheduler.is_mock_active(esp_id):
+            await sim_scheduler.stop_mock(esp_id)
+            logger.info(f"Stopped simulation for {esp_id}")
+    except RuntimeError:
+        pass  # Scheduler not initialized
 
-    logger.info(f"Admin {current_user.username} deleted mock ESP: {esp_id}")
+    # 2. Delete from database
+    deleted = await esp_repo.delete_mock_device(esp_id)
+    if deleted:
+        await db.commit()
+        logger.info(f"Admin {current_user.username} deleted mock ESP: {esp_id}")
+
+
+# =============================================================================
+# Simulation Control (NEW - DB-First)
+# =============================================================================
+@router.post(
+    "/mock-esp/{esp_id}/simulation/start",
+    response_model=CommandResponse,
+    summary="Start Mock Simulation",
+    description="Start simulation for an existing mock ESP32 from database."
+)
+async def start_mock_simulation(
+    esp_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> CommandResponse:
+    """
+    Start simulation for an existing mock ESP.
+    
+    Loads configuration from database and starts heartbeat job.
+    """
+    esp_repo = ESPRepository(db)
+    
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not found"
+        )
+    
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        
+        if sim_scheduler.is_mock_active(esp_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Simulation for {esp_id} already running"
+            )
+        
+        # Get heartbeat interval from metadata
+        heartbeat_interval = esp_repo.get_heartbeat_interval(device)
+        
+        success = await sim_scheduler.start_mock(
+            esp_id=esp_id,
+            kaiser_id=device.kaiser_id or "god",
+            zone_id=device.zone_id or "",
+            heartbeat_interval=heartbeat_interval
+        )
+        
+        if success:
+            # Update simulation state in DB
+            await esp_repo.update_simulation_state(esp_id, "running")
+            device.status = "online"
+            await db.commit()
+        
+        return CommandResponse(
+            success=success,
+            esp_id=esp_id,
+            command="start_simulation",
+            result={"started": success, "heartbeat_interval": heartbeat_interval}
+        )
+        
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"SimulationScheduler not available: {e}"
+        )
+
+
+@router.post(
+    "/mock-esp/{esp_id}/simulation/stop",
+    response_model=CommandResponse,
+    summary="Stop Mock Simulation",
+    description="Stop simulation for a mock ESP32."
+)
+async def stop_mock_simulation(
+    esp_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> CommandResponse:
+    """
+    Stop simulation for a mock ESP.
+    
+    Stops heartbeat job and updates database state.
+    """
+    esp_repo = ESPRepository(db)
+    
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not found"
+        )
+    
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        
+        if not sim_scheduler.is_mock_active(esp_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Simulation for {esp_id} not running"
+            )
+        
+        success = await sim_scheduler.stop_mock(esp_id)
+        
+        if success:
+            # Update simulation state in DB
+            await esp_repo.update_simulation_state(esp_id, "stopped")
+            device.status = "offline"
+            await db.commit()
+        
+        return CommandResponse(
+            success=success,
+            esp_id=esp_id,
+            command="stop_simulation",
+            result={"stopped": success}
+        )
+        
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"SimulationScheduler not available: {e}"
+        )
 
 
 # =============================================================================
@@ -245,15 +549,21 @@ async def delete_mock_esp(
 async def trigger_heartbeat(
     esp_id: str,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    scheduler: SimulationScheduler,
 ) -> HeartbeatResponse:
-    """Trigger a heartbeat message from the mock ESP."""
-    result = await manager.trigger_heartbeat(esp_id)
+    """
+    Trigger a heartbeat message from the mock ESP.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    # Check if mock is active
+    if not scheduler.is_mock_active(esp_id):
+        raise SimulationNotRunningError(esp_id)
+    
+    # Trigger heartbeat
+    result = await scheduler.trigger_heartbeat(esp_id)
     if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
-        )
+        raise ESPNotFoundError(esp_id)
 
     return HeartbeatResponse(
         success=True,
@@ -274,15 +584,16 @@ async def set_state(
     esp_id: str,
     request: StateTransitionRequest,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    scheduler: SimulationScheduler,
 ) -> CommandResponse:
-    """Set the system state of a mock ESP."""
-    result = await manager.set_state(esp_id, request.state, request.reason)
+    """
+    Set the system state of a mock ESP.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    result = await scheduler.set_state(esp_id, request.state, request.reason)
     if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
-        )
+        raise SimulationNotRunningError(esp_id)
 
     return CommandResponse(
         success=True,
@@ -300,29 +611,41 @@ async def set_state(
 )
 async def configure_auto_heartbeat(
     esp_id: str,
-    enabled: bool = True,
-    interval_seconds: int = 60,
-    current_user: AdminUser = None,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    current_user: AdminUser,
+    db: DBSession,
+    scheduler: SimulationScheduler,
+    enabled: bool = Query(True),
+    interval_seconds: int = Query(60),
 ) -> CommandResponse:
-    """Configure auto-heartbeat for a mock ESP."""
-    success = await manager.set_auto_heartbeat(esp_id, enabled, interval_seconds)
-    if not success:
+    """
+    Configure auto-heartbeat for a mock ESP.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    try:
+        success = await scheduler.set_auto_heartbeat(
+            esp_id=esp_id,
+            enabled=enabled,
+            interval_seconds=float(interval_seconds),
+            session=db,
+        )
+        await db.commit()
+        
+        return CommandResponse(
+            success=success,
+            esp_id=esp_id,
+            command="auto_heartbeat",
+            result={"enabled": enabled, "interval_seconds": interval_seconds}
+        )
+    except ESPNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
 
-    return CommandResponse(
-        success=True,
-        esp_id=esp_id,
-        command="auto_heartbeat",
-        result={"enabled": enabled, "interval_seconds": interval_seconds}
-    )
-
 
 # =============================================================================
-# Sensor Operations
+# Sensor Operations (DB-First)
 # =============================================================================
 @router.post(
     "/mock-esp/{esp_id}/sensors",
@@ -334,21 +657,73 @@ async def add_sensor(
     esp_id: str,
     config: MockSensorConfig,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> CommandResponse:
-    """Add a sensor to a mock ESP."""
-    result = await manager.add_sensor(esp_id, config)
-    if result is None:
+    """
+    Add a sensor to a mock ESP.
+
+    DB-FIRST: Updates database configuration.
+    If simulation is running, sensor job is started immediately.
+    """
+    esp_repo = ESPRepository(db)
+
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
 
+    sensor_config = {
+        "sensor_type": config.sensor_type,
+        "base_value": config.raw_value,  # Use raw_value as base_value
+        "unit": config.unit,
+        "quality": config.quality,
+        "name": config.name,
+        "subzone_id": config.subzone_id,
+        "raw_mode": config.raw_mode,
+        "interval_seconds": getattr(config, "interval_seconds", 30.0),
+        "variation_pattern": getattr(config, "variation_pattern", "constant"),
+        "variation_range": getattr(config, "variation_range", 0.0),
+        "min_value": getattr(config, "min_value", config.raw_value - 10.0),
+        "max_value": getattr(config, "max_value", config.raw_value + 10.0),
+    }
+
+    # 1. Update database (Single Source of Truth)
+    success = await esp_repo.add_sensor_to_mock(esp_id, config.gpio, sensor_config)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to add sensor to database"
+        )
+
+    await db.commit()
+
+    # 2. If simulation is running: Start sensor job immediately
+    job_started = False
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        if sim_scheduler.is_mock_active(esp_id):
+            job_started = sim_scheduler.add_sensor_job(
+                esp_id=esp_id,
+                gpio=config.gpio,
+                interval_seconds=sensor_config["interval_seconds"]
+            )
+            if job_started:
+                logger.info(f"Started sensor job for {esp_id} GPIO {config.gpio}")
+    except RuntimeError:
+        pass  # Scheduler not initialized
+
     return CommandResponse(
-        success=True,
+        success=success,
         esp_id=esp_id,
         command="add_sensor",
-        result=result.model_dump()
+        result={
+            "gpio": config.gpio,
+            "sensor_type": config.sensor_type,
+            "db_updated": success,
+            "job_started": job_started
+        }
     )
 
 
@@ -357,63 +732,175 @@ async def add_sensor(
     response_model=CommandResponse,
     status_code=status.HTTP_200_OK,
     summary="Remove Sensor",
-    description="Remove a sensor from a mock ESP32 and return the pin to safe mode."
+    description="Remove a sensor from a mock ESP32."
 )
 async def remove_sensor(
     esp_id: str,
     gpio: int,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> CommandResponse:
-    """Remove a sensor and free the pin (DELETE endpoint)."""
-    success = await manager.remove_sensor(esp_id, gpio)
+    """
+    Remove a sensor from a mock ESP.
+
+    DB-FIRST: Updates database configuration.
+    If simulation is running, sensor job is stopped immediately.
+    """
+    esp_repo = ESPRepository(db)
+
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not found"
+        )
+
+    # 1. Stop sensor job if simulation is running
+    job_stopped = False
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        if sim_scheduler.is_mock_active(esp_id):
+            job_stopped = sim_scheduler.remove_sensor_job(esp_id, gpio)
+            if job_stopped:
+                logger.info(f"Stopped sensor job for {esp_id} GPIO {gpio}")
+    except RuntimeError:
+        pass  # Scheduler not initialized
+
+    # 2. Update database (Single Source of Truth)
+    success = await esp_repo.remove_sensor_from_mock(esp_id, gpio)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} or sensor GPIO {gpio} not found"
+            detail=f"Sensor GPIO {gpio} not found on {esp_id}"
         )
+
+    await db.commit()
 
     return CommandResponse(
         success=True,
         esp_id=esp_id,
         command="remove_sensor",
-        result={"gpio": gpio}
+        result={
+            "gpio": gpio,
+            "db_updated": success,
+            "job_stopped": job_stopped
+        }
     )
 
 
 @router.post(
-    "/mock-esp/{esp_id}/sensors/{gpio}",
+    "/mock-esp/{esp_id}/sensors/{gpio}/value",
     response_model=CommandResponse,
-    summary="Set Sensor Value",
-    description="Set the raw value of a sensor on a mock ESP32."
+    summary="Set Manual Sensor Override",
+    description="Set manual override value for a sensor (DB-First). Overrides variation pattern until cleared."
 )
-async def set_sensor_value(
+async def set_manual_sensor_override(
     esp_id: str,
     gpio: int,
     request: SetSensorValueRequest,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> CommandResponse:
-    """Set a sensor's raw value and optionally publish MQTT message."""
-    result = await manager.set_sensor_value(
-        esp_id=esp_id,
-        gpio=gpio,
-        raw_value=request.raw_value,
-        quality=request.quality.value if request.quality else None,
-        publish=request.publish
-    )
+    """
+    Set manual override for a sensor value.
 
-    if result is None:
+    DB-FIRST: Updates simulation_config.manual_overrides in database.
+    The sensor will send this constant value until override is cleared.
+    """
+    esp_repo = ESPRepository(db)
+
+    # Check if sensor exists
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} or sensor GPIO {gpio} not found"
+            detail=f"Mock ESP {esp_id} not found"
         )
+
+    sim_config = esp_repo.get_simulation_config(device)
+    if str(gpio) not in sim_config.get("sensors", {}):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sensor GPIO {gpio} not found on {esp_id}"
+        )
+
+    # Set manual override
+    success = await esp_repo.set_manual_sensor_override(esp_id, gpio, request.raw_value)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to set manual override"
+        )
+
+    await db.commit()
+
+    logger.info(
+        f"Admin {current_user.username} set manual override for {esp_id} GPIO {gpio}: {request.raw_value}"
+    )
 
     return CommandResponse(
         success=True,
         esp_id=esp_id,
-        command="set_sensor_value",
-        result=result
+        command="set_manual_sensor_override",
+        result={
+            "gpio": gpio,
+            "override_value": request.raw_value,
+            "db_updated": True
+        }
+    )
+
+
+@router.delete(
+    "/mock-esp/{esp_id}/sensors/{gpio}/value",
+    response_model=CommandResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Clear Manual Sensor Override",
+    description="Clear manual override value for a sensor (DB-First). Sensor returns to pattern-based simulation."
+)
+async def clear_manual_sensor_override(
+    esp_id: str,
+    gpio: int,
+    current_user: AdminUser,
+    db: DBSession,
+) -> CommandResponse:
+    """
+    Clear manual override for a sensor value.
+
+    DB-FIRST: Removes from simulation_config.manual_overrides in database.
+    The sensor will resume pattern-based value calculation.
+    """
+    esp_repo = ESPRepository(db)
+
+    # Check if sensor exists
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not found"
+        )
+
+    # Clear manual override
+    success = await esp_repo.clear_manual_sensor_override(esp_id, gpio)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No manual override found for GPIO {gpio} on {esp_id}"
+        )
+
+    await db.commit()
+
+    logger.info(
+        f"Admin {current_user.username} cleared manual override for {esp_id} GPIO {gpio}"
+    )
+
+    return CommandResponse(
+        success=True,
+        esp_id=esp_id,
+        command="clear_manual_sensor_override",
+        result={
+            "gpio": gpio,
+            "override_cleared": True
+        }
     )
 
 
@@ -427,31 +914,38 @@ async def set_batch_sensor_values(
     esp_id: str,
     request: BatchSensorValueRequest,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
+    scheduler: SimulationScheduler,
 ) -> CommandResponse:
-    """Set multiple sensor values and optionally publish batch message."""
-    result = await manager.set_batch_sensor_values(
-        esp_id=esp_id,
-        values=request.values,
-        publish=request.publish
-    )
+    """
+    Set multiple sensor values and optionally publish batch message.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    try:
+        result = await scheduler.set_batch_sensor_values(
+            esp_id=esp_id,
+            values=request.values,
+            session=db,
+            publish=request.publish
+        )
+        await db.commit()
 
-    if result is None:
+        return CommandResponse(
+            success=True,
+            esp_id=esp_id,
+            command="set_batch_sensor_values",
+            result=result
+        )
+    except SimulationNotRunningError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            detail=f"Mock ESP {esp_id} not found or simulation not running"
         )
-
-    return CommandResponse(
-        success=True,
-        esp_id=esp_id,
-        command="set_batch_sensor_values",
-        result=result
-    )
 
 
 # =============================================================================
-# Actuator Operations
+# Actuator Operations (DB-First)
 # =============================================================================
 @router.post(
     "/mock-esp/{esp_id}/actuators",
@@ -463,21 +957,41 @@ async def add_actuator(
     esp_id: str,
     config: MockActuatorConfig,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> CommandResponse:
-    """Add an actuator to a mock ESP."""
-    result = await manager.add_actuator(esp_id, config)
-    if result is None:
+    """
+    Add an actuator to a mock ESP.
+    
+    DB-FIRST: Updates database configuration.
+    """
+    esp_repo = ESPRepository(db)
+    
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
+    
+    actuator_config = {
+        "actuator_type": config.actuator_type,
+        "name": config.name,
+        "state": config.state,
+        "pwm_value": config.pwm_value,
+        "min_value": config.min_value,
+        "max_value": config.max_value,
+    }
+    
+    # Update database
+    success = await esp_repo.add_actuator_to_mock(esp_id, config.gpio, actuator_config)
+    if success:
+        await db.commit()
 
     return CommandResponse(
-        success=True,
+        success=success,
         esp_id=esp_id,
         command="add_actuator",
-        result=result.model_dump()
+        result={"gpio": config.gpio, "actuator_type": config.actuator_type, "db_updated": success}
     )
 
 
@@ -492,29 +1006,41 @@ async def set_actuator_state(
     gpio: int,
     request: SetActuatorStateRequest,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
+    scheduler: SimulationScheduler,
 ) -> CommandResponse:
-    """Set an actuator's state and optionally publish MQTT status."""
-    result = await manager.set_actuator_state(
-        esp_id=esp_id,
-        gpio=gpio,
-        state=request.state,
-        pwm_value=request.pwm_value,
-        publish=request.publish
-    )
-
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} or actuator GPIO {gpio} not found"
+    """
+    Set an actuator's state and optionally publish MQTT status.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    from ...core.exceptions import ActuatorNotFoundError
+    
+    try:
+        success = await scheduler.set_actuator_state(
+            esp_id=esp_id,
+            gpio=gpio,
+            state=request.state,
+            session=db,
+            pwm_value=request.pwm_value,
         )
 
-    return CommandResponse(
-        success=True,
-        esp_id=esp_id,
-        command="set_actuator_state",
-        result=result
-    )
+        return CommandResponse(
+            success=success,
+            esp_id=esp_id,
+            command="set_actuator_state",
+            result={"gpio": gpio, "state": request.state, "pwm_value": request.pwm_value}
+        )
+    except SimulationNotRunningError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Simulation for {esp_id} not running"
+        )
+    except ActuatorNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Actuator GPIO {gpio} not found on {esp_id}"
+        )
 
 
 # =============================================================================
@@ -528,25 +1054,35 @@ async def set_actuator_state(
 )
 async def emergency_stop(
     esp_id: str,
-    reason: str = "manual",
-    current_user: AdminUser = None,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    current_user: AdminUser,
+    scheduler: SimulationScheduler,
+    reason: str = Query("manual"),
 ) -> CommandResponse:
-    """Trigger emergency stop on a mock ESP."""
-    result = await manager.emergency_stop(esp_id, reason)
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
-        )
+    """
+    Trigger emergency stop on a mock ESP.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    if not scheduler.is_mock_active(esp_id):
+        raise SimulationNotRunningError(esp_id)
+    
+    success = await scheduler.emergency_stop(esp_id, reason)
 
-    logger.warning(f"Emergency stop triggered on mock ESP {esp_id} by {current_user.username if current_user else 'unknown'}: {reason}")
+    logger.warning(
+        f"Emergency stop triggered on mock ESP {esp_id} by {current_user.username}: {reason}",
+        extra={
+            "esp_id": esp_id,
+            "user": current_user.username,
+            "reason": reason,
+            "category": "actuator_operation"
+        }
+    )
 
     return CommandResponse(
-        success=True,
+        success=success,
         esp_id=esp_id,
         command="emergency_stop",
-        result=result
+        result={"reason": reason, "emergency_stopped": True}
     )
 
 
@@ -559,22 +1095,270 @@ async def emergency_stop(
 async def clear_emergency(
     esp_id: str,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    scheduler: SimulationScheduler,
 ) -> CommandResponse:
-    """Clear emergency stop on a mock ESP."""
-    result = await manager.clear_emergency(esp_id)
-    if result is None:
+    """
+    Clear emergency stop on a mock ESP.
+    
+    Paket X: Uses SimulationScheduler instead of MockESPManager.
+    """
+    if not scheduler.is_mock_active(esp_id):
+        raise SimulationNotRunningError(esp_id)
+    
+    success = await scheduler.clear_emergency(esp_id)
+
+    logger.info(
+        f"Emergency cleared on mock ESP {esp_id} by {current_user.username}",
+        extra={
+            "esp_id": esp_id,
+            "user": current_user.username,
+            "category": "actuator_operation"
+        }
+    )
+
+    return CommandResponse(
+        success=success,
+        esp_id=esp_id,
+        command="clear_emergency",
+        result={"emergency_stopped": False}
+    )
+
+
+# =============================================================================
+# Actuator Command Simulation (Paket G)
+# =============================================================================
+@router.post(
+    "/mock-esp/{esp_id}/actuators/{gpio}/command",
+    response_model=ActuatorCommandResponse,
+    summary="Simulate Actuator Command",
+    description="""
+    Simulate an actuator command as if sent by the Logic Engine.
+    
+    This tests the full MQTT command flow for Mock-ESPs:
+    1. Command is processed by MockActuatorHandler
+    2. Actuator state is updated in runtime
+    3. Response message is published to MQTT
+    4. Status message is published to MQTT
+    
+    Unlike set_actuator_state (which directly sets state), this endpoint
+    simulates the complete command flow including emergency stop checks
+    and duration-based auto-off scheduling.
+    """
+)
+async def simulate_actuator_command(
+    esp_id: str,
+    gpio: int,
+    request: ActuatorCommandRequest,
+    current_user: AdminUser,
+    db: DBSession,
+) -> ActuatorCommandResponse:
+    """
+    Simulate an actuator command via the MQTT flow.
+    
+    This endpoint is useful for testing:
+    - Logic Engine integration
+    - Emergency stop behavior
+    - Duration-based auto-off
+    - MQTT response/status publishing
+    """
+    try:
+        sim_scheduler = get_simulation_scheduler()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SimulationScheduler not available"
+        )
+    
+    # Check if mock is active
+    if not sim_scheduler.is_mock_active(esp_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            detail=f"Mock ESP {esp_id} not running. Start it first with auto_heartbeat=true"
+        )
+    
+    # Get actuator handler
+    handler = sim_scheduler.get_actuator_handler()
+    if not handler:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MockActuatorHandler not initialized"
+        )
+    
+    # Build mock MQTT topic and payload
+    runtime = sim_scheduler.get_runtime(esp_id)
+    kaiser_id = runtime.kaiser_id if runtime else "god"
+
+    from ...mqtt.topics import TopicBuilder
+    import json
+    import time
+
+    # Use TopicBuilder for consistency (TopicBuilder adds kaiser_id automatically)
+    topic = TopicBuilder.build_actuator_command_topic(esp_id, gpio)
+    payload = json.dumps({
+        "command": request.command,
+        "value": request.value,
+        "duration": request.duration,
+        "timestamp": int(time.time()),
+        "command_id": f"api_{int(time.time())}"
+    })
+    
+    # Execute command via handler
+    success = await handler.handle_command(topic, payload)
+    
+    # Get updated state
+    state_info = sim_scheduler.get_actuator_state(esp_id, gpio)
+    
+    if state_info:
+        return ActuatorCommandResponse(
+            success=success,
+            esp_id=esp_id,
+            gpio=gpio,
+            command=request.command,
+            state=state_info["state"],
+            pwm_value=state_info["pwm_value"],
+            message=f"Command {request.command} {'executed' if success else 'failed'}"
+        )
+    else:
+        # Command may have failed, but return response anyway
+        return ActuatorCommandResponse(
+            success=success,
+            esp_id=esp_id,
+            gpio=gpio,
+            command=request.command,
+            state=False,
+            pwm_value=0,
+            message="Command processed but actuator state not found"
         )
 
+
+@router.post(
+    "/mock-esp/{esp_id}/actuators/{gpio}/emergency-stop",
+    response_model=CommandResponse,
+    summary="Emergency Stop Single Actuator",
+    description="Trigger emergency stop on a mock ESP32 via SimulationScheduler."
+)
+async def emergency_stop_via_scheduler(
+    esp_id: str,
+    gpio: int,
+    current_user: AdminUser,
+    db: DBSession,
+) -> CommandResponse:
+    """
+    Trigger emergency stop on a mock ESP using SimulationScheduler.
+    
+    This uses the new Paket G infrastructure instead of MockESPManager.
+    """
+    try:
+        sim_scheduler = get_simulation_scheduler()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SimulationScheduler not available"
+        )
+    
+    if not sim_scheduler.is_mock_active(esp_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not running"
+        )
+    
+    # Get handler and trigger emergency
+    handler = sim_scheduler.get_actuator_handler()
+    if handler:
+        # Simulate emergency message
+        import json
+        topic = f"kaiser/god/esp/{esp_id}/actuator/emergency"
+        payload = json.dumps({"reason": "manual_api_trigger", "timestamp": int(__import__('time').time())})
+        await handler.handle_emergency(topic, payload, esp_id)
+    
+    logger.warning(f"Emergency stop triggered on mock ESP {esp_id} by {current_user.username}")
+    
     return CommandResponse(
         success=True,
         esp_id=esp_id,
-        command="clear_emergency",
-        result=result
+        command="emergency_stop_scheduler",
+        result={"gpio": gpio, "emergency_stopped": True}
     )
+
+
+@router.post(
+    "/mock-esp/{esp_id}/clear-emergency-scheduler",
+    response_model=CommandResponse,
+    summary="Clear Emergency (Scheduler)",
+    description="Clear emergency stop state using SimulationScheduler."
+)
+async def clear_emergency_via_scheduler(
+    esp_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> CommandResponse:
+    """
+    Clear emergency stop on a mock ESP using SimulationScheduler.
+    
+    This uses the new Paket G infrastructure instead of MockESPManager.
+    """
+    try:
+        sim_scheduler = get_simulation_scheduler()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SimulationScheduler not available"
+        )
+    
+    if not sim_scheduler.is_mock_active(esp_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not running"
+        )
+    
+    success = await sim_scheduler.clear_emergency(esp_id)
+    
+    return CommandResponse(
+        success=success,
+        esp_id=esp_id,
+        command="clear_emergency_scheduler",
+        result={"emergency_cleared": success}
+    )
+
+
+@router.get(
+    "/mock-esp/{esp_id}/actuator-states",
+    response_model=Dict[str, Any],
+    summary="Get All Actuator States",
+    description="Get all actuator states for a running mock ESP."
+)
+async def get_actuator_states(
+    esp_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+) -> Dict[str, Any]:
+    """
+    Get all actuator states from SimulationScheduler runtime.
+    
+    Returns real-time state information for all actuators.
+    """
+    try:
+        sim_scheduler = get_simulation_scheduler()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SimulationScheduler not available"
+        )
+    
+    if not sim_scheduler.is_mock_active(esp_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not running"
+        )
+    
+    states = sim_scheduler.get_all_actuator_states(esp_id)
+    runtime = sim_scheduler.get_runtime(esp_id)
+
+    return {
+        "esp_id": esp_id,
+        "emergency_stopped": runtime.emergency_stopped if runtime else False,
+        "actuators": states
+    }
 
 
 # =============================================================================
@@ -584,30 +1368,37 @@ async def clear_emergency(
     "/mock-esp/{esp_id}/messages",
     response_model=MockESPMessagesResponse,
     summary="Get Published Messages",
-    description="Get MQTT messages published by a mock ESP32."
+    description="Get MQTT messages published by a mock ESP32. Note: Message history is not persisted after migration to SimulationScheduler."
 )
 async def get_messages(
     esp_id: str,
-    limit: int = 100,
-    current_user: AdminUser = None,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    current_user: AdminUser,
+    db: DBSession,
+    scheduler: SimulationScheduler,
+    limit: int = Query(100),
 ) -> MockESPMessagesResponse:
-    """Get recently published MQTT messages from a mock ESP."""
-    messages = await manager.get_published_messages(esp_id, limit)
-
-    # Check if ESP exists (empty list could mean no messages OR not found)
-    esp = await manager.get_mock_esp(esp_id)
-    if esp is None:
+    """
+    Get recently published MQTT messages from a mock ESP.
+    
+    Paket X: Message history is no longer stored in-memory.
+    Returns empty list - messages should be queried from MQTT broker or database logs.
+    """
+    esp_repo = ESPRepository(db)
+    device = await esp_repo.get_mock_device(esp_id)
+    
+    if device is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mock ESP {esp_id} not found"
         )
 
+    # Message history is not stored in SimulationScheduler
+    # Return empty list with note about where to find messages
     return MockESPMessagesResponse(
         success=True,
         esp_id=esp_id,
-        messages=messages,
-        total=len(messages)
+        messages=[],
+        total=0
     )
 
 
@@ -615,12 +1406,13 @@ async def get_messages(
     "/mock-esp/{esp_id}/messages",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Clear Messages",
-    description="Clear message history for a mock ESP32."
+    description="Clear message history for a mock ESP32. (Deprecated - no longer applicable)"
 )
 async def clear_messages(
     esp_id: str,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
+    scheduler: SimulationScheduler,
 ):
     """Clear message history for a mock ESP."""
     cleared = await manager.clear_messages(esp_id)
@@ -1562,59 +2354,74 @@ class MetricsResponse(BaseModel):
     "/load-test/bulk-create",
     response_model=BulkCreateResponse,
     summary="Bulk Create Mock ESPs",
-    description="Create multiple mock ESPs for load testing."
+    description="Create multiple mock ESPs for load testing using SimulationScheduler."
 )
 async def bulk_create_mock_esps(
     request: BulkCreateRequest,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
+    scheduler: SimulationScheduler,
 ) -> BulkCreateResponse:
-    """Create multiple mock ESPs at once for load testing."""
+    """
+    Create multiple mock ESPs at once for load testing.
+
+    Paket X: Uses SimulationScheduler.create_mock_esp() for DB-first creation.
+    """
     created_ids = []
-    
+
     for i in range(request.count):
         esp_id = f"{request.prefix}_{i+1:04d}"
-        
+
         try:
-            from ...schemas.debug import MockESPCreate, MockSensorConfig, MockActuatorConfig
-            
-            # Create sensors
+            # Build sensor configs
             sensors = []
             for s in range(request.with_sensors):
-                sensors.append(MockSensorConfig(
-                    gpio=2 + s,
-                    sensor_type="DHT22" if s % 2 == 0 else "DS18B20",
-                    name=f"Sensor_{s+1}",
-                    unit="°C" if s % 2 == 0 else "%"
-                ))
-            
-            # Create actuators
+                sensors.append({
+                    "gpio": 2 + s,
+                    "sensor_type": "DHT22" if s % 2 == 0 else "DS18B20",
+                    "name": f"Sensor_{s+1}",
+                    "unit": "°C" if s % 2 == 0 else "%",
+                    "raw_value": 20.0 + s,
+                    "interval_seconds": 30.0,
+                    "variation_pattern": "random",
+                    "variation_range": 5.0,
+                })
+
+            # Build actuator configs
             actuators = []
             for a in range(request.with_actuators):
-                actuators.append(MockActuatorConfig(
-                    gpio=12 + a,
-                    actuator_type="relay" if a % 2 == 0 else "pwm",
-                    name=f"Actuator_{a+1}"
-                ))
-            
-            config = MockESPCreate(
+                actuators.append({
+                    "gpio": 12 + a,
+                    "actuator_type": "relay" if a % 2 == 0 else "pwm",
+                    "name": f"Actuator_{a+1}",
+                })
+
+            # Create via SimulationScheduler (DB-first)
+            await scheduler.create_mock_esp(
                 esp_id=esp_id,
+                session=db,
+                auto_start=True,
                 sensors=sensors,
-                actuators=actuators
+                actuators=actuators,
+                heartbeat_interval=60.0,
             )
-            
-            await manager.create_mock_esp(config)
             created_ids.append(esp_id)
-            
-        except ValueError:
-            # ESP already exists, skip
-            continue
+
         except Exception as e:
-            logger.error(f"Error creating mock ESP {esp_id}: {e}")
+            # ESP already exists or other error, skip
+            logger.warning(f"Failed to create mock ESP {esp_id}: {e}")
             continue
-    
-    logger.info(f"Admin {current_user.username} bulk-created {len(created_ids)} mock ESPs")
-    
+
+    logger.info(
+        f"Admin {current_user.username} bulk-created {len(created_ids)} mock ESPs",
+        extra={
+            "admin_user": current_user.username,
+            "created_count": len(created_ids),
+            "prefix": request.prefix,
+            "category": "esp_lifecycle"
+        }
+    )
+
     return BulkCreateResponse(
         success=True,
         created_count=len(created_ids),
@@ -1627,39 +2434,59 @@ async def bulk_create_mock_esps(
     "/load-test/simulate",
     response_model=SimulationResponse,
     summary="Start Sensor Simulation",
-    description="Start automatic sensor value simulation for load testing."
+    description="Start automatic sensor value simulation for load testing using SimulationScheduler."
 )
 async def start_simulation(
     request: SimulationRequest,
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
+    scheduler: SimulationScheduler,
 ) -> SimulationResponse:
-    """Start sensor simulation on mock ESPs."""
+    """
+    Start sensor simulation on mock ESPs.
+
+    Paket X: Uses SimulationScheduler.set_auto_heartbeat() for simulation control.
+    """
+    esp_repo = ESPRepository(db)
+
     # Get ESPs to simulate
     if request.esp_ids:
         esp_ids = request.esp_ids
     else:
-        esps = await manager.list_mock_esps()
-        esp_ids = [esp.esp_id for esp in esps]
-    
+        # Get all mock devices from database
+        devices = await esp_repo.get_mock_devices()
+        esp_ids = [device.device_id for device in devices]
+
     # Start auto-heartbeat on each ESP (simulating activity)
     interval_seconds = request.interval_ms / 1000
-    
+
     active_count = 0
     for esp_id in esp_ids:
-        success = await manager.set_auto_heartbeat(
-            esp_id, 
-            enabled=True, 
-            interval_seconds=int(interval_seconds)
-        )
-        if success:
-            active_count += 1
-    
+        try:
+            success = await scheduler.set_auto_heartbeat(
+                esp_id=esp_id,
+                enabled=True,
+                interval_seconds=interval_seconds,
+                session=db,
+            )
+            if success:
+                active_count += 1
+        except Exception as e:
+            logger.warning(f"Failed to start simulation for {esp_id}: {e}")
+            continue
+
     logger.info(
         f"Admin {current_user.username} started simulation on {active_count} ESPs "
-        f"(interval={request.interval_ms}ms, duration={request.duration_seconds}s)"
+        f"(interval={request.interval_ms}ms, duration={request.duration_seconds}s)",
+        extra={
+            "admin_user": current_user.username,
+            "active_count": active_count,
+            "interval_ms": request.interval_ms,
+            "duration_seconds": request.duration_seconds,
+            "category": "simulation_control"
+        }
     )
-    
+
     return SimulationResponse(
         success=True,
         message=f"Started simulation on {active_count} mock ESPs",
@@ -1671,23 +2498,29 @@ async def start_simulation(
     "/load-test/stop",
     response_model=SimulationResponse,
     summary="Stop Simulation",
-    description="Stop all sensor simulations."
+    description="Stop all sensor simulations using SimulationScheduler."
 )
 async def stop_simulation(
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    scheduler: SimulationScheduler,
 ) -> SimulationResponse:
-    """Stop all active simulations."""
-    esps = await manager.list_mock_esps()
-    stopped_count = 0
-    
-    for esp in esps:
-        success = await manager.set_auto_heartbeat(esp.esp_id, enabled=False)
-        if success:
-            stopped_count += 1
-    
-    logger.info(f"Admin {current_user.username} stopped simulation on {stopped_count} ESPs")
-    
+    """
+    Stop all active simulations.
+
+    Paket X: Uses SimulationScheduler.stop_all_mocks() for efficient batch stop.
+    """
+    # Stop all active simulations
+    stopped_count = await scheduler.stop_all_mocks()
+
+    logger.info(
+        f"Admin {current_user.username} stopped simulation on {stopped_count} ESPs",
+        extra={
+            "admin_user": current_user.username,
+            "stopped_count": stopped_count,
+            "category": "simulation_control"
+        }
+    )
+
     return SimulationResponse(
         success=True,
         message=f"Stopped simulation on {stopped_count} mock ESPs",
@@ -1699,33 +2532,61 @@ async def stop_simulation(
     "/load-test/metrics",
     response_model=MetricsResponse,
     summary="Get Load Test Metrics",
-    description="Get performance metrics for load testing."
+    description="Get performance metrics for load testing from database."
 )
 async def get_load_test_metrics(
     current_user: AdminUser,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
+    db: DBSession,
 ) -> MetricsResponse:
-    """Get load test performance metrics."""
-    esps = await manager.list_mock_esps()
-    
-    total_sensors = sum(len(esp.sensors) for esp in esps)
-    total_actuators = sum(len(esp.actuators) for esp in esps)
-    
-    # Count total messages (sum from all ESPs)
-    total_messages = 0
-    for esp in esps:
-        messages = await manager.get_published_messages(esp.esp_id, limit=10000)
-        total_messages += len(messages)
-    
+    """
+    Get load test performance metrics.
+
+    Paket X: Uses database queries for metrics (no in-memory message history).
+    """
+    esp_repo = ESPRepository(db)
+
+    # Get all mock devices
+    devices = await esp_repo.get_mock_devices()
+
+    # Count sensors and actuators from device metadata
+    total_sensors = 0
+    total_actuators = 0
+    for device in devices:
+        if device.device_metadata:
+            sim_config = device.device_metadata.get("simulation_config", {})
+            total_sensors += len(sim_config.get("sensors", {}))
+            total_actuators += len(sim_config.get("actuators", {}))
+
+    # Count sensor_data entries (as proxy for MQTT messages)
+    from ..models.sensor import SensorData
+    sensor_data_count_result = await db.execute(
+        select(func.count(SensorData.id))
+        .join(SensorData.esp_device)
+        .where(SensorData.esp_device.has(hardware_type="MOCK_ESP32"))
+    )
+    sensor_data_count = sensor_data_count_result.scalar() or 0
+
+    # Count actuator_history entries
+    from ..models.actuator import ActuatorHistory
+    actuator_history_count_result = await db.execute(
+        select(func.count(ActuatorHistory.id))
+        .join(ActuatorHistory.esp_device)
+        .where(ActuatorHistory.esp_device.has(hardware_type="MOCK_ESP32"))
+    )
+    actuator_history_count = actuator_history_count_result.scalar() or 0
+
+    total_messages = sensor_data_count + actuator_history_count
+
     # Calculate uptime (time since first ESP was created)
     uptime_seconds = 0.0
-    if esps:
-        oldest = min(esp.created_at for esp in esps)
-        uptime_seconds = (datetime.now(timezone.utc) - oldest).total_seconds()
-    
+    if devices:
+        oldest = min(device.created_at for device in devices if device.created_at)
+        if oldest:
+            uptime_seconds = (datetime.now(timezone.utc) - oldest).total_seconds()
+
     return MetricsResponse(
         success=True,
-        mock_esp_count=len(esps),
+        mock_esp_count=len(devices),
         total_sensors=total_sensors,
         total_actuators=total_actuators,
         messages_published=total_messages,
@@ -1749,65 +2610,61 @@ class CleanupResponse(BaseModel):
     "/cleanup/orphaned-mocks",
     response_model=CleanupResponse,
     summary="Cleanup Orphaned Mock ESPs",
-    description="Delete mock ESP entries from database that are not in the in-memory manager."
+    description="DEPRECATED: With DB-first architecture, orphaned mocks no longer exist. Use DELETE /mock-esp/{id} instead.",
+    deprecated=True
 )
 async def cleanup_orphaned_mocks(
     current_user: AdminUser,
     db: DBSession,
-    manager: MockESPManager = Depends(get_mock_esp_manager)
 ) -> CleanupResponse:
     """
     Clean up orphaned mock ESP entries from the database.
 
-    This removes database entries for mock ESPs that:
-    - Have device_id matching 'ESP_MOCK_%'
-    - Are not currently active in the in-memory MockESPManager
-    - Or have NULL values for required fields (ip_address, mac_address, etc.)
+    Paket X: DEPRECATED - This endpoint is no longer needed with DB-first architecture.
+    With SimulationScheduler, the database is the single source of truth and there are
+    no "orphaned" entries. Use DELETE /mock-esp/{id} to remove individual mocks.
+
+    This endpoint now only cleans up legacy entries with NULL required fields
+    (from pre-Paket B implementations).
     """
     deleted_ids = []
 
-    # Get all mock ESPs from database
+    # Only delete entries with NULL required fields (legacy cleanup)
     result = await db.execute(
-        text("SELECT id, device_id, ip_address, mac_address, firmware_version FROM esp_devices WHERE device_id LIKE 'ESP_MOCK_%'")
+        text("""
+            SELECT id, device_id
+            FROM esp_devices
+            WHERE hardware_type = 'MOCK_ESP32'
+              AND (ip_address IS NULL OR mac_address IS NULL OR firmware_version IS NULL)
+        """)
     )
-    mock_esps = result.fetchall()
+    invalid_esps = result.fetchall()
 
-    # Get active mock ESPs from manager
-    active_mocks = await manager.list_mock_esps()
-    active_ids = {mock.esp_id for mock in active_mocks}
-
-    for esp in mock_esps:
+    for esp in invalid_esps:
         esp_id = esp[1]  # device_id
-        ip_address = esp[2]
-        mac_address = esp[3]
-        firmware_version = esp[4]
-
-        # Delete if:
-        # 1. Not in active mocks, OR
-        # 2. Has NULL required fields (orphaned from before fix)
-        should_delete = (
-            esp_id not in active_ids or
-            ip_address is None or
-            mac_address is None or
-            firmware_version is None
+        await db.execute(
+            text("DELETE FROM esp_devices WHERE id = :id"),
+            {"id": str(esp[0])}
         )
-
-        if should_delete:
-            await db.execute(
-                text("DELETE FROM esp_devices WHERE id = :id"),
-                {"id": str(esp[0])}
-            )
-            deleted_ids.append(esp_id)
+        deleted_ids.append(esp_id)
 
     if deleted_ids:
         await db.commit()
-        logger.info(f"Admin {current_user.username} cleaned up {len(deleted_ids)} orphaned mock ESPs: {deleted_ids}")
+        logger.info(
+            f"Admin {current_user.username} cleaned up {len(deleted_ids)} legacy mock ESPs",
+            extra={
+                "admin_user": current_user.username,
+                "deleted_count": len(deleted_ids),
+                "deleted_ids": deleted_ids,
+                "category": "esp_lifecycle"
+            }
+        )
 
     return CleanupResponse(
         success=True,
         deleted_count=len(deleted_ids),
         deleted_ids=deleted_ids,
-        message=f"Cleaned up {len(deleted_ids)} orphaned mock ESP entries from database"
+        message=f"Cleaned up {len(deleted_ids)} legacy mock ESP entries (use DELETE /mock-esp/{{id}} for individual deletion)"
     )
 
 
@@ -2007,46 +2864,68 @@ class MockESPSyncStatusResponse(BaseModel):
 @router.get(
     "/mock-esp/sync-status",
     response_model=MockESPSyncStatusResponse,
-    summary="Get Mock ESP Sync Status",
-    description="Check synchronization between in-memory Mock ESPs and database entries."
+    summary="[DEPRECATED] Get Mock ESP Sync Status",
+    description="DEPRECATED: This endpoint is no longer needed. Database is now Single Source of Truth. Use GET /mock-esp instead.",
+    deprecated=True,
 )
 async def get_mock_esp_sync_status(
     current_user: AdminUser,
     db: DBSession,
 ) -> MockESPSyncStatusResponse:
     """
-    Get synchronization status between in-memory Mock ESPs and database.
+    DEPRECATED: Get synchronization status between in-memory Mock ESPs and database.
 
-    This helps identify:
-    - Orphaned database entries (Mock ESPs from previous server runs)
-    - Memory-only Mock ESPs (unlikely, indicates a bug)
+    This endpoint exists only for backward compatibility and debugging purposes.
+    With DB-First architecture (Paket B), the database is the Single Source of Truth
+    and sync issues should not occur.
 
-    Returns sync status with details about discrepancies.
+    Use GET /mock-esp instead to list all Mock ESPs from database.
+    
+    Migration:
+        OLD: GET /v1/debug/mock-esp/sync-status
+        NEW: GET /v1/debug/mock-esp (lists all mocks from DB with runtime status)
     """
-    from ...db.repositories import ESPRepository
-
-    manager = await MockESPManager.get_instance()
     esp_repo = ESPRepository(db)
 
-    # Get all Mock ESPs from database
-    db_mock_esps = await esp_repo.get_by_hardware_type("MOCK_ESP32")
+    # Get all Mock ESPs from database (Single Source of Truth)
+    db_mock_esps = await esp_repo.get_all_mock_devices()
     db_mock_ids = [esp.device_id for esp in db_mock_esps]
+    
+    # Get active simulations from SimulationScheduler
+    active_ids: List[str] = []
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        active_ids = sim_scheduler.get_active_mocks()
+    except RuntimeError:
+        pass
 
-    # Get sync status
-    sync_status = manager.get_sync_status(db_mock_ids)
+    # Check for discrepancies (should be rare with DB-first approach)
+    # DB has mocks not in runtime -> they need to be recovered or are stopped
+    # Runtime has mocks not in DB -> bug (should not happen with DB-first)
+    orphaned_ids = [id for id in db_mock_ids if id not in active_ids]
+    memory_only_ids = [id for id in active_ids if id not in db_mock_ids]
+    synced_count = len([id for id in active_ids if id in db_mock_ids])
 
-    if sync_status["is_synced"]:
-        message = "All Mock ESPs are synchronized between memory and database."
+    is_synced = len(memory_only_ids) == 0  # DB-first: memory-only is a bug
+
+    if is_synced:
+        message = "DEPRECATED: Database is Single Source of Truth. Use GET /mock-esp instead."
     else:
         parts = []
-        if sync_status["orphaned_count"] > 0:
-            parts.append(f"{sync_status['orphaned_count']} orphaned DB entries")
-        if len(sync_status["memory_only_ids"]) > 0:
-            parts.append(f"{len(sync_status['memory_only_ids'])} memory-only entries")
-        message = f"Sync issues detected: {', '.join(parts)}"
+        if len(orphaned_ids) > 0:
+            parts.append(f"{len(orphaned_ids)} stopped simulations in DB")
+        if len(memory_only_ids) > 0:
+            parts.append(f"{len(memory_only_ids)} runtime-only entries (BUG)")
+        message = f"Status: {', '.join(parts)}. This endpoint is DEPRECATED."
 
     return MockESPSyncStatusResponse(
-        **sync_status,
+        in_memory_count=len(active_ids),
+        in_database_count=len(db_mock_ids),
+        synced_count=synced_count,
+        orphaned_count=len(orphaned_ids),
+        orphaned_ids=orphaned_ids,
+        memory_only_ids=memory_only_ids,
+        is_synced=is_synced,
         message=message
     )
 
@@ -2183,3 +3062,594 @@ async def test_data_source_detection(
         detection_reason=detection_reason,
         checks_performed=checks
     )
+
+
+# =============================================================================
+# Maintenance Service Endpoints
+# =============================================================================
+
+class MaintenanceStatusResponse(BaseModel):
+    """Response for maintenance service status."""
+    service_running: bool
+    jobs: List[Dict[str, Any]]
+    stats_cache: Dict[str, Any]
+
+
+class MaintenanceTriggerResponse(BaseModel):
+    """Response for manual job trigger."""
+    job_id: str
+    triggered: bool
+    message: str
+
+
+class MaintenanceConfigResponse(BaseModel):
+    """Response for maintenance configuration (Data-Safe Version)."""
+    # Sensor Data Cleanup
+    sensor_data_retention_enabled: bool
+    sensor_data_retention_days: int
+    sensor_data_cleanup_dry_run: bool
+    sensor_data_cleanup_batch_size: int
+    sensor_data_cleanup_max_batches: int
+    
+    # Command History Cleanup
+    command_history_retention_enabled: bool
+    command_history_retention_days: int
+    command_history_cleanup_dry_run: bool
+    command_history_cleanup_batch_size: int
+    command_history_cleanup_max_batches: int
+    
+    # Audit Log Cleanup
+    audit_log_retention_enabled: bool
+    audit_log_retention_days: int
+    audit_log_cleanup_dry_run: bool
+    audit_log_cleanup_batch_size: int
+    audit_log_cleanup_max_batches: int
+    
+    # Orphaned Mocks
+    orphaned_mock_cleanup_enabled: bool
+    orphaned_mock_auto_delete: bool
+    orphaned_mock_age_hours: int
+    
+    # Health Checks
+    heartbeat_timeout_seconds: int
+    mqtt_health_check_interval_seconds: int
+    esp_health_check_interval_seconds: int
+    
+    # Stats Aggregation
+    stats_aggregation_enabled: bool
+    stats_aggregation_interval_minutes: int
+    
+    # Safety Features
+    cleanup_require_confirmation: bool
+    cleanup_alert_threshold_percent: float
+    cleanup_max_records_per_run: int
+
+
+@router.get(
+    "/maintenance/status",
+    response_model=MaintenanceStatusResponse,
+    summary="Get Maintenance Service Status",
+    description="Get status of all maintenance and monitoring jobs."
+)
+async def get_maintenance_status(
+    current_user: AdminUser,
+) -> MaintenanceStatusResponse:
+    """Get status of maintenance service and all registered jobs."""
+    try:
+        from ...services.maintenance import get_maintenance_service
+        
+        maintenance_service = get_maintenance_service()
+        status = maintenance_service.get_status()
+        
+        return MaintenanceStatusResponse(**status)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"MaintenanceService not available: {e}"
+        )
+
+
+@router.post(
+    "/maintenance/trigger/{job_name}",
+    response_model=MaintenanceTriggerResponse,
+    summary="Trigger Maintenance Job Manually",
+    description="Manually trigger a maintenance or monitoring job immediately."
+)
+async def trigger_maintenance_job(
+    job_name: str,
+    current_user: AdminUser,
+) -> MaintenanceTriggerResponse:
+    """
+    Manually trigger a maintenance job.
+    
+    Available job names:
+    - cleanup_sensor_data
+    - cleanup_command_history
+    - cleanup_orphaned_mocks
+    - health_check_esps
+    - health_check_mqtt
+    - aggregate_stats
+    """
+    try:
+        from ...services.maintenance import get_maintenance_service
+        from ...core.scheduler import get_central_scheduler
+        
+        maintenance_service = get_maintenance_service()
+        scheduler = get_central_scheduler()
+        
+        # Map job name to full job ID
+        job_id_map = {
+            "cleanup_sensor_data": "maintenance_cleanup_sensor_data",
+            "cleanup_command_history": "maintenance_cleanup_command_history",
+            "cleanup_orphaned_mocks": "maintenance_cleanup_orphaned_mocks",
+            "health_check_esps": "monitor_health_check_esps",
+            "health_check_mqtt": "monitor_health_check_mqtt",
+            "aggregate_stats": "maintenance_aggregate_stats",
+        }
+        
+        full_job_id = job_id_map.get(job_name)
+        if not full_job_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown job name: {job_name}. Available: {list(job_id_map.keys())}"
+            )
+        
+        # Get job function from maintenance service
+        job_func_map = {
+            "maintenance_cleanup_sensor_data": maintenance_service._cleanup_sensor_data,
+            "maintenance_cleanup_command_history": maintenance_service._cleanup_command_history,
+            "maintenance_cleanup_orphaned_mocks": maintenance_service._cleanup_orphaned_mocks,
+            "monitor_health_check_esps": maintenance_service._health_check_esps,
+            "monitor_health_check_mqtt": maintenance_service._health_check_mqtt,
+            "maintenance_aggregate_stats": maintenance_service._aggregate_stats,
+        }
+        
+        job_func = job_func_map.get(full_job_id)
+        if not job_func:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Job function not found for {full_job_id}"
+            )
+        
+        # Trigger job asynchronously
+        import asyncio
+        asyncio.create_task(job_func())
+        
+        logger.info(f"Admin {current_user.username} manually triggered maintenance job: {job_name}")
+        
+        return MaintenanceTriggerResponse(
+            job_id=full_job_id,
+            triggered=True,
+            message=f"Job {job_name} triggered manually, will run immediately"
+        )
+        
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"MaintenanceService not available: {e}"
+        )
+
+
+@router.get(
+    "/maintenance/config",
+    response_model=MaintenanceConfigResponse,
+    summary="Get Maintenance Configuration",
+    description="Get current maintenance service configuration."
+)
+async def get_maintenance_config(
+    current_user: AdminUser,
+) -> MaintenanceConfigResponse:
+    """Get maintenance service configuration."""
+    settings = get_settings()
+    maintenance_settings = settings.maintenance
+    
+    return MaintenanceConfigResponse(
+        # Sensor Data Cleanup
+        sensor_data_retention_enabled=maintenance_settings.sensor_data_retention_enabled,
+        sensor_data_retention_days=maintenance_settings.sensor_data_retention_days,
+        sensor_data_cleanup_dry_run=maintenance_settings.sensor_data_cleanup_dry_run,
+        sensor_data_cleanup_batch_size=maintenance_settings.sensor_data_cleanup_batch_size,
+        sensor_data_cleanup_max_batches=maintenance_settings.sensor_data_cleanup_max_batches,
+        
+        # Command History Cleanup
+        command_history_retention_enabled=maintenance_settings.command_history_retention_enabled,
+        command_history_retention_days=maintenance_settings.command_history_retention_days,
+        command_history_cleanup_dry_run=maintenance_settings.command_history_cleanup_dry_run,
+        command_history_cleanup_batch_size=maintenance_settings.command_history_cleanup_batch_size,
+        command_history_cleanup_max_batches=maintenance_settings.command_history_cleanup_max_batches,
+        
+        # Audit Log Cleanup
+        audit_log_retention_enabled=maintenance_settings.audit_log_retention_enabled,
+        audit_log_retention_days=maintenance_settings.audit_log_retention_days,
+        audit_log_cleanup_dry_run=maintenance_settings.audit_log_cleanup_dry_run,
+        audit_log_cleanup_batch_size=maintenance_settings.audit_log_cleanup_batch_size,
+        audit_log_cleanup_max_batches=maintenance_settings.audit_log_cleanup_max_batches,
+        
+        # Orphaned Mocks
+        orphaned_mock_cleanup_enabled=maintenance_settings.orphaned_mock_cleanup_enabled,
+        orphaned_mock_auto_delete=maintenance_settings.orphaned_mock_auto_delete,
+        orphaned_mock_age_hours=maintenance_settings.orphaned_mock_age_hours,
+        
+        # Health Checks
+        heartbeat_timeout_seconds=maintenance_settings.heartbeat_timeout_seconds,
+        mqtt_health_check_interval_seconds=maintenance_settings.mqtt_health_check_interval_seconds,
+        esp_health_check_interval_seconds=maintenance_settings.esp_health_check_interval_seconds,
+        
+        # Stats Aggregation
+        stats_aggregation_enabled=maintenance_settings.stats_aggregation_enabled,
+        stats_aggregation_interval_minutes=maintenance_settings.stats_aggregation_interval_minutes,
+        
+        # Safety Features
+        cleanup_require_confirmation=maintenance_settings.cleanup_require_confirmation,
+        cleanup_alert_threshold_percent=maintenance_settings.cleanup_alert_threshold_percent,
+        cleanup_max_records_per_run=maintenance_settings.cleanup_max_records_per_run,
+    )
+
+
+# =============================================================================
+# Resilience Debug Endpoints
+# =============================================================================
+
+class ResilienceStatusResponse(BaseModel):
+    """Response for resilience status."""
+    healthy: bool
+    circuit_breakers: Dict[str, Any]
+    summary: Dict[str, int]
+    mqtt_client: Dict[str, Any]
+
+
+class CircuitBreakerActionResponse(BaseModel):
+    """Response for circuit breaker actions."""
+    name: str
+    previous_state: str
+    new_state: str
+    message: str
+
+
+class CircuitBreakerMetricsResponse(BaseModel):
+    """Response for circuit breaker metrics."""
+    name: str
+    state: str
+    metrics: Dict[str, Any]
+
+
+@router.get(
+    "/resilience/status",
+    response_model=ResilienceStatusResponse,
+    summary="Get Resilience Status",
+    description="Get status of all circuit breakers and resilience components."
+)
+async def get_resilience_status(
+    current_user: AdminUser,
+) -> ResilienceStatusResponse:
+    """
+    Get aggregated resilience status.
+    
+    Returns:
+    - Health status of all circuit breakers
+    - Individual breaker states and metrics
+    - MQTT client resilience status
+    """
+    from ...core.resilience import ResilienceRegistry
+    from ...mqtt.client import MQTTClient
+    
+    registry = ResilienceRegistry.get_instance()
+    health_status = registry.get_health_status()
+    
+    # Get MQTT client resilience status
+    mqtt_client = MQTTClient.get_instance()
+    mqtt_status = mqtt_client.get_resilience_status()
+    
+    return ResilienceStatusResponse(
+        healthy=health_status["healthy"],
+        circuit_breakers=health_status["breakers"],
+        summary=health_status["summary"],
+        mqtt_client=mqtt_status,
+    )
+
+
+@router.get(
+    "/resilience/metrics",
+    response_model=Dict[str, Any],
+    summary="Get Resilience Metrics",
+    description="Get detailed metrics from all circuit breakers."
+)
+async def get_resilience_metrics(
+    current_user: AdminUser,
+) -> Dict[str, Any]:
+    """
+    Get detailed metrics from all circuit breakers.
+    
+    Returns metrics including:
+    - Total requests
+    - Success/failure counts
+    - Rejection counts
+    - State transition history
+    """
+    from ...core.resilience import ResilienceRegistry
+    from ...mqtt.publisher import Publisher
+    
+    registry = ResilienceRegistry.get_instance()
+    breaker_metrics = registry.get_metrics()
+    
+    # Get publisher metrics
+    publisher = Publisher()
+    publisher_metrics = publisher.get_metrics()
+    
+    return {
+        "circuit_breakers": breaker_metrics,
+        "publisher": publisher_metrics,
+    }
+
+
+@router.get(
+    "/resilience/circuit-breaker/{name}",
+    response_model=CircuitBreakerMetricsResponse,
+    summary="Get Circuit Breaker Details",
+    description="Get detailed information about a specific circuit breaker."
+)
+async def get_circuit_breaker_details(
+    name: str,
+    current_user: AdminUser,
+) -> CircuitBreakerMetricsResponse:
+    """Get details of a specific circuit breaker."""
+    from ...core.resilience import ResilienceRegistry
+    
+    registry = ResilienceRegistry.get_instance()
+    breaker = registry.get_circuit_breaker(name)
+    
+    if breaker is None:
+        available = registry.get_breaker_names()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Circuit breaker '{name}' not found. Available: {available}"
+        )
+    
+    metrics = breaker.get_metrics()
+    
+    return CircuitBreakerMetricsResponse(
+        name=name,
+        state=breaker.get_state().value,
+        metrics=metrics,
+    )
+
+
+@router.post(
+    "/resilience/circuit-breaker/{name}/reset",
+    response_model=CircuitBreakerActionResponse,
+    summary="Reset Circuit Breaker",
+    description="Manually reset a circuit breaker to CLOSED state."
+)
+async def reset_circuit_breaker(
+    name: str,
+    current_user: AdminUser,
+) -> CircuitBreakerActionResponse:
+    """
+    Manually reset a circuit breaker to CLOSED state.
+    
+    Use this to recover from an OPEN state after resolving
+    the underlying issue.
+    """
+    from ...core.resilience import ResilienceRegistry
+    
+    registry = ResilienceRegistry.get_instance()
+    breaker = registry.get_circuit_breaker(name)
+    
+    if breaker is None:
+        available = registry.get_breaker_names()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Circuit breaker '{name}' not found. Available: {available}"
+        )
+    
+    previous_state = breaker.get_state().value
+    await breaker.reset_async()
+    new_state = breaker.get_state().value
+    
+    logger.info(
+        f"Admin {current_user.username} reset circuit breaker '{name}': "
+        f"{previous_state} → {new_state}"
+    )
+    
+    return CircuitBreakerActionResponse(
+        name=name,
+        previous_state=previous_state,
+        new_state=new_state,
+        message=f"Circuit breaker '{name}' reset successfully",
+    )
+
+
+@router.post(
+    "/resilience/circuit-breaker/{name}/force-open",
+    response_model=CircuitBreakerActionResponse,
+    summary="Force Open Circuit Breaker",
+    description="Force a circuit breaker to OPEN state for testing."
+)
+async def force_open_circuit_breaker(
+    name: str,
+    current_user: AdminUser,
+) -> CircuitBreakerActionResponse:
+    """
+    Force a circuit breaker to OPEN state.
+    
+    WARNING: This is for testing purposes only.
+    The breaker will reject all requests until manually reset.
+    """
+    from ...core.resilience import ResilienceRegistry
+    
+    registry = ResilienceRegistry.get_instance()
+    breaker = registry.get_circuit_breaker(name)
+    
+    if breaker is None:
+        available = registry.get_breaker_names()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Circuit breaker '{name}' not found. Available: {available}"
+        )
+    
+    previous_state = breaker.get_state().value
+    await breaker.force_open_async()
+    new_state = "open (forced)"
+    
+    logger.warning(
+        f"Admin {current_user.username} FORCED OPEN circuit breaker '{name}' "
+        f"(previous state: {previous_state})"
+    )
+    
+    return CircuitBreakerActionResponse(
+        name=name,
+        previous_state=previous_state,
+        new_state=new_state,
+        message=f"Circuit breaker '{name}' forced OPEN (testing mode)",
+    )
+
+
+@router.post(
+    "/resilience/reset-all",
+    response_model=Dict[str, Any],
+    summary="Reset All Circuit Breakers",
+    description="Reset all circuit breakers to CLOSED state."
+)
+async def reset_all_circuit_breakers(
+    current_user: AdminUser,
+) -> Dict[str, Any]:
+    """
+    Reset all circuit breakers to CLOSED state.
+    
+    Use this for emergency recovery after resolving system-wide issues.
+    """
+    from ...core.resilience import ResilienceRegistry
+    
+    registry = ResilienceRegistry.get_instance()
+    
+    # Get states before reset
+    before = {
+        name: breaker.get_state().value
+        for name, breaker in registry.get_all_breakers().items()
+    }
+    
+    count = await registry.reset_all_async()
+    
+    # Get states after reset
+    after = {
+        name: breaker.get_state().value
+        for name, breaker in registry.get_all_breakers().items()
+    }
+    
+    logger.warning(
+        f"Admin {current_user.username} reset ALL {count} circuit breakers"
+    )
+    
+    return {
+        "reset_count": count,
+        "before": before,
+        "after": after,
+        "message": f"Reset {count} circuit breakers successfully",
+    }
+
+
+@router.get(
+    "/resilience/offline-buffer",
+    response_model=Dict[str, Any],
+    summary="Get Offline Buffer Status",
+    description="Get MQTT offline buffer status and metrics."
+)
+async def get_offline_buffer_status(
+    current_user: AdminUser,
+) -> Dict[str, Any]:
+    """
+    Get MQTT offline buffer status.
+    
+    Returns:
+    - Current buffer size
+    - Messages added/flushed/dropped
+    - Buffer utilization
+    """
+    from ...mqtt.client import MQTTClient
+    
+    mqtt_client = MQTTClient.get_instance()
+    metrics = mqtt_client.get_offline_buffer_metrics()
+    
+    return {
+        "enabled": metrics.get("enabled", True) if "enabled" in metrics else True,
+        "metrics": metrics,
+    }
+
+
+@router.post(
+    "/resilience/offline-buffer/flush",
+    response_model=Dict[str, Any],
+    summary="Flush Offline Buffer",
+    description="Manually flush the MQTT offline buffer."
+)
+async def flush_offline_buffer(
+    current_user: AdminUser,
+) -> Dict[str, Any]:
+    """
+    Manually flush the MQTT offline buffer.
+    
+    Attempts to send all buffered messages to the MQTT broker.
+    """
+    from ...mqtt.client import MQTTClient
+    
+    mqtt_client = MQTTClient.get_instance()
+    
+    if not mqtt_client._offline_buffer:
+        return {
+            "success": False,
+            "message": "Offline buffer not available",
+            "flushed_count": 0,
+        }
+    
+    flushed_count = await mqtt_client._offline_buffer.flush_all(mqtt_client)
+    
+    logger.info(
+        f"Admin {current_user.username} manually flushed offline buffer: "
+        f"{flushed_count} messages"
+    )
+    
+    return {
+        "success": True,
+        "message": f"Flushed {flushed_count} messages from offline buffer",
+        "flushed_count": flushed_count,
+        "remaining": mqtt_client._offline_buffer.size,
+    }
+
+
+@router.delete(
+    "/resilience/offline-buffer",
+    response_model=Dict[str, Any],
+    summary="Clear Offline Buffer",
+    description="Clear all messages from the MQTT offline buffer."
+)
+async def clear_offline_buffer(
+    current_user: AdminUser,
+) -> Dict[str, Any]:
+    """
+    Clear all messages from the offline buffer.
+    
+    WARNING: This will permanently delete all buffered messages.
+    """
+    from ...mqtt.client import MQTTClient
+    
+    mqtt_client = MQTTClient.get_instance()
+    
+    if not mqtt_client._offline_buffer:
+        return {
+            "success": False,
+            "message": "Offline buffer not available",
+            "cleared_count": 0,
+        }
+    
+    cleared_count = await mqtt_client._offline_buffer.clear()
+    
+    logger.warning(
+        f"Admin {current_user.username} CLEARED offline buffer: "
+        f"{cleared_count} messages deleted"
+    )
+    
+    return {
+        "success": True,
+        "message": f"Cleared {cleared_count} messages from offline buffer",
+        "cleared_count": cleared_count,
+    }
