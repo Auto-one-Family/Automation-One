@@ -267,6 +267,53 @@ export const useMockEspStore = defineStore('mockEsp', () => {
     }
   }
 
+  /**
+   * Update ESP from WebSocket event (partial update)
+   * Used for live updates without full refresh
+   */
+  function updateEspFromEvent(espId: string, updates: Partial<MockESP>): void {
+    const index = mockEsps.value.findIndex(esp => esp.esp_id === espId)
+    if (index !== -1) {
+      // Merge updates into existing ESP object
+      mockEsps.value[index] = {
+        ...mockEsps.value[index],
+        ...updates,
+      }
+    }
+  }
+
+  /**
+   * Update sensor value from WebSocket event
+   */
+  function updateSensorFromEvent(espId: string, gpio: number, updates: Partial<MockESP['sensors'][0]>): void {
+    const esp = mockEsps.value.find(e => e.esp_id === espId)
+    if (!esp) return
+
+    const sensorIndex = esp.sensors.findIndex(s => s.gpio === gpio)
+    if (sensorIndex !== -1) {
+      esp.sensors[sensorIndex] = {
+        ...esp.sensors[sensorIndex],
+        ...updates,
+      }
+    }
+  }
+
+  /**
+   * Update actuator state from WebSocket event
+   */
+  function updateActuatorFromEvent(espId: string, gpio: number, updates: Partial<MockESP['actuators'][0]>): void {
+    const esp = mockEsps.value.find(e => e.esp_id === espId)
+    if (!esp) return
+
+    const actuatorIndex = esp.actuators.findIndex(a => a.gpio === gpio)
+    if (actuatorIndex !== -1) {
+      esp.actuators[actuatorIndex] = {
+        ...esp.actuators[actuatorIndex],
+        ...updates,
+      }
+    }
+  }
+
   function selectEsp(espId: string | null): void {
     selectedEspId.value = espId
   }
@@ -302,6 +349,9 @@ export const useMockEspStore = defineStore('mockEsp', () => {
     setActuatorState,
     emergencyStop,
     clearEmergency,
+    updateEspFromEvent,
+    updateSensorFromEvent,
+    updateActuatorFromEvent,
     selectEsp,
     clearError,
   }

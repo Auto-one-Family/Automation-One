@@ -10,7 +10,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
 import { debugApi } from '@/api/debug'
 import { useWebSocket } from '@/composables/useWebSocket'
-import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType } from '@/types'
+import { useToast } from '@/composables/useToast'
+import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponse } from '@/types'
 
 /**
  * Extract error message from Axios error response.
@@ -44,11 +45,12 @@ export const useEspStore = defineStore('esp', () => {
   // - sensor_data (sensor_handler.py)
   // - actuator_status (actuator_handler.py)
   // - actuator_alert (actuator_alert_handler.py)
+  // - config_response (config_handler.py)
   const ws = useWebSocket({
     autoConnect: true,
     autoReconnect: true,
     filters: {
-      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert'] as MessageType[],
+      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 'config_response'] as MessageType[],
     },
   })
 
@@ -617,6 +619,33 @@ export const useEspStore = defineStore('esp', () => {
       : new Date().toISOString()
   }
 
+  /**
+   * Handle config_response WebSocket event
+   * Shows toast notification when ESP confirms config changes
+   */
+  function handleConfigResponse(message: any): void {
+    const data: ConfigResponse = message.data
+    const toast = useToast()
+
+    if (!data.esp_id) return
+
+    const deviceName = devices.value.find(d => getDeviceId(d) === data.esp_id)?.name || data.esp_id
+
+    if (data.status === 'success') {
+      toast.success(
+        `${deviceName}: ${data.message}`,
+        { duration: 4000 }
+      )
+      console.info(`[ESP Store] Config success: ${data.esp_id} - ${data.config_type} (${data.count})`)
+    } else {
+      toast.error(
+        `${deviceName}: ${data.error_code || 'CONFIG_ERROR'} - ${data.message}`,
+        { duration: 6000 }
+      )
+      console.error(`[ESP Store] Config error: ${data.esp_id} - ${data.error_code}`)
+    }
+  }
+
   // Subscribe to WebSocket events with proper cleanup
   onMounted(() => {
     // Each ws.on() returns an unsubscribe function - store for cleanup
@@ -625,6 +654,7 @@ export const useEspStore = defineStore('esp', () => {
       ws.on('sensor_data', handleSensorData),
       ws.on('actuator_status', handleActuatorStatus),
       ws.on('actuator_alert', handleActuatorAlert),
+      ws.on('config_response', handleConfigResponse),
     )
     console.debug('[ESP Store] WebSocket handlers registered')
   })
