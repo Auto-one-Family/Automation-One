@@ -309,3 +309,4 @@ def get_health_status() -> Dict[str, Any]:
     """Get aggregated health status from the global registry."""
     return get_registry().get_health_status()
 
+

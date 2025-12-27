@@ -146,24 +146,54 @@ Detail-View für **einzelnes Mock-ESP-Gerät**. Zeigt:
 | **Klick [➕ Aktor hinzufügen]** | Button | Modal öffnet sich |
 | **Zone Panel: Klick [Change Zone]** | Button | Zone-Dialog (externe Komponente) |
 
-### Wichtige Features
+### User kann vollständig einstellen:
 
-✅ **Vollständig**:
-- Status-Cards mit Live-Daten
-- Sensor-Verwaltung (Hinzufügen, Bearbeiten, Löschen)
-- Batch-Sensor-Update
-- Aktor-Steuerung
-- Emergency-Stop Handling
-- Zone-Zuweisung
-- Sensor-Value-Qualität
-- Safe-Mode Toggle
-- Heartbeat Trigger
+#### ✅ **VOLLSTÄNDIG implementiert:**
+- **ESP-System-State:** OPERATIONAL ↔ SAFE_MODE toggle mit Bestätigung
+- **Heartbeat:** Manueller Trigger mit MQTT-Publish
+- **Emergency-Stop:** Auslösen/Aufheben für gesamtes ESP
+- **Zone-Zuweisung:** Zone ändern via ZoneAssignmentPanel
+- **Sensor-Management:**
+  - Sensor hinzufügen (GPIO, Type, Name, initialer Wert)
+  - Einzelne Sensor-Werte bearbeiten (Value, Quality)
+  - Sensor löschen mit Bestätigung
+  - Batch-Update aller Sensor-Werte gleichzeitig
+- **Aktor-Management:**
+  - Aktor hinzufügen (GPIO, Type, Name, initialer State)
+  - Aktor ein-/ausschalten
+  - Emergency-Stop Status anzeigen
 
-❌ **Fehlt**:
-- Sensor-Value-Historie/Graphen
-- Auto-Refresh (manuelles Reload nötig)
-- Sensor-Simulation-Parameter (z.B. "ramp from 20 to 30°C over 5 minutes")
-- CSV Export der Sensor-Daten
+#### ❌ **KRITISCHE LÜCKEN - User kann NICHT einstellen:**
+- **PWM-Kontrolle:** Aktoren haben nur ON/OFF - kein präziser 0.0-1.0 Slider
+- **Sensor-Historie:** Keine Graphen oder historische Trends
+- **Auto-Refresh:** Keine automatische Aktualisierung - nur manuelles Reload
+- **Sensor-Simulation:** Keine Ramp/Sine-Wave/Noise Parameter für Mock-Sensoren
+- **CSV-Export:** Keine Daten-Export Funktion
+- **Sensor-Filter:** Keine Filter nach Zone/Subzone oder Wertbereich
+- **Aktor-Gruppen:** Keine Möglichkeit, Aktoren zu gruppieren oder Sequenzen zu definieren
+
+### Warum diese Lücken kritisch sind:
+
+1. **PWM-Kontrolle:** Industrielle Aktoren brauchen präzise Kontrolle (z.B. Pumpe auf 75% Leistung)
+2. **Historie:** User brauchen Kontext - "war der Sensor-Wert immer so?" oder "Trend-Analyse"
+3. **Auto-Refresh:** Echtzeit-System sollte sich selbst aktualisieren
+4. **Simulation:** Entwickler brauchen realistische Test-Szenarien
+5. **Export:** Datenanalyse und Backup-Fehlerbehebung
+
+### Priorität für Implementierung:
+
+🟥 **KRITISCH - Sofort (User-Blockierer):**
+- PWM-Slider für Aktoren (DeviceDetailView & ActuatorsView)
+
+🟡 **HOCH - UX-Verbesserung:**
+- Auto-Refresh konfigurieren (alle X Sekunden)
+- Sensor-Historie/Graphen
+- CSV-Export von Sensor-Daten
+
+🟢 **MITTEL - Nice-to-have:**
+- Advanced Sensor-Simulation (Ramp, Sine-Wave)
+- Aktor-Gruppen und Sequenzen
+- Zone/Subzone-Filter
 
 ---
 
@@ -466,11 +496,43 @@ POST   /api/v1/logic/rules/:ruleId/test # Rule testen
 
 ## 05. Weitere Views (Kompakt-Übersicht)
 
+### DashboardView - KRITISCHE LÜCKE!
+
+**Datei:** `src/views/DashboardView.vue`
+**Route:** `/`
+**Status:** ✅ Implementiert, aber **KEINE EINSTELLUNGEN!**
+
+#### Was der User sieht:
+- System-Status-Karten (ESP-Count, Sensor-Count, etc.)
+- Kritische Alerts und Warnings
+- Statische Übersicht ohne Interaktion
+
+#### User kann einstellen:
+❌ **NICHTS!** - Dashboard ist reine Anzeige
+
+#### KRITISCHE LÜCKE:
+**Dashboard hat NULL Einstellungen!** Das ist das Erste was User sehen - und sie können nichts anpassen:
+- ❌ Keine Dashboard-Widgets konfigurieren (Layout ändern)
+- ❌ Keine KPIs auswählen (welche Metriken anzeigen?)
+- ❌ Keine Zeitbereiche filtern
+- ❌ Keine Alert-Konfiguration (was ist kritisch?)
+- ❌ Keine personalisierten Dashboards speichern
+
+#### Warum das kritisch ist:
+- **Erste User-Experience:** User kommen auf Dashboard - müssen es sofort anpassen können
+- **Verschiedene Rollen:** Admin sieht andere KPIs als Operator
+- **Skalierung:** Bei 100 ESPs braucht User fokussierte Dashboards
+- **Personalisierung:** Jeder User hat andere Prioritäten
+
+**Status:** 🟥 **KRITISCH - SOFORT beheben!**
+
+---
+
 | View | Route | Auth | Status | Kurzbeschreibung |
 |------|-------|------|--------|------------------|
 | **DashboardView** | `/` | ✅ | ✅ Impl. | System-Übersicht: Stats, Devices, Warnings |
-| **SensorsView** | `/sensors` | ✅ | ✅ Impl. | Alle Sensoren aggregiert mit Filter (Typ, Quality) |
-| **ActuatorsView** | `/actuators` | ✅ | ✅ Impl. | Alle Aktoren aggregiert |
+| **SensorsView** | `/sensors` | ⚠️ | ✅ Impl. | **KRITISCH:** Nur Mock-ESPs! Echte ESPs fehlen komplett - FEHLT: Zone-Filter, Historie, Bulk-Updates |
+| **ActuatorsView** | `/actuators` | ⚠️ | ✅ Impl. | **KRITISCH:** Nur Mock-ESPs! Echte ESPs fehlen komplett - FEHLT: PWM-Kontrolle, Bulk-Operationen, Gruppen |
 | **DatabaseExplorerView** | `/database` | ✅ Admin | ✅ Impl. | Dynamic DB-Table Browser mit DataTable |
 | **LogViewerView** | `/logs` | ✅ Admin | ✅ Impl. | Server-Logs streamen (SSH-ähnlich) |
 | **UserManagementView** | `/users` | ✅ Admin | ✅ Impl. | User CRUD (Create, Read, Update, Delete) |
@@ -666,6 +728,39 @@ Backend:
   - db/models/audit_log.py               # Audit-Model
 ```
 
+#### ActuatorsView - Aggregierte Aktor-Steuerung
+
+**Datei:** `src/views/ActuatorsView.vue`
+**Route:** `/actuators`
+**Status:** ✅ Implementiert, aber **KRITISCHE LÜCKEN**
+
+### Was der User sieht:
+- Alle Aktoren aus allen ESPs in tabellarischer Übersicht
+- Live-Status via WebSocket (actuator_status Events)
+- Emergency-Stop Status pro Aktor
+
+### User kann einstellen:
+✅ **VOLLSTÄNDIG:**
+- Aktor ein-/ausschalten (ON/OFF Toggle)
+- Emergency-Stop Status sehen
+
+❌ **KRITISCHE LÜCKEN:**
+- **KEINE PWM-Kontrolle!** Nur ON/OFF - kein 0.0-1.0 Slider
+- Keine Bulk-Operationen (mehrere Aktoren gleichzeitig steuern)
+- Keine Aktor-Gruppen oder Sequenzen
+- Keine Filter nach Zone/Subzone
+- Keine Timing/Timeout-Konfiguration
+
+### Warum PWM-Kontrolle kritisch ist:
+- Industrielle Aktoren brauchen präzise Kontrolle
+- Beispiel: Pumpe auf 75% statt volle Leistung
+- Beispiel: Ventil 30% öffnen statt ganz auf
+- Beispiel: LED-Helligkeit dimmen
+
+**Status:** 🟥 **BLOCKIERT USER** - PWM-Kontrolle fehlt komplett!
+
+---
+
 #### LoadTestView
 ```
 Frontend:
@@ -702,6 +797,64 @@ Backend:
   - services/logic/conditions/*.py # Condition-Implementierungen
   - db/repositories/logic_repo.py # Logic-DB-Operationen
 ```
+
+---
+
+## 🔍 **KRITISCHE CODEBASE-ANALYSE: ESP-Typ-Unterscheidung**
+
+Basierend auf Hierarchie.md **FEHLT** die Unterscheidung zwischen echten ESPs und Mock-ESPs in der UI kritisch!
+
+### 📊 **ESP-Typ-Matrix (aus Hierarchie.md)**
+
+| ESP-Typ | Hardware | Datenbank | UI-Badge | API-Prefix | Store-Nutzung | Status |
+|---------|----------|-----------|----------|------------|---------------|--------|
+| **Echte ESPs** | ESP32 WROOM/XIAO C3 | `hardware_type: null/ESP32` | 🟢 **REAL** | `/api/v1/esp/*` | `useEspStore` ✅ | ✅ DevicesView, DeviceDetailView |
+| **Mock-ESPs** | Software-Simulation | `hardware_type: "MOCK_ESP32"` | 🔵 **MOCK** | `/api/v1/debug/mock-esp/*` | `useEspStore` ✅ + `useMockEspStore` ⚠️ | ⚠️ SensorsView, ActuatorsView (nur Mock) |
+
+### 🟥 **KRITISCHE STORE-INKONSISTENZ**
+
+**Problem:** Zwei Stores führen zu inkonsistenten Views!
+
+#### `useEspStore` (esp.ts) - **REKOMMANDIERT**
+- ✅ Unterstützt beide ESP-Typen
+- ✅ Unified API-Calls
+- ✅ Verwendet von: DevicesView, DeviceDetailView, DashboardView
+
+#### `useMockEspStore` (mockEsp.ts) - **LEGACY-PROBLEM**
+- ⚠️ Unterstützt NUR Mock-ESPs
+- ⚠️ Verwendet von: SensorsView, ActuatorsView
+- ❌ Blockiert echte ESP Integration
+
+### 📋 **Betroffene Views - Migrations-Status**
+
+#### **SensorsView - KRITISCHE LÜCKE**
+- **Aktuell:** Nutzt `useMockEspStore` → Zeigt NUR Mock-ESPs
+- **Fehlt:** Echte ESP Sensoren komplett
+- **Benötigt:** Migration zu `useEspStore`, ESP-Typ-Badges
+
+#### **ActuatorsView - KRITISCHE LÜCKE**
+- **Aktuell:** Nutzt `useMockEspStore` → Zeigt NUR Mock-ESPs
+- **Fehlt:** Echte ESP Aktoren komplett
+- **Benötigt:** Migration zu `useEspStore`, PWM-Kontrolle
+
+#### **DeviceDetailView - ✅ TEILWEISE KORREKT**
+- **Aktuell:** Nutzt `useEspStore` ✅ → Zeigt beide Typen
+- **Problem:** API-Routing unterschiedlich je nach Typ
+- **Benötigt:** Unified API-Endpoints
+
+### 🔧 **Sofort-Handlungsempfehlungen**
+
+1. **SensorsView & ActuatorsView migrieren** zu `useEspStore`
+2. **ESP-Typ-Badges implementieren** (🟢 REAL, 🔵 MOCK)
+3. **Unified API-Endpoints** für beide ESP-Typen
+4. **PWM-Kontrolle erweitern** auf echte ESPs
+
+### 📈 **Business Impact**
+
+**Ohne Behebung:** User können echte ESPs nicht in Aggregations-Views sehen
+**Mit Behebung:** Vollständige ESP-Übersicht, konsistente UX
+
+**Status:** 🟥 **KRITISCH - Verhindert unified ESP-Management in Production!**
 
 #### Auth (LoginView, SetupView)
 ```

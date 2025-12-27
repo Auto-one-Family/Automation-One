@@ -354,3 +354,4 @@ class MQTTOfflineBuffer:
             f"flushed={self._messages_flushed}, dropped={self._messages_dropped})"
         )
 
+
