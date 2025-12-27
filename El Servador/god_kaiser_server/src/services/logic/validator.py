@@ -76,13 +76,19 @@ class DuplicateResult:
 class LogicValidator:
     """
     Logic rule validator.
-    
+
     Validates rules for:
     - Schema compliance
     - Safety constraints
     - Conflicts with existing rules
     - Duplicates
+    - Loop detection (NEW)
     """
+
+    def __init__(self):
+        """Initialize validator with Loop Detector."""
+        from .safety.loop_detector import LoopDetector
+        self.loop_detector = LoopDetector()
 
     def validate_schema(self, rule_data: Dict[str, Any]) -> ValidationResult:
         """
@@ -275,32 +281,32 @@ class LogicValidator:
     def validate(
         self,
         rule_data: Dict[str, Any],
-        existing_rules: Optional[List[Dict[str, Any]]] = None,
+        existing_rules: Optional[List[Dict[str, Any]]] = None
     ) -> ValidationResult:
         """
-        Perform comprehensive validation.
-        
+        Umfassende Rule-Validierung inkl. Loop-Detection.
+
         Args:
             rule_data: Rule data dictionary
-            existing_rules: Optional list of existing rules for conflict checking
-            
+            existing_rules: List of existing active rules (for loop detection and conflict checking)
+
         Returns:
-            ValidationResult with all validation results
+            ValidationResult with all validation checks
+
+        NOTE: Kombiniert Schema-Validierung, Safety-Checks, Conflict-Detection,
+              Duplicate-Detection und Loop-Detection.
         """
-        result = ValidationResult(valid=True)
+        # Schema-Validierung
+        result = self.validate_schema(rule_data)
 
-        # Schema validation
-        schema_result = self.validate_schema(rule_data)
-        if not schema_result.valid:
-            result.errors.extend(schema_result.errors)
-            result.valid = False
+        if not result.valid:
+            return result
 
-        # Safety validation
+        # Safety-Validierung
         safety_result = self.validate_safety(rule_data)
-        if not safety_result.safe:
-            result.warnings.extend(safety_result.warnings)
+        result.warnings.extend(safety_result.warnings)
 
-        # Conflict checking
+        # Conflict und Duplicate Checking
         if existing_rules:
             conflict_result = self.check_conflicts(rule_data, existing_rules)
             if conflict_result.has_conflicts:
@@ -314,8 +320,27 @@ class LogicValidator:
                         f"({dup['similarity']:.1f}% match)"
                     )
 
-        return result
+            # Loop-Detection
+            try:
+                loop_result = self.loop_detector.check_new_rule(rule_data, existing_rules)
 
+                if loop_result.has_loop:
+                    result.add_error(
+                        f"Loop detected: This rule would create an endless loop. "
+                        f"Cycle: {' → '.join(loop_result.cycle_path)}"
+                    )
+                    logger.error(
+                        f"Loop detected for rule {rule_data.get('name', 'unknown')}: "
+                        f"{loop_result.message}"
+                    )
+            except Exception as e:
+                # Loop-Detection Fehler sollten nicht die gesamte Validierung blockieren
+                logger.error(f"Error in loop detection: {e}", exc_info=True)
+                result.add_warning(
+                    "Loop detection failed - rule may still create loops. Please verify manually."
+                )
+
+        return result
 
 
 
