@@ -46,6 +46,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
 
+# Import TopicBuilder for consistent topic generation
+from src.mqtt.topics import TopicBuilder
+
 logger = logging.getLogger(__name__)
 
 
@@ -834,7 +837,7 @@ class MockESP32Client:
 
         # Publish to device-specific emergency topic
         self.published_messages.append({
-            "topic": f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/emergency",
+            "topic": TopicBuilder.build_actuator_emergency_topic(self.esp_id, self.kaiser_id),
             "payload": {
                 "esp_id": self.esp_id,
                 "command_id": command_id,
@@ -1132,13 +1135,15 @@ class MockESP32Client:
         if sensor.calibration:
             payload["meta"] = {"calibration": sensor.calibration}
 
-        # Primary topic
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/sensor/{gpio}/data"
+        # Primary topic (use TopicBuilder for consistency)
+        topic = TopicBuilder.build_sensor_data_topic(self.esp_id, gpio, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
         # Zone-based topic (if configured)
         if self.zone and self.zone.subzone_id:
-            zone_topic = f"kaiser/{self.kaiser_id}/zone/{self.zone.master_zone_id}/esp/{self.esp_id}/subzone/{self.zone.subzone_id}/sensor/{gpio}/data"
+            zone_topic = TopicBuilder.build_subzone_sensor_data_topic(
+                self.esp_id, gpio, self.zone.master_zone_id, self.zone.subzone_id, self.kaiser_id
+            )
             self._store_and_publish(zone_topic, payload, qos=1, retain=False)
 
         # Note: on_publish is now called by _store_and_publish()
@@ -1151,7 +1156,7 @@ class MockESP32Client:
             "sensors": readings
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/sensor/batch"
+        topic = TopicBuilder.build_sensor_batch_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_actuator_status(self, gpio: int):
@@ -1174,7 +1179,7 @@ class MockESP32Client:
             "timestamp": actuator.timestamp
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/{gpio}/status"
+        topic = TopicBuilder.build_actuator_status_topic(self.esp_id, gpio, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=True)
 
         # Note: on_publish is now called by _store_and_publish()
@@ -1190,7 +1195,7 @@ class MockESP32Client:
             "message": message
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/{gpio}/response"
+        topic = TopicBuilder.build_actuator_response_topic(self.esp_id, gpio, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_actuator_alert(self, gpio: int, alert_type: str, message: str):
@@ -1204,7 +1209,7 @@ class MockESP32Client:
             "severity": "warning" if alert_type != "emergency_stop" else "critical"
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/actuator/{gpio}/alert"
+        topic = TopicBuilder.build_actuator_alert_topic(self.esp_id, gpio, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_heartbeat(self):
@@ -1225,7 +1230,7 @@ class MockESP32Client:
             "safe_mode": self.system_state == SystemState.SAFE_MODE
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/system/heartbeat"
+        topic = TopicBuilder.build_heartbeat_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=0, retain=False)
 
     def _publish_system_response(self, command_id: str, action: str, success: bool):
@@ -1238,7 +1243,7 @@ class MockESP32Client:
             "success": success
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/system/response"
+        topic = TopicBuilder.build_system_response_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_system_diagnostics(self, diagnostics: Dict[str, Any]):
@@ -1249,7 +1254,7 @@ class MockESP32Client:
             **diagnostics
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/system/diagnostics"
+        topic = TopicBuilder.build_system_diagnostics_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_config_update(self, key: str, value: Any):
@@ -1262,7 +1267,7 @@ class MockESP32Client:
             "action": "updated"
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/config"
+        topic = TopicBuilder.build_config_topic(self.esp_id)
         self._store_and_publish(topic, payload, qos=1, retain=True)
 
     def _publish_library_event(self, event: str, library_name: str, version: str):
@@ -1274,7 +1279,7 @@ class MockESP32Client:
             "version": version
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/library/{event}"
+        topic = TopicBuilder.build_library_event_topic(self.esp_id, event, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_safe_mode_status(self, reason: str):
@@ -1287,7 +1292,7 @@ class MockESP32Client:
             "actuators_disabled": list(self.actuators.keys())
         }
 
-        topic = f"kaiser/{self.kaiser_id}/esp/{self.esp_id}/safe_mode"
+        topic = TopicBuilder.build_safe_mode_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=True)
 
     # =========================================================================
