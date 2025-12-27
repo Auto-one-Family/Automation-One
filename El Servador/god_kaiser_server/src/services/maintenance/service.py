@@ -1,0 +1,532 @@
+"""
+Maintenance Service
+
+Manages all maintenance and monitoring jobs:
+- Cleanup jobs (sensor data, command history, orphaned mocks)
+- Health check jobs (ESP timeouts, MQTT broker)
+- Statistics aggregation
+
+Uses CentralScheduler for job management.
+"""
+
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Dict, Optional
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...core.config import Settings, get_settings
+from ...core.logging_config import get_logger
+from ...core.scheduler import CentralScheduler, JobCategory, get_central_scheduler
+from ...db.models.actuator import ActuatorHistory
+from ...db.models.esp import ESPDevice
+from ...db.models.sensor import SensorData
+from ...db.session import get_session
+from ...mqtt.client import MQTTClient
+
+logger = get_logger(__name__)
+
+
+class MaintenanceService:
+    """
+    Service for managing maintenance and monitoring jobs.
+
+    Registers cleanup, health check, and statistics aggregation jobs
+    with the CentralScheduler.
+    """
+
+    def __init__(
+        self,
+        scheduler: CentralScheduler,
+        session_factory: Callable,
+        mqtt_client: MQTTClient,
+        settings: Settings,
+    ):
+        """
+        Initialize MaintenanceService.
+
+        Args:
+            scheduler: CentralScheduler instance
+            session_factory: Async function that yields DB sessions
+            mqtt_client: MQTTClient instance
+            settings: Settings instance
+        """
+        self._scheduler = scheduler
+        self._session_factory = session_factory
+        self._mqtt_client = mqtt_client
+        self._settings = settings
+        self._maintenance_settings = settings.maintenance
+
+        # Stats cache (in-memory)
+        self._stats_cache: Dict[str, Any] = {
+            "last_updated": None,
+            "total_esps": 0,
+            "online_esps": 0,
+            "offline_esps": 0,
+            "total_sensors": 0,
+            "total_actuators": 0,
+        }
+
+        # Job execution tracking
+        self._job_results: Dict[str, Dict[str, Any]] = {}
+
+        logger.info("MaintenanceService initialized")
+
+    def start(self) -> None:
+        """Register all maintenance jobs with the scheduler."""
+        logger.info("Starting MaintenanceService - registering jobs...")
+
+        # ────────────────────────────────────────────────────
+        # STARTUP WARNING: Cleanup-Status
+        # ────────────────────────────────────────────────────
+        self._log_cleanup_status()
+
+        # Cleanup Jobs (MAINTENANCE category) - nur wenn aktiviert
+        if self._maintenance_settings.sensor_data_retention_enabled:
+            self._scheduler.add_cron_job(
+                job_id="cleanup_sensor_data",
+                func=self._cleanup_sensor_data,
+                cron_expression={"hour": 3, "minute": 0},  # Daily at 03:00
+                category=JobCategory.MAINTENANCE,
+            )
+            dry_run = " (DRY-RUN)" if self._maintenance_settings.sensor_data_cleanup_dry_run else ""
+            logger.info(
+                f"Registered cleanup_sensor_data job (daily 03:00){dry_run} "
+                f"(retain {self._maintenance_settings.sensor_data_retention_days} days)"
+            )
+        else:
+            logger.info(
+                "Skipped cleanup_sensor_data job (DISABLED - unlimited retention)"
+            )
+
+        if self._maintenance_settings.command_history_retention_enabled:
+            self._scheduler.add_cron_job(
+                job_id="cleanup_command_history",
+                func=self._cleanup_command_history,
+                cron_expression={"hour": 3, "minute": 30},  # Daily at 03:30
+                category=JobCategory.MAINTENANCE,
+            )
+            dry_run = " (DRY-RUN)" if self._maintenance_settings.command_history_cleanup_dry_run else ""
+            logger.info(
+                f"Registered cleanup_command_history job (daily 03:30){dry_run} "
+                f"(retain {self._maintenance_settings.command_history_retention_days} days)"
+            )
+        else:
+            logger.info(
+                "Skipped cleanup_command_history job (DISABLED - unlimited retention)"
+            )
+
+        if self._maintenance_settings.orphaned_mock_cleanup_enabled:
+            self._scheduler.add_interval_job(
+                job_id="cleanup_orphaned_mocks",
+                func=self._cleanup_orphaned_mocks,
+                seconds=3600,  # Hourly
+                category=JobCategory.MAINTENANCE,
+            )
+            mode = "AUTO-DELETE" if self._maintenance_settings.orphaned_mock_auto_delete else "WARN ONLY"
+            logger.info(f"Registered cleanup_orphaned_mocks job (hourly, {mode})")
+        else:
+            logger.info("Skipped cleanup_orphaned_mocks job (DISABLED)")
+
+        # Health Check Jobs (MONITOR category) - immer aktiv
+        self._scheduler.add_interval_job(
+            job_id="health_check_esps",
+            func=self._health_check_esps,
+            seconds=self._maintenance_settings.esp_health_check_interval_seconds,
+            category=JobCategory.MONITOR,
+        )
+        logger.info(
+            f"Registered health_check_esps job (every {self._maintenance_settings.esp_health_check_interval_seconds}s)"
+        )
+
+        self._scheduler.add_interval_job(
+            job_id="health_check_mqtt",
+            func=self._health_check_mqtt,
+            seconds=self._maintenance_settings.mqtt_health_check_interval_seconds,
+            category=JobCategory.MONITOR,
+        )
+        logger.info(
+            f"Registered health_check_mqtt job (every {self._maintenance_settings.mqtt_health_check_interval_seconds}s)"
+        )
+
+        # Stats Aggregation (MAINTENANCE category) - nur wenn aktiviert
+        if self._maintenance_settings.stats_aggregation_enabled:
+            self._scheduler.add_interval_job(
+                job_id="aggregate_stats",
+                func=self._aggregate_stats,
+                seconds=self._maintenance_settings.stats_aggregation_interval_minutes * 60,
+                category=JobCategory.MAINTENANCE,
+            )
+            logger.info(
+                f"Registered aggregate_stats job (every {self._maintenance_settings.stats_aggregation_interval_minutes} minutes)"
+            )
+        else:
+            logger.info("Skipped aggregate_stats job (DISABLED)")
+
+        logger.info("MaintenanceService started - all jobs registered")
+
+    def _log_cleanup_status(self) -> None:
+        """Loggt Cleanup-Status beim Startup"""
+        cleanup_status = []
+
+        if self._maintenance_settings.sensor_data_retention_enabled:
+            dry_run = " (DRY-RUN)" if self._maintenance_settings.sensor_data_cleanup_dry_run else ""
+            cleanup_status.append(
+                f"  - Sensor Data Cleanup: ENABLED{dry_run} "
+                f"(retain {self._maintenance_settings.sensor_data_retention_days} days)"
+            )
+        else:
+            cleanup_status.append("  - Sensor Data Cleanup: DISABLED (unlimited retention)")
+
+        if self._maintenance_settings.command_history_retention_enabled:
+            dry_run = " (DRY-RUN)" if self._maintenance_settings.command_history_cleanup_dry_run else ""
+            cleanup_status.append(
+                f"  - Command History Cleanup: ENABLED{dry_run} "
+                f"(retain {self._maintenance_settings.command_history_retention_days} days)"
+            )
+        else:
+            cleanup_status.append("  - Command History Cleanup: DISABLED (unlimited retention)")
+
+        if self._maintenance_settings.orphaned_mock_auto_delete:
+            cleanup_status.append("  - Orphaned Mocks Cleanup: AUTO-DELETE ENABLED")
+        else:
+            cleanup_status.append("  - Orphaned Mocks Cleanup: WARN ONLY (no deletion)")
+
+        logger.info(
+            "Maintenance Cleanup Status:\n" + "\n".join(cleanup_status)
+        )
+
+    def stop(self) -> None:
+        """Remove all maintenance jobs from the scheduler."""
+        logger.info("Stopping MaintenanceService - removing jobs...")
+
+        # Remove all maintenance and monitor jobs
+        removed_maintenance = self._scheduler.remove_jobs_by_category(
+            JobCategory.MAINTENANCE
+        )
+        removed_monitor = self._scheduler.remove_jobs_by_category(JobCategory.MONITOR)
+
+        logger.info(
+            f"MaintenanceService stopped - removed {removed_maintenance} maintenance jobs, "
+            f"{removed_monitor} monitor jobs"
+        )
+
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get status of all maintenance jobs.
+
+        Returns:
+            Status dictionary with job information and stats cache
+        """
+        jobs = []
+        for job in self._scheduler.get_all_jobs():
+            job_id = job["id"]
+            if job_id.startswith("maintenance_") or job_id.startswith("monitor_"):
+                job_stats = self._scheduler.get_job_stats(job_id)
+                job_info = {
+                    "job_id": job_id,
+                    "next_run": job.get("next_run"),
+                    "last_run": job_stats.get("last_run") if job_stats else None,
+                    "last_result": "success" if job_stats and job_stats.get("errors", 0) == 0 else "error",
+                }
+
+                # Add job-specific results
+                if job_id in self._job_results:
+                    job_info.update(self._job_results[job_id])
+
+                jobs.append(job_info)
+
+        return {
+            "service_running": True,
+            "jobs": jobs,
+            "stats_cache": self._stats_cache.copy(),
+            "config": {
+                "sensor_data_retention_enabled": self._maintenance_settings.sensor_data_retention_enabled,
+                "command_history_retention_enabled": self._maintenance_settings.command_history_retention_enabled,
+                "orphaned_mock_auto_delete": self._maintenance_settings.orphaned_mock_auto_delete,
+            }
+        }
+
+    # ================================================================
+    # CLEANUP JOBS
+    # ================================================================
+
+    async def _cleanup_sensor_data(self) -> None:
+        """Cleanup old sensor data (runs daily at 03:00)."""
+        job_id = "maintenance_cleanup_sensor_data"
+
+        try:
+            async for session in self._session_factory():
+                from .jobs.cleanup import SensorDataCleanup
+
+                cleanup = SensorDataCleanup(session, self._maintenance_settings)
+                result = await cleanup.execute()
+                self._job_results[job_id] = result
+                break  # Exit after first session
+
+        except Exception as e:
+            logger.error(f"[maintenance] ERROR cleanup_sensor_data: {e}", exc_info=True)
+            self._job_results[job_id] = {"error": str(e), "status": "error"}
+
+    async def _cleanup_command_history(self) -> None:
+        """Cleanup old actuator command history (runs daily at 03:30)."""
+        job_id = "maintenance_cleanup_command_history"
+
+        try:
+            async for session in self._session_factory():
+                from .jobs.cleanup import CommandHistoryCleanup
+
+                cleanup = CommandHistoryCleanup(session, self._maintenance_settings)
+                result = await cleanup.execute()
+                self._job_results[job_id] = result
+                break  # Exit after first session
+
+        except Exception as e:
+            logger.error(
+                f"[maintenance] ERROR cleanup_command_history: {e}", exc_info=True
+            )
+            self._job_results[job_id] = {"error": str(e), "status": "error"}
+
+    async def _cleanup_orphaned_mocks(self) -> None:
+        """Cleanup orphaned mock ESPs (runs hourly)."""
+        job_id = "maintenance_cleanup_orphaned_mocks"
+
+        try:
+            async for session in self._session_factory():
+                from .jobs.cleanup import OrphanedMocksCleanup
+
+                cleanup = OrphanedMocksCleanup(
+                    session, self._scheduler, self._maintenance_settings
+                )
+                result = await cleanup.execute()
+                self._job_results[job_id] = result
+                break  # Exit after first session
+
+        except Exception as e:
+            logger.error(
+                f"[maintenance] ERROR cleanup_orphaned_mocks: {e}", exc_info=True
+            )
+            self._job_results[job_id] = {"error": str(e), "status": "error"}
+
+    # ================================================================
+    # HEALTH CHECK JOBS
+    # ================================================================
+
+    async def _health_check_esps(self) -> None:
+        """Check ESP health and detect timeouts (runs every 60s)."""
+        job_id = "monitor_health_check_esps"
+
+        try:
+            from ...mqtt.handlers.heartbeat_handler import get_heartbeat_handler
+
+            heartbeat_handler = get_heartbeat_handler()
+            result = await heartbeat_handler.check_device_timeouts()
+
+            checked = result.get("checked", 0)
+            timed_out = result.get("timed_out", 0)
+            offline_devices = result.get("offline_devices", [])
+
+            logger.info(
+                f"[monitor] health_check_esps: {checked} checked, "
+                f"{result.get('checked', 0) - timed_out} online, "
+                f"{timed_out} timed out"
+            )
+
+            if timed_out > 0:
+                logger.warning(
+                    f"[monitor] health_check_esps: {timed_out} ESP(s) timed out: {offline_devices}"
+                )
+
+            self._job_results[job_id] = {
+                "esps_checked": checked,
+                "timeouts_detected": timed_out,
+                "offline_devices": offline_devices,
+            }
+
+        except Exception as e:
+            logger.error(f"[monitor] ERROR health_check_esps: {e}", exc_info=True)
+            self._job_results[job_id] = {"error": str(e)}
+
+    async def _health_check_mqtt(self) -> None:
+        """Check MQTT broker health (runs every 30s)."""
+        job_id = "monitor_health_check_mqtt"
+
+        try:
+            is_connected = self._mqtt_client.is_connected()
+
+            if not is_connected:
+                logger.warning("[monitor] health_check_mqtt: MQTT broker disconnected")
+                # Reconnect is handled by MQTTClient auto-reconnect
+
+                # Optional: Broadcast WebSocket event
+                try:
+                    from ...websocket.manager import WebSocketManager
+
+                    ws_manager = await WebSocketManager.get_instance()
+                    await ws_manager.broadcast(
+                        "system_event",
+                        {
+                            "event": "mqtt_disconnected",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to broadcast MQTT disconnect event: {e}")
+
+            else:
+                logger.debug("[monitor] health_check_mqtt: Connected")
+
+            self._job_results[job_id] = {
+                "connected": is_connected,
+                "last_check": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"[monitor] ERROR health_check_mqtt: {e}", exc_info=True)
+            self._job_results[job_id] = {"error": str(e)}
+
+    # ================================================================
+    # STATS AGGREGATION
+    # ================================================================
+
+    async def _aggregate_stats(self) -> None:
+        """Aggregate statistics for dashboard (runs hourly)."""
+        job_id = "maintenance_aggregate_stats"
+        start_time = time.time()
+
+        try:
+            async for session in self._session_factory():
+                from ...db.repositories import (
+                    ESPRepository,
+                    SensorRepository,
+                    ActuatorRepository,
+                )
+
+                esp_repo = ESPRepository(session)
+                sensor_repo = SensorRepository(session)
+                actuator_repo = ActuatorRepository(session)
+
+                # Get ESP counts
+                total_esps = await esp_repo.count()
+                online_esps = len(await esp_repo.get_by_status("online"))
+                offline_esps = total_esps - online_esps
+
+                # Get sensor/actuator counts
+                total_sensors = await sensor_repo.count()
+                total_actuators = await actuator_repo.count()
+
+                # Count by type (query with limit to get all)
+                from sqlalchemy import select, func
+                from ...db.models.sensor import SensorConfig
+                from ...db.models.actuator import ActuatorConfig
+
+                # Sensors by type
+                sensor_type_stmt = (
+                    select(SensorConfig.sensor_type, func.count())
+                    .group_by(SensorConfig.sensor_type)
+                )
+                sensor_type_result = await session.execute(sensor_type_stmt)
+                sensors_by_type = {
+                    row[0]: row[1] for row in sensor_type_result.fetchall()
+                }
+
+                # Actuators by type
+                actuator_type_stmt = (
+                    select(ActuatorConfig.actuator_type, func.count())
+                    .group_by(ActuatorConfig.actuator_type)
+                )
+                actuator_type_result = await session.execute(actuator_type_stmt)
+                actuators_by_type = {
+                    row[0]: row[1] for row in actuator_type_result.fetchall()
+                }
+
+                # Update cache
+                self._stats_cache = {
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "total_esps": total_esps,
+                    "online_esps": online_esps,
+                    "offline_esps": offline_esps,
+                    "total_sensors": total_sensors,
+                    "total_actuators": total_actuators,
+                    "sensors_by_type": sensors_by_type,
+                    "actuators_by_type": actuators_by_type,
+                }
+
+                duration = time.time() - start_time
+                logger.debug(
+                    f"[maintenance] aggregate_stats: Updated stats cache "
+                    f"({total_esps} ESPs, {total_sensors} sensors, {total_actuators} actuators) "
+                    f"in {duration:.2f}s"
+                )
+
+                self._job_results[job_id] = {
+                    "duration_seconds": duration,
+                    "stats_updated": True,
+                }
+
+                break
+
+        except Exception as e:
+            logger.error(f"[maintenance] ERROR aggregate_stats: {e}", exc_info=True)
+            self._job_results[job_id] = {"error": str(e)}
+
+
+# ================================================================
+# DEPENDENCY INJECTION
+# ================================================================
+
+_maintenance_service: Optional[MaintenanceService] = None
+
+
+def get_maintenance_service() -> MaintenanceService:
+    """
+    Get MaintenanceService instance (Dependency Injection).
+
+    Returns:
+        MaintenanceService instance
+
+    Raises:
+        RuntimeError: If service not initialized
+    """
+    global _maintenance_service
+    if _maintenance_service is None:
+        raise RuntimeError("MaintenanceService not initialized. Call init_maintenance_service() first.")
+    return _maintenance_service
+
+
+def init_maintenance_service(
+    scheduler: CentralScheduler,
+    session_factory: Callable,
+    mqtt_client: MQTTClient,
+    settings: Settings,
+) -> MaintenanceService:
+    """
+    Initialize MaintenanceService.
+
+    Must be called during startup in main.py.
+
+    Args:
+        scheduler: CentralScheduler instance
+        session_factory: Async function that yields DB sessions
+        mqtt_client: MQTTClient instance
+        settings: Settings instance
+
+    Returns:
+        Initialized MaintenanceService instance
+    """
+    global _maintenance_service
+
+    if _maintenance_service is not None:
+        logger.warning("MaintenanceService already initialized")
+        return _maintenance_service
+
+    _maintenance_service = MaintenanceService(
+        scheduler=scheduler,
+        session_factory=session_factory,
+        mqtt_client=mqtt_client,
+        settings=settings,
+    )
+
+    return _maintenance_service
+

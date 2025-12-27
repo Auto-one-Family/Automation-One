@@ -300,6 +300,44 @@ export const debugApi = {
   ): Promise<TestDataCleanupResponse> {
     return this.cleanupTestData(true, includeMock, includeSimulation)
   },
+
+  // ==========================================================================
+  // Maintenance Service (Paket D)
+  // ==========================================================================
+
+  /**
+   * Get maintenance service status
+   */
+  async getMaintenanceStatus(): Promise<MaintenanceStatusResponse> {
+    const response = await api.get<MaintenanceStatusResponse>('/debug/maintenance/status')
+    return response.data
+  },
+
+  /**
+   * Get maintenance configuration
+   */
+  async getMaintenanceConfig(): Promise<MaintenanceConfigResponse> {
+    const response = await api.get<MaintenanceConfigResponse>('/debug/maintenance/config')
+    return response.data
+  },
+
+  /**
+   * Trigger a maintenance job manually
+   *
+   * Available jobs:
+   * - cleanup_sensor_data
+   * - cleanup_command_history
+   * - cleanup_orphaned_mocks
+   * - health_check_esps
+   * - health_check_mqtt
+   * - aggregate_stats
+   */
+  async triggerMaintenanceJob(jobName: string): Promise<MaintenanceTriggerResponse> {
+    const response = await api.post<MaintenanceTriggerResponse>(
+      `/debug/maintenance/trigger/${jobName}`
+    )
+    return response.data
+  },
 }
 
 // =============================================================================
@@ -328,4 +366,102 @@ export interface TestDataCleanupResponse {
   }
   total_deleted: number
   message: string
+}
+
+/**
+ * Maintenance job information
+ *
+ * @see El Servador/god_kaiser_server/src/api/v1/debug.py - MaintenanceStatusResponse
+ */
+export interface MaintenanceJob {
+  job_id: string
+  next_run: string | null
+  last_run: string | null
+  last_result: string
+  // Job-specific results
+  dry_run?: boolean
+  records_found?: number
+  records_deleted?: number
+  batches_processed?: number
+  cutoff_date?: string
+  duration_seconds?: number
+  status?: string
+  orphaned_found?: number
+  deleted?: number
+  warned?: number
+  esps_checked?: number
+  timeouts_detected?: number
+  offline_devices?: string[]
+  connected?: boolean
+  stats_updated?: boolean
+}
+
+/**
+ * Maintenance service status response
+ */
+export interface MaintenanceStatusResponse {
+  service_running: boolean
+  jobs: MaintenanceJob[]
+  stats_cache: {
+    last_updated: string | null
+    total_esps: number
+    online_esps: number
+    offline_esps: number
+    total_sensors: number
+    total_actuators: number
+    sensors_by_type?: Record<string, number>
+    actuators_by_type?: Record<string, number>
+  }
+  config: {
+    sensor_data_retention_enabled: boolean
+    command_history_retention_enabled: boolean
+    orphaned_mock_auto_delete: boolean
+  }
+}
+
+/**
+ * Maintenance configuration response
+ */
+export interface MaintenanceConfigResponse {
+  sensor_data: {
+    retention_enabled: boolean
+    retention_days: number
+    dry_run: boolean
+    batch_size: number
+    max_batches: number
+  }
+  command_history: {
+    retention_enabled: boolean
+    retention_days: number
+    dry_run: boolean
+    batch_size: number
+    max_batches: number
+  }
+  orphaned_mocks: {
+    cleanup_enabled: boolean
+    auto_delete: boolean
+    age_hours: number
+  }
+  health_checks: {
+    heartbeat_timeout_seconds: number
+    mqtt_interval_seconds: number
+    esp_interval_seconds: number
+  }
+  stats: {
+    aggregation_enabled: boolean
+    interval_minutes: number
+  }
+  advanced_safety: {
+    alert_threshold_percent: number
+    max_records_per_run: number
+  }
+}
+
+/**
+ * Maintenance trigger response
+ */
+export interface MaintenanceTriggerResponse {
+  job_id: string
+  triggered: boolean
+  result: Record<string, unknown>
 }
