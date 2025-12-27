@@ -302,6 +302,423 @@ class DevelopmentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
+class MaintenanceSettings(BaseSettings):
+    """
+    Maintenance and cleanup settings (Data-Safe Version).
+    
+    WICHTIG: Alle Cleanup-Jobs sind per Default DISABLED!
+    User muss explizit aktivieren um Datenverlust zu verhindern.
+    """
+
+    # ─────────────────────────────────────────────────────────
+    # SENSOR DATA CLEANUP (DEFAULT: DISABLED)
+    # ─────────────────────────────────────────────────────────
+    sensor_data_retention_enabled: bool = Field(
+        default=False,
+        alias="SENSOR_DATA_RETENTION_ENABLED",
+        description="⚠️ Enable sensor data cleanup (Default: DISABLED - unlimited retention)",
+    )
+    sensor_data_retention_days: int = Field(
+        default=30,
+        alias="SENSOR_DATA_RETENTION_DAYS",
+        ge=1,
+        le=3650,
+        description="Days to keep sensor data (only used if retention_enabled=True)",
+    )
+    sensor_data_cleanup_dry_run: bool = Field(
+        default=True,
+        alias="SENSOR_DATA_CLEANUP_DRY_RUN",
+        description="Safety: Dry-Run mode (counts only, no deletion) - Default: True",
+    )
+    sensor_data_cleanup_batch_size: int = Field(
+        default=1000,
+        alias="SENSOR_DATA_CLEANUP_BATCH_SIZE",
+        ge=100,
+        le=10000,
+        description="Max records per batch (prevents DB locks)",
+    )
+    sensor_data_cleanup_max_batches: int = Field(
+        default=100,
+        alias="SENSOR_DATA_CLEANUP_MAX_BATCHES",
+        ge=1,
+        le=1000,
+        description="Max batches per run (safety limit: max 100k records per run)",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # COMMAND HISTORY CLEANUP (DEFAULT: DISABLED)
+    # ─────────────────────────────────────────────────────────
+    command_history_retention_enabled: bool = Field(
+        default=False,
+        alias="COMMAND_HISTORY_RETENTION_ENABLED",
+        description="⚠️ Enable command history cleanup (Default: DISABLED - unlimited retention)",
+    )
+    command_history_retention_days: int = Field(
+        default=14,
+        alias="COMMAND_HISTORY_RETENTION_DAYS",
+        ge=1,
+        le=3650,
+        description="Days to keep command history (only used if retention_enabled=True)",
+    )
+    command_history_cleanup_dry_run: bool = Field(
+        default=True,
+        alias="COMMAND_HISTORY_CLEANUP_DRY_RUN",
+        description="Safety: Dry-Run mode (counts only, no deletion) - Default: True",
+    )
+    command_history_cleanup_batch_size: int = Field(
+        default=1000,
+        alias="COMMAND_HISTORY_CLEANUP_BATCH_SIZE",
+        ge=100,
+        le=10000,
+        description="Max records per batch",
+    )
+    command_history_cleanup_max_batches: int = Field(
+        default=50,
+        alias="COMMAND_HISTORY_CLEANUP_MAX_BATCHES",
+        ge=1,
+        le=1000,
+        description="Max batches per run",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # AUDIT LOG CLEANUP (DEFAULT: DISABLED)
+    # ─────────────────────────────────────────────────────────
+    audit_log_retention_enabled: bool = Field(
+        default=False,
+        alias="AUDIT_LOG_RETENTION_ENABLED",
+        description="⚠️ Enable audit log cleanup (Default: DISABLED - unlimited retention)",
+    )
+    audit_log_retention_days: int = Field(
+        default=90,
+        alias="AUDIT_LOG_RETENTION_DAYS",
+        ge=1,
+        le=3650,
+        description="Days to keep audit logs (only used if retention_enabled=True)",
+    )
+    audit_log_cleanup_dry_run: bool = Field(
+        default=True,
+        alias="AUDIT_LOG_CLEANUP_DRY_RUN",
+        description="Safety: Dry-Run mode (counts only, no deletion) - Default: True",
+    )
+    audit_log_cleanup_batch_size: int = Field(
+        default=1000,
+        alias="AUDIT_LOG_CLEANUP_BATCH_SIZE",
+        ge=100,
+        le=10000,
+        description="Max records per batch",
+    )
+    audit_log_cleanup_max_batches: int = Field(
+        default=200,
+        alias="AUDIT_LOG_CLEANUP_MAX_BATCHES",
+        ge=1,
+        le=1000,
+        description="Max batches per run",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # ORPHANED MOCKS CLEANUP (DEFAULT: WARN ONLY)
+    # ─────────────────────────────────────────────────────────
+    orphaned_mock_cleanup_enabled: bool = Field(
+        default=True,
+        alias="ORPHANED_MOCK_CLEANUP_ENABLED",
+        description="Enable cleanup of orphaned mock ESPs",
+    )
+    orphaned_mock_auto_delete: bool = Field(
+        default=False,
+        alias="ORPHANED_MOCK_AUTO_DELETE",
+        description="⚠️ Auto-delete orphaned mocks (Default: False - only log warnings)",
+    )
+    orphaned_mock_age_hours: int = Field(
+        default=24,
+        alias="ORPHANED_MOCK_AGE_HOURS",
+        ge=1,
+        description="Age in hours before mock is considered orphaned",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # HEALTH CHECKS (IMMER ENABLED - löschen keine Daten)
+    # ─────────────────────────────────────────────────────────
+    heartbeat_timeout_seconds: int = Field(
+        default=180,
+        alias="HEARTBEAT_TIMEOUT_SECONDS",
+        ge=30,
+        description="Seconds before ESP is considered offline (3x heartbeat interval)",
+    )
+    mqtt_health_check_interval_seconds: int = Field(
+        default=30,
+        alias="MQTT_HEALTH_CHECK_INTERVAL_SECONDS",
+        ge=10,
+        le=300,
+        description="Interval for MQTT broker health checks",
+    )
+    esp_health_check_interval_seconds: int = Field(
+        default=60,
+        alias="ESP_HEALTH_CHECK_INTERVAL_SECONDS",
+        ge=10,
+        le=300,
+        description="Interval for ESP health checks",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # STATS AGGREGATION (IMMER ENABLED - löschen keine Daten)
+    # ─────────────────────────────────────────────────────────
+    stats_aggregation_enabled: bool = Field(
+        default=True,
+        alias="STATS_AGGREGATION_ENABLED",
+        description="Enable statistics aggregation",
+    )
+    stats_aggregation_interval_minutes: int = Field(
+        default=60,
+        alias="STATS_AGGREGATION_INTERVAL_MINUTES",
+        ge=1,
+        le=1440,
+        description="Interval for statistics aggregation (minutes)",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # ADVANCED SAFETY FEATURES
+    # ─────────────────────────────────────────────────────────
+    cleanup_require_confirmation: bool = Field(
+        default=True,
+        alias="CLEANUP_REQUIRE_CONFIRMATION",
+        description="Warn user on first cleanup run (safety feature)",
+    )
+    cleanup_alert_threshold_percent: float = Field(
+        default=10.0,
+        alias="CLEANUP_ALERT_THRESHOLD_PERCENT",
+        ge=0.0,
+        le=100.0,
+        description="Alert if deletion exceeds this percentage of total records",
+    )
+    cleanup_max_records_per_run: int = Field(
+        default=100000,
+        alias="CLEANUP_MAX_RECORDS_PER_RUN",
+        ge=1000,
+        le=1000000,
+        description="Safety limit: Max records deleted per cleanup run",
+    )
+
+    @field_validator("sensor_data_retention_days")
+    @classmethod
+    def validate_sensor_retention(cls, v: int, info) -> int:
+        """Warne bei zu kurzer Retention-Period"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if v < 7 and info.data.get("sensor_data_retention_enabled"):
+            logger.warning(
+                f"SENSOR_DATA_RETENTION_DAYS={v} ist sehr kurz! "
+                "Empfohlen: >= 7 Tage"
+            )
+        return v
+
+    @field_validator("command_history_retention_days")
+    @classmethod
+    def validate_command_retention(cls, v: int, info) -> int:
+        """Warne bei zu kurzer Retention-Period"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if v < 7 and info.data.get("command_history_retention_enabled"):
+            logger.warning(
+                f"COMMAND_HISTORY_RETENTION_DAYS={v} ist sehr kurz! "
+                "Empfohlen: >= 7 Tage"
+            )
+        return v
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
+class ResilienceSettings(BaseSettings):
+    """
+    Resilience Patterns Configuration (Circuit Breaker, Retry, Timeout)
+    
+    Provides fault tolerance settings for:
+    - Circuit Breakers (MQTT, Database, External APIs)
+    - Retry mechanisms with exponential backoff
+    - Timeout handling for async operations
+    - Offline buffer for graceful degradation
+    """
+
+    # ─────────────────────────────────────────────────────────
+    # CIRCUIT BREAKER: MQTT
+    # ─────────────────────────────────────────────────────────
+    circuit_breaker_mqtt_failure_threshold: int = Field(
+        default=5,
+        alias="CIRCUIT_BREAKER_MQTT_FAILURE_THRESHOLD",
+        ge=1,
+        le=100,
+        description="Failures before MQTT circuit breaker opens",
+    )
+    circuit_breaker_mqtt_recovery_timeout: int = Field(
+        default=30,
+        alias="CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT",
+        ge=5,
+        le=300,
+        description="Seconds in OPEN before trying HALF_OPEN",
+    )
+    circuit_breaker_mqtt_half_open_timeout: int = Field(
+        default=10,
+        alias="CIRCUIT_BREAKER_MQTT_HALF_OPEN_TIMEOUT",
+        ge=1,
+        le=60,
+        description="Seconds for test request in HALF_OPEN",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # CIRCUIT BREAKER: DATABASE
+    # ─────────────────────────────────────────────────────────
+    circuit_breaker_db_failure_threshold: int = Field(
+        default=3,
+        alias="CIRCUIT_BREAKER_DB_FAILURE_THRESHOLD",
+        ge=1,
+        le=100,
+        description="Failures before database circuit breaker opens",
+    )
+    circuit_breaker_db_recovery_timeout: int = Field(
+        default=10,
+        alias="CIRCUIT_BREAKER_DB_RECOVERY_TIMEOUT",
+        ge=5,
+        le=300,
+        description="Seconds in OPEN before trying HALF_OPEN",
+    )
+    circuit_breaker_db_half_open_timeout: int = Field(
+        default=5,
+        alias="CIRCUIT_BREAKER_DB_HALF_OPEN_TIMEOUT",
+        ge=1,
+        le=60,
+        description="Seconds for test request in HALF_OPEN",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # CIRCUIT BREAKER: EXTERNAL API
+    # ─────────────────────────────────────────────────────────
+    circuit_breaker_api_failure_threshold: int = Field(
+        default=5,
+        alias="CIRCUIT_BREAKER_API_FAILURE_THRESHOLD",
+        ge=1,
+        le=100,
+        description="Failures before external API circuit breaker opens",
+    )
+    circuit_breaker_api_recovery_timeout: int = Field(
+        default=60,
+        alias="CIRCUIT_BREAKER_API_RECOVERY_TIMEOUT",
+        ge=5,
+        le=600,
+        description="Seconds in OPEN before trying HALF_OPEN",
+    )
+    circuit_breaker_api_half_open_timeout: int = Field(
+        default=15,
+        alias="CIRCUIT_BREAKER_API_HALF_OPEN_TIMEOUT",
+        ge=1,
+        le=120,
+        description="Seconds for test request in HALF_OPEN",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # RETRY CONFIGURATION
+    # ─────────────────────────────────────────────────────────
+    retry_max_attempts: int = Field(
+        default=3,
+        alias="RETRY_MAX_ATTEMPTS",
+        ge=1,
+        le=10,
+        description="Maximum retry attempts for transient failures",
+    )
+    retry_base_delay: float = Field(
+        default=1.0,
+        alias="RETRY_BASE_DELAY",
+        ge=0.1,
+        le=30.0,
+        description="Base delay in seconds for exponential backoff",
+    )
+    retry_max_delay: float = Field(
+        default=30.0,
+        alias="RETRY_MAX_DELAY",
+        ge=1.0,
+        le=300.0,
+        description="Maximum delay cap in seconds",
+    )
+    retry_exponential_base: float = Field(
+        default=2.0,
+        alias="RETRY_EXPONENTIAL_BASE",
+        ge=1.1,
+        le=4.0,
+        description="Base for exponential backoff calculation",
+    )
+    retry_jitter_enabled: bool = Field(
+        default=True,
+        alias="RETRY_JITTER_ENABLED",
+        description="Add random jitter to prevent thundering herd",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # TIMEOUT CONFIGURATION
+    # ─────────────────────────────────────────────────────────
+    timeout_mqtt_publish: float = Field(
+        default=5.0,
+        alias="TIMEOUT_MQTT_PUBLISH",
+        ge=1.0,
+        le=60.0,
+        description="Timeout for MQTT publish operations",
+    )
+    timeout_db_query: float = Field(
+        default=5.0,
+        alias="TIMEOUT_DB_QUERY",
+        ge=1.0,
+        le=60.0,
+        description="Timeout for simple database queries",
+    )
+    timeout_db_query_complex: float = Field(
+        default=30.0,
+        alias="TIMEOUT_DB_QUERY_COMPLEX",
+        ge=5.0,
+        le=120.0,
+        description="Timeout for complex database queries (aggregations)",
+    )
+    timeout_external_api: float = Field(
+        default=10.0,
+        alias="TIMEOUT_EXTERNAL_API",
+        ge=1.0,
+        le=120.0,
+        description="Timeout for external API calls",
+    )
+    timeout_websocket_send: float = Field(
+        default=2.0,
+        alias="TIMEOUT_WEBSOCKET_SEND",
+        ge=0.5,
+        le=30.0,
+        description="Timeout for WebSocket send operations",
+    )
+    timeout_sensor_processing: float = Field(
+        default=1.0,
+        alias="TIMEOUT_SENSOR_PROCESSING",
+        ge=0.1,
+        le=10.0,
+        description="Timeout for sensor data processing",
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # OFFLINE BUFFER CONFIGURATION
+    # ─────────────────────────────────────────────────────────
+    offline_buffer_max_size: int = Field(
+        default=1000,
+        alias="OFFLINE_BUFFER_MAX_SIZE",
+        ge=100,
+        le=10000,
+        description="Maximum messages in offline buffer",
+    )
+    offline_buffer_flush_batch_size: int = Field(
+        default=50,
+        alias="OFFLINE_BUFFER_FLUSH_BATCH_SIZE",
+        ge=10,
+        le=500,
+        description="Messages to flush per batch on reconnect",
+    )
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
 class Settings(BaseSettings):
     """Master settings class combining all configuration sections"""
 
@@ -329,6 +746,8 @@ class Settings(BaseSettings):
     external_services: ExternalServicesSettings = ExternalServicesSettings()
     notification: NotificationSettings = NotificationSettings()
     development: DevelopmentSettings = DevelopmentSettings()
+    maintenance: MaintenanceSettings = MaintenanceSettings()
+    resilience: ResilienceSettings = ResilienceSettings()
     
     @property
     def cors_origins(self) -> list[str]:

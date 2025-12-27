@@ -6,7 +6,15 @@ from typing import Any, Dict, Optional
 
 
 class GodKaiserException(Exception):
-    """Base exception for all God-Kaiser Server errors"""
+    """
+    Base exception for all God-Kaiser Server errors.
+    
+    Paket X: Code Consolidation & Industrial Quality
+    Alle Exceptions erben von dieser Basis-Klasse.
+    """
+
+    status_code: int = 500
+    error_code: str = "INTERNAL_ERROR"
 
     def __init__(
         self,
@@ -23,7 +31,7 @@ class GodKaiserException(Exception):
             details: Optional additional details dict
         """
         self.message = message
-        self.error_code = error_code
+        self.error_code = error_code or self.error_code
         self.details = details or {}
         super().__init__(self.message)
 
@@ -166,6 +174,21 @@ class InsufficientPermissionsException(GodKaiserException):
         )
 
 
+# Generic Resource Exceptions (must be defined early for inheritance)
+class NotFoundError(GodKaiserException):
+    """Raised when a resource is not found"""
+
+    status_code = 404
+    error_code = "NOT_FOUND"
+
+    def __init__(self, resource_type: str, identifier: Any) -> None:
+        super().__init__(
+            message=f"{resource_type} with identifier {identifier} not found",
+            error_code="NOT_FOUND",
+            details={"resource_type": resource_type, "identifier": str(identifier)},
+        )
+
+
 # ESP32 Device Exceptions
 class ESP32Exception(GodKaiserException):
     """Base exception for ESP32 device errors"""
@@ -173,15 +196,29 @@ class ESP32Exception(GodKaiserException):
     pass
 
 
-class ESP32NotFoundException(ESP32Exception):
+class ESP32NotFoundException(ESP32Exception, NotFoundError):
     """Raised when ESP32 device is not found"""
+
+    status_code = 404
+    error_code = "ESP_NOT_FOUND"
 
     def __init__(self, esp_id: str) -> None:
         super().__init__(
             message=f"ESP32 device {esp_id} not found",
-            error_code="ESP32_NOT_FOUND",
+            error_code="ESP_NOT_FOUND",
             details={"esp_id": esp_id},
         )
+        NotFoundError.__init__(self, "ESP32", esp_id)
+
+
+class ESPNotFoundError(NotFoundError):
+    """Alias for ESP32NotFoundException - Paket X compatibility"""
+
+    error_code = "ESP_NOT_FOUND"
+
+    def __init__(self, esp_id: str) -> None:
+        super().__init__("ESP32", esp_id)
+        self.details["esp_id"] = esp_id
 
 
 class ESP32OfflineException(ESP32Exception):
@@ -213,8 +250,11 @@ class SensorException(GodKaiserException):
     pass
 
 
-class SensorNotFoundException(SensorException):
+class SensorNotFoundException(SensorException, NotFoundError):
     """Raised when sensor is not found"""
+
+    status_code = 404
+    error_code = "SENSOR_NOT_FOUND"
 
     def __init__(self, esp_id: str, gpio: int) -> None:
         super().__init__(
@@ -222,6 +262,18 @@ class SensorNotFoundException(SensorException):
             error_code="SENSOR_NOT_FOUND",
             details={"esp_id": esp_id, "gpio": gpio},
         )
+        NotFoundError.__init__(self, "Sensor", f"{esp_id}:{gpio}")
+
+
+class SensorNotFoundError(NotFoundError):
+    """Alias for SensorNotFoundException - Paket X compatibility"""
+
+    error_code = "SENSOR_NOT_FOUND"
+
+    def __init__(self, esp_id: str, gpio: int) -> None:
+        super().__init__("Sensor", f"{esp_id}:{gpio}")
+        self.details["esp_id"] = esp_id
+        self.details["gpio"] = gpio
 
 
 class SensorProcessingException(SensorException):
@@ -241,8 +293,11 @@ class ActuatorException(GodKaiserException):
     pass
 
 
-class ActuatorNotFoundException(ActuatorException):
+class ActuatorNotFoundException(ActuatorException, NotFoundError):
     """Raised when actuator is not found"""
+
+    status_code = 404
+    error_code = "ACTUATOR_NOT_FOUND"
 
     def __init__(self, esp_id: str, gpio: int) -> None:
         super().__init__(
@@ -250,6 +305,18 @@ class ActuatorNotFoundException(ActuatorException):
             error_code="ACTUATOR_NOT_FOUND",
             details={"esp_id": esp_id, "gpio": gpio},
         )
+        NotFoundError.__init__(self, "Actuator", f"{esp_id}:{gpio}")
+
+
+class ActuatorNotFoundError(NotFoundError):
+    """Alias for ActuatorNotFoundException - Paket X compatibility"""
+
+    error_code = "ACTUATOR_NOT_FOUND"
+
+    def __init__(self, esp_id: str, gpio: int) -> None:
+        super().__init__("Actuator", f"{esp_id}:{gpio}")
+        self.details["esp_id"] = esp_id
+        self.details["gpio"] = gpio
 
 
 class ActuatorCommandFailedException(ActuatorException):
@@ -278,11 +345,68 @@ class SafetyConstraintViolationException(ActuatorException):
 class ValidationException(GodKaiserException):
     """Raised when input validation fails"""
 
+    status_code = 400
+    error_code = "VALIDATION_ERROR"
+
     def __init__(self, field: str, message: str) -> None:
         super().__init__(
             message=f"Validation failed for field '{field}': {message}",
             error_code="VALIDATION_ERROR",
             details={"field": field, "validation_message": message},
+        )
+
+
+class DuplicateError(GodKaiserException):
+    """Raised when attempting to create a duplicate resource"""
+
+    status_code = 409
+    error_code = "DUPLICATE"
+
+    def __init__(self, resource_type: str, field: str, value: Any) -> None:
+        super().__init__(
+            message=f"{resource_type} with {field}={value} already exists",
+            error_code="DUPLICATE",
+            details={"resource_type": resource_type, "field": field, "value": str(value)},
+        )
+
+
+class AuthenticationError(GodKaiserException):
+    """Raised when authentication fails"""
+
+    status_code = 401
+    error_code = "AUTHENTICATION_FAILED"
+
+    def __init__(self, message: str = "Authentication failed") -> None:
+        super().__init__(
+            message=message,
+            error_code="AUTHENTICATION_FAILED",
+        )
+
+
+class AuthorizationError(GodKaiserException):
+    """Raised when authorization fails"""
+
+    status_code = 403
+    error_code = "FORBIDDEN"
+
+    def __init__(self, message: str = "Forbidden") -> None:
+        super().__init__(
+            message=message,
+            error_code="FORBIDDEN",
+        )
+
+
+class ServiceUnavailableError(GodKaiserException):
+    """Raised when a service is unavailable"""
+
+    status_code = 503
+    error_code = "SERVICE_UNAVAILABLE"
+
+    def __init__(self, service_name: str, details: Optional[str] = None) -> None:
+        super().__init__(
+            message=f"Service {service_name} is unavailable",
+            error_code="SERVICE_UNAVAILABLE",
+            details={"service_name": service_name, "details": details} if details else {"service_name": service_name},
         )
 
 
@@ -325,3 +449,50 @@ class KaiserCommunicationException(ExternalServiceException):
             error_code="KAISER_COMMUNICATION_FAILED",
             details={"kaiser_id": kaiser_id, "details": details},
         )
+
+
+# Simulation Exceptions (Paket X)
+class SimulationException(GodKaiserException):
+    """Base exception for simulation errors"""
+
+    status_code = 500
+    error_code = "SIMULATION_ERROR"
+
+
+class SimulationNotRunningError(SimulationException, ValidationException):
+    """Raised when simulation is not running"""
+
+    status_code = 400
+    error_code = "SIMULATION_NOT_RUNNING"
+
+    def __init__(self, esp_id: str) -> None:
+        super().__init__(
+            field="simulation_state",
+            message=f"Simulation for ESP {esp_id} is not running",
+        )
+        self.details["esp_id"] = esp_id
+
+
+class EmergencyStopActiveError(SimulationException, ValidationException):
+    """Raised when emergency stop is active"""
+
+    status_code = 400
+    error_code = "EMERGENCY_STOP_ACTIVE"
+
+    def __init__(self, esp_id: str) -> None:
+        super().__init__(
+            field="emergency_stop",
+            message=f"Emergency stop is active for ESP {esp_id}",
+        )
+        self.details["esp_id"] = esp_id
+
+
+# Duplicate ESP Error (Paket X compatibility)
+class DuplicateESPError(DuplicateError):
+    """Raised when attempting to create a duplicate ESP"""
+
+    error_code = "DUPLICATE_ESP"
+
+    def __init__(self, esp_id: str) -> None:
+        super().__init__("ESP32", "device_id", esp_id)
+        self.details["esp_id"] = esp_id
