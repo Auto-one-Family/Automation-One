@@ -50,15 +50,32 @@ Das Logic Engine System ermöglicht **Cross-ESP Automatisierung**: Sensor-Daten 
 │  - Rule CRUD with validation                                 │
 │  - Duplicate detection                                       │
 │  - Rule testing/simulation                                   │
+│  - Loop detection & safety checks                            │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              LogicEngine (Background Task)                   │
-│  - Runs in asyncio event loop                               │
-│  - Triggered by sensor_handler OR LogicScheduler            │
-│  - Evaluates conditions via modular Evaluators              │
-│  - Executes actions via modular Executors                   │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ Modular Evaluators:                                   │    │
+│  │ - SensorConditionEvaluator                            │    │
+│  │ - TimeConditionEvaluator                              │    │
+│  │ - CompoundConditionEvaluator                          │    │
+│  │ - HysteresisConditionEvaluator                        │    │
+│  └─────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ Modular Executors:                                   │    │
+│  │ - ActuatorActionExecutor                             │    │
+│  │ - DelayActionExecutor                                │    │
+│  │ - NotificationActionExecutor                         │    │
+│  │ - SequenceActionExecutor                             │    │
+│  └─────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ Safety Components:                                   │    │
+│  │ - ConflictManager (Actuator conflicts)               │    │
+│  │ - RateLimiter (Execution limits)                     │    │
+│  │ - LoopDetector (Circular dependencies)               │    │
+│  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
           │                                   ▲
           │                                   │
@@ -74,6 +91,12 @@ Das Logic Engine System ermöglicht **Cross-ESP Automatisierung**: Sensor-Daten 
 1. **Sensor-Trigger:** ESP → MQTT → sensor_handler → LogicEngine
 2. **Timer-Trigger:** LogicScheduler → LogicEngine (periodisch)
 
+**Safety Features:**
+- **Conflict Management:** Verhindert widersprüchliche Actuator-Befehle
+- **Rate Limiting:** Begrenzt Ausführungen pro Stunde und ESP
+- **Loop Detection:** Erkennt zirkuläre Abhängigkeiten zwischen Rules
+- **Hysteresis:** Verhindert häufiges Ein-/Ausschalten bei Grenzwerten
+
 ### 1.2 Rule Datenmodell
 
 **Code-Location:** `El Servador/god_kaiser_server/src/db/models/logic.py` (Zeile 18-139)
@@ -81,25 +104,159 @@ Das Logic Engine System ermöglicht **Cross-ESP Automatisierung**: Sensor-Daten 
 ```python
 class CrossESPLogic(Base, TimestampMixin):
     __tablename__ = "cross_esp_logic"
-    
-    id: UUID                         # Primary Key
-    rule_name: str                   # Unique name (100 chars max)
-    description: Optional[str]       # Human-readable description
-    trigger_conditions: dict         # JSON: Conditions to evaluate
-    actions: list                    # JSON: Actions to execute
-    logic_operator: str              # "AND" | "OR" (default: "AND")
-    enabled: bool                    # Active/Inactive (default: True)
-    priority: int                    # Lower value = higher priority (default: 100)
-    cooldown_seconds: Optional[int]  # Min time between executions
-    max_executions_per_hour: Optional[int]  # Rate limit
-    last_triggered: Optional[datetime]
-    rule_metadata: dict              # Additional metadata (tags, category, etc.)
-    created_at: datetime             # Auto-set via TimestampMixin
-    updated_at: datetime             # Auto-updated via TimestampMixin
 
-# Alias properties for API compatibility:
-# - rule.name → rule.rule_name
-# - rule.conditions → rule.trigger_conditions (as list)
+    # Primary Key
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        doc="Primary key (UUID)",
+    )
+
+    # Rule Identity
+    rule_name: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
+        nullable=False,
+        doc="Unique rule name",
+    )
+
+    description: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Human-readable rule description",
+    )
+
+    # Rule Status
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        index=True,
+        doc="Whether rule is active",
+    )
+
+    # Trigger Conditions (CRITICAL!)
+    trigger_conditions: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        doc=(
+            "Trigger conditions (sensor thresholds, time windows, etc.). "
+            "Example: {'type': 'sensor_threshold', 'esp_id': 'ESP_A1', 'gpio': 34, "
+            "'sensor_type': 'temperature', 'operator': '>', 'value': 25.0}"
+        ),
+    )
+
+    # Logic Operator for Multiple Conditions
+    logic_operator: Mapped[str] = mapped_column(
+        String(3),
+        default="AND",
+        nullable=False,
+        doc="Logic operator for multiple conditions (AND/OR)",
+    )
+
+    # Actions (CRITICAL!)
+    actions: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        doc=(
+            "Actions to execute when triggered. "
+            "Example: [{'type': 'actuator_command', 'esp_id': 'ESP_B2', 'gpio': 18, "
+            "'actuator_type': 'pump', 'value': 0.75, 'duration_seconds': 60}]"
+        ),
+    )
+
+    # Execution Control
+    priority: Mapped[int] = mapped_column(
+        Integer,
+        default=100,
+        nullable=False,
+        doc="Execution priority (lower = higher priority)",
+    )
+
+    cooldown_seconds: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Minimum time between executions (prevents spam)",
+    )
+
+    max_executions_per_hour: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Maximum executions per hour (rate limit)",
+    )
+
+    last_triggered: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        doc="Timestamp of last execution",
+    )
+
+    # Metadata
+    rule_metadata: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+        doc="Additional rule metadata (tags, category, owner, etc.)",
+    )
+
+    # Indices
+    __table_args__ = (Index("idx_rule_enabled_priority", "enabled", "priority"),)
+
+    # Alias properties for API compatibility
+    @property
+    def name(self) -> str:
+        """Alias for rule_name (API compatibility)."""
+        return self.rule_name
+
+    @name.setter
+    def name(self, value: str) -> None:
+        """Setter for name alias."""
+        self.rule_name = value
+
+    @property
+    def conditions(self) -> list:
+        """Return trigger_conditions as list format (API compatibility)."""
+        if isinstance(self.trigger_conditions, list):
+            return self.trigger_conditions
+        # Single condition dict -> wrap in list
+        return [self.trigger_conditions]
+
+    @conditions.setter
+    def conditions(self, value: list) -> None:
+        """Setter for conditions - stores as trigger_conditions."""
+        self.trigger_conditions = value
+
+    # =========================================================================
+    # VALIDATORS (Pydantic Validation for Production Safety)
+    # =========================================================================
+
+    @validates("trigger_conditions")
+    def validate_trigger_conditions(self, key, value):
+        """Validate trigger_conditions using Pydantic models."""
+        if value is None:
+            raise ValueError("trigger_conditions cannot be None")
+
+        try:
+            # Validate using Pydantic models
+            validate_conditions(value)
+            return value
+        except ValidationError as e:
+            raise ValueError(f"Invalid trigger_conditions: {e}")
+
+    @validates("actions")
+    def validate_actions_field(self, key, value):
+        """Validate actions using Pydantic models."""
+        if value is None:
+            raise ValueError("actions cannot be None")
+
+        try:
+            # Validate using Pydantic models
+            validate_actions(value)
+            return value
+        except ValidationError as e:
+            raise ValueError(f"Invalid actions: {e}")
 ```
 
 > ⚠️ **Wichtig: Priority Sortierung**
@@ -118,6 +275,7 @@ class CrossESPLogic(Base, TimestampMixin):
 | `time_window` | Zeitbasierte Bedingung (Stunden) | `start_hour`, `end_hour`, `days_of_week` | `TimeConditionEvaluator` |
 | `time` | Alias für time_window (HH:MM Format) | `start_time`, `end_time`, `days_of_week` | `TimeConditionEvaluator` |
 | `compound` | Kombinierte Bedingungen | `logic` (AND/OR), `conditions` | `CompoundConditionEvaluator` |
+| `hysteresis` | Hysteresis-Schwellwerte | `esp_id`, `gpio`, `on_threshold`, `off_threshold`, `sensor_type` | `HysteresisConditionEvaluator` |
 
 **Operator Support für sensor_threshold:**
 - `>`, `>=`, `<`, `<=`, `==`, `!=`
@@ -138,6 +296,7 @@ class CrossESPLogic(Base, TimestampMixin):
 | `actuator` | Shorthand | `esp_id`, `gpio`, `command`, `value`, `duration` | `ActuatorActionExecutor` |
 | `delay` | Verzögerung (1-3600s) | `seconds` | `DelayActionExecutor` |
 | `notification` | Multi-Channel Notification | `channel`, `target`, `message_template` | `NotificationActionExecutor` |
+| `sequence` | Sequenzielle Actions | `steps` (Action-Array mit `delay` pro Step) | `SequenceActionExecutor` |
 
 **Actuator Commands:** `ON`, `OFF`, `PWM`, `TOGGLE`
 
@@ -149,6 +308,66 @@ class CrossESPLogic(Base, TimestampMixin):
 **Message Template Variablen:**
 - `{sensor_value}`, `{esp_id}`, `{gpio}`, `{sensor_type}`
 - `{timestamp}`, `{rule_name}`, `{rule_id}`
+
+### 1.5 Safety Features
+
+**Code-Location:** `El Servador/god_kaiser_server/src/services/logic/safety/`
+
+#### 1.5.1 Conflict Manager
+
+**Zweck:** Verhindert widersprüchliche Actuator-Befehle zwischen verschiedenen Rules
+
+```python
+# Beispiel: Rule A schaltet Pumpe ON, Rule B schaltet Pumpe OFF
+# Conflict Manager prüft Prioritäten und blockiert niedrigere Rules
+```
+
+**Mechanismen:**
+- **Priority-based Blocking:** Höhere Priority (niedrigere Zahl) gewinnt
+- **Safety Critical Flags:** Kritische Actions können nicht überschrieben werden
+- **Lock Management:** Temporäre Locks für Actuator-Kombinationen
+
+#### 1.5.2 Rate Limiter
+
+**Zweck:** Begrenzt Rule-Ausführungen um Systemüberlastung zu verhindern
+
+**Limits:**
+- `max_executions_per_hour` pro Rule
+- ESP-basierte Limits (nicht implementiert)
+- Globale System-Limits
+
+#### 1.5.3 Loop Detector
+
+**Zweck:** Erkennt zirkuläre Abhängigkeiten zwischen Rules
+
+**Beispiel problematische Schleife:**
+```
+Rule A: Sensor X > 25 → ESP_B.actuator ON
+Rule B: ESP_B.actuator ON → Sensor Y > 20 → ESP_A.actuator ON
+Rule C: ESP_A.actuator ON → Sensor X > 30 → ESP_B.actuator OFF
+```
+
+**Detection Algorithm:**
+- Graph-basierte Analyse der Rule-Abhängigkeiten
+- DFS-Traversal mit Cycle-Detection
+
+#### 1.5.4 Hysteresis Condition
+
+**Zweck:** Verhindert häufiges Ein-/Ausschalten bei Grenzwerten
+
+**Beispiel:**
+```json
+{
+  "type": "hysteresis",
+  "esp_id": "ESP_TEMP",
+  "gpio": 4,
+  "on_threshold": 25.0,    // Schalte ein bei 25°C
+  "off_threshold": 22.0,   // Schalte aus bei 22°C
+  "sensor_type": "temperature"
+}
+```
+
+**Vorteil:** Reduziert Wear-and-Tear bei Relais und Pumpen
 
 ---
 
@@ -319,11 +538,19 @@ POST /api/v1/logic/rules
 
 **Validierungsregeln:**
 - Name muss unique sein
-- Conditions müssen gültiges Format haben
-- Actions müssen gültiges Format haben
+- Conditions müssen gültiges Format haben (Pydantic Schema Validation)
+- Actions müssen gültiges Format haben (Pydantic Schema Validation)
 - ESP-IDs sollten existieren (Warning)
 - GPIO-Pins sollten konfiguriert sein (Warning)
 - Keine Duplikate (gleiche Conditions + Actions)
+- **Loop Detection:** Zirkuläre Abhängigkeiten werden erkannt
+- **Safety Checks:** Kritische Parameterbereiche werden validiert
+
+**Safety Validation Classes:**
+- `ValidationResult` - Basis Validierungsergebnis
+- `SafetyResult` - Sicherheitsspezifische Warnungen
+- `ConflictResult` - Konflikt-Analyse Ergebnisse
+- `DuplicateResult` - Duplikats-Erkennung Ergebnisse
 
 ### 2.4 Toggle Rule (Enable/Disable)
 
@@ -519,12 +746,69 @@ if rule.cooldown_seconds:
         if time_since_last.total_seconds() < rule.cooldown_seconds:
             logger.debug(f"Rule {rule.rule_name} in cooldown")
             return  # Skip execution
+
+# Check rate limiting
+target_esp_ids = self._extract_target_esp_ids(rule.actions)
+rate_result = await self.rate_limiter.check_rate_limit(
+    rule_id=str(rule.id),
+    rule_max_per_hour=rule.max_executions_per_hour,
+    esp_ids=target_esp_ids
+)
+
+if not rate_result["allowed"]:
+    logger.warning(
+        f"Rule {rule.rule_name} rate limited: {rate_result['reason']}"
+    )
+    return
 ```
 
 > 📝 **Hinweis:** `get_last_execution()` gibt ein `LogicExecutionHistory`-Objekt zurück.
 > Der `timestamp`-Zugriff ist erforderlich für den datetime-Vergleich.
 
-### 3.5 LogicScheduler (Timer-Triggered Rules)
+**Rate Limiting Mechanismen:**
+- **Rule-based:** `max_executions_per_hour` pro Rule
+- **ESP-based:** Zukünftig implementierbare ESP-spezifische Limits
+- **Global Limits:** Systemweite Schutzmechanismen
+
+### 3.5 Conflict Management & Action Execution
+
+**Code-Location:** `logic_engine.py` (Zeile 522-620)
+
+```python
+# Extract actuator actions for conflict management
+actuator_actions = [
+    action for action in actions
+    if action.get("type") in ("actuator_command", "actuator")
+]
+
+# Acquire locks for all actuator actions
+acquired_locks = []
+for action in actuator_actions:
+    can_execute, conflict = await self.conflict_manager.acquire_actuator(
+        esp_id=action.get("esp_id"),
+        gpio=action.get("gpio"),
+        rule_id=str(rule_id),
+        priority=rule_priority,
+        command=action.get("command", "ON"),
+        is_safety_critical=action.get("is_safety_critical", False)
+    )
+
+    if not can_execute:
+        logger.warning(
+            f"Actuator conflict for rule {rule_name}: {conflict.message if conflict else 'Unknown conflict'}"
+        )
+        # Rollback already acquired locks
+        for lock in acquired_locks:
+            await self.conflict_manager.release_actuator(...)
+        return
+```
+
+**Conflict Resolution Strategies:**
+1. **Priority-based:** Niedrigere Priority-Zahl = höhere Priorität
+2. **Safety Critical:** Kritische Actions können nicht überschrieben werden
+3. **Lock Management:** Temporäre exklusive Locks für Actuator/GPIO Kombinationen
+
+### 3.6 LogicScheduler (Timer-Triggered Rules)
 
 **Code-Location:** `El Servador/god_kaiser_server/src/services/logic_scheduler.py`
 
@@ -777,29 +1061,38 @@ POST /api/v1/logic/rules/{rule_id}/test
 | Logic Schemas | `src/schemas/logic.py` | 1-670 | Pydantic API models |
 | Logic API | `src/api/v1/logic.py` | 1-608 | REST endpoints |
 | LogicService | `src/services/logic_service.py` | 1-427 | Business logic |
-| LogicEngine | `src/services/logic_engine.py` | 1-673 | Background evaluation |
+| LogicEngine | `src/services/logic_engine.py` | 1-782 | Background evaluation + Safety |
 | LogicScheduler | `src/services/logic_scheduler.py` | 1-108 | Timer-based rule scheduling |
-| LogicValidator | `src/services/logic/validator.py` | 1-326 | Rule validation |
+| LogicValidator | `src/services/logic/validator.py` | 1-326 | Rule validation + Loop detection |
 | **Condition Evaluators** | | | |
 | - Base | `src/services/logic/conditions/base.py` | 1-53 | Abstract base class |
 | - Sensor | `src/services/logic/conditions/sensor_evaluator.py` | 1-109 | sensor_threshold, sensor |
 | - Time | `src/services/logic/conditions/time_evaluator.py` | 1-117 | time_window, time |
 | - Compound | `src/services/logic/conditions/compound_evaluator.py` | 1-107 | AND/OR combinations |
+| - Hysteresis | `src/services/logic/conditions/hysteresis_evaluator.py` | - | Hysteresis thresholds |
 | **Action Executors** | | | |
 | - Base | `src/services/logic/actions/base.py` | 1-60 | Abstract base class + ActionResult |
 | - Actuator | `src/services/logic/actions/actuator_executor.py` | 1-133 | actuator_command, actuator |
 | - Delay | `src/services/logic/actions/delay_executor.py` | 1-85 | delay |
 | - Notification | `src/services/logic/actions/notification_executor.py` | 1-247 | email, webhook, websocket |
+| - Sequence | `src/services/logic/actions/sequence_executor.py` | - | Sequential action execution |
+| **Safety Components** | | | |
+| - ConflictManager | `src/services/logic/safety/conflict_manager.py` | - | Actuator conflict resolution |
+| - RateLimiter | `src/services/logic/safety/rate_limiter.py` | - | Execution rate limiting |
+| - LoopDetector | `src/services/logic/safety/loop_detector.py` | - | Circular dependency detection |
 
 ### 9.2 Integration Points
 
 | Component | File | Connection | Zeilen |
 |-----------|------|------------|--------|
 | Sensor Handler | `src/mqtt/handlers/sensor_handler.py` | Calls `logic_engine.evaluate_sensor_data()` | 245-268 |
-| Main App | `src/main.py` | Initializes LogicEngine + LogicScheduler on startup | 220-256 |
+| Main App | `src/main.py` | Initializes LogicEngine + LogicScheduler + Safety Service | 220-256 |
 | WebSocket | `src/websocket/manager.py` | Broadcasts `logic_execution` & `notification` events | - |
 | Actuator Service | `src/services/actuator_service.py` | Executes actuator commands via MQTT | - |
+| Safety Service | `src/services/safety_service.py` | Circuit breaker for actuator operations | - |
 | Publisher | `src/mqtt/publisher.py` | MQTT message publishing | - |
+| Conflict Manager | `src/services/logic/safety/conflict_manager.py` | Actuator conflict resolution | - |
+| Rate Limiter | `src/services/logic/safety/rate_limiter.py` | Execution rate limiting | - |
 
 ### 9.3 Sensor Handler Integration (Detail)
 
@@ -843,13 +1136,21 @@ except Exception as e:
 1. Rule ist disabled
 2. Conditions nicht erfüllt
 3. Cooldown aktiv
-4. ESP-ID oder GPIO stimmt nicht überein
-5. LogicEngine nicht gestartet
+4. **Rate limiting aktiv** (max_executions_per_hour erreicht)
+5. **Actuator conflict** (höhere Priority Rule blockiert)
+6. ESP-ID oder GPIO stimmt nicht überein
+7. LogicEngine nicht gestartet
 
 **Debug:**
 ```python
 # In sensor_handler.py nach evaluate_sensor_data() Call prüfen
 logger.debug(f"Triggering logic evaluation for {esp_id}:{gpio}")
+
+# In logic_engine.py für Rate Limiting prüfen
+logger.debug(f"Rate limit check: {rate_result}")
+
+# In logic_engine.py für Conflicts prüfen
+logger.warning(f"Actuator conflict: {conflict.message}")
 ```
 
 ### 10.2 Action wird nicht ausgeführt
@@ -946,7 +1247,8 @@ mosquitto_sub -t "kaiser/god/esp/+/actuator/set" -v
 
 ---
 
-**Letzte Verifizierung:** 19. Dezember 2025
+**Letzte Verifizierung:** 27. Dezember 2025
 **Dokumentation basiert auf:** Git master branch
-**Code-Review:** Alle Zeilenreferenzen verifiziert
+**Code-Review:** Alle Zeilenreferenzen verifiziert, Safety-Features hinzugefügt
+**Neue Features:** Conflict Management, Rate Limiting, Hysteresis, Loop Detection
 

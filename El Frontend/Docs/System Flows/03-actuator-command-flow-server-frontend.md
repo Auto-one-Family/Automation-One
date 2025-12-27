@@ -428,10 +428,10 @@ Gespiegelte Dokumentation zu `El Trabajante/docs/system-flows/03-actuator-comman
 **Features:**
 
 - Liste aller Aktoren über alle ESPs (Zeile 39-47)
-- Globaler Emergency Stop Button (Zeile 119-125)
+- Globaler Emergency Stop Button (Zeile 174-180)
 - Quick Stats: Active/Inactive/E-Stop Count (Zeile 81-89)
 - Filter nach ESP ID, Actuator Type, State (Zeile 50-71)
-- Toggle ON/OFF per Actuator (Zeile 115-117)
+- Toggle ON/OFF per Actuator (Zeile 170-172)
 
 **Datenquelle:** `mockEspStore.fetchAll()` (REST API Polling)
 
@@ -451,10 +451,10 @@ Gespiegelte Dokumentation zu `El Trabajante/docs/system-flows/03-actuator-comman
 
 | User-Aktion | UI Element | API Call | Code-Location |
 |-------------|------------|----------|---------------|
-| Actuator ON/OFF | Toggle Button | `mockEspStore.setActuatorState()` | `ActuatorsView.vue:115-117` |
-| Emergency Stop (ESP) | Red Button | `mockEspStore.emergencyStop()` | `MockEspDetailView.vue:132-135` |
-| Emergency Stop (All) | Red Button | `emergencyStopAll()` Loop | `ActuatorsView.vue:119-125` |
-| Clear Emergency | Button | `mockEspStore.clearEmergency()` | `MockEspDetailView.vue:138-140` |
+| Actuator ON/OFF | Toggle Button | `mockEspStore.setActuatorState()` | `ActuatorsView.vue:170-172` |
+| Emergency Stop (ESP) | Red Button | `mockEspStore.emergencyStop()` | `MockEspDetailView.vue:214-218` |
+| Emergency Stop (All) | Red Button | `emergencyStopAll()` Loop | `ActuatorsView.vue:174-180` |
+| Clear Emergency | Button | `mockEspStore.clearEmergency()` | `MockEspDetailView.vue:220-222` |
 
 ### Debug API Funktionen
 
@@ -701,14 +701,14 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 | **ESP32 Topic Builder** | `El Trabajante/src/utils/topic_builder.cpp` | `buildActuatorCommandTopic()` (69-78), `buildActuatorStatusTopic()` (80-89), `buildActuatorResponseTopic()` (91-100) |
 | **Server ActuatorService** | `El Servador/.../services/actuator_service.py` | `send_command()` (44-193) |
 | **Server Publisher** | `El Servador/.../mqtt/publisher.py` | `publish_actuator_command()` (38-72), `_publish_with_retry()` (201-244) |
-| **Server Constants** | `El Servador/.../core/constants.py` | `QOS_ACTUATOR_COMMAND = 2` (169) |
+| **Server Constants** | `El Servador/.../core/constants.py` | `QOS_ACTUATOR_COMMAND = 2` (193) |
 | **Server Status Handler** | `El Servador/.../mqtt/handlers/actuator_handler.py` | `handle_actuator_status()` (34-186), `_validate_payload()` (195-263) |
 | **Server Response Handler** | `El Servador/.../mqtt/handlers/actuator_response_handler.py` | `handle_actuator_response()` (54-160) |
 | **Server Alert Handler** | `El Servador/.../mqtt/handlers/actuator_alert_handler.py` | `handle_actuator_alert()` (66-197), `ALERT_SEVERITY` (44-49) |
 | **Server API Endpoints** | `El Servador/.../api/v1/actuators.py` | `send_command()` (350-428), `emergency_stop()` (524-648) |
 | **Logic Actuator Executor** | `El Servador/.../services/logic/actions/actuator_executor.py` | `execute()` (39-132) |
-| **Frontend Actuators View** | `El Frontend/src/views/ActuatorsView.vue` | `toggleActuator()` (115-117), `emergencyStopAll()` (119-125) |
-| **Frontend ESP Detail** | `El Frontend/src/views/MockEspDetailView.vue` | `toggleActuator()` (200-202), `emergencyStop()` (132-135) |
+| **Frontend Actuators View** | `El Frontend/src/views/ActuatorsView.vue` | `toggleActuator()` (170-172), `emergencyStopAll()` (174-180) |
+| **Frontend ESP Detail** | `El Frontend/src/views/MockEspDetailView.vue` | `toggleActuator()` (295-297), `emergencyStop()` (214-218) |
 | **Frontend Debug API** | `El Frontend/src/api/debug.ts` | `setActuatorState()` (194-206), `emergencyStop()` (215-222) |
 
 ---
@@ -727,7 +727,7 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 ### Server-Seite (Command senden)
 
 - [x] `publish_actuator_command()` auf Zeilen 38-72 in `publisher.py`
-- [x] QoS 2 bestätigt (`constants.py:169`)
+- [x] QoS 2 bestätigt (`constants.py:193`)
 - [x] Retry-Logik: 3 Versuche, 1s Delay (`publisher.py:228-242`)
 - [x] API Endpoint: `POST /api/v1/actuators/{esp_id}/{gpio}/command`
 - [x] Emergency Stop Endpoint: `POST /api/v1/actuators/emergency_stop`
@@ -749,8 +749,8 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 
 ---
 
-**Letzte Verifizierung:** 2025-12-17
-**Verifiziert gegen Code-Version:** Git master branch (Commit-Stand: 2025-12-17)
+**Letzte Verifizierung:** 2025-12-27
+**Verifiziert gegen Code-Version:** Git master branch (Commit-Stand: 2025-12-27)
 
 ---
 
@@ -758,4 +758,5 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 
 | Datum | Version | Änderungen |
 |-------|---------|------------|
+| 2025-12-27 | 1.1 | Aktualisiert Zeilennummern für Frontend-Code (ActuatorsView.vue, MockEspDetailView.vue) und QOS_ACTUATOR_COMMAND Konstante |
 | 2025-12-17 | 1.0 | Initiale Erstellung, vollständig verifiziert gegen aktuellen Code |

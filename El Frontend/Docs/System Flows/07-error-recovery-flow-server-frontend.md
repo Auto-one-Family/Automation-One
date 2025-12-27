@@ -142,10 +142,17 @@ ESP32                          Server                    Database
 
 | Funktion | Zeilen | Beschreibung |
 |----------|--------|--------------|
-| `handle_heartbeat()` | 54-175 | Hauptlogik |
-| `_validate_payload()` | 298-371 | Payload-Validierung |
-| `_update_esp_metadata()` | 253-296 | Metadata-Update |
-| `_log_health_metrics()` | 373-413 | Health-Logging mit Warnungen |
+| `handle_heartbeat()` | 55-177 | Hauptlogik |
+| `_validate_payload()` | 303-376 | Payload-Validierung |
+| `_update_esp_metadata()` | 258-301 | Metadata-Update |
+| `_log_health_metrics()` | 449-489 | Health-Logging mit Warnungen |
+| `_detect_device_source()` | 378-447 | Device-Source-Detection für Logging |
+| `check_device_timeouts()` | 491-540 | Periodic Timeout-Check |
+
+**Neue Features:**
+- **Auto-Discovery DISABLED:** Sicherheit - ESPs müssen manuell registriert werden
+- **Device Source Detection:** Erkennt Mock/Test/Production Devices für Logging
+- **Structured Error Codes:** Detaillierte Fehlerklassifizierung
 
 **Health-Warnungen:**
 - `heap_free < 10000`: Low memory warning
@@ -173,6 +180,9 @@ async def check_device_status(
 ) -> Dict[str, List[str]]:
     """
     Check all device statuses and mark offline devices.
+
+    Args:
+        offline_threshold_seconds: Seconds since last_seen to mark offline (default: 120)
 
     Returns:
         {
@@ -278,6 +288,9 @@ asyncio.create_task(periodic_health_check())
 │ - Auto-Reconnect mit Exponential Backoff                    │
 │ - Connection State Management                               │
 │ - Thread-safe Operations                                    │
+│ - Circuit Breaker Integration (Resilienz)                  │
+│ - Offline Buffer (Graceful Degradation)                     │
+│ - Rate-Limiting für Disconnect Logs                         │
 ├─────────────────────────────────────────────────────────────┤
 │ Instanz holen:                                              │
 │   client = MQTTClient.get_instance()                        │
@@ -294,6 +307,14 @@ asyncio.create_task(periodic_health_check())
 | `connected` | bool | False | Aktueller Verbindungsstatus |
 | `reconnect_delay` | int | 1 | Aktuelle Reconnect-Verzögerung (Sekunden) |
 | `max_reconnect_delay` | int | 60 | Maximale Reconnect-Verzögerung |
+| `_circuit_breaker` | CircuitBreaker | None | Circuit Breaker für MQTT-Operationen |
+| `_offline_buffer` | MQTTOfflineBuffer | None | Buffer für Offline-Nachrichten |
+
+**Neue Resilience-Features:**
+
+- **Circuit Breaker:** Verhindert MQTT-Publishes bei anhaltenden Fehlern, aktiviert Offline-Buffer
+- **Offline Buffer:** Speichert Nachrichten bei Verbindungsunterbrechung für späteren Versand
+- **Rate-Limiting:** Begrenzt Disconnect-Log-Spam auf max. 1 Meldung pro 60 Sekunden
 
 ---
 
@@ -322,14 +343,36 @@ self.client.reconnect_delay_set(min_delay=1, max_delay=60)
 
 ### 2.3 Connection Events
 
-**`_on_connect` Callback (Zeilen 303-319):**
+**`_on_connect` Callback (Zeilen 456-494):**
 
 ```python
 def _on_connect(self, client, userdata, flags, rc):
     if rc == 0:
         self.connected = True
         self.reconnect_delay = 1  # Reset reconnect delay
+        # Reset rate-limiting on successful connect
+        with self._disconnect_lock:
+            self._last_disconnect_log_time = 0.0
+            self._disconnect_suppressed_count = 0
         logger.info(f"MQTT connected with result code: {rc}")
+
+        # Reset circuit breaker on successful connection
+        if self._circuit_breaker:
+            self._circuit_breaker.reset()
+            logger.info("[resilience] MQTT CircuitBreaker reset on connect")
+
+        # Auto re-subscribe to all topics if this is a reconnection
+        if self._subscriber and hasattr(self._subscriber, 'subscribe_all'):
+            logger.info("Reconnected to MQTT broker - re-subscribing to all topics...")
+            try:
+                self._subscriber.subscribe_all()
+                logger.info("Re-subscription complete")
+            except Exception as e:
+                logger.error(f"Failed to re-subscribe after reconnect: {e}", exc_info=True)
+
+        # Flush offline buffer on reconnect
+        if self._offline_buffer and not self._offline_buffer.is_empty:
+            asyncio.create_task(self._flush_offline_buffer())
     else:
         self.connected = False
         # Error handling mit Reason-Codes
@@ -404,12 +447,19 @@ def _on_disconnect(self, client, userdata, rc):
          │     │ (rc = 0)       │           │ (max: 60s)     │
          │     │                │           └────────┬───────┘
          │     │ - connected =  │                    │
-         │     │   True         │                    │
-         │     │ - Reset delay  │           ┌────────▼────────┐
+         │     │   True         │           ┌────────▼────────┐
          │◄────│   to 1s        │           │ Wait & Retry    │
-         │     │ - Subs auto-   │           │ (Exponential    │
-         │     │   restored     │           │  Backoff)       │
-         │     └────────────────┘           └─────────────────┘
+         │     │ - Reset delay  │           │ (Exponential    │
+         │     │   to 1s        │           │  Backoff)       │
+         │     │ - Circuit      │           └─────────────────┘
+         │     │   Breaker      │
+         │     │   reset        │
+         │     │ - Auto re-     │
+         │     │   subscribe    │
+         │     │ - Flush        │
+         │     │   offline      │
+         │     │   buffer       │
+         │     └────────────────┘
 ```
 
 ---
@@ -816,9 +866,13 @@ async function checkAuthStatus(): Promise<void> {
 
 ### 5.3 WebSocket Error Handling
 
-**Code-Location:** `src/composables/useRealTimeData.ts`
+**⚠️ WICHTIGER HINWEIS:** Der `useRealTimeData` Composable ist **DEPRECATED**.
+Er wurde ersetzt durch `useWebSocket` für bessere Performance und Ressourcen-Management.
 
-**Connection Handling (Zeilen 125-175):**
+**Neue Implementierung:** `src/composables/useWebSocket.ts`
+**Alte Implementierung (deprecated):** `src/composables/useRealTimeData.ts`
+
+**Connection Handling (Zeilen 182-246 - DEPRECATED IMPLEMENTIERUNG):**
 
 ```typescript
 function connect() {
@@ -863,7 +917,7 @@ function connect() {
 }
 ```
 
-**Auto-Reconnect (Zeilen 197-210):**
+**Auto-Reconnect (Zeilen 269-280 - DEPRECATED IMPLEMENTIERUNG):**
 
 ```typescript
 function scheduleReconnect() {
@@ -1127,28 +1181,35 @@ t=260s  [Normal Operation Resumed]    [Receiving Heartbeats]       [Showing "Onl
 
 ### Server-Seite
 
-- [x] `src/mqtt/client.py` - Reconnection-Logic mit Exponential Backoff (Zeilen 133-136)
-- [x] `src/mqtt/client.py` - `is_connected()` Methode (Zeilen 293-300)
-- [x] `src/mqtt/client.py` - `on_connect` / `on_disconnect` Callbacks (Zeilen 303-350)
+- [x] `src/mqtt/client.py` - Reconnection-Logic mit Exponential Backoff (Zeilen 243-246)
+- [x] `src/mqtt/client.py` - Circuit Breaker Integration (Zeilen 140-164)
+- [x] `src/mqtt/client.py` - Offline Buffer für Graceful Degradation (Zeilen 165-173)
+- [x] `src/mqtt/client.py` - Rate-Limiting für Disconnect Logs (Zeilen 33-81)
+- [x] `src/mqtt/client.py` - Auto Re-subscription bei Reconnect (Zeilen 472-479)
+- [x] `src/mqtt/client.py` - `is_connected()` Methode (Zeilen 446-453)
+- [x] `src/mqtt/client.py` - `on_connect` / `on_disconnect` Callbacks (Zeilen 456-568)
 - [x] `src/services/esp_service.py` - `check_device_status()` - Vollständige Logik (Zeilen 211-250)
 - [x] `src/services/esp_service.py` - `update_health()` - Vollständige Logik (Zeilen 160-209)
 - [x] `src/services/esp_service.py` - Offline-Threshold-Wert: 120s (Default), konfigurierbar als Parameter
-- [x] `src/mqtt/handlers/heartbeat_handler.py` - Vollständiger Flow (Zeilen 54-175)
-- [x] `src/mqtt/handlers/heartbeat_handler.py` - WebSocket Broadcast vorhanden: **JA** (Zeilen 148-163)
+- [x] `src/mqtt/handlers/heartbeat_handler.py` - Vollständiger Flow (Zeilen 55-177)
+- [x] `src/mqtt/handlers/heartbeat_handler.py` - Auto-Discovery DISABLED (Zeilen 113-126)
+- [x] `src/mqtt/handlers/heartbeat_handler.py` - Device Source Detection (Zeilen 378-447)
+- [x] `src/mqtt/handlers/heartbeat_handler.py` - WebSocket Broadcast vorhanden: **JA** (Zeilen 153-168)
 - [x] `src/mqtt/handlers/actuator_alert_handler.py` - Alert-Types und Severity (Zeilen 44-49)
 - [x] `src/mqtt/handlers/config_handler.py` - WebSocket Broadcast vorhanden: **JA** (Zeilen 154-177)
 - [x] `src/services/safety_service.py` - Emergency-Stop-Integration (Zeilen 215-234)
-- [x] `src/websocket/manager.py` - `broadcast_threadsafe()` Methode (Zeilen 219-238)
-- [x] `src/websocket/manager.py` - Rate-Limiting-Implementierung: 10 msg/sec (Zeilen 240-269)
+- [x] `src/websocket/manager.py` - `broadcast_threadsafe()` Methode (Zeilen 237-256)
+- [x] `src/websocket/manager.py` - Rate-Limiting-Implementierung: 10 msg/sec (Zeilen 258-287)
 
 ### Frontend-Seite
 
 - [x] `src/api/index.ts` - Error-Interceptor vollständig analysiert (Zeilen 31-71)
 - [x] `src/stores/auth.ts` - Token-Refresh-Logic vollständig analysiert (Zeilen 104-119)
-- [x] `src/composables/useRealTimeData.ts` - WebSocket onclose/onerror Handler (Zeilen 150-165)
+- [x] `src/composables/useRealTimeData.ts` - DEPRECATED (Zeilen 1-5), ersetzt durch `useWebSocket`
+- [x] `src/composables/useRealTimeData.ts` - WebSocket onclose/onerror Handler (Zeilen 213-246)
 - [x] Notification-System vorhanden: **NEIN** (⚠️ LÜCKE - `useToast` auskommentiert)
 - [x] ESP-Status-Badges vorhanden: **JA** - `ESPCard.vue:96-98`
-- [x] Connection-Status-Indicator vorhanden: **JA** - `isConnected` in useRealTimeData
+- [x] Connection-Status-Indicator vorhanden: **JA** - `isConnected` in useRealTimeData (deprecated)
 - [x] Emergency-Stop-UI vorhanden: **JA** - `ActuatorsView.vue`, `DashboardView.vue`, `ESPCard.vue`
 
 ### Cross-System
@@ -1158,6 +1219,8 @@ t=260s  [Normal Operation Resumed]    [Receiving Heartbeats]       [Showing "Onl
 - [x] Server Offline-Threshold: **120s (Default)**, **300s (Heartbeat Handler)**
 - [x] Server Offline-Threshold konfigurierbar: **JA** - als Parameter in `check_device_status()` und via `core/config.py:194`
 - [x] Periodic Health-Check-Task vorhanden: **NEIN** (⚠️ LÜCKE)
+- [x] MQTT Circuit Breaker Integration: **JA** - mit Offline Buffer (Zeilen 379-424)
+- [x] WebSocket Composable Migration: **AUSSTEHEND** (⚠️ LÜCKE - `useRealTimeData` deprecated)
 
 ---
 
@@ -1174,6 +1237,7 @@ t=260s  [Normal Operation Resumed]    [Receiving Heartbeats]       [Showing "Onl
 | Lücke | Beschreibung | Geschätzter Aufwand |
 |-------|--------------|---------------------|
 | **Globales Notification-System** | Toast/Snackbar für API-Fehler | 2-3 Stunden |
+| **WebSocket Composable Migration** | `useRealTimeData` → `useWebSocket` Migration | 4-6 Stunden |
 
 ### Phase 3: Nice-to-have
 
@@ -1184,5 +1248,5 @@ t=260s  [Normal Operation Resumed]    [Receiving Heartbeats]       [Showing "Onl
 
 ---
 
-**Letzte Verifizierung:** 2025-12-18
+**Letzte Verifizierung:** 2025-12-27
 **Verifiziert gegen Code-Version:** Git master branch

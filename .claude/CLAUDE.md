@@ -9,18 +9,22 @@
 | Ich will... | Primäre Quelle | Code-Location |
 |-------------|----------------|---------------|
 | **ESP32 Code ändern** | [Section 8: Workflow](#8-ki-agenten-workflow) | `El Trabajante/src/` |
-| **Server Code ändern** | `.claude/CLAUDE_SERVER.md` → [Section 13: Workflow](.claude/CLAUDE_SERVER.md#13-ki-agenten-workflow) | `El Servador/god_kaiser_server/src/` |
+| **Server Code ändern** | [Section 11.1: Server-Architektur](#111-el-servador---server-architektur-god-kaiser) + `.claude/CLAUDE_SERVER.md` | `El Servador/god_kaiser_server/src/` |
 | **Frontend Code ändern** | `.claude/CLAUDE_FRONTEND.md` | `El Frontend/src/` |
+| **Maintenance Jobs** | `.claude/PAKET_D_MAINTENANCE_JOBS_IMPROVED.md` | Server: `src/services/maintenance/`<br>Frontend: `El Frontend/src/views/MaintenanceView.vue` |
 | **Frontend + Server starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
 | **Frontend Bug debuggen** | `El Frontend/Docs/Bugs_Found.md` | Workflow + Fix dokumentiert |
 | **MQTT verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | ESP: `src/services/communication/mqtt_client.*`<br>Server: `.claude/CLAUDE_SERVER.md` → [Section 4](.claude/CLAUDE_SERVER.md#4-mqtt-topic-referenz-server-perspektive) |
 | **ESP32 API verstehen** | `El Trabajante/docs/API_REFERENCE.md` | `src/services/[modul]/` |
-| **Server API verstehen** | `.claude/CLAUDE_SERVER.md` → [Section 3.2](.claude/CLAUDE_SERVER.md#32-aufgabe-rest-api-endpoint-hinzufügen) | `El Servador/god_kaiser_server/src/api/v1/` |
+| **Server API verstehen** | [Section 11.1: Server-Architektur](#111-el-servador---server-architektur-god-kaiser) → REST API | `El Servador/god_kaiser_server/src/api/v1/` |
 | **Tests schreiben** | `.claude/CLAUDE_SERVER.md` → [Section 12](.claude/CLAUDE_SERVER.md#12-modul-dokumentation-navigation) | `El Servador/god_kaiser_server/tests/` |
 | **Error-Code finden** | [Section 5](#5-error-codes-verifiziert) | `src/models/error_codes.h` |
 | **ESP32 Build ausführen** | [Section 1](#1-build--commands) | `platformio.ini` |
 | **Server starten** | `.claude/CLAUDE_SERVER.md` → [Section 7.1](.claude/CLAUDE_SERVER.md#71-server-starten-development) | `El Servador/god_kaiser_server/` |
-| **System-Flow verstehen** | `El Trabajante/docs/system-flows/` | `src/core/` |
+| **System-Flow verstehen** | `El Trabajante/docs/system-flows/` (9 Flows inkl. Subzone-Management) | `src/core/` |
+| **Paket X (Migration)** | `.cursor/plans/paket_x_-_vollständige_migration_zu_industrietauglichem_system_bc5638d4.plan.md` | SimulationScheduler → MockESPManager Migration |
+| **Paket F (Live-Updates)** | `.claude/PAKET_F_ANALYSE.md` | WebSocket Live-Updates im Frontend |
+| **Subzone-Management** | `El Trabajante/docs/system-flows/09-subzone-management-flow.md` | Pin-Level Zone-Gruppierung mit Safe-Mode |
 
 ---
 
@@ -143,7 +147,7 @@ El Trabajante/                     # ESP32 Firmware (~13.300 Zeilen)
 │   ├── NVS_KEYS.md                # NVS-Speicher-Keys (~300 Zeilen)
 │   ├── Roadmap.md                 # Aktueller Status (~150 Zeilen)
 │   ├── System_Overview.md         # Codebase-Analyse (~2.500 Zeilen)
-│   └── system-flows/              # 8 Ablauf-Diagramme
+│   └── system-flows/              # 9 Ablauf-Diagramme (inkl. Subzone-Management)
 └── platformio.ini                 # Build-Konfiguration
 ```
 
@@ -377,6 +381,8 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 | NVS-Keys | `docs/NVS_KEYS.md` | `src/services/config/storage_manager.*` |
 | System-Flow | `docs/system-flows/` | `docs/System_Overview.md` |
 | Tests schreiben | `El Servador/docs/ESP32_TESTING.md` | `.claude/TEST_WORKFLOW.md` |
+| Live-Updates verstehen | `.claude/PAKET_F_ANALYSE.md` | `El Frontend/src/services/websocket.ts` |
+| Simulation verstehen | `.cursor/plans/paket_x_-_vollständige_migration_zu_industrietauglichem_system_bc5638d4.plan.md` | `El Servador/god_kaiser_server/src/services/simulation/scheduler.py` |
 | Error-Handling | `src/models/error_codes.h` | `src/error_handling/` |
 
 ---
@@ -395,6 +401,8 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 - Server + Frontend starten → `DEBUG_ARCHITECTURE.md` Section 0
 - Bug debuggen → `Bugs_Found.md`
 - API verstehen → `APIs.md`
+- **Live-Updates verstehen** → `.claude/PAKET_F_ANALYSE.md` (WebSocket Integration)
+- **WebSocket Service** → `El Frontend/src/services/websocket.ts` (Singleton-Pattern)
 
 **📖 Server-Aufgaben?** → Siehe `.claude/CLAUDE_SERVER.md`:
 - Sensor-Library hinzufügen → [Section 3.1](.claude/CLAUDE_SERVER.md#31-aufgabe-neuen-sensor-typ-hinzufügen)
@@ -405,7 +413,395 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 
 ---
 
-## 11.1 Server-Integration: Verhaltensregeln für ESP32-Code
+## 11.1 El Servador - Server-Architektur (God-Kaiser)
+
+### Verzeichnisstruktur
+
+```
+El Servador/god_kaiser_server/      # Python FastAPI Server (~15.000+ Zeilen)
+├── src/
+│   ├── main.py                     # ⭐ FastAPI App Entry Point, Lifespan Management
+│   ├── api/
+│   │   ├── v1/                     # ⭐ REST API Endpoints (v1)
+│   │   │   ├── auth.py            # JWT Authentication
+│   │   │   ├── esp.py             # ESP32 Device Management
+│   │   │   ├── sensors.py         # Sensor Configuration & Data
+│   │   │   ├── actuators.py       # Actuator Control & Commands
+│   │   │   ├── logic.py           # Cross-ESP Automation Rules
+│   │   │   ├── zone.py            # Zone Assignment & Management
+│   │   │   ├── subzone.py         # Subzone Management & Safe-Mode
+│   │   │   ├── health.py          # Health Checks & Metrics
+│   │   │   ├── audit.py           # Audit Log API
+│   │   │   ├── debug.py           # Mock ESP Management
+│   │   │   ├── users.py           # User Management
+│   │   │   ├── library.py         # Sensor Library Management
+│   │   │   └── websocket/         # WebSocket Real-time Updates
+│   │   ├── dependencies.py        # FastAPI Dependencies (Auth, DB Session)
+│   │   └── sensor_processing.py   # Real-Time HTTP Sensor Processing
+│   ├── core/
+│   │   ├── config.py              # ⭐ Pydantic Settings (15+ Config-Klassen)
+│   │   ├── constants.py          # System Constants
+│   │   ├── error_codes.py         # Unified Error Codes (1000-5999)
+│   │   ├── exceptions.py          # Custom Exceptions
+│   │   ├── logging_config.py     # Structured Logging Setup
+│   │   ├── scheduler.py           # Central APScheduler Instance
+│   │   ├── security.py            # JWT, Password Hashing
+│   │   └── validators.py          # Pydantic Validators
+│   ├── db/
+│   │   ├── base.py                # SQLAlchemy Base
+│   │   ├── session.py            # Async Session Factory
+│   │   ├── models/               # ⭐ Database Models (15 Models)
+│   │   │   ├── esp.py            # ESPDevice
+│   │   │   ├── sensor.py         # SensorConfig, SensorData
+│   │   │   ├── actuator.py       # ActuatorConfig, ActuatorState, ActuatorHistory
+│   │   │   ├── logic.py          # CrossESPLogic, LogicExecutionHistory
+│   │   │   ├── zone.py           # Zone (via ESPDevice.master_zone_id)
+│   │   │   ├── subzone.py        # SubzoneConfig
+│   │   │   ├── user.py           # User
+│   │   │   ├── auth.py           # TokenBlacklist
+│   │   │   ├── audit_log.py      # AuditLog
+│   │   │   ├── library.py        # LibraryMetadata
+│   │   │   ├── ai.py             # AIPredictions
+│   │   │   ├── kaiser.py         # KaiserRegistry, ESPOwnership
+│   │   │   ├── system.py         # SystemConfig
+│   │   │   └── enums.py          # DataSource, etc.
+│   │   └── repositories/         # ⭐ Repository Pattern (14 Repositories)
+│   │       ├── base_repo.py      # Generic CRUD Base
+│   │       ├── esp_repo.py       # ESPDevice Repository
+│   │       ├── sensor_repo.py    # Sensor Repository
+│   │       ├── actuator_repo.py # Actuator Repository
+│   │       ├── logic_repo.py     # Logic Repository
+│   │       ├── zone_repo.py      # Zone Repository
+│   │       ├── user_repo.py      # User Repository
+│   │       └── ...               # Weitere Repositories
+│   ├── mqtt/
+│   │   ├── client.py             # ⭐ Singleton MQTT Client (Paho-MQTT)
+│   │   ├── subscriber.py         # ⭐ Topic Subscription & Handler Routing
+│   │   ├── publisher.py          # MQTT Message Publishing
+│   │   ├── topics.py             # Topic Builder Utilities
+│   │   └── handlers/             # ⭐ MQTT Message Handlers (12 Handler)
+│   │       ├── base_handler.py   # Base Handler mit Error-Isolation
+│   │       ├── sensor_handler.py # Sensor Data Processing
+│   │       ├── actuator_handler.py # Actuator Status Updates
+│   │       ├── actuator_response_handler.py # Command Confirmations
+│   │       ├── actuator_alert_handler.py # Emergency/Timeout Alerts
+│   │       ├── heartbeat_handler.py # ESP Health Monitoring
+│   │       ├── config_handler.py # Config Acknowledgment
+│   │       ├── zone_ack_handler.py # Zone Assignment ACK
+│   │       ├── subzone_ack_handler.py # Subzone Assignment ACK
+│   │       ├── discovery_handler.py # Legacy Discovery (DEPRECATED)
+│   │       └── kaiser_handler.py # Kaiser Node Status (PLANNED)
+│   ├── services/
+│   │   ├── esp_service.py        # ⭐ ESP Device Management
+│   │   ├── sensor_service.py     # ⭐ Sensor Configuration & Data
+│   │   ├── actuator_service.py   # ⭐ Actuator Control & Safety
+│   │   ├── safety_service.py     # ⭐ Safety Validation (Emergency-Stop, Value-Checks)
+│   │   ├── logic_engine.py       # ⭐ Cross-ESP Automation Engine (Background Task)
+│   │   ├── logic_scheduler.py    # Logic Rule Scheduler (Timer-based)
+│   │   ├── logic_service.py     # Logic Rule CRUD Operations
+│   │   ├── zone_service.py      # Zone Management
+│   │   ├── subzone_service.py   # Subzone Management
+│   │   ├── config_builder.py    # ESP32 Config Payload Builder
+│   │   ├── mock_esp_manager.py  # Mock ESP Simulation Management
+│   │   ├── mqtt_auth_service.py  # MQTT Authentication (Mosquitto Passwd)
+│   │   ├── health_service.py    # Health Check Aggregation
+│   │   ├── audit_retention_service.py # Audit Log Cleanup
+│   │   ├── library_service.py   # Sensor Library Management
+│   │   ├── god_client.py        # God Layer HTTP Client
+│   │   ├── ai_service.py         # AI/God Layer Integration
+│   │   ├── kaiser_service.py    # Kaiser Node Management (PLANNED)
+│   │   ├── maintenance/         # ⭐ Maintenance Jobs System
+│   │   │   ├── service.py       # MaintenanceService (Singleton)
+│   │   │   └── jobs/
+│   │   │       └── cleanup.py  # Cleanup Jobs (Sensor Data, Command History, Audit Log)
+│   │   ├── simulation/          # Mock ESP Simulation
+│   │   │   └── scheduler.py    # SimulationScheduler
+│   │   └── logic/               # Logic Engine Components
+│   │       ├── conditions/     # Condition Evaluators
+│   │       │   ├── base.py
+│   │       │   ├── sensor_evaluator.py
+│   │       │   ├── time_evaluator.py
+│   │       │   └── compound_evaluator.py
+│   │       └── actions/        # Action Executors
+│   │           ├── base.py
+│   │           ├── actuator_executor.py
+│   │           ├── delay_executor.py
+│   │           └── notification_executor.py
+│   ├── sensors/
+│   │   ├── base_processor.py    # Base Sensor Processor Interface
+│   │   ├── library_loader.py    # Dynamic Library Loading
+│   │   ├── sensor_type_registry.py # Sensor Type Registry
+│   │   └── sensor_libraries/
+│   │       └── active/          # ⭐ Active Sensor Libraries (10 Libraries)
+│   │           ├── ds18b20.py   # DS18B20 Temperature
+│   │           ├── sht31.py     # SHT31 Temperature/Humidity
+│   │           ├── ph.py        # PH Sensor
+│   │           └── ...          # Weitere Libraries
+│   ├── schemas/                 # ⭐ Pydantic Schemas (Request/Response)
+│   │   ├── esp.py
+│   │   ├── sensor.py
+│   │   ├── actuator.py
+│   │   ├── logic.py
+│   │   ├── zone.py
+│   │   ├── auth.py
+│   │   └── ...
+│   ├── websocket/
+│   │   └── manager.py           # ⭐ WebSocket Manager (Real-time Updates)
+│   └── utils/
+│       ├── data_helpers.py      # Data Transformation Utilities
+│       ├── mqtt_helpers.py      # MQTT Utilities
+│       ├── network_helpers.py   # Network Utilities
+│       └── time_helpers.py      # Time Utilities
+├── tests/                        # ⭐ Comprehensive Test Suite (150+ Tests)
+│   ├── unit/                     # Unit Tests (20+ Tests)
+│   ├── integration/              # Integration Tests (17+ Tests)
+│   ├── esp32/                    # ESP32 Mock Tests (140+ Tests)
+│   │   ├── mocks/                # Mock ESP32 Client
+│   │   └── test_*.py             # Test Categories
+│   └── e2e/                      # End-to-End Tests
+├── alembic/                      # Database Migrations
+│   └── versions/                 # Migration Scripts
+├── config/
+│   └── logging.yaml              # Logging Configuration
+├── docs/                         # Server-spezifische Dokumentation
+│   ├── ESP32_TESTING.md          # ESP32 Test Framework Guide
+│   ├── MQTT_TEST_PROTOCOL.md     # MQTT Test Protocol
+│   └── ...
+├── pyproject.toml                # Poetry Dependencies
+├── alembic.ini                   # Alembic Configuration
+└── README.md                     # Server README
+```
+
+### Kern-Komponenten
+
+#### 1. FastAPI Application (`src/main.py`)
+- **Lifespan Management:** Startup/Shutdown Orchestrierung
+- **Startup-Sequenz:**
+  1. Security Validation (JWT Secret, MQTT TLS)
+  2. Database Initialization (PostgreSQL)
+  3. MQTT Client Connection (Auto-Reconnect)
+  4. MQTT Handler Registration (12 Handler)
+  5. Central Scheduler Initialization (APScheduler)
+  6. SimulationScheduler Initialization
+  7. MaintenanceService Initialization
+  8. MockESPManager Configuration
+  9. Mock-ESP Recovery (nach Server-Restart)
+  10. WebSocket Manager Initialization
+  11. Logic Engine & Scheduler Initialization
+- **Shutdown-Sequenz:**
+  1. Logic Scheduler Stop
+  2. Logic Engine Stop
+  3. MaintenanceService Stop
+  4. MockESPManager Shutdown
+  5. Central Scheduler Shutdown
+  6. WebSocket Manager Shutdown
+  7. MQTT Subscriber Shutdown
+  8. MQTT Client Disconnect
+  9. Database Engine Dispose
+
+#### 2. MQTT-System (`src/mqtt/`)
+- **MQTTClient (Singleton):**
+  - Paho-MQTT Wrapper
+  - TLS/SSL Support
+  - Auto-Reconnect mit Exponential Backoff
+  - Connection State Management
+  - Rate-Limited Disconnect Warnings
+- **Subscriber:**
+  - Thread-Pool für Handler-Execution (`MQTT_SUBSCRIBER_MAX_WORKERS`, default: 10)
+  - Pattern-based Topic Routing
+  - Error Isolation (Handler-Fehler crashen nicht den Subscriber)
+  - Performance Monitoring
+- **Publisher:**
+  - QoS-Level Management
+  - Retry-Logic
+- **Handler-System:**
+  - `BaseMQTTHandler`: Abstrakte Basis-Klasse mit Error-Isolation
+  - 12 spezialisierte Handler für verschiedene Message-Types
+  - Topic-Parsing, Payload-Validation, ESP-Lookup standardisiert
+
+#### 3. Database-Layer (`src/db/`)
+- **Models (15 Models):**
+  - `ESPDevice`: ESP32 Device Registry
+  - `SensorConfig`, `SensorData`: Sensor Configuration & Time-Series Data
+  - `ActuatorConfig`, `ActuatorState`, `ActuatorHistory`: Actuator Management
+  - `CrossESPLogic`, `LogicExecutionHistory`: Automation Rules
+  - `User`, `TokenBlacklist`: Authentication
+  - `AuditLog`: Event Tracking
+  - `SubzoneConfig`: Subzone Management
+  - `LibraryMetadata`: Sensor Library Metadata
+  - `AIPredictions`: AI/God Layer Integration
+  - `KaiserRegistry`, `ESPOwnership`: Multi-Kaiser Support (PLANNED)
+- **Repositories (14 Repositories):**
+  - Repository Pattern für Datenbankzugriff
+  - Generic CRUD Operations in `BaseRepository`
+  - Async SQLAlchemy Sessions
+  - Transaction Management
+
+#### 4. Service-Layer (`src/services/`)
+- **Core Services:**
+  - `ESPService`: Device Management, Registration, Config Updates
+  - `SensorService`: Sensor Configuration, Data Storage, Pi-Enhanced Processing
+  - `ActuatorService`: Actuator Control, Command Publishing, History Tracking
+  - `SafetyService`: Safety Validation (Emergency-Stop, Value-Checks, Timeout-Protection)
+  - `LogicEngine`: Cross-ESP Automation (Background Task)
+  - `LogicScheduler`: Timer-based Rule Evaluation
+  - `ZoneService`: Zone Assignment & Management
+  - `SubzoneService`: Subzone Management & Safe-Mode Control
+- **Support Services:**
+  - `SimulationScheduler`: ⭐ **NEU** - Industrietaugliche Mock ESP Simulation (ersetzt MockESPManager)
+  - `MaintenanceService`: Cleanup Jobs, Health Checks, Stats Aggregation
+  - `HealthService`: Health Check Aggregation
+  - `AuditRetentionService`: Audit Log Cleanup
+  - `MQTTAuthService`: Mosquitto Password File Management
+  - `ConfigBuilder`: ESP32 Config Payload Builder
+  - `LibraryService`: Sensor Library Management
+  - `MockESPManager`: Legacy Mock ESP Simulation (deprecated - durch SimulationScheduler ersetzt)
+
+#### 5. REST API (`src/api/v1/`)
+- **Endpoints:**
+  - `/api/v1/auth`: JWT Authentication (Login, Refresh, Register)
+  - `/api/v1/esp`: ESP32 Device Management (CRUD, Config, Health)
+  - `/api/v1/sensors`: Sensor Configuration & Data Query
+  - `/api/v1/actuators`: Actuator Control & Commands
+  - `/api/v1/logic`: Cross-ESP Automation Rules (CRUD, Toggle, Test)
+  - `/api/v1/zone`: Zone Assignment & Management
+  - `/api/v1/subzone`: Subzone Management & Safe-Mode
+  - `/api/v1/health`: Health Checks & Metrics
+  - `/api/v1/audit`: Audit Log Query & Statistics
+  - `/api/v1/debug`: Mock ESP Management
+  - `/api/v1/users`: User Management
+  - `/api/v1/library`: Sensor Library Management
+  - `/api/v1/websocket`: WebSocket Real-time Updates
+- **Authentication:**
+  - JWT Tokens (Access + Refresh)
+  - Token Blacklist für Logout
+  - Role-based Access Control (Admin, User)
+  - API Keys für ESP32 Devices (MQTT Auth)
+
+#### 6. Logic Engine (`src/services/logic_engine.py`)
+- **Architektur:**
+  - Background Task (asyncio)
+  - Event-driven Evaluation (bei Sensor-Daten-Arrival)
+  - Timer-based Evaluation (via LogicScheduler)
+- **Condition Evaluators:**
+  - `SensorConditionEvaluator`: Sensor-Wert-Vergleiche
+  - `TimeConditionEvaluator`: Zeit-basierte Bedingungen
+  - `CompoundConditionEvaluator`: AND/OR/NOT Kombinationen
+- **Action Executors:**
+  - `ActuatorActionExecutor`: Aktor-Befehle ausführen
+  - `DelayActionExecutor`: Verzögerungen
+  - `NotificationActionExecutor`: WebSocket Notifications
+- **Features:**
+  - Cross-ESP Rules (UUID-basiert)
+  - Cooldown-Mechanismus (zu häufige Ausführungen verhindern)
+  - Execution History Tracking
+  - Rule Toggle (enable/disable)
+
+#### 7. Sensor Processing (`src/sensors/`)
+- **Pi-Enhanced Processing:**
+  - Dynamic Library Loading (`library_loader.py`)
+  - Sensor Type Registry (`sensor_type_registry.py`)
+  - 10 Active Sensor Libraries (`sensor_libraries/active/`)
+  - Base Processor Interface (`base_processor.py`)
+- **Workflow:**
+  1. ESP32 sendet RAW-Daten (`raw_mode: true`)
+  2. Sensor Handler prüft `pi_enhanced: true`
+  3. Library wird dynamisch geladen
+  4. Processing läuft asynchron
+  5. Processed-Werte werden in DB gespeichert
+  6. Optional: Processed-Werte zurück an ESP32
+
+#### 8. WebSocket System (`src/websocket/manager.py`) ⭐ **NEU - Paket F**
+- **Features:**
+  - Real-time Updates für Frontend (Live-Updates in allen Views)
+  - Event Types: `sensor_data`, `actuator_status`, `esp_health`, `system_event`, `config_response`
+  - Filter-System (types, esp_ids, sensor_types, topicPattern)
+  - Connection Management mit Auto-Reconnect
+  - Heartbeat für Connection Health
+  - Rate-Limiting (10 msg/sec)
+  - Singleton-Pattern für effiziente Ressourcen-Nutzung
+
+#### 9. SimulationScheduler (`src/services/simulation/scheduler.py`) ⭐ **NEU - Paket X**
+- **Architektur:**
+  - Single Source of Truth für Mock ESP Simulation (ersetzt MockESPManager)
+  - Database-zentrierte Persistenz (PostgreSQL statt In-Memory)
+  - APScheduler für zeitgesteuerte Jobs (Heartbeat, Sensor-Simulation)
+  - Industrietaugliche Robustheit mit Server-Neustart-Recovery
+- **Features:**
+  - Batch-Sensor-Value-Updates
+  - Auto-Heartbeat-Konfiguration
+  - MQTT-Message-Publishing
+  - Simulation-State-Management
+  - Runtime-Monitoring und Health-Checks
+
+#### 10. Configuration (`src/core/config.py`)
+- **Pydantic Settings:**
+  - `DatabaseSettings`: PostgreSQL Connection
+  - `MQTTSettings`: MQTT Broker Config (TLS, Worker-Pool)
+  - `SecuritySettings`: JWT, Password Hashing
+  - `PerformanceSettings`: Logic Scheduler Interval, Monitoring
+  - `MaintenanceSettings`: Cleanup Jobs (Data-Safe, Default: DISABLED)
+  - `NotificationSettings`: SMTP, Webhook
+  - `WebSocketSettings`: Connection Limits
+  - `SensorSettings`: Pi-Enhanced Processing
+  - `ActuatorSettings`: Safety Checks, Emergency-Stop
+  - 15+ Config-Klassen total
+- **Environment Variables:**
+  - Alle Settings via `.env` Datei konfigurierbar
+  - Defaults für Development
+  - Production-Validation (z.B. JWT Secret)
+
+#### 10. Testing (`tests/`)
+- **Test-Kategorien:**
+  - **Unit Tests (20+):** Service-Layer Tests
+  - **Integration Tests (17+):** API Integration Tests
+  - **ESP32 Mock Tests (140+):** Communication, Infrastructure, Actuator, Sensor, Cross-ESP, Performance
+  - **E2E Tests:** End-to-End Workflows
+- **Test-Framework:**
+  - pytest mit pytest-asyncio
+  - Mock ESP32 Client für Hardware-unabhängige Tests
+  - Real ESP32 Client für Hardware-Tests (optional)
+  - Coverage Reports (HTML)
+
+### Technologie-Stack
+
+- **Framework:** FastAPI 0.109+
+- **Database:** PostgreSQL (SQLAlchemy Async 2.0+)
+- **MQTT:** Paho-MQTT + aiomqtt
+- **Authentication:** python-jose (JWT), passlib (bcrypt)
+- **Validation:** Pydantic 2.5+
+- **Scheduling:** APScheduler 3.11+
+- **WebSocket:** websockets 12.0+
+- **Testing:** pytest 8.0+, pytest-asyncio, pytest-cov
+- **Migrations:** Alembic 1.13+
+- **Logging:** Structured Logging (JSON/Text)
+
+### Performance-Features
+
+- **Async/Await:** Vollständig asynchron (FastAPI, SQLAlchemy Async)
+- **Connection Pooling:** Database Connection Pool (configurable)
+- **Thread-Pool:** MQTT Handler Thread-Pool (`MQTT_SUBSCRIBER_MAX_WORKERS`)
+- **Background Tasks:** Logic Engine, Scheduler, Maintenance Jobs
+- **Rate-Limiting:** WebSocket Rate-Limiting (10 msg/sec), MQTT Message-Batching
+- **Batch Operations:** Cleanup Jobs mit Batch-Processing, SimulationScheduler Batch-Updates
+- **Database Indizes:** Performance-Indizes auf Time-Range Queries, Audit-Log Indizes
+- **Singleton-Pattern:** WebSocket Service, SimulationScheduler für Ressourcen-Effizienz
+
+### Sicherheits-Features
+
+- **JWT Authentication:** Access + Refresh Tokens
+- **Token Blacklist:** Logout-Support
+- **Password Hashing:** bcrypt
+- **MQTT TLS:** Optional TLS/SSL für MQTT
+- **MQTT Auth:** Mosquitto Password File Integration
+- **Safety Service:** Emergency-Stop, Value-Validierung, Timeout-Protection
+- **Audit Logging:** Vollständiges Event-Tracking
+- **Input Validation:** Pydantic Schema Validation
+- **SQL Injection Protection:** SQLAlchemy ORM
+
+---
+
+## 11.2 Server-Integration: Verhaltensregeln für ESP32-Code
 
 **KRITISCH:** ESP32-Code muss mit dem God-Kaiser Server kompatibel sein. Diese Regeln MÜSSEN befolgt werden:
 
@@ -478,14 +874,50 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 |-------|--------|--------|
 | Phase 0-7 | ✅ COMPLETE | GPIO, Logger, Config, WiFi, MQTT, I2C, OneWire, Sensor, Actuator, Error |
 | Phase 8 | ⏳ NEXT | Integration & Final Testing |
+| Phase 9 | ✅ COMPLETE | Subzone-Management, Pin-Level Zone-Gruppierung |
+| Paket X | ✅ COMPLETE | SimulationScheduler Migration (industrietaugliche Simulation) |
+| Paket F | ✅ COMPLETE | WebSocket Live-Updates im Frontend |
 
 **Code-Qualität:** 5.0/5 (Production-Ready)
-**Implementierte Zeilen:** ~13.300
+**Implementierte Zeilen:** ~13.300 (ESP32) + ~15.000+ (Server) + ~7.000 (Frontend)
+**Neue Features:** Subzone-Management, SimulationScheduler, WebSocket Live-Updates
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-24
-**Version:** 4.5 (Zone Naming & Mock ESP Updates)
+**Letzte Aktualisierung:** 2025-12-27
+**Version:** 4.8 (Paket X & F Integration, Subzone-Management)
+
+> **Änderungen in v4.8 (Paket X & F Integration, Subzone-Management):**
+> - **Vollständige Paket X Integration:** SimulationScheduler als industrietauglicher Ersatz für MockESPManager dokumentiert
+> - **Paket F Live-Updates:** WebSocket System für Real-time Frontend-Updates vollständig integriert
+> - **Subzone-Management Phase 9:** Pin-Level Zone-Gruppierung mit Safe-Mode-Integration dokumentiert
+> - **System-Flows aktualisiert:** Von 8 auf 9 Flows erweitert (Subzone-Management hinzugefügt)
+> - **Quick Reference erweitert:** Neue Pakete und Features in Übersicht integriert
+> - **Frontend-Dokumentation:** Live-Updates und WebSocket-Service-Verweise hinzugefügt
+> - **Phase-Status aktualisiert:** Phase 9, Paket X, Paket F als abgeschlossen markiert
+
+> **Änderungen in v4.7 (Server-Architektur Dokumentation):**
+> - **Umfassende Server-Codebase-Analyse:** Vollständige Dokumentation der God-Kaiser Server-Architektur
+> - **Verzeichnisstruktur:** Detaillierte Übersicht aller Server-Komponenten (API, Services, MQTT, DB, Tests)
+> - **Kern-Komponenten:** 10 Haupt-Komponenten dokumentiert (FastAPI App, MQTT-System, Database-Layer, Service-Layer, REST API, Logic Engine, Sensor Processing, WebSocket, Configuration, Testing)
+> - **Technologie-Stack:** Vollständige Liste aller verwendeten Frameworks und Libraries
+> - **Performance-Features:** Async/Await, Connection Pooling, Thread-Pool, Background Tasks dokumentiert
+> - **Sicherheits-Features:** JWT, Token Blacklist, MQTT TLS, Safety Service, Audit Logging dokumentiert
+> - **Quick Reference:** Server-spezifische Verweise aktualisiert
+
+---
+
+**Diese Dokumentation ist nun vollständig auf dem neuesten Stand (2025-12-27). Alle System Flows, Pakete und neuen Features wurden integriert.**
+
+> **Änderungen in v4.6 (Paket D: Maintenance Jobs Integration):**
+> - **Maintenance Jobs System:** Data-Safe Cleanup-Jobs für Sensor-Daten, Command-History, Orphaned-Mocks
+> - **Safety-First-Approach:** Alle Cleanup-Jobs per Default DISABLED, Dry-Run Mode per Default aktiv
+> - **Health-Check-Jobs:** ESP-Timeout-Detection, MQTT-Broker-Monitoring
+> - **Stats-Aggregation:** Dashboard-Statistiken werden automatisch aggregiert
+> - **Frontend-Integration:** MaintenanceView.vue für Admin-Zugriff auf Maintenance-Jobs
+> - **Umfassende Test-Suite:** 21 Unit-Tests für alle Cleanup-Jobs
+> - **Dokumentation:** PAKET_D_* Dokumente mit vollständiger Implementierung und Verifikation
+> - **Quick Reference:** Maintenance Jobs hinzugefügt
 
 > **Änderungen in v4.5 (Zone Naming & Mock ESP Updates):**
 > - **Zone Naming Konventionen:** Zwei-Feld-System (`zone_id` technisch, `zone_name` menschenlesbar)

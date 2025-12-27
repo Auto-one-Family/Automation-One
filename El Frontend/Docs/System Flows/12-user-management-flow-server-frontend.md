@@ -94,7 +94,7 @@ ActiveUser = Annotated[User, Depends(get_current_active_user)]
 
 **Endpoint:** `GET /api/v1/users`
 
-**Code-Location:** `users.py` (Zeile 43-61)
+**Code-Location:** `users.py` (Zeile 49-61)
 
 ```mermaid
 sequenceDiagram
@@ -446,6 +446,17 @@ const ROLES: { value: UserRole; label: string; icon: typeof Shield; color: strin
 ]
 ```
 
+**Icons Used (Lucide Vue Next):**
+- Admin: `Shield` (red-400)
+- Operator: `Settings` (yellow-400)
+- Viewer: `Eye` (blue-400)
+
+**Additional UI Icons in View:**
+- Actions: `Edit`, `Key` (reset password), `Trash2` (delete)
+- Status: `UserCheck` (active), `UserX` (inactive)
+- Feedback: `RefreshCw` (loading), `Check` (success), `AlertCircle` (error)
+- Navigation: `Users` (page header), `Plus` (add user)
+
 ---
 
 ## Teil 5: User Experience
@@ -557,11 +568,27 @@ async function createUser(): Promise<void> {
   - Mindestens 1 Ziffer
 ```
 
-**Für PasswordReset/PasswordChange (Zeile 128-169):**
+**Für PasswordReset (Zeile 128-142):**
 ```python
 # schemas/user.py - NUR min_length=8, KEINE Komplexitätsprüfung!
-# ⚠️ SECURITY CONSIDERATION: Sollte dieselbe Validierung wie UserCreate haben
+class PasswordReset(BaseModel):
+    new_password: str = Field(
+        ..., min_length=8, description="New password (minimum 8 characters)"
+    )
+    # ⚠️ FEHLT: Vollständige Komplexitätsprüfung wie bei UserCreate
 ```
+
+**Für PasswordChange (Zeile 145-169):**
+```python
+# schemas/user.py - NUR min_length=8, KEINE Komplexitätsprüfung!
+class PasswordChange(BaseModel):
+    new_password: str = Field(
+        ..., min_length=8, description="New password (minimum 8 characters)"
+    )
+    # ⚠️ FEHLT: Vollständige Komplexitätsprüfung wie bei UserCreate
+```
+
+> ⚠️ **SECURITY CONSIDERATION:** PasswordReset und PasswordChange sollten dieselbe strenge Validierung wie UserCreate verwenden. Aktuell können schwache Passwörter bei Password-Änderungen gesetzt werden!
 
 ### 7.3 Verbindung zu Authentication Security
 
@@ -811,7 +838,7 @@ UserManagementView.vue:188-207    ──►   users.py:267-299
 ## Verifizierungscheckliste (verifiziert am Code)
 
 - [x] `__tablename__ = "user_accounts"` (nicht "users"!) - `user.py:30`
-- [x] List Users: Zeilen 43-61 - ✅ verifiziert
+- [x] List Users: Zeilen 49-61 - ✅ verifiziert
 - [x] Create User: Zeilen 64-112 - ✅ verifiziert
 - [x] Update User: Zeilen 139-187 - ✅ verifiziert
 - [x] Delete User: Zeilen 190-222 - ✅ verifiziert
@@ -821,11 +848,11 @@ UserManagementView.vue:188-207    ──►   users.py:267-299
 - [x] Token Version Increment bei Password Reset/Change - ✅ verifiziert
 - [x] AdminUser/ActiveUser Dependencies - ✅ verifiziert (`deps.py:297-298`)
 - [x] Frontend ROLES Config: Zeilen 44-48 - ✅ verifiziert
-- [ ] ⚠️ `PasswordReset` und `PasswordChange` sollten gleiche Komplexitätsprüfung wie `UserCreate` haben
+- [ ] ⚠️ **SECURITY ISSUE:** `PasswordReset` und `PasswordChange` sollten gleiche Komplexitätsprüfung wie `UserCreate` haben
 
 ---
 
-**Letzte Verifizierung:** Dezember 2025
+**Letzte Verifizierung:** Dezember 2025 (Code-Analyse aller Dateien)
 **Dokumentation basiert auf:** Aktueller Code-Stand
 **Verifiziert durch:** Code-Analyse aller referenzierten Dateien
 

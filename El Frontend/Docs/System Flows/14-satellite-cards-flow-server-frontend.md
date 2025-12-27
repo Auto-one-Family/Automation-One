@@ -14,11 +14,11 @@ Das Satelliten-Cards System visualisiert Sensoren und Aktoren als **kompakte Kar
 |------------|-------------|--------------|--------|
 | **SensorSatellite.vue** | ✅ 100% fertig (273 LOC) | ✅ | ✅ Implementiert |
 | **ActuatorSatellite.vue** | ✅ 100% fertig (292 LOC) | ✅ | ✅ Implementiert |
-| **ConnectionLines.vue** | ✅ 100% fertig (271 LOC) | ✅ | ✅ Implementiert (Logic-Parsing TODO) |
-| **ESPOrbitalLayout.vue** | ✅ 100% fertig (794 LOC) | ✅ | ✅ Vollständig implementiert |
+| **ConnectionLines.vue** | ✅ 100% fertig (276 LOC) | ✅ | ✅ Implementiert (Logic-Parsing TODO) |
+| **ESPOrbitalLayout.vue** | ✅ 100% fertig (795 LOC) | ✅ | ✅ Vollständig implementiert |
 | **Orbital-Layout CSS** | ✅ 100% | ✅ Positions-System | ✅ Responsive mit Mobile/Tablet/Desktop |
 | **WebSocket sensor_data** | ✅ Implementiert | ✅ Live-Updates | ✅ In esp.ts Store aktiv |
-| **DevicesView Integration** | ✅ Verwendet | ✅ | ✅ Zeile 16+326 |
+| **DevicesView Integration** | ❌ Nicht verwendet | ✅ | ❌ DevicesView zeigt ESPs als Grid/Liste |
 
 ### Status-Zusammenfassung
 
@@ -28,7 +28,7 @@ Integration:     █████████████████████
 WebSocket:       ████████████████████████████  100%  ✅ sensor_data, actuator_status
 ```
 
-**Fazit:** Das Satelliten-System ist **vollständig implementiert**. `ESPOrbitalLayout.vue` integriert alle Satellites und wird in `DevicesView.vue` für die kompakte Kartenansicht verwendet.
+**Fazit:** Das Satelliten-System ist **vollständig implementiert**. `ESPOrbitalLayout.vue` integriert alle Satellites und kann in Detail-Views für die kompakte Kartenansicht verwendet werden. `DevicesView.vue` verwendet derzeit eine Grid/List-Ansicht.
 
 ---
 
@@ -653,9 +653,9 @@ const logicConnections = computed(() => {
 
 | Component | File | Zeilen | Beschreibung |
 |-----------|------|--------|--------------|
-| SensorSatellite | `src/components/esp/SensorSatellite.vue` | 1-270 | Sensor-Karte |
-| ActuatorSatellite | `src/components/esp/ActuatorSatellite.vue` | 1-289 | Aktor-Karte |
-| ConnectionLines | `src/components/esp/ConnectionLines.vue` | 1-269 | SVG-Linien |
+| SensorSatellite | `src/components/esp/SensorSatellite.vue` | 1-273 | Sensor-Karte |
+| ActuatorSatellite | `src/components/esp/ActuatorSatellite.vue` | 1-292 | Aktor-Karte |
+| ConnectionLines | `src/components/esp/ConnectionLines.vue` | 1-276 | SVG-Linien |
 | ESPCard | `src/components/esp/ESPCard.vue` | 1-415 | ESP-Hauptkarte |
 | SensorValueCard | `src/components/esp/SensorValueCard.vue` | 1-335 | Detaillierte Sensor-Anzeige |
 | DeviceDetailView | `src/views/DeviceDetailView.vue` | 1-864 | ESP Detail-Ansicht |
@@ -871,7 +871,7 @@ Mock ESPs können:
 | Icon Mapping | 55-65 | ✅ Verifiziert |
 | Status Display | 68-86 | ✅ Verifiziert |
 | Template | 97-151 | ✅ Verifiziert |
-| Styles | 153-287 | ✅ Verifiziert |
+| Styles | 153-292 | ✅ Verifiziert |
 
 ### A.3 ConnectionLines.vue - Verifizierte Struktur
 
@@ -890,7 +890,7 @@ Mock ESPs können:
 
 ### B.1 ESPOrbitalLayout Integration
 
-Die `ESPOrbitalLayout.vue` (794 LOC) enthält **alle Satelliten-Komponenten**:
+Die `ESPOrbitalLayout.vue` (795 LOC) enthält **alle Satelliten-Komponenten**:
 
 ```typescript
 // VORHANDEN in ESPOrbitalLayout.vue (Zeile 18-21):
@@ -923,9 +923,13 @@ const ws = useWebSocket({
 
 ### B.3 DevicesView Integration
 
-In `src/views/DevicesView.vue`:
-- Import: Zeile 16
-- Verwendung: Zeile 326 (compactMode: true)
+### B.3 DashboardView Integration
+
+In `src/views/DashboardView.vue`:
+- Import: Zeile 28
+- Verwendung: Zeile 305 (compactMode: true)
+
+**Hinweis:** `ESPOrbitalLayout` wird **nicht** in `DevicesView.vue` verwendet. `DevicesView.vue` zeigt ESPs als Grid/List-Ansicht für CRUD-Operationen, während `DashboardView.vue` die `ESPOrbitalLayout` für die kompakte visuelle Darstellung verwendet.
 
 ### B.4 Exports in index.ts
 
@@ -948,7 +952,7 @@ export { default as ConnectionLines } from './ConnectionLines.vue'
 
 ---
 
-**Letzte Verifizierung:** 23. Dezember 2025
+**Letzte Verifizierung:** 27. Dezember 2025
 **Dokumentation basiert auf:** Git master branch
-**Code-Analyse durchgeführt:** 23.12.2025 (vollständige Revision)
+**Code-Analyse durchgeführt:** 27.12.2025 (vollständige Revision)
 

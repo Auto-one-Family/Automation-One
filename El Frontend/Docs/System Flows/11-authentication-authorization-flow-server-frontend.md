@@ -38,7 +38,6 @@ to_encode = {
     "iat": datetime.now(timezone.utc),
     "type": "access",
 }
-# + additional_claims (role, token_version) hinzugefügt in auth.py
 
 # Refresh Token Claims (security.py Zeile 120-126)
 to_encode = {
@@ -50,7 +49,7 @@ to_encode = {
 }
 ```
 
-**Wichtig:** `role` und `token_version` werden als `additional_claims` in `auth.py` (Zeile 181-186, 281-286) hinzugefügt:
+**Wichtig:** `role` und `token_version` werden als `additional_claims` in `auth.py` hinzugefügt:
 
 ```python
 # auth.py Zeile 281-288 (Login)
@@ -102,21 +101,37 @@ async def require_operator(current_user: ActiveUser) -> User:
 **Code-Location:** `El Servador/god_kaiser_server/src/api/deps.py` (Zeile 157-195)
 
 ```python
-# Token Blacklist Check (Zeile 157-165)
+# Token Blacklist Check
 blacklist_repo = TokenBlacklistRepository(db)
 if await blacklist_repo.is_blacklisted(token):
-    raise HTTPException(status_code=401, detail="Token has been revoked")
+    logger.warning(f"Blacklisted token used for user_id={user_id}")
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token has been revoked",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
-# Token Version Check (Zeile 175-188)
+# TOKEN VERSIONING: Check if token version matches user's current version
 token_version = payload.get("token_version")
 if token_version is not None:
+    # Token has version claim - validate it
     if token_version < user.token_version:
-        raise HTTPException(status_code=401, detail="Token has been invalidated (logout all devices)")
-
-# Backward Compatibility (Zeile 189-195)
-# Tokens ohne token_version claim (alte Tokens) werden toleriert
+        logger.warning(
+            f"Token version mismatch for user {user.username}: "
+            f"token_version={token_version}, user.token_version={user.token_version}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been invalidated (logout all devices)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+# If token doesn't have version claim, it's an old token - allow it for backward compatibility
+# but log a warning
 elif user.token_version > 0:
-    logger.debug(f"Token without version claim for user {user.username}")
+    logger.debug(
+        f"Token without version claim for user {user.username} "
+        f"(user.token_version={user.token_version})"
+    )
 ```
 
 **Wichtig:** Alte Tokens ohne `token_version` Claim werden aus Rückwärtskompatibilitätsgründen akzeptiert. Diese werden jedoch geloggt und sollten nach einer Übergangsphase abgelehnt werden.
@@ -291,13 +306,28 @@ sequenceDiagram
 **Code:** `auth.py` (Zeile 517-530)
 ```python
 # TOKEN ROTATION: Blacklist old refresh token BEFORE creating new ones
-await blacklist_repo.add_token(
-    token=old_refresh_token,
-    token_type="refresh",
-    user_id=user.id,
-    expires_at=expires_at,
-    reason="token_rotation",
-)
+# Cache user data before any DB operations that might fail
+user_id = user.id
+user_role = user.role
+user_token_version = user.token_version
+user_username = user.username
+
+try:
+    await blacklist_repo.add_token(
+        token=old_refresh_token,
+        token_type="refresh",
+        user_id=user_id,
+        expires_at=expires_at,
+        reason="token_rotation",
+    )
+    await db.commit()
+    logger.debug(f"Old refresh token blacklisted for user: {user_username}")
+except Exception as e:
+    # Rollback the failed transaction to allow further DB operations
+    await db.rollback()
+    logger.warning(f"Failed to blacklist old refresh token (might be already blacklisted): {e}")
+    # Continue anyway - token rotation is best effort
+    # Token might already be blacklisted by concurrent request (race condition)
 ```
 
 ### 2.4 Logout Flow
@@ -779,19 +809,20 @@ stores/auth.ts:19-21       ──►   isAdmin, isOperator computed
 ## Verifizierungscheckliste
 
 - [x] Initial Setup erstellt Admin-User korrekt (`auth.py:113-211`)
-- [x] Login generiert valide JWT Tokens (`auth.py:219-318`)
-- [x] Token enthält `role` und `token_version` Claims (`auth.py:281-286`)
-- [x] Refresh Token Rotation funktioniert (`auth.py:517-530`)
-- [x] Token Blacklist wird bei Logout verwendet (`auth.py:593-612`)
-- [x] Rate Limiting blockiert nach 10 Versuchen (`deps.py:573-602`)
-- [x] Admin-Only Endpoints verweigern Zugriff für Nicht-Admins (`deps.py:239-264`)
-- [x] Frontend speichert Tokens in localStorage (`auth.ts:134-139`)
+- [x] Login generiert valide JWT Tokens mit role und token_version (`auth.py:219-318`)
+- [x] Token Blacklist und Versioning funktionieren (`deps.py:157-195`)
+- [x] Refresh Token Rotation mit Fehlerbehandlung (`auth.py:517-530`)
+- [x] Logout (Single/All Devices) funktioniert korrekt (`auth.py:561-640`)
+- [x] Rate Limiting blockiert nach 10 Versuchen pro Minute (`deps.py:573-602`)
+- [x] Role Guards schützen Admin/Operator Endpoints (`deps.py:239-293`)
+- [x] Frontend Auth Store verwaltet Tokens korrekt (`auth.ts:1-172`)
 - [x] Axios Interceptor refreshed Tokens automatisch (`api/index.ts:31-70`)
 - [x] Router Guards schützen geschützte Routen (`router/index.ts:123-152`)
+- [x] Token Models (User, TokenBlacklist) sind korrekt implementiert
 
 ---
 
 **Letzte Verifizierung:** Dezember 2025
 **Dokumentation basiert auf:** Aktueller Code-Stand
-**Verifiziert durch:** Code-Analyse aller referenzierten Dateien
+**Verifiziert durch:** Vollständige Code-Analyse aller referenzierten Dateien am 27. Dezember 2025
 

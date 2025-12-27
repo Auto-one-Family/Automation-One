@@ -34,13 +34,18 @@ Die `lifespan()` Funktion in `main.py` orchestriert den Server-Start:
 
 | Step | Aktion | Code-Location | Details |
 |------|--------|---------------|---------|
-| **0** | Security Validation | `main.py:82-110` | JWT Secret Key prüfen, MQTT TLS Warnung |
-| **1** | Database Initialization | `main.py:112-120` | `init_db()` erstellt Tabellen |
-| **2** | MQTT Client Connection | `main.py:122-130` | `MQTTClient.get_instance().connect()` |
-| **3** | Register MQTT Handlers | `main.py:132-174` | Handler für Sensor, Actuator, Heartbeat, Discovery, Config |
-| **4** | Subscribe to MQTT Topics | `main.py:178-181` | `Subscriber.subscribe_all()` |
-| **5** | Initialize WebSocket Manager | `main.py:183-188` | `WebSocketManager.get_instance()` |
-| **6** | Initialize Services | `main.py:190-243` | Safety, Actuator, Logic Engine, Logic Scheduler |
+| **0** | Security Validation | `main.py:91-119` | JWT Secret Key prüfen, MQTT TLS Warnung |
+| **0.5** | Initialize Resilience Patterns | `main.py:121-143` | Circuit Breaker Registry für external_api, database, mqtt |
+| **1** | Database Initialization | `main.py:145-157` | `init_db()`, Circuit Breaker Setup |
+| **2** | MQTT Client Connection | `main.py:159-170` | `MQTTClient.get_instance().connect()` |
+| **3** | Register MQTT Handlers | `main.py:172-278` | Handler für Sensor, Actuator, Heartbeat, Discovery, Config, Zone/Subzone ACK |
+| **3.4** | Initialize Central Scheduler | `main.py:232-236` | `init_central_scheduler()` |
+| **3.4.1** | Initialize SimulationScheduler | `main.py:238-246` | Mock-ESP Simulation Framework |
+| **3.4.2** | Initialize MaintenanceService | `main.py:280-290` | Scheduled Maintenance Jobs |
+| **3.5** | Recover Mock-ESP Simulations | `main.py:292-304` | DB-First Recovery nach Server-Restart |
+| **4** | Subscribe to MQTT Topics | `main.py:306-312` | `Subscriber.subscribe_all()` (nur wenn connected) |
+| **5** | Initialize WebSocket Manager | `main.py:314-319` | `WebSocketManager.get_instance()` |
+| **6** | Initialize Services | `main.py:321-385` | Safety, Actuator, Logic Engine, Logic Scheduler |
 
 ### MQTT-Handler die auf ESP-Boot reagieren
 
@@ -54,6 +59,11 @@ kaiser/god/esp/+/actuator/+/alert       → actuator_alert_handler.handle_actuat
 kaiser/god/esp/+/system/heartbeat       → heartbeat_handler.handle_heartbeat
 kaiser/god/discovery/esp32_nodes        → discovery_handler.handle_discovery
 kaiser/god/esp/+/config_response        → config_handler.handle_config_ack
+kaiser/god/esp/+/zone/ack               → zone_ack_handler.handle_zone_ack
+kaiser/god/esp/+/subzone/ack            → subzone_ack_handler.handle_subzone_ack
+kaiser/god/esp/+/actuator/+/command     → mock_actuator_command_handler (Paket G)
+kaiser/god/esp/+/actuator/emergency     → mock_actuator_command_handler (Paket G)
+kaiser/broadcast/emergency              → mock_actuator_command_handler (Paket G)
 ```
 
 ---
@@ -416,14 +426,14 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 
 | Komponente | Pfad | Relevante Funktionen |
 |------------|------|---------------------|
-| **Server Startup** | `El Servador/god_kaiser_server/src/main.py` | `lifespan()` (Zeilen 67-308) |
-| **Heartbeat Handler** | `El Servador/.../mqtt/handlers/heartbeat_handler.py` | `handle_heartbeat()` (Zeilen 45-159) |
-| **ESP Registration API** | `El Servador/.../api/v1/esp.py` | `register_device()` (Zeilen 229-302) |
+| **Server Startup** | `El Servador/god_kaiser_server/src/main.py` | `lifespan()` (Zeilen 76-488) |
+| **Heartbeat Handler** | `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` | `handle_heartbeat()` (Zeilen 55-177) |
+| **ESP Registration API** | `El Servador/god_kaiser_server/src/api/v1/esp.py` | `register_device()` (Zeilen 232-305) |
 | **ESP Service** | `El Servador/.../services/esp_service.py` | `register_device()`, `update_health()` |
-| **Frontend Router** | `El Frontend/src/router/index.ts` | Navigation Guards (Zeilen 111-140) |
+| **Frontend Router** | `El Frontend/src/router/index.ts` | Navigation Guards (Zeilen 129-158) |
 | **Auth Store** | `El Frontend/src/stores/auth.ts` | `checkAuthStatus()` (Zeilen 24-63) |
 | **API Interceptor** | `El Frontend/src/api/index.ts` | Token-Refresh (Zeilen 31-70) |
-| **WebSocket View** | `El Frontend/src/views/MqttLogView.vue` | `connect()` (Zeilen 56-123) |
+| **WebSocket View** | `El Frontend/src/views/MqttLogView.vue` | WebSocket Subscription (Zeilen 123-131) |
 | **Debug API** | `El Frontend/src/api/debug.ts` | `createMockEsp()` (Zeilen 48-51) |
 
 ---
@@ -454,8 +464,8 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 
 ---
 
-**Letzte Verifizierung:** 2025-12-17
-**Verifiziert gegen Code-Version:** Git master branch (Commit-Stand: 2025-12-17)
+**Letzte Verifizierung:** 2025-12-27
+**Verifiziert gegen Code-Version:** Git master branch (Commit-Stand: 2025-12-27)
 
 ---
 
@@ -463,5 +473,6 @@ poetry run uvicorn god_kaiser_server.src.main:app --reload --log-level debug
 
 | Datum | Version | Änderungen |
 |-------|---------|------------|
+| 2025-12-27 | 1.2 | Server-Startup erweitert: Resilience Registry, Central Scheduler, SimulationScheduler, MaintenanceService, Mock-ESP Recovery. MQTT Handler erweitert (Zone/Subzone ACK, Mock-Command Handler). Code-Locations aktualisiert. |
 | 2025-12-17 | 1.1 | Korrekturen nach Verifizierung: Server-Start-Pfad (`god_kaiser_server/`), Heartbeat-Payload Required/Optional Fields, Initial-Status "unknown", exakte Rejection-Message |
 | 2025-12-17 | 1.0 | Initiale Erstellung, vollständig verifiziert gegen aktuellen Code |

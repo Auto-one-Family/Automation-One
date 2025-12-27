@@ -24,17 +24,20 @@ Wie das dynamische Sensor-Library-System auf dem Server funktioniert und wie neu
 
 Das Library-System verwendet **Python's `importlib`** für dynamisches Laden von Sensor-Processing-Bibliotheken zur Laufzeit. Alle Libraries liegen in `sensor_libraries/active/` und werden automatisch entdeckt.
 
-**Code-Location:** `src/sensors/library_loader.py`
+**Code-Location:** `src/sensors/library_loader.py` (1-285)
 
 ```python
 class LibraryLoader:
     """
     Singleton library loader for sensor processors.
+
     Features:
     - Dynamic module import using importlib
     - Processor instance caching (one instance per sensor type)
     - Automatic discovery of new processors
     - Type validation (all processors must extend BaseSensorProcessor)
+    - Library reloading for development
+    - Multiple import path fallback
     """
 ```
 
@@ -44,7 +47,10 @@ class LibraryLoader:
 def _discover_libraries(self):
     """Discover and load all sensor processor libraries."""
     if not self.library_path.exists():
-        logger.error(f"Sensor libraries path not found: {self.library_path}")
+        logger.error(
+            f"Sensor libraries path not found: {self.library_path}. "
+            "No processors loaded."
+        )
         return
 
     logger.debug(f"Discovering libraries in: {self.library_path}")
@@ -56,33 +62,107 @@ def _discover_libraries(self):
             continue
 
         module_name = file_path.stem  # e.g., "ph_sensor"
-        self._load_library(module_name)
+
+        try:
+            # Import module dynamically - returns list of ALL processors
+            processor_instances = self._load_library(module_name)
+
+            for processor_instance in processor_instances:
+                sensor_type = processor_instance.get_sensor_type()
+                self.processors[sensor_type] = processor_instance
+                logger.debug(
+                    f"Loaded processor: {sensor_type} "
+                    f"({processor_instance.__class__.__name__})"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to load library '{module_name}': {e}",
+                exc_info=True,
+            )
 ```
 
-**Library Loading mit Fallback-Imports:**
+**Zusätzliche Features:**
 
 ```python
-# Try multiple import paths for flexibility
-import_paths = [
-    f"src.sensors.sensor_libraries.active.{module_name}",
-    f"sensors.sensor_libraries.active.{module_name}",
-    f"god_kaiser_server.src.sensors.sensor_libraries.active.{module_name}",
-]
+def reload_libraries(self):
+    """
+    Reload all sensor libraries.
+    Useful for development/hot-reload scenarios.
+    """
+    logger.info("Reloading sensor libraries...")
+    self.processors.clear()
+    self._discover_libraries()
+    logger.info(
+        f"Libraries reloaded. {len(self.processors)} processors available."
+    )
 
-for full_module_path in import_paths:
+def get_available_sensors(self) -> list[str]:
+    """
+    Get list of available sensor types.
+    Returns: ["ph", "temperature", "humidity", "ec_sensor", ...]
+    """
+    return list(self.processors.keys())
+```
+
+**Library Loading mit Fallback-Imports und Multi-Processor Support:**
+
+```python
+def _load_library(self, module_name: str) -> list[BaseSensorProcessor]:
+    """
+    Load all sensor processor classes from a library module.
+    Returns list of BaseSensorProcessor instances.
+    """
     try:
-        module = importlib.import_module(full_module_path)
-        break  # Success - exit loop
-    except ImportError as e:
-        last_error = e
-        continue
+        # Try multiple import paths for flexibility
+        import_paths = [
+            f"src.sensors.sensor_libraries.active.{module_name}",
+            f"sensors.sensor_libraries.active.{module_name}",
+            f"god_kaiser_server.src.sensors.sensor_libraries.active.{module_name}",
+        ]
+
+        module = None
+        last_error = None
+
+        for full_module_path in import_paths:
+            try:
+                module = importlib.import_module(full_module_path)
+                break  # Success - exit loop
+            except ImportError as e:
+                last_error = e
+                continue
+
+        if module is None:
+            raise ImportError(f"Could not import {module_name} from any path. Last error: {last_error}")
+
+        # Find all classes in module that extend BaseSensorProcessor
+        processor_classes = []
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, BaseSensorProcessor)
+                and obj is not BaseSensorProcessor
+                and obj.__module__ == module.__name__
+            ):
+                processor_classes.append(obj)
+
+        # Instantiate ALL processor classes from this module
+        processor_instances = []
+        for processor_class in processor_classes:
+            processor_instance = processor_class()
+            processor_instances.append(processor_instance)
+
+        return processor_instances
+
+    except Exception as e:
+        logger.error(f"Failed to load processors from '{module_name}': {e}", exc_info=True)
+        return []
 ```
 
 ### 1.2 Sensor Type Registry & Normalization
 
 Sensor-Typen werden zwischen ESP32-Format und Server-Processor-Format normalisiert. Multi-Value-Sensoren (z.B. SHT31) werden unterstützt.
 
-**Code-Location:** `src/sensors/sensor_type_registry.py`
+**Code-Location:** `src/sensors/sensor_type_registry.py` (1-285)
 
 **Sensor Type Mapping (ESP32 → Server):**
 
@@ -98,23 +178,45 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     "temperature_ds18b20": "ds18b20",
     "ds18b20": "ds18b20",
 
-    # BMP280 variants
+    # BMP280 variants (Phase 2)
     "pressure_bmp280": "bmp280_pressure",
     "temperature_bmp280": "bmp280_temp",
+    "bmp280_pressure": "bmp280_pressure",
+    "bmp280_temp": "bmp280_temp",
 
     # pH sensor
     "ph_sensor": "ph",
     "ph": "ph",
+
+    # EC sensor (Phase 2)
+    "ec_sensor": "ec",
+    "ec": "ec",
+
+    # Moisture sensor (Phase 2)
+    "moisture": "moisture",
+
+    # CO2 sensors (Phase 3)
+    "mhz19_co2": "mhz19_co2",
+    "scd30_co2": "scd30_co2",
+
+    # Light sensor (Phase 3)
+    "light": "light",
+    "tsl2561": "light",
+    "bh1750": "light",
+
+    # Flow sensor (Phase 3)
+    "flow": "flow",
+    "yfs201": "flow",
 }
 ```
 
-**Multi-Value Sensor Definition:**
+**Multi-Value Sensor Definitions:**
 
 ```python
 MULTI_VALUE_SENSORS: Dict[str, MultiValueSensorDefinition] = {
     "sht31": {
         "device_type": "i2c",
-        "device_address": 0x44,
+        "device_address": 0x44,  # Default SHT31 address (0x45 if ADR pin to VIN)
         "values": [
             {
                 "sensor_type": "sht31_temp",
@@ -127,25 +229,72 @@ MULTI_VALUE_SENSORS: Dict[str, MultiValueSensorDefinition] = {
                 "unit": "%RH",
             },
         ],
-        "i2c_pins": {"sda": 21, "scl": 22},
+        "i2c_pins": {"sda": 21, "scl": 22},  # ESP32 default I2C pins
     },
+    "bmp280": {
+        "device_type": "i2c",
+        "device_address": 0x76,  # Default BMP280 address (0x77 if SDO to VCC)
+        "values": [
+            {
+                "sensor_type": "bmp280_pressure",
+                "name": "Pressure",
+                "unit": "hPa",
+            },
+            {
+                "sensor_type": "bmp280_temp",
+                "name": "Temperature",
+                "unit": "°C",
+            },
+        ],
+        "i2c_pins": {"sda": 21, "scl": 22},  # ESP32 default I2C pins
+    },
+    # Future multi-value sensors: "scd30": {...},  # CO2 + Temp + Humidity
 }
+```
+
+**Zusätzliche Hilfsfunktionen:**
+
+```python
+def normalize_sensor_type(sensor_type: str) -> str:
+    """Normalize sensor type from ESP32 format to server processor format."""
+
+def get_multi_value_sensor_def(device_type: str) -> Optional[MultiValueSensorDefinition]:
+    """Get multi-value sensor definition by device type."""
+
+def is_multi_value_sensor(device_type: str) -> bool:
+    """Check if a device type is a multi-value sensor."""
+
+def get_device_type_from_sensor_type(sensor_type: str) -> Optional[str]:
+    """Extract device type from sensor type."""
+
+def get_all_value_types_for_device(device_type: str) -> List[str]:
+    """Get all sensor types for a multi-value sensor device."""
+
+def get_i2c_address(device_type: str, default_address: Optional[int] = None) -> Optional[int]:
+    """Get I2C address for a device type."""
 ```
 
 ### 1.3 BaseSensorProcessor ABC
 
 Alle Sensor-Libraries müssen diese abstrakte Basisklasse implementieren.
 
-**Code-Location:** `src/sensors/base_processor.py`
+**Code-Location:** `src/sensors/base_processor.py` (1-214)
 
 ```python
 class BaseSensorProcessor(ABC):
     """
     Abstract Base Class for all sensor processors.
+
     Subclasses must implement:
     - process(): Convert raw value to physical measurement
     - validate(): Check if raw value is within acceptable range
     - get_sensor_type(): Return sensor type identifier
+
+    Optionally override:
+    - calibrate(): Perform calibration (if sensor supports it)
+    - get_default_params(): Return default processing parameters
+    - get_value_range(): Return expected value range
+    - get_raw_value_range(): Return expected raw value range
     """
 
     @abstractmethod
@@ -164,6 +313,31 @@ class BaseSensorProcessor(ABC):
     @abstractmethod
     def get_sensor_type(self) -> str:
         pass
+
+    def calibrate(
+        self,
+        calibration_points: list[Dict[str, float]],
+        method: str = "linear",
+    ) -> Dict[str, Any]:
+        """
+        Perform sensor calibration (optional).
+        Override this method if sensor supports calibration.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support calibration"
+        )
+
+    def get_default_params(self) -> Dict[str, Any]:
+        """Get default processing parameters."""
+        return {}
+
+    def get_value_range(self) -> Dict[str, float]:
+        """Get expected value range for the sensor."""
+        return {"min": float("-inf"), "max": float("inf")}
+
+    def get_raw_value_range(self) -> Dict[str, float]:
+        """Get expected raw value range (ADC/digital)."""
+        return {"min": float("-inf"), "max": float("inf")}
 ```
 
 **ProcessingResult & ValidationResult:**
@@ -194,7 +368,7 @@ Pi-Enhanced Processing wird nur ausgelöst wenn:
 2. **ESP sendet raw_mode:** `payload["raw_mode"] == True`
 3. **Library verfügbar:** Processor für `sensor_type` gefunden
 
-**Code-Location:** `src/mqtt/handlers/sensor_handler.py:150-196`
+**Code-Location:** `src/mqtt/handlers/sensor_handler.py:489-606`
 
 ```python
 if sensor_config and sensor_config.pi_enhanced and raw_mode:
@@ -267,7 +441,7 @@ async def _trigger_pi_enhanced_processing(
 
 Nach erfolgreichem Processing wird das Ergebnis zurück an den ESP32 gesendet.
 
-**Code-Location:** `src/mqtt/publisher.py:227-262`
+**Code-Location:** `src/mqtt/publisher.py:253-287`
 
 ```python
 def publish_pi_enhanced_response(
@@ -281,6 +455,17 @@ def publish_pi_enhanced_response(
 ) -> bool:
     """
     Publish Pi-Enhanced processing result to ESP.
+
+    Args:
+        esp_id: ESP device ID
+        gpio: GPIO pin number
+        processed_value: Processed sensor value
+        unit: Measurement unit
+        quality: Data quality (excellent, good, fair, poor, bad)
+        retry: Enable retry on failure
+
+    Returns:
+        True if publish successful
     """
     topic = TopicBuilder.build_pi_enhanced_response_topic(esp_id, gpio)
     payload = {
@@ -291,13 +476,15 @@ def publish_pi_enhanced_response(
     }
 
     qos = constants.QOS_SENSOR_DATA  # QoS 1 (At least once)
+
+    logger.debug(f"Publishing Pi-Enhanced response to {esp_id} GPIO {gpio}: {processed_value} {unit}")
     return self._publish_with_retry(topic, payload, qos, retry)
 ```
 
 **Topic Structure:**
 - **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/processed`
 - **QoS:** 1 (At least once)
-- **Code-Location:** `src/mqtt/topics.py:116-127`
+- **Code-Location:** `src/mqtt/topics.py:116-128`
 
 ---
 
@@ -305,13 +492,21 @@ def publish_pi_enhanced_response(
 
 ### 3.1 Library Structure
 
-**File:** `src/sensors/sensor_libraries/active/ph_sensor.py`
+**File:** `src/sensors/sensor_libraries/active/ph_sensor.py` (1-317)
 
 ```python
 class PHSensorProcessor(BaseSensorProcessor):
     """
     pH sensor processor for analog pH sensors.
-    Converts raw ADC values to calibrated pH measurements.
+
+    Converts raw ADC values to calibrated pH measurements using
+    two-point linear calibration.
+
+    Features:
+    - Two-point calibration (pH 4.0 and pH 7.0 buffers)
+    - Temperature compensation (optional)
+    - Quality assessment based on value range and calibration status
+    - Voltage-to-pH conversion
     """
 
     # ESP32 ADC configuration
@@ -323,6 +518,7 @@ class PHSensorProcessor(BaseSensorProcessor):
     PH_MAX = 14.0
 
     def get_sensor_type(self) -> str:
+        """Return sensor type identifier."""
         return "ph"
 
     def process(
@@ -342,101 +538,239 @@ class PHSensorProcessor(BaseSensorProcessor):
             )
 
         # Step 2: Convert ADC to voltage
-        voltage = (raw_value / self.ADC_MAX) * self.ADC_VOLTAGE_RANGE
+        voltage = self._adc_to_voltage(raw_value)
 
-        # Step 3: Apply calibration (two-point linear calibration)
-        ph_value = self._apply_calibration(voltage, calibration)
+        # Step 3: Apply calibration if available
+        if calibration and "slope" in calibration and "offset" in calibration:
+            slope = calibration["slope"]
+            offset = calibration["offset"]
+            ph_value = self._voltage_to_ph_calibrated(voltage, slope, offset)
+            calibrated = True
+        else:
+            # No calibration - use default conversion
+            ph_value = self._voltage_to_ph_default(voltage)
+            calibrated = False
 
-        # Step 4: Apply temperature compensation if provided
+        # Step 4: Temperature compensation (optional)
         if params and "temperature_compensation" in params:
-            temp_c = params["temperature_compensation"]
-            ph_value = self._apply_temperature_compensation(ph_value, temp_c)
+            temp = params["temperature_compensation"]
+            ph_value = self._apply_temperature_compensation(ph_value, temp)
 
-        # Step 5: Assess quality
-        quality = self._assess_quality(ph_value, calibration)
+        # Step 5: Round to decimal places
+        decimal_places = 2  # Default
+        if params and "decimal_places" in params:
+            decimal_places = params["decimal_places"]
+        ph_value = round(ph_value, decimal_places)
 
+        # Step 6: Assess quality
+        quality = self._assess_quality(ph_value, calibrated)
+
+        # Step 7: Return result
         return ProcessingResult(
-            value=round(ph_value, 2),
+            value=ph_value,
             unit="pH",
             quality=quality,
+            metadata={
+                "voltage": voltage,
+                "calibrated": calibrated,
+                "raw_value": raw_value,
+            },
         )
+
+    def validate(self, raw_value: float) -> ValidationResult:
+        """Validate raw ADC value."""
+        if raw_value < 0 or raw_value > self.ADC_MAX:
+            return ValidationResult(
+                valid=False,
+                error=f"Raw value {raw_value} out of range (0-{self.ADC_MAX})",
+            )
+
+        # Warning if value is near extremes
+        warnings = []
+        if raw_value < 100:
+            warnings.append("Value very low - pH sensor might be disconnected")
+        elif raw_value > 4000:
+            warnings.append("Value very high - check sensor connection")
+
+        return ValidationResult(valid=True, warnings=warnings if warnings else None)
+
+    def calibrate(
+        self,
+        calibration_points: list[Dict[str, float]],
+        method: str = "linear",
+    ) -> Dict[str, Any]:
+        """Perform two-point pH calibration."""
+        if len(calibration_points) < 2:
+            raise ValueError("pH calibration requires at least 2 points")
+
+        if method != "linear":
+            raise ValueError(f"Calibration method '{method}' not supported for pH")
+
+        # Extract points
+        point1 = calibration_points[0]
+        point2 = calibration_points[1]
+
+        raw1 = point1["raw"]
+        ph1 = point1["reference"]
+        raw2 = point2["raw"]
+        ph2 = point2["reference"]
+
+        # Convert ADC to voltage
+        voltage1 = self._adc_to_voltage(raw1)
+        voltage2 = self._adc_to_voltage(raw2)
+
+        # Calculate slope and offset: pH = slope * voltage + offset
+        slope = (ph2 - ph1) / (voltage2 - voltage1)
+        offset = ph1 - (slope * voltage1)
+
+        return {
+            "slope": slope,
+            "offset": offset,
+            "method": "linear",
+            "points": len(calibration_points),
+        }
+
+    def get_default_params(self) -> Dict[str, Any]:
+        """Get default processing parameters."""
+        return {
+            "temperature_compensation": None,  # No temp compensation by default
+            "decimal_places": 2,
+        }
+
+    def get_value_range(self) -> Dict[str, float]:
+        """Get expected pH value range (0-14)."""
+        return {"min": self.PH_MIN, "max": self.PH_MAX}
+
+    def get_raw_value_range(self) -> Dict[str, float]:
+        """Get expected ADC range (0-4095)."""
+        return {"min": 0.0, "max": self.ADC_MAX}
+
+    # Private helper methods
+    def _adc_to_voltage(self, adc_value: float) -> float:
+        """Convert ADC value to voltage."""
+        return (adc_value / self.ADC_MAX) * self.ADC_VOLTAGE_RANGE
+
+    def _voltage_to_ph_calibrated(self, voltage: float, slope: float, offset: float) -> float:
+        """Convert voltage to pH using calibration."""
+        ph = slope * voltage + offset
+        # Clamp to valid pH range
+        ph = max(self.PH_MIN, min(self.PH_MAX, ph))
+        return ph
+
+    def _voltage_to_ph_default(self, voltage: float) -> float:
+        """Convert voltage to pH using default conversion."""
+        # Default calibration: pH 7.0 at 1.5V, slope -3.5
+        NEUTRAL_VOLTAGE = 1.5
+        DEFAULT_SLOPE = -3.5
+
+        ph = 7.0 + DEFAULT_SLOPE * (voltage - NEUTRAL_VOLTAGE)
+        # Clamp to valid pH range
+        ph = max(self.PH_MIN, min(self.PH_MAX, ph))
+        return ph
+
+    def _apply_temperature_compensation(self, ph: float, temperature: float) -> float:
+        """Apply temperature compensation to pH reading."""
+        REFERENCE_TEMP = 25.0  # °C
+        TEMP_COEFFICIENT = 0.003  # pH/°C
+
+        temp_difference = temperature - REFERENCE_TEMP
+        compensation = temp_difference * TEMP_COEFFICIENT * (7.0 - ph)
+
+        ph_compensated = ph + compensation
+        # Clamp to valid range
+        ph_compensated = max(self.PH_MIN, min(self.PH_MAX, ph_compensated))
+
+        return ph_compensated
+
+    def _assess_quality(self, ph_value: float, calibrated: bool) -> str:
+        """Assess data quality."""
+        # Check if pH is within expected range
+        if ph_value < self.PH_MIN or ph_value > self.PH_MAX:
+            return "error"
+
+        # Good quality: calibrated and within typical range (3-11)
+        if calibrated and 3.0 <= ph_value <= 11.0:
+            return "good"
+
+        # Fair quality: calibrated but at extremes, or not calibrated but reasonable
+        if calibrated or (4.0 <= ph_value <= 10.0):
+            return "fair"
+
+        # Poor quality: not calibrated and at extremes
+        return "poor"
 ```
 
 ### 3.2 Calibration & Temperature Compensation
 
+**Zwei-Punkt-Kalibrierung:**
 ```python
-def _apply_calibration(self, voltage: float, calibration: Optional[Dict]) -> float:
-    """Apply two-point linear calibration."""
-    if not calibration:
-        # No calibration: assume neutral pH (7.0) at 1.5V
-        return 7.0 + (voltage - 1.5) * 3.5  # Rough approximation
+def calibrate(self, calibration_points: list[Dict[str, float]], method: str = "linear") -> Dict[str, Any]:
+    """Perform two-point pH calibration using pH 4.0 and pH 7.0 buffer solutions."""
+    # Requires calibration_points: [{"raw": 2150, "reference": 7.0}, {"raw": 1800, "reference": 4.0}]
+    # Returns: {"slope": float, "offset": float, "method": "linear", "points": 2}
+```
 
-    # Two-point calibration: pH 4.0 and pH 7.0 buffer solutions
-    slope = calibration.get("slope", 3.5)  # Default slope
-    offset = calibration.get("offset", 7.0)  # Default neutral pH
+**Temperaturkompensation:**
+```python
+def _apply_temperature_compensation(self, ph: float, temperature: float) -> float:
+    """Apply temperature compensation (0.003 pH/°C coefficient)."""
+    REFERENCE_TEMP = 25.0  # °C
+    TEMP_COEFFICIENT = 0.003  # pH/°C
 
-    return offset + (voltage - 1.5) * slope
+    temp_difference = temperature - REFERENCE_TEMP
+    compensation = temp_difference * TEMP_COEFFICIENT * (7.0 - ph)
 
-def _apply_temperature_compensation(self, ph_value: float, temperature_c: float) -> float:
-    """Apply temperature compensation for pH measurements."""
-    # pH temperature coefficient (typical -0.03 pH/°C for many electrodes)
-    temp_coefficient = -0.03
-
-    # Reference temperature (usually 25°C for calibration)
-    reference_temp = 25.0
-
-    compensation = temp_coefficient * (temperature_c - reference_temp)
-    return ph_value + compensation
+    return ph + compensation  # Clamped to valid pH range
 ```
 
 ### 3.3 Quality Assessment
 
+**Verbesserte Qualitätsbewertung:**
 ```python
-def _assess_quality(self, ph_value: float, calibration: Optional[Dict]) -> str:
-    """Assess measurement quality based on value range and calibration status."""
-    # Check if pH value is within reasonable range
+def _assess_quality(self, ph_value: float, calibrated: bool) -> str:
+    """Assess data quality based on value range and calibration status."""
+    # Check if pH is within expected range
     if ph_value < self.PH_MIN or ph_value > self.PH_MAX:
         return "error"
 
-    # Check calibration status
-    if not calibration:
-        return "fair"  # No calibration = reduced quality
+    # Good quality: calibrated and within typical range (3-11)
+    if calibrated and 3.0 <= ph_value <= 11.0:
+        return "good"
 
-    # Check calibration age (if timestamp available)
-    if "timestamp" in calibration:
-        import time
-        calibration_age_days = (time.time() - calibration["timestamp"]) / 86400
-        if calibration_age_days > 30:
-            return "fair"  # Old calibration
+    # Fair quality: calibrated but at extremes, or not calibrated but reasonable
+    if calibrated or (4.0 <= ph_value <= 10.0):
+        return "fair"
 
-    # All checks passed
-    return "excellent"
+    # Poor quality: not calibrated and at extremes
+    return "poor"
 ```
+
+**Qualitätskriterien:**
+- **good:** Kalibriert und pH-Wert im typischen Bereich (3.0-11.0)
+- **fair:** Kalibriert (aber extremes pH) oder unkaliert (aber vernünftiges pH)
+- **poor:** Nicht kalibriert und extremes pH
+- **error:** pH außerhalb gültigen Bereichs (0-14)
 
 ### 3.4 Validation
 
+**Erweiterte Validierung mit Warnungen:**
 ```python
 def validate(self, raw_value: float) -> ValidationResult:
-    """Validate raw ADC value."""
-    if not isinstance(raw_value, (int, float)):
+    """Validate raw ADC value with warnings for extreme values."""
+    if raw_value < 0 or raw_value > self.ADC_MAX:
         return ValidationResult(
             valid=False,
-            error="Raw value must be numeric"
+            error=f"Raw value {raw_value} out of range (0-{self.ADC_MAX})",
         )
 
-    if raw_value < 0:
-        return ValidationResult(
-            valid=False,
-            error="Raw value cannot be negative"
-        )
+    # Warning if value is near extremes (might be sensor issues)
+    warnings = []
+    if raw_value < 100:
+        warnings.append("Value very low - pH sensor might be disconnected")
+    elif raw_value > 4000:
+        warnings.append("Value very high - check sensor connection")
 
-    if raw_value > self.ADC_MAX:
-        return ValidationResult(
-            valid=False,
-            error=f"Raw value exceeds ADC maximum ({self.ADC_MAX})"
-        )
-
-    return ValidationResult(valid=True)
+    return ValidationResult(valid=True, warnings=warnings if warnings else None)
 ```
 
 ---
@@ -711,12 +1045,12 @@ async def check_library_health():
 | Komponente | Pfad | Zeilen |
 |------------|------|--------|
 | **LibraryLoader** | `src/sensors/library_loader.py` | 1-285 |
-| **BaseSensorProcessor** | `src/sensors/base_processor.py` | 1-230 |
-| **SensorTypeRegistry** | `src/sensors/sensor_type_registry.py` | 1-269 |
-| **SensorHandler** | `src/mqtt/handlers/sensor_handler.py` | 1-491 |
-| **Publisher** | `src/mqtt/publisher.py` | 227-262 |
-| **TopicBuilder** | `src/mqtt/topics.py` | 116-127 |
-| **pH Sensor Library** | `src/sensors/sensor_libraries/active/ph_sensor.py` | 1-318 |
+| **BaseSensorProcessor** | `src/sensors/base_processor.py` | 1-214 |
+| **SensorTypeRegistry** | `src/sensors/sensor_type_registry.py` | 1-285 |
+| **SensorHandler** | `src/mqtt/handlers/sensor_handler.py` | 1-606 |
+| **Publisher** | `src/mqtt/publisher.py` | 253-287 |
+| **TopicBuilder** | `src/mqtt/topics.py` | 116-128 |
+| **pH Sensor Library** | `src/sensors/sensor_libraries/active/ph_sensor.py` | 1-317 |
 
 ---
 
@@ -728,6 +1062,9 @@ async def check_library_health():
 - [x] **Auto-Discovery:** Libraries in `active/` automatisch gefunden
 - [x] **Type Validation:** Alle Processors erben von `BaseSensorProcessor`
 - [x] **Caching:** Processor-Instanzen werden gecached
+- [x] **Multi-Processor Support:** Ein Module kann mehrere Processor-Klassen enthalten
+- [x] **Library Reloading:** `reload_libraries()` für Development verfügbar
+- [x] **Import Fallback:** Mehrere Import-Pfade für Flexibilität
 
 ### Sensor Processing
 - [x] **Pi-Enhanced Trigger:** Nur bei `pi_enhanced=true` && `raw_mode=true`
@@ -735,22 +1072,29 @@ async def check_library_health():
 - [x] **Temperature Compensation:** Optionale Temp-Kompensation
 - [x] **Quality Assessment:** Automatische Qualitätsbewertung
 - [x] **Error Handling:** Graceful Fallback bei Processing-Fehlern
+- [x] **Parameter Support:** Sensor-spezifische Processing-Parameter
+- [x] **Metadata Integration:** Zusätzliche Processing-Informationen
+- [x] **Value Range Validation:** Physikalische und Raw-Value Bereiche
 
 ### ESP32 Integration
 - [x] **Response Publishing:** Processed Data zurück an ESP32
 - [x] **Topic Structure:** Korrekte MQTT-Topics implementiert
 - [x] **QoS Settings:** At least once (QoS 1) für Sensor-Daten
 - [x] **Timestamp Handling:** Unix timestamps korrekt konvertiert
+- [x] **Raw Mode Detection:** Automatische Erkennung von Raw-Data
 
 ### Erweiterbarkeit
 - [x] **Abstract Base Class:** Klare Interface-Definition
 - [x] **Registry System:** Flexibler Sensor-Type-Mapping
 - [x] **Multi-Value Support:** SHT31, BMP280 etc. unterstützt
 - [x] **Plugin Architecture:** Neue Libraries einfach hinzufügbar
+- [x] **Sensor Type Normalization:** Automatische ESP32→Server Format-Konvertierung
+- [x] **I2C Address Management:** Zentralisierte Adress-Verwaltung
+- [x] **Device Type Registry:** Unterstützung für verschiedene Kommunikationsprotokolle
 
 ---
 
-**Letzte Verifizierung:** Dezember 2025
+**Letzte Verifizierung:** Dezember 2025 (aktualisiert)
 **Verifiziert gegen Code-Version:** Git master branch
 
 **Anmerkungen:**
@@ -758,10 +1102,15 @@ async def check_library_health():
 - **Pi-Enhanced Processing aktiv:** Server-seitige Verarbeitung für pH, Temperatur, etc.
 - **ESP32 Integration vorbereitet:** Response-Publishing implementiert, Topics definiert
 - **Erweiterbarkeit gegeben:** Neue Sensoren einfach durch Library-Hinzufügung integrierbar
-- **Frontend-Integration geplant:** API-Struktur für Custom Libraries vorbereitet
-- **OTA Deployment vorbereitet:** MQTT-Infrastruktur für Library-Updates vorhanden
+- **Verbesserte pH Library:** Vollständige Kalibrierung, Temperaturkompensation, Qualitätsbewertung
+- **Multi-Value Sensor Support:** SHT31, BMP280 mit mehreren Messwerten unterstützt
+- **Erweiterte Registry:** Zusätzliche Sensor-Typen für Phase 2/3 vorbereitet
+- **Development Features:** Library-Reloading für einfachere Entwicklung
 
 Das Library-System ist **production-ready** und ermöglicht flexible Sensor-Integration ohne Server-Neustarts.
+
+
+
 
 
 

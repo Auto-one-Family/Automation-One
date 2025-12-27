@@ -9,25 +9,31 @@ Kombinierte Dokumentation für Sensor- und Actuator-Konfiguration.
 - [El Trabajante/docs/system-flows/04-runtime-sensor-config-flow.md](../../../El Trabajante/docs/system-flows/04-runtime-sensor-config-flow.md)
 - [El Trabajante/docs/system-flows/05-runtime-actuator-config-flow.md](../../../El Trabajante/docs/system-flows/05-runtime-actuator-config-flow.md)
 
-**Status:** ✅ **VOLLSTÄNDIG IMPLEMENTIERT** (Server-seitig) - Config-Response und Config-Sending funktionieren
+**Status:** ✅ **SERVER-SEITIG VOLLSTÄNDIG IMPLEMENTIERT** - ⚠️ **FRONTEND-INTEGRATION FEHLT**
 
 ---
 
-## ✅ ARCHITEKTUR-MISMATCH BEHOBEN
+## ✅ SERVER-SEITE: VOLLSTÄNDIG IMPLEMENTIERT
 
-**Gelöst:** Server und ESP32 nutzen nun **dieselbe Topic-Struktur** für Config-Messages:
+**Server und ESP32 nutzen dieselbe Topic-Struktur für Config-Messages:**
 
 | Komponente | Topic | Payload-Struktur |
 |------------|-------|------------------|
 | **ESP32 erwartet** | `kaiser/{kaiser_id}/esp/{esp_id}/config` | `{"sensors": [...], "actuators": [...]}` |
 | **Server sendet** | `kaiser/{kaiser_id}/esp/{esp_id}/config` | `{"sensors": [...], "actuators": [...]}` ✅ |
 
-**Status:**
-- ✅ Server-REST-APIs existieren (`/v1/sensors`, `/v1/actuators`)
-- ✅ Config-Response-Handler funktioniert
-- ✅ Config-Publishing implementiert (`publish_config()` in `publisher.py:134-194`)
-- ✅ APIs senden Config nach DB-Save via `ESPService.send_config()`
-- ⚠️ Frontend nutzt Mock-ESP Debug-APIs (Production-Frontend noch ausstehend)
+**Implementierungsstatus:**
+- ✅ Server-REST-APIs: `/v1/sensors/{esp_id}/{gpio}`, `/v1/actuators/{esp_id}/{gpio}`
+- ✅ Config-Response-Handler: `config_handler.py` - Verarbeitet ESP32-Responses mit Audit-Log
+- ✅ Config-Publishing: `publish_config()` in `publisher.py:160-203`
+- ✅ APIs publishen Config nach DB-Save via `ESPService.send_config()`
+- ✅ WebSocket-Broadcast für Config-Responses implementiert
+
+---
+
+## ⚠️ FRONTEND-SEITE: NUR MOCK-ESPS
+
+**Frontend hat KEINE echte Config-Integration:**
 
 **Implementierungsdetails:**
 1. ✅ `MQTT_TOPIC_ESP_CONFIG` in `constants.py:27`
@@ -362,16 +368,17 @@ if config_sent:
 
 ---
 
-## Teil 3: Frontend-Implementierung (⚠️ Nur Mock-ESPs)
+## Teil 3: Frontend-Implementierung (❌ **NICHT IMPLEMENTIERT**)
 
-### 3.1 Aktueller Status: Mock-ESP System
+### 3.1 Aktueller Status: **NUR MOCK-ESPS**
 
-**Was funktioniert:**
+**Das Frontend hat KEINE echte Config-Integration mit Server-APIs.**
 
-Das Frontend hat ein vollständiges Mock-ESP-System für Tests:
+**Was existiert (nur für Mock-ESPs):**
 
 **API:** [El Frontend/src/api/debug.ts](../../src/api/debug.ts)
 ```typescript
+// NUR für Mock-ESPs!
 // Sensor hinzufügen
 async addSensor(espId: string, config: MockSensorConfig): Promise<CommandResponse>
 // POST /debug/mock-esp/{espId}/sensors
@@ -391,24 +398,24 @@ async addActuator(espId: string, config: MockActuatorConfig): Promise<CommandRes
 - `addActuator()`: Zeilen 200-212
 - Nutzt `debugApi`
 
-### 3.2 Was fehlt: Echte Config-Integration
+### 3.2 Was FEHLT: Echte Config-Integration
 
-❌ **KEINE echten Sensor/Actuator-Config-APIs**
+❌ **Echte Sensor/Actuator-APIs nicht integriert**
 
-Das Frontend hat KEINE Integration mit den Server-Endpoints:
-- `/v1/sensors/{esp_id}/{gpio}`
-- `/v1/actuators/{esp_id}/{gpio}`
+Obwohl die APIs existieren, werden sie NICHT verwendet:
+- ✅ `src/api/sensors.ts` existiert mit `createOrUpdate()`
+- ✅ `src/api/actuators.ts` existiert mit `createOrUpdate()`
+- ❌ **ABER:** Keine View/Store nutzt diese echten APIs
 
-❌ **KEIN WebSocket-Handling**
+❌ **WebSocket-Handling nicht integriert**
 
-Das Frontend empfängt KEINE Config-Response-Events vom Server.
+- ✅ `src/composables/useConfigResponse.ts` existiert
+- ❌ **ABER:** Keine View verwendet dieses Composable
 
-❌ **KEIN Feedback für User**
+❌ **DeviceDetailView nutzt nur Mock-Logik**
 
-Nach Config-Änderung gibt es:
-- Keine Success-Notification
-- Keine Error-Anzeige
-- Keine automatische Liste-Aktualisierung
+- `src/views/DeviceDetailView.vue` prüft `isMock()` und verwendet nur Mock-Funktionen
+- Keine Integration mit echten Server-APIs
 
 ### 3.3 Was implementiert werden sollte
 
@@ -736,12 +743,13 @@ mosquitto_sub -h localhost -t "kaiser/god/esp/+/config_response" -v
 
 | Komponente | Pfad | Zeilen | Status |
 |------------|------|--------|--------|
-| **Mock API** | [src/api/debug.ts](../../src/api/debug.ts) | 127-149 | ✅ Funktioniert (Mock-ESPs) |
-| **Mock View** | [src/views/MockEspDetailView.vue](../../src/views/MockEspDetailView.vue) | 141-161 | ✅ Funktioniert (Mock-ESPs) |
-| **Mock Store** | [src/stores/mockEsp.ts](../../src/stores/mockEsp.ts) | 137-212 | ✅ Funktioniert (Mock-ESPs) |
-| **Real Sensor API** | `src/api/sensors.ts` | - | ❌ **FEHLT!** |
-| **Real Actuator API** | `src/api/actuators.ts` | - | ❌ **FEHLT!** |
-| **Config Response Hook** | `src/composables/useConfigResponse.ts` | - | ❌ **FEHLT!** |
+| **Mock API** | [src/api/debug.ts](../../src/api/debug.ts) | 127-149 | ✅ Funktioniert (nur Mock-ESPs) |
+| **Mock View** | [src/views/MockEspDetailView.vue](../../src/views/MockEspDetailView.vue) | 141-161 | ✅ Funktioniert (nur Mock-ESPs) |
+| **Mock Store** | [src/stores/mockEsp.ts](../../src/stores/mockEsp.ts) | 137-212 | ✅ Funktioniert (nur Mock-ESPs) |
+| **Real Sensor API** | [src/api/sensors.ts](../../src/api/sensors.ts) | 8-22 | ✅ **EXISTIERT ABER NICHT VERWENDET** |
+| **Real Actuator API** | [src/api/actuators.ts](../../src/api/actuators.ts) | 8-22 | ✅ **EXISTIERT ABER NICHT VERWENDET** |
+| **Config Response Hook** | [src/composables/useConfigResponse.ts](../../src/composables/useConfigResponse.ts) | 18-97 | ✅ **EXISTIERT ABER NICHT VERWENDET** |
+| **DeviceDetailView** | [src/views/DeviceDetailView.vue](../../src/views/DeviceDetailView.vue) | - | ⚠️ **NUTZT NUR MOCK-APIs** |
 
 ---
 
@@ -835,43 +843,45 @@ config_sent = await esp_service.send_config(esp_id, combined_config)
 
 ### Frontend-Seite
 
-- [ ] ⚠️ **Config UI existiert** (Nur Mock-ESPs)
-- [ ] ⚠️ **Echte API-Calls implementiert** (FEHLT - nur Debug-APIs)
-- [ ] ⚠️ **WebSocket Event-Handling implementiert** (FEHLT)
-- [ ] ⚠️ **User Feedback implementiert** (FEHLT)
+- [ ] ❌ **Echte Config UI implementiert** (Nur Mock-ESPs funktionieren)
+- [ ] ❌ **Echte API-Calls integriert** (APIs existieren aber werden nicht verwendet)
+- [ ] ❌ **WebSocket Event-Handling integriert** (Composable existiert aber nicht verwendet)
+- [ ] ❌ **User Feedback implementiert** (Keine Success/Error-Notifications)
 
 ---
 
 ## Zusammenfassung
 
 **Was funktioniert:** ✅
-- ESP32 Config-Empfang und -Response
-- Server Config-Response-Handling
-- Server WebSocket-Broadcast
-- Frontend Mock-ESP-System
-- **Server Config-Publishing (`publish_config()`)** ✅ IMPLEMENTIERT
-- **Server Topic-Builder (`build_config_topic()`)** ✅ IMPLEMENTIERT
-- **ConfigPayloadBuilder für ESP32-kompatible Payloads** ✅ IMPLEMENTIERT
-- **API Integration (Sensor/Actuator APIs rufen send_config auf)** ✅ IMPLEMENTIERT
+- ESP32 Config-Empfang und -Response (vollständig implementiert)
+- Server Config-Response-Handling mit Audit-Log (vollständig implementiert)
+- Server WebSocket-Broadcast (vollständig implementiert)
+- Frontend Mock-ESP-System (vollständig implementiert)
+- **Server Config-Publishing (`publish_config()`)** ✅ VOLLSTÄNDIG IMPLEMENTIERT
+- **Server Topic-Builder (`build_config_topic()`)** ✅ VOLLSTÄNDIG IMPLEMENTIERT
+- **ConfigPayloadBuilder für ESP32-kompatible Payloads** ✅ VOLLSTÄNDIG IMPLEMENTIERT
+- **API Integration (Sensor/Actuator APIs rufen send_config auf)** ✅ VOLLSTÄNDIG IMPLEMENTIERT
 
 **Was fehlt:** ❌
-- Frontend echte Config-APIs (nutzt nur Mock-ESPs)
-- Frontend WebSocket-Handling für Config-Responses
-- Audit-Log für Config-Responses in DB
+- **Frontend echte Config-APIs** (APIs existieren aber werden nicht verwendet)
+- **Frontend WebSocket-Handling** (Composable existiert aber nicht integriert)
+- **Echte ESP Config-UI** (nur Mock-ESPs funktionieren)
+- **User Feedback für Config-Operations** (keine Notifications)
 
 **Nächste Schritte:**
-1. ~~**KRITISCH:** Server Config-Publishing implementieren (Phase 1)~~ ✅ ERLEDIGT
-2. **HIGH:** Frontend echte Config-APIs implementieren (Phase 2)
-3. **MEDIUM:** Frontend WebSocket-Integration (Phase 3)
-4. **LOW:** Audit-Log für Config-Responses implementieren
+1. ~~**KRITISCH:** Server Config-Publishing implementieren~~ ✅ **ABGESCHLOSSEN**
+2. **HIGH:** DeviceDetailView echte Server-APIs integrieren (Phase 2)
+3. **HIGH:** useConfigResponse Composable in Views integrieren (Phase 3)
+4. **MEDIUM:** Success/Error-Notifications implementieren
+5. **LOW:** Audit-Log Query-Methoden für Config-Historie erweitern
 
 ---
 
-**Letzte Verifizierung:** 2025-12-18
-**Verifiziert gegen Code-Version:** Latest (2025-12-18)
+**Letzte Verifizierung:** 2025-12-27
+**Verifiziert gegen Code-Version:** Latest (2025-12-27)
 **Dokumentation erstellt von:** Claude Sonnet 4.5 (KI-Agent)
-**Letzte Aktualisierung:** Claude Opus 4.5 - Config-Publishing als IMPLEMENTIERT markiert
+**Code-Analyse durchgeführt von:** Claude Opus 4.5
 **Verifizierte Komponenten:**
-- ✅ ESP32: El Trabajante (Firmware v4.0+)
-- ✅ Server: El Servador (god_kaiser_server) - **Config-Publishing vollständig implementiert**
-- ✅ Frontend: El Frontend (Vue 3 + Pinia) - Mock-ESPs funktionieren, Production-APIs ausstehend
+- ✅ ESP32: El Trabajante - Vollständig implementiert (Config-Empfang/-Response)
+- ✅ Server: El Servador - **VOLLSTÄNDIG IMPLEMENTIERT** (Config-Publishing + Response-Handling)
+- ⚠️ Frontend: El Frontend - APIs/Composables existieren aber nicht integriert (nur Mock-ESPs)

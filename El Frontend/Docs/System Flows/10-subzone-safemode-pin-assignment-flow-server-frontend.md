@@ -13,7 +13,7 @@ Subzones sind logische Gruppierungen einzelner GPIO-Pins/Sensoren/Aktoren innerh
 |-----------|--------|--------------|
 | ESP32 (El Trabajante) | ✅ VOLLSTÄNDIG | GPIO-Manager, Config-Manager, MQTT-Handler, Safety-Controller |
 | Server (El Servador) | ✅ VOLLSTÄNDIG IMPLEMENTIERT | Service, API, Handler, Schemas, DB Model, MQTT Integration |
-| Frontend (El Frontend) | ✅ VOLLSTÄNDIG IMPLEMENTIERT | Types, API Client, WebSocket, Integration |
+| Frontend (El Frontend) | ✅ CORE IMPLEMENTIERT (UI Components ausstehend) | Types, API Client, WebSocket erweitert |
 
 ---
 
@@ -2628,7 +2628,7 @@ sequenceDiagram
 - [x] `src/mqtt/handlers/subzone_ack_handler.py` - ACK Handler
 - [x] `src/main.py` - Handler Registration
 
-### Frontend-Seite (✅ VOLLSTÄNDIG IMPLEMENTIERT)
+### Frontend-Seite (✅ CORE IMPLEMENTIERT)
 
 - [x] `src/types/index.ts` - Subzone Interfaces
 - [x] `src/api/subzones.ts` - API Client
@@ -2638,8 +2638,8 @@ sequenceDiagram
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-18
-**Dokumentversion:** 3.0 (Komplette Server & Frontend Implementierung)
+**Letzte Aktualisierung:** 2025-12-27
+**Dokumentversion:** 3.1 (Korrigierte Implementierungsstatus nach Code-Analyse)
 **ESP32 Status:** ✅ VOLLSTÄNDIG IMPLEMENTIERT
 **Server Status:** ✅ VOLLSTÄNDIG IMPLEMENTIERT
 **Frontend Status:** ✅ CORE IMPLEMENTIERT (UI Components ausstehend)

@@ -90,17 +90,23 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 
 **Topic:** `kaiser/{kaiser_id}/esp/+/sensor/+/data`
 **Funktion:** `handle_sensor_data()`
-**Datei:** [sensor_handler.py:57-277]
+**Datei:** [sensor_handler.py:78-311]
 
 **Verarbeitung:**
 1. Topic parsen → `esp_id`, `gpio`
-2. Payload validieren (ts, esp_id, gpio, sensor_type, raw/raw_value, raw_mode)
-3. ESP-Device lookup
+2. Payload validieren (ts/timestamp, esp_id, gpio, sensor_type, raw/raw_value, raw_mode)
+3. ESP-Device lookup (mit resilient_session und circuit breaker protection)
 4. Sensor-Config lookup (für Pi-Enhanced)
-5. Wert verarbeiten (raw oder Pi-Enhanced)
-6. In DB speichern (`sensor_data` Tabelle)
+5. Wert verarbeiten (raw oder Pi-Enhanced mit sensor library loader)
+6. In DB speichern (`sensor_data` Tabelle mit data_source detection)
 7. WebSocket broadcast (`sensor_data` Event)
-8. Logic Engine triggern (non-blocking)
+8. Logic Engine triggern (non-blocking asyncio task)
+
+**Resilience Features:**
+- Circuit breaker protection für DB operations
+- Timeout handling für Pi-Enhanced processing
+- Best-effort WebSocket broadcasts
+- Data source auto-detection (PRODUCTION/MOCK/TEST/SIMULATION)
 
 **Payload (ESP32 sendet):**
 ```json
@@ -110,6 +116,7 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
   "gpio": 4,
   "sensor_type": "ph_sensor",
   "raw": 2048,
+  "raw_value": 20.48,
   "raw_mode": true,
   "value": 0.0,
   "unit": "",
@@ -121,7 +128,7 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 
 **Topic:** `kaiser/{kaiser_id}/esp/+/actuator/+/status`
 **Funktion:** `handle_actuator_status()`
-**Datei:** [actuator_handler.py:43-203]
+**Datei:** [actuator_handler.py:44-436]
 
 **Verarbeitung:**
 1. Topic parsen → `esp_id`, `gpio`
@@ -150,7 +157,7 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 
 **Topic:** `kaiser/{kaiser_id}/esp/+/system/heartbeat`
 **Funktion:** `handle_heartbeat()`
-**Datei:** [heartbeat_handler.py:54-175]
+**Datei:** [heartbeat_handler.py:55-573]
 
 **Verarbeitung:**
 1. Topic parsen → `esp_id`
@@ -201,14 +208,15 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 
 **Topic:** `kaiser/{kaiser_id}/esp/+/actuator/+/response`
 **Funktion:** `handle_actuator_response()`
-**Datei:** [actuator_response_handler.py:54-153]
+**Datei:** [actuator_response_handler.py:54-260]
 
 **Verarbeitung:**
-1. Topic parsen → `esp_id`, `gpio`
-2. Payload validieren (ts, esp_id, gpio, command, success)
+1. Payload validieren (esp_id, gpio, command, success)
+2. ESP-Device lookup (optional - nicht kritisch bei Fehlern)
 3. Pending-Command als abgeschlossen markieren
 4. Command-Response in History loggen
 5. WebSocket broadcast (`actuator_response` Event)
+6. Timestamp-Konvertierung (auto-detect millis vs seconds)
 
 **Payload (ESP32 sendet):**
 ```json
@@ -218,7 +226,9 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
   "command": "ON",
   "value": 1.0,
   "success": true,
-  "message": "Command executed"
+  "message": "Command executed",
+  "duration": 150,
+  "ts": 1733000000000
 }
 ```
 
@@ -226,15 +236,21 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 
 **Topic:** `kaiser/{kaiser_id}/esp/+/actuator/+/alert`
 **Funktion:** `handle_actuator_alert()`
-**Datei:** [actuator_alert_handler.py:66-190]
+**Datei:** [actuator_alert_handler.py:66-302]
 
 **Verarbeitung:**
-1. Topic parsen → `esp_id`, `gpio`
-2. Payload validieren (ts, esp_id, gpio, alert_type)
-3. Alert-Typ identifizieren (emergency_stop, runtime_protection, safety_violation, hardware_error)
-4. Safety-Maßnahmen einleiten (State auf OFF setzen bei kritischen Alerts)
-5. Alert in Command-History loggen
-6. WebSocket broadcast (`actuator_alert` Event, high priority)
+1. Payload validieren (esp_id, gpio, alert_type)
+2. Alert-Typ identifizieren (emergency_stop, runtime_protection, safety_violation, hardware_error)
+3. Safety-Maßnahmen einleiten (State auf OFF setzen bei kritischen Alerts)
+4. Alert in Command-History loggen
+5. WebSocket broadcast (`actuator_alert` Event, high priority)
+6. Timestamp-Konvertierung (auto-detect millis vs seconds)
+
+**Alert Types:**
+- `emergency_stop`: Manual/automatic emergency stop
+- `runtime_protection`: Actuator exceeded max runtime
+- `safety_violation`: Safety constraint violated
+- `hardware_error`: Hardware malfunction detected
 
 **Payload (ESP32 sendet):**
 ```json
@@ -242,7 +258,8 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
   "esp_id": "ESP_12AB34CD",
   "gpio": 25,
   "alert_type": "emergency_stop",
-  "message": "Actuator stopped due to safety constraint"
+  "message": "Actuator stopped due to safety constraint",
+  "ts": 1733000000000
 }
 ```
 
@@ -254,7 +271,7 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 
 **Endpoint:** `ws://{host}:8000/api/v1/ws/realtime/{client_id}?token={jwt}`
 
-**Code-Location:** [MqttLogView.vue:56-123]
+**Code-Location:** [MqttLogView.vue:20-137]
 
 ### 4.2 Event-Handling
 
@@ -275,16 +292,27 @@ def _find_handler(self, topic: str) -> Optional[Callable]:
 - `actuator_response` - Command-Responses
 - `actuator_alert` - Safety-Alerts
 
-**MqttLogView Filter (Zeile 35):**
+**MqttLogView Filter (Zeile 44):**
 ```typescript
 const messageTypes: MessageType[] = [
-  'sensor_data', 
-  'actuator_status', 
-  'logic_execution', 
-  'esp_health', 
-  'system_event'
+  'sensor_data',
+  'actuator_status',
+  'actuator_response',
+  'actuator_alert',
+  'esp_health',
+  'config_response',
+  'zone_assignment',
+  'logic_execution',
+  'system_event',
 ]
 ```
+
+**WebSocket Manager Features:**
+- Thread-safe singleton pattern mit asyncio.Lock
+- Rate limiting: 10 messages/second per client
+- Subscription-based filtering (types, esp_ids, sensor_types)
+- Auto-reconnect handling
+- Graceful client disconnection
 
 ### 4.3 MqttLogView (Debug-Ansicht)
 
@@ -300,7 +328,101 @@ const messageTypes: MessageType[] = [
 
 ---
 
-## Teil 5: Error-Handling & Robustheit
+## Teil 5: Mock-ESP Integration
+
+### 5.1 Paket G: Mock-ESP Actuator Commands
+
+**Funktion:** Ermöglicht Mock-ESPs, Actuator-Commands vom Server zu empfangen.
+
+**Handler-Registration (main.py:248-278):**
+```python
+# Paket G: Register handler for Mock-ESP actuator commands
+async def mock_actuator_command_handler(topic: str, payload: dict) -> bool:
+    """Route actuator commands to Mock-ESP handler if target is an active mock."""
+    try:
+        from .services.simulation import get_simulation_scheduler
+        sim_scheduler = get_simulation_scheduler()
+        payload_str = json.dumps(payload)
+        return await sim_scheduler.handle_mqtt_message(topic, payload_str)
+    except RuntimeError:
+        return False
+    except Exception as e:
+        logger.debug(f"Mock actuator command handler error: {e}")
+        return False
+
+_subscriber_instance.register_handler(
+    f"kaiser/{kaiser_id}/esp/+/actuator/+/command",
+    mock_actuator_command_handler
+)
+# Emergency topics for mocks
+_subscriber_instance.register_handler(
+    f"kaiser/{kaiser_id}/esp/+/actuator/emergency",
+    mock_actuator_command_handler
+)
+_subscriber_instance.register_handler(
+    "kaiser/broadcast/emergency",
+    mock_actuator_command_handler
+)
+```
+
+### 5.2 Paket X: Mock-ESP Recovery nach Server-Restart
+
+**Problem:** APScheduler-Jobs sind In-Memory → Verlust bei Server-Restart.
+
+**Lösung:** DB-First Recovery (main.py:292-304):
+```python
+# Step 3.5: Recover running Mock-ESP simulations from database
+try:
+    async for session in get_session():
+        recovered_count = await _simulation_scheduler.recover_mocks(session)
+        if recovered_count > 0:
+            logger.info(f"Mock-ESP recovery complete: {recovered_count} simulations restored")
+        else:
+            logger.info("No active Mock-ESP simulations to recover")
+        break
+except Exception as e:
+    logger.warning(f"Mock-ESP recovery failed (non-critical): {e}")
+```
+
+**Recovery-SQL:**
+```sql
+SELECT * FROM esp_devices
+WHERE hardware_type = 'MOCK_ESP32'
+AND device_metadata->>'simulation_state' = 'running'
+```
+
+### 5.3 Mock-ESP Sensor Simulation
+
+**Features:**
+- 3 Variation Patterns: CONSTANT, RANDOM, DRIFT
+- Manual Override: Sensor-Werte zur Laufzeit setzen
+- Identische Payloads zu echten ESP32s
+- DB-First Architecture (Konfiguration überlebt Restart)
+
+**API Endpoints:**
+- `POST /api/v1/debug/mock-esp/{esp_id}/sensors` - Sensor hinzufügen
+- `POST /api/v1/debug/mock-esp/{esp_id}/sensors/{gpio}/value` - Manual Override setzen
+- `DELETE /api/v1/debug/mock-esp/{esp_id}/sensors/{gpio}/value` - Manual Override entfernen
+
+**Payload-Kompatibilität:**
+```json
+{
+    "ts": 1735818000000,         // MILLISEKUNDEN (int(time.time() * 1000))
+    "esp_id": "MOCK_001",
+    "gpio": 4,
+    "sensor_type": "DS18B20",
+    "raw": 2250,                  // INTEGER (int(value * 100))
+    "raw_value": 22.5,            // FLOAT
+    "raw_mode": true,             // BOOLEAN (REQUIRED!)
+    "value": 22.5,
+    "unit": "°C",
+    "quality": "good"
+}
+```
+
+---
+
+## Teil 6: Error-Handling & Robustheit
 
 ### 5.1 Handler-Level Errors
 
@@ -375,22 +497,25 @@ poetry run uvicorn ...
 
 | Komponente | Pfad | Zeilen |
 |------------|------|--------|
-| **Haupt-Einstieg** | `god_kaiser_server/src/main.py` | 1-405 |
+| **Haupt-Einstieg** | `god_kaiser_server/src/main.py` | 1-591 |
 | **MQTT Client** | `god_kaiser_server/src/mqtt/client.py` | 1-376 |
-| **Subscriber** | `god_kaiser_server/src/mqtt/subscriber.py` | 1-274 |
-| **Topic Constants** | `god_kaiser_server/src/core/constants.py` | 1-306 |
+| **Subscriber** | `god_kaiser_server/src/mqtt/subscriber.py` | 1-280 |
+| **Topic Constants** | `god_kaiser_server/src/core/constants.py` | 1-330 |
 | **Topic Builder** | `god_kaiser_server/src/mqtt/topics.py` | 1-506 |
 | **Base Handler** | `god_kaiser_server/src/mqtt/handlers/base_handler.py` | 1-567 |
-| **sensor_handler** | `god_kaiser_server/src/mqtt/handlers/sensor_handler.py` | 1-491 |
-| **actuator_handler** | `god_kaiser_server/src/mqtt/handlers/actuator_handler.py` | 1-349 |
-| **heartbeat_handler** | `god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` | 1-175 |
-| **config_handler** | `god_kaiser_server/src/mqtt/handlers/config_handler.py` | 1-183 |
-| **actuator_response_handler** | `god_kaiser_server/src/mqtt/handlers/actuator_response_handler.py` | 1-153 |
-| **actuator_alert_handler** | `god_kaiser_server/src/mqtt/handlers/actuator_alert_handler.py` | 1-190 |
+| **sensor_handler** | `god_kaiser_server/src/mqtt/handlers/sensor_handler.py` | 1-606 |
+| **actuator_handler** | `god_kaiser_server/src/mqtt/handlers/actuator_handler.py` | 1-436 |
+| **heartbeat_handler** | `god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` | 1-573 |
+| **config_handler** | `god_kaiser_server/src/mqtt/handlers/config_handler.py` | 1-240 |
+| **actuator_response_handler** | `god_kaiser_server/src/mqtt/handlers/actuator_response_handler.py` | 1-261 |
+| **actuator_alert_handler** | `god_kaiser_server/src/mqtt/handlers/actuator_alert_handler.py` | 1-302 |
 | **discovery_handler** | `god_kaiser_server/src/mqtt/handlers/discovery_handler.py` | - |
 | **kaiser_handler** | `god_kaiser_server/src/mqtt/handlers/kaiser_handler.py` | - |
-| **WebSocket Manager** | `god_kaiser_server/src/websocket/manager.py` | 1-291 |
-| **MqttLogView** | `frontend/src/views/MqttLogView.vue` | 1-423 |
+| **WebSocket Manager** | `god_kaiser_server/src/websocket/manager.py` | 1-309 |
+| **MqttLogView** | `frontend/src/views/MqttLogView.vue` | 1-282 |
+| **SimulationScheduler** | `god_kaiser_server/src/services/simulation/scheduler.py` | 1-717 |
+| **ESPRepository** | `god_kaiser_server/src/db/repositories/esp_repo.py` | 1-665 |
+| **Debug API** | `god_kaiser_server/src/api/v1/debug.py` | 1-901 |
 
 ---
 
@@ -402,15 +527,25 @@ poetry run uvicorn ...
 - [x] Handler-Registration dokumentiert
 
 ### Handler
-- [x] Alle 6 Handler identifiziert und dokumentiert
+- [x] Alle 6 Handler identifiziert und dokumentiert (sensor, actuator, heartbeat, config, actuator_response, actuator_alert)
 - [x] Jeder Handler hat: Topic, Funktion, Datei, Verarbeitung, Payload
-- [x] Konsistentes Pattern über alle Handler
+- [x] BaseMQTTHandler-Pattern implementiert für konsistente Validierung und Logging
+- [x] Resilience Features: Circuit breaker, timeout handling, best-effort broadcasts
 
 ### WebSocket
-- [x] Alle 6 Event-Types dokumentiert (sensor_data, actuator_status, esp_health, config_response, actuator_response, actuator_alert)
-- [x] Frontend-Handling dokumentiert (MqttLogView)
-- [x] WebSocket-Manager implementiert (singleton, thread-safe, rate-limiting)
+- [x] Alle 9 Event-Types dokumentiert (sensor_data, actuator_status, actuator_response, actuator_alert, esp_health, config_response, zone_assignment, logic_execution, system_event)
+- [x] Frontend-Handling dokumentiert (MqttLogView mit Filter-Unterstützung)
+- [x] WebSocket-Manager implementiert (singleton, thread-safe, rate-limiting 10 msg/sec)
 - [x] Real-time Broadcasting für alle Handler implementiert
+- [x] Subscription-based filtering (types, esp_ids, sensor_types)
+
+### Mock-ESP Integration
+- [x] Paket G: Mock-ESP actuator command handling implementiert
+- [x] Paket X: Mock-ESP recovery nach Server-Restart implementiert
+- [x] Sensor simulation mit 3 Variation Patterns (CONSTANT, RANDOM, DRIFT)
+- [x] Manual Override für Sensor-Werte
+- [x] DB-First Architecture für Konfigurationspersistenz
+- [x] API Endpoints für Runtime-Management
 
 ### Error-Handling
 - [x] Handler-Level Errors dokumentiert
@@ -418,16 +553,20 @@ poetry run uvicorn ...
 
 ---
 
-**Letzte Verifizierung:** Dezember 2025
+**Letzte Verifizierung:** Dezember 2025 (aktualisiert mit Mock-ESP Integration)
 **Verifiziert gegen Code-Version:** Git master branch
 
 **Anmerkungen:**
 - **BaseMQTTHandler-Pattern implementiert**: Alle Handler erben von BaseMQTTHandler für konsistente Validierung, Logging und WebSocket-Broadcasting
-- **WebSocket-Manager vollständig implementiert**: Thread-safe singleton mit Rate-Limiting und Filter-Unterstützung
-- **Logic Engine Integration**: Sensor-Handler triggert Logic Engine nach Daten-Speicherung (non-blocking)
+- **WebSocket-Manager vollständig implementiert**: Thread-safe singleton mit Rate-Limiting (10 msg/sec) und subscription-based filtering
+- **Logic Engine Integration**: Sensor-Handler triggert Logic Engine nach Daten-Speicherung (non-blocking asyncio task)
 - **Auto-Discovery deaktiviert**: Heartbeat-Handler aktualisiert ESP-Status ohne Auto-Discovery (ESPs müssen via REST API registriert werden)
 - **Topic-Konsistenz**: Alle Topics in constants.py definiert, actuator_response und actuator_alert werden dynamisch gebaut
 - **Error-Handling**: Strukturiertes Error-Code-System (ValidationErrorCode, ConfigErrorCode, ServiceErrorCode)
 - **Performance**: Thread-Pool für Handler-Ausführung, DB-Verbindungs-Pooling, MQTT QoS-Optimierung
 - **Frontend-Konsistenz**: Nutzt ausschließlich vorhandene APIs, Patterns und Topic-Strukturen
 - **System-Konsistenz**: 100% konform mit Hierarchie.md und Server-Vorgaben (God-Kaiser steuert ESPs direkt via kaiser_id="god")
+- **Mock-ESP Integration**: Paket G (actuator commands) und Paket X (recovery) vollständig implementiert
+- **Resilience Features**: Circuit breaker protection, timeout handling, best-effort broadcasts, data source auto-detection
+- **Sensor Processing**: Pi-Enhanced processing mit dynamic sensor library loading
+- **Safety System**: Actuator alerts mit emergency stop und safety violation handling
