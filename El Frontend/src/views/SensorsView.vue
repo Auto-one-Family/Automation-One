@@ -1,10 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMockEspStore } from '@/stores/mockEsp'
+import { useWebSocket } from '@/composables/useWebSocket'
 import type { QualityLevel } from '@/types'
+import type { WebSocketMessage } from '@/services/websocket'
 import { Thermometer, Gauge, Filter, X, ChevronDown, ChevronUp } from 'lucide-vue-next'
 
 const mockEspStore = useMockEspStore()
+
+// WebSocket for live updates
+const { subscribe, unsubscribe } = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
+})
+
+// Track updated sensors for visual feedback
+const updatedSensorKeys = ref<Set<string>>(new Set())
 
 // Filter state
 const showFilters = ref(false)
@@ -27,9 +38,63 @@ const availableEspIds = computed(() => {
 
 const qualityLevels: QualityLevel[] = ['excellent', 'good', 'fair', 'poor', 'bad', 'stale']
 
-onMounted(() => {
-  mockEspStore.fetchAll()
+onMounted(async () => {
+  // Initial load via REST
+  await mockEspStore.fetchAll()
+
+  // Subscribe to WebSocket events for live updates
+  subscribe(
+    {
+      types: ['sensor_data', 'esp_health'],
+    },
+    (message: WebSocketMessage) => {
+      handleWebSocketMessage(message)
+    }
+  )
 })
+
+onUnmounted(() => {
+  unsubscribe()
+})
+
+/**
+ * Handle WebSocket messages for live updates
+ */
+function handleWebSocketMessage(message: WebSocketMessage) {
+  const { type, data } = message
+
+  if (type === 'sensor_data') {
+    const espId = data.esp_id as string
+    const gpio = data.gpio as number
+    if (!espId || gpio === undefined) return
+
+    // Update sensor value
+    mockEspStore.updateSensorFromEvent(espId, gpio, {
+      raw_value: (data.value as number) ?? (data.raw_value as number) ?? (data.raw as number),
+      quality: (data.quality as QualityLevel),
+      unit: (data.unit as string),
+      last_read: data.timestamp ? new Date((data.timestamp as number) * 1000).toISOString() : new Date().toISOString(),
+    })
+
+    // Visual feedback: highlight updated sensor
+    const sensorKey = `${espId}-${gpio}`
+    updatedSensorKeys.value.add(sensorKey)
+    setTimeout(() => {
+      updatedSensorKeys.value.delete(sensorKey)
+    }, 500) // Remove highlight after 500ms
+  } else if (type === 'esp_health') {
+    // Update ESP connection status (affects sensor display)
+    const espId = data.esp_id as string
+    if (!espId) return
+
+    const esp = mockEspStore.mockEsps.find(e => e.esp_id === espId)
+    if (!esp) return
+
+    mockEspStore.updateEspFromEvent(espId, {
+      connected: data.status === 'online' || data.status === 'connected',
+    })
+  }
+}
 
 const allSensors = computed(() => {
   return mockEspStore.mockEsps.flatMap(esp =>
@@ -241,7 +306,10 @@ function getQualityColor(quality: string): string {
       <div
         v-for="sensor in filteredSensors"
         :key="`${sensor.esp_id}-${sensor.gpio}`"
-        class="card hover:border-dark-600 transition-colors"
+        :class="[
+          'card hover:border-dark-600 transition-colors',
+          updatedSensorKeys.has(`${sensor.esp_id}-${sensor.gpio}`) ? 'sensor-value--updated' : ''
+        ]"
       >
         <div class="card-header flex items-center gap-3">
           <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -291,5 +359,21 @@ function getQualityColor(quality: string): string {
 .slide-enter-to,
 .slide-leave-from {
   max-height: 500px;
+}
+
+/* Visual feedback for updated sensor values */
+.sensor-value--updated {
+  animation: sensorUpdateHighlight 0.5s ease-out;
+}
+
+@keyframes sensorUpdateHighlight {
+  0% {
+    border-color: rgba(59, 130, 246, 0.5);
+    background-color: rgba(59, 130, 246, 0.1);
+  }
+  100% {
+    border-color: transparent;
+    background-color: transparent;
+  }
 }
 </style>

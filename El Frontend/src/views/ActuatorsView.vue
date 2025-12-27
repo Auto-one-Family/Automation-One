@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMockEspStore } from '@/stores/mockEsp'
+import { useWebSocket } from '@/composables/useWebSocket'
+import type { WebSocketMessage } from '@/services/websocket'
 import { Power, AlertTriangle, Filter, X, ChevronDown, ChevronUp } from 'lucide-vue-next'
 
 type ActuatorStateFilter = 'on' | 'off' | 'emergency'
 
 const mockEspStore = useMockEspStore()
+
+// WebSocket for live updates
+const { subscribe, unsubscribe } = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
+})
 
 // Filter state
 const showFilters = ref(false)
@@ -32,9 +40,56 @@ const stateFilters: { value: ActuatorStateFilter; label: string }[] = [
   { value: 'emergency', label: 'E-STOP' },
 ]
 
-onMounted(() => {
-  mockEspStore.fetchAll()
+onMounted(async () => {
+  // Initial load via REST
+  await mockEspStore.fetchAll()
+
+  // Subscribe to WebSocket events for live updates
+  subscribe(
+    {
+      types: ['actuator_status', 'esp_health'],
+    },
+    (message: WebSocketMessage) => {
+      handleWebSocketMessage(message)
+    }
+  )
 })
+
+onUnmounted(() => {
+  unsubscribe()
+})
+
+/**
+ * Handle WebSocket messages for live updates
+ */
+function handleWebSocketMessage(message: WebSocketMessage) {
+  const { type, data } = message
+
+  if (type === 'actuator_status') {
+    const espId = data.esp_id as string
+    const gpio = data.gpio as number
+    if (!espId || gpio === undefined) return
+
+    // Update actuator state
+    mockEspStore.updateActuatorFromEvent(espId, gpio, {
+      state: (data.state as boolean) ?? false,
+      pwm_value: (data.pwm_value as number) ?? (data.pwm as number) ?? 0,
+      emergency_stopped: (data.emergency_stopped as boolean) ?? false,
+      last_command: data.timestamp ? new Date((data.timestamp as number) * 1000).toISOString() : new Date().toISOString(),
+    })
+  } else if (type === 'esp_health') {
+    // Update ESP connection status (affects actuator display)
+    const espId = data.esp_id as string
+    if (!espId) return
+
+    const esp = mockEspStore.mockEsps.find(e => e.esp_id === espId)
+    if (!esp) return
+
+    mockEspStore.updateEspFromEvent(espId, {
+      connected: data.status === 'online' || data.status === 'connected',
+    })
+  }
+}
 
 const allActuators = computed(() => {
   return mockEspStore.mockEsps.flatMap(esp =>

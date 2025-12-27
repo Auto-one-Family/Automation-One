@@ -7,10 +7,12 @@
  * Uses SENSOR_TYPE_CONFIG for correct units and defaults.
  */
 
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMockEspStore } from '@/stores/mockEsp'
+import { useWebSocket } from '@/composables/useWebSocket'
 import type { MockSensorConfig, MockActuatorConfig, MockSystemState, QualityLevel } from '@/types'
+import type { WebSocketMessage } from '@/services/websocket'
 import {
   ArrowLeft, Heart, AlertTriangle, Plus, Trash2, Power, X,
   Thermometer, Gauge, RefreshCw
@@ -51,6 +53,12 @@ const isMock = computed(() =>
   esp.value?.hardware_type?.startsWith('MOCK_') || 
   esp.value?.esp_id?.startsWith('ESP_MOCK_')
 )
+
+// WebSocket for live updates (filtered to this ESP)
+const { subscribe, unsubscribe } = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
+})
 
 // Modals
 const showAddSensorModal = ref(false)
@@ -110,13 +118,87 @@ onMounted(async () => {
   if (mockEspStore.mockEsps.length === 0) {
     await mockEspStore.fetchAll()
   }
+
+  // Subscribe to WebSocket events for this ESP only
+  subscribe(
+    {
+      types: ['esp_health', 'sensor_data', 'actuator_status'],
+      esp_ids: [espId.value],
+    },
+    (message: WebSocketMessage) => {
+      handleWebSocketMessage(message)
+    }
+  )
+})
+
+onUnmounted(() => {
+  unsubscribe()
 })
 
 watch(espId, async () => {
   if (!esp.value) {
     await mockEspStore.fetchAll()
   }
+
+  // Resubscribe with new ESP ID
+  unsubscribe()
+  subscribe(
+    {
+      types: ['esp_health', 'sensor_data', 'actuator_status'],
+      esp_ids: [espId.value],
+    },
+    (message: WebSocketMessage) => {
+      handleWebSocketMessage(message)
+    }
+  )
 })
+
+/**
+ * Handle WebSocket messages for live updates (filtered to current ESP)
+ */
+function handleWebSocketMessage(message: WebSocketMessage) {
+  const { type, data } = message
+  const msgEspId = (data.esp_id as string) || (data.device_id as string)
+
+  // Double-check ESP ID filter (safety check)
+  if (msgEspId !== espId.value) {
+    return
+  }
+
+  if (type === 'esp_health') {
+    // Update ESP health data
+    mockEspStore.updateEspFromEvent(espId.value, {
+      connected: data.status === 'online' || data.status === 'connected',
+      heap_free: (data.heap_free as number) ?? esp.value?.heap_free,
+      wifi_rssi: (data.wifi_rssi as number) ?? esp.value?.wifi_rssi,
+      uptime: (data.uptime as number) ?? esp.value?.uptime,
+      last_heartbeat: data.timestamp ? new Date((data.timestamp as number) * 1000).toISOString() : esp.value?.last_heartbeat,
+      system_state: (data.system_state as MockSystemState) ?? esp.value?.system_state,
+    })
+  } else if (type === 'sensor_data') {
+    const gpio = data.gpio as number
+    if (gpio === undefined) return
+
+    // Update sensor value
+    mockEspStore.updateSensorFromEvent(espId.value, gpio, {
+      raw_value: (data.value as number) ?? (data.raw_value as number) ?? (data.raw as number),
+      quality: (data.quality as QualityLevel),
+      unit: (data.unit as string),
+      last_read: data.timestamp ? new Date((data.timestamp as number) * 1000).toISOString() : new Date().toISOString(),
+    })
+  } else if (type === 'actuator_status') {
+    const gpio = data.gpio as number
+    if (gpio === undefined) return
+
+    // Update actuator state
+    mockEspStore.updateActuatorFromEvent(espId.value, gpio, {
+      state: (data.state as boolean) ?? false,
+      pwm_value: (data.pwm_value as number) ?? (data.pwm as number) ?? 0,
+      emergency_stopped: (data.emergency_stopped as boolean) ?? false,
+      last_command: data.timestamp ? new Date((data.timestamp as number) * 1000).toISOString() : new Date().toISOString(),
+    })
+  }
+}
 
 // Actions
 async function triggerHeartbeat() {

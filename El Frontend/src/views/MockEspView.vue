@@ -4,11 +4,14 @@
  * 
  * List view for all Mock ESP devices.
  * Uses ESPCard component for consistent display.
+ * Live-updates via WebSocket for esp_health and system_event.
  */
 
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useMockEspStore } from '@/stores/mockEsp'
+import { useWebSocket } from '@/composables/useWebSocket'
 import type { MockESPCreate, MockSystemState } from '@/types'
+import type { WebSocketMessage } from '@/services/websocket'
 import { Plus, RefreshCw, AlertTriangle, X, Filter } from 'lucide-vue-next'
 
 // Components
@@ -16,6 +19,12 @@ import ESPCard from '@/components/esp/ESPCard.vue'
 import { LoadingState, EmptyState, ErrorState } from '@/components/common'
 
 const mockEspStore = useMockEspStore()
+
+// WebSocket for live updates
+const { subscribe, unsubscribe, isConnected } = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
+})
 
 // Modal state
 const showCreateModal = ref(false)
@@ -32,9 +41,60 @@ const newEsp = ref<MockESPCreate>({
 const filterType = ref<'all' | 'mock' | 'real'>('all')
 const filterStatus = ref<'all' | 'online' | 'offline'>('all')
 
-onMounted(() => {
-  mockEspStore.fetchAll()
+onMounted(async () => {
+  // Initial load via REST
+  await mockEspStore.fetchAll()
+
+  // Subscribe to WebSocket events for live updates
+  subscribe(
+    {
+      types: ['esp_health', 'system_event'],
+    },
+    (message: WebSocketMessage) => {
+      handleWebSocketMessage(message)
+    }
+  )
 })
+
+onUnmounted(() => {
+  unsubscribe()
+})
+
+/**
+ * Handle WebSocket messages for live updates
+ */
+function handleWebSocketMessage(message: WebSocketMessage) {
+  const { type, data } = message
+
+  if (type === 'esp_health') {
+    // Update ESP health data
+    const espId = data.esp_id as string
+    if (!espId) return
+
+    // Find ESP in store
+    const esp = mockEspStore.mockEsps.find(e => e.esp_id === espId)
+    if (!esp) return // ESP not found (might be from another Kaiser)
+
+    // Update ESP with health data
+    mockEspStore.updateEspFromEvent(espId, {
+      connected: data.status === 'online' || data.status === 'connected',
+      heap_free: (data.heap_free as number) ?? esp.heap_free,
+      wifi_rssi: (data.wifi_rssi as number) ?? esp.wifi_rssi,
+      uptime: (data.uptime as number) ?? esp.uptime,
+      last_heartbeat: data.timestamp ? new Date((data.timestamp as number) * 1000).toISOString() : esp.last_heartbeat,
+      system_state: (data.system_state as MockSystemState) ?? esp.system_state,
+    })
+  } else if (type === 'system_event') {
+    // Handle system events (ESP created/deleted)
+    const eventType = data.event_type as string
+    const espId = data.esp_id as string
+
+    if (eventType === 'esp_created' || eventType === 'esp_deleted') {
+      // Reload list to get accurate state
+      mockEspStore.fetchAll()
+    }
+  }
+}
 
 // Filtered ESPs
 const filteredEsps = computed(() => {

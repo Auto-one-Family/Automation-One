@@ -1,18 +1,26 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useAuthStore } from '@/stores/auth'
+/**
+ * MqttLogView
+ * 
+ * Real-time MQTT message log viewer.
+ * Uses WebSocket singleton service for efficient connection management.
+ */
+
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useWebSocket } from '@/composables/useWebSocket'
 import type { MqttMessage, MessageType } from '@/types'
+import type { WebSocketMessage } from '@/services/websocket'
 import { Play, Pause, Trash2, Filter, X, ChevronDown, ChevronRight } from 'lucide-vue-next'
 
-const authStore = useAuthStore()
-
 const messages = ref<MqttMessage[]>([])
-const isConnected = ref(false)
 const isPaused = ref(false)
-const ws = ref<WebSocket | null>(null)
 const maxMessages = 500
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-const reconnectDelayMs = 3000
+
+// WebSocket for live updates (singleton)
+const { subscribe, unsubscribe, isConnected } = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
+})
 
 // Filters
 const showFilters = ref(false)
@@ -45,101 +53,30 @@ const messageTypes: MessageType[] = [
   'system_event',
 ]
 
-async function ensureAuthToken(): Promise<string | null> {
-  if (authStore.accessToken) {
-    return authStore.accessToken
-  }
+/**
+ * Handle WebSocket messages
+ */
+function handleWebSocketMessage(message: WebSocketMessage) {
+  if (isPaused.value) return
 
-  if (authStore.refreshToken) {
-    try {
-      await authStore.refreshTokens()
-      return authStore.accessToken
-    } catch (err) {
-      console.error('WebSocket token refresh failed', err)
-    }
-  }
-
-  await authStore.logout()
-  window.location.href = '/login'
-  return null
-}
-
-async function connect() {
-  if (ws.value) return
-
-  const token = await ensureAuthToken()
-  if (!token) return
-
-  const clientId = `frontend_${Date.now()}`
-  // Use backend server URL (API_BASE), not frontend dev server
-  const apiHost = import.meta.env.VITE_API_HOST || 'localhost:8000'
-  const wsUrl = `ws://${apiHost}/api/v1/ws/realtime/${clientId}?token=${token}`
-
-  ws.value = new WebSocket(wsUrl)
-
-  ws.value.onopen = () => {
-    isConnected.value = true
-    // Subscribe to all message types
-    ws.value?.send(JSON.stringify({
-      action: 'subscribe',
-      filters: { types: messageTypes }
-    }))
-  }
-
-  ws.value.onmessage = (event) => {
-    if (isPaused.value) return
-
-    try {
-      const data = JSON.parse(event.data)
-      const msg: MqttMessage = {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        timestamp: new Date().toISOString(),
-        type: data.type || 'system_event',
-        topic: data.topic || '',
-        payload: data.payload || data,
-        esp_id: data.esp_id,
-      }
-
-      messages.value.unshift(msg)
-
-      // Limit messages
-      if (messages.value.length > maxMessages) {
-        messages.value = messages.value.slice(0, maxMessages)
-      }
-    } catch (e) {
-      console.error('Failed to parse WebSocket message:', e)
-    }
-  }
-
-  ws.value.onclose = () => {
-    isConnected.value = false
-    ws.value = null
-
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
+  try {
+    const msg: MqttMessage = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      timestamp: new Date().toISOString(),
+      type: (message.type as MessageType) || 'system_event',
+      topic: (message.data.topic as string) || '',
+      payload: message.data.payload || message.data,
+      esp_id: (message.data.esp_id as string) || undefined,
     }
 
-    reconnectTimer = window.setTimeout(() => {
-      reconnectTimer = null
-      if (!ws.value) {
-        connect()
-      }
-    }, reconnectDelayMs)
-  }
+    messages.value.unshift(msg)
 
-  ws.value.onerror = (error) => {
-    console.error('WebSocket error:', error)
-  }
-}
-
-function disconnect() {
-  ws.value?.close()
-  ws.value = null
-  isConnected.value = false
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
+    // Limit messages
+    if (messages.value.length > maxMessages) {
+      messages.value = messages.value.slice(0, maxMessages)
+    }
+  } catch (e) {
+    console.error('Failed to parse WebSocket message:', e)
   }
 }
 
@@ -184,11 +121,18 @@ function formatJson(obj: unknown): string {
 }
 
 onMounted(() => {
-  connect()
+  // Subscribe to all message types via singleton WebSocket service
+  subscribe(
+    {
+      types: messageTypes,
+    },
+    handleWebSocketMessage
+  )
 })
 
 onUnmounted(() => {
-  disconnect()
+  // Unsubscribe from WebSocket (singleton handles cleanup)
+  unsubscribe()
 })
 </script>
 
