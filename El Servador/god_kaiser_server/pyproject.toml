@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "god-kaiser-server"
-version = "1.0.0"
+version = "1.0.1"
 description = "God-Kaiser Server - Industrial IoT Backend for ESP32 Firmware Management"
 authors = ["Auto-One Team"]
 readme = "README.md"
