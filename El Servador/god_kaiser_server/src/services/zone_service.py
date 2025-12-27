@@ -395,9 +395,10 @@ class ZoneService:
         master_zone_id: Optional[str],
     ) -> None:
         """
-        Update zone in MockESPManager for mock devices.
+        Update zone in SimulationScheduler for mock devices.
 
-        This ensures the in-memory mock ESP store stays synchronized
+        Paket X: Uses SimulationScheduler instead of MockESPManager.
+        This ensures the runtime simulation state stays synchronized
         with the database when zones are assigned via the Zone API.
 
         Args:
@@ -407,23 +408,23 @@ class ZoneService:
             master_zone_id: Parent master zone ID
         """
         try:
-            from .mock_esp_manager import MockESPManager
-            manager = await MockESPManager.get_instance()
+            from .simulation import get_simulation_scheduler
 
-            if manager.has_mock_esp(device_id):
-                await manager.update_zone(
+            scheduler = get_simulation_scheduler()
+
+            if scheduler.is_mock_active(device_id):
+                scheduler.update_zone(
                     esp_id=device_id,
-                    zone_id=zone_id,
-                    zone_name=zone_name,
-                    master_zone_id=master_zone_id,
+                    zone_id=zone_id or "",
+                    kaiser_id=master_zone_id or "god",
                 )
-                logger.debug(f"Updated MockESPManager zone for {device_id}")
+                logger.debug(f"Updated SimulationScheduler zone for {device_id}")
             else:
                 logger.debug(
-                    f"Mock ESP {device_id} not found in MockESPManager "
-                    "(may be orphaned or server restarted)"
+                    f"Mock ESP {device_id} not running in SimulationScheduler "
+                    "(may be stopped or server restarted)"
                 )
         except Exception as e:
             # Don't fail the zone assignment if mock update fails
             # The DB update is the source of truth
-            logger.warning(f"Failed to update MockESPManager for {device_id}: {e}")
+            logger.warning(f"Failed to update SimulationScheduler for {device_id}: {e}")

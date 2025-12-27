@@ -46,23 +46,27 @@ class LogicEngine:
         websocket_manager: WebSocketManager,
         condition_evaluators: Optional[List[BaseConditionEvaluator]] = None,
         action_executors: Optional[List[BaseActionExecutor]] = None,
+        conflict_manager=None,
+        rate_limiter=None,
     ):
         """
         Initialize Logic Engine.
-        
+
         Args:
             logic_repo: LogicRepository instance
             actuator_service: ActuatorService instance
             websocket_manager: WebSocketManager instance
             condition_evaluators: Optional list of condition evaluators (creates defaults if None)
             action_executors: Optional list of action executors (creates defaults if None)
+            conflict_manager: Optional ConflictManager instance (creates default if None)
+            rate_limiter: Optional RateLimiter instance (creates default if None)
         """
         self.logic_repo = logic_repo
         self.actuator_service = actuator_service
         self.websocket_manager = websocket_manager
         self._running = False
         self._task: Optional[asyncio.Task] = None
-        
+
         # Setup condition evaluators
         if condition_evaluators is None:
             sensor_eval = SensorConditionEvaluator()
@@ -71,7 +75,7 @@ class LogicEngine:
             self.condition_evaluators = [sensor_eval, time_eval, compound_eval]
         else:
             self.condition_evaluators = condition_evaluators
-        
+
         # Setup action executors
         if action_executors is None:
             actuator_exec = ActuatorActionExecutor(actuator_service)
@@ -80,6 +84,19 @@ class LogicEngine:
             self.action_executors = [actuator_exec, delay_exec, notification_exec]
         else:
             self.action_executors = action_executors
+
+        # Setup safety components
+        if conflict_manager is None:
+            from .logic.safety.conflict_manager import ConflictManager
+            self.conflict_manager = ConflictManager()
+        else:
+            self.conflict_manager = conflict_manager
+
+        if rate_limiter is None:
+            from .logic.safety.rate_limiter import RateLimiter
+            self.rate_limiter = RateLimiter(logic_repo=logic_repo)
+        else:
+            self.rate_limiter = rate_limiter
 
     async def start(self) -> None:
         """
@@ -270,12 +287,28 @@ class LogicEngine:
                             f"{time_since_last.total_seconds():.1f}s < {rule.cooldown_seconds}s"
                         )
                         return
-            
+
+            # Check rate limiting
+            target_esp_ids = self._extract_target_esp_ids(rule.actions)
+            rate_result = await self.rate_limiter.check_rate_limit(
+                rule_id=str(rule.id),
+                rule_max_per_hour=rule.max_executions_per_hour,
+                esp_ids=target_esp_ids
+            )
+
+            if not rate_result["allowed"]:
+                logger.warning(
+                    f"Rule {rule.rule_name} rate limited: {rate_result['reason']}"
+                )
+                return
+
             # Evaluate conditions
             # For sensor-triggered rules, prepare context with sensor_data
             context = {
                 "sensor_data": trigger_data,
                 "current_time": datetime.now(),
+                "rule_id": str(rule.id),  # For hysteresis state management
+                "condition_index": 0,  # For hysteresis state management
             }
             conditions_met = await self._check_conditions(
                 rule.trigger_conditions, context
@@ -291,9 +324,9 @@ class LogicEngine:
             logger.info(
                 f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions"
             )
-            
+
             await self._execute_actions(
-                rule.actions, trigger_data, rule.id, rule.rule_name
+                rule.actions, trigger_data, rule.id, rule.rule_name, rule.priority
             )
             
             # Update last_triggered timestamp
@@ -492,67 +525,116 @@ class LogicEngine:
         trigger_data: dict,
         rule_id: uuid.UUID,
         rule_name: str,
+        rule_priority: int = 100,
     ) -> None:
         """
         Execute actions for a triggered rule using modular executors.
-        
+
         Args:
             actions: List of action dictionaries
             trigger_data: Sensor data that triggered the rule
             rule_id: UUID of the rule
             rule_name: Name of the rule
+            rule_priority: Rule priority (lower number = higher priority)
         """
+        # Extract actuator actions for conflict management
+        actuator_actions = [
+            action for action in actions
+            if action.get("type") in ("actuator_command", "actuator")
+        ]
+
+        # Acquire locks for all actuator actions
+        acquired_locks = []
+        for action in actuator_actions:
+
+            can_execute, conflict = await self.conflict_manager.acquire_actuator(
+                esp_id=action.get("esp_id"),
+                gpio=action.get("gpio"),
+                rule_id=str(rule_id),
+                priority=rule_priority,
+                command=action.get("command", "ON"),
+                is_safety_critical=action.get("is_safety_critical", False)
+            )
+
+            if not can_execute:
+                logger.warning(
+                    f"Actuator conflict for rule {rule_name}: {conflict.message if conflict else 'Unknown conflict'}"
+                )
+                # Rollback already acquired locks
+                for lock in acquired_locks:
+                    await self.conflict_manager.release_actuator(
+                        esp_id=lock["esp_id"],
+                        gpio=lock["gpio"],
+                        rule_id=lock["rule_id"]
+                    )
+                return
+
+            acquired_locks.append({
+                "esp_id": action.get("esp_id"),
+                "gpio": action.get("gpio"),
+                "rule_id": str(rule_id)
+            })
+
         # Create execution context
         context = {
             "trigger_data": trigger_data,
             "rule_id": rule_id,
             "rule_name": rule_name,
         }
-        
-        for action in actions:
-            action_type = action.get("type")
-            
-            # Use modular executors if available
-            executor_found = False
-            if self.action_executors:
-                for executor in self.action_executors:
-                    if executor.supports(action_type):
-                        executor_found = True
-                        try:
-                            result = await executor.execute(action, context)
-                            
-                            # WebSocket broadcast
-                            await self.websocket_manager.broadcast("logic_execution", {
-                                "rule_id": str(rule_id),
-                                "rule_name": rule_name,
-                                "trigger": trigger_data,
-                                "action": action,
-                                "success": result.success,
-                                "message": result.message,
-                                "timestamp": trigger_data.get("timestamp"),
-                            })
-                            
-                            if result.success:
-                                logger.info(
-                                    f"Rule {rule_name} executed action: {action_type} - {result.message}"
-                                )
-                            else:
+
+        try:
+            for action in actions:
+                action_type = action.get("type")
+
+                # Use modular executors if available
+                executor_found = False
+                if self.action_executors:
+                    for executor in self.action_executors:
+                        if executor.supports(action_type):
+                            executor_found = True
+                            try:
+                                result = await executor.execute(action, context)
+
+                                # WebSocket broadcast
+                                await self.websocket_manager.broadcast("logic_execution", {
+                                    "rule_id": str(rule_id),
+                                    "rule_name": rule_name,
+                                    "trigger": trigger_data,
+                                    "action": action,
+                                    "success": result.success,
+                                    "message": result.message,
+                                    "timestamp": trigger_data.get("timestamp"),
+                                })
+
+                                if result.success:
+                                    logger.info(
+                                        f"Rule {rule_name} executed action: {action_type} - {result.message}"
+                                    )
+                                else:
+                                    logger.error(
+                                        f"Rule {rule_name} failed to execute action: {action_type} - {result.message}"
+                                    )
+
+                            except Exception as e:
                                 logger.error(
-                                    f"Rule {rule_name} failed to execute action: {action_type} - {result.message}"
+                                    f"Error executing action {action_type} for rule {rule_name}: {e}",
+                                    exc_info=True,
                                 )
-                        
-                        except Exception as e:
-                            logger.error(
-                                f"Error executing action {action_type} for rule {rule_name}: {e}",
-                                exc_info=True,
-                            )
-                        
-                        break
-            
-            # Fallback to legacy implementation for backward compatibility
-            if not executor_found:
-                await self._execute_action_legacy(
-                    action, trigger_data, rule_id, rule_name
+
+                            break
+
+                # Fallback to legacy implementation for backward compatibility
+                if not executor_found:
+                    await self._execute_action_legacy(
+                        action, trigger_data, rule_id, rule_name
+                    )
+        finally:
+            # Release all acquired locks
+            for lock in acquired_locks:
+                await self.conflict_manager.release_actuator(
+                    esp_id=lock["esp_id"],
+                    gpio=lock["gpio"],
+                    rule_id=lock["rule_id"]
                 )
     
     async def _execute_action_legacy(
@@ -618,6 +700,33 @@ class LogicEngine:
         
         else:
             logger.warning(f"Unknown action type: {action_type}")
+
+    def _extract_target_esp_ids(self, actions: list) -> List[str]:
+        """
+        Extract ESP IDs from actions for rate limiting.
+
+        Args:
+            actions: List of action dictionaries
+
+        Returns:
+            List of unique ESP IDs targeted by actions
+        """
+        esp_ids = set()
+        for action in actions:
+            if action.get("type") in ("actuator_command", "actuator"):
+                esp_id = action.get("esp_id")
+                if esp_id:
+                    esp_ids.add(esp_id)
+            elif action.get("type") == "sequence":
+                # Extract ESP IDs from sequence steps
+                steps = action.get("steps", [])
+                for step in steps:
+                    step_action = step.get("action", {})
+                    if step_action.get("type") in ("actuator_command", "actuator"):
+                        esp_id = step_action.get("esp_id")
+                        if esp_id:
+                            esp_ids.add(esp_id)
+        return list(esp_ids)
 
     async def _evaluation_loop(self) -> None:
         """
