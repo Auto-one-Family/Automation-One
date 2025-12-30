@@ -274,6 +274,7 @@ class MockActuatorResponse(BaseModel):
 class MockESPResponse(BaseModel):
     """Full mock ESP state response."""
     esp_id: str
+    name: Optional[str] = None  # Human-readable device name (from DB)
     zone_id: Optional[str]
     zone_name: Optional[str] = None
     master_zone_id: Optional[str]

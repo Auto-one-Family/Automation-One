@@ -193,7 +193,15 @@ export const espApi = {
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])
 
-    console.debug(`[ESP API] listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
+    console.log(`[ESP API] listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
+
+    // DEBUG: Log raw mock ESP data from server to verify name field
+    if (mockEsps.length > 0) {
+      console.log('[ESP API] listDevices: Raw Mock ESP data from debug API:')
+      mockEsps.forEach((mock) => {
+        console.log(`  - ${mock.esp_id}: name="${mock.name}", zone_id="${mock.zone_id}"`)
+      })
+    }
 
     // Create Set of mock ESP IDs for fast lookup
     const mockEspIds = new Set(mockEsps.map((m) => m.esp_id))
@@ -203,7 +211,7 @@ export const espApi = {
       id: mock.esp_id,
       device_id: mock.esp_id,
       esp_id: mock.esp_id,
-      name: null,
+      name: mock.name || null,  // Now properly passed from server
       zone_id: mock.zone_id || null,
       zone_name: mock.zone_name || null,
       master_zone_id: mock.master_zone_id || null,
@@ -272,7 +280,7 @@ export const espApi = {
           id: mockEsp.esp_id,
           device_id: mockEsp.esp_id,
           esp_id: mockEsp.esp_id,
-          name: null,
+          name: mockEsp.name || null,  // Now properly passed from server
           zone_id: mockEsp.zone_id || null,
           zone_name: mockEsp.zone_name || null, // Map zone_name from Mock ESP
           master_zone_id: mockEsp.master_zone_id || null,
@@ -326,7 +334,7 @@ export const espApi = {
         id: mockEsp.esp_id,
         device_id: mockEsp.esp_id,
         esp_id: mockEsp.esp_id,
-        name: null,
+        name: mockEsp.name || null,  // Now properly passed from server
         zone_id: mockEsp.zone_id || null,
         zone_name: mockEsp.zone_name || null, // Map zone_name from Mock ESP
         master_zone_id: mockEsp.master_zone_id || null,
@@ -369,11 +377,17 @@ export const espApi = {
     // Both Mock and Real ESPs are in the database and can be updated via the normal API
     // Mock ESPs are registered in DB when created (debug.py lines 104-146)
     try {
+      console.log(`[ESP API] updateDevice: Sending PATCH to /esp/devices/${normalizedId}`, update)
       const response = await api.patch<ESPDevice>(
         `/esp/devices/${normalizedId}`,
         update
       )
-      console.debug(`[ESP API] Updated device ${normalizedId}:`, update)
+      console.log(`[ESP API] updateDevice: Server response:`, {
+        status: response.status,
+        name: response.data.name,
+        device_id: response.data.device_id,
+        fullData: response.data,
+      })
       return response.data
     } catch (err: unknown) {
       const axiosError = err as { response?: { status?: number } }
@@ -393,7 +407,7 @@ export const espApi = {
             id: current.esp_id,
             device_id: current.esp_id,
             esp_id: current.esp_id,
-            name: null,
+            name: current.name || null,  // Now properly passed from server
             zone_id: current.zone_id || null,
             zone_name: current.zone_name || null,
             master_zone_id: current.master_zone_id || null,

@@ -102,6 +102,7 @@ export interface MockActuator {
 
 export interface MockESP {
   esp_id: string
+  name: string | null  // Human-readable device name (from DB)
   zone_id: string | null
   zone_name: string | null  // User-friendly zone name (allows spaces)
   master_zone_id: string | null

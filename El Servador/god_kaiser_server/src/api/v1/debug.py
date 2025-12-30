@@ -74,8 +74,8 @@ from ...core.exceptions import (
     ValidationException,
 )
 from ...services.audit_retention_service import AuditRetentionService
-from ...db.repositories import ESPRepository
-from ..deps import AdminUser, DBSession, SimulationScheduler, get_simulation_scheduler
+from ...db.repositories import ESPRepository, SensorRepository
+from ..deps import AdminUser, DBSession, SimulationSchedulerDep, get_simulation_scheduler
 
 logger = get_logger(__name__)
 
@@ -140,6 +140,7 @@ def _build_mock_esp_response(
     
     return MockESPResponse(
         esp_id=device.device_id,
+        name=device.name,  # Human-readable name from DB
         zone_id=device.zone_id,
         zone_name=device.zone_name,
         master_zone_id=device.master_zone_id,
@@ -240,7 +241,32 @@ async def create_mock_esp(
         
         await db.commit()
         await db.refresh(device)
-        
+
+        # 1.5 Create SensorConfig entries for each sensor (fixes Bug P)
+        # This ensures sensor_handler can find configs for Mock-ESP sensors
+        sensor_repo = SensorRepository(db)
+        for sensor in config.sensors:
+            try:
+                await sensor_repo.create(
+                    esp_id=device.id,
+                    gpio=sensor.gpio,
+                    sensor_type=sensor.sensor_type,
+                    sensor_name=sensor.name or f"{sensor.sensor_type}_{sensor.gpio}",
+                    enabled=True,
+                    pi_enhanced=False,  # Mock ESPs typically don't need Pi-Enhanced
+                    sample_interval_ms=30000,  # Default 30s
+                    sensor_metadata={
+                        "source": "mock_esp",
+                        "unit": sensor.unit,
+                        "subzone_id": sensor.subzone_id,
+                    }
+                )
+                logger.debug(f"Created SensorConfig for {config.esp_id} GPIO {sensor.gpio}")
+            except Exception as e:
+                logger.warning(f"Failed to create SensorConfig for GPIO {sensor.gpio}: {e}")
+
+        await db.commit()
+
         # 2. Start simulation if auto_heartbeat is True
         simulation_started = False
         if config.auto_heartbeat:
@@ -549,7 +575,7 @@ async def stop_mock_simulation(
 async def trigger_heartbeat(
     esp_id: str,
     current_user: AdminUser,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> HeartbeatResponse:
     """
     Trigger a heartbeat message from the mock ESP.
@@ -584,7 +610,7 @@ async def set_state(
     esp_id: str,
     request: StateTransitionRequest,
     current_user: AdminUser,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> CommandResponse:
     """
     Set the system state of a mock ESP.
@@ -613,7 +639,7 @@ async def configure_auto_heartbeat(
     esp_id: str,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
     enabled: bool = Query(True),
     interval_seconds: int = Query(60),
 ) -> CommandResponse:
@@ -697,6 +723,27 @@ async def add_sensor(
             detail=f"Failed to add sensor to database"
         )
 
+    # 1.5 Create SensorConfig entry (fixes Bug P)
+    sensor_repo = SensorRepository(db)
+    try:
+        await sensor_repo.create(
+            esp_id=device.id,
+            gpio=config.gpio,
+            sensor_type=config.sensor_type,
+            sensor_name=config.name or f"{config.sensor_type}_{config.gpio}",
+            enabled=True,
+            pi_enhanced=False,
+            sample_interval_ms=int(sensor_config["interval_seconds"] * 1000),
+            sensor_metadata={
+                "source": "mock_esp",
+                "unit": config.unit,
+                "subzone_id": config.subzone_id,
+            }
+        )
+        logger.debug(f"Created SensorConfig for {esp_id} GPIO {config.gpio}")
+    except Exception as e:
+        logger.warning(f"Failed to create SensorConfig for GPIO {config.gpio}: {e}")
+
     await db.commit()
 
     # 2. If simulation is running: Start sensor job immediately
@@ -773,6 +820,16 @@ async def remove_sensor(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensor GPIO {gpio} not found on {esp_id}"
         )
+
+    # 2.5 Delete SensorConfig entry (fixes Bug P cleanup)
+    sensor_repo = SensorRepository(db)
+    try:
+        sensor_config = await sensor_repo.get_by_esp_and_gpio(device.id, gpio)
+        if sensor_config:
+            await sensor_repo.delete(sensor_config.id)
+            logger.debug(f"Deleted SensorConfig for {esp_id} GPIO {gpio}")
+    except Exception as e:
+        logger.warning(f"Failed to delete SensorConfig for GPIO {gpio}: {e}")
 
     await db.commit()
 
@@ -915,7 +972,7 @@ async def set_batch_sensor_values(
     request: BatchSensorValueRequest,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> CommandResponse:
     """
     Set multiple sensor values and optionally publish batch message.
@@ -1007,7 +1064,7 @@ async def set_actuator_state(
     request: SetActuatorStateRequest,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> CommandResponse:
     """
     Set an actuator's state and optionally publish MQTT status.
@@ -1055,7 +1112,7 @@ async def set_actuator_state(
 async def emergency_stop(
     esp_id: str,
     current_user: AdminUser,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
     reason: str = Query("manual"),
 ) -> CommandResponse:
     """
@@ -1095,7 +1152,7 @@ async def emergency_stop(
 async def clear_emergency(
     esp_id: str,
     current_user: AdminUser,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> CommandResponse:
     """
     Clear emergency stop on a mock ESP.
@@ -1374,7 +1431,7 @@ async def get_messages(
     esp_id: str,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
     limit: int = Query(100),
 ) -> MockESPMessagesResponse:
     """
@@ -1412,7 +1469,7 @@ async def clear_messages(
     esp_id: str,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ):
     """Clear message history for a mock ESP."""
     cleared = await manager.clear_messages(esp_id)
@@ -2360,7 +2417,7 @@ async def bulk_create_mock_esps(
     request: BulkCreateRequest,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> BulkCreateResponse:
     """
     Create multiple mock ESPs at once for load testing.
@@ -2440,7 +2497,7 @@ async def start_simulation(
     request: SimulationRequest,
     current_user: AdminUser,
     db: DBSession,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> SimulationResponse:
     """
     Start sensor simulation on mock ESPs.
@@ -2502,7 +2559,7 @@ async def start_simulation(
 )
 async def stop_simulation(
     current_user: AdminUser,
-    scheduler: SimulationScheduler,
+    scheduler: SimulationSchedulerDep,
 ) -> SimulationResponse:
     """
     Stop all active simulations.
