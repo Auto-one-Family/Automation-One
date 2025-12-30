@@ -36,7 +36,7 @@ export const zonesApi = {
    */
   async removeZone(deviceId: string): Promise<ZoneRemoveResponse> {
     const response = await api.delete<ZoneRemoveResponse>(
-      `/zone/devices/${deviceId}/assign`
+      `/zone/devices/${deviceId}/zone`
     )
     return response.data
   },

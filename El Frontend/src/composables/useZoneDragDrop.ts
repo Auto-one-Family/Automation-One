@@ -158,11 +158,11 @@ export function useZoneDragDrop() {
       const zoneName = zoneIdToDisplayName(toZoneId)
       toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
 
-      console.log(`[useZoneDragDrop] Successfully assigned ${deviceId} to zone ${toZoneId}`)
+      console.debug(`[ZoneDragDrop] Assigned ${deviceId} → ${toZoneId}`)
       return true
 
     } catch (error) {
-      console.error('[useZoneDragDrop] Failed to assign zone:', error)
+      console.error(`[ZoneDragDrop] Failed to assign ${deviceId} to ${toZoneId}:`, error)
 
       // Refresh store to ensure consistent state
       await espStore.fetchAll()

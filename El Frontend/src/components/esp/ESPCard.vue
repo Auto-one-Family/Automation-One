@@ -10,9 +10,10 @@
  * - Different actions for Mock vs Real devices with loading states
  * - Zone information
  * - Last heartbeat time
+ * - Inline name editing
  */
 
-import { computed } from 'vue'
+import { computed, ref, nextTick } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   Heart,
@@ -32,10 +33,14 @@ import {
   MemoryStick,
   Radio,
   TimerOff,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
 import { espApi, type ESPDevice } from '@/api/esp'
+import { useEspStore } from '@/stores/esp'
 
 interface Props {
   /** The ESP device data */
@@ -58,7 +63,103 @@ const emit = defineEmits<{
   heartbeat: [espId: string]
   toggleSafeMode: [espId: string]
   delete: [espId: string]
+  nameUpdated: [espId: string, newName: string | null]
 }>()
+
+// ESP Store for name updates
+const espStore = useEspStore()
+
+// =============================================================================
+// Name Editing State
+// =============================================================================
+const isEditingName = ref(false)
+const editedName = ref('')
+const isSavingName = ref(false)
+const saveError = ref('')
+const nameInputRef = ref<HTMLInputElement | null>(null)
+
+// Computed: Display name or fallback
+const displayName = computed(() => props.esp.name || null)
+
+/**
+ * Start inline editing of the device name
+ */
+function startEditName() {
+  editedName.value = props.esp.name || ''
+  isEditingName.value = true
+  saveError.value = ''
+  // Focus the input after DOM update
+  nextTick(() => {
+    nameInputRef.value?.focus()
+    nameInputRef.value?.select()
+  })
+}
+
+/**
+ * Cancel name editing, reset to original value
+ */
+function cancelEditName() {
+  isEditingName.value = false
+  editedName.value = ''
+  saveError.value = ''
+}
+
+/**
+ * Save the new name via API
+ */
+async function saveName() {
+  if (isSavingName.value) return
+
+  const newName = editedName.value.trim() || null
+  const deviceId = espId.value
+
+  console.log('[ESPCard] saveName called:', {
+    deviceId,
+    currentName: props.esp.name,
+    newName,
+    editedNameValue: editedName.value,
+  })
+
+  // No change? Just close
+  if (newName === (props.esp.name || null)) {
+    console.log('[ESPCard] No change detected, cancelling')
+    cancelEditName()
+    return
+  }
+
+  isSavingName.value = true
+  saveError.value = ''
+
+  try {
+    console.log('[ESPCard] Calling espStore.updateDevice with:', { name: newName || undefined })
+    const result = await espStore.updateDevice(deviceId, { name: newName || undefined })
+    console.log('[ESPCard] updateDevice returned:', result)
+    isEditingName.value = false
+    emit('nameUpdated', deviceId, newName)
+  } catch (err: unknown) {
+    const axiosError = err as { response?: { data?: { detail?: string } } }
+    saveError.value = axiosError.response?.data?.detail || 'Fehler beim Speichern'
+    // Keep edit mode open on error
+    setTimeout(() => {
+      saveError.value = ''
+    }, 3000)
+  } finally {
+    isSavingName.value = false
+  }
+}
+
+/**
+ * Handle keyboard events in name input
+ */
+function handleNameKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    saveName()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelEditName()
+  }
+}
 
 // Computed properties
 const isMock = computed(() => {
@@ -227,6 +328,57 @@ const hasIncompleteData = computed(() => {
          props.esp.heap_free === undefined &&
          props.esp.wifi_rssi === undefined
 })
+
+// =============================================================================
+// Satellite Dots - Compact sensor/actuator indicators
+// =============================================================================
+
+const sensorCount = computed(() => props.esp.sensor_count ?? props.esp.sensors?.length ?? 0)
+const actuatorCount = computed(() => props.esp.actuator_count ?? props.esp.actuators?.length ?? 0)
+const hasSatellites = computed(() => sensorCount.value > 0 || actuatorCount.value > 0)
+
+// Limit displayed dots to 5 max
+const limitedSensors = computed(() => {
+  const sensors = props.esp.sensors || []
+  return sensors.slice(0, 5)
+})
+
+const limitedActuators = computed(() => {
+  const actuators = props.esp.actuators || []
+  return actuators.slice(0, 5)
+})
+
+// Get quality class for sensor dot
+function getSensorDotClass(sensor: any): string {
+  const quality = sensor.quality || sensor.data_quality
+  if (quality === 'excellent' || quality === 'good') return 'esp-card__satellite-dot--good'
+  if (quality === 'fair' || quality === 'degraded') return 'esp-card__satellite-dot--fair'
+  if (quality === 'poor' || quality === 'bad' || quality === 'emergency') return 'esp-card__satellite-dot--poor'
+  return 'esp-card__satellite-dot--unknown'
+}
+
+// Get state class for actuator dot
+function getActuatorDotClass(actuator: any): string {
+  if (actuator.emergency_stopped) return 'esp-card__satellite-dot--emergency'
+  if (actuator.state === true || actuator.current_state === true) return 'esp-card__satellite-dot--on'
+  if (actuator.state === false || actuator.current_state === false) return 'esp-card__satellite-dot--off'
+  return 'esp-card__satellite-dot--unknown'
+}
+
+// Format sensor value for tooltip
+function formatSensorTooltip(sensor: any): string {
+  const type = sensor.sensor_type || 'Sensor'
+  const value = sensor.processed_value ?? sensor.raw_value ?? '?'
+  const unit = sensor.unit || ''
+  return `${type} (GPIO ${sensor.gpio}): ${value}${unit}`
+}
+
+// Format actuator tooltip
+function formatActuatorTooltip(actuator: any): string {
+  const type = actuator.actuator_type || 'Actuator'
+  const state = actuator.emergency_stopped ? 'E-STOP' : (actuator.state ? 'AN' : 'AUS')
+  return `${type} (GPIO ${actuator.gpio}): ${state}`
+}
 </script>
 
 <template>
@@ -235,21 +387,86 @@ const hasIncompleteData = computed(() => {
     <div :class="['esp-card__status-bar', statusBarClasses]" />
     
     <div class="esp-card__content">
-      <!-- Header: ID + Badges -->
+      <!-- Header: Name (editable) + Badges -->
       <div class="esp-card__header">
-        <div class="esp-card__id-group">
-        <RouterLink
-          :to="`/devices/${espId}`"
-          class="esp-card__id"
-        >
-          {{ espId }}
-        </RouterLink>
-          
-          <Badge :variant="isMock ? 'mock' : 'real'" size="sm">
-            {{ isMock ? 'MOCK' : 'REAL' }}
-          </Badge>
+        <div class="esp-card__name-group">
+          <!-- Editable Name Section -->
+          <div class="esp-card__name-row">
+            <!-- Edit Mode: Input -->
+            <template v-if="isEditingName">
+              <div class="esp-card__name-edit">
+                <input
+                  ref="nameInputRef"
+                  v-model="editedName"
+                  type="text"
+                  class="esp-card__name-input"
+                  placeholder="Gerätename eingeben..."
+                  :disabled="isSavingName"
+                  @keydown="handleNameKeydown"
+                  @blur="saveName"
+                />
+                <div class="esp-card__name-actions">
+                  <button
+                    v-if="isSavingName"
+                    class="esp-card__name-btn"
+                    disabled
+                  >
+                    <Loader2 class="w-4 h-4 animate-spin" />
+                  </button>
+                  <template v-else>
+                    <button
+                      class="esp-card__name-btn esp-card__name-btn--save"
+                      title="Speichern (Enter)"
+                      @mousedown.prevent="saveName"
+                    >
+                      <Check class="w-4 h-4" />
+                    </button>
+                    <button
+                      class="esp-card__name-btn esp-card__name-btn--cancel"
+                      title="Abbrechen (Escape)"
+                      @mousedown.prevent="cancelEditName"
+                    >
+                      <X class="w-4 h-4" />
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Display Mode: Name + Pencil -->
+            <template v-else>
+              <div
+                class="esp-card__name-display"
+                @click="startEditName"
+                title="Klicken zum Bearbeiten"
+              >
+                <span :class="['esp-card__name', { 'esp-card__name--empty': !displayName }]">
+                  {{ displayName || 'Unbenannt' }}
+                </span>
+                <Pencil class="esp-card__name-pencil w-4 h-4" />
+              </div>
+            </template>
+          </div>
+
+          <!-- Error Message -->
+          <div v-if="saveError" class="esp-card__name-error">
+            {{ saveError }}
+          </div>
+
+          <!-- ESP-ID (secondary, always visible) -->
+          <div class="esp-card__id-row">
+            <RouterLink
+              :to="`/devices/${espId}`"
+              class="esp-card__id"
+            >
+              {{ espId }}
+            </RouterLink>
+            <Badge :variant="isMock ? 'mock' : 'real'" size="sm">
+              {{ isMock ? 'MOCK' : 'REAL' }}
+            </Badge>
+          </div>
         </div>
-        
+
         <div class="esp-card__status-badges">
           <!-- Orphaned Mock Warning - highest priority indicator -->
           <Badge
@@ -355,6 +572,37 @@ const hasIncompleteData = computed(() => {
         <div v-if="esp.wifi_rssi !== undefined" class="esp-card__stat" title="WiFi RSSI">
           <Wifi class="w-4 h-4" />
           <span>{{ esp.wifi_rssi }} dBm</span>
+        </div>
+      </div>
+
+      <!-- Satellite Dots - Compact sensor/actuator indicators -->
+      <div v-if="hasSatellites" class="esp-card__satellites">
+        <!-- Sensor Dots (circles) -->
+        <div v-if="limitedSensors.length > 0" class="esp-card__satellite-group">
+          <span class="esp-card__satellite-label">S</span>
+          <div
+            v-for="sensor in limitedSensors"
+            :key="`sensor-${sensor.gpio}`"
+            :class="['esp-card__satellite-dot esp-card__satellite-dot--sensor', getSensorDotClass(sensor)]"
+            :title="formatSensorTooltip(sensor)"
+          />
+          <span v-if="sensorCount > 5" class="esp-card__satellite-more">
+            +{{ sensorCount - 5 }}
+          </span>
+        </div>
+
+        <!-- Actuator Dots (rounded squares) -->
+        <div v-if="limitedActuators.length > 0" class="esp-card__satellite-group">
+          <span class="esp-card__satellite-label">A</span>
+          <div
+            v-for="actuator in limitedActuators"
+            :key="`actuator-${actuator.gpio}`"
+            :class="['esp-card__satellite-dot esp-card__satellite-dot--actuator', getActuatorDotClass(actuator)]"
+            :title="formatActuatorTooltip(actuator)"
+          />
+          <span v-if="actuatorCount > 5" class="esp-card__satellite-more">
+            +{{ actuatorCount - 5 }}
+          </span>
         </div>
       </div>
 
@@ -544,18 +792,148 @@ const hasIncompleteData = computed(() => {
   gap: 0.75rem;
 }
 
-.esp-card__id-group {
+.esp-card__name-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.esp-card__name-row {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+}
+
+/* Name Display Mode */
+.esp-card__name-display {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  margin: -0.25rem -0.5rem;
+  border-radius: 0.375rem;
+  transition: background-color 0.15s ease;
+}
+
+.esp-card__name-display:hover {
+  background-color: var(--glass-bg);
+}
+
+.esp-card__name-display:hover .esp-card__name-pencil {
+  opacity: 1;
+}
+
+.esp-card__name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+
+.esp-card__name--empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.esp-card__name-pencil {
+  color: var(--color-text-muted);
+  opacity: 0.3;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+/* Name Edit Mode */
+.esp-card__name-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.esp-card__name-input {
+  flex: 1;
   min-width: 0;
+  padding: 0.375rem 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid var(--color-iridescent-1);
+  outline: none;
+  font-family: inherit;
+}
+
+.esp-card__name-input::placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.esp-card__name-input:disabled {
+  opacity: 0.6;
+}
+
+.esp-card__name-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.esp-card__name-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background-color: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.esp-card__name-btn:hover:not(:disabled) {
+  background-color: var(--glass-bg);
+}
+
+.esp-card__name-btn:disabled {
+  cursor: not-allowed;
+}
+
+.esp-card__name-btn--save:hover:not(:disabled) {
+  color: var(--color-success);
+  background-color: rgba(34, 197, 94, 0.1);
+}
+
+.esp-card__name-btn--cancel:hover:not(:disabled) {
+  color: var(--color-error);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Name Error */
+.esp-card__name-error {
+  font-size: 0.75rem;
+  color: var(--color-error);
+  padding-left: 0.5rem;
+}
+
+/* ESP-ID Row (secondary) */
+.esp-card__id-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .esp-card__id {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
   text-decoration: none;
   transition: color 0.2s;
   white-space: nowrap;
@@ -741,6 +1119,103 @@ const hasIncompleteData = computed(() => {
 .esp-card__actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* =============================================================================
+   Satellite Dots - Compact sensor/actuator indicators
+   ============================================================================= */
+
+.esp-card__satellites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+.esp-card__satellite-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.esp-card__satellite-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  margin-right: 0.25rem;
+  opacity: 0.7;
+}
+
+.esp-card__satellite-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* Sensor dots: circles */
+.esp-card__satellite-dot--sensor {
+  border-radius: 50%;
+}
+
+/* Actuator dots: rounded squares */
+.esp-card__satellite-dot--actuator {
+  border-radius: 2px;
+}
+
+/* State-based colors */
+.esp-card__satellite-dot--good,
+.esp-card__satellite-dot--on {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.esp-card__satellite-dot--fair {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.esp-card__satellite-dot--poor,
+.esp-card__satellite-dot--emergency {
+  background: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.esp-card__satellite-dot--off,
+.esp-card__satellite-dot--unknown {
+  background: var(--color-text-muted);
+  border-color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+/* Hover effect */
+.esp-card__satellite-dot:hover {
+  transform: scale(1.5);
+  box-shadow: 0 0 8px currentColor;
+  z-index: 1;
+}
+
+/* Emergency pulsing */
+.esp-card__satellite-dot--emergency {
+  animation: pulse-dot 1s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* "+X more" indicator */
+.esp-card__satellite-more {
+  font-size: 0.625rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-muted);
+  margin-left: 0.25rem;
 }
 </style>
 

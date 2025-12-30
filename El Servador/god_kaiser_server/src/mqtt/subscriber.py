@@ -41,20 +41,43 @@ class Subscriber:
         """
         self.client = mqtt_client or MQTTClient.get_instance()
         self.handlers: Dict[str, Callable] = {}
-        
-        # Thread pool for async handler execution
-        # Allows concurrent processing of messages without blocking MQTT loop
+
+        # Capture main event loop for async handler execution
+        # CRITICAL: SQLAlchemy AsyncEngine is bound to this loop
+        # All async handlers MUST run in this loop to avoid "Queue bound to different event loop"
+        try:
+            self._main_loop = asyncio.get_running_loop()
+            logger.info("Captured main event loop for async handler execution")
+        except RuntimeError:
+            # No running loop - will be set later or handlers will create their own
+            self._main_loop = None
+            logger.warning("No running event loop during Subscriber init - async handlers may fail")
+
+        # Thread pool for handler dispatch (not execution of async handlers)
+        # Used to prevent blocking MQTT network loop
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix="mqtt_handler_"
         )
-        
+
         # Performance metrics
         self.messages_processed = 0
         self.messages_failed = 0
 
         # Set global message callback
         self.client.set_on_message_callback(self._route_message)
+
+    def set_main_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """
+        Set the main event loop for async handler execution.
+
+        Call this if Subscriber was created before async context was available.
+
+        Args:
+            loop: The main asyncio event loop
+        """
+        self._main_loop = loop
+        logger.info("Main event loop set for async handler execution")
 
     def register_handler(self, topic_pattern: str, handler: Callable) -> None:
         """
@@ -161,9 +184,13 @@ class Subscriber:
     def _execute_handler(self, handler: Callable, topic: str, payload: dict) -> None:
         """
         Execute handler in thread pool.
-        
+
         Handles both sync and async handlers transparently.
-        Runs async handlers in new event loop for isolation.
+
+        CRITICAL FIX (2025-12-30):
+        Async handlers are scheduled in the MAIN event loop using run_coroutine_threadsafe().
+        This ensures SQLAlchemy AsyncEngine (bound to main loop) works correctly.
+        Previously, creating a new event loop per thread caused "Queue bound to different event loop".
 
         Args:
             handler: Handler function (sync or async)
@@ -173,26 +200,43 @@ class Subscriber:
         try:
             # Check if handler is async (coroutine function)
             if asyncio.iscoroutinefunction(handler):
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                # CRITICAL: Run async handler in MAIN event loop
+                # SQLAlchemy AsyncEngine's connection pool is bound to main loop
+                if self._main_loop is None or self._main_loop.is_closed():
+                    logger.error(
+                        f"No main event loop available for async handler on {topic}. "
+                        "Handler will not be executed."
+                    )
+                    self.messages_failed += 1
+                    return
+
+                # Schedule coroutine in main event loop (thread-safe)
+                future = asyncio.run_coroutine_threadsafe(
+                    handler(topic, payload),
+                    self._main_loop
+                )
+
                 try:
-                    # Run async handler to completion
-                    result = loop.run_until_complete(handler(topic, payload))
+                    # Wait for completion with timeout (30 seconds)
+                    result = future.result(timeout=30.0)
                     if result is False:
                         logger.warning(
                             f"Handler returned False for topic {topic} - processing may have failed"
                         )
-                finally:
-                    loop.close()
+                except TimeoutError:
+                    logger.error(f"Handler timed out for topic {topic} (30s)")
+                    self.messages_failed += 1
+                except Exception as e:
+                    logger.error(f"Async handler failed for topic {topic}: {e}")
+                    self.messages_failed += 1
             else:
-                # Sync handler - call directly
+                # Sync handler - call directly in thread pool
                 result = handler(topic, payload)
                 if result is False:
                     logger.warning(
                         f"Handler returned False for topic {topic} - processing may have failed"
                     )
-                    
+
         except Exception as e:
             logger.error(
                 f"Handler execution failed for topic {topic}: {e}",

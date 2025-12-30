@@ -346,18 +346,16 @@ async function onDeviceDropped(payload: {
   }
 }
 
+/* Grid item - transparent wrapper, ESPCard provides its own styling */
 .esp-orbital-grid__item {
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
-  overflow: hidden;
-  transition: all 0.2s;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
 }
 
-.esp-orbital-grid__item:hover {
-  border-color: rgba(96, 165, 250, 0.3);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
+/* Hover handled by ESPCard itself */
 
 /* Filter group */
 .filter-group {

@@ -50,7 +50,7 @@ export const useEspStore = defineStore('esp', () => {
     autoConnect: true,
     autoReconnect: true,
     filters: {
-      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 'config_response'] as MessageType[],
+      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 'config_response', 'zone_assignment'] as MessageType[],
     },
   })
 
@@ -126,6 +126,12 @@ export const useEspStore = defineStore('esp', () => {
     try {
       const fetchedDevices = await espApi.listDevices(params)
 
+      // DEBUG: Log fetched devices with name field
+      console.log('[ESP Store] fetchAll: Fetched devices:')
+      fetchedDevices.forEach((d) => {
+        console.log(`  - ${d.device_id || d.esp_id}: name="${d.name}"`)
+      })
+
       // Deduplicate by device ID (safety net for API-level deduplication failures)
       const seen = new Set<string>()
       const dedupedDevices: ESPDevice[] = []
@@ -140,6 +146,7 @@ export const useEspStore = defineStore('esp', () => {
         }
       }
 
+      console.log('[ESP Store] fetchAll: Setting devices.value with', dedupedDevices.length, 'devices')
       devices.value = dedupedDevices
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch ESP devices')
@@ -206,17 +213,27 @@ export const useEspStore = defineStore('esp', () => {
     isLoading.value = true
     error.value = null
 
+    console.log('[ESP Store] updateDevice called:', { deviceId, update })
+
     try {
       const device = await espApi.updateDevice(deviceId, update)
-      
+      console.log('[ESP Store] espApi.updateDevice returned:', {
+        deviceId: device.device_id,
+        name: device.name,
+        fullDevice: device,
+      })
+
       // Update device in list
-      const index = devices.value.findIndex(d => 
+      const index = devices.value.findIndex(d =>
         getDeviceId(d) === getDeviceId(device)
       )
+      console.log('[ESP Store] Updating device at index:', index)
       if (index !== -1) {
+        console.log('[ESP Store] Before update - devices[index].name:', devices.value[index].name)
         devices.value[index] = device
+        console.log('[ESP Store] After update - devices[index].name:', devices.value[index].name)
       }
-      
+
       return device
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, `Failed to update device ${deviceId}`)
@@ -646,6 +663,47 @@ export const useEspStore = defineStore('esp', () => {
     }
   }
 
+  /**
+   * Handle zone_assignment WebSocket event
+   * Updates device zone fields when ESP confirms zone assignment
+   *
+   * Server payload (from zone_ack_handler.py):
+   * {
+   *   esp_id: string,
+   *   status: "zone_assigned" | "error",
+   *   zone_id: string,
+   *   master_zone_id?: string,
+   *   timestamp: number,
+   *   message?: string
+   * }
+   */
+  function handleZoneAssignment(message: any): void {
+    const data = message.data
+    const espId = data.esp_id || data.device_id
+
+    if (!espId) {
+      console.warn('[ESP Store] zone_assignment missing esp_id')
+      return
+    }
+
+    const device = devices.value.find(d => getDeviceId(d) === espId)
+    if (!device) {
+      console.debug(`[ESP Store] Zone assignment for unknown device: ${espId}`)
+      return
+    }
+
+    if (data.status === 'zone_assigned') {
+      // Update zone fields
+      device.zone_id = data.zone_id || undefined
+      device.master_zone_id = data.master_zone_id || undefined
+      console.info(`[ESP Store] Zone confirmed: ${espId} → ${data.zone_id}`)
+    } else if (data.status === 'error') {
+      console.error(`[ESP Store] Zone assignment error for ${espId}: ${data.message}`)
+    } else {
+      console.warn(`[ESP Store] Unknown zone_assignment status: ${data.status}`)
+    }
+  }
+
   // Subscribe to WebSocket events with proper cleanup
   onMounted(() => {
     // Each ws.on() returns an unsubscribe function - store for cleanup
@@ -655,6 +713,7 @@ export const useEspStore = defineStore('esp', () => {
       ws.on('actuator_status', handleActuatorStatus),
       ws.on('actuator_alert', handleActuatorAlert),
       ws.on('config_response', handleConfigResponse),
+      ws.on('zone_assignment', handleZoneAssignment),
     )
     console.debug('[ESP Store] WebSocket handlers registered')
   })

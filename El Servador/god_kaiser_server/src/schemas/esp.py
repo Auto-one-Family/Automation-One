@@ -40,9 +40,9 @@ class ESPDeviceBase(BaseModel):
 
     device_id: str = Field(
         ...,
-        pattern=r"^ESP_([A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
-        description="ESP device ID (format: ESP_XXXXXXXX or ESP_MOCK_XXX for mock devices)",
-        examples=["ESP_12AB34CD", "ESP_MOCK_TEST01"],
+        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        description="ESP device ID (format: ESP_XXXXXXXX for real devices or MOCK_XXX for mock devices)",
+        examples=["ESP_12AB34CD", "MOCK_TEST01"],
     )
     name: Optional[str] = Field(
         None,

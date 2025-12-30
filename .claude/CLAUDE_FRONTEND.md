@@ -1,11 +1,18 @@
 ## Zweck
 Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScript + Vite + Pinia + Tailwind). Ziel: sofort relevante Dateien finden, Flows verstehen, Bugs lokalisieren.
 
-> **Letzte Aktualisierung (2025-12-24):** Zone Naming & Mock ESP Updates
+> **Letzte Aktualisierung (2025-12-30):** Drag & Drop Zone Assignment Fix
+> - **Bug R FIXED:** vue-draggable-plus verwendet `@add` Event statt `@change` für Zone-Wechsel
+> - **Server-Zentrische Architektur:** Neuer Section mit komplettem Drag & Drop Flow dokumentiert
+> - **Event-Handling:** Wichtiger Unterschied zwischen `@add`, `@change`, `@update` Events erklärt
+
+> **Vorherige Updates (2025-12-30):**
+> - **Service-Management:** Umfassende Anleitung zum Starten/Stoppen/Prüfen von Services in `DEBUG_ARCHITECTURE.md` Section 0
+> - **Bugs_Found_2.md:** Bug-Dokumentation für Session 2 (Event-Loop Bug, Sensor Config, Drag & Drop)
+
+> **Vorherige Updates (2025-12-24):**
 > - **Zone Naming Konventionen:** `zone_id` (technisch) vs `zone_name` (menschenlesbar) klar getrennt
 > - **Mock ESP DB-Integration:** Mock ESPs werden in Server-DB registriert und können normal aktualisiert werden
-> - **ZoneAssignmentPanel:** Generiert automatisch `zone_id` aus `zone_name` (z.B. "Zelt 1" → "zelt_1")
-> - **esp.ts updateDevice:** Mock ESPs nutzen jetzt die normale ESP API (nicht mehr blockiert)
 
 ---
 
@@ -14,9 +21,13 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
 | Ich will... | Primäre Quelle | Code-Location |
 |-------------|----------------|---------------|
 | **Server + Frontend starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
-| **Bug debuggen** | `El Frontend/Docs/Bugs_Found.md` | Workflow + Fix dokumentiert |
+| **Services stoppen/neu starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.3 | - |
+| **Server-Logs prüfen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5 | - |
+| **Bug debuggen (historisch)** | `El Frontend/Docs/Bugs_Found.md` | Production-Ready Bugs |
+| **Bug debuggen (aktuell)** | `El Frontend/Docs/Bugs_Found_2.md` | Event-Loop Bug, aktuelle Issues |
 | **API-Endpoint finden** | `El Frontend/Docs/APIs.md` | `src/api/` |
-| **Zone zuweisen** | Section "Zone Naming" unten | `src/components/zones/ZoneAssignmentPanel.vue` |
+| **Zone zuweisen (Formular)** | Section "Zone Naming" unten | `src/components/zones/ZoneAssignmentPanel.vue` |
+| **Zone zuweisen (Drag&Drop)** | Section "Drag & Drop Zone Assignment" | `src/components/zones/ZoneGroup.vue` |
 | **ESP-Gerät updaten** | Section "Mock ESP Architektur" unten | `src/api/esp.ts` |
 | **Audit-Logs verwalten** | `AuditLogView.vue` | `src/views/AuditLogView.vue` + `src/api/audit.ts` |
 | **Auth-Flow verstehen** | `El Frontend/Docs/Admin oder user erstellen...md` | `src/stores/auth.ts` |
@@ -108,11 +119,12 @@ Schnell-Orientierung für KI-Agenten im Frontend (`El Frontend`, Vue 3 + TypeScr
 ### Frontend-spezifische Dokumentation
 | Dokument | Pfad | Inhalt |
 |----------|------|--------|
-| **Startup-Anleitung** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` | Server + Frontend starten, Architektur, Flows |
-| **Bug-Dokumentation** | `El Frontend/Docs/Bugs_Found.md` | Alle gefundenen Bugs mit Workflows & Fixes |
+| **Service-Management** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | **NEU:** Start/Stop/Logs/Health-Checks für KI-Agenten |
+| **Bug-Dokumentation (aktuell)** | `El Frontend/Docs/Bugs_Found_2.md` | **NEU:** Event-Loop Bug, aktuelle Issues (2025-12-30) |
+| **Bug-Dokumentation (historisch)** | `El Frontend/Docs/Bugs_Found.md` | Production-Ready Bugs mit Workflows & Fixes |
 | **API-Referenz** | `El Frontend/Docs/APIs.md` | REST-Endpunkte, Payloads, Response-Typen |
 | **Auth-Flow** | `El Frontend/Docs/Admin oder user erstellen...md` | Token-Handling, Guards, Login/Setup |
-| **Audit-System** | Neu: `AuditLogView.vue` + `src/api/audit.ts` | Audit-Log-Dashboard mit Retention-Management |
+| **Audit-System** | `AuditLogView.vue` + `src/api/audit.ts` | Audit-Log-Dashboard mit Retention-Management |
 
 ### System-übergreifende Dokumentation
 | Dokument | Pfad | Inhalt |
@@ -160,6 +172,101 @@ function generateZoneId(zoneName: string): string {
 | `src/views/DeviceDetailView.vue` | Zone-Anzeige in Geräte-Details |
 | `src/views/DevicesView.vue` | Zone-Eingabe bei ESP-Erstellung |
 | `src/api/zones.ts` | Zone API (assignZone, removeZone) |
+
+---
+
+## Drag & Drop Zone Assignment
+
+### vue-draggable-plus Event-Handling
+
+**WICHTIG:** `vue-draggable-plus` verwendet **separate Events** statt einem kombinierten `@change` Event:
+
+| Event | Wann gefeuert | Verwendung |
+|-------|---------------|------------|
+| `@add` | Element von anderer Liste hinzugefügt | **Zone-Wechsel erkennen** |
+| `@remove` | Element zu anderer Liste verschoben | Cleanup (optional) |
+| `@update` | Reihenfolge innerhalb Liste geändert | Sortierung |
+| `@change` | CustomEvent mit anderer Struktur | **NICHT für added/removed nutzen!** |
+
+### Korrektes Event-Handling
+
+```typescript
+// ZoneGroup.vue - RICHTIG: @add verwenden
+function handleDragAdd(event: any) {
+  const newIndex = event?.newIndex
+  if (typeof newIndex === 'number' && newIndex >= 0) {
+    const device = localDevices.value[newIndex]
+    emit('device-dropped', {
+      device,
+      fromZoneId: device.zone_id || null,
+      toZoneId: props.zoneId
+    })
+  }
+}
+
+// FALSCH: @change hat andere Struktur!
+// event.added ist undefined bei vue-draggable-plus
+```
+
+### Server-Zentrische Architektur
+
+Zone-Änderungen folgen dem **Server-First-Prinzip**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     DRAG & DROP FLOW                             │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. UI: VueDraggable @add Event                                   │
+│    └─> ZoneGroup emits 'device-dropped'                          │
+│                                                                  │
+│ 2. View: onDeviceDropped → handleDeviceDrop()                    │
+│    └─> useZoneDragDrop Composable                                │
+│                                                                  │
+│ 3. API: zonesApi.assignZone(deviceId, {zone_id, zone_name})      │
+│    └─> POST /api/v1/zone/devices/{id}/assign                     │
+│                                                                  │
+│ 4. Server: ZoneService.assign_zone()                             │
+│    ├─> DB Update: ESPDevice.zone_id = new_zone                   │
+│    └─> MQTT Publish: kaiser/{id}/esp/{esp_id}/zone/assign        │
+│                                                                  │
+│ 5. ESP32: Empfängt MQTT, speichert in NVS, sendet ACK            │
+│                                                                  │
+│ 6. Server: Empfängt ACK, broadcastet WebSocket Event             │
+│                                                                  │
+│ 7. Frontend: espStore.fetchAll() → UI aktualisiert               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Wichtige Patterns
+
+```typescript
+// useZoneDragDrop.ts - Single API Call Pattern
+async function handleDeviceDrop(event: ZoneDropEvent): Promise<boolean> {
+  // 1. Early returns für ungültige Drops
+  if (fromZoneId === toZoneId) return true
+  if (toZoneId === '__unassigned__') return handleRemoveFromZone(device)
+
+  // 2. Single API Call - Server handled alles
+  const response = await zonesApi.assignZone(deviceId, {
+    zone_id: toZoneId,
+    zone_name: zoneIdToDisplayName(toZoneId)
+  })
+
+  // 3. Refresh vom Server (Single Source of Truth)
+  await espStore.fetchAll()
+
+  // 4. User Feedback
+  toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
+}
+```
+
+### Relevante Dateien
+| Datei | Funktion |
+|-------|----------|
+| `src/components/zones/ZoneGroup.vue` | Drag & Drop Container mit @add Handler |
+| `src/composables/useZoneDragDrop.ts` | Zone Assignment Composable |
+| `src/views/DashboardView.vue` | Dashboard mit Zone-Gruppen |
+| `src/views/DevicesView.vue` | Geräte-View mit Zone-Gruppen |
 
 ---
 

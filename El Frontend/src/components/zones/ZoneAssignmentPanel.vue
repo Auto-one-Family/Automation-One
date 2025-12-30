@@ -8,8 +8,21 @@
             <span class="font-medium">Zone</span>
           </div>
           <!-- Status Badge - show zone_name (human-readable) with zone_id as tooltip -->
-          <Badge v-if="saving" variant="warning" size="sm" pulse>
-            Speichern...
+          <Badge v-if="assignmentState === 'sending'" variant="warning" size="sm" pulse>
+            <Loader2 class="w-3 h-3 animate-spin mr-1" />
+            Sende...
+          </Badge>
+          <Badge v-else-if="assignmentState === 'pending_ack'" variant="info" size="sm" pulse>
+            <Radio class="w-3 h-3 animate-pulse mr-1" />
+            Warte auf ESP...
+          </Badge>
+          <Badge v-else-if="assignmentState === 'success'" variant="success" size="sm">
+            <CheckCircle class="w-3 h-3 mr-1" />
+            Erfolgreich
+          </Badge>
+          <Badge v-else-if="assignmentState === 'timeout'" variant="warning" size="sm">
+            <AlertCircle class="w-3 h-3 mr-1" />
+            Timeout
           </Badge>
           <Badge v-else-if="currentZoneName || currentZoneId" variant="success" size="sm" :title="currentZoneId ? `Zone-ID: ${currentZoneId}` : undefined">
             {{ currentZoneName || currentZoneId }}
@@ -95,8 +108,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
-import { MapPin, Check, X, AlertCircle, CheckCircle } from 'lucide-vue-next'
+import { ref, watch, computed, onUnmounted } from 'vue'
+import { MapPin, Check, X, AlertCircle, CheckCircle, Radio, Loader2 } from 'lucide-vue-next'
 import Card from '@/components/common/Card.vue'
 import Input from '@/components/common/Input.vue'
 import Button from '@/components/common/Button.vue'
@@ -120,12 +133,29 @@ const emit = defineEmits<{
   (e: 'zone-error', error: string): void
 }>()
 
+// =============================================================================
+// State Machine for Zone Assignment
+// =============================================================================
+
+type ZoneAssignmentState = 'idle' | 'sending' | 'pending_ack' | 'success' | 'timeout' | 'error'
+
 // State - use zone_name for display (human-readable), zone_id is technical
 const zoneInput = ref(props.currentZoneName || props.currentZoneId || '')
-const saving = ref(false)
+const assignmentState = ref<ZoneAssignmentState>('idle')
 const isRemoving = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+const ackTimeoutId = ref<ReturnType<typeof setTimeout> | null>(null)
+
+// Computed states for compatibility with existing template
+const saving = computed(() => assignmentState.value === 'sending' || assignmentState.value === 'pending_ack')
+
+// Cleanup timeout on unmount
+onUnmounted(() => {
+  if (ackTimeoutId.value) {
+    clearTimeout(ackTimeoutId.value)
+  }
+})
 
 /**
  * Generate technical zone_id from human-readable zone_name
@@ -154,6 +184,34 @@ watch([() => props.currentZoneName, () => props.currentZoneId], ([newName, newId
   }
 })
 
+// Watch for zone confirmation via WebSocket (prop update during pending_ack)
+// When the server broadcasts zone_assignment event, ESP Store updates device.zone_id
+// which flows down as currentZoneId prop - detect this and transition to success
+watch(() => props.currentZoneId, (newZoneId) => {
+  if (assignmentState.value === 'pending_ack' && newZoneId === generatedZoneId.value) {
+    // ESP confirmed zone assignment via WebSocket!
+    console.log('[ZoneAssignmentPanel] Zone confirmed via WebSocket:', newZoneId)
+
+    // Clear the timeout
+    if (ackTimeoutId.value) {
+      clearTimeout(ackTimeoutId.value)
+      ackTimeoutId.value = null
+    }
+
+    // Transition to success
+    assignmentState.value = 'success'
+    successMessage.value = `Zone "${zoneInput.value}" vom ESP bestätigt`
+
+    // Reset to idle after showing success
+    setTimeout(() => {
+      if (assignmentState.value === 'success') {
+        assignmentState.value = 'idle'
+        successMessage.value = ''
+      }
+    }, 3000)
+  }
+})
+
 async function saveZone() {
   if (!zoneInput.value) return
 
@@ -162,10 +220,16 @@ async function saveZone() {
 
   if (!zoneId) {
     errorMessage.value = 'Ungültiger Zonenname - bitte alphanumerische Zeichen verwenden'
+    assignmentState.value = 'error'
     return
   }
 
-  saving.value = true
+  // Clear any existing timeout
+  if (ackTimeoutId.value) {
+    clearTimeout(ackTimeoutId.value)
+  }
+
+  assignmentState.value = 'sending'
   isRemoving.value = false
   errorMessage.value = ''
   successMessage.value = ''
@@ -187,41 +251,79 @@ async function saveZone() {
     console.log('[ZoneAssignmentPanel] API response:', response)
 
     if (response.success) {
-      // Server has updated the zone - emit success
-      // Note: The server updates the database directly, and MQTT is sent to ESP
-      // ESP will confirm via heartbeat - we don't need to wait for ACK here
-      successMessage.value = response.mqtt_sent
-        ? `Zone "${zoneName}" zugewiesen (MQTT gesendet)`
-        : `Zone "${zoneName}" in Datenbank gespeichert`
+      // For real ESPs with MQTT, show pending_ack briefly
+      // Mock ESPs don't need ACK wait since server handles it immediately
+      if (response.mqtt_sent && !props.isMock) {
+        assignmentState.value = 'pending_ack'
+
+        // Set timeout for ACK - show timeout after 30 seconds if no ESP confirmation
+        ackTimeoutId.value = setTimeout(() => {
+          if (assignmentState.value === 'pending_ack') {
+            assignmentState.value = 'timeout'
+            errorMessage.value = `ESP hat nicht innerhalb von 30 Sekunden bestätigt. Zone wurde in der Datenbank gespeichert, aber ESP-Bestätigung fehlt.`
+
+            // Reset to idle after showing timeout
+            setTimeout(() => {
+              if (assignmentState.value === 'timeout') {
+                assignmentState.value = 'idle'
+                errorMessage.value = ''
+              }
+            }, 5000)
+          }
+        }, 30000)
+      } else {
+        // Immediate success for mocks or non-MQTT updates
+        assignmentState.value = 'success'
+        successMessage.value = response.mqtt_sent
+          ? `Zone "${zoneName}" zugewiesen (MQTT gesendet)`
+          : `Zone "${zoneName}" in Datenbank gespeichert`
+
+        // Reset to idle after showing success
+        setTimeout(() => {
+          if (assignmentState.value === 'success') {
+            assignmentState.value = 'idle'
+            successMessage.value = ''
+          }
+        }, 3000)
+      }
 
       emit('zone-updated', {
         zone_id: zoneId,
         zone_name: zoneName,
         master_zone_id: props.currentMasterZoneId
       })
-
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        successMessage.value = ''
-      }, 3000)
     } else {
+      assignmentState.value = 'error'
       errorMessage.value = response.message || 'Zone-Zuweisung fehlgeschlagen'
       emit('zone-error', errorMessage.value)
+
+      // Reset to idle after showing error
+      setTimeout(() => {
+        if (assignmentState.value === 'error') {
+          assignmentState.value = 'idle'
+        }
+      }, 5000)
     }
   } catch (error: unknown) {
     console.error('[ZoneAssignmentPanel] API error:', error)
     const axiosError = error as { response?: { data?: { detail?: string } } }
     const message = axiosError.response?.data?.detail
       || (error instanceof Error ? error.message : 'Unbekannter Fehler')
+    assignmentState.value = 'error'
     errorMessage.value = `Fehler: ${message}`
     emit('zone-error', errorMessage.value)
-  } finally {
-    saving.value = false
+
+    // Reset to idle after showing error
+    setTimeout(() => {
+      if (assignmentState.value === 'error') {
+        assignmentState.value = 'idle'
+      }
+    }, 5000)
   }
 }
 
 async function removeZone() {
-  saving.value = true
+  assignmentState.value = 'sending'
   isRemoving.value = true
   errorMessage.value = ''
   successMessage.value = ''
@@ -234,6 +336,7 @@ async function removeZone() {
 
     if (response.success) {
       // Server has removed the zone
+      assignmentState.value = 'success'
       successMessage.value = 'Zone-Zuweisung entfernt'
       zoneInput.value = ''
 
@@ -243,23 +346,41 @@ async function removeZone() {
         master_zone_id: undefined
       })
 
-      // Clear success message after 3 seconds
+      // Reset to idle after showing success
       setTimeout(() => {
-        successMessage.value = ''
+        if (assignmentState.value === 'success') {
+          assignmentState.value = 'idle'
+          successMessage.value = ''
+        }
       }, 3000)
     } else {
+      assignmentState.value = 'error'
       errorMessage.value = response.message || 'Zone-Entfernung fehlgeschlagen'
       emit('zone-error', errorMessage.value)
+
+      // Reset to idle after showing error
+      setTimeout(() => {
+        if (assignmentState.value === 'error') {
+          assignmentState.value = 'idle'
+        }
+      }, 5000)
     }
   } catch (error: unknown) {
     console.error('[ZoneAssignmentPanel] Remove error:', error)
     const axiosError = error as { response?: { data?: { detail?: string } } }
     const message = axiosError.response?.data?.detail
       || (error instanceof Error ? error.message : 'Unbekannter Fehler')
+    assignmentState.value = 'error'
     errorMessage.value = `Fehler: ${message}`
     emit('zone-error', errorMessage.value)
+
+    // Reset to idle after showing error
+    setTimeout(() => {
+      if (assignmentState.value === 'error') {
+        assignmentState.value = 'idle'
+      }
+    }, 5000)
   } finally {
-    saving.value = false
     isRemoving.value = false
   }
 }

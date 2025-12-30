@@ -586,7 +586,7 @@ class ActuatorListFilter(BaseModel):
     
     esp_id: Optional[str] = Field(
         None,
-        pattern=r"^ESP_([A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
         description="Filter by ESP device ID",
     )
     actuator_type: Optional[str] = Field(

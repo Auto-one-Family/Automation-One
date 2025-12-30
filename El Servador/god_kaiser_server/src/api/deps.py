@@ -765,4 +765,5 @@ def get_simulation_scheduler():
 
 
 # Type alias for simulation scheduler dependency
-SimulationScheduler = Annotated["SimulationScheduler", Depends(get_simulation_scheduler)]  # type: ignore
+# IMPORTANT: Named 'SimulationSchedulerDep' to avoid shadowing the actual class name
+SimulationSchedulerDep = Annotated["SimulationScheduler", Depends(get_simulation_scheduler)]  # type: ignore

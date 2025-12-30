@@ -230,13 +230,25 @@ class ESPService:
         newly_offline = []
         
         for device in all_devices:
-            if device.last_seen and (now - device.last_seen) < threshold:
-                # Device is online
-                if device.status != "online":
-                    device.status = "online"
-                online.append(device.device_id)
+            last_seen = device.last_seen
+            if last_seen:
+                # Make timezone-aware if naive (assume UTC for database values)
+                if last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=timezone.utc)
+                if (now - last_seen) < threshold:
+                    # Device is online
+                    if device.status != "online":
+                        device.status = "online"
+                    online.append(device.device_id)
+                else:
+                    # Device is offline
+                    if device.status == "online":
+                        device.status = "offline"
+                        newly_offline.append(device.device_id)
+                        logger.warning(f"ESP device went offline: {device.device_id}")
+                    offline.append(device.device_id)
             else:
-                # Device is offline
+                # No last_seen - treat as offline
                 if device.status == "online":
                     device.status = "offline"
                     newly_offline.append(device.device_id)

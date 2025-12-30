@@ -6,13 +6,15 @@
  * Focused on editing, configuration, and detailed information.
  */
 
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
+import { debugApi } from '@/api/debug'
 import type { MockSensorConfig, MockActuatorConfig, MockSystemState, QualityLevel } from '@/types'
 import {
   ArrowLeft, Heart, AlertTriangle, Plus, Trash2, Power, X,
-  Thermometer, Gauge, RefreshCw, Settings, Wifi, Activity, Info
+  Thermometer, Gauge, RefreshCw, Settings, Wifi, Activity, Info,
+  Pencil, Loader2
 } from 'lucide-vue-next'
 
 // Import utilities
@@ -67,6 +69,12 @@ const mockEsp = computed(() => {
 const showAddSensorModal = ref(false)
 const showAddActuatorModal = ref(false)
 const showBatchSensorModal = ref(false)
+
+// Name editing state
+const isEditingName = ref(false)
+const editedName = ref('')
+const isSavingName = ref(false)
+const nameInputRef = ref<HTMLInputElement | null>(null)
 
 // Get all sensor types for dropdown
 const sensorTypeOptions = getSensorTypeOptions()
@@ -213,8 +221,29 @@ function openBatchModal() {
 
 async function saveBatchSensorValues() {
   if (!isMock.value || !mockEsp.value) return
-  await espStore.setSensorValue(espId.value, 0, 0) // This needs batch API
-  showBatchSensorModal.value = false
+
+  try {
+    // Convert Record<number, number> to proper format for API
+    const values = Object.fromEntries(
+      Object.entries(batchSensorValues.value)
+        .filter(([_, value]) => value !== null && value !== undefined)
+        .map(([gpio, value]) => [parseInt(gpio), value])
+    )
+
+    if (Object.keys(values).length === 0) {
+      console.warn('No sensor values to update')
+      return
+    }
+
+    // Use debugApi batch update endpoint
+    await debugApi.setBatchSensorValues(espId.value, values, batchPublish.value)
+    showBatchSensorModal.value = false
+
+    // Refresh device data
+    await espStore.fetchDevice(espId.value)
+  } catch (error) {
+    console.error('Batch sensor update failed:', error)
+  }
 }
 
 async function toggleActuator(gpio: number, currentState: boolean) {
@@ -242,6 +271,41 @@ async function handleZoneUpdate(zoneData: { zone_id: string; zone_name?: string;
   })
 }
 
+// =============================================================================
+// Device Name Editing
+// =============================================================================
+
+function startEditName() {
+  editedName.value = device.value?.name || ''
+  isEditingName.value = true
+  nextTick(() => nameInputRef.value?.focus())
+}
+
+function cancelEditName() {
+  isEditingName.value = false
+  editedName.value = ''
+}
+
+async function saveName() {
+  const trimmedName = editedName.value.trim()
+
+  // If name is empty or unchanged, just cancel
+  if (!trimmedName || trimmedName === device.value?.name || isSavingName.value) {
+    cancelEditName()
+    return
+  }
+
+  isSavingName.value = true
+  try {
+    await espStore.updateDevice(espId.value, { name: trimmedName })
+    isEditingName.value = false
+  } catch (error) {
+    console.error('Failed to update device name:', error)
+  } finally {
+    isSavingName.value = false
+  }
+}
+
 // Quick edit sensor value
 function quickEditSensor(gpio: number) {
   if (!mockEsp.value) return
@@ -263,9 +327,40 @@ function quickEditSensor(gpio: number) {
       
       <div class="flex-1">
         <div class="flex items-center gap-3 flex-wrap">
+          <!-- Device ID -->
           <h1 class="text-2xl font-bold font-mono" style="color: var(--color-text-primary)">
             {{ espId }}
           </h1>
+
+          <!-- Editable Device Name -->
+          <div class="device-name-wrapper">
+            <template v-if="!isEditingName">
+              <span
+                class="device-name"
+                @click="startEditName"
+                :title="'Klicken zum Bearbeiten'"
+              >
+                {{ device?.name || 'Unbenannt' }}
+                <Pencil class="device-name__edit-icon" />
+              </span>
+            </template>
+            <template v-else>
+              <div class="device-name-edit">
+                <input
+                  ref="nameInputRef"
+                  v-model="editedName"
+                  class="device-name__input"
+                  placeholder="Gerätename eingeben..."
+                  @keyup.enter="saveName"
+                  @keyup.escape="cancelEditName"
+                  @blur="saveName"
+                  :disabled="isSavingName"
+                />
+                <Loader2 v-if="isSavingName" class="w-4 h-4 animate-spin text-muted" />
+              </div>
+            </template>
+          </div>
+
           <Badge v-if="isMock" variant="mock" size="sm">MOCK</Badge>
           <Badge v-else variant="real" size="sm">REAL</Badge>
           <Badge 
@@ -716,6 +811,75 @@ function quickEditSensor(gpio: number) {
 </template>
 
 <style scoped>
+/* =============================================================================
+   Device Name Inline Edit
+   ============================================================================= */
+
+.device-name-wrapper {
+  display: inline-flex;
+  align-items: center;
+}
+
+.device-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.device-name:hover {
+  background: var(--glass-bg);
+  color: var(--color-text-primary);
+}
+
+.device-name__edit-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.device-name:hover .device-name__edit-icon {
+  opacity: 0.5;
+}
+
+.device-name-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.device-name__input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-iridescent-1);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  outline: none;
+  padding: 0.25rem 0;
+  min-width: 150px;
+  max-width: 300px;
+}
+
+.device-name__input::placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.device-name__input:disabled {
+  opacity: 0.5;
+}
+
+.text-muted {
+  color: var(--color-text-muted);
+}
+
 /* Info Grid */
 .info-grid {
   display: grid;

@@ -126,9 +126,9 @@ class HeartbeatHandler:
                     return False
 
                 # Step 5: Update device status and last_seen
-                last_seen = datetime.fromtimestamp(
-                    payload["ts"] / 1000 if payload["ts"] > 1e10 else payload["ts"]
-                )
+                # Use timezone-aware datetime for consistency with timeout checks
+                ts_value = payload["ts"] / 1000 if payload["ts"] > 1e10 else payload["ts"]
+                last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
                 await esp_repo.update_status(esp_id_str, "online", last_seen)
                 
                 # Step 6: Update metadata with latest heartbeat info
@@ -513,14 +513,19 @@ class HeartbeatHandler:
                 timeout_threshold = now - timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS)
 
                 for device in online_devices:
-                    if device.last_seen and device.last_seen < timeout_threshold:
-                        # Device timed out
-                        await esp_repo.update_status(device.device_id, "offline")
-                        offline_devices.append(device.device_id)
-                        logger.warning(
-                            f"Device {device.device_id} timed out. "
-                            f"Last seen: {device.last_seen}"
-                        )
+                    last_seen = device.last_seen
+                    if last_seen:
+                        # Make timezone-aware if naive (assume UTC for database values)
+                        if last_seen.tzinfo is None:
+                            last_seen = last_seen.replace(tzinfo=timezone.utc)
+                        if last_seen < timeout_threshold:
+                            # Device timed out
+                            await esp_repo.update_status(device.device_id, "offline")
+                            offline_devices.append(device.device_id)
+                            logger.warning(
+                                f"Device {device.device_id} timed out. "
+                                f"Last seen: {device.last_seen}"
+                            )
 
                 # Commit transaction
                 await session.commit()

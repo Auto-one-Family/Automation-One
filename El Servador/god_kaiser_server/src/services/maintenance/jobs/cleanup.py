@@ -486,25 +486,29 @@ class OrphanedMocksCleanup:
             sim_state = device.device_metadata.get("simulation_state", "stopped")
             if sim_state == "stopped":
                 updated_at = device.updated_at or device.created_at
-                if updated_at and updated_at < cutoff_age:
-                    old_stopped_count += 1
-                    if self.settings.orphaned_mock_auto_delete:
-                        # AUTO-DELETE AKTIVIERT
-                        await self.session.delete(device)
-                        deleted_count += 1
+                if updated_at:
+                    # Make timezone-aware if naive (assume UTC for database values)
+                    if updated_at.tzinfo is None:
+                        updated_at = updated_at.replace(tzinfo=timezone.utc)
+                    if updated_at < cutoff_age:
+                        old_stopped_count += 1
+                        if self.settings.orphaned_mock_auto_delete:
+                            # AUTO-DELETE AKTIVIERT
+                            await self.session.delete(device)
+                            deleted_count += 1
 
-                        self.logger.info(
-                            f"🗑️  Deleted old orphaned Mock: {device.device_id} "
-                            f"(last updated: {updated_at.date()})"
-                        )
-                    else:
-                        # NUR WARNEN (DEFAULT)
-                        self.logger.warning(
-                            f"⚠️  Old orphaned Mock found: {device.device_id} "
-                            f"(last updated: {updated_at.date()}). "
-                            "Set ORPHANED_MOCK_AUTO_DELETE=true to auto-delete."
-                        )
-                        warned_count += 1
+                            self.logger.info(
+                                f"🗑️  Deleted old orphaned Mock: {device.device_id} "
+                                f"(last updated: {updated_at.date()})"
+                            )
+                        else:
+                            # NUR WARNEN (DEFAULT)
+                            self.logger.warning(
+                                f"⚠️  Old orphaned Mock found: {device.device_id} "
+                                f"(last updated: {updated_at.date()}). "
+                                "Set ORPHANED_MOCK_AUTO_DELETE=true to auto-delete."
+                            )
+                            warned_count += 1
 
         if deleted_count > 0:
             await self.session.commit()

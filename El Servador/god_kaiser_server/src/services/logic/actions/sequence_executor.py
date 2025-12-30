@@ -878,7 +878,11 @@ class SequenceActionExecutor(BaseActionExecutor):
         async with self._lock:
             for seq_id, progress in self._sequences.items():
                 if progress.is_terminal and progress.completed_at:
-                    if progress.completed_at < cutoff:
+                    completed_at = progress.completed_at
+                    # Make timezone-aware if naive (assume UTC)
+                    if completed_at.tzinfo is None:
+                        completed_at = completed_at.replace(tzinfo=timezone.utc)
+                    if completed_at < cutoff:
                         to_remove.append(seq_id)
 
             for seq_id in to_remove:

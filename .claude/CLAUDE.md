@@ -12,8 +12,11 @@
 | **Server Code ändern** | [Section 11.1: Server-Architektur](#111-el-servador---server-architektur-god-kaiser) + `.claude/CLAUDE_SERVER.md` | `El Servador/god_kaiser_server/src/` |
 | **Frontend Code ändern** | `.claude/CLAUDE_FRONTEND.md` | `El Frontend/src/` |
 | **Maintenance Jobs** | `.claude/PAKET_D_MAINTENANCE_JOBS_IMPROVED.md` | Server: `src/services/maintenance/`<br>Frontend: `El Frontend/src/views/MaintenanceView.vue` |
-| **Frontend + Server starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
-| **Frontend Bug debuggen** | `El Frontend/Docs/Bugs_Found.md` | Workflow + Fix dokumentiert |
+| **Frontend + Server starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.4 | - |
+| **Services stoppen/neu starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.3 | - |
+| **Server-Logs prüfen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5 | - |
+| **Frontend Bug debuggen (aktuell)** | `El Frontend/Docs/Bugs_Found_2.md` | Event-Loop Bug, aktuelle Issues |
+| **Frontend Bug debuggen (historisch)** | `El Frontend/Docs/Bugs_Found.md` | Production-Ready Bugs |
 | **MQTT verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | ESP: `src/services/communication/mqtt_client.*`<br>Server: `.claude/CLAUDE_SERVER.md` → [Section 4](.claude/CLAUDE_SERVER.md#4-mqtt-topic-referenz-server-perspektive) |
 | **ESP32 API verstehen** | `El Trabajante/docs/API_REFERENCE.md` | `src/services/[modul]/` |
 | **Server API verstehen** | [Section 11.1: Server-Architektur](#111-el-servador---server-architektur-god-kaiser) → REST API | `El Servador/god_kaiser_server/src/api/v1/` |

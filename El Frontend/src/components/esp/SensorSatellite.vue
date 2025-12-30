@@ -140,26 +140,31 @@ function handleClick() {
 </template>
 
 <style scoped>
+/* =============================================================================
+   SensorSatellite - Lighter Glassmorphism Design
+   Industry-Benchmark: Home Assistant Mushroom Cards
+   ============================================================================= */
+
 .sensor-satellite {
   position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem;
-  background-color: var(--color-bg-secondary);
-  border: 2px solid var(--glass-border);
-  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
   cursor: pointer;
-  transition: all 0.2s;
-  min-width: 180px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+  min-width: 160px;
+  backdrop-filter: blur(4px);
 }
 
 .sensor-satellite:hover {
   border-color: var(--color-iridescent-1);
-  box-shadow: 0 6px 20px rgba(167, 139, 250, 0.4);
-  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(167, 139, 250, 0.25);
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .sensor-satellite--selected {

@@ -54,7 +54,7 @@ class TestHeartbeatWebSocketBroadcast:
             mock_ws_class.get_instance = AsyncMock(return_value=mock_websocket_manager)
             
             # Mock database operations
-            with patch("src.mqtt.handlers.heartbeat_handler.get_session") as mock_session:
+            with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
                 # Create a mock session context manager
                 mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
                 mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -97,10 +97,10 @@ class TestHeartbeatWebSocketBroadcast:
             mock_ws_class.get_instance = AsyncMock(side_effect=Exception("WebSocket error"))
             
             # Mock database operations
-            with patch("src.mqtt.handlers.heartbeat_handler.get_session") as mock_session:
+            with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
                 mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
                 mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
-                
+
                 with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
                     mock_repo = MagicMock()
                     mock_esp_device = MagicMock()
@@ -110,7 +110,7 @@ class TestHeartbeatWebSocketBroadcast:
                     mock_repo.get_by_device_id = AsyncMock(return_value=mock_esp_device)
                     mock_repo.update_status = AsyncMock()
                     mock_repo_class.return_value = mock_repo
-                    
+
                     # Handler should not raise exception, should handle gracefully
                     result = await heartbeat_handler.handle_heartbeat(topic, payload)
                     # Should still process heartbeat even if WebSocket fails

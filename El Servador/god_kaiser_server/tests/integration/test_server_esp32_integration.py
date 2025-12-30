@@ -16,6 +16,7 @@ import pytest
 import pytest_asyncio
 import time
 import uuid
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import AsyncGenerator
 
@@ -369,13 +370,14 @@ class TestSensorHandlerProcessing:
             "raw_mode": False,  # Local processing (no Pi-Enhanced)
         }
         
-        # Mock get_session to return our test session
-        async def mock_get_session():
+        # Mock resilient_session to return our test session
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
-        
+
         assert result is True
         
         # Verify data was saved
@@ -405,12 +407,13 @@ class TestSensorHandlerProcessing:
             "raw_mode": False,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
-        
+
         # Should fail - ESP not in database
         assert result is False
     
@@ -548,21 +551,22 @@ class TestActuatorHandlerProcessing:
             "error": None,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.actuator_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.actuator_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_actuator_status(topic, payload)
-        
+
         assert result is True
-        
+
         # Verify state was updated
         actuator_repo = ActuatorRepository(test_session)
         state = await actuator_repo.get_state(sample_esp_device.id, 18)
         assert state is not None
         assert state.current_value == 255
         assert state.state == "on"
-    
+
     @pytest.mark.asyncio
     async def test_handle_actuator_status_with_error(
         self,
@@ -586,12 +590,13 @@ class TestActuatorHandlerProcessing:
             "error": "Motor stalled - overcurrent detected",
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.actuator_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.actuator_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_actuator_status(topic, payload)
-        
+
         assert result is True  # Should still process, but log error
 
 
@@ -682,10 +687,11 @@ class TestFullMessageFlow:
             },
         ]
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             for reading in sensor_readings:
                 topic = f"kaiser/god/esp/ESP_12AB34CD/sensor/{reading['gpio']}/data"
                 payload = {
@@ -694,10 +700,10 @@ class TestFullMessageFlow:
                     "raw_mode": reading["raw_mode"],
                     **reading,
                 }
-                
+
                 result = await handler.handle_sensor_data(topic, payload)
                 assert result is True, f"Failed for GPIO {reading['gpio']}"
-        
+
         # Verify all data was saved
         sensor_repo = SensorRepository(test_session)
         
@@ -737,12 +743,13 @@ class TestFullMessageFlow:
             "error": None,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.actuator_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.actuator_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_actuator_status(topic, status_payload)
-        
+
         assert result is True
 
 
@@ -777,14 +784,15 @@ class TestEdgeCases:
             "raw_mode": False,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
+
         # Should use topic ESP ID, but payload should still be processed
         # (or rejected based on implementation)
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
-        
+
         # Behavior depends on implementation - document the expected behavior
         # Current implementation uses topic ESP ID, ignores payload ESP ID
         assert result is True  # Or False, depending on validation rules
@@ -808,9 +816,10 @@ class TestEdgeCases:
         
         extreme_values = [0, -1000, 65535, 4294967295, 0.0001, -999999.99]
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
+
         for raw_value in extreme_values:
             topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
             payload = {
@@ -824,10 +833,10 @@ class TestEdgeCases:
                 "quality": "good",
                 "raw_mode": False,
             }
-            
-            with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+            with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
                 result = await handler.handle_sensor_data(topic, payload)
-            
+
             assert result is True, f"Should handle extreme value: {raw_value}"
     
     def test_topic_with_special_characters(self):
@@ -864,13 +873,14 @@ class TestPerformance:
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
+
         # Simulate 100 rapid updates
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             for i in range(100):
                 payload = {
                     "ts": int(time.time()),
@@ -883,10 +893,10 @@ class TestPerformance:
                     "quality": "good",
                     "raw_mode": False,
                 }
-                
+
                 result = await handler.handle_sensor_data(topic, payload)
                 assert result is True
-        
+
         # Verify all 100 readings were saved
         sensor_repo = SensorRepository(test_session)
         saved = await sensor_repo.get_latest_data(sample_esp_device.id, 34, limit=100)
@@ -999,14 +1009,15 @@ class TestHeartbeatHandlerProcessing:
             "wifi_rssi": -65,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.heartbeat_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.heartbeat_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_heartbeat(topic, payload)
-        
+
         assert result is True
-        
+
         # Verify device status was updated
         esp_repo = ESPRepository(test_session)
         device = await esp_repo.get_by_device_id("ESP_12AB34CD")
@@ -1027,12 +1038,13 @@ class TestHeartbeatHandlerProcessing:
             "wifi_rssi": -65,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.heartbeat_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.heartbeat_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_heartbeat(topic, payload)
-        
+
         # Should fail - device not registered
         assert result is False
 
@@ -1090,17 +1102,18 @@ class TestPiEnhancedProcessing:
             "raw_mode": True,  # Triggers Pi-Enhanced
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
+
         # Mock the library loader to return a fake processor
         mock_processor = MagicMock()
         mock_processor.process.return_value = MagicMock(
             value=7.2, unit="pH", quality="good"
         )
-        
+
         # Mock at the location where it's imported in _trigger_pi_enhanced_processing
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             with patch('src.sensors.library_loader.get_library_loader') as mock_loader:
                 mock_loader_instance = MagicMock()
                 mock_loader_instance.get_processor.return_value = mock_processor
@@ -1151,17 +1164,18 @@ class TestPiEnhancedProcessing:
             "raw_mode": False,  # ...but ESP processed locally
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
-        
+
         assert result is True
-        
+
         # Pi-Enhanced response should NOT be published
         mock_publisher.publish_pi_enhanced_response.assert_not_called()
-        
+
         # Verify data saved with "local" processing mode
         sensor_repo = SensorRepository(test_session)
         saved = await sensor_repo.get_latest_data(sample_esp_device.id, 34)
@@ -1204,11 +1218,12 @@ class TestPiEnhancedProcessing:
             "raw_mode": True,
         }
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
+
         # Mock the library loader to return None (no processor found)
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             with patch('src.sensors.library_loader.get_library_loader') as mock_loader:
                 mock_loader_instance = MagicMock()
                 mock_loader_instance.get_processor.return_value = None
@@ -1276,10 +1291,11 @@ class TestCompleteWorkflows:
             {"raw": 2800, "value": 28.0, "quality": "poor"},  # Too hot!
         ]
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             for reading in readings:
                 topic = "kaiser/god/esp/ESP_12AB34CD/sensor/4/data"
                 payload = {
@@ -1293,10 +1309,10 @@ class TestCompleteWorkflows:
                     "quality": reading["quality"],
                     "raw_mode": False,
                 }
-                
+
                 result = await handler.handle_sensor_data(topic, payload)
                 assert result is True
-        
+
         # Verify all readings saved
         sensor_repo = SensorRepository(test_session)
         saved = await sensor_repo.get_latest_data(sample_esp_device.id, 4, limit=5)
@@ -1373,16 +1389,17 @@ class TestCompleteWorkflows:
             {"gpio": 35, "sensor_type": "ph", "raw": 2150, "value": 0.0, "unit": ""},  # Pi-Enhanced
         ]
         
-        async def mock_get_session():
+        @asynccontextmanager
+        async def mock_resilient_session():
             yield test_session
-        
+
         # Mock processor for pH
         mock_processor = MagicMock()
         mock_processor.process.return_value = MagicMock(
             value=7.2, unit="pH", quality="good"
         )
-        
-        with patch('src.mqtt.handlers.sensor_handler.get_session', mock_get_session):
+
+        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
             with patch('src.sensors.library_loader.get_library_loader') as mock_loader:
                 mock_loader_instance = MagicMock()
                 mock_loader_instance.get_processor.return_value = mock_processor

@@ -197,11 +197,13 @@ async function onDeviceDropped(payload: {
   await espStore.fetchAll()
 }
 
-// Generate random ESP ID
+// Generate random Mock ESP ID
+// Server expects: ESP_[A-Za-z0-9]{8} OR MOCK_[A-Za-z0-9]+
+// Using MOCK_ prefix for clear distinction from real ESPs
 function generateEspId(): string {
   const chars = 'ABCDEF0123456789'
-  let id = 'ESP_MOCK_'
-  for (let i = 0; i < 6; i++) {
+  let id = 'MOCK_'
+  for (let i = 0; i < 8; i++) {
     id += chars.charAt(Math.floor(Math.random() * chars.length))
   }
   return id

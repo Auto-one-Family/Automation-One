@@ -126,7 +126,7 @@ async def assign_zone(
 
 
 @router.delete(
-    "/devices/{esp_id}/assign",
+    "/devices/{esp_id}/zone",
     response_model=ZoneRemoveResponse,
     status_code=status.HTTP_200_OK,
     summary="Remove Zone Assignment",

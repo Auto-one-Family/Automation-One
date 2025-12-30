@@ -25,6 +25,7 @@ Reference Values (from hardware datasheets):
 """
 
 import pytest
+from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -484,34 +485,32 @@ class TestPiEnhancedFlowE2E:
             "raw_mode": True,
         }
 
+        # Create mock ESP device
+        mock_esp = MagicMock()
+        mock_esp.id = 1
+        mock_esp.device_id = "MOCK_E2E_001"
+
+        # Create mock sensor config with pi_enhanced=True
+        mock_sensor_config = MagicMock()
+        mock_sensor_config.pi_enhanced = True
+        mock_sensor_config.calibration = None
+        mock_sensor_config.processing_params = {}
+
+        # Setup mock repositories
+        mock_esp_repo = AsyncMock()
+        mock_esp_repo.get_by_device_id.return_value = mock_esp
+
+        mock_sensor_repo = AsyncMock()
+        mock_sensor_repo.get_by_esp_and_gpio.return_value = mock_sensor_config
+        mock_sensor_repo.save_sensor_data.return_value = MagicMock()
+
+        # Create async context manager for session
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield MagicMock()
+
         # Mock database session and repositories
-        with patch("src.mqtt.handlers.sensor_handler.get_session") as mock_session:
-            # Create mock ESP device
-            mock_esp = MagicMock()
-            mock_esp.id = 1
-            mock_esp.device_id = "MOCK_E2E_001"
-
-            # Create mock sensor config with pi_enhanced=True
-            mock_sensor_config = MagicMock()
-            mock_sensor_config.pi_enhanced = True
-            mock_sensor_config.calibration = None
-            mock_sensor_config.processing_params = {}
-
-            # Setup mock repositories
-            mock_esp_repo = AsyncMock()
-            mock_esp_repo.get_by_device_id.return_value = mock_esp
-
-            mock_sensor_repo = AsyncMock()
-            mock_sensor_repo.get_by_esp_and_gpio.return_value = mock_sensor_config
-            mock_sensor_repo.save_sensor_data.return_value = MagicMock()
-
-            # Create async generator for session
-            async def mock_session_gen():
-                session = MagicMock()
-                yield session
-
-            mock_session.return_value = mock_session_gen()
-
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             # Patch repositories
             with patch("src.mqtt.handlers.sensor_handler.ESPRepository", return_value=mock_esp_repo):
                 with patch("src.mqtt.handlers.sensor_handler.SensorRepository", return_value=mock_sensor_repo):
@@ -548,29 +547,27 @@ class TestPiEnhancedFlowE2E:
             "raw_mode": True,
         }
 
-        with patch("src.mqtt.handlers.sensor_handler.get_session") as mock_session:
-            mock_esp = MagicMock()
-            mock_esp.id = 2
-            mock_esp.device_id = "MOCK_E2E_002"
+        mock_esp = MagicMock()
+        mock_esp.id = 2
+        mock_esp.device_id = "MOCK_E2E_002"
 
-            mock_sensor_config = MagicMock()
-            mock_sensor_config.pi_enhanced = True
-            mock_sensor_config.calibration = None
-            mock_sensor_config.processing_params = {}
+        mock_sensor_config = MagicMock()
+        mock_sensor_config.pi_enhanced = True
+        mock_sensor_config.calibration = None
+        mock_sensor_config.processing_params = {}
 
-            mock_esp_repo = AsyncMock()
-            mock_esp_repo.get_by_device_id.return_value = mock_esp
+        mock_esp_repo = AsyncMock()
+        mock_esp_repo.get_by_device_id.return_value = mock_esp
 
-            mock_sensor_repo = AsyncMock()
-            mock_sensor_repo.get_by_esp_and_gpio.return_value = mock_sensor_config
-            mock_sensor_repo.save_sensor_data.return_value = MagicMock()
+        mock_sensor_repo = AsyncMock()
+        mock_sensor_repo.get_by_esp_and_gpio.return_value = mock_sensor_config
+        mock_sensor_repo.save_sensor_data.return_value = MagicMock()
 
-            async def mock_session_gen():
-                session = MagicMock()
-                yield session
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield MagicMock()
 
-            mock_session.return_value = mock_session_gen()
-
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             with patch("src.mqtt.handlers.sensor_handler.ESPRepository", return_value=mock_esp_repo):
                 with patch("src.mqtt.handlers.sensor_handler.SensorRepository", return_value=mock_sensor_repo):
                     result = await handler.handle_sensor_data(topic, payload)

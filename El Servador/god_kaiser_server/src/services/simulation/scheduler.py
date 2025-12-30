@@ -780,8 +780,13 @@ class SimulationScheduler:
         base_value = sensor_config.get("base_value", 0.0)
         variation_pattern = sensor_config.get("variation_pattern", "constant").lower()
         variation_range = sensor_config.get("variation_range", 0.0)
-        min_value = sensor_config.get("min_value", base_value - 10.0)
-        max_value = sensor_config.get("max_value", base_value + 10.0)
+
+        # Handle None values explicitly - .get() returns None if key exists with None value
+        # This happens when sensor config is created without min/max values specified
+        min_value_raw = sensor_config.get("min_value")
+        max_value_raw = sensor_config.get("max_value")
+        min_value = min_value_raw if min_value_raw is not None else (base_value - 10.0)
+        max_value = max_value_raw if max_value_raw is not None else (base_value + 10.0)
 
         # 2. Pattern-basierte Berechnung
         if variation_pattern == "constant":
@@ -1015,22 +1020,35 @@ class SimulationScheduler:
             raise DuplicateESPError(esp_id)
 
         # Build simulation config
+        # Note: Only include optional fields if they have values to avoid None issues
+        def build_sensor_config(sensor: Dict[str, Any]) -> Dict[str, Any]:
+            """Build sensor config dict, excluding None values for optional fields."""
+            base_value = sensor.get("base_value", sensor.get("raw_value", 0.0))
+            config = {
+                "sensor_type": sensor.get("sensor_type", "GENERIC"),
+                "base_value": base_value,
+                "raw_value": sensor.get("raw_value", 0.0),
+                "unit": sensor.get("unit", ""),
+                "quality": sensor.get("quality", "good"),
+                "raw_mode": sensor.get("raw_mode", True),
+                "interval_seconds": sensor.get("interval_seconds", 30.0),
+                "variation_pattern": sensor.get("variation_pattern", "constant"),
+                "variation_range": sensor.get("variation_range", 0.0),
+            }
+            # Only add optional fields if provided (avoid storing None)
+            if sensor.get("name") is not None:
+                config["name"] = sensor["name"]
+            if sensor.get("subzone_id") is not None:
+                config["subzone_id"] = sensor["subzone_id"]
+            if sensor.get("min_value") is not None:
+                config["min_value"] = sensor["min_value"]
+            if sensor.get("max_value") is not None:
+                config["max_value"] = sensor["max_value"]
+            return config
+
         simulation_config = {
             "sensors": {
-                str(sensor["gpio"]): {
-                    "sensor_type": sensor.get("sensor_type", "GENERIC"),
-                    "raw_value": sensor.get("raw_value", 0.0),
-                    "unit": sensor.get("unit", ""),
-                    "quality": sensor.get("quality", "good"),
-                    "name": sensor.get("name"),
-                    "subzone_id": sensor.get("subzone_id"),
-                    "raw_mode": sensor.get("raw_mode", True),
-                    "interval_seconds": sensor.get("interval_seconds", 30.0),
-                    "variation_pattern": sensor.get("variation_pattern", "constant"),
-                    "variation_range": sensor.get("variation_range", 0.0),
-                    "min_value": sensor.get("min_value"),
-                    "max_value": sensor.get("max_value"),
-                }
+                str(sensor["gpio"]): build_sensor_config(sensor)
                 for sensor in (sensors or [])
             },
             "actuators": {

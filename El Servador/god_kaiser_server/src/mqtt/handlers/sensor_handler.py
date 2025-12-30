@@ -135,166 +135,165 @@ class SensorDataHandler:
                     esp_repo = ESPRepository(session)
                     sensor_repo = SensorRepository(session)
 
-                # Step 4: Lookup ESP device
-                esp_device = await esp_repo.get_by_device_id(esp_id_str)
-                if not esp_device:
-                    logger.error(
-                        f"[{ConfigErrorCode.ESP_DEVICE_NOT_FOUND}] "
-                        f"ESP device not found: {esp_id_str} - "
-                        f"{get_error_code_description(ConfigErrorCode.ESP_DEVICE_NOT_FOUND)}"
+                    # Step 4: Lookup ESP device
+                    esp_device = await esp_repo.get_by_device_id(esp_id_str)
+                    if not esp_device:
+                        logger.error(
+                            f"[{ConfigErrorCode.ESP_DEVICE_NOT_FOUND}] "
+                            f"ESP device not found: {esp_id_str} - "
+                            f"{get_error_code_description(ConfigErrorCode.ESP_DEVICE_NOT_FOUND)}"
+                        )
+                        return False
+
+                    # Step 5: Lookup sensor config
+                    sensor_config = await sensor_repo.get_by_esp_and_gpio(
+                        esp_device.id, gpio
                     )
-                    return False
+                    if not sensor_config:
+                        logger.warning(
+                            f"Sensor config not found: esp_id={esp_id_str}, gpio={gpio}. "
+                            "Saving data without config."
+                        )
 
-                # Step 5: Lookup sensor config
-                sensor_config = await sensor_repo.get_by_esp_and_gpio(
-                    esp_device.id, gpio
-                )
-                if not sensor_config:
-                    logger.warning(
-                        f"Sensor config not found: esp_id={esp_id_str}, gpio={gpio}. "
-                        "Saving data without config."
-                    )
+                    # Step 6: Extract data from payload
+                    # Accept both "raw" and "raw_value" for compatibility
+                    raw_value = float(payload.get("raw", payload.get("raw_value")))
+                    sensor_type = payload.get("sensor_type", "unknown")
+                    # raw_mode defaults to True (ESP32 always works in raw mode)
+                    raw_mode = payload.get("raw_mode", True)
+                    value = payload.get("value", 0.0)
+                    unit = payload.get("unit", "")
+                    quality = payload.get("quality", "unknown")
 
-                # Step 6: Extract data from payload
-                # Accept both "raw" and "raw_value" for compatibility
-                raw_value = float(payload.get("raw", payload.get("raw_value")))
-                sensor_type = payload.get("sensor_type", "unknown")
-                # raw_mode defaults to True (ESP32 always works in raw mode)
-                raw_mode = payload.get("raw_mode", True)
-                value = payload.get("value", 0.0)
-                unit = payload.get("unit", "")
-                quality = payload.get("quality", "unknown")
+                    # Step 7: Determine processing mode
+                    processing_mode = "raw"
+                    processed_value = None
 
-                # Step 7: Determine processing mode
-                processing_mode = "raw"
-                processed_value = None
+                    if sensor_config and sensor_config.pi_enhanced and raw_mode:
+                        # Pi-Enhanced processing needed
+                        processing_mode = "pi_enhanced"
 
-                if sensor_config and sensor_config.pi_enhanced and raw_mode:
-                    # Pi-Enhanced processing needed
-                    processing_mode = "pi_enhanced"
-
-                    # Trigger Pi-Enhanced processing
-                    pi_result = await self._trigger_pi_enhanced_processing(
-                        esp_id_str,
-                        gpio,
-                        sensor_type,
-                        raw_value,
-                        sensor_config,
-                    )
-
-                    if pi_result:
-                        processed_value = pi_result["processed_value"]
-                        unit = pi_result["unit"]
-                        quality = pi_result["quality"]
-
-                        # Publish processed data back to ESP
-                        self.publisher.publish_pi_enhanced_response(
+                        # Trigger Pi-Enhanced processing
+                        pi_result = await self._trigger_pi_enhanced_processing(
                             esp_id_str,
                             gpio,
-                            processed_value,
-                            unit,
-                            quality,
-                            retry=False,
+                            sensor_type,
+                            raw_value,
+                            sensor_config,
                         )
 
-                        logger.debug(
-                            f"Pi-Enhanced processing complete: raw={raw_value}, "
-                            f"processed={processed_value} {unit}"
-                        )
-                    else:
-                        # Processing failed, mark quality
-                        quality = "error"
-                        logger.error(
-                            f"[{ServiceErrorCode.OPERATION_TIMEOUT}] "
-                            f"Pi-Enhanced processing failed: esp_id={esp_id_str}, "
-                            f"gpio={gpio}, sensor_type={sensor_type} - "
-                            f"{get_error_code_description(ServiceErrorCode.OPERATION_TIMEOUT)}"
-                        )
+                        if pi_result:
+                            processed_value = pi_result["processed_value"]
+                            unit = pi_result["unit"]
+                            quality = pi_result["quality"]
 
-                elif not raw_mode:
-                    # ESP already processed locally
-                    processing_mode = "local"
-                    processed_value = value
+                            # Publish processed data back to ESP
+                            self.publisher.publish_pi_enhanced_response(
+                                esp_id_str,
+                                gpio,
+                                processed_value,
+                                unit,
+                                quality,
+                                retry=False,
+                            )
 
-                # Step 8: Detect data source (mock/test/production)
-                data_source = self._detect_data_source(esp_device, payload)
+                            logger.debug(
+                                f"Pi-Enhanced processing complete: raw={raw_value}, "
+                                f"processed={processed_value} {unit}"
+                            )
+                        else:
+                            # Processing failed, mark quality
+                            quality = "error"
+                            logger.error(
+                                f"[{ServiceErrorCode.OPERATION_TIMEOUT}] "
+                                f"Pi-Enhanced processing failed: esp_id={esp_id_str}, "
+                                f"gpio={gpio}, sensor_type={sensor_type} - "
+                                f"{get_error_code_description(ServiceErrorCode.OPERATION_TIMEOUT)}"
+                            )
 
-                # Step 9: Save data to database
-                # Convert ESP32 timestamp (millis since boot) to UTC datetime
-                # Same pattern as heartbeat_handler: auto-detect millis vs seconds
-                esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
-                esp32_timestamp = datetime.fromtimestamp(
-                    esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
-                    tz=timezone.utc
-                )
+                    elif not raw_mode:
+                        # ESP already processed locally
+                        processing_mode = "local"
+                        processed_value = value
 
-                sensor_data = await sensor_repo.save_data(
-                    esp_id=esp_device.id,
-                    gpio=gpio,
-                    sensor_type=sensor_type,
-                    raw_value=raw_value,
-                    processed_value=processed_value,
-                    unit=unit,
-                    processing_mode=processing_mode,
-                    quality=quality,
-                    timestamp=esp32_timestamp,
-                    metadata={
-                        "raw_mode": raw_mode,
-                    },
-                    data_source=data_source,
-                )
+                    # Step 8: Detect data source (mock/test/production)
+                    data_source = self._detect_data_source(esp_device, payload)
 
-                # Commit transaction
-                await session.commit()
+                    # Step 9: Save data to database
+                    # Convert ESP32 timestamp (millis since boot) to UTC datetime
+                    # Same pattern as heartbeat_handler: auto-detect millis vs seconds
+                    esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
+                    esp32_timestamp = datetime.fromtimestamp(
+                        esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
+                        tz=timezone.utc
+                    )
 
-                logger.info(
-                    f"Sensor data saved: id={sensor_data.id}, esp_id={esp_id_str}, "
-                    f"gpio={gpio}, processing_mode={processing_mode}"
-                )
+                    sensor_data = await sensor_repo.save_data(
+                        esp_id=esp_device.id,
+                        gpio=gpio,
+                        sensor_type=sensor_type,
+                        raw_value=raw_value,
+                        processed_value=processed_value,
+                        unit=unit,
+                        processing_mode=processing_mode,
+                        quality=quality,
+                        timestamp=esp32_timestamp,
+                        metadata={
+                            "raw_mode": raw_mode,
+                        },
+                        data_source=data_source,
+                    )
 
-                # WebSocket Broadcast
-                try:
-                    from ...websocket.manager import WebSocketManager
-                    ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast("sensor_data", {
-                        "esp_id": esp_id_str,
-                        "gpio": gpio,
-                        "sensor_type": sensor_type,
-                        "value": processed_value or raw_value,
-                        "unit": unit,
-                        "quality": quality,
-                        "timestamp": esp32_timestamp_raw
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")
+                    # Commit transaction
+                    await session.commit()
 
-                # Logic Engine Trigger (non-blocking!)
-                try:
-                    import asyncio
-                    from ...services.logic_engine import get_logic_engine
-                    
-                    async def trigger_logic_evaluation():
-                        try:
-                            logic_engine = get_logic_engine()
-                            if logic_engine:
-                                await logic_engine.evaluate_sensor_data(
-                                    esp_id=esp_id_str,
-                                    gpio=gpio,
-                                    sensor_type=sensor_type,
-                                    value=processed_value or raw_value
-                                )
-                            else:
-                                logger.debug("Logic Engine not yet initialized, skipping evaluation")
-                        except Exception as e:
-                            logger.error(f"Error in logic evaluation: {e}", exc_info=True)
-                    
-                    # Create non-blocking task
-                    asyncio.create_task(trigger_logic_evaluation())
-                except Exception as e:
-                    logger.warning(f"Failed to trigger logic evaluation: {e}")
+                    logger.info(
+                        f"Sensor data saved: id={sensor_data.id}, esp_id={esp_id_str}, "
+                        f"gpio={gpio}, processing_mode={processing_mode}"
+                    )
+
+                    # WebSocket Broadcast (best-effort, outside transaction)
+                    try:
+                        from ...websocket.manager import WebSocketManager
+                        ws_manager = await WebSocketManager.get_instance()
+                        await ws_manager.broadcast("sensor_data", {
+                            "esp_id": esp_id_str,
+                            "gpio": gpio,
+                            "sensor_type": sensor_type,
+                            "value": processed_value or raw_value,
+                            "unit": unit,
+                            "quality": quality,
+                            "timestamp": esp32_timestamp_raw
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")
+
+                    # Logic Engine Trigger (non-blocking!)
+                    try:
+                        from ...services.logic_engine import get_logic_engine
+
+                        async def trigger_logic_evaluation():
+                            try:
+                                logic_engine = get_logic_engine()
+                                if logic_engine:
+                                    await logic_engine.evaluate_sensor_data(
+                                        esp_id=esp_id_str,
+                                        gpio=gpio,
+                                        sensor_type=sensor_type,
+                                        value=processed_value or raw_value
+                                    )
+                                else:
+                                    logger.debug("Logic Engine not yet initialized, skipping evaluation")
+                            except Exception as e:
+                                logger.error(f"Error in logic evaluation: {e}", exc_info=True)
+
+                        # Create non-blocking task
+                        asyncio.create_task(trigger_logic_evaluation())
+                    except Exception as e:
+                        logger.warning(f"Failed to trigger logic evaluation: {e}")
 
                     return True
-                    
+
             except ServiceUnavailableError as e:
                 # Database circuit breaker is OPEN
                 logger.warning(

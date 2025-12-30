@@ -47,7 +47,7 @@ class SensorCondition(BaseModel):
     )
     esp_id: str = Field(
         ...,
-        pattern=r"^ESP_([A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
         description="ESP device ID",
     )
     gpio: int = Field(
@@ -159,7 +159,7 @@ class ActuatorAction(BaseModel):
     )
     esp_id: str = Field(
         ...,
-        pattern=r"^ESP_([A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
         description="Target ESP device ID",
     )
     gpio: int = Field(

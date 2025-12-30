@@ -23,8 +23,6 @@ References:
 - El Servador/god_kaiser_server/src/mqtt/handlers/zone_ack_handler.py (Pattern)
 """
 
-import asyncio
-import json
 from typing import Any, Dict, Optional
 
 from pydantic import ValidationError
@@ -52,36 +50,33 @@ class SubzoneAckHandler:
         """Initialize handler with WebSocket manager."""
         self.ws_manager = WebSocketManager()
 
-    async def handle(self, topic: str, payload: str) -> None:
+    async def handle(self, topic: str, payload: dict) -> bool:
         """
         Handle incoming subzone ACK message.
 
         Args:
             topic: MQTT topic (kaiser/{kaiser_id}/esp/{esp_id}/subzone/ack)
-            payload: JSON payload string
+            payload: Parsed JSON payload dict (already parsed by subscriber)
+
+        Returns:
+            True if processed successfully, False otherwise
         """
         # Parse topic to extract ESP ID
         topic_info = TopicBuilder.parse_subzone_ack_topic(topic)
         if not topic_info:
             logger.warning(f"Could not parse subzone ACK topic: {topic}")
-            return
+            return False
 
         esp_id = topic_info.get("esp_id")
         if not esp_id:
             logger.warning(f"No esp_id in subzone ACK topic: {topic}")
-            return
+            return False
 
-        # Parse payload
-        payload_data = self._parse_payload(payload)
-        if not payload_data:
-            logger.warning(f"Invalid subzone ACK payload from {esp_id}")
-            return
-
-        # Validate payload
-        ack_payload = self._validate_payload(payload_data)
+        # Validate payload (payload is already a dict from subscriber)
+        ack_payload = self._validate_payload(payload)
         if not ack_payload:
             logger.warning(f"Subzone ACK payload validation failed from {esp_id}")
-            return
+            return False
 
         logger.info(
             f"Received subzone ACK from {esp_id}: "
@@ -106,24 +101,10 @@ class SubzoneAckHandler:
                 await session.commit()
                 # Broadcast to WebSocket clients
                 await self._broadcast_subzone_update(ack_payload)
+                return True
             else:
                 logger.warning(f"Subzone ACK processing failed for {esp_id}")
-
-    def _parse_payload(self, payload: str) -> Optional[Dict[str, Any]]:
-        """
-        Parse JSON payload.
-
-        Args:
-            payload: JSON string
-
-        Returns:
-            Parsed dict or None
-        """
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError as e:
-            logger.error(f"Subzone ACK JSON decode error: {e}")
-            return None
+                return False
 
     def _validate_payload(
         self, payload_data: Dict[str, Any]
@@ -173,50 +154,20 @@ class SubzoneAckHandler:
 # Module-level handler function (for MQTT subscriber registration)
 # =============================================================================
 
-# Global handler instance
-_handler_instance: Optional[SubzoneAckHandler] = None
+# Module-level instance for handler registration (matches zone_ack_handler pattern)
+_handler = SubzoneAckHandler()
 
 
-def get_handler() -> SubzoneAckHandler:
-    """Get or create handler instance."""
-    global _handler_instance
-    if _handler_instance is None:
-        _handler_instance = SubzoneAckHandler()
-    return _handler_instance
-
-
-def handle_subzone_ack(topic: str, payload: str) -> None:
+async def handle_subzone_ack(topic: str, payload: dict) -> bool:
     """
     Module-level handler function for MQTT subscriber registration.
 
-    This is called from the MQTT client's callback thread.
-    Uses asyncio.run_coroutine_threadsafe to run async code.
-
     Args:
-        topic: MQTT topic
-        payload: JSON payload string
+        topic: MQTT topic string
+        payload: Parsed JSON payload dict
+
+    Returns:
+        True if processed successfully
     """
-    handler = get_handler()
-
-    # Get or create event loop for the handler
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop - create new one for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(handler.handle(topic, payload))
-        return
-
-    # Running loop exists - schedule coroutine
-    future = asyncio.run_coroutine_threadsafe(
-        handler.handle(topic, payload),
-        loop,
-    )
-
-    try:
-        # Wait for completion with timeout
-        future.result(timeout=10.0)
-    except Exception as e:
-        logger.error(f"Subzone ACK handler error: {e}")
+    return await _handler.handle(topic, payload)
 

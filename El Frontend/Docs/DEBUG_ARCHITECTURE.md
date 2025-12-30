@@ -4,11 +4,234 @@ Ziel: Das Debug-Dashboard soll ohne echte ESP32‑Hardware die gleichen Flows wi
 
 ---
 
-## 0) KI-Agenten: Server & Frontend starten
+## 0) KI-Agenten: Service-Management (Start/Stop/Logs)
 
 > **WICHTIG:** Diese Section ist für KI-Agenten gedacht, die das System entwickeln oder debuggen.
+> **Letzte Aktualisierung:** 2025-12-30
 
-### 0.1) Voraussetzungen prüfen
+### 0.1) Quick-Reference: Services
+
+| Service | Port | Prozess | Prüf-Befehl |
+|---------|------|---------|-------------|
+| **Server (uvicorn)** | 8000 | `python.exe` | `netstat -ano \| findstr "8000"` |
+| **Frontend (Vite)** | 5173 | `node.exe` | `netstat -ano \| findstr "5173"` |
+| **MQTT (Mosquitto)** | 1883 | `mosquitto.exe` | `netstat -ano \| findstr "1883"` |
+
+### 0.2) Laufende Services finden
+
+```bash
+# Schritt 1: Prozesse nach Namen finden
+tasklist | findstr "python"      # Server (uvicorn)
+tasklist | findstr "node"        # Frontend (Vite)
+tasklist | findstr "mosquitto"   # MQTT Broker
+
+# Schritt 2: Ports prüfen (zeigt PIDs)
+netstat -ano | findstr "8000"    # Server Port → PID in letzter Spalte
+netstat -ano | findstr "5173"    # Frontend Port
+netstat -ano | findstr "1883"    # MQTT Port
+
+# Beispiel-Output:
+# TCP    0.0.0.0:8000    0.0.0.0:0    ABHÖREN    63588
+#                                              ↑ PID
+```
+
+**Service-Status interpretieren:**
+- `ABHÖREN` / `LISTENING` = Service läuft und akzeptiert Verbindungen
+- Keine Ausgabe = Service läuft NICHT auf diesem Port
+- `WARTEND` / `TIME_WAIT` = Alte Verbindungen werden aufgeräumt
+
+### 0.3) Services beenden
+
+**WICHTIG für Git Bash:** Verwende `//` statt `/` für Windows-Befehle!
+
+```bash
+# Einzelnen Prozess nach PID beenden (Git Bash Syntax)
+taskkill //PID 63588 //F //T
+
+# Erklärung:
+# //PID = Prozess-ID (aus netstat)
+# //F   = Force (erzwingen)
+# //T   = Tree (auch Child-Prozesse beenden)
+
+# Mosquitto-Dienst stoppen (benötigt Admin-Rechte)
+net stop mosquitto
+
+# ALLE Python-Prozesse beenden (Vorsicht!)
+taskkill //IM python.exe //F
+
+# ALLE Node-Prozesse beenden (Vorsicht!)
+taskkill //IM node.exe //F
+```
+
+**Vollständiger Neustart-Workflow:**
+```bash
+# 1. Finde PIDs
+netstat -ano | findstr "8000"  # → z.B. PID 63588
+netstat -ano | findstr "5173"  # → z.B. PID 17344
+
+# 2. Beende Services
+taskkill //PID 63588 //F //T   # Server
+taskkill //PID 17344 //F //T   # Frontend
+
+# 3. Warte kurz (optional)
+sleep 2
+
+# 4. Starte neu (siehe 0.4)
+```
+
+### 0.4) Services starten
+
+**Server starten (Foreground):**
+```bash
+cd "c:/Users/PCUser/Documents/PlatformIO/Projects/Auto-one/El Servador/god_kaiser_server"
+poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Server starten (Background - für KI-Agenten):**
+```bash
+# Mit Claude Code Bash Tool: run_in_background=true
+cd "c:/Users/PCUser/Documents/PlatformIO/Projects/Auto-one/El Servador/god_kaiser_server" && poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Frontend starten (Foreground):**
+```bash
+cd "c:/Users/PCUser/Documents/PlatformIO/Projects/Auto-one/El Frontend"
+npm run dev
+```
+
+**Frontend starten (Background - für KI-Agenten):**
+```bash
+# Mit Claude Code Bash Tool: run_in_background=true
+cd "c:/Users/PCUser/Documents/PlatformIO/Projects/Auto-one/El Frontend" && npm run dev
+```
+
+**Erwartete Server-Ausgabe:**
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [63588] using WatchFiles
+INFO:     Started server process [34872]
+INFO:     Waiting for application startup.
+SECURITY: Using default JWT secret key (OK for development only).
+MQTT TLS is disabled.
+INFO:     Application startup complete.
+```
+
+**Erwartete Frontend-Ausgabe:**
+```
+VITE v6.4.1  ready in 369 ms
+
+➜  Local:   http://localhost:5173/
+➜  Network: use --host to expose
+```
+
+### 0.5) Server-Logs prüfen
+
+**Wenn Server im Background läuft (Claude Code):**
+
+Der Output wird in eine temporäre Datei geschrieben. Verwende das `TaskOutput` Tool mit der `task_id` die beim Start zurückgegeben wurde.
+
+```
+# Beispiel task_id: b7eeb35
+# → Logs in: C:\Users\PCUser\AppData\Local\Temp\claude\...\tasks\b7eeb35.output
+```
+
+**Log-Ausgaben interpretieren:**
+
+| Log-Pattern | Bedeutung | Aktion |
+|-------------|-----------|--------|
+| `Application startup complete` | Server läuft | ✅ OK |
+| `RuntimeError: Queue bound to different event loop` | AsyncIO Bug | Siehe `Bugs_Found_2.md` Bug O |
+| `Sensor config not found` | Fehlende Config | Warning, nicht kritisch |
+| `Handler returned False` | Handler-Fehler | Prüfe Traceback darüber |
+| `Device X timed out` | ESP offline | Normal für inaktive Mocks |
+
+### 0.6) Health-Checks durchführen
+
+```bash
+# Server erreichbar?
+curl -s http://localhost:8000/api/v1/auth/status
+
+# Erwartete Antwort:
+# {"setup_required":false,"users_exist":true,"mqtt_auth_enabled":false,"mqtt_tls_enabled":false}
+
+# Frontend erreichbar?
+curl -I http://localhost:5173
+# Erwartete Antwort: HTTP/1.1 200 OK
+```
+
+### 0.7) System-Status-Tabelle
+
+Nach erfolgreichem Start sollte die Tabelle so aussehen:
+
+| Service | URL | Status-Check | Erwartung |
+|---------|-----|--------------|-----------|
+| Backend API | `http://localhost:8000` | `curl http://localhost:8000/api/v1/auth/status` | JSON Response |
+| Frontend | `http://localhost:5173` | Browser öffnen | Vue App lädt |
+| API Docs | `http://localhost:8000/docs` | Swagger UI | Interaktive Docs |
+| MQTT Broker | `mqtt://localhost:1883` | `netstat -ano \| findstr "1883"` | LISTENING |
+
+### 0.8) Häufige Startprobleme
+
+| Problem | Ursache | Lösung |
+|---------|---------|--------|
+| `EADDRINUSE :8000` | Server läuft bereits | PID finden und beenden (siehe 0.3) |
+| `EADDRINUSE :5173` | Frontend läuft bereits | PID finden und beenden (siehe 0.3) |
+| `ModuleNotFoundError` | Dependencies fehlen | `poetry install` im Server-Ordner |
+| `npm ERR!` | Node modules fehlen | `npm install` im Frontend-Ordner |
+| `401 Unauthorized` (Loop) | Token korrupt | LocalStorage leeren, neu einloggen |
+| `404 Not Found` auf API | Falscher Prefix | Prüfe ob `/api/v1/` im Pfad ist |
+| `Queue bound to different event loop` | Python 3.14 Bug | Siehe `Bugs_Found_2.md` Bug O |
+| `Zugriff verweigert` bei Dienst | Keine Admin-Rechte | PowerShell als Admin öffnen |
+
+### 0.9) Mosquitto MQTT Broker
+
+Mosquitto läuft als **Windows-Dienst** und startet automatisch mit Windows.
+
+```bash
+# Dienst-Status prüfen
+sc query mosquitto
+
+# Erwartete Antwort:
+# STATE: 4 RUNNING
+
+# Dienst neu starten (benötigt Admin-Rechte)
+net stop mosquitto && net start mosquitto
+
+# Manuell starten (falls kein Dienst)
+"C:\Program Files\mosquitto\mosquitto.exe" -v
+```
+
+**Konfigurationsdatei:** `C:\Program Files\mosquitto\mosquitto.conf`
+
+**Standard-Ports:**
+- 1883: MQTT (unverschlüsselt)
+- 9001: WebSocket (falls konfiguriert)
+
+### 0.10) Kompletter Neustart-Workflow (Copy-Paste Ready)
+
+```bash
+# 1. Aktuelle Prozesse finden
+netstat -ano | findstr "8000"
+netstat -ano | findstr "5173"
+
+# 2. Services beenden (PIDs aus Schritt 1 einsetzen)
+# taskkill //PID <SERVER_PID> //F //T
+# taskkill //PID <FRONTEND_PID> //F //T
+
+# 3. Server starten (Background)
+cd "c:/Users/PCUser/Documents/PlatformIO/Projects/Auto-one/El Servador/god_kaiser_server" && poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+
+# 4. Warten (5 Sekunden)
+sleep 5
+
+# 5. Frontend starten (Background)
+cd "c:/Users/PCUser/Documents/PlatformIO/Projects/Auto-one/El Frontend" && npm run dev
+
+# 6. Verifizieren
+curl -s http://localhost:8000/api/v1/auth/status
+```
+
+### 0.11) Voraussetzungen prüfen
 
 ```bash
 # Working Directory muss Auto-one sein
@@ -21,107 +244,6 @@ poetry --version
 # Node.js muss installiert sein (für Frontend)
 node --version
 npm --version
-```
-
-### 0.2) Server starten (God-Kaiser Backend)
-
-```bash
-# Terminal 1: Server starten
-cd "El Servador/god_kaiser_server"
-poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Erwartete Ausgabe:**
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process
-INFO:     Started server process
-INFO:     Application startup complete.
-```
-
-**Server-Verifizierung:**
-```bash
-# Health-Check (sollte 200 OK zurückgeben)
-curl http://localhost:8000/health
-
-# Auth-Status prüfen (zeigt ob Setup nötig ist)
-curl http://localhost:8000/api/v1/auth/status
-```
-
-### 0.3) Frontend starten (Vue 3 Dev Server)
-
-```bash
-# Terminal 2: Frontend starten
-cd "El Frontend"
-npm run dev
-```
-
-**Erwartete Ausgabe:**
-```
-VITE v5.x.x  ready in XXX ms
-
-➜  Local:   http://localhost:5173/
-➜  Network: http://192.168.x.x:5173/
-```
-
-### 0.4) System-Status nach Start
-
-| Service | URL | Status-Check |
-|---------|-----|--------------|
-| Backend API | `http://localhost:8000` | `curl http://localhost:8000/health` |
-| Frontend | `http://localhost:5173` | Browser öffnen |
-| API Docs | `http://localhost:8000/docs` | Swagger UI |
-
-### 0.5) Erster Login / Setup
-
-1. **Browser öffnen:** `http://localhost:5173`
-2. **Wenn Setup nötig:** Admin-Account erstellen (username, password, email)
-3. **Wenn bereits eingerichtet:** Mit Admin-Credentials einloggen
-4. **Nach Login:** Dashboard sollte erscheinen
-
-### 0.6) Häufige Startprobleme
-
-| Problem | Ursache | Lösung |
-|---------|---------|--------|
-| `EADDRINUSE :8000` | Server läuft bereits | `netstat -ano | findstr :8000` → PID killen |
-| `EADDRINUSE :5173` | Frontend läuft bereits | `netstat -ano | findstr :5173` → PID killen |
-| `ModuleNotFoundError` | Dependencies fehlen | `poetry install` im Server-Ordner |
-| `npm ERR!` | Node modules fehlen | `npm install` im Frontend-Ordner |
-| `401 Unauthorized` (Endlos-Loop) | Token abgelaufen, kein Refresh | Siehe `Bugs_Found.md` Bug #1 Pattern |
-| `404 Not Found` auf API | Router-Prefix falsch | Prüfe `main.py` + Router Prefixes |
-
-### 0.7) Beide Services gleichzeitig (Background)
-
-Für KI-Agenten die beide Services im Hintergrund laufen lassen wollen:
-
-```bash
-# Server im Hintergrund (mit Bash Tool, run_in_background=true)
-cd "El Servador/god_kaiser_server" && poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
-
-# Frontend im Hintergrund (mit Bash Tool, run_in_background=true)
-cd "El Frontend" && npm run dev
-```
-
-**Output prüfen:** Mit `BashOutput` Tool den Status der Background-Tasks abrufen.
-
-### 0.8) Mosquitto MQTT Broker (Optional)
-
-Für echte MQTT-Funktionalität (nicht nur Mock):
-
-```bash
-# Windows (Chocolatey)
-choco install mosquitto
-
-# Oder manuell von https://mosquitto.org/download/
-
-# Broker starten
-mosquitto -v
-```
-
-**Konfiguration in `.env`:**
-```
-MQTT_BROKER_HOST=localhost
-MQTT_BROKER_PORT=1883
 ```
 
 ---

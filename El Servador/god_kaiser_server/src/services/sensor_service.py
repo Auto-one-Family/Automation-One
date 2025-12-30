@@ -294,7 +294,7 @@ class SensorService:
             processed_value=processed_value,
             unit=unit,
             quality=quality,
-            timestamp=datetime.fromtimestamp(timestamp) if timestamp else datetime.now(timezone.utc),
+            timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp else datetime.now(timezone.utc),
         )
         
         await self.sensor_repo.store_reading(reading)

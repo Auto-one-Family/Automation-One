@@ -1,11 +1,12 @@
 # CLAUDE_SERVER.md - God-Kaiser Server Referenz für KI-Agenten
 
-**Version:** 3.0  
-**Letzte Aktualisierung:** 2025-12-08  
+**Version:** 3.1
+**Letzte Aktualisierung:** 2025-12-30
 **Zweck:** Zentrale Referenz für Claude, um bei jeder Server-Aufgabe die richtigen Dateien, Patterns und Konventionen zu finden.
 
-> **📖 ESP32-Firmware Dokumentation:** Siehe `.claude/CLAUDE.md` für ESP32-spezifische Details  
+> **📖 ESP32-Firmware Dokumentation:** Siehe `.claude/CLAUDE.md` für ESP32-spezifische Details
 > **🔄 Cross-Referenzen:** Beide Dokumentationen verweisen jetzt aufeinander für vollständigen Kontext
+> **🛠️ Service-Management:** Siehe `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 für Start/Stop/Logs
 
 > **Letzte Änderungen (2025-12-08 - v3.0):**
 > - **Vollständige Code-Analyse:** Alle kritischen Dateien analysiert und dokumentiert
