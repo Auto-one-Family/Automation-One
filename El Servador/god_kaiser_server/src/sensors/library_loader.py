@@ -57,8 +57,10 @@ class LibraryLoader:
         self._discover_libraries()
 
         self._initialized = True
+        # DEBUG: Log all available processors for debugging
+        processor_list = ", ".join(sorted(self.processors.keys()))
         logger.info(
-            f"LibraryLoader initialized with {len(self.processors)} processors"
+            f"LibraryLoader initialized with {len(self.processors)} processors: [{processor_list}]"
         )
 
     @classmethod

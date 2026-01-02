@@ -103,12 +103,30 @@ def _build_mock_esp_response(
     # Build sensor responses
     sensors = []
     for gpio_str, config in sensors_config.items():
+        # =====================================================================
+        # SENSOR VALUE LOADING - Consistent Fallback Chain
+        # =====================================================================
+        # Mock-ESP sensors store their value in TWO keys (for historical reasons):
+        #   - "raw_value": Display value for Frontend (what user sees)
+        #   - "base_value": Base value for SimulationScheduler calculations
+        #
+        # Both contain the SAME value (user-entered, e.g., 20.0 for 20°C).
+        # This is NOT an ADC value - Mock ESPs work with human-readable values.
+        #
+        # For real ESP32s, raw_value would be hardware-specific (ADC 0-4095 for
+        # analog sensors, or already-converted values for digital sensors like
+        # DS18B20 which outputs Celsius directly).
+        #
+        # See: add_sensor() below for where these values are stored.
+        # =====================================================================
+        sensor_value = config.get("raw_value", config.get("base_value", 0.0))
+
         sensors.append(MockSensorResponse(
             gpio=int(gpio_str),
             sensor_type=config.get("sensor_type", "GENERIC"),
             name=config.get("name"),
             subzone_id=config.get("subzone_id"),
-            raw_value=config.get("raw_value", 0.0),
+            raw_value=sensor_value,
             unit=config.get("unit", ""),
             quality=config.get("quality", "good"),
             raw_mode=config.get("raw_mode", True),
@@ -195,11 +213,16 @@ async def create_mock_esp(
     
     try:
         # Build simulation config for DB storage
+        # =====================================================================
+        # SENSOR CONFIG - Dual-Key System (see add_sensor() for details)
+        # Both raw_value and base_value contain the same user-entered value.
+        # =====================================================================
         simulation_config = {
             "sensors": {
                 str(sensor.gpio): {
                     "sensor_type": sensor.sensor_type,
-                    "raw_value": sensor.raw_value,
+                    "raw_value": sensor.raw_value,   # For Frontend display
+                    "base_value": sensor.raw_value,  # For SimulationScheduler
                     "unit": sensor.unit,
                     "quality": sensor.quality,
                     "name": sensor.name,
@@ -576,16 +599,52 @@ async def trigger_heartbeat(
     esp_id: str,
     current_user: AdminUser,
     scheduler: SimulationSchedulerDep,
+    db: DBSession,
 ) -> HeartbeatResponse:
     """
     Trigger a heartbeat message from the mock ESP.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
+
+    Bug Fix (2025-12-30): If mock exists in DB but simulation is not active
+    (e.g., after server restart), automatically start the simulation first.
     """
     # Check if mock is active
     if not scheduler.is_mock_active(esp_id):
-        raise SimulationNotRunningError(esp_id)
-    
+        logger.debug(f"[HEARTBEAT] Simulation not active for {esp_id}, checking DB...")
+
+        # Check if mock exists in database
+        esp_repo = ESPRepository(db)
+        device = await esp_repo.get_mock_device(esp_id)
+
+        if device is None:
+            logger.debug(f"[HEARTBEAT] Mock {esp_id} not found in DB")
+            raise ESPNotFoundError(esp_id)
+
+        # Mock exists in DB but simulation not running - auto-start it
+        logger.info(f"[HEARTBEAT] Auto-starting simulation for {esp_id} (found in DB)")
+
+        # Get config from device metadata
+        heartbeat_interval = esp_repo.get_heartbeat_interval(device)
+
+        # Start simulation
+        success = await scheduler.start_mock(
+            esp_id=esp_id,
+            kaiser_id=device.kaiser_id or "god",
+            zone_id=device.zone_id or "",
+            heartbeat_interval=heartbeat_interval
+        )
+
+        if success:
+            # Update simulation_state in DB to 'running'
+            await esp_repo.update_simulation_state(esp_id, "running")
+            device.status = "online"
+            await db.commit()
+            logger.info(f"[HEARTBEAT] Simulation auto-started for {esp_id}")
+        else:
+            logger.error(f"[HEARTBEAT] Failed to auto-start simulation for {esp_id}")
+            raise SimulationNotRunningError(esp_id)
+
     # Trigger heartbeat
     result = await scheduler.trigger_heartbeat(esp_id)
     if result is None:
@@ -700,9 +759,26 @@ async def add_sensor(
             detail=f"Mock ESP {esp_id} not found"
         )
 
+    # =========================================================================
+    # SENSOR CONFIG STORAGE - Dual-Key System for Consistency
+    # =========================================================================
+    # We store the user-entered value under TWO keys:
+    #
+    #   "raw_value"  - Used by _build_mock_esp_response() for Frontend display
+    #   "base_value" - Used by SimulationScheduler._calculate_sensor_value()
+    #
+    # IMPORTANT: For Mock ESPs, the user enters human-readable values (e.g., 20°C),
+    # NOT hardware ADC values. This differs from real ESP32s where:
+    #   - DS18B20/SHT31: Already output Celsius (raw_value = celsius)
+    #   - pH/EC sensors: Output ADC 0-4095 (raw_value = adc, server converts)
+    #
+    # Mock ESPs bypass the ADC layer entirely - the value the user enters
+    # is the value that gets displayed and processed.
+    # =========================================================================
     sensor_config = {
         "sensor_type": config.sensor_type,
-        "base_value": config.raw_value,  # Use raw_value as base_value
+        "raw_value": config.raw_value,   # For Frontend display
+        "base_value": config.raw_value,  # For SimulationScheduler calculations
         "unit": config.unit,
         "quality": config.quality,
         "name": config.name,
@@ -748,6 +824,7 @@ async def add_sensor(
 
     # 2. If simulation is running: Start sensor job immediately
     job_started = False
+    initial_published = False
     try:
         sim_scheduler = get_simulation_scheduler()
         if sim_scheduler.is_mock_active(esp_id):
@@ -758,6 +835,14 @@ async def add_sensor(
             )
             if job_started:
                 logger.info(f"Started sensor job for {esp_id} GPIO {config.gpio}")
+
+                # 3. Sofortiger initialer Publish damit Frontend nicht auf Intervall warten muss
+                initial_published = await sim_scheduler.trigger_immediate_sensor_publish(
+                    esp_id=esp_id,
+                    gpio=config.gpio
+                )
+                if initial_published:
+                    logger.info(f"Initial sensor value published for {esp_id} GPIO {config.gpio}")
     except RuntimeError:
         pass  # Scheduler not initialized
 
@@ -769,7 +854,8 @@ async def add_sensor(
             "gpio": config.gpio,
             "sensor_type": config.sensor_type,
             "db_updated": success,
-            "job_started": job_started
+            "job_started": job_started,
+            "initial_published": initial_published
         }
     )
 

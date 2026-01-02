@@ -357,34 +357,25 @@ async def update_device(
     await db.flush()
     await db.commit()
 
-    # Für Mock ESPs: last_seen aktualisieren und WebSocket Broadcast senden
-    # Dies funktioniert auch ohne MQTT-Verbindung
-    if device.hardware_type == "MOCK_ESP32":
-        from datetime import datetime, timezone
-        logger.warning(f"[MOCK-FIX] Detected MOCK_ESP32 device: {esp_id}")
-        try:
-            # Direkt last_seen aktualisieren (ohne MQTT-Umweg)
-            device.last_seen = datetime.now(timezone.utc)
-            device.status = "online"
-            await db.commit()
-            logger.warning(f"[MOCK-FIX] Updated last_seen for {esp_id}: {device.last_seen}")
-
-            # WebSocket Broadcast senden
-            from ...websocket.manager import WebSocketManager
-            ws_manager = await WebSocketManager.get_instance()
-            await ws_manager.broadcast("esp_health", {
-                "esp_id": esp_id,
-                "status": "online",
-                "last_seen": device.last_seen.isoformat(),
-                "name": device.name,
-            })
-            logger.warning(f"[MOCK-FIX] Sent WebSocket broadcast for {esp_id}")
-        except Exception as e:
-            # Non-critical: Log but don't fail the update
-            logger.warning(f"[MOCK-FIX] ERROR for {esp_id}: {e}")
-
+    # Sensor/Actuator counts (needed for MOCK-FIX and response)
     sensor_count = await sensor_repo.count_by_esp(device.id)
     actuator_count = await actuator_repo.count_by_esp(device.id)
+
+    # Für Mock ESPs: Heartbeat triggern für korrekte Health-Metriken
+    # Der SimulationScheduler hat die aktuellen Runtime-Werte und sendet ein
+    # vollständiges esp_health Event via MQTT → WebSocket
+    if device.hardware_type == "MOCK_ESP32":
+        try:
+            from ..deps import get_simulation_scheduler
+            scheduler = get_simulation_scheduler()
+            if scheduler.is_mock_active(esp_id):
+                await scheduler.trigger_heartbeat(esp_id)
+                logger.debug(f"[MOCK-FIX] Triggered heartbeat for {esp_id} after update")
+            else:
+                logger.debug(f"[MOCK-FIX] Mock {esp_id} not active, skipping heartbeat")
+        except Exception as e:
+            # Non-critical: Log but don't fail the update
+            logger.warning(f"[MOCK-FIX] ERROR triggering heartbeat for {esp_id}: {e}")
 
     logger.info(f"ESP device updated: {esp_id} by {current_user.username}")
     

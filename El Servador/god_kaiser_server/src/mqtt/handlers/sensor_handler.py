@@ -523,18 +523,26 @@ class SensorDataHandler:
 
             # Normalize sensor type (ESP32 → Server Processor)
             normalized_type = normalize_sensor_type(sensor_type)
-            
+
+            # DEBUG: Enhanced logging for sensor processing flow
+            logger.info(
+                f"[Pi-Enhanced] Processing: esp_id={esp_id}, gpio={gpio}, "
+                f"sensor_type='{sensor_type}' → normalized='{normalized_type}'"
+            )
+
             # Get processor for sensor type (normalization happens in get_processor too)
             processor = loader.get_processor(sensor_type)
-            
-            if normalized_type != sensor_type.lower():
-                logger.debug(
-                    f"Normalized sensor type: '{sensor_type}' → '{normalized_type}'"
-                )
 
-            if not processor:
+            # DEBUG: Log processor selection result
+            if processor:
+                logger.info(
+                    f"[Pi-Enhanced] Processor found: {type(processor).__name__} "
+                    f"for '{normalized_type}'"
+                )
+            else:
                 logger.error(
-                    f"No processor found for sensor type: {sensor_type}. "
+                    f"[Pi-Enhanced] No processor found for sensor type: '{sensor_type}'. "
+                    f"Normalized: '{normalized_type}'. "
                     f"Available processors: {loader.get_available_sensors()}"
                 )
                 return None
@@ -551,10 +559,11 @@ class SensorDataHandler:
                 params=processing_params,
             )
 
-            logger.debug(
-                f"Pi-Enhanced processing successful: {sensor_type}, "
-                f"raw={raw_value}, processed={result.value} {result.unit}, "
-                f"quality={result.quality}"
+            # DEBUG: Enhanced result logging
+            logger.info(
+                f"[Pi-Enhanced] SUCCESS: esp_id={esp_id}, gpio={gpio}, "
+                f"sensor_type='{sensor_type}' → raw={raw_value} → "
+                f"processed={result.value} {result.unit}, quality={result.quality}"
             )
 
             return {

@@ -542,6 +542,38 @@ class SimulationScheduler:
         )
         return True
 
+    async def trigger_immediate_sensor_publish(
+        self,
+        esp_id: str,
+        gpio: int
+    ) -> bool:
+        """
+        Triggert sofortigen Sensor-Publish (für initialen Wert nach Sensor-Erstellung).
+
+        Diese Methode wird von der API aufgerufen um einen Sensor-Wert sofort zu
+        publishen, anstatt auf das nächste Intervall zu warten.
+
+        Args:
+            esp_id: ESP Device ID
+            gpio: GPIO Pin
+
+        Returns:
+            True wenn Publish erfolgreich
+        """
+        runtime = self._runtimes.get(esp_id)
+        if not runtime:
+            logger.warning(f"Cannot publish: Mock {esp_id} not running")
+            return False
+
+        try:
+            # Führe den Sensor-Job direkt aus
+            await self._sensor_job(esp_id, gpio)
+            logger.info(f"[{esp_id}] Immediate sensor publish for GPIO {gpio}")
+            return True
+        except Exception as e:
+            logger.error(f"[{esp_id}] Immediate publish failed: {e}")
+            return False
+
     def remove_sensor_job(self, esp_id: str, gpio: int) -> bool:
         """
         Entfernt dynamisch einen Sensor-Job (während Simulation läuft).
@@ -624,9 +656,9 @@ class SimulationScheduler:
 
         try:
             self._mqtt_publish(topic, payload, 0)
-            logger.debug(f"[{esp_id}] Heartbeat published")
+            logger.info(f"[AUTO-HB] {esp_id} heartbeat published (state={state})")
         except Exception as e:
-            logger.error(f"[{esp_id}] Heartbeat failed: {e}")
+            logger.error(f"[AUTO-HB] {esp_id} heartbeat failed: {e}")
 
     async def trigger_heartbeat(self, esp_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -720,14 +752,16 @@ class SimulationScheduler:
                 # Build MQTT Topic (MUST use TopicBuilder!)
                 topic = TopicBuilder.build_sensor_data_topic(esp_id, gpio, runtime.kaiser_id)
 
-                # Build Payload (IDENTISCH zu echtem ESP!)
+                # Build Payload (Format wie echter ESP - raw_value ist der korrekte Wert)
+                # HINWEIS: "raw" wurde entfernt, da es den Wert falsch mit 100 multiplizierte
+                # Der sensor_handler verwendet payload.get("raw", payload.get("raw_value"))
+                # und fällt jetzt korrekt auf raw_value zurück
                 payload = {
                     "ts": int(time.time() * 1000),  # MILLISEKUNDEN (KRITISCH!)
                     "esp_id": esp_id,
                     "gpio": gpio,
                     "sensor_type": sensor_config.get("sensor_type", "GENERIC"),
-                    "raw": int(value * 100),  # INTEGER (KRITISCH!)
-                    "raw_value": value,       # FLOAT
+                    "raw_value": value,       # FLOAT - Der korrekte Sensor-Wert
                     "raw_mode": True,         # BOOLEAN (KRITISCH! - Required by handler)
                     "value": value,
                     "unit": sensor_config.get("unit", ""),
@@ -1291,16 +1325,45 @@ class SimulationScheduler:
         if publish and self._mqtt_publish:
             runtime = self.get_runtime(esp_id)
             if runtime:
+                # =====================================================================
+                # MQTT PAYLOAD FOR MOCK ESP SENSOR DATA
+                # =====================================================================
+                # Mock ESPs send human-readable values (e.g., 20.0 for 20°C), NOT
+                # hardware ADC values. This is different from real ESP32s where:
+                #
+                #   - Temperature sensors (DS18B20, SHT31): Already output Celsius,
+                #     so raw_value = celsius (no ADC conversion needed)
+                #   - Analog sensors (pH, EC): Output ADC 0-4095, server converts
+                #
+                # For Mock ESPs, we intentionally:
+                #   1. Do NOT include a "raw" field (legacy ADC field)
+                #   2. Set raw_value = value (both are the user-entered value)
+                #   3. Set raw_mode = True (tells server to use raw_value as-is)
+                #
+                # The sensor_handler.py uses: payload.get("raw", payload.get("raw_value"))
+                # By omitting "raw", it falls back to "raw_value" which is correct.
+                #
+                # BUG FIX: Previously had "raw": int(value * 100) which caused 20°C
+                # to become 2000 in the database (the sensor_handler used "raw" first).
+                # =====================================================================
+
+                # Get sensor_type from config for complete payload
+                sensors_config = sim_config.get("sensors", {})
+                sensor_config = sensors_config.get(str(gpio), {})
+                sensor_type = sensor_config.get("sensor_type", "GENERIC")
+                unit = sensor_config.get("unit", "")
+
                 topic = TopicBuilder.build_sensor_data_topic(esp_id, gpio, runtime.kaiser_id)
                 payload = {
                     "ts": int(time.time() * 1000),
                     "esp_id": esp_id,
                     "gpio": gpio,
-                    "raw": int(value * 100),
-                    "raw_value": value,
-                    "raw_mode": True,
-                    "value": value,
+                    "sensor_type": sensor_type,
+                    "raw_value": value,      # User-entered value (human-readable)
+                    "value": value,          # Same as raw_value for Mock ESPs
+                    "unit": unit,
                     "quality": "good",
+                    "raw_mode": True,        # Server should use raw_value directly
                 }
                 self._mqtt_publish(topic, payload, 0)
 
