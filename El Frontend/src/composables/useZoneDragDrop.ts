@@ -8,7 +8,23 @@
  * - Toast notifications
  */
 
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+
+// =============================================================================
+// Constants (CONSISTENCY fix: Replace magic strings with exported constants)
+// =============================================================================
+
+/**
+ * Zone ID for unassigned devices.
+ * Used throughout the drag-drop system to identify devices without zone assignment.
+ * Export this constant and use it instead of hardcoded '__unassigned__' strings.
+ */
+export const ZONE_UNASSIGNED = '__unassigned__' as const
+
+/**
+ * Display name for unassigned zone.
+ */
+export const ZONE_UNASSIGNED_DISPLAY_NAME = 'Nicht zugewiesen' as const
 import { zonesApi } from '@/api/zones'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from './useToast'
@@ -26,6 +42,19 @@ interface ZoneGrouping {
   devices: ESPDevice[]
 }
 
+/**
+ * History entry for undo/redo
+ */
+interface ZoneHistoryEntry {
+  deviceId: string
+  deviceName: string
+  fromZoneId: string | null
+  fromZoneName: string | null
+  toZoneId: string | null
+  toZoneName: string | null
+  timestamp: number
+}
+
 export function useZoneDragDrop() {
   const espStore = useEspStore()
   const toast = useToast()
@@ -34,6 +63,15 @@ export function useZoneDragDrop() {
   const isProcessing = ref(false)
   const lastError = ref<string | null>(null)
   const processingDeviceId = ref<string | null>(null)
+
+  // Undo/Redo History (max 20 entries)
+  const MAX_HISTORY = 20
+  const undoStack = ref<ZoneHistoryEntry[]>([])
+  const redoStack = ref<ZoneHistoryEntry[]>([])
+
+  // Computed properties for undo/redo availability
+  const canUndo = computed(() => undoStack.value.length > 0 && !isProcessing.value)
+  const canRedo = computed(() => redoStack.value.length > 0 && !isProcessing.value)
 
   /**
    * Generate zone_name from zone_id (reverse of the normal flow)
@@ -66,16 +104,37 @@ export function useZoneDragDrop() {
   }
 
   /**
+   * Add entry to undo stack (clears redo stack)
+   */
+  function pushToHistory(entry: ZoneHistoryEntry) {
+    undoStack.value.push(entry)
+    // Limit history size
+    if (undoStack.value.length > MAX_HISTORY) {
+      undoStack.value.shift()
+    }
+    // Clear redo stack on new action
+    redoStack.value = []
+  }
+
+  /**
    * Group devices by zone
    * Returns array of zone groups including an "unassigned" group
+   * ALWAYS includes the ZONE_UNASSIGNED group (even if empty) as a drop target
    */
   function groupDevicesByZone(devices: ESPDevice[]): ZoneGrouping[] {
     const zoneMap = new Map<string, ZoneGrouping>()
 
+    // ALWAYS create unassigned group as drop target (even if empty)
+    zoneMap.set(ZONE_UNASSIGNED, {
+      zoneId: ZONE_UNASSIGNED,
+      zoneName: ZONE_UNASSIGNED_DISPLAY_NAME,
+      devices: []
+    })
+
     // Group devices
     for (const device of devices) {
-      const zoneId = device.zone_id || '__unassigned__'
-      const zoneName = device.zone_name || (zoneId !== '__unassigned__' ? zoneIdToDisplayName(zoneId) : 'Nicht zugewiesen')
+      const zoneId = device.zone_id || ZONE_UNASSIGNED
+      const zoneName = device.zone_name || (zoneId !== ZONE_UNASSIGNED ? zoneIdToDisplayName(zoneId) : ZONE_UNASSIGNED_DISPLAY_NAME)
 
       if (!zoneMap.has(zoneId)) {
         zoneMap.set(zoneId, {
@@ -91,8 +150,8 @@ export function useZoneDragDrop() {
     // Convert to array and sort (unassigned last)
     const groups = Array.from(zoneMap.values())
     groups.sort((a, b) => {
-      if (a.zoneId === '__unassigned__') return 1
-      if (b.zoneId === '__unassigned__') return -1
+      if (a.zoneId === ZONE_UNASSIGNED) return 1
+      if (b.zoneId === ZONE_UNASSIGNED) return -1
       return a.zoneName.localeCompare(b.zoneName)
     })
 
@@ -131,7 +190,7 @@ export function useZoneDragDrop() {
     }
 
     // Skip if dropping to unassigned (use removeZone instead)
-    if (toZoneId === '__unassigned__') {
+    if (toZoneId === ZONE_UNASSIGNED) {
       return handleRemoveFromZone(device)
     }
 
@@ -157,6 +216,17 @@ export function useZoneDragDrop() {
       const deviceName = device.name || deviceId
       const zoneName = zoneIdToDisplayName(toZoneId)
       toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
+
+      // Record in history for undo
+      pushToHistory({
+        deviceId,
+        deviceName,
+        fromZoneId: fromZoneId,
+        fromZoneName: fromZoneId ? zoneIdToDisplayName(fromZoneId) : null,
+        toZoneId: toZoneId,
+        toZoneName: zoneName,
+        timestamp: Date.now()
+      })
 
       console.debug(`[ZoneDragDrop] Assigned ${deviceId} → ${toZoneId}`)
       return true
@@ -226,6 +296,17 @@ export function useZoneDragDrop() {
       const zoneName = originalZoneName || zoneIdToDisplayName(originalZoneId)
       toast.success(`"${deviceName}" wurde aus "${zoneName}" entfernt`)
 
+      // Record in history for undo
+      pushToHistory({
+        deviceId,
+        deviceName,
+        fromZoneId: originalZoneId,
+        fromZoneName: zoneName,
+        toZoneId: null,
+        toZoneName: null,
+        timestamp: Date.now()
+      })
+
       console.log(`[useZoneDragDrop] Successfully removed ${deviceId} from zone`)
       return true
 
@@ -258,11 +339,159 @@ export function useZoneDragDrop() {
     }
   }
 
+  /**
+   * Undo the last zone assignment
+   * Reverses the last operation by assigning device back to previous zone
+   */
+  async function undo(): Promise<boolean> {
+    if (!canUndo.value) return false
+
+    const entry = undoStack.value.pop()
+    if (!entry) return false
+
+    isProcessing.value = true
+    processingDeviceId.value = entry.deviceId
+    lastError.value = null
+
+    try {
+      // Reverse the operation: assign back to fromZoneId
+      if (entry.fromZoneId) {
+        // Was assigned to a zone, assign back
+        const response = await zonesApi.assignZone(entry.deviceId, {
+          zone_id: entry.fromZoneId,
+          zone_name: entry.fromZoneName || zoneIdToDisplayName(entry.fromZoneId)
+        })
+        if (!response.success) {
+          throw new Error(response.message || 'Undo fehlgeschlagen')
+        }
+      } else {
+        // Was unassigned, remove zone
+        const response = await zonesApi.removeZone(entry.deviceId)
+        if (!response.success) {
+          throw new Error(response.message || 'Undo fehlgeschlagen')
+        }
+      }
+
+      // Refresh store
+      await espStore.fetchAll()
+
+      // Push to redo stack
+      redoStack.value.push(entry)
+
+      // Success toast
+      const targetZone = entry.fromZoneName || 'Nicht zugewiesen'
+      toast.success(`Rückgängig: "${entry.deviceName}" → "${targetZone}"`)
+
+      console.debug(`[ZoneDragDrop] Undo: ${entry.deviceId} → ${entry.fromZoneId || 'unassigned'}`)
+      return true
+
+    } catch (error) {
+      console.error('[ZoneDragDrop] Undo failed:', error)
+
+      // Put entry back on undo stack
+      undoStack.value.push(entry)
+
+      // Refresh store to ensure consistent state
+      await espStore.fetchAll()
+
+      const errorMessage = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      lastError.value = errorMessage
+      toast.error(`Rückgängig fehlgeschlagen: ${errorMessage}`)
+
+      return false
+
+    } finally {
+      isProcessing.value = false
+      processingDeviceId.value = null
+    }
+  }
+
+  /**
+   * Redo the last undone zone assignment
+   * Re-applies the previously undone operation
+   */
+  async function redo(): Promise<boolean> {
+    if (!canRedo.value) return false
+
+    const entry = redoStack.value.pop()
+    if (!entry) return false
+
+    isProcessing.value = true
+    processingDeviceId.value = entry.deviceId
+    lastError.value = null
+
+    try {
+      // Re-apply the original operation: assign to toZoneId
+      if (entry.toZoneId) {
+        // Was assigned to a zone
+        const response = await zonesApi.assignZone(entry.deviceId, {
+          zone_id: entry.toZoneId,
+          zone_name: entry.toZoneName || zoneIdToDisplayName(entry.toZoneId)
+        })
+        if (!response.success) {
+          throw new Error(response.message || 'Wiederherstellen fehlgeschlagen')
+        }
+      } else {
+        // Was removed from zone
+        const response = await zonesApi.removeZone(entry.deviceId)
+        if (!response.success) {
+          throw new Error(response.message || 'Wiederherstellen fehlgeschlagen')
+        }
+      }
+
+      // Refresh store
+      await espStore.fetchAll()
+
+      // Push back to undo stack
+      undoStack.value.push(entry)
+
+      // Success toast
+      const targetZone = entry.toZoneName || 'Nicht zugewiesen'
+      toast.success(`Wiederherstellen: "${entry.deviceName}" → "${targetZone}"`)
+
+      console.debug(`[ZoneDragDrop] Redo: ${entry.deviceId} → ${entry.toZoneId || 'unassigned'}`)
+      return true
+
+    } catch (error) {
+      console.error('[ZoneDragDrop] Redo failed:', error)
+
+      // Put entry back on redo stack
+      redoStack.value.push(entry)
+
+      // Refresh store to ensure consistent state
+      await espStore.fetchAll()
+
+      const errorMessage = error instanceof Error ? error.message : 'Unbekannter Fehler'
+      lastError.value = errorMessage
+      toast.error(`Wiederherstellen fehlgeschlagen: ${errorMessage}`)
+
+      return false
+
+    } finally {
+      isProcessing.value = false
+      processingDeviceId.value = null
+    }
+  }
+
+  /**
+   * Clear undo/redo history
+   */
+  function clearHistory() {
+    undoStack.value = []
+    redoStack.value = []
+  }
+
   return {
     // State
     isProcessing,
     lastError,
     processingDeviceId,
+
+    // Undo/Redo State
+    canUndo,
+    canRedo,
+    undoStack,
+    redoStack,
 
     // Methods
     groupDevicesByZone,
@@ -270,6 +499,11 @@ export function useZoneDragDrop() {
     handleDeviceDrop,
     handleRemoveFromZone,
     generateZoneId,
-    zoneIdToDisplayName
+    zoneIdToDisplayName,
+
+    // Undo/Redo Methods
+    undo,
+    redo,
+    clearHistory
   }
 }

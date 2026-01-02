@@ -18,7 +18,6 @@ import {
   Layers,
   AlertTriangle
 } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
 import ESPCard from '@/components/esp/ESPCard.vue'
 import { type ESPDevice } from '@/api/esp'
 
@@ -120,16 +119,15 @@ function toggleExpanded() {
 }
 
 // Drag & Drop handlers
-// vue-draggable-plus uses separate events: @add, @remove, @update
-// Note: @change has different event structure (CustomEvent), use @add for cross-zone drops
+// vue-draggable-plus @change event provides structured data with added/removed/moved
+// This is more reliable than @add/@remove events which have SortableJS format
 
-function handleDragAdd(event: any) {
-  // @add is triggered when an element is added FROM another list
-  const newIndex = event?.newIndex
-  if (typeof newIndex === 'number' && newIndex >= 0 && newIndex < localDevices.value.length) {
-    const device = localDevices.value[newIndex] as ESPDevice
+function handleDragChange(event: any) {
+  // Handle add event - device dropped into this zone FROM another zone
+  if (event.added) {
+    const device = event.added.element as ESPDevice
     const fromZoneId = device.zone_id || null
-    const deviceId = device.device_id || device.esp_id
+    const deviceId = device.device_id || device.esp_id || ''
 
     console.debug(`[ZoneGroup] Device ${deviceId} dropped: ${fromZoneId} → ${props.zoneId}`)
 
@@ -139,15 +137,19 @@ function handleDragAdd(event: any) {
       toZoneId: props.zoneId
     })
   }
+
+  // Handle moved event - reorder within zone
+  if (event.moved) {
+    emit('devices-reordered', localDevices.value)
+  }
+}
+
+function handleDragAdd(_event: any) {
+  // Kept for compatibility but @change handles this better
 }
 
 function handleDragUpdate(_event: any) {
-  // @update is triggered when sort order changes within the same list
-  emit('devices-reordered', localDevices.value)
-}
-
-function handleDragChange(_event: any) {
-  // @change is kept for compatibility but @add handles cross-zone drops
+  // Kept for compatibility but @change handles this better
 }
 
 function handleDragStart() {
@@ -237,12 +239,15 @@ function getDeviceId(device: ESPDevice): string {
     <!-- Zone Content (devices) -->
     <Transition name="zone-content">
       <div v-show="isExpanded" class="zone-group__content">
-        <!-- Draggable wrapper -->
+        <!-- Draggable wrapper with minimum height for empty drop targets -->
         <VueDraggable
           v-if="enableDragDrop"
           v-model="localDevices"
           class="zone-group__grid"
-          :class="{ 'zone-group__grid--compact': compactMode }"
+          :class="{
+            'zone-group__grid--compact': compactMode,
+            'zone-group__grid--empty': devices.length === 0
+          }"
           group="esp-devices"
           :animation="200"
           ghost-class="zone-item--ghost"
@@ -254,11 +259,12 @@ function getDeviceId(device: ESPDevice): string {
           @start="handleDragStart"
           @end="handleDragEnd"
         >
-          <!-- Use slot for custom device rendering, or default to ESPCard -->
+          <!-- Device cards - wrapper needs explicit height for VueDraggable -->
           <div
             v-for="device in localDevices"
             :key="getDeviceId(device)"
             class="zone-group__item"
+            :data-device-id="getDeviceId(device)"
           >
             <slot name="device" :device="device" :device-id="getDeviceId(device)">
               <ESPCard
@@ -268,6 +274,23 @@ function getDeviceId(device: ESPDevice): string {
                 @delete="handleDelete"
               />
             </slot>
+          </div>
+
+          <!-- Empty state INSIDE VueDraggable for drop target visibility -->
+          <div v-if="devices.length === 0" class="zone-group__empty zone-group__empty--drop-target">
+            <Layers class="zone-group__empty-icon" />
+            <p class="zone-group__empty-text">
+              {{ isUnassigned
+                ? 'Geräte hierher ziehen, um sie aus ihrer Zone zu lösen'
+                : 'Keine Geräte in dieser Zone'
+              }}
+            </p>
+            <p class="zone-group__empty-hint">
+              {{ isUnassigned
+                ? 'Die Geräte bleiben erhalten und können später einer neuen Zone zugewiesen werden'
+                : 'Geräte hierher ziehen zum Zuweisen'
+              }}
+            </p>
           </div>
         </VueDraggable>
 
@@ -291,20 +314,17 @@ function getDeviceId(device: ESPDevice): string {
               />
             </slot>
           </div>
-        </div>
 
-        <!-- Empty state -->
-        <div v-if="devices.length === 0" class="zone-group__empty">
-          <Layers class="zone-group__empty-icon" />
-          <p class="zone-group__empty-text">
-            {{ isUnassigned
-              ? 'Alle Geräte sind Zonen zugewiesen'
-              : 'Keine Geräte in dieser Zone'
-            }}
-          </p>
-          <p v-if="enableDragDrop && !isUnassigned" class="zone-group__empty-hint">
-            Geräte hierher ziehen um sie zuzuweisen
-          </p>
+          <!-- Empty state for non-draggable mode -->
+          <div v-if="devices.length === 0" class="zone-group__empty">
+            <Layers class="zone-group__empty-icon" />
+            <p class="zone-group__empty-text">
+              {{ isUnassigned
+                ? 'Alle Geräte sind Zonen zugewiesen'
+                : 'Keine Geräte in dieser Zone'
+              }}
+            </p>
+          </div>
         </div>
       </div>
     </Transition>
@@ -321,9 +341,9 @@ function getDeviceId(device: ESPDevice): string {
 .zone-group {
   position: relative;
   background: transparent;
-  border-left: 2px solid rgba(96, 165, 250, 0.2);
-  padding: 1rem 0 1rem 1rem;
-  margin-bottom: 1.5rem;
+  border-left: 2px solid rgba(96, 165, 250, 0.45);  /* Deutlich verstärkt */
+  padding: 0.625rem 0 0.625rem 0.75rem;
+  margin-bottom: 0;  /* Grid-Gap übernimmt */
   transition: all 0.2s ease;
 }
 
@@ -375,8 +395,8 @@ function getDeviceId(device: ESPDevice): string {
 .zone-group__header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
+  margin-bottom: 0.625rem;
   cursor: pointer;
   user-select: none;
 }
@@ -400,7 +420,8 @@ function getDeviceId(device: ESPDevice): string {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    var(--glass-border) 50%,
+    rgba(255, 255, 255, 0.2) 20%,   /* Früher sichtbar, stärker */
+    rgba(255, 255, 255, 0.2) 80%,   /* Längeres Plateau */
     transparent 100%
   );
 }
@@ -409,16 +430,16 @@ function getDeviceId(device: ESPDevice): string {
 .zone-group__header-label {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.75rem;
+  gap: 0.625rem;
+  padding: 0.375rem 1rem;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-muted);
+  font-size: 0.875rem;           /* 14px statt 12px */
+  font-weight: 600;               /* Fetter */
+  text-transform: none;           /* Kein UPPERCASE mehr */
+  letter-spacing: 0.01em;         /* Weniger Spacing */
+  color: var(--color-text-secondary);  /* Heller */
   white-space: nowrap;
   transition: all 0.2s ease;
 }
@@ -430,9 +451,9 @@ function getDeviceId(device: ESPDevice): string {
 
 /* Icon inside label */
 .zone-group__header-icon {
-  width: 0.75rem;
-  height: 0.75rem;
-  opacity: 0.7;
+  width: 1rem;
+  height: 1rem;
+  opacity: 0.85;
 }
 
 /* Zone name text */
@@ -491,51 +512,66 @@ function getDeviceId(device: ESPDevice): string {
 
 .zone-group__content {
   padding: 0;
+  overflow: visible;  /* Erlaubt Overlays */
 }
 
 .zone-group__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  /* min() verhindert Overflow bei schmalen Containern */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 1rem;
+  overflow: visible;  /* Erlaubt Overlays von Child-Elementen */
 }
 
 /* Responsive grid */
 @media (min-width: 1280px) {
   .zone-group__grid {
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   }
 }
 
 @media (min-width: 1600px) {
   .zone-group__grid {
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   }
 }
 
-/* Compact mode for dashboard */
+/* Compact mode for dashboard - TIGHT layout */
 .zone-group__grid--compact {
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 1.5rem;
+  /* Smaller min-width for more cards per row */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: 0.75rem;
 }
 
 @media (min-width: 1440px) {
   .zone-group__grid--compact {
-    grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+    gap: 1rem;
   }
 }
 
 @media (min-width: 1920px) {
   .zone-group__grid--compact {
-    grid-template-columns: repeat(auto-fill, minmax(600px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+    gap: 1rem;
   }
 }
 
-@media (max-width: 768px) {
+/* Mobile: min() sorgt bereits für 1 Spalte wenn nötig */
+/* Diese Regel nur für garantiert 1 Spalte auf sehr kleinen Screens */
+@media (max-width: 480px) {
   .zone-group__grid,
   .zone-group__grid--compact {
     grid-template-columns: 1fr;
     gap: 0.75rem;
   }
+}
+
+/* Empty Grid (min-height for drop targets) */
+.zone-group__grid--empty {
+  min-height: 100px;
+  display: flex;
+  align-items: stretch;
 }
 
 /* =============================================================================
@@ -552,6 +588,20 @@ function getDeviceId(device: ESPDevice): string {
   background: var(--glass-bg);
   border: 1px dashed var(--glass-border);
   border-radius: 0.5rem;
+}
+
+/* Drop target styling - spans full width inside VueDraggable */
+.zone-group__empty--drop-target {
+  flex: 1;
+  width: 100%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* Highlight on drag-over */
+.zone-group--drag-over .zone-group__empty--drop-target {
+  border-color: var(--color-iridescent-1);
+  background: rgba(96, 165, 250, 0.05);
 }
 
 .zone-group__empty-icon {
@@ -599,6 +649,12 @@ function getDeviceId(device: ESPDevice): string {
 
 .zone-group__item {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Position relative für z-index Stacking */
+  position: relative;
+  z-index: 1;
+  /* WICHTIG: Kein contain:layout mehr - das blockiert absolute Positionierung
+     von Child-Elementen wie AnalysisDropZone Overlay */
+  overflow: visible;  /* Erlaubt Overlays die über das Item hinausgehen */
 }
 
 .zone-item--ghost {
@@ -619,7 +675,8 @@ function getDeviceId(device: ESPDevice): string {
 
 .zone-item--drag {
   transform: scale(1.03);
-  z-index: 1000;
+  z-index: 9999;  /* Höher als alles andere während des Ziehens */
+  pointer-events: none;  /* Verhindert Selbst-Drop */
 }
 
 .zone-item--drag > * {
