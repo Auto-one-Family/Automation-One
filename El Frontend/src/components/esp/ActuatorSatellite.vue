@@ -1,20 +1,21 @@
 <script setup lang="ts">
 /**
  * ActuatorSatellite Component
- * 
+ *
  * Displays an actuator as a "satellite" card around the main ESP card.
  * Shows actuator status (ON/OFF/PWM value).
- * 
+ *
  * Features:
  * - Status display (AN/AUS/PWM-Wert)
  * - Icon based on actuator type
  * - Click to show connection lines to linked sensors
+ * - Draggable for future chart integration (Phase 4)
  */
 
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Power, ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
-import { getActuatorTypeLabel, getActuatorTypeInfo } from '@/utils/labels'
+import { getActuatorTypeInfo } from '@/utils/labels'
 
 interface Props {
   /** ESP ID this actuator belongs to */
@@ -35,18 +36,24 @@ interface Props {
   selected?: boolean
   /** Whether to show connection lines on click */
   showConnections?: boolean
+  /** Whether dragging is enabled */
+  draggable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   emergencyStopped: false,
   selected: false,
   showConnections: false,
+  draggable: true,
 })
 
 const emit = defineEmits<{
   click: [gpio: number]
   showConnections: [gpio: number]
 }>()
+
+// Drag state
+const isDragging = ref(false)
 
 // Get actuator type info
 const actuatorInfo = computed(() => getActuatorTypeInfo(props.actuatorType))
@@ -73,16 +80,16 @@ const statusDisplay = computed(() => {
   if (props.actuatorType === 'pwm' || props.actuatorType === 'fan') {
     const pwm = props.pwmValue || 0
     const percent = Math.round((pwm / 255) * 100)
-    return { 
-      text: `${percent}%`, 
-      variant: (pwm > 0 ? 'success' : 'gray') as const 
-    }
+    return {
+      text: `${percent}%`,
+      variant: pwm > 0 ? 'success' : 'gray'
+    } as const
   }
-  
+
   return {
     text: props.state ? 'AN' : 'AUS',
-    variant: (props.state ? 'success' : 'gray') as const
-  }
+    variant: props.state ? 'success' : 'gray'
+  } as const
 })
 
 // Handle click
@@ -92,59 +99,83 @@ function handleClick() {
     emit('showConnections', props.gpio)
   }
 }
+
+// Drag handlers (Phase 4)
+function handleDragStart(event: DragEvent) {
+  if (!props.draggable || !event.dataTransfer) return
+
+  // KRITISCH: Verhindere dass VueDraggable (Parent) das Event abfängt!
+  // Ohne stopPropagation() würde VueDraggable denken, eine ESP-Card wird gedraggt.
+  event.stopPropagation()
+
+  isDragging.value = true
+
+  // Set drag data with actuator info
+  const dragData = {
+    type: 'actuator' as const,
+    espId: props.espId,
+    gpio: props.gpio,
+    actuatorType: props.actuatorType,
+    name: props.name || actuatorInfo.value.label,
+  }
+  event.dataTransfer.setData('application/json', JSON.stringify(dragData))
+  event.dataTransfer.effectAllowed = 'copy'
+}
+
+function handleDragEnd(event: DragEvent) {
+  // KRITISCH: Auch hier stopPropagation für konsistentes Verhalten
+  event.stopPropagation()
+  isDragging.value = false
+}
 </script>
 
 <template>
   <div
     :class="[
       'actuator-satellite',
-      { 
+      {
         'actuator-satellite--selected': selected,
         'actuator-satellite--active': state && !emergencyStopped,
-        'actuator-satellite--emergency': emergencyStopped
+        'actuator-satellite--emergency': emergencyStopped,
+        'actuator-satellite--dragging': isDragging,
+        'actuator-satellite--draggable': draggable
       }
     ]"
+    :data-esp-id="espId"
+    :data-gpio="gpio"
+    data-satellite-type="actuator"
+    :draggable="draggable"
+    :title="`${name || actuatorInfo.label} (GPIO ${gpio})`"
     @click="handleClick"
+    @dragstart="handleDragStart"
+    @dragend="handleDragEnd"
   >
-    <!-- Icon -->
-    <div 
-      class="actuator-satellite__icon" 
+    <!-- Compact vertical layout: Icon → Status → Label -->
+    <div
+      class="actuator-satellite__icon"
       :class="[
         `actuator-satellite__icon--${statusDisplay.variant}`,
         { 'actuator-satellite__icon--active': state && !emergencyStopped }
       ]"
     >
-      <component :is="actuatorIcon" class="w-5 h-5" />
+      <component :is="actuatorIcon" class="w-4 h-4" />
     </div>
-    
-    <!-- Content -->
-    <div class="actuator-satellite__content">
-      <!-- Name/Type -->
-      <div class="actuator-satellite__header">
-        <span class="actuator-satellite__name">
-          {{ name || actuatorInfo.label }}
-        </span>
-        <span class="actuator-satellite__gpio">GPIO {{ gpio }}</span>
-      </div>
-      
-      <!-- Status -->
-      <div class="actuator-satellite__status">
-        <Badge 
-          :variant="statusDisplay.variant" 
-          size="sm"
-          :pulse="state && !emergencyStopped"
-        >
-          {{ statusDisplay.text }}
-        </Badge>
-        <span 
-          v-if="(actuatorType === 'pwm' || actuatorType === 'fan') && pwmValue !== undefined"
-          class="actuator-satellite__pwm"
-        >
-          PWM: {{ pwmValue }}
-        </span>
-      </div>
-    </div>
-    
+
+    <!-- Status Badge (prominent) -->
+    <Badge
+      :variant="statusDisplay.variant"
+      size="xs"
+      :pulse="state && !emergencyStopped"
+      class="actuator-satellite__badge"
+    >
+      {{ statusDisplay.text }}
+    </Badge>
+
+    <!-- Label (compact) -->
+    <span class="actuator-satellite__label">
+      {{ name || actuatorInfo.label }}
+    </span>
+
     <!-- Connection indicator (if has connections) -->
     <div v-if="showConnections" class="actuator-satellite__connection-indicator" />
   </div>
@@ -152,30 +183,33 @@ function handleClick() {
 
 <style scoped>
 /* =============================================================================
-   ActuatorSatellite - Lighter Glassmorphism Design
-   Industry-Benchmark: Home Assistant Mushroom Cards
+   ActuatorSatellite - Compact Vertical Design for Side-by-Side Layout
+   Optimized for narrow columns in horizontal ESP layout
    ============================================================================= */
 
 .actuator-satellite {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  background: rgba(255, 255, 255, 0.02);
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: rgba(30, 32, 40, 0.85);
   border: 1px solid var(--glass-border);
   border-radius: 0.5rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 160px;
-  backdrop-filter: blur(4px);
+  min-width: 52px;
+  max-width: 130px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 .actuator-satellite:hover {
   border-color: var(--color-iridescent-1);
-  box-shadow: 0 4px 16px rgba(167, 139, 250, 0.25);
+  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.25);
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(40, 42, 54, 0.9);
 }
 
 .actuator-satellite--selected {
@@ -183,12 +217,26 @@ function handleClick() {
   box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.2);
 }
 
+.actuator-satellite--draggable {
+  cursor: grab;
+}
+
+.actuator-satellite--draggable:active {
+  cursor: grabbing;
+}
+
+.actuator-satellite--dragging {
+  opacity: 0.7;
+  transform: scale(0.95);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
 .actuator-satellite--active {
-  border-color: rgba(52, 211, 153, 0.3);
+  border-color: rgba(52, 211, 153, 0.4);
 }
 
 .actuator-satellite--emergency {
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: rgba(248, 113, 113, 0.4);
   animation: pulse-emergency 1s infinite;
 }
 
@@ -197,13 +245,14 @@ function handleClick() {
   50% { opacity: 0.7; }
 }
 
+/* Icon - compact circle */
 .actuator-satellite__icon {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2rem;
+  height: 2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
+  border-radius: 50%;
   flex-shrink: 0;
   transition: all 0.2s;
 }
@@ -232,56 +281,31 @@ function handleClick() {
   50% { opacity: 0.7; }
 }
 
-.actuator-satellite__content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-width: 0;
+/* Badge - centered */
+.actuator-satellite__badge {
+  /* Badge styling handled by component */
 }
 
-.actuator-satellite__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.actuator-satellite__name {
-  font-size: 0.75rem;
+/* Label - compact */
+.actuator-satellite__label {
+  font-size: 0.625rem;
   font-weight: 500;
-  color: var(--color-text-primary);
+  color: var(--color-text-muted);
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.2;
 }
 
-.actuator-satellite__gpio {
-  font-size: 0.625rem;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.actuator-satellite__status {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.actuator-satellite__pwm {
-  font-size: 0.75rem;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--color-text-muted);
-}
-
+/* Connection indicator */
 .actuator-satellite__connection-indicator {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 0.5rem;
-  height: 0.5rem;
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 0.375rem;
+  height: 0.375rem;
   border-radius: 50%;
   background-color: var(--color-success);
   animation: pulse-dot 2s infinite;

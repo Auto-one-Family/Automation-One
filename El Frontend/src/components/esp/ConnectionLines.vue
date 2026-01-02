@@ -11,7 +11,7 @@
  * - Solid lines = Cross-ESP connections (sensor on ESP1 → actuator on ESP2)
  */
 
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 interface Connection {
   /** Source ESP ID */
@@ -32,6 +32,8 @@ interface Connection {
   ruleId?: string
   /** Rule name (if logic connection) */
   ruleName?: string
+  /** Human-readable rule description (e.g., "Temp > 25°C → Lüfter AN") */
+  ruleDescription?: string
   /** Whether connection is active */
   active?: boolean
 }
@@ -143,6 +145,28 @@ function handleConnectionClick(connection: Connection) {
   emit('connectionClick', connection)
 }
 
+/**
+ * Truncate text for display along line
+ */
+function truncateText(text: string | undefined, maxLength: number): string {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength - 3) + '...'
+}
+
+/**
+ * Get display text for connection (name or description)
+ */
+function getConnectionText(connection: Connection): string {
+  if (connection.ruleDescription) {
+    return truncateText(connection.ruleDescription, 25)
+  }
+  if (connection.ruleName) {
+    return truncateText(connection.ruleName, 20)
+  }
+  return ''
+}
+
 // Lifecycle
 onMounted(() => {
   updateViewBox()
@@ -162,24 +186,54 @@ onUnmounted(() => {
       class="connection-lines"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <!-- Connection lines -->
+      <!-- Connection lines with text -->
       <g v-for="(connection, index) in connections" :key="index">
+        <!-- Define path for text to follow -->
+        <defs>
+          <path
+            :id="`connection-path-${index}`"
+            :d="getLinePath(connection)"
+            fill="none"
+          />
+        </defs>
+
+        <!-- Visible line -->
         <path
           :d="getLinePath(connection)"
           :style="getLineStyle(connection)"
           fill="none"
           :class="[
             'connection-line',
-            { 'connection-line--hovered': hoveredConnection === connection }
+            { 'connection-line--hovered': hoveredConnection === connection },
+            { 'connection-line--active': connection.active }
           ]"
           @mouseenter="handleConnectionHover(connection)"
           @mouseleave="handleConnectionHover(null)"
           @click="handleConnectionClick(connection)"
         />
-        
+
+        <!-- Text along the line (only for logic/cross-esp connections with text) -->
+        <text
+          v-if="connection.connectionType !== 'internal' && getConnectionText(connection)"
+          :class="[
+            'connection-text',
+            { 'connection-text--hovered': hoveredConnection === connection },
+            { 'connection-text--active': connection.active }
+          ]"
+          dy="-5"
+        >
+          <textPath
+            :href="`#connection-path-${index}`"
+            startOffset="50%"
+            text-anchor="middle"
+          >
+            {{ getConnectionText(connection) }}
+          </textPath>
+        </text>
+
         <!-- Arrow marker (for logic connections) -->
         <circle
-          v-if="connection.connectionType === 'logic'"
+          v-if="connection.connectionType === 'logic' || connection.connectionType === 'cross-esp'"
           :cx="positions[`${connection.targetEspId}_${connection.targetGpio}`]?.x || positions[connection.targetEspId]?.x"
           :cy="positions[`${connection.targetEspId}_${connection.targetGpio}`]?.y || positions[connection.targetEspId]?.y"
           r="4"
@@ -260,11 +314,75 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
+.connection-text {
+  font-size: 10px;
+  fill: var(--color-text-secondary);
+  pointer-events: none;
+  opacity: 0.7;
+  font-weight: 500;
+  text-shadow: 0 0 3px var(--color-bg-primary), 0 0 3px var(--color-bg-primary);
+}
+
+.connection-text--hovered {
+  opacity: 1;
+  font-weight: 600;
+  fill: var(--color-text-primary);
+}
+
+/* Dimmen anderer Linien bei Hover */
+.connection-lines:has(.connection-line:hover) .connection-line:not(:hover) {
+  opacity: 0.3;
+}
+
+.connection-lines:has(.connection-line:hover) .connection-text:not(.connection-text--hovered) {
+  opacity: 0.3;
+}
+
 .connection-tooltip-bg {
   pointer-events: none;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.2));
 }
+
+/* Active connection styles (when rule is executing) */
+.connection-line--active {
+  stroke-width: 4 !important;
+  opacity: 1 !important;
+  filter: drop-shadow(0 0 8px currentColor);
+  animation: pulse-active 0.5s ease-out;
+}
+
+@keyframes pulse-active {
+  0% {
+    stroke-width: 2;
+    filter: drop-shadow(0 0 0 currentColor);
+  }
+  50% {
+    stroke-width: 6;
+    filter: drop-shadow(0 0 16px currentColor);
+  }
+  100% {
+    stroke-width: 4;
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+}
+
+.connection-text--active {
+  opacity: 1;
+  font-weight: 600;
+  fill: var(--color-success);
+  animation: text-glow 0.5s ease-out;
+}
+
+@keyframes text-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 var(--color-success));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px var(--color-success));
+  }
+}
 </style>
+
 
 
 

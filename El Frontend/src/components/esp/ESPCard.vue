@@ -39,6 +39,7 @@ import {
 } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
+import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { espApi, type ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 
@@ -47,21 +48,17 @@ interface Props {
   esp: ESPDevice
   /** Loading state for heartbeat action */
   heartbeatLoading?: boolean
-  /** Loading state for safe-mode toggle action */
-  safeModeLoading?: boolean
   /** Loading state for delete action */
   deleteLoading?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   heartbeatLoading: false,
-  safeModeLoading: false,
   deleteLoading: false,
 })
 
 const emit = defineEmits<{
   heartbeat: [espId: string]
-  toggleSafeMode: [espId: string]
   delete: [espId: string]
   nameUpdated: [espId: string, newName: string | null]
 }>()
@@ -190,7 +187,7 @@ const isOrphanedMock = computed(() => {
 
 // Check if any action is currently loading
 const isAnyActionLoading = computed(() =>
-  props.heartbeatLoading || props.safeModeLoading || props.deleteLoading
+  props.heartbeatLoading || props.deleteLoading
 )
 
 // System state (FSM) for Mock ESPs - only shown when relevant (SAFE_MODE, ERROR)
@@ -339,12 +336,12 @@ const hasSatellites = computed(() => sensorCount.value > 0 || actuatorCount.valu
 
 // Limit displayed dots to 5 max
 const limitedSensors = computed(() => {
-  const sensors = props.esp.sensors || []
+  const sensors = (props.esp.sensors || []) as Array<{ gpio: number; quality?: string; data_quality?: string; sensor_type?: string; name?: string; raw_value?: number }>
   return sensors.slice(0, 5)
 })
 
 const limitedActuators = computed(() => {
-  const actuators = props.esp.actuators || []
+  const actuators = (props.esp.actuators || []) as Array<{ gpio: number; state?: boolean; pwm_value?: number; actuator_type?: string; name?: string; emergency_stopped?: boolean }>
   return actuators.slice(0, 5)
 })
 
@@ -379,6 +376,38 @@ function formatActuatorTooltip(actuator: any): string {
   const state = actuator.emergency_stopped ? 'E-STOP' : (actuator.state ? 'AN' : 'AUS')
   return `${type} (GPIO ${actuator.gpio}): ${state}`
 }
+
+// =============================================================================
+// WiFi Signal Strength
+// =============================================================================
+
+const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(props.esp.wifi_rssi))
+
+// WiFi color class based on signal quality
+const wifiColorClass = computed(() => {
+  switch (wifiInfo.value.quality) {
+    case 'excellent':
+    case 'good':
+      return 'text-emerald-400'
+    case 'fair':
+      return 'text-yellow-400'
+    case 'poor':
+      return 'text-orange-400'
+    case 'none':
+      return 'text-red-400'
+    default:
+      return 'text-slate-500'
+  }
+})
+
+// WiFi tooltip with detailed info
+const wifiTooltip = computed(() => {
+  if (props.esp.wifi_rssi === undefined || props.esp.wifi_rssi === null) {
+    return 'WiFi: Keine Daten'
+  }
+  const simNote = isMock.value ? ' (simuliert)' : ''
+  return `WiFi: ${props.esp.wifi_rssi} dBm - ${wifiInfo.value.label}${simNote}`
+})
 </script>
 
 <template>
@@ -505,19 +534,14 @@ function formatActuatorTooltip(actuator: any): string {
         </div>
       </div>
       
-      <!-- Zone info (prominent) - shows zone_name (human-readable) with zone_id fallback -->
-      <div class="esp-card__zone">
-        <MapPin class="w-4 h-4 text-muted" />
+      <!-- Zone info (prominent) - shows zone_name (human-readable), zone_id only in tooltip -->
+      <div
+        :class="['esp-card__zone', { 'esp-card__zone--empty': !esp.zone_name && !esp.zone_id }]"
+        :title="esp.zone_id ? `Zone-ID: ${esp.zone_id}` : 'Keine Zone zugewiesen'"
+      >
+        <MapPin :class="['w-4 h-4', esp.zone_name || esp.zone_id ? 'text-accent' : 'text-muted']" />
         <span class="esp-card__zone-name">
           {{ esp.zone_name || esp.zone_id || 'Keine Zone' }}
-        </span>
-        <!-- Show technical zone_id as tooltip if zone_name differs -->
-        <span
-          v-if="esp.zone_name && esp.zone_id && esp.zone_name !== esp.zone_id"
-          class="esp-card__zone-id"
-          :title="`Zone ID: ${esp.zone_id}`"
-        >
-          ({{ esp.zone_id }})
         </span>
       </div>
 
@@ -553,13 +577,15 @@ function formatActuatorTooltip(actuator: any): string {
 
       <!-- Quick stats (compact grid) -->
       <div class="esp-card__stats">
+        <!-- Sensors -->
         <div class="esp-card__stat" title="Sensoren">
           <Thermometer class="w-4 h-4" />
-          <span>{{ esp.sensor_count ?? esp.sensors?.length ?? 0 }}</span>
+          <span :class="{ 'text-muted': sensorCount === 0 }">{{ sensorCount }}</span>
         </div>
+        <!-- Actuators -->
         <div class="esp-card__stat" title="Aktoren">
           <Zap class="w-4 h-4" />
-          <span>{{ esp.actuator_count ?? esp.actuators?.length ?? 0 }}</span>
+          <span :class="{ 'text-muted': actuatorCount === 0 }">{{ actuatorCount }}</span>
         </div>
         <div v-if="esp.uptime !== undefined" class="esp-card__stat" title="Uptime">
           <Clock class="w-4 h-4" />
@@ -569,9 +595,9 @@ function formatActuatorTooltip(actuator: any): string {
           <HardDrive class="w-4 h-4" />
           <span>{{ formatHeapSize(esp.heap_free || 0) }}</span>
         </div>
-        <div v-if="esp.wifi_rssi !== undefined" class="esp-card__stat" title="WiFi RSSI">
-          <Wifi class="w-4 h-4" />
-          <span>{{ esp.wifi_rssi }} dBm</span>
+        <div v-if="esp.wifi_rssi !== undefined" class="esp-card__stat" :title="wifiTooltip">
+          <Wifi :class="['w-4 h-4', wifiColorClass]" />
+          <span :class="wifiColorClass">{{ wifiInfo.label }}</span>
         </div>
       </div>
 
@@ -632,70 +658,49 @@ function formatActuatorTooltip(actuator: any): string {
 
       <!-- Actions -->
       <div class="esp-card__actions">
-        <!-- Always available: Details -->
-        <RouterLink
-          :to="`/devices/${espId}`"
-          class="btn-secondary btn-sm"
-        >
-          <ExternalLink class="w-4 h-4" />
-          Details
-        </RouterLink>
+        <!-- Left group: Details + other actions -->
+        <div class="esp-card__actions-left">
+          <RouterLink
+            :to="`/devices/${espId}`"
+            class="esp-card__details-btn"
+          >
+            <ExternalLink class="w-4 h-4" />
+            Details
+          </RouterLink>
 
-        <!-- Mock ESP specific actions -->
-        <template v-if="isMock">
-          <!-- Heartbeat Button with Loading -->
+          <!-- Mock ESP: Heartbeat -->
           <button
-            class="btn-ghost btn-sm"
+            v-if="isMock"
+            class="esp-card__action-btn esp-card__action-btn--heartbeat"
             :disabled="heartbeatLoading || isOrphanedMock || isAnyActionLoading"
-            :title="isOrphanedMock ? 'Nicht verfügbar für verwaiste Mocks' : 'Heartbeat senden'"
+            :title="isOrphanedMock ? 'Nicht verfügbar für verwaiste Mocks' : 'Heartbeat auslösen'"
             @click="emit('heartbeat', espId)"
           >
             <Loader2 v-if="heartbeatLoading" class="w-4 h-4 animate-spin" />
             <Heart v-else class="w-4 h-4" />
           </button>
 
-          <!-- Safe Mode Toggle with Loading -->
+          <!-- Real ESP: Settings -->
           <button
-            :class="['btn-ghost btn-sm', mockStateInfo?.variant === 'warning' ? 'text-warning' : '']"
-            :disabled="safeModeLoading || isOrphanedMock || isAnyActionLoading"
-            :title="isOrphanedMock ? 'Nicht verfügbar für verwaiste Mocks' : (systemState === 'SAFE_MODE' ? 'Sicherheitsmodus beenden' : 'Sicherheitsmodus aktivieren')"
-            @click="emit('toggleSafeMode', espId)"
-          >
-            <Loader2 v-if="safeModeLoading" class="w-4 h-4 animate-spin" />
-            <AlertTriangle v-else class="w-4 h-4" />
-          </button>
-
-          <!-- Delete Button with Loading -->
-          <button
-            class="btn-ghost btn-sm text-error hover:bg-danger/10"
-            :disabled="deleteLoading || isAnyActionLoading"
-            title="Löschen"
-            @click="emit('delete', espId)"
-          >
-            <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
-            <Trash2 v-else class="w-4 h-4" />
-          </button>
-        </template>
-
-        <!-- Real ESP specific actions -->
-        <template v-else>
-          <button
-            class="btn-ghost btn-sm"
-            :disabled="deleteLoading"
-            title="Löschen"
-            @click="emit('delete', espId)"
-          >
-            <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
-            <Trash2 v-else class="w-4 h-4" />
-          </button>
-          <button
-            class="btn-ghost btn-sm"
+            v-if="!isMock"
+            class="esp-card__action-btn"
             title="Konfigurieren"
             @click="$router.push(`/devices/${espId}`)"
           >
             <Settings class="w-4 h-4" />
           </button>
-        </template>
+        </div>
+
+        <!-- Right: Delete (always) -->
+        <button
+          class="esp-card__action-btn esp-card__action-btn--delete"
+          :disabled="deleteLoading || isAnyActionLoading"
+          title="Löschen"
+          @click="emit('delete', espId)"
+        >
+          <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
+          <Trash2 v-else class="w-4 h-4" />
+        </button>
       </div>
     </div>
   </div>
@@ -709,12 +714,19 @@ function formatActuatorTooltip(actuator: any): string {
   border-radius: 0.75rem;
   border: 1px solid var(--glass-border);
   overflow: hidden;
-  transition: all 0.2s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  outline: none; /* Remove focus outline - prevents blue border after click */
 }
 
 .esp-card:hover {
-  border-color: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.25);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Focus only for keyboard navigation (accessibility) */
+.esp-card:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
 }
 
 /* Status bar (left border indicator) */
@@ -954,13 +966,29 @@ function formatActuatorTooltip(actuator: any): string {
 
 /* Zone info */
 .esp-card__zone {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.375rem 0.75rem;
   background-color: var(--color-bg-tertiary);
-  border-radius: 0.5rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
   font-size: 0.8125rem;
+  transition: all 0.15s ease;
+}
+
+.esp-card__zone:hover {
+  background-color: rgba(96, 165, 250, 0.08);
+  border-color: rgba(96, 165, 250, 0.2);
+}
+
+.esp-card__zone--empty {
+  background-color: transparent;
+  border-style: dashed;
+}
+
+.esp-card__zone--empty:hover {
+  background-color: var(--color-bg-tertiary);
 }
 
 .esp-card__zone-name {
@@ -968,11 +996,14 @@ function formatActuatorTooltip(actuator: any): string {
   font-weight: 500;
 }
 
-.esp-card__zone-id {
+.esp-card__zone--empty .esp-card__zone-name {
   color: var(--color-text-muted);
-  font-size: 0.6875rem;
-  font-family: 'JetBrains Mono', monospace;
-  cursor: help;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.text-accent {
+  color: var(--color-iridescent-1);
 }
 
 .text-muted {
@@ -1050,8 +1081,13 @@ function formatActuatorTooltip(actuator: any): string {
 
 .esp-card__stat span {
   color: var(--color-text-secondary);
-  font-weight: 500;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.esp-card__stat span.text-muted {
+  color: var(--color-text-muted);
+  font-weight: 400;
 }
 
 /* Heartbeat info */
@@ -1109,15 +1145,89 @@ function formatActuatorTooltip(actuator: any): string {
 .esp-card__actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--glass-border);
   margin-top: auto;
 }
 
+.esp-card__actions-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Details button - subtle iridescent accent */
+.esp-card__details-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.12), rgba(139, 92, 246, 0.08));
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-radius: 0.5rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.esp-card__details-btn:hover {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.2), rgba(139, 92, 246, 0.15));
+  border-color: rgba(96, 165, 250, 0.4);
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.15);
+  transform: translateY(-1px);
+}
+
+.esp-card__details-btn:active {
+  transform: translateY(0);
+}
+
+/* Action buttons (icon-only) */
+.esp-card__action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background-color: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.esp-card__action-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--glass-bg);
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.esp-card__action-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+/* Heartbeat button - pink/red accent */
+.esp-card__action-btn--heartbeat:hover:not(:disabled) {
+  color: #f472b6;
+  background-color: rgba(244, 114, 182, 0.1);
+  border-color: rgba(244, 114, 182, 0.3);
+}
+
+/* Delete button - red accent */
+.esp-card__action-btn--delete:hover:not(:disabled) {
+  color: var(--color-error);
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
 /* Disabled button state */
-.esp-card__actions button:disabled {
-  opacity: 0.5;
+.esp-card__action-btn:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 

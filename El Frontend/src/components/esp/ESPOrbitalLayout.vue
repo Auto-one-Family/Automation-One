@@ -1,29 +1,40 @@
 <script setup lang="ts">
 /**
- * ESPOrbitalLayout Component
- * 
- * Displays sensors and actuators in an orbital layout around the central ESP card.
- * 
+ * ESPHorizontalLayout Component (formerly ESPOrbitalLayout)
+ *
+ * Displays sensors and actuators in a horizontal 3-column layout:
+ * - Left column: Sensors (vertically stacked)
+ * - Center column: ESP Card
+ * - Right column: Actuators (vertically stacked)
+ *
  * Features:
- * - Circular arrangement: sensors left (180°-360°), actuators right (0°-180°)
- * - Dynamic radius based on item count
- * - Responsive: mobile = linear, tablet/desktop = orbital
- * - Position tracking for ConnectionLines
+ * - Side-by-side layout: no overlap, all elements always visible
+ * - Responsive: mobile = vertical stack, tablet/desktop = horizontal
+ * - Drag & drop for adding sensors from sidebar
  * - Click to select/highlight satellites
+ * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ExternalLink, Wifi, Activity } from 'lucide-vue-next'
+import { ExternalLink, X } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
 import SensorSatellite from './SensorSatellite.vue'
 import ActuatorSatellite from './ActuatorSatellite.vue'
-import ConnectionLines from './ConnectionLines.vue'
+import AnalysisDropZone from './AnalysisDropZone.vue'
 import Badge from '@/components/common/Badge.vue'
 import type { ESPDevice } from '@/api/esp'
-import type { MockSensor, MockActuator, QualityLevel } from '@/types'
+import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
 import { espApi } from '@/api/esp'
 import { getStateInfo } from '@/utils/labels'
+import { useEspStore } from '@/stores/esp'
+import { useDragStateStore } from '@/stores/dragState'
+import {
+  SENSOR_TYPE_CONFIG,
+  getSensorUnit,
+  getSensorDefault,
+  getSensorTypeOptions
+} from '@/utils/sensorDefaults'
 
 interface Props {
   /** The ESP device data */
@@ -40,18 +51,172 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const router = useRouter()
+const espStore = useEspStore()
+const dragStore = useDragStateStore()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
   actuatorClick: [gpio: number]
+  sensorDropped: [sensor: ChartSensor]
 }>()
+
+// =============================================================================
+// Analysis Drop Zone State
+// =============================================================================
+const analysisExpanded = ref(false)
+
+// Track if chart was auto-opened (to auto-close when drag ends)
+const wasAutoOpened = ref(false)
+
+// Check if a sensor from this ESP is being dragged (for visual feedback)
+const isSensorBeingDraggedFromThisEsp = computed(() =>
+  dragStore.isDraggingSensor && dragStore.draggingSensorEspId === espId.value
+)
+
+// Handle sensor dropped into analysis zone
+function handleSensorDrop(sensor: ChartSensor) {
+  emit('sensorDropped', sensor)
+}
+
+// =============================================================================
+// Add Sensor Drop Handler State
+// =============================================================================
+const isDragOver = ref(false)
+const showAddSensorModal = ref(false)
+
+// Default sensor type for new sensors
+const defaultSensorType = 'DS18B20'
+
+// New sensor form state
+const newSensor = ref<MockSensorConfig>({
+  gpio: 0,
+  sensor_type: defaultSensorType,
+  name: '',
+  subzone_id: '',
+  raw_value: getSensorDefault(defaultSensorType),
+  unit: getSensorUnit(defaultSensorType),
+  quality: 'good',
+  raw_mode: true
+})
+
+// Sensor type options for dropdown
+const sensorTypeOptions = getSensorTypeOptions()
+
+// Watch for sensor type changes and update unit/initial value
+watch(() => newSensor.value.sensor_type, (newType) => {
+  const config = SENSOR_TYPE_CONFIG[newType]
+  if (config) {
+    newSensor.value.unit = config.unit
+    newSensor.value.raw_value = config.defaultValue
+  }
+})
+
+// Reset new sensor form to defaults
+function resetNewSensor() {
+  newSensor.value = {
+    gpio: 0,
+    sensor_type: defaultSensorType,
+    name: '',
+    subzone_id: '',
+    raw_value: getSensorDefault(defaultSensorType),
+    unit: getSensorUnit(defaultSensorType),
+    quality: 'good',
+    raw_mode: true
+  }
+}
+
+// =============================================================================
+// Drop Event Handlers (for adding sensors via drag from sidebar)
+// =============================================================================
+
+function onDragEnter(event: DragEvent) {
+  // Only react visually if dragging a sensor type from sidebar (for adding new sensors)
+  if (dragStore.isDraggingSensorType) {
+    isDragOver.value = true
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy'
+    }
+  }
+  // Sensor-Satellite-Drags (für Chart) werden durchgelassen zur AnalysisDropZone
+}
+
+function onDragOver(event: DragEvent) {
+  // KRITISCH: preventDefault() muss aufgerufen werden um Drop zu erlauben!
+  // Ohne preventDefault() zeigt der Browser "nicht zulässig" (roter Kreis)
+
+  if (dragStore.isDraggingSensorType) {
+    // Sensor-Typ aus Sidebar → Drop auf ESP-Card erlauben (zum Hinzufügen)
+    event.preventDefault()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy'
+    }
+  } else if (dragStore.isDraggingSensor) {
+    // Sensor-Satellite für Chart → Drop auf AnalysisDropZone erlauben
+    // Wir erlauben den Drop hier, die AnalysisDropZone entscheidet ob sie ihn annimmt
+    event.preventDefault()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy'
+    }
+  }
+  // Andere Drags (z.B. ESP-Card-Reordering via VueDraggable) werden durchgelassen
+}
+
+function onDragLeave(event: DragEvent) {
+  // Only reset if leaving the container entirely
+  const target = event.currentTarget as HTMLElement
+  const related = event.relatedTarget as HTMLElement
+  if (!target.contains(related)) {
+    isDragOver.value = false
+  }
+}
+
+function onDrop(event: DragEvent) {
+  event.preventDefault()
+  isDragOver.value = false
+
+  const jsonData = event.dataTransfer?.getData('application/json')
+  if (!jsonData) return
+
+  try {
+    const payload = JSON.parse(jsonData)
+    if (payload.action === 'add-sensor') {
+      // Pre-fill form with dragged sensor type
+      newSensor.value.sensor_type = payload.sensorType
+      newSensor.value.unit = getSensorUnit(payload.sensorType)
+      newSensor.value.raw_value = getSensorDefault(payload.sensorType)
+      // Find next available GPIO
+      const usedGpios = sensors.value.map(s => s.gpio)
+      const availableGpios = [32, 33, 34, 35, 36, 39, 25, 26, 27, 14, 12, 13]
+      const nextGpio = availableGpios.find(g => !usedGpios.includes(g)) || 0
+      newSensor.value.gpio = nextGpio
+      // Open modal
+      showAddSensorModal.value = true
+    }
+  } catch (error) {
+    console.error('[ESPOrbitalLayout] Failed to parse drop data:', error)
+  }
+}
+
+// Add sensor to ESP
+async function addSensor() {
+  if (!isMock.value) return
+
+  try {
+    await espStore.addSensor(espId.value, newSensor.value)
+    showAddSensorModal.value = false
+    resetNewSensor()
+    // Refresh ESP data
+    await espStore.fetchAll()
+  } catch (error) {
+    console.error('[ESPOrbitalLayout] Failed to add sensor:', error)
+  }
+}
 
 // =============================================================================
 // Refs
 // =============================================================================
 const containerRef = ref<HTMLElement | null>(null)
 const centerRef = ref<HTMLElement | null>(null)
-const isDesktop = ref(true)
 
 // Selected satellite state
 const selectedGpio = ref<number | null>(null)
@@ -102,193 +267,37 @@ const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
 
+/**
+ * Connection quality based on WiFi RSSI
+ * - 'good': RSSI > -60 dBm (stable)
+ * - 'fair': RSSI -60 to -75 dBm (weak)
+ * - 'poor': RSSI < -75 dBm or offline (no connection)
+ */
+const connectionQuality = computed(() => {
+  if (!isOnline.value) return 'poor'
+  const rssi = props.device?.wifi_rssi
+  if (rssi === undefined || rssi === null) return 'fair' // Unknown = assume fair
+  if (rssi > -60) return 'good'
+  if (rssi >= -75) return 'fair'
+  return 'poor'
+})
+
+/**
+ * Human-readable connection tooltip (NO technical dBm values!)
+ */
+const connectionTooltip = computed(() => {
+  if (!isOnline.value) return 'Keine Verbindung'
+  switch (connectionQuality.value) {
+    case 'good': return 'Verbindung: Stabil'
+    case 'fair': return 'Verbindung: Schwach'
+    case 'poor': return 'Verbindung: Kritisch'
+    default: return 'Verbindung: Unbekannt'
+  }
+})
+
 // Navigation to detail view
 function goToDetails() {
   router.push(`/devices/${espId.value}`)
-}
-
-// =============================================================================
-// Computed: Orbital Layout
-// =============================================================================
-
-/**
- * Dynamic orbital radius based on number of items
- * In compact mode, use larger radius to prevent overlap
- */
-const orbitalRadius = computed(() => {
-  // Compact mode needs MORE space, not less, to avoid overlap
-  const baseRadius = props.compactMode ? 1.4 : 1.0
-  if (totalItems.value <= 2) return 180 * baseRadius
-  if (totalItems.value <= 4) return 200 * baseRadius
-  if (totalItems.value <= 8) return 240 * baseRadius
-  if (totalItems.value <= 12) return 280 * baseRadius
-  return 320 * baseRadius
-})
-
-/**
- * Calculate sensor positions (left semicircle: 180° to 360°)
- * Sensors are distributed evenly on the left half
- */
-const sensorPositions = computed(() => {
-  const items = sensors.value
-  const positions: Record<number, { x: number; y: number; angle: number }> = {}
-  
-  if (items.length === 0) return positions
-  
-  // Single sensor: position at top-left (225°)
-  if (items.length === 1) {
-    const angle = (5 * Math.PI) / 4 // 225°
-    positions[items[0].gpio] = {
-      x: Math.cos(angle) * orbitalRadius.value,
-      y: Math.sin(angle) * orbitalRadius.value,
-      angle
-    }
-    return positions
-  }
-  
-  // Multiple sensors: distribute on left semicircle (180° to 360°)
-  const startAngle = Math.PI // 180°
-  const endAngle = 2 * Math.PI // 360°
-  const angleStep = (endAngle - startAngle) / (items.length + 1)
-  
-  items.forEach((sensor, index) => {
-    const angle = startAngle + angleStep * (index + 1)
-    positions[sensor.gpio] = {
-      x: Math.cos(angle) * orbitalRadius.value,
-      y: Math.sin(angle) * orbitalRadius.value,
-      angle
-    }
-  })
-  
-  return positions
-})
-
-/**
- * Calculate actuator positions (right semicircle: 0° to 180°)
- * Actuators are distributed evenly on the right half
- */
-const actuatorPositions = computed(() => {
-  const items = actuators.value
-  const positions: Record<number, { x: number; y: number; angle: number }> = {}
-  
-  if (items.length === 0) return positions
-  
-  // Single actuator: position at top-right (-45° / 315°)
-  if (items.length === 1) {
-    const angle = -Math.PI / 4 // -45° (top-right)
-    positions[items[0].gpio] = {
-      x: Math.cos(angle) * orbitalRadius.value,
-      y: Math.sin(angle) * orbitalRadius.value,
-      angle
-    }
-    return positions
-  }
-  
-  // Multiple actuators: distribute on right semicircle (0° to 180°)
-  const startAngle = 0 // 0°
-  const endAngle = Math.PI // 180°
-  const angleStep = (endAngle - startAngle) / (items.length + 1)
-  
-  items.forEach((actuator, index) => {
-    const angle = startAngle + angleStep * (index + 1)
-    positions[actuator.gpio] = {
-      x: Math.cos(angle) * orbitalRadius.value,
-      y: Math.sin(angle) * orbitalRadius.value,
-      angle
-    }
-  })
-  
-  return positions
-})
-
-// =============================================================================
-// Computed: ConnectionLines
-// =============================================================================
-
-/**
- * Absolute positions for ConnectionLines
- * Keys: 'center', 'sensor-{gpio}', 'actuator-{gpio}'
- */
-const absolutePositions = ref<Record<string, { x: number; y: number }>>({})
-
-/**
- * Connections array - currently empty, ready for Logic Rules integration
- */
-const connections = computed(() => {
-  // TODO: Logic Rules Integration (when Logic Store is available)
-  // For now, return empty array
-  return []
-})
-
-// =============================================================================
-// Position Tracking
-// =============================================================================
-
-/**
- * Update absolute positions for ConnectionLines
- * Called on mount, resize, and device changes
- */
-function updateAbsolutePositions() {
-  if (!containerRef.value || !centerRef.value || !isDesktop.value) {
-    absolutePositions.value = {}
-    return
-  }
-  
-  try {
-    const containerRect = containerRef.value.getBoundingClientRect()
-    const centerRect = centerRef.value.getBoundingClientRect()
-    
-    const centerX = centerRect.left - containerRect.left + centerRect.width / 2
-    const centerY = centerRect.top - containerRect.top + centerRect.height / 2
-    
-    const positions: Record<string, { x: number; y: number }> = {}
-    
-    // Center position
-    positions['center'] = { x: centerX, y: centerY }
-    
-    // Sensor positions
-    for (const [gpio, pos] of Object.entries(sensorPositions.value)) {
-      positions[`sensor-${gpio}`] = {
-        x: centerX + pos.x,
-        y: centerY + pos.y
-      }
-    }
-    
-    // Actuator positions
-    for (const [gpio, pos] of Object.entries(actuatorPositions.value)) {
-      positions[`actuator-${gpio}`] = {
-        x: centerX + pos.x,
-        y: centerY + pos.y
-      }
-    }
-    
-    absolutePositions.value = positions
-  } catch (error) {
-    console.error('[ESPOrbitalLayout] Error calculating positions:', error)
-    absolutePositions.value = {}
-  }
-}
-
-/**
- * Debounced resize handler
- */
-let resizeTimeout: ReturnType<typeof setTimeout> | null = null
-
-function handleResize() {
-  if (resizeTimeout) {
-    clearTimeout(resizeTimeout)
-  }
-  resizeTimeout = setTimeout(() => {
-    checkBreakpoint()
-    updateAbsolutePositions()
-  }, 100)
-}
-
-/**
- * Check if we're on desktop (>= 768px)
- */
-function checkBreakpoint() {
-  isDesktop.value = window.innerWidth >= 768
 }
 
 // =============================================================================
@@ -322,106 +331,84 @@ function handleActuatorClick(gpio: number) {
 // =============================================================================
 
 onMounted(() => {
-  checkBreakpoint()
-  window.addEventListener('resize', handleResize)
-  
-  // Update positions after DOM is ready
-  nextTick(() => {
-    updateAbsolutePositions()
-  })
+  // Component mounted - no special initialization needed for horizontal layout
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  if (resizeTimeout) {
-    clearTimeout(resizeTimeout)
+  // Cleanup handled by Vue reactivity
+})
+
+// =============================================================================
+// Auto-Opening Chart when Sensor is Dragged
+// =============================================================================
+
+/**
+ * Check if a sensor from THIS ESP is being dragged.
+ * Used to immediately activate drop target (before visual opening).
+ */
+const isSensorFromThisEspDragging = computed(() =>
+  dragStore.isDraggingSensor && dragStore.draggingSensorEspId === espId.value
+)
+
+/**
+ * Watch for sensor drag state changes.
+ * Auto-opens the chart IMMEDIATELY when a sensor from THIS ESP is being dragged.
+ *
+ * WICHTIG: Die DropZone wird während des Drags als OVERLAY angezeigt (position: absolute),
+ * damit das Layout stabil bleibt und das Drag-Event nicht unterbrochen wird.
+ * Nach dem Drop wechselt sie in den normalen Inline-Modus.
+ */
+watch(
+  () => isSensorFromThisEspDragging.value,
+  (isDraggingFromThisEsp) => {
+    if (isDraggingFromThisEsp) {
+      // Sofort öffnen - kein Delay, da wir Overlay-Modus verwenden
+      // Overlay verhindert Layout-Shifts die Drag unterbrechen könnten
+      if (!analysisExpanded.value) {
+        wasAutoOpened.value = true // ZUERST setzen - aktiviert Overlay-Modus
+        analysisExpanded.value = true
+      }
+    } else {
+      // Nach Drag-Ende: Overlay-Modus beenden, Chart bleibt aber offen
+      // Kurze Verzögerung damit Drop-Event verarbeitet werden kann
+      if (wasAutoOpened.value) {
+        setTimeout(() => {
+          wasAutoOpened.value = false
+          // Chart bleibt geöffnet im normalen Inline-Modus
+        }, 300)
+      }
+    }
   }
-})
+)
 
-// Watch for device changes
-watch(() => props.device, () => {
-  nextTick(() => {
-    updateAbsolutePositions()
-  })
-}, { deep: true })
-
-// Watch for breakpoint changes
-watch(isDesktop, () => {
-  nextTick(() => {
-    updateAbsolutePositions()
-  })
-})
+// Wenn User manuell schließt, auch wasAutoOpened zurücksetzen
+watch(
+  () => analysisExpanded.value,
+  (expanded) => {
+    if (!expanded) {
+      wasAutoOpened.value = false
+    }
+  }
+)
 </script>
 
 <template>
-  <div 
-    ref="containerRef" 
-    class="esp-orbital-layout"
-    :class="{ 'esp-orbital-layout--has-items': totalItems > 0 }"
-    :style="{
-      '--orbital-radius': `${orbitalRadius}px`,
-      '--container-size': `${orbitalRadius * 2 + 250}px`
+  <div
+    ref="containerRef"
+    class="esp-horizontal-layout"
+    :class="{
+      'esp-horizontal-layout--has-items': totalItems > 0,
+      'esp-horizontal-layout--can-drop': dragStore.isDraggingSensorType && isMock,
+      'esp-horizontal-layout--drag-over': isDragOver && isMock
     }"
+    :data-esp-id="espId"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
   >
-    <!-- SVG Connection Lines (Background Layer) -->
-    <ConnectionLines
-      v-if="showConnections && isDesktop && connections.length > 0"
-      :connections="connections"
-      :positions="absolutePositions"
-      class="esp-orbital-layout__connections"
-    />
-    
-    <!-- Central ESP Info -->
-    <div ref="centerRef" class="esp-orbital-layout__center">
-      <!-- Compact Mode: Simple Info Card -->
-      <div v-if="compactMode" class="esp-info-compact">
-        <div class="esp-info-compact__header">
-          <div class="esp-info-compact__title-group">
-            <h3 class="esp-info-compact__title">{{ espId }}</h3>
-            <Badge :variant="isMock ? 'mock' : 'real'" size="xs">
-              {{ isMock ? 'MOCK' : 'REAL' }}
-            </Badge>
-          </div>
-          <Badge 
-            :variant="stateInfo.variant as any" 
-            :pulse="isOnline && (systemState === 'OPERATIONAL' || device.status === 'online')"
-            dot
-            size="sm"
-          >
-            {{ stateInfo.label }}
-          </Badge>
-        </div>
-        
-        <div class="esp-info-compact__stats">
-          <div class="esp-info-compact__stat">
-            <span class="esp-info-compact__stat-label">Zone</span>
-            <span class="esp-info-compact__stat-value">{{ device.zone_name || device.zone_id || '-' }}</span>
-          </div>
-          <div class="esp-info-compact__stat">
-            <Activity class="w-3 h-3" style="color: var(--color-text-muted)" />
-            <span class="esp-info-compact__stat-value">{{ sensors.length }} / {{ actuators.length }}</span>
-          </div>
-          <div v-if="device.wifi_rssi !== undefined" class="esp-info-compact__stat">
-            <Wifi class="w-3 h-3" style="color: var(--color-text-muted)" />
-            <span class="esp-info-compact__stat-value">{{ device.wifi_rssi }} dBm</span>
-          </div>
-        </div>
-        
-        <button class="esp-info-compact__details-btn" @click="goToDetails">
-          <ExternalLink class="w-4 h-4" />
-          <span>Details & Management</span>
-        </button>
-      </div>
-      
-      <!-- Full Mode: Full ESP Card (for detail view) -->
-      <ESPCard v-else :esp="device" />
-    </div>
-    
-    <!-- Sensor Satellites -->
-    <div 
-      v-if="sensors.length > 0"
-      class="esp-orbital-layout__satellites esp-orbital-layout__satellites--sensors"
-    >
+    <!-- Left Column: Sensors -->
+    <div class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors">
       <SensorSatellite
         v-for="sensor in sensors"
         :key="`sensor-${sensor.gpio}`"
@@ -429,26 +416,96 @@ watch(isDesktop, () => {
         :gpio="sensor.gpio"
         :sensor-type="sensor.sensor_type"
         :name="sensor.name"
-        :value="sensor.raw_value"
+        :value="sensor.processed_value ?? sensor.raw_value"
         :quality="sensor.quality as QualityLevel"
         :unit="sensor.unit"
         :selected="selectedGpio === sensor.gpio && selectedType === 'sensor'"
         :show-connections="showConnections"
-        :style="isDesktop ? {
-          '--orbital-x': `${sensorPositions[sensor.gpio]?.x || 0}px`,
-          '--orbital-y': `${sensorPositions[sensor.gpio]?.y || 0}px`,
-        } : undefined"
-        :class="{ 'esp-orbital-layout__satellite--orbital': isDesktop }"
-        class="esp-orbital-layout__satellite"
+        class="esp-horizontal-layout__satellite"
         @click="handleSensorClick(sensor.gpio)"
       />
+      <!-- Empty sensor placeholder -->
+      <div v-if="sensors.length === 0" class="esp-horizontal-layout__empty-column">
+        <span class="esp-horizontal-layout__empty-label">Keine Sensoren</span>
+      </div>
     </div>
-    
-    <!-- Actuator Satellites -->
-    <div 
-      v-if="actuators.length > 0"
-      class="esp-orbital-layout__satellites esp-orbital-layout__satellites--actuators"
-    >
+
+    <!-- Center Column: ESP Card -->
+    <div ref="centerRef" class="esp-horizontal-layout__center">
+      <!-- Compact Mode: Simple Info Card -->
+      <div v-if="compactMode" class="esp-info-compact">
+        <div class="esp-info-compact__header">
+          <div class="esp-info-compact__title-group">
+            <!-- Device name as main title, fallback to ESP-ID -->
+            <h3 class="esp-info-compact__title">{{ device.name || espId }}</h3>
+            <Badge :variant="isMock ? 'mock' : 'real'" size="xs">
+              {{ isMock ? 'MOCK' : 'REAL' }}
+            </Badge>
+          </div>
+          <!-- ESP-ID secondary (only if name exists) -->
+          <span v-if="device.name" class="esp-info-compact__id">{{ espId }}</span>
+          <div class="esp-info-compact__status-row">
+            <Badge
+              :variant="stateInfo.variant as any"
+              :pulse="isOnline && (systemState === 'OPERATIONAL' || device.status === 'online')"
+              dot
+              size="sm"
+            >
+              {{ stateInfo.label }}
+            </Badge>
+            <!-- Connection quality indicator -->
+            <span
+              :class="['connection-dot', connectionQuality]"
+              :title="connectionTooltip"
+            />
+          </div>
+        </div>
+
+        <!-- Analysis Drop Zone (collapsible) -->
+        <div class="esp-info-compact__analysis">
+          <button
+            class="esp-info-compact__analysis-toggle"
+            :class="{
+              'esp-info-compact__analysis-toggle--active': analysisExpanded,
+              'esp-info-compact__analysis-toggle--drag-hint': isSensorBeingDraggedFromThisEsp && !analysisExpanded
+            }"
+            @click="analysisExpanded = !analysisExpanded"
+          >
+            <span>{{ analysisExpanded ? 'Chart ▲' : (isSensorBeingDraggedFromThisEsp ? '↓ Hier ablegen' : 'Chart ▼') }}</span>
+          </button>
+        </div>
+
+        <!--
+          WICHTIG: DropZone ist IMMER im DOM (kein v-if!), nur mit CSS versteckt.
+          Dadurch bleibt sie während des Drags als Drop-Target verfügbar.
+          Bei Auto-Open während Drag wird sie als Overlay angezeigt.
+        -->
+        <AnalysisDropZone
+          :esp-id="espId"
+          :max-sensors="4"
+          :compact="true"
+          :class="[
+            'esp-info-compact__dropzone',
+            {
+              'esp-info-compact__dropzone--visible': analysisExpanded,
+              'esp-info-compact__dropzone--overlay': wasAutoOpened && analysisExpanded
+            }
+          ]"
+          @sensor-added="handleSensorDrop"
+        />
+
+        <button class="esp-info-compact__details-btn" @click="goToDetails">
+          <ExternalLink class="w-3 h-3" />
+          <span>Details</span>
+        </button>
+      </div>
+
+      <!-- Full Mode: Full ESP Card (for detail view) -->
+      <ESPCard v-else :esp="device" />
+    </div>
+
+    <!-- Right Column: Actuators -->
+    <div class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators">
       <ActuatorSatellite
         v-for="actuator in actuators"
         :key="`actuator-${actuator.gpio}`"
@@ -461,334 +518,717 @@ watch(isDesktop, () => {
         :emergency-stopped="actuator.emergency_stopped"
         :selected="selectedGpio === actuator.gpio && selectedType === 'actuator'"
         :show-connections="showConnections"
-        :style="isDesktop ? {
-          '--orbital-x': `${actuatorPositions[actuator.gpio]?.x || 0}px`,
-          '--orbital-y': `${actuatorPositions[actuator.gpio]?.y || 0}px`,
-        } : undefined"
-        :class="{ 'esp-orbital-layout__satellite--orbital': isDesktop }"
-        class="esp-orbital-layout__satellite"
+        class="esp-horizontal-layout__satellite"
         @click="handleActuatorClick(actuator.gpio)"
       />
+      <!-- Empty actuator placeholder -->
+      <div v-if="actuators.length === 0" class="esp-horizontal-layout__empty-column">
+        <span class="esp-horizontal-layout__empty-label">Keine Aktoren</span>
+      </div>
     </div>
-    
-    <!-- Empty State (no sensors/actuators) -->
-    <div v-if="totalItems === 0" class="esp-orbital-layout__empty">
-      <p class="esp-orbital-layout__empty-text">
-        Keine Sensoren oder Aktoren konfiguriert
-      </p>
-    </div>
+
+    <!-- Drop Indicator Overlay -->
+    <Transition name="fade">
+      <div v-if="isDragOver && isMock" class="esp-horizontal-layout__drop-indicator">
+        <span class="esp-horizontal-layout__drop-text">Sensor hinzufügen</span>
+      </div>
+    </Transition>
   </div>
+
+  <!-- Add Sensor Modal (Teleport to body) -->
+  <Teleport to="body">
+    <div v-if="showAddSensorModal && isMock" class="modal-overlay" @click.self="showAddSensorModal = false">
+      <div class="modal-content">
+        <!-- Modal Header -->
+        <div class="modal-header">
+          <h3 class="modal-title">Sensor hinzufügen</h3>
+          <button class="modal-close" @click="showAddSensorModal = false">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body">
+          <!-- GPIO + Sensor Type Row -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">GPIO</label>
+              <input
+                v-model.number="newSensor.gpio"
+                type="number"
+                min="0"
+                max="39"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Sensor-Typ</label>
+              <select v-model="newSensor.sensor_type" class="form-select">
+                <option
+                  v-for="option in sensorTypeOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Name -->
+          <div class="form-group">
+            <label class="form-label">Name (optional)</label>
+            <input
+              v-model="newSensor.name"
+              type="text"
+              class="form-input"
+              placeholder="z.B. Wassertemperatur"
+            />
+          </div>
+
+          <!-- Subzone -->
+          <div class="form-group">
+            <label class="form-label">Subzone (optional)</label>
+            <input
+              v-model="newSensor.subzone_id"
+              type="text"
+              class="form-input"
+              placeholder="z.B. gewaechshaus_reihe_1"
+            />
+          </div>
+
+          <!-- Initial Value + Unit Row -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Startwert</label>
+              <input
+                v-model.number="newSensor.raw_value"
+                type="number"
+                step="0.1"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Einheit</label>
+              <input
+                :value="newSensor.unit"
+                type="text"
+                class="form-input form-input--readonly"
+                readonly
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer">
+          <button class="btn btn--secondary" @click="showAddSensorModal = false">
+            Abbrechen
+          </button>
+          <button class="btn btn--primary" @click="addSensor">
+            Hinzufügen
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
 /* =============================================================================
+   NEW: Horizontal 3-Column Layout (Sensors | ESP-Card | Actuators)
+   Replaces orbital/absolute positioning with side-by-side flexbox
+   ============================================================================= */
+.esp-horizontal-layout {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  min-height: auto;
+}
+
+/* =============================================================================
+   Left/Right Columns (Sensors & Actuators)
+   ============================================================================= */
+.esp-horizontal-layout__column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 56px;
+  max-width: 140px;
+  flex-shrink: 0;
+}
+
+/* Sensors column: align items to the right (toward center card) */
+.esp-horizontal-layout__column--sensors {
+  align-items: flex-end;
+}
+
+/* Actuators column: align items to the left (toward center card) */
+.esp-horizontal-layout__column--actuators {
+  align-items: flex-start;
+}
+
+/* Satellite cards in horizontal layout - compact styling */
+.esp-horizontal-layout__satellite {
+  /* Override any absolute positioning from satellite components */
+  position: relative !important;
+  transform: none !important;
+  left: auto !important;
+  top: auto !important;
+  /* Compact width for side columns */
+  width: 100%;
+  max-width: 130px;
+}
+
+/* Empty column placeholder */
+.esp-horizontal-layout__empty-column {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  padding: 0.5rem;
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.375rem;
+  opacity: 0.5;
+}
+
+.esp-horizontal-layout__empty-label {
+  font-size: 0.625rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* =============================================================================
+   Center Column (ESP Card)
+   ============================================================================= */
+.esp-horizontal-layout__center {
+  flex: 1;
+  min-width: 140px;
+  max-width: 220px;
+}
+
+/* =============================================================================
    Compact ESP Info Card
    ============================================================================= */
 .esp-info-compact {
+  position: relative; /* Für absolute Positionierung des Overlay-Dropzone */
   width: 100%;
-  max-width: 280px;
   background-color: var(--color-bg-secondary);
-  border: 3px solid var(--glass-border);
-  border-radius: 0.75rem;
-  padding: 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.625rem;
+  padding: 0.625rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  transition: all 0.2s;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
+  gap: 0.5rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  outline: none;
+  overflow: visible; /* Damit Overlay sichtbar ist */
 }
 
 .esp-info-compact:hover {
-  border-color: var(--color-iridescent-1);
-  box-shadow: 0 12px 32px rgba(167, 139, 250, 0.5);
-  transform: scale(1.02);
+  border-color: rgba(96, 165, 250, 0.4);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.esp-info-compact:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
 }
 
 .esp-info-compact__header {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.375rem;
 }
 
 .esp-info-compact__title-group {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem;
   flex-wrap: wrap;
 }
 
 .esp-info-compact__title {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-primary);
-  word-break: break-all;
+  word-break: break-word;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
 }
 
-.esp-info-compact__stats {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background-color: var(--color-bg-tertiary);
-  border-radius: 0.5rem;
+.esp-info-compact__id {
+  font-size: 0.6rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-muted);
+  opacity: 0.7;
 }
 
-.esp-info-compact__stat {
+.esp-info-compact__status-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.75rem;
 }
 
-.esp-info-compact__stat-label {
-  color: var(--color-text-muted);
-  min-width: 50px;
+/* Connection quality indicator dot */
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: help;
+  transition: transform 0.2s;
 }
 
-.esp-info-compact__stat-value {
-  color: var(--color-text-primary);
-  font-weight: 500;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+.connection-dot:hover {
+  transform: scale(1.3);
+}
+
+.connection-dot.good {
+  background-color: var(--color-success, #22c55e);
+  box-shadow: 0 0 6px var(--color-success, #22c55e);
+}
+
+.connection-dot.fair {
+  background-color: var(--color-warning, #f59e0b);
+  box-shadow: 0 0 6px var(--color-warning, #f59e0b);
+}
+
+.connection-dot.poor {
+  background-color: var(--color-danger, #ef4444);
+  box-shadow: 0 0 6px var(--color-danger, #ef4444);
 }
 
 .esp-info-compact__details-btn {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1rem;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
   background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  background-size: 200% 200%;
   color: white;
   border: none;
-  border-radius: 0.5rem;
-  font-size: 0.875rem;
+  border-radius: 0.375rem;
+  font-size: 0.7rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(167, 139, 250, 0.3);
+  box-shadow: 0 2px 6px rgba(167, 139, 250, 0.25);
+  overflow: hidden;
+}
+
+.esp-info-compact__details-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.esp-info-compact__details-btn:hover::before {
+  left: 100%;
 }
 
 .esp-info-compact__details-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(167, 139, 250, 0.4);
+  background-position: 100% 100%;
 }
 
 .esp-info-compact__details-btn:active {
   transform: translateY(0);
 }
 
-/* =============================================================================
-   Base Layout (Mobile-First)
-   ============================================================================= */
-.esp-orbital-layout {
-  position: relative;
+/* Analysis Drop Zone - Chart Toggle */
+.esp-info-compact__analysis {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 1rem;
-  min-height: 300px;
-  isolation: isolate; /* Create stacking context */
+  gap: 0.375rem;
 }
 
-.esp-orbital-layout__center {
-  position: relative;
-  z-index: 5;
-  width: 100%;
-  max-width: 400px;
-  pointer-events: auto;
-}
-
-.esp-orbital-layout__satellites {
+.esp-info-compact__analysis-toggle {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+  align-items: center;
   justify-content: center;
   width: 100%;
-}
-
-.esp-orbital-layout__satellites--sensors {
-  order: -1; /* Sensors above center on mobile */
-}
-
-.esp-orbital-layout__satellites--actuators {
-  order: 1; /* Actuators below center on mobile */
-}
-
-.esp-orbital-layout__satellite {
-  flex-shrink: 0;
-  z-index: 10;
-  position: relative;
-}
-
-.esp-orbital-layout__connections {
-  display: none; /* Hidden on mobile */
-  z-index: 1;
-}
-
-.esp-orbital-layout__empty {
-  padding: 2rem;
-  text-align: center;
-}
-
-.esp-orbital-layout__empty-text {
+  padding: 0.25rem 0.5rem;
+  background-color: var(--color-bg-tertiary);
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.25rem;
+  font-size: 0.65rem;
   color: var(--color-text-muted);
-  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-/* =============================================================================
-   Tablet Layout (768px+)
-   ============================================================================= */
-@media (min-width: 768px) {
-  .esp-orbital-layout {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    min-height: calc(var(--container-size, 500px) + 2rem);
-    padding: 3rem;
-    gap: 0;
-  }
-
-  .esp-orbital-layout--has-items {
-    /* When we have satellites, position relatively for orbital layout */
-    position: relative;
-    min-height: calc(var(--container-size, 600px) + 4rem);
-  }
-
-  .esp-orbital-layout__center {
-    position: relative;
-    z-index: 5;
-    max-width: none;
-    width: auto;
-  }
-
-  .esp-orbital-layout__satellites {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    display: block;
-    z-index: 10;
-  }
-
-  .esp-orbital-layout__satellites--sensors,
-  .esp-orbital-layout__satellites--actuators {
-    order: 0;
-  }
-
-  .esp-orbital-layout__satellite--orbital {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(
-      calc(-50% + var(--orbital-x, 0px)),
-      calc(-50% + var(--orbital-y, 0px))
-    );
-    pointer-events: auto;
-    transition: transform 0.3s ease, box-shadow 0.2s ease, z-index 0s;
-    z-index: 10;
-  }
-
-  .esp-orbital-layout__satellite--orbital:hover {
-    z-index: 20;
-    transform: translate(
-      calc(-50% + var(--orbital-x, 0px)),
-      calc(-50% + var(--orbital-y, 0px))
-    ) scale(1.05);
-  }
-
-  .esp-orbital-layout__connections {
-    display: block;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 1;
-    pointer-events: none;
-  }
+.esp-info-compact__analysis-toggle:hover {
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-secondary);
 }
 
-/* =============================================================================
-   Desktop Layout (1024px+)
-   ============================================================================= */
-@media (min-width: 1024px) {
-  .esp-orbital-layout {
-    min-height: calc(var(--container-size, 600px) + 2rem);
-    padding: 3rem;
-  }
-
-  .esp-orbital-layout__satellite--orbital {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
-                box-shadow 0.2s ease,
-                border-color 0.2s ease;
-  }
+.esp-info-compact__analysis-toggle--active {
+  border-style: solid;
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-primary);
+  background-color: rgba(167, 139, 250, 0.08);
 }
 
-/* =============================================================================
-   Section Labels (Optional Visual Enhancement)
-   ============================================================================= */
-@media (min-width: 768px) {
-  .esp-orbital-layout__satellites--sensors::before,
-  .esp-orbital-layout__satellites--actuators::before {
-    position: absolute;
-    font-size: 0.625rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-text-muted);
-    opacity: 0.6;
-  }
-
-  .esp-orbital-layout__satellites--sensors::before {
-    content: 'Sensoren';
-    left: calc(-1 * var(--orbital-radius, 150px) - 2rem);
-    top: 50%;
-    transform: translateY(-50%) rotate(-90deg);
-    transform-origin: center center;
-  }
-
-  .esp-orbital-layout__satellites--actuators::before {
-    content: 'Aktoren';
-    right: calc(-1 * var(--orbital-radius, 150px) - 2rem);
-    top: 50%;
-    transform: translateY(-50%) rotate(90deg);
-    transform-origin: center center;
-  }
+.esp-info-compact__analysis-toggle--drag-hint {
+  border-style: solid;
+  border-color: var(--color-success);
+  color: var(--color-success);
+  background-color: rgba(16, 185, 129, 0.15);
+  animation: pulse-hint 1s ease-in-out infinite;
 }
 
-/* =============================================================================
-   Animations
-   ============================================================================= */
-@keyframes satellite-appear {
+@keyframes pulse-hint {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2); }
+}
+
+/*
+ * DropZone ist IMMER im DOM, aber standardmäßig unsichtbar.
+ * Zwei Modi:
+ * 1. Normal (manuell geöffnet): Inline-Anzeige, beeinflusst Layout
+ * 2. Overlay (auto-geöffnet während Drag): Absolute Position, Layout stabil
+ *
+ * WICHTIG: Wir verwenden opacity + pointer-events statt visibility,
+ * weil visibility: hidden ALLE Pointer-Events blockiert, einschließlich
+ * dragover und drop - was Drag & Drop unmöglich macht!
+ */
+.esp-info-compact__dropzone {
+  /* Standardmäßig unsichtbar aber im DOM für Drag-Target */
+  opacity: 0;
+  pointer-events: none; /* Verhindert Klicks auf unsichtbares Element */
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-height 0.2s ease, pointer-events 0s;
+  margin-top: 0;
+}
+
+/* Sichtbarer Zustand - normal (manuell geöffnet) */
+.esp-info-compact__dropzone--visible {
+  opacity: 1;
+  pointer-events: auto; /* Events wieder aktivieren */
+  max-height: 300px;
+  overflow: visible;
+  margin-top: 0.5rem;
+}
+
+/* Overlay-Modus (auto-geöffnet während Drag) */
+.esp-info-compact__dropzone--overlay {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  /* WICHTIG: z-index muss höher sein als .zone-item--drag (9999) */
+  z-index: 10000;
+  margin-top: 0.25rem;
+  max-height: none;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-success);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25),
+              0 0 0 4px rgba(16, 185, 129, 0.1);
+  animation: dropzone-appear 0.15s ease-out;
+}
+
+@keyframes dropzone-appear {
   from {
     opacity: 0;
-    transform: translate(
-      calc(-50% + var(--orbital-x, 0px) * 0.5),
-      calc(-50% + var(--orbital-y, 0px) * 0.5)
-    ) scale(0.8);
+    transform: translateY(-8px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translate(
-      calc(-50% + var(--orbital-x, 0px)),
-      calc(-50% + var(--orbital-y, 0px))
-    ) scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 
-@media (min-width: 768px) {
-  .esp-orbital-layout__satellite--orbital {
-    animation: satellite-appear 0.4s ease-out forwards;
-    animation-delay: calc(var(--satellite-index, 0) * 0.05s);
+/* =============================================================================
+   Mobile Layout (< 768px): Vertical Stack
+   ============================================================================= */
+@media (max-width: 767px) {
+  .esp-horizontal-layout {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .esp-horizontal-layout__column {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: none;
+    width: 100%;
+  }
+
+  .esp-horizontal-layout__column--sensors {
+    order: -1; /* Sensors above center */
+    align-items: center;
+  }
+
+  .esp-horizontal-layout__column--actuators {
+    order: 1; /* Actuators below center */
+    align-items: center;
+  }
+
+  .esp-horizontal-layout__center {
+    max-width: 280px;
+    order: 0;
+  }
+
+  .esp-horizontal-layout__satellite {
+    max-width: 140px;
   }
 }
+
+/* =============================================================================
+   Tablet Layout (768px - 1023px): Same as desktop but tighter
+   ============================================================================= */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .esp-horizontal-layout {
+    gap: 0.5rem;
+  }
+
+  .esp-horizontal-layout__column {
+    max-width: 120px;
+  }
+
+  .esp-horizontal-layout__center {
+    max-width: 180px;
+  }
+}
+
+/* =============================================================================
+   Desktop Layout (1024px+): Full horizontal with more space
+   ============================================================================= */
+@media (min-width: 1024px) {
+  .esp-horizontal-layout {
+    gap: 1rem;
+  }
+
+  .esp-horizontal-layout__column {
+    max-width: 150px;
+  }
+
+  .esp-horizontal-layout__center {
+    max-width: 220px;
+  }
+
+  .esp-horizontal-layout__satellite {
+    max-width: 140px;
+  }
+}
+
+/* =============================================================================
+   Drop Zone Styling (for adding sensors via drag from sidebar)
+   ============================================================================= */
+.esp-horizontal-layout--can-drop {
+  border: 2px dashed var(--color-iridescent-2);
+  border-radius: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.esp-horizontal-layout--drag-over {
+  border-color: var(--color-success);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.esp-horizontal-layout__drop-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: 0.75rem;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.esp-horizontal-layout__drop-text {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-success);
+  background: var(--color-bg-secondary);
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: 2px solid var(--color-success);
+}
+
+/* Fade transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* =============================================================================
+   Modal Styling
+   ============================================================================= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  width: 100%;
+  max-width: 28rem;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.modal-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modal-close:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.modal-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+/* Form Elements */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.form-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.form-input,
+.form-select {
+  padding: 0.625rem 0.75rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  transition: border-color 0.15s ease;
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--color-iridescent-1);
+}
+
+.form-input--readonly {
+  background: var(--color-bg-primary);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+/* Buttons */
+.btn {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+
+.btn--primary {
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  color: white;
+}
+
+.btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.4);
+}
+
+.btn--secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--glass-border);
+}
+
+.btn--secondary:hover {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
 </style>
+
 

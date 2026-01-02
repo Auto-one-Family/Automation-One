@@ -1,23 +1,23 @@
 <script setup lang="ts">
 /**
  * SensorSatellite Component
- * 
+ *
  * Displays a sensor as a "satellite" card around the main ESP card.
  * Shows live sensor values with quality indicators.
- * 
+ *
  * Features:
  * - Live value display with unit
  * - Quality indicator (good/degraded/poor)
  * - Icon based on sensor type
  * - Click to show connection lines to linked actuators
+ * - Draggable for Multi-Sensor Chart (Phase 4)
  */
 
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Thermometer, Droplet, Zap, Gauge, Wind, Sun } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
 import { SENSOR_TYPE_CONFIG, getSensorUnit, getSensorLabel } from '@/utils/sensorDefaults'
-import { getQualityInfo } from '@/utils/labels'
 import { formatNumber } from '@/utils/formatters'
+import { useDragStateStore } from '@/stores/dragState'
 import type { QualityLevel } from '@/types'
 
 interface Props {
@@ -39,17 +39,26 @@ interface Props {
   selected?: boolean
   /** Whether to show connection lines on click */
   showConnections?: boolean
+  /** Whether dragging is enabled (for Multi-Sensor Chart) */
+  draggable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   selected: false,
   showConnections: false,
+  draggable: true,
 })
 
 const emit = defineEmits<{
   click: [gpio: number]
   showConnections: [gpio: number]
 }>()
+
+// Drag state store (global for auto-opening chart)
+const dragStore = useDragStateStore()
+
+// Local drag state for visual feedback
+const isDragging = ref(false)
 
 // Get sensor configuration
 const sensorConfig = computed(() => SENSOR_TYPE_CONFIG[props.sensorType] || {
@@ -70,14 +79,11 @@ const sensorIcon = computed(() => {
   return Gauge
 })
 
-// Quality info
-const qualityInfo = computed(() => getQualityInfo(props.quality))
-
-// Quality variant for badge
+// Quality variant for icon color
 const qualityVariant = computed(() => {
   if (props.quality === 'excellent' || props.quality === 'good') return 'success'
-  if (props.quality === 'fair' || props.quality === 'degraded') return 'warning'
-  if (props.quality === 'poor' || props.quality === 'bad') return 'danger'
+  if (props.quality === 'fair') return 'warning'
+  if (props.quality === 'poor' || props.quality === 'bad' || props.quality === 'stale') return 'danger'
   return 'gray'
 })
 
@@ -93,47 +99,79 @@ function handleClick() {
     emit('showConnections', props.gpio)
   }
 }
+
+// Drag handlers for Multi-Sensor Chart (Phase 4)
+function handleDragStart(event: DragEvent) {
+  if (!props.draggable || !event.dataTransfer) return
+
+  // KRITISCH: Verhindere dass VueDraggable (Parent) das Event abfängt!
+  // Ohne stopPropagation() würde VueDraggable denken, eine ESP-Card wird gedraggt,
+  // was den UI-State korrumpiert und dragend nie aufgerufen wird.
+  event.stopPropagation()
+
+  isDragging.value = true
+
+  // Set drag data with sensor info
+  const dragData = {
+    type: 'sensor' as const,
+    espId: props.espId,
+    gpio: props.gpio,
+    sensorType: props.sensorType,
+    name: props.name || sensorConfig.value.label,
+    unit: sensorConfig.value.unit,
+  }
+  event.dataTransfer.setData('application/json', JSON.stringify(dragData))
+  event.dataTransfer.effectAllowed = 'copy'
+
+  // Update global drag state for auto-opening chart
+  dragStore.startSensorDrag(dragData)
+}
+
+function handleDragEnd(event: DragEvent) {
+  // KRITISCH: Auch hier stopPropagation für konsistentes Verhalten
+  event.stopPropagation()
+
+  isDragging.value = false
+  // Clear global drag state
+  dragStore.endDrag()
+}
 </script>
 
 <template>
   <div
     :class="[
       'sensor-satellite',
-      { 'sensor-satellite--selected': selected }
+      {
+        'sensor-satellite--selected': selected,
+        'sensor-satellite--dragging': isDragging,
+        'sensor-satellite--draggable': draggable
+      }
     ]"
+    :data-esp-id="espId"
+    :data-gpio="gpio"
+    data-satellite-type="sensor"
+    :draggable="draggable"
+    :title="`${name || sensorConfig.label} (GPIO ${gpio})`"
     @click="handleClick"
+    @dragstart="handleDragStart"
+    @dragend="handleDragEnd"
   >
-    <!-- Icon -->
+    <!-- Compact vertical layout: Icon → Value → Label -->
     <div class="sensor-satellite__icon" :class="`sensor-satellite__icon--${qualityVariant}`">
-      <component :is="sensorIcon" class="w-5 h-5" />
+      <component :is="sensorIcon" class="w-4 h-4" />
     </div>
-    
-    <!-- Content -->
-    <div class="sensor-satellite__content">
-      <!-- Name/Type -->
-      <div class="sensor-satellite__header">
-        <span class="sensor-satellite__name">
-          {{ name || sensorConfig.label }}
-        </span>
-        <span class="sensor-satellite__gpio">GPIO {{ gpio }}</span>
-      </div>
-      
-      <!-- Value -->
-      <div class="sensor-satellite__value">
-        <span class="sensor-satellite__value-number">{{ formattedValue }}</span>
-        <span class="sensor-satellite__value-unit">{{ sensorConfig.unit }}</span>
-      </div>
-      
-      <!-- Quality Badge -->
-      <Badge 
-        :variant="qualityVariant" 
-        size="xs"
-        class="sensor-satellite__quality"
-      >
-        {{ qualityInfo.label }}
-      </Badge>
+
+    <!-- Value (prominent) -->
+    <div class="sensor-satellite__value">
+      <span class="sensor-satellite__value-number">{{ formattedValue }}</span>
+      <span class="sensor-satellite__value-unit">{{ sensorConfig.unit }}</span>
     </div>
-    
+
+    <!-- Label (compact) -->
+    <span class="sensor-satellite__label">
+      {{ name || sensorConfig.label }}
+    </span>
+
     <!-- Connection indicator (if has connections) -->
     <div v-if="showConnections" class="sensor-satellite__connection-indicator" />
   </div>
@@ -141,30 +179,33 @@ function handleClick() {
 
 <style scoped>
 /* =============================================================================
-   SensorSatellite - Lighter Glassmorphism Design
-   Industry-Benchmark: Home Assistant Mushroom Cards
+   SensorSatellite - Compact Vertical Design for Side-by-Side Layout
+   Optimized for narrow columns in horizontal ESP layout
    ============================================================================= */
 
 .sensor-satellite {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  background: rgba(255, 255, 255, 0.02);
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: rgba(30, 32, 40, 0.85);
   border: 1px solid var(--glass-border);
   border-radius: 0.5rem;
   cursor: pointer;
-  transition: all 0.2s ease;
-  min-width: 160px;
-  backdrop-filter: blur(4px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 52px;
+  max-width: 130px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 .sensor-satellite:hover {
-  border-color: var(--color-iridescent-1);
-  box-shadow: 0 4px 16px rgba(167, 139, 250, 0.25);
+  border-color: var(--color-iridescent-2);
+  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.25);
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(40, 42, 54, 0.9);
 }
 
 .sensor-satellite--selected {
@@ -172,13 +213,30 @@ function handleClick() {
   box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.2);
 }
 
+.sensor-satellite--draggable {
+  cursor: grab;
+}
+
+.sensor-satellite--draggable:active {
+  cursor: grabbing;
+}
+
+.sensor-satellite--dragging {
+  opacity: 0.7;
+  transform: scale(0.95);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4),
+              0 0 12px rgba(167, 139, 250, 0.3);
+  border-color: var(--color-iridescent-1);
+}
+
+/* Icon - compact circle */
 .sensor-satellite__icon {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2rem;
+  height: 2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
+  border-radius: 50%;
   flex-shrink: 0;
   transition: all 0.2s;
 }
@@ -203,45 +261,16 @@ function handleClick() {
   color: var(--color-text-muted);
 }
 
-.sensor-satellite__content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.sensor-satellite__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.sensor-satellite__name {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sensor-satellite__gpio {
-  font-size: 0.625rem;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
+/* Value - prominent display */
 .sensor-satellite__value {
   display: flex;
   align-items: baseline;
-  gap: 0.25rem;
+  justify-content: center;
+  gap: 0.125rem;
 }
 
 .sensor-satellite__value-number {
-  font-size: 1.125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-primary);
@@ -249,20 +278,30 @@ function handleClick() {
 }
 
 .sensor-satellite__value-unit {
-  font-size: 0.75rem;
+  font-size: 0.625rem;
   color: var(--color-text-muted);
 }
 
-.sensor-satellite__quality {
-  align-self: flex-start;
+/* Label - compact */
+.sensor-satellite__label {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.2;
 }
 
+/* Connection indicator */
 .sensor-satellite__connection-indicator {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 0.5rem;
-  height: 0.5rem;
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 0.375rem;
+  height: 0.375rem;
   border-radius: 50%;
   background-color: var(--color-success);
   animation: pulse-dot 2s infinite;

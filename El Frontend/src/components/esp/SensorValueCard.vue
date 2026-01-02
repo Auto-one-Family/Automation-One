@@ -16,8 +16,8 @@ import Badge from '@/components/common/Badge.vue'
 import { 
   SENSOR_TYPE_CONFIG, 
   getSensorLabel, 
-  getSensorUnit,
-  formatSensorValueWithUnit 
+  
+   
 } from '@/utils/sensorDefaults'
 import { getQualityInfo, getGpioDescription } from '@/utils/labels'
 import { formatRelativeTime, formatNumber } from '@/utils/formatters'
@@ -327,6 +327,7 @@ const gpioTooltip = computed(() => getGpioDescription(props.sensor.gpio))
   background-color: rgba(248, 113, 113, 0.1);
 }
 </style>
+
 
 
 
