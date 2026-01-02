@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<Props>(), {
   fullHeight: false,
   size: 'md',
 })
+void props // Used in template
 
 const sizeClasses = {
   sm: 'w-4 h-4',
@@ -56,6 +57,7 @@ const containerClasses = {
     </span>
   </div>
 </template>
+
 
 
 

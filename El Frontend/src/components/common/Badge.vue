@@ -23,7 +23,7 @@ type BadgeVariant =
   | 'real'    // For real ESP devices (cyan)
   | 'neutral' // Gray, for unknown/default
 
-type BadgeSize = 'sm' | 'md' | 'lg'
+type BadgeSize = 'xs' | 'sm' | 'md' | 'lg'
 
 interface Props {
   /** Badge variant/color */
@@ -66,6 +66,7 @@ const badgeClasses = computed(() => {
 
   // Size styles
   const sizeClasses: Record<BadgeSize, string> = {
+    xs: 'px-1.5 py-0.5 text-[9px] gap-0.5',
     sm: 'px-2 py-0.5 text-[10px] gap-1',
     md: 'px-2.5 py-1 text-xs gap-1.5',
     lg: 'px-3 py-1 text-sm gap-2',

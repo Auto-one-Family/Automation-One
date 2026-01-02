@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
   color: 'border-t-blue-500',
   center: false,
 })
+void props // Used in template
 
 const sizeClasses: Record<SpinnerSize, string> = {
   sm: 'w-4 h-4 border-2',

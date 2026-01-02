@@ -13,15 +13,14 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { 
-  X, 
+import {
+  X,
   ChevronDown,
   LayoutDashboard,
   Cpu,
   Thermometer,
   Power,
   Workflow,
-  History,
   Activity,
   FileText,
   Users,

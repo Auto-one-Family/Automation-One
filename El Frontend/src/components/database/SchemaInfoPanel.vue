@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { TableSchema, ColumnSchema } from '@/api/database'
+import type { TableSchema } from '@/api/database'
 import { ChevronDown, ChevronRight, Key, Link, Hash, Type, Calendar, ToggleLeft, Braces } from 'lucide-vue-next'
 
 const props = defineProps<{
   schema: TableSchema | null
 }>()
 
+void props // Used in template
 const isCollapsed = ref(true)
 
 function getTypeIcon(type: string) {
@@ -102,6 +103,7 @@ function getTypeColor(type: string): string {
     </div>
   </div>
 </template>
+
 
 
 

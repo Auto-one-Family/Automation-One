@@ -30,6 +30,7 @@ const props = withDefaults(defineProps<Props>(), {
   showAction: true,
 })
 
+void props // Used in template
 const emit = defineEmits<{
   action: []
 }>()
@@ -98,6 +99,7 @@ const emit = defineEmits<{
   margin-bottom: 1.5rem;
 }
 </style>
+
 
 
 

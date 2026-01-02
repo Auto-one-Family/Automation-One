@@ -29,38 +29,101 @@ const visibleColumns = computed(() => {
   return sorted.slice(0, 8) // Show max 8 columns
 })
 
-function formatValue(value: unknown, type: string): string {
+/**
+ * Format relative time (e.g., "vor 5 Min." or "14:30 (UTC)")
+ */
+function formatRelativeTime(date: Date): string {
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffSec = Math.floor(diffMs / 1000)
+  const diffMin = Math.floor(diffSec / 60)
+  const diffHour = Math.floor(diffMin / 60)
+  const diffDay = Math.floor(diffHour / 24)
+
+  if (diffSec < 60) {
+    return 'gerade eben'
+  } else if (diffMin < 60) {
+    return `vor ${diffMin} Min.`
+  } else if (diffHour < 24) {
+    return `vor ${diffHour} Std.`
+  } else if (diffDay < 7) {
+    return `vor ${diffDay} Tag${diffDay > 1 ? 'en' : ''}`
+  } else {
+    // Fallback to time with timezone indicator
+    const hours = date.getHours().toString().padStart(2, '0')
+    const minutes = date.getMinutes().toString().padStart(2, '0')
+    const day = date.getDate().toString().padStart(2, '0')
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    return `${day}.${month}. ${hours}:${minutes}`
+  }
+}
+
+/**
+ * Check if a string looks like a UUID
+ */
+function isUuid(str: string): boolean {
+  // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  return uuidRegex.test(str)
+}
+
+/**
+ * Format UUID for display (shortened)
+ */
+function formatUuid(uuid: string): string {
+  return uuid.substring(0, 8) + '...'
+}
+
+interface FormattedValue {
+  display: string
+  tooltip?: string  // Full value for hover
+}
+
+function formatValue(value: unknown, type: string): FormattedValue {
   if (value === null || value === undefined) {
-    return '—'
+    return { display: '—' }
   }
-  
+
   if (value === '***MASKED***') {
-    return '••••••••'
+    return { display: '••••••••', tooltip: 'Masked for security' }
   }
-  
+
+  // Handle datetime with relative time
   if (type === 'datetime' && typeof value === 'string') {
     try {
       const date = new Date(value)
-      return date.toLocaleString()
+      const relative = formatRelativeTime(date)
+      const full = date.toLocaleString('de-DE', {
+        dateStyle: 'medium',
+        timeStyle: 'medium'
+      })
+      return { display: relative, tooltip: full }
     } catch {
-      return String(value)
+      return { display: String(value) }
     }
   }
-  
+
   if (type === 'boolean') {
-    return value ? 'true' : 'false'
+    return { display: value ? 'true' : 'false' }
   }
-  
+
   if (type === 'json') {
-    return '{...}'
+    const jsonStr = JSON.stringify(value)
+    return { display: '{...}', tooltip: jsonStr.substring(0, 200) + (jsonStr.length > 200 ? '...' : '') }
   }
-  
+
   const str = String(value)
+
+  // Handle UUIDs - shorten for readability
+  if (isUuid(str)) {
+    return { display: formatUuid(str), tooltip: str }
+  }
+
   // Truncate long values
   if (str.length > 50) {
-    return str.substring(0, 47) + '...'
+    return { display: str.substring(0, 47) + '...', tooltip: str }
   }
-  return str
+  return { display: str }
 }
 
 function getValueClass(value: unknown, type: string): string {
@@ -137,8 +200,11 @@ function getPrimaryKeyValue(record: Record<string, unknown>): string {
               :key="column.name"
               class="p-3 text-sm font-mono"
             >
-              <span :class="getValueClass(record[column.name], column.type)">
-                {{ formatValue(record[column.name], column.type) }}
+              <span
+                :class="getValueClass(record[column.name], column.type)"
+                :title="formatValue(record[column.name], column.type).tooltip"
+              >
+                {{ formatValue(record[column.name], column.type).display }}
               </span>
             </td>
             <td class="p-3">
@@ -173,6 +239,7 @@ function getPrimaryKeyValue(record: Record<string, unknown>): string {
     </div>
   </div>
 </template>
+
 
 
 
