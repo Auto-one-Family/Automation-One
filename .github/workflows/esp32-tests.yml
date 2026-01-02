@@ -69,7 +69,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: El Servador/god_kaiser_server
-        run: poetry install --no-interaction
+        run: poetry install --no-root --no-interaction
 
       - name: Run ESP32 Tests
         working-directory: El Servador/god_kaiser_server

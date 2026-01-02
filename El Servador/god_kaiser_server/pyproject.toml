@@ -4,7 +4,7 @@ version = "1.0.1"
 description = "God-Kaiser Server - Industrial IoT Backend for ESP32 Firmware Management"
 authors = ["Auto-One Team"]
 readme = "README.md"
-packages = [{include = "god_kaiser_server", from = "src"}]
+packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -66,7 +66,7 @@ types-python-dateutil = "^2.8.19"
 types-pytz = "^2024.1"
 
 [tool.poetry.scripts]
-server = "god_kaiser_server.src.main:main"
+server = "src.main:main"
 
 [tool.black]
 line-length = 100
@@ -118,7 +118,7 @@ disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --strict-markers --cov=god_kaiser_server --cov-report=term-missing --cov-report=html"
+addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing --cov-report=html"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -135,7 +135,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["god_kaiser_server"]
+source = ["src"]
 omit = [
     "*/tests/*",
     "*/alembic/*",

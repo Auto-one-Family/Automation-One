@@ -54,7 +54,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: El Servador/god_kaiser_server
-        run: poetry install --no-interaction
+        run: poetry install --no-root --no-interaction
 
       - name: Run Ruff (Linter)
         working-directory: El Servador/god_kaiser_server
@@ -100,7 +100,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: El Servador/god_kaiser_server
-        run: poetry install --no-interaction
+        run: poetry install --no-root --no-interaction
 
       - name: Run Unit Tests
         working-directory: El Servador/god_kaiser_server
@@ -167,7 +167,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: El Servador/god_kaiser_server
-        run: poetry install --no-interaction
+        run: poetry install --no-root --no-interaction
 
       - name: Run Integration Tests
         working-directory: El Servador/god_kaiser_server
