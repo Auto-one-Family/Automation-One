@@ -501,7 +501,7 @@ export const espApi = {
           actuator_count: mockEsp.actuators?.length || 0,
           timestamp: Math.floor(Date.now() / 1000),
         },
-        last_seen: mockEsp.last_heartbeat || null,
+        last_seen: mockEsp.last_heartbeat ?? undefined,
       }
     } else {
       const response = await api.get<ESPHealthResponse>(
