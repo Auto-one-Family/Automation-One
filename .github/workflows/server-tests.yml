@@ -198,6 +198,10 @@ jobs:
     timeout-minutes: 15
     needs: [unit-tests, integration-tests]
     if: always()
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
 
     steps:
       - name: Download all test results
@@ -206,11 +210,16 @@ jobs:
           pattern: '*-test-results'
           merge-multiple: true
 
+      - name: List downloaded files
+        run: |
+          echo "Downloaded artifacts:"
+          find . -name "*.xml" -type f 2>/dev/null || echo "No XML files found"
+
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           files: |
-            junit-*.xml
+            **/junit-*.xml
           check_name: Test Results
           comment_mode: always
