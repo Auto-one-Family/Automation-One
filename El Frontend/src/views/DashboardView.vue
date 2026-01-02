@@ -3,133 +3,191 @@
  * DashboardView
  *
  * Main dashboard with:
- * - StatCards for key metrics
+ * - ActionBar for quick status overview and actions
  * - Zone-grouped ESP overview with drag & drop
  * - ESPOrbitalLayout for visual device display (within zones)
  */
 
-import { ref, onMounted, computed } from 'vue'
-import { RouterLink } from 'vue-router'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useEspStore } from '@/stores/esp'
-import { useZoneDragDrop } from '@/composables'
+import { useLogicStore } from '@/stores/logic'
+import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import {
-  Cpu,
-  Thermometer,
-  Power,
-  AlertTriangle,
-  Workflow,
   Plus,
   Filter,
-  Layers
+  GitBranch,
+  Wifi,
+  Info
 } from 'lucide-vue-next'
 
 // Components
-import StatCard from '@/components/dashboard/StatCard.vue'
+import ActionBar from '@/components/dashboard/ActionBar.vue'
+import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
 import ZoneGroup from '@/components/zones/ZoneGroup.vue'
+import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnectionOverlay.vue'
+import SensorSidebar from '@/components/dashboard/SensorSidebar.vue'
+import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 
 const espStore = useEspStore()
+const logicStore = useLogicStore()
 const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
 
-// Filter state
+// Filter state (type filter unchanged)
 const filterType = ref<'all' | 'mock' | 'real'>('all')
-const filterStatus = ref<'all' | 'online' | 'offline'>('all')
+
+// Status filter using Set for multi-select pills
+type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
+const activeStatusFilters = ref<Set<StatusFilter>>(new Set())
+
+// Modal states
+const showCreateMockModal = ref(false)
+const showRealEspInfo = ref(false)
+
+// Cross-ESP connections toggle
+const showCrossEspConnections = ref(true)
 
 onMounted(() => {
   espStore.fetchAll()
+  logicStore.fetchRules()
+  // Subscribe to WebSocket for live logic execution updates
+  logicStore.subscribeToWebSocket()
 })
 
-// Stats computed from store
-const stats = computed(() => {
-  const devices = espStore.devices
-  const onlineCount = espStore.onlineDevices.length
-  const totalSensors = devices.reduce((sum, e) => {
-    if (espStore.isMock(espStore.getDeviceId(e))) {
-      return sum + ((e as any).sensors?.length ?? 0)
-    }
-    return sum + (e.sensor_count ?? 0)
-  }, 0)
-  const totalActuators = devices.reduce((sum, e) => {
-    if (espStore.isMock(espStore.getDeviceId(e))) {
-      return sum + ((e as any).actuators?.length ?? 0)
-    }
-    return sum + (e.actuator_count ?? 0)
-  }, 0)
-  const activeActuators = devices.reduce((sum, e) => {
-    if (espStore.isMock(espStore.getDeviceId(e))) {
-      return sum + (((e as any).actuators?.filter((a: any) => a.state)?.length ?? 0))
-    }
-    return sum // Real ESPs don't have actuator state in device object
-  }, 0)
-
-  return {
-    devices: devices.length,
-    online: onlineCount,
-    sensors: totalSensors,
-    actuators: totalActuators,
-    activeActuators,
-  }
+onUnmounted(() => {
+  // Unsubscribe from WebSocket when leaving dashboard
+  logicStore.unsubscribeFromWebSocket()
 })
 
-// Emergency count
-const emergencyCount = computed(() =>
+// Status counts for ActionBar pills
+const onlineCount = computed(() => espStore.onlineDevices.length)
+const offlineCount = computed(() => espStore.offlineDevices.length)
+
+const warningCount = computed(() =>
   espStore.devices.filter(device => {
     const deviceId = espStore.getDeviceId(device)
     if (espStore.isMock(deviceId)) {
       const mockDevice = device as any
-      return mockDevice.system_state === 'SAFE_MODE' ||
-        mockDevice.system_state === 'ERROR' ||
+      return mockDevice.system_state === 'ERROR' ||
         mockDevice.actuators?.some((a: any) => a.emergency_stopped)
     }
     return device.status === 'error'
   }).length
 )
 
-// Filtered ESPs
+const safeModeCount = computed(() =>
+  espStore.devices.filter(device => {
+    const deviceId = espStore.getDeviceId(device)
+    if (espStore.isMock(deviceId)) {
+      return (device as any).system_state === 'SAFE_MODE'
+    }
+    return false
+  }).length
+)
+
+// Problem message for ActionBar warning banner
+const problemMessage = computed(() => {
+  if (warningCount.value > 0) {
+    return `${warningCount.value} Gerät(e) mit Fehlern`
+  }
+  if (safeModeCount.value > 0) {
+    return `${safeModeCount.value} Gerät(e) im Safe-Mode`
+  }
+  if (offlineCount.value > 0 && onlineCount.value > 0) {
+    return `${offlineCount.value} Gerät(e) offline`
+  }
+  return ''
+})
+
+const hasProblems = computed(() =>
+  warningCount.value > 0 || safeModeCount.value > 0
+)
+
+// Toggle status filter
+function toggleStatusFilter(filter: StatusFilter) {
+  const newFilters = new Set(activeStatusFilters.value)
+  if (newFilters.has(filter)) {
+    newFilters.delete(filter)
+  } else {
+    newFilters.add(filter)
+  }
+  activeStatusFilters.value = newFilters
+}
+
+// Handle Mock ESP created
+function onMockEspCreated(espId: string) {
+  // Refresh devices to show the new ESP
+  espStore.fetchAll()
+  // Show a toast or notification (could be enhanced later)
+  console.log(`Mock ESP erstellt: ${espId}`)
+}
+
+// Filtered ESPs (using type filter + status pills)
 const filteredEsps = computed(() => {
   let esps = espStore.devices
 
-  // Filter by type
+  // Filter by type (unchanged)
   if (filterType.value === 'mock') {
     esps = esps.filter(e => espStore.isMock(espStore.getDeviceId(e)))
   } else if (filterType.value === 'real') {
     esps = esps.filter(e => !espStore.isMock(espStore.getDeviceId(e)))
   }
 
-  // Filter by status
-  if (filterStatus.value === 'online') {
-    esps = esps.filter(e => e.status === 'online' || e.connected === true)
-  } else if (filterStatus.value === 'offline') {
-    esps = esps.filter(e => e.status === 'offline' || e.connected === false)
+  // Filter by status pills (Set-based, empty = show all)
+  const filters = activeStatusFilters.value
+  if (filters.size > 0) {
+    esps = esps.filter(device => {
+      const deviceId = espStore.getDeviceId(device)
+      const isMock = espStore.isMock(deviceId)
+      const mockDevice = device as any
+
+      // Check each active filter
+      if (filters.has('online')) {
+        if (device.status === 'online' || device.connected === true) return true
+      }
+      if (filters.has('offline')) {
+        if (device.status === 'offline' || device.connected === false) return true
+      }
+      if (filters.has('warning')) {
+        if (isMock) {
+          if (mockDevice.system_state === 'ERROR' ||
+              mockDevice.actuators?.some((a: any) => a.emergency_stopped)) return true
+        } else if (device.status === 'error') return true
+      }
+      if (filters.has('safemode')) {
+        if (isMock && mockDevice.system_state === 'SAFE_MODE') return true
+      }
+      return false
+    })
   }
 
   return esps
 })
 
-// Counts for filter badges
+// Counts for filter badges (type filter)
 const counts = computed(() => ({
   all: espStore.devices.length,
   mock: espStore.mockDevices.length,
   real: espStore.realDevices.length,
-  online: espStore.onlineDevices.length,
-  offline: espStore.offlineDevices.length,
 }))
 
-// Group filtered ESPs by zone
+// Group filtered ESPs by zone (excluding unassigned - shown in bottom bar)
 const zoneGroups = computed(() => {
-  return groupDevicesByZone(filteredEsps.value)
+  const allGroups = groupDevicesByZone(filteredEsps.value)
+  // Filter out unassigned group - it's shown in UnassignedDropBar
+  return allGroups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
 })
 
 // Handle zone drop event
+// NOTE: handleDeviceDrop() already calls espStore.fetchAll() internally,
+// so we don't need to call it again here (BUG-001 fix)
 async function onDeviceDropped(payload: {
   device: any
   fromZoneId: string | null
   toZoneId: string
 }) {
   await handleDeviceDrop(payload)
-  // Refresh devices after zone change
-  await espStore.fetchAll()
 }
 </script>
 
@@ -141,62 +199,23 @@ async function onDeviceDropped(payload: {
       <p style="color: var(--color-text-muted)" class="mt-1">AutomationOne System-Übersicht</p>
     </div>
 
-    <!-- Emergency Alert -->
-    <div
-      v-if="emergencyCount > 0"
-      class="emergency-alert"
-    >
-      <AlertTriangle class="w-6 h-6 flex-shrink-0" />
-      <div>
-        <p class="font-medium">Achtung: Systemwarnung</p>
-        <p class="text-sm opacity-80">
-          {{ emergencyCount }} Gerät(e) im Sicherheitsmodus oder mit Notfall-Stopp
-        </p>
-      </div>
-    </div>
+    <!-- Action Bar (replaces StatCards and Status Filters) -->
+    <ActionBar
+      :online-count="onlineCount"
+      :offline-count="offlineCount"
+      :warning-count="warningCount"
+      :safe-mode-count="safeModeCount"
+      :active-filters="activeStatusFilters"
+      :has-problems="hasProblems"
+      :problem-message="problemMessage"
+      @toggle-filter="toggleStatusFilter"
+      @create-mock-esp="showCreateMockModal = true"
+      @show-real-esp-info="showRealEspInfo = true"
+      @open-settings="() => {}"
+    />
 
-    <!-- Stats Grid -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <StatCard
-        title="ESP-Geräte"
-        :value="stats.devices"
-        :subtitle="`${stats.online} online`"
-        :icon="Cpu"
-        icon-color="text-iridescent-1"
-        icon-bg-color="bg-iridescent-1/10"
-        :loading="espStore.isLoading"
-      />
-      <StatCard
-        title="Sensoren"
-        :value="stats.sensors"
-        subtitle="Aktive Messungen"
-        :icon="Thermometer"
-        icon-color="text-mock"
-        icon-bg-color="bg-mock/10"
-        :loading="espStore.isLoading"
-      />
-      <StatCard
-        title="Aktoren"
-        :value="stats.actuators"
-        :subtitle="`${stats.activeActuators} eingeschaltet`"
-        :icon="Power"
-        icon-color="text-warning"
-        icon-bg-color="bg-warning/10"
-        :loading="espStore.isLoading"
-      />
-      <StatCard
-        title="Automation"
-        value="0"
-        subtitle="Aktive Regeln"
-        :icon="Workflow"
-        icon-color="text-success"
-        icon-bg-color="bg-success/10"
-      />
-    </div>
-
-    <!-- Filters -->
-    <div class="flex flex-wrap gap-4">
-      <!-- Type Filter -->
+    <!-- Type Filter (compact row) -->
+    <div class="flex flex-wrap items-center gap-3">
       <div class="filter-group">
         <span class="filter-label">Typ:</span>
         <div class="filter-buttons">
@@ -221,37 +240,15 @@ async function onDeviceDropped(payload: {
         </div>
       </div>
 
-      <!-- Status Filter -->
-      <div class="filter-group">
-        <span class="filter-label">Status:</span>
-        <div class="filter-buttons">
-          <button
-            :class="['filter-btn', filterStatus === 'all' ? 'filter-btn--active' : '']"
-            @click="filterStatus = 'all'"
-          >
-            Alle
-          </button>
-          <button
-            :class="['filter-btn', filterStatus === 'online' ? 'filter-btn--active filter-btn--success' : '']"
-            @click="filterStatus = 'online'"
-          >
-            Online ({{ counts.online }})
-          </button>
-          <button
-            :class="['filter-btn', filterStatus === 'offline' ? 'filter-btn--active' : '']"
-            @click="filterStatus = 'offline'"
-          >
-            Offline ({{ counts.offline }})
-          </button>
-        </div>
-      </div>
-
-      <!-- Link to Devices for management -->
-      <div class="ml-auto">
-        <RouterLink to="/devices" class="btn-secondary">
-          <Cpu class="w-4 h-4" />
-          Geräte verwalten
-        </RouterLink>
+      <!-- Active filter indicator -->
+      <div v-if="activeStatusFilters.size > 0" class="flex items-center gap-2 text-sm">
+        <span class="text-gray-400">Filter aktiv:</span>
+        <button
+          class="text-emerald-400 hover:text-emerald-300 underline"
+          @click="activeStatusFilters = new Set()"
+        >
+          Zurücksetzen
+        </button>
       </div>
     </div>
 
@@ -280,43 +277,123 @@ async function onDeviceDropped(payload: {
       <p style="color: var(--color-text-muted)" class="mb-4">
         Keine Geräte entsprechen den aktuellen Filtern.
       </p>
-      <button class="btn-secondary" @click="filterType = 'all'; filterStatus = 'all'">
+      <button class="btn-secondary" @click="filterType = 'all'; activeStatusFilters = new Set()">
         Filter zurücksetzen
       </button>
     </div>
 
-    <!-- Zone-Grouped ESP Grid -->
-    <div v-else class="zone-groups-container">
-      <ZoneGroup
-        v-for="group in zoneGroups"
-        :key="group.zoneId"
-        :zone-id="group.zoneId"
-        :zone-name="group.zoneName"
-        :devices="group.devices"
-        :is-unassigned="group.zoneId === '__unassigned__'"
-        :compact-mode="true"
-        :enable-drag-drop="true"
-        :default-expanded="true"
-        @device-dropped="onDeviceDropped"
-      >
-        <!-- Use ESPOrbitalLayout for Dashboard (compact view with sensors/actuators) -->
-        <template #device="{ device }">
-          <div class="esp-orbital-grid__item">
-            <ESPOrbitalLayout
-              :device="device"
-              :show-connections="false"
-              :compact-mode="true"
-            />
-          </div>
-        </template>
-      </ZoneGroup>
+    <!-- Zone-Grouped ESP Grid with Cross-ESP Overlay and Sensor Sidebar -->
+    <div v-else class="dashboard-main-layout">
+      <!-- Main Content Area -->
+      <div class="zone-groups-wrapper">
+        <!-- Cross-ESP Connection Overlay (renders on top of all ESPs) -->
+        <CrossEspConnectionOverlay
+          :show="showCrossEspConnections"
+          :show-labels="true"
+        />
 
-      <!-- Hint for drag & drop -->
-      <div v-if="zoneGroups.length > 1" class="drag-hint">
-        <Layers class="w-4 h-4" />
-        <span>Tipp: Geräte zwischen Zonen verschieben per Drag & Drop</span>
+        <div class="zone-groups-container">
+          <!-- Empty State when all devices are unassigned -->
+          <div v-if="zoneGroups.length === 0" class="no-zones-hint">
+            <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
+            <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
+          </div>
+
+          <ZoneGroup
+            v-for="group in zoneGroups"
+            :key="group.zoneId"
+            :zone-id="group.zoneId"
+            :zone-name="group.zoneName"
+            :devices="group.devices"
+            :is-unassigned="false"
+            :compact-mode="true"
+            :enable-drag-drop="true"
+            :default-expanded="true"
+            @device-dropped="onDeviceDropped"
+          >
+            <!-- Use ESPOrbitalLayout for Dashboard (compact view with sensors/actuators) -->
+            <template #device="{ device }">
+              <ESPOrbitalLayout
+                :device="device"
+                :show-connections="false"
+                :compact-mode="true"
+              />
+            </template>
+          </ZoneGroup>
+        </div>
+
+        <!-- Cross-ESP Toggle (if connections exist) -->
+        <button
+          v-if="logicStore.crossEspConnections.length > 0"
+          class="cross-esp-toggle"
+          :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
+          @click="showCrossEspConnections = !showCrossEspConnections"
+          :title="showCrossEspConnections ? 'Verbindungen ausblenden' : 'Verbindungen einblenden'"
+        >
+          <GitBranch class="w-4 h-4" />
+          <span>{{ logicStore.crossEspConnections.length }} Cross-ESP</span>
+        </button>
       </div>
+
+      <!-- Sensor Sidebar (rechte Seite) -->
+      <SensorSidebar />
     </div>
+
+    <!-- Fixed Bottom Bar for Unassigned Devices -->
+    <UnassignedDropBar />
+
+    <!-- Create Mock ESP Modal -->
+    <CreateMockEspModal
+      v-model="showCreateMockModal"
+      @created="onMockEspCreated"
+    />
+
+    <!-- Real ESP Info Dialog -->
+    <Teleport to="body">
+      <div
+        v-if="showRealEspInfo"
+        class="modal-overlay"
+        @click.self="showRealEspInfo = false"
+      >
+        <div class="info-dialog">
+          <div class="info-dialog__header">
+            <Wifi class="w-6 h-6 text-emerald-400" />
+            <h3 class="info-dialog__title">Echten ESP32 verbinden</h3>
+          </div>
+          <div class="info-dialog__body">
+            <p class="mb-3">
+              Echte ESP32-Geräte verbinden sich automatisch über MQTT mit dem System.
+            </p>
+            <div class="info-steps">
+              <div class="info-step">
+                <span class="info-step__number">1</span>
+                <span>Flash die AutomationOne Firmware auf deinen ESP32</span>
+              </div>
+              <div class="info-step">
+                <span class="info-step__number">2</span>
+                <span>Konfiguriere WiFi und MQTT-Server in der Firmware</span>
+              </div>
+              <div class="info-step">
+                <span class="info-step__number">3</span>
+                <span>Der ESP erscheint automatisch im Dashboard</span>
+              </div>
+            </div>
+            <p class="text-sm text-gray-400 mt-4">
+              <Info class="w-4 h-4 inline mr-1" />
+              Siehe <code class="text-emerald-400">El Trabajante/</code> für die ESP32-Firmware
+            </p>
+          </div>
+          <div class="info-dialog__footer">
+            <button
+              class="btn-primary w-full"
+              @click="showRealEspInfo = false"
+            >
+              Verstanden
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -410,24 +487,201 @@ async function onDeviceDropped(payload: {
   color: var(--color-success);
 }
 
-/* Zone groups container */
+/* Zone groups container - compact spacing */
 .zone-groups-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  display: grid;
+  gap: 1rem;
+  /* Automatische Spalten - optimiert für mehrere Zonen */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  /* Padding at bottom for fixed UnassignedDropBar */
+  padding-bottom: 60px;
+  overflow: visible;  /* Erlaubt AnalysisDropZone Overlays */
 }
 
-/* Drag hint */
-.drag-hint {
+/* No zones hint */
+.no-zones-hint {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--glass-bg);
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.5rem;
+}
+
+.no-zones-hint p {
+  margin: 0;
+}
+
+.no-zones-hint .text-sm {
+  font-size: 0.875rem;
+  opacity: 0.7;
+  margin-top: 0.5rem;
+}
+
+/* Wide Desktop: Mehr Platz pro Zone */
+@media (min-width: 1600px) {
+  .zone-groups-container {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 450px), 1fr));
+    gap: 1.25rem;
+  }
+}
+
+/* Dashboard Main Layout - Flex Container für Zones + Sidebar */
+.dashboard-main-layout {
+  display: flex;
+  gap: 0;
+  min-height: 400px;
+}
+
+/* Zone groups wrapper for Cross-ESP overlay */
+.zone-groups-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;  /* Verhindert Flex-Item-Overflow */
+}
+
+/* Cross-ESP toggle button */
+.cross-esp-toggle {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.cross-esp-toggle:hover {
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(167, 139, 250, 0.3);
+}
+
+.cross-esp-toggle--active {
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  border-color: transparent;
+  color: white;
+}
+
+.cross-esp-toggle--active:hover {
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 6px 20px rgba(167, 139, 250, 0.5);
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 1rem;
+  background-color: rgba(10, 10, 15, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+/* Info dialog */
+.info-dialog {
+  width: 100%;
+  max-width: 26rem;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--glass-shadow);
+  overflow: hidden;
+}
+
+.info-dialog__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.info-dialog__title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.info-dialog__body {
+  padding: 1.25rem;
+  color: var(--color-text-secondary);
+}
+
+.info-dialog__footer {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+/* Info steps */
+.info-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.info-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.info-step__number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* Primary button (reused from global styles) */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  background-color: var(--color-bg-tertiary);
-  border: 1px dashed var(--glass-border);
+  padding: 0.625rem 1.25rem;
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  color: white;
+  font-weight: 500;
   border-radius: 0.5rem;
-  color: var(--color-text-muted);
-  font-size: 0.8125rem;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.3);
 }
 </style>
