@@ -22,6 +22,37 @@ export interface SensorTypeConfig {
   defaultValue: number
   /** Tooltip description */
   description?: string
+  /** Category for grouping in sidebar: 'temperature', 'water', 'soil', 'air', 'light', 'other' */
+  category: SensorCategoryId
+}
+
+/**
+ * Sensor Category IDs for grouping
+ */
+export type SensorCategoryId = 'temperature' | 'water' | 'soil' | 'air' | 'light' | 'other'
+
+/**
+ * Category Configuration
+ */
+export interface SensorCategory {
+  name: string
+  icon: string
+  order: number
+}
+
+/**
+ * SENSOR_CATEGORIES
+ *
+ * Categories for grouping sensor types in the sidebar.
+ * Used by SensorSidebar.vue for collapsible sections.
+ */
+export const SENSOR_CATEGORIES: Record<SensorCategoryId, SensorCategory> = {
+  temperature: { name: 'Temperatur', icon: 'Thermometer', order: 1 },
+  water: { name: 'Wasser', icon: 'Droplet', order: 2 },
+  soil: { name: 'Boden', icon: 'Leaf', order: 3 },
+  air: { name: 'Luft', icon: 'Wind', order: 4 },
+  light: { name: 'Licht', icon: 'Sun', order: 5 },
+  other: { name: 'Sonstige', icon: 'Settings', order: 6 }
 }
 
 /**
@@ -42,7 +73,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Thermometer',
     defaultValue: 20.0,
-    description: 'Digitaler Temperatursensor, wasserdicht. Ideal für Flüssigkeiten und Umgebungstemperatur.'
+    description: 'Digitaler Temperatursensor, wasserdicht. Ideal für Flüssigkeiten und Umgebungstemperatur.',
+    category: 'temperature'
   },
   
   'pH': {
@@ -53,7 +85,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 2,
     icon: 'Droplet',
     defaultValue: 7.0,
-    description: 'Säuregrad der Lösung. 0-6 = sauer, 7 = neutral, 8-14 = basisch.'
+    description: 'Säuregrad der Lösung. 0-6 = sauer, 7 = neutral, 8-14 = basisch.',
+    category: 'water'
   },
   
   'EC': {
@@ -64,7 +97,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 0,
     icon: 'Zap',
     defaultValue: 1200,
-    description: 'Elektrische Leitfähigkeit. Zeigt Nährstoffgehalt der Lösung an.'
+    description: 'Elektrische Leitfähigkeit. Zeigt Nährstoffgehalt der Lösung an.',
+    category: 'water'
   },
   
   'SHT31': {
@@ -75,9 +109,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Thermometer',
     defaultValue: 22.0,
-    description: 'Präziser Temperatur- und Feuchtesensor (I2C).'
+    description: 'Präziser Temperatur- und Feuchtesensor (I2C).',
+    category: 'temperature'
   },
-  
+
   'SHT31_humidity': {
     label: 'Luftfeuchtigkeit (SHT31)',
     unit: '% RH',
@@ -86,9 +121,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Droplets',
     defaultValue: 50.0,
-    description: 'Relative Luftfeuchtigkeit. Optimal für Pflanzen: 40-70%.'
+    description: 'Relative Luftfeuchtigkeit. Optimal für Pflanzen: 40-70%.',
+    category: 'air'
   },
-  
+
   'BME280': {
     label: 'Temperatur (BME280)',
     unit: '°C',
@@ -97,9 +133,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Thermometer',
     defaultValue: 22.0,
-    description: 'Temperatur-, Feuchte- und Drucksensor.'
+    description: 'Temperatur-, Feuchte- und Drucksensor.',
+    category: 'temperature'
   },
-  
+
   'BME280_humidity': {
     label: 'Luftfeuchtigkeit (BME280)',
     unit: '% RH',
@@ -108,9 +145,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Droplets',
     defaultValue: 50.0,
-    description: 'Relative Luftfeuchtigkeit.'
+    description: 'Relative Luftfeuchtigkeit.',
+    category: 'air'
   },
-  
+
   'BME280_pressure': {
     label: 'Luftdruck (BME280)',
     unit: 'hPa',
@@ -119,7 +157,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Gauge',
     defaultValue: 1013.25,
-    description: 'Atmosphärischer Luftdruck in Hektopascal.'
+    description: 'Atmosphärischer Luftdruck in Hektopascal.',
+    category: 'air'
   },
   
   'analog': {
@@ -130,9 +169,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 0,
     icon: 'Activity',
     defaultValue: 2048,
-    description: 'Rohwert des ADC (12-bit: 0-4095).'
+    description: 'Rohwert des ADC (12-bit: 0-4095).',
+    category: 'other'
   },
-  
+
   'digital': {
     label: 'Digital-Eingang',
     unit: '',
@@ -141,9 +181,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 0,
     icon: 'ToggleLeft',
     defaultValue: 0,
-    description: 'Digitaler Eingang (0 = LOW, 1 = HIGH).'
+    description: 'Digitaler Eingang (0 = LOW, 1 = HIGH).',
+    category: 'other'
   },
-  
+
   'flow': {
     label: 'Durchflusssensor',
     unit: 'L/min',
@@ -152,9 +193,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 2,
     icon: 'Waves',
     defaultValue: 0,
-    description: 'Durchflussrate in Liter pro Minute.'
+    description: 'Durchflussrate in Liter pro Minute.',
+    category: 'water'
   },
-  
+
   'level': {
     label: 'Füllstand',
     unit: '%',
@@ -163,9 +205,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 1,
     icon: 'Layers',
     defaultValue: 50,
-    description: 'Füllstand des Behälters in Prozent.'
+    description: 'Füllstand des Behälters in Prozent.',
+    category: 'water'
   },
-  
+
   'light': {
     label: 'Lichtsensor',
     unit: 'lux',
@@ -174,9 +217,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 0,
     icon: 'Sun',
     defaultValue: 500,
-    description: 'Beleuchtungsstärke in Lux.'
+    description: 'Beleuchtungsstärke in Lux.',
+    category: 'light'
   },
-  
+
   'co2': {
     label: 'CO2-Sensor',
     unit: 'ppm',
@@ -185,7 +229,20 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     decimals: 0,
     icon: 'Cloud',
     defaultValue: 400,
-    description: 'CO2-Konzentration in ppm. Normal: 400-1000 ppm.'
+    description: 'CO2-Konzentration in ppm. Normal: 400-1000 ppm.',
+    category: 'air'
+  },
+
+  'moisture': {
+    label: 'Bodenfeuchte',
+    unit: '%',
+    min: 0,
+    max: 100,
+    decimals: 0,
+    icon: 'Droplets',
+    defaultValue: 50,
+    description: 'Bodenfeuchtigkeit in Prozent. Kapazitiver oder resistiver Sensor.',
+    category: 'soil'
   },
 }
 
@@ -262,6 +319,7 @@ export function formatSensorValueWithUnit(value: number | null, sensorType: stri
   
   return `${value.toFixed(config.decimals)} ${config.unit}`
 }
+
 
 
 

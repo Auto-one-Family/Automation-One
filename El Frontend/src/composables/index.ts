@@ -1,8 +1,10 @@
 /**
  * Composables
  *
+ * Vue 3 Composition API utilities for reusable logic.
+ *
  * Usage:
- * import { useModal, useSwipeNavigation, useRealTimeData } from '@/composables'
+ * import { useModal, useSwipeNavigation, useToast } from '@/composables'
  */
 
 export { useModal, useModals } from './useModal'
@@ -11,13 +13,7 @@ export {
   useSidebarSwipe,
   useEdgeSwipe,
 } from './useSwipeNavigation'
-export {
-  useRealTimeData,
-  useGlobalRealTimeData,
-} from './useRealTimeData'
-
-export { useZoneDragDrop } from './useZoneDragDrop'
+export { useZoneDragDrop, ZONE_UNASSIGNED, ZONE_UNASSIGNED_DISPLAY_NAME } from './useZoneDragDrop'
 export { useToast } from './useToast'
-
-// Future composables to be added:
-// export { useFilter } from './useFilter'
+export { useWebSocket } from './useWebSocket'
+export { useConfigResponse } from './useConfigResponse'

@@ -76,7 +76,7 @@ export type MockSystemState =
   | 'SAFE_MODE'
   | 'ERROR'
 
-export type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad' | 'stale'
+export type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad' | 'stale' | 'error'
 
 export interface MockSensor {
   gpio: number
@@ -84,6 +84,7 @@ export interface MockSensor {
   name: string | null
   subzone_id?: string | null
   raw_value: number
+  processed_value?: number  // Optional - present when Pi-enhanced processing returns data
   unit: string
   quality: QualityLevel
   raw_mode: boolean
@@ -227,49 +228,27 @@ export interface CommandResponse {
 }
 
 // =============================================================================
-// Logic Types
+// Logic Types (re-exported from logic.ts for detailed types)
 // =============================================================================
-export interface LogicRule {
-  id: string
-  name: string
-  description: string | null
-  enabled: boolean
-  priority: number
-  conditions: LogicCondition[]
-  actions: LogicAction[]
-  cooldown_seconds: number
-  last_triggered: string | null
-  trigger_count: number
-  created_at: string
-  updated_at: string
-}
+export type {
+  LogicRule,
+  LogicCondition,
+  SensorCondition,
+  TimeCondition,
+  CompoundCondition,
+  LogicAction,
+  ActuatorAction,
+  NotificationAction,
+  DelayAction,
+  LogicConnection,
+  LogicRulesResponse,
+  ExecutionHistoryResponse,
+  ExecutionHistoryItem,
+} from './logic'
 
-export interface LogicCondition {
-  type: 'sensor' | 'time' | 'compound'
-  sensor_gpio?: number
-  sensor_esp_id?: string
-  operator?: string
-  value?: number
-  time_start?: string
-  time_end?: string
-  days?: number[]
-  logic?: 'AND' | 'OR'
-  conditions?: LogicCondition[]
-}
+export { generateRuleDescription, extractConnections } from './logic'
 
-export interface LogicAction {
-  type: 'actuator' | 'delay' | 'notification'
-  actuator_gpio?: number
-  actuator_esp_id?: string
-  command?: string
-  value?: number
-  duration?: number
-  delay_seconds?: number
-  notification_type?: string
-  notification_target?: string
-  notification_message?: string
-}
-
+// Legacy LogicExecution (kept for backward compatibility)
 export interface LogicExecution {
   id: string
   rule_id: string
@@ -322,6 +301,130 @@ export interface SensorConfigResponse {
   latest_timestamp?: string | null
   created_at: string
   updated_at: string
+}
+
+// =============================================================================
+// Sensor History Types (Phase 3 - Server History Endpoint)
+// =============================================================================
+
+/**
+ * Single sensor reading from history.
+ * Matches server schema: SensorReading (schemas/sensor.py:268-308)
+ */
+export interface SensorReading {
+  timestamp: string
+  raw_value: number
+  processed_value: number | null
+  unit: string | null
+  quality: QualityLevel
+}
+
+/**
+ * Query parameters for sensor data history.
+ * Matches server endpoint: GET /v1/sensors/data
+ */
+export interface SensorDataQuery {
+  esp_id?: string
+  gpio?: number
+  sensor_type?: string
+  start_time?: string  // ISO datetime
+  end_time?: string    // ISO datetime
+  quality?: QualityLevel
+  limit?: number       // 1-1000, default 100
+}
+
+/**
+ * Response from sensor data query.
+ * Matches server schema: SensorDataResponse (schemas/sensor.py:362-405)
+ */
+export interface SensorDataResponse {
+  success: boolean
+  esp_id: string | null
+  gpio: number | null
+  sensor_type: string | null
+  readings: SensorReading[]
+  count: number
+  aggregation: string | null
+  time_range: {
+    start: string
+    end: string
+  } | null
+}
+
+/**
+ * Statistical summary for sensor data.
+ * Matches server schema: SensorStats (schemas/sensor.py:424-454)
+ */
+export interface SensorStats {
+  min_value: number | null
+  max_value: number | null
+  avg_value: number | null
+  std_dev: number | null
+  reading_count: number
+  quality_distribution: Record<QualityLevel, number>
+}
+
+/**
+ * Response from sensor statistics query.
+ * Matches server schema: SensorStatsResponse (schemas/sensor.py:457-466)
+ */
+export interface SensorStatsResponse {
+  success: boolean
+  esp_id: string
+  gpio: number
+  sensor_type: string
+  stats: SensorStats
+  time_range: {
+    start: string
+    end: string
+  }
+}
+
+// =============================================================================
+// Drag & Drop Types (Phase 4 - Multi-Sensor Chart)
+// =============================================================================
+
+/**
+ * Drag data for sensor satellite.
+ * Used by SensorSatellite → AnalysisDropZone
+ */
+export interface SensorDragData {
+  type: 'sensor'
+  espId: string
+  gpio: number
+  sensorType: string
+  name: string
+  unit: string
+}
+
+/**
+ * Drag data for actuator satellite.
+ * Used by ActuatorSatellite → AnalysisDropZone
+ */
+export interface ActuatorDragData {
+  type: 'actuator'
+  espId: string
+  gpio: number
+  actuatorType: string
+  name: string
+}
+
+/**
+ * Union type for all drag data.
+ */
+export type DragData = SensorDragData | ActuatorDragData
+
+/**
+ * Selected sensor for Multi-Sensor Chart.
+ */
+export interface ChartSensor {
+  id: string  // Unique ID: `${espId}_${gpio}`
+  espId: string
+  gpio: number
+  sensorType: string
+  name: string
+  unit: string
+  color: string  // Chart line color
 }
 
 export interface ActuatorConfigCreate {

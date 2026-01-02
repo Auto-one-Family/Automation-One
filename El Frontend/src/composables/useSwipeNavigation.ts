@@ -1,5 +1,5 @@
 import { ref, watch, onMounted, onUnmounted, type Ref } from 'vue'
-import { useSwipe, type UseSwipeDirection } from '@vueuse/core'
+import { useSwipe } from '@vueuse/core'
 
 export interface SwipeNavigationOptions {
   /** Minimum swipe distance in pixels to trigger action */

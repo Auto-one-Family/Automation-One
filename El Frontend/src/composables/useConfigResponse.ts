@@ -37,11 +37,11 @@ export function useConfigResponse() {
       if (message.type === 'config_response') {
         const response: ConfigResponse = {
           esp_id: (message.data.esp_id as string) || '',
-          config_type: (message.data.config_type as string) || 'sensor',
+          config_type: (message.data.config_type as 'sensor' | 'actuator') || 'sensor',
           status: (message.data.status as 'success' | 'error') || 'error',
           count: (message.data.count as number) || 0,
           message: (message.data.message as string) || '',
-          error_code: message.data.error_code as number | undefined,
+          error_code: message.data.error_code as string | undefined,
           timestamp: (message.data.timestamp as number) || Date.now(),
         }
         

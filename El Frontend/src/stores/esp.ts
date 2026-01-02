@@ -6,12 +6,12 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
 import { debugApi } from '@/api/debug'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useToast } from '@/composables/useToast'
-import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponse } from '@/types'
+import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponse, MockESPCreate } from '@/types'
 
 /**
  * Extract error message from Axios error response.
@@ -182,7 +182,7 @@ export const useEspStore = defineStore('esp', () => {
     }
   }
 
-  async function createDevice(config: ESPDeviceCreate): Promise<ESPDevice> {
+  async function createDevice(config: ESPDeviceCreate | MockESPCreate): Promise<ESPDevice> {
     isLoading.value = true
     error.value = null
 
@@ -216,22 +216,30 @@ export const useEspStore = defineStore('esp', () => {
     console.log('[ESP Store] updateDevice called:', { deviceId, update })
 
     try {
-      const device = await espApi.updateDevice(deviceId, update)
+      // First, persist the update to the database
+      const dbDevice = await espApi.updateDevice(deviceId, update)
       console.log('[ESP Store] espApi.updateDevice returned:', {
-        deviceId: device.device_id,
-        name: device.name,
-        fullDevice: device,
+        deviceId: dbDevice.device_id,
+        name: dbDevice.name,
       })
+
+      // For Mock ESPs: Re-fetch to get complete data (merged from Debug Store + DB)
+      // The DB only returns partial data, but espApi.getDevice() merges both sources
+      let device: ESPDevice
+      if (isMock(deviceId)) {
+        console.log('[ESP Store] Mock ESP detected, re-fetching complete data from server')
+        device = await espApi.getDevice(deviceId)
+      } else {
+        device = dbDevice
+      }
 
       // Update device in list
       const index = devices.value.findIndex(d =>
         getDeviceId(d) === getDeviceId(device)
       )
-      console.log('[ESP Store] Updating device at index:', index)
       if (index !== -1) {
-        console.log('[ESP Store] Before update - devices[index].name:', devices.value[index].name)
         devices.value[index] = device
-        console.log('[ESP Store] After update - devices[index].name:', devices.value[index].name)
+        console.log('[ESP Store] Device updated in list:', device.name)
       }
 
       return device
@@ -523,11 +531,15 @@ export const useEspStore = defineStore('esp', () => {
 
   /**
    * Handle esp_health WebSocket event
+   *
+   * Receives updates from:
+   * 1. Heartbeat handler (MQTT) - sends timestamp (Unix seconds)
+   * 2. MOCK-FIX in esp.py PATCH - sends last_seen (ISO string)
    */
   function handleEspHealth(message: any): void {
     const data = message.data
     const espId = data.esp_id || data.device_id
-    
+
     if (!espId) return
 
     const device = devices.value.find(d => getDeviceId(d) === espId)
@@ -538,7 +550,42 @@ export const useEspStore = defineStore('esp', () => {
       if (data.wifi_rssi !== undefined) device.wifi_rssi = data.wifi_rssi
       if (data.sensor_count !== undefined) device.sensor_count = data.sensor_count
       if (data.actuator_count !== undefined) device.actuator_count = data.actuator_count
-      if (data.timestamp) device.last_seen = new Date(data.timestamp * 1000).toISOString()
+
+      // Handle last_seen from either source:
+      // - timestamp: Unix ms from heartbeat handler (MQTT) - 13 digits
+      // - timestamp: Unix seconds from old handlers - 10 digits
+      // - last_seen: ISO string from MOCK-FIX (esp.py PATCH)
+      let newLastSeen: string | null = null
+      if (data.timestamp) {
+        // Check if timestamp is in seconds (10 digits) or milliseconds (13 digits)
+        const ts = data.timestamp > 10000000000 ? data.timestamp : data.timestamp * 1000
+        newLastSeen = new Date(ts).toISOString()
+      } else if (data.last_seen) {
+        newLastSeen = data.last_seen
+      }
+
+      if (newLastSeen) {
+        device.last_seen = newLastSeen
+        // Also update last_heartbeat since ESPCard uses it for freshness
+        // (ESPCard: const timestamp = props.esp.last_heartbeat || props.esp.last_seen)
+        device.last_heartbeat = newLastSeen
+      }
+
+      // Update status if provided (from MOCK-FIX or heartbeat)
+      if (data.status !== undefined) {
+        device.status = data.status
+      }
+
+      // Update name if provided (from MOCK-FIX broadcast)
+      if (data.name !== undefined) {
+        device.name = data.name
+      }
+
+      console.debug(`[ESP Store] esp_health update for ${espId}:`, {
+        last_seen: device.last_seen,
+        status: device.status,
+        name: device.name,
+      })
     }
   }
 
@@ -704,8 +751,23 @@ export const useEspStore = defineStore('esp', () => {
     }
   }
 
-  // Subscribe to WebSocket events with proper cleanup
-  onMounted(() => {
+  // =============================================================================
+  // WebSocket Registration
+  // =============================================================================
+  // NOTE: Pinia stores don't have lifecycle hooks like Vue components.
+  // We register handlers immediately and provide explicit cleanup methods.
+
+  /**
+   * Initialize WebSocket subscriptions.
+   * Called automatically on store creation.
+   * Safe to call multiple times (guards against duplicate registration).
+   */
+  function initWebSocket(): void {
+    if (wsUnsubscribers.length > 0) {
+      console.debug('[ESP Store] WebSocket handlers already registered, skipping')
+      return
+    }
+
     // Each ws.on() returns an unsubscribe function - store for cleanup
     wsUnsubscribers.push(
       ws.on('esp_health', handleEspHealth),
@@ -716,15 +778,21 @@ export const useEspStore = defineStore('esp', () => {
       ws.on('zone_assignment', handleZoneAssignment),
     )
     console.debug('[ESP Store] WebSocket handlers registered')
-  })
+  }
 
-  onUnmounted(() => {
-    // Unsubscribe all handlers to prevent memory leaks
+  /**
+   * Cleanup WebSocket subscriptions.
+   * Call when app is being destroyed or user logs out.
+   */
+  function cleanupWebSocket(): void {
     wsUnsubscribers.forEach(unsub => unsub())
     wsUnsubscribers.length = 0
     ws.disconnect()
     console.debug('[ESP Store] WebSocket handlers unregistered')
-  })
+  }
+
+  // Auto-initialize WebSocket handlers on store creation
+  initWebSocket()
 
   return {
     // State
@@ -771,6 +839,10 @@ export const useEspStore = defineStore('esp', () => {
     selectDevice,
     clearError,
     updateDeviceInList,
+
+    // WebSocket management
+    initWebSocket,
+    cleanupWebSocket,
   }
 })
 
