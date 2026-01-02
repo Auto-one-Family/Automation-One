@@ -46,7 +46,8 @@ class WebSocketService {
   private status: WebSocketStatus = 'disconnected'
   private reconnectAttempts: number = 0
   private maxReconnectAttempts: number = 10
-  private reconnectDelay: number = 3000
+  private baseReconnectDelay: number = 1000  // Base delay for exponential backoff
+  private maxReconnectDelay: number = 30000  // Max 30 seconds
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private subscriptions: Map<string, WebSocketSubscription> = new Map()
   private messageQueue: WebSocketMessage[] = []
@@ -54,6 +55,13 @@ class WebSocketService {
   private messageCount: number = 0
   private rateLimitWindowStart: number = Date.now()
   private listeners: Map<string, Set<(message: WebSocketMessage) => void>> = new Map()
+  private visibilityHandler: (() => void) | null = null
+
+  // NEW: Pending subscriptions queue for subscriptions during 'connecting' state
+  private pendingSubscriptions: WebSocketFilters[] = []
+
+  // NEW: Token expiration tracking
+  private tokenExpiry: number | null = null
 
   private constructor() {
     // Generate client ID (UUID-like)
@@ -76,6 +84,7 @@ class WebSocketService {
 
   /**
    * Get WebSocket URL
+   * Also extracts and stores token expiry for automatic refresh handling
    */
   private getWebSocketUrl(): string {
     const authStore = useAuthStore()
@@ -83,6 +92,14 @@ class WebSocketService {
 
     if (!token) {
       throw new Error('No access token available')
+    }
+
+    // Extract token expiry from JWT payload (for auto-refresh handling)
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      this.tokenExpiry = payload.exp ? payload.exp * 1000 : null // Convert to ms
+    } catch {
+      this.tokenExpiry = null
     }
 
     // In development, use localhost:8000 directly for WebSocket
@@ -93,6 +110,37 @@ class WebSocketService {
 
     // Backend endpoint: /api/v1/ws/realtime/{client_id}
     return `${protocol}//${host}/api/v1/ws/realtime/${this.clientId}?token=${encodeURIComponent(token)}`
+  }
+
+  /**
+   * Check if token is expired or about to expire (within 60 seconds)
+   */
+  private isTokenExpired(): boolean {
+    if (!this.tokenExpiry) return false
+    const bufferMs = 60000 // 60 second buffer
+    return Date.now() >= this.tokenExpiry - bufferMs
+  }
+
+  /**
+   * Refresh access token before reconnecting
+   * Returns true if refresh was successful, false otherwise
+   */
+  private async refreshTokenIfNeeded(): Promise<boolean> {
+    if (!this.isTokenExpired()) {
+      return true // Token still valid
+    }
+
+    console.log('[WebSocket] Token expired/expiring, refreshing before reconnect...')
+    const authStore = useAuthStore()
+
+    try {
+      await authStore.refreshTokens()
+      console.log('[WebSocket] Token refreshed successfully')
+      return true
+    } catch (error) {
+      console.error('[WebSocket] Token refresh failed:', error)
+      return false
+    }
   }
 
   /**
@@ -118,10 +166,16 @@ class WebSocketService {
         this.status = 'connected'
         this.reconnectAttempts = 0
         this.rateLimitWarning = false
-        
+
+        // Enable visibility handling for tab switches
+        this.setupVisibilityHandling()
+
         // Send existing subscriptions
         this.resubscribeAll()
-        
+
+        // Process pending subscriptions that were queued during 'connecting' state
+        this.processPendingSubscriptions()
+
         // Process queued messages
         this.processMessageQueue()
       }
@@ -156,6 +210,9 @@ class WebSocketService {
    * Disconnect from WebSocket
    */
   disconnect(): void {
+    // Cleanup visibility handling
+    this.cleanupVisibilityHandling()
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -166,12 +223,16 @@ class WebSocketService {
       this.ws = null
     }
 
+    // Clear pending subscriptions
+    this.pendingSubscriptions = []
+
     this.status = 'disconnected'
     this.reconnectAttempts = 0
   }
 
   /**
-   * Schedule a reconnect attempt
+   * Schedule a reconnect attempt with exponential backoff
+   * Delay doubles each attempt: 1s, 2s, 4s, 8s, 16s (max 30s)
    */
   private scheduleReconnect(): void {
     if (this.reconnectTimer) {
@@ -179,11 +240,88 @@ class WebSocketService {
     }
 
     this.reconnectAttempts++
-    console.log(`[WebSocket] Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`)
 
-    this.reconnectTimer = setTimeout(() => {
+    // Exponential backoff with jitter
+    const exponentialDelay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    )
+    // Add jitter (±10%) to prevent thundering herd
+    const jitter = exponentialDelay * 0.1 * (Math.random() * 2 - 1)
+    const delay = Math.round(exponentialDelay + jitter)
+
+    console.log(`[WebSocket] Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`)
+
+    this.reconnectTimer = setTimeout(async () => {
+      // Refresh token before reconnecting if needed
+      const tokenValid = await this.refreshTokenIfNeeded()
+      if (!tokenValid) {
+        console.error('[WebSocket] Cannot reconnect - token refresh failed')
+        this.status = 'error'
+        return
+      }
+
       this.connect()
-    }, this.reconnectDelay)
+    }, delay)
+  }
+
+  /**
+   * Setup Page Visibility API handling for Tab-Wechsel
+   * Reconnects WebSocket when tab becomes visible again
+   */
+  private setupVisibilityHandling(): void {
+    // Nur einmal registrieren
+    if (this.visibilityHandler) return
+
+    this.visibilityHandler = async () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[WebSocket] Tab visible, checking connection...')
+
+        // Check if already connected or connecting
+        if (this.isConnected()) {
+          console.debug('[WebSocket] Already connected')
+          return
+        }
+
+        if (this.status === 'connecting') {
+          console.debug('[WebSocket] Already connecting, waiting...')
+          return
+        }
+
+        console.log('[WebSocket] Reconnecting after tab became visible')
+
+        // Only reset attempts if significant time has passed (>30s)
+        // This prevents rapid reconnect attempts on quick tab switches
+        if (this.reconnectAttempts > 0) {
+          // Keep some backoff if we recently failed
+          this.reconnectAttempts = Math.max(0, this.reconnectAttempts - 2)
+        }
+
+        // Refresh token before reconnecting if needed
+        const tokenValid = await this.refreshTokenIfNeeded()
+        if (!tokenValid) {
+          console.error('[WebSocket] Cannot reconnect - token refresh failed')
+          this.status = 'error'
+          return
+        }
+
+        this.connect()
+      }
+    }
+
+    document.addEventListener('visibilitychange', this.visibilityHandler)
+    console.log('[WebSocket] Visibility handling enabled')
+  }
+
+  /**
+   * Cleanup Page Visibility API handler
+   */
+  private cleanupVisibilityHandling(): void {
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler)
+      this.visibilityHandler = null
+      console.log('[WebSocket] Visibility handling disabled')
+    }
   }
 
   /**
@@ -192,10 +330,13 @@ class WebSocketService {
   private handleMessage(data: string): void {
     try {
       const message: WebSocketMessage = JSON.parse(data)
-      
+
+      // DEBUG: Log all incoming WebSocket messages
+      console.log('[WebSocket] Received message:', message.type, message.data)
+
       // Rate limiting check (10 msg/sec)
       this.checkRateLimit()
-      
+
       // Route message to subscribers
       this.routeMessage(message)
       
@@ -234,7 +375,7 @@ class WebSocketService {
    * Route message to matching subscriptions
    */
   private routeMessage(message: WebSocketMessage): void {
-    for (const [id, subscription] of this.subscriptions.entries()) {
+    for (const [, subscription] of this.subscriptions.entries()) {
       if (this.matchesFilters(message, subscription.filters)) {
         subscription.callback(message)
       }
@@ -281,17 +422,22 @@ class WebSocketService {
 
   /**
    * Subscribe to messages matching filters
+   * If WebSocket is connecting, subscription is queued and sent after connection
    */
   subscribe(filters: WebSocketFilters, callback: (message: WebSocketMessage) => void): string {
     const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
+
     this.subscriptions.set(subscriptionId, { filters, callback })
-    
+
     // Send subscription to server if connected
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.sendSubscription(filters)
+    } else if (this.status === 'connecting') {
+      // Queue subscription for when connection is established
+      console.debug('[WebSocket] Connection pending, queuing subscription:', filters.types)
+      this.pendingSubscriptions.push(filters)
     }
-    
+
     return subscriptionId
   }
 
@@ -375,9 +521,32 @@ class WebSocketService {
   }
 
   /**
+   * Process pending subscriptions that were queued during 'connecting' state
+   */
+  private processPendingSubscriptions(): void {
+    if (this.pendingSubscriptions.length === 0) return
+
+    console.log(`[WebSocket] Processing ${this.pendingSubscriptions.length} pending subscriptions`)
+
+    while (this.pendingSubscriptions.length > 0) {
+      const filters = this.pendingSubscriptions.shift()
+      if (filters) {
+        this.sendSubscription(filters)
+      }
+    }
+  }
+
+  /**
    * Process queued messages
    */
   private processMessageQueue(): void {
+    // Limit queue size to prevent memory issues
+    const MAX_QUEUE_SIZE = 1000
+    if (this.messageQueue.length > MAX_QUEUE_SIZE) {
+      console.warn(`[WebSocket] Message queue exceeded ${MAX_QUEUE_SIZE}, dropping oldest messages`)
+      this.messageQueue = this.messageQueue.slice(-MAX_QUEUE_SIZE)
+    }
+
     while (this.messageQueue.length > 0) {
       const message = this.messageQueue.shift()
       if (message) {
@@ -410,6 +579,7 @@ class WebSocketService {
 
 // Export singleton instance
 export const websocketService = WebSocketService.getInstance()
+
 
 
 

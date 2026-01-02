@@ -195,11 +195,18 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   }
 
   // =============================================================================
-  // Lifecycle
+  // Lifecycle & Status Monitoring
   // =============================================================================
 
-  onMounted(() => {
-    // Watch service status
+  // Status check interval - works in both component and non-component contexts
+  let statusInterval: ReturnType<typeof setInterval> | null = null
+
+  /**
+   * Start status monitoring
+   */
+  function startStatusMonitor(): void {
+    if (statusInterval) return // Already running
+
     const checkStatus = () => {
       const connected = websocketService.isConnected()
       if (connected !== isConnected.value) {
@@ -207,30 +214,50 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       }
     }
 
-    // Check status periodically
-    const statusInterval = setInterval(checkStatus, 1000)
+    statusInterval = setInterval(checkStatus, 1000)
+  }
 
-    // Auto-connect if enabled
-    if (autoConnect) {
-      connect()
-    }
-
-    // Cleanup on unmount
-    onUnmounted(() => {
+  /**
+   * Stop status monitoring
+   */
+  function stopStatusMonitor(): void {
+    if (statusInterval) {
       clearInterval(statusInterval)
-      if (autoReconnect) {
-        disconnect()
-      }
-    })
+      statusInterval = null
+    }
+  }
+
+  /**
+   * Full cleanup - call when done with this composable instance
+   */
+  function cleanup(): void {
+    stopStatusMonitor()
+    messageHandlers.clear()
+    if (subscriptionId.value) {
+      unsubscribe()
+    }
+  }
+
+  // Auto-connect immediately if enabled (works in both component and store contexts)
+  if (autoConnect) {
+    connect()
+    startStatusMonitor()
+  }
+
+  // Vue component lifecycle hooks (only work when used in Vue components)
+  // These provide automatic cleanup when used in components
+  onMounted(() => {
+    // Start status monitor if not already started
+    if (!statusInterval) {
+      startStatusMonitor()
+    }
   })
 
   onUnmounted(() => {
-    // Cleanup handlers
-    messageHandlers.clear()
-    
-    // Unsubscribe
-    if (subscriptionId.value) {
-      unsubscribe()
+    cleanup()
+    if (autoReconnect) {
+      // Note: We don't disconnect the singleton service, just cleanup this composable
+      // The service should stay connected for other consumers
     }
   })
 
@@ -258,8 +285,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     updateFilters,
     on,
     watchStatus,
+    cleanup,
   }
 }
+
 
 
 
