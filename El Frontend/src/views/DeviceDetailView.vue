@@ -13,7 +13,7 @@ import { debugApi } from '@/api/debug'
 import type { MockSensorConfig, MockActuatorConfig, MockSystemState, QualityLevel } from '@/types'
 import {
   ArrowLeft, Heart, AlertTriangle, Plus, Trash2, Power, X,
-  Thermometer, Gauge, RefreshCw, Settings, Wifi, Activity, Info,
+  Thermometer, Gauge, RefreshCw, Info,
   Pencil, Loader2
 } from 'lucide-vue-next'
 
@@ -306,14 +306,6 @@ async function saveName() {
   }
 }
 
-// Quick edit sensor value
-function quickEditSensor(gpio: number) {
-  if (!mockEsp.value) return
-  const sensor = mockEsp.value.sensors.find((s: any) => s.gpio === gpio)
-  if (sensor) {
-    startEditSensor(gpio, sensor.raw_value, sensor.quality)
-  }
-}
 </script>
 
 <template>

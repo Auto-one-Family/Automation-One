@@ -6,7 +6,7 @@
  * Uses WebSocket singleton service for efficient connection management.
  */
 
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useWebSocket } from '@/composables/useWebSocket'
 import type { MqttMessage, MessageType } from '@/types'
 import type { WebSocketMessage } from '@/services/websocket'
@@ -65,7 +65,7 @@ function handleWebSocketMessage(message: WebSocketMessage) {
       timestamp: new Date().toISOString(),
       type: (message.type as MessageType) || 'system_event',
       topic: (message.data.topic as string) || '',
-      payload: message.data.payload || message.data,
+      payload: (message.data.payload || message.data) as Record<string, unknown>,
       esp_id: (message.data.esp_id as string) || undefined,
     }
 

@@ -22,8 +22,8 @@ import type {
 } from '@/api/audit'
 import {
   FileText, AlertTriangle, Settings, Trash2, RefreshCw, 
-  Filter, Clock, Database, ChevronDown, ChevronUp, X,
-  AlertCircle, Info, CheckCircle, XCircle
+  Filter, ChevronDown, ChevronUp, X,
+  AlertCircle, Info, XCircle
 } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import { LoadingState } from '@/components/common'
@@ -65,7 +65,14 @@ const cleanupResult = ref<CleanupResult | null>(null)
 const isRunningCleanup = ref(false)
 
 // Retention form
-const retentionForm = ref({
+const retentionForm = ref<{
+  enabled: boolean
+  default_days: number
+  severity_days: Record<string, number>
+  max_records: number
+  batch_size: number
+  preserve_emergency_stops: boolean
+}>({
   enabled: true,
   default_days: 30,
   severity_days: {
@@ -89,12 +96,6 @@ const activeFiltersCount = computed(() => {
   return count
 })
 
-const severityColors: Record<string, string> = {
-  info: 'var(--color-info)',
-  warning: 'var(--color-warning)',
-  error: 'var(--color-error)',
-  critical: '#dc2626',
-}
 
 // Methods
 async function fetchData() {
@@ -129,7 +130,7 @@ async function fetchData() {
       retentionForm.value = {
         enabled: configResponse.enabled,
         default_days: configResponse.default_days,
-        severity_days: { ...configResponse.severity_days },
+        severity_days: { ...configResponse.severity_days } as typeof retentionForm.value.severity_days,
         max_records: configResponse.max_records,
         batch_size: configResponse.batch_size,
         preserve_emergency_stops: configResponse.preserve_emergency_stops,

@@ -298,7 +298,7 @@ function handleDelete(espId: string) {
         >
           <Info class="w-4 h-4" />
         </button>
-        <button class="btn-secondary" @click="espStore.fetchAll" :disabled="espStore.isLoading">
+        <button class="btn-secondary" @click="() => espStore.fetchAll()" :disabled="espStore.isLoading">
           <RefreshCw :class="['w-4 h-4', espStore.isLoading ? 'animate-spin' : '']" />
           <span class="hidden sm:inline ml-1">Aktualisieren</span>
         </button>
@@ -1116,9 +1116,17 @@ function handleDelete(espId: string) {
 
 /* Zone groups container */
 .zone-groups-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  display: grid;
+  gap: 2rem;
+  /* Automatische Spalten - keine feste Anzahl! */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+
+/* Wide Desktop: Größere Mindestbreite */
+@media (min-width: 1600px) {
+  .zone-groups-container {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
 }
 
 /* Drag hint */

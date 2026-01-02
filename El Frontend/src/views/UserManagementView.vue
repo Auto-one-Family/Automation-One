@@ -219,7 +219,7 @@ function formatDate(dateStr: string): string {
   }
 }
 
-const isCurrentUser = computed(() => (user: User) => user.id === authStore.user?.id)
+const isCurrentUser = computed(() => (user: User) => String(user.id) === String(authStore.user?.id))
 
 onMounted(() => {
   loadUsers()
@@ -554,6 +554,7 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
 
 
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useDatabaseStore } from '@/stores/database'
 import { useEspStore } from '@/stores/esp'
 import { Database, RefreshCw, AlertCircle, MemoryStick, HardDrive, CheckCircle2, AlertTriangle, Radio } from 'lucide-vue-next'
@@ -93,19 +93,19 @@ const syncStatus = computed(() => {
 
 // Mock Store columns for table display (with German labels for better UX)
 const mockStoreColumns = [
-  { name: 'esp_id', label: 'ESP-ID', type: 'text', nullable: false, primary_key: true },
-  { name: 'zone_name', label: 'Zone', type: 'text', nullable: true, primary_key: false },
-  { name: 'zone_id', label: 'Zone-ID', type: 'text', nullable: true, primary_key: false },
-  { name: 'system_state', label: 'Systemzustand', type: 'text', nullable: false, primary_key: false },
-  { name: 'status', label: 'Status', type: 'text', nullable: false, primary_key: false },
-  { name: 'connected', label: 'Verbunden', type: 'boolean', nullable: false, primary_key: false },
-  { name: 'sensors', label: 'Sensoren', type: 'integer', nullable: false, primary_key: false },
-  { name: 'actuators', label: 'Aktoren', type: 'integer', nullable: false, primary_key: false },
-  { name: 'heap_free', label: 'Freier Heap', type: 'integer', nullable: true, primary_key: false },
-  { name: 'wifi_rssi', label: 'WiFi RSSI', type: 'integer', nullable: true, primary_key: false },
-  { name: 'uptime', label: 'Laufzeit', type: 'integer', nullable: true, primary_key: false },
-  { name: 'auto_heartbeat', label: 'Auto-Heartbeat', type: 'boolean', nullable: false, primary_key: false },
-  { name: 'last_heartbeat', label: 'Letzter Heartbeat', type: 'timestamp', nullable: true, primary_key: false },
+  { name: 'esp_id', label: 'ESP-ID', type: 'string' as const, nullable: false, primary_key: true },
+  { name: 'zone_name', label: 'Zone', type: 'string' as const, nullable: true, primary_key: false },
+  { name: 'zone_id', label: 'Zone-ID', type: 'string' as const, nullable: true, primary_key: false },
+  { name: 'system_state', label: 'Systemzustand', type: 'string' as const, nullable: false, primary_key: false },
+  { name: 'status', label: 'Status', type: 'string' as const, nullable: false, primary_key: false },
+  { name: 'connected', label: 'Verbunden', type: 'boolean' as const, nullable: false, primary_key: false },
+  { name: 'sensors', label: 'Sensoren', type: 'integer' as const, nullable: false, primary_key: false },
+  { name: 'actuators', label: 'Aktoren', type: 'integer' as const, nullable: false, primary_key: false },
+  { name: 'heap_free', label: 'Freier Heap', type: 'integer' as const, nullable: true, primary_key: false },
+  { name: 'wifi_rssi', label: 'WiFi RSSI', type: 'integer' as const, nullable: true, primary_key: false },
+  { name: 'uptime', label: 'Laufzeit', type: 'integer' as const, nullable: true, primary_key: false },
+  { name: 'auto_heartbeat', label: 'Auto-Heartbeat', type: 'boolean' as const, nullable: false, primary_key: false },
+  { name: 'last_heartbeat', label: 'Letzter Heartbeat', type: 'datetime' as const, nullable: true, primary_key: false },
 ]
 
 // Transform mock ESPs to table rows
@@ -544,6 +544,7 @@ async function handleNavigateToForeignKey(table: string, id: string): Promise<vo
   opacity: 0.8;
 }
 </style>
+
 
 
 
