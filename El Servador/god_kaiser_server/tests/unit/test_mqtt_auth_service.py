@@ -252,7 +252,11 @@ class TestConfigureCredentials:
         """Test that configure_credentials can disable authentication."""
         system_config_repo = SystemConfigRepository(db_session)
         service = MQTTAuthService(system_config_repo, None)
-        
+
+        # Mock file operations to avoid permission errors
+        service._update_passwd_file = MagicMock()
+        service.reload_mosquitto = MagicMock(return_value=True)
+
         # First enable
         await service.configure_credentials(
             username="testuser",
@@ -260,11 +264,11 @@ class TestConfigureCredentials:
             enabled=True,
         )
         await db_session.commit()
-        
+
         # Then disable
         result = await service.disable_authentication()
         assert result is True
-        
+
         # Verify disabled in DB
         config = await system_config_repo.get_mqtt_auth_config()
         assert config["enabled"] is False
