@@ -29,24 +29,32 @@ const router = createRouter({
           name: 'dashboard',
           component: () => import('@/views/DashboardView.vue'),
         },
+        // DEPRECATED 2025-01-04: DevicesView → Dashboard redirect
         {
           path: 'devices',
           name: 'devices',
-          component: () => import('@/views/DevicesView.vue'),
+          redirect: '/',
         },
+        // DEPRECATED 2025-01-04: DeviceDetailView → Dashboard with openSettings query
         {
           path: 'devices/:espId',
           name: 'device-detail',
-          component: () => import('@/views/DeviceDetailView.vue'),
+          redirect: (to) => ({
+            path: '/',
+            query: { openSettings: to.params.espId as string },
+          }),
         },
-        // Backward compatibility redirects
+        // Backward compatibility redirects (legacy mock-esp routes)
         {
           path: 'mock-esp',
-          redirect: { name: 'devices' },
+          redirect: '/',
         },
         {
           path: 'mock-esp/:espId',
-          redirect: (to) => ({ name: 'device-detail', params: { espId: to.params.espId } }),
+          redirect: (to) => ({
+            path: '/',
+            query: { openSettings: to.params.espId as string },
+          }),
         },
         {
           path: 'database',
@@ -99,10 +107,11 @@ const router = createRouter({
           name: 'sensors',
           component: () => import('@/views/SensorsView.vue'),
         },
+        // DEPRECATED 2025-01-04: ActuatorsView → SensorsView with tab query
         {
           path: 'actuators',
           name: 'actuators',
-          component: () => import('@/views/ActuatorsView.vue'),
+          redirect: '/sensors?tab=actuators',
         },
         {
           path: 'logic',

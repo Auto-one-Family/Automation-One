@@ -1,7 +1,11 @@
 <script setup lang="ts">
 /**
  * DeviceDetailView
- * 
+ *
+ * @deprecated 2025-01-04: Funktionen wurden in ESPSettingsPopover verschoben.
+ * Route redirected zu Dashboard mit ?openSettings={espId}.
+ * Entfernung in v2.0 geplant.
+ *
  * Management & Configuration view for ESP devices.
  * Focused on editing, configuration, and detailed information.
  */

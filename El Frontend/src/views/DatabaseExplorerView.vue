@@ -411,8 +411,8 @@ async function handleNavigateToForeignKey(table: string, id: string): Promise<vo
         <p class="text-sm text-dark-500 mb-4">
           Erstelle einen Mock ESP unter "Geräte" um Daten hier zu sehen.
         </p>
-        <router-link to="/devices" class="btn-primary">
-          Zu den Geräten
+        <router-link to="/" class="btn-primary">
+          Zum Dashboard
         </router-link>
       </div>
     </template>

@@ -2,6 +2,10 @@
 /**
  * DevicesView
  *
+ * @deprecated 2025-01-04: Redirect zu Dashboard (/).
+ * Alle ESPs werden jetzt auf dem Dashboard angezeigt.
+ * Entfernung in v2.0 geplant.
+ *
  * Management view for all ESP devices (Mock + Real).
  * Shows ESPs in a list/card grid for CRUD operations.
  *
