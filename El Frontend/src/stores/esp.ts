@@ -251,6 +251,32 @@ export const useEspStore = defineStore('esp', () => {
     }
   }
 
+  /**
+   * Update device zone fields directly in store (optimistic update).
+   * Called immediately after successful API response for instant UI feedback.
+   * WebSocket event will also update, but this ensures immediate reactivity.
+   */
+  function updateDeviceZone(
+    deviceId: string,
+    zoneData: { zone_id?: string; zone_name?: string; master_zone_id?: string }
+  ): void {
+    const index = devices.value.findIndex(d => getDeviceId(d) === deviceId)
+    if (index === -1) {
+      console.warn(`[ESP Store] updateDeviceZone: device not found: ${deviceId}`)
+      return
+    }
+
+    const device = devices.value[index]
+    // Replace entire object to trigger Vue reactivity
+    devices.value[index] = {
+      ...device,
+      zone_id: zoneData.zone_id ?? device.zone_id,
+      zone_name: zoneData.zone_name ?? device.zone_name,
+      master_zone_id: zoneData.master_zone_id ?? device.master_zone_id,
+    }
+    console.info(`[ESP Store] Zone updated (optimistic): ${deviceId} → ${zoneData.zone_id}`)
+  }
+
   async function deleteDevice(deviceId: string): Promise<void> {
     isLoading.value = true
     error.value = null
@@ -733,17 +759,24 @@ export const useEspStore = defineStore('esp', () => {
       return
     }
 
-    const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (!device) {
+    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
+    if (deviceIndex === -1) {
       console.debug(`[ESP Store] Zone assignment for unknown device: ${espId}`)
       return
     }
 
+    const device = devices.value[deviceIndex]
+
     if (data.status === 'zone_assigned') {
-      // Update zone fields
-      device.zone_id = data.zone_id || undefined
-      device.master_zone_id = data.master_zone_id || undefined
-      console.info(`[ESP Store] Zone confirmed: ${espId} → ${data.zone_id}`)
+      // IMPORTANT: Replace entire device object to trigger Vue reactivity
+      // Direct mutation (device.zone_id = ...) doesn't reliably trigger computed updates
+      devices.value[deviceIndex] = {
+        ...device,
+        zone_id: data.zone_id || undefined,
+        zone_name: data.zone_name || undefined,
+        master_zone_id: data.master_zone_id || undefined,
+      }
+      console.info(`[ESP Store] Zone confirmed: ${espId} → ${data.zone_id} (reactivity triggered)`)
     } else if (data.status === 'error') {
       console.error(`[ESP Store] Zone assignment error for ${espId}: ${data.message}`)
     } else {
@@ -818,6 +851,7 @@ export const useEspStore = defineStore('esp', () => {
     fetchDevice,
     createDevice,
     updateDevice,
+    updateDeviceZone,
     deleteDevice,
     getHealth,
     restartDevice,

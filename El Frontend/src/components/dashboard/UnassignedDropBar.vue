@@ -200,7 +200,7 @@ function goToDevice() {
               />
             </div>
             <RouterLink
-              :to="`/devices/${getDeviceId(device)}`"
+              :to="`/?openSettings=${getDeviceId(device)}`"
               class="unassigned-bar__device-link"
               @click="goToDevice()"
             >

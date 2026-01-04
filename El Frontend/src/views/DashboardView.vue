@@ -8,9 +8,11 @@
  * - ESPOrbitalLayout for visual device display (within zones)
  */
 
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/stores/logic'
+import type { ESPDevice } from '@/api/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import {
   Plus,
@@ -24,12 +26,15 @@ import {
 import ActionBar from '@/components/dashboard/ActionBar.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
+import ESPSettingsPopover from '@/components/esp/ESPSettingsPopover.vue'
 import ZoneGroup from '@/components/zones/ZoneGroup.vue'
 import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnectionOverlay.vue'
 import SensorSidebar from '@/components/dashboard/SensorSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 
+const router = useRouter()
+const route = useRoute()
 const espStore = useEspStore()
 const logicStore = useLogicStore()
 const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
@@ -45,6 +50,10 @@ const activeStatusFilters = ref<Set<StatusFilter>>(new Set())
 const showCreateMockModal = ref(false)
 const showRealEspInfo = ref(false)
 
+// Settings popover state (Phase 2)
+const settingsDevice = ref<ESPDevice | null>(null)
+const isSettingsOpen = ref(false)
+
 // Cross-ESP connections toggle
 const showCrossEspConnections = ref(true)
 
@@ -59,6 +68,39 @@ onUnmounted(() => {
   // Unsubscribe from WebSocket when leaving dashboard
   logicStore.unsubscribeFromWebSocket()
 })
+
+// =============================================================================
+// Query Parameter Support: ?openSettings=ESP_ID
+// Opens ESPSettingsPopover when navigating from /devices/:espId redirect
+// =============================================================================
+watch(
+  [() => route.query.openSettings, () => espStore.devices, () => espStore.isLoading],
+  ([openSettingsId, devices, isLoading]) => {
+    // Wait for devices to be loaded
+    if (isLoading || !devices.length) return
+
+    // Check if we have an openSettings query parameter
+    if (!openSettingsId || typeof openSettingsId !== 'string') return
+
+    // Find the device by ID
+    const device = devices.find(d => espStore.getDeviceId(d) === openSettingsId)
+
+    if (device) {
+      // Open settings popover for this device
+      settingsDevice.value = device
+      isSettingsOpen.value = true
+      console.info(`[Dashboard] Opened settings for ${openSettingsId} via query parameter`)
+
+      // Remove query parameter from URL to prevent re-opening on refresh
+      router.replace({ path: '/', query: {} })
+    } else {
+      console.warn(`[Dashboard] Device ${openSettingsId} not found for openSettings query`)
+      // Remove invalid query parameter
+      router.replace({ path: '/', query: {} })
+    }
+  },
+  { immediate: true }
+)
 
 // Status counts for ActionBar pills
 const onlineCount = computed(() => espStore.onlineDevices.length)
@@ -189,6 +231,137 @@ async function onDeviceDropped(payload: {
 }) {
   await handleDeviceDrop(payload)
 }
+
+// =============================================================================
+// Phase 0: Event Handlers from ZoneGroup
+// These handlers were missing - ZoneGroup emits them but DashboardView wasn't handling them
+// =============================================================================
+
+/**
+ * Handle heartbeat request from ZoneGroup/ESPCard
+ * Only works for Mock ESPs - Real ESPs send heartbeats automatically
+ */
+async function handleHeartbeat(espId: string) {
+  if (!espStore.isMock(espId)) {
+    // Real ESPs send heartbeats automatically every 60 seconds
+    // There's no server endpoint to request a heartbeat from real devices
+    console.info(`[Dashboard] Heartbeat request ignored for Real ESP ${espId} - they send automatically`)
+    return
+  }
+
+  try {
+    await espStore.triggerHeartbeat(espId)
+    console.info(`[Dashboard] Heartbeat triggered for Mock ESP ${espId}`)
+  } catch (err) {
+    console.error(`[Dashboard] Failed to trigger heartbeat for ${espId}:`, err)
+  }
+}
+
+/**
+ * Handle delete request from ZoneGroup/ESPCard
+ * Works for both Mock and Real ESPs with confirmation dialog
+ */
+async function handleDelete(espId: string) {
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  const displayName = device?.name || espId
+
+  // Simple confirmation dialog - can be enhanced with a proper modal later
+  if (!confirm(`Möchtest du "${displayName}" wirklich löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden.`)) {
+    return
+  }
+
+  try {
+    await espStore.deleteDevice(espId)
+    console.info(`[Dashboard] Device ${espId} deleted successfully`)
+  } catch (err) {
+    console.error(`[Dashboard] Failed to delete device ${espId}:`, err)
+  }
+}
+
+/**
+ * Handle safe-mode toggle from ZoneGroup/ESPCard
+ * Only works for Mock ESPs - toggles between OPERATIONAL and SAFE_MODE
+ */
+async function handleToggleSafeMode(espId: string) {
+  if (!espStore.isMock(espId)) {
+    console.warn(`[Dashboard] Safe-mode toggle not available for Real ESP ${espId}`)
+    return
+  }
+
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!device) {
+    console.warn(`[Dashboard] Device ${espId} not found`)
+    return
+  }
+
+  // Type assertion for Mock ESP device with system_state
+  const mockDevice = device as { system_state?: string }
+  const currentState = mockDevice.system_state
+
+  // Toggle between SAFE_MODE and OPERATIONAL
+  const newState = currentState === 'SAFE_MODE' ? 'OPERATIONAL' : 'SAFE_MODE'
+
+  try {
+    await espStore.setState(espId, newState as any, 'Manueller Wechsel über Dashboard')
+    console.info(`[Dashboard] Safe-mode toggled for ${espId}: ${currentState} → ${newState}`)
+  } catch (err) {
+    console.error(`[Dashboard] Failed to toggle safe-mode for ${espId}:`, err)
+  }
+}
+
+/**
+ * Handle settings request from ESPOrbitalLayout
+ * Opens ESPSettingsPopover with the selected device
+ */
+function handleSettings(device: ESPDevice) {
+  const deviceId = espStore.getDeviceId(device)
+  console.info(`[Dashboard] Settings requested for ${deviceId}`)
+
+  // Open ESPSettingsPopover
+  settingsDevice.value = device
+  isSettingsOpen.value = true
+}
+
+/**
+ * Handle popover close
+ */
+function handleSettingsClose() {
+  isSettingsOpen.value = false
+  // Keep settingsDevice for a moment to allow closing animation
+  setTimeout(() => {
+    if (!isSettingsOpen.value) {
+      settingsDevice.value = null
+    }
+  }, 200)
+}
+
+/**
+ * Handle device deletion from popover
+ */
+function handleDeviceDeleted(payload: { deviceId: string }) {
+  console.info(`[Dashboard] Device ${payload.deviceId} was deleted via popover`)
+  // Device list will be updated automatically via store
+  handleSettingsClose()
+}
+
+/**
+ * Handle name update from ESPOrbitalLayout or ESPSettingsPopover (Phase 3)
+ */
+function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
+  console.info(`[Dashboard] Device name updated: ${payload.deviceId} → "${payload.name || 'Unbenannt'}"`)
+  // Store is already updated via updateDevice(), just log for debugging
+}
+
+/**
+ * Handle zone update from ESPSettingsPopover (Phase 4)
+ * Zone assignment is already processed by ZoneAssignmentPanel → zonesApi → ESP Store
+ * This handler is for logging and potential future cross-component coordination
+ */
+function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName: string }) {
+  console.info(`[Dashboard] Zone updated: ${payload.deviceId} → "${payload.zoneName}" (${payload.zoneId})`)
+  // ESP Store is updated via WebSocket event from server
+  // Card will automatically move to correct ZoneGroup via reactive computed
+}
 </script>
 
 <template>
@@ -262,7 +435,7 @@ async function onDeviceDropped(payload: {
       title="Keine ESP-Geräte"
       description="Erstellen Sie Ihr erstes Mock-ESP32-Gerät, um mit dem Testen zu beginnen."
       action-text="Gerät erstellen"
-      @action="$router.push('/devices')"
+      @action="showCreateMockModal = true"
     />
 
     <!-- No Results (with filters) -->
@@ -310,6 +483,9 @@ async function onDeviceDropped(payload: {
             :enable-drag-drop="true"
             :default-expanded="true"
             @device-dropped="onDeviceDropped"
+            @heartbeat="handleHeartbeat"
+            @delete="handleDelete"
+            @toggle-safe-mode="handleToggleSafeMode"
           >
             <!-- Use ESPOrbitalLayout for Dashboard (compact view with sensors/actuators) -->
             <template #device="{ device }">
@@ -317,6 +493,10 @@ async function onDeviceDropped(payload: {
                 :device="device"
                 :show-connections="false"
                 :compact-mode="true"
+                @heartbeat="(d) => handleHeartbeat(espStore.getDeviceId(d))"
+                @delete="(d) => handleDelete(espStore.getDeviceId(d))"
+                @settings="handleSettings"
+                @name-updated="handleNameUpdated"
               />
             </template>
           </ZoneGroup>
@@ -346,6 +526,19 @@ async function onDeviceDropped(payload: {
     <CreateMockEspModal
       v-model="showCreateMockModal"
       @created="onMockEspCreated"
+    />
+
+    <!-- ESP Settings Popover (Phase 2, 3 & 4) -->
+    <ESPSettingsPopover
+      v-if="settingsDevice"
+      :device="settingsDevice"
+      :is-open="isSettingsOpen"
+      @update:is-open="isSettingsOpen = $event"
+      @close="handleSettingsClose"
+      @deleted="handleDeviceDeleted"
+      @heartbeat-triggered="(p) => handleHeartbeat(p.deviceId)"
+      @name-updated="handleNameUpdated"
+      @zone-updated="handleZoneUpdated"
     />
 
     <!-- Real ESP Info Dialog -->
