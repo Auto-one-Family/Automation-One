@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * ActuatorsView
+ *
+ * @deprecated 2025-01-04: Funktionen wurden in SensorsView (Tab-System) integriert.
+ * Route redirected zu /sensors?tab=actuators.
+ * Entfernung in v2.0 geplant.
+ */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMockEspStore } from '@/stores/mockEsp'
 import { useWebSocket } from '@/composables/useWebSocket'

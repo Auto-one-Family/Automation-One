@@ -137,6 +137,18 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 
 // =============================================================================
+// Debug Logger
+// =============================================================================
+function log(message: string, data?: Record<string, unknown>): void {
+  const style = 'background: #14b8a6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+  if (data) {
+    console.log(`%c[MultiSensorChart]%c ${message}`, style, 'color: #5eead4;', data)
+  } else {
+    console.log(`%c[MultiSensorChart]%c ${message}`, style, 'color: #5eead4;')
+  }
+}
+
+// =============================================================================
 // Computed
 // =============================================================================
 
@@ -205,6 +217,53 @@ const totalDataPoints = computed(() => {
     total += readings.length
   }
   return total
+})
+
+/** Berechne Y-Achsen-Bereich automatisch mit Puffer */
+const computedYRange = computed(() => {
+  let minVal = Infinity
+  let maxVal = -Infinity
+  let valueCount = 0
+
+  // Sammle alle Y-Werte von allen Sensoren
+  for (const [sensorId, readings] of combinedData.value.entries()) {
+    for (const reading of readings) {
+      const value = reading.processed_value ?? reading.raw_value
+      if (typeof value === 'number' && !isNaN(value)) {
+        minVal = Math.min(minVal, value)
+        maxVal = Math.max(maxVal, value)
+        valueCount++
+      }
+    }
+  }
+
+  // Fallback wenn keine Daten
+  if (minVal === Infinity || maxVal === -Infinity) {
+    log('computedYRange: no valid data', { valueCount })
+    return { min: undefined, max: undefined }
+  }
+
+  // 15% Puffer hinzufügen für bessere Lesbarkeit
+  const range = maxVal - minVal
+  const padding = range > 0 ? range * 0.15 : 1 // Mindestens 1 Einheit Puffer
+
+  const result = {
+    min: Math.floor((minVal - padding) * 10) / 10, // Auf 0.1 abrunden
+    max: Math.ceil((maxVal + padding) * 10) / 10,  // Auf 0.1 aufrunden
+  }
+
+  log('computedYRange calculated', {
+    rawMin: minVal,
+    rawMax: maxVal,
+    range,
+    padding,
+    resultMin: result.min,
+    resultMax: result.max,
+    valueCount,
+    sensorCount: combinedData.value.size,
+  })
+
+  return result
 })
 
 /** Chart-Daten im Chart.js Format */
@@ -296,8 +355,9 @@ const chartOptions = computed(() => {
       },
       y: {
         beginAtZero: false,
-        min: props.yMin,
-        max: props.yMax,
+        // Explizite Props haben Vorrang, sonst berechnete Werte
+        min: props.yMin ?? computedYRange.value.min,
+        max: props.yMax ?? computedYRange.value.max,
         grid: {
           color: 'rgba(255, 255, 255, 0.05)',
         },
@@ -318,7 +378,15 @@ const chartOptions = computed(() => {
  * Verwendet Retry-Logik bei Fehlern.
  */
 async function fetchData(retryAttempt = 0): Promise<void> {
+  log('fetchData called', {
+    sensorCount: props.sensors.length,
+    sensors: props.sensors.map(s => s.id),
+    timeRange: props.timeRange,
+    retryAttempt,
+  })
+
   if (props.sensors.length === 0) {
+    log('No sensors - skipping fetch')
     sensorData.value = new Map()
     return
   }
@@ -332,9 +400,18 @@ async function fetchData(retryAttempt = 0): Promise<void> {
   const now = new Date()
   const startTime = new Date(now.getTime() - timeRangeMs.value)
 
+  log('Fetching data', {
+    startTime: startTime.toISOString(),
+    endTime: now.toISOString(),
+  })
+
   try {
     const promises = props.sensors.map(async (sensor) => {
       try {
+        log(`Querying API for sensor ${sensor.id}`, {
+          esp_id: sensor.espId,
+          gpio: sensor.gpio,
+        })
         const response = await sensorsApi.queryData({
           esp_id: sensor.espId,
           gpio: sensor.gpio,
@@ -342,10 +419,14 @@ async function fetchData(retryAttempt = 0): Promise<void> {
           end_time: now.toISOString(),
           limit: MAX_DATA_POINTS,
         })
+        log(`API response for ${sensor.id}`, {
+          readingsCount: response.readings?.length ?? 0,
+          response,
+        })
         return { id: sensor.id, readings: response.readings, error: null }
       } catch (err) {
         // Einzelner Sensor-Fehler wird nicht als kritischer Fehler behandelt
-        console.warn(`[MultiSensorChart] Fehler beim Laden von ${sensor.id}:`, err)
+        log(`API ERROR for ${sensor.id}`, { error: err })
         return { id: sensor.id, readings: [], error: err }
       }
     })
@@ -364,15 +445,22 @@ async function fetchData(retryAttempt = 0): Promise<void> {
 
     sensorData.value = newData
 
+    log('fetchData complete', {
+      successCount,
+      totalSensors: props.sensors.length,
+      enableLiveUpdates: props.enableLiveUpdates,
+    })
+
     // Kein Error wenn mindestens ein Sensor Daten hat oder Live-Updates aktiv sind
     if (successCount === 0 && !props.enableLiveUpdates) {
       // Keine historischen Daten - kein Error, nur Info
-      console.info('[MultiSensorChart] Keine historischen Daten verfügbar')
+      log('⚠️ No historical data available - waiting for live updates')
     }
 
     error.value = null
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Fehler beim Laden der Daten'
+    log('fetchData FAILED', { error: err, errorMessage })
 
     // Retry-Logik
     if (retryAttempt < RETRY_CONFIG.maxAttempts) {
@@ -380,7 +468,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
         RETRY_CONFIG.baseDelay * Math.pow(2, retryAttempt),
         RETRY_CONFIG.maxDelay
       )
-      console.warn(`[MultiSensorChart] Retry ${retryAttempt + 1}/${RETRY_CONFIG.maxAttempts} in ${delay}ms`)
+      log(`Retry ${retryAttempt + 1}/${RETRY_CONFIG.maxAttempts} in ${delay}ms`)
 
       error.value = {
         message: `${errorMessage} (Retry ${retryAttempt + 1}/${RETRY_CONFIG.maxAttempts}...)`,
@@ -416,7 +504,15 @@ function retry(): void {
  * Richtet WebSocket-Subscriptions für Live-Updates ein.
  */
 function setupWebSocketSubscriptions(): void {
-  if (!props.enableLiveUpdates || props.sensors.length === 0) return
+  log('setupWebSocketSubscriptions', {
+    enableLiveUpdates: props.enableLiveUpdates,
+    sensorCount: props.sensors.length,
+  })
+
+  if (!props.enableLiveUpdates || props.sensors.length === 0) {
+    log('WebSocket subscriptions skipped')
+    return
+  }
 
   // Cleanup vorheriger Subscriptions
   cleanupWebSocketSubscriptions()
@@ -433,9 +529,15 @@ function setupWebSocketSubscriptions(): void {
       }
     )
     wsSubscriptionIds.value.push(subscriptionId)
+    log(`WebSocket subscription created`, {
+      sensorId: sensor.id,
+      espId: sensor.espId,
+      gpio: sensor.gpio,
+      subscriptionId,
+    })
   }
 
-  console.debug(`[MultiSensorChart] ${wsSubscriptionIds.value.length} WebSocket subscriptions aktiv`)
+  log(`✅ ${wsSubscriptionIds.value.length} WebSocket subscriptions aktiv`)
 }
 
 /**
@@ -446,8 +548,21 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
 
   // Prüfe ob die Daten zu diesem Sensor gehören (GPIO-Match)
   if (data.gpio !== undefined && data.gpio !== sensor.gpio) {
+    // Nur alle 5 Sekunden loggen um Console nicht zu fluten
+    const now = Date.now()
+    const lastLog = (handleSensorDataMessage as any)._lastFilterLog || 0
+    if (now - lastLog > 5000) {
+      log(`WebSocket data filtered (GPIO mismatch)`, {
+        expectedGpio: sensor.gpio,
+        receivedGpio: data.gpio,
+        sensorId: sensor.id,
+      })
+      ;(handleSensorDataMessage as any)._lastFilterLog = now
+    }
     return
   }
+
+  log(`📡 WebSocket data received for ${sensor.id}`, { data, value: data.value ?? data.raw_value })
 
   // Erstelle SensorReading aus WebSocket-Daten
   const reading: SensorReading = {
@@ -468,6 +583,8 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
   const newLiveData = new Map(liveDataPoints.value)
   newLiveData.set(sensor.id, updatedLive)
   liveDataPoints.value = newLiveData
+
+  log(`Live data updated for ${sensor.id}`, { totalPoints: updatedLive.length })
 }
 
 /**
@@ -491,21 +608,22 @@ function clearLiveData(): void {
 // Watchers
 // =============================================================================
 
+/**
+ * Sensor-IDs als String für zuverlässige Watch-Erkennung.
+ * WICHTIG: Array-Mutation mit .push() ändert die Referenz nicht,
+ * daher brauchen wir einen abgeleiteten Wert für die Watch.
+ */
+const sensorIdsString = computed(() => props.sensors.map(s => s.id).sort().join(','))
+
 // Bei Sensor-Änderungen neu laden
 watch(
-  () => props.sensors,
-  (newSensors, oldSensors) => {
-    // Prüfe ob sich die Sensor-IDs geändert haben
-    const newIds = newSensors.map(s => s.id).sort().join(',')
-    const oldIds = (oldSensors || []).map(s => s.id).sort().join(',')
-
-    if (newIds !== oldIds) {
-      clearLiveData()
-      fetchData()
-      setupWebSocketSubscriptions()
-    }
-  },
-  { deep: true }
+  sensorIdsString,
+  (newIds, oldIds) => {
+    log('sensorIdsString changed', { newIds, oldIds })
+    clearLiveData()
+    fetchData()
+    setupWebSocketSubscriptions()
+  }
 )
 
 // Bei Zeitraum-Änderungen neu laden
@@ -607,7 +725,17 @@ onUnmounted(() => {
 
     <!-- Chart -->
     <div v-else class="multi-sensor-chart__container" :style="{ height: `${height}px` }">
-      <Line :data="chartData" :options="chartOptions" />
+      <!--
+        Key erzwingt Re-Render bei:
+        - Sensor-Änderungen (neue/entfernte Sensoren)
+        - Y-Achsen-Bereich-Änderungen (wenn neue Daten außerhalb des alten Bereichs liegen)
+        Ohne Y-Range im Key würde Chart.js die Achsen nicht aktualisieren!
+      -->
+      <Line
+        :key="`chart-${sensors.map(s => s.id).join('-')}-y${computedYRange.min ?? 'auto'}-${computedYRange.max ?? 'auto'}-n${totalDataPoints}`"
+        :data="chartData"
+        :options="chartOptions"
+      />
 
       <!-- Info-Badge: Datenpunkte & Live-Status -->
       <div class="multi-sensor-chart__info">
@@ -648,12 +776,12 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 2rem 1rem;
+  gap: 0.375rem;
+  padding: 1.5rem 0.75rem;
   color: var(--color-text-muted);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   text-align: center;
-  min-height: 120px;
+  min-height: 100px;
 }
 
 .multi-sensor-chart__error {
@@ -663,15 +791,16 @@ onUnmounted(() => {
 .multi-sensor-chart__error-icon,
 .multi-sensor-chart__empty-icon,
 .multi-sensor-chart__no-data-icon {
-  font-size: 1.5rem;
-  margin-bottom: 0.25rem;
+  font-size: 1.25rem;
+  margin-bottom: 0.125rem;
 }
 
 .multi-sensor-chart__empty-hint,
 .multi-sensor-chart__no-data-hint {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   opacity: 0.7;
-  max-width: 200px;
+  max-width: 180px;
+  line-height: 1.3;
 }
 
 /* Retry Button */
@@ -696,21 +825,22 @@ onUnmounted(() => {
 .multi-sensor-chart__live-indicator {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  margin-top: 0.5rem;
-  padding: 0.25rem 0.5rem;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+  padding: 0.1875rem 0.4375rem;
   background: rgba(52, 211, 153, 0.1);
   border-radius: 9999px;
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   color: var(--color-success);
 }
 
 .multi-sensor-chart__live-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   background: var(--color-success);
   border-radius: 50%;
   animation: pulse-live 2s ease-in-out infinite;
+  flex-shrink: 0;
 }
 
 @keyframes pulse-live {
@@ -721,28 +851,30 @@ onUnmounted(() => {
 /* Info Badge */
 .multi-sensor-chart__info {
   position: absolute;
-  bottom: 8px;
-  right: 8px;
+  bottom: 6px;
+  right: 6px;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 0.25rem;
-  font-size: 0.625rem;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.375rem;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 0.1875rem;
+  font-size: 0.5625rem;
   color: var(--color-text-muted);
   backdrop-filter: blur(4px);
 }
 
 .multi-sensor-chart__info-points {
   font-family: 'JetBrains Mono', monospace;
+  letter-spacing: -0.025em;
 }
 
 .multi-sensor-chart__info-live {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.1875rem;
   color: var(--color-success);
+  font-weight: 500;
 }
 
 /* Loading Overlay */
