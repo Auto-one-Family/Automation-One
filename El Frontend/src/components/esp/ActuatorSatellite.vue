@@ -16,6 +16,7 @@ import { computed, ref } from 'vue'
 import { Power, ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import { getActuatorTypeInfo } from '@/utils/labels'
+import { useDragStateStore } from '@/stores/dragState'
 
 interface Props {
   /** ESP ID this actuator belongs to */
@@ -52,8 +53,24 @@ const emit = defineEmits<{
   showConnections: [gpio: number]
 }>()
 
+// Drag state store (global ESP-Card drag tracking)
+const dragStore = useDragStateStore()
+
 // Drag state
 const isDragging = ref(false)
+
+/**
+ * Effective draggable state.
+ * KRITISCH: Wenn ein ESP-Card-Drag (VueDraggable) aktiv ist,
+ * muss das Actuator-eigene draggable deaktiviert werden,
+ * da es sonst den VueDraggable-Drag stören würde.
+ */
+const effectiveDraggable = computed(() => {
+  if (dragStore.isDraggingEspCard) {
+    return false
+  }
+  return props.draggable
+})
 
 // Get actuator type info
 const actuatorInfo = computed(() => getActuatorTypeInfo(props.actuatorType))
@@ -138,13 +155,13 @@ function handleDragEnd(event: DragEvent) {
         'actuator-satellite--active': state && !emergencyStopped,
         'actuator-satellite--emergency': emergencyStopped,
         'actuator-satellite--dragging': isDragging,
-        'actuator-satellite--draggable': draggable
+        'actuator-satellite--draggable': effectiveDraggable
       }
     ]"
     :data-esp-id="espId"
     :data-gpio="gpio"
     data-satellite-type="actuator"
-    :draggable="draggable"
+    :draggable="effectiveDraggable"
     :title="`${name || actuatorInfo.label} (GPIO ${gpio})`"
     @click="handleClick"
     @dragstart="handleDragStart"

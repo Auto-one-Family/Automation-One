@@ -2,6 +2,9 @@
 /**
  * ESPCard Component
  *
+ * @legacy Nur noch für ZoneGroup verwendet. Dashboard nutzt ESPOrbitalLayout.
+ * Links wurden auf /?openSettings=${espId} aktualisiert.
+ *
  * Displays an ESP device card with:
  * - Mock/Real visual distinction (purple vs cyan border)
  * - Online/Offline status indicator
@@ -11,6 +14,34 @@
  * - Zone information
  * - Last heartbeat time
  * - Inline name editing
+ *
+ * =============================================================================
+ * DATA SOURCES DOCUMENTATION (Phase 1)
+ * =============================================================================
+ *
+ * | Datum      | Mock-Quelle                          | Real-Quelle                      | Aktualisierung           |
+ * |------------|--------------------------------------|----------------------------------|--------------------------|
+ * | Name       | device.name (DB via Mock→normalized) | device.name (DB)                 | Bei Änderung via PATCH   |
+ * | Status     | device.connected → 'online'/'offline'| device.status + last_seen        | WebSocket esp_health     |
+ * | WiFi RSSI  | mock.wifi_rssi (Debug Store, -43dBm) | device.wifi_rssi (from heartbeat)| WebSocket esp_health     |
+ * | Uptime     | mock.uptime (Debug Store)            | device.uptime (from heartbeat)   | WebSocket esp_health     |
+ * | Heap       | mock.heap_free (Debug Store, 180KB)  | device.heap_free (from heartbeat)| WebSocket esp_health     |
+ * | Last Seen  | mock.last_heartbeat                  | device.last_seen / last_heartbeat| WebSocket esp_health     |
+ * | Sensors    | mock.sensors[] (Debug Store)         | device.sensor_count (DB)         | WebSocket sensor_data    |
+ * | Actuators  | mock.actuators[] (Debug Store)       | device.actuator_count (DB)       | WebSocket actuator_status|
+ *
+ * Mock ESP Default Values (from server MockESPManager):
+ * - wifi_rssi: -43 dBm (simulated excellent signal)
+ * - heap_free: 180000 bytes (~176 KB)
+ * - uptime: incremented every heartbeat
+ *
+ * Real ESP Data Flow:
+ * 1. ESP sends heartbeat via MQTT with metrics (uptime, heap, rssi)
+ * 2. Server heartbeat_handler stores in DB + broadcasts WebSocket esp_health
+ * 3. Frontend esp.ts store receives esp_health and updates device in list
+ * 4. ESPCard re-renders with updated props
+ *
+ * =============================================================================
  */
 
 import { computed, ref, nextTick } from 'vue'
@@ -400,13 +431,59 @@ const wifiColorClass = computed(() => {
   }
 })
 
-// WiFi tooltip with detailed info
+// WiFi tooltip with detailed info (shows technical dBm value for experts)
 const wifiTooltip = computed(() => {
   if (props.esp.wifi_rssi === undefined || props.esp.wifi_rssi === null) {
-    return 'WiFi: Keine Daten'
+    return 'WiFi-Signalstärke: Keine Daten verfügbar'
   }
   const simNote = isMock.value ? ' (simuliert)' : ''
-  return `WiFi: ${props.esp.wifi_rssi} dBm - ${wifiInfo.value.label}${simNote}`
+  return `WiFi: ${props.esp.wifi_rssi} dBm${simNote}`
+})
+
+// =============================================================================
+// Heartbeat Indicator (Phase 1)
+// =============================================================================
+
+/**
+ * Check if heartbeat is "fresh" (< 30 seconds ago)
+ * Used for pulse animation on heartbeat icon
+ */
+const isHeartbeatFresh = computed(() => {
+  const timestamp = props.esp.last_heartbeat || props.esp.last_seen
+  if (!timestamp) return false
+
+  const now = Date.now()
+  const then = new Date(timestamp).getTime()
+  const diffSec = Math.floor((now - then) / 1000)
+
+  return diffSec >= 0 && diffSec < 30
+})
+
+/**
+ * Heartbeat click handler
+ * - Mock ESP: Triggers manual heartbeat
+ * - Real ESP: Shows info that heartbeats are automatic
+ */
+function handleHeartbeatClick() {
+  if (isMock.value) {
+    emit('heartbeat', espId.value)
+  } else {
+    // Show browser alert for Real ESPs
+    alert('Real ESPs senden Heartbeats automatisch alle 60 Sekunden.\n\nDiese Funktion ist nur für Mock ESPs verfügbar.')
+  }
+}
+
+/**
+ * Heartbeat tooltip based on device type
+ */
+const heartbeatTooltip = computed(() => {
+  const timestamp = props.esp.last_heartbeat || props.esp.last_seen
+  const relativeTime = timestamp ? formatRelativeTime(timestamp) : 'Nie'
+
+  if (isMock.value) {
+    return `Letzter Heartbeat: ${relativeTime}\nKlicken um Heartbeat auszulösen`
+  }
+  return `Letzter Heartbeat: ${relativeTime}\nReal ESPs senden automatisch alle 60s`
 })
 </script>
 
@@ -485,7 +562,7 @@ const wifiTooltip = computed(() => {
           <!-- ESP-ID (secondary, always visible) -->
           <div class="esp-card__id-row">
             <RouterLink
-              :to="`/devices/${espId}`"
+              :to="`/?openSettings=${espId}`"
               class="esp-card__id"
             >
               {{ espId }}
@@ -595,9 +672,21 @@ const wifiTooltip = computed(() => {
           <HardDrive class="w-4 h-4" />
           <span>{{ formatHeapSize(esp.heap_free || 0) }}</span>
         </div>
-        <div v-if="esp.wifi_rssi !== undefined" class="esp-card__stat" :title="wifiTooltip">
-          <Wifi :class="['w-4 h-4', wifiColorClass]" />
+        <!-- WiFi Signal with bars indicator (Phase 1) -->
+        <div v-if="esp.wifi_rssi !== undefined" class="esp-card__stat esp-card__wifi" :title="wifiTooltip">
+          <!-- WiFi Bars Indicator -->
+          <div :class="['esp-card__wifi-bars', wifiColorClass]">
+            <span :class="['esp-card__wifi-bar', { active: wifiInfo.bars >= 1 }]" />
+            <span :class="['esp-card__wifi-bar', { active: wifiInfo.bars >= 2 }]" />
+            <span :class="['esp-card__wifi-bar', { active: wifiInfo.bars >= 3 }]" />
+            <span :class="['esp-card__wifi-bar', { active: wifiInfo.bars >= 4 }]" />
+          </div>
           <span :class="wifiColorClass">{{ wifiInfo.label }}</span>
+        </div>
+        <!-- WiFi Unknown state -->
+        <div v-else class="esp-card__stat esp-card__wifi" title="WiFi-Signalstärke: Keine Daten verfügbar">
+          <Wifi class="w-4 h-4 text-slate-500" style="opacity: 0.4" />
+          <span class="text-slate-500">Unbekannt</span>
         </div>
       </div>
 
@@ -632,13 +721,29 @@ const wifiTooltip = computed(() => {
         </div>
       </div>
 
-      <!-- Last heartbeat (separate row for visibility) -->
-      <div v-if="esp.last_heartbeat || esp.last_seen" class="esp-card__heartbeat-info">
-        <Heart class="w-3.5 h-3.5" />
-        <span :title="esp.last_heartbeat || esp.last_seen || ''">
+      <!-- Heartbeat Indicator (Phase 1: Clickable with pulse animation) -->
+      <button
+        v-if="esp.last_heartbeat || esp.last_seen || isMock"
+        :class="[
+          'esp-card__heartbeat-indicator',
+          { 'esp-card__heartbeat-indicator--fresh': isHeartbeatFresh },
+          { 'esp-card__heartbeat-indicator--mock': isMock }
+        ]"
+        :title="heartbeatTooltip"
+        :disabled="heartbeatLoading || isOrphanedMock"
+        @click="handleHeartbeatClick"
+      >
+        <Heart
+          :class="[
+            'w-4 h-4',
+            isHeartbeatFresh ? 'esp-card__heart-pulse' : ''
+          ]"
+        />
+        <span class="esp-card__heartbeat-text">
           {{ formatRelativeTime(esp.last_heartbeat || esp.last_seen || '') }}
         </span>
-      </div>
+        <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin ml-1" />
+      </button>
       
       <!-- Auto-heartbeat indicator (Mock ESP only) -->
       <div v-if="isMock && 'auto_heartbeat' in esp" class="esp-card__auto-heartbeat">
@@ -661,7 +766,7 @@ const wifiTooltip = computed(() => {
         <!-- Left group: Details + other actions -->
         <div class="esp-card__actions-left">
           <RouterLink
-            :to="`/devices/${espId}`"
+            :to="`/?openSettings=${espId}`"
             class="esp-card__details-btn"
           >
             <ExternalLink class="w-4 h-4" />
@@ -685,7 +790,7 @@ const wifiTooltip = computed(() => {
             v-if="!isMock"
             class="esp-card__action-btn"
             title="Konfigurieren"
-            @click="$router.push(`/devices/${espId}`)"
+            @click="$router.push(`/?openSettings=${espId}`)"
           >
             <Settings class="w-4 h-4" />
           </button>
@@ -1090,17 +1195,119 @@ const wifiTooltip = computed(() => {
   font-weight: 400;
 }
 
-/* Heartbeat info */
-.esp-card__heartbeat-info {
+/* =============================================================================
+   WiFi Bars Indicator (Phase 1)
+   ============================================================================= */
+
+.esp-card__wifi {
+  cursor: help;
+}
+
+.esp-card__wifi-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+
+.esp-card__wifi-bar {
+  width: 3px;
+  background-color: var(--color-text-muted);
+  border-radius: 1px;
+  opacity: 0.25;
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+/* Bar heights: increasing from left to right */
+.esp-card__wifi-bar:nth-child(1) { height: 4px; }
+.esp-card__wifi-bar:nth-child(2) { height: 7px; }
+.esp-card__wifi-bar:nth-child(3) { height: 10px; }
+.esp-card__wifi-bar:nth-child(4) { height: 14px; }
+
+/* Active bars inherit color from parent and are fully opaque */
+.esp-card__wifi-bar.active {
+  opacity: 1;
+  background-color: currentColor;
+}
+
+/* =============================================================================
+   Heartbeat Indicator (Phase 1)
+   ============================================================================= */
+
+.esp-card__heartbeat-indicator {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
   font-size: 0.75rem;
   color: var(--color-text-muted);
+  background-color: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.esp-card__heartbeat-info span {
+.esp-card__heartbeat-indicator:hover:not(:disabled) {
+  background-color: var(--glass-bg);
+  border-color: rgba(244, 114, 182, 0.3);
   color: var(--color-text-secondary);
+}
+
+.esp-card__heartbeat-indicator:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mock ESP heartbeat button - more prominent */
+.esp-card__heartbeat-indicator--mock {
+  border-color: rgba(244, 114, 182, 0.2);
+}
+
+.esp-card__heartbeat-indicator--mock:hover:not(:disabled) {
+  background-color: rgba(244, 114, 182, 0.08);
+  border-color: rgba(244, 114, 182, 0.4);
+}
+
+/* Fresh heartbeat state - green tint */
+.esp-card__heartbeat-indicator--fresh {
+  color: var(--color-success);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.esp-card__heartbeat-indicator--fresh:hover:not(:disabled) {
+  background-color: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.esp-card__heartbeat-text {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+/* Heart pulse animation */
+.esp-card__heart-pulse {
+  animation: heart-beat 1.5s ease-in-out infinite;
+  color: #f472b6; /* Pink heart */
+}
+
+@keyframes heart-beat {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  25% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  75% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
 }
 
 /* Auto-heartbeat indicator */

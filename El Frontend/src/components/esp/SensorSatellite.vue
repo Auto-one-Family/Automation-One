@@ -88,9 +88,23 @@ const qualityVariant = computed(() => {
 })
 
 // Formatted value
-const formattedValue = computed(() => 
+const formattedValue = computed(() =>
   formatNumber(props.value, sensorConfig.value.decimals)
 )
+
+/**
+ * Effective draggable state.
+ * KRITISCH: Wenn ein ESP-Card-Drag (VueDraggable) aktiv ist,
+ * muss das Sensor-eigene draggable deaktiviert werden,
+ * da es sonst den VueDraggable-Drag stören würde.
+ */
+const effectiveDraggable = computed(() => {
+  // Wenn ESP-Card gedraggt wird, eigenes draggable deaktivieren
+  if (dragStore.isDraggingEspCard) {
+    return false
+  }
+  return props.draggable
+})
 
 // Handle click
 function handleClick() {
@@ -100,14 +114,31 @@ function handleClick() {
   }
 }
 
+// Debug logger with consistent styling
+function log(message: string, data?: Record<string, unknown>): void {
+  const style = 'background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+  const label = `SensorSatellite:${props.espId}:GPIO${props.gpio}`
+  if (data) {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #34d399;', data)
+  } else {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #34d399;')
+  }
+}
+
 // Drag handlers for Multi-Sensor Chart (Phase 4)
 function handleDragStart(event: DragEvent) {
-  if (!props.draggable || !event.dataTransfer) return
+  log('dragstart fired', { draggable: props.draggable, hasDataTransfer: !!event.dataTransfer })
+
+  if (!props.draggable || !event.dataTransfer) {
+    log('dragstart ABORTED - not draggable or no dataTransfer')
+    return
+  }
 
   // KRITISCH: Verhindere dass VueDraggable (Parent) das Event abfängt!
   // Ohne stopPropagation() würde VueDraggable denken, eine ESP-Card wird gedraggt,
   // was den UI-State korrumpiert und dragend nie aufgerufen wird.
   event.stopPropagation()
+  log('stopPropagation() called')
 
   isDragging.value = true
 
@@ -122,18 +153,24 @@ function handleDragStart(event: DragEvent) {
   }
   event.dataTransfer.setData('application/json', JSON.stringify(dragData))
   event.dataTransfer.effectAllowed = 'copy'
+  log('dataTransfer set', { dragData })
 
   // Update global drag state for auto-opening chart
   dragStore.startSensorDrag(dragData)
+  log('dragStore.startSensorDrag() called')
 }
 
 function handleDragEnd(event: DragEvent) {
+  log('dragend fired', { dropEffect: event.dataTransfer?.dropEffect })
+
   // KRITISCH: Auch hier stopPropagation für konsistentes Verhalten
   event.stopPropagation()
+  log('stopPropagation() called')
 
   isDragging.value = false
   // Clear global drag state
   dragStore.endDrag()
+  log('dragStore.endDrag() called - drag complete')
 }
 </script>
 
@@ -144,13 +181,13 @@ function handleDragEnd(event: DragEvent) {
       {
         'sensor-satellite--selected': selected,
         'sensor-satellite--dragging': isDragging,
-        'sensor-satellite--draggable': draggable
+        'sensor-satellite--draggable': effectiveDraggable
       }
     ]"
     :data-esp-id="espId"
     :data-gpio="gpio"
     data-satellite-type="sensor"
-    :draggable="draggable"
+    :draggable="effectiveDraggable"
     :title="`${name || sensorConfig.label} (GPIO ${gpio})`"
     @click="handleClick"
     @dragstart="handleDragStart"
@@ -188,15 +225,15 @@ function handleDragEnd(event: DragEvent) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  gap: 0.1875rem;
+  padding: 0.4375rem 0.375rem;
   background: rgba(30, 32, 40, 0.85);
   border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: 0.4375rem;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 52px;
-  max-width: 130px;
+  min-width: 50px;
+  max-width: 120px;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
@@ -231,8 +268,8 @@ function handleDragEnd(event: DragEvent) {
 
 /* Icon - compact circle */
 .sensor-satellite__icon {
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -266,25 +303,26 @@ function handleDragEnd(event: DragEvent) {
   display: flex;
   align-items: baseline;
   justify-content: center;
-  gap: 0.125rem;
+  gap: 0.0625rem;
 }
 
 .sensor-satellite__value-number {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-primary);
   line-height: 1;
+  letter-spacing: -0.025em;
 }
 
 .sensor-satellite__value-unit {
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   color: var(--color-text-muted);
 }
 
 /* Label - compact */
 .sensor-satellite__label {
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   font-weight: 500;
   color: var(--color-text-muted);
   text-align: center;

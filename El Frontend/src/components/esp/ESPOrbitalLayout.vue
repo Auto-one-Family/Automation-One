@@ -15,10 +15,11 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { ExternalLink, X } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
+import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
+import { formatRelativeTime } from '@/utils/formatters'
 import SensorSatellite from './SensorSatellite.vue'
 import ActuatorSatellite from './ActuatorSatellite.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
@@ -50,7 +51,6 @@ const props = withDefaults(defineProps<Props>(), {
   compactMode: false
 })
 
-const router = useRouter()
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
 
@@ -58,6 +58,14 @@ const emit = defineEmits<{
   sensorClick: [gpio: number]
   actuatorClick: [gpio: number]
   sensorDropped: [sensor: ChartSensor]
+  /** Heartbeat request (Mock ESPs only) */
+  heartbeat: [device: ESPDevice]
+  /** Delete request - opens confirmation dialog */
+  delete: [device: ESPDevice]
+  /** Settings popover request */
+  settings: [device: ESPDevice]
+  /** Name was updated via inline edit */
+  'name-updated': [payload: { deviceId: string; name: string | null }]
 }>()
 
 // =============================================================================
@@ -126,21 +134,64 @@ function resetNewSensor() {
 }
 
 // =============================================================================
+// Debug Logger
+// =============================================================================
+function log(message: string, data?: Record<string, unknown>): void {
+  const style = 'background: #3b82f6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+  const label = `ESPLayout:${espId.value}`
+  if (data) {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #60a5fa;', data)
+  } else {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #60a5fa;')
+  }
+}
+
+// =============================================================================
 // Drop Event Handlers (for adding sensors via drag from sidebar)
 // =============================================================================
 
 function onDragEnter(event: DragEvent) {
+  // Prüfe ob das ein VueDraggable-Event ist (ESP-Card-Reordering)
+  // VueDraggable setzt keine dataTransfer-Typen, native Drags schon
+  const types = event.dataTransfer?.types || []
+  const isVueDraggable = types.length === 0 || types.includes('text/plain')
+
+  log('dragenter', {
+    isDraggingSensorType: dragStore.isDraggingSensorType,
+    isDraggingSensor: dragStore.isDraggingSensor,
+    types: Array.from(types),
+    isVueDraggable,
+    target: (event.target as Element)?.className?.slice?.(0, 50) || (event.target as Element)?.tagName,
+  })
+
+  // KRITISCH: Wenn weder SensorType noch Sensor gedraggt wird,
+  // ist es wahrscheinlich ein VueDraggable-Event (ESP-Card-Reordering)
+  // In diesem Fall NICHT reagieren, um VueDraggable nicht zu stören!
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+    log('dragenter IGNORED - likely VueDraggable ESP-Card reordering')
+    return
+  }
+
   // Only react visually if dragging a sensor type from sidebar (for adding new sensors)
   if (dragStore.isDraggingSensorType) {
     isDragOver.value = true
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy'
     }
+    log('isDragOver = true (sensor type from sidebar)')
   }
   // Sensor-Satellite-Drags (für Chart) werden durchgelassen zur AnalysisDropZone
 }
 
 function onDragOver(event: DragEvent) {
+  // KRITISCH: Wenn weder SensorType noch Sensor gedraggt wird,
+  // ist es wahrscheinlich ein VueDraggable-Event (ESP-Card-Reordering)
+  // In diesem Fall NICHT preventDefault() aufrufen, um VueDraggable nicht zu stören!
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+    // VueDraggable ESP-Card-Reordering - durchlassen ohne Intervention
+    return
+  }
+
   // KRITISCH: preventDefault() muss aufgerufen werden um Drop zu erlauben!
   // Ohne preventDefault() zeigt der Browser "nicht zulässig" (roter Kreis)
 
@@ -158,28 +209,50 @@ function onDragOver(event: DragEvent) {
       event.dataTransfer.dropEffect = 'copy'
     }
   }
-  // Andere Drags (z.B. ESP-Card-Reordering via VueDraggable) werden durchgelassen
 }
 
 function onDragLeave(event: DragEvent) {
+  // KRITISCH: Ignorieren wenn es ein VueDraggable-Event ist
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+    return
+  }
+
   // Only reset if leaving the container entirely
   const target = event.currentTarget as HTMLElement
   const related = event.relatedTarget as HTMLElement
   if (!target.contains(related)) {
     isDragOver.value = false
+    log('dragleave - isDragOver = false')
   }
 }
 
 function onDrop(event: DragEvent) {
+  // KRITISCH: Ignorieren wenn es ein VueDraggable-Event ist
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+    log('DROP IGNORED - likely VueDraggable ESP-Card reordering')
+    return
+  }
+
+  log('DROP on ESPLayout', {
+    hasJsonData: !!event.dataTransfer?.getData('application/json'),
+    types: event.dataTransfer?.types,
+  })
+
   event.preventDefault()
   isDragOver.value = false
 
   const jsonData = event.dataTransfer?.getData('application/json')
-  if (!jsonData) return
+  if (!jsonData) {
+    log('DROP - no JSON data, ignoring')
+    return
+  }
 
   try {
     const payload = JSON.parse(jsonData)
+    log('DROP payload parsed', payload)
+
     if (payload.action === 'add-sensor') {
+      log('DROP - add-sensor action, opening modal')
       // Pre-fill form with dragged sensor type
       newSensor.value.sensor_type = payload.sensorType
       newSensor.value.unit = getSensorUnit(payload.sensorType)
@@ -191,9 +264,13 @@ function onDrop(event: DragEvent) {
       newSensor.value.gpio = nextGpio
       // Open modal
       showAddSensorModal.value = true
+    } else if (payload.type === 'sensor') {
+      log('DROP - sensor for chart, should be handled by AnalysisDropZone')
+    } else {
+      log('DROP - unknown payload type', { type: payload.type, action: payload.action })
     }
   } catch (error) {
-    console.error('[ESPOrbitalLayout] Failed to parse drop data:', error)
+    log('DROP ERROR - failed to parse', { error })
   }
 }
 
@@ -268,36 +345,213 @@ const totalItems = computed(() => {
 })
 
 /**
- * Connection quality based on WiFi RSSI
- * - 'good': RSSI > -60 dBm (stable)
- * - 'fair': RSSI -60 to -75 dBm (weak)
- * - 'poor': RSSI < -75 dBm or offline (no connection)
+ * Determine if sensors should use multi-row layout.
+ * - ≤5 sensors: single row (horizontal)
+ * - >5 sensors: 2-column grid (wraps into multiple rows)
  */
-const connectionQuality = computed(() => {
-  if (!isOnline.value) return 'poor'
-  const rssi = props.device?.wifi_rssi
-  if (rssi === undefined || rssi === null) return 'fair' // Unknown = assume fair
-  if (rssi > -60) return 'good'
-  if (rssi >= -75) return 'fair'
-  return 'poor'
+const sensorsUseMultiRow = computed(() => {
+  return sensors.value.length > 5
 })
 
 /**
- * Human-readable connection tooltip (NO technical dBm values!)
+ * Connection quality based on WiFi RSSI
+ * @deprecated - Use wifiInfo.quality instead (provides more detailed levels)
  */
-const connectionTooltip = computed(() => {
-  if (!isOnline.value) return 'Keine Verbindung'
-  switch (connectionQuality.value) {
-    case 'good': return 'Verbindung: Stabil'
-    case 'fair': return 'Verbindung: Schwach'
-    case 'poor': return 'Verbindung: Kritisch'
-    default: return 'Verbindung: Unbekannt'
+// const connectionQuality = computed(() => {
+//   if (!isOnline.value) return 'poor'
+//   const rssi = props.device?.wifi_rssi
+//   if (rssi === undefined || rssi === null) return 'fair'
+//   if (rssi > -60) return 'good'
+//   if (rssi >= -75) return 'fair'
+//   return 'poor'
+// })
+//
+// const connectionTooltip = computed(() => {
+//   if (!isOnline.value) return 'Keine Verbindung'
+//   switch (connectionQuality.value) {
+//     case 'good': return 'Verbindung: Stabil'
+//     case 'fair': return 'Verbindung: Schwach'
+//     case 'poor': return 'Verbindung: Kritisch'
+//     default: return 'Verbindung: Unbekannt'
+//   }
+// })
+
+// =============================================================================
+// WiFi Signal Strength (Phase 1)
+// =============================================================================
+
+/** WiFi strength info from RSSI value */
+const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(props.device?.wifi_rssi))
+
+/** WiFi color class based on signal quality */
+const wifiColorClass = computed(() => {
+  switch (wifiInfo.value.quality) {
+    case 'excellent':
+    case 'good':
+      return 'text-emerald-400'
+    case 'fair':
+      return 'text-yellow-400'
+    case 'poor':
+      return 'text-orange-400'
+    case 'none':
+      return 'text-red-400'
+    default:
+      return 'text-slate-500'
   }
 })
 
-// Navigation to detail view
-function goToDetails() {
-  router.push(`/devices/${espId.value}`)
+/** WiFi tooltip with technical dBm value for experts */
+const wifiTooltip = computed(() => {
+  if (props.device?.wifi_rssi === undefined || props.device?.wifi_rssi === null) {
+    return 'WiFi-Signalstärke: Keine Daten verfügbar'
+  }
+  const simNote = isMock.value ? ' (simuliert)' : ''
+  return `WiFi: ${props.device.wifi_rssi} dBm${simNote}`
+})
+
+// =============================================================================
+// Heartbeat Indicator (Phase 1)
+// =============================================================================
+
+/** Loading state for heartbeat button */
+const heartbeatLoading = ref(false)
+
+/**
+ * Check if heartbeat is "fresh" (< 30 seconds ago)
+ * Used for pulse animation on heartbeat icon
+ */
+const isHeartbeatFresh = computed(() => {
+  const timestamp = props.device?.last_heartbeat || props.device?.last_seen
+  if (!timestamp) return false
+
+  const now = Date.now()
+  const then = new Date(timestamp).getTime()
+  const diffSec = Math.floor((now - then) / 1000)
+
+  return diffSec >= 0 && diffSec < 30
+})
+
+/**
+ * Heartbeat tooltip based on device type
+ */
+const heartbeatTooltip = computed(() => {
+  const timestamp = props.device?.last_heartbeat || props.device?.last_seen
+  const relativeTime = timestamp ? formatRelativeTime(timestamp) : 'Nie'
+
+  if (isMock.value) {
+    return `Letzter Heartbeat: ${relativeTime}\nKlicken zum manuellen Senden`
+  }
+  return `Letzter Heartbeat: ${relativeTime}\n(Real ESPs senden automatisch)`
+})
+
+/**
+ * Heartbeat click handler
+ * - Mock ESP: Emits heartbeat event
+ * - Real ESP: Shows info tooltip (no action)
+ */
+async function handleHeartbeatClick() {
+  if (!isMock.value) {
+    // Real ESPs can't trigger heartbeat manually - tooltip explains this
+    return
+  }
+
+  heartbeatLoading.value = true
+  emit('heartbeat', props.device)
+
+  // Reset loading after a short delay (actual response comes via WebSocket)
+  setTimeout(() => {
+    heartbeatLoading.value = false
+  }, 1500)
+}
+
+/**
+ * Settings click handler - opens settings popover
+ */
+function handleSettingsClick() {
+  emit('settings', props.device)
+}
+
+// =============================================================================
+// Name Editing (Phase 3)
+// =============================================================================
+
+const isEditingName = ref(false)
+const editedName = ref('')
+const isSavingName = ref(false)
+const saveError = ref('')
+const nameInputRef = ref<HTMLInputElement | null>(null)
+
+/** Display name or fallback */
+const displayName = computed(() => props.device?.name || null)
+
+/**
+ * Start inline editing of the device name
+ */
+function startEditName() {
+  editedName.value = props.device?.name || ''
+  isEditingName.value = true
+  saveError.value = ''
+  // Focus the input after DOM update
+  nextTick(() => {
+    nameInputRef.value?.focus()
+    nameInputRef.value?.select()
+  })
+}
+
+/**
+ * Cancel name editing, reset to original value
+ */
+function cancelEditName() {
+  isEditingName.value = false
+  editedName.value = ''
+  saveError.value = ''
+}
+
+/**
+ * Save the new name via API
+ */
+async function saveName() {
+  if (isSavingName.value) return
+
+  const newName = editedName.value.trim() || null
+  const deviceId = espId.value
+
+  // No change? Just close
+  if (newName === (props.device?.name || null)) {
+    cancelEditName()
+    return
+  }
+
+  isSavingName.value = true
+  saveError.value = ''
+
+  try {
+    await espStore.updateDevice(deviceId, { name: newName || undefined })
+    isEditingName.value = false
+    emit('name-updated', { deviceId, name: newName })
+  } catch (err: unknown) {
+    const axiosError = err as { response?: { data?: { detail?: string } } }
+    saveError.value = axiosError.response?.data?.detail || 'Fehler beim Speichern'
+    // Keep edit mode open on error
+    setTimeout(() => {
+      saveError.value = ''
+    }, 3000)
+  } finally {
+    isSavingName.value = false
+  }
+}
+
+/**
+ * Handle keyboard events in name input
+ */
+function handleNameKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    saveName()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelEditName()
+  }
 }
 
 // =============================================================================
@@ -361,19 +615,28 @@ const isSensorFromThisEspDragging = computed(() =>
 watch(
   () => isSensorFromThisEspDragging.value,
   (isDraggingFromThisEsp) => {
+    log('isSensorFromThisEspDragging changed', {
+      isDraggingFromThisEsp,
+      analysisExpanded: analysisExpanded.value,
+      wasAutoOpened: wasAutoOpened.value,
+    })
+
     if (isDraggingFromThisEsp) {
       // Sofort öffnen - kein Delay, da wir Overlay-Modus verwenden
       // Overlay verhindert Layout-Shifts die Drag unterbrechen könnten
       if (!analysisExpanded.value) {
         wasAutoOpened.value = true // ZUERST setzen - aktiviert Overlay-Modus
         analysisExpanded.value = true
+        log('Auto-opening chart (overlay mode)')
       }
     } else {
       // Nach Drag-Ende: Overlay-Modus beenden, Chart bleibt aber offen
       // Kurze Verzögerung damit Drop-Event verarbeitet werden kann
       if (wasAutoOpened.value) {
+        log('Drag ended, transitioning from overlay to inline mode')
         setTimeout(() => {
           wasAutoOpened.value = false
+          log('wasAutoOpened = false (inline mode now)')
           // Chart bleibt geöffnet im normalen Inline-Modus
         }, 300)
       }
@@ -407,8 +670,12 @@ watch(
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Left Column: Sensors -->
-    <div class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors">
+    <!-- Left Column: Sensors (only shown if sensors exist) -->
+    <div
+      v-if="sensors.length > 0"
+      class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors"
+      :class="{ 'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow }"
+    >
       <SensorSatellite
         v-for="sensor in sensors"
         :key="`sensor-${sensor.gpio}`"
@@ -424,61 +691,141 @@ watch(
         class="esp-horizontal-layout__satellite"
         @click="handleSensorClick(sensor.gpio)"
       />
-      <!-- Empty sensor placeholder -->
-      <div v-if="sensors.length === 0" class="esp-horizontal-layout__empty-column">
-        <span class="esp-horizontal-layout__empty-label">Keine Sensoren</span>
-      </div>
     </div>
 
     <!-- Center Column: ESP Card -->
     <div ref="centerRef" class="esp-horizontal-layout__center">
       <!-- Compact Mode: Simple Info Card -->
-      <div v-if="compactMode" class="esp-info-compact">
-        <div class="esp-info-compact__header">
-          <div class="esp-info-compact__title-group">
-            <!-- Device name as main title, fallback to ESP-ID -->
-            <h3 class="esp-info-compact__title">{{ device.name || espId }}</h3>
-            <Badge :variant="isMock ? 'mock' : 'real'" size="xs">
-              {{ isMock ? 'MOCK' : 'REAL' }}
-            </Badge>
+      <div
+        v-if="compactMode"
+        :class="['esp-info-compact', isMock ? 'esp-info-compact--mock' : 'esp-info-compact--real']"
+      >
+        <!-- Header is the drag handle for VueDraggable (esp-drag-handle class) -->
+        <div class="esp-info-compact__header esp-drag-handle">
+          <!-- Top Row: Name + Settings -->
+          <div class="esp-info-compact__top-row">
+            <!-- Name Editing (Phase 3) - Edit Mode -->
+            <template v-if="isEditingName">
+              <div class="esp-info-compact__name-edit" data-no-drag>
+                <input
+                  ref="nameInputRef"
+                  v-model="editedName"
+                  type="text"
+                  class="esp-info-compact__name-input"
+                  placeholder="Gerätename..."
+                  :disabled="isSavingName"
+                  @keydown="handleNameKeydown"
+                  @blur="saveName"
+                  @click.stop
+                />
+                <div class="esp-info-compact__name-actions">
+                  <button
+                    v-if="isSavingName"
+                    class="esp-info-compact__name-btn"
+                    disabled
+                  >
+                    <Loader2 class="w-3 h-3 animate-spin" />
+                  </button>
+                  <template v-else>
+                    <button
+                      class="esp-info-compact__name-btn esp-info-compact__name-btn--save"
+                      title="Speichern (Enter)"
+                      @mousedown.prevent="saveName"
+                    >
+                      <Check class="w-3 h-3" />
+                    </button>
+                    <button
+                      class="esp-info-compact__name-btn esp-info-compact__name-btn--cancel"
+                      title="Abbrechen (Escape)"
+                      @mousedown.prevent="cancelEditName"
+                    >
+                      <X class="w-3 h-3" />
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Name Display Mode (double-click to edit) -->
+            <template v-else>
+              <div
+                class="esp-info-compact__name-display"
+                title="Doppelklick zum Bearbeiten"
+                @dblclick.stop="startEditName"
+              >
+                <h3 :class="['esp-info-compact__title', { 'esp-info-compact__title--empty': !displayName }]">
+                  {{ displayName || 'Unbenannt' }}
+                </h3>
+                <Pencil class="esp-info-compact__name-pencil w-3 h-3" />
+              </div>
+            </template>
+
+            <!-- Settings Icon - always top right -->
+            <button
+              class="esp-info-compact__settings-btn"
+              title="Einstellungen"
+              @click.stop="handleSettingsClick"
+            >
+              <Settings2 class="w-4 h-4" />
+            </button>
           </div>
-          <!-- ESP-ID secondary (only if name exists) -->
-          <span v-if="device.name" class="esp-info-compact__id">{{ espId }}</span>
-          <div class="esp-info-compact__status-row">
+
+          <!-- Name Edit Error Message -->
+          <span v-if="saveError" class="esp-info-compact__name-error">{{ saveError }}</span>
+
+          <!-- Info Row: Type Badge, ESP-ID, Status, WiFi -->
+          <div class="esp-info-compact__info-row">
+            <Badge :variant="isMock ? 'mock' : 'real'" size="xs">
+              {{ isMock ? 'Simuliert' : 'Hardware' }}
+            </Badge>
+            <span class="esp-info-compact__id">{{ espId }}</span>
             <Badge
               :variant="stateInfo.variant as any"
               :pulse="isOnline && (systemState === 'OPERATIONAL' || device.status === 'online')"
               dot
-              size="sm"
+              size="xs"
             >
               {{ stateInfo.label }}
             </Badge>
-            <!-- Connection quality indicator -->
-            <span
-              :class="['connection-dot', connectionQuality]"
-              :title="connectionTooltip"
-            />
+            <!-- WiFi Signal Bars -->
+            <div class="esp-info-compact__wifi" :title="wifiTooltip">
+              <div :class="['esp-info-compact__wifi-bars', wifiColorClass]">
+                <span :class="['esp-info-compact__wifi-bar', { active: wifiInfo.bars >= 1 }]" />
+                <span :class="['esp-info-compact__wifi-bar', { active: wifiInfo.bars >= 2 }]" />
+                <span :class="['esp-info-compact__wifi-bar', { active: wifiInfo.bars >= 3 }]" />
+                <span :class="['esp-info-compact__wifi-bar', { active: wifiInfo.bars >= 4 }]" />
+              </div>
+              <span :class="['esp-info-compact__wifi-label', wifiColorClass]">{{ wifiInfo.label }}</span>
+            </div>
           </div>
-        </div>
 
-        <!-- Analysis Drop Zone (collapsible) -->
-        <div class="esp-info-compact__analysis">
+          <!-- Heartbeat Row -->
           <button
-            class="esp-info-compact__analysis-toggle"
-            :class="{
-              'esp-info-compact__analysis-toggle--active': analysisExpanded,
-              'esp-info-compact__analysis-toggle--drag-hint': isSensorBeingDraggedFromThisEsp && !analysisExpanded
-            }"
-            @click="analysisExpanded = !analysisExpanded"
+            :class="[
+              'esp-info-compact__heartbeat',
+              { 'esp-info-compact__heartbeat--fresh': isHeartbeatFresh },
+              { 'esp-info-compact__heartbeat--mock': isMock }
+            ]"
+            :title="heartbeatTooltip"
+            :disabled="heartbeatLoading"
+            @click.stop="handleHeartbeatClick"
           >
-            <span>{{ analysisExpanded ? 'Chart ▲' : (isSensorBeingDraggedFromThisEsp ? '↓ Hier ablegen' : 'Chart ▼') }}</span>
+            <Heart
+              :class="[
+                'w-3 h-3',
+                isHeartbeatFresh ? 'esp-info-compact__heart-pulse' : ''
+              ]"
+            />
+            <span class="esp-info-compact__heartbeat-text">
+              {{ formatRelativeTime(device.last_heartbeat || device.last_seen || '') }}
+            </span>
+            <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin" />
           </button>
         </div>
 
         <!--
-          WICHTIG: DropZone ist IMMER im DOM (kein v-if!), nur mit CSS versteckt.
-          Dadurch bleibt sie während des Drags als Drop-Target verfügbar.
-          Bei Auto-Open während Drag wird sie als Overlay angezeigt.
+          Analysis Drop Zone - Öffnet sich automatisch bei Sensor-Drag.
+          IMMER im DOM (kein v-if!), nur mit CSS versteckt/sichtbar.
         -->
         <AnalysisDropZone
           :esp-id="espId"
@@ -493,19 +840,14 @@ watch(
           ]"
           @sensor-added="handleSensorDrop"
         />
-
-        <button class="esp-info-compact__details-btn" @click="goToDetails">
-          <ExternalLink class="w-3 h-3" />
-          <span>Details</span>
-        </button>
       </div>
 
       <!-- Full Mode: Full ESP Card (for detail view) -->
       <ESPCard v-else :esp="device" />
     </div>
 
-    <!-- Right Column: Actuators -->
-    <div class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators">
+    <!-- Right Column: Actuators (only shown if actuators exist) -->
+    <div v-if="actuators.length > 0" class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators">
       <ActuatorSatellite
         v-for="actuator in actuators"
         :key="`actuator-${actuator.gpio}`"
@@ -521,10 +863,6 @@ watch(
         class="esp-horizontal-layout__satellite"
         @click="handleActuatorClick(actuator.gpio)"
       />
-      <!-- Empty actuator placeholder -->
-      <div v-if="actuators.length === 0" class="esp-horizontal-layout__empty-column">
-        <span class="esp-horizontal-layout__empty-label">Keine Aktoren</span>
-      </div>
     </div>
 
     <!-- Drop Indicator Overlay -->
@@ -644,26 +982,45 @@ watch(
   display: flex;
   flex-direction: row;
   align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.5rem;
+  justify-content: center; /* Center content when columns are hidden */
+  gap: 0.5rem; /* Reduced gap for tighter layout */
+  padding: 0; /* Removed padding - card provides its own */
   min-height: auto;
+  /* Shrink container to fit content */
+  width: fit-content;
 }
 
 /* =============================================================================
    Left/Right Columns (Sensors & Actuators)
+   Dynamic sizing - columns shrink to fit content, no fixed min-width
    ============================================================================= */
 .esp-horizontal-layout__column {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  min-width: 56px;
-  max-width: 140px;
+  gap: 0.375rem;
+  /* Dynamic width based on content - no fixed min-width */
+  width: fit-content;
+  max-width: 120px;
   flex-shrink: 0;
 }
 
-/* Sensors column: align items to the right (toward center card) */
+/* Sensors column: Default = single vertical column */
 .esp-horizontal-layout__column--sensors {
-  align-items: flex-end;
+  /* Vertical column by default (≤5 sensors) */
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  align-items: stretch; /* All same width */
+  width: 65px; /* Fixed width for single column */
+}
+
+/* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
+.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
+  /* Switch to CSS Grid: 2 equal columns */
+  display: grid;
+  grid-template-columns: repeat(2, 65px);
+  gap: 0.375rem;
+  width: auto; /* Override single-column width */
 }
 
 /* Actuators column: align items to the left (toward center card) */
@@ -678,9 +1035,9 @@ watch(
   transform: none !important;
   left: auto !important;
   top: auto !important;
-  /* Compact width for side columns */
+  /* Fill parent column width */
   width: 100%;
-  max-width: 130px;
+  box-sizing: border-box;
 }
 
 /* Empty column placeholder */
@@ -706,9 +1063,9 @@ watch(
    Center Column (ESP Card)
    ============================================================================= */
 .esp-horizontal-layout__center {
-  flex: 1;
+  flex: 0 1 auto; /* Don't grow, can shrink, auto width */
   min-width: 140px;
-  max-width: 220px;
+  max-width: 240px;
 }
 
 /* =============================================================================
@@ -719,16 +1076,17 @@ watch(
   width: 100%;
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.625rem;
-  padding: 0.625rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4375rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
   outline: none;
   overflow: visible; /* Damit Overlay sichtbar ist */
+  user-select: none; /* Verhindert Text-Selection während Drag (blaues Leuchten) */
 }
 
 .esp-info-compact:hover {
@@ -744,10 +1102,32 @@ watch(
 .esp-info-compact__header {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: 0.25rem;
 }
 
-.esp-info-compact__title-group {
+/* =============================================================================
+   Mock vs Real Visual Distinction
+   ============================================================================= */
+
+.esp-info-compact--mock {
+  border-left: 3px solid var(--color-mock, #a78bfa);
+}
+
+.esp-info-compact--real {
+  border-left: 3px solid var(--color-real, #34d399);
+}
+
+/* Top Row: Name + Settings (flexbox with space-between) */
+.esp-info-compact__top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* Info Row: Badges, ID, Status, WiFi (compact horizontal) */
+.esp-info-compact__info-row {
   display: flex;
   align-items: center;
   gap: 0.375rem;
@@ -755,7 +1135,7 @@ watch(
 }
 
 .esp-info-compact__title {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-text-primary);
   word-break: break-word;
@@ -766,20 +1146,264 @@ watch(
   margin: 0;
 }
 
+.esp-info-compact__title--empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* =============================================================================
+   Name Editing (Phase 3)
+   ============================================================================= */
+
+.esp-info-compact__name-display {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  padding: 0.125rem 0.25rem;
+  margin: -0.125rem -0.25rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.15s ease;
+}
+
+.esp-info-compact__name-display:hover {
+  background-color: var(--glass-bg);
+}
+
+.esp-info-compact__name-display:hover .esp-info-compact__name-pencil {
+  opacity: 1;
+}
+
+.esp-info-compact__name-pencil {
+  color: var(--color-text-muted);
+  opacity: 0.3;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.esp-info-compact__name-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.esp-info-compact__name-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 120px;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid var(--color-iridescent-1);
+  outline: none;
+  font-family: inherit;
+}
+
+.esp-info-compact__name-input::placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.esp-info-compact__name-input:disabled {
+  opacity: 0.6;
+}
+
+.esp-info-compact__name-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.esp-info-compact__name-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 0.25rem;
+  background-color: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.esp-info-compact__name-btn:hover:not(:disabled) {
+  background-color: var(--glass-bg);
+}
+
+.esp-info-compact__name-btn:disabled {
+  cursor: not-allowed;
+}
+
+.esp-info-compact__name-btn--save:hover:not(:disabled) {
+  color: var(--color-success);
+  background-color: rgba(34, 197, 94, 0.1);
+}
+
+.esp-info-compact__name-btn--cancel:hover:not(:disabled) {
+  color: var(--color-error);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.esp-info-compact__name-error {
+  font-size: 0.625rem;
+  color: var(--color-error);
+  margin-left: 0.25rem;
+}
+
 .esp-info-compact__id {
-  font-size: 0.6rem;
+  font-size: 0.5625rem;
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-muted);
   opacity: 0.7;
+  letter-spacing: -0.025em;
 }
 
-.esp-info-compact__status-row {
+/* Settings Button */
+.esp-info-compact__settings-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  padding: 0.25rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-/* Connection quality indicator dot */
+.esp-info-compact__settings-btn:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
+  color: var(--color-text-secondary);
+}
+
+.esp-info-compact__settings-btn:active {
+  transform: scale(0.95);
+}
+
+/* =============================================================================
+   WiFi Signal Bars (Phase 1.1)
+   ============================================================================= */
+
+.esp-info-compact__wifi {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: help;
+}
+
+.esp-info-compact__wifi-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 12px;
+}
+
+.esp-info-compact__wifi-bar {
+  width: 2px;
+  background-color: var(--color-text-muted);
+  border-radius: 1px;
+  opacity: 0.25;
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+/* Bar heights: increasing from left to right */
+.esp-info-compact__wifi-bar:nth-child(1) { height: 3px; }
+.esp-info-compact__wifi-bar:nth-child(2) { height: 5px; }
+.esp-info-compact__wifi-bar:nth-child(3) { height: 8px; }
+.esp-info-compact__wifi-bar:nth-child(4) { height: 11px; }
+
+/* Active bars inherit color from parent and are fully opaque */
+.esp-info-compact__wifi-bar.active {
+  opacity: 1;
+  background-color: currentColor;
+}
+
+.esp-info-compact__wifi-label {
+  font-size: 0.5625rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* WiFi color classes - these are shared with Tailwind classes */
+.text-emerald-400 { color: #34d399; }
+.text-yellow-400 { color: #facc15; }
+.text-orange-400 { color: #fb923c; }
+.text-red-400 { color: #f87171; }
+.text-slate-500 { color: #64748b; }
+
+/* =============================================================================
+   Heartbeat Indicator (Phase 1.2)
+   ============================================================================= */
+
+.esp-info-compact__heartbeat {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1875rem 0.375rem;
+  font-size: 0.5625rem;
+  color: var(--color-text-muted);
+  background-color: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  cursor: default;
+  transition: all 0.2s ease;
+}
+
+.esp-info-compact__heartbeat--mock {
+  cursor: pointer;
+}
+
+.esp-info-compact__heartbeat--mock:hover:not(:disabled) {
+  background-color: var(--glass-bg);
+  border-color: rgba(244, 114, 182, 0.3);
+  color: var(--color-text-secondary);
+}
+
+.esp-info-compact__heartbeat:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Fresh heartbeat (< 30s) - show success color */
+.esp-info-compact__heartbeat--fresh {
+  border-color: rgba(74, 222, 128, 0.3);
+  color: var(--color-success);
+}
+
+.esp-info-compact__heartbeat-text {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Pulse animation for fresh heartbeat */
+.esp-info-compact__heart-pulse {
+  animation: heart-pulse 1s ease-in-out infinite;
+}
+
+@keyframes heart-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+/* Connection quality indicator dot (legacy - kept for backwards compatibility) */
 .connection-dot {
   width: 8px;
   height: 8px;
@@ -808,98 +1432,6 @@ watch(
   box-shadow: 0 0 6px var(--color-danger, #ef4444);
 }
 
-.esp-info-compact__details-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
-  background-size: 200% 200%;
-  color: white;
-  border: none;
-  border-radius: 0.375rem;
-  font-size: 0.7rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 6px rgba(167, 139, 250, 0.25);
-  overflow: hidden;
-}
-
-.esp-info-compact__details-btn::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.5s ease;
-}
-
-.esp-info-compact__details-btn:hover::before {
-  left: 100%;
-}
-
-.esp-info-compact__details-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.4);
-  background-position: 100% 100%;
-}
-
-.esp-info-compact__details-btn:active {
-  transform: translateY(0);
-}
-
-/* Analysis Drop Zone - Chart Toggle */
-.esp-info-compact__analysis {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.esp-info-compact__analysis-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 0.25rem 0.5rem;
-  background-color: var(--color-bg-tertiary);
-  border: 1px dashed var(--glass-border);
-  border-radius: 0.25rem;
-  font-size: 0.65rem;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.esp-info-compact__analysis-toggle:hover {
-  border-color: var(--color-iridescent-1);
-  color: var(--color-text-secondary);
-}
-
-.esp-info-compact__analysis-toggle--active {
-  border-style: solid;
-  border-color: var(--color-iridescent-1);
-  color: var(--color-text-primary);
-  background-color: rgba(167, 139, 250, 0.08);
-}
-
-.esp-info-compact__analysis-toggle--drag-hint {
-  border-style: solid;
-  border-color: var(--color-success);
-  color: var(--color-success);
-  background-color: rgba(16, 185, 129, 0.15);
-  animation: pulse-hint 1s ease-in-out infinite;
-}
-
-@keyframes pulse-hint {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2); }
-}
-
 /*
  * DropZone ist IMMER im DOM, aber standardmäßig unsichtbar.
  * Zwei Modi:
@@ -924,9 +1456,9 @@ watch(
 .esp-info-compact__dropzone--visible {
   opacity: 1;
   pointer-events: auto; /* Events wieder aktivieren */
-  max-height: 300px;
+  max-height: 350px;
   overflow: visible;
-  margin-top: 0.5rem;
+  margin-top: 0.375rem;
 }
 
 /* Overlay-Modus (auto-geöffnet während Drag) */
@@ -944,17 +1476,19 @@ watch(
   border-radius: 0.5rem;
   box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25),
               0 0 0 4px rgba(16, 185, 129, 0.1);
-  animation: dropzone-appear 0.15s ease-out;
+  /* KEINE Animation mit transform während Drag - das verursacht Hit-Test-Probleme!
+     Die Animation würde das Element verschieben während der Cursor darüber ist,
+     was zu sofortigem dragleave führt. Nur opacity-Fade verwenden. */
+  animation: dropzone-appear 0.1s ease-out;
 }
 
 @keyframes dropzone-appear {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.98);
+    /* KEIN transform hier! Verursacht Drag-Drop-Probleme */
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -1009,7 +1543,7 @@ watch(
   }
 
   .esp-horizontal-layout__center {
-    max-width: 180px;
+    max-width: 240px;
   }
 }
 
@@ -1018,19 +1552,19 @@ watch(
    ============================================================================= */
 @media (min-width: 1024px) {
   .esp-horizontal-layout {
-    gap: 1rem;
+    gap: 0.875rem;
   }
 
   .esp-horizontal-layout__column {
-    max-width: 150px;
+    max-width: 140px;
   }
 
   .esp-horizontal-layout__center {
-    max-width: 220px;
+    max-width: 300px;
   }
 
   .esp-horizontal-layout__satellite {
-    max-width: 140px;
+    max-width: 130px;
   }
 }
 

@@ -76,6 +76,25 @@ const timeRangeOptions = [
 const hasReachedMax = computed(() => selectedSensors.value.length >= props.maxSensors)
 const isEmpty = computed(() => selectedSensors.value.length === 0)
 
+// Debug logger with consistent styling
+function log(message: string, data?: Record<string, unknown>): void {
+  const style = 'background: #f59e0b; color: black; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+  if (data) {
+    console.log(`%c[AnalysisDropZone]%c ${message}`, style, 'color: #fbbf24;', data)
+  } else {
+    console.log(`%c[AnalysisDropZone]%c ${message}`, style, 'color: #fbbf24;')
+  }
+}
+
+// Safely get className as string (handles SVG elements where className is SVGAnimatedString)
+function getClassName(element: Element | null): string {
+  if (!element) return ''
+  const cn = element.className
+  if (typeof cn === 'string') return cn.slice(0, 50)
+  if (cn && typeof cn === 'object' && 'baseVal' in cn) return (cn.baseVal || '').slice(0, 50)
+  return ''
+}
+
 // Get next available color
 function getNextColor(): string {
   const usedColors = selectedSensors.value.map((s) => s.color)
@@ -84,42 +103,103 @@ function getNextColor(): string {
 
 // Drag handlers - auf Root-Element für zuverlässiges Drop-Target
 function handleDragEnter(event: DragEvent) {
+  // KRITISCH: stopPropagation verhindert dass Parent-Handler (ESPOrbitalLayout) interferieren
+  event.stopPropagation()
   event.preventDefault()
+
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  log('dragenter', {
+    hasReachedMax: hasReachedMax.value,
+    targetTag: (event.target as Element)?.tagName,
+    targetClass: getClassName(event.target as Element),
+    relatedTarget: (event.relatedTarget as Element)?.tagName,
+    rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    clientXY: { x: event.clientX, y: event.clientY }
+  })
+
   if (!hasReachedMax.value) {
     isDragOver.value = true
+    log('isDragOver = true ✓')
   }
 }
 
 function handleDragOver(event: DragEvent) {
+  // KRITISCH: stopPropagation + preventDefault BEIDE nötig für korrekten Drop!
+  event.stopPropagation()
   event.preventDefault()
+
   if (hasReachedMax.value) {
+    log('dragover - BLOCKED (max reached)')
     event.dataTransfer!.dropEffect = 'none'
     return
   }
+
   event.dataTransfer!.dropEffect = 'copy'
   isDragOver.value = true
+
+  // Nur alle 500ms loggen um Console nicht zu fluten
+  const now = Date.now()
+  if (!handleDragOver._lastLog || now - handleDragOver._lastLog > 500) {
+    log('dragover ✓', {
+      dropEffect: event.dataTransfer!.dropEffect,
+      clientXY: { x: event.clientX, y: event.clientY }
+    })
+    handleDragOver._lastLog = now
+  }
 }
+// Timestamp für Throttling
+handleDragOver._lastLog = 0
 
 function handleDragLeave(event: DragEvent) {
+  // KRITISCH: stopPropagation für konsistentes Event-Handling
+  event.stopPropagation()
+
   // Nur zurücksetzen wenn wir das Root-Element verlassen, nicht bei Child-Elementen
   const target = event.currentTarget as HTMLElement
   const related = event.relatedTarget as HTMLElement | null
+
+  log('dragleave RAW', {
+    targetTag: (event.target as Element)?.tagName,
+    relatedTargetTag: related?.tagName,
+    relatedTargetClass: getClassName(related),
+    containsRelated: related ? target.contains(related) : 'null'
+  })
+
   if (!related || !target.contains(related)) {
     isDragOver.value = false
+    log('dragleave - isDragOver = false (left element)')
+  } else {
+    log('dragleave - IGNORED (moved to child element)')
   }
 }
 
 function handleDrop(event: DragEvent) {
+  // KRITISCH: stopPropagation verhindert dass ESPOrbitalLayout das Event abfängt
+  event.stopPropagation()
   event.preventDefault()
+
+  log('DROP EVENT FIRED! 🎯', {
+    hasData: !!event.dataTransfer?.getData('application/json'),
+    types: event.dataTransfer?.types,
+    clientXY: { x: event.clientX, y: event.clientY }
+  })
+
   isDragOver.value = false
 
-  if (hasReachedMax.value) return
+  if (hasReachedMax.value) {
+    log('DROP REJECTED - max sensors reached')
+    return
+  }
 
   const data = event.dataTransfer?.getData('application/json')
-  if (!data) return
+  if (!data) {
+    log('DROP REJECTED - no JSON data in dataTransfer')
+    return
+  }
 
   try {
     const dragData = JSON.parse(data)
+    log('Parsed drag data', dragData)
 
     // ISSUE-002 fix: Vollständige Validierung der drag data
     // Prüfe alle erforderlichen Felder bevor sie verwendet werden
@@ -129,7 +209,7 @@ function handleDrop(event: DragEvent) {
       typeof dragData.gpio !== 'number' || isNaN(dragData.gpio) ||
       typeof dragData.sensorType !== 'string' || !dragData.sensorType
     ) {
-      console.warn('[AnalysisDropZone] Invalid drag data - missing required fields:', {
+      log('DROP REJECTED - invalid drag data', {
         type: dragData.type,
         espId: dragData.espId,
         gpio: dragData.gpio,
@@ -141,7 +221,7 @@ function handleDrop(event: DragEvent) {
     // Check if sensor already exists
     const sensorId = `${dragData.espId}_${dragData.gpio}`
     if (selectedSensors.value.some((s) => s.id === sensorId)) {
-      console.debug(`[AnalysisDropZone] Sensor ${sensorId} already in chart`)
+      log('DROP REJECTED - sensor already in chart', { sensorId })
       return
     }
 
@@ -157,9 +237,9 @@ function handleDrop(event: DragEvent) {
     }
     selectedSensors.value.push(newSensor)
     emit('sensorAdded', newSensor)
-    console.debug(`[AnalysisDropZone] Added sensor ${sensorId} to chart`)
+    log('✅ SENSOR ADDED TO CHART', { newSensor, totalSensors: selectedSensors.value.length })
   } catch (error) {
-    console.warn('[AnalysisDropZone] Failed to parse drag data:', error)
+    log('DROP ERROR - failed to parse', { error })
   }
 }
 
@@ -185,6 +265,7 @@ function clearAll() {
         'analysis-drop-zone--drag-over': isDragOver
       }
     ]"
+    data-no-drag="true"
     @dragover="handleDragOver"
     @dragenter="handleDragEnter"
     @dragleave="handleDragLeave"
@@ -297,13 +378,10 @@ function clearAll() {
           </button>
         </div>
 
-        <!-- Add more indicator - Events sind auf Root-Element -->
+        <!-- Add more indicator - NUR während Drag sichtbar -->
         <div
-          v-if="!hasReachedMax"
-          :class="[
-            'analysis-drop-zone__add-more',
-            { 'analysis-drop-zone__add-more--drag-over': isDragOver },
-          ]"
+          v-if="!hasReachedMax && isDragOver"
+          class="analysis-drop-zone__add-more analysis-drop-zone__add-more--drag-over"
         >
           <Plus class="w-4 h-4" />
         </div>
@@ -315,7 +393,7 @@ function clearAll() {
         :time-range="timeRange"
         :y-min="yAxisMin"
         :y-max="yAxisMax"
-        :height="compact ? 120 : 300"
+        :height="compact ? 160 : 300"
       />
 
       <!-- Actions -->
@@ -338,6 +416,8 @@ function clearAll() {
   flex-direction: column;
   gap: 1rem;
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+  /* Drop zone, not drag source - default cursor indicates this isn't draggable */
+  cursor: default;
 }
 
 /* Visuelles Feedback auf Root-Element beim Drag-Over */
@@ -623,18 +703,25 @@ function clearAll() {
 
 /* =============================================================================
    Compact Mode Styles (for ESP Card embedded view)
+   Optimized for narrow center column in horizontal ESP layout
    ============================================================================= */
 .analysis-drop-zone--compact {
-  padding: 0.5rem;
-  gap: 0.5rem;
+  padding: 0.625rem;
+  gap: 0.625rem;
+  border-radius: 0.5rem;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__header {
   gap: 0.5rem;
+  min-height: 1.75rem;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__title {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
+  gap: 0.375rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__controls {
   gap: 0.375rem;
 }
 
@@ -643,50 +730,122 @@ function clearAll() {
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__time-btn {
-  padding: 0.125rem 0.375rem;
-  font-size: 0.625rem;
+  padding: 0.1875rem 0.375rem;
+  font-size: 0.6875rem;
+  min-width: 1.5rem;
 }
 
 .analysis-drop-zone__empty--compact {
-  padding: 1rem;
-  gap: 0.25rem;
+  padding: 1.25rem 0.75rem;
+  gap: 0.375rem;
   font-size: 0.75rem;
 }
 
+/* Legend - horizontal wrap with better spacing */
 .analysis-drop-zone--compact .analysis-drop-zone__legend {
   gap: 0.375rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__legend-item {
-  padding: 0.125rem 0.375rem;
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.6875rem;
+  border-radius: 0.3125rem;
+  gap: 0.25rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__legend-color {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__legend-name {
+  max-width: 5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__legend-unit {
   font-size: 0.625rem;
 }
 
+.analysis-drop-zone--compact .analysis-drop-zone__legend-remove {
+  margin-left: 0.125rem;
+}
+
+/* Settings button */
 .analysis-drop-zone--compact .analysis-drop-zone__settings-btn {
   padding: 0.25rem;
+  border-radius: 0.25rem;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__settings-btn .w-4 {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 0.8125rem;
+  height: 0.8125rem;
 }
 
+/* Y-Axis Settings - better layout for narrow width */
 .analysis-drop-zone--compact .analysis-drop-zone__y-axis-settings {
-  padding: 0.375rem 0.5rem;
+  padding: 0.5rem 0.625rem;
+  margin-top: 0.125rem;
+  border-radius: 0.375rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__y-axis-row {
+  gap: 0.375rem;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__y-axis-label {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
+  min-width: 3rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__y-axis-inputs {
+  gap: 0.25rem;
+  flex: 1;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__y-axis-input {
-  width: 55px;
-  padding: 0.125rem 0.375rem;
-  font-size: 0.625rem;
+  width: 3.5rem;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.6875rem;
+  border-radius: 0.25rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__y-axis-input::placeholder {
+  font-size: 0.5625rem;
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__y-axis-separator {
+  font-size: 0.6875rem;
+  padding: 0 0.125rem;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__y-axis-reset {
-  font-size: 0.5rem;
-  padding: 0.125rem 0.375rem;
+  font-size: 0.5625rem;
+  padding: 0.1875rem 0.4375rem;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+
+/* Actions - compact clear button */
+.analysis-drop-zone--compact .analysis-drop-zone__actions {
+  margin-top: 0.25rem;
+  padding-top: 0.375rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+.analysis-drop-zone--compact .analysis-drop-zone__clear-btn {
+  padding: 0.3125rem 0.625rem;
+  font-size: 0.6875rem;
+}
+
+/* Add-more indicator during drag */
+.analysis-drop-zone--compact .analysis-drop-zone__add-more {
+  width: 1.625rem;
+  height: 1.625rem;
+  border-width: 1.5px;
 }
 </style>
