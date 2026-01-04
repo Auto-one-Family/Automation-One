@@ -143,11 +143,11 @@ El Frontend/src/
 │   └── index.ts              # Re-Exports
 │
 ├── views/                    # Page Views (15 Dateien)
-│   ├── DashboardView.vue     # ⭐ Dashboard (/)
-│   ├── DevicesView.vue       # ⭐ Geräte-Liste (/devices)
-│   ├── DeviceDetailView.vue  # ⭐ Geräte-Details (/devices/:espId)
-│   ├── SensorsView.vue       # Sensoren (/sensors)
-│   ├── ActuatorsView.vue     # Aktoren (/actuators)
+│   ├── DashboardView.vue     # ⭐ Dashboard + ESP-Übersicht (/)
+│   ├── DevicesView.vue       # ⚠️ DEPRECATED → Redirect zu /
+│   ├── DeviceDetailView.vue  # ⚠️ DEPRECATED → Redirect zu /?openSettings={id}
+│   ├── SensorsView.vue       # ⭐ Komponenten mit Tabs: Sensoren | Aktoren (/sensors)
+│   ├── ActuatorsView.vue     # ⚠️ DEPRECATED → Redirect zu /sensors?tab=actuators
 │   ├── LogicView.vue         # Automation Rules (/logic)
 │   ├── DatabaseExplorerView.vue # Database Explorer (/database)
 │   ├── AuditLogView.vue      # Audit Logs (/audit)
@@ -393,11 +393,8 @@ interface WebSocketFilters {
 '/setup'  → SetupView.vue
 
 // Protected Routes (requiresAuth: true)
-'/'               → DashboardView.vue
-'/devices'        → DevicesView.vue
-'/devices/:espId' → DeviceDetailView.vue
-'/sensors'        → SensorsView.vue
-'/actuators'      → ActuatorsView.vue
+'/'               → DashboardView.vue (mit ?openSettings={id} Support)
+'/sensors'        → SensorsView.vue (Tabs: Sensoren | Aktoren)
 '/logic'          → LogicView.vue
 '/mqtt-log'       → MqttLogView.vue
 '/audit'          → AuditLogView.vue
@@ -411,9 +408,12 @@ interface WebSocketFilters {
 '/load-test'      → LoadTestView.vue
 '/maintenance'    → MaintenanceView.vue
 
-// Legacy Redirects
-'/mock-esp'        → redirect to '/devices'
-'/mock-esp/:espId' → redirect to '/devices/:espId'
+// Redirects (Stand: 2025-01-04)
+'/devices'        → redirect to '/'
+'/devices/:espId' → redirect to '/?openSettings={espId}'
+'/actuators'      → redirect to '/sensors?tab=actuators'
+'/mock-esp'       → redirect to '/'
+'/mock-esp/:espId' → redirect to '/?openSettings={espId}'
 ```
 
 ### Navigation Guards

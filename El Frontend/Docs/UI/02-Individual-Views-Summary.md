@@ -1,21 +1,24 @@
 # Individual Views - Detailübersicht
 
 **Erstellt:** 2025-12-19
-**Letztes Update:** 2025-12-23 (Vollständige Synchronisation mit Code)
-**Status:** ✅ Schnellereferenz für alle 18 Views (inkl. 2 Legacy-Redirects)
+**Letztes Update:** 2026-01-04 (Dashboard Konsolidierung Phase 7)
+**Status:** ✅ Schnellereferenz für alle 18 Views (inkl. 5 Redirects)
 
 ---
 
-## ⚠️ WICHTIG: Refactoring-Hinweis (20.12.2025)
+## ⚠️ WICHTIG: Dashboard Konsolidierung (04.01.2026)
 
-Die Views wurden refactored zu einem **Unified Device System**:
+Dashboard ist jetzt die **zentrale ESP-Übersicht**. Legacy Views wurden deprecated:
 
-| Alt | Neu | Neue Route |
-|-----|-----|------------|
-| `MockEspView.vue` | **`DevicesView.vue`** | `/devices` |
-| `MockEspDetailView.vue` | **`DeviceDetailView.vue`** | `/devices/:espId` |
+| View | Alte Route | Neuer Redirect | Grund |
+|------|------------|---------------|-------|
+| `DevicesView.vue` | `/devices` | → `/` | Dashboard ist ESP-Übersicht |
+| `DeviceDetailView.vue` | `/devices/:espId` | → `/?openSettings={espId}` | ESPSettingsPopover übernimmt |
+| `ActuatorsView.vue` | `/actuators` | → `/sensors?tab=actuators` | SensorsView hat Tabs |
 
-**Alte Routes (`/mock-esp/*`) redirecten automatisch zu neuen Routes.**
+**SensorsView** wurde zu **Komponenten-View** mit Tab-System erweitert:
+- `/sensors` → Sensoren-Tab (default)
+- `/sensors?tab=actuators` → Aktoren-Tab
 
 ---
 
@@ -25,8 +28,11 @@ Die Views wurden refactored zu einem **Unified Device System**:
 
 | View | Route | Status | Detaildoku | Backend-Dateien |
 |------|-------|--------|-----------|-----------------|
-| **DevicesView** | `/devices` | ✅ Impl. | ➜ `01-MockEspView.md` (veraltet) | `El Servador/.../api/v1/debug.py`, `esp.py` |
-| **DeviceDetailView** | `/devices/:espId` | ✅ Impl. | ➜ siehe unten | `El Servador/.../api/v1/debug.py`, `esp.py` |
+| **DashboardView** | `/` | ✅ Impl. | ➜ `DASHBOARD_PLAN.md` | `El Servador/.../api/v1/esp.py`, `zones.py` |
+| **SensorsView** | `/sensors` | ✅ Impl. | ➜ Kombinierte Sensoren+Aktoren mit Tabs | `El Servador/.../api/v1/sensors.py`, `actuators.py` |
+| ~~DevicesView~~ | `/devices` | ⚠️ DEPRECATED | Redirect zu `/` | - |
+| ~~DeviceDetailView~~ | `/devices/:espId` | ⚠️ DEPRECATED | Redirect zu `/?openSettings={espId}` | - |
+| ~~ActuatorsView~~ | `/actuators` | ⚠️ DEPRECATED | Redirect zu `/sensors?tab=actuators` | - |
 | MqttLogView | `/mqtt-log` | ✅ Impl. | ➜ siehe unten | `El Servador/.../api/v1/websocket/realtime.py` |
 | LogicView | `/logic` | ⚠️ **Placeholder (53 LOC)** | ➜ siehe unten | `El Servador/.../api/v1/logic.py` |
 

@@ -1,6 +1,7 @@
 <template>
-  <div class="zone-panel">
-    <Card>
+  <div :class="['zone-panel', { 'zone-panel--compact': compact }]">
+    <!-- Card wrapper for non-compact mode -->
+    <Card v-if="!compact">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -104,6 +105,89 @@
         </div>
       </div>
     </Card>
+
+    <!-- Compact mode content (no Card wrapper) -->
+    <template v-else>
+      <!-- Status Badge Row -->
+      <div class="compact-status">
+        <Badge v-if="assignmentState === 'sending'" variant="warning" size="sm" pulse>
+          <Loader2 class="w-3 h-3 animate-spin mr-1" />
+          Sende...
+        </Badge>
+        <Badge v-else-if="assignmentState === 'pending_ack'" variant="info" size="sm" pulse>
+          <Radio class="w-3 h-3 animate-pulse mr-1" />
+          Warte auf ESP...
+        </Badge>
+        <Badge v-else-if="assignmentState === 'success'" variant="success" size="sm">
+          <CheckCircle class="w-3 h-3 mr-1" />
+          Bestätigt
+        </Badge>
+        <Badge v-else-if="assignmentState === 'timeout'" variant="warning" size="sm">
+          <AlertCircle class="w-3 h-3 mr-1" />
+          Timeout
+        </Badge>
+      </div>
+
+      <!-- Error Message -->
+      <div v-if="errorMessage" class="error-banner error-banner--compact">
+        <AlertCircle class="w-4 h-4 flex-shrink-0" />
+        <span>{{ errorMessage }}</span>
+        <button class="ml-auto" @click="errorMessage = ''">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <!-- Success Message -->
+      <div v-if="successMessage" class="success-banner success-banner--compact">
+        <CheckCircle class="w-4 h-4 flex-shrink-0" />
+        <span>{{ successMessage }}</span>
+        <button class="ml-auto" @click="successMessage = ''">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <!-- Zone Input -->
+      <div class="compact-content">
+        <Input
+          v-model="zoneInput"
+          label="Zonenname"
+          placeholder="z.B. Zelt 1, Gewächshaus"
+          :helper="zoneInput && generatedZoneId ? undefined : 'Name eingeben, Zone-ID wird automatisch generiert.'"
+          :disabled="saving"
+          size="sm"
+        />
+
+        <!-- Show generated zone_id preview -->
+        <div v-if="zoneInput && generatedZoneId" class="zone-id-preview">
+          Zone-ID: <code>{{ generatedZoneId }}</code>
+        </div>
+
+        <div class="compact-actions">
+          <Button
+            v-if="currentZoneId"
+            variant="danger"
+            size="sm"
+            :loading="saving && isRemoving"
+            :disabled="saving"
+            @click="removeZone"
+          >
+            <X class="w-4 h-4" />
+            Entfernen
+          </Button>
+
+          <Button
+            variant="primary"
+            size="sm"
+            :loading="saving && !isRemoving"
+            :disabled="!zoneInput || !generatedZoneId || generatedZoneId === currentZoneId || saving"
+            @click="saveZone"
+          >
+            <Check class="w-4 h-4" />
+            {{ currentZoneId ? 'Ändern' : 'Zuweisen' }}
+          </Button>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -115,6 +199,9 @@ import Input from '@/components/common/Input.vue'
 import Button from '@/components/common/Button.vue'
 import Badge from '@/components/common/Badge.vue'
 import { zonesApi } from '@/api/zones'
+import { useEspStore } from '@/stores/esp'
+
+const espStore = useEspStore()
 
 // Props
 interface Props {
@@ -123,9 +210,12 @@ interface Props {
   currentZoneName?: string
   currentMasterZoneId?: string
   isMock?: boolean  // Whether this is a Mock ESP (no server API call needed)
+  compact?: boolean // Compact mode without Card wrapper (for embedding in popovers)
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  compact: false,
+})
 
 // Emits
 const emit = defineEmits<{
@@ -251,6 +341,14 @@ async function saveZone() {
     console.log('[ZoneAssignmentPanel] API response:', response)
 
     if (response.success) {
+      // OPTIMISTIC UPDATE: Update ESP Store immediately for instant UI feedback
+      // This ensures the Dashboard updates without waiting for WebSocket event
+      espStore.updateDeviceZone(props.espId, {
+        zone_id: zoneId,
+        zone_name: zoneName,
+        master_zone_id: props.currentMasterZoneId,
+      })
+
       // For real ESPs with MQTT, show pending_ack briefly
       // Mock ESPs don't need ACK wait since server handles it immediately
       if (response.mqtt_sent && !props.isMock) {
@@ -335,6 +433,13 @@ async function removeZone() {
     console.log('[ZoneAssignmentPanel] Remove response:', response)
 
     if (response.success) {
+      // OPTIMISTIC UPDATE: Update ESP Store immediately for instant UI feedback
+      espStore.updateDeviceZone(props.espId, {
+        zone_id: undefined,
+        zone_name: undefined,
+        master_zone_id: undefined,
+      })
+
       // Server has removed the zone
       assignmentState.value = 'success'
       successMessage.value = 'Zone-Zuweisung entfernt'
@@ -391,6 +496,10 @@ async function removeZone() {
   margin-bottom: 16px;
 }
 
+.zone-panel--compact {
+  margin-bottom: 0;
+}
+
 .error-banner {
   display: flex;
   align-items: center;
@@ -404,6 +513,11 @@ async function removeZone() {
   font-size: 0.875rem;
 }
 
+.error-banner--compact {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+}
+
 .success-banner {
   display: flex;
   align-items: center;
@@ -415,6 +529,45 @@ async function removeZone() {
   border-radius: 0.5rem;
   color: var(--color-success, #22c55e);
   font-size: 0.875rem;
+}
+
+.success-banner--compact {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+/* Compact mode styles */
+.compact-status {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+  min-height: 24px;
+}
+
+.compact-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.zone-id-preview {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.zone-id-preview code {
+  font-family: 'JetBrains Mono', monospace;
+  background-color: var(--color-bg-tertiary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.6875rem;
+}
+
+.compact-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
 }
 </style>
 

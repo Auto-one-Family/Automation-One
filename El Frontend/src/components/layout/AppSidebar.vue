@@ -104,16 +104,8 @@ const navigationGroups: NavGroup[] = [
     id: 'main',
     items: [
       { name: 'Dashboard', to: '/', icon: LayoutDashboard },
-    ]
-  },
-  {
-    id: 'devices',
-    label: 'Geräte',
-    icon: Cpu,
-    items: [
-      { name: 'Alle ESPs', to: '/devices', icon: Cpu },
-      { name: 'Sensoren', to: '/sensors', icon: Thermometer },
-      { name: 'Aktoren', to: '/actuators', icon: Power },
+      // Komponenten: Combined Sensors & Actuators view with tabs
+      { name: 'Komponenten', to: '/sensors', icon: Cpu },
     ]
   },
   {
