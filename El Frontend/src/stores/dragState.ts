@@ -31,8 +31,9 @@ const DRAG_TIMEOUT_MS = 30000 // 30 Sekunden
 
 /**
  * Debug-Modus aktivieren (für Entwicklung)
+ * IMMER aktiv für Drag-Debug - später wieder auf import.meta.env.DEV setzen
  */
-const DEBUG = import.meta.env.DEV
+const DEBUG = true  // Force enabled for debugging
 
 // =============================================================================
 // Types
@@ -95,6 +96,9 @@ export const useDragStateStore = defineStore('dragState', () => {
   /** ESP-ID des aktuell gedraggten Sensors (für Auto-Open Chart) */
   const draggingSensorEspId = ref<string | null>(null)
 
+  /** True wenn eine ESP-Card zwischen Zonen gedraggt wird (VueDraggable) */
+  const isDraggingEspCard = ref(false)
+
   /** Zeitpunkt des Drag-Starts (für Timeout-Detection) */
   const dragStartTime = ref<number | null>(null)
 
@@ -115,7 +119,7 @@ export const useDragStateStore = defineStore('dragState', () => {
 
   /** True wenn irgendein Drag aktiv ist */
   const isAnyDragActive = computed(() =>
-    isDraggingSensorType.value || isDraggingSensor.value
+    isDraggingSensorType.value || isDraggingSensor.value || isDraggingEspCard.value
   )
 
   /** Aktuelle Drag-Dauer in ms (für Debugging) */
@@ -155,11 +159,16 @@ export const useDragStateStore = defineStore('dragState', () => {
   }
 
   /**
-   * Debug-Logger
+   * Debug-Logger - mit auffälligem Styling für einfaches Debugging
    */
   function log(message: string, data?: Record<string, unknown>): void {
     if (DEBUG) {
-      console.debug(`[DragState] ${message}`, data || '')
+      const style = 'background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+      if (data) {
+        console.log(`%c[DragState]%c ${message}`, style, 'color: #a78bfa;', data)
+      } else {
+        console.log(`%c[DragState]%c ${message}`, style, 'color: #a78bfa;')
+      }
     }
   }
 
@@ -188,6 +197,42 @@ export const useDragStateStore = defineStore('dragState', () => {
   }
 
   /**
+   * Startet einen ESP-Card-Drag (VueDraggable zwischen Zonen)
+   */
+  function startEspCardDrag(): void {
+    log('Starting ESP card drag')
+
+    // Reset vorheriger State (Sicherheit)
+    if (isAnyDragActive.value) {
+      log('Warning: Starting new drag while previous drag active - resetting')
+      endDrag()
+    }
+
+    isDraggingEspCard.value = true
+    dragStartTime.value = Date.now()
+    stats.value.startCount++
+
+    startSafetyTimeout()
+  }
+
+  /**
+   * Beendet einen ESP-Card-Drag
+   */
+  function endEspCardDrag(): void {
+    log('Ending ESP card drag')
+    isDraggingEspCard.value = false
+
+    // Berechne Drag-Dauer für Statistiken
+    if (dragStartTime.value) {
+      stats.value.lastDragDuration = Date.now() - dragStartTime.value
+    }
+
+    dragStartTime.value = null
+    stats.value.endCount++
+    clearSafetyTimeout()
+  }
+
+  /**
    * Startet einen Sensor-Satellite-Drag für Chart-Analyse
    */
   function startSensorDrag(payload: SensorDragPayload): void {
@@ -213,10 +258,19 @@ export const useDragStateStore = defineStore('dragState', () => {
    * Wird sowohl von Components als auch vom Safety-Timeout aufgerufen.
    */
   function endDrag(): void {
+    // Log current state BEFORE reset
+    log('endDrag() called', {
+      wasDraggingSensorType: isDraggingSensorType.value,
+      wasDraggingSensor: isDraggingSensor.value,
+      wasDraggingEspCard: isDraggingEspCard.value,
+      sensorPayload: sensorPayload.value,
+      draggingSensorEspId: draggingSensorEspId.value,
+    })
+
     // Berechne Drag-Dauer für Statistiken
     if (dragStartTime.value) {
       stats.value.lastDragDuration = Date.now() - dragStartTime.value
-      log('Ending drag', { duration: stats.value.lastDragDuration })
+      log('Drag duration', { duration: `${stats.value.lastDragDuration}ms` })
     }
 
     // State zurücksetzen
@@ -225,10 +279,12 @@ export const useDragStateStore = defineStore('dragState', () => {
     isDraggingSensor.value = false
     sensorPayload.value = null
     draggingSensorEspId.value = null
+    isDraggingEspCard.value = false
     dragStartTime.value = null
     stats.value.endCount++
 
     clearSafetyTimeout()
+    log('State reset complete', { stats: stats.value })
   }
 
   /**
@@ -257,15 +313,31 @@ export const useDragStateStore = defineStore('dragState', () => {
   /**
    * Globaler dragend Listener als Safety-Net.
    * Fängt dragend Events ab die nicht von Components behandelt werden.
+   *
+   * WICHTIG: Nur für native HTML5 Drags (SensorSatellite, SensorTypeDrag).
+   * VueDraggable/SortableJS verwendet KEINE nativen drag events - es verwendet
+   * Mouse-Events. Daher dürfen wir bei isDraggingEspCard NICHT eingreifen!
    */
   function handleGlobalDragEnd(event: DragEvent): void {
-    if (isAnyDragActive.value) {
-      log('Global dragend caught - ensuring state cleanup', {
+    // Nur für native HTML5 Drags reagieren, NICHT für SortableJS/VueDraggable
+    // isDraggingEspCard wird von VueDraggable verwaltet (@choose/@end Events)
+    if (isDraggingEspCard.value) {
+      log('Global dragend ignored - ESP card drag is managed by VueDraggable', {
         target: (event.target as HTMLElement)?.tagName,
+      })
+      return
+    }
+
+    // Nur bei nativen Drags (Sensor-Typ aus Sidebar, Sensor-Satellite für Chart)
+    if (isDraggingSensorType.value || isDraggingSensor.value) {
+      log('Global dragend caught for native drag - ensuring state cleanup', {
+        target: (event.target as HTMLElement)?.tagName,
+        isDraggingSensorType: isDraggingSensorType.value,
+        isDraggingSensor: isDraggingSensor.value,
       })
       // Kleine Verzögerung um Component-Handler Zeit zu geben
       setTimeout(() => {
-        if (isAnyDragActive.value) {
+        if (isDraggingSensorType.value || isDraggingSensor.value) {
           log('State still active after global dragend - forcing cleanup')
           endDrag()
         }
@@ -325,6 +397,7 @@ export const useDragStateStore = defineStore('dragState', () => {
     isDraggingSensor,
     sensorPayload,
     draggingSensorEspId,
+    isDraggingEspCard,
 
     // Computed
     isAnyDragActive,
@@ -333,6 +406,8 @@ export const useDragStateStore = defineStore('dragState', () => {
     // Actions
     startSensorTypeDrag,
     startSensorDrag,
+    startEspCardDrag,
+    endEspCardDrag,
     endDrag,
     forceReset,
     getStats,
