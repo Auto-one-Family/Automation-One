@@ -20,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 import ESPCard from '@/components/esp/ESPCard.vue'
 import { type ESPDevice } from '@/api/esp'
+import { useDragStateStore } from '@/stores/dragState'
 
 interface Props {
   /** Zone ID (technical, lowercase) */
@@ -65,11 +66,15 @@ const emit = defineEmits<{
   (e: 'delete', espId: string): void
 }>()
 
+// Drag state store (global ESP-Card drag tracking)
+const dragStore = useDragStateStore()
+
 // Local state
 const isExpanded = ref(props.defaultExpanded)
 const isDragOver = ref(false)
 const dragOverCount = ref(0)  // Track nested drag events
 const localDevices = ref<ESPDevice[]>([...props.devices])
+const dragStarted = ref(false)  // Tracks if @start has fired (for proper cleanup in @unchoose)
 
 // Watch for prop changes to sync local devices
 watch(() => props.devices, (newDevices) => {
@@ -111,6 +116,17 @@ const containerClasses = computed(() => {
   return classes
 })
 
+// Debug logger with consistent styling
+function log(message: string, data?: Record<string, unknown>): void {
+  const style = 'background: #ec4899; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+  const label = `ZoneGroup:${props.zoneId}`
+  if (data) {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;', data)
+  } else {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;')
+  }
+}
+
 // Methods
 function toggleExpanded() {
   if (props.collapsible) {
@@ -123,41 +139,181 @@ function toggleExpanded() {
 // This is more reliable than @add/@remove events which have SortableJS format
 
 function handleDragChange(event: any) {
-  // Handle add event - device dropped into this zone FROM another zone
-  if (event.added) {
-    const device = event.added.element as ESPDevice
-    const fromZoneId = device.zone_id || null
-    const deviceId = device.device_id || device.esp_id || ''
+  log('VueDraggable @change', {
+    hasAdded: !!event.added,
+    hasMoved: !!event.moved,
+    hasRemoved: !!event.removed,
+    event,
+  })
 
-    console.debug(`[ZoneGroup] Device ${deviceId} dropped: ${fromZoneId} → ${props.zoneId}`)
+  // Note: @change mit added/moved/removed funktioniert nur bei manchen vue-draggable-plus Versionen
+  // Wir verwenden stattdessen @add für das Hinzufügen
 
-    emit('device-dropped', {
-      device,
-      fromZoneId,
-      toZoneId: props.zoneId
-    })
-  }
-
-  // Handle moved event - reorder within zone
+  // Handle moved event - reorder within zone (falls hier getriggert)
   if (event.moved) {
+    log('Device MOVED within zone', { oldIndex: event.moved.oldIndex, newIndex: event.moved.newIndex })
     emit('devices-reordered', localDevices.value)
   }
 }
 
-function handleDragAdd(_event: any) {
-  // Kept for compatibility but @change handles this better
+function handleDragAdd(event: any) {
+  // SortableJS @add Event Format:
+  // - event.item: DOM-Element das hinzugefügt wurde
+  // - event.item.dataset: data-* Attribute (deviceId)
+  // - event.from: Container von dem es kam
+  // - event.oldIndex, event.newIndex: Positionen
+
+  const deviceId = event?.item?.dataset?.deviceId
+  log('VueDraggable @add 📥', {
+    deviceId,
+    oldIndex: event?.oldIndex,
+    newIndex: event?.newIndex,
+    fromClass: event?.from?.className?.slice?.(0, 50),
+    toClass: event?.to?.className?.slice?.(0, 50),
+  })
+
+  if (!deviceId) {
+    log('ERROR: No deviceId found in item dataset')
+    return
+  }
+
+  // Finde das Device in localDevices (wurde bereits von VueDraggable hinzugefügt)
+  const device = localDevices.value.find(d =>
+    (d.device_id || d.esp_id) === deviceId
+  )
+
+  if (!device) {
+    log('ERROR: Device not found in localDevices', { deviceId, localDevices: localDevices.value.map(d => d.device_id || d.esp_id) })
+    return
+  }
+
+  const fromZoneId = device.zone_id || null
+
+  log('Device ADDED to zone ✅', {
+    deviceId,
+    fromZoneId,
+    toZoneId: props.zoneId,
+    deviceName: device.name,
+  })
+
+  // Emit event für Parent-Komponente um API-Call auszuführen
+  emit('device-dropped', {
+    device,
+    fromZoneId,
+    toZoneId: props.zoneId
+  })
 }
 
 function handleDragUpdate(_event: any) {
+  log('VueDraggable @update (legacy)', { event: _event })
   // Kept for compatibility but @change handles this better
 }
 
-function handleDragStart() {
-  // Could add visual feedback here
+function handleDragStart(event: any) {
+  log('VueDraggable @start 🚀', {
+    item: event?.item?.dataset,
+    itemClass: event?.item?.className?.slice?.(0, 80),
+    from: event?.from?.className?.slice?.(0, 50),
+    originalEvent: event?.originalEvent?.type,
+    // SortableJS interne Flags
+    dragged: !!event?.item,
+    clone: !!event?.clone,
+  })
+
+  // Flag setzen damit @unchoose weiß dass der Drag gestartet wurde
+  dragStarted.value = true
+
+  // State wurde bereits in @choose gesetzt, hier nur sicherstellen
+  if (!dragStore.isDraggingEspCard) {
+    dragStore.startEspCardDrag()
+  }
 }
 
-function handleDragEnd() {
+function handleDragEnd(event: any) {
+  log('VueDraggable @end 🏁', {
+    item: event?.item?.dataset,
+    itemClass: event?.item?.className?.slice?.(0, 80),
+    to: event?.to?.className?.slice?.(0, 50),
+    from: event?.from?.className?.slice?.(0, 50),
+    oldIndex: event?.oldIndex,
+    newIndex: event?.newIndex,
+    pullMode: event?.pullMode,
+    originalEvent: event?.originalEvent?.type,
+  })
   isDragOver.value = false
+
+  // Reset flag
+  dragStarted.value = false
+
+  // KRITISCH: Globalen ESP-Card-Drag-State beenden
+  dragStore.endEspCardDrag()
+}
+
+// VueDraggable @choose event - fired when item is selected (before drag starts)
+function handleDragChoose(event: any) {
+  log('VueDraggable @choose 👆 (item selected)', {
+    item: event?.item?.dataset,
+    itemClass: event?.item?.className?.slice?.(0, 80),
+    oldIndex: event?.oldIndex,
+  })
+
+  // Reset flag
+  dragStarted.value = false
+
+  // KRITISCH: ESP-Card-Drag-State SOFORT setzen (nicht erst bei @start!)
+  // Dadurch wird SensorSatellite's draggable deaktiviert BEVOR der Drag startet
+  // und verhindert dass Sensor-Elemente den Drag "stehlen"
+  dragStore.startEspCardDrag()
+}
+
+// VueDraggable @unchoose event - fired when item is deselected
+function handleDragUnchoose(event: any) {
+  log('VueDraggable @unchoose 👋 (item deselected)', {
+    item: event?.item?.dataset,
+    dragStarted: dragStarted.value,
+  })
+
+  // Wenn @start nie gefeuert hat, wurde der Drag abgebrochen (z.B. kurzer Klick)
+  // In diesem Fall müssen wir den State hier beenden
+  if (!dragStarted.value) {
+    log('Drag was aborted (no @start), cleaning up state')
+    dragStore.endEspCardDrag()
+  }
+  // Sonst: @end wird den State beenden
+}
+
+/**
+ * Handles native HTML5 dragstart events on the item wrapper.
+ *
+ * KRITISCH: VueDraggable mit force-fallback verwendet Mouse Events, nicht native Drag Events.
+ * Aber Child-Elemente (SensorSatellite, ActuatorSatellite) haben draggable="true" für Chart-Drag.
+ * Diese können native dragstart Events auslösen die hochbubblen.
+ *
+ * Diese Funktion:
+ * 1. Lässt Satellite-Drags durch (für Chart-Funktionalität)
+ * 2. Blockiert alle anderen native Drags (verhindert Interferenz mit VueDraggable)
+ */
+function handleNativeDragStart(event: DragEvent) {
+  const target = event.target as HTMLElement
+
+  // Prüfe ob das Event von einem Satellite-Element kommt (für Chart-Drag)
+  const isSatelliteDrag = target.closest('[data-satellite-type]')
+
+  if (isSatelliteDrag) {
+    // Satellite-Drag für Chart - durchlassen
+    log('Native dragstart from satellite - allowing for chart drag', {
+      satelliteType: (target.closest('[data-satellite-type]') as HTMLElement)?.dataset?.satelliteType,
+    })
+    return
+  }
+
+  // Alle anderen native Drags blockieren - VueDraggable handhabt ESP-Card-Drag via Mouse Events
+  log('Native dragstart BLOCKED - VueDraggable uses mouse events (force-fallback)', {
+    target: target.tagName,
+    targetClass: target.className?.toString()?.slice(0, 50),
+  })
+  event.preventDefault()
+  event.stopPropagation()
 }
 
 // Container-level drag handlers for full zone drag-over effect
@@ -165,6 +321,7 @@ function handleContainerDragEnter(event: DragEvent) {
   event.preventDefault()
   dragOverCount.value++
   isDragOver.value = true
+  log('Container dragenter', { dragOverCount: dragOverCount.value })
 }
 
 function handleContainerDragLeave(event: DragEvent) {
@@ -174,9 +331,11 @@ function handleContainerDragLeave(event: DragEvent) {
     dragOverCount.value = 0
     isDragOver.value = false
   }
+  log('Container dragleave', { dragOverCount: dragOverCount.value })
 }
 
 function handleContainerDrop(event: DragEvent) {
+  log('Container drop', { types: event.dataTransfer?.types })
   event.preventDefault()
   dragOverCount.value = 0
   isDragOver.value = false
@@ -240,6 +399,19 @@ function getDeviceId(device: ESPDevice): string {
     <Transition name="zone-content">
       <div v-show="isExpanded" class="zone-group__content">
         <!-- Draggable wrapper with minimum height for empty drop targets -->
+        <!--
+          VueDraggable Configuration:
+          - group="esp-devices": Enables cross-zone drag & drop
+          - animation="0": Disabled for performance (fallback mode has its own animation)
+          - handle: Only the ESP card header (.esp-drag-handle) can trigger drag
+          - filter: Backup exclusion for elements that should never trigger drag
+          - force-fallback: KRITISCH! Zwingt SortableJS, Mouse Events statt native HTML5 Drag API zu verwenden.
+            Ohne force-fallback können native drag events von Satellit-Elementen (draggable="true" für Chart)
+            den VueDraggable-Drag unterbrechen, weil @choose feuert aber dann ein natives dragend Event
+            den internen State korrumpiert bevor @start feuern kann.
+          - fallback-on-body: Clone wird auf <body> appendiert für besseres z-index handling
+          - fallback-class: Custom class for the fallback drag clone (siehe :global() CSS)
+        -->
         <VueDraggable
           v-if="enableDragDrop"
           v-model="localDevices"
@@ -249,22 +421,40 @@ function getDeviceId(device: ESPDevice): string {
             'zone-group__grid--empty': devices.length === 0
           }"
           group="esp-devices"
-          :animation="200"
+          :animation="0"
           ghost-class="zone-item--ghost"
           chosen-class="zone-item--chosen"
           drag-class="zone-item--drag"
+          handle=".esp-drag-handle"
+          :filter="'button, a, input, select, [data-no-drag]'"
+          :prevent-on-filter="false"
+          :force-fallback="true"
+          :fallback-on-body="true"
+          fallback-class="zone-item--fallback"
+          :delay="0"
+          :touch-start-threshold="5"
           @add="handleDragAdd"
           @update="handleDragUpdate"
           @change="handleDragChange"
           @start="handleDragStart"
           @end="handleDragEnd"
+          @choose="handleDragChoose"
+          @unchoose="handleDragUnchoose"
         >
-          <!-- Device cards - wrapper needs explicit height for VueDraggable -->
+          <!--
+            Device cards wrapper - VueDraggable manages drag via mouse events (force-fallback).
+            The @dragstart.capture prevents any NATIVE drag events from propagating.
+            This is necessary because:
+            1. Child elements (SensorSatellite, ActuatorSatellite) have draggable="true" for chart drag
+            2. Without this, a native dragstart could bubble up and interfere with VueDraggable
+            3. We only allow dragstart to proceed if it originates from a satellite element
+          -->
           <div
             v-for="device in localDevices"
             :key="getDeviceId(device)"
             class="zone-group__item"
             :data-device-id="getDeviceId(device)"
+            @dragstart.capture="handleNativeDragStart"
           >
             <slot name="device" :device="device" :device-id="getDeviceId(device)">
               <ESPCard
@@ -516,54 +706,35 @@ function getDeviceId(device: ESPDevice): string {
 }
 
 .zone-group__grid {
-  display: grid;
-  /* min() verhindert Overflow bei schmalen Containern */
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  /* FLEXBOX statt GRID: Items behalten ihre natürliche Größe */
+  display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
+  align-items: flex-start;
   overflow: visible;  /* Erlaubt Overlays von Child-Elementen */
 }
 
-/* Responsive grid */
-@media (min-width: 1280px) {
-  .zone-group__grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
-  }
-}
-
-@media (min-width: 1600px) {
-  .zone-group__grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  }
-}
-
-/* Compact mode for dashboard - TIGHT layout */
+/* Compact mode for dashboard - gleiche Flex-Basis */
 .zone-group__grid--compact {
-  /* Smaller min-width for more cards per row */
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
   gap: 0.75rem;
 }
 
 @media (min-width: 1440px) {
   .zone-group__grid--compact {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
     gap: 1rem;
   }
 }
 
-@media (min-width: 1920px) {
-  .zone-group__grid--compact {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
-    gap: 1rem;
-  }
-}
-
-/* Mobile: min() sorgt bereits für 1 Spalte wenn nötig */
-/* Diese Regel nur für garantiert 1 Spalte auf sehr kleinen Screens */
+/* Mobile: Flex-Items bekommen volle Breite */
 @media (max-width: 480px) {
   .zone-group__grid,
   .zone-group__grid--compact {
-    grid-template-columns: 1fr;
+    flex-direction: column;
     gap: 0.75rem;
+  }
+
+  .zone-group__item {
+    width: 100%;
   }
 }
 
@@ -648,13 +819,27 @@ function getDeviceId(device: ESPDevice): string {
    ============================================================================= */
 
 .zone-group__item {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* PERFORMANCE: Nur transform/opacity für GPU-Beschleunigung */
+  transition: transform 0.15s ease-out, opacity 0.15s ease-out;
   /* Position relative für z-index Stacking */
   position: relative;
   z-index: 1;
   /* WICHTIG: Kein contain:layout mehr - das blockiert absolute Positionierung
      von Child-Elementen wie AnalysisDropZone Overlay */
   overflow: visible;  /* Erlaubt Overlays die über das Item hinausgehen */
+  /* KRITISCH: Verhindere Text-Selection (blaues Highlight) während Drag */
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  /* Bessere Touch-Unterstützung */
+  touch-action: manipulation;
+  /* GPU-Hint für bessere Performance */
+  will-change: transform, opacity;
+}
+
+/* Verhindere Text-Selektion auf ALLEN Kind-Elementen während eines Drags */
+.zone-group__item * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 .zone-item--ghost {
@@ -683,14 +868,64 @@ function getDeviceId(device: ESPDevice): string {
   box-shadow: 0 12px 32px rgba(96, 165, 250, 0.3) !important;
 }
 
-/* Grab cursor for draggable items */
-:deep(.esp-card),
-:deep(.esp-orbital-grid__item) {
+/*
+ * Fallback mode styling (when force-fallback is enabled)
+ * SortableJS creates a clone of the dragged element with this class
+ * NOTE: Using :global() because fallback-on-body appends to <body>
+ *
+ * Problem: Grid macht Items 380px+ breit, Clone erbt diese Breite.
+ * Lösung: width: fit-content auf Clone UND seine Kinder.
+ */
+:global(.zone-item--fallback) {
+  transform: scale(1.02);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.85;
+  will-change: transform;
+  transition: none !important;
+  /* KRITISCH: Clone soll sich an Inhalt anpassen, nicht Grid-Breite erben */
+  width: fit-content !important;
+}
+
+:global(.zone-item--fallback) > * {
+  box-shadow: 0 8px 24px rgba(96, 165, 250, 0.35) !important;
+  border: 2px solid var(--color-iridescent-1) !important;
+  transition: none !important;
+  /* Auch Kinder sollen sich anpassen */
+  width: fit-content !important;
+}
+
+/* Spezifisch für den Layout-Container im Fallback */
+:global(.zone-item--fallback .esp-horizontal-layout) {
+  width: fit-content !important;
+}
+
+/* =============================================================================
+   Cursor Styling for Drag & Drop
+
+   Principle: Show grab cursor only on the drag handle (.esp-drag-handle).
+   The handle is the ESP card header area. Other areas have their own cursors.
+   ============================================================================= */
+
+/* Base: Item wrapper has default cursor (not draggable everywhere) */
+.zone-group__item {
+  cursor: default;
+}
+
+/* Only the drag handle shows grab cursor */
+.zone-group__item :deep(.esp-drag-handle) {
   cursor: grab;
 }
 
-:deep(.esp-card):active,
-:deep(.esp-orbital-grid__item):active {
+.zone-group__item :deep(.esp-drag-handle):active {
   cursor: grabbing;
 }
+
+/*
+ * Other elements control their own cursor:
+ * - SensorSatellite: cursor: grab (when draggable for chart)
+ * - ActuatorSatellite: cursor: grab (when draggable for chart)
+ * - AnalysisDropZone: cursor: default
+ * - Buttons/Links: cursor: pointer
+ */
 </style>
