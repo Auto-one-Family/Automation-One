@@ -330,14 +330,81 @@ Die Wokwi CLI interpretiert das erste Argument als Projektpfad und sucht dort na
 
 ---
 
-## Nächste Schritte
+## Bug #4: Ungültige Szenario-Syntax - "timeout" pro Step nicht erlaubt
 
-1. [x] Bug #1 fixen: Mosquitto Health-Check korrigieren
-2. [x] Workflow erneut ausführen
-3. [x] Bug #2 fixen: WOKWI_CLI_TOKEN Secret konfiguriert
-4. [ ] **Bug #3 fixen: wokwi.toml Pfad korrigieren**
-5. [ ] Workflow erneut triggern und echte Simulation validieren
+### Zusammenfassung
+
+Die Wokwi Szenario-YAML-Dateien verwenden `timeout:` als separates Feld pro Step, was nicht unterstützt wird.
+
+### Status
+
+| Eigenschaft | Wert |
+|-------------|------|
+| **Workflow Run ID** | 20703687677 |
+| **Fehler-Schritt** | `Run Boot Sequence Test` |
+| **Exit Code** | 0 (durch `|| true` maskiert) |
+| **Ursache** | Falsche YAML-Syntax in Szenario-Dateien |
+
+### Symptome
+
+```
+Wokwi CLI v0.19.1 (e0043c48bf15)
+Error: Invalid scenario step key: timeout
+```
+
+### Root Cause Analyse
+
+**Dateien:**
+- `El Trabajante/tests/wokwi/boot_test.yaml`
+- `El Trabajante/tests/wokwi/mqtt_connection.yaml`
+
+**Falsche Syntax:**
+```yaml
+steps:
+  - wait-serial: "ESP32 Sensor Network"
+    timeout: 10000  # FALSCH! Nicht unterstützt
+```
+
+**Korrekte Syntax:**
+```yaml
+steps:
+  - wait-serial: "ESP32 Sensor Network"  # Kein timeout pro Step!
+```
+
+Der Timeout wird **nur** als CLI-Option gesetzt: `--timeout 90000`
+
+### Lösung
+
+Alle `timeout:` Zeilen aus den Szenario-Dateien entfernen. Der globale Timeout wird über die CLI-Option gesteuert.
+
+### Priorität
+
+**GEFIXT** - Szenario-Dateien korrigiert (2026-01-05)
 
 ---
 
-**Letzte Aktualisierung:** 2026-01-05 02:52 UTC
+## Workflow-Status Übersicht (2026-01-05)
+
+| Workflow | Run ID | Status | Fehler |
+|----------|--------|--------|--------|
+| **Wokwi ESP32 Tests** | 20703443328 | FAILURE | Bug #1 (Mosquitto Health-Check) - GEFIXT |
+| **Wokwi ESP32 Tests** | 20703490678 | SUCCESS* | Bug #2 (Token fehlt) - GEFIXT |
+| **Wokwi ESP32 Tests** | 20703576871 | SUCCESS* | Bug #3 (wokwi.toml Pfad) - GEFIXT |
+| **Wokwi ESP32 Tests** | 20703634815 | SUCCESS* | Bug #3 (noch falscher Pfad) |
+| **Wokwi ESP32 Tests** | 20703687677 | SUCCESS* | Bug #4 (Szenario Syntax) - GEFIXT |
+| **ESP32 Tests** | 20703443326 | SUCCESS | - |
+| **Server Tests** | 20703443330 | SUCCESS | - |
+
+---
+
+## Nächste Schritte
+
+1. [x] Bug #1 fixen: Mosquitto Health-Check korrigieren
+2. [x] Bug #2 fixen: WOKWI_CLI_TOKEN Secret konfiguriert
+3. [x] Bug #3 fixen: wokwi.toml Pfad korrigieren (Projektverzeichnis als erstes Argument)
+4. [x] Bug #4 fixen: Szenario-Syntax korrigiert (kein timeout pro Step)
+5. [ ] **Workflow erneut triggern und echte Simulation validieren**
+
+---
+
+**Letzte Aktualisierung:** 2026-01-05 03:00 UTC

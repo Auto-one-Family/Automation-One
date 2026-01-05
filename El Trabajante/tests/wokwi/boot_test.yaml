@@ -16,8 +16,9 @@
 # - main.cpp:474    "MQTT connected successfully"
 # - main.cpp:478    "Initial heartbeat sent"
 #
+# NOTE: Timeout is set via CLI --timeout option, not per step
 # Usage:
-#   wokwi-cli run --timeout 90000 --scenario tests/wokwi/boot_test.yaml
+#   wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
 
 name: Boot Sequence Test
 version: 1
@@ -27,86 +28,43 @@ steps:
   # Phase 0: Hardware Initialization
   # ============================================
   - wait-serial: "ESP32 Sensor Network"
-    timeout: 10000
-
   - wait-serial: "Chip Model:"
-    timeout: 5000
-
   - wait-serial: "Watchdog configured"
-    timeout: 5000
 
   # ============================================
   # Phase 1: Core Infrastructure
   # ============================================
-  # GPIO Safe-Mode Initialization (gpio_manager.cpp:33)
   - wait-serial: "GPIO SAFE-MODE"
-    timeout: 5000
-
   - wait-serial: "Logger system initialized"
-    timeout: 5000
-
   - wait-serial: "ConfigManager"
-    timeout: 5000
-
-  # Wokwi simulation mode confirmation (config_manager.cpp:66)
   - wait-serial: "WOKWI_SIMULATION mode"
-    timeout: 5000
-
   - wait-serial: "Phase 1: Core Infrastructure READY"
-    timeout: 10000
 
   # ============================================
   # Phase 2: Communication Layer
   # ============================================
   - wait-serial: "Phase 2: Communication Layer"
-    timeout: 5000
-
-  # WiFi connection (wifi_manager.cpp:86)
   - wait-serial: "Connecting to WiFi:"
-    timeout: 5000
-
-  # WiFi connected (wifi_manager.cpp:140) - may take time in Wokwi
   - wait-serial: "WiFi connected"
-    timeout: 45000
-
-  # MQTT connection (main.cpp:474)
   - wait-serial: "MQTT connected"
-    timeout: 30000
-
   - wait-serial: "Phase 2: Communication Layer READY"
-    timeout: 10000
 
   # ============================================
   # Phase 3: Hardware Abstraction
   # ============================================
   - wait-serial: "Phase 3: Hardware Abstraction"
-    timeout: 5000
-
-  # I2C Bus Manager (i2c_bus.cpp:114)
   - wait-serial: "I2C Bus Manager initialized"
-    timeout: 5000
-
   - wait-serial: "Phase 3: Hardware Abstraction READY"
-    timeout: 10000
 
   # ============================================
   # Phase 4 & 5: Sensor & Actuator
   # ============================================
   - wait-serial: "Phase 4: Sensor System"
-    timeout: 5000
-
   - wait-serial: "Phase 4: Sensor System READY"
-    timeout: 10000
-
   - wait-serial: "Phase 5: Actuator System"
-    timeout: 5000
-
   - wait-serial: "Phase 5: Actuator System READY"
-    timeout: 10000
 
   # ============================================
   # Heartbeat (confirms full boot)
   # ============================================
-  # Initial heartbeat (main.cpp:478)
   - wait-serial: "heartbeat"
-    timeout: 10000

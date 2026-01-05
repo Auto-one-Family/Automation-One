@@ -15,8 +15,9 @@
 # - main.cpp:478          "Initial heartbeat sent for ESP registration"
 # - main.cpp:428          "Free Heap: ..."
 #
+# NOTE: Timeout is set via CLI --timeout option, not per step
 # Usage:
-#   wokwi-cli run --timeout 90000 --scenario tests/wokwi/mqtt_connection.yaml
+#   wokwi-cli . --timeout 90000 --scenario tests/wokwi/mqtt_connection.yaml
 
 name: MQTT Connection Test
 version: 1
@@ -26,46 +27,30 @@ steps:
   # Wait for boot completion
   # ============================================
   - wait-serial: "Phase 2: Communication Layer"
-    timeout: 30000
 
   # ============================================
   # WiFi Connection
   # ============================================
-  # wifi_manager.cpp:140 "WiFi connected! IP: ..."
   - wait-serial: "WiFi connected"
-    timeout: 45000
-
   - wait-serial: "IP:"
-    timeout: 5000
 
   # ============================================
   # MQTT Connection
   # ============================================
-  # mqtt_client.cpp:77 "MQTTClient initialized"
   - wait-serial: "MQTTClient"
-    timeout: 10000
-
-  # main.cpp:474 "MQTT connected successfully"
   - wait-serial: "MQTT connected"
-    timeout: 30000
 
   # ============================================
   # Topic Subscriptions
   # ============================================
-  # main.cpp:508 "Subscribed to system + actuator + zone assignment + subzone management topics"
   - wait-serial: "Subscribed to"
-    timeout: 10000
 
   # ============================================
   # Initial Heartbeat
   # ============================================
-  # main.cpp:478 "Initial heartbeat sent for ESP registration"
   - wait-serial: "heartbeat"
-    timeout: 10000
 
   # ============================================
   # Memory Status (confirms stable operation)
   # ============================================
-  # main.cpp:428 "Free Heap: ..."
   - wait-serial: "Free Heap:"
-    timeout: 5000
