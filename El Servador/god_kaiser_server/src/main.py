@@ -14,6 +14,7 @@ Phase: 5 (Week 9-10) - API Layer
 Status: IMPLEMENTED
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -182,6 +183,12 @@ async def lifespan(app: FastAPI):
             mqtt_client,
             max_workers=settings.mqtt.subscriber_max_workers,
         )
+
+        # BUG O FIX (2026-01-05): Explicitly set main event loop for async handlers
+        # This ensures SQLAlchemy AsyncEngine operations run in the correct event loop,
+        # preventing "Queue bound to different event loop" errors in Python 3.12+.
+        _subscriber_instance.set_main_loop(asyncio.get_running_loop())
+        logger.info("Main event loop set for MQTT subscriber")
 
         # Register subscriber in MQTT client for auto re-subscription on reconnect
         mqtt_client.set_subscriber(_subscriber_instance)

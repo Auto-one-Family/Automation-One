@@ -55,11 +55,16 @@ class WebSocketManager:
     async def initialize(self) -> None:
         """
         Initialize WebSocket Manager.
-        
+
         Sets event loop reference for thread-safe broadcasts.
+
+        IMPORTANT: Uses get_running_loop() instead of get_event_loop() to ensure
+        we capture the correct event loop. This prevents "Queue bound to different
+        event loop" errors in Python 3.12+ where get_event_loop() is deprecated
+        and may return/create a different loop.
         """
-        self._loop = asyncio.get_event_loop()
-        logger.info("WebSocket Manager initialized")
+        self._loop = asyncio.get_running_loop()
+        logger.info("WebSocket Manager initialized with event loop")
 
     @property
     def connection_count(self) -> int:

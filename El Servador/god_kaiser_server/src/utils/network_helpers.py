@@ -33,19 +33,23 @@ async def is_reachable(host: str, port: int, timeout: float = 5.0) -> bool:
 async def _check_connection(host: str, port: int) -> None:
     """
     Internal helper to check connection.
-    
+
     Args:
         host: Hostname or IP address
         port: Port number
-        
+
     Raises:
         OSError: If connection fails
+
+    Note:
+        Uses get_running_loop() instead of deprecated get_event_loop()
+        to prevent "Queue bound to different event loop" errors in Python 3.12+.
     """
     # Run socket.connect in executor to avoid blocking
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(5.0)  # Socket-level timeout
-    
+
     try:
         await loop.sock_connect(sock, (host, port))
     finally:

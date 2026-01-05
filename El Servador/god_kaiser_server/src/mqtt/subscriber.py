@@ -181,6 +181,35 @@ class Subscriber:
             )
             self.messages_failed += 1
     
+    def _get_valid_main_loop(self) -> asyncio.AbstractEventLoop:
+        """
+        Get a valid main event loop for async handler execution.
+
+        This method validates the cached loop and attempts recovery if it's invalid.
+        Prevents "Queue bound to different event loop" errors.
+
+        Returns:
+            Valid event loop or None
+
+        Raises:
+            RuntimeError: If no valid event loop is available
+        """
+        # Check if cached loop is still valid
+        if self._main_loop is not None and not self._main_loop.is_closed():
+            return self._main_loop
+
+        # Cached loop is invalid - log warning and attempt to use the set_main_loop() value
+        logger.warning(
+            "[Bug O Fix] Cached main event loop is invalid or closed. "
+            "This may indicate an event loop lifecycle issue."
+        )
+
+        # Cannot automatically recover - the loop must be set explicitly
+        raise RuntimeError(
+            "Main event loop is not available or has been closed. "
+            "Call set_main_loop() to set a valid event loop."
+        )
+
     def _execute_handler(self, handler: Callable, topic: str, payload: dict) -> None:
         """
         Execute handler in thread pool.
@@ -192,6 +221,10 @@ class Subscriber:
         This ensures SQLAlchemy AsyncEngine (bound to main loop) works correctly.
         Previously, creating a new event loop per thread caused "Queue bound to different event loop".
 
+        BUG O FIX (2026-01-05):
+        Added robust loop validation to prevent "Queue bound to different event loop" errors
+        in Python 3.12+ which is stricter about event loop binding.
+
         Args:
             handler: Handler function (sync or async)
             topic: MQTT topic
@@ -202,10 +235,11 @@ class Subscriber:
             if asyncio.iscoroutinefunction(handler):
                 # CRITICAL: Run async handler in MAIN event loop
                 # SQLAlchemy AsyncEngine's connection pool is bound to main loop
-                if self._main_loop is None or self._main_loop.is_closed():
+                try:
+                    main_loop = self._get_valid_main_loop()
+                except RuntimeError as e:
                     logger.error(
-                        f"No main event loop available for async handler on {topic}. "
-                        "Handler will not be executed."
+                        f"[Bug O] {e} - Handler for {topic} will not be executed."
                     )
                     self.messages_failed += 1
                     return
@@ -213,7 +247,7 @@ class Subscriber:
                 # Schedule coroutine in main event loop (thread-safe)
                 future = asyncio.run_coroutine_threadsafe(
                     handler(topic, payload),
-                    self._main_loop
+                    main_loop
                 )
 
                 try:
@@ -227,7 +261,15 @@ class Subscriber:
                     logger.error(f"Handler timed out for topic {topic} (30s)")
                     self.messages_failed += 1
                 except Exception as e:
-                    logger.error(f"Async handler failed for topic {topic}: {e}")
+                    # Check specifically for event loop errors
+                    error_str = str(e).lower()
+                    if "event loop" in error_str or "queue" in error_str:
+                        logger.error(
+                            f"[Bug O] Event loop error in handler for {topic}: {e}. "
+                            "This may indicate the main loop reference has become invalid."
+                        )
+                    else:
+                        logger.error(f"Async handler failed for topic {topic}: {e}")
                     self.messages_failed += 1
             else:
                 # Sync handler - call directly in thread pool
