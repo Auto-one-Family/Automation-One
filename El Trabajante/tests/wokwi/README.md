@@ -83,10 +83,11 @@ mosquitto -c /etc/mosquitto/mosquitto.conf
 cd "El Trabajante"
 
 # Boot sequence test
-wokwi-cli run --timeout 90000 --scenario tests/wokwi/boot_test.yaml
+# Syntax: wokwi-cli <project-dir> --timeout <ms> --scenario <path>
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
 
 # MQTT connection test
-wokwi-cli run --timeout 90000 --scenario tests/wokwi/mqtt_connection.yaml
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/mqtt_connection.yaml
 ```
 
 ### CI/CD (GitHub Actions)
@@ -193,10 +194,12 @@ pio run -e wokwi_simulation
    version: 1
    steps:
      - wait-serial: "Expected output"
-       timeout: 10000
+     # NOTE: timeout per step is NOT supported!
+     # Use CLI --timeout option instead
    ```
-3. Update GitHub Actions workflow if needed
-4. Test locally before pushing
+3. Run with: `wokwi-cli . --timeout 90000 --scenario tests/wokwi/my_test.yaml`
+4. Update GitHub Actions workflow if needed
+5. Test locally before pushing
 
 ---
 
