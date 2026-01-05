@@ -254,20 +254,42 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.y
 
 ---
 
-## Aktiver Bug: Event-Loop-Konflikt (Bug O)
+## Behobener Bug: Event-Loop-Konflikt (Bug O)
 
-**Status:** ⚠️ BEOBACHTET (sporadisch, nicht kritisch)
+**Status:** ✅ FIXED (2026-01-05) - Verifizierung: Server 48h+ laufen lassen
 
-**Symptom:** Server läuft normal, aber nach längerer Laufzeit erscheint:
+**Symptom:** Server läuft normal, aber nach längerer Laufzeit erscheint sporadisch:
 ```
 RuntimeError: Queue bound to different event loop
 ```
 
-**Root Cause:** MQTT-Subscriber Thread-Pool + Python 3.12+ Event-Loop-Binding.
+**Root Cause:** Python 3.12+ ist strenger bei Event-Loop-Binding:
+1. `asyncio.get_event_loop()` ist deprecated und kann falsche/neue Loops zurückgeben
+2. MQTT-Handler werden in ThreadPool-Threads ausgeführt, brauchen aber den Main-Loop
+3. SQLAlchemy AsyncEngine ist an den Main-Loop gebunden
 
-**Workaround:** Server neu starten. Tritt sporadisch auf.
+**Lösung (3 Teile):**
 
-**Langfristige Lösung (TODO):**
-1. Prüfen ob alle async Queues im Main-Event-Loop erstellt werden
-2. APScheduler auf `AsyncIOScheduler` umstellen
-3. Thread-Pool durch `asyncio.to_thread()` ersetzen
+1. **websocket/manager.py:61** - `get_event_loop()` → `get_running_loop()`
+   ```python
+   self._loop = asyncio.get_running_loop()
+   ```
+
+2. **network_helpers.py:45** - `get_event_loop()` → `get_running_loop()`
+   ```python
+   loop = asyncio.get_running_loop()
+   ```
+
+3. **main.py + subscriber.py** - Explizite Loop-Zuweisung beim Startup
+   ```python
+   # main.py (nach Subscriber-Erstellung)
+   _subscriber_instance.set_main_loop(asyncio.get_running_loop())
+   ```
+
+**Geänderte Dateien:**
+- `El Servador/god_kaiser_server/src/websocket/manager.py`
+- `El Servador/god_kaiser_server/src/utils/network_helpers.py`
+- `El Servador/god_kaiser_server/src/mqtt/subscriber.py`
+- `El Servador/god_kaiser_server/src/main.py`
+
+**Erfolgskriterium:** Server läuft 48+ Stunden ohne Event-Loop-Fehler
