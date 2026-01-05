@@ -1,7 +1,7 @@
 # Bugs Found
 
 > **Letzte Aktualisierung:** 2026-01-05
-> **Status:** ⚠️ 1 AKTIVER BUG (Bug O - sporadisch, nicht kritisch)
+> **Status:** 🟡 2 NON-CRITICAL BUGS (Bug R - Windows Console, Bug S - Test Cleanup)
 
 ---
 
@@ -9,11 +9,103 @@
 
 | Kategorie | Status |
 |-----------|--------|
+| **Windows Console Unicode** | 🟡 OPEN (Bug R - Windows CP1252 encoding, non-critical) |
+| **Test asyncio Task Cleanup** | 🟡 OPEN (Bug S - SequenceActionExecutor cleanup, non-critical) |
 | **Wokwi Zero Serial Output** | ✅ FIXED (Bug Q - Serial Monitor + Timing, Workflow verifiziert) |
 | **Wokwi GPIO 0 Boot-Loop** | ✅ FIXED (Bug P - committed, Workaround aktiv) |
-| **AsyncIO Event-Loop Bug** | ⚠️ OPEN (Bug O - sporadisch, nicht kritisch) |
+| **AsyncIO Event-Loop Bug** | ✅ FIXED (Bug O - committed, pending 48h verification) |
 | Deprecation Warnings | 🟡 Non-Critical |
 | Sicherheitshinweise | 🔵 Dev Only |
+
+---
+
+## Aktive Bugs (Non-Critical)
+
+### Bug R: Windows Console UnicodeEncodeError
+
+**Status:** 🟡 OPEN (Non-Critical, nur Windows)
+
+**Entdeckt:** 2026-01-05 (Server-Startup-Logs)
+
+**Symptom:** Server startet und funktioniert, aber in der Windows-Konsole erscheinen `UnicodeEncodeError`-Meldungen:
+```
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 123
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 93-94
+```
+
+**Root Cause:**
+- Windows-Terminal verwendet standardmäßig CP1252-Encoding
+- Server-Logs enthalten Unicode-Zeichen: `→` (\u2192), `⚠️` (\u26a0\ufe0f)
+- Diese Zeichen können von CP1252 nicht dargestellt werden
+- **Nur betrifft Console-Output**, nicht die JSON-Log-Datei
+
+**Betroffene Dateien:**
+- `src/core/resilience/circuit_breaker.py:338` - Verwendet `→` in Log-Nachricht
+- `src/services/maintenance/jobs/cleanup.py:468` - Verwendet `⚠️` in Warning
+
+**Workarounds:**
+1. **Terminal auf UTF-8 setzen:** `chcp 65001` vor Server-Start
+2. **PowerShell:** `$OutputEncoding = [System.Text.Encoding]::UTF8`
+3. **Log-Datei lesen statt Console:** `god_kaiser.log` ist JSON-formatiert und UTF-8
+
+**Mögliche Fixes:**
+```python
+# Option 1: Unicode-Zeichen durch ASCII ersetzen
+"closed → closed"  # →  "closed -> closed"
+"⚠️ Orphaned"       # →  "[WARN] Orphaned"
+
+# Option 2: Console-Handler mit UTF-8 forcieren (logging_config.py)
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+```
+
+**Priorität:** Low - Logs funktionieren korrekt, nur Console-Anzeige betroffen
+
+---
+
+### Bug S: asyncio Task-Warnings bei Test-Cleanup
+
+**Status:** 🟡 OPEN (Non-Critical, nur Tests)
+
+**Entdeckt:** 2026-01-05 (pytest-Ausführung)
+
+**Symptom:** Nach pytest-Durchlauf erscheinen mehrere Warnings:
+```
+ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8877' coro=<SequenceActionExecutor._cleanup_loop() running at .../sequence_executor.py:864>>
+```
+
+**Root Cause:**
+- `SequenceActionExecutor` startet Background-Tasks (`_cleanup_loop`)
+- Diese Tasks werden bei Test-Teardown nicht sauber beendet
+- asyncio meldet "destroyed but pending" für nicht-abgeschlossene Tasks
+- **Nur bei Tests**, nicht in Production
+
+**Betroffene Datei:**
+- `src/services/logic/actions/sequence_executor.py:864` - `_cleanup_loop()` Coroutine
+
+**Impact:**
+- Tests laufen erfolgreich durch (908 passed)
+- Warnings sind nur informativ, kein funktionaler Bug
+- In Production läuft der Cleanup-Loop kontinuierlich
+
+**Möglicher Fix:**
+```python
+# In conftest.py - explizites Cleanup nach jedem Test
+@pytest.fixture(autouse=True)
+async def cleanup_tasks():
+    yield
+    # Cancel all pending tasks
+    for task in asyncio.all_tasks():
+        if '_cleanup_loop' in str(task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+```
+
+**Priorität:** Low - Nur kosmetisch, Tests funktionieren
 
 ---
 
