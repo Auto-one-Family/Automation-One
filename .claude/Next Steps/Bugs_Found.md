@@ -140,7 +140,106 @@ gh run view 20703443328 --log
 
 ### Priorität
 
-**KRITISCH** - Blockiert gesamte Wokwi CI/CD Pipeline
+**GEFIXT** - Der Mosquitto Health-Check wurde korrigiert (Run 20703490678 erfolgreich)
+
+---
+
+## Bug #2: WOKWI_CLI_TOKEN Secret nicht konfiguriert (KRITISCH)
+
+### Zusammenfassung
+
+Das GitHub Secret `WOKWI_CLI_TOKEN` ist nicht korrekt konfiguriert. Die Wokwi CLI kann nicht authentifizieren und die ESP32-Simulation läuft nicht.
+
+### Status
+
+| Eigenschaft | Wert |
+|-------------|------|
+| **Workflow Run ID** | 20703490678 |
+| **Fehler-Schritt** | `Run Boot Sequence Test` / `Run MQTT Connection Test` |
+| **Exit Code** | 0 (durch `|| true` maskiert) |
+| **Ursache** | WOKWI_CLI_TOKEN Secret fehlt oder leer |
+
+### Symptome
+
+Der Workflow zeigt "SUCCESS", aber in den Logs:
+
+```
+Wokwi CLI v0.19.1 (e0043c48bf15)
+Error: Missing WOKWI_CLI_TOKEN environment variable. Please set it to your Wokwi token.
+Get your token at https://wokwi.com/dashboard/ci.
+```
+
+**Die Wokwi-Simulation läuft NICHT!** Der "Erfolg" ist ein falsches Positiv.
+
+### Root Cause Analyse
+
+**Datei:** [.github/workflows/wokwi-tests.yml](.github/workflows/wokwi-tests.yml)
+**Zeilen:** 118-129
+
+```yaml
+- name: Run Boot Sequence Test
+  env:
+    WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+  run: |
+    ...
+    timeout 120 wokwi-cli run \
+      --timeout 90000 \
+      --scenario tests/wokwi/boot_test.yaml \
+      2>&1 | tee wokwi_output.log || true  # <-- || true maskiert den Fehler!
+```
+
+**Probleme:**
+
+1. **Secret nicht vorhanden oder leer:** Das Secret `WOKWI_CLI_TOKEN` wurde nicht im GitHub Repository konfiguriert
+2. **Fehler wird maskiert:** `|| true` am Ende des Commands lässt den Workflow "erfolgreich" erscheinen obwohl die Simulation fehlschlägt
+
+### Lösung
+
+**Schritt 1: GitHub Secret konfigurieren**
+
+1. Gehe zu: https://github.com/Auto-one-Family/Automation-One/settings/secrets/actions
+2. Klicke "New repository secret"
+3. Name: `WOKWI_CLI_TOKEN`
+4. Value: Token von https://wokwi.com/dashboard/ci
+5. Klicke "Add secret"
+
+**Schritt 2 (Optional): Workflow robuster machen**
+
+Das `|| true` sollte entfernt werden, damit echte Fehler erkannt werden:
+
+```yaml
+# Statt:
+timeout 120 wokwi-cli run ... 2>&1 | tee wokwi_output.log || true
+
+# Besser:
+if ! timeout 120 wokwi-cli run ... 2>&1 | tee wokwi_output.log; then
+  echo "Wokwi simulation failed"
+  # Nur bei Token-Fehler fortfahren, sonst abbrechen
+  if grep -q "Missing WOKWI_CLI_TOKEN" wokwi_output.log; then
+    echo "::warning::Wokwi token not configured, skipping simulation"
+  else
+    exit 1
+  fi
+fi
+```
+
+### Betroffene Dateien
+
+| Datei | Beschreibung |
+|-------|--------------|
+| [.github/workflows/wokwi-tests.yml](.github/workflows/wokwi-tests.yml) | GitHub Actions Workflow |
+| GitHub Repository Settings | Secrets → Actions |
+
+### Log-Abruf
+
+```bash
+# Vollständige Logs abrufen
+gh run view 20703490678 --log | grep -A 5 "WOKWI_CLI_TOKEN"
+```
+
+### Priorität
+
+**KRITISCH** - Ohne Token läuft keine ESP32-Simulation, der gesamte Wokwi-Test ist wirkungslos.
 
 ---
 
@@ -148,18 +247,102 @@ gh run view 20703443328 --log
 
 | Workflow | Run ID | Status | Fehler |
 |----------|--------|--------|--------|
-| **Wokwi ESP32 Tests** | 20703443328 | FAILURE | Bug #1 (Mosquitto Health-Check) |
+| **Wokwi ESP32 Tests** | 20703443328 | FAILURE | Bug #1 (Mosquitto Health-Check) - GEFIXT |
+| **Wokwi ESP32 Tests** | 20703490678 | SUCCESS* | Bug #2 (Token fehlt) - *Falsches Positiv |
 | **ESP32 Tests** | 20703443326 | SUCCESS | - |
-| **Server Tests** | 20703443330 | IN_PROGRESS | - |
+| **Server Tests** | 20703443330 | SUCCESS | - |
+
+---
+
+## Bug #3: wokwi.toml nicht gefunden - falscher Pfad (KRITISCH)
+
+### Zusammenfassung
+
+Die Wokwi CLI sucht `wokwi.toml` im falschen Verzeichnis (`El Trabajante/run/` statt `El Trabajante/`).
+
+### Status
+
+| Eigenschaft | Wert |
+|-------------|------|
+| **Workflow Run ID** | 20703576871 |
+| **Fehler-Schritt** | `Run Boot Sequence Test` |
+| **Exit Code** | 0 (durch `|| true` maskiert) |
+| **Ursache** | Wokwi CLI interpretiert Pfad falsch |
+
+### Symptome
+
+```
+Wokwi CLI v0.19.1 (e0043c48bf15)
+Error: wokwi.toml not found in /home/runner/work/Automation-One/Automation-One/El Trabajante/run.
+```
+
+Die Wokwi CLI sucht in `El Trabajante/run/` statt in `El Trabajante/`.
+
+### Root Cause Analyse
+
+**Datei:** [.github/workflows/wokwi-tests.yml](.github/workflows/wokwi-tests.yml)
+**Zeilen:** 126-129
+
+```yaml
+timeout 120 wokwi-cli run \
+  --timeout 90000 \
+  --scenario tests/wokwi/boot_test.yaml \
+  2>&1 | tee wokwi_output.log || true
+```
+
+**Problem:** Die Wokwi CLI braucht explizit das Projektverzeichnis oder muss ohne Unterverzeichnis aufgerufen werden.
+
+### Lösung
+
+**Option A: Explizites Projektverzeichnis angeben**
+```yaml
+timeout 120 wokwi-cli run \
+  --timeout 90000 \
+  --scenario tests/wokwi/boot_test.yaml \
+  . \
+  2>&1 | tee wokwi_output.log || true
+```
+
+**Option B: Nur wokwi-cli ohne "run" Subcommand (wenn es ohne Argumente läuft)**
+```yaml
+timeout 120 wokwi-cli \
+  --timeout 90000 \
+  --scenario tests/wokwi/boot_test.yaml \
+  2>&1 | tee wokwi_output.log || true
+```
+
+### Betroffene Dateien
+
+| Datei | Beschreibung |
+|-------|--------------|
+| [.github/workflows/wokwi-tests.yml](.github/workflows/wokwi-tests.yml) | GitHub Actions Workflow |
+
+### Priorität
+
+**KRITISCH** - Die Wokwi-Simulation kann nicht starten.
+
+---
+
+## Workflow-Status Übersicht (2026-01-05)
+
+| Workflow | Run ID | Status | Fehler |
+|----------|--------|--------|--------|
+| **Wokwi ESP32 Tests** | 20703443328 | FAILURE | Bug #1 (Mosquitto Health-Check) - GEFIXT |
+| **Wokwi ESP32 Tests** | 20703490678 | SUCCESS* | Bug #2 (Token fehlt) - GEFIXT |
+| **Wokwi ESP32 Tests** | 20703576871 | SUCCESS* | Bug #3 (wokwi.toml Pfad) - *Falsches Positiv |
+| **ESP32 Tests** | 20703443326 | SUCCESS | - |
+| **Server Tests** | 20703443330 | SUCCESS | - |
 
 ---
 
 ## Nächste Schritte
 
-1. [ ] Bug #1 fixen: Mosquitto Health-Check korrigieren
-2. [ ] Workflow erneut ausführen
-3. [ ] Wokwi-Simulation validieren
+1. [x] Bug #1 fixen: Mosquitto Health-Check korrigieren
+2. [x] Workflow erneut ausführen
+3. [x] Bug #2 fixen: WOKWI_CLI_TOKEN Secret konfiguriert
+4. [ ] **Bug #3 fixen: wokwi.toml Pfad korrigieren**
+5. [ ] Workflow erneut triggern und echte Simulation validieren
 
 ---
 
-**Letzte Aktualisierung:** 2026-01-05 02:45 UTC
+**Letzte Aktualisierung:** 2026-01-05 02:52 UTC
