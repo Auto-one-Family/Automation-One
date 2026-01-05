@@ -118,57 +118,63 @@ void setup() {
   // ============================================
   // Check if Boot button (GPIO 0) is pressed for Factory Reset
   // This MUST be before gpioManager.initializeAllPinsToSafeMode()
+  //
+  // NOTE: Skipped in Wokwi simulation because:
+  // - GPIO 0 is not connected to a physical button in diagram.json
+  // - GPIO 0 may float LOW in simulation, triggering false factory resets
+  // - Factory reset is not meaningful in CI/CD environment
+  #ifndef WOKWI_SIMULATION
   const uint8_t BOOT_BUTTON_PIN = 0;  // GPIO 0 on ESP32
   const unsigned long HOLD_TIME_MS = 10000;  // 10 seconds
-  
+
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
-  
+
   if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
     Serial.println("╔════════════════════════════════════════╗");
     Serial.println("║  ⚠️  BOOT BUTTON PRESSED              ║");
     Serial.println("║  Hold for 10 seconds for Factory Reset║");
     Serial.println("╚════════════════════════════════════════╝");
-    
+
     unsigned long start_time = millis();
     bool held_for_10s = true;
     uint8_t last_second = 0;
-    
+
     while (millis() - start_time < HOLD_TIME_MS) {
       if (digitalRead(BOOT_BUTTON_PIN) == HIGH) {
         held_for_10s = false;
         Serial.println("\nButton released - Factory Reset cancelled");
         break;
       }
-      
+
       // Progress indicator (every second)
       uint8_t current_second = (millis() - start_time) / 1000;
       if (current_second > last_second) {
         Serial.print(".");
         last_second = current_second;
       }
-      
+
       delay(100);
     }
-    
+
     if (held_for_10s) {
       Serial.println("\n╔════════════════════════════════════════╗");
       Serial.println("║  🔥 FACTORY RESET TRIGGERED           ║");
       Serial.println("╚════════════════════════════════════════╝");
-      
+
       // Initialize minimal systems for NVS access
       storageManager.begin();
       configManager.begin();
-      
+
       // Clear WiFi config
       configManager.resetWiFiConfig();
       Serial.println("✅ WiFi configuration cleared");
-      
+
       // Clear zone config
       KaiserZone kaiser;
       MasterZone master;
       configManager.saveZoneConfig(kaiser, master);
       Serial.println("✅ Zone configuration cleared");
-      
+
       Serial.println("\n╔════════════════════════════════════════╗");
       Serial.println("║  ✅ FACTORY RESET COMPLETE            ║");
       Serial.println("╚════════════════════════════════════════╝");
@@ -177,6 +183,10 @@ void setup() {
       ESP.restart();
     }
   }
+  #else
+  // Wokwi simulation: Skip boot button check, log for debugging
+  Serial.println("[WOKWI] Boot button check skipped (no physical button in simulation)");
+  #endif // WOKWI_SIMULATION
   
   // ============================================
   // STEP 3: GPIO SAFE-MODE (CRITICAL - FIRST!)
