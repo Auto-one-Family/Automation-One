@@ -1,7 +1,7 @@
 # CLAUDE_SERVER.md - God-Kaiser Server Referenz für KI-Agenten
 
-**Version:** 3.1
-**Letzte Aktualisierung:** 2025-12-30
+**Version:** 3.2
+**Letzte Aktualisierung:** 2026-01-05
 **Zweck:** Zentrale Referenz für Claude, um bei jeder Server-Aufgabe die richtigen Dateien, Patterns und Konventionen zu finden.
 
 > **📖 ESP32-Firmware Dokumentation:** Siehe `.claude/CLAUDE.md` für ESP32-spezifische Details
@@ -1639,4 +1639,134 @@ python -c "import sqlite3; conn = sqlite3.connect('god_kaiser_dev.db'); print([r
 
 ---
 
+## 19. CI/CD INTEGRATION (GitHub Actions)
+
+### 19.1 Relevante Workflows für Server-Tests
+
+| Workflow | Datei | Trigger | Tests | Artifacts |
+|----------|-------|---------|-------|-----------|
+| **Server Tests** | `server-tests.yml` | Push/PR auf `El Servador/**` | Unit + Integration | `unit-test-results`, `integration-test-results` |
+| **ESP32 Tests** | `esp32-tests.yml` | Push/PR auf `tests/esp32/**` | MockESP32 Tests | `esp32-test-results` |
+
+### 19.2 Server-Tests Workflow Details
+
+**Workflow-Datei:** `.github/workflows/server-tests.yml`
+
+**Jobs:**
+1. `lint` - Ruff + Black Format-Check
+2. `unit-tests` - Unit Tests mit Coverage
+3. `integration-tests` - Integration Tests mit Mosquitto Docker-Service
+4. `test-summary` - Ergebnisse zusammenfassen + PR-Kommentar
+
+**CI-Umgebung:**
+```yaml
+env:
+  PYTHON_VERSION: '3.11'
+  POETRY_VERSION: '1.7.1'
+  MQTT_BROKER_HOST: localhost
+  DATABASE_URL: sqlite+aiosqlite:///./test.db
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports: [1883:1883]
+```
+
+**Artifacts:**
+- `unit-test-results` → `junit-unit.xml`, `coverage-unit.xml`
+- `integration-test-results` → `junit-integration.xml`, `coverage-integration.xml`
+
+### 19.3 GitHub CLI - Log-Befehle
+
+```bash
+# ============================================
+# WORKFLOW-STATUS PRÜFEN
+# ============================================
+
+# Server Tests - letzte Runs
+gh run list --workflow=server-tests.yml --limit=10
+
+# ESP32 Tests - letzte Runs
+gh run list --workflow=esp32-tests.yml --limit=10
+
+# Nur fehlgeschlagene Runs
+gh run list --workflow=server-tests.yml --status=failure
+
+# ============================================
+# LOGS ABRUFEN (Run-ID aus obiger Liste)
+# ============================================
+
+# Vollständige Logs
+gh run view <run-id> --log
+
+# Nur fehlgeschlagene Jobs
+gh run view <run-id> --log-failed
+
+# Spezifischen Job anzeigen
+gh run view <run-id> --job=<job-id>
+
+# Live-Logs eines laufenden Workflows
+gh run watch <run-id>
+
+# ============================================
+# ARTIFACTS HERUNTERLADEN
+# ============================================
+
+# Alle Artifacts eines Runs
+gh run download <run-id>
+
+# Unit-Test-Ergebnisse
+gh run download <run-id> --name=unit-test-results
+
+# Integration-Test-Ergebnisse
+gh run download <run-id> --name=integration-test-results
+
+# ============================================
+# WORKFLOW MANUELL STARTEN
+# ============================================
+
+gh workflow run server-tests.yml
+gh workflow run esp32-tests.yml
+```
+
+### 19.4 Typischer Debug-Workflow für KI-Agenten
+
+```bash
+# 1. Fehlgeschlagenen Run identifizieren
+gh run list --workflow=server-tests.yml --status=failure --limit=3
+
+# 2. Fehler-Logs analysieren
+gh run view <run-id> --log-failed
+
+# 3. JUnit XML für Details herunterladen
+gh run download <run-id> --name=unit-test-results
+cat junit-unit.xml | grep -A 10 "<failure"
+
+# 4. Spezifischen fehlgeschlagenen Test lokal debuggen
+cd "El Servador/god_kaiser_server"
+poetry run pytest tests/unit/test_xyz.py::test_failed_function -xvs
+```
+
+### 19.5 CI vs. Lokal: Umgebungsunterschiede
+
+| Komponente | CI (GitHub Actions) | Lokal (Development) |
+|------------|---------------------|---------------------|
+| **Python** | 3.11 (fest) | Poetry-Env |
+| **Database** | SQLite In-Memory | PostgreSQL oder SQLite |
+| **MQTT Broker** | Mosquitto Docker | Optional lokal |
+| **Coverage** | XML Reports | HTML Reports |
+| **Parallelität** | `-x` (stop on first) | Alle Tests |
+| **Timeouts** | 15 min pro Job | Unbegrenzt |
+
+### 19.6 Verwandte Dokumentation
+
+- **Vollständige Test-Dokumentation:** `El Servador/docs/ESP32_TESTING.md`
+- **Test-Workflow für KI-Agenten:** `.claude/TEST_WORKFLOW.md`
+- **Haupt-KI-Dokumentation:** `.claude/CLAUDE.md` (Section 13: CI/CD)
+
+---
+
 **Ende der CLAUDE_SERVER.md**
+
+**Letzte Aktualisierung:** 2026-01-05
+**Version:** 3.2 (CI/CD Integration dokumentiert)

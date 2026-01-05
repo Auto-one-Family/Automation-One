@@ -577,6 +577,125 @@ Check file naming:
 
 ---
 
-**Letzte Aktualisierung:** 2025-11-26
-**Version:** 1.0
-**Status:** ✅ Produktionsreif
+## CI/CD Integration (GitHub Actions)
+
+### Relevante Workflows
+
+| Workflow | Datei | Trigger | Beschreibung |
+|----------|-------|---------|--------------|
+| **ESP32 Tests** | `.github/workflows/esp32-tests.yml` | Push/PR auf `main`, `master`, `develop` | MockESP32 Tests mit Mosquitto-Service |
+| **Server Tests** | `.github/workflows/server-tests.yml` | Push/PR auf `main`, `master`, `develop` | Unit + Integration Tests mit Coverage |
+
+### ESP32-Tests Workflow Details
+
+**Workflow:** `esp32-tests.yml`
+
+**Trigger-Pfade:**
+- `El Servador/god_kaiser_server/tests/esp32/**`
+- `El Servador/god_kaiser_server/src/mqtt/**`
+- `El Servador/god_kaiser_server/src/services/**`
+
+**Umgebung:**
+- Python 3.11, Poetry 1.7.1
+- Mosquitto 2 als Docker-Service (Port 1883)
+- SQLite In-Memory für Tests
+
+**Artifacts:**
+- `esp32-test-results` → `junit-esp32.xml`
+
+### Server-Tests Workflow Details
+
+**Workflow:** `server-tests.yml`
+
+**Jobs:**
+1. **lint** - Ruff + Black Format-Check
+2. **unit-tests** - Unit Tests mit Coverage
+3. **integration-tests** - Integration Tests mit Mosquitto
+4. **test-summary** - Ergebnisse zusammenfassen + PR-Kommentar
+
+**Artifacts:**
+- `unit-test-results` → `junit-unit.xml`, `coverage-unit.xml`
+- `integration-test-results` → `junit-integration.xml`, `coverage-integration.xml`
+
+### GitHub CLI Log-Befehle
+
+```bash
+# ============================================
+# Workflow-Runs auflisten
+# ============================================
+
+# ESP32 Tests - Letzte Runs
+gh run list --workflow=esp32-tests.yml --limit=10
+
+# Server Tests - Letzte Runs
+gh run list --workflow=server-tests.yml --limit=10
+
+# Nur fehlgeschlagene Runs
+gh run list --workflow=esp32-tests.yml --status=failure
+
+# ============================================
+# Logs abrufen (Run-ID aus obiger Liste)
+# ============================================
+
+# Vollständige Logs eines Runs
+gh run view <run-id> --log
+
+# Nur fehlgeschlagene Job-Logs
+gh run view <run-id> --log-failed
+
+# Spezifischen Job anzeigen
+gh run view <run-id> --job=<job-id>
+
+# ============================================
+# Artifacts herunterladen
+# ============================================
+
+# Alle Artifacts eines Runs
+gh run download <run-id>
+
+# Spezifisches Artifact
+gh run download <run-id> --name=esp32-test-results
+gh run download <run-id> --name=unit-test-results
+
+# ============================================
+# Workflow manuell starten
+# ============================================
+
+# ESP32 Tests manuell triggern
+gh workflow run esp32-tests.yml
+
+# Server Tests manuell triggern
+gh workflow run server-tests.yml
+```
+
+### Typischer KI-Workflow bei CI-Fehlern
+
+```bash
+# 1. Fehlgeschlagenen Run finden
+gh run list --workflow=esp32-tests.yml --status=failure --limit=5
+
+# 2. Logs analysieren
+gh run view <run-id> --log-failed
+
+# 3. JUnit XML herunterladen für Details
+gh run download <run-id> --name=esp32-test-results
+
+# 4. XML parsen (zeigt fehlgeschlagene Tests)
+cat junit-esp32.xml | grep -A 5 "<failure"
+```
+
+### CI-Umgebung vs. Lokale Tests
+
+| Aspekt | CI (GitHub Actions) | Lokal |
+|--------|---------------------|-------|
+| Database | `sqlite+aiosqlite:///./test.db` | `.env` konfigurierbar |
+| MQTT | Mosquitto Docker Service | Optional lokal |
+| Python | 3.11 (fest) | Poetry-Env |
+| Parallelität | `-x` (stop on first fail) | Beliebig |
+| Coverage | XML Reports | HTML optional |
+
+---
+
+**Letzte Aktualisierung:** 2026-01-05
+**Version:** 1.2
+**Status:** ✅ Produktionsreif mit CI/CD-Integration

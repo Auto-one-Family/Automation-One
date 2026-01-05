@@ -1074,6 +1074,183 @@ DELETE /api/v1/debug/test-data/cleanup?dry_run=false&include_mock=true&include_s
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-24
-**Version:** 3.0 (Alle Phasen 1-6 implementiert)
+---
+
+## 10. CI/CD Integration (GitHub Actions)
+
+### Übersicht aller Test-Workflows
+
+| Workflow | Datei | Trigger | Tests | Artifacts |
+|----------|-------|---------|-------|-----------|
+| **ESP32 Tests** | `esp32-tests.yml` | Push/PR auf ESP32-Pfade | MockESP32 (~100 Tests) | `esp32-test-results` |
+| **Server Tests** | `server-tests.yml` | Push/PR auf Server-Pfade | Unit + Integration (~70 Tests) | `unit-test-results`, `integration-test-results` |
+| **Wokwi Tests** | `wokwi-tests.yml` | Push/PR auf Firmware-Pfade | ESP32 Firmware Simulation | `wokwi-logs` |
+| **PR Checks** | `pr-checks.yml` | Pull Requests | Build-Validierung | - |
+
+### CI Workflow: ESP32 Tests
+
+**Workflow-Datei:** `.github/workflows/esp32-tests.yml`
+
+**Was wird getestet:**
+- MockESP32Client Tests
+- MQTT Handler Tests
+- Service-Layer Tests
+
+**CI-Umgebung:**
+```yaml
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports: [1883:1883]
+env:
+  MQTT_BROKER_HOST: localhost
+  DATABASE_URL: sqlite+aiosqlite:///./test.db
+```
+
+### CI Workflow: Server Tests
+
+**Workflow-Datei:** `.github/workflows/server-tests.yml`
+
+**Jobs:**
+1. `lint` - Ruff Linter + Black Format-Check
+2. `unit-tests` - Unit Tests mit Coverage
+3. `integration-tests` - Integration Tests mit Mosquitto
+4. `test-summary` - PR-Kommentar mit Ergebnissen
+
+**Coverage Reports:**
+- `coverage-unit.xml` (Unit Tests)
+- `coverage-integration.xml` (Integration Tests)
+
+### CI Workflow: Wokwi ESP32 Simulation
+
+**Workflow-Datei:** `.github/workflows/wokwi-tests.yml`
+
+**Was wird getestet:**
+- ESP32 Boot-Sequenz
+- MQTT-Verbindung
+- Sensor/Actuator-Initialisierung
+
+**Voraussetzungen:**
+- `WOKWI_CLI_TOKEN` Secret im Repository
+- Mosquitto als Docker-Service
+- Firmware-Build (`wokwi_simulation` Environment)
+
+**Szenarien:**
+- `tests/wokwi/boot_test.yaml` - Boot-Sequenz validieren
+- `tests/wokwi/mqtt_connection.yaml` - MQTT-Connectivity
+
+### GitHub CLI - Log-Befehle Schnellreferenz
+
+```bash
+# ============================================
+# WORKFLOW-STATUS PRÜFEN
+# ============================================
+
+# Alle Workflows - letzte 5 Runs
+gh run list --limit=5
+
+# Spezifischer Workflow
+gh run list --workflow=esp32-tests.yml --limit=10
+gh run list --workflow=server-tests.yml --limit=10
+gh run list --workflow=wokwi-tests.yml --limit=10
+
+# Nur fehlgeschlagene
+gh run list --status=failure --limit=10
+
+# ============================================
+# LOGS ABRUFEN
+# ============================================
+
+# Vollständige Logs (Run-ID aus obiger Liste)
+gh run view <run-id> --log
+
+# Nur fehlgeschlagene Jobs
+gh run view <run-id> --log-failed
+
+# Live-Logs eines laufenden Workflows
+gh run watch <run-id>
+
+# ============================================
+# ARTIFACTS HERUNTERLADEN
+# ============================================
+
+# Alle Artifacts eines Runs
+gh run download <run-id>
+
+# Spezifisches Artifact
+gh run download <run-id> --name=esp32-test-results
+gh run download <run-id> --name=wokwi-logs
+
+# ============================================
+# WORKFLOW MANUELL STARTEN
+# ============================================
+
+gh workflow run esp32-tests.yml
+gh workflow run server-tests.yml
+gh workflow run wokwi-tests.yml
+```
+
+### Typischer Debug-Workflow für KI-Agenten
+
+```bash
+# 1. Fehlgeschlagenen Run identifizieren
+gh run list --workflow=server-tests.yml --status=failure --limit=3
+
+# Beispiel-Output:
+# STATUS  TITLE                      WORKFLOW      BRANCH  EVENT  ID
+# X       feat: add new sensor       Server Tests  main    push   20703799000
+
+# 2. Fehler-Logs analysieren
+gh run view 20703799000 --log-failed
+
+# 3. JUnit XML für Details herunterladen
+gh run download 20703799000 --name=unit-test-results
+cat junit-unit.xml | grep -A 10 "<failure"
+
+# 4. Spezifischen fehlgeschlagenen Test lokal debuggen
+cd "El Servador/god_kaiser_server"
+poetry run pytest tests/unit/test_xyz.py::test_failed_function -xvs
+```
+
+### CI vs. Lokal: Umgebungsunterschiede
+
+| Komponente | CI (GitHub Actions) | Lokal (Development) |
+|------------|---------------------|---------------------|
+| **Python** | 3.11 (fest) | Poetry-Env |
+| **Database** | SQLite In-Memory | PostgreSQL oder SQLite |
+| **MQTT Broker** | Mosquitto Docker | Optional lokal |
+| **Coverage** | XML Reports | HTML Reports |
+| **Parallelität** | `-x` (stop on first) | Alle Tests |
+| **Timeouts** | 15 min pro Job | Unbegrenzt |
+
+### Wokwi-Simulation Besonderheiten
+
+**WICHTIG:** Wokwi CLI Syntax:
+```bash
+# KORREKT: Projekt-Verzeichnis als ERSTES Argument
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
+
+# FALSCH: --scenario vor Projekt-Verzeichnis
+wokwi-cli --scenario tests/wokwi/boot_test.yaml .  # FEHLER!
+```
+
+**Scenario-YAML Format:**
+```yaml
+# KORREKT: Nur wait-serial Steps
+steps:
+  - wait-serial: "WiFi connected"
+  - wait-serial: "MQTT connected"
+
+# FALSCH: timeout pro Step (nicht erlaubt!)
+steps:
+  - wait-serial: "WiFi connected"
+    timeout: 30000  # FEHLER!
+```
+
+**Timeout wird NUR via CLI gesetzt:** `--timeout 90000`
+
+---
+
+**Letzte Aktualisierung:** 2026-01-05
+**Version:** 3.1 (CI/CD Integration dokumentiert)
 
