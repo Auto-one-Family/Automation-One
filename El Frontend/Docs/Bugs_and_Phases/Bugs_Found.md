@@ -1,7 +1,7 @@
 # Bugs Found
 
 > **Letzte Aktualisierung:** 2026-01-05
-> **Status:** ✅ ALLE KRITISCHEN BUGS GEFIXT
+> **Status:** ⚠️ 2 AKTIVE BUGS (Bug O + Bug P)
 
 ---
 
@@ -9,6 +9,7 @@
 
 | Kategorie | Status |
 |-----------|--------|
+| **Wokwi Serial-Output Bug** | ⚠️ OPEN (Bug P - CI/CD Tests betroffen) |
 | **AsyncIO Event-Loop Bug** | ⚠️ OPEN (Bug O - sporadisch, nicht kritisch) |
 | Deprecation Warnings | 🟡 Non-Critical |
 | Sicherheitshinweise | 🔵 Dev Only |
@@ -132,6 +133,52 @@ Alle kritischen Bugs wurden behoben. Siehe Git-History für Details:
 - ✅ BUG-003: Inkonsistentes Cursor-Styling
 - ✅ BUG-004: Sensor-Satellite Timing-Konflikt
 - ✅ BUG-005: Native Drag-Events brechen VueDraggable ab (Root Cause)
+
+---
+
+## Aktiver Bug: Wokwi Serial-Output (Bug P)
+
+**Status:** ⚠️ OFFEN (CI/CD betroffen)
+
+**Entdeckt:** 2026-01-05 (Workflow Run 20705170819)
+
+**Symptom:** Wokwi ESP32 Simulation startet, aber die Firmware produziert **keine Serial-Ausgabe**.
+
+**Logs:**
+```
+Wokwi CLI v0.19.1 (e0043c48bf15)
+Connected to Wokwi Simulation API 1.0.0-20251216-g19b991f6
+Starting simulation...
+
+Timeout: simulation did not finish in 90000ms
+```
+
+**Auswirkung:**
+- Alle CI/CD Tests zeigen "MISSING" für erwartete Outputs
+- Workflow ist "success" weil `|| true` verwendet wird, aber Tests prüfen nichts effektiv
+
+**Test-Ergebnisse:**
+| Test | Ergebnis |
+|------|----------|
+| Boot Full | Phase 1-5 MISSING |
+| Safe-Mode | MISSING |
+| Heartbeat | MISSING |
+| OneWire | MISSING |
+| MQTT Connection | MISSING |
+
+**Vermutete Ursachen:**
+1. Firmware-Crash beim Boot (vor Serial.begin() oder direkt danach)
+2. Wokwi-GUEST WiFi Verbindungsproblem
+3. Provisioning-Modus wird getriggert (kein SSID in NVS)
+4. WOKWI_SIMULATION Flag wird nicht korrekt gesetzt beim Build
+
+**Debugging-Schritte (TODO):**
+1. Lokales Wokwi-Testing mit `wokwi-cli . --timeout 120000` durchführen
+2. `--elf` Flag nutzen um ELF-Debug-Symbole zu laden
+3. Prüfen ob ConfigManager WOKWI_SIMULATION Mode erkennt
+4. Boot-Button-Check (GPIO 0) in Wokwi diagram.json prüfen
+
+**Workaround:** Keiner - Tests liefern keine aussagekräftigen Ergebnisse.
 
 ---
 
