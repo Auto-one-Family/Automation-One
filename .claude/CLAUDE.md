@@ -28,6 +28,10 @@
 | **Paket X (Migration)** | `.cursor/plans/paket_x_-_vollständige_migration_zu_industrietauglichem_system_bc5638d4.plan.md` | SimulationScheduler → MockESPManager Migration |
 | **Paket F (Live-Updates)** | `.claude/PAKET_F_ANALYSE.md` | WebSocket Live-Updates im Frontend |
 | **Subzone-Management** | `El Trabajante/docs/system-flows/09-subzone-management-flow.md` | Pin-Level Zone-Gruppierung mit Safe-Mode |
+| **CI/CD Workflows** | [Section 13: CI/CD & GitHub Actions](#13-cicd--github-actions) | `.github/workflows/` |
+| **Workflow-Logs abrufen** | [Section 13: GitHub CLI Log-Befehle](#github-cli-log-befehle) | `gh run view <id> --log` |
+| **Wokwi ESP32 Tests** | [Section 13: Wokwi Tests](#wokwi-esp32-tests-firmware-simulation) | `El Trabajante/tests/wokwi/` |
+| **Wokwi Bug-Dokumentation** | `.claude/Next Steps/Bugs_Found.md` | 4 gefixte Bugs dokumentiert |
 
 ---
 
@@ -887,8 +891,169 @@ El Servador/god_kaiser_server/      # Python FastAPI Server (~15.000+ Zeilen)
 
 ---
 
-**Letzte Aktualisierung:** 2025-12-27
-**Version:** 4.8 (Paket X & F Integration, Subzone-Management)
+## 13. CI/CD & GitHub Actions
+
+### Workflow-Übersicht
+
+| Workflow | Datei | Trigger | Beschreibung |
+|----------|-------|---------|--------------|
+| **Wokwi ESP32 Tests** | `wokwi-tests.yml` | Push/PR zu `El Trabajante/**` | ESP32-Firmware in Wokwi-Simulation testen |
+| **ESP32 Tests** | `esp32-tests.yml` | Push/PR zu `tests/esp32/**`, `mqtt/**`, `services/**` | Mock-ESP32-Tests auf Server-Seite |
+| **Server Tests** | `server-tests.yml` | Push/PR zu `El Servador/**` | Unit-, Integration-Tests, Linting |
+| **PR Checks** | `pr-checks.yml` | Pull Requests | Label-PR, Large-File-Check, Sensitive-File-Check |
+
+### Wokwi ESP32 Tests (Firmware-Simulation)
+
+**Zweck:** Testet die echte ESP32-Firmware in der Wokwi-Virtualisierung.
+
+**Voraussetzungen:**
+- GitHub Secret `WOKWI_CLI_TOKEN` muss konfiguriert sein
+- Token erstellen: https://wokwi.com/dashboard/ci
+
+**Ablauf:**
+1. Startet Mosquitto MQTT Broker (Docker)
+2. Baut ESP32-Firmware mit PlatformIO (`pio run -e wokwi_simulation`)
+3. Installiert Wokwi CLI
+4. Führt Boot-Sequence-Test aus (`boot_test.yaml`)
+5. Führt MQTT-Connection-Test aus (`mqtt_connection.yaml`)
+
+**Dateien:**
+| Datei | Beschreibung |
+|-------|--------------|
+| `.github/workflows/wokwi-tests.yml` | GitHub Actions Workflow |
+| `El Trabajante/tests/wokwi/boot_test.yaml` | Boot-Sequence Szenario |
+| `El Trabajante/tests/wokwi/mqtt_connection.yaml` | MQTT-Connection Szenario |
+| `El Trabajante/wokwi.toml` | Wokwi CLI Konfiguration |
+| `El Trabajante/diagram.json` | Virtuelle Hardware-Konfiguration |
+| `El Trabajante/tests/wokwi/README.md` | Wokwi-Test Dokumentation |
+| `.claude/Next Steps/Bugs_Found.md` | Bug-Dokumentation (4 Bugs gefixt) |
+
+**Wokwi CLI Syntax:**
+```bash
+# WICHTIG: Projektverzeichnis als ERSTES Argument!
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
+
+# FALSCH (häufiger Fehler):
+wokwi-cli run --timeout 90000 --scenario tests/wokwi/boot_test.yaml  # FALSCH!
+```
+
+**Szenario-Format:**
+```yaml
+name: My Test
+version: 1
+steps:
+  - wait-serial: "Expected output"
+  # HINWEIS: timeout per Step wird NICHT unterstützt!
+  # Nutze stattdessen: wokwi-cli . --timeout 90000
+```
+
+### ESP32 Mock Tests (Server-seitig)
+
+**Zweck:** Testet ESP32-Kommunikation ohne echte Hardware.
+
+**Services:** Mosquitto MQTT Broker (Docker)
+
+**Tests:** `El Servador/god_kaiser_server/tests/esp32/`
+
+**Kategorien:**
+- Communication Tests (MQTT Pub/Sub)
+- Infrastructure Tests (Handler, Services)
+- Actuator Tests (Commands, Safety)
+- Sensor Tests (Data Processing)
+- Cross-ESP Tests (Logic Engine)
+- Performance Tests
+
+### Server Tests
+
+**Zweck:** Testet den God-Kaiser Server.
+
+**Jobs:**
+1. **Lint:** Ruff (Linter) + Black (Formatter)
+2. **Unit Tests:** `tests/unit/` mit Coverage
+3. **Integration Tests:** `tests/integration/` mit MQTT Broker
+4. **Test Summary:** Publiziert Ergebnisse in PR
+
+**Artifacts:** JUnit XML + Coverage Reports
+
+### GitHub CLI Log-Befehle
+
+```bash
+# Alle Workflows auflisten
+gh workflow list
+
+# Runs eines spezifischen Workflows auflisten
+gh run list --workflow=wokwi-tests.yml
+gh run list --workflow=esp32-tests.yml
+gh run list --workflow=server-tests.yml
+
+# Run-Details anzeigen
+gh run view <run-id>
+
+# Live-Logs verfolgen (während Ausführung)
+gh run watch <run-id>
+
+# Vollständige Logs abrufen
+gh run view <run-id> --log
+
+# Nur fehlgeschlagene Logs
+gh run view <run-id> --log-failed
+
+# Logs in Datei speichern
+gh run view <run-id> --log > workflow_logs.txt
+
+# Workflow manuell triggern
+gh workflow run wokwi-tests.yml
+gh workflow run esp32-tests.yml
+gh workflow run server-tests.yml
+
+# Artifacts herunterladen
+gh run download <run-id>
+gh run download <run-id> -n wokwi-test-logs
+```
+
+### Troubleshooting
+
+| Problem | Lösung |
+|---------|--------|
+| `WOKWI_CLI_TOKEN` fehlt | GitHub Secret konfigurieren: Settings → Secrets → Actions |
+| `wokwi.toml not found` | Projektverzeichnis als **erstes** CLI-Argument: `wokwi-cli . --timeout ...` |
+| `Invalid scenario step key: timeout` | `timeout:` aus YAML entfernen, nur CLI `--timeout` verwenden |
+| `Mosquitto failed to start` | `mosquitto_pub` statt `mosquitto_sub` für Health-Check verwenden |
+| Tests laufen nicht | `gh run view <id> --log-failed` für Details |
+
+### Lokale Test-Ausführung
+
+```bash
+# ESP32 Firmware bauen (Wokwi)
+cd "El Trabajante"
+pio run -e wokwi_simulation
+
+# Server Tests lokal
+cd "El Servador/god_kaiser_server"
+poetry run pytest tests/unit/ -v
+poetry run pytest tests/integration/ -v
+poetry run pytest tests/esp32/ -v
+
+# Wokwi-Test lokal (benötigt WOKWI_CLI_TOKEN)
+export WOKWI_CLI_TOKEN=your_token
+cd "El Trabajante"
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
+```
+
+---
+
+**Letzte Aktualisierung:** 2026-01-05
+**Version:** 4.9 (CI/CD & GitHub Actions Dokumentation)
+
+> **Änderungen in v4.9 (CI/CD & GitHub Actions Dokumentation):**
+> - **Neue Section 13:** Vollständige CI/CD & GitHub Actions Dokumentation
+> - **Workflow-Übersicht:** Alle 4 Workflows dokumentiert (Wokwi, ESP32, Server, PR Checks)
+> - **Wokwi ESP32 Tests:** Firmware-Simulation mit korrekter CLI-Syntax dokumentiert
+> - **GitHub CLI Befehle:** Vollständige Referenz für Workflow-Logs und Troubleshooting
+> - **Troubleshooting-Tabelle:** 5 häufige Probleme mit Lösungen dokumentiert
+> - **Lokale Test-Ausführung:** Befehle für lokales Testen hinzugefügt
+> - **Quick Reference erweitert:** CI/CD, Workflow-Logs, Wokwi-Tests, Bug-Dokumentation hinzugefügt
+> - **Bug-Dokumentation:** `.claude/Next Steps/Bugs_Found.md` mit 4 gefixten Bugs verlinkt
 
 > **Änderungen in v4.8 (Paket X & F Integration, Subzone-Management):**
 > - **Vollständige Paket X Integration:** SimulationScheduler als industrietauglicher Ersatz für MockESPManager dokumentiert
@@ -910,7 +1075,7 @@ El Servador/god_kaiser_server/      # Python FastAPI Server (~15.000+ Zeilen)
 
 ---
 
-**Diese Dokumentation ist nun vollständig auf dem neuesten Stand (2025-12-27). Alle System Flows, Pakete und neuen Features wurden integriert.**
+**Diese Dokumentation ist nun vollständig auf dem neuesten Stand (2026-01-05). Alle System Flows, Pakete, CI/CD Workflows und neuen Features wurden integriert.**
 
 > **Änderungen in v4.6 (Paket D: Maintenance Jobs Integration):**
 > - **Maintenance Jobs System:** Data-Safe Cleanup-Jobs für Sensor-Daten, Command-History, Orphaned-Mocks
