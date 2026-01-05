@@ -59,7 +59,8 @@ export interface ESPDevice {
   system_state?: string               // MockSystemState (BOOT, OPERATIONAL, etc.)
   sensors?: unknown[]                 // MockSensor[]
   actuators?: unknown[]               // MockActuator[]
-  auto_heartbeat?: boolean
+  auto_heartbeat?: boolean            // Whether auto-heartbeat is enabled (Mock ESPs only)
+  heartbeat_interval_seconds?: number // Heartbeat interval in seconds (Mock ESPs only)
   heap_free?: number                  // Free heap memory in bytes
   wifi_rssi?: number                  // WiFi signal strength in dBm
   uptime?: number                     // Uptime in seconds
@@ -276,7 +277,8 @@ export const espApi = {
     if (isMockEsp(normalizedId)) {
       try {
         const mockEsp = await debugApi.getMockEsp(normalizedId)
-        return {
+
+        const result: ESPDevice = {
           id: mockEsp.esp_id,
           device_id: mockEsp.esp_id,
           esp_id: mockEsp.esp_id,
@@ -301,6 +303,7 @@ export const espApi = {
           actuator_count: mockEsp.actuators?.length || 0,
           created_at: mockEsp.created_at,
         }
+        return result
       } catch (err: unknown) {
         const axiosError = err as { response?: { status?: number } }
 

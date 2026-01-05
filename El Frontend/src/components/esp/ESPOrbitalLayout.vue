@@ -1111,10 +1111,32 @@ watch(
 
 .esp-info-compact--mock {
   border-left: 3px solid var(--color-mock, #a78bfa);
+  border-color: rgba(167, 139, 250, 0.25);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 20px rgba(167, 139, 250, 0.08);
+}
+
+.esp-info-compact--mock:hover {
+  border-color: rgba(167, 139, 250, 0.4);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.25),
+    0 0 25px rgba(167, 139, 250, 0.12);
 }
 
 .esp-info-compact--real {
-  border-left: 3px solid var(--color-real, #34d399);
+  border-left: 3px solid var(--color-real, #22d3ee);
+  border-color: rgba(34, 211, 238, 0.2);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 20px rgba(34, 211, 238, 0.06);
+}
+
+.esp-info-compact--real:hover {
+  border-color: rgba(34, 211, 238, 0.35);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.25),
+    0 0 25px rgba(34, 211, 238, 0.1);
 }
 
 /* Top Row: Name + Settings (flexbox with space-between) */

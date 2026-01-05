@@ -396,7 +396,7 @@ export const useEspStore = defineStore('esp', () => {
 
     try {
       await debugApi.setAutoHeartbeat(deviceId, enabled, interval)
-      // Refresh device data
+      // Refresh device data to get updated auto_heartbeat state
       await fetchDevice(deviceId)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to configure auto-heartbeat')

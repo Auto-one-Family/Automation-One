@@ -32,6 +32,8 @@ import {
   Pencil,
   Check,
   Timer,
+  Tag,
+  Activity,
 } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
@@ -387,19 +389,66 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
 })
 
+/**
+ * Sync auto-heartbeat state from store.
+ * Called on popover open AND on device change.
+ * Always reads from store (not props.device) to ensure fresh data.
+ */
+function syncAutoHeartbeatFromStore() {
+  const currentDeviceId = espId.value
+  if (!currentDeviceId) return
+
+  const storeDevice = espStore.devices.find(
+    d => (d.device_id || d.esp_id) === currentDeviceId
+  )
+  const deviceAutoHB = storeDevice?.auto_heartbeat ?? (props.device as any)?.auto_heartbeat
+
+  autoHeartbeatEnabled.value = deviceAutoHB ?? false
+}
+
 // Focus management when opening
 watch(
   () => props.isOpen,
   (isOpen) => {
     if (isOpen) {
       showDeleteConfirm.value = false
-      // Sync auto-heartbeat state from device (Phase 5)
-      autoHeartbeatEnabled.value = (props.device as any)?.auto_heartbeat ?? false
+      syncAutoHeartbeatFromStore()
       nextTick(() => {
         popoverRef.value?.focus()
       })
     }
   }
+)
+
+// ALSO sync when device changes (user switches between ESPs while popover is open)
+watch(
+  () => props.device?.device_id || props.device?.esp_id,
+  (newId, oldId) => {
+    if (newId && newId !== oldId && props.isOpen) {
+      syncAutoHeartbeatFromStore()
+    }
+  }
+)
+
+// CRITICAL FIX: Watch the STORE value directly for the current device
+// This ensures the toggle stays in sync even when the store is updated
+// after toggle (via fetchDevice) while the popover remains open
+watch(
+  () => {
+    const currentId = espId.value
+    if (!currentId) return undefined
+    const device = espStore.devices.find(d => (d.device_id || d.esp_id) === currentId)
+    return device?.auto_heartbeat
+  },
+  (newVal) => {
+    if (props.isOpen && newVal !== undefined) {
+      // Only update if different (avoid loops)
+      if (autoHeartbeatEnabled.value !== newVal) {
+        autoHeartbeatEnabled.value = newVal
+      }
+    }
+  },
+  { immediate: true }
 )
 </script>
 
@@ -436,7 +485,10 @@ watch(
           <div class="popover-body">
             <!-- IDENTIFICATION Section -->
             <section class="popover-section">
-              <h4 class="popover-section__title">Identifikation</h4>
+              <h4 class="popover-section__title">
+                <Tag class="w-3.5 h-3.5" />
+                Identifikation
+              </h4>
               <div class="popover-section__content">
                 <!-- Name (Editable - Phase 3) -->
                 <div class="info-row info-row--name">
@@ -524,7 +576,10 @@ watch(
 
             <!-- STATUS Section -->
             <section class="popover-section">
-              <h4 class="popover-section__title">Status</h4>
+              <h4 class="popover-section__title">
+                <Activity class="w-3.5 h-3.5" />
+                Status
+              </h4>
               <div class="popover-section__content">
                 <!-- Online Status -->
                 <div class="info-row">
@@ -627,7 +682,10 @@ watch(
 
             <!-- MOCK CONTROLS Section (only for Mock ESPs) -->
             <section v-if="isMock" class="popover-section popover-section--mock">
-              <h4 class="popover-section__title">Mock-Steuerung</h4>
+              <h4 class="popover-section__title">
+                <Settings2 class="w-3.5 h-3.5" />
+                Mock-Steuerung
+              </h4>
               <div class="popover-section__content">
                 <!-- Manual Heartbeat Button -->
                 <button
@@ -865,11 +923,14 @@ watch(
 }
 
 .popover-section__title {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);  /* Improved contrast */
   margin: 0;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--glass-border);
@@ -1258,17 +1319,19 @@ watch(
 /* Toggle Switch */
 .auto-heartbeat__toggle {
   position: relative;
-  width: 44px;
-  height: 24px;
+  width: 48px;          /* Increased from 44px */
+  height: 26px;         /* Increased from 24px */
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
+  border-radius: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
 .auto-heartbeat__toggle:hover:not(:disabled) {
   border-color: rgba(168, 85, 247, 0.4);
+  background-color: var(--color-bg-hover);
 }
 
 .auto-heartbeat__toggle:disabled {
@@ -1283,19 +1346,19 @@ watch(
 
 .auto-heartbeat__toggle-knob {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 3px;
+  left: 3px;
   width: 18px;
   height: 18px;
-  background-color: var(--color-text-muted);
+  background-color: var(--color-text-secondary);  /* Improved contrast */
   border-radius: 50%;
   transition: all 0.2s ease;
 }
 
 .auto-heartbeat__toggle--active .auto-heartbeat__toggle-knob {
-  left: calc(100% - 20px);
+  left: 25px;           /* Adjusted for new width */
   background-color: #a78bfa;
-  box-shadow: 0 0 8px rgba(167, 139, 250, 0.5);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
 }
 
 /* Interval Input */

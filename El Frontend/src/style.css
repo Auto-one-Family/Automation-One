@@ -16,8 +16,8 @@
   
   /* === TEXT === */
   --color-text-primary: #f0f0f5;
-  --color-text-secondary: #a0a0b0;
-  --color-text-muted: #606070;
+  --color-text-secondary: #b0b0c0;  /* Improved contrast (was #a0a0b0) */
+  --color-text-muted: #707080;      /* Improved contrast (was #606070) */
   
   /* === IRIDESCENT AKZENTE (Wasser-Reflexion) === */
   --color-iridescent-1: #60a5fa;

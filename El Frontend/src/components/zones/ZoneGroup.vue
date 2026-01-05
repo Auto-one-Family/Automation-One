@@ -69,8 +69,32 @@ const emit = defineEmits<{
 // Drag state store (global ESP-Card drag tracking)
 const dragStore = useDragStateStore()
 
-// Local state
-const isExpanded = ref(props.defaultExpanded)
+// LocalStorage key for zone collapsed state persistence
+const STORAGE_KEY = 'automation-one-zone-collapsed'
+
+// LocalStorage helper functions
+function saveCollapsedState(zoneId: string, collapsed: boolean): void {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+    stored[zoneId] = collapsed
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+  } catch (e) {
+    console.warn('Failed to save zone collapsed state:', e)
+  }
+}
+
+function getCollapsedState(zoneId: string): boolean | null {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+    return stored[zoneId] ?? null
+  } catch (e) {
+    return null
+  }
+}
+
+// Local state - initialize from LocalStorage if available
+const savedCollapsed = getCollapsedState(props.zoneId)
+const isExpanded = ref(savedCollapsed !== null ? !savedCollapsed : props.defaultExpanded)
 const isDragOver = ref(false)
 const dragOverCount = ref(0)  // Track nested drag events
 const localDevices = ref<ESPDevice[]>([...props.devices])
@@ -83,6 +107,7 @@ watch(() => props.devices, (newDevices) => {
 
 // Computed
 const deviceCount = computed(() => props.devices.length)
+const onlineCount = computed(() => props.devices.filter(d => d.status === 'online').length)
 
 const headerClasses = computed(() => {
   const classes = ['zone-group__header']
@@ -131,6 +156,8 @@ function log(message: string, data?: Record<string, unknown>): void {
 function toggleExpanded() {
   if (props.collapsible) {
     isExpanded.value = !isExpanded.value
+    // Persist collapsed state to LocalStorage
+    saveCollapsedState(props.zoneId, !isExpanded.value)
   }
 }
 
@@ -368,7 +395,7 @@ function getDeviceId(device: ESPDevice): string {
     @dragover.prevent
     @drop="handleContainerDrop"
   >
-    <!-- Minimal Section Header -->
+    <!-- Zone Header with Stats -->
     <div
       :class="headerClasses"
       role="button"
@@ -378,21 +405,21 @@ function getDeviceId(device: ESPDevice): string {
       @keydown.enter="toggleExpanded"
       @keydown.space.prevent="toggleExpanded"
     >
-      <div class="zone-group__header-line"></div>
-
-      <span class="zone-group__header-label">
+      <div class="zone-group__header-left">
         <component :is="isUnassigned ? AlertTriangle : Tag" class="zone-group__header-icon" />
         <span class="zone-group__header-text">{{ zoneName }}</span>
-        <span class="zone-group__header-count">({{ deviceCount }})</span>
-      </span>
+      </div>
 
-      <div class="zone-group__header-line"></div>
-
-      <ChevronDown
-        v-if="collapsible"
-        class="zone-group__chevron"
-        :class="{ 'zone-group__chevron--expanded': isExpanded }"
-      />
+      <div class="zone-group__header-right">
+        <span class="zone-group__header-stats">
+          {{ deviceCount }} ESPs • {{ onlineCount }} Online
+        </span>
+        <ChevronDown
+          v-if="collapsible"
+          class="zone-group__chevron"
+          :class="{ 'zone-group__chevron--collapsed': !isExpanded }"
+        />
+      </div>
     </div>
 
     <!-- Zone Content (devices) -->
@@ -527,145 +554,109 @@ function getDeviceId(device: ESPDevice): string {
    Industry-Benchmark: Home Assistant Mushroom Cards, Grafana IoT
    ============================================================================= */
 
-/* Base: Transparent with left accent border */
+/* Base: Full container with glass-morphism background */
 .zone-group {
   position: relative;
-  background: transparent;
-  border-left: 2px solid rgba(96, 165, 250, 0.45);  /* Deutlich verstärkt */
-  padding: 0.625rem 0 0.625rem 0.75rem;
-  margin-bottom: 0;  /* Grid-Gap übernimmt */
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  margin-bottom: 1rem;
   transition: all 0.2s ease;
 }
 
-/* Drag-over state: Highlight left border + subtle background */
+/* Drag-over state: Highlight border + subtle background */
 .zone-group--drag-over {
-  border-left-color: var(--color-iridescent-1);
-  background: rgba(96, 165, 250, 0.02);
-}
-
-/* Pulsing left border effect during drag */
-.zone-group--drag-over::before {
-  content: '';
-  position: absolute;
-  left: -2px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(
-    180deg,
-    var(--color-iridescent-1),
-    var(--color-iridescent-2),
-    var(--color-iridescent-3),
-    var(--color-iridescent-1)
-  );
-  background-size: 100% 300%;
-  animation: drag-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes drag-pulse {
-  0%, 100% {
-    background-position: 50% 0%;
-    opacity: 0.8;
-  }
-  50% {
-    background-position: 50% 100%;
-    opacity: 1;
-  }
+  border-color: var(--color-iridescent-1);
+  background: rgba(96, 165, 250, 0.04);
+  box-shadow: 0 0 16px rgba(96, 165, 250, 0.15);
 }
 
 /* Unassigned zone: Warning accent */
 .zone-group--unassigned {
-  border-left-color: rgba(251, 191, 36, 0.3);
+  border-color: rgba(251, 191, 36, 0.25);
 }
 
 /* =============================================================================
-   Section Header - Horizontal line with pill label
+   Section Header - Full-width bar with stats
    ============================================================================= */
 
 .zone-group__header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.625rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--glass-border);
   cursor: pointer;
   user-select: none;
+  transition: background 0.15s ease;
+}
+
+.zone-group__header:hover {
+  background: var(--color-bg-hover);
 }
 
 .zone-group__header:focus-visible {
   outline: none;
-}
-
-.zone-group__header:focus-visible .zone-group__header-label {
-  box-shadow: 0 0 0 2px var(--color-iridescent-1);
+  background: var(--color-bg-hover);
 }
 
 .zone-group__header--static {
   cursor: default;
 }
 
-/* Horizontal gradient line */
-.zone-group__header-line {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.2) 20%,   /* Früher sichtbar, stärker */
-    rgba(255, 255, 255, 0.2) 80%,   /* Längeres Plateau */
-    transparent 100%
-  );
+.zone-group__header--static:hover {
+  background: var(--color-bg-tertiary);
 }
 
-/* Pill-shaped label */
-.zone-group__header-label {
-  display: inline-flex;
+/* Left side: Icon + Zone name */
+.zone-group__header-left {
+  display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.375rem 1rem;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 9999px;
-  font-size: 0.875rem;           /* 14px statt 12px */
-  font-weight: 600;               /* Fetter */
-  text-transform: none;           /* Kein UPPERCASE mehr */
-  letter-spacing: 0.01em;         /* Weniger Spacing */
-  color: var(--color-text-secondary);  /* Heller */
-  white-space: nowrap;
-  transition: all 0.2s ease;
+  gap: 0.5rem;
 }
 
-.zone-group__header:hover .zone-group__header-label {
-  border-color: rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.05);
+/* Right side: Stats + Chevron */
+.zone-group__header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-/* Icon inside label */
+/* Icon */
 .zone-group__header-icon {
   width: 1rem;
   height: 1rem;
+  color: var(--color-iridescent-1);
   opacity: 0.85;
 }
 
 /* Zone name text */
 .zone-group__header-text {
-  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
-/* Device count */
-.zone-group__header-count {
+/* Stats (X ESPs • Y Online) */
+.zone-group__header-stats {
+  font-size: 0.8125rem;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6875rem;
-  opacity: 0.7;
+  color: var(--color-text-muted);
 }
 
-/* Unassigned zone: Warning styling for label */
-.zone-group--unassigned .zone-group__header-label {
-  background: rgba(251, 191, 36, 0.1);
-  border-color: rgba(251, 191, 36, 0.2);
-  color: var(--color-warning);
+/* Unassigned zone: Warning styling */
+.zone-group--unassigned .zone-group__header {
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.zone-group--unassigned .zone-group__header:hover {
+  background: rgba(251, 191, 36, 0.08);
 }
 
 .zone-group--unassigned .zone-group__header-icon {
+  color: var(--color-warning);
   opacity: 1;
 }
 
@@ -673,10 +664,9 @@ function getDeviceId(device: ESPDevice): string {
   color: var(--color-warning);
 }
 
-/* Drag-over state for header label */
-.zone-group--drag-over .zone-group__header-label {
-  border-color: var(--color-iridescent-1);
-  box-shadow: 0 0 8px rgba(96, 165, 250, 0.3);
+/* Drag-over state for header */
+.zone-group--drag-over .zone-group__header {
+  background: rgba(96, 165, 250, 0.08);
 }
 
 /* Chevron */
@@ -684,16 +674,17 @@ function getDeviceId(device: ESPDevice): string {
   width: 1rem;
   height: 1rem;
   color: var(--color-text-muted);
-  opacity: 0.5;
+  opacity: 0.6;
   transition: transform 0.2s ease, opacity 0.2s ease;
+  flex-shrink: 0;
 }
 
 .zone-group__header:hover .zone-group__chevron {
-  opacity: 0.8;
+  opacity: 0.9;
 }
 
-.zone-group__chevron--expanded {
-  transform: rotate(180deg);
+.zone-group__chevron--collapsed {
+  transform: rotate(-90deg);
 }
 
 /* =============================================================================
@@ -701,7 +692,7 @@ function getDeviceId(device: ESPDevice): string {
    ============================================================================= */
 
 .zone-group__content {
-  padding: 0;
+  padding: 1rem;
   overflow: visible;  /* Erlaubt Overlays */
 }
 
@@ -834,6 +825,11 @@ function getDeviceId(device: ESPDevice): string {
   touch-action: manipulation;
   /* GPU-Hint für bessere Performance */
   will-change: transform, opacity;
+  /* Konsistente Mindesthöhe für alle ESP-Cards */
+  min-height: 180px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 /* Verhindere Text-Selektion auf ALLEN Kind-Elementen während eines Drags */

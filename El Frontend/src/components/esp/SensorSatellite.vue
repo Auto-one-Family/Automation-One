@@ -227,22 +227,29 @@ function handleDragEnd(event: DragEvent) {
   align-items: center;
   gap: 0.1875rem;
   padding: 0.4375rem 0.375rem;
-  background: rgba(30, 32, 40, 0.85);
+  background: rgba(30, 32, 40, 0.9);
   border: 1px solid var(--glass-border);
-  border-radius: 0.4375rem;
+  border-radius: 0.5rem;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 50px;
   max-width: 120px;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(10px);
+  /* Enhanced floating effect */
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
 .sensor-satellite:hover {
   border-color: var(--color-iridescent-2);
-  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.25);
-  transform: translateY(-1px);
-  background: rgba(40, 42, 54, 0.9);
+  transform: translateY(-2px);
+  background: rgba(40, 42, 54, 0.95);
+  /* Enhanced hover shadow */
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 8px 24px rgba(0, 0, 0, 0.15),
+    0 0 16px rgba(167, 139, 250, 0.15);
 }
 
 .sensor-satellite--selected {
@@ -307,8 +314,8 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__value-number {
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-size: 0.875rem;    /* Increased from 0.8125rem */
+  font-weight: 700;       /* Increased from 600 */
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-primary);
   line-height: 1;
@@ -316,15 +323,15 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__value-unit {
-  font-size: 0.5625rem;
-  color: var(--color-text-muted);
+  font-size: 0.625rem;    /* Increased from 0.5625rem */
+  color: var(--color-text-secondary);  /* Improved contrast */
 }
 
 /* Label - compact */
 .sensor-satellite__label {
-  font-size: 0.5625rem;
+  font-size: 0.625rem;    /* Increased from 0.5625rem */
   font-weight: 500;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);  /* Improved contrast */
   text-align: center;
   white-space: nowrap;
   overflow: hidden;

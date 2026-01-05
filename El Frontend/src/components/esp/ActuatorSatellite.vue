@@ -211,22 +211,29 @@ function handleDragEnd(event: DragEvent) {
   align-items: center;
   gap: 0.25rem;
   padding: 0.5rem;
-  background: rgba(30, 32, 40, 0.85);
+  background: rgba(30, 32, 40, 0.9);
   border: 1px solid var(--glass-border);
   border-radius: 0.5rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 52px;
   max-width: 130px;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(10px);
+  /* Enhanced floating effect */
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
 .actuator-satellite:hover {
   border-color: var(--color-iridescent-1);
-  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.25);
-  transform: translateY(-1px);
-  background: rgba(40, 42, 54, 0.9);
+  transform: translateY(-2px);
+  background: rgba(40, 42, 54, 0.95);
+  /* Enhanced hover shadow */
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 8px 24px rgba(0, 0, 0, 0.15),
+    0 0 16px rgba(167, 139, 250, 0.15);
 }
 
 .actuator-satellite--selected {
