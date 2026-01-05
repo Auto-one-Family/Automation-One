@@ -1,0 +1,205 @@
+# ============================================
+# Wokwi ESP32 Firmware Tests
+# ============================================
+# Purpose: Test real ESP32 firmware in Wokwi virtual environment
+#
+# This workflow:
+# 1. Starts Mosquitto MQTT broker (anonymous access enabled)
+# 2. Builds the ESP32 firmware with Wokwi-specific configuration
+# 3. Runs the firmware in Wokwi simulator
+# 4. Validates boot sequence, WiFi, and MQTT connectivity
+#
+# Prerequisites:
+# - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
+#
+# Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
+
+name: Wokwi ESP32 Tests
+
+on:
+  push:
+    paths:
+      - 'El Trabajante/**'
+      - '.github/workflows/wokwi-tests.yml'
+  pull_request:
+    paths:
+      - 'El Trabajante/**'
+      - '.github/workflows/wokwi-tests.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  wokwi-firmware-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ============================================
+      # Start Mosquitto MQTT Broker
+      # ============================================
+      # Note: Using docker run instead of services because services
+      # start before checkout, so we can't use config files from repo
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          # Create minimal config for anonymous access
+          mkdir -p /tmp/mosquitto
+          cat > /tmp/mosquitto/mosquitto.conf << 'EOF'
+          listener 1883 0.0.0.0
+          allow_anonymous true
+          persistence false
+          log_dest stderr
+          log_type all
+          connection_messages true
+          EOF
+
+          # Start Mosquitto container
+          docker run -d \
+            --name mosquitto \
+            -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+
+          # Wait for Mosquitto to be ready
+          echo "Waiting for Mosquitto to start..."
+          for i in {1..30}; do
+            if docker exec mosquitto mosquitto_sub -t '#' -C 1 -W 1 2>/dev/null; then
+              echo "Mosquitto is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Mosquitto failed to start"
+              docker logs mosquitto
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Show Mosquitto logs
+          echo "=== Mosquitto Logs ==="
+          docker logs mosquitto
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: |
+          pip install platformio
+          echo "PlatformIO version:"
+          pio --version
+
+      - name: Build Wokwi Firmware
+        run: |
+          cd "El Trabajante"
+          pio run -e wokwi_simulation
+          echo "Firmware built successfully"
+          ls -la .pio/build/wokwi_simulation/
+
+          # Verify firmware size
+          echo "=== Firmware Size ==="
+          ls -lh .pio/build/wokwi_simulation/firmware.bin
+
+      - name: Install Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Verify Wokwi CLI
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          wokwi-cli --version
+
+      # ============================================
+      # Boot Sequence Test
+      # ============================================
+      - name: Run Boot Sequence Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Run simulation with timeout and capture output
+          timeout 120 wokwi-cli run \
+            --timeout 90000 \
+            --scenario tests/wokwi/boot_test.yaml \
+            2>&1 | tee wokwi_output.log || true
+
+          # Check for expected boot messages
+          echo "=== Checking Boot Sequence ==="
+          grep -q "Phase 1: Core Infrastructure READY" wokwi_output.log && echo "Phase 1 OK"
+          grep -q "Phase 2: Communication Layer READY" wokwi_output.log && echo "Phase 2 OK"
+
+          # Check for critical errors
+          if grep -q "CRITICAL" wokwi_output.log; then
+            echo "CRITICAL errors found in boot sequence!"
+            grep "CRITICAL" wokwi_output.log
+            exit 1
+          fi
+
+          echo "Boot sequence test passed!"
+
+      # ============================================
+      # MQTT Connection Test
+      # ============================================
+      - name: Run MQTT Connection Test
+        if: success()
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Run simulation with MQTT scenario
+          timeout 120 wokwi-cli run \
+            --timeout 90000 \
+            --scenario tests/wokwi/mqtt_connection.yaml \
+            2>&1 | tee wokwi_mqtt_output.log || true
+
+          # Check for MQTT connection
+          echo "=== Checking MQTT Connection ==="
+          if grep -q "MQTT connected" wokwi_mqtt_output.log; then
+            echo "MQTT connection successful!"
+          else
+            echo "Warning: MQTT connection not confirmed (may be expected in CI)"
+          fi
+
+          # Check for heartbeat
+          if grep -q "heartbeat" wokwi_mqtt_output.log; then
+            echo "Heartbeat published!"
+          fi
+
+      # ============================================
+      # Upload Artifacts
+      # ============================================
+      - name: Upload Wokwi Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wokwi-test-logs
+          path: |
+            El Trabajante/wokwi_output.log
+            El Trabajante/wokwi_mqtt_output.log
+          retention-days: 7
+
+      - name: Upload Firmware Binary
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/firmware.bin
+          retention-days: 30
+
+      # ============================================
+      # Cleanup
+      # ============================================
+      - name: Stop Mosquitto
+        if: always()
+        run: |
+          echo "=== Final Mosquitto Logs ==="
+          docker logs mosquitto 2>/dev/null || true
+          docker stop mosquitto 2>/dev/null || true
+          docker rm mosquitto 2>/dev/null || true

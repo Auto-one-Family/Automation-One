@@ -1,0 +1,43 @@
+# ============================================
+# Wokwi ESP32 Simulation Configuration
+# ============================================
+# Documentation: https://docs.wokwi.com/wokwi-toml
+# Purpose: Enables testing of real ESP32 firmware in virtual environment
+#
+# Usage:
+#   Local:  wokwi-cli run --timeout 60000
+#   CI:     wokwi-cli run --timeout 60000 --scenario tests/wokwi/boot_test.yaml
+#
+# Prerequisites:
+#   1. Build firmware first: pio run -e wokwi_simulation
+#   2. Wokwi CLI installed: https://docs.wokwi.com/wokwi-cli/getting-started
+#   3. WOKWI_CLI_TOKEN environment variable set (for CI)
+
+[wokwi]
+version = 1
+firmware = ".pio/build/wokwi_simulation/firmware.bin"
+elf = ".pio/build/wokwi_simulation/firmware.elf"
+
+# ============================================
+# Network Configuration
+# ============================================
+# Gateway enables connection to external services (MQTT broker)
+# - Local development: host.wokwi.internal -> localhost
+# - CI: host.wokwi.internal -> CI service (mosquitto)
+[wokwi.network]
+gateway = true
+
+# ============================================
+# Serial Monitor Configuration
+# ============================================
+[wokwi.serial]
+# Baud rate must match Serial.begin() in firmware
+baud = 115200
+
+# ============================================
+# GDB Debugging (optional)
+# ============================================
+# Uncomment to enable GDB debugging on port 3333
+# [wokwi.gdb]
+# enabled = true
+# port = 3333

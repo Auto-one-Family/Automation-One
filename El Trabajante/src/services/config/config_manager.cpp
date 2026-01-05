@@ -59,33 +59,81 @@ bool ConfigManager::loadAllConfigs() {
 // WIFI CONFIGURATION
 // ============================================
 bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
+  // ============================================
+  // WOKWI SIMULATION MODE: Use compile-time credentials
+  // ============================================
+  #ifdef WOKWI_SIMULATION
+    LOG_INFO("ConfigManager: WOKWI_SIMULATION mode - using compile-time credentials");
+
+    // WiFi credentials (Wokwi-GUEST is open network in Wokwi simulator)
+    #ifdef WOKWI_WIFI_SSID
+      config.ssid = WOKWI_WIFI_SSID;
+    #else
+      config.ssid = "Wokwi-GUEST";
+    #endif
+
+    #ifdef WOKWI_WIFI_PASSWORD
+      config.password = WOKWI_WIFI_PASSWORD;
+    #else
+      config.password = "";
+    #endif
+
+    // MQTT broker (host.wokwi.internal routes to localhost or CI service)
+    #ifdef WOKWI_MQTT_HOST
+      config.server_address = WOKWI_MQTT_HOST;
+    #else
+      config.server_address = "host.wokwi.internal";
+    #endif
+
+    #ifdef WOKWI_MQTT_PORT
+      config.mqtt_port = WOKWI_MQTT_PORT;
+    #else
+      config.mqtt_port = 1883;
+    #endif
+
+    // Anonymous MQTT mode for Wokwi
+    config.mqtt_username = "";
+    config.mqtt_password = "";
+    config.configured = true;
+
+    wifi_config_loaded_ = true;
+
+    LOG_INFO("ConfigManager: Wokwi WiFi config - SSID: " + config.ssid +
+             ", MQTT: " + config.server_address + ":" + String(config.mqtt_port));
+
+    return true;
+  #endif
+
+  // ============================================
+  // NORMAL MODE: Load from NVS
+  // ============================================
   if (!storageManager.beginNamespace("wifi_config", true)) {
     LOG_ERROR("ConfigManager: Failed to open wifi_config namespace");
     return false;
   }
-  
+
   // Load WiFi settings
   config.ssid = storageManager.getStringObj("ssid", "");
   config.password = storageManager.getStringObj("password", "");
-  
+
   // Load server settings
   config.server_address = storageManager.getStringObj("server_address", "192.168.0.198");
   config.mqtt_port = storageManager.getUInt16("mqtt_port", 8883);
-  
+
   // Load credentials
   config.mqtt_username = storageManager.getStringObj("mqtt_username", "");
   config.mqtt_password = storageManager.getStringObj("mqtt_password", "");
-  
+
   // Load status
   config.configured = storageManager.getBool("configured", false);
-  
+
   storageManager.endNamespace();
-  
+
   wifi_config_loaded_ = true;
-  
-  LOG_INFO("ConfigManager: WiFi config loaded - SSID: " + config.ssid + 
+
+  LOG_INFO("ConfigManager: WiFi config loaded - SSID: " + config.ssid +
            ", Server: " + config.server_address);
-  
+
   return true;
 }
 
@@ -672,19 +720,37 @@ void ConfigManager::printConfigurationStatus() const {
 // ============================================
 void ConfigManager::generateESPIdIfMissing() {
   if (system_config_.esp_id.length() == 0) {
+    // ============================================
+    // WOKWI SIMULATION MODE: Use compile-time ESP ID
+    // ============================================
+    #ifdef WOKWI_SIMULATION
+      #ifdef WOKWI_ESP_ID
+        system_config_.esp_id = WOKWI_ESP_ID;
+        LOG_INFO("ConfigManager: Using Wokwi ESP ID: " + system_config_.esp_id);
+      #else
+        system_config_.esp_id = "ESP_WOKWI001";
+        LOG_INFO("ConfigManager: Using default Wokwi ESP ID: " + system_config_.esp_id);
+      #endif
+      saveSystemConfig(system_config_);
+      return;
+    #endif
+
+    // ============================================
+    // NORMAL MODE: Generate from MAC address
+    // ============================================
     LOG_WARNING("ConfigManager: ESP ID not configured - generating from MAC address");
-    
+
     WiFi.mode(WIFI_STA);  // Must be before macAddress()
     uint8_t mac[6];
     WiFi.macAddress(mac);
-    
+
     char esp_id[32];
-    snprintf(esp_id, sizeof(esp_id), "ESP_%02X%02X%02X", 
+    snprintf(esp_id, sizeof(esp_id), "ESP_%02X%02X%02X",
              mac[3], mac[4], mac[5]);
-    
+
     system_config_.esp_id = String(esp_id);
     saveSystemConfig(system_config_);
-    
+
     LOG_INFO("ConfigManager: Generated ESP ID: " + system_config_.esp_id);
   }
 }
