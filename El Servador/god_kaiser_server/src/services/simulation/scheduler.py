@@ -1521,6 +1521,20 @@ class SimulationScheduler:
         if not device or device.hardware_type != "MOCK_ESP32":
             raise ESPNotFoundError(esp_id)
 
+        # Helper function to update auto_heartbeat in simulation_config
+        async def update_auto_heartbeat_config(enable: bool) -> None:
+            """Update auto_heartbeat field in simulation_config."""
+            # Get existing simulation_config or create empty one
+            metadata = device.device_metadata or {}
+            sim_config = metadata.get("simulation_config", {})
+
+            # Update auto_heartbeat and interval
+            sim_config["auto_heartbeat"] = enable
+            sim_config["heartbeat_interval"] = interval_seconds
+
+            # Persist to database
+            await esp_repo.update_simulation_config(esp_id, sim_config)
+
         if enabled:
             # Start simulation if not running
             if not self.is_mock_active(esp_id):
@@ -1533,7 +1547,11 @@ class SimulationScheduler:
                 )
                 if success:
                     await esp_repo.update_simulation_state(esp_id, "running")
+                    await update_auto_heartbeat_config(True)
                 return success
+            else:
+                # Already running, just update the config
+                await update_auto_heartbeat_config(True)
             return True
         else:
             # Stop simulation if running
@@ -1541,7 +1559,11 @@ class SimulationScheduler:
                 success = await self.stop_mock(esp_id)
                 if success:
                     await esp_repo.update_simulation_state(esp_id, "stopped")
+                    await update_auto_heartbeat_config(False)
                 return success
+            else:
+                # Already stopped, just update the config
+                await update_auto_heartbeat_config(False)
             return True
 
     async def set_state(

@@ -55,6 +55,37 @@ router = APIRouter(prefix="/v1/esp", tags=["esp"])
 
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def _extract_mock_fields(device) -> tuple[Optional[bool], Optional[int]]:
+    """
+    Extract Mock ESP specific fields from device_metadata.
+
+    Returns:
+        Tuple of (auto_heartbeat, heartbeat_interval_seconds)
+        Both are None for non-Mock ESPs.
+    """
+    if device.hardware_type != "MOCK_ESP32":
+        return None, None
+
+    if not device.device_metadata:
+        return None, None
+
+    sim_config = device.device_metadata.get("simulation_config", {})
+    auto_heartbeat = sim_config.get("auto_heartbeat")
+    heartbeat_interval = sim_config.get("heartbeat_interval")
+
+    # Convert to int if present (DB stores as float)
+    heartbeat_interval_seconds = (
+        int(heartbeat_interval) if heartbeat_interval is not None else None
+    )
+
+    return auto_heartbeat, heartbeat_interval_seconds
+
+
+# =============================================================================
 # List Devices
 # =============================================================================
 
@@ -114,7 +145,10 @@ async def list_devices(
     for device in paginated_devices:
         sensor_count = await sensor_repo.count_by_esp(device.id)
         actuator_count = await actuator_repo.count_by_esp(device.id)
-        
+
+        # Extract Mock-specific fields
+        auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
+
         device_responses.append(ESPDeviceResponse(
             id=device.id,
             device_id=device.device_id,
@@ -132,6 +166,8 @@ async def list_devices(
             metadata=device.device_metadata,
             sensor_count=sensor_count,
             actuator_count=actuator_count,
+            auto_heartbeat=auto_heartbeat,
+            heartbeat_interval_seconds=heartbeat_interval_seconds,
             created_at=device.created_at,
             updated_at=device.updated_at,
         ))
@@ -190,7 +226,10 @@ async def get_device(
     
     sensor_count = await sensor_repo.count_by_esp(device.id)
     actuator_count = await actuator_repo.count_by_esp(device.id)
-    
+
+    # Extract Mock-specific fields
+    auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
+
     return ESPDeviceResponse(
         id=device.id,
         device_id=device.device_id,
@@ -208,6 +247,8 @@ async def get_device(
         metadata=device.device_metadata,
         sensor_count=sensor_count,
         actuator_count=actuator_count,
+        auto_heartbeat=auto_heartbeat,
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
         created_at=device.created_at,
         updated_at=device.updated_at,
     )
@@ -282,7 +323,10 @@ async def register_device(
     await db.commit()
     
     logger.info(f"ESP device registered: {device.device_id} by {current_user.username}")
-    
+
+    # Extract Mock-specific fields (will be None for newly registered real ESPs)
+    auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
+
     return ESPDeviceResponse(
         id=device.id,
         device_id=device.device_id,
@@ -300,6 +344,8 @@ async def register_device(
         metadata=device.device_metadata,
         sensor_count=0,
         actuator_count=0,
+        auto_heartbeat=auto_heartbeat,
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
         created_at=device.created_at,
         updated_at=device.updated_at,
     )
@@ -378,7 +424,10 @@ async def update_device(
             logger.warning(f"[MOCK-FIX] ERROR triggering heartbeat for {esp_id}: {e}")
 
     logger.info(f"ESP device updated: {esp_id} by {current_user.username}")
-    
+
+    # Extract Mock-specific fields
+    auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
+
     return ESPDeviceResponse(
         id=device.id,
         device_id=device.device_id,
@@ -396,6 +445,8 @@ async def update_device(
         metadata=device.device_metadata,
         sensor_count=sensor_count,
         actuator_count=actuator_count,
+        auto_heartbeat=auto_heartbeat,
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
         created_at=device.created_at,
         updated_at=device.updated_at,
     )

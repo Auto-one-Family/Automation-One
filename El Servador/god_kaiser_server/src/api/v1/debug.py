@@ -155,7 +155,10 @@ def _build_mock_esp_response(
     simulation_state = "stopped"
     if device.device_metadata:
         simulation_state = device.device_metadata.get("simulation_state", "stopped")
-    
+
+    # Get auto_heartbeat from DB config (fallback to simulation_active for backwards compatibility)
+    auto_heartbeat_config = sim_config.get("auto_heartbeat", simulation_active)
+
     return MockESPResponse(
         esp_id=device.device_id,
         name=device.name,  # Human-readable name from DB
@@ -166,7 +169,7 @@ def _build_mock_esp_response(
         system_state="OPERATIONAL" if simulation_active else "OFFLINE",
         sensors=sensors,
         actuators=actuators,
-        auto_heartbeat=simulation_active,
+        auto_heartbeat=auto_heartbeat_config,
         heap_free=45000 if simulation_active else 0,
         wifi_rssi=-50 if simulation_active else -100,
         uptime=uptime,

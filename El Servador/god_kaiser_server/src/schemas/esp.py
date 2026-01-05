@@ -218,7 +218,18 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
         description="Number of configured actuators",
         ge=0,
     )
-    
+
+    # Mock-specific fields (only populated for Mock ESPs)
+    auto_heartbeat: Optional[bool] = Field(
+        None,
+        description="Whether automatic heartbeat is enabled (Mock ESPs only)",
+    )
+    heartbeat_interval_seconds: Optional[int] = Field(
+        None,
+        description="Heartbeat interval in seconds (Mock ESPs only)",
+        ge=1,
+    )
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -239,6 +250,8 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
                 "metadata": None,
                 "sensor_count": 3,
                 "actuator_count": 2,
+                "auto_heartbeat": None,
+                "heartbeat_interval_seconds": None,
                 "created_at": "2025-01-01T00:00:00Z",
                 "updated_at": "2025-01-01T12:00:00Z"
             }

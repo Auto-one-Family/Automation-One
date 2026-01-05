@@ -28,7 +28,7 @@ from .core.exception_handlers import (
     general_exception_handler,
 )
 from .core.exceptions import GodKaiserException
-from .core.logging_config import get_logger
+from .core.logging_config import get_logger, setup_logging
 from .core.resilience import ResilienceRegistry, get_health_status
 from .db.repositories import ActuatorRepository, ESPRepository, LogicRepository
 from .db.session import dispose_engine, get_engine, get_session, init_db, init_db_circuit_breaker
@@ -63,6 +63,9 @@ from .services.logic_engine import LogicEngine
 from .services.logic_scheduler import LogicScheduler
 from .services.safety_service import SafetyService
 from .websocket.manager import WebSocketManager
+
+# Initialize logging BEFORE any logger usage
+setup_logging()
 
 logger = get_logger(__name__)
 settings = get_settings()
