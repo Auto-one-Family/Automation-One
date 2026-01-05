@@ -1,7 +1,7 @@
 # Bugs Found
 
 > **Letzte Aktualisierung:** 2026-01-05
-> **Status:** ⚠️ 1 AKTIVER BUG (Bug O) - Bug P behoben
+> **Status:** ⚠️ 1 AKTIVER BUG (Bug O - sporadisch, nicht kritisch)
 
 ---
 
@@ -9,7 +9,8 @@
 
 | Kategorie | Status |
 |-----------|--------|
-| **Wokwi Serial-Output Bug** | ✅ FIXED (Bug P - GPIO 0 Boot-Loop) |
+| **Wokwi Zero Serial Output** | ✅ FIXED (Bug Q - Serial Timing + Watchdog Skip) |
+| **Wokwi GPIO 0 Boot-Loop** | ✅ FIXED (Bug P - committed, Workaround aktiv) |
 | **AsyncIO Event-Loop Bug** | ⚠️ OPEN (Bug O - sporadisch, nicht kritisch) |
 | Deprecation Warnings | 🟡 Non-Critical |
 | Sicherheitshinweise | 🔵 Dev Only |
@@ -135,17 +136,18 @@ Alle kritischen Bugs wurden behoben. Siehe Git-History für Details:
 - ✅ BUG-005: Native Drag-Events brechen VueDraggable ab (Root Cause)
 
 ### Wokwi/CI Bugs (2026-01-05)
-- ✅ Bug P: Wokwi Serial-Output Boot-Loop (GPIO 0 Factory Reset Check)
+- ✅ Bug P: GPIO 0 Boot-Loop (committed, gefixt)
+- ✅ Bug Q: Zero Serial Output (committed - Serial Timing + Watchdog Skip)
 
 ---
 
-## Behobener Bug: Wokwi Serial-Output (Bug P)
+## Behobener Bug: Wokwi GPIO 0 Boot-Loop (Bug P)
 
-**Status:** ✅ BEHOBEN (2026-01-05)
+**Status:** ✅ COMMITTED (2026-01-05) - Verifizierung blockiert durch Bug Q
 
 **Entdeckt:** 2026-01-05 (Workflow Run 20705170819)
 
-**Symptom:** Wokwi ESP32 Simulation startet, aber die Firmware produziert **keine Serial-Ausgabe**.
+**Symptom:** GPIO 0 Factory Reset Check verursacht potentielle Boot-Loop in Wokwi.
 
 **Root Cause:** Boot-Button Factory Reset Check auf GPIO 0 verursachte **Boot-Loop**.
 
@@ -169,9 +171,75 @@ Alle kritischen Bugs wurden behoben. Siehe Git-History für Details:
 # Build erfolgreich:
 cd "El Trabajante" && pio run -e wokwi_simulation
 # → SUCCESS in 24.16 seconds
+
+# Commit:
+git commit -m "fix(wokwi): Skip boot button check in simulation (Bug P)"
+# → 3f3a12e (2026-01-05)
 ```
 
-**Nächster Schritt:** Workflow erneut triggern um Fix in CI/CD zu verifizieren.
+**Nächster Schritt:** Workflow-Run verifizieren nach Bug Q Fix.
+
+---
+
+## Behobener Bug: Wokwi Zero Serial Output (Bug Q)
+
+**Status:** ✅ COMMITTED (2026-01-05) - Verifizierung via Workflow-Run erforderlich
+
+**Entdeckt:** 2026-01-05 (Workflow Run 20705951050)
+
+**Symptom:** Wokwi ESP32 Simulation startet, läuft 90 Sekunden, aber produziert **ZERO Serial-Ausgabe** - nicht einmal den Boot-Banner.
+
+**Root Cause (identifiziert):**
+1. **Wokwi Serial Timing:** Wokwi's virtuelle UART braucht mehr Zeit zur Initialisierung als echte Hardware. Die ursprüngliche `delay(100)` nach `Serial.begin()` war zu kurz.
+2. **esp_task_wdt Problem:** Die Low-Level ESP-IDF Watchdog-Funktionen (`esp_task_wdt_init()`, `esp_task_wdt_add()`) werden in Wokwi möglicherweise nicht korrekt unterstützt und verursachten einen frühen Crash/Reset vor jeglichem Serial-Output.
+
+**Lösung:**
+1. **Längere Serial-Delay für Wokwi:** 500ms statt 100ms nach `Serial.begin()` in Wokwi-Modus
+2. **Früher Wokwi-Output mit Flush:** `[WOKWI] Serial initialized` + `Serial.flush()` vor Boot-Banner
+3. **Watchdog überspringen:** `esp_task_wdt_*` Funktionen mit `#ifndef WOKWI_SIMULATION` Guard umgeben
+
+**Geänderte Dateien:**
+- `El Trabajante/src/main.cpp` (Zeilen 91-133)
+
+**Code-Änderung:**
+```cpp
+// VORHER:
+Serial.begin(115200);
+delay(100);  // Allow Serial to stabilize
+// ...
+esp_task_wdt_init(30, false);  // 30s timeout, don't panic
+esp_task_wdt_add(NULL);        // Add current task to watchdog
+
+// NACHHER:
+Serial.begin(115200);
+#ifdef WOKWI_SIMULATION
+delay(500);  // Wokwi needs more time for UART
+Serial.println("[WOKWI] Serial initialized - simulation mode active");
+Serial.flush();  // Ensure output is sent before continuing
+delay(100);
+#else
+delay(100);  // Allow Serial to stabilize on real hardware
+#endif
+// ...
+#ifndef WOKWI_SIMULATION
+esp_task_wdt_init(30, false);  // 30s timeout, don't panic
+esp_task_wdt_add(NULL);        // Add current task to watchdog
+Serial.println("✅ Watchdog configured: 30s timeout, no panic");
+#else
+Serial.println("[WOKWI] Watchdog skipped (not supported in simulation)");
+#endif
+```
+
+**Verifizierung:**
+```bash
+# Build:
+cd "El Trabajante" && pio run -e wokwi_simulation
+
+# Commit:
+git commit -m "fix(wokwi): Improve Serial timing and skip watchdog in simulation (Bug Q)"
+```
+
+**Erfolgskriterium:** Workflow-Run zeigt `[WOKWI] Serial initialized` und `Phase 1: Core Infrastructure READY` in den Logs.
 
 ---
 

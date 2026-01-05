@@ -89,8 +89,18 @@ void setup() {
   // STEP 1: HARDWARE INITIALIZATION
   // ============================================
   Serial.begin(115200);
-  delay(100);  // Allow Serial to stabilize
-  
+
+  // NOTE: Wokwi simulation needs longer delay for virtual UART initialization
+  // On real hardware 100ms is sufficient, but Wokwi's virtual serial is slower
+  #ifdef WOKWI_SIMULATION
+  delay(500);  // Wokwi needs more time for UART
+  Serial.println("[WOKWI] Serial initialized - simulation mode active");
+  Serial.flush();  // Ensure output is sent before continuing
+  delay(100);
+  #else
+  delay(100);  // Allow Serial to stabilize on real hardware
+  #endif
+
   // ============================================
   // STEP 2: BOOT BANNER (before Logger exists)
   // ============================================
@@ -109,9 +119,18 @@ void setup() {
   // - Factory Reset (10s button hold)
   // - Provisioning (10min timeout)
   // - Long-running operations
+  //
+  // NOTE: Skipped in Wokwi simulation because:
+  // - esp_task_wdt_* functions may not be fully supported in Wokwi's virtual environment
+  // - Watchdog behavior in simulation differs from real hardware
+  // - Avoids potential early crash before any serial output
+  #ifndef WOKWI_SIMULATION
   esp_task_wdt_init(30, false);  // 30s timeout, don't panic
   esp_task_wdt_add(NULL);        // Add current task to watchdog
   Serial.println("✅ Watchdog configured: 30s timeout, no panic");
+  #else
+  Serial.println("[WOKWI] Watchdog skipped (not supported in simulation)");
+  #endif
 
   // ============================================
   // STEP 2.5: BOOT-BUTTON FACTORY RESET CHECK (Before GPIO init!)
