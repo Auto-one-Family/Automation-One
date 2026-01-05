@@ -9,7 +9,7 @@
 
 | Kategorie | Status |
 |-----------|--------|
-| **Wokwi Zero Serial Output** | ✅ FIXED (Bug Q - Serial Timing + Watchdog Skip) |
+| **Wokwi Zero Serial Output** | ✅ FIXED (Bug Q - Serial Monitor + Timing, Workflow verifiziert) |
 | **Wokwi GPIO 0 Boot-Loop** | ✅ FIXED (Bug P - committed, Workaround aktiv) |
 | **AsyncIO Event-Loop Bug** | ⚠️ OPEN (Bug O - sporadisch, nicht kritisch) |
 | Deprecation Warnings | 🟡 Non-Critical |
@@ -183,7 +183,7 @@ git commit -m "fix(wokwi): Skip boot button check in simulation (Bug P)"
 
 ## Behobener Bug: Wokwi Zero Serial Output (Bug Q)
 
-**Status:** ✅ FIXED (2026-01-05) - Verifizierung via Workflow-Run erforderlich
+**Status:** ✅ FIXED & VERIFIZIERT (2026-01-05, Workflow Run 20706888212)
 
 **Entdeckt:** 2026-01-05 (Workflow Run 20705951050)
 
@@ -245,7 +245,12 @@ cd "El Trabajante" && pio run -e wokwi_simulation
 wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.yaml
 ```
 
-**Erfolgskriterium:** Workflow-Run zeigt `[WOKWI] Serial initialized` und `Phase 1: Core Infrastructure READY` in den Logs.
+**Erfolgskriterium:** ✅ ERFÜLLT - Workflow-Run 20706888212 zeigt:
+- Phase 1 OK
+- Phase 2 OK
+- Phase 3 OK
+- Phase 4 OK
+- Phase 5 OK
 
 ---
 
