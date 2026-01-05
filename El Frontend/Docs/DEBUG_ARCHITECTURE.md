@@ -126,9 +126,34 @@ VITE v6.4.1  ready in 369 ms
 
 ### 0.5) Server-Logs prüfen
 
+**Log-Datei (primäre Methode):**
+
+Die Server-Logs werden automatisch in eine rotierende Log-Datei geschrieben:
+
+```
+El Servador/god_kaiser_server/logs/god_kaiser.log
+```
+
+**Log-Datei lesen:**
+```bash
+# Letzte 50 Zeilen
+tail -50 "El Servador/god_kaiser_server/logs/god_kaiser.log"
+
+# Live-Logs verfolgen
+tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
+
+# Nach Fehlern suchen
+grep -i "error\|exception\|critical" "El Servador/god_kaiser_server/logs/god_kaiser.log"
+```
+
+**Log-Konfiguration (via Umgebungsvariablen):**
+- `LOG_LEVEL`: DEBUG, INFO (default), WARNING, ERROR
+- `LOG_FORMAT`: json (default), text
+- `LOG_FILE_PATH`: Pfad zur Log-Datei (default: `logs/god_kaiser.log`)
+
 **Wenn Server im Background läuft (Claude Code):**
 
-Der Output wird in eine temporäre Datei geschrieben. Verwende das `TaskOutput` Tool mit der `task_id` die beim Start zurückgegeben wurde.
+Der Output wird zusätzlich in eine temporäre Datei geschrieben. Verwende das `TaskOutput` Tool mit der `task_id` die beim Start zurückgegeben wurde.
 
 ```
 # Beispiel task_id: b7eeb35
@@ -139,8 +164,9 @@ Der Output wird in eine temporäre Datei geschrieben. Verwende das `TaskOutput` 
 
 | Log-Pattern | Bedeutung | Aktion |
 |-------------|-----------|--------|
+| `Logging configured: level=INFO` | Logging aktiv | ✅ OK |
 | `Application startup complete` | Server läuft | ✅ OK |
-| `RuntimeError: Queue bound to different event loop` | AsyncIO Bug | Siehe `Bugs_Found_2.md` Bug O |
+| `RuntimeError: Queue bound to different event loop` | AsyncIO Bug | Siehe `Bugs_and_Phases/Bugs_Found_2.md` Bug O |
 | `Sensor config not found` | Fehlende Config | Warning, nicht kritisch |
 | `Handler returned False` | Handler-Fehler | Prüfe Traceback darüber |
 | `Device X timed out` | ESP offline | Normal für inaktive Mocks |
@@ -180,7 +206,7 @@ Nach erfolgreichem Start sollte die Tabelle so aussehen:
 | `npm ERR!` | Node modules fehlen | `npm install` im Frontend-Ordner |
 | `401 Unauthorized` (Loop) | Token korrupt | LocalStorage leeren, neu einloggen |
 | `404 Not Found` auf API | Falscher Prefix | Prüfe ob `/api/v1/` im Pfad ist |
-| `Queue bound to different event loop` | Python 3.14 Bug | Siehe `Bugs_Found_2.md` Bug O |
+| `Queue bound to different event loop` | Python 3.14 Bug | Siehe `Bugs_and_Phases/Bugs_Found_2.md` Bug O |
 | `Zugriff verweigert` bei Dienst | Keine Admin-Rechte | PowerShell als Admin öffnen |
 
 ### 0.9) Mosquitto MQTT Broker
