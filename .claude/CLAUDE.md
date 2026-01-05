@@ -14,7 +14,8 @@
 | **Maintenance Jobs** | `.claude/PAKET_D_MAINTENANCE_JOBS_IMPROVED.md` | Server: `src/services/maintenance/`<br>Frontend: `El Frontend/src/views/MaintenanceView.vue` |
 | **Frontend + Server starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.4 | - |
 | **Services stoppen/neu starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.3 | - |
-| **Server-Logs prüfen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5 | - |
+| **Server-Logs prüfen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5 | `El Servador/god_kaiser_server/logs/god_kaiser.log` |
+| **Server-Logs analysieren (KI-Workflow)** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5.9 | Read/Grep Tools, JSON-Format |
 | **Frontend Bug debuggen (aktuell)** | `El Frontend/Docs/Bugs_Found_2.md` | Event-Loop Bug, aktuelle Issues |
 | **Frontend Bug debuggen (historisch)** | `El Frontend/Docs/Bugs_Found.md` | Production-Ready Bugs |
 | **MQTT verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | ESP: `src/services/communication/mqtt_client.*`<br>Server: `.claude/CLAUDE_SERVER.md` → [Section 4](.claude/CLAUDE_SERVER.md#4-mqtt-topic-referenz-server-perspektive) |

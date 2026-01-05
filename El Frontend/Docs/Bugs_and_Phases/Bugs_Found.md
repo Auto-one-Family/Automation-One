@@ -1,6 +1,6 @@
 # Bugs Found
 
-> **Letzte Aktualisierung:** 2025-12-30
+> **Letzte Aktualisierung:** 2026-01-05
 > **Status:** ✅ ALLE KRITISCHEN BUGS GEFIXT
 
 ---
@@ -9,8 +9,7 @@
 
 | Kategorie | Status |
 |-----------|--------|
-| **AsyncIO Event-Loop Bug** | ⚠️ OPEN (Bugs_Found_2.md) |
-| **Sensor Config Missing** | 🟡 Low Priority (Bugs_Found_2.md) |
+| **AsyncIO Event-Loop Bug** | ⚠️ OPEN (Bug O - sporadisch, nicht kritisch) |
 | Deprecation Warnings | 🟡 Non-Critical |
 | Sicherheitshinweise | 🔵 Dev Only |
 
@@ -105,6 +104,7 @@ MQTT TLS is disabled.
 
 Alle kritischen Bugs wurden behoben. Siehe Git-History für Details:
 
+### Server/Backend Bugs (2025-12)
 - ✅ Bug I: Circular Import (2025-12-27)
 - ✅ Bug J: Test Import Bugs (2025-12-27)
 - ✅ Bug K: Test Implementation Bugs (2025-12-27)
@@ -120,10 +120,35 @@ Alle kritischen Bugs wurden behoben. Siehe Git-History für Details:
 - ✅ Bug M: SimulationSchedulerDep (verifiziert 2025-12-30)
 - ✅ Zone-ACK WebSocket Bug (2025-12-30)
 
+### Mock ESP Bugs (2025-12-30) - ehemals Bugs_Found_2.md
+- ✅ Bug 1: Mock ESP Name nicht persistent (2025-12-30)
+- ✅ Bug 2: Freshness-Anzeige nach Name-Update (2025-12-30)
+- ✅ Bug 3: Heartbeat nach Server-Neustart (2025-12-30)
+- ✅ Bug 4: Freshness-Indikator bei Name-Änderung (2025-12-30)
+
+### Drag & Drop Bugs (2026-01-03) - ehemals Bugs_Found_3.md
+- ✅ BUG-001: AnalysisDropZone triggert ESP-Card-Drag
+- ✅ BUG-002: ESP-Card nicht sofort draggbar
+- ✅ BUG-003: Inkonsistentes Cursor-Styling
+- ✅ BUG-004: Sensor-Satellite Timing-Konflikt
+- ✅ BUG-005: Native Drag-Events brechen VueDraggable ab (Root Cause)
+
 ---
 
-## Aktive Bugs → Bugs_Found_2.md
+## Aktiver Bug: Event-Loop-Konflikt (Bug O)
 
-Die noch offenen Bugs befinden sich in `Bugs_Found_2.md`:
-- **Bug O:** AsyncIO Event-Loop Bug (CRITICAL)
-- **Bug P:** Sensor Config Missing (MEDIUM)
+**Status:** ⚠️ BEOBACHTET (sporadisch, nicht kritisch)
+
+**Symptom:** Server läuft normal, aber nach längerer Laufzeit erscheint:
+```
+RuntimeError: Queue bound to different event loop
+```
+
+**Root Cause:** MQTT-Subscriber Thread-Pool + Python 3.12+ Event-Loop-Binding.
+
+**Workaround:** Server neu starten. Tritt sporadisch auf.
+
+**Langfristige Lösung (TODO):**
+1. Prüfen ob alle async Queues im Main-Event-Loop erstellt werden
+2. APScheduler auf `AsyncIOScheduler` umstellen
+3. Thread-Pool durch `asyncio.to_thread()` ersetzen

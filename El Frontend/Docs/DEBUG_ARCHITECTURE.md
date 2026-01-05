@@ -126,50 +126,203 @@ VITE v6.4.1  ready in 369 ms
 
 ### 0.5) Server-Logs prüfen
 
-**Log-Datei (primäre Methode):**
+> **Für KI-Agenten:** Diese Section enthält alle notwendigen Befehle und Informationen zum Lesen und Analysieren der Server-Logs.
 
-Die Server-Logs werden automatisch in eine rotierende Log-Datei geschrieben:
+#### 0.5.1) Log-Dateien Übersicht
 
+| Log-Datei | Pfad | Beschreibung |
+|-----------|------|--------------|
+| **Haupt-Log** | `El Servador/god_kaiser_server/logs/god_kaiser.log` | Primäre Log-Datei (JSON-Format, rotierend) |
+| **Backup-Logs** | `logs/god_kaiser.log.1` bis `.5` | Rotierte Log-Dateien (ältere Logs) |
+| **Server-Log** | `El Servador/god_kaiser_server/server.log` | Alternative Server-Logs (wenn vorhanden) |
+| **Test-Logs** | `El Servador/god_kaiser_server/test_*.log` | Test-spezifische Logs |
+
+#### 0.5.2) Log-Dateien lesen (Claude Code / KI-Agenten)
+
+**Methode 1: Read Tool verwenden (EMPFOHLEN für KI-Agenten)**
 ```
-El Servador/god_kaiser_server/logs/god_kaiser.log
+# Verwende das Read Tool mit dem absoluten Pfad:
+c:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Servador\god_kaiser_server\logs\god_kaiser.log
+
+# Für die letzten 100 Zeilen (von Anfang):
+Read Tool mit limit=100
 ```
 
-**Log-Datei lesen:**
+**Methode 2: Bash-Befehle (für spezifische Suchen)**
 ```bash
 # Letzte 50 Zeilen
 tail -50 "El Servador/god_kaiser_server/logs/god_kaiser.log"
 
-# Live-Logs verfolgen
+# Letzte 200 Zeilen
+tail -200 "El Servador/god_kaiser_server/logs/god_kaiser.log"
+
+# Live-Logs verfolgen (für laufenden Server)
 tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
 
-# Nach Fehlern suchen
-grep -i "error\|exception\|critical" "El Servador/god_kaiser_server/logs/god_kaiser.log"
+# Anzahl Zeilen zählen
+wc -l "El Servador/god_kaiser_server/logs/god_kaiser.log"
 ```
 
-**Log-Konfiguration (via Umgebungsvariablen):**
-- `LOG_LEVEL`: DEBUG, INFO (default), WARNING, ERROR
-- `LOG_FORMAT`: json (default), text
-- `LOG_FILE_PATH`: Pfad zur Log-Datei (default: `logs/god_kaiser.log`)
+**Methode 3: Grep Tool verwenden (für Fehlersuche)**
+```bash
+# Nach Fehlern suchen (Grep Tool)
+pattern: "ERROR|CRITICAL|exception"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
+output_mode: content
 
-**Wenn Server im Background läuft (Claude Code):**
+# Nach spezifischem ESP suchen
+pattern: "ESP_[A-Z0-9]+"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
 
-Der Output wird zusätzlich in eine temporäre Datei geschrieben. Verwende das `TaskOutput` Tool mit der `task_id` die beim Start zurückgegeben wurde.
-
+# Nach MQTT-Problemen suchen
+pattern: "mqtt|MQTT|broker|disconnect"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
 ```
-# Beispiel task_id: b7eeb35
-# → Logs in: C:\Users\PCUser\AppData\Local\Temp\claude\...\tasks\b7eeb35.output
+
+#### 0.5.3) JSON-Log-Format verstehen
+
+Die Logs sind im JSON-Format geschrieben. Jede Zeile ist ein JSON-Objekt:
+
+```json
+{
+  "timestamp": "2026-01-05 00:22:15",
+  "level": "INFO",
+  "logger": "src.main",
+  "message": "MQTT client connected successfully",
+  "module": "main",
+  "function": "lifespan",
+  "line": 175,
+  "exception": "..." // nur bei Fehlern
+}
 ```
 
-**Log-Ausgaben interpretieren:**
+**Wichtige Felder:**
+| Feld | Beschreibung | Beispiel |
+|------|--------------|----------|
+| `timestamp` | Zeitstempel | `2026-01-05 00:22:15` |
+| `level` | Log-Level | DEBUG, INFO, WARNING, ERROR, CRITICAL |
+| `logger` | Logger-Name (Modul) | `src.mqtt.client`, `src.main` |
+| `message` | Log-Nachricht | `MQTT connected with result code: 0` |
+| `module` | Python-Modul | `client`, `main`, `session` |
+| `function` | Funktion | `connect`, `lifespan` |
+| `line` | Zeilennummer | `175` |
+
+#### 0.5.4) Log-Konfiguration
+
+**Umgebungsvariablen (in `.env` oder Environment):**
+
+| Variable | Default | Beschreibung |
+|----------|---------|--------------|
+| `LOG_LEVEL` | `INFO` | Log-Level: DEBUG, INFO, WARNING, ERROR, CRITICAL |
+| `LOG_FORMAT` | `json` | Format: `json` (strukturiert) oder `text` (lesbar) |
+| `LOG_FILE_PATH` | `logs/god_kaiser.log` | Pfad zur Log-Datei |
+| `LOG_FILE_MAX_BYTES` | `10485760` (10MB) | Max. Größe vor Rotation |
+| `LOG_FILE_BACKUP_COUNT` | `5` | Anzahl rotierter Backup-Dateien |
+
+**Log-Level ändern (temporär):**
+```bash
+# Server mit DEBUG-Level starten
+LOG_LEVEL=DEBUG poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### 0.5.5) Wichtige Log-Patterns für Fehlersuche
 
 | Log-Pattern | Bedeutung | Aktion |
 |-------------|-----------|--------|
 | `Logging configured: level=INFO` | Logging aktiv | ✅ OK |
 | `Application startup complete` | Server läuft | ✅ OK |
+| `MQTT connected with result code: 0` | MQTT verbunden | ✅ OK |
+| `Registered X MQTT handlers` | Handler registriert | ✅ OK |
 | `RuntimeError: Queue bound to different event loop` | AsyncIO Bug | Siehe `Bugs_and_Phases/Bugs_Found_2.md` Bug O |
 | `Sensor config not found` | Fehlende Config | Warning, nicht kritisch |
 | `Handler returned False` | Handler-Fehler | Prüfe Traceback darüber |
 | `Device X timed out` | ESP offline | Normal für inaktive Mocks |
+| `MQTT connection lost` | Broker-Verbindung verloren | Mosquitto prüfen |
+| `Database engine created` | DB initialisiert | ✅ OK |
+| `CircuitBreaker[X]: state change` | Resilience-Pattern aktiv | Prüfe Service-Status |
+
+#### 0.5.6) Spezifische Log-Suchen für KI-Agenten
+
+**Startup-Probleme finden:**
+```bash
+# Grep Tool verwenden
+pattern: "ERROR|CRITICAL|failed|error"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
+output_mode: content
+-C: 3  # 3 Zeilen Kontext
+```
+
+**MQTT-Handler-Probleme:**
+```bash
+pattern: "handler|Handler|mqtt.*error"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
+```
+
+**ESP32-Kommunikation prüfen:**
+```bash
+pattern: "ESP_|esp_id|heartbeat|sensor.*data"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
+```
+
+**Database-Probleme:**
+```bash
+pattern: "database|Database|SQLAlchemy|session|commit"
+path: El Servador/god_kaiser_server/logs/god_kaiser.log
+```
+
+#### 0.5.7) Logs bei Background-Server (Claude Code)
+
+Wenn der Server im Background läuft (via `run_in_background=true`), wird der Output zusätzlich in eine temporäre Datei geschrieben.
+
+**TaskOutput Tool verwenden:**
+```
+# Beispiel task_id vom Server-Start: b7eeb35
+# Verwende TaskOutput Tool mit task_id
+# → Logs in: C:\Users\PCUser\AppData\Local\Temp\claude\...\tasks\b7eeb35.output
+```
+
+**Wichtig:** TaskOutput zeigt die Console-Ausgabe (stdout/stderr), die Log-Datei (`logs/god_kaiser.log`) enthält die vollständigen strukturierten Logs.
+
+#### 0.5.8) Log-Rotation verstehen
+
+Die Log-Datei rotiert automatisch:
+- Wenn `god_kaiser.log` > 10MB erreicht
+- Alte Datei wird zu `god_kaiser.log.1` umbenannt
+- Bis zu 5 Backup-Dateien werden behalten (`.1` bis `.5`)
+- Älteste Backup-Datei wird gelöscht
+
+**Alle Log-Dateien auflisten:**
+```bash
+ls -la "El Servador/god_kaiser_server/logs/"
+```
+
+#### 0.5.9) Log-Analyse Workflow für KI-Agenten
+
+**Schritt 1:** Zuerst Log-Datei auf Existenz prüfen
+```bash
+ls -la "El Servador/god_kaiser_server/logs/god_kaiser.log"
+```
+
+**Schritt 2:** Letzte Einträge lesen
+```
+# Read Tool verwenden
+file_path: El Servador/god_kaiser_server/logs/god_kaiser.log
+limit: 100
+```
+
+**Schritt 3:** Bei Fehlern nach spezifischen Patterns suchen
+```bash
+# Grep Tool
+pattern: "ERROR|exception|failed"
+output_mode: content
+-C: 5
+```
+
+**Schritt 4:** Kontext verstehen
+- `logger` zeigt welches Modul betroffen ist
+- `function` zeigt wo der Fehler auftrat
+- `line` für Code-Referenz
+- Vorherige Zeilen für Kontext prüfen
 
 ### 0.6) Health-Checks durchführen
 

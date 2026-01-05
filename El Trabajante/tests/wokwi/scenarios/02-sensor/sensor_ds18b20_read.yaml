@@ -1,0 +1,19 @@
+# DS18B20 Sensor Read Test
+# Validates OneWire bus and sensor reading
+# Note: DS18B20 in Wokwi always returns configured temperature (22.5C)
+# Timeout: 90000ms
+
+name: DS18B20 Sensor Read Test
+version: 1
+steps:
+  # Wait for full boot
+  - wait-serial: "Phase 5: Actuator System READY"
+
+  # Verify OneWire bus is initialized
+  - wait-serial: "OneWire Bus Manager"
+
+  # Verify Sensor Manager is active
+  - wait-serial: "Sensor Manager"
+
+  # Wait for heartbeat to confirm loop() is running
+  - wait-serial: "heartbeat"

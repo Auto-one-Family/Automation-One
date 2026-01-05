@@ -408,7 +408,7 @@ Alle `timeout:` Zeilen aus den Szenario-Dateien entfernen. Der globale Timeout w
 
 ---
 
-**Letzte Aktualisierung:** 2026-01-05 03:15 UTC
+**Letzte Aktualisierung:** 2026-01-05 04:45 UTC
 
 ---
 
@@ -424,3 +424,44 @@ Das Wokwi ESP32 CI/CD Setup ist vollständig funktional. Alle 4 Bugs wurden iden
 4. **Bug #4:** Wokwi Szenario-YAML unterstützt kein `timeout:` pro Step
 
 Der finale Workflow-Run (20703799303) war erfolgreich und die ESP32-Firmware wird nun in der Wokwi-Simulation getestet.
+
+---
+
+## Debug-Session: 2026-01-05 04:45 UTC
+
+### System-Status
+
+| Service | Port | Status | Details |
+|---------|------|--------|---------|
+| **Server (uvicorn)** | 8000 | ✅ RUNNING | PID 30856 |
+| **Frontend (Vite)** | 5173 | ✅ RUNNING | PID 5756 |
+| **MQTT (Mosquitto)** | 1883 | ✅ RUNNING | PID 4900, Service STATE: 4 RUNNING |
+
+### Health-Checks
+
+| Endpoint | Status | Response |
+|----------|--------|----------|
+| `GET /api/v1/auth/status` | ✅ 200 | `{"setup_required":false,"users_exist":true,...}` |
+| `GET http://localhost:5173` | ✅ 200 | HTML Response |
+| MQTT Connection | ✅ OK | Result code: 0 |
+
+### Server-Logs Analyse
+
+| Kategorie | Status | Details |
+|-----------|--------|---------|
+| **ERROR-Level Logs** | ✅ KEINE | Keine ERROR oder CRITICAL Logs gefunden |
+| **WARNING-Level Logs** | ⚠️ Normal | JWT Token Expiry (erwartetes Verhalten) |
+| **Scheduler Jobs** | ✅ OK | SimulationScheduler, MaintenanceService laufen |
+| **Mock ESPs** | ✅ 9 online | Health-Check: 9 checked, 9 online, 0 timed out |
+
+### MQTT-Kommunikation
+
+- **Verbindung:** `MQTT connected with result code: 0`
+- **Heartbeats:** Alle Mock-ESPs senden regelmäßig (alle 60s)
+- **Sensor-Daten:** Werden alle 30s publiziert und gespeichert
+
+### Gefundene Bugs: KEINE NEUEN
+
+Alle bekannten Bugs wurden in früheren Sessions behoben. Siehe:
+- `El Frontend/Docs/Bugs_and_Phases/Bugs_Found_2.md` - **Bug O (Event-Loop)** bleibt offen (sporadisch)
+- `El Frontend/Docs/Bugs_and_Phases/Bugs_Found_3.md` - Drag & Drop Fixes ✅
