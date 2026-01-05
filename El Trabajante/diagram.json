@@ -49,6 +49,8 @@
     }
   ],
   "connections": [
+    ["esp:TX0", "$serialMonitor:RX", "", []],
+    ["esp:RX0", "$serialMonitor:TX", "", []],
     ["esp:GND.1", "temp1:GND", "black", ["v20", "h-60"]],
     ["esp:3V3", "temp1:VCC", "red", ["v10", "h-80"]],
     ["esp:D4", "temp1:DQ", "green", ["v40", "h-40"]],

@@ -183,60 +183,66 @@ git commit -m "fix(wokwi): Skip boot button check in simulation (Bug P)"
 
 ## Behobener Bug: Wokwi Zero Serial Output (Bug Q)
 
-**Status:** ✅ COMMITTED (2026-01-05) - Verifizierung via Workflow-Run erforderlich
+**Status:** ✅ FIXED (2026-01-05) - Verifizierung via Workflow-Run erforderlich
 
 **Entdeckt:** 2026-01-05 (Workflow Run 20705951050)
 
 **Symptom:** Wokwi ESP32 Simulation startet, läuft 90 Sekunden, aber produziert **ZERO Serial-Ausgabe** - nicht einmal den Boot-Banner.
 
-**Root Cause (identifiziert):**
-1. **Wokwi Serial Timing:** Wokwi's virtuelle UART braucht mehr Zeit zur Initialisierung als echte Hardware. Die ursprüngliche `delay(100)` nach `Serial.begin()` war zu kurz.
-2. **esp_task_wdt Problem:** Die Low-Level ESP-IDF Watchdog-Funktionen (`esp_task_wdt_init()`, `esp_task_wdt_add()`) werden in Wokwi möglicherweise nicht korrekt unterstützt und verursachten einen frühen Crash/Reset vor jeglichem Serial-Output.
+**Root Cause (FINAL - nach 2 Iterationen):**
 
-**Lösung:**
-1. **Längere Serial-Delay für Wokwi:** 500ms statt 100ms nach `Serial.begin()` in Wokwi-Modus
-2. **Früher Wokwi-Output mit Flush:** `[WOKWI] Serial initialized` + `Serial.flush()` vor Boot-Banner
-3. **Watchdog überspringen:** `esp_task_wdt_*` Funktionen mit `#ifndef WOKWI_SIMULATION` Guard umgeben
+1. **HAUPTURSACHE: Fehlende Serial Monitor Verbindung in diagram.json**
+   - Die `diagram.json` hatte KEINE Verbindung zwischen ESP32 TX0/RX0 und `$serialMonitor`
+   - Ohne diese Verbindungen wird die Serial-Ausgabe nicht zum Wokwi CLI geleitet
+   - Dokumentation: https://docs.wokwi.com/guides/serial-monitor
+
+2. **Sekundär: Wokwi Serial Timing**
+   - Wokwi's virtuelle UART braucht mehr Zeit zur Initialisierung (500ms statt 100ms)
+
+3. **Sekundär: esp_task_wdt Problem**
+   - Die Low-Level ESP-IDF Watchdog-Funktionen werden in Wokwi nicht unterstützt
+
+**Lösung (3 Teile):**
+
+1. **diagram.json: Serial Monitor Verbindung hinzufügen (KRITISCH!)**
+   ```json
+   "connections": [
+     ["esp:TX0", "$serialMonitor:RX", "", []],
+     ["esp:RX0", "$serialMonitor:TX", "", []],
+     // ... andere Verbindungen
+   ]
+   ```
+
+2. **main.cpp: Längere Serial-Delay für Wokwi**
+   ```cpp
+   #ifdef WOKWI_SIMULATION
+   delay(500);  // Wokwi needs more time for UART
+   Serial.println("[WOKWI] Serial initialized");
+   Serial.flush();
+   #else
+   delay(100);
+   #endif
+   ```
+
+3. **main.cpp: Watchdog überspringen in Wokwi**
+   ```cpp
+   #ifndef WOKWI_SIMULATION
+   esp_task_wdt_init(30, false);
+   esp_task_wdt_add(NULL);
+   #endif
+   ```
 
 **Geänderte Dateien:**
+- `El Trabajante/diagram.json` (Serial Monitor Verbindung)
 - `El Trabajante/src/main.cpp` (Zeilen 91-133)
-
-**Code-Änderung:**
-```cpp
-// VORHER:
-Serial.begin(115200);
-delay(100);  // Allow Serial to stabilize
-// ...
-esp_task_wdt_init(30, false);  // 30s timeout, don't panic
-esp_task_wdt_add(NULL);        // Add current task to watchdog
-
-// NACHHER:
-Serial.begin(115200);
-#ifdef WOKWI_SIMULATION
-delay(500);  // Wokwi needs more time for UART
-Serial.println("[WOKWI] Serial initialized - simulation mode active");
-Serial.flush();  // Ensure output is sent before continuing
-delay(100);
-#else
-delay(100);  // Allow Serial to stabilize on real hardware
-#endif
-// ...
-#ifndef WOKWI_SIMULATION
-esp_task_wdt_init(30, false);  // 30s timeout, don't panic
-esp_task_wdt_add(NULL);        // Add current task to watchdog
-Serial.println("✅ Watchdog configured: 30s timeout, no panic");
-#else
-Serial.println("[WOKWI] Watchdog skipped (not supported in simulation)");
-#endif
-```
 
 **Verifizierung:**
 ```bash
 # Build:
 cd "El Trabajante" && pio run -e wokwi_simulation
 
-# Commit:
-git commit -m "fix(wokwi): Improve Serial timing and skip watchdog in simulation (Bug Q)"
+# Lokaler Test (benötigt WOKWI_CLI_TOKEN):
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.yaml
 ```
 
 **Erfolgskriterium:** Workflow-Run zeigt `[WOKWI] Serial initialized` und `Phase 1: Core Infrastructure READY` in den Logs.
