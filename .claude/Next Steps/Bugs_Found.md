@@ -294,22 +294,17 @@ timeout 120 wokwi-cli run \
 
 ### Lösung
 
-**Option A: Explizites Projektverzeichnis angeben**
+**Korrekte Syntax (Projektverzeichnis als ERSTES Argument):**
 ```yaml
-timeout 120 wokwi-cli run \
+# Syntax: wokwi-cli <project-dir> --timeout <ms> --scenario <path>
+timeout 120 wokwi-cli . \
   --timeout 90000 \
   --scenario tests/wokwi/boot_test.yaml \
-  . \
   2>&1 | tee wokwi_output.log || true
 ```
 
-**Option B: Nur wokwi-cli ohne "run" Subcommand (wenn es ohne Argumente läuft)**
-```yaml
-timeout 120 wokwi-cli \
-  --timeout 90000 \
-  --scenario tests/wokwi/boot_test.yaml \
-  2>&1 | tee wokwi_output.log || true
-```
+**WICHTIG:** Das Projektverzeichnis (`.`) muss als erstes Argument kommen, nicht als letztes!
+Die Wokwi CLI interpretiert das erste Argument als Projektpfad und sucht dort nach `wokwi.toml`.
 
 ### Betroffene Dateien
 

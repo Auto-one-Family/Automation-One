@@ -125,11 +125,10 @@ jobs:
           cd "El Trabajante"
 
           # Run simulation with timeout and capture output
-          # NOTE: "." at the end specifies the project directory (where wokwi.toml is located)
-          timeout 120 wokwi-cli run \
+          # Syntax: wokwi-cli <project-dir> --timeout <ms> --scenario <path>
+          timeout 120 wokwi-cli . \
             --timeout 90000 \
             --scenario tests/wokwi/boot_test.yaml \
-            . \
             2>&1 | tee wokwi_output.log || true
 
           # Check for expected boot messages
@@ -158,11 +157,10 @@ jobs:
           cd "El Trabajante"
 
           # Run simulation with MQTT scenario
-          # NOTE: "." at the end specifies the project directory (where wokwi.toml is located)
-          timeout 120 wokwi-cli run \
+          # Syntax: wokwi-cli <project-dir> --timeout <ms> --scenario <path>
+          timeout 120 wokwi-cli . \
             --timeout 90000 \
             --scenario tests/wokwi/mqtt_connection.yaml \
-            . \
             2>&1 | tee wokwi_mqtt_output.log || true
 
           # Check for MQTT connection
