@@ -94,6 +94,17 @@ from .sensor import (
     SensorReading,
     SensorStats,
     SensorStatsResponse,
+    TriggerMeasurementResponse,
+)
+
+# Sensor Type Defaults schemas (Phase 2A)
+from .sensor_type_defaults import (
+    EffectiveConfigResponse,
+    SensorTypeDefaultsCreate,
+    SensorTypeDefaultsListResponse,
+    SensorTypeDefaultsResponse,
+    SensorTypeDefaultsUpdate,
+    VALID_OPERATING_MODES,
 )
 
 # Actuator schemas
@@ -260,6 +271,14 @@ __all__ = [
     "SensorReading",
     "SensorStats",
     "SensorStatsResponse",
+    "TriggerMeasurementResponse",
+    # Sensor Type Defaults (Phase 2A)
+    "EffectiveConfigResponse",
+    "SensorTypeDefaultsCreate",
+    "SensorTypeDefaultsListResponse",
+    "SensorTypeDefaultsResponse",
+    "SensorTypeDefaultsUpdate",
+    "VALID_OPERATING_MODES",
     # Actuator
     "ACTUATOR_COMMANDS",
     "ACTUATOR_TYPE_MAPPING",

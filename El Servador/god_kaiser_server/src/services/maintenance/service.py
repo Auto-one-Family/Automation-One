@@ -150,6 +150,17 @@ class MaintenanceService:
             f"Registered health_check_mqtt job (every {self._maintenance_settings.mqtt_health_check_interval_seconds}s)"
         )
 
+        # Sensor Health Check (Phase 2E) - checks continuous sensors for timeout
+        self._scheduler.add_interval_job(
+            job_id="health_check_sensors",
+            func=self._check_sensor_health,
+            seconds=self._maintenance_settings.sensor_health_check_interval_seconds,
+            category=JobCategory.MONITOR,
+        )
+        logger.info(
+            f"Registered health_check_sensors job (every {self._maintenance_settings.sensor_health_check_interval_seconds}s)"
+        )
+
         # Stats Aggregation (MAINTENANCE category) - nur wenn aktiviert
         if self._maintenance_settings.stats_aggregation_enabled:
             self._scheduler.add_interval_job(
@@ -385,6 +396,67 @@ class MaintenanceService:
         except Exception as e:
             logger.error(f"[monitor] ERROR health_check_mqtt: {e}", exc_info=True)
             self._job_results[job_id] = {"error": str(e)}
+
+    async def _check_sensor_health(self) -> None:
+        """
+        Check sensor health for timeout violations (Phase 2E).
+
+        Checks all continuous-mode sensors for timeout violations
+        and broadcasts WebSocket events for stale sensors.
+
+        Runs every sensor_health_check_interval_seconds (default: 60s).
+        """
+        job_id = "monitor_health_check_sensors"
+
+        try:
+            from .jobs.sensor_health import check_sensor_timeouts
+            from ...websocket.manager import WebSocketManager
+
+            # Get WebSocket manager for broadcasting
+            ws_manager = await WebSocketManager.get_instance()
+
+            async for session in self._session_factory():
+                result = await check_sensor_timeouts(
+                    session=session,
+                    settings=self._maintenance_settings,
+                    ws_manager=ws_manager,
+                )
+
+                checked = result.get("sensors_checked", 0)
+                stale = result.get("sensors_stale", 0)
+                healthy = result.get("sensors_healthy", 0)
+                skipped = result.get("sensors_skipped", 0)
+
+                if stale > 0:
+                    logger.warning(
+                        f"[monitor] health_check_sensors: {stale} sensor(s) stale "
+                        f"(checked: {checked}, healthy: {healthy}, skipped: {skipped})"
+                    )
+                else:
+                    logger.debug(
+                        f"[monitor] health_check_sensors: All {healthy} sensors healthy "
+                        f"(checked: {checked}, skipped: {skipped})"
+                    )
+
+                self._job_results[job_id] = {
+                    "sensors_checked": checked,
+                    "sensors_stale": stale,
+                    "sensors_healthy": healthy,
+                    "sensors_skipped": skipped,
+                    "last_check": datetime.now(timezone.utc).isoformat(),
+                }
+
+                if result.get("errors"):
+                    self._job_results[job_id]["errors"] = result["errors"]
+
+                break  # Exit after first session
+
+        except Exception as e:
+            logger.error(f"[monitor] ERROR health_check_sensors: {e}", exc_info=True)
+            self._job_results[job_id] = {
+                "error": str(e),
+                "last_check": datetime.now(timezone.utc).isoformat(),
+            }
 
     # ================================================================
     # STATS AGGREGATION

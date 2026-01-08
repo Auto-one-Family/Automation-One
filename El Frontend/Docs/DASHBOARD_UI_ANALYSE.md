@@ -1,715 +1,823 @@
-# Dashboard UI Feinschliff - Codebase Analyse
+# Entwickler-Briefing: Dashboard UI Feinschliff & Bug Fix
 
-## Datum: 2026-01-04
-## Analysiert von: Claude Opus 4.5 (KI-Agent)
-
----
-
-## Zusammenfassung der Haupterkenntnisse
-
-| Bereich | Status | Kritische Findings |
-|---------|--------|-------------------|
-| **ESP Card & Satellites** | ✅ Dokumentiert | 8 Komponenten, vollständiges Design-System |
-| **Auto-Heartbeat Bug** | 🔴 **BUG GEFUNDEN** | `auto_heartbeat` geht bei `fetchAll()` verloren |
-| **Geräte-Einstellungen** | ✅ Dokumentiert | ESPSettingsPopover.vue vollständig analysiert |
+**Projekt:** AutomationOne Framework  
+**Datum:** 2026-01-04  
+**Priorität:** Hoch  
+**Geschätzter Aufwand:** 8-12 Stunden
 
 ---
 
-## 1. ESP Card & Satellite Design
+## Teil A: Systemeinführung
 
-### 1.1 Komponenten-Mapping
+### A.1 Was ist AutomationOne?
 
-| Komponente | Pfad | LOC | Hauptzweck |
-|-----------|------|-----|-----------|
-| **ESPOrbitalLayout.vue** | [ESPOrbitalLayout.vue](src/components/esp/ESPOrbitalLayout.vue) | 1767 | **HAUPTKOMPONENTE** für Dashboard - Horizontales 3-Spalten-Layout |
-| **ESPCard.vue** | [ESPCard.vue](src/components/esp/ESPCard.vue) | 1543 | Legacy Komponente für ZoneGroup |
-| **SensorSatellite.vue** | [SensorSatellite.vue](src/components/esp/SensorSatellite.vue) | 355 | Kompakte Sensor-Darstellung |
-| **ActuatorSatellite.vue** | [ActuatorSatellite.vue](src/components/esp/ActuatorSatellite.vue) | 336 | Kompakte Aktor-Darstellung |
-| **ConnectionLines.vue** | [ConnectionLines.vue](src/components/esp/ConnectionLines.vue) | 395 | SVG-basierte Verbindungslinien |
-| **ESPSettingsPopover.vue** | [ESPSettingsPopover.vue](src/components/esp/ESPSettingsPopover.vue) | ~800 | Settings-Popup |
-| **DashboardView.vue** | [DashboardView.vue](src/views/DashboardView.vue) | ~600 | Nutzt ESPOrbitalLayout, ZoneGroup |
-| **CreateMockEspModal.vue** | [CreateMockEspModal.vue](src/components/modals/CreateMockEspModal.vue) | 319 | Mock ESP Erstellung |
+AutomationOne ist ein industrielles IoT-Framework für Gewächshaus-Automatisierung mit einer **4-Layer-Architektur**:
 
-### 1.2 Mock vs. Real ESP Unterscheidung
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ LAYER 1: God (KI-Layer) - OPTIONAL, noch nicht implementiert   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕ HTTP REST
+┌─────────────────────────────────────────────────────────────────┐
+│ LAYER 2: God-Kaiser (Raspberry Pi 5)                            │
+│ → Control Hub, MQTT Broker, PostgreSQL, Logic Engine            │
+│ → Code: El Servador/god_kaiser_server/                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕ MQTT (TLS)
+┌─────────────────────────────────────────────────────────────────┐
+│ LAYER 3: Kaiser-Nodes (Pi Zero) - OPTIONAL für Skalierung       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕ MQTT
+┌─────────────────────────────────────────────────────────────────┐
+│ LAYER 4: ESP32-Agenten ("El Trabajante")                        │
+│ → Sensor-Auslesung, Aktor-Steuerung                             │
+│ → Code: El Trabajante/ (Firmware, ~13.300 LOC)                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**Erkennungsmechanismus:**
-- **Datei:** [esp.ts:144-149](src/api/esp.ts#L144-L149)
-```typescript
-function isMockEsp(espId: string): boolean {
-  return (
-    espId.startsWith('ESP_MOCK_') ||
-    espId.startsWith('MOCK_') ||
-    espId.includes('MOCK')
-  )
+**Kern-Prinzip:** Server-Centric Architecture
+- ESP32 Geräte sind "dumm" - senden nur RAW-Daten
+- Server (God-Kaiser) übernimmt alle Intelligenz
+- Python-Libraries verarbeiten Sensor-Daten serverseitig
+
+### A.2 Die drei Code-Repositories
+
+| Repository | Sprache | Zweck |
+|------------|---------|-------|
+| **El Trabajante** | C++ (PlatformIO) | ESP32 Firmware |
+| **El Servador** | Python (FastAPI) | Backend-Server |
+| **El Frontend** | TypeScript (Vue 3) | Web-Interface |
+
+**Für diesen Auftrag relevant:** `El Frontend` + `El Servador`
+
+### A.3 Mock ESP System
+
+Ein **Alleinstellungsmerkmal** von AutomationOne: Vollständige Hardware-Simulation ohne physische Geräte.
+
+```
+Mock ESP = Virtuelle ESP32-Simulation im Server
+         → Sendet echte MQTT-Nachrichten
+         → Durchläuft identische Processing-Pipeline wie echte Hardware
+         → Ermöglicht vollständiges Testing ohne Hardware
+```
+
+**Dual-Storage-Architektur:**
+- **PostgreSQL:** Persistente Daten (Name, Zone, Metadata)
+- **In-Memory (SimulationScheduler):** Live-Simulation (Heartbeats, Sensor-Werte)
+
+---
+
+## Teil B: Orientierung im Code
+
+### B.1 Pflichtlektüre (in dieser Reihenfolge)
+
+| Datei | Pfad | Inhalt | Lesezeit |
+|-------|------|--------|----------|
+| **1. CLAUDE.md** | `.claude/CLAUDE.md` | Gesamtübersicht, ESP32-Architektur, Quick Reference | 15 min |
+| **2. Hierarchie.md** | `.claude/Hierarchie.md` | 4-Layer-Architektur, Zone-System, Code-Locations | 20 min |
+| **3. CLAUDE_FRONTEND.md** | `.claude/CLAUDE_FRONTEND.md` | Frontend-Struktur, Stores, API-Layer | 10 min |
+| **4. CLAUDE_SERVER.md** | `.claude/CLAUDE_SERVER.md` | Backend-API, MQTT-Handler, Database | 15 min |
+
+### B.2 Relevante Flow-Dokumentation
+
+| Dokument | Pfad | Relevanz für diesen Auftrag |
+|----------|------|----------------------------|
+| **14-satellite-cards-flow** | `.claude/14-satellite-cards-flow-server-frontend.md` | Satellite-Komponenten, Layout-System |
+| **VIEW_ANALYSIS.md** | `.claude/VIEW_ANALYSIS.md` | View-Struktur, API-Endpoints |
+| **API_PAYLOAD_EXAMPLES.md** | `.claude/API_PAYLOAD_EXAMPLES.md` | Request/Response Beispiele |
+
+### B.3 Projekt-Struktur (Frontend)
+
+```
+El Frontend/
+├── src/
+│   ├── api/
+│   │   ├── esp.ts          ← ESPDevice Interface, API-Calls
+│   │   ├── debug.ts        ← Mock ESP API
+│   │   └── index.ts        ← Axios-Wrapper
+│   ├── stores/
+│   │   └── esp.ts          ← Pinia Store für ESP-Geräte
+│   ├── components/
+│   │   ├── esp/
+│   │   │   ├── ESPOrbitalLayout.vue   ← HAUPT-Dashboard-Komponente
+│   │   │   ├── ESPCard.vue            ← Legacy Card
+│   │   │   ├── ESPSettingsPopover.vue ← Geräte-Einstellungen
+│   │   │   ├── SensorSatellite.vue    ← Sensor-Karte
+│   │   │   └── ActuatorSatellite.vue  ← Aktor-Karte
+│   │   └── modals/
+│   │       └── CreateMockEspModal.vue ← Mock ESP erstellen
+│   ├── views/
+│   │   └── DashboardView.vue          ← Dashboard-Seite
+│   └── style.css                       ← Design-Tokens, CSS Variables
+```
+
+### B.4 Projekt-Struktur (Backend - relevant)
+
+```
+El Servador/god_kaiser_server/
+├── src/
+│   ├── api/v1/
+│   │   ├── debug.py        ← Mock ESP Endpoints
+│   │   └── esp.py          ← ESP Device Endpoints
+│   ├── schemas/
+│   │   ├── debug.py        ← MockESPResponse Schema
+│   │   └── esp.py          ← ESPDeviceResponse Schema
+│   ├── services/
+│   │   └── simulation_scheduler.py  ← Mock-Simulation Engine
+│   └── db/
+│       └── models/esp.py   ← ESPDevice DB Model
+```
+
+---
+
+## Teil C: Auftragsübersicht
+
+### C.1 Die drei Arbeitsbereiche
+
+| # | Bereich | Typ | Priorität |
+|---|---------|-----|-----------|
+| **1** | Auto-Heartbeat UI-Sync Bug | 🔴 Bug Fix | KRITISCH |
+| **2** | ESP Card & Satellite Design | 🎨 Design | HOCH |
+| **3** | Geräte-Einstellungen Design | 🎨 Design | MITTEL |
+
+### C.2 Identifizierter Bug (aus Codebase-Analyse)
+
+**Problem:** `auto_heartbeat` Status geht nach Page-Reload verloren
+
+**Root Cause:**
+1. Beim Erstellen wird `auto_heartbeat: true` korrekt gespeichert
+2. `fetchAll()` überschreibt den Store mit Daten von `GET /esp/devices`
+3. `ESPDeviceResponse` (Backend-Schema) enthält **kein** `auto_heartbeat` Feld
+4. → UI zeigt `false` obwohl Heartbeat aktiv ist
+
+**Beweis:**
+```python
+# schemas/esp.py - ESPDeviceResponse
+# → KEIN auto_heartbeat Feld vorhanden
+
+# schemas/debug.py - MockESPResponse  
+auto_heartbeat: bool  # ← Nur hier vorhanden
+```
+
+---
+
+## Teil D: Implementierungsphasen
+
+---
+
+## Phase 1: Auto-Heartbeat Bug Fix
+
+**Ziel:** `auto_heartbeat` Status bleibt nach Reload erhalten  
+**Geschätzter Aufwand:** 2-3 Stunden
+
+### Phase 1.1: Backend-Erweiterung
+
+**Datei:** `El Servador/god_kaiser_server/src/schemas/esp.py`
+
+**Aufgabe:** `ESPDeviceResponse` um Mock-spezifische Felder erweitern
+
+```python
+# VORHER (ca. Zeile 45-70):
+class ESPDeviceResponse(BaseModel):
+    id: int
+    esp_id: str
+    name: Optional[str]
+    hardware_type: Optional[str]
+    zone_id: Optional[str]
+    zone_name: Optional[str]
+    # ... weitere Felder
+
+# NACHHER - Hinzufügen:
+class ESPDeviceResponse(BaseModel):
+    # ... bestehende Felder ...
+    
+    # Mock-spezifische Felder (nur für Mock ESPs relevant)
+    auto_heartbeat: Optional[bool] = None
+    heartbeat_interval_seconds: Optional[int] = None
+```
+
+### Phase 1.2: Repository-Erweiterung
+
+**Datei:** `El Servador/god_kaiser_server/src/db/repositories/esp_repository.py`
+
+**Aufgabe:** `get_all_devices()` und `get_device()` um Simulation-Status erweitern
+
+**Recherche-Schritte:**
+1. Finde `get_all_devices()` Methode
+2. Prüfe ob `simulation_config` aus der DB geladen wird
+3. Falls ja: Mapping zu Response hinzufügen
+4. Falls nein: Join mit `simulation_scheduler` Status
+
+**Hinweis:** Mock ESPs haben `simulation_config` als JSON-Feld in der DB:
+```python
+# Erwartete Struktur:
+simulation_config = {
+    "auto_heartbeat": True,
+    "heartbeat_interval_seconds": 60
 }
 ```
 
-**Visuelle Unterschiede:**
+### Phase 1.3: API-Endpoint Anpassung
+
+**Datei:** `El Servador/god_kaiser_server/src/api/v1/esp.py`
+
+**Aufgabe:** `get_devices()` Endpoint nutzt erweiterte Response
+
+**Prüfpunkte:**
+- [ ] Response-Schema verwendet `ESPDeviceResponse`
+- [ ] `auto_heartbeat` wird aus DB/Simulation geladen
+- [ ] Nur für Mock ESPs gefüllt (Real ESPs: `null`)
+
+### Phase 1.4: Frontend Type-Update
+
+**Datei:** `El Frontend/src/api/esp.ts`
+
+**Aufgabe:** `ESPDevice` Interface aktualisieren (falls nötig)
+
+```typescript
+// Zeile ~62 - Prüfen ob bereits vorhanden:
+export interface ESPDevice {
+  // ... bestehende Felder ...
+  auto_heartbeat?: boolean        // ← Sicherstellen
+  heartbeat_interval_seconds?: number  // ← Sicherstellen
+}
+```
+
+### Phase 1.5: Verifizierung
+
+**Test-Szenario:**
+1. Mock ESP erstellen mit `auto_heartbeat: true`
+2. Seite neu laden (F5)
+3. Geräte-Einstellungen öffnen
+4. **Erwartung:** Toggle zeigt "aktiv"
+
+**Debug-Logging (temporär hinzufügen):**
+```typescript
+// esp.ts Store - fetchAll()
+console.log('Fetched devices:', devices.value.map(d => ({
+  id: d.esp_id,
+  auto_heartbeat: d.auto_heartbeat
+})))
+```
+
+---
+
+## Phase 2: ESP Card & Satellite Design
+
+**Ziel:** Luxuriöseres Design, bessere Lesbarkeit, visueller Zusammenhalt  
+**Geschätzter Aufwand:** 3-4 Stunden
+
+### Phase 2.1: Mock/Real Unterscheidung verbessern
+
+**Dateien:**
+- `El Frontend/src/components/esp/ESPOrbitalLayout.vue`
+- `El Frontend/src/style.css`
+
+**Aktuelle Unterscheidung:**
+- Badge in Einstellungen (klein, kaum sichtbar)
+
+**Gewünschte Unterscheidung:**
 
 | Element | Mock | Real |
 |---------|------|------|
-| Type Badge | `variant="mock"` (Lila #a78bfa) | `variant="real"` (Cyan #22d3ee) |
-| Section Border (Einstellungen) | `rgba(168, 85, 247, 0.15)` | Standard |
-| Heartbeat-Steuerung | Manuell + Auto-Toggle | Nur Info-Text |
-| Hardware Type | `MOCK_ESP32_WROOM` | `ESP32_WROOM` |
+| **Card Border** | Subtiler violetter Schimmer | Subtiler cyan Schimmer |
+| **Type Badge** | Oben rechts auf Card | Oben rechts auf Card |
+| **Badge Farbe** | `--color-mock` (#a78bfa) | `--color-real` (#22d3ee) |
 
-**Mock-spezifische Aktionen:**
-1. `handleHeartbeat()` - Manueller Heartbeat-Trigger
-2. `handleAutoHeartbeatToggle()` - Auto-Heartbeat an/aus
-3. `handleIntervalChange()` - Interval ändern (10-300s)
+**Implementierung:**
 
-**Conditional Rendering:**
 ```vue
-<!-- ESPSettingsPopover.vue -->
-<section v-if="isMock" class="popover-section popover-section--mock">
-  <!-- Mock-Steuerung -->
-</section>
-
-<section v-if="!isMock" class="popover-section popover-section--info">
-  <!-- Real ESP Info -->
-</section>
+<!-- ESPOrbitalLayout.vue - esp-info-compact Section -->
+<div 
+  class="esp-info-compact"
+  :class="{
+    'esp-info-compact--mock': isMock,
+    'esp-info-compact--real': !isMock
+  }"
+>
+  <!-- Type Badge (NEU) -->
+  <div class="esp-type-badge" :class="isMock ? 'badge--mock' : 'badge--real'">
+    {{ isMock ? 'MOCK' : 'REAL' }}
+  </div>
+  
+  <!-- ... bestehender Content ... -->
+</div>
 ```
 
-### 1.3 Design-System Bestandsaufnahme
-
-**Quelle:** [style.css](src/style.css) (757 Zeilen)
-
-#### CSS Custom Properties
-
 ```css
-/* Dark Theme Basis */
---color-bg-primary:     #0a0a0f   /* Tiefster Hintergrund */
---color-bg-secondary:   #12121a   /* Haupt-Card-Hintergrund */
---color-bg-tertiary:    #1a1a24   /* Hover-Zustände, Panels */
---color-bg-hover:       #22222e   /* Hover-Effekt */
+/* style.css - Neue Styles */
 
-/* Text */
---color-text-primary:   #f0f0f5   /* Primärer Text */
---color-text-secondary: #a0a0b0   /* Labels */
---color-text-muted:     #606070   /* Placeholder */
-
-/* Iridescent Akzente (Wasser-Reflexion) */
---color-iridescent-1: #60a5fa   /* Himmelblau */
---color-iridescent-2: #818cf8   /* Indigo */
---color-iridescent-3: #a78bfa   /* Violett */
---color-iridescent-4: #c084fc   /* Purpur */
-
-/* Status-Farben */
---color-success: #34d399   /* Grün (Online) */
---color-warning: #fbbf24   /* Gelb (Warnung) */
---color-error:   #f87171   /* Rot (Fehler) */
---color-info:    #60a5fa   /* Blau (Info) */
-
-/* Mock/Real */
---color-mock: #a78bfa   /* Violett */
---color-real: #22d3ee   /* Cyan */
-
-/* Glasmorphism */
---glass-bg:     rgba(255, 255, 255, 0.03)
---glass-border: rgba(255, 255, 255, 0.08)
---glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3)
-```
-
-#### Tailwind-Klassen für Cards
-
-```css
-/* ESP Card Basis */
-.esp-card {
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+/* Card-Varianten */
+.esp-info-compact--mock {
+  border-color: rgba(167, 139, 250, 0.2);
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 20px rgba(167, 139, 250, 0.05);
 }
 
-/* Hover */
-.esp-card:hover {
-  border-color: rgba(96, 165, 250, 0.25);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+.esp-info-compact--real {
+  border-color: rgba(34, 211, 238, 0.2);
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 20px rgba(34, 211, 238, 0.05);
+}
+
+/* Type Badge */
+.esp-type-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+}
+
+.badge--mock {
+  background: rgba(167, 139, 250, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+.badge--real {
+  background: rgba(34, 211, 238, 0.15);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.3);
 }
 ```
 
-#### Typografie
+### Phase 2.2: Satellites "schwebender" machen
 
-| Element | Font-Size | Font-Weight | Line-Height |
-|---------|-----------|-------------|-------------|
-| Card Title | 0.9375rem | 600 | 1.4 |
-| ESP ID | 0.75rem (Mono) | 400 | 1.2 |
-| Sensor Value | 0.8125rem (Mono) | 600 | 1.2 |
-| Labels | 0.6875rem | 500 | 1.3 |
-| Section Headers | 0.6875rem | 600 (uppercase) | 1.2 |
+**Datei:** `El Frontend/src/components/esp/ESPOrbitalLayout.vue`
 
-#### Spacing
+**Aktuell:** Satellites direkt an ESP Card anliegend  
+**Gewünscht:** Mehr visuelle Trennung, "schwebender" Effekt
 
-| Element | Gap | Padding |
-|---------|-----|---------|
-| Card | 0.75rem | 1rem |
-| Satellite | 0.1875rem | 0.4375rem 0.375rem |
-| Section | 0.75rem | 0.875rem |
-| Popover | 0 | 1rem 1.25rem |
+**CSS-Anpassungen:**
 
-### 1.4 Satellite-Layout Analyse
-
-**Layout-System:** Flexbox mit 3 Spalten
-
-```
-┌─────────────────────────────────────────────────────┐
-│                                                      │
-│  Sensoren      │    ESP-Card      │    Aktoren      │
-│  (Flex-Col)    │   (Center)       │    (Flex-Col)   │
-│                │                  │                 │
-│  • Temp        │ ┌──────────────┐ │ • Pump          │
-│  • pH          │ │ Kompakt Info │ │ • Valve         │
-│  • EC          │ │ + Heartbeat  │ │ • Fan           │
-│                │ │              │ │                 │
-│  (Multi-Row    │ │ [Chart Zone] │ │                 │
-│   wenn >5)     │ │              │ │                 │
-│                │ └──────────────┘ │                 │
-│                │                  │                 │
-└─────────────────────────────────────────────────────┘
-```
-
-**Positionierung:**
 ```css
+/* Satellite Cards - Schwebender Effekt */
+.sensor-satellite,
+.actuator-satellite {
+  /* Bestehende Styles... */
+  
+  /* NEU: Schwebender Effekt */
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    0 4px 16px rgba(0, 0, 0, 0.1);
+  
+  /* Subtiler Glow basierend auf Status */
+  transition: all 0.2s ease;
+}
+
+.sensor-satellite:hover,
+.actuator-satellite:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+/* Abstand zwischen Satellites und ESP Card */
+.esp-horizontal-layout__column {
+  gap: 0.5rem;  /* Erhöht von 0.375rem */
+}
+
 .esp-horizontal-layout {
+  gap: 1rem;    /* Erhöht von 0.75rem */
+}
+```
+
+### Phase 2.3: Lesbarkeit verbessern
+
+**Datei:** `El Frontend/src/style.css`
+
+**Anpassungen:**
+
+```css
+/* Kontrast erhöhen */
+:root {
+  /* VORHER: --color-text-secondary: #a0a0b0 */
+  --color-text-secondary: #b0b0c0;  /* Heller */
+  
+  /* VORHER: --color-text-muted: #606070 */
+  --color-text-muted: #707080;      /* Heller */
+}
+
+/* Sensor-Werte prominenter */
+.sensor-satellite__value {
+  font-size: 0.875rem;    /* Erhöht von 0.8125rem */
+  font-weight: 700;       /* Erhöht von 600 */
+}
+
+/* Labels klarer */
+.sensor-satellite__name,
+.actuator-satellite__name {
+  font-size: 0.75rem;     /* Erhöht von 0.6875rem */
+  color: var(--color-text-secondary);
+}
+```
+
+### Phase 2.4: ESPs ohne Sensoren/Aktoren
+
+**Datei:** `El Frontend/src/components/esp/ESPOrbitalLayout.vue`
+
+**Aktuell:** Leere Spalten werden ausgeblendet  
+**Gewünscht:** Valider Zustand, keine visuellen Artefakte
+
+**Prüfpunkte:**
+- [ ] ESP ohne Sensoren: Linke Spalte leer oder mit Placeholder
+- [ ] ESP ohne Aktoren: Rechte Spalte leer oder mit Placeholder
+- [ ] ESP ohne beides: Nur zentrale Card, keine leeren Bereiche
+
+**Implementierung (optional - nur wenn gewünscht):**
+
+```vue
+<!-- Placeholder für leere Sensor-Spalte -->
+<div v-if="sensors.length === 0" class="satellite-placeholder">
+  <span class="satellite-placeholder__text">Keine Sensoren</span>
+</div>
+```
+
+```css
+.satellite-placeholder {
   display: flex;
-  flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.5rem;
+  opacity: 0.5;
+}
+
+.satellite-placeholder__text {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+```
+
+---
+
+## Phase 3: Geräte-Einstellungen Design
+
+**Ziel:** Konsistentes Spacing, bessere visuelle Hierarchie  
+**Geschätzter Aufwand:** 2-3 Stunden
+
+### Phase 3.1: Spacing-Konsistenz
+
+**Datei:** `El Frontend/src/components/esp/ESPSettingsPopover.vue`
+
+**Design-Tokens definieren (am Anfang der `<style>` Section):**
+
+```css
+.esp-settings-popover {
+  /* Spacing-Tokens */
+  --popover-padding: 1.25rem;
+  --section-gap: 1rem;
+  --section-padding: 0.875rem;
+  --item-gap: 0.625rem;
+  --label-gap: 0.375rem;
+}
+```
+
+**Einheitlich anwenden:**
+
+```css
+.popover-section {
+  padding: var(--section-padding);
+  margin-bottom: var(--section-gap);
+}
+
+.popover-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--item-gap);
+}
+
+.section-label {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--label-gap);
+}
+```
+
+### Phase 3.2: Section-Titel verbessern
+
+**Aktuell:** Kleine, unauffällige Titel  
+**Gewünscht:** Größer, mit Icons
+
+```vue
+<!-- Section Header Template -->
+<div class="section-header">
+  <component :is="sectionIcon" class="section-header__icon" />
+  <span class="section-header__title">{{ title }}</span>
+</div>
+```
+
+```css
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.section-header__icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+
+.section-header__title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+```
+
+**Icons pro Section:**
+
+| Section | Icon (Lucide) |
+|---------|---------------|
+| IDENTIFIKATION | `Tag` |
+| STATUS | `Activity` |
+| ZONE | `MapPin` |
+| MOCK-STEUERUNG | `Settings2` |
+| GEFAHRENZONE | `AlertTriangle` |
+
+### Phase 3.3: Status-Grid Layout
+
+**Datei:** `El Frontend/src/components/esp/ESPSettingsPopover.vue`
+
+**Aktuell:** Status-Werte lose angeordnet  
+**Gewünscht:** Strukturiertes Grid
+
+```vue
+<div class="status-grid">
+  <div class="status-item">
+    <span class="status-label">Verbindung</span>
+    <span class="status-value">
+      <Badge :variant="isOnline ? 'success' : 'error'">
+        {{ isOnline ? 'Online' : 'Offline' }}
+      </Badge>
+    </span>
+  </div>
+  
+  <div class="status-item">
+    <span class="status-label">WiFi</span>
+    <span class="status-value">
+      <WifiDisplay :rssi="wifiRssi" />
+    </span>
+  </div>
+  
+  <!-- ... weitere Items ... -->
+</div>
+```
+
+```css
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.75rem;
 }
 
-.esp-horizontal-layout__column {
+.status-item {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
-  min-width: 50px;
-  max-width: 140px;
+  gap: 0.25rem;
+}
+
+.status-label {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.status-value {
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
 }
 ```
 
-**Multi-Row für >5 Sensoren:**
-```css
-.esp-horizontal-layout__column--multi-row {
-  display: grid;
-  grid-template-columns: repeat(2, 65px);
-  gap: 0.375rem;
-}
+### Phase 3.4: Auto-Heartbeat Toggle verbessern
+
+**Aktuell:** Kleiner Toggle, schwer zu treffen  
+**Gewünscht:** Größerer Hit-Bereich, klare Labels
+
+```vue
+<div class="auto-heartbeat-control">
+  <div class="auto-heartbeat-info">
+    <span class="auto-heartbeat-label">Automatische Heartbeats</span>
+    <span class="auto-heartbeat-description">
+      {{ autoHeartbeatEnabled ? `Alle ${heartbeatInterval}s` : 'Deaktiviert' }}
+    </span>
+  </div>
+  
+  <button 
+    class="toggle-switch"
+    :class="{ 'toggle-switch--active': autoHeartbeatEnabled }"
+    @click="handleAutoHeartbeatToggle"
+    role="switch"
+    :aria-checked="autoHeartbeatEnabled"
+  >
+    <span class="toggle-switch__knob" />
+  </button>
+</div>
 ```
-
-**Responsive Breakpoints:**
-
-| Breakpoint | Verhalten |
-|------------|-----------|
-| < 768px (Mobile) | Vertikal, Satellites horizontal wrappen |
-| 768-1023px (Tablet) | Kompakt horizontal, max-width 120px |
-| ≥ 1024px (Desktop) | Volle Breite, max-width 140px |
-
-**Connection Lines:**
-- **Implementierung:** SVG-basiert ([ConnectionLines.vue](src/components/esp/ConnectionLines.vue))
-- **Stile:**
-  - Logic Connections: Grün, 3px solid
-  - Cross-ESP: Blau/Iridescent, 2px solid
-  - Internal: Grau, 1.5px dashed
-- **Features:** Hover-Glow, pulsende Animation bei aktiven Rules
-
-### 1.5 Verbesserungsvorschläge (Design)
-
-1. **Satellites "schwebender":**
-   - Aktuell: Satellites sind direkt an der ESP Card anliegend
-   - Vorschlag: `margin` + `box-shadow` für mehr visuelle Trennung
-
-2. **Mock/Real Badge prominenter:**
-   - Aktuell: Kleiner Badge in Einstellungen
-   - Vorschlag: Subtile Border-Farbe oder Corner-Badge auf ESP Card
-
-3. **ESPs ohne Sensoren/Aktoren:**
-   - Aktuell: Leere Spalten werden ausgeblendet
-   - Vorschlag: Placeholder mit "Keine Sensoren" + Quick-Add Button
-
----
-
-## 2. Auto-Heartbeat UI-Sync Bug
-
-### 2.1 Datenfluss beim Erstellen
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. CreateMockEspModal.vue:34 - Default-Wert                            │
-│    auto_heartbeat: true                                                  │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 2. CreateMockEspModal.vue:92 - API Call                                 │
-│    await espStore.createDevice(config)                                   │
-│    config enthält: auto_heartbeat: true                                  │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 3. esp.ts (Store):190 - API aufrufen                                    │
-│    const device = await espApi.createDevice(config)                     │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 4. esp.ts (API):332 - Mock ESP erstellen                                │
-│    const mockEsp = await debugApi.createMockEsp(mockConfig)             │
-│    POST /debug/mock-esp                                                  │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 5. Backend debug.py:244 - In simulation_config speichern               │
-│    simulation_config = {                                                 │
-│      "auto_heartbeat": config.auto_heartbeat,  ← TRUE                   │
-│    }                                                                     │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 6. Backend debug.py:295 - Simulation starten wenn auto_heartbeat=True  │
-│    if config.auto_heartbeat:                                             │
-│        simulation_started = await sim_scheduler.start_mock(...)         │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 7. Backend debug.py:169 - Response (MockESPResponse)                   │
-│    auto_heartbeat: simulation_active  ← TRUE (korrekt!)                │
-│                                                                          │
-│    Schema: schemas/debug.py:285                                         │
-│    auto_heartbeat: bool                                                  │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 8. esp.ts (API):347 - Response Mapping                                  │
-│    return {                                                              │
-│      ...                                                                 │
-│      auto_heartbeat: mockEsp.auto_heartbeat,  ← TRUE                    │
-│    }                                                                     │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 9. esp.ts (Store):200 - In Store speichern                              │
-│    devices.value.push(device)  ← Device mit auto_heartbeat: true        │
-│                                                                          │
-│    ✅ BIS HIER IST ALLES KORREKT!                                       │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 2.2 Datenfluss beim Laden der Geräte-Einstellungen
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ ESPSettingsPopover.vue:397 - State initialisieren                       │
-│                                                                          │
-│ watch(() => props.isOpen, (isOpen) => {                                 │
-│   if (isOpen) {                                                          │
-│     autoHeartbeatEnabled.value = (props.device as any)?.auto_heartbeat  │
-│                                   ?? false                               │
-│   }                                                                      │
-│ })                                                                       │
-│                                                                          │
-│ props.device kommt aus dem Pinia Store (devices.value)                  │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Problem:** `props.device` muss `auto_heartbeat` enthalten - prüfen wir woher es kommt.
-
-### 2.3 🔴 **IDENTIFIZIERTE URSACHE**
-
-**Das Problem liegt im `fetchAll()` oder `fetchDevice()` Aufruf!**
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ NACH dem Erstellen (oder bei Page Reload):                              │
-│                                                                          │
-│ 1. fetchAll() wird aufgerufen (esp.ts:130-157)                         │
-│                                                                          │
-│ 2. GET /esp/devices → ESPDeviceListResponse                             │
-│    Server-Schema: schemas/esp.py → ESPDeviceResponse                    │
-│                                                                          │
-│    ⚠️  ESPDeviceResponse enthält KEIN auto_heartbeat Feld!             │
-│                                                                          │
-│ 3. esp.ts:150 - VOLLSTÄNDIGE ÜBERSCHREIBUNG:                           │
-│    devices.value = dedupedDevices                                        │
-│                                                                          │
-│    → Das Device mit auto_heartbeat: true wird ersetzt durch            │
-│      ein neues Device OHNE auto_heartbeat                               │
-│                                                                          │
-│ 4. ESPSettingsPopover liest:                                            │
-│    (props.device as any)?.auto_heartbeat ?? false                       │
-│    → undefined ?? false → FALSE ❌                                      │
-│                                                                          │
-│ 🔴 BUG: auto_heartbeat geht bei fetchAll/fetchDevice verloren!          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 2.4 Bestätigende Code-Referenzen
-
-**Backend ESP Schema (schemas/esp.py):**
-```bash
-grep -n "auto_heartbeat" El Servador/god_kaiser_server/src/schemas/esp.py
-# → KEINE TREFFER!
-```
-
-**Backend Debug Schema (schemas/debug.py:285):**
-```python
-auto_heartbeat: bool  # ← NUR in MockESPResponse, nicht in ESPDeviceResponse
-```
-
-**Frontend ESPDevice Interface (esp.ts:62):**
-```typescript
-auto_heartbeat?: boolean  // Optional - nur bei Mock ESPs vorhanden
-```
-
-**Store fetchAll (esp.ts:150):**
-```typescript
-devices.value = dedupedDevices  // ← VOLLSTÄNDIGE ÜBERSCHREIBUNG
-```
-
-### 2.5 Mögliche Lösungsansätze
-
-| Lösung | Aufwand | Empfehlung |
-|--------|---------|------------|
-| **A) Server-seitig:** `ESPDeviceResponse` erweitern um `auto_heartbeat` | Mittel | ✅ EMPFOHLEN |
-| **B) Frontend:** Vor fetchAll den `auto_heartbeat` Status merken und mergen | Hoch | ⚠️ Workaround |
-| **C) Separater Store** für Mock-spezifische Felder | Hoch | ❌ Overkill |
-| **D) WebSocket-basierter State** | Sehr hoch | ❌ Overkill |
-
-**Empfohlene Lösung (A):**
-
-1. **Backend:** `ESPDeviceResponse` (schemas/esp.py) erweitern:
-   ```python
-   auto_heartbeat: Optional[bool] = None  # Nur für Mock ESPs relevant
-   ```
-
-2. **Backend:** `ESPRepository.get_all_devices()` um `simulation_config.auto_heartbeat` erweitern
-
-3. **Alternative:** Separater Endpoint `/esp/devices/{id}/simulation-status` für Mock-spezifische Felder
-
----
-
-## 3. Geräte-Einstellungen Design
-
-### 3.1 Komponenten-Struktur
-
-**Hauptkomponente:** [ESPSettingsPopover.vue](src/components/esp/ESPSettingsPopover.vue)
-
-**Typ:** Popover (Teleport to body, Overlay-basiert)
-
-**Sections:**
-
-```
-ESPSettingsPopover
-├── Header (Settings2 Icon + Close Button)
-├── IDENTIFIKATION
-│   ├── Name (editierbar, inline)
-│   ├── ESP-ID (monospace, kopierbar)
-│   └── Type Badge (mock/real)
-├── STATUS
-│   ├── Connection Badge (online/offline + Pulse)
-│   ├── WiFi Display (4 Bars + RSSI)
-│   ├── Heap (wenn verfügbar)
-│   ├── Uptime (wenn verfügbar)
-│   └── Last Heartbeat
-├── ZONE
-│   └── ZoneAssignmentPanel (compact mode)
-├── MOCK-STEUERUNG (v-if="isMock")
-│   ├── Manual Heartbeat Button
-│   └── Auto-Heartbeat Toggle + Interval
-├── GERÄTEINFORMATION (v-if="!isMock")
-│   └── Info-Text
-└── GEFAHRENZONE
-    ├── Delete Button (outline)
-    └── Delete Confirmation
-```
-
-### 3.2 Aktuelle Design-Elemente
-
-#### IDENTIFIKATION
 
 ```css
-/* Section */
-.popover-section--identification {
-  border-bottom: 1px solid var(--glass-border);
-  padding-bottom: 0.875rem;
-}
-
-/* Name Display */
-.name-display {
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.375rem;
-  transition: background-color 0.15s;
-}
-
-.name-display:hover {
-  background-color: var(--glass-bg);
-}
-
-/* Name Edit */
-.name-input {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid var(--color-iridescent-1);
-  font-weight: 600;
-}
-
-/* ESP-ID */
-.esp-id {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  background: var(--color-bg-tertiary);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-}
-```
-
-#### STATUS
-
-```css
-/* Connection Badge */
-.badge-success.pulse {
-  animation: pulse 2s infinite;
-}
-
-/* WiFi Bars */
-.wifi-bars {
+.auto-heartbeat-control {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 16px;
-}
-
-.wifi-bar {
-  width: 3px;
-  border-radius: 1px;
-  background: var(--color-text-muted);
-  opacity: 0.25;
-}
-
-.wifi-bar.active {
-  opacity: 1;
-  /* Farbe je nach Qualität */
-}
-
-/* Heartbeat */
-.heartbeat-fresh {
-  color: var(--color-success);
-}
-
-.heart-pulse {
-  animation: heart-beat 1.5s ease-in-out infinite;
-}
-```
-
-#### ZONE
-
-```css
-/* ZoneAssignmentPanel (compact) */
-.zone-panel--compact {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-/* Zone Badge */
-.badge-success {
-  background: rgba(52, 211, 153, 0.15);
-  color: var(--color-success);
-}
-```
-
-#### MOCK-STEUERUNG
-
-```css
-/* Section */
-.popover-section--mock {
-  background: rgba(168, 85, 247, 0.04);
-  border: 1px solid rgba(168, 85, 247, 0.15);
-  border-radius: 0.5rem;
-  padding: 0.875rem;
-}
-
-/* Heartbeat Button */
-.heartbeat-btn {
-  width: 100%;
-  background: linear-gradient(135deg, rgba(244, 114, 182, 0.15), rgba(168, 85, 247, 0.1));
-  border: 1px solid rgba(244, 114, 182, 0.3);
-  color: #f472b6;
-  border-radius: 0.5rem;
-  padding: 0.625rem 1rem;
-}
-
-.heartbeat-btn:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-}
-
-/* Auto-Heartbeat Toggle */
-.auto-heartbeat__toggle {
-  width: 44px;
-  height: 24px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.625rem;
   background: var(--color-bg-tertiary);
-  border-radius: 12px;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.auto-heartbeat-control:hover {
+  background: var(--color-bg-hover);
+}
+
+.auto-heartbeat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.auto-heartbeat-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.auto-heartbeat-description {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+/* Toggle Switch - Größer */
+.toggle-switch {
+  width: 48px;
+  height: 26px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 13px;
   position: relative;
   cursor: pointer;
+  transition: all 0.2s;
 }
 
-.auto-heartbeat__toggle--active {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(139, 92, 246, 0.3));
+.toggle-switch--active {
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.4), rgba(139, 92, 246, 0.3));
+  border-color: rgba(167, 139, 250, 0.5);
 }
 
-.auto-heartbeat__toggle-knob {
+.toggle-switch__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
   width: 18px;
   height: 18px;
-  background: var(--color-text-primary);
+  background: var(--color-text-secondary);
   border-radius: 50%;
-  transition: left 0.2s;
+  transition: all 0.2s;
 }
 
-.auto-heartbeat__toggle--active .auto-heartbeat__toggle-knob {
-  left: 23px;
+.toggle-switch--active .toggle-switch__knob {
+  left: 25px;
   background: #a78bfa;
-  box-shadow: 0 0 8px rgba(167, 139, 250, 0.5);
-}
-
-/* Interval Input */
-.interval-input {
-  width: 60px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  text-align: center;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
-}
-
-.interval-input:focus {
-  border-color: var(--color-iridescent-1);
-  outline: none;
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
 }
 ```
 
-#### GEFAHRENZONE
+---
 
-```css
-/* Section */
-.popover-section--danger {
-  background: rgba(239, 68, 68, 0.04);
-  border: 1px solid rgba(239, 68, 68, 0.15);
-  border-radius: 0.5rem;
-  padding: 0.875rem;
-}
+## Teil E: Qualitätskriterien
 
-/* Title */
-.danger-title {
-  color: var(--color-error);
-  font-weight: 600;
-}
+### E.1 Code-Standards
 
-/* Delete Button (Outline) */
-.delete-btn--outline {
-  background: transparent;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: var(--color-error);
-}
+- [ ] TypeScript strict mode - keine `any` Types
+- [ ] Vue 3 Composition API mit `<script setup>`
+- [ ] CSS Custom Properties für alle Farben/Spacing
+- [ ] Responsive Design (Mobile, Tablet, Desktop)
+- [ ] Accessibility (ARIA Labels, Keyboard Navigation)
 
-/* Delete Button (Confirm) */
-.delete-btn--confirm {
-  background: var(--color-error);
-  color: white;
-  border: none;
-}
+### E.2 Naming Conventions
 
-.delete-btn:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-}
+```
+Dateien:     PascalCase.vue, camelCase.ts
+Komponenten: PascalCase
+CSS-Klassen: kebab-case mit BEM (.block__element--modifier)
+Variables:   camelCase
+Constants:   UPPER_SNAKE_CASE
 ```
 
-### 3.3 Verbesserungspotential
+### E.3 Commit-Format
 
-| Bereich | Beobachtung | Vorschlag |
-|---------|-------------|-----------|
-| **Spacing** | Sections haben unterschiedliche Abstände | Einheitlich 0.875rem padding, 0.75rem gap |
-| **Visuelle Hierarchie** | Section-Titel zu klein/unauffällig | Größere Font-Size, Icon hinzufügen |
-| **Lesbarkeit** | Muted Text schwer lesbar auf Dark BG | Kontrast erhöhen (von #606070 → #808090) |
-| **Hover-States** | Nicht alle interaktiven Elemente haben Hover | Cursor + Background für alle klickbaren |
-| **Gruppierung** | Status-Werte lose angeordnet | Grid-Layout für Label/Value Paare |
-| **Auto-Heartbeat** | Toggle ist klein und schwer zu treffen | Größerer Hit-Bereich, Labels |
-| **Delete-Flow** | Bestätigung ist abrupt | Zwei-Schritt mit Timeout/Animation |
-
----
-
-## Anhang: Offene Fragen
-
-### Frage 1: Wann wird `fetchAll()` nach Create aufgerufen?
-
-Mögliche Trigger:
-- [ ] WebSocket-Event nach Mock ESP Erstellung?
-- [ ] Navigation zwischen Views?
-- [ ] Automatischer Refresh-Timer?
-- [ ] Dashboard-Mount?
-
-→ **Empfehlung:** Logging hinzufügen um genauen Trigger zu identifizieren.
-
-### Frage 2: Dual-Storage Konsistenz
-
-Mock ESPs existieren in:
-1. **PostgreSQL** (ESPDevice Tabelle)
-2. **In-Memory** (SimulationScheduler._runtimes)
-
-→ **Frage:** Sind beide immer synchron? Welche ist die "Source of Truth" für `auto_heartbeat`?
-
-### Frage 3: Device-Typ im Interface
-
-```typescript
-// ESPSettingsPopover.vue:397
-autoHeartbeatEnabled.value = (props.device as any)?.auto_heartbeat ?? false
+```
+feat(frontend): add mock/real type badge to ESP cards
+fix(backend): include auto_heartbeat in ESPDeviceResponse
+style(frontend): improve satellite card shadows and spacing
 ```
 
-Der `as any` Cast deutet auf Typ-Unsicherheit hin.
+---
 
-→ **Frage:** Soll `ESPDevice` Interface um Mock-spezifische Felder erweitert werden, oder separate Typen?
+## Teil F: Verifizierung
+
+### F.1 Test-Checkliste Phase 1 (Bug Fix)
+
+- [ ] Mock ESP erstellen mit `auto_heartbeat: true`
+- [ ] Seite neu laden
+- [ ] Einstellungen öffnen → Toggle zeigt "aktiv"
+- [ ] Toggle deaktivieren → Speichert korrekt
+- [ ] Seite neu laden → Toggle zeigt "inaktiv"
+- [ ] Real ESP hat kein Auto-Heartbeat Feld
+
+### F.2 Test-Checkliste Phase 2 (Card Design)
+
+- [ ] Mock ESP hat violetten Border-Schimmer
+- [ ] Real ESP hat cyan Border-Schimmer
+- [ ] Type Badge oben rechts sichtbar
+- [ ] Satellites haben Schatten und Hover-Effekt
+- [ ] Text ist gut lesbar (Kontrast prüfen)
+- [ ] ESP ohne Sensoren zeigt keine leeren Bereiche
+
+### F.3 Test-Checkliste Phase 3 (Settings Design)
+
+- [ ] Einheitliches Spacing in allen Sections
+- [ ] Section-Titel haben Icons
+- [ ] Status-Grid ist übersichtlich
+- [ ] Auto-Heartbeat Toggle ist größer und klickbar
+- [ ] Alle Hover-States funktionieren
 
 ---
 
-## Dateien-Referenz
+## Teil G: Ansprechpartner & Ressourcen
 
-| Datei | Absolute Pfad | Relevanz |
-|-------|---------------|----------|
-| **style.css** | `El Frontend/src/style.css` | Design-Tokens |
-| **ESPOrbitalLayout.vue** | `El Frontend/src/components/esp/ESPOrbitalLayout.vue` | Haupt-Layout |
-| **ESPSettingsPopover.vue** | `El Frontend/src/components/esp/ESPSettingsPopover.vue` | Einstellungen |
-| **CreateMockEspModal.vue** | `El Frontend/src/components/modals/CreateMockEspModal.vue` | Mock Create |
-| **esp.ts (API)** | `El Frontend/src/api/esp.ts` | ESPDevice Interface, API |
-| **esp.ts (Store)** | `El Frontend/src/stores/esp.ts` | Pinia Store |
-| **debug.ts** | `El Frontend/src/api/debug.ts` | Debug API |
-| **debug.py** | `El Servador/god_kaiser_server/src/api/v1/debug.py` | Backend Mock API |
-| **schemas/debug.py** | `El Servador/god_kaiser_server/src/schemas/debug.py` | MockESPResponse |
-| **schemas/esp.py** | `El Servador/god_kaiser_server/src/schemas/esp.py` | ESPDeviceResponse |
+### G.1 Bei Fragen
+
+- **Architektur-Fragen:** CLAUDE.md, Hierarchie.md konsultieren
+- **API-Fragen:** API_PAYLOAD_EXAMPLES.md, CLAUDE_SERVER.md
+- **Design-Fragen:** style.css (Design-Tokens), 14-satellite-cards-flow
+
+### G.2 Hilfreiche Commands
+
+```bash
+# Frontend starten
+cd "El Frontend"
+npm run dev
+
+# Backend starten
+cd "El Servador"
+poetry run uvicorn god_kaiser_server.src.main:app --reload
+
+# Tests ausführen (Backend)
+cd "El Servador"
+poetry run pytest god_kaiser_server/tests/ -v
+```
+
+### G.3 Browser DevTools
+
+- **Vue DevTools:** Komponenten-Hierarchie, Store-Inspection
+- **Network Tab:** API-Responses prüfen (`auto_heartbeat` Feld)
+- **Console:** Debug-Logs für Store-Updates
 
 ---
 
-## Nächste Schritte
+## Zusammenfassung der Phasen
 
-1. **Bug Fix (Priorität 1):**
-   - Backend: `auto_heartbeat` zu `ESPDeviceResponse` hinzufügen
-   - Oder: Separater Endpoint für Mock-Status
+| Phase | Aufgabe | Dateien | Aufwand |
+|-------|---------|---------|---------|
+| **1.1** | Backend Schema erweitern | `schemas/esp.py` | 30 min |
+| **1.2** | Repository erweitern | `repositories/esp_repository.py` | 45 min |
+| **1.3** | API Endpoint anpassen | `api/v1/esp.py` | 30 min |
+| **1.4** | Frontend Type Update | `api/esp.ts` | 15 min |
+| **1.5** | Verifizierung | - | 30 min |
+| **2.1** | Mock/Real Badge | `ESPOrbitalLayout.vue`, `style.css` | 1h |
+| **2.2** | Satellite Shadows | `style.css` | 30 min |
+| **2.3** | Lesbarkeit | `style.css` | 30 min |
+| **2.4** | Leere Zustände | `ESPOrbitalLayout.vue` | 30 min |
+| **3.1** | Spacing-Konsistenz | `ESPSettingsPopover.vue` | 45 min |
+| **3.2** | Section-Titel | `ESPSettingsPopover.vue` | 30 min |
+| **3.3** | Status-Grid | `ESPSettingsPopover.vue` | 45 min |
+| **3.4** | Toggle verbessern | `ESPSettingsPopover.vue` | 30 min |
 
-2. **Design-Verbesserungen (Priorität 2):**
-   - Satellites visuell "schwebender" machen
-   - Mock/Real Badge prominenter
-
-3. **Testing:**
-   - E2E Test für Auto-Heartbeat Flow
-   - Verifizieren dass State nach Reload erhalten bleibt
+**Gesamtaufwand:** ~8-10 Stunden
 
 ---
 
-*Dokument erstellt am 2026-01-04 durch systematische Codebase-Analyse*
+*Briefing erstellt am 2026-01-04*  
+*Basierend auf Codebase-Analyse vom gleichen Tag*

@@ -33,6 +33,18 @@ from ..db.repositories import ESPRepository, SensorRepository, ActuatorRepositor
 logger = get_logger(__name__)
 
 
+class ConfigConflictError(Exception):
+    """
+    Raised when config contains GPIO conflicts.
+
+    This error indicates that multiple sensors/actuators are configured
+    for the same GPIO pin, which would cause hardware conflicts on the ESP32.
+
+    Phase: 2 (GPIO Validation)
+    """
+    pass
+
+
 class ConfigPayloadBuilder:
     """
     Builds ESP32-compatible configuration payloads.
@@ -164,7 +176,36 @@ class ConfigPayloadBuilder:
         # Filter only enabled sensors/actuators (ESP32 only processes active ones)
         active_sensors = [s for s in sensors if s.enabled]
         active_actuators = [a for a in actuators if a.enabled]
-        
+
+        # =====================================================================
+        # GPIO-Konflikt-Check (Phase 2)
+        # Prüft ob mehrere Sensoren/Aktoren auf dem gleichen GPIO konfiguriert sind
+        # =====================================================================
+        used_gpios: dict[int, str] = {}
+
+        for sensor in active_sensors:
+            if sensor.gpio in used_gpios:
+                sensor_name = sensor.sensor_name or sensor.sensor_type
+                raise ConfigConflictError(
+                    f"GPIO {sensor.gpio} Konflikt: Sensor '{sensor_name}' "
+                    f"kollidiert mit {used_gpios[sensor.gpio]}"
+                )
+            sensor_name = sensor.sensor_name or sensor.sensor_type
+            used_gpios[sensor.gpio] = f"sensor:{sensor_name}"
+
+        for actuator in active_actuators:
+            if actuator.gpio in used_gpios:
+                actuator_name = actuator.actuator_name or actuator.actuator_type
+                raise ConfigConflictError(
+                    f"GPIO {actuator.gpio} Konflikt: Actuator '{actuator_name}' "
+                    f"kollidiert mit {used_gpios[actuator.gpio]}"
+                )
+            actuator_name = actuator.actuator_name or actuator.actuator_type
+            used_gpios[actuator.gpio] = f"actuator:{actuator_name}"
+
+        logger.debug(f"Config GPIO validation passed: {len(used_gpios)} unique GPIOs")
+        # =====================================================================
+
         # Build payload arrays
         sensor_payloads = [self.build_sensor_payload(s) for s in active_sensors]
         actuator_payloads = [self.build_actuator_payload(a) for a in active_actuators]

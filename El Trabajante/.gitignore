@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Wokwi Serial Logs (generiert von scripts/wokwi_serial_logger.py)
+logs/*.log
+!logs/.gitkeep

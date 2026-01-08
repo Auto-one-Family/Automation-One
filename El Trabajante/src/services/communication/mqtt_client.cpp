@@ -4,6 +4,7 @@
 #include "../../services/sensor/sensor_manager.h"
 #include "../../services/actuator/actuator_manager.h"
 #include "../../utils/time_manager.h"
+#include "../../drivers/gpio_manager.h"  // Phase 1: GPIO Status
 #include <WiFi.h>
 
 // ============================================
@@ -82,6 +83,20 @@ bool MQTTClient::begin() {
 // CONNECTION MANAGEMENT
 // ============================================
 bool MQTTClient::connect(const MQTTConfig& config) {
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_entry\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:84\",\"message\":\"MQTT connect() called\",\"data\":{\"server\":\"");
+    Serial.print(config.server);
+    Serial.print("\",\"port\":");
+    Serial.print(config.port);
+    Serial.print(",\"client_id\":\"");
+    Serial.print(config.client_id);
+    Serial.print("\",\"username_len\":");
+    Serial.print(config.username.length());
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    // #endregion
+    
     if (!initialized_) {
         LOG_ERROR("MQTTClient not initialized");
         errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
@@ -91,6 +106,11 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     
     // Validate config
     if (config.server.length() == 0) {
+        // #region agent log
+        Serial.print("[DEBUG]{\"id\":\"mqtt_connect_empty_server\",\"timestamp\":");
+        Serial.print(millis());
+        Serial.print(",\"location\":\"mqtt_client.cpp:93\",\"message\":\"MQTT server address is empty\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        // #endregion
         LOG_ERROR("MQTT server address is empty");
         errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
                                            "MQTT server address is empty");
@@ -113,10 +133,42 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     mqtt_.setServer(config.server.c_str(), config.port);
     mqtt_.setKeepAlive(config.keepalive);
     
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_before_broker\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:115\",\"message\":\"About to call connectToBroker()\",\"data\":{\"server_set\":\"");
+    Serial.print(config.server);
+    Serial.print("\",\"port_set\":");
+    Serial.print(config.port);
+    Serial.print(",\"wifi_status\":");
+    Serial.print(WiFi.status());
+    Serial.print(",\"wifi_connected\":");
+    Serial.print(WiFi.isConnected() ? "true" : "false");
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}\n");
+    // #endregion
+    
     return connectToBroker();
 }
 
 bool MQTTClient::connectToBroker() {
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_broker_entry\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:119\",\"message\":\"connectToBroker() called\",\"data\":{\"server\":\"");
+    Serial.print(current_config_.server);
+    Serial.print("\",\"port\":");
+    Serial.print(current_config_.port);
+    Serial.print(",\"mqtt_state\":");
+    Serial.print(mqtt_.state());
+    Serial.print(",\"wifi_status\":");
+    Serial.print(WiFi.status());
+    Serial.print(",\"wifi_ssid\":\"");
+    Serial.print(WiFi.SSID());
+    Serial.print("\",\"wifi_ip\":\"");
+    Serial.print(WiFi.localIP().toString());
+    Serial.print("\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}\n");
+    // #endregion
+    
     LOG_INFO("Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
 
     // ============================================
@@ -138,6 +190,17 @@ bool MQTTClient::connectToBroker() {
 
     // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
     // Try configured port first (likely 8883 for TLS)
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_before_attempt\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:141\",\"message\":\"About to attempt MQTT connection\",\"data\":{\"server\":\"");
+    Serial.print(current_config_.server);
+    Serial.print("\",\"port\":");
+    Serial.print(current_config_.port);
+    Serial.print(",\"hostname_length\":");
+    Serial.print(current_config_.server.length());
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    // #endregion
     bool connected = attemptMQTTConnection(last_will_topic, last_will_message);
 
     // If connection failed and port is 8883 (TLS), try fallback to 1883 (plain MQTT)
@@ -162,6 +225,17 @@ bool MQTTClient::connectToBroker() {
     }
 
     if (connected) {
+        // #region agent log
+        Serial.print("[DEBUG]{\"id\":\"mqtt_connect_success\",\"timestamp\":");
+        Serial.print(millis());
+        Serial.print(",\"location\":\"mqtt_client.cpp:164\",\"message\":\"MQTT connection successful\",\"data\":{\"server\":\"");
+        Serial.print(current_config_.server);
+        Serial.print("\",\"port\":");
+        Serial.print(current_config_.port);
+        Serial.print(",\"mqtt_state\":");
+        Serial.print(mqtt_.state());
+        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        // #endregion
         LOG_INFO("MQTT connected!");
         reconnect_attempts_ = 0;
         reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
@@ -174,6 +248,21 @@ bool MQTTClient::connectToBroker() {
 
         return true;
     } else {
+        // #region agent log
+        Serial.print("[DEBUG]{\"id\":\"mqtt_connect_failed\",\"timestamp\":");
+        Serial.print(millis());
+        Serial.print(",\"location\":\"mqtt_client.cpp:177\",\"message\":\"MQTT connection failed\",\"data\":{\"server\":\"");
+        Serial.print(current_config_.server);
+        Serial.print("\",\"port\":");
+        Serial.print(current_config_.port);
+        Serial.print(",\"mqtt_state\":");
+        Serial.print(mqtt_.state());
+        Serial.print(",\"server_length\":");
+        Serial.print(current_config_.server.length());
+        Serial.print(",\"wifi_status\":");
+        Serial.print(WiFi.status());
+        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        // #endregion
         LOG_ERROR("MQTT connection failed, rc=" + String(mqtt_.state()));
         errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
                                            ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
@@ -183,9 +272,35 @@ bool MQTTClient::connectToBroker() {
 
 // ✅ FIX #2: Helper function for connection attempts
 bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const String& last_will_message) {
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_entry\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:185\",\"message\":\"attemptMQTTConnection() called\",\"data\":{\"server\":\"");
+    Serial.print(current_config_.server);
+    Serial.print("\",\"port\":");
+    Serial.print(current_config_.port);
+    Serial.print(",\"anonymous_mode\":");
+    Serial.print(anonymous_mode_ ? "true" : "false");
+    Serial.print(",\"client_id\":\"");
+    Serial.print(current_config_.client_id);
+    Serial.print("\",\"mqtt_state_before\":");
+    Serial.print(mqtt_.state());
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    // #endregion
+    
+    bool result = false;
     if (anonymous_mode_) {
         // Anonymous connection with Last-Will
-        return mqtt_.connect(
+        // #region agent log
+        Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_anonymous\",\"timestamp\":");
+        Serial.print(millis());
+        Serial.print(",\"location\":\"mqtt_client.cpp:188\",\"message\":\"Calling mqtt_.connect() anonymous\",\"data\":{\"server\":\"");
+        Serial.print(current_config_.server);
+        Serial.print("\",\"port\":");
+        Serial.print(current_config_.port);
+        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        // #endregion
+        result = mqtt_.connect(
             current_config_.client_id.c_str(),
             last_will_topic.c_str(),
             1,  // QoS 1 (At Least Once)
@@ -194,7 +309,16 @@ bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const Stri
         );
     } else {
         // Authenticated connection with Last-Will
-        return mqtt_.connect(
+        // #region agent log
+        Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_authenticated\",\"timestamp\":");
+        Serial.print(millis());
+        Serial.print(",\"location\":\"mqtt_client.cpp:197\",\"message\":\"Calling mqtt_.connect() authenticated\",\"data\":{\"server\":\"");
+        Serial.print(current_config_.server);
+        Serial.print("\",\"port\":");
+        Serial.print(current_config_.port);
+        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        // #endregion
+        result = mqtt_.connect(
             current_config_.client_id.c_str(),
             current_config_.username.c_str(),
             current_config_.password.c_str(),
@@ -204,6 +328,22 @@ bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const Stri
             last_will_message.c_str()
         );
     }
+    
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_result\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:207\",\"message\":\"MQTT connect() returned\",\"data\":{\"result\":");
+    Serial.print(result ? "true" : "false");
+    Serial.print(",\"mqtt_state_after\":");
+    Serial.print(mqtt_.state());
+    Serial.print(",\"server\":\"");
+    Serial.print(current_config_.server);
+    Serial.print("\",\"port\":");
+    Serial.print(current_config_.port);
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    // #endregion
+    
+    return result;
 }
 
 bool MQTTClient::disconnect() {
@@ -219,6 +359,18 @@ bool MQTTClient::isConnected() {
 }
 
 void MQTTClient::reconnect() {
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_entry\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:221\",\"message\":\"reconnect() called\",\"data\":{\"is_connected\":");
+    Serial.print(isConnected() ? "true" : "false");
+    Serial.print(",\"mqtt_state\":");
+    Serial.print(mqtt_.state());
+    Serial.print(",\"reconnect_attempts\":");
+    Serial.print(reconnect_attempts_);
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+    // #endregion
+    
     if (isConnected()) {
         LOG_DEBUG("MQTT already connected");
         circuit_breaker_.recordSuccess();  // Reset on successful connection
@@ -229,6 +381,11 @@ void MQTTClient::reconnect() {
     // CIRCUIT BREAKER CHECK (Phase 6+)
     // ============================================
     if (!circuit_breaker_.allowRequest()) {
+        // #region agent log
+        Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_circuit_breaker\",\"timestamp\":");
+        Serial.print(millis());
+        Serial.print(",\"location\":\"mqtt_client.cpp:231\",\"message\":\"Reconnect blocked by Circuit Breaker\",\"data\":{\"circuit_open\":true},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+        // #endregion
         LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
         return;  // Skip reconnect attempt
     }
@@ -243,6 +400,20 @@ void MQTTClient::reconnect() {
     // ✅ IMPROVEMENT #3: Keine Reconnect-Limit (Circuit Breaker regelt Fehlerbehandlung)
     LOG_INFO("Attempting MQTT reconnection (attempt " +
              String(reconnect_attempts_) + ")");
+
+    // #region agent log
+    Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_attempt\",\"timestamp\":");
+    Serial.print(millis());
+    Serial.print(",\"location\":\"mqtt_client.cpp:243\",\"message\":\"About to call connectToBroker() for reconnect\",\"data\":{\"attempt\":");
+    Serial.print(reconnect_attempts_);
+    Serial.print(",\"server\":\"");
+    Serial.print(current_config_.server);
+    Serial.print("\",\"port\":");
+    Serial.print(current_config_.port);
+    Serial.print(",\"server_length\":");
+    Serial.print(current_config_.server.length());
+    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+    // #endregion
 
     if (!connectToBroker()) {
         // ❌ RECONNECT FAILED
@@ -432,13 +603,14 @@ void MQTTClient::setCallback(std::function<void(const String&, const String&)> c
 // ============================================
 // HEARTBEAT SYSTEM
 // ============================================
-void MQTTClient::publishHeartbeat() {
+void MQTTClient::publishHeartbeat(bool force) {
     unsigned long current_time = millis();
-    
-    if (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS) {
+
+    // Skip throttle check if force=true (for initial heartbeat after connect/reconnect)
+    if (!force && (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS)) {
         return;
     }
-    
+
     last_heartbeat_ = current_time;
     
     // Build heartbeat topic
@@ -458,7 +630,30 @@ void MQTTClient::publishHeartbeat() {
     payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
-    payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount());
+    payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
+
+    // ============================================
+    // GPIO STATUS (Phase 1)
+    // ============================================
+    std::vector<GPIOPinInfo> reservedPins = gpioManager.getReservedPinsList();
+
+    payload += "\"gpio_status\":[";
+    bool first = true;
+    for (const auto& pin : reservedPins) {
+        if (!first) payload += ",";
+        first = false;
+
+        payload += "{";
+        payload += "\"gpio\":" + String(pin.pin) + ",";
+        payload += "\"owner\":\"" + String(pin.owner) + "\",";
+        payload += "\"component\":\"" + String(pin.component_name) + "\",";
+        payload += "\"mode\":" + String(pin.mode) + ",";
+        payload += "\"safe\":" + String(pin.in_safe_mode ? "true" : "false");
+        payload += "}";
+    }
+    payload += "],";
+    payload += "\"gpio_reserved_count\":" + String(reservedPins.size());
+
     payload += "}";
     
     // Publish with QoS 0 (heartbeat doesn't need guaranteed delivery)

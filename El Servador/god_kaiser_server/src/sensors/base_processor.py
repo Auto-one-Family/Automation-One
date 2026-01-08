@@ -62,6 +62,42 @@ class BaseSensorProcessor(ABC):
     Optionally override:
     - calibrate(): Perform calibration (if sensor supports it)
     - get_default_params(): Return default processing parameters
+    - RECOMMENDED_MODE: Default operating mode for this sensor type
+    - RECOMMENDED_TIMEOUT_SECONDS: Default timeout for stale detection
+    - RECOMMENDED_INTERVAL_SECONDS: Default measurement interval
+    - SUPPORTS_ON_DEMAND: Whether sensor supports manual triggering
+    """
+
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Subclasses can override these to provide sensor-type-specific defaults.
+    # These are used when no database configuration exists (lowest priority).
+
+    RECOMMENDED_MODE: str = "continuous"
+    """
+    Recommended operating mode for this sensor type.
+
+    Values:
+    - "continuous": Automatic measurements at regular intervals (default)
+    - "on_demand": Manual measurements only (user-triggered)
+    - "scheduled": Measurements at specific times
+    - "paused": Temporarily disabled
+    """
+
+    RECOMMENDED_TIMEOUT_SECONDS: int = 180
+    """
+    Recommended timeout in seconds for stale detection.
+    Set to 0 for sensors that don't need timeout monitoring (e.g., on_demand sensors).
+    """
+
+    RECOMMENDED_INTERVAL_SECONDS: int = 30
+    """Recommended measurement interval in seconds (for continuous mode)."""
+
+    SUPPORTS_ON_DEMAND: bool = False
+    """
+    Whether this sensor type supports manual/on-demand measurements.
+    Set to True for sensors like pH meters, EC meters that are used point-wise.
     """
 
     @abstractmethod

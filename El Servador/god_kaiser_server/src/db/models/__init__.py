@@ -11,12 +11,13 @@ from . import (  # noqa: F401
     ai,
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
-    enums,  # Shared enums (DataSource, etc.)
+    enums,  # Shared enums (DataSource, SensorOperatingMode, etc.)
     esp,
     kaiser,
     library,
     logic,
     sensor,
+    sensor_type_defaults,  # Sensor type default configuration (Phase 2A)
     subzone,  # Subzone configuration model (Phase 9)
     system,
     user,
@@ -27,12 +28,13 @@ from .actuator import ActuatorConfig, ActuatorState, ActuatorHistory  # noqa: F4
 from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
-from .enums import DataSource  # noqa: F401
+from .enums import DataSource, SensorOperatingMode  # noqa: F401
 from .esp import ESPDevice  # noqa: F401
 from .kaiser import KaiserRegistry, ESPOwnership  # noqa: F401
 from .library import LibraryMetadata  # noqa: F401
 from .logic import CrossESPLogic, LogicExecutionHistory  # noqa: F401
 from .sensor import SensorConfig, SensorData  # noqa: F401
+from .sensor_type_defaults import SensorTypeDefaults  # noqa: F401
 from .subzone import SubzoneConfig  # noqa: F401
 from .system import SystemConfig  # noqa: F401
 from .user import User  # noqa: F401
@@ -49,11 +51,13 @@ __all__ = [
     "library",
     "logic",
     "sensor",
+    "sensor_type_defaults",
     "subzone",
     "system",
     "user",
     # Enums
     "DataSource",
+    "SensorOperatingMode",
     # Models
     "ActuatorConfig",
     "ActuatorState",
@@ -72,6 +76,7 @@ __all__ = [
     "LogicExecutionHistory",
     "SensorConfig",
     "SensorData",
+    "SensorTypeDefaults",
     "SubzoneConfig",
     "SystemConfig",
     "User",

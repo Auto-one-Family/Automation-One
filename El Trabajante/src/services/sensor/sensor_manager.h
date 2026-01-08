@@ -95,7 +95,11 @@ public:
 
     // Set measurement interval (Phase 2: Robustness)
     void setMeasurementInterval(unsigned long interval_ms);
-    
+
+    // ✅ Phase 2C: Trigger manual measurement for on-demand sensors
+    // Returns true if measurement was successful
+    bool triggerManualMeasurement(uint8_t gpio);
+
     // ============================================
     // RAW DATA READING METHODS (PHASE 4)
     // ============================================

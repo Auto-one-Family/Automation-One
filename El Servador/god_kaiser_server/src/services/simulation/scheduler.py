@@ -17,6 +17,7 @@ import json
 import re
 import time
 import random
+from datetime import datetime, timezone
 from typing import Dict, Optional, Callable, Any, List, TYPE_CHECKING
 from dataclasses import dataclass, field
 
@@ -447,8 +448,12 @@ class SimulationScheduler:
 
                     if success:
                         recovered += 1
-                        # Update device status to online
+                        # Update device status to online AND last_seen to current time
+                        # Bug Y Fix: Set last_seen BEFORE health-check can run to avoid
+                        # race condition where health-check sees old last_seen and marks
+                        # device as timed out before heartbeat-handler can update it.
                         device.status = "online"
+                        device.last_seen = datetime.now(timezone.utc)
                         logger.debug(f"Recovered mock simulation: {device.device_id}")
                     else:
                         failed += 1

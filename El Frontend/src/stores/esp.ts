@@ -9,9 +9,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
 import { debugApi } from '@/api/debug'
+import { sensorsApi } from '@/api/sensors'
 import { useWebSocket } from '@/composables/useWebSocket'
+import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
-import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponse, MockESPCreate } from '@/types'
+import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponse, ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem } from '@/types'
 
 /**
  * Extract error message from Axios error response.
@@ -19,17 +21,51 @@ import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLeve
 function extractErrorMessage(err: unknown, fallback: string): string {
   const axiosError = err as { response?: { data?: { detail?: string | Array<{ msg?: string; loc?: string[] }> } } }
   const detail = axiosError.response?.data?.detail
-  
+
   if (!detail) return fallback
-  
+
   if (Array.isArray(detail)) {
     return detail.map(d => {
       const field = d.loc?.slice(1).join('.') || 'unknown'
       return `${field}: ${d.msg || 'validation error'}`
     }).join('; ')
   }
-  
+
   return detail
+}
+
+// ============================================
+// OFFLINE REASON HELPERS
+// ============================================
+
+/**
+ * Generiert menschenlesbaren Text für Offline-Grund.
+ *
+ * @param source - Quelle der Offline-Erkennung
+ * @param reason - Detaillierter Grund (optional)
+ * @returns Menschenlesbarer deutscher Text
+ */
+function getOfflineDisplayText(source: StatusSource, reason?: string): string {
+  switch (source) {
+    case 'lwt':
+      return 'Verbindung verloren'
+    case 'heartbeat_timeout':
+      return 'Keine Antwort'
+    case 'api':
+      return reason === 'shutdown' ? 'Heruntergefahren' : 'Offline'
+    default:
+      return 'Offline'
+  }
+}
+
+/**
+ * Mappt source zu OfflineReason.
+ */
+function getOfflineReason(source: StatusSource, reason?: string): OfflineReason {
+  if (source === 'lwt') return 'lwt'
+  if (source === 'heartbeat_timeout' || reason === 'heartbeat_timeout') return 'heartbeat_timeout'
+  if (reason === 'shutdown') return 'shutdown'
+  return 'unknown'
 }
 
 export const useEspStore = defineStore('esp', () => {
@@ -39,6 +75,10 @@ export const useEspStore = defineStore('esp', () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
+  // GPIO Status State (Phase 3)
+  const gpioStatusMap = ref<Map<string, GpioStatusResponse>>(new Map())
+  const gpioStatusLoading = ref<Map<string, boolean>>(new Map())
+
   // WebSocket integration
   // Note: Server broadcasts these types from MQTT handlers:
   // - esp_health (heartbeat_handler.py)
@@ -46,11 +86,12 @@ export const useEspStore = defineStore('esp', () => {
   // - actuator_status (actuator_handler.py)
   // - actuator_alert (actuator_alert_handler.py)
   // - config_response (config_handler.py)
+  // - sensor_health (maintenance/jobs/sensor_health.py) - Phase 2E
   const ws = useWebSocket({
     autoConnect: true,
     autoReconnect: true,
     filters: {
-      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 'config_response', 'zone_assignment'] as MessageType[],
+      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 'config_response', 'zone_assignment', 'sensor_health'] as MessageType[],
     },
   })
 
@@ -110,6 +151,208 @@ export const useEspStore = defineStore('esp', () => {
    */
   function getDeviceId(device: ESPDevice): string {
     return device.device_id || device.esp_id || ''
+  }
+
+  // =========================================================================
+  // GPIO Status Getters (Phase 3)
+  // =========================================================================
+
+  /**
+   * Get GPIO status for a specific ESP.
+   */
+  function getGpioStatusForEsp(espId: string): GpioStatusResponse | null {
+    return gpioStatusMap.value.get(espId) ?? null
+  }
+
+  /**
+   * Get available GPIOs for a specific ESP.
+   */
+  function getAvailableGpios(espId: string): number[] {
+    return gpioStatusMap.value.get(espId)?.available ?? []
+  }
+
+  /**
+   * Get reserved GPIOs for a specific ESP.
+   */
+  function getReservedGpios(espId: string): GpioUsageItem[] {
+    return gpioStatusMap.value.get(espId)?.reserved ?? []
+  }
+
+  /**
+   * Check if a GPIO is available for a specific ESP.
+   */
+  function isGpioAvailableForEsp(espId: string, gpio: number): boolean {
+    const status = gpioStatusMap.value.get(espId)
+    if (!status) return false  // Unknown = not available (safe default)
+    return status.available.includes(gpio)
+  }
+
+  /**
+   * Get human-readable name for system pins.
+   */
+  function getSystemPinName(gpio: number): string {
+    const names: Record<number, string> = {
+      0: 'Boot',
+      1: 'UART TX',
+      2: 'Boot',
+      3: 'UART RX',
+      6: 'Flash CLK',
+      7: 'Flash D0',
+      8: 'Flash D1',
+      9: 'Flash D2',
+      10: 'Flash D3',
+      11: 'Flash CMD',
+      21: 'I2C SDA',
+      22: 'I2C SCL'
+    }
+    return names[gpio] ?? `System ${gpio}`
+  }
+
+  /**
+   * Get enriched pin status list for UI.
+   * Combines all GPIO info into displayable format.
+   */
+  function getAllPinStatuses(espId: string): GpioPinStatus[] {
+    const status = gpioStatusMap.value.get(espId)
+    if (!status) return []
+
+    const allPins: GpioPinStatus[] = []
+
+    // Available pins
+    for (const gpio of status.available) {
+      allPins.push({
+        gpio,
+        available: true,
+        owner: null,
+        component: null,
+        name: null,
+        statusClass: 'available',
+        tooltip: `GPIO ${gpio} - Verfügbar`
+      })
+    }
+
+    // Reserved pins
+    for (const item of status.reserved) {
+      allPins.push({
+        gpio: item.gpio,
+        available: false,
+        owner: item.owner,
+        component: item.component,
+        name: item.name,
+        statusClass: item.owner as 'sensor' | 'actuator' | 'system',
+        tooltip: `GPIO ${item.gpio} - ${item.owner}: ${item.name || item.component}`
+      })
+    }
+
+    // System pins
+    for (const gpio of status.system) {
+      allPins.push({
+        gpio,
+        available: false,
+        owner: 'system',
+        component: getSystemPinName(gpio),
+        name: null,
+        statusClass: 'system',
+        tooltip: `GPIO ${gpio} - System (${getSystemPinName(gpio)})`
+      })
+    }
+
+    return allPins.sort((a, b) => a.gpio - b.gpio)
+  }
+
+  // =========================================================================
+  // GPIO Status Actions (Phase 3)
+  // =========================================================================
+
+  /**
+   * Fetch GPIO status for an ESP device.
+   *
+   * Called when:
+   * - ESP detail view is opened
+   * - Add sensor/actuator modal is opened
+   * - After successful sensor/actuator creation
+   */
+  async function fetchGpioStatus(espId: string): Promise<GpioStatusResponse | null> {
+    // Prevent duplicate fetches
+    if (gpioStatusLoading.value.get(espId)) {
+      return gpioStatusMap.value.get(espId) ?? null
+    }
+
+    gpioStatusLoading.value.set(espId, true)
+
+    try {
+      const status = await espApi.getGpioStatus(espId)
+      gpioStatusMap.value.set(espId, status)
+      return status
+    } catch (err) {
+      console.error(`[ESP Store] Failed to fetch GPIO status for ${espId}:`, err)
+      return null
+    } finally {
+      gpioStatusLoading.value.set(espId, false)
+    }
+  }
+
+  /**
+   * Clear GPIO status for an ESP (e.g., when device goes offline).
+   */
+  function clearGpioStatus(espId: string): void {
+    gpioStatusMap.value.delete(espId)
+  }
+
+  /**
+   * Update GPIO status from WebSocket esp_health event.
+   *
+   * Partial update: Only updates if gpio_status is present in event.
+   * If no full status exists yet, triggers a full fetch.
+   */
+  function updateGpioStatusFromHeartbeat(
+    espId: string,
+    gpioStatus: HeartbeatGpioItem[]
+  ): void {
+    const current = gpioStatusMap.value.get(espId)
+    if (!current) {
+      // No full status yet, trigger full fetch
+      fetchGpioStatus(espId)
+      return
+    }
+
+    // Update reserved list from ESP-reported data
+    // Note: This is a partial update, full status comes from API
+    const espReported: GpioUsageItem[] = gpioStatus
+      .filter(item => !item.safe)  // Only non-safe-mode pins
+      .map(item => ({
+        gpio: item.gpio,
+        owner: item.owner as GpioOwner,
+        component: item.component,
+        name: null,
+        id: null,
+        source: 'esp_reported' as const
+      }))
+
+    // Merge: Keep DB-sourced items, add/update ESP-reported
+    const dbItems = current.reserved.filter(r => r.source === 'database' || r.source === 'static')
+    const mergedReserved = [...dbItems]
+
+    for (const espItem of espReported) {
+      const existingIndex = mergedReserved.findIndex(r => r.gpio === espItem.gpio)
+      if (existingIndex === -1) {
+        mergedReserved.push(espItem)
+      }
+      // Don't overwrite DB/static items with ESP items (DB is more detailed)
+    }
+
+    // Update available list
+    const reservedGpios = new Set(mergedReserved.map(r => r.gpio))
+    const systemGpios = new Set(current.system)
+    const available = Array.from({ length: 40 }, (_, i) => i)
+      .filter(gpio => !reservedGpios.has(gpio) && !systemGpios.has(gpio))
+
+    gpioStatusMap.value.set(espId, {
+      ...current,
+      available,
+      reserved: mergedReserved,
+      last_esp_report: new Date().toISOString()
+    })
   }
 
   // Actions
@@ -404,19 +647,164 @@ export const useEspStore = defineStore('esp', () => {
     }
   }
 
-  async function addSensor(deviceId: string, config: MockSensorConfig): Promise<void> {
-    if (!isMock(deviceId)) {
-      throw new Error('Add sensor is only available for Mock ESPs')
-    }
-
+  /**
+   * Fügt einen Sensor zu einem ESP hinzu.
+   *
+   * Routing-Logik (Phase 2B):
+   * - Mock-ESP (isMock=true)  → debugApi.addSensor()  → /debug/mock-esp/{id}/sensors
+   * - Real-ESP (isMock=false) → sensorsApi.createOrUpdate() → /sensors/{espId}/{gpio}
+   *
+   * @param deviceId - ESP Device ID
+   * @param config - Sensor-Konfiguration (Mock-Format, wird für Real-ESPs gemappt)
+   */
+  async function addSensor(
+    deviceId: string,
+    config: MockSensorConfig & { operating_mode?: string; timeout_seconds?: number }
+  ): Promise<void> {
     error.value = null
 
     try {
-      await debugApi.addSensor(deviceId, config)
-      // Refresh device data
+      if (isMock(deviceId)) {
+        // =========================================================================
+        // MOCK-ESP: Debug-API verwenden (bestehende Logik)
+        // =========================================================================
+        await debugApi.addSensor(deviceId, config)
+
+      } else {
+        // =========================================================================
+        // REAL-ESP: Sensor-API verwenden (NEU in Phase 2B)
+        // =========================================================================
+        const realConfig: SensorConfigCreate = {
+          esp_id: deviceId,
+          gpio: config.gpio,
+          sensor_type: config.sensor_type,
+          name: config.name || null,
+          enabled: true,
+          // Operating Mode Felder (Phase 2B)
+          operating_mode: (config.operating_mode as SensorConfigCreate['operating_mode']) || 'continuous',
+          timeout_seconds: config.timeout_seconds ?? 180,
+          timeout_warning_enabled: (config.timeout_seconds ?? 180) > 0,
+          // Weitere Felder mit Defaults
+          calibration: null,
+          threshold_min: null,
+          threshold_max: null,
+          metadata: {
+            subzone_id: config.subzone_id || null,
+            created_via: 'dashboard_drag_drop'
+          }
+        }
+
+        await sensorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
+      }
+
+      // UI aktualisieren
       await fetchDevice(deviceId)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to add sensor')
+      throw err
+    }
+  }
+
+  /**
+   * Aktualisiert die Konfiguration eines bestehenden Sensors (Phase 2F).
+   *
+   * Verwendet für Operating Mode Overrides und Sensor-Einstellungen.
+   * Routing-Logik:
+   * - Mock-ESP (isMock=true)  → debugApi.updateSensor() (falls verfügbar) oder Re-Add
+   * - Real-ESP (isMock=false) → sensorsApi.createOrUpdate()
+   *
+   * @param deviceId - ESP Device ID
+   * @param gpio - GPIO Pin des Sensors
+   * @param config - Zu aktualisierende Felder (partial update)
+   */
+  async function updateSensorConfig(
+    deviceId: string,
+    gpio: number,
+    config: Partial<{
+      name: string | null
+      operating_mode: string | null
+      timeout_seconds: number | null
+      timeout_warning_enabled: boolean | null
+      enabled: boolean
+      schedule_config: { type: string; expression: string } | null
+    }>
+  ): Promise<void> {
+    error.value = null
+
+    // Find existing sensor to get current values
+    const device = devices.value.find(d => getDeviceId(d) === deviceId)
+    if (!device) {
+      throw new Error(`Device not found: ${deviceId}`)
+    }
+
+    const sensors = device.sensors as MockSensor[] | undefined
+    const existingSensor = sensors?.find(s => s.gpio === gpio)
+    if (!existingSensor) {
+      throw new Error(`Sensor not found: GPIO ${gpio}`)
+    }
+
+    try {
+      if (isMock(deviceId)) {
+        // =========================================================================
+        // MOCK-ESP: Debug-API verwenden oder Sensor neu erstellen
+        // =========================================================================
+        // Mock ESPs können Sensoren über addSensor mit überschriebenen Werten aktualisieren
+        const mockConfig: MockSensorConfig & { operating_mode?: string; timeout_seconds?: number } = {
+          gpio: gpio,
+          sensor_type: existingSensor.sensor_type,
+          name: config.name !== undefined ? config.name || '' : existingSensor.name || '',
+          raw_value: existingSensor.raw_value ?? 0,
+          unit: existingSensor.unit || '',
+          quality: existingSensor.quality || 'good',
+          raw_mode: true,
+          operating_mode: config.operating_mode !== undefined ? config.operating_mode || undefined : existingSensor.operating_mode,
+          timeout_seconds: config.timeout_seconds !== undefined ? config.timeout_seconds ?? undefined : existingSensor.timeout_seconds,
+        }
+
+        // Remove sensor first, then re-add with updated config
+        await debugApi.removeSensor(deviceId, gpio)
+        await debugApi.addSensor(deviceId, mockConfig)
+
+      } else {
+        // =========================================================================
+        // REAL-ESP: Sensor-API mit Partial Update
+        // =========================================================================
+        const realConfig: SensorConfigCreate = {
+          esp_id: deviceId,
+          gpio: gpio,
+          sensor_type: existingSensor.sensor_type,
+          name: config.name !== undefined ? config.name : existingSensor.name,
+          enabled: config.enabled !== undefined ? config.enabled : true,
+          // Operating Mode Felder (Phase 2F)
+          operating_mode: config.operating_mode !== undefined
+            ? (config.operating_mode as SensorConfigCreate['operating_mode'] ?? undefined)
+            : (existingSensor.operating_mode as SensorConfigCreate['operating_mode'] ?? undefined),
+          timeout_seconds: config.timeout_seconds !== undefined
+            ? (config.timeout_seconds ?? undefined)
+            : (existingSensor.timeout_seconds ?? undefined),
+          timeout_warning_enabled: config.timeout_warning_enabled !== undefined
+            ? (config.timeout_warning_enabled ?? undefined)
+            : ((existingSensor.timeout_seconds ?? 180) > 0 ? true : undefined),
+          // Schedule configuration (Phase 2F)
+          schedule_config: config.schedule_config !== undefined
+            ? (config.schedule_config ?? undefined)
+            : (existingSensor.schedule_config as { type: string; expression: string } ?? undefined),
+          // Preserve existing metadata
+          calibration: undefined,
+          threshold_min: undefined,
+          threshold_max: undefined,
+          metadata: {
+            updated_via: 'edit_modal_phase_2f'
+          }
+        }
+
+        await sensorsApi.createOrUpdate(deviceId, gpio, realConfig)
+      }
+
+      // UI aktualisieren
+      await fetchDevice(deviceId)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to update sensor config')
       throw err
     }
   }
@@ -561,57 +949,107 @@ export const useEspStore = defineStore('esp', () => {
    * Receives updates from:
    * 1. Heartbeat handler (MQTT) - sends timestamp (Unix seconds)
    * 2. MOCK-FIX in esp.py PATCH - sends last_seen (ISO string)
+   * 3. LWT handler - sends source='lwt' when ESP disconnects unexpectedly
+   *
+   * BUG X FIX: If device is unknown but status is "online", refresh device list
+   * to show newly connected ESPs immediately in the UI.
    */
   function handleEspHealth(message: any): void {
     const data = message.data
     const espId = data.esp_id || data.device_id
 
+    // DEBUG: Log when WebSocket event arrives
+    console.log('[ESP Store] handleEspHealth received:', {
+      esp_id: espId,
+      status: data.status,
+      timestamp: data.timestamp,
+      source: data.source,
+      reason: data.reason,
+      receivedAt: Date.now()
+    })
+
     if (!espId) return
 
     const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (device) {
-      // Update device health metrics
-      if (data.uptime !== undefined) device.uptime = data.uptime
-      if (data.heap_free !== undefined) device.heap_free = data.heap_free
-      if (data.wifi_rssi !== undefined) device.wifi_rssi = data.wifi_rssi
-      if (data.sensor_count !== undefined) device.sensor_count = data.sensor_count
-      if (data.actuator_count !== undefined) device.actuator_count = data.actuator_count
 
-      // Handle last_seen from either source:
+    // BUG X FIX: Unknown device came online - refresh device list for real-time updates
+    if (!device && data.status === 'online') {
+      console.info(`[ESP Store] New device online: ${espId}, refreshing device list...`)
+      fetchAll().catch(err => {
+        console.error('[ESP Store] Failed to refresh devices after new online device:', err)
+      })
+      return
+    }
+
+    if (device) {
+      // IMPORTANT: Replace entire device object for Vue reactivity
+      // Direct mutation doesn't reliably trigger computed/watch updates
+      const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
+      if (deviceIndex === -1) return
+
+      // Calculate new last_seen from either source:
       // - timestamp: Unix ms from heartbeat handler (MQTT) - 13 digits
       // - timestamp: Unix seconds from old handlers - 10 digits
       // - last_seen: ISO string from MOCK-FIX (esp.py PATCH)
-      let newLastSeen: string | null = null
+      let newLastSeen: string | undefined = device.last_seen
       if (data.timestamp) {
-        // Check if timestamp is in seconds (10 digits) or milliseconds (13 digits)
         const ts = data.timestamp > 10000000000 ? data.timestamp : data.timestamp * 1000
         newLastSeen = new Date(ts).toISOString()
       } else if (data.last_seen) {
         newLastSeen = data.last_seen
       }
 
-      if (newLastSeen) {
-        device.last_seen = newLastSeen
-        // Also update last_heartbeat since ESPCard uses it for freshness
-        // (ESPCard: const timestamp = props.esp.last_heartbeat || props.esp.last_seen)
-        device.last_heartbeat = newLastSeen
+      // Calculate offline info if device went offline
+      let offlineInfo: OfflineInfo | undefined = undefined
+      if (data.status === 'offline') {
+        const source = (data.source as StatusSource) || 'heartbeat_timeout'
+        const reason = getOfflineReason(source, data.reason)
+        const displayText = getOfflineDisplayText(source, data.reason)
+
+        offlineInfo = {
+          reason,
+          source,
+          timestamp: data.timestamp || Math.floor(Date.now() / 1000),
+          displayText
+        }
+
+        // Toast notification for LWT (unexpected disconnect)
+        if (source === 'lwt') {
+          const toast = useToast()
+          toast.warning(
+            `${device.name || device.device_id}: Verbindung unerwartet verloren`,
+            { duration: 5000 }
+          )
+        }
       }
 
-      // Update status if provided (from MOCK-FIX or heartbeat)
-      if (data.status !== undefined) {
-        device.status = data.status
-      }
-
-      // Update name if provided (from MOCK-FIX broadcast)
-      if (data.name !== undefined) {
-        device.name = data.name
+      // Replace device with updated copy (triggers Vue reactivity)
+      devices.value[deviceIndex] = {
+        ...device,
+        uptime: data.uptime ?? device.uptime,
+        heap_free: data.heap_free ?? device.heap_free,
+        wifi_rssi: data.wifi_rssi ?? device.wifi_rssi,
+        sensor_count: data.sensor_count ?? device.sensor_count,
+        actuator_count: data.actuator_count ?? device.actuator_count,
+        last_seen: newLastSeen,
+        last_heartbeat: newLastSeen,
+        status: data.status ?? device.status,
+        name: data.name ?? device.name,
+        // Clear offlineInfo when online, set when offline
+        offlineInfo: data.status === 'offline' ? offlineInfo : undefined,
       }
 
       console.debug(`[ESP Store] esp_health update for ${espId}:`, {
-        last_seen: device.last_seen,
-        status: device.status,
-        name: device.name,
+        last_seen: newLastSeen,
+        status: data.status ?? device.status,
+        name: data.name ?? device.name,
+        offlineInfo: data.status === 'offline' ? offlineInfo : 'cleared',
       })
+
+      // Phase 3: Update GPIO status from heartbeat if present
+      if (data.gpio_status && Array.isArray(data.gpio_status)) {
+        updateGpioStatusFromHeartbeat(espId, data.gpio_status as HeartbeatGpioItem[])
+      }
     }
   }
 
@@ -712,14 +1150,19 @@ export const useEspStore = defineStore('esp', () => {
   /**
    * Handle config_response WebSocket event
    * Shows toast notification when ESP confirms config changes
+   *
+   * Phase 4: Extended to handle partial_success and failures array
+   * - Max 3 detail toasts for individual failures
+   * - Additional failures logged to console
    */
   function handleConfigResponse(message: any): void {
-    const data: ConfigResponse = message.data
+    const data = message.data as ConfigResponseExtended
     const toast = useToast()
 
     if (!data.esp_id) return
 
     const deviceName = devices.value.find(d => getDeviceId(d) === data.esp_id)?.name || data.esp_id
+    const MAX_DETAIL_TOASTS = 3
 
     if (data.status === 'success') {
       toast.success(
@@ -727,13 +1170,71 @@ export const useEspStore = defineStore('esp', () => {
         { duration: 4000 }
       )
       console.info(`[ESP Store] Config success: ${data.esp_id} - ${data.config_type} (${data.count})`)
+    } else if (data.status === 'partial_success') {
+      // Phase 4: Partial success - some items OK, some failed
+      toast.warning(
+        `${deviceName}: ${data.count} konfiguriert, ${data.failed_count || 0} fehlgeschlagen`,
+        { duration: 6000 }
+      )
+      console.warn(`[ESP Store] Config partial_success: ${data.esp_id} - ${data.count} OK, ${data.failed_count} failed`)
+
+      // Show detail toasts for individual failures (max 3)
+      if (data.failures && data.failures.length > 0) {
+        const toShow = data.failures.slice(0, MAX_DETAIL_TOASTS)
+        toShow.forEach((failure: ConfigFailure) => {
+          toast.error(
+            `GPIO ${failure.gpio} (${failure.type}): ${failure.error}${failure.detail ? ` - ${failure.detail}` : ''}`,
+            { duration: 8000 }
+          )
+        })
+
+        // Log additional failures to console
+        if (data.failures.length > MAX_DETAIL_TOASTS) {
+          const remaining = data.failures.slice(MAX_DETAIL_TOASTS)
+          console.warn(`[ESP Store] ${remaining.length} additional failures (not shown in toast):`)
+          remaining.forEach((failure: ConfigFailure) => {
+            console.warn(`  - GPIO ${failure.gpio} (${failure.type}): ${failure.error} - ${failure.detail || 'No details'}`)
+          })
+        }
+      }
     } else {
+      // Full error - all items failed
       toast.error(
         `${deviceName}: ${data.error_code || 'CONFIG_ERROR'} - ${data.message}`,
         { duration: 6000 }
       )
       console.error(`[ESP Store] Config error: ${data.esp_id} - ${data.error_code}`)
+
+      // Phase 4: Show detail toasts for failures (max 3)
+      if (data.failures && data.failures.length > 0) {
+        const toShow = data.failures.slice(0, MAX_DETAIL_TOASTS)
+        toShow.forEach((failure: ConfigFailure) => {
+          toast.error(
+            `GPIO ${failure.gpio}: ${failure.detail || failure.error}`,
+            { duration: 8000 }
+          )
+        })
+
+        // Log additional failures to console
+        if (data.failures.length > MAX_DETAIL_TOASTS) {
+          const remaining = data.failures.slice(MAX_DETAIL_TOASTS)
+          console.error(`[ESP Store] ${remaining.length} additional failures:`)
+          remaining.forEach((failure: ConfigFailure) => {
+            console.error(`  - GPIO ${failure.gpio}: ${failure.error} - ${failure.detail || 'No details'}`)
+          })
+        }
+      } else if (data.failed_item) {
+        // Legacy: Single failed_item (backward compatibility)
+        const item = data.failed_item
+        toast.error(
+          `GPIO ${item.gpio || 'N/A'}: ${item.sensor_type || item.actuator_type || 'Unknown'}`,
+          { duration: 8000 }
+        )
+      }
     }
+
+    // Refresh GPIO status after config change
+    fetchGpioStatus(data.esp_id)
   }
 
   /**
@@ -784,6 +1285,87 @@ export const useEspStore = defineStore('esp', () => {
     }
   }
 
+  /**
+   * Handle sensor_health WebSocket event (Phase 2E).
+   * Updates sensor stale status based on timeout violations.
+   *
+   * Server payload (from maintenance/jobs/sensor_health.py):
+   * {
+   *   esp_id: string,
+   *   gpio: number,
+   *   sensor_type: string,
+   *   sensor_name: string | null,
+   *   is_stale: boolean,
+   *   stale_reason: 'timeout_exceeded' | 'no_data' | 'sensor_error',
+   *   last_reading_at: string | null,
+   *   timeout_seconds: number,
+   *   seconds_overdue: number,
+   *   operating_mode: string,
+   *   config_source: string,
+   *   timestamp: number
+   * }
+   */
+  function handleSensorHealth(message: { data: SensorHealthEvent }): void {
+    const event = message.data
+
+    if (!event.esp_id || event.gpio === undefined) {
+      console.warn('[ESP Store] sensor_health missing esp_id or gpio')
+      return
+    }
+
+    // Find the device
+    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === event.esp_id)
+    if (deviceIndex === -1) {
+      console.debug(`[ESP Store] sensor_health: Device not found: ${event.esp_id}`)
+      return
+    }
+
+    const device = devices.value[deviceIndex]
+    if (!device.sensors) {
+      console.debug(`[ESP Store] sensor_health: Device ${event.esp_id} has no sensors`)
+      return
+    }
+
+    // Find the sensor
+    const sensors = device.sensors as Array<{
+      gpio: number
+      is_stale?: boolean
+      stale_reason?: string
+      last_reading_at?: string | null
+      operating_mode?: string
+      timeout_seconds?: number
+    }>
+    const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
+    if (sensorIndex === -1) {
+      console.debug(
+        `[ESP Store] sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`
+      )
+      return
+    }
+
+    // Update sensor health status
+    // Note: We update the sensor in-place since sensors is already reactive
+    const sensor = sensors[sensorIndex]
+    sensor.is_stale = event.is_stale
+    sensor.stale_reason = event.stale_reason
+    sensor.last_reading_at = event.last_reading_at
+    sensor.operating_mode = event.operating_mode
+    sensor.timeout_seconds = event.timeout_seconds
+
+    if (event.is_stale) {
+      console.warn(
+        `[ESP Store] Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +
+        `(${event.sensor_type}) - ${event.stale_reason}, ` +
+        `overdue by ${event.seconds_overdue}s`
+      )
+    } else {
+      console.debug(
+        `[ESP Store] Sensor health updated: ${event.esp_id} GPIO ${event.gpio} ` +
+        `is_stale=${event.is_stale}`
+      )
+    }
+  }
+
   // =============================================================================
   // WebSocket Registration
   // =============================================================================
@@ -809,7 +1391,22 @@ export const useEspStore = defineStore('esp', () => {
       ws.on('actuator_alert', handleActuatorAlert),
       ws.on('config_response', handleConfigResponse),
       ws.on('zone_assignment', handleZoneAssignment),
+      ws.on('sensor_health', handleSensorHealth),  // Phase 2E
     )
+
+    // BUG U FIX: Register callback to refresh ESP data when WebSocket connects/reconnects
+    // This ensures the UI shows the current state from the server after connection is established
+    wsUnsubscribers.push(
+      websocketService.onConnect(() => {
+        console.log('[ESP Store] WebSocket connected, refreshing ESP data...')
+        // Use fetchAll to get current state from server
+        // This handles the case where heartbeats arrived before WebSocket was connected
+        fetchAll().catch(err => {
+          console.error('[ESP Store] Failed to refresh ESP data after WebSocket connect:', err)
+        })
+      })
+    )
+
     console.debug('[ESP Store] WebSocket handlers registered')
   }
 
@@ -862,6 +1459,7 @@ export const useEspStore = defineStore('esp', () => {
     setState,
     setAutoHeartbeat,
     addSensor,
+    updateSensorConfig,  // Phase 2F: Edit Sensor Config
     setSensorValue,
     removeSensor,
     addActuator,
@@ -877,6 +1475,19 @@ export const useEspStore = defineStore('esp', () => {
     // WebSocket management
     initWebSocket,
     cleanupWebSocket,
+
+    // GPIO Status (Phase 3)
+    gpioStatusMap,
+    gpioStatusLoading,
+    getGpioStatusForEsp,
+    getAvailableGpios,
+    getReservedGpios,
+    isGpioAvailableForEsp,
+    getAllPinStatuses,
+    getSystemPinName,
+    fetchGpioStatus,
+    clearGpioStatus,
+    updateGpioStatusFromHeartbeat,
   }
 })
 

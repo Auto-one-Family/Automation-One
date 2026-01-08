@@ -15,6 +15,9 @@ public:
   // Phase 1: 8 Critical Topic Patterns (Guide-konform)
   static const char* buildSensorDataTopic(uint8_t gpio);        // Pattern 1
   static const char* buildSensorBatchTopic();                   // Pattern 2
+  // ✅ Phase 2C: Sensor Command/Response Topics (On-Demand Measurement)
+  static const char* buildSensorCommandTopic(uint8_t gpio);     // Phase 2C
+  static const char* buildSensorResponseTopic(uint8_t gpio);    // Phase 2C
   static const char* buildActuatorCommandTopic(uint8_t gpio);   // Pattern 3
   static const char* buildActuatorStatusTopic(uint8_t gpio);    // Pattern 4
   static const char* buildActuatorResponseTopic(uint8_t gpio);  // Phase 5

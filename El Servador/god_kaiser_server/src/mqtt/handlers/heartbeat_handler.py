@@ -150,6 +150,14 @@ class HeartbeatHandler:
                     f"heap_free={payload.get('heap_free', payload.get('free_heap'))} bytes"
                 )
 
+                # DEBUG: Log timing for first heartbeat investigation
+                import time
+                ws_broadcast_start = time.time()
+                logger.info(
+                    f"DEBUG: About to broadcast esp_health for {esp_id_str} "
+                    f"(device status in DB: online, last_seen: {last_seen})"
+                )
+
                 # WebSocket Broadcast
                 try:
                     from ...websocket.manager import WebSocketManager
@@ -162,8 +170,17 @@ class HeartbeatHandler:
                         "uptime": payload.get("uptime"),
                         "sensor_count": payload.get("sensor_count", payload.get("active_sensors", 0)),
                         "actuator_count": payload.get("actuator_count", payload.get("active_actuators", 0)),
-                        "timestamp": payload.get("ts")
+                        "timestamp": payload.get("ts"),
+                        # GPIO STATUS (Phase 1)
+                        "gpio_status": payload.get("gpio_status", []),
+                        "gpio_reserved_count": payload.get("gpio_reserved_count", 0)
                     })
+                    # DEBUG: Log after WebSocket broadcast
+                    ws_broadcast_end = time.time()
+                    logger.info(
+                        f"DEBUG: WebSocket broadcast completed for {esp_id_str} "
+                        f"in {(ws_broadcast_end - ws_broadcast_start)*1000:.2f}ms"
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to broadcast ESP health via WebSocket: {e}")
 
@@ -294,7 +311,30 @@ class HeartbeatHandler:
                 "actuator_count", payload.get("active_actuators", 0)
             )
             current_metadata["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
-            
+
+            # ============================================
+            # GPIO STATUS (Phase 1) - With Pydantic Validation
+            # ============================================
+            if "gpio_status" in payload:
+                validated_gpio_status = self._validate_gpio_status(
+                    payload.get("gpio_status", []),
+                    payload.get("gpio_reserved_count", 0),
+                    esp_device.device_id
+                )
+                if validated_gpio_status is not None:
+                    current_metadata["gpio_status"] = validated_gpio_status["gpio_status"]
+                    current_metadata["gpio_reserved_count"] = validated_gpio_status["gpio_reserved_count"]
+                    current_metadata["gpio_status_updated_at"] = datetime.now(timezone.utc).isoformat()
+                    logger.debug(
+                        f"GPIO status validated and updated for {esp_device.device_id}: "
+                        f"{len(validated_gpio_status['gpio_status'])} reserved pins"
+                    )
+                else:
+                    logger.warning(
+                        f"GPIO status validation failed for {esp_device.device_id}, "
+                        f"skipping GPIO metadata update"
+                    )
+
             esp_device.device_metadata = current_metadata
             
         except Exception as e:
@@ -446,6 +486,70 @@ class HeartbeatHandler:
         logger.debug(f"DeviceSource detection [{esp_id}]: {result} (reason: {detection_reason})")
         return result
 
+    def _validate_gpio_status(
+        self,
+        gpio_status: list,
+        gpio_reserved_count: int,
+        device_id: str
+    ) -> Optional[dict]:
+        """
+        Validate GPIO status data using Pydantic models.
+
+        Ensures data integrity before storing in database.
+        Returns validated data dict or None on validation failure.
+
+        Args:
+            gpio_status: Raw GPIO status list from payload
+            gpio_reserved_count: Reported count from payload
+            device_id: ESP device ID for logging
+
+        Returns:
+            Dict with validated gpio_status and gpio_reserved_count, or None on error
+        """
+        try:
+            from ...schemas.esp import GpioStatusList, GpioStatusItem
+            from pydantic import ValidationError
+
+            # Validate each GPIO status item
+            validated_items = []
+            for idx, item in enumerate(gpio_status):
+                try:
+                    validated_item = GpioStatusItem(**item)
+                    validated_items.append(validated_item.model_dump())
+                except ValidationError as e:
+                    logger.warning(
+                        f"GPIO status item {idx} validation failed for {device_id}: {e}"
+                    )
+                    # Skip invalid items but continue processing
+                    continue
+
+            # Log count mismatch but don't reject
+            if gpio_reserved_count != len(validated_items):
+                logger.warning(
+                    f"GPIO count mismatch for {device_id}: "
+                    f"reported={gpio_reserved_count}, actual={len(validated_items)}"
+                )
+
+            # Return validated items as dicts (already converted via model_dump)
+            return {
+                "gpio_status": validated_items,
+                "gpio_reserved_count": len(validated_items)
+            }
+
+        except ImportError as e:
+            logger.error(f"Failed to import GPIO schemas: {e}")
+            # Fallback: return raw data without validation (for backward compatibility)
+            return {
+                "gpio_status": gpio_status,
+                "gpio_reserved_count": gpio_reserved_count
+            }
+        except Exception as e:
+            logger.error(
+                f"Unexpected error validating GPIO status for {device_id}: {e}",
+                exc_info=True
+            )
+            return None
+
     def _log_health_metrics(self, esp_id: str, payload: dict):
         """
         Log device health metrics.
@@ -529,6 +633,25 @@ class HeartbeatHandler:
 
                 # Commit transaction
                 await session.commit()
+
+                # Broadcast esp_health offline events via WebSocket
+                if offline_devices:
+                    try:
+                        from ...websocket.manager import WebSocketManager
+                        ws_manager = await WebSocketManager.get_instance()
+                        for device_id in offline_devices:
+                            await ws_manager.broadcast("esp_health", {
+                                "esp_id": device_id,
+                                "status": "offline",
+                                "reason": "heartbeat_timeout",
+                                "timeout_seconds": HEARTBEAT_TIMEOUT_SECONDS,
+                                "timestamp": int(now.timestamp())
+                            })
+                            logger.info(
+                                f"📡 Broadcast esp_health offline event for {device_id}"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to broadcast ESP offline events: {e}")
 
                 return {
                     "checked": len(online_devices),

@@ -32,7 +32,9 @@
 | **CI/CD Workflows** | [Section 13: CI/CD & GitHub Actions](#13-cicd--github-actions) | `.github/workflows/` |
 | **Workflow-Logs abrufen** | [Section 13: GitHub CLI Log-Befehle](#github-cli-log-befehle) | `gh run view <id> --log` |
 | **Wokwi ESP32 Tests** | [Section 13: Wokwi Tests](#wokwi-esp32-tests-firmware-simulation) | `El Trabajante/tests/wokwi/` |
-| **Wokwi Bug-Dokumentation** | `.claude/Next Steps/Bugs_Found.md` | 4 gefixte Bugs dokumentiert |
+| **Wokwi Development Workflow** | `.claude/Next Steps/1.Wokwiki.md` Section 14 | KI startet Services, User startet Wokwi manuell |
+| **Wokwi-ESP registrieren** | `poetry run python scripts/seed_wokwi_esp.py` | ESP_00000001 in DB (El Servador/.../scripts/) |
+| **Wokwi Bug-Dokumentation** | `.claude/Next Steps/1.Wokwiki.md` Section 13 | Timezone-Bug, ESP ID Bug, Standby-Bug |
 
 ---
 

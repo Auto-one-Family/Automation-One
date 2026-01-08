@@ -508,3 +508,95 @@ export function getCategoryColorClass(category: GpioCategory): string {
   }
   return classes[category]
 }
+
+// =============================================================================
+// DYNAMIC STATUS INTEGRATION (Phase 3)
+// =============================================================================
+
+import type { GpioStatusResponse, GpioPinStatus } from '@/types/gpio'
+
+/**
+ * Merge static GPIO config with dynamic status from server.
+ *
+ * Combines hardware-specific pin definitions with actual usage status.
+ * Used when you need both static pin info (features, warnings) and
+ * dynamic status (available/reserved).
+ *
+ * @param hardwareType - ESP32 variant
+ * @param dynamicStatus - Status from GET /gpio-status (or null if not loaded)
+ * @returns Enriched pin list with both static info and usage status
+ */
+export function mergeGpioConfigWithStatus(
+  hardwareType: HardwareType,
+  dynamicStatus: GpioStatusResponse | null
+): GpioPinStatus[] {
+  const staticConfig = getGpioConfig(hardwareType)
+
+  if (!dynamicStatus) {
+    // Fallback: Only static info, all marked as unknown
+    return staticConfig.map(pin => ({
+      gpio: pin.gpio,
+      available: false,  // Unknown = unavailable (safe default)
+      owner: null,
+      component: null,
+      name: pin.label,
+      statusClass: 'system' as const,
+      tooltip: `GPIO ${pin.gpio} - Status unbekannt`
+    }))
+  }
+
+  return staticConfig.map(pin => {
+    // Check if in system pins
+    if (dynamicStatus.system.includes(pin.gpio)) {
+      return {
+        gpio: pin.gpio,
+        available: false,
+        owner: 'system' as const,
+        component: pin.label,
+        name: null,
+        statusClass: 'system' as const,
+        tooltip: `GPIO ${pin.gpio} - System (${pin.label})`
+      }
+    }
+
+    // Check if reserved
+    const reserved = dynamicStatus.reserved.find(r => r.gpio === pin.gpio)
+    if (reserved) {
+      const ownerLabel = reserved.owner === 'sensor' ? 'Sensor' :
+                         reserved.owner === 'actuator' ? 'Aktor' : 'System'
+      return {
+        gpio: pin.gpio,
+        available: false,
+        owner: reserved.owner,
+        component: reserved.component,
+        name: reserved.name,
+        statusClass: reserved.owner as 'sensor' | 'actuator' | 'system',
+        tooltip: `GPIO ${pin.gpio} - ${ownerLabel}: ${reserved.name || reserved.component}`
+      }
+    }
+
+    // Available
+    if (dynamicStatus.available.includes(pin.gpio)) {
+      return {
+        gpio: pin.gpio,
+        available: true,
+        owner: null,
+        component: null,
+        name: pin.label,
+        statusClass: 'available' as const,
+        tooltip: `GPIO ${pin.gpio} - Verfügbar (${pin.label})`
+      }
+    }
+
+    // Unknown (not in any list)
+    return {
+      gpio: pin.gpio,
+      available: false,
+      owner: null,
+      component: null,
+      name: pin.label,
+      statusClass: 'system' as const,
+      tooltip: `GPIO ${pin.gpio} - Status unbekannt`
+    }
+  })
+}

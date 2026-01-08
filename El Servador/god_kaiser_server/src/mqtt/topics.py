@@ -47,6 +47,44 @@ class TopicBuilder:
         )
 
     @staticmethod
+    def build_sensor_command_topic(esp_id: str, gpio: int) -> str:
+        """
+        Build topic for sensor commands (e.g., manual measurement trigger).
+
+        Topic: kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/command
+
+        Args:
+            esp_id: ESP device ID
+            gpio: Sensor GPIO pin
+
+        Returns:
+            Full MQTT topic string
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_SENSOR_COMMAND,
+            esp_id=esp_id, gpio=gpio
+        )
+
+    @staticmethod
+    def build_sensor_response_topic(esp_id: str, gpio: int) -> str:
+        """
+        Build topic for sensor command responses.
+
+        Topic: kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/response
+
+        Args:
+            esp_id: ESP device ID
+            gpio: Sensor GPIO pin
+
+        Returns:
+            Full MQTT topic string
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_SENSOR_RESPONSE,
+            esp_id=esp_id, gpio=gpio
+        )
+
+    @staticmethod
     def build_sensor_config_topic(esp_id: str, gpio: int) -> str:
         """
         Build sensor config topic.
@@ -390,6 +428,35 @@ class TopicBuilder:
                 "kaiser_id": match.group(1),
                 "esp_id": match.group(2),
                 "type": "heartbeat",
+            }
+        return None
+
+    @staticmethod
+    def parse_lwt_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse LWT (Last-Will-Testament) topic.
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/{esp_id}/system/will
+
+        Returns:
+            {
+                "kaiser_id": str,
+                "esp_id": str,
+                "type": "lwt"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/system/will
+        # Note: ESP32 builds this from heartbeat topic: /system/heartbeat -> /system/will
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/system/will"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "lwt",
             }
         return None
 
@@ -787,6 +854,7 @@ class TopicBuilder:
             cls.parse_actuator_response_topic,
             cls.parse_actuator_alert_topic,
             cls.parse_heartbeat_topic,
+            cls.parse_lwt_topic,
             cls.parse_health_status_topic,
             cls.parse_config_response_topic,
             cls.parse_discovery_topic,

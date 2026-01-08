@@ -1,9 +1,11 @@
 /**
  * Sensor Type Configuration
- * 
+ *
  * Defines default values, units, and metadata for each sensor type.
  * CRITICAL: This fixes the bug where pH sensors showed "°C" instead of "pH".
  */
+
+import type { SensorOperatingMode } from '@/types'
 
 export interface SensorTypeConfig {
   /** Human-readable label: "Temperatur (DS18B20)" */
@@ -24,6 +26,15 @@ export interface SensorTypeConfig {
   description?: string
   /** Category for grouping in sidebar: 'temperature', 'water', 'soil', 'air', 'light', 'other' */
   category: SensorCategoryId
+  // =========================================================================
+  // OPERATING MODE RECOMMENDATIONS (Phase 2B)
+  // =========================================================================
+  /** Empfohlener Betriebsmodus für diesen Sensor-Typ */
+  recommendedMode?: SensorOperatingMode
+  /** Empfohlener Timeout in Sekunden (0 = kein Timeout) */
+  recommendedTimeout?: number
+  /** Ob dieser Sensor-Typ On-Demand-Messungen unterstützt */
+  supportsOnDemand?: boolean
 }
 
 /**
@@ -74,7 +85,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Thermometer',
     defaultValue: 20.0,
     description: 'Digitaler Temperatursensor, wasserdicht. Ideal für Flüssigkeiten und Umgebungstemperatur.',
-    category: 'temperature'
+    category: 'temperature',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
   
   'pH': {
@@ -86,7 +101,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Droplet',
     defaultValue: 7.0,
     description: 'Säuregrad der Lösung. 0-6 = sauer, 7 = neutral, 8-14 = basisch.',
-    category: 'water'
+    category: 'water',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'on_demand',
+    recommendedTimeout: 0,
+    supportsOnDemand: true,
   },
   
   'EC': {
@@ -98,7 +117,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Zap',
     defaultValue: 1200,
     description: 'Elektrische Leitfähigkeit. Zeigt Nährstoffgehalt der Lösung an.',
-    category: 'water'
+    category: 'water',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'on_demand',
+    recommendedTimeout: 0,
+    supportsOnDemand: true,
   },
   
   'SHT31': {
@@ -110,7 +133,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Thermometer',
     defaultValue: 22.0,
     description: 'Präziser Temperatur- und Feuchtesensor (I2C).',
-    category: 'temperature'
+    category: 'temperature',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
 
   'SHT31_humidity': {
@@ -122,7 +149,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Droplets',
     defaultValue: 50.0,
     description: 'Relative Luftfeuchtigkeit. Optimal für Pflanzen: 40-70%.',
-    category: 'air'
+    category: 'air',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
 
   'BME280': {
@@ -134,7 +165,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Thermometer',
     defaultValue: 22.0,
     description: 'Temperatur-, Feuchte- und Drucksensor.',
-    category: 'temperature'
+    category: 'temperature',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
 
   'BME280_humidity': {
@@ -146,7 +181,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Droplets',
     defaultValue: 50.0,
     description: 'Relative Luftfeuchtigkeit.',
-    category: 'air'
+    category: 'air',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
 
   'BME280_pressure': {
@@ -158,7 +197,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Gauge',
     defaultValue: 1013.25,
     description: 'Atmosphärischer Luftdruck in Hektopascal.',
-    category: 'air'
+    category: 'air',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 300,
+    supportsOnDemand: false,
   },
   
   'analog': {
@@ -170,7 +213,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Activity',
     defaultValue: 2048,
     description: 'Rohwert des ADC (12-bit: 0-4095).',
-    category: 'other'
+    category: 'other',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: true,
   },
 
   'digital': {
@@ -182,7 +229,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'ToggleLeft',
     defaultValue: 0,
     description: 'Digitaler Eingang (0 = LOW, 1 = HIGH).',
-    category: 'other'
+    category: 'other',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 60,
+    supportsOnDemand: false,
   },
 
   'flow': {
@@ -194,7 +245,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Waves',
     defaultValue: 0,
     description: 'Durchflussrate in Liter pro Minute.',
-    category: 'water'
+    category: 'water',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 60,
+    supportsOnDemand: false,
   },
 
   'level': {
@@ -206,7 +261,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Layers',
     defaultValue: 50,
     description: 'Füllstand des Behälters in Prozent.',
-    category: 'water'
+    category: 'water',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 300,
+    supportsOnDemand: false,
   },
 
   'light': {
@@ -218,7 +277,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Sun',
     defaultValue: 500,
     description: 'Beleuchtungsstärke in Lux.',
-    category: 'light'
+    category: 'light',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
 
   'co2': {
@@ -230,7 +293,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Cloud',
     defaultValue: 400,
     description: 'CO2-Konzentration in ppm. Normal: 400-1000 ppm.',
-    category: 'air'
+    category: 'air',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
   },
 
   'moisture': {
@@ -242,7 +309,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     icon: 'Droplets',
     defaultValue: 50,
     description: 'Bodenfeuchtigkeit in Prozent. Kapazitiver oder resistiver Sensor.',
-    category: 'soil'
+    category: 'soil',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 300,
+    supportsOnDemand: false,
   },
 }
 
@@ -319,6 +390,8 @@ export function formatSensorValueWithUnit(value: number | null, sensorType: stri
   
   return `${value.toFixed(config.decimals)} ${config.unit}`
 }
+
+
 
 
 

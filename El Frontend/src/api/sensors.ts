@@ -181,7 +181,51 @@ export const sensorsApi = {
     }>('/sensors/data/stats/by-source')
     return response.data
   },
+
+  // ===========================================================================
+  // On-Demand Measurement (Phase 2D)
+  // Server: POST /sensors/{esp_id}/{gpio}/measure (sensors.py:727-773)
+  // ===========================================================================
+
+  /**
+   * Trigger a manual measurement for a sensor.
+   *
+   * Used for on-demand sensors or forcing immediate measurement.
+   *
+   * @param espId - ESP device ID (e.g., "ESP_12AB34CD")
+   * @param gpio - Sensor GPIO pin
+   * @returns Promise with measurement trigger response
+   *
+   * @example
+   * // Trigger measurement
+   * const result = await sensorsApi.triggerMeasurement('ESP_12AB34CD', 34)
+   * console.log(result.request_id) // UUID for tracking
+   */
+  async triggerMeasurement(
+    espId: string,
+    gpio: number
+  ): Promise<TriggerMeasurementResponse> {
+    const response = await api.post<TriggerMeasurementResponse>(
+      `/sensors/${espId}/${gpio}/measure`
+    )
+    return response.data
+  },
 }
+
+// ===========================================================================
+// Types for On-Demand Measurement (Phase 2D)
+// ===========================================================================
+
+export interface TriggerMeasurementResponse {
+  success: boolean
+  request_id: string
+  esp_id: string
+  gpio: number
+  sensor_type: string
+  message: string
+}
+
+
 
 
 

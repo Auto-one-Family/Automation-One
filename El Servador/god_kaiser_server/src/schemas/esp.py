@@ -260,6 +260,219 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
 
 
 # =============================================================================
+# GPIO Status (Phase 1 - GPIO-Status-Übertragung)
+# =============================================================================
+
+
+class GpioStatusItem(BaseModel):
+    """
+    Single GPIO pin status from ESP32 heartbeat.
+
+    Represents the current reservation state of a GPIO pin as reported
+    by the ESP32's GPIOManager. This is the SOURCE OF TRUTH for which
+    GPIOs are actually in use on the physical device.
+
+    Reference: El Trabajante/docs/Mqtt_Protocoll.md (Heartbeat gpio_status)
+    """
+
+    gpio: int = Field(
+        ...,
+        ge=0,
+        le=48,
+        description="GPIO pin number (ESP32: 0-39, ESP32-C3: 0-21)",
+    )
+    owner: str = Field(
+        ...,
+        pattern=r"^(sensor|actuator|system)$",
+        description="Owner category: sensor, actuator, or system",
+    )
+    component: str = Field(
+        ...,
+        max_length=32,
+        description="Component name (e.g., DS18B20, pump_1, I2C_SDA)",
+    )
+    mode: int = Field(
+        ...,
+        ge=0,
+        le=2,
+        description="Pin mode: 0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP",
+    )
+    safe: bool = Field(
+        ...,
+        description="True if in safe mode (not actively used), False if actively used",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "gpio": 4,
+                "owner": "sensor",
+                "component": "DS18B20",
+                "mode": 1,
+                "safe": False,
+            }
+        }
+    )
+
+
+class GpioStatusList(BaseModel):
+    """
+    GPIO status list with validation.
+
+    Used by heartbeat handler to validate incoming GPIO status data.
+    """
+
+    gpio_status: List[GpioStatusItem] = Field(
+        default_factory=list,
+        description="List of reserved GPIO pins",
+    )
+    gpio_reserved_count: int = Field(
+        0,
+        ge=0,
+        description="Total count of reserved pins (should match len(gpio_status))",
+    )
+
+    @field_validator("gpio_reserved_count")
+    @classmethod
+    def validate_count_matches(cls, v: int, info) -> int:
+        """Warn if count doesn't match array length."""
+        gpio_status = info.data.get("gpio_status", [])
+        if gpio_status and v != len(gpio_status):
+            # Log warning but don't reject - ESP array is truth
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"gpio_reserved_count ({v}) != len(gpio_status) ({len(gpio_status)})"
+            )
+        return v
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "gpio_status": [
+                    {"gpio": 4, "owner": "sensor", "component": "DS18B20", "mode": 1, "safe": False},
+                    {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False},
+                ],
+                "gpio_reserved_count": 2,
+            }
+        }
+    )
+
+
+# =============================================================================
+# GPIO Usage Status (Phase 2 - GPIO Validation)
+# =============================================================================
+
+
+class GpioUsageItem(BaseModel):
+    """
+    Einzelner GPIO-Belegungseintrag.
+
+    Kombiniert DB-Daten mit ESP-gemeldetem Status für vollständige Übersicht.
+
+    Phase: 2 (GPIO Validation)
+    """
+
+    gpio: int = Field(
+        ...,
+        description="GPIO pin number (0-39 for ESP32-WROOM)",
+        ge=0,
+        le=48,
+    )
+    owner: str = Field(
+        ...,
+        description="Owner type: sensor, actuator, or system",
+        pattern=r"^(sensor|actuator|system)$",
+    )
+    component: str = Field(
+        ...,
+        description="Component type (e.g., DS18B20, pump, I2C_SDA)",
+        max_length=32,
+    )
+    name: Optional[str] = Field(
+        None,
+        description="Human-readable name (if configured)",
+        max_length=64,
+    )
+    id: Optional[str] = Field(
+        None,
+        description="Database ID of the sensor/actuator (UUID as string)",
+    )
+    source: str = Field(
+        ...,
+        description="Data source: database, esp_reported, or static",
+        pattern=r"^(database|esp_reported|static)$",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "gpio": 4,
+                "owner": "sensor",
+                "component": "DS18B20",
+                "name": "Temperature Sensor 1",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "source": "database"
+            }
+        }
+    )
+
+
+class GpioStatusResponse(BaseModel):
+    """
+    Vollständiger GPIO-Belegungsstatus für einen ESP.
+
+    Kombiniert:
+    - Statisch reservierte System-Pins
+    - DB-konfigurierte Sensoren/Aktoren
+    - ESP-gemeldeter Status (aus Heartbeat)
+
+    Phase: 2 (GPIO Validation)
+    """
+
+    esp_id: str = Field(
+        ...,
+        description="ESP device ID",
+    )
+    available: List[int] = Field(
+        default_factory=list,
+        description="List of available GPIO pins (not in use)",
+    )
+    reserved: List[GpioUsageItem] = Field(
+        default_factory=list,
+        description="List of reserved/in-use GPIO pins",
+    )
+    system: List[int] = Field(
+        default_factory=list,
+        description="List of system-reserved GPIO pins (Flash, UART, etc.)",
+    )
+    hardware_type: str = Field(
+        "ESP32_WROOM",
+        description="ESP32 hardware type (affects valid GPIO range)",
+    )
+    last_esp_report: Optional[str] = Field(
+        None,
+        description="Timestamp of last ESP GPIO status report (ISO format)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "esp_id": "ESP_12AB34CD",
+                "available": [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33, 34, 35],
+                "reserved": [
+                    {"gpio": 21, "owner": "system", "component": "I2C_SDA", "name": None, "id": None, "source": "static"},
+                    {"gpio": 22, "owner": "system", "component": "I2C_SCL", "name": None, "id": None, "source": "static"},
+                ],
+                "system": [0, 1, 2, 3, 6, 7, 8, 9, 10, 11],
+                "hardware_type": "ESP32_WROOM",
+                "last_esp_report": "2026-01-08T12:00:00Z"
+            }
+        }
+    )
+
+
+# =============================================================================
 # ESP Health
 # =============================================================================
 
@@ -637,3 +850,146 @@ class ESPDeviceListResponse(PaginatedResponse[ESPDeviceResponse]):
     Paginated list of ESP devices.
     """
     pass
+
+
+# =============================================================================
+# Config Response (Phase 4 - Detailed Config Feedback)
+# =============================================================================
+
+
+class ConfigFailureItem(BaseModel):
+    """
+    Single configuration failure from ESP32.
+
+    Used in config_response MQTT messages when one or more items
+    fail to configure. Provides detailed error information for
+    user feedback and debugging.
+
+    Phase: 4 (Detailed Config Feedback)
+    Reference: El Trabajante/src/models/config_types.h (ConfigFailureItem)
+    """
+
+    type: str = Field(
+        ...,
+        pattern=r"^(sensor|actuator)$",
+        description="Component type that failed",
+    )
+    gpio: int = Field(
+        ...,
+        ge=0,
+        le=48,
+        description="GPIO pin number",
+    )
+    error_code: int = Field(
+        ...,
+        ge=0,
+        description="Error code from error_codes.h (e.g., 1001 for GPIO_RESERVED)",
+    )
+    error: str = Field(
+        ...,
+        max_length=32,
+        description="Short error name (e.g., GPIO_CONFLICT, MISSING_FIELD)",
+    )
+    detail: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Human-readable error details",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "type": "sensor",
+                "gpio": 5,
+                "error_code": 1002,
+                "error": "GPIO_CONFLICT",
+                "detail": "GPIO 5 reserved by actuator (pump_1)"
+            }
+        }
+    )
+
+
+class ConfigResponsePayload(BaseModel):
+    """
+    Extended config_response payload with failures array.
+
+    Supports three status values:
+    - "success": All items configured successfully
+    - "partial_success": Some items succeeded, some failed
+    - "error" / "failed": All items failed
+
+    Backward compatible with legacy config_response format
+    (single failed_item instead of failures array).
+
+    Phase: 4 (Detailed Config Feedback)
+    Reference: El Trabajante/docs/Mqtt_Protocoll.md (config_response topic)
+    """
+
+    status: str = Field(
+        ...,
+        pattern=r"^(success|partial_success|error|failed)$",
+        description="Overall configuration status",
+    )
+    type: str = Field(
+        ...,
+        pattern=r"^(sensor|actuator|zone|system|wifi|unknown)$",
+        description="Configuration type",
+    )
+    count: int = Field(
+        0,
+        ge=0,
+        description="Number of successfully configured items",
+    )
+    failed_count: int = Field(
+        0,
+        ge=0,
+        description="Number of failed items (Phase 4)",
+    )
+    message: str = Field(
+        "",
+        max_length=500,
+        description="Human-readable status message",
+    )
+    error_code: Optional[str] = Field(
+        None,
+        max_length=32,
+        description="Legacy: Single error code (for backward compat)",
+    )
+    failed_item: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Legacy: Single failed item (for backward compat)",
+    )
+    failures: List[ConfigFailureItem] = Field(
+        default_factory=list,
+        description="Phase 4: Array of failure details (max 10)",
+    )
+    failures_truncated: Optional[bool] = Field(
+        None,
+        description="True if failures were truncated (more than MAX_CONFIG_FAILURES)",
+    )
+    total_failures: Optional[int] = Field(
+        None,
+        description="Total failure count if truncated",
+    )
+
+    model_config = ConfigDict(
+        extra="allow",  # Allow unknown fields for forward compatibility
+        json_schema_extra={
+            "example": {
+                "status": "partial_success",
+                "type": "sensor",
+                "count": 2,
+                "failed_count": 1,
+                "message": "2 configured, 1 failed",
+                "failures": [
+                    {
+                        "type": "sensor",
+                        "gpio": 5,
+                        "error_code": 1002,
+                        "error": "GPIO_CONFLICT",
+                        "detail": "GPIO 5 reserved by actuator (pump_1)"
+                    }
+                ]
+            }
+        }
+    )

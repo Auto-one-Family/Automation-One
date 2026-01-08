@@ -17,6 +17,7 @@ from .esp import router as esp_router
 from .health import router as health_router
 from .logic import router as logic_router
 from .sensors import router as sensors_router
+from .sensor_type_defaults import router as sensor_type_defaults_router
 from .sequences import router as sequences_router
 from .subzone import router as subzone_router
 from .users import router as users_router
@@ -30,6 +31,7 @@ api_v1_router.include_router(auth_router)
 api_v1_router.include_router(audit_router)
 api_v1_router.include_router(esp_router)
 api_v1_router.include_router(sensors_router)
+api_v1_router.include_router(sensor_type_defaults_router)  # Phase 2A - Sensor Operating Modes
 api_v1_router.include_router(actuators_router)
 api_v1_router.include_router(health_router)
 api_v1_router.include_router(logic_router)
@@ -47,6 +49,7 @@ __all__ = [
     "debug_router",
     "esp_router",
     "sensors_router",
+    "sensor_type_defaults_router",
     "actuators_router",
     "health_router",
     "logic_router",

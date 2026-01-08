@@ -67,7 +67,7 @@ public:
     void setCallback(std::function<void(const String&, const String&)> callback);
     
     // Heartbeat
-    void publishHeartbeat();
+    void publishHeartbeat(bool force = false);
     
     // Status
     String getConnectionStatus();

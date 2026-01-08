@@ -53,3 +53,68 @@ class DataSource(str, Enum):
             True if source is MOCK, TEST, or SIMULATION
         """
         return source in (cls.MOCK, cls.TEST, cls.SIMULATION)
+
+
+class SensorOperatingMode(str, Enum):
+    """
+    Operating mode for sensor measurement behavior.
+
+    Determines how and when a sensor performs measurements:
+    - CONTINUOUS: Automatic measurements at regular intervals (default)
+    - ON_DEMAND: Manual measurements only (user-triggered via MQTT command)
+    - SCHEDULED: Measurements at specific times (cron-based)
+    - PAUSED: Temporarily disabled (no measurements, no timeout warnings)
+
+    Use Cases:
+        - CONTINUOUS: Temperature, humidity sensors (always-on monitoring)
+        - ON_DEMAND: pH meters, EC meters (point measurements)
+        - SCHEDULED: Daily calibration checks, periodic water quality tests
+        - PAUSED: Sensor maintenance, calibration in progress
+    """
+
+    CONTINUOUS = "continuous"
+    ON_DEMAND = "on_demand"
+    SCHEDULED = "scheduled"
+    PAUSED = "paused"
+
+    @classmethod
+    def from_string(cls, value: str) -> "SensorOperatingMode":
+        """
+        Convert string to SensorOperatingMode enum.
+
+        Args:
+            value: String value to convert
+
+        Returns:
+            SensorOperatingMode enum value, defaults to CONTINUOUS if not found
+        """
+        try:
+            return cls(value.lower())
+        except (ValueError, AttributeError):
+            return cls.CONTINUOUS
+
+    @classmethod
+    def requires_timeout(cls, mode: "SensorOperatingMode") -> bool:
+        """
+        Check if operating mode requires timeout monitoring.
+
+        Args:
+            mode: SensorOperatingMode to check
+
+        Returns:
+            True if mode should trigger stale warnings on timeout
+        """
+        return mode == cls.CONTINUOUS
+
+    @classmethod
+    def is_active_mode(cls, mode: "SensorOperatingMode") -> bool:
+        """
+        Check if operating mode allows measurements.
+
+        Args:
+            mode: SensorOperatingMode to check
+
+        Returns:
+            True if sensor can/should take measurements in this mode
+        """
+        return mode != cls.PAUSED

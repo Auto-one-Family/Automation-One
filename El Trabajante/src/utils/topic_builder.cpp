@@ -59,9 +59,27 @@ const char* TopicBuilder::buildSensorDataTopic(uint8_t gpio) {
 
 // Pattern 2: kaiser/god/esp/{esp_id}/sensor/batch
 const char* TopicBuilder::buildSensorBatchTopic() {
-  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
                          "kaiser/%s/esp/%s/sensor/batch",
                          kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// ✅ Phase 2C: Sensor Command Topic (for on-demand measurements)
+// Pattern: kaiser/god/esp/{esp_id}/sensor/{gpio}/command
+const char* TopicBuilder::buildSensorCommandTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/sensor/%d/command",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
+// ✅ Phase 2C: Sensor Response Topic (for on-demand measurement responses)
+// Pattern: kaiser/god/esp/{esp_id}/sensor/{gpio}/response
+const char* TopicBuilder::buildSensorResponseTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/sensor/%d/response",
+                         kaiser_id_, esp_id_, gpio);
   return validateTopicBuffer(written);
 }
 

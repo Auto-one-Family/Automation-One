@@ -1,0 +1,59 @@
+# EditorConfig helps maintain consistent coding styles
+# https://editorconfig.org
+
+root = true
+
+# All files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# JavaScript/TypeScript/Vue files
+[*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,vue}]
+indent_size = 2
+indent_style = space
+max_line_length = 100
+
+# CSS/SCSS files
+[*.{css,scss,sass,less,styl}]
+indent_size = 2
+indent_style = space
+max_line_length = 100
+
+# Python files
+[*.py]
+indent_size = 4
+indent_style = space
+max_line_length = 120
+
+# Markdown files
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# C/C++ files (ESP32)
+[*.{c,cpp,h,hpp,ino}]
+indent_size = 2
+indent_style = space
+
+# YAML files
+[*.{yml,yaml}]
+indent_size = 2
+indent_style = space
+
+# JSON files
+[*.json]
+indent_size = 2
+indent_style = space
+
+# Config files
+[*.{ini,toml,cfg,conf}]
+indent_size = 2
+indent_style = space
+
+# Windows batch files (must use CRLF)
+[*.{bat,cmd}]
+end_of_line = crlf
+

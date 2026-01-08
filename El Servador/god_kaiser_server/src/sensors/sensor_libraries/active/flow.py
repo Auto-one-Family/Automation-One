@@ -18,11 +18,20 @@ from ...base_processor import (
 class FlowProcessor(BaseSensorProcessor):
     """
     Flow Sensor Processor (YFS201, Generic).
-    
+
     Supports:
     - YFS201: Hall-effect flow sensor (pulses per liter)
     - Generic: Pulse-based flow sensors
     """
+
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Flow sensors are typically used for continuous monitoring during irrigation.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 10  # Read every 10 seconds (faster for flow monitoring)
+    SUPPORTS_ON_DEMAND = False
 
     # Sensor Specifications
     YFS201_PULSES_PER_LITER = 450  # Typical calibration factor

@@ -7,7 +7,7 @@
 
 import api from './index'
 import { debugApi } from './debug'
-import type { MockESP, MockESPCreate } from '@/types'
+import type { MockESP, MockESPCreate, OfflineInfo, GpioStatusResponse } from '@/types'
 
 // =============================================================================
 // Type Definitions
@@ -66,6 +66,11 @@ export interface ESPDevice {
   uptime?: number                     // Uptime in seconds
   last_heartbeat?: string | null      // ISO timestamp
   connected?: boolean                 // MQTT connection status
+  /**
+   * Offline-Informationen (nur wenn status = 'offline').
+   * Enthält Grund, Zeitstempel und UI-Text.
+   */
+  offlineInfo?: OfflineInfo
   created_at?: string
   updated_at?: string
 }
@@ -605,6 +610,26 @@ export const espApi = {
       )
       return response.data
     }
+  },
+
+  /**
+   * Get GPIO status for an ESP device.
+   *
+   * Returns available, reserved, and system GPIOs for the device.
+   * Used by GPIO picker components and validation.
+   *
+   * Note: Works for both Mock and Real ESPs - server provides GPIO status for all devices.
+   *
+   * @param espId - ESP device ID (e.g., "ESP_12AB34CD")
+   * @returns GPIO status with available/reserved/system pins
+   * @throws ApiError on network or server error
+   */
+  async getGpioStatus(espId: string): Promise<GpioStatusResponse> {
+    const normalizedId = normalizeEspId(espId)
+    const response = await api.get<GpioStatusResponse>(
+      `/esp/devices/${normalizedId}/gpio-status`
+    )
+    return response.data
   },
 
   /**

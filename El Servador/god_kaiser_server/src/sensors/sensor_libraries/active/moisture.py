@@ -59,6 +59,16 @@ class MoistureSensorProcessor(BaseSensorProcessor):
     - Sensor should not be fully submerged (only sensing pad in soil)
     """
 
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Soil moisture sensors are typically used for continuous monitoring.
+    # Slower interval than temperature since soil moisture changes gradually.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 300  # 5 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 60  # Read every 60 seconds
+    SUPPORTS_ON_DEMAND = False
+
     # ESP32 ADC configuration
     ADC_MAX = 4095  # 12-bit ADC (ESP32 ADC1: GPIO32-39 only, ADC2 conflicts with WiFi!)
     ADC_VOLTAGE_RANGE = 3.3  # Volts (ESP32 ADC reference voltage)

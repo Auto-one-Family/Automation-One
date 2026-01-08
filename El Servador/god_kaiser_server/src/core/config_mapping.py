@@ -111,6 +111,24 @@ DEFAULT_SENSOR_MAPPINGS: List[Dict[str, Any]] = [
         "field_type": "bool",
         "default": True,
     },
+    # Phase 2C: Operating Mode for ESP32 measurement behavior
+    # Modes: continuous (auto-measure), on_demand (command only), paused (no measure), scheduled (server-triggered)
+    {
+        "source": "operating_mode",
+        "target": "operating_mode",
+        "field_type": "string",
+        "required": False,
+        "default": "continuous",
+    },
+    # Phase 2C: Per-sensor measurement interval in seconds (converted from ms)
+    {
+        "source": "sample_interval_ms",
+        "target": "measurement_interval_seconds",
+        "field_type": "int",
+        "required": False,
+        "default": 30,
+        "transform": "ms_to_seconds",
+    },
 ]
 
 
@@ -214,6 +232,8 @@ class ConfigMappingEngine:
         "to_float": lambda x: float(x) if x is not None else 0.0,
         "to_bool": lambda x: bool(x) if x is not None else False,
         "invert_bool": lambda x: not bool(x) if x is not None else True,
+        # Phase 2C: Convert milliseconds to seconds for ESP32 measurement interval
+        "ms_to_seconds": lambda x: (int(x) // 1000) if x else 30,
     }
     
     def __init__(
@@ -490,6 +510,8 @@ def set_mapping_engine(engine: ConfigMappingEngine) -> None:
     """Set a custom mapping engine (for testing or runtime config)."""
     global _default_engine
     _default_engine = engine
+
+
 
 
 

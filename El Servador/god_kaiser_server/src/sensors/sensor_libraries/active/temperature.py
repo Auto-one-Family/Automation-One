@@ -45,6 +45,15 @@ class DS18B20Processor(BaseSensorProcessor):
     - Multiple sensors on same bus: Supported (unique 64-bit ROM address)
     """
 
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Temperature sensors are typically used for continuous monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 30  # Read every 30 seconds
+    SUPPORTS_ON_DEMAND = False
+
     # DS18B20 Specifications
     TEMP_MIN = -55.0  # °C (datasheet minimum)
     TEMP_MAX = 125.0  # °C (datasheet maximum)
@@ -317,6 +326,15 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
     - Address: 0x44 (default) or 0x45 (if ADR pin connected to VIN)
     - Multiple sensors: Use different I2C addresses
     """
+
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Temperature sensors are typically used for continuous monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 30  # Read every 30 seconds
+    SUPPORTS_ON_DEMAND = False
 
     # SHT31 Specifications
     TEMP_MIN = -40.0  # °C (datasheet minimum)

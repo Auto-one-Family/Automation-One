@@ -1,5 +1,7 @@
 """
 Sensor Models: SensorConfig, SensorData
+
+Phase 2A: Added operating mode fields for per-sensor override of type defaults.
 """
 
 import uuid
@@ -116,6 +118,65 @@ class SensorConfig(Base, TimestampMixin):
         default=dict,
         nullable=False,
         doc="Additional sensor metadata",
+    )
+
+    # =========================================================================
+    # OPERATING MODE CONFIGURATION (Phase 2A)
+    # =========================================================================
+    # These fields allow per-sensor override of type defaults.
+    # NULL values mean "use type default" from sensor_type_defaults table.
+
+    operating_mode: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,  # NULL = use type default
+        doc="Operating mode override: continuous, on_demand, scheduled, paused (NULL = use type default)",
+    )
+
+    timeout_seconds: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,  # NULL = use type default
+        doc="Timeout override in seconds (NULL = use type default, 0 = no timeout)",
+    )
+
+    timeout_warning_enabled: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,  # NULL = use type default
+        doc="Timeout warning override (NULL = use type default)",
+    )
+
+    schedule_config: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Schedule configuration for scheduled mode (cron expression or time list)",
+    )
+
+    last_manual_request: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        doc="Timestamp of last manual measurement request (for on_demand mode)",
+    )
+
+    # =========================================================================
+    # CONFIG STATUS (Phase 4 - Detailed Config Feedback)
+    # =========================================================================
+    # Tracks the configuration status from ESP32 config_response.
+
+    config_status: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        default="pending",
+        doc="Config status: pending, applied, failed",
+    )
+
+    config_error: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Error code if config_status=failed (e.g., GPIO_CONFLICT)",
+    )
+
+    config_error_detail: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        doc="Detailed error message if config_status=failed",
     )
 
     # Relationships

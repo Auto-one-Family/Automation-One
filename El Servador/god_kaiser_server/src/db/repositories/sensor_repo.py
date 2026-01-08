@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.sensor import SensorConfig, SensorData
@@ -258,6 +258,67 @@ class SensorRepository(BaseRepository[SensorConfig]):
         """
         data = await self.get_latest_data(esp_id, gpio, limit=1)
         return data[0] if data else None
+
+    async def get_latest_readings_batch(
+        self,
+        sensor_keys: list[tuple[uuid.UUID, int]],
+    ) -> dict[tuple[uuid.UUID, int], SensorData]:
+        """
+        Get latest reading for multiple sensors in a single batch query.
+
+        This method optimizes the common pattern of fetching the latest reading
+        for many sensors by using a subquery with MAX(timestamp) instead of
+        N individual queries.
+
+        Uses index: idx_esp_gpio_timestamp (esp_id, gpio, timestamp)
+
+        Args:
+            sensor_keys: List of (esp_id, gpio) tuples identifying sensors
+
+        Returns:
+            Dict mapping (esp_id, gpio) tuple to latest SensorData.
+            Sensors without any readings are not included in the result.
+
+        Example:
+            >>> keys = [(uuid1, 34), (uuid2, 35), (uuid3, 36)]
+            >>> readings = await repo.get_latest_readings_batch(keys)
+            >>> latest = readings.get((uuid1, 34))  # SensorData or None
+        """
+        if not sensor_keys:
+            return {}
+
+        # Subquery: Get MAX(timestamp) per (esp_id, gpio)
+        max_timestamp_subq = (
+            select(
+                SensorData.esp_id,
+                SensorData.gpio,
+                func.max(SensorData.timestamp).label("max_ts"),
+            )
+            .where(
+                tuple_(SensorData.esp_id, SensorData.gpio).in_(sensor_keys)
+            )
+            .group_by(SensorData.esp_id, SensorData.gpio)
+            .subquery()
+        )
+
+        # Main query: Join with subquery to get full SensorData rows
+        stmt = (
+            select(SensorData)
+            .join(
+                max_timestamp_subq,
+                and_(
+                    SensorData.esp_id == max_timestamp_subq.c.esp_id,
+                    SensorData.gpio == max_timestamp_subq.c.gpio,
+                    SensorData.timestamp == max_timestamp_subq.c.max_ts,
+                ),
+            )
+        )
+
+        result = await self.session.execute(stmt)
+        data_list = result.scalars().all()
+
+        # Build lookup dict: (esp_id, gpio) → SensorData
+        return {(d.esp_id, d.gpio): d for d in data_list}
 
     async def query_data(
         self,

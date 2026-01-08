@@ -12,6 +12,7 @@
 
 /**
  * @brief Helper for publishing standardized configuration responses.
+ * Phase 4: Extended with publishWithFailures() for detailed error reporting.
  */
 class ConfigResponseBuilder {
 public:
@@ -24,8 +25,34 @@ public:
 
   static bool publish(const ConfigResponsePayload& payload);
 
+  /**
+   * @brief Publish response with multiple failures (Phase 4).
+   *
+   * Automatically determines status based on counts:
+   * - SUCCESS: fail_count == 0
+   * - PARTIAL_SUCCESS: success_count > 0 && fail_count > 0
+   * - ERROR: success_count == 0 && fail_count > 0
+   *
+   * @param type Configuration type (SENSOR or ACTUATOR)
+   * @param success_count Number of successfully configured items
+   * @param fail_count Number of failed items
+   * @param failures Vector of failure details (max 10 items)
+   * @return true if MQTT publish succeeded
+   */
+  static bool publishWithFailures(
+      ConfigType type,
+      uint8_t success_count,
+      uint8_t fail_count,
+      const std::vector<ConfigFailureItem>& failures);
+
 private:
   static String buildJsonPayload(const ConfigResponsePayload& payload);
+  static String buildJsonPayloadWithFailures(
+      ConfigType type,
+      ConfigStatus status,
+      uint8_t success_count,
+      uint8_t fail_count,
+      const std::vector<ConfigFailureItem>& failures);
 };
 
 #endif  // SERVICES_CONFIG_CONFIG_RESPONSE_H

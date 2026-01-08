@@ -139,7 +139,30 @@ class SensorConfigCreate(SensorConfigBase):
         None,
         description="Custom metadata",
     )
-    
+    # =========================================================================
+    # OPERATING MODE CONFIGURATION (Phase 2F)
+    # =========================================================================
+    operating_mode: Optional[str] = Field(
+        None,
+        description="Operating mode override: continuous, on_demand, scheduled, paused. "
+                    "NULL = use SensorTypeDefaults",
+        pattern=r"^(continuous|on_demand|scheduled|paused)$",
+    )
+    timeout_seconds: Optional[int] = Field(
+        None,
+        ge=0,
+        le=86400,  # Max 24 hours
+        description="Timeout override in seconds. NULL = use SensorTypeDefaults, 0 = no timeout",
+    )
+    timeout_warning_enabled: Optional[bool] = Field(
+        None,
+        description="Enable timeout warnings. NULL = use SensorTypeDefaults",
+    )
+    schedule_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Schedule configuration for scheduled mode",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -157,7 +180,9 @@ class SensorConfigCreate(SensorConfigBase):
                 "threshold_min": 0.0,
                 "threshold_max": 14.0,
                 "warning_min": 5.5,
-                "warning_max": 7.5
+                "warning_max": 7.5,
+                "operating_mode": "continuous",
+                "timeout_seconds": 180
             }
         }
     )
@@ -166,10 +191,10 @@ class SensorConfigCreate(SensorConfigBase):
 class SensorConfigUpdate(BaseModel):
     """
     Sensor configuration update request.
-    
+
     All fields optional - only provided fields are updated.
     """
-    
+
     name: Optional[str] = Field(None, max_length=100)
     enabled: Optional[bool] = Field(None)
     interval_ms: Optional[int] = Field(None, ge=1000, le=300000)
@@ -183,6 +208,29 @@ class SensorConfigUpdate(BaseModel):
     warning_min: Optional[float] = Field(None)
     warning_max: Optional[float] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # =========================================================================
+    # OPERATING MODE CONFIGURATION (Phase 2F)
+    # =========================================================================
+    operating_mode: Optional[str] = Field(
+        None,
+        description="Operating mode override: continuous, on_demand, scheduled, paused. "
+                    "NULL = use SensorTypeDefaults",
+        pattern=r"^(continuous|on_demand|scheduled|paused)$",
+    )
+    timeout_seconds: Optional[int] = Field(
+        None,
+        ge=0,
+        le=86400,
+        description="Timeout override in seconds. NULL = use SensorTypeDefaults, 0 = no timeout",
+    )
+    timeout_warning_enabled: Optional[bool] = Field(
+        None,
+        description="Enable timeout warnings. NULL = use SensorTypeDefaults",
+    )
+    schedule_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Schedule configuration for scheduled mode",
+    )
 
 
 class SensorConfigResponse(SensorConfigBase, TimestampMixin):
@@ -688,7 +736,7 @@ class SensorCalibrateResponse(BaseResponse):
     """
     Sensor calibration response.
     """
-    
+
     calibration: Dict[str, Any] = Field(
         ...,
         description="Calculated calibration data",
@@ -697,3 +745,32 @@ class SensorCalibrateResponse(BaseResponse):
     method: str = Field(..., description="Calibration method used")
     saved: bool = Field(..., description="Whether saved to database")
     message: Optional[str] = Field(None, description="Additional info")
+
+
+# =============================================================================
+# On-Demand Measurement (Phase 2D)
+# =============================================================================
+
+
+class TriggerMeasurementResponse(BaseModel):
+    """Response for trigger measurement endpoint."""
+
+    success: bool = Field(..., description="Whether command was sent successfully")
+    request_id: str = Field(..., description="Unique request ID for tracking")
+    esp_id: str = Field(..., description="Target ESP device ID")
+    gpio: int = Field(..., description="Target sensor GPIO")
+    sensor_type: str = Field(..., description="Sensor type")
+    message: str = Field(..., description="Status message")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "request_id": "550e8400-e29b-41d4-a716-446655440000",
+                "esp_id": "ESP_12AB34CD",
+                "gpio": 34,
+                "sensor_type": "ph",
+                "message": "Measurement command sent",
+            }
+        }
+    )

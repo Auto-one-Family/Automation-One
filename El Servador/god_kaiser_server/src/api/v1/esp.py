@@ -15,6 +15,7 @@ Provides:
 - POST /devices/{esp_id}/restart - Restart command
 - POST /devices/{esp_id}/reset - Factory reset
 - GET /devices/{esp_id}/health - Health metrics
+- GET /devices/{esp_id}/gpio-status - GPIO pin availability (Phase 2)
 - POST /devices/{esp_id}/assign_kaiser - Assign to Kaiser
 - GET /discovery - Network discovery results
 
@@ -46,6 +47,8 @@ from ...schemas import (
     ESPRestartRequest,
     DiscoveredESP,
 )
+from ...schemas.esp import GpioStatusResponse, GpioUsageItem
+from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
 from ...schemas.common import PaginationMeta, PaginationParams
 from ..deps import ActiveUser, DBSession, OperatorUser, get_mqtt_publisher
 
@@ -794,6 +797,100 @@ async def get_device_health(
         metrics=metrics,
         last_seen=device.last_seen,
         uptime_formatted=uptime_formatted,
+    )
+
+
+# =============================================================================
+# GPIO Status (Phase 2 - GPIO Validation)
+# =============================================================================
+
+
+@router.get(
+    "/devices/{esp_id}/gpio-status",
+    response_model=GpioStatusResponse,
+    responses={
+        200: {"description": "GPIO status retrieved"},
+        404: {"description": "Device not found"},
+    },
+    summary="Get GPIO pin status",
+    description="Get GPIO pin availability and usage for an ESP device. Combines database configuration with ESP-reported status.",
+)
+async def get_gpio_status(
+    esp_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> GpioStatusResponse:
+    """
+    Get GPIO pin status for an ESP device.
+
+    Combines:
+    - Statically reserved system pins (Flash, UART, Boot)
+    - Database-configured sensors/actuators
+    - ESP-reported GPIO status (from heartbeat)
+
+    Args:
+        esp_id: ESP device ID
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        GpioStatusResponse with available, reserved, and system GPIO lists
+
+    Phase: 2 (GPIO Validation)
+    """
+    esp_repo = ESPRepository(db)
+    sensor_repo = SensorRepository(db)
+    actuator_repo = ActuatorRepository(db)
+
+    device = await esp_repo.get_by_device_id(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ESP device '{esp_id}' not found",
+        )
+
+    # Use GpioValidationService to get all used GPIOs
+    gpio_validator = GpioValidationService(
+        session=db,
+        sensor_repo=sensor_repo,
+        actuator_repo=actuator_repo,
+        esp_repo=esp_repo
+    )
+
+    used_gpios = await gpio_validator.get_all_used_gpios(device.id)
+
+    # Convert to GpioUsageItem schema
+    reserved_items = [
+        GpioUsageItem(
+            gpio=g["gpio"],
+            owner=g["owner"],
+            component=g["component"],
+            name=g.get("name"),
+            id=g.get("id"),
+            source=g["source"]
+        )
+        for g in used_gpios
+    ]
+
+    # Calculate available GPIOs (ESP32-WROOM has GPIO 0-39)
+    # Exclude input-only pins that can't be used for output (34, 35, 36, 39)
+    all_gpios = set(range(40))
+    used_gpio_numbers = {g["gpio"] for g in used_gpios}
+    available_gpios = sorted(all_gpios - used_gpio_numbers - SYSTEM_RESERVED_PINS)
+
+    # Get hardware type and last ESP report timestamp
+    hardware_type = device.hardware_type or "ESP32_WROOM"
+    last_esp_report = None
+    if device.device_metadata:
+        last_esp_report = device.device_metadata.get("gpio_status_updated_at")
+
+    return GpioStatusResponse(
+        esp_id=esp_id,
+        available=available_gpios,
+        reserved=reserved_items,
+        system=sorted(SYSTEM_RESERVED_PINS),
+        hardware_type=hardware_type,
+        last_esp_report=last_esp_report,
     )
 
 

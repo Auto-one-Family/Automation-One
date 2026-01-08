@@ -126,6 +126,29 @@ class ActuatorConfig(Base, TimestampMixin):
         doc="Additional actuator metadata",
     )
 
+    # =========================================================================
+    # CONFIG STATUS (Phase 4 - Detailed Config Feedback)
+    # =========================================================================
+    # Tracks the configuration status from ESP32 config_response.
+
+    config_status: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        default="pending",
+        doc="Config status: pending, applied, failed",
+    )
+
+    config_error: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Error code if config_status=failed (e.g., GPIO_CONFLICT)",
+    )
+
+    config_error_detail: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        doc="Detailed error message if config_status=failed",
+    )
+
     # Relationships
     esp: Mapped["ESPDevice"] = relationship(
         "ESPDevice",

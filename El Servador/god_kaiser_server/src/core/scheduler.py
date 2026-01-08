@@ -46,6 +46,7 @@ class JobCategory(str, Enum):
     MAINTENANCE = "maintenance"  # Cleanup, Reports
     MONITOR = "monitor"         # Timeout-Checks, Health
     CUSTOM = "custom"           # User-definierte Jobs
+    SENSOR_SCHEDULE = "sensor_schedule"  # Scheduled sensor measurements (Phase 2H)
 
 
 @dataclass

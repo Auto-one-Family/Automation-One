@@ -194,14 +194,69 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 
 ---
 
+### 2a. Sensor-Command (Phase 2C - On-Demand Measurement)
+
+**Topic:** `kaiser/god/esp/{esp_id}/sensor/{gpio}/command`
+
+**Direction:** Server → ESP32
+**QoS:** 1
+**Retain:** false
+**Module:** `main.cpp::handleSensorCommand()`
+**TopicBuilder:** `TopicBuilder::buildSensorCommandTopic(gpio)`
+
+**Payload-Schema:**
+```json
+{
+  "command": "measure",                  // Currently only "measure" supported
+  "request_id": "req_12345"              // Optional: Request ID for tracking response
+}
+```
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `measure` | Triggers manual measurement for on_demand sensors |
+
+**ESP32-Verhalten:**
+1. Empfängt Command
+2. Parst GPIO aus Topic
+3. Führt `sensorManager.triggerManualMeasurement(gpio)` aus
+4. Sendet Response (wenn `request_id` vorhanden)
+5. Publiziert Messwert via reguläres `/data` Topic
+
+---
+
+### 2b. Sensor-Response (Phase 2C - Command Acknowledgment)
+
+**Topic:** `kaiser/god/esp/{esp_id}/sensor/{gpio}/response`
+
+**Direction:** ESP32 → Server
+**QoS:** 1
+**Retain:** false
+**Module:** `main.cpp::handleSensorCommand()`
+**TopicBuilder:** `TopicBuilder::buildSensorResponseTopic(gpio)`
+
+**Payload-Schema:**
+```json
+{
+  "request_id": "req_12345",             // Echo of original request_id
+  "gpio": 4,                             // GPIO pin
+  "command": "measure",                  // Executed command
+  "success": true,                       // true if measurement succeeded
+  "ts": 1735818000                       // Timestamp (Unix seconds)
+}
+```
+
+---
+
 ### 3. Heartbeat (System-Health)
 
 **Topic:** `kaiser/god/esp/{esp_id}/system/heartbeat`
 
-**QoS:** 0 (at most once, Latency-optimiert)  
-**Retain:** false  
-**Frequency:** Alle 60s (forced) + bei Zustandsänderung (change-detection)  
-**Module:** `services/communication/mqtt_client.cpp` → `publishHeartbeat()`  
+**QoS:** 0 (at most once, Latency-optimiert)
+**Retain:** false
+**Frequency:** Alle 60s (forced) + bei Zustandsänderung (change-detection)
+**Module:** `services/communication/mqtt_client.cpp` → `publishHeartbeat()`
 **TopicBuilder:** `TopicBuilder::buildSystemHeartbeatTopic()`
 
 **Payload-Schema (Current Implementation):**
@@ -216,9 +271,31 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
   "heap_free": 245760,                 // Freier Heap-Speicher (Bytes) - REQUIRED (or "free_heap")
   "wifi_rssi": -65,                    // WiFi Signal Strength (dBm) - REQUIRED
   "sensor_count": 3,                   // Anzahl aktiver Sensoren - OPTIONAL (or "active_sensors")
-  "actuator_count": 2                  // Anzahl aktiver Aktoren - OPTIONAL (or "active_actuators")
+  "actuator_count": 2,                 // Anzahl aktiver Aktoren - OPTIONAL (or "active_actuators")
+  "gpio_status": [                     // GPIO-Status Array - OPTIONAL (Phase 1)
+    {
+      "gpio": 4,                       // GPIO-Pin-Nummer
+      "owner": "sensor",               // Besitzer: "sensor", "actuator", "system"
+      "component": "DS18B20",          // Komponenten-Name
+      "mode": 1,                       // Pin-Mode: 0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP
+      "safe": false                    // In Safe-Mode? (false = aktiv genutzt)
+    }
+  ],
+  "gpio_reserved_count": 4             // Anzahl reservierter Pins - OPTIONAL (Phase 1)
 }
 ```
+
+**gpio_status Array (Phase 1 - GPIO-Status-Übertragung):**
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `gpio` | int | GPIO-Pin-Nummer |
+| `owner` | string | Besitzer: `"sensor"`, `"actuator"`, `"system"` |
+| `component` | string | Komponenten-Name (z.B. `"DS18B20"`, `"pump_1"`, `"I2C_SDA"`) |
+| `mode` | int | Hardware-Mode: `0`=INPUT, `1`=OUTPUT, `2`=INPUT_PULLUP |
+| `safe` | bool | `true` = Pin in Safe-Mode, `false` = aktiv genutzt |
+
+**Hinweis:** `gpio_status` enthält nur Pins die **NICHT** in Safe-Mode sind (also aktiv reserviert). Pins in Safe-Mode werden nicht gelistet.
 
 **Server-Kompatibilität (Stand: 2025-12-08):**
 Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
@@ -1655,7 +1732,9 @@ mosquitto_pub -h localhost \
       "name": "Boden Temp",
       "subzone_id": "zone_a",
       "active": true,
-      "raw_mode": false
+      "raw_mode": true,
+      "operating_mode": "continuous",    // ✅ Phase 2C: "continuous", "on_demand", "paused", "scheduled"
+      "measurement_interval_seconds": 30 // ✅ Phase 2C: Messintervall in Sekunden (1-300)
     }
   ],
   "actuators": [                       // Optional
@@ -1731,6 +1810,86 @@ mosquitto_pub -h localhost \
 - Bei Config-Apply-Failure: Automatischer Rollback zur letzten funktionierenden Config
 - Rollback-Config wird aus NVS geladen
 - Rollback-Status in Response-Payload
+
+---
+
+#### Phase 4 Extended: Config-Response mit Failures Array
+
+**ERWEITERUNG (Phase 4):** Seit Phase 4 unterstützt das Config-Response-Format zusätzlich:
+- `partial_success` Status (einige Items OK, einige fehlgeschlagen)
+- `failures` Array mit detaillierten Per-Item Fehlerinformationen
+- `failed_count` für Anzahl fehlgeschlagener Items
+
+**Neue Methode:** `ConfigResponseBuilder::publishWithFailures()`
+
+**Extended Payload-Schema (v2):**
+```json
+{
+  "status": "partial_success",
+  "type": "sensor",
+  "count": 2,
+  "failed_count": 1,
+  "message": "2 configured, 1 failed",
+  "failures": [
+    {
+      "type": "sensor",
+      "gpio": 5,
+      "error_code": 1002,
+      "error": "GPIO_CONFLICT",
+      "detail": "GPIO reserved by actuator pump_1"
+    }
+  ]
+}
+```
+
+**Status-Werte (Phase 4):**
+
+| Status | Beschreibung | Bedingung |
+|--------|--------------|-----------|
+| `success` | Alle Items erfolgreich | `failed_count == 0` |
+| `partial_success` | Einige OK, einige fehlgeschlagen | `count > 0 && failed_count > 0` |
+| `error` | Alle Items fehlgeschlagen | `count == 0 && failed_count > 0` |
+
+**Failures Array (max 10 Items):**
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `type` | string | `"sensor"` oder `"actuator"` |
+| `gpio` | number | GPIO-Pin-Nummer |
+| `error_code` | number | Numerischer Error-Code aus `error_codes.h` |
+| `error` | string | Kurzer Error-Name (z.B. `"GPIO_CONFLICT"`) |
+| `detail` | string | Menschenlesbarer Fehlertext |
+
+**Error-Codes (aus error_codes.h):**
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 1001 | `GPIO_RESERVED` | GPIO bereits reserviert |
+| 1002 | `GPIO_CONFLICT` | GPIO-Konflikt mit anderer Komponente |
+| 1003 | `GPIO_INIT_FAILED` | GPIO-Initialisierung fehlgeschlagen |
+| 1040 | `SENSOR_READ_FAILED` | Sensor antwortet nicht |
+| 1041 | `SENSOR_INIT_FAILED` | Sensor-Initialisierung fehlgeschlagen |
+| 2010 | `CONFIG_INVALID` | Ungültige Konfiguration |
+| 2011 | `CONFIG_MISSING` | Konfiguration fehlt |
+
+**Memory-Limit:** Max 10 Failures werden gespeichert. Bei mehr als 10 Fehlern werden `failures_truncated: true` und `total_failures: N` hinzugefügt.
+
+**Backward Compatibility:**
+- Alte Payloads ohne `failures` werden weiter unterstützt
+- Legacy `failed_item` (einzeln) wird weiter akzeptiert
+- Server akzeptiert beide Formate
+
+**Server-Verarbeitung:**
+1. Server parst `failures` Array
+2. Bei `partial_success` oder `error`: `_process_config_failures()` wird aufgerufen
+3. Sensor/Actuator DB-Records werden mit `config_status="failed"` aktualisiert
+4. WebSocket broadcast enthält `failures` Array
+
+**Frontend-Verarbeitung:**
+- `success`: 1 Success-Toast
+- `partial_success`: 1 Warning-Toast + max 3 Detail-Error-Toasts
+- `error`: 1 Error-Toast + max 3 Detail-Error-Toasts
+- Zusätzliche Failures werden in Console geloggt
 
 ---
 

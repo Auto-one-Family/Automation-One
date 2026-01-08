@@ -41,6 +41,7 @@ from .mqtt.handlers import (
     config_handler,
     discovery_handler,
     heartbeat_handler,
+    lwt_handler,
     sensor_handler,
     subzone_ack_handler,
     zone_ack_handler,
@@ -238,6 +239,16 @@ async def lifespan(app: FastAPI):
             f"kaiser/{kaiser_id}/esp/+/subzone/ack",
             subzone_ack_handler.handle_subzone_ack
         )
+        # LWT Handler (Instant Offline Detection)
+        # Topic: kaiser/{kaiser_id}/esp/+/system/will
+        # ESP32 builds LWT topic from heartbeat: /system/heartbeat -> /system/will
+        # QoS: 1 (broker publishes LWT with QoS from ESP32 config)
+        # This provides INSTANT offline detection when ESP32 disconnects unexpectedly
+        _subscriber_instance.register_handler(
+            f"kaiser/{kaiser_id}/esp/+/system/will",
+            lwt_handler.handle_lwt
+        )
+        logger.info(f"LWT handler registered: kaiser/{kaiser_id}/esp/+/system/will")
 
         logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 
@@ -314,6 +325,57 @@ async def lifespan(app: FastAPI):
                 break  # Exit after first session
         except Exception as e:
             logger.warning(f"Mock-ESP recovery failed (non-critical): {e}")
+
+        # Step 3.6: Sensor Type Auto-Registration (Phase 2A)
+        # Ensures all loaded sensor libraries have entries in sensor_type_defaults.
+        # New libraries get defaults based on their RECOMMENDED_* class attributes.
+        # Runs on every startup - idempotent (skips existing entries).
+        logger.info("Running sensor type auto-registration...")
+        try:
+            from .services.sensor_type_registration import auto_register_sensor_types
+
+            async for session in get_session():
+                reg_results = await auto_register_sensor_types(session)
+                logger.info(
+                    f"Sensor type auto-registration: "
+                    f"{reg_results['newly_registered']} new, "
+                    f"{reg_results['already_registered']} existing, "
+                    f"{reg_results['failed']} failed"
+                )
+                break  # Exit after first session
+        except Exception as e:
+            # Non-fatal: System can work with system-defaults fallback
+            logger.warning(f"Sensor type auto-registration failed (non-critical): {e}")
+
+        # Step 3.7: Recover Scheduled Sensor Jobs (Phase 2H)
+        # Recreates APScheduler jobs for sensors with operating_mode='scheduled'.
+        # Jobs are stored in sensor.schedule_config (cron expressions).
+        # Missed jobs during server downtime are NOT caught up (only future runs).
+        logger.info("Recovering scheduled sensor jobs...")
+        try:
+            from .db.repositories.esp_repo import ESPRepository
+            from .db.repositories.sensor_repo import SensorRepository
+            from .services.sensor_scheduler_service import SensorSchedulerService
+
+            async for session in get_session():
+                sensor_repo = SensorRepository(session)
+                esp_repo = ESPRepository(session)
+                publisher = Publisher()
+
+                sensor_scheduler_service = SensorSchedulerService(
+                    sensor_repo=sensor_repo,
+                    esp_repo=esp_repo,
+                    publisher=publisher,
+                )
+
+                recovered_count = await sensor_scheduler_service.recover_all_jobs(session)
+                logger.info(
+                    f"Sensor schedule recovery complete: {recovered_count} jobs"
+                )
+                break  # Exit after first session
+        except Exception as e:
+            # Non-fatal: Scheduled sensors won't auto-trigger, but manual trigger still works
+            logger.warning(f"Sensor schedule recovery failed (non-critical): {e}")
 
         # Step 4: Subscribe to all topics (only if connected)
         if connected:

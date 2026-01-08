@@ -13,6 +13,7 @@ Provides singleton MQTT client with:
 
 import asyncio
 import logging
+import os
 import ssl
 import threading
 import time
@@ -213,8 +214,13 @@ class MQTTClient:
         use_tls = use_tls if use_tls is not None else self.settings.mqtt.use_tls
 
         try:
-            # Create paho-mqtt client
-            client_id = self.settings.mqtt.client_id or f"god_kaiser_{int(time.time())}"
+            # Create paho-mqtt client with UNIQUE client ID
+            # BUG V FIX: Append process ID to prevent multiple instances with same ID
+            # MQTT only allows ONE connection per client_id - duplicate IDs cause reconnect loops
+            base_id = self.settings.mqtt.client_id or "god_kaiser"
+            client_id = f"{base_id}_{os.getpid()}"
+            logger.info(f"MQTT Client ID: {client_id} (PID-based for uniqueness)")
+
             self.client = mqtt.Client(
                 client_id=client_id,
                 clean_session=True,

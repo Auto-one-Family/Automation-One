@@ -1213,7 +1213,10 @@ class MockESP32Client:
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_heartbeat(self):
-        """Publish system heartbeat with all fields."""
+        """Publish system heartbeat with all fields including GPIO status."""
+        # Build GPIO status (Phase 1)
+        gpio_status = self._build_gpio_status()
+
         payload = {
             "esp_id": self.esp_id,
             "zone_id": self.zone.zone_id if self.zone else None,
@@ -1227,7 +1230,10 @@ class MockESP32Client:
             "actuator_count": len(self.actuators),
             "state": self.system_state.name,
             "mqtt_connected": self.connected,
-            "safe_mode": self.system_state == SystemState.SAFE_MODE
+            "safe_mode": self.system_state == SystemState.SAFE_MODE,
+            # GPIO-Status (Phase 1) - matches ESP32 mqtt_client.cpp:638-656
+            "gpio_status": gpio_status,
+            "gpio_reserved_count": len(gpio_status)
         }
 
         topic = TopicBuilder.build_heartbeat_topic(self.esp_id, self.kaiser_id)
@@ -1298,6 +1304,55 @@ class MockESP32Client:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+    def _build_gpio_status(self) -> List[Dict[str, Any]]:
+        """
+        Build GPIO status array from registered sensors/actuators.
+
+        Simulates ESP32's GPIOManager.getReservedPinsList() behavior.
+        Returns list of reserved GPIO pins with owner, component, mode, and safe status.
+
+        Mode values (from ESP32 gpio_manager.cpp):
+        - 0 = INPUT (sensors)
+        - 1 = OUTPUT (actuators, system pins)
+        - 2 = INPUT_PULLUP
+
+        Returns:
+            List of GPIO status dicts matching GpioStatusItem schema
+        """
+        gpio_status = []
+
+        # Sensoren hinzufügen (owner="sensor", mode=0 INPUT)
+        for gpio, sensor in self.sensors.items():
+            gpio_status.append({
+                "gpio": gpio,
+                "owner": "sensor",
+                "component": sensor.sensor_type,
+                "mode": 0,  # INPUT mode for sensors
+                "safe": False  # Active sensors are not in safe mode
+            })
+
+        # Aktoren hinzufügen (owner="actuator", mode=1 OUTPUT)
+        for gpio, actuator in self.actuators.items():
+            gpio_status.append({
+                "gpio": gpio,
+                "owner": "actuator",
+                "component": actuator.actuator_type,
+                "mode": 1,  # OUTPUT mode for actuators
+                "safe": actuator.emergency_stopped  # Emergency-stopped = safe mode
+            })
+
+        # System-Pins (I2C) - NUR wenn I2C-Sensoren vorhanden sind
+        i2c_sensor_types = {"SHT31", "BME280", "BH1750", "ADS1115", "CCS811", "TSL2561"}
+        has_i2c = any(s.sensor_type in i2c_sensor_types for s in self.sensors.values())
+
+        if has_i2c:
+            gpio_status.extend([
+                {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False},
+                {"gpio": 22, "owner": "system", "component": "I2C_SCL", "mode": 1, "safe": False}
+            ])
+
+        return gpio_status
+
     def _build_sensor_response_data(self, sensor: SensorState) -> Dict[str, Any]:
         """Build sensor response data structure."""
         data = {

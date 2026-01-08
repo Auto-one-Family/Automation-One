@@ -67,11 +67,13 @@ import {
   Pencil,
   Check,
   X,
+  Power,
 } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { espApi, type ESPDevice } from '@/api/esp'
+import type { OfflineInfo } from '@/types'
 import { useEspStore } from '@/stores/esp'
 
 interface Props {
@@ -485,6 +487,85 @@ const heartbeatTooltip = computed(() => {
   }
   return `Letzter Heartbeat: ${relativeTime}\nReal ESPs senden automatisch alle 60s`
 })
+
+// =============================================================================
+// Offline Info Display (Phase 1 - LWT & Heartbeat Timeout)
+// =============================================================================
+
+/**
+ * Icon for offline reason.
+ */
+const offlineIcon = computed(() => {
+  if (!props.esp.offlineInfo) return null
+
+  switch (props.esp.offlineInfo.reason) {
+    case 'lwt':
+      return Zap  // ⚡ Lightning for sudden disconnect
+    case 'heartbeat_timeout':
+      return Clock  // ⏱️ Clock for timeout
+    case 'shutdown':
+      return Power  // 🔌 Power for intentional shutdown
+    default:
+      return null
+  }
+})
+
+/**
+ * Color class for offline reason.
+ */
+const offlineColor = computed(() => {
+  if (!props.esp.offlineInfo) return 'text-gray-400'
+
+  switch (props.esp.offlineInfo.reason) {
+    case 'lwt':
+      return 'text-red-500'  // Red for crash/power-loss
+    case 'heartbeat_timeout':
+      return 'text-orange-500'  // Orange for timeout
+    case 'shutdown':
+      return 'text-blue-400'  // Blue for intentional shutdown
+    default:
+      return 'text-gray-400'
+  }
+})
+
+/**
+ * Formatted timestamp for offline info.
+ * Shows relative time (e.g., "vor 15 Minuten").
+ */
+const offlineTimeAgo = computed(() => {
+  if (!props.esp.offlineInfo?.timestamp) return null
+
+  const now = Date.now()
+  const offlineAt = props.esp.offlineInfo.timestamp * 1000
+  const diffMs = now - offlineAt
+  const diffMin = Math.floor(diffMs / 60000)
+
+  if (diffMin < 1) return 'gerade eben'
+  if (diffMin < 60) return `vor ${diffMin} Min`
+
+  const diffHours = Math.floor(diffMin / 60)
+  if (diffHours < 24) return `vor ${diffHours} Std`
+
+  const diffDays = Math.floor(diffHours / 24)
+  return `vor ${diffDays} Tag${diffDays > 1 ? 'en' : ''}`
+})
+
+/**
+ * Absolute timestamp for tooltip.
+ */
+const offlineTimeAbsolute = computed(() => {
+  if (!props.esp.offlineInfo?.timestamp) return null
+
+  const date = new Date(props.esp.offlineInfo.timestamp * 1000)
+  return date.toLocaleString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+})
 </script>
 
 <template>
@@ -620,6 +701,19 @@ const heartbeatTooltip = computed(() => {
         <span class="esp-card__zone-name">
           {{ esp.zone_name || esp.zone_id || 'Keine Zone' }}
         </span>
+      </div>
+
+      <!-- Offline Info Line (Phase 1 - LWT & Heartbeat Timeout) -->
+      <div
+        v-if="esp.status === 'offline' && esp.offlineInfo"
+        class="esp-card__offline-info"
+        :class="offlineColor"
+        :title="offlineTimeAbsolute || undefined"
+      >
+        <component :is="offlineIcon" class="w-4 h-4" />
+        <span class="esp-card__offline-text">{{ esp.offlineInfo.displayText }}</span>
+        <span class="esp-card__offline-separator">•</span>
+        <span class="esp-card__offline-time">{{ offlineTimeAgo }}</span>
       </div>
 
       <!-- Data Source & Freshness Indicators -->
@@ -1533,6 +1627,53 @@ const heartbeatTooltip = computed(() => {
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-muted);
   margin-left: 0.25rem;
+}
+
+/* =============================================================================
+   Offline Info Display (Phase 1 - LWT & Heartbeat Timeout)
+   ============================================================================= */
+
+.esp-card__offline-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 0.375rem;
+  cursor: help;
+}
+
+.esp-card__offline-text {
+  font-weight: 600;
+}
+
+.esp-card__offline-separator {
+  opacity: 0.5;
+}
+
+.esp-card__offline-time {
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+/* LWT: Red for crash/power-loss */
+.esp-card__offline-info.text-red-500 {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Heartbeat Timeout: Orange for timeout */
+.esp-card__offline-info.text-orange-500 {
+  background-color: rgba(249, 115, 22, 0.1);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+}
+
+/* Shutdown: Blue for intentional */
+.esp-card__offline-info.text-blue-400 {
+  background-color: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.2);
 }
 </style>
 

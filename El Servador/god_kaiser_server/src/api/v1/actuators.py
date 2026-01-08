@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.logging_config import get_logger
 from ...db.models.actuator import ActuatorConfig, ActuatorState as ActuatorStateModel
-from ...db.repositories import ActuatorRepository, ESPRepository
+from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...mqtt.publisher import Publisher
 from ...schemas import (
     ActuatorCommand,
@@ -49,6 +49,7 @@ from ...schemas.common import PaginationMeta
 from ...services.actuator_service import ActuatorService
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
+from ...services.gpio_validation_service import GpioValidationService
 from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service, get_config_builder, get_esp_service, get_mqtt_publisher
 
 logger = get_logger(__name__)
@@ -299,17 +300,53 @@ async def create_or_update_actuator(
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+    sensor_repo = SensorRepository(db)
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Check if actuator exists
     existing = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-    
+
+    # =========================================================================
+    # GPIO-Validierung (Phase 2)
+    # Prüft: System-Pins, DB-Sensoren, DB-Aktoren, ESP-gemeldeten Status
+    # =========================================================================
+    gpio_validator = GpioValidationService(
+        session=db,
+        sensor_repo=sensor_repo,
+        actuator_repo=actuator_repo,
+        esp_repo=esp_repo
+    )
+
+    validation_result = await gpio_validator.validate_gpio_available(
+        esp_db_id=esp_device.id,
+        gpio=gpio,
+        exclude_actuator_id=existing.id if existing else None
+    )
+
+    if not validation_result.available:
+        logger.warning(
+            f"GPIO conflict for ESP {esp_id}, GPIO {gpio}: "
+            f"{validation_result.conflict_type} - {validation_result.message}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "GPIO_CONFLICT",
+                "gpio": gpio,
+                "conflict_type": validation_result.conflict_type.value,
+                "conflict_component": validation_result.conflict_component,
+                "conflict_id": str(validation_result.conflict_id) if validation_result.conflict_id else None,
+                "message": validation_result.message
+            }
+        )
+    # =========================================================================
+
     if existing:
         # Update existing
         model_fields = _schema_to_model_fields(request, existing=existing)

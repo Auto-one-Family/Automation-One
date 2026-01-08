@@ -151,8 +151,16 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 | `sensor_{i}_subzone` | String | N/A | Max 32 chars | Subzone Identifier |
 | `sensor_{i}_active` | bool | N/A | - | Is Sensor Active? |
 | `sensor_{i}_raw_mode` | bool | `true` | - | Raw ADC Mode (true) or Calibrated (false) |
+| `sensor_{i}_mode` | String | `"continuous"` | Max 16 chars | **✅ Phase 2C** Operating Mode (continuous, on_demand, paused, scheduled) |
+| `sensor_{i}_interval` | uint32_t | `30000` | 1000-300000 | **✅ Phase 2C** Measurement Interval in Milliseconds |
 
 **Note:** Sensor-Array-Elemente haben **keine Default-Values**. Keys werden nur geschrieben, wenn ein Sensor konfiguriert wird.
+
+**Phase 2C Operating Modes:**
+- `continuous`: Sensor misst automatisch im konfigurierten Intervall
+- `on_demand`: Sensor misst nur auf MQTT-Command (via `/sensor/{gpio}/command`)
+- `paused`: Sensor misst nicht (GPIO bleibt reserviert)
+- `scheduled`: Sensor misst auf Server-getriggerte Commands (Phase 2D)
 
 #### Actuator Configuration (Namespace: `actuator_config`)
 
@@ -207,6 +215,10 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
   - `sensor_{i}_active` (bool) - Aktiv?
 
   - `sensor_{i}_raw_mode` (bool) - Raw-Mode aktiv? (immer `true` für Server-Centric Architecture)
+
+  - `sensor_{i}_mode` (String) - **✅ Phase 2C** Operating Mode ("continuous", "on_demand", "paused", "scheduled")
+
+  - `sensor_{i}_interval` (uint32_t) - **✅ Phase 2C** Mess-Intervall in Millisekunden (1000-300000, default: 30000)
 
 ## Actuator Configuration
 
@@ -302,9 +314,9 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 - WiFi: 7 Keys
 - Zone: 6 Keys
 - System: 5 Keys
-- Sensors: 1 + (6 × 20) = 121 Keys (bei 20 Sensoren)
+- Sensors: 1 + (8 × 20) = 161 Keys (bei 20 Sensoren, **+2 Keys Phase 2C: mode, interval**)
 - Actuators: 1 + (10 × 20) = 201 Keys (bei 20 Aktoren)
-- **TOTAL: ~340 Keys** (bei voller Auslastung)
+- **TOTAL: ~380 Keys** (bei voller Auslastung)
 
 **Estimated NVS-Usage:**
 - Strings (avg 30 bytes): ~240 Keys × 30 = 7.2 KB

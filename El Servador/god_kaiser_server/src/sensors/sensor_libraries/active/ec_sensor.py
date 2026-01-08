@@ -66,6 +66,16 @@ class ECSensorProcessor(BaseSensorProcessor):
     - Different water types affect readings (freshwater vs seawater)
     """
 
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # EC sensors (like pH) are typically used for point measurements.
+    # Users dip the probe when needed, read the value, and rinse/store the probe.
+    RECOMMENDED_MODE = "on_demand"
+    RECOMMENDED_TIMEOUT_SECONDS = 0  # No timeout for on-demand sensors
+    RECOMMENDED_INTERVAL_SECONDS = 0  # No automatic measurements
+    SUPPORTS_ON_DEMAND = True
+
     # ESP32 ADC configuration
     ADC_MAX_12BIT = 4095  # ESP32 12-bit ADC (0-3.3V)
     ADC_MAX_16BIT = 32767  # ADS1115 16-bit ADC (0-5V, for precision applications)

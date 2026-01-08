@@ -672,13 +672,36 @@ def get_actuator_service(db: DBSession):
     from ..mqtt.publisher import Publisher
     from ..services.actuator_service import ActuatorService
     from ..services.safety_service import SafetyService
-    
+
     actuator_repo = ActuatorRepository(db)
     esp_repo = ESPRepository(db)
     safety_service = SafetyService(actuator_repo, esp_repo)
     publisher = get_mqtt_publisher()
-    
+
     return ActuatorService(actuator_repo, safety_service, publisher)
+
+
+def get_sensor_service(db: DBSession):
+    """
+    Get SensorService instance.
+
+    Provides SensorService with all required dependencies:
+    - SensorRepository
+    - ESPRepository
+    - Publisher (for MQTT commands)
+    """
+    from ..db.repositories import ESPRepository, SensorRepository
+    from ..services.sensor_service import SensorService
+
+    sensor_repo = SensorRepository(db)
+    esp_repo = ESPRepository(db)
+    publisher = get_mqtt_publisher()
+
+    return SensorService(
+        sensor_repo=sensor_repo,
+        esp_repo=esp_repo,
+        publisher=publisher,
+    )
 
 
 def get_config_builder(db: DBSession):
@@ -767,3 +790,39 @@ def get_simulation_scheduler():
 # Type alias for simulation scheduler dependency
 # IMPORTANT: Named 'SimulationSchedulerDep' to avoid shadowing the actual class name
 SimulationSchedulerDep = Annotated["SimulationScheduler", Depends(get_simulation_scheduler)]  # type: ignore
+
+
+# =============================================================================
+# Sensor Scheduler Service Dependency (Phase 2H)
+# =============================================================================
+
+
+def get_sensor_scheduler_service(db: DBSession):
+    """
+    Get SensorSchedulerService instance.
+
+    Phase 2H: Provides dependency for scheduled sensor measurement jobs.
+
+    Args:
+        db: Database session
+
+    Returns:
+        SensorSchedulerService instance with all dependencies
+    """
+    from ..db.repositories.esp_repo import ESPRepository
+    from ..db.repositories.sensor_repo import SensorRepository
+    from ..services.sensor_scheduler_service import SensorSchedulerService
+
+    sensor_repo = SensorRepository(db)
+    esp_repo = ESPRepository(db)
+    publisher = get_mqtt_publisher()
+
+    return SensorSchedulerService(
+        sensor_repo=sensor_repo,
+        esp_repo=esp_repo,
+        publisher=publisher,
+    )
+
+
+# Type alias for sensor scheduler service dependency
+SensorSchedulerServiceDep = Annotated["SensorSchedulerService", Depends(get_sensor_scheduler_service)]  # type: ignore

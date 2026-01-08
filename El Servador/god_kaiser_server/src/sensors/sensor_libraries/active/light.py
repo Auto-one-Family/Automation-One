@@ -18,11 +18,20 @@ from ...base_processor import (
 class LightProcessor(BaseSensorProcessor):
     """
     Light Sensor Processor (TSL2561, BH1750).
-    
+
     Supports:
     - TSL2561: I2C lux sensor (0-40000 lux)
     - BH1750: I2C lux sensor (1-65535 lux)
     """
+
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Light sensors are typically used for continuous environmental monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 60  # Read every 60 seconds (light changes slowly)
+    SUPPORTS_ON_DEMAND = False
 
     # Sensor Specifications
     TSL2561_MIN = 0.0  # lux

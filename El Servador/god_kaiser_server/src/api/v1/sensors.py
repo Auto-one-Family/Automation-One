@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig, SensorData
 from ...db.models.enums import DataSource
-from ...db.repositories import ESPRepository, SensorRepository
+from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...schemas import (
     SensorConfigCreate,
     SensorConfigListResponse,
@@ -38,11 +38,15 @@ from ...schemas import (
     SensorReading,
     SensorStats,
     SensorStatsResponse,
+    TriggerMeasurementResponse,
 )
 from ...schemas.common import PaginationMeta
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
-from ..deps import ActiveUser, DBSession, OperatorUser, get_config_builder, get_esp_service, get_mqtt_publisher
+from ..deps import ActiveUser, DBSession, OperatorUser, get_config_builder, get_esp_service, get_mqtt_publisher, get_sensor_service, get_sensor_scheduler_service
+from ...services.sensor_scheduler_service import SensorSchedulerService
+from ...services.sensor_service import SensorService
+from ...services.gpio_validation_service import GpioValidationService
 
 logger = get_logger(__name__)
 
@@ -103,12 +107,12 @@ def _model_to_response(sensor: SensorConfig, esp_device_id: Optional[str] = None
 def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
     """
     Convert SensorConfigCreate schema fields to SensorConfig model fields.
-    
+
     Returns dict with model field names for direct model creation.
     """
     # Convert processing_mode string to pi_enhanced boolean
     pi_enhanced = request.processing_mode == "pi_enhanced"
-    
+
     # Build thresholds dict from individual fields
     thresholds = {}
     if request.threshold_min is not None:
@@ -119,7 +123,7 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         thresholds["warning_min"] = request.warning_min
     if request.warning_max is not None:
         thresholds["warning_max"] = request.warning_max
-    
+
     return {
         "sensor_type": request.sensor_type,
         "sensor_name": request.name or "",  # Schema: name -> Model: sensor_name
@@ -129,6 +133,13 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         "calibration_data": request.calibration,  # Schema: calibration -> Model: calibration_data
         "thresholds": thresholds if thresholds else None,
         "sensor_metadata": request.metadata or {},  # Schema: metadata -> Model: sensor_metadata
+        # =========================================================================
+        # OPERATING MODE FIELDS (Phase 2F)
+        # =========================================================================
+        "operating_mode": request.operating_mode,
+        "timeout_seconds": request.timeout_seconds,
+        "timeout_warning_enabled": request.timeout_warning_enabled,
+        "schedule_config": request.schedule_config,
     }
 
 
@@ -293,17 +304,53 @@ async def create_or_update_sensor(
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
-    
+    actuator_repo = ActuatorRepository(db)
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Check if sensor exists
     existing = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-    
+
+    # =========================================================================
+    # GPIO-Validierung (Phase 2)
+    # Prüft: System-Pins, DB-Sensoren, DB-Aktoren, ESP-gemeldeten Status
+    # =========================================================================
+    gpio_validator = GpioValidationService(
+        session=db,
+        sensor_repo=sensor_repo,
+        actuator_repo=actuator_repo,
+        esp_repo=esp_repo
+    )
+
+    validation_result = await gpio_validator.validate_gpio_available(
+        esp_db_id=esp_device.id,
+        gpio=gpio,
+        exclude_sensor_id=existing.id if existing else None
+    )
+
+    if not validation_result.available:
+        logger.warning(
+            f"GPIO conflict for ESP {esp_id}, GPIO {gpio}: "
+            f"{validation_result.conflict_type} - {validation_result.message}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "GPIO_CONFLICT",
+                "gpio": gpio,
+                "conflict_type": validation_result.conflict_type.value,
+                "conflict_component": validation_result.conflict_component,
+                "conflict_id": str(validation_result.conflict_id) if validation_result.conflict_id else None,
+                "message": validation_result.message
+            }
+        )
+    # =========================================================================
+
     # Convert schema fields to model fields
     model_fields = _schema_to_model_fields(request)
     
@@ -321,6 +368,14 @@ async def create_or_update_sensor(
             existing.thresholds = model_fields["thresholds"]
         if request.metadata is not None:
             existing.sensor_metadata = model_fields["sensor_metadata"]
+        # =========================================================================
+        # OPERATING MODE FIELDS (Phase 2F)
+        # Note: Always update - None is valid (means "use type default")
+        # =========================================================================
+        existing.operating_mode = model_fields["operating_mode"]
+        existing.timeout_seconds = model_fields["timeout_seconds"]
+        existing.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
+        existing.schedule_config = model_fields["schedule_config"]
         sensor = existing
         logger.info(f"Sensor updated: {esp_id} GPIO {gpio} by {current_user.username}")
     else:
@@ -335,15 +390,40 @@ async def create_or_update_sensor(
     
     await db.commit()
     await db.refresh(sensor)
-    
+
+    # =========================================================================
+    # SCHEDULE JOB UPDATE (Phase 2H)
+    # Update APScheduler job based on operating_mode and schedule_config
+    # =========================================================================
+    try:
+        scheduler_service: SensorSchedulerService = get_sensor_scheduler_service(db)
+
+        if sensor.operating_mode == "scheduled" and sensor.schedule_config:
+            # Create or update scheduled job
+            job_success = await scheduler_service.create_or_update_job(
+                esp_id=esp_id,
+                gpio=gpio,
+                schedule_config=sensor.schedule_config,
+            )
+            if job_success:
+                logger.info(f"Scheduled job created/updated for {esp_id}/GPIO {gpio}")
+            else:
+                logger.warning(f"Failed to create scheduled job for {esp_id}/GPIO {gpio}")
+        else:
+            # Remove job if mode is not scheduled (or schedule_config is None)
+            await scheduler_service.remove_job(esp_id, gpio)
+    except Exception as e:
+        # Non-fatal: DB save was successful, job can be recovered on server restart
+        logger.warning(f"Schedule job update failed for {esp_id}/GPIO {gpio}: {e}")
+
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
-        
+
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
-        
+
         if config_sent:
             logger.info(f"Config published to ESP {esp_id} after sensor create/update")
         else:
@@ -351,7 +431,7 @@ async def create_or_update_sensor(
     except Exception as e:
         # Log error but don't fail the request (DB save was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
-    
+
     # Convert model to response schema
     return _model_to_response(sensor, esp_id)
 
@@ -409,9 +489,20 @@ async def delete_sensor(
     # Delete sensor
     await sensor_repo.delete(sensor.id)
     await db.commit()
-    
+
     logger.info(f"Sensor deleted: {esp_id} GPIO {gpio} by {current_user.username}")
-    
+
+    # =========================================================================
+    # SCHEDULE JOB REMOVAL (Phase 2H)
+    # Remove APScheduler job when sensor is deleted
+    # =========================================================================
+    try:
+        scheduler_service: SensorSchedulerService = get_sensor_scheduler_service(db)
+        await scheduler_service.remove_job(esp_id, gpio)
+    except Exception as e:
+        # Non-fatal: Job may not exist, or scheduler may not be initialized
+        logger.debug(f"Schedule job removal for deleted sensor: {e}")
+
     # Publish updated config to ESP32 via MQTT (sensor removed from payload)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
@@ -715,3 +806,57 @@ async def get_sensor_stats(
         ),
         time_range={"start": start_time, "end": end_time},
     )
+
+
+# =============================================================================
+# On-Demand Measurement (Phase 2D)
+# =============================================================================
+
+
+@router.post(
+    "/{esp_id}/{gpio}/measure",
+    response_model=TriggerMeasurementResponse,
+    summary="Trigger manual measurement",
+    description="Triggers a manual measurement for an on-demand sensor.",
+    responses={
+        200: {"description": "Measurement command sent successfully"},
+        404: {"description": "ESP or sensor not found"},
+        503: {"description": "ESP offline or MQTT failure"},
+    },
+)
+async def trigger_measurement(
+    esp_id: str,
+    gpio: int,
+    db: DBSession,
+    current_user: OperatorUser,
+    sensor_service: Annotated[SensorService, Depends(get_sensor_service)],
+) -> TriggerMeasurementResponse:
+    """
+    Trigger a manual measurement for a sensor.
+
+    Used primarily for sensors with operating_mode='on_demand'.
+    Can also be used to force a measurement on any sensor.
+
+    Requires Operator role or higher.
+
+    Args:
+        esp_id: ESP device ID
+        gpio: Sensor GPIO pin
+
+    Returns:
+        TriggerMeasurementResponse with request tracking info
+    """
+    try:
+        result = await sensor_service.trigger_measurement(
+            esp_id=esp_id,
+            gpio=gpio,
+        )
+        return TriggerMeasurementResponse(**result)
+
+    except ValueError as e:
+        # ESP or sensor not found, or sensor disabled
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    except RuntimeError as e:
+        # ESP offline or MQTT failure
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))

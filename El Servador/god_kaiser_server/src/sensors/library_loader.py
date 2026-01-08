@@ -133,6 +133,30 @@ class LibraryLoader:
         """
         return list(self.processors.keys())
 
+    def get_all_processor_classes(self) -> Dict[str, type]:
+        """
+        Get all loaded processor classes (for auto-registration).
+
+        Returns a mapping from sensor_type to the processor CLASS (not instance).
+        This is used by SensorTypeRegistrationService to read class attributes
+        like RECOMMENDED_MODE, RECOMMENDED_TIMEOUT_SECONDS, etc.
+
+        Returns:
+            Dict mapping sensor_type (str) to processor class (type)
+
+        Example:
+            {
+                "ph": PHSensorProcessor,
+                "temperature": TemperatureProcessor,
+                "humidity": HumidityProcessor,
+                ...
+            }
+        """
+        return {
+            sensor_type: instance.__class__
+            for sensor_type, instance in self.processors.items()
+        }
+
     def _discover_libraries(self):
         """
         Discover and load all sensor processor libraries.

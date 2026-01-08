@@ -26,6 +26,7 @@ from src.core.config import get_settings
 from src.core.logging_config import get_logger
 from src.core.security import hash_password
 from src.db.base import Base
+from src.db.repositories.esp_repo import ESPRepository
 from src.db.repositories.system_config_repo import SystemConfigRepository
 from src.db.repositories.user_repo import UserRepository
 from src.db.session import get_engine, get_session, init_db
@@ -95,23 +96,108 @@ async def create_default_system_settings() -> None:
     async for session in get_session():
         try:
             system_config_repo = SystemConfigRepository(session)
-            
+
             # MQTT Auth settings
             await system_config_repo.set_mqtt_auth_config(
                 enabled=False,
                 username=None,
                 password_hash=None,
             )
-            
+
             await session.commit()
             logger.info("Default system settings created")
-            
+
         except Exception as e:
             logger.error(f"Failed to create default system settings: {e}", exc_info=True)
             await session.rollback()
             raise
         finally:
             break
+
+
+async def create_wokwi_esp() -> bool:
+    """
+    Create Wokwi simulation ESP device if it doesn't exist.
+
+    This ESP is pre-registered so Wokwi-simulated firmware can connect
+    immediately without manual registration.
+
+    ESP ID: ESP_WOKWI001 (matches WOKWI_ESP_ID in platformio.ini)
+
+    Returns:
+        True if created, False if already exists
+    """
+    from datetime import timezone
+    from src.db.models.esp import ESPDevice
+
+    WOKWI_ESP_ID = "ESP_WOKWI001"
+
+    async for session in get_session():
+        try:
+            esp_repo = ESPRepository(session)
+
+            # Check if Wokwi ESP already exists
+            existing_esp = await esp_repo.get_by_device_id(WOKWI_ESP_ID)
+            if existing_esp:
+                logger.info(f"Wokwi ESP '{WOKWI_ESP_ID}' already exists")
+                return False
+
+            # Create Wokwi ESP device
+            wokwi_esp = ESPDevice(
+                device_id=WOKWI_ESP_ID,
+                name="Wokwi Simulation ESP",
+                hardware_type="ESP32_WROOM",
+                status="offline",  # Will become online when Wokwi connects
+                zone_id=None,
+                zone_name=None,
+                master_zone_id=None,
+                is_zone_master=False,
+                kaiser_id="god",
+                capabilities={
+                    "max_sensors": 20,
+                    "max_actuators": 12,
+                    "features": ["heartbeat", "sensors", "actuators", "wokwi_simulation"],
+                    "wokwi": True,
+                },
+                device_metadata={
+                    "source": "wokwi_simulation",
+                    "created_by": "init_db",
+                    "description": "Pre-registered Wokwi ESP for firmware simulation testing",
+                    "simulation_config": {
+                        "sensors": {},
+                        "actuators": {},
+                        "auto_heartbeat": False,
+                    },
+                },
+            )
+
+            session.add(wokwi_esp)
+            await session.commit()
+
+            logger.info(
+                f"\n{'='*60}\n"
+                f"WOKWI ESP CREATED:\n"
+                f"  Device ID: {WOKWI_ESP_ID}\n"
+                f"  Name: Wokwi Simulation ESP\n"
+                f"  Status: offline (waiting for Wokwi connection)\n"
+                f"{'='*60}\n"
+                f"To start Wokwi simulation:\n"
+                f"  1. Start Mosquitto: mosquitto -v\n"
+                f"  2. Start Server: poetry run uvicorn ...\n"
+                f"  3. Build firmware: cd 'El Trabajante' && pio run -e wokwi_simulation\n"
+                f"  4. Run Wokwi: wokwi-cli . --timeout 0\n"
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to create Wokwi ESP: {e}", exc_info=True)
+            await session.rollback()
+            raise
+        finally:
+            break
+
+    return False
 
 
 async def run_alembic_upgrade() -> None:
@@ -157,38 +243,46 @@ async def run_alembic_upgrade() -> None:
 async def main() -> None:
     """
     Main initialization function.
-    
+
     Steps:
     1. Run Alembic migrations (create tables)
     2. Create default admin user
     3. Create default system settings
+    4. Create Wokwi ESP device (for simulation testing)
     """
     logger.info("=" * 60)
     logger.info("Database Initialization Script")
     logger.info("=" * 60)
-    
+
     try:
         # Step 1: Run Alembic migrations
         logger.info("Step 1: Running database migrations...")
         await run_alembic_upgrade()
-        
+
         # Step 2: Create default admin
         logger.info("Step 2: Creating default admin user...")
         username, password = await create_default_admin()
-        
+
         # Step 3: Create default system settings
         logger.info("Step 3: Creating default system settings...")
         await create_default_system_settings()
-        
+
+        # Step 4: Create Wokwi ESP device
+        logger.info("Step 4: Creating Wokwi ESP device...")
+        wokwi_created = await create_wokwi_esp()
+
         logger.info("=" * 60)
         logger.info("Database initialization completed successfully!")
         logger.info("=" * 60)
-        
+
         if password != "[existing password]":
             logger.info(f"\nAdmin credentials:")
             logger.info(f"  Username: {username}")
             logger.info(f"  Password: {password}")
             logger.info("\n⚠️  Save these credentials securely!")
+
+        if wokwi_created:
+            logger.info("\n🎮 Wokwi ESP 'ESP_WOKWI001' ready for simulation testing!")
         
     except Exception as e:
         logger.error(f"Database initialization failed: {e}", exc_info=True)

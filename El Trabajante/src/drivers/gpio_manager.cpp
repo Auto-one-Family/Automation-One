@@ -300,7 +300,7 @@ GPIOPinInfo GPIOManager::getPinInfo(uint8_t gpio) const {
             return pin_info;
         }
     }
-    
+
     // Return empty info if pin not found
     GPIOPinInfo empty;
     empty.pin = 255;  // Invalid pin marker
@@ -309,6 +309,29 @@ GPIOPinInfo GPIOManager::getPinInfo(uint8_t gpio) const {
     empty.mode = INPUT_PULLUP;
     empty.in_safe_mode = true;
     return empty;
+}
+
+// ============================================
+// PIN OWNER/COMPONENT QUERIES (Phase 4)
+// ============================================
+// Used for detailed error messages in config_response
+
+String GPIOManager::getPinOwner(uint8_t gpio) const {
+    for (const auto& pin_info : pins_) {
+        if (pin_info.pin == gpio && pin_info.owner[0] != '\0') {
+            return String(pin_info.owner);
+        }
+    }
+    return "";
+}
+
+String GPIOManager::getPinComponent(uint8_t gpio) const {
+    for (const auto& pin_info : pins_) {
+        if (pin_info.pin == gpio && pin_info.component_name[0] != '\0') {
+            return String(pin_info.component_name);
+        }
+    }
+    return "";
 }
 
 void GPIOManager::printPinStatus() const {
@@ -340,6 +363,55 @@ uint8_t GPIOManager::getAvailablePinCount() const {
             count++;
         }
     }
+    return count;
+}
+
+// ============================================
+// GPIO STATUS REPORTING (Phase 1)
+// ============================================
+
+std::vector<GPIOPinInfo> GPIOManager::getReservedPinsList() const {
+    std::vector<GPIOPinInfo> reserved;
+
+    // Pre-allocate for performance and to prevent heap fragmentation
+    // MAX_SENSORS + MAX_ACTUATORS + System-Pins (I2C, SPI, etc.)
+    reserved.reserve(16);
+
+    try {
+        for (const auto& pin_info : pins_) {
+            // Nur Pins die NICHT in Safe-Mode sind (also aktiv reserviert)
+            // UND einen Owner haben (doppelte Sicherheit)
+            if (!pin_info.in_safe_mode && pin_info.owner[0] != '\0') {
+                reserved.push_back(pin_info);
+            }
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("GPIOManager::getReservedPinsList() failed: " + String(e.what()));
+        // Return empty list on error - don't crash the heartbeat
+        return std::vector<GPIOPinInfo>();
+    } catch (...) {
+        LOG_ERROR("GPIOManager::getReservedPinsList() unknown exception");
+        return std::vector<GPIOPinInfo>();
+    }
+
+    LOG_DEBUG("GPIOManager: " + String(reserved.size()) + " reserved pins for heartbeat");
+    return reserved;
+}
+
+uint8_t GPIOManager::getReservedPinCount() const {
+    uint8_t count = 0;
+
+    try {
+        for (const auto& pin_info : pins_) {
+            if (!pin_info.in_safe_mode && pin_info.owner[0] != '\0') {
+                count++;
+            }
+        }
+    } catch (...) {
+        LOG_ERROR("GPIOManager::getReservedPinCount() exception");
+        return 0;
+    }
+
     return count;
 }
 

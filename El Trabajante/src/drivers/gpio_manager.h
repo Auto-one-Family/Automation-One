@@ -103,11 +103,42 @@ public:
     // Get detailed information about a specific pin
     GPIOPinInfo getPinInfo(uint8_t gpio) const;
 
+    /**
+     * @brief Get owner of a reserved pin (Phase 4 - Config Feedback)
+     * @param gpio GPIO pin number
+     * @return Owner string ("sensor", "actuator", "system") or empty if not reserved
+     */
+    String getPinOwner(uint8_t gpio) const;
+
+    /**
+     * @brief Get component name of a reserved pin (Phase 4 - Config Feedback)
+     * @param gpio GPIO pin number
+     * @return Component name (e.g., "DS18B20", "Pump1") or empty if not reserved
+     */
+    String getPinComponent(uint8_t gpio) const;
+
     // Print status of all GPIO pins to Serial
     void printPinStatus() const;
 
     // Get count of available (unallocated) pins
     uint8_t getAvailablePinCount() const;
+
+    // ============================================
+    // GPIO STATUS REPORTING (Phase 1)
+    // ============================================
+    /**
+     * Returns list of all reserved (non-safe-mode) pins with details.
+     * Used by MQTTClient to include GPIO status in heartbeat payload.
+     * Only returns pins that are NOT in safe mode (i.e., actively used).
+     * @return Vector of GPIOPinInfo for all reserved pins
+     */
+    std::vector<GPIOPinInfo> getReservedPinsList() const;
+
+    /**
+     * Returns total count of reserved pins (not in safe mode).
+     * @return Number of pins actively in use
+     */
+    uint8_t getReservedPinCount() const;
 
     // ============================================
     // I2C PIN MANAGEMENT

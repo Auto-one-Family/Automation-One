@@ -1,13 +1,31 @@
 /**
  * Formatting Utilities (German)
- * 
+ *
  * Provides consistent formatting for dates, times, numbers, and other values
  * throughout the application. All formats are German-localized.
  */
 
+import type { SensorOperatingMode } from '@/types'
+
 // =============================================================================
 // DATE & TIME FORMATTING
 // =============================================================================
+
+/**
+ * Normalize a date string to ensure proper timezone handling.
+ * Server sends timestamps without 'Z' suffix, but they are in UTC.
+ * This function appends 'Z' to treat them as UTC.
+ */
+function normalizeTimestamp(date: string | Date): Date {
+  if (date instanceof Date) {
+    return date
+  }
+  // If no timezone info, assume UTC
+  if (!date.endsWith('Z') && !date.includes('+') && !date.includes('-', 10)) {
+    return new Date(date + 'Z')
+  }
+  return new Date(date)
+}
 
 /**
  * Format a date as relative time (German)
@@ -15,9 +33,9 @@
  */
 export function formatRelativeTime(date: string | Date | null | undefined): string {
   if (!date) return 'Nie'
-  
+
   const now = new Date()
-  const then = new Date(date)
+  const then = normalizeTimestamp(date)
   const diffMs = now.getTime() - then.getTime()
   const diffSec = Math.floor(diffMs / 1000)
   
@@ -52,7 +70,7 @@ export function formatRelativeTime(date: string | Date | null | undefined): stri
  */
 export function formatDateTime(date: string | Date | null | undefined): string {
   if (!date) return '-'
-  
+
   try {
     return new Intl.DateTimeFormat('de-DE', {
       day: '2-digit',
@@ -60,7 +78,7 @@ export function formatDateTime(date: string | Date | null | undefined): string {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    }).format(new Date(date))
+    }).format(normalizeTimestamp(date))
   } catch {
     return '-'
   }
@@ -72,13 +90,13 @@ export function formatDateTime(date: string | Date | null | undefined): string {
  */
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return '-'
-  
+
   try {
     return new Intl.DateTimeFormat('de-DE', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-    }).format(new Date(date))
+    }).format(normalizeTimestamp(date))
   } catch {
     return '-'
   }
@@ -90,18 +108,18 @@ export function formatDate(date: string | Date | null | undefined): string {
  */
 export function formatTime(date: string | Date | null | undefined, includeSeconds = false): string {
   if (!date) return '-'
-  
+
   try {
     const options: Intl.DateTimeFormatOptions = {
       hour: '2-digit',
       minute: '2-digit',
     }
-    
+
     if (includeSeconds) {
       options.second = '2-digit'
     }
-    
-    return new Intl.DateTimeFormat('de-DE', options).format(new Date(date))
+
+    return new Intl.DateTimeFormat('de-DE', options).format(normalizeTimestamp(date))
   } catch {
     return '-'
   }
@@ -490,6 +508,109 @@ export function getAgeSeconds(timestamp: string | Date | null | undefined): numb
   const then = new Date(timestamp).getTime()
   return Math.floor((now - then) / 1000)
 }
+
+// =============================================================================
+// SENSOR STATUS FORMATTING (Phase 2E)
+// =============================================================================
+
+/**
+ * Badge variant types for UI components.
+ */
+export type SensorStatusVariant = 'success' | 'warning' | 'error' | 'info' | 'gray'
+
+/**
+ * Sensor status information for display.
+ */
+export interface SensorStatusInfo {
+  label: string
+  variant: SensorStatusVariant
+  icon: 'Activity' | 'AlertTriangle' | 'Clock' | 'Calendar' | 'Pause' | 'HelpCircle'
+  showLastReading: boolean
+}
+
+/**
+ * Formatiert Sensor-Status basierend auf Operating Mode.
+ *
+ * @param sensor - Sensor mit operating_mode, is_stale, last_reading_at
+ * @returns Object mit label, variant, icon für Badge-Anzeige
+ */
+export function formatSensorStatus(sensor: {
+  operating_mode?: SensorOperatingMode
+  is_stale?: boolean
+  last_reading_at?: string | null
+  timeout_seconds?: number
+}): SensorStatusInfo {
+  const mode = sensor.operating_mode || 'continuous'
+
+  switch (mode) {
+    case 'continuous':
+      if (sensor.is_stale) {
+        return {
+          label: sensor.last_reading_at
+            ? `Keine Daten seit ${formatRelativeTime(sensor.last_reading_at)}`
+            : 'Noch keine Daten empfangen',
+          variant: 'error',
+          icon: 'AlertTriangle',
+          showLastReading: false,
+        }
+      }
+      return {
+        label: 'Aktiv',
+        variant: 'success',
+        icon: 'Activity',
+        showLastReading: true,
+      }
+
+    case 'on_demand':
+      return {
+        label: sensor.last_reading_at
+          ? `Letzte Messung: ${formatRelativeTime(sensor.last_reading_at)}`
+          : 'Noch keine Messung durchgeführt',
+        variant: 'info',
+        icon: 'Clock',
+        showLastReading: false,
+      }
+
+    case 'scheduled':
+      return {
+        label: 'Geplant',
+        variant: 'info',
+        icon: 'Calendar',
+        showLastReading: true,
+      }
+
+    case 'paused':
+      return {
+        label: 'Pausiert',
+        variant: 'gray',
+        icon: 'Pause',
+        showLastReading: false,
+      }
+
+    default:
+      return {
+        label: 'Unbekannt',
+        variant: 'gray',
+        icon: 'HelpCircle',
+        showLastReading: false,
+      }
+  }
+}
+
+/**
+ * Übersetzt Operating Mode in lesbares Label.
+ */
+export function getModeLabel(mode: SensorOperatingMode | undefined): string {
+  switch (mode) {
+    case 'continuous': return 'Kontinuierlich'
+    case 'on_demand': return 'Auf Abruf'
+    case 'scheduled': return 'Geplant'
+    case 'paused': return 'Pausiert'
+    default: return 'Unbekannt'
+  }
+}
+
+
 
 
 

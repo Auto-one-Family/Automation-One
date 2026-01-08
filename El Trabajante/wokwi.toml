@@ -19,6 +19,13 @@ firmware = ".pio/build/wokwi_simulation/firmware.bin"
 elf = ".pio/build/wokwi_simulation/firmware.elf"
 
 # ============================================
+# RFC2217 Serial Port für externen Zugriff
+# ============================================
+# Ermöglicht Claude/Scripts den Serial-Output zu lesen
+# Verbindung: rfc2217://localhost:4000
+rfc2217ServerPort = 4000
+
+# ============================================
 # Network Configuration
 # ============================================
 # Gateway enables connection to external services (MQTT broker)
@@ -26,6 +33,10 @@ elf = ".pio/build/wokwi_simulation/firmware.elf"
 # - CI: host.wokwi.internal -> CI service (mosquitto)
 [wokwi.network]
 gateway = true
+
+# HINWEIS: ESP32 verbindet zu host.wokwi.internal, was automatisch
+# zum Host-Rechner aufgelöst wird wenn gateway = true.
+# Die Windows Firewall muss Verbindungen auf Port 1883 erlauben!
 
 # ============================================
 # Serial Monitor Configuration

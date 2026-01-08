@@ -231,7 +231,8 @@ bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
   kaiser.zone_assigned = storageManager.getBool("zone_assigned", false);
   
   // Load Kaiser zone (Existing)
-  kaiser.kaiser_id = storageManager.getStringObj("kaiser_id", "");
+  // Default to "god" if not set (required for MQTT topics)
+  kaiser.kaiser_id = storageManager.getStringObj("kaiser_id", "god");
   kaiser.kaiser_name = storageManager.getStringObj("kaiser_name", "");
   kaiser.connected = storageManager.getBool("connected", false);
   kaiser.id_generated = storageManager.getBool("id_generated", false);
@@ -809,7 +810,13 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   success &= storageManager.putBool(key_buffer, config.active);
   buildSensorKey(key_buffer, sizeof(key_buffer), index, "raw_mode");
   success &= storageManager.putBool(key_buffer, config.raw_mode);
-  
+
+  // ✅ Phase 2C: Operating Mode Persistence
+  buildSensorKey(key_buffer, sizeof(key_buffer), index, "mode");
+  success &= storageManager.putString(key_buffer, config.operating_mode);
+  buildSensorKey(key_buffer, sizeof(key_buffer), index, "interval");
+  success &= storageManager.putULong(key_buffer, config.measurement_interval_ms);
+
   // Update count if new sensor
   if (existing_index < 0) {
     success &= storageManager.putUInt8("sensor_count", sensor_count + 1);
@@ -877,9 +884,17 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     sensors[loaded_count].active = storageManager.getBool(key_buffer, false);
     buildSensorKey(key_buffer, sizeof(key_buffer), i, "raw_mode");
     sensors[loaded_count].raw_mode = storageManager.getBool(key_buffer, true);
+
+    // ✅ Phase 2C: Operating Mode from NVS
+    buildSensorKey(key_buffer, sizeof(key_buffer), i, "mode");
+    sensors[loaded_count].operating_mode = storageManager.getStringObj(key_buffer, "continuous");
+    buildSensorKey(key_buffer, sizeof(key_buffer), i, "interval");
+    sensors[loaded_count].measurement_interval_ms = storageManager.getULong(key_buffer, 30000);
+
+    // Reset runtime fields
     sensors[loaded_count].last_raw_value = 0;
     sensors[loaded_count].last_reading = 0;
-    
+
     // Validate loaded config
     if (sensors[loaded_count].gpio != 255 && sensors[loaded_count].sensor_type.length() > 0) {
       loaded_count++;

@@ -38,7 +38,7 @@ struct KaiserZone {
   bool zone_assigned = false;       // Zone configuration status
 
   // Kaiser Communication (Existing)
-  String kaiser_id = "";            // ID of the parent Kaiser device managing this ESP (default: "god")
+  String kaiser_id = "god";         // ID of the parent Kaiser device managing this ESP
   String kaiser_name = "";          // Kaiser name (optional)
   String system_name = "";          // System name (optional)
   bool connected = false;           // MQTT connection status

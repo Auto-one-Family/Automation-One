@@ -554,29 +554,60 @@ void SensorManager::performAllMeasurements() {
     if (!initialized_) {
         return;
     }
-    
+
     unsigned long now = millis();
-    if (now - last_measurement_time_ < measurement_interval_) {
-        return;  // Not time yet
-    }
-    
-    // Measure all active sensors
+
+    // ✅ Phase 2C: Pro-Sensor Iteration with Mode-Check
+    // (Removed global interval check - each sensor has its own interval)
     for (uint8_t i = 0; i < sensor_count_; i++) {
+        // Check 1: Sensor must be active
         if (!sensors_[i].active) {
             continue;
         }
-        
+
+        // ✅ Phase 2C: Check 2: Operating Mode
+        const String& mode = sensors_[i].operating_mode;
+
+        if (mode == "paused") {
+            // Paused sensors are never measured automatically
+            continue;
+        }
+
+        if (mode == "on_demand") {
+            // On-demand sensors are only measured via command
+            continue;
+        }
+
+        if (mode == "scheduled") {
+            // Scheduled sensors are measured via server command (Phase 2D)
+            continue;
+        }
+
+        // ✅ Phase 2C: Check 3: Pro-Sensor Interval
+        uint32_t sensor_interval = sensors_[i].measurement_interval_ms;
+        if (sensor_interval == 0) {
+            sensor_interval = measurement_interval_;  // Fallback to global interval
+        }
+
+        // Check if enough time has passed since last measurement
+        if (now - sensors_[i].last_reading < sensor_interval) {
+            continue;  // Not time for this sensor yet
+        }
+
+        // ✅ Continuous Mode: Perform measurement
         // Check if this is a multi-value sensor
         const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
-        
+
         if (capability && capability->is_multi_value) {
             // Multi-value sensor - create multiple readings
             SensorReading readings[4];  // Max 4 values per sensor
             uint8_t count = performMultiValueMeasurement(sensors_[i].gpio, readings, 4);
-            
+
             // Readings are already published by performMultiValueMeasurement
             if (count == 0) {
                 LOG_WARNING("Sensor Manager: Multi-value measurement failed for GPIO " + String(sensors_[i].gpio));
+            } else {
+                sensors_[i].last_reading = now;  // Update timestamp
             }
         } else {
             // Single-value sensor - standard measurement
@@ -584,10 +615,12 @@ void SensorManager::performAllMeasurements() {
             if (performMeasurement(sensors_[i].gpio, reading)) {
                 // Publish via MQTT
                 publishSensorReading(reading);
+                sensors_[i].last_reading = now;  // Update timestamp
             }
         }
     }
-    
+
+    // Update global timestamp for compatibility
     last_measurement_time_ = now;
 }
 
@@ -597,6 +630,62 @@ void SensorManager::performAllMeasurements() {
 void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
     measurement_interval_ = interval_ms;
     LOG_INFO("Measurement interval set to " + String(interval_ms) + " ms");
+}
+
+// ============================================
+// MANUAL MEASUREMENT (PHASE 2C - On-Demand)
+// ============================================
+bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
+    if (!initialized_) {
+        LOG_ERROR("SensorManager: Not initialized, cannot trigger manual measurement");
+        return false;
+    }
+
+    // Find sensor configuration
+    SensorConfig* config = findSensorConfig(gpio);
+    if (!config) {
+        LOG_ERROR("SensorManager: Sensor not found on GPIO " + String(gpio));
+        return false;
+    }
+
+    // Check if sensor is active
+    if (!config->active) {
+        LOG_WARNING("SensorManager: Cannot measure inactive sensor on GPIO " + String(gpio));
+        return false;
+    }
+
+    LOG_INFO("SensorManager: Manual measurement triggered for GPIO " + String(gpio) +
+             " (mode: " + config->operating_mode + ")");
+
+    unsigned long now = millis();
+
+    // Check if this is a multi-value sensor
+    const SensorCapability* capability = findSensorCapability(config->sensor_type);
+
+    if (capability && capability->is_multi_value) {
+        // Multi-value sensor - create multiple readings
+        SensorReading readings[4];  // Max 4 values per sensor
+        uint8_t count = performMultiValueMeasurement(gpio, readings, 4);
+
+        if (count == 0) {
+            LOG_ERROR("SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
+            return false;
+        }
+
+        config->last_reading = now;
+        return true;
+    } else {
+        // Single-value sensor - standard measurement
+        SensorReading reading;
+        if (performMeasurement(gpio, reading)) {
+            publishSensorReading(reading);
+            config->last_reading = now;
+            return true;
+        }
+
+        LOG_ERROR("SensorManager: Manual measurement failed for GPIO " + String(gpio));
+        return false;
+    }
 }
 
 // ============================================

@@ -16,7 +16,13 @@ struct SensorConfig {
   String sensor_name = "";               // User-definierter Name
   String subzone_id = "";                // Subzone-Zuordnung
   bool active = false;                   // Sensor aktiv?
-  
+
+  // ✅ Phase 2C: Operating Mode Support
+  // Modes: "continuous" (auto-measure), "on_demand" (command only),
+  //        "paused" (no measure), "scheduled" (server-triggered)
+  String operating_mode = "continuous";      // Betriebsmodus
+  uint32_t measurement_interval_ms = 30000;  // Pro-Sensor Messintervall (ms)
+
   // ✅ Pi-Enhanced Mode (DEFAULT - 90% der Anwendungen):
   bool raw_mode = true;                  // IMMER true (Rohdaten-Modus)
   uint32_t last_raw_value = 0;           // Letzter Rohdaten-Wert (ADC 0-4095)

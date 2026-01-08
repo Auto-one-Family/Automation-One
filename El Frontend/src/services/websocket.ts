@@ -63,6 +63,9 @@ class WebSocketService {
   // NEW: Token expiration tracking
   private tokenExpiry: number | null = null
 
+  // NEW: Connection success callbacks for notifying stores to refresh data
+  private onConnectCallbacks: Set<() => void> = new Set()
+
   private constructor() {
     // Generate client ID (UUID-like)
     this.clientId = this.generateClientId()
@@ -145,6 +148,9 @@ class WebSocketService {
 
   /**
    * Connect to WebSocket
+   *
+   * Returns a Promise that resolves when the connection is actually open,
+   * not just when the WebSocket object is created.
    */
   async connect(): Promise<void> {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
@@ -155,55 +161,63 @@ class WebSocketService {
     this.status = 'connecting'
     this.reconnectAttempts = 0
 
-    try {
-      const url = this.getWebSocketUrl()
-      console.log('[WebSocket] Connecting to:', url)
-      
-      this.ws = new WebSocket(url)
+    return new Promise((resolve, reject) => {
+      try {
+        const url = this.getWebSocketUrl()
+        console.log('[WebSocket] Connecting to:', url)
 
-      this.ws.onopen = () => {
-        console.log('[WebSocket] Connected')
-        this.status = 'connected'
-        this.reconnectAttempts = 0
-        this.rateLimitWarning = false
+        this.ws = new WebSocket(url)
 
-        // Enable visibility handling for tab switches
-        this.setupVisibilityHandling()
+        this.ws.onopen = () => {
+          console.log('[WebSocket] Connected')
+          this.status = 'connected'
+          this.reconnectAttempts = 0
+          this.rateLimitWarning = false
 
-        // Send existing subscriptions
-        this.resubscribeAll()
+          // Enable visibility handling for tab switches
+          this.setupVisibilityHandling()
 
-        // Process pending subscriptions that were queued during 'connecting' state
-        this.processPendingSubscriptions()
+          // Send existing subscriptions
+          this.resubscribeAll()
 
-        // Process queued messages
-        this.processMessageQueue()
-      }
+          // Process pending subscriptions that were queued during 'connecting' state
+          this.processPendingSubscriptions()
 
-      this.ws.onclose = (event) => {
-        console.log('[WebSocket] Disconnected:', event.code, event.reason)
-        this.status = 'disconnected'
-        this.ws = null
-        
-        // Attempt reconnect if not a normal closure
-        if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.scheduleReconnect()
+          // Process queued messages
+          this.processMessageQueue()
+
+          // Notify listeners that connection is established (for stores to refresh data)
+          this.notifyConnectCallbacks()
+
+          resolve()
         }
-      }
 
-      this.ws.onerror = (event) => {
-        console.error('[WebSocket] Error:', event)
+        this.ws.onclose = (event) => {
+          console.log('[WebSocket] Disconnected:', event.code, event.reason)
+          this.status = 'disconnected'
+          this.ws = null
+
+          // Attempt reconnect if not a normal closure
+          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.scheduleReconnect()
+          }
+        }
+
+        this.ws.onerror = (event) => {
+          console.error('[WebSocket] Error:', event)
+          this.status = 'error'
+          reject(new Error('WebSocket connection failed'))
+        }
+
+        this.ws.onmessage = (event) => {
+          this.handleMessage(event.data)
+        }
+      } catch (error) {
+        console.error('[WebSocket] Connection error:', error)
         this.status = 'error'
+        reject(error)
       }
-
-      this.ws.onmessage = (event) => {
-        this.handleMessage(event.data)
-      }
-    } catch (error) {
-      console.error('[WebSocket] Connection error:', error)
-      this.status = 'error'
-      throw error
-    }
+    })
   }
 
   /**
@@ -575,10 +589,41 @@ class WebSocketService {
   isConnected(): boolean {
     return this.status === 'connected' && this.ws?.readyState === WebSocket.OPEN
   }
+
+  /**
+   * Register a callback to be called when WebSocket connects successfully.
+   * Useful for stores to refresh data after connection is established.
+   *
+   * @param callback Function to call on connect
+   * @returns Unsubscribe function
+   */
+  onConnect(callback: () => void): () => void {
+    this.onConnectCallbacks.add(callback)
+    return () => {
+      this.onConnectCallbacks.delete(callback)
+    }
+  }
+
+  /**
+   * Notify all registered connect callbacks.
+   * Called internally when WebSocket connection is established.
+   */
+  private notifyConnectCallbacks(): void {
+    console.log(`[WebSocket] Notifying ${this.onConnectCallbacks.size} connect callbacks`)
+    this.onConnectCallbacks.forEach(callback => {
+      try {
+        callback()
+      } catch (error) {
+        console.error('[WebSocket] Error in connect callback:', error)
+      }
+    })
+  }
 }
 
 // Export singleton instance
 export const websocketService = WebSocketService.getInstance()
+
+
 
 
 

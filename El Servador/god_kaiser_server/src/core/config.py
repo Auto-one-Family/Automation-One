@@ -458,6 +458,13 @@ class MaintenanceSettings(BaseSettings):
         le=300,
         description="Interval for ESP health checks",
     )
+    sensor_health_check_interval_seconds: int = Field(
+        default=60,
+        alias="SENSOR_HEALTH_CHECK_INTERVAL_SECONDS",
+        ge=10,
+        le=300,
+        description="Interval for sensor timeout checks (Phase 2E)",
+    )
 
     # ─────────────────────────────────────────────────────────
     # STATS AGGREGATION (IMMER ENABLED - löschen keine Daten)

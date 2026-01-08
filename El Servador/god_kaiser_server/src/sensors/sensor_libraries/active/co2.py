@@ -18,11 +18,20 @@ from ...base_processor import (
 class CO2Processor(BaseSensorProcessor):
     """
     CO2 Sensor Processor (MHZ19, SCD30).
-    
+
     Supports:
     - MHZ19: UART-based CO2 sensor (0-5000 ppm)
     - SCD30: I2C CO2 sensor (400-10000 ppm)
     """
+
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # CO2 sensors are typically used for continuous air quality monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 30  # Read every 30 seconds
+    SUPPORTS_ON_DEMAND = False
 
     # Sensor Specifications
     MHZ19_MIN = 0.0  # ppm

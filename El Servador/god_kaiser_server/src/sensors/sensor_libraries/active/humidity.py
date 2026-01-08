@@ -53,6 +53,15 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
     - For accurate readings, allow sensor to stabilize for 8 seconds
     """
 
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Humidity sensors are typically used for continuous environmental monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 30  # Read every 30 seconds
+    SUPPORTS_ON_DEMAND = False
+
     # SHT31 Humidity Specifications
     HUMIDITY_MIN = 0.0  # % RH (physical minimum)
     HUMIDITY_MAX = 100.0  # % RH (physical maximum)

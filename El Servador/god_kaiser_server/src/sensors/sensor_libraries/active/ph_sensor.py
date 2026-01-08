@@ -38,6 +38,16 @@ class PHSensorProcessor(BaseSensorProcessor):
     - Voltage-to-pH conversion
     """
 
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # pH sensors are typically used for point measurements, not continuous monitoring.
+    # Users dip the probe when needed, read the value, and store the probe.
+    RECOMMENDED_MODE = "on_demand"
+    RECOMMENDED_TIMEOUT_SECONDS = 0  # No timeout for on-demand sensors
+    RECOMMENDED_INTERVAL_SECONDS = 0  # No automatic measurements
+    SUPPORTS_ON_DEMAND = True
+
     # ESP32 ADC configuration
     ADC_MAX = 4095  # 12-bit ADC
     ADC_VOLTAGE_RANGE = 3.3  # Volts

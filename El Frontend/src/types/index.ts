@@ -1,4 +1,9 @@
 // =============================================================================
+// GPIO Types (Phase 3)
+// =============================================================================
+export * from './gpio'
+
+// =============================================================================
 // Auth Types
 // =============================================================================
 export interface User {
@@ -89,6 +94,14 @@ export interface MockSensor {
   quality: QualityLevel
   raw_mode: boolean
   last_read: string | null
+  // Phase 2E: Health-Status fields
+  operating_mode?: SensorOperatingMode
+  timeout_seconds?: number
+  is_stale?: boolean
+  stale_reason?: 'timeout_exceeded' | 'no_data' | 'sensor_error'
+  last_reading_at?: string | null
+  // Phase 2F: Schedule configuration
+  schedule_config?: { type: string; expression: string } | null
 }
 
 export interface MockActuator {
@@ -178,6 +191,7 @@ export type MessageType =
   | 'actuator_alert'
   // Device health & status
   | 'esp_health'
+  | 'sensor_health'  // Phase 2E: Sensor timeout events
   // Configuration events
   | 'config_response'
   | 'zone_assignment'
@@ -198,6 +212,85 @@ export interface WebSocketFilters {
   types: MessageType[]
   esp_ids: string[]
   topicPattern: string
+}
+
+// =============================================================================
+// Offline Reason Types (LWT & Heartbeat Timeout)
+// =============================================================================
+
+/**
+ * Grund für Offline-Status eines ESP-Geräts.
+ *
+ * - 'lwt': Verbindung unerwartet verloren (Power-Loss, Crash, Netzwerkfehler)
+ * - 'heartbeat_timeout': Keine Antwort seit 5 Minuten
+ * - 'shutdown': Gerät wurde absichtlich heruntergefahren (Future)
+ * - 'unknown': Unbekannter Grund (Legacy-Daten)
+ */
+export type OfflineReason = 'lwt' | 'heartbeat_timeout' | 'shutdown' | 'unknown'
+
+/**
+ * Quelle der Status-Änderung.
+ *
+ * - 'lwt': Last-Will-Testament vom MQTT Broker
+ * - 'heartbeat': Regulärer Heartbeat
+ * - 'heartbeat_timeout': Timeout-Check im Server
+ * - 'api': Manueller Status-Update via API
+ */
+export type StatusSource = 'lwt' | 'heartbeat' | 'heartbeat_timeout' | 'api'
+
+/**
+ * Offline-Informationen für ein ESP-Gerät.
+ * Wird im ESP Store gespeichert wenn status = 'offline'.
+ */
+export interface OfflineInfo {
+  /** Grund für Offline-Status */
+  reason: OfflineReason
+  /** Quelle der Status-Änderung */
+  source: StatusSource
+  /** Zeitstempel wann offline ging (Unix timestamp) */
+  timestamp: number
+  /** Menschenlesbarer Text für UI */
+  displayText: string
+}
+
+/**
+ * WebSocket esp_health Event Payload.
+ * Erweitert um source und reason Felder.
+ */
+export interface EspHealthEvent {
+  esp_id: string
+  status: 'online' | 'offline'
+  heap_free?: number
+  wifi_rssi?: number
+  uptime?: number
+  sensor_count?: number
+  actuator_count?: number
+  timestamp?: number
+  /** Nur bei status='offline': Quelle der Offline-Erkennung */
+  source?: StatusSource
+  /** Nur bei status='offline': Grund für Offline */
+  reason?: string
+  /** Nur bei heartbeat_timeout: Timeout-Dauer in Sekunden */
+  timeout_seconds?: number
+}
+
+/**
+ * WebSocket sensor_health Event Payload (Phase 2E).
+ * Wird vom Server bei Sensor-Timeout-Überschreitung gesendet.
+ */
+export interface SensorHealthEvent {
+  esp_id: string
+  gpio: number
+  sensor_type: string
+  sensor_name: string | null
+  is_stale: boolean
+  stale_reason: 'timeout_exceeded' | 'no_data' | 'sensor_error'
+  last_reading_at: string | null
+  timeout_seconds: number
+  seconds_overdue: number
+  operating_mode: SensorOperatingMode
+  config_source: 'instance' | 'type_default' | 'system_default'
+  timestamp: number
 }
 
 // =============================================================================
@@ -261,6 +354,20 @@ export interface LogicExecution {
 }
 
 // =============================================================================
+// Sensor Operating Modes (Phase 2B)
+// =============================================================================
+
+/**
+ * Operating Mode für Sensor-Messverhalten.
+ *
+ * - continuous: Automatische Messungen im Intervall
+ * - on_demand: Nur manuelle Messungen (User-triggered)
+ * - scheduled: Messungen zu definierten Zeiten
+ * - paused: Temporär deaktiviert
+ */
+export type SensorOperatingMode = 'continuous' | 'on_demand' | 'scheduled' | 'paused'
+
+// =============================================================================
 // Sensor & Actuator Config Types (Real ESPs)
 // =============================================================================
 
@@ -278,6 +385,17 @@ export interface SensorConfigCreate {
   warning_min?: number | null
   warning_max?: number | null
   metadata?: Record<string, unknown> | null
+  // =========================================================================
+  // OPERATING MODE FIELDS (Phase 2B)
+  // =========================================================================
+  /** Betriebsmodus: continuous, on_demand, scheduled, paused */
+  operating_mode?: SensorOperatingMode
+  /** Timeout in Sekunden für Stale-Erkennung (0 = kein Timeout) */
+  timeout_seconds?: number
+  /** Ob Timeout-Warnungen aktiviert sind */
+  timeout_warning_enabled?: boolean
+  /** Schedule-Konfiguration für scheduled-Modus */
+  schedule_config?: Record<string, unknown> | null
 }
 
 export interface SensorConfigResponse {
@@ -474,6 +592,28 @@ export interface ConfigResponse {
   message: string
   error_code?: string
   timestamp: number
+}
+
+/**
+ * Phase 4: Individual configuration failure from ESP32.
+ */
+export interface ConfigFailure {
+  type: 'sensor' | 'actuator'
+  gpio: number
+  error_code: number
+  error: string
+  detail: string | null
+}
+
+/**
+ * Phase 4: Extended config response with failures array and partial_success status.
+ */
+export interface ConfigResponseExtended extends ConfigResponse {
+  status: 'success' | 'partial_success' | 'error'
+  failed_count?: number
+  failures?: ConfigFailure[]
+  error_description?: string
+  failed_item?: Record<string, unknown>  // Legacy backward compatibility
 }
 
 // =============================================================================

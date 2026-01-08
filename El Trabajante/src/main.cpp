@@ -57,7 +57,10 @@ MasterZone g_master;
 // ============================================
 void handleSensorConfig(const String& payload);
 bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj);
+// Phase 4: Version with failure output parameter for aggregated error reporting
+bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, ConfigFailureItem* failure_out);
 void handleActuatorConfig(const String& payload);
+void handleSensorCommand(const String& topic, const String& payload);  // Phase 2C
 
 // ============================================
 // HELPER FUNCTIONS
@@ -503,7 +506,8 @@ void setup() {
     LOG_INFO("MQTT connected successfully");
     
     // Phase 7: Send initial heartbeat for ESP discovery/registration
-    mqttClient.publishHeartbeat();
+    // force=true bypasses throttle check (fix for initial heartbeat being blocked)
+    mqttClient.publishHeartbeat(true);
     LOG_INFO("Initial heartbeat sent for ESP registration");
     
     // Subscribe to critical topics
@@ -533,8 +537,18 @@ void setup() {
     String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
     mqttClient.subscribe(subzone_assign_topic);
     mqttClient.subscribe(subzone_remove_topic);
-    
-    LOG_INFO("Subscribed to system + actuator + zone assignment + subzone management topics");
+
+    // ✅ Phase 2C: Sensor command topic (on-demand measurement)
+    // Wildcard subscription for all sensor GPIOs: kaiser/{id}/esp/{esp_id}/sensor/+/command
+    String sensor_command_wildcard = "kaiser/" + g_kaiser.kaiser_id +
+                                     "/esp/" + g_system_config.esp_id +
+                                     "/sensor/+/command";
+    if (g_kaiser.kaiser_id.length() == 0) {
+      sensor_command_wildcard = "kaiser/god/esp/" + g_system_config.esp_id + "/sensor/+/command";
+    }
+    mqttClient.subscribe(sensor_command_wildcard);
+
+    LOG_INFO("Subscribed to system + actuator + zone + subzone + sensor command topics");
     
     // Set MQTT callback for message routing (Phase 4)
     mqttClient.setCallback([](const String& topic, const String& payload) {
@@ -556,7 +570,15 @@ void setup() {
         actuatorManager.handleActuatorCommand(topic, payload);
         return;
       }
-      
+
+      // ✅ Phase 2C: Sensor commands (on-demand measurement)
+      String sensor_command_prefix = String(TopicBuilder::buildSensorCommandTopic(0));
+      sensor_command_prefix.replace("/0/command", "/");
+      if (topic.startsWith(sensor_command_prefix) && topic.endsWith("/command")) {
+        handleSensorCommand(topic, payload);
+        return;
+      }
+
       // ESP-specific emergency stop (with auth check)
       String esp_emergency_topic = String(TopicBuilder::buildActuatorEmergencyTopic());
       if (topic == esp_emergency_topic) {
@@ -737,8 +759,8 @@ void setup() {
             g_system_config.current_state = STATE_ZONE_CONFIGURED;
             configManager.saveSystemConfig(g_system_config);
             
-            // Send updated heartbeat
-            mqttClient.publishHeartbeat();
+            // Send updated heartbeat (force=true to immediately notify server of zone change)
+            mqttClient.publishHeartbeat(true);
           } else {
             LOG_ERROR("❌ Failed to save zone configuration");
             
@@ -1161,69 +1183,78 @@ void handleSensorConfig(const String& payload) {
     return;
   }
 
+  // Phase 4: Collect failures for aggregated response
+  std::vector<ConfigFailureItem> failures;
+  failures.reserve(min(total, (size_t)MAX_CONFIG_FAILURES));
   uint8_t success_count = 0;
+
   for (JsonObject sensorObj : sensors) {
-    if (parseAndConfigureSensor(sensorObj)) {
+    ConfigFailureItem failure;
+    if (parseAndConfigureSensorWithTracking(sensorObj, &failure)) {
       success_count++;
+    } else {
+      // Only store up to MAX_CONFIG_FAILURES
+      if (failures.size() < MAX_CONFIG_FAILURES) {
+        failures.push_back(failure);
+      }
     }
   }
 
-  if (success_count == total) {
-    String message = "Configured " + String(success_count) + " sensor(s) successfully";
-    ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, success_count, message);
-  }
+  // Phase 4: Use publishWithFailures for aggregated response
+  uint8_t fail_count = static_cast<uint8_t>(total - success_count);
+  ConfigResponseBuilder::publishWithFailures(
+      ConfigType::SENSOR,
+      success_count,
+      fail_count,
+      failures);
 }
 
-bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
+// ============================================
+// PHASE 4: SENSOR PARSING WITH FAILURE TRACKING
+// ============================================
+// New version that fills failure details instead of publishing immediately
+bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, ConfigFailureItem* failure_out) {
   SensorConfig config;
-  JsonVariantConst failed_variant = sensor_obj;
+
+  // Helper macro to set failure and return false
+  #define SET_FAILURE_AND_RETURN(gpio_val, err_code, err_name, detail_msg) \
+    if (failure_out) { \
+      failure_out->type = "sensor"; \
+      failure_out->gpio = gpio_val; \
+      failure_out->error_code = err_code; \
+      failure_out->error_name = err_name; \
+      failure_out->detail = detail_msg; \
+    } \
+    return false;
 
   if (!sensor_obj.containsKey("gpio")) {
-    String message = "Sensor config missing required field 'gpio'";
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor config missing required field 'gpio'");
+    SET_FAILURE_AND_RETURN(0, ERROR_CONFIG_MISSING, "MISSING_FIELD", "Missing required field 'gpio'");
   }
 
   int gpio_value = 255;
   if (!JsonHelpers::extractInt(sensor_obj, "gpio", gpio_value)) {
-    String message = "Sensor field 'gpio' must be an integer";
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::TYPE_MISMATCH, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor field 'gpio' must be an integer");
+    SET_FAILURE_AND_RETURN(0, ERROR_CONFIG_INVALID, "TYPE_MISMATCH", "Field 'gpio' must be an integer");
   }
   config.gpio = static_cast<uint8_t>(gpio_value);
 
   if (!sensor_obj.containsKey("sensor_type")) {
-    String message = "Sensor config missing required field 'sensor_type'";
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor config missing required field 'sensor_type'");
+    SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_MISSING, "MISSING_FIELD", "Missing required field 'sensor_type'");
   }
   if (!JsonHelpers::extractString(sensor_obj, "sensor_type", config.sensor_type)) {
-    String message = "Sensor field 'sensor_type' must be a string";
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::TYPE_MISMATCH, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor field 'sensor_type' must be a string");
+    SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_INVALID, "TYPE_MISMATCH", "Field 'sensor_type' must be a string");
   }
 
   if (!sensor_obj.containsKey("sensor_name")) {
-    String message = "Sensor config missing required field 'sensor_name'";
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor config missing required field 'sensor_name'");
+    SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_MISSING, "MISSING_FIELD", "Missing required field 'sensor_name'");
   }
   if (!JsonHelpers::extractString(sensor_obj, "sensor_name", config.sensor_name)) {
-    String message = "Sensor field 'sensor_name' must be a string";
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::TYPE_MISMATCH, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor field 'sensor_name' must be a string");
+    SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_INVALID, "TYPE_MISMATCH", "Field 'sensor_name' must be a string");
   }
 
   JsonHelpers::extractString(sensor_obj, "subzone_id", config.subzone_id, "");
@@ -1241,12 +1272,52 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
     config.raw_mode = true;
   }
 
+  // ✅ Phase 2C: Operating Mode Parsing
+  String mode_str;
+  if (JsonHelpers::extractString(sensor_obj, "operating_mode", mode_str, "continuous")) {
+    if (mode_str == "continuous" || mode_str == "on_demand" ||
+        mode_str == "paused" || mode_str == "scheduled") {
+      config.operating_mode = mode_str;
+    } else {
+      LOG_WARNING("Invalid operating_mode '" + mode_str + "', defaulting to 'continuous'");
+      config.operating_mode = "continuous";
+    }
+  } else {
+    config.operating_mode = "continuous";
+  }
+
+  // ✅ Phase 2C: Measurement Interval Parsing
+  int interval_seconds = 30;
+  if (JsonHelpers::extractInt(sensor_obj, "measurement_interval_seconds", interval_seconds, 30)) {
+    if (interval_seconds < 1) {
+      LOG_WARNING("measurement_interval_seconds too low, using minimum 1s");
+      interval_seconds = 1;
+    } else if (interval_seconds > 300) {
+      LOG_WARNING("measurement_interval_seconds too high, using maximum 300s");
+      interval_seconds = 300;
+    }
+  }
+  config.measurement_interval_ms = static_cast<uint32_t>(interval_seconds) * 1000;
+
+  LOG_DEBUG("Sensor GPIO " + String(config.gpio) + " config: mode=" +
+            config.operating_mode + ", interval=" + String(interval_seconds) + "s");
+
   if (!configManager.validateSensorConfig(config)) {
-    String message = "Sensor validation failed for GPIO " + String(config.gpio);
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::VALIDATION_FAILED, message, failed_variant);
-    return false;
+    LOG_ERROR("Sensor validation failed for GPIO " + String(config.gpio));
+    // Check if it's a GPIO conflict using GPIOManager
+    String pin_owner = gpioManager.getPinOwner(config.gpio);
+    String pin_component = gpioManager.getPinComponent(config.gpio);
+    String detail;
+    if (pin_owner.length() > 0) {
+      detail = "GPIO " + String(config.gpio) + " reserved by " + pin_owner;
+      if (pin_component.length() > 0) {
+        detail += " (" + pin_component + ")";
+      }
+      SET_FAILURE_AND_RETURN(config.gpio, ERROR_GPIO_CONFLICT, "GPIO_CONFLICT", detail);
+    } else {
+      SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_INVALID, "VALIDATION_FAILED",
+                             "Sensor validation failed for GPIO " + String(config.gpio));
+    }
   }
 
   if (!config.active) {
@@ -1254,39 +1325,137 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
       LOG_WARNING("Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
     }
     if (!configManager.removeSensorConfig(config.gpio)) {
-      String message = "Failed to remove sensor config from NVS for GPIO " + String(config.gpio);
-      LOG_ERROR(message);
-      ConfigResponseBuilder::publishError(
-          ConfigType::SENSOR, ConfigErrorCode::NVS_WRITE_FAILED, message, failed_variant);
-      return false;
+      LOG_ERROR("Failed to remove sensor config from NVS for GPIO " + String(config.gpio));
+      SET_FAILURE_AND_RETURN(config.gpio, ERROR_NVS_WRITE_FAILED, "NVS_WRITE_FAILED",
+                             "Failed to remove sensor config from NVS");
     }
     LOG_INFO("Sensor removed: GPIO " + String(config.gpio));
     return true;
   }
 
   if (!sensorManager.configureSensor(config)) {
-    String message = "Failed to configure sensor on GPIO " + String(config.gpio);
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant);
-    return false;
+    LOG_ERROR("Failed to configure sensor on GPIO " + String(config.gpio));
+    // Check for GPIO conflict
+    String pin_owner = gpioManager.getPinOwner(config.gpio);
+    String pin_component = gpioManager.getPinComponent(config.gpio);
+    if (pin_owner.length() > 0) {
+      String detail = "GPIO " + String(config.gpio) + " already used by " + pin_owner;
+      if (pin_component.length() > 0) {
+        detail += " (" + pin_component + ")";
+      }
+      SET_FAILURE_AND_RETURN(config.gpio, ERROR_GPIO_CONFLICT, "GPIO_CONFLICT", detail);
+    } else {
+      SET_FAILURE_AND_RETURN(config.gpio, ERROR_SENSOR_INIT_FAILED, "CONFIG_FAILED",
+                             "Failed to configure sensor on GPIO " + String(config.gpio));
+    }
   }
 
   if (!configManager.saveSensorConfig(config)) {
-    String message = "Failed to save sensor config to NVS for GPIO " + String(config.gpio);
-    LOG_ERROR(message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::NVS_WRITE_FAILED, message, failed_variant);
-    return false;
+    LOG_ERROR("Failed to save sensor config to NVS for GPIO " + String(config.gpio));
+    SET_FAILURE_AND_RETURN(config.gpio, ERROR_NVS_WRITE_FAILED, "NVS_WRITE_FAILED",
+                           "Failed to save sensor config to NVS");
   }
 
   LOG_INFO("Sensor configured: GPIO " + String(config.gpio) + " (" + config.sensor_type + ")");
+
+  #undef SET_FAILURE_AND_RETURN
   return true;
+}
+
+// Legacy version for backward compatibility (calls new version)
+bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
+  ConfigFailureItem failure;
+  bool success = parseAndConfigureSensorWithTracking(sensor_obj, &failure);
+
+  // For backward compatibility: publish individual error if failed
+  if (!success) {
+    ConfigResponseBuilder::publishError(
+        ConfigType::SENSOR,
+        static_cast<ConfigErrorCode>(failure.error_code),
+        failure.detail);
+  }
+
+  return success;
 }
 
 void handleActuatorConfig(const String& payload) {
   LOG_INFO("Handling actuator configuration from MQTT");
   actuatorManager.handleActuatorConfig(payload);
+}
+
+// ============================================
+// SENSOR COMMAND HANDLER (PHASE 2C - On-Demand)
+// ============================================
+/**
+ * Handles sensor commands (e.g., manual measurement trigger)
+ *
+ * Topic: kaiser/{id}/esp/{esp_id}/sensor/{gpio}/command
+ * Payload: {"command": "measure", "request_id": "req_12345"}
+ */
+void handleSensorCommand(const String& topic, const String& payload) {
+  LOG_INFO("Sensor command received: " + topic);
+
+  // Extract GPIO from topic
+  // Format: kaiser/{id}/esp/{esp_id}/sensor/{gpio}/command
+  int sensor_pos = topic.indexOf("/sensor/");
+  int command_pos = topic.lastIndexOf("/command");
+
+  if (sensor_pos < 0 || command_pos < 0 || sensor_pos >= command_pos) {
+    LOG_ERROR("Invalid sensor command topic format: " + topic);
+    return;
+  }
+
+  // Extract GPIO string between "/sensor/" and "/command"
+  String gpio_str = topic.substring(sensor_pos + 8, command_pos);
+  uint8_t gpio = static_cast<uint8_t>(gpio_str.toInt());
+
+  if (gpio == 0 && gpio_str != "0") {
+    LOG_ERROR("Failed to parse GPIO from topic: " + topic);
+    return;
+  }
+
+  // Parse JSON payload
+  DynamicJsonDocument doc(256);
+  DeserializationError error = deserializeJson(doc, payload);
+
+  if (error) {
+    LOG_ERROR("Failed to parse sensor command JSON: " + String(error.c_str()));
+    return;
+  }
+
+  String command = doc["command"] | "";
+  String request_id = doc["request_id"] | "";
+
+  if (command == "measure") {
+    LOG_INFO("Manual measurement requested for GPIO " + String(gpio));
+
+    bool success = sensorManager.triggerManualMeasurement(gpio);
+
+    // Send response if request_id was provided
+    if (request_id.length() > 0) {
+      String response_topic = String(TopicBuilder::buildSensorResponseTopic(gpio));
+      DynamicJsonDocument response(256);
+      response["request_id"] = request_id;
+      response["gpio"] = gpio;
+      response["command"] = "measure";
+      response["success"] = success;
+      response["ts"] = timeManager.getUnixTimestamp();
+
+      String response_payload;
+      serializeJson(response, response_payload);
+      mqttClient.publish(response_topic, response_payload, 1);
+
+      LOG_DEBUG("Sensor command response sent: " + response_payload);
+    }
+
+    if (success) {
+      LOG_INFO("Manual measurement completed for GPIO " + String(gpio));
+    } else {
+      LOG_WARNING("Manual measurement failed for GPIO " + String(gpio));
+    }
+  } else {
+    LOG_WARNING("Unknown sensor command: " + command);
+  }
 }
 
 

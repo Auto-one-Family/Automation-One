@@ -69,6 +69,16 @@ def setup_logging() -> None:
     Creates log directory if it doesn't exist and configures
     file and console handlers with appropriate formatters.
     """
+    # Bug Z Fix: Windows Console kann keine Unicode-Zeichen (Emojis, Pfeile) darstellen
+    # Ersetze nicht darstellbare Zeichen durch '?' statt einen UnicodeEncodeError zu werfen
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(errors="replace")
+            sys.stderr.reconfigure(errors="replace")
+        except AttributeError:
+            # Python < 3.7 hat kein reconfigure()
+            pass
+
     settings = get_settings()
 
     # Create logs directory

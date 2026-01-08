@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional
 from ..core.logging_config import get_logger
 from ..db.models.sensor import SensorConfig, SensorData
 from ..db.repositories import ESPRepository, SensorRepository
-from ..sensor_library.loader import SensorLibraryLoader
+from ..mqtt.publisher import Publisher
+from ..sensors.library_loader import LibraryLoader as SensorLibraryLoader
 
 logger = get_logger(__name__)
 
@@ -41,18 +42,21 @@ class SensorService:
         self,
         sensor_repo: SensorRepository,
         esp_repo: ESPRepository,
+        publisher: Optional[Publisher] = None,
         library_loader: Optional[SensorLibraryLoader] = None,
     ):
         """
         Initialize SensorService.
-        
+
         Args:
             sensor_repo: Sensor repository
             esp_repo: ESP repository
+            publisher: MQTT publisher for sensor commands (optional)
             library_loader: Sensor library loader (optional, created if not provided)
         """
         self.sensor_repo = sensor_repo
         self.esp_repo = esp_repo
+        self.publisher = publisher or Publisher()
         self.library_loader = library_loader or SensorLibraryLoader()
     
     # =========================================================================
@@ -467,4 +471,75 @@ class SensorService:
             "sensor_type": sensor_type,
             "method": method,
             "saved": saved,
+        }
+
+    # =========================================================================
+    # On-Demand Measurement (Phase 2D)
+    # =========================================================================
+
+    async def trigger_measurement(
+        self,
+        esp_id: str,
+        gpio: int,
+    ) -> Dict[str, Any]:
+        """
+        Trigger a manual measurement for a sensor.
+
+        Used for on_demand operating mode sensors.
+
+        Args:
+            esp_id: ESP device ID (e.g., "ESP_12AB34CD")
+            gpio: Sensor GPIO pin
+
+        Returns:
+            dict with success status and request_id
+
+        Raises:
+            ValueError: If ESP or sensor not found, or sensor disabled
+            RuntimeError: If ESP is offline or MQTT publish fails
+        """
+        # 1. Validate ESP exists and is online
+        esp = await self.esp_repo.get_by_device_id(esp_id)
+
+        if not esp:
+            raise ValueError(f"ESP device not found: {esp_id}")
+
+        if esp.status != "online":
+            raise RuntimeError(
+                f"ESP device is offline: {esp_id} (status: {esp.status})"
+            )
+
+        # 2. Validate sensor exists and is enabled
+        sensor = await self.sensor_repo.get_by_esp_and_gpio(esp.id, gpio)
+
+        if not sensor:
+            raise ValueError(f"Sensor not found: {esp_id}/GPIO {gpio}")
+
+        if not sensor.enabled:
+            raise ValueError(f"Sensor is disabled: {esp_id}/GPIO {gpio}")
+
+        # 3. Publish MQTT command via Publisher
+        success, request_id = self.publisher.publish_sensor_command(
+            esp_id=esp_id,
+            gpio=gpio,
+            command="measure",
+        )
+
+        if not success:
+            raise RuntimeError(
+                f"Failed to publish measurement command to {esp_id}/GPIO {gpio}"
+            )
+
+        logger.info(
+            f"Measurement triggered for {esp_id}/GPIO {gpio} "
+            f"(sensor_type: {sensor.sensor_type}, request_id: {request_id})"
+        )
+
+        return {
+            "success": True,
+            "request_id": request_id,
+            "esp_id": esp_id,
+            "gpio": gpio,
+            "sensor_type": sensor.sensor_type,
+            "message": "Measurement command sent",
         }

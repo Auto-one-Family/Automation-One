@@ -22,6 +22,8 @@ MQTT_TOPIC_ESP_HEARTBEAT = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
 
 # God-Kaiser → ESP (Outgoing)
 MQTT_TOPIC_ESP_ACTUATOR_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command"
+MQTT_TOPIC_ESP_SENSOR_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/command"
+MQTT_TOPIC_ESP_SENSOR_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/response"
 MQTT_TOPIC_ESP_CONFIG_SENSOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/sensor/{gpio}"
 MQTT_TOPIC_ESP_CONFIG_ACTUATOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/actuator/{gpio}"
 MQTT_TOPIC_ESP_CONFIG = "kaiser/{kaiser_id}/esp/{esp_id}/config"  # Combined sensor/actuator config
@@ -191,6 +193,7 @@ INTERVAL_SENSOR_POLLING = 5000  # 5 seconds
 
 QOS_SENSOR_DATA = 1  # At least once
 QOS_ACTUATOR_COMMAND = 2  # Exactly once
+QOS_SENSOR_COMMAND = 2  # Exactly once - same as actuator commands
 QOS_HEARTBEAT = 0  # At most once
 QOS_CONFIG = 2  # Exactly once
 

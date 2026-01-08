@@ -8,6 +8,7 @@ from .base_repo import BaseRepository
 from .esp_repo import ESPRepository
 from .logic_repo import LogicRepository
 from .sensor_repo import SensorRepository
+from .sensor_type_defaults_repo import SensorTypeDefaultsRepository
 from .subzone_repo import SubzoneRepository
 from .system_config_repo import SystemConfigRepository
 from .token_blacklist_repo import TokenBlacklistRepository
@@ -17,6 +18,7 @@ __all__ = [
     "BaseRepository",
     "ESPRepository",
     "SensorRepository",
+    "SensorTypeDefaultsRepository",
     "ActuatorRepository",
     "AuditLogRepository",
     "UserRepository",

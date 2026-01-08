@@ -97,6 +97,53 @@ class Publisher:
         logger.info(f"Publishing actuator command to {esp_id} GPIO {gpio}: {command} (value={value})")
         return self._publish_with_retry(topic, payload, qos, retry)
 
+    def publish_sensor_command(
+        self,
+        esp_id: str,
+        gpio: int,
+        command: str = "measure",
+        retry: bool = True,
+    ) -> tuple[bool, str]:
+        """
+        Publish a command to a sensor (e.g., trigger manual measurement).
+
+        Args:
+            esp_id: Target ESP device ID
+            gpio: Target sensor GPIO pin
+            command: Command type ("measure", etc.)
+            retry: Whether to retry on failure
+
+        Returns:
+            Tuple of (success: bool, request_id: str)
+        """
+        import uuid
+
+        request_id = str(uuid.uuid4())
+
+        topic = TopicBuilder.build_sensor_command_topic(esp_id, gpio)
+
+        payload = {
+            "command": command,
+            "request_id": request_id,
+            "timestamp": int(time.time()),
+        }
+
+        qos = constants.QOS_SENSOR_COMMAND
+
+        success = self._publish_with_retry(topic, payload, qos, retry)
+
+        if success:
+            logger.info(
+                f"Sensor command published: {command} to {esp_id}/sensor/{gpio} "
+                f"(request_id: {request_id})"
+            )
+        else:
+            logger.error(
+                f"Failed to publish sensor command to {esp_id}/sensor/{gpio}"
+            )
+
+        return success, request_id
+
     def publish_sensor_config(
         self,
         esp_id: str,

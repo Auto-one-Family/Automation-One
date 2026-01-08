@@ -65,6 +65,15 @@ class BMP280PressureProcessor(BaseSensorProcessor):
     - Address: 0x76 (default) or 0x77
     """
 
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Pressure sensors are typically used for continuous environmental monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 300  # 5 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 60  # Read every 60 seconds
+    SUPPORTS_ON_DEMAND = False
+
     # BMP280 Pressure Specifications (based on Bosch BMP280 datasheet)
     PRESSURE_MIN = 300.0  # hPa (sensor minimum, ~9000m altitude)
     PRESSURE_MAX = 1100.0  # hPa (sensor maximum, ~500m below sea level)
@@ -431,6 +440,15 @@ class BMP280TemperatureProcessor(BaseSensorProcessor):
     - I2C: GPIO21 (SDA), GPIO22 (SCL)
     - Address: 0x76 (default) or 0x77
     """
+
+    # =========================================================================
+    # OPERATING MODE RECOMMENDATIONS (Phase 2A)
+    # =========================================================================
+    # Temperature sensors are typically used for continuous environmental monitoring.
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180  # 3 minutes timeout
+    RECOMMENDED_INTERVAL_SECONDS = 30  # Read every 30 seconds
+    SUPPORTS_ON_DEMAND = False
 
     # BMP280 Temperature Specifications
     TEMP_MIN = -40.0  # °C (sensor minimum)

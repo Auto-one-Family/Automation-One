@@ -27,6 +27,7 @@ import Badge from '@/components/common/Badge.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
 import { espApi } from '@/api/esp'
+import { sensorsApi } from '@/api/sensors'
 import { getStateInfo } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
@@ -95,8 +96,8 @@ const showAddSensorModal = ref(false)
 // Default sensor type for new sensors
 const defaultSensorType = 'DS18B20'
 
-// New sensor form state
-const newSensor = ref<MockSensorConfig>({
+// New sensor form state (Phase 2B: Operating Mode erweitert)
+const newSensor = ref<MockSensorConfig & { operating_mode?: string; timeout_seconds?: number }>({
   gpio: 0,
   sensor_type: defaultSensorType,
   name: '',
@@ -104,22 +105,57 @@ const newSensor = ref<MockSensorConfig>({
   raw_value: getSensorDefault(defaultSensorType),
   unit: getSensorUnit(defaultSensorType),
   quality: 'good',
-  raw_mode: true
+  raw_mode: true,
+  // Operating Mode (Phase 2B)
+  operating_mode: 'continuous',
+  timeout_seconds: 180
 })
 
 // Sensor type options for dropdown
 const sensorTypeOptions = getSensorTypeOptions()
 
-// Watch for sensor type changes and update unit/initial value
+// Watch for sensor type changes and update unit/initial value + Operating Mode (Phase 2B)
 watch(() => newSensor.value.sensor_type, (newType) => {
   const config = SENSOR_TYPE_CONFIG[newType]
   if (config) {
     newSensor.value.unit = config.unit
     newSensor.value.raw_value = config.defaultValue
+    // Operating Mode aktualisieren (Phase 2B)
+    newSensor.value.operating_mode = config.recommendedMode || 'continuous'
+    newSensor.value.timeout_seconds = config.recommendedTimeout ?? 180
   }
 })
 
-// Reset new sensor form to defaults
+// ============================================================================
+// OPERATING MODE HELPERS (Phase 2B)
+// ============================================================================
+
+/**
+ * Empfohlener Operating Mode für den ausgewählten Sensor-Typ.
+ * Wird aus sensorDefaults.ts gelesen oder Default 'continuous'.
+ */
+const recommendedMode = computed(() => {
+  const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
+  return config?.recommendedMode || 'continuous'
+})
+
+/**
+ * Empfohlener Timeout für den ausgewählten Sensor-Typ.
+ */
+const recommendedTimeout = computed(() => {
+  const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
+  return config?.recommendedTimeout ?? 180
+})
+
+/**
+ * Ob der ausgewählte Sensor-Typ On-Demand unterstützt.
+ */
+const supportsOnDemand = computed(() => {
+  const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
+  return config?.supportsOnDemand ?? false
+})
+
+// Reset new sensor form to defaults (Phase 2B: Operating Mode erweitert)
 function resetNewSensor() {
   newSensor.value = {
     gpio: 0,
@@ -129,8 +165,82 @@ function resetNewSensor() {
     raw_value: getSensorDefault(defaultSensorType),
     unit: getSensorUnit(defaultSensorType),
     quality: 'good',
-    raw_mode: true
+    raw_mode: true,
+    // Operating Mode reset (Phase 2B)
+    operating_mode: 'continuous',
+    timeout_seconds: 180
   }
+}
+
+// =============================================================================
+// EDIT SENSOR STATE (Phase 2F)
+// =============================================================================
+const showEditSensorModal = ref(false)
+const editingSensor = ref<{
+  gpio: number
+  sensor_type: string
+  name: string | null
+  operating_mode: string | null  // null = use type default
+  timeout_seconds: number | null // null = use type default
+  schedule_config: { type: string; expression: string } | null // Schedule configuration
+  // Type defaults for comparison
+  typeDefaultMode: string
+  typeDefaultTimeout: number
+} | null>(null)
+
+// Cron Presets for easy selection
+const CRON_PRESETS = [
+  { label: 'Jede Stunde', value: '0 * * * *', description: 'Zur vollen Stunde' },
+  { label: 'Alle 6 Stunden', value: '0 */6 * * *', description: '00:00, 06:00, 12:00, 18:00' },
+  { label: 'Täglich um 8:00', value: '0 8 * * *', description: 'Einmal täglich' },
+  { label: 'Alle 15 Minuten', value: '*/15 * * * *', description: '00, 15, 30, 45' },
+  { label: 'Alle 30 Minuten', value: '*/30 * * * *', description: '00 und 30' },
+  { label: 'Wochentags 9:00', value: '0 9 * * 1-5', description: 'Mo-Fr um 9:00' },
+]
+
+// Loading & Error State for Edit Modal
+const isEditSaving = ref(false)
+const editError = ref<string | null>(null)
+const isMeasuring = ref(false)
+const measureSuccess = ref<string | null>(null)
+
+// =============================================================================
+// EDIT MODAL COMPUTED (Phase 2F)
+// =============================================================================
+
+// Check if current value differs from type default
+const editHasModeOverride = computed(() => {
+  if (!editingSensor.value) return false
+  return editingSensor.value.operating_mode !== null
+})
+
+const editHasTimeoutOverride = computed(() => {
+  if (!editingSensor.value) return false
+  return editingSensor.value.timeout_seconds !== null
+})
+
+// Effective values (what will actually be used)
+const editEffectiveMode = computed(() => {
+  if (!editingSensor.value) return 'continuous'
+  return editingSensor.value.operating_mode ?? editingSensor.value.typeDefaultMode
+})
+
+const editEffectiveTimeout = computed(() => {
+  if (!editingSensor.value) return 180
+  return editingSensor.value.timeout_seconds ?? editingSensor.value.typeDefaultTimeout
+})
+
+// Check if on_demand is supported for this sensor type
+const editSupportsOnDemand = computed(() => {
+  if (!editingSensor.value) return false
+  const config = SENSOR_TYPE_CONFIG[editingSensor.value.sensor_type]
+  return config?.supportsOnDemand ?? false
+})
+
+// Get sensor label for display
+function getSensorLabel(sensorType: string): string {
+  const config = SENSOR_TYPE_CONFIG[sensorType]
+  return config?.label || sensorType
 }
 
 // =============================================================================
@@ -275,17 +385,192 @@ function onDrop(event: DragEvent) {
 }
 
 // Add sensor to ESP
+// Phase 2B: Keine isMock-Blockade mehr!
+// Der Store entscheidet welche API verwendet wird.
 async function addSensor() {
-  if (!isMock.value) return
-
   try {
-    await espStore.addSensor(espId.value, newSensor.value)
+    await espStore.addSensor(espId.value, {
+      ...newSensor.value,
+      // Operating Mode Felder für Real-ESPs
+      operating_mode: newSensor.value.operating_mode,
+      timeout_seconds: newSensor.value.timeout_seconds,
+    })
     showAddSensorModal.value = false
     resetNewSensor()
     // Refresh ESP data
     await espStore.fetchAll()
   } catch (error) {
     console.error('[ESPOrbitalLayout] Failed to add sensor:', error)
+  }
+}
+
+// =============================================================================
+// EDIT SENSOR HANDLERS (Phase 2F)
+// =============================================================================
+
+/**
+ * Open edit modal for a sensor
+ */
+function openEditSensorModal(gpio: number) {
+  const sensor = sensors.value.find(s => s.gpio === gpio)
+  if (!sensor) {
+    console.error('[ESPOrbitalLayout] Sensor not found:', gpio)
+    return
+  }
+
+  // Reset error/success states
+  editError.value = null
+  measureSuccess.value = null
+  isEditSaving.value = false
+  isMeasuring.value = false
+
+  // Get type defaults
+  const typeConfig = SENSOR_TYPE_CONFIG[sensor.sensor_type] || {}
+  const typeDefaultMode = typeConfig.recommendedMode || 'continuous'
+  const typeDefaultTimeout = typeConfig.recommendedTimeout ?? 180
+
+  // Initialize edit state
+  // null means "use type default"
+  // Parse existing schedule_config if present
+  const existingSchedule = sensor.schedule_config as { type?: string; expression?: string } | null
+  const scheduleConfig = existingSchedule?.expression
+    ? { type: 'cron', expression: existingSchedule.expression }
+    : null
+
+  editingSensor.value = {
+    gpio: sensor.gpio,
+    sensor_type: sensor.sensor_type,
+    name: sensor.name || null,
+    // If sensor has override different from default, use it; otherwise null (= use default)
+    operating_mode: sensor.operating_mode && sensor.operating_mode !== typeDefaultMode
+      ? sensor.operating_mode
+      : null,
+    timeout_seconds: sensor.timeout_seconds !== undefined && sensor.timeout_seconds !== typeDefaultTimeout
+      ? sensor.timeout_seconds
+      : null,
+    // Schedule configuration for scheduled mode
+    schedule_config: scheduleConfig,
+    // Store defaults for comparison
+    typeDefaultMode,
+    typeDefaultTimeout,
+  }
+
+  showEditSensorModal.value = true
+}
+
+/**
+ * Reset a field to type default
+ */
+function resetToTypeDefault(field: 'operating_mode' | 'timeout_seconds') {
+  if (!editingSensor.value) return
+
+  if (field === 'operating_mode') {
+    editingSensor.value.operating_mode = null
+  } else if (field === 'timeout_seconds') {
+    editingSensor.value.timeout_seconds = null
+  }
+}
+
+/**
+ * Set override value (when user changes from default)
+ */
+function setOverrideValue(field: 'operating_mode' | 'timeout_seconds', value: string | number) {
+  if (!editingSensor.value) return
+
+  if (field === 'operating_mode') {
+    editingSensor.value.operating_mode = value as string
+  } else if (field === 'timeout_seconds') {
+    editingSensor.value.timeout_seconds = value as number
+  }
+}
+
+/**
+ * Set cron expression from preset or custom input
+ */
+function setCronExpression(expression: string) {
+  if (!editingSensor.value) return
+  editingSensor.value.schedule_config = expression
+    ? { type: 'cron', expression }
+    : null
+}
+
+/**
+ * Save sensor configuration
+ */
+async function saveEditSensor() {
+  if (!editingSensor.value) return
+
+  isEditSaving.value = true
+  editError.value = null
+
+  try {
+    // Prepare schedule_config for API
+    const scheduleConfig = editingSensor.value.operating_mode === 'scheduled' && editingSensor.value.schedule_config
+      ? editingSensor.value.schedule_config
+      : undefined
+
+    await espStore.updateSensorConfig(espId.value, editingSensor.value.gpio, {
+      name: editingSensor.value.name,
+      operating_mode: editingSensor.value.operating_mode,
+      timeout_seconds: editingSensor.value.timeout_seconds,
+      schedule_config: scheduleConfig,
+    })
+
+    console.log(`[ESPOrbitalLayout] Sensor GPIO ${editingSensor.value.gpio} aktualisiert`)
+    showEditSensorModal.value = false
+    editingSensor.value = null
+
+    // Refresh ESP data
+    await espStore.fetchAll()
+  } catch (err: any) {
+    console.error('[ESPOrbitalLayout] Failed to update sensor:', err)
+    editError.value = err.message || 'Fehler beim Speichern der Sensor-Konfiguration'
+  } finally {
+    isEditSaving.value = false
+  }
+}
+
+/**
+ * Cancel edit
+ */
+function cancelEditSensor() {
+  showEditSensorModal.value = false
+  editingSensor.value = null
+  editError.value = null
+  measureSuccess.value = null
+  isEditSaving.value = false
+  isMeasuring.value = false
+}
+
+/**
+ * Trigger immediate measurement for on-demand sensors
+ */
+async function triggerMeasureNow() {
+  if (!editingSensor.value) return
+
+  isMeasuring.value = true
+  editError.value = null
+  measureSuccess.value = null
+
+  try {
+    const result = await sensorsApi.triggerMeasurement(espId.value, editingSensor.value.gpio)
+    measureSuccess.value = `Messung angefordert (ID: ${result.request_id.slice(0, 8)}...)`
+    console.log('[ESPOrbitalLayout] Measurement triggered:', result)
+
+    // Auto-clear success message after 5 seconds
+    setTimeout(() => {
+      measureSuccess.value = null
+    }, 5000)
+
+    // Refresh to get new data after a short delay
+    setTimeout(async () => {
+      await espStore.fetchAll()
+    }, 2000)
+  } catch (err: any) {
+    console.error('[ESPOrbitalLayout] Failed to trigger measurement:', err)
+    editError.value = err.message || 'Fehler bei der Messungsanforderung'
+  } finally {
+    isMeasuring.value = false
   }
 }
 
@@ -559,13 +844,9 @@ function handleNameKeydown(event: KeyboardEvent) {
 // =============================================================================
 
 function handleSensorClick(gpio: number) {
-  if (selectedGpio.value === gpio && selectedType.value === 'sensor') {
-    selectedGpio.value = null
-    selectedType.value = null
-  } else {
-    selectedGpio.value = gpio
-    selectedType.value = 'sensor'
-  }
+  // Phase 2F: Öffne Edit-Modal statt nur Selektion zu toggeln
+  openEditSensorModal(gpio)
+  // Auch Event emittieren für externe Handler
   emit('sensorClick', gpio)
 }
 
@@ -661,8 +942,8 @@ watch(
     class="esp-horizontal-layout"
     :class="{
       'esp-horizontal-layout--has-items': totalItems > 0,
-      'esp-horizontal-layout--can-drop': dragStore.isDraggingSensorType && isMock,
-      'esp-horizontal-layout--drag-over': isDragOver && isMock
+      'esp-horizontal-layout--can-drop': dragStore.isDraggingSensorType,
+      'esp-horizontal-layout--drag-over': isDragOver
     }"
     :data-esp-id="espId"
     @dragenter="onDragEnter"
@@ -865,17 +1146,17 @@ watch(
       />
     </div>
 
-    <!-- Drop Indicator Overlay -->
+    <!-- Drop Indicator Overlay (Phase 2B: für alle ESPs) -->
     <Transition name="fade">
-      <div v-if="isDragOver && isMock" class="esp-horizontal-layout__drop-indicator">
+      <div v-if="isDragOver" class="esp-horizontal-layout__drop-indicator">
         <span class="esp-horizontal-layout__drop-text">Sensor hinzufügen</span>
       </div>
     </Transition>
   </div>
 
-  <!-- Add Sensor Modal (Teleport to body) -->
+  <!-- Add Sensor Modal (Teleport to body) - Phase 2B: für alle ESPs -->
   <Teleport to="body">
-    <div v-if="showAddSensorModal && isMock" class="modal-overlay" @click.self="showAddSensorModal = false">
+    <div v-if="showAddSensorModal" class="modal-overlay" @click.self="showAddSensorModal = false">
       <div class="modal-content">
         <!-- Modal Header -->
         <div class="modal-header">
@@ -912,6 +1193,57 @@ watch(
               </select>
             </div>
           </div>
+
+          <!-- ================================================================== -->
+          <!-- OPERATING MODE SECTION (Phase 2B)                                  -->
+          <!-- ================================================================== -->
+          <div class="form-group">
+            <label class="form-label">
+              Betriebsmodus
+              <span
+                v-if="recommendedMode"
+                class="text-xs text-gray-400 ml-2"
+                :title="`Empfohlen für ${newSensor.sensor_type}`"
+              >
+                (Empfohlen: {{ recommendedMode === 'on_demand' ? 'Auf Abruf' : 'Kontinuierlich' }})
+              </span>
+            </label>
+            <select
+              v-model="newSensor.operating_mode"
+              class="form-select"
+            >
+              <option value="continuous">Kontinuierlich</option>
+              <option value="on_demand" :disabled="!supportsOnDemand">
+                Auf Abruf {{ !supportsOnDemand ? '(nicht unterstützt)' : '' }}
+              </option>
+              <option value="scheduled">Geplant</option>
+              <option value="paused">Pausiert</option>
+            </select>
+          </div>
+
+          <!-- Timeout (nur bei continuous) -->
+          <div
+            v-if="newSensor.operating_mode === 'continuous'"
+            class="form-group"
+          >
+            <label class="form-label">
+              Timeout (Sekunden)
+              <span class="text-xs text-gray-400 ml-2">
+                (0 = kein Timeout)
+              </span>
+            </label>
+            <input
+              v-model.number="newSensor.timeout_seconds"
+              type="number"
+              min="0"
+              max="86400"
+              class="form-input"
+              placeholder="180"
+            />
+          </div>
+          <!-- ================================================================== -->
+          <!-- END OPERATING MODE SECTION                                         -->
+          <!-- ================================================================== -->
 
           <!-- Name -->
           <div class="form-group">
@@ -965,6 +1297,231 @@ watch(
           </button>
           <button class="btn btn--primary" @click="addSensor">
             Hinzufügen
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- =======================================================================
+       EDIT SENSOR MODAL (Phase 2F)
+       ======================================================================= -->
+  <Teleport to="body">
+    <div
+      v-if="showEditSensorModal && editingSensor"
+      class="modal-overlay"
+      @click.self="cancelEditSensor"
+    >
+      <div class="modal-content">
+        <!-- Modal Header -->
+        <div class="modal-header modal-header--edit">
+          <div>
+            <h3 class="modal-title">Sensor bearbeiten</h3>
+            <p class="modal-subtitle">
+              GPIO {{ editingSensor.gpio }} · {{ getSensorLabel(editingSensor.sensor_type) }}
+            </p>
+          </div>
+          <button class="modal-close" @click="cancelEditSensor">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body">
+          <!-- Name -->
+          <div class="form-group">
+            <label class="form-label">Name (optional)</label>
+            <input
+              v-model="editingSensor.name"
+              type="text"
+              class="form-input"
+              placeholder="z.B. Temperatur Gewächshaus 1"
+            />
+          </div>
+
+          <!-- Operating Mode -->
+          <div class="form-group">
+            <div class="form-label-row">
+              <label class="form-label">Betriebsmodus</label>
+              <button
+                v-if="editHasModeOverride"
+                class="btn-reset"
+                title="Auf Type-Default zurücksetzen"
+                @click="resetToTypeDefault('operating_mode')"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Type-Default
+              </button>
+            </div>
+
+            <select
+              :value="editEffectiveMode"
+              class="form-select"
+              @change="setOverrideValue('operating_mode', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="continuous">Kontinuierlich</option>
+              <option value="on_demand" :disabled="!editSupportsOnDemand">
+                Auf Abruf {{ !editSupportsOnDemand ? '(nicht unterstützt)' : '' }}
+              </option>
+              <option value="scheduled">Geplant</option>
+              <option value="paused">Pausiert</option>
+            </select>
+
+            <!-- Type Default Info -->
+            <p :class="['form-hint', editHasModeOverride ? 'form-hint--warning' : '']">
+              <template v-if="editHasModeOverride">
+                ⚠️ Individuell angepasst (Type-Default: {{ editingSensor.typeDefaultMode }})
+              </template>
+              <template v-else>
+                Verwendet Type-Default: {{ editingSensor.typeDefaultMode }}
+              </template>
+            </p>
+          </div>
+
+          <!-- Timeout (nur bei continuous) -->
+          <div v-if="editEffectiveMode === 'continuous'" class="form-group">
+            <div class="form-label-row">
+              <label class="form-label">Timeout (Sekunden)</label>
+              <button
+                v-if="editHasTimeoutOverride"
+                class="btn-reset"
+                title="Auf Type-Default zurücksetzen"
+                @click="resetToTypeDefault('timeout_seconds')"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Type-Default
+              </button>
+            </div>
+
+            <input
+              :value="editEffectiveTimeout"
+              type="number"
+              min="0"
+              max="86400"
+              class="form-input"
+              placeholder="180"
+              @input="setOverrideValue('timeout_seconds', parseInt(($event.target as HTMLInputElement).value) || 0)"
+            />
+
+            <!-- Type Default Info -->
+            <p :class="['form-hint', editHasTimeoutOverride ? 'form-hint--warning' : '']">
+              <template v-if="editHasTimeoutOverride">
+                ⚠️ Individuell angepasst (Type-Default: {{ editingSensor.typeDefaultTimeout }}s)
+              </template>
+              <template v-else>
+                Verwendet Type-Default: {{ editingSensor.typeDefaultTimeout }}s
+              </template>
+            </p>
+
+            <p class="form-hint">
+              0 = Kein Timeout (Warnung deaktiviert)
+            </p>
+          </div>
+
+          <!-- Info für nicht-continuous Modi -->
+          <div v-if="editEffectiveMode !== 'continuous'" class="info-box">
+            <template v-if="editEffectiveMode === 'on_demand'">
+              <div class="info-box__content">
+                <p>ℹ️ <strong>Auf Abruf:</strong> Sensor misst nur bei manueller Anforderung. Kein automatisches Timeout.</p>
+                <button
+                  class="btn btn--accent btn--sm"
+                  :disabled="isMeasuring"
+                  @click="triggerMeasureNow"
+                >
+                  <Loader2 v-if="isMeasuring" class="animate-spin" :size="14" />
+                  <span v-else>📏</span>
+                  {{ isMeasuring ? 'Messe...' : 'Jetzt messen' }}
+                </button>
+              </div>
+            </template>
+            <template v-else-if="editEffectiveMode === 'paused'">
+              ℹ️ <strong>Pausiert:</strong> Sensor ist deaktiviert, GPIO bleibt reserviert.
+            </template>
+            <template v-else-if="editEffectiveMode === 'scheduled'">
+              <div class="schedule-config">
+                <p class="schedule-config__info">
+                  ℹ️ <strong>Geplant:</strong> Messung zu definierten Zeitpunkten (Server-gesteuert).
+                </p>
+
+                <!-- Cron Presets -->
+                <div class="schedule-config__presets">
+                  <label class="form-label">Zeitplan-Vorlagen:</label>
+                  <div class="preset-buttons">
+                    <button
+                      v-for="preset in CRON_PRESETS"
+                      :key="preset.value"
+                      class="preset-btn"
+                      :class="{ 'preset-btn--active': editingSensor?.schedule_config?.expression === preset.value }"
+                      :title="preset.description"
+                      @click="setCronExpression(preset.value)"
+                    >
+                      {{ preset.label }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Custom Cron Input -->
+                <div class="schedule-config__custom">
+                  <label class="form-label">Cron-Expression:</label>
+                  <input
+                    :value="editingSensor?.schedule_config?.expression || ''"
+                    type="text"
+                    class="form-input form-input--mono"
+                    placeholder="z.B. 0 */6 * * * (alle 6 Stunden)"
+                    @input="setCronExpression(($event.target as HTMLInputElement).value)"
+                  />
+                  <p class="form-hint">
+                    Format: Minute Stunde Tag Monat Wochentag
+                    <br />
+                    <code>*</code> = jeder, <code>*/n</code> = alle n, <code>1-5</code> = Bereich
+                  </p>
+                </div>
+
+                <!-- Current Schedule Display -->
+                <div v-if="editingSensor?.schedule_config?.expression" class="schedule-config__current">
+                  <span class="schedule-label">Aktuell:</span>
+                  <code class="schedule-value">{{ editingSensor.schedule_config.expression }}</code>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Error Message -->
+          <div v-if="editError" class="alert alert--error">
+            <span class="alert__icon">⚠️</span>
+            <span class="alert__text">{{ editError }}</span>
+            <button class="alert__close" @click="editError = null">×</button>
+          </div>
+
+          <!-- Success Message -->
+          <div v-if="measureSuccess" class="alert alert--success">
+            <span class="alert__icon">✅</span>
+            <span class="alert__text">{{ measureSuccess }}</span>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer">
+          <button
+            class="btn btn--secondary"
+            :disabled="isEditSaving"
+            @click="cancelEditSensor"
+          >
+            Abbrechen
+          </button>
+          <button
+            class="btn btn--primary"
+            :disabled="isEditSaving"
+            @click="saveEditSensor"
+          >
+            <Loader2 v-if="isEditSaving" class="animate-spin" :size="16" />
+            {{ isEditSaving ? 'Speichere...' : 'Speichern' }}
           </button>
         </div>
       </div>
@@ -1784,6 +2341,270 @@ watch(
 .btn--secondary:hover {
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
+}
+
+/* =============================================================================
+   EDIT SENSOR MODAL STYLES (Phase 2F)
+   ============================================================================= */
+
+.modal-header--edit {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+}
+
+.modal-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
+
+.form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.375rem;
+}
+
+.form-label-row .form-label {
+  margin-bottom: 0;
+}
+
+.btn-reset {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--color-iridescent-1);
+  background: transparent;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-reset:hover {
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--color-iridescent-2);
+}
+
+.btn-reset svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.form-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
+
+.form-hint--warning {
+  color: var(--color-warning, #f59e0b);
+}
+
+.info-box {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  line-height: 1.5;
+}
+
+.info-box strong {
+  color: var(--color-text-primary);
+}
+
+.info-box__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.info-box__content p {
+  margin: 0;
+}
+
+/* Alert Messages */
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  margin-top: 0.75rem;
+}
+
+.alert--error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.alert--success {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #22c55e;
+}
+
+.alert__icon {
+  flex-shrink: 0;
+}
+
+.alert__text {
+  flex: 1;
+}
+
+.alert__close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.25rem;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0;
+  line-height: 1;
+}
+
+.alert__close:hover {
+  opacity: 1;
+}
+
+/* Small Button Variant */
+.btn--sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  gap: 0.375rem;
+}
+
+/* Accent Button (for Measure Now) */
+.btn--accent {
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  border: none;
+}
+
+.btn--accent:hover:not(:disabled) {
+  background: var(--color-primary-hover, #2563eb);
+}
+
+.btn--accent:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Animation for loading spinner */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Schedule Configuration Styles */
+.schedule-config {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.schedule-config__info {
+  margin: 0;
+}
+
+.schedule-config__presets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.preset-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.375rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.preset-btn--active {
+  background: var(--color-primary, #3b82f6);
+  border-color: var(--color-primary, #3b82f6);
+  color: white;
+}
+
+.schedule-config__custom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form-input--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+.schedule-config__current {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--color-bg-tertiary);
+  border-radius: 0.375rem;
+}
+
+.schedule-label {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.schedule-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: var(--color-primary, #3b82f6);
+  background: var(--color-bg-secondary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+}
+
+/* Code styling in hints */
+.form-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.6875rem;
+  background: var(--color-bg-tertiary);
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.25rem;
+}
+
+/* Utility classes for SVG icons */
+.w-3 {
+  width: 0.75rem;
+}
+.h-3 {
+  height: 0.75rem;
 }
 </style>
 
