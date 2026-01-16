@@ -836,9 +836,7 @@ Basierend auf Hierarchie.md **FEHLT** die Unterscheidung zwischen echten ESPs un
 #### **SensorsView - KRITISCHE LÜCKE**
 - **Aktuell:** Nutzt `useMockEspStore` → Zeigt NUR Mock-ESPs
 - **Fehlt:** Echte ESP Sensoren komplett
-- **Benötigt:** Migration zu `useEspStore`, ESP-Typ-Badges
-
-#### **ActuatorsView - KRITISCHE LÜCKE**
+- **Benötigt:** Migration zu `useEspStore`, ESP-Typ-Badges#### **ActuatorsView - KRITISCHE LÜCKE**
 - **Aktuell:** Nutzt `useMockEspStore` → Zeigt NUR Mock-ESPs
 - **Fehlt:** Echte ESP Aktoren komplett
 - **Benötigt:** Migration zu `useEspStore`, PWM-Kontrolle
@@ -927,4 +925,3 @@ Pfad: El Servador/god_kaiser_server/src/db/models/
 | `config/logging.yaml` | Logging-Konfiguration |
 | `alembic/` | Datenbank-Migrationen |
 | `pyproject.toml` | Python-Dependencies (Poetry) |
-

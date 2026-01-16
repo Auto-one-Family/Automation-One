@@ -88,8 +88,13 @@ class SensorConfigBase(BaseModel):
 class SensorConfigCreate(SensorConfigBase):
     """
     Sensor configuration create request.
+
+    Multi-Value Sensor Support:
+    - I2C sensors: Multiple sensor_types can share same GPIO (bus pins 21/22)
+    - OneWire sensors: Multiple devices can share same GPIO (bus pin)
+    - Analog/Digital: GPIO must be exclusive
     """
-    
+
     esp_id: str = Field(
         ...,
         pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
@@ -112,6 +117,35 @@ class SensorConfigCreate(SensorConfigBase):
         description="Processing mode: pi_enhanced (server), local (ESP), raw (no processing)",
         pattern=r"^(pi_enhanced|local|raw)$",
     )
+
+    # =========================================================================
+    # MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+    # =========================================================================
+    interface_type: Optional[str] = Field(
+        None,
+        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL)$",
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred if not provided)",
+    )
+
+    i2c_address: Optional[int] = Field(
+        None,
+        ge=0,
+        le=127,
+        description="I2C address (required for I2C sensors, e.g., 68 for 0x44)",
+    )
+
+    onewire_address: Optional[str] = Field(
+        None,
+        max_length=16,
+        description="OneWire device address (required for OneWire sensors)",
+    )
+
+    provides_values: Optional[List[str]] = Field(
+        None,
+        description="List of value types this sensor provides (for multi-value sensors, e.g., ['sht31_temp', 'sht31_humidity'])",
+    )
+    # =========================================================================
+
     # Calibration
     calibration: Optional[Dict[str, Any]] = Field(
         None,
@@ -237,7 +271,7 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     """
     Sensor configuration response.
     """
-    
+
     id: uuid.UUID = Field(
         ...,
         description="Unique identifier (UUID)",
@@ -262,6 +296,31 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
         ...,
         description="Processing mode",
     )
+
+    # =========================================================================
+    # MULTI-VALUE SENSOR SUPPORT
+    # =========================================================================
+    interface_type: str = Field(
+        ...,
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL",
+    )
+
+    i2c_address: Optional[int] = Field(
+        None,
+        description="I2C address (for I2C sensors)",
+    )
+
+    onewire_address: Optional[str] = Field(
+        None,
+        description="OneWire device address (for OneWire sensors)",
+    )
+
+    provides_values: Optional[List[str]] = Field(
+        None,
+        description="List of value types this sensor provides",
+    )
+    # =========================================================================
+
     calibration: Optional[Dict[str, Any]] = Field(None)
     threshold_min: Optional[float] = Field(None)
     threshold_max: Optional[float] = Field(None)
@@ -745,6 +804,169 @@ class SensorCalibrateResponse(BaseResponse):
     method: str = Field(..., description="Calibration method used")
     saved: bool = Field(..., description="Whether saved to database")
     message: Optional[str] = Field(None, description="Additional info")
+
+
+# =============================================================================
+# OneWire Scan (DS18B20 Support)
+# =============================================================================
+
+
+class OneWireDevice(BaseModel):
+    """
+    OneWire device found during bus scan.
+    
+    Used for DS18B20 and other 1-Wire sensors.
+    Each device has a unique 64-bit ROM address.
+    
+    OneWire Multi-Device Support:
+    - Multiple DS18B20 sensors can share the same GPIO pin (bus topology)
+    - Each device is uniquely identified by its 64-bit ROM code
+    - Scan results are enriched with already_configured flag to distinguish
+      new devices from those already in the database
+    """
+
+    rom_code: str = Field(
+        ...,
+        min_length=16,
+        max_length=16,
+        description="OneWire ROM code (16 hex chars, e.g., '28FF641E8D3C0C79')",
+        examples=["28FF641E8D3C0C79"],
+    )
+    device_type: str = Field(
+        ...,
+        description="Device type: ds18b20, ds18s20, ds1822, unknown",
+        examples=["ds18b20"],
+    )
+    pin: int = Field(
+        ...,
+        ge=0,
+        le=48,
+        description="GPIO pin the device was found on",
+    )
+    # =========================================================================
+    # OneWire Multi-Device Support (GPIO-Sharing)
+    # =========================================================================
+    already_configured: bool = Field(
+        False,
+        description="True if this device is already configured in database",
+    )
+    sensor_name: Optional[str] = Field(
+        None,
+        description="Sensor name if already configured (for display in UI)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rom_code": "28FF641E8D3C0C79",
+                "device_type": "ds18b20",
+                "pin": 4,
+                "already_configured": False,
+                "sensor_name": None
+            }
+        }
+    )
+
+
+class OneWireScanRequest(BaseModel):
+    """
+    OneWire scan request parameters.
+    """
+    
+    pin: int = Field(
+        4,
+        ge=0,
+        le=48,
+        description="GPIO pin for OneWire bus (default: 4)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "pin": 4
+            }
+        }
+    )
+
+
+class OneWireScanResponse(BaseResponse):
+    """
+    Response from OneWire bus scan.
+    
+    Contains list of discovered devices with their ROM codes and types.
+    
+    OneWire Multi-Device Support:
+    - Devices are enriched with already_configured flag
+    - new_count indicates how many devices are NOT yet in database
+    - Frontend can use this to show which devices are new vs already configured
+    """
+
+    devices: List[OneWireDevice] = Field(
+        default_factory=list,
+        description="List of discovered OneWire devices",
+    )
+    found_count: int = Field(
+        ...,
+        ge=0,
+        description="Total number of devices found on bus",
+    )
+    # =========================================================================
+    # OneWire Multi-Device Support (GPIO-Sharing)
+    # =========================================================================
+    new_count: int = Field(
+        0,
+        ge=0,
+        description="Number of NEW devices (not yet configured in database)",
+    )
+    pin: int = Field(
+        ...,
+        description="GPIO pin that was scanned",
+    )
+    esp_id: str = Field(
+        ...,
+        description="ESP device that performed the scan",
+    )
+    scan_duration_ms: Optional[int] = Field(
+        None,
+        description="Scan duration in milliseconds",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "success": True,
+                "message": "Found 3 OneWire device(s) (2 new)",
+                "devices": [
+                    {
+                        "rom_code": "28FF641E8D3C0C79",
+                        "device_type": "ds18b20",
+                        "pin": 4,
+                        "already_configured": True,
+                        "sensor_name": "Gewächshaus Temp"
+                    },
+                    {
+                        "rom_code": "28FF123456789ABC",
+                        "device_type": "ds18b20",
+                        "pin": 4,
+                        "already_configured": False,
+                        "sensor_name": None
+                    },
+                    {
+                        "rom_code": "28FF987654321DEF",
+                        "device_type": "ds18b20",
+                        "pin": 4,
+                        "already_configured": False,
+                        "sensor_name": None
+                    }
+                ],
+                "found_count": 3,
+                "new_count": 2,
+                "pin": 4,
+                "esp_id": "ESP_12AB34CD",
+                "scan_duration_ms": 250
+            }
+        }
+    )
 
 
 # =============================================================================

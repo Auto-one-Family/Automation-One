@@ -35,6 +35,15 @@ export interface SensorTypeConfig {
   recommendedTimeout?: number
   /** Ob dieser Sensor-Typ On-Demand-Messungen unterstützt */
   supportsOnDemand?: boolean
+  // =========================================================================
+  // ONEWIRE SUPPORT (Phase 6 - DS18B20)
+  // =========================================================================
+  /** Requires OneWire address scanning before configuration */
+  requiresAddressScanning?: boolean
+  /** Multiple sensors can share the same GPIO pin (OneWire bus) */
+  supportsMultipleOnSamePin?: boolean
+  /** Recommended GPIO pins for this sensor type */
+  recommendedGpios?: number[]
 }
 
 /**
@@ -90,6 +99,29 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    // OneWire (Phase 6)
+    requiresAddressScanning: true,
+    supportsMultipleOnSamePin: true,
+    recommendedGpios: [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33],
+  },
+
+  // Lowercase variant for consistency (ESP32 may send lowercase)
+  'ds18b20': {
+    label: 'Temperatur (DS18B20)',
+    unit: '°C',
+    min: -55,
+    max: 125,
+    decimals: 1,
+    icon: 'Thermometer',
+    defaultValue: 20.0,
+    description: 'Digitaler Temperatursensor, wasserdicht. Ideal für Flüssigkeiten und Umgebungstemperatur.',
+    category: 'temperature',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
+    requiresAddressScanning: true,
+    supportsMultipleOnSamePin: true,
+    recommendedGpios: [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33],
   },
   
   'pH': {
@@ -125,16 +157,47 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
   
   'SHT31': {
-    label: 'Temperatur (SHT31)',
+    label: 'SHT31',
     unit: '°C',
     min: -40,
     max: 125,
     decimals: 1,
     icon: 'Thermometer',
     defaultValue: 22.0,
-    description: 'Präziser Temperatur- und Feuchtesensor (I2C).',
+    description: 'Präziser Temperatur- und Feuchtesensor (I2C). Multi-Value-Sensor: Temperatur + Luftfeuchtigkeit.',
     category: 'temperature',
     // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
+  },
+
+  // Lowercase variants for consistency
+  'sht31': {
+    label: 'SHT31',
+    unit: '°C',
+    min: -40,
+    max: 125,
+    decimals: 1,
+    icon: 'Thermometer',
+    defaultValue: 22.0,
+    description: 'Präziser Temperatur- und Feuchtesensor (I2C). Multi-Value-Sensor: Temperatur + Luftfeuchtigkeit.',
+    category: 'temperature',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
+  },
+
+  'sht31_temp': {
+    label: 'Temperatur',
+    unit: '°C',
+    min: -40,
+    max: 125,
+    decimals: 1,
+    icon: 'Thermometer',
+    defaultValue: 22.0,
+    description: 'SHT31 Temperaturwert.',
+    category: 'temperature',
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
@@ -384,12 +447,274 @@ export function getSensorTypeOptions(): Array<{ value: string; label: string }> 
  */
 export function formatSensorValueWithUnit(value: number | null, sensorType: string): string {
   if (value === null || value === undefined) return '-'
-  
+
   const config = SENSOR_TYPE_CONFIG[sensorType]
   if (!config) return `${value}`
-  
+
   return `${value.toFixed(config.decimals)} ${config.unit}`
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// MULTI-VALUE DEVICE REGISTRY (Phase 6)
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Configuration for a single value within a multi-value device
+ */
+export interface MultiValueConfig {
+  /** Value key (e.g., "temp", "humidity") */
+  key: string
+  /** Full sensor_type string (e.g., "sht31_temp") */
+  sensorType: string
+  /** Display label */
+  label: string
+  /** Unit of measurement */
+  unit: string
+  /** Display order (lower = first) */
+  order: number
+  /** Icon for this specific value (optional) */
+  icon?: string
+}
+
+/**
+ * Configuration for a multi-value device
+ */
+export interface MultiValueDeviceConfig {
+  /** Device type identifier (e.g., "sht31") */
+  deviceType: string
+  /** Human-readable device name */
+  label: string
+  /** All sensor_types this device produces */
+  sensorTypes: string[]
+  /** Detailed config for each value */
+  values: MultiValueConfig[]
+  /** Primary icon for the device */
+  icon: string
+  /** Interface type */
+  interface: 'i2c' | 'onewire' | 'analog' | 'digital'
+  /** Typical I2C address (if applicable) */
+  i2cAddress?: string
+}
+
+/**
+ * Registry of all known multi-value devices
+ *
+ * ⚠️ KRITISCH: sensor_type Strings müssen EXAKT mit ESP32-Code übereinstimmen!
+ * Quelle: El Trabajante/src/models/sensor_registry.cpp (lines 88-140)
+ */
+export const MULTI_VALUE_DEVICES: Record<string, MultiValueDeviceConfig> = {
+  sht31: {
+    deviceType: 'sht31',
+    label: 'SHT31 (Temp + Humidity)',
+    sensorTypes: ['sht31_temp', 'sht31_humidity'],
+    values: [
+      { key: 'temp', sensorType: 'sht31_temp', label: 'Temperatur', unit: '°C', order: 1, icon: 'Thermometer' },
+      { key: 'humidity', sensorType: 'sht31_humidity', label: 'Luftfeuchtigkeit', unit: '% RH', order: 2, icon: 'Droplets' }
+    ],
+    icon: 'Thermometer',
+    interface: 'i2c',
+    i2cAddress: '0x44'
+  },
+
+  bmp280: {
+    deviceType: 'bmp280',
+    label: 'BMP280 (Pressure + Temp)',
+    sensorTypes: ['bmp280_pressure', 'bmp280_temp'],
+    values: [
+      { key: 'pressure', sensorType: 'bmp280_pressure', label: 'Luftdruck', unit: 'hPa', order: 1, icon: 'Gauge' },
+      { key: 'temp', sensorType: 'bmp280_temp', label: 'Temperatur', unit: '°C', order: 2, icon: 'Thermometer' }
+    ],
+    icon: 'Gauge',
+    interface: 'i2c',
+    i2cAddress: '0x76'
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MULTI-VALUE HELPER FUNCTIONS
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Maps base sensor types (from DB/Server) to their device type
+ *
+ * Problem: DB speichert "SHT31", aber Registry erwartet "sht31_temp"/"sht31_humidity"
+ * Lösung: Diese Map erlaubt das Erkennen von Base-Types
+ */
+const BASE_TYPE_TO_DEVICE: Record<string, string> = {
+  // SHT31 variants
+  'sht31': 'sht31',
+  'SHT31': 'sht31',
+  'sht31_temp': 'sht31',
+  'sht31_humidity': 'sht31',
+  // BMP280 variants
+  'bmp280': 'bmp280',
+  'BMP280': 'bmp280',
+  'bmp280_temp': 'bmp280',
+  'bmp280_pressure': 'bmp280',
+  // BME280 (same as BMP280 with humidity)
+  'bme280': 'bme280',
+  'BME280': 'bme280',
+}
+
+/**
+ * Extended MULTI_VALUE_DEVICES with BME280 support
+ */
+const BME280_CONFIG: MultiValueDeviceConfig = {
+  deviceType: 'bme280',
+  label: 'BME280 (Temp + Humidity + Pressure)',
+  sensorTypes: ['bme280_temp', 'bme280_humidity', 'bme280_pressure', 'BME280'],
+  values: [
+    { key: 'temp', sensorType: 'bme280_temp', label: 'Temperatur', unit: '°C', order: 1, icon: 'Thermometer' },
+    { key: 'humidity', sensorType: 'bme280_humidity', label: 'Feuchtigkeit', unit: '% RH', order: 2, icon: 'Droplets' },
+    { key: 'pressure', sensorType: 'bme280_pressure', label: 'Druck', unit: 'hPa', order: 3, icon: 'Gauge' }
+  ],
+  icon: 'Thermometer',
+  interface: 'i2c',
+  i2cAddress: '0x76'
+}
+
+// Add BME280 to registry
+MULTI_VALUE_DEVICES['bme280'] = BME280_CONFIG
+
+/**
+ * Check if a sensor_type belongs to a multi-value device
+ * Now also checks base types like "SHT31" or "BME280"
+ */
+export function isMultiValueSensorType(sensorType: string): boolean {
+  // Direct check in base type map
+  if (BASE_TYPE_TO_DEVICE[sensorType]) return true
+
+  // Check in device configs
+  return Object.values(MULTI_VALUE_DEVICES).some(
+    device => device.sensorTypes.includes(sensorType)
+  )
+}
+
+/**
+ * Get device type from sensor_type
+ *
+ * Extended to recognize base types like "SHT31", "BME280"
+ *
+ * @example
+ * getDeviceTypeFromSensorType('sht31_temp') // 'sht31'
+ * getDeviceTypeFromSensorType('SHT31') // 'sht31' (NEW!)
+ * getDeviceTypeFromSensorType('BME280') // 'bme280' (NEW!)
+ * getDeviceTypeFromSensorType('ds18b20') // null (single-value)
+ */
+export function getDeviceTypeFromSensorType(sensorType: string): string | null {
+  // First check base type map (handles uppercase variants)
+  if (BASE_TYPE_TO_DEVICE[sensorType]) {
+    return BASE_TYPE_TO_DEVICE[sensorType]
+  }
+
+  // Then check device configs
+  for (const [deviceType, config] of Object.entries(MULTI_VALUE_DEVICES)) {
+    if (config.sensorTypes.includes(sensorType)) {
+      return deviceType
+    }
+  }
+  return null
+}
+
+/**
+ * Get all sensor_types for a device type
+ *
+ * @example
+ * getSensorTypesForDevice('sht31') // ['sht31_temp', 'sht31_humidity']
+ */
+export function getSensorTypesForDevice(deviceType: string): string[] {
+  return MULTI_VALUE_DEVICES[deviceType]?.sensorTypes ?? []
+}
+
+/**
+ * Get device config by device type
+ */
+export function getMultiValueDeviceConfig(deviceType: string): MultiValueDeviceConfig | null {
+  return MULTI_VALUE_DEVICES[deviceType] ?? null
+}
+
+/**
+ * Get device config by any of its sensor_types
+ */
+export function getMultiValueDeviceConfigBySensorType(sensorType: string): MultiValueDeviceConfig | null {
+  const deviceType = getDeviceTypeFromSensorType(sensorType)
+  return deviceType ? MULTI_VALUE_DEVICES[deviceType] : null
+}
+
+/**
+ * Get value config for a specific sensor_type within a multi-value device
+ */
+export function getValueConfigForSensorType(sensorType: string): MultiValueConfig | null {
+  const deviceConfig = getMultiValueDeviceConfigBySensorType(sensorType)
+  if (!deviceConfig) return null
+
+  return deviceConfig.values.find(v => v.sensorType === sensorType) ?? null
+}
+
+// =============================================================================
+// INTERFACE TYPE INFERENCE
+// =============================================================================
+
+export type InterfaceType = 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
+
+/**
+ * Infer interface type from sensor_type.
+ *
+ * Matches server-side logic in sensors.py:_infer_interface_type
+ *
+ * Rules:
+ * - sht31*, bmp280*, bme280*, bh1750*, veml7700* → I2C
+ * - ds18b20* → ONEWIRE
+ * - Everything else → ANALOG (default)
+ *
+ * @example
+ * inferInterfaceType('ds18b20') // 'ONEWIRE'
+ * inferInterfaceType('sht31_temp') // 'I2C'
+ * inferInterfaceType('ph') // 'ANALOG'
+ */
+export function inferInterfaceType(sensorType: string): InterfaceType {
+  const lower = sensorType.toLowerCase()
+
+  // I2C sensors
+  if (
+    lower.includes('sht31') ||
+    lower.includes('bmp280') ||
+    lower.includes('bme280') ||
+    lower.includes('bh1750') ||
+    lower.includes('veml7700')
+  ) {
+    return 'I2C'
+  }
+
+  // OneWire sensors
+  if (lower.includes('ds18b20')) {
+    return 'ONEWIRE'
+  }
+
+  // Default to ANALOG
+  return 'ANALOG'
+}
+
+/**
+ * Get default I2C address for a sensor type (if applicable).
+ *
+ * @example
+ * getDefaultI2CAddress('sht31_temp') // 0x44 (68 decimal)
+ * getDefaultI2CAddress('ds18b20') // null (not I2C)
+ */
+export function getDefaultI2CAddress(sensorType: string): number | null {
+  const deviceConfig = getMultiValueDeviceConfigBySensorType(sensorType)
+
+  if (deviceConfig?.interface === 'i2c' && deviceConfig.i2cAddress) {
+    // Convert hex string "0x44" to number
+    return parseInt(deviceConfig.i2cAddress, 16)
+  }
+
+  return null
+}
+
+
+
 
 
 

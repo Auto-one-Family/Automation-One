@@ -531,11 +531,44 @@ class TopicBuilder:
         # Pattern: kaiser/{any_kaiser_id}/discovery/esp32_nodes
         pattern = r"kaiser/([a-zA-Z0-9_]+)/discovery/esp32_nodes"
         match = re.match(pattern, topic)
-        
+
         if match:
             return {
                 "kaiser_id": match.group(1),
                 "type": "discovery",
+            }
+        return None
+
+    @staticmethod
+    def parse_system_error_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse system error topic.
+
+        Expected topic: kaiser/{kaiser_id}/esp/{esp_id}/system/error
+
+        ESP32 publishes error events to this topic when hardware/config
+        errors occur (e.g., DS18B20 sensor failures, GPIO conflicts).
+
+        Args:
+            topic: MQTT topic string
+
+        Returns:
+            {
+                "kaiser_id": str,
+                "esp_id": str,
+                "type": "system_error"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/system/error
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/system/error$"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "system_error",
             }
         return None
 
@@ -858,6 +891,7 @@ class TopicBuilder:
             cls.parse_health_status_topic,
             cls.parse_config_response_topic,
             cls.parse_discovery_topic,
+            cls.parse_system_error_topic,
             cls.parse_pi_enhanced_request_topic,
             cls.parse_zone_ack_topic,
             cls.parse_subzone_ack_topic,

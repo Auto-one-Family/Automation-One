@@ -30,6 +30,13 @@
 #define ERROR_ONEWIRE_INIT_FAILED   1020
 #define ERROR_ONEWIRE_NO_DEVICES    1021
 #define ERROR_ONEWIRE_READ_FAILED   1022
+#define ERROR_ONEWIRE_INVALID_ROM_LENGTH  1023  // ROM-Code not 16 hex chars
+#define ERROR_ONEWIRE_INVALID_ROM_FORMAT  1024  // ROM-Code contains non-hex chars
+#define ERROR_ONEWIRE_INVALID_ROM_CRC     1025  // ROM-Code CRC8 validation failed
+#define ERROR_ONEWIRE_DEVICE_NOT_FOUND    1026  // Device not present on bus
+#define ERROR_ONEWIRE_BUS_NOT_INITIALIZED 1027  // OneWire bus not initialized
+#define ERROR_ONEWIRE_READ_TIMEOUT        1028  // Device read timeout
+#define ERROR_ONEWIRE_DUPLICATE_ROM       1029  // ROM-Code already registered
 
 #define ERROR_PWM_INIT_FAILED       1030
 #define ERROR_PWM_CHANNEL_FULL      1031
@@ -133,6 +140,11 @@
 #define ERROR_TASK_TIMEOUT          4061
 #define ERROR_TASK_QUEUE_FULL       4062
 
+// Watchdog Error Codes (Industrial-Grade) - Unique values to avoid conflicts
+#define ERROR_WATCHDOG_TIMEOUT      4070  // Watchdog timeout detected
+#define ERROR_WATCHDOG_FEED_BLOCKED 4071  // Watchdog feed blocked: Circuit breakers open
+#define ERROR_WATCHDOG_FEED_BLOCKED_CRITICAL 4072  // Watchdog feed blocked: Critical errors active
+
 // ============================================
 // CONFIGURATION RESPONSE ERROR CODES (Enum)
 // ============================================
@@ -221,6 +233,13 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_ONEWIRE_INIT_FAILED: return "Failed to initialize OneWire bus";
     case ERROR_ONEWIRE_NO_DEVICES: return "No OneWire devices found on bus";
     case ERROR_ONEWIRE_READ_FAILED: return "Failed to read from OneWire device";
+    case ERROR_ONEWIRE_INVALID_ROM_LENGTH: return "OneWire ROM-Code must be 16 hex characters";
+    case ERROR_ONEWIRE_INVALID_ROM_FORMAT: return "OneWire ROM-Code contains invalid characters (expected 0-9, A-F)";
+    case ERROR_ONEWIRE_INVALID_ROM_CRC: return "OneWire ROM-Code CRC validation failed (corrupted or fake ROM)";
+    case ERROR_ONEWIRE_DEVICE_NOT_FOUND: return "OneWire device not present on bus (check wiring)";
+    case ERROR_ONEWIRE_BUS_NOT_INITIALIZED: return "OneWire bus not initialized (call begin() first)";
+    case ERROR_ONEWIRE_READ_TIMEOUT: return "OneWire device read timeout (device not responding)";
+    case ERROR_ONEWIRE_DUPLICATE_ROM: return "OneWire ROM-Code already registered for another sensor";
 
     case ERROR_PWM_INIT_FAILED: return "Failed to initialize PWM controller";
     case ERROR_PWM_CHANNEL_FULL: return "All PWM channels already in use";
@@ -317,6 +336,10 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_TASK_FAILED: return "FreeRTOS task failed";
     case ERROR_TASK_TIMEOUT: return "FreeRTOS task timeout";
     case ERROR_TASK_QUEUE_FULL: return "FreeRTOS task queue is full";
+
+    case ERROR_WATCHDOG_TIMEOUT: return "Watchdog timeout detected (system hang)";
+    case ERROR_WATCHDOG_FEED_BLOCKED: return "Watchdog feed blocked: Circuit breakers open";
+    case ERROR_WATCHDOG_FEED_BLOCKED_CRITICAL: return "Watchdog feed blocked: Critical errors active";
 
     default: return "Unknown error code";
   }

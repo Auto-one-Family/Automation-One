@@ -21,21 +21,58 @@ OneWireBusManager& oneWireBusManager = OneWireBusManager::getInstance();
 // ============================================
 // LIFECYCLE: INITIALIZATION
 // ============================================
-bool OneWireBusManager::begin() {
-    // Prevent double initialization
+bool OneWireBusManager::begin(uint8_t pin) {
+    // ============================================
+    // PIN SELECTION: Override oder Default (BEFORE init check!)
+    // ============================================
+    uint8_t requested_pin;
+    if (pin != 0 && pin <= 39) {  // ESP32 hat GPIO 0-39
+        requested_pin = pin;
+    } else {
+        requested_pin = HardwareConfig::DEFAULT_ONEWIRE_PIN;
+    }
+
+    // ============================================
+    // DOUBLE-INIT CHECK: Same pin OK, different pin ERROR
+    // ============================================
     if (initialized_) {
-        LOG_WARNING("OneWire bus already initialized");
-        return true;
+        // Same pin → OK, bus already active
+        if (requested_pin == pin_) {
+            LOG_DEBUG("OneWire: Already initialized on GPIO " + String(pin_) + ", reusing bus");
+            return true;
+        }
+        
+        // Different pin → ERROR (Single-Bus-Design!)
+        // Cannot switch OneWire bus to different pin without calling end() first
+        LOG_ERROR("OneWire: Bus active on GPIO " + String(pin_) + 
+                 ", cannot switch to GPIO " + String(requested_pin) + 
+                 " (Single-Bus-Design - call end() first if pin change needed)");
+        errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
+                               ERROR_SEVERITY_ERROR,
+                               ("Pin conflict: active=" + String(pin_) + ", requested=" + String(requested_pin)).c_str());
+        return false;
     }
 
     LOG_INFO("OneWire Bus Manager initialization started");
-    
-    // Load hardware-specific configuration
-    pin_ = HardwareConfig::DEFAULT_ONEWIRE_PIN;
-    
+
+    // ============================================
+    // PIN ASSIGNMENT
+    // ============================================
+    pin_ = requested_pin;
+    if (pin != 0 && pin <= 39) {
+        LOG_INFO("OneWireBus: Using configured pin GPIO " + String(pin_));
+    } else {
+        LOG_INFO("OneWireBus: Using hardware default pin GPIO " + String(pin_));
+        #ifdef WOKWI_SIMULATION
+            LOG_DEBUG("  (Wokwi mode - using diagram.json pin configuration)");
+        #endif
+    }
+
     LOG_DEBUG("OneWire Config: Pin=" + String(pin_));
-    
-    // Reserve pin via GPIO Manager
+
+    // ============================================
+    // GPIO SAFETY VALIDATION
+    // ============================================
     if (!gpioManager.requestPin(pin_, "sensor", "OneWireBus")) {
         LOG_ERROR("Failed to reserve OneWire pin " + String(pin_));
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,

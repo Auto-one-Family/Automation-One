@@ -41,11 +41,19 @@ public:
     // ============================================
     // LIFECYCLE MANAGEMENT
     // ============================================
-    // Initialize OneWire bus with hardware-specific pin
-    // Loads pin configuration from HardwareConfig
+    // Initialize OneWire bus with optional pin override
+    // pin: GPIO pin for OneWire bus (0 = use hardware default)
     // Reserves pin via GPIOManager
     // Returns false if initialization fails
-    bool begin();
+    //
+    // Pin Selection Priority:
+    // 1. pin parameter (if != 0)
+    // 2. HardwareConfig::DEFAULT_ONEWIRE_PIN
+    //
+    // Example:
+    //   oneWireBusManager.begin();      // Use default pin (GPIO 4 on ESP32 Dev)
+    //   oneWireBusManager.begin(21);    // Override to GPIO 21
+    bool begin(uint8_t pin = 0);
 
     // Deinitialize OneWire bus and release pin
     void end();
@@ -84,6 +92,10 @@ public:
     // ============================================
     // Check if OneWire bus is initialized
     bool isInitialized() const { return initialized_; }
+
+    // Get current OneWire pin (for debugging/verification)
+    // Returns 0 if not initialized
+    uint8_t getPin() const { return pin_; }
 
     // Get detailed bus status for debugging
     // Format: "OneWire[Pin:6,Init:true]"

@@ -18,7 +18,7 @@
 import { ref, computed } from 'vue'
 import { X, ChartLine, Plus, Settings } from 'lucide-vue-next'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
-import type { ChartSensor, SensorDragData } from '@/types'
+import type { ChartSensor } from '@/types'
 
 interface Props {
   /** Title for the drop zone */
@@ -91,7 +91,10 @@ function getClassName(element: Element | null): string {
   if (!element) return ''
   const cn = element.className
   if (typeof cn === 'string') return cn.slice(0, 50)
-  if (cn && typeof cn === 'object' && 'baseVal' in cn) return (cn.baseVal || '').slice(0, 50)
+  // SVG elements have SVGAnimatedString with baseVal property
+  if (cn && typeof cn === 'object' && 'baseVal' in cn) {
+    return ((cn as SVGAnimatedString).baseVal || '').slice(0, 50)
+  }
   return ''
 }
 

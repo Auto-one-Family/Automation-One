@@ -71,6 +71,30 @@ public:
   bool isConfigurationComplete() const;
   void printConfigurationStatus() const;
   
+  // ============================================
+  // DIAGNOSTICS (Observability - Phase 1-3 Integration)
+  // ============================================
+  /**
+   * @brief Get configuration diagnostics as JSON string
+   * 
+   * Returns ESP status and configuration summary for server observability.
+   * Used by Heartbeat to expose ESP state without direct hardware access.
+   * 
+   * @return JSON string with config_status fields
+   * 
+   * Example output:
+   * {
+   *   "wifi_configured": true,
+   *   "zone_assigned": true,
+   *   "sensor_count": 3,
+   *   "actuator_count": 1,
+   *   "subzone_count": 2,
+   *   "nvs_errors": 0,
+   *   "boot_count": 5
+   * }
+   */
+  String getDiagnosticsJSON() const;
+  
   // Accessors (cached in memory)
   const WiFiConfig& getWiFiConfig() const { return wifi_config_; }
   const KaiserZone& getKaiser() const { return kaiser_; }
@@ -100,6 +124,71 @@ private:
   
   // Helper Methods
   void generateESPIdIfMissing();
+  
+  // ============================================
+  // NVS MIGRATION HELPERS (2026-01-15 Refactoring)
+  // ============================================
+  // These methods transparently migrate legacy NVS keys (>15 chars) to
+  // new compact keys (≤15 chars) for ESP32 NVS compatibility.
+  // Migration happens automatically on first read.
+  
+  /**
+   * @brief Reads NVS string with automatic migration from legacy key
+   * @param new_key New short key name (≤15 chars)
+   * @param old_key Old long key name (legacy, may be >15 chars)
+   * @param default_value Default if both keys missing
+   * @return String value (from new key, old key, or default)
+   */
+  String migrateReadString(const char* new_key, const char* old_key, 
+                           const String& default_value);
+  
+  /**
+   * @brief Reads bool with migration support
+   */
+  bool migrateReadBool(const char* new_key, const char* old_key, 
+                       bool default_value);
+  
+  /**
+   * @brief Reads uint8_t with migration support
+   */
+  uint8_t migrateReadUInt8(const char* new_key, const char* old_key, 
+                           uint8_t default_value);
+  
+  /**
+   * @brief Reads uint32_t with migration support
+   */
+  uint32_t migrateReadUInt32(const char* new_key, const char* old_key, 
+                             uint32_t default_value);
+  
+  // ============================================
+  // SUBZONE INDEX-MAP HELPERS (2026-01-15 Phase 1E-C)
+  // ============================================
+  // These methods manage the index-map for variable-length subzone IDs.
+  // Pattern: "A:0,irr_A:1,climate_1:2" maps subzone IDs to numeric indices.
+  
+  /**
+   * @brief Get index for subzone ID from index map
+   * @param subzone_id Subzone ID to look up
+   * @param index_map Current index map string
+   * @return Index (0-99) or -1 if not found
+   */
+  int8_t getSubzoneIndex(const String& subzone_id, const String& index_map);
+  
+  /**
+   * @brief Add subzone ID to index map
+   * @param subzone_id Subzone ID to add
+   * @param index_map Current index map (will be modified)
+   * @return Assigned index or -1 if failed
+   */
+  int8_t addSubzoneToIndexMap(const String& subzone_id, String& index_map);
+  
+  /**
+   * @brief Remove subzone ID from index map
+   * @param subzone_id Subzone ID to remove
+   * @param index_map Current index map (will be modified)
+   * @return true if removed, false if not found
+   */
+  bool removeSubzoneFromIndexMap(const String& subzone_id, String& index_map);
 };
 
 // ============================================

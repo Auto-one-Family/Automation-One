@@ -181,6 +181,124 @@ class TestDS18B20Processor:
         assert result.value == 69.8
         assert result.unit == "°F"
 
+    # =========================================================================
+    # RAW Mode Tests (Pi-Enhanced Mode - DS18B20 12-bit Integer)
+    # =========================================================================
+
+    def test_raw_mode_conversion_normal_range(self, processor):
+        """Test RAW to Celsius conversion (Pi-Enhanced mode)."""
+        # 400 * 0.0625 = 25.0°C
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=400, params=params)
+        
+        assert result.value == 25.0
+        assert result.quality == "good"
+        assert result.metadata["raw_mode"] is True
+        assert result.metadata["original_raw_value"] == 400
+        assert result.metadata["conversion_factor"] == 0.0625
+
+    def test_raw_mode_conversion_negative(self, processor):
+        """Test RAW mode with negative temperature."""
+        # -880 * 0.0625 = -55.0°C (spec minimum)
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=-880, params=params)
+        
+        assert result.value == -55.0
+        assert result.quality == "fair"  # At spec limit
+        assert result.metadata["raw_mode"] is True
+
+    def test_raw_mode_conversion_max_spec(self, processor):
+        """Test RAW mode at maximum spec value."""
+        # 2000 * 0.0625 = 125.0°C (spec maximum)
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=2000, params=params)
+        
+        assert result.value == 125.0
+        assert result.quality == "fair"  # At spec limit
+        assert result.metadata["raw_mode"] is True
+
+    def test_raw_mode_zero_value(self, processor):
+        """Test RAW mode with zero (0°C)."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=0, params=params)
+        
+        assert result.value == 0.0
+        assert result.quality == "good"
+
+    def test_raw_mode_with_fahrenheit_conversion(self, processor):
+        """Test RAW mode combined with Fahrenheit conversion."""
+        # 400 * 0.0625 = 25.0°C → 77.0°F
+        params = {"raw_mode": True, "unit": "fahrenheit"}
+        result = processor.process(raw_value=400, params=params)
+        
+        assert result.value == 77.0
+        assert result.unit == "°F"
+        assert result.metadata["raw_mode"] is True
+
+    def test_raw_mode_with_calibration_offset(self, processor):
+        """Test RAW mode with calibration offset."""
+        # 400 * 0.0625 = 25.0°C + 0.5°C offset = 25.5°C
+        params = {"raw_mode": True}
+        calibration = {"offset": 0.5}
+        result = processor.process(raw_value=400, params=params, calibration=calibration)
+        
+        assert result.value == 25.5
+        assert result.metadata["calibrated"] is True
+        assert result.metadata["raw_mode"] is True
+
+    def test_raw_mode_false_explicit(self, processor):
+        """Test explicit raw_mode=False (pre-converted value)."""
+        # Value is already in Celsius
+        params = {"raw_mode": False}
+        result = processor.process(raw_value=25.0, params=params)
+        
+        assert result.value == 25.0
+        assert result.metadata["raw_mode"] is False
+        assert result.metadata["original_raw_value"] is None
+
+    def test_raw_mode_default_is_false(self, processor):
+        """Test that raw_mode defaults to False for backward compatibility."""
+        # No params = raw_mode defaults to False
+        result = processor.process(raw_value=25.0)
+        
+        assert result.value == 25.0
+        assert result.metadata["raw_mode"] is False
+
+    def test_raw_mode_out_of_spec_high(self, processor):
+        """Test RAW mode with value above spec range."""
+        # 2100 * 0.0625 = 131.25°C (above 125°C spec)
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=2100, params=params)
+        
+        # Should fail validation (out of sensor range)
+        assert result.quality == "error"
+
+    def test_raw_mode_out_of_spec_low(self, processor):
+        """Test RAW mode with value below spec range."""
+        # -1000 * 0.0625 = -62.5°C (below -55°C spec)
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=-1000, params=params)
+        
+        # Should fail validation (out of sensor range)
+        assert result.quality == "error"
+
+    def test_raw_mode_greenhouse_typical_range(self, processor):
+        """Test RAW mode with typical greenhouse temperature."""
+        # 320 * 0.0625 = 20.0°C (typical greenhouse)
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=320, params=params)
+        
+        assert result.value == 20.0
+        assert result.quality == "good"
+
+    def test_raw_mode_decimal_places(self, processor):
+        """Test RAW mode respects decimal_places parameter."""
+        # 401 * 0.0625 = 25.0625°C → rounded to 1 decimal = 25.1°C
+        params = {"raw_mode": True, "decimal_places": 1}
+        result = processor.process(raw_value=401, params=params)
+        
+        assert result.value == 25.1
+
 
 class TestSHT31TemperatureProcessor:
     """Unit tests for SHT31 temperature processor."""

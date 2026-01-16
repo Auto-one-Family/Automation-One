@@ -145,27 +145,53 @@ class SensorDataHandler:
                         )
                         return False
 
-                    # Step 5: Lookup sensor config
-                    sensor_config = await sensor_repo.get_by_esp_and_gpio(
-                        esp_device.id, gpio
-                    )
-                    if not sensor_config:
-                        logger.warning(
-                            f"Sensor config not found: esp_id={esp_id_str}, gpio={gpio}. "
-                            "Saving data without config."
-                        )
+                    # Step 5: Extract sensor_type FIRST (needed for multi-value lookup)
+                    sensor_type = payload.get("sensor_type", "unknown")
 
-                    # Step 6: Extract data from payload
+                    # Step 5.5: Extract onewire_address (for OneWire 4-way lookup)
+                    # DS18B20 sensors send ROM code to distinguish multiple sensors on same GPIO
+                    onewire_address = payload.get("onewire_address")
+
+                    # Step 6: Lookup sensor config (Multi-Value Support + OneWire Support)
+                    sensor_config = None
+
+                    if onewire_address:
+                        # OneWire Sensor: 4-way lookup (esp_id, gpio, sensor_type, onewire_address)
+                        # Multiple DS18B20 sensors can share same GPIO (bus pin)
+                        logger.debug(
+                            f"OneWire sensor detected: gpio={gpio}, rom={onewire_address}"
+                        )
+                        sensor_config = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+                            esp_device.id, gpio, sensor_type, onewire_address
+                        )
+                        if not sensor_config:
+                            logger.warning(
+                                f"OneWire sensor config not found: esp_id={esp_id_str}, "
+                                f"gpio={gpio}, type={sensor_type}, rom={onewire_address}. "
+                                f"Saving data without config."
+                            )
+                    else:
+                        # Standard Sensor: 3-way lookup (esp_id, gpio, sensor_type)
+                        # e.g., SHT31 on GPIO 21: sht31_temp + sht31_humidity
+                        sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
+                            esp_device.id, gpio, sensor_type
+                        )
+                        if not sensor_config:
+                            logger.warning(
+                                f"Sensor config not found: esp_id={esp_id_str}, gpio={gpio}, "
+                                f"type={sensor_type}. Saving data without config."
+                            )
+
+                    # Step 7: Extract remaining data from payload
                     # Accept both "raw" and "raw_value" for compatibility
                     raw_value = float(payload.get("raw", payload.get("raw_value")))
-                    sensor_type = payload.get("sensor_type", "unknown")
                     # raw_mode defaults to True (ESP32 always works in raw mode)
                     raw_mode = payload.get("raw_mode", True)
                     value = payload.get("value", 0.0)
                     unit = payload.get("unit", "")
                     quality = payload.get("quality", "unknown")
 
-                    # Step 7: Determine processing mode
+                    # Step 8: Determine processing mode
                     processing_mode = "raw"
                     processed_value = None
 
@@ -173,13 +199,14 @@ class SensorDataHandler:
                         # Pi-Enhanced processing needed
                         processing_mode = "pi_enhanced"
 
-                        # Trigger Pi-Enhanced processing
+                        # Trigger Pi-Enhanced processing (pass raw_mode!)
                         pi_result = await self._trigger_pi_enhanced_processing(
                             esp_id_str,
                             gpio,
                             sensor_type,
                             raw_value,
                             sensor_config,
+                            raw_mode=raw_mode,  # Pass raw_mode to processor
                         )
 
                         if pi_result:
@@ -492,6 +519,7 @@ class SensorDataHandler:
         sensor_type: str,
         raw_value: float,
         sensor_config,
+        raw_mode: bool = True,
     ) -> Optional[dict]:
         """
         Trigger Pi-Enhanced sensor processing.
@@ -505,6 +533,8 @@ class SensorDataHandler:
             sensor_type: Sensor type (ph, temperature, etc.)
             raw_value: Raw sensor value
             sensor_config: SensorConfig instance with processing params
+            raw_mode: Whether ESP sent RAW value (True) or pre-converted (False)
+                     For DS18B20: raw_mode=True means 12-bit integer (400 = 25°C)
 
         Returns:
             {
@@ -549,9 +579,13 @@ class SensorDataHandler:
 
             # Process raw value using sensor library
             # Extract processing params from metadata if available
-            processing_params = None
+            processing_params = {}
             if sensor_config and sensor_config.sensor_metadata:
-                processing_params = sensor_config.sensor_metadata.get("processing_params")
+                processing_params = sensor_config.sensor_metadata.get("processing_params") or {}
+            
+            # Always pass raw_mode to processor (Pi-Enhanced mode indicator)
+            # For DS18B20: raw_mode=True means ESP sent 12-bit integer (400 = 25°C)
+            processing_params["raw_mode"] = raw_mode
             
             result = processor.process(
                 raw_value=raw_value,

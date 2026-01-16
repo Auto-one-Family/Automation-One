@@ -74,11 +74,22 @@ class DS18B20Processor(BaseSensorProcessor):
         """
         Process DS18B20 temperature reading.
 
+        Supports TWO modes:
+        1. RAW Mode (Pi-Enhanced): ESP sends 12-bit signed integer, server converts
+           - raw_value = 400 → 400 * 0.0625 = 25.0°C
+           - Set params["raw_mode"] = True
+        2. Pre-Converted Mode: ESP sends temperature in °C
+           - raw_value = 25.0 → 25.0°C (direct)
+           - Set params["raw_mode"] = False (default for backward compatibility)
+
         Args:
-            raw_value: Temperature in °C (already processed by ESP32 DallasTemperature library)
+            raw_value: Temperature value
+                - If raw_mode=True: 12-bit signed integer (LSB = 0.0625°C)
+                - If raw_mode=False: Temperature in °C (pre-converted by ESP)
             calibration: Optional calibration data
                 - "offset": float - Temperature offset correction (°C)
             params: Optional processing parameters
+                - "raw_mode": bool - Whether value is RAW 12-bit (default: False)
                 - "unit": str - Output unit ("celsius", "fahrenheit", "kelvin")
                 - "decimal_places": int - Decimal places for rounding (default: 2)
 
@@ -86,32 +97,46 @@ class DS18B20Processor(BaseSensorProcessor):
             ProcessingResult with temperature value, unit, quality assessment
 
         Example:
-            # Basic usage
+            # RAW Mode (Pi-Enhanced) - ESP sends 12-bit integer
+            result = processor.process(
+                raw_value=400,  # 12-bit RAW
+                params={"raw_mode": True}
+            )
+            # result.value = 25.0 (400 * 0.0625), result.unit = "°C"
+
+            # Pre-Converted Mode (backward compatible)
             result = processor.process(raw_value=23.5)
             # result.value = 23.5, result.unit = "°C", result.quality = "good"
 
-            # With calibration offset
+            # RAW Mode with Fahrenheit conversion
             result = processor.process(
-                raw_value=23.5,
-                calibration={"offset": 0.5}
+                raw_value=400,
+                params={"raw_mode": True, "unit": "fahrenheit"}
             )
-            # result.value = 24.0
-
-            # Fahrenheit conversion
-            result = processor.process(
-                raw_value=0.0,
-                params={"unit": "fahrenheit"}
-            )
-            # result.value = 32.0, result.unit = "°F"
+            # result.value = 77.0 (25°C → °F), result.unit = "°F"
         """
-        # Step 1: Validate raw value
+        # Step 0: Check for RAW mode (Pi-Enhanced)
+        # If raw_mode=True, convert 12-bit signed integer to Celsius first
+        raw_mode = params.get("raw_mode", False) if params else False
+        original_raw_value = raw_value  # Keep original for metadata
+
+        if raw_mode:
+            # DS18B20 12-bit resolution: 1 LSB = 0.0625°C
+            # RAW value is signed 16-bit: -55°C = -880, +125°C = +2000
+            raw_value = float(raw_value) * self.RESOLUTION
+
+        # Step 1: Validate converted value (now in Celsius)
         validation = self.validate(raw_value)
         if not validation.valid:
             return ProcessingResult(
                 value=0.0,
                 unit="°C",
                 quality="error",
-                metadata={"error": validation.error},
+                metadata={
+                    "error": validation.error,
+                    "raw_mode": raw_mode,
+                    "original_raw_value": original_raw_value if raw_mode else None,
+                },
             )
 
         # Step 2: Apply calibration offset (if provided)
@@ -154,6 +179,10 @@ class DS18B20Processor(BaseSensorProcessor):
                 "raw_celsius": raw_value,
                 "calibrated": calibrated,
                 "warnings": validation.warnings,
+                # RAW mode metadata (Pi-Enhanced)
+                "raw_mode": raw_mode,
+                "original_raw_value": original_raw_value if raw_mode else None,
+                "conversion_factor": self.RESOLUTION if raw_mode else None,
             },
         )
 
@@ -263,8 +292,16 @@ class DS18B20Processor(BaseSensorProcessor):
         """
         Get expected raw value range.
 
-        For DS18B20, raw value is already in Celsius (processed by ESP32),
-        so range is same as value range.
+        For DS18B20 in RAW mode (Pi-Enhanced):
+        - ESP sends 12-bit signed integer
+        - Range: -880 (-55°C) to +2000 (+125°C)
+        
+        For pre-converted mode (backward compatible):
+        - ESP sends Celsius directly
+        - Range: -55.0 to +125.0
+        
+        This returns the Celsius range since it's used for validation
+        AFTER conversion to Celsius.
         """
         return {"min": self.TEMP_MIN, "max": self.TEMP_MAX}
 

@@ -83,6 +83,33 @@ export type MockSystemState =
 
 export type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad' | 'stale' | 'error'
 
+// =============================================================================
+// Multi-Value Sensor Types (Phase 6)
+// =============================================================================
+
+/**
+ * Single value within a multi-value sensor
+ */
+export interface MultiValueEntry {
+  /** Current value */
+  value: number
+  /** Unit of measurement */
+  unit: string
+  /** Data quality */
+  quality: QualityLevel
+  /** Timestamp of last update (Unix ms) */
+  timestamp: number
+  /** Sensor type for this value */
+  sensorType: string
+}
+
+/**
+ * Type guard for multi-value sensors
+ */
+export function isMultiValueSensor(sensor: MockSensor): boolean {
+  return sensor.is_multi_value === true && sensor.multi_values !== null && sensor.multi_values !== undefined
+}
+
 export interface MockSensor {
   gpio: number
   sensor_type: string
@@ -102,6 +129,16 @@ export interface MockSensor {
   last_reading_at?: string | null
   // Phase 2F: Schedule configuration
   schedule_config?: { type: string; expression: string } | null
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Phase 6: Multi-Value Sensor Fields
+  // ═══════════════════════════════════════════════════════════════════════════
+  /** Device type if multi-value (e.g., "sht31"), null for single-value */
+  device_type?: string | null
+  /** All values for multi-value sensors, keyed by sensor_type */
+  multi_values?: Record<string, MultiValueEntry> | null
+  /** Is this a multi-value sensor? */
+  is_multi_value?: boolean
 }
 
 export interface MockActuator {
@@ -156,6 +193,13 @@ export interface MockSensorConfig {
   unit?: string
   quality?: QualityLevel
   raw_mode?: boolean
+  // =========================================================================
+  // Phase 6: OneWire Support (DS18B20)
+  // =========================================================================
+  /** OneWire ROM address for DS18B20 sensors (16 hex chars) */
+  onewire_address?: string
+  /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL) */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
 }
 
 export interface MockActuatorConfig {
@@ -166,6 +210,11 @@ export interface MockActuatorConfig {
   pwm_value?: number
   min_value?: number
   max_value?: number
+  // Phase 7: Actuator Sidebar fields
+  aux_gpio?: number | null      // 255 = nicht verwendet (für Ventile: Direction-Pin)
+  inverted_logic?: boolean      // LOW = ON (für Pumpen, Ventile, Relais)
+  max_runtime_seconds?: number  // RuntimeProtection (für Pumpen)
+  cooldown_seconds?: number     // RuntimeProtection (für Pumpen)
 }
 
 // =============================================================================
@@ -386,6 +435,17 @@ export interface SensorConfigCreate {
   warning_max?: number | null
   metadata?: Record<string, unknown> | null
   // =========================================================================
+  // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+  // =========================================================================
+  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred if not provided) */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
+  /** I2C address (0-127) - required for I2C sensors */
+  i2c_address?: number | null
+  /** OneWire device ROM address - optional, server auto-generates if not provided */
+  onewire_address?: string | null
+  /** List of value types this sensor provides (for multi-value sensors) */
+  provides_values?: string[] | null
+  // =========================================================================
   // OPERATING MODE FIELDS (Phase 2B)
   // =========================================================================
   /** Betriebsmodus: continuous, on_demand, scheduled, paused */
@@ -557,6 +617,9 @@ export interface ActuatorConfigCreate {
   servo_min_pulse?: number | null
   servo_max_pulse?: number | null
   metadata?: Record<string, unknown> | null
+  // Phase 7: Actuator Sidebar fields
+  aux_gpio?: number | null       // 255 = nicht verwendet (für Ventile: Direction-Pin)
+  inverted_logic?: boolean | null  // LOW = ON (für Pumpen, Ventile, Relais)
 }
 
 export interface ActuatorConfigResponse {
@@ -587,7 +650,7 @@ export interface ActuatorConfigResponse {
 export interface ConfigResponse {
   esp_id: string
   config_type: 'sensor' | 'actuator'
-  status: 'success' | 'error'
+  status: 'success' | 'partial_success' | 'error'
   count: number
   message: string
   error_code?: string

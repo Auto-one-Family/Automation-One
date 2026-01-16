@@ -236,6 +236,58 @@ async def sample_esp_no_zone(db_session: AsyncSession):
     return device
 
 
+# ==================== Hardware Validation Test Fixtures ====================
+
+@pytest_asyncio.fixture
+async def sample_esp_c3(db_session: AsyncSession):
+    """Create a sample ESP32-C3 device for testing.
+    
+    ESP32-C3 (XIAO) has different hardware constraints than WROOM:
+    - GPIO Range: 0-21 (not 0-39!)
+    - I2C Pins: GPIO 4 (SDA), GPIO 5 (SCL) - not 21/22!
+    - No Input-Only Pins (all bidirectional)
+    """
+    from src.db.models.esp import ESPDevice
+    
+    device = ESPDevice(
+        device_id="ESP_C3_TEST_001",
+        name="Test ESP32-C3",
+        ip_address="192.168.1.101",
+        mac_address="AA:BB:CC:DD:EE:C3",
+        firmware_version="1.0.0",
+        hardware_type="XIAO_ESP32_C3",  # ← CRITICAL!
+        status="online",
+        capabilities={"max_sensors": 20, "max_actuators": 12},
+    )
+    db_session.add(device)
+    await db_session.flush()
+    await db_session.refresh(device)
+    return device
+
+
+@pytest_asyncio.fixture
+async def gpio_service(
+    db_session: AsyncSession,
+    sensor_repo: "SensorRepository",
+    actuator_repo: "ActuatorRepository",
+    esp_repo: "ESPRepository",
+):
+    """Create real GpioValidationService instance.
+    
+    This fixture creates a real service (not mocked) for testing
+    hardware validation logic.
+    """
+    from src.services.gpio_validation_service import GpioValidationService
+    
+    service = GpioValidationService(
+        session=db_session,
+        sensor_repo=sensor_repo,
+        actuator_repo=actuator_repo,
+        esp_repo=esp_repo,
+    )
+    return service
+
+
 @pytest.fixture
 def mock_mqtt_publisher_for_subzone():
     """
@@ -381,7 +433,5 @@ async def override_actuator_service(test_engine: AsyncEngine):
     # Apply override
     app.dependency_overrides[get_actuator_service] = override_get_actuator_service_func
 
-    yield
-
-    # Cleanup - remove override
+    yield    # Cleanup - remove override
     app.dependency_overrides.pop(get_actuator_service, None)

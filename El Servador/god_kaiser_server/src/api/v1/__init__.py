@@ -13,6 +13,7 @@ from .actuators import router as actuators_router
 from .audit import router as audit_router
 from .auth import router as auth_router
 from .debug import router as debug_router
+from .errors import router as errors_router
 from .esp import router as esp_router
 from .health import router as health_router
 from .logic import router as logic_router
@@ -29,6 +30,7 @@ api_v1_router = APIRouter()
 # Include all sub-routers
 api_v1_router.include_router(auth_router)
 api_v1_router.include_router(audit_router)
+api_v1_router.include_router(errors_router)  # DS18B20 Error Handling Integration
 api_v1_router.include_router(esp_router)
 api_v1_router.include_router(sensors_router)
 api_v1_router.include_router(sensor_type_defaults_router)  # Phase 2A - Sensor Operating Modes
@@ -47,6 +49,7 @@ __all__ = [
     "audit_router",
     "auth_router",
     "debug_router",
+    "errors_router",
     "esp_router",
     "sensors_router",
     "sensor_type_defaults_router",

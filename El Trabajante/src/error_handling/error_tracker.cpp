@@ -16,7 +16,11 @@ ErrorTracker& ErrorTracker::getInstance() {
 
 ErrorTracker::ErrorTracker()
   : error_buffer_index_(0),
-    error_count_(0) {
+    error_count_(0),
+    mqtt_callback_(nullptr),
+    mqtt_esp_id_(""),
+    mqtt_publishing_enabled_(false),
+    mqtt_publish_in_progress_(false) {
   // Initialize fixed buffer
   for (size_t i = 0; i < MAX_ERROR_ENTRIES; i++) {
     error_buffer_[i] = ErrorEntry();
@@ -46,6 +50,9 @@ void ErrorTracker::trackError(uint16_t error_code, ErrorSeverity severity, const
   
   // Add to circular buffer
   addToBuffer(error_code, severity, message);
+  
+  // Publish to MQTT (if enabled and not recursing)
+  publishErrorToMqtt(error_code, severity, message);
 }
 
 void ErrorTracker::trackError(uint16_t error_code, const char* message) {
@@ -248,4 +255,67 @@ ErrorCategory ErrorTracker::getCategory(uint16_t error_code) {
   } else {
     return ERROR_HARDWARE;
   }
+}
+
+// ============================================
+// MQTT PUBLISHING (Observability - Phase 1-3)
+// ============================================
+void ErrorTracker::setMqttPublishCallback(MqttErrorPublishCallback callback, const String& esp_id) {
+  mqtt_callback_ = callback;
+  mqtt_esp_id_ = esp_id;
+  mqtt_publishing_enabled_ = (callback != nullptr && esp_id.length() > 0);
+  
+  if (mqtt_publishing_enabled_) {
+    LOG_INFO("ErrorTracker: MQTT error publishing enabled for ESP " + esp_id);
+  }
+}
+
+void ErrorTracker::clearMqttPublishCallback() {
+  mqtt_callback_ = nullptr;
+  mqtt_esp_id_ = "";
+  mqtt_publishing_enabled_ = false;
+  LOG_DEBUG("ErrorTracker: MQTT error publishing disabled");
+}
+
+void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message) {
+  // Guard: Skip if disabled or already publishing (recursion prevention)
+  if (!mqtt_publishing_enabled_ || mqtt_publish_in_progress_) {
+    return;
+  }
+  
+  // Guard: Must have callback
+  if (mqtt_callback_ == nullptr) {
+    return;
+  }
+  
+  // Set recursion guard
+  mqtt_publish_in_progress_ = true;
+  
+  // Build topic: kaiser/god/esp/{esp_id}/system/error
+  String topic = "kaiser/god/esp/" + mqtt_esp_id_ + "/system/error";
+  
+  // Build payload (JSON)
+  String payload;
+  payload.reserve(200);
+  payload = "{";
+  payload += "\"error_code\":";
+  payload += String(error_code);
+  payload += ",\"severity\":";
+  payload += String(static_cast<int>(severity));
+  payload += ",\"category\":\"";
+  payload += getCategoryString(error_code);
+  payload += "\",\"message\":\"";
+  // Escape quotes in message for valid JSON
+  String escaped_msg = String(message);
+  escaped_msg.replace("\"", "\\\"");
+  payload += escaped_msg;
+  payload += "\",\"ts\":";
+  payload += String(millis());
+  payload += "}";
+  
+  // Fire-and-forget publish (no error handling - prevent recursion!)
+  mqtt_callback_(topic.c_str(), payload.c_str());
+  
+  // Clear recursion guard
+  mqtt_publish_in_progress_ = false;
 }

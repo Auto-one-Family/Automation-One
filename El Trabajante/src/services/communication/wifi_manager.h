@@ -34,6 +34,9 @@ public:
     // Monitoring
     void loop();  // Call in main loop for reconnection
     
+    // Circuit Breaker Access (for Watchdog integration)
+    CircuitState getCircuitBreakerState() const;
+    
 private:
     WiFiManager();
     ~WiFiManager();

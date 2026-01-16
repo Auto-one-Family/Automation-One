@@ -101,8 +101,9 @@ def _build_mock_esp_response(
     actuators_config = sim_config.get("actuators", {})
     
     # Build sensor responses
+    # MULTI-VALUE SUPPORT: Keys are now "{gpio}_{sensor_type}" format
     sensors = []
-    for gpio_str, config in sensors_config.items():
+    for sensor_key, config in sensors_config.items():
         # =====================================================================
         # SENSOR VALUE LOADING - Consistent Fallback Chain
         # =====================================================================
@@ -113,16 +114,23 @@ def _build_mock_esp_response(
         # Both contain the SAME value (user-entered, e.g., 20.0 for 20°C).
         # This is NOT an ADC value - Mock ESPs work with human-readable values.
         #
-        # For real ESP32s, raw_value would be hardware-specific (ADC 0-4095 for
-        # analog sensors, or already-converted values for digital sensors like
-        # DS18B20 which outputs Celsius directly).
-        #
-        # See: add_sensor() below for where these values are stored.
+        # MULTI-VALUE: Key format is "{gpio}_{sensor_type}" (e.g., "21_sht31_temp")
+        # We extract GPIO from config.gpio or from the key prefix.
         # =====================================================================
         sensor_value = config.get("raw_value", config.get("base_value", 0.0))
 
+        # MULTI-VALUE: Extract GPIO from config or key
+        if "gpio" in config:
+            gpio = int(config["gpio"])
+        elif "_" in sensor_key and not sensor_key.isdigit():
+            # New format: "{gpio}_{sensor_type}"
+            gpio = int(sensor_key.split("_")[0])
+        else:
+            # Legacy format: just GPIO
+            gpio = int(sensor_key)
+
         sensors.append(MockSensorResponse(
-            gpio=int(gpio_str),
+            gpio=gpio,
             sensor_type=config.get("sensor_type", "GENERIC"),
             name=config.get("name"),
             subzone_id=config.get("subzone_id"),
@@ -778,6 +786,18 @@ async def add_sensor(
     # Mock ESPs bypass the ADC layer entirely - the value the user enters
     # is the value that gets displayed and processed.
     # =========================================================================
+    
+    # Infer interface_type if not provided
+    interface_type = config.interface_type
+    if not interface_type:
+        sensor_lower = config.sensor_type.lower()
+        if "ds18b20" in sensor_lower:
+            interface_type = "ONEWIRE"
+        elif any(s in sensor_lower for s in ["sht31", "bmp280", "bme280", "bh1750"]):
+            interface_type = "I2C"
+        else:
+            interface_type = "ANALOG"
+    
     sensor_config = {
         "sensor_type": config.sensor_type,
         "raw_value": config.raw_value,   # For Frontend display
@@ -792,6 +812,12 @@ async def add_sensor(
         "variation_range": getattr(config, "variation_range", 0.0),
         "min_value": getattr(config, "min_value", config.raw_value - 10.0),
         "max_value": getattr(config, "max_value", config.raw_value + 10.0),
+        # =====================================================================
+        # MULTI-VALUE SENSOR SUPPORT (DS18B20, SHT31, etc.)
+        # =====================================================================
+        "interface_type": interface_type,
+        "onewire_address": getattr(config, "onewire_address", None),
+        "i2c_address": getattr(config, "i2c_address", None),
     }
 
     # 1. Update database (Single Source of Truth)
@@ -813,19 +839,26 @@ async def add_sensor(
             enabled=True,
             pi_enhanced=False,
             sample_interval_ms=int(sensor_config["interval_seconds"] * 1000),
+            # =====================================================================
+            # MULTI-VALUE SENSOR SUPPORT (DS18B20, SHT31, etc.)
+            # =====================================================================
+            interface_type=interface_type,
+            onewire_address=getattr(config, "onewire_address", None),
+            i2c_address=getattr(config, "i2c_address", None),
             sensor_metadata={
                 "source": "mock_esp",
                 "unit": config.unit,
                 "subzone_id": config.subzone_id,
             }
         )
-        logger.debug(f"Created SensorConfig for {esp_id} GPIO {config.gpio}")
+        logger.debug(f"Created SensorConfig for {esp_id} GPIO {config.gpio} (type={interface_type})")
     except Exception as e:
         logger.warning(f"Failed to create SensorConfig for GPIO {config.gpio}: {e}")
 
     await db.commit()
 
     # 2. If simulation is running: Start sensor job immediately
+    # MULTI-VALUE SUPPORT: Pass sensor_type to job for unique job IDs
     job_started = False
     initial_published = False
     try:
@@ -834,18 +867,20 @@ async def add_sensor(
             job_started = sim_scheduler.add_sensor_job(
                 esp_id=esp_id,
                 gpio=config.gpio,
-                interval_seconds=sensor_config["interval_seconds"]
+                interval_seconds=sensor_config["interval_seconds"],
+                sensor_type=config.sensor_type  # MULTI-VALUE: Pass sensor_type
             )
             if job_started:
-                logger.info(f"Started sensor job for {esp_id} GPIO {config.gpio}")
+                logger.info(f"Started sensor job for {esp_id} GPIO {config.gpio} type {config.sensor_type}")
 
                 # 3. Sofortiger initialer Publish damit Frontend nicht auf Intervall warten muss
                 initial_published = await sim_scheduler.trigger_immediate_sensor_publish(
                     esp_id=esp_id,
-                    gpio=config.gpio
+                    gpio=config.gpio,
+                    sensor_type=config.sensor_type  # MULTI-VALUE: Pass sensor_type
                 )
                 if initial_published:
-                    logger.info(f"Initial sensor value published for {esp_id} GPIO {config.gpio}")
+                    logger.info(f"Initial sensor value published for {esp_id} GPIO {config.gpio} type {config.sensor_type}")
     except RuntimeError:
         pass  # Scheduler not initialized
 
@@ -863,24 +898,104 @@ async def add_sensor(
     )
 
 
+# =============================================================================
+# Mock-ESP OneWire Scan (DS18B20 Discovery)
+# =============================================================================
+@router.post(
+    "/mock-esp/{esp_id}/onewire/scan",
+    response_model=CommandResponse,
+    summary="Mock OneWire Bus Scan",
+    description="""
+    Simulates a OneWire bus scan on a mock ESP.
+    
+    **Returns fake DS18B20 devices** for testing the Frontend integration.
+    
+    Use this to test the OneWire scan UI workflow without real hardware.
+    """,
+    responses={
+        200: {"description": "Scan completed (returns fake devices)"},
+        404: {"description": "Mock ESP not found"},
+    },
+)
+async def mock_onewire_scan(
+    esp_id: str,
+    current_user: AdminUser,
+    db: DBSession,
+    pin: int = Query(4, ge=0, le=48, description="GPIO pin for OneWire bus (ignored, returns fake data)"),
+) -> CommandResponse:
+    """
+    Simulate OneWire bus scan for mock ESP.
+    
+    Returns 2 fake DS18B20 devices for testing:
+    - Device 1: ROM 28FF641E8D3C0C79
+    - Device 2: ROM 28FF123456789ABC
+    
+    **Note:** Real ESP scans are handled by `/api/v1/sensors/esp/{esp_id}/onewire/scan`
+    """
+    esp_repo = ESPRepository(db)
+    
+    device = await esp_repo.get_mock_device(esp_id)
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Mock ESP {esp_id} not found"
+        )
+    
+    # Generate fake OneWire devices for testing
+    # Real ROM codes start with family code 0x28 (DS18B20)
+    fake_devices = [
+        {
+            "rom_code": "28FF641E8D3C0C79",
+            "device_type": "ds18b20",
+            "pin": pin
+        },
+        {
+            "rom_code": "28FF123456789ABC",
+            "device_type": "ds18b20",
+            "pin": pin
+        }
+    ]
+    
+    logger.info(f"Mock OneWire scan on {esp_id} GPIO {pin}: returning {len(fake_devices)} fake devices")
+    
+    return CommandResponse(
+        success=True,
+        esp_id=esp_id,
+        command="onewire_scan",
+        result={
+            "devices": fake_devices,
+            "found_count": len(fake_devices),
+            "pin": pin,
+            "message": f"Mock scan: {len(fake_devices)} fake DS18B20 devices (for testing)"
+        }
+    )
+
+
 @router.delete(
     "/mock-esp/{esp_id}/sensors/{gpio}",
     response_model=CommandResponse,
     status_code=status.HTTP_200_OK,
     summary="Remove Sensor",
-    description="Remove a sensor from a mock ESP32."
+    description="Remove a sensor from a mock ESP32. MULTI-VALUE: Optionally specify sensor_type to remove only that type."
 )
 async def remove_sensor(
     esp_id: str,
     gpio: int,
     current_user: AdminUser,
     db: DBSession,
+    sensor_type: Optional[str] = Query(
+        None,
+        description="Optional sensor type to remove (e.g., 'sht31_temp'). If not specified, removes ALL sensors on this GPIO."
+    ),
 ) -> CommandResponse:
     """
     Remove a sensor from a mock ESP.
 
     DB-FIRST: Updates database configuration.
     If simulation is running, sensor job is stopped immediately.
+
+    MULTI-VALUE SUPPORT: If sensor_type is provided, removes only that specific
+    sensor type on the GPIO. If not provided, removes ALL sensors on that GPIO.
     """
     esp_repo = ESPRepository(db)
 
@@ -892,31 +1007,35 @@ async def remove_sensor(
         )
 
     # 1. Stop sensor job if simulation is running
+    # MULTI-VALUE: Pass sensor_type for targeted removal
     job_stopped = False
     try:
         sim_scheduler = get_simulation_scheduler()
         if sim_scheduler.is_mock_active(esp_id):
-            job_stopped = sim_scheduler.remove_sensor_job(esp_id, gpio)
+            job_stopped = sim_scheduler.remove_sensor_job(esp_id, gpio, sensor_type)
             if job_stopped:
-                logger.info(f"Stopped sensor job for {esp_id} GPIO {gpio}")
+                logger.info(f"Stopped sensor job for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}")
     except RuntimeError:
         pass  # Scheduler not initialized
 
     # 2. Update database (Single Source of Truth)
-    success = await esp_repo.remove_sensor_from_mock(esp_id, gpio)
+    # MULTI-VALUE: Pass sensor_type for targeted removal
+    success = await esp_repo.remove_sensor_from_mock(esp_id, gpio, sensor_type)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor GPIO {gpio} not found on {esp_id}"
+            detail=f"Sensor GPIO {gpio} (type={sensor_type or 'any'}) not found on {esp_id}"
         )
 
     # 2.5 Delete SensorConfig entry (fixes Bug P cleanup)
+    # Note: For multi-value, we may need to delete specific sensor_config by type
     sensor_repo = SensorRepository(db)
     try:
         sensor_config = await sensor_repo.get_by_esp_and_gpio(device.id, gpio)
-        if sensor_config:
+        # Only delete if sensor_type matches or no type specified
+        if sensor_config and (not sensor_type or sensor_config.sensor_type == sensor_type):
             await sensor_repo.delete(sensor_config.id)
-            logger.debug(f"Deleted SensorConfig for {esp_id} GPIO {gpio}")
+            logger.debug(f"Deleted SensorConfig for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}")
     except Exception as e:
         logger.warning(f"Failed to delete SensorConfig for GPIO {gpio}: {e}")
 
@@ -928,6 +1047,7 @@ async def remove_sensor(
         command="remove_sensor",
         result={
             "gpio": gpio,
+            "sensor_type": sensor_type,
             "db_updated": success,
             "job_stopped": job_stopped
         }

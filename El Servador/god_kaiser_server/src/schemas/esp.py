@@ -272,6 +272,11 @@ class GpioStatusItem(BaseModel):
     by the ESP32's GPIOManager. This is the SOURCE OF TRUTH for which
     GPIOs are actually in use on the physical device.
 
+    Phase 2 Enhancement (2026-01-15):
+    - Accepts Arduino pinMode raw values (1, 2, 5)
+    - Normalizes to protocol enum (0, 1, 2) via field_validator
+    - Maintains backwards-compatibility with deployed ESPs
+
     Reference: El Trabajante/docs/Mqtt_Protocoll.md (Heartbeat gpio_status)
     """
 
@@ -294,13 +299,73 @@ class GpioStatusItem(BaseModel):
     mode: int = Field(
         ...,
         ge=0,
-        le=2,
-        description="Pin mode: 0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP",
+        le=255,  # Tolerant: Accept any uint8 value (Arduino modes are 1, 2, 5)
+        description="Pin mode (accepts Arduino raw values, normalized to 0-2)",
     )
     safe: bool = Field(
         ...,
         description="True if in safe mode (not actively used), False if actively used",
     )
+
+    @field_validator("mode")
+    @classmethod
+    def normalize_gpio_mode(cls, v: int) -> int:
+        """
+        Normalize Arduino pinMode values to protocol enum.
+
+        Arduino Core definitions (what ESP32 sends):
+            INPUT           = 0x01 (1)
+            OUTPUT          = 0x02 (2)
+            INPUT_PULLUP    = 0x05 (5)
+
+        Protocol enum (what Server/Frontend uses):
+            0 = INPUT
+            1 = OUTPUT
+            2 = INPUT_PULLUP
+
+        Mapping:
+            Arduino INPUT (1)       → Protocol INPUT (0)
+            Arduino OUTPUT (2)      → Protocol OUTPUT (1)
+            Arduino INPUT_PULLUP (5) → Protocol INPUT_PULLUP (2)
+
+        Args:
+            v: Raw mode value from ESP (typically 1, 2, or 5)
+
+        Returns:
+            Normalized mode value (0, 1, or 2)
+
+        Note:
+            - ESP32 ALWAYS sends Arduino values (1, 2, 5)
+            - Values 1, 2, 5 are ALWAYS normalized (assumed Arduino)
+            - Value 0 is already Protocol INPUT (no Arduino equivalent)
+            - Unknown values (3, 4, 6-255) are logged and passed through
+        """
+        # Mapping: Arduino → Protocol
+        # ESP32 sends Arduino Core pinMode values, we normalize to protocol
+        ARDUINO_TO_PROTOCOL = {
+            1: 0,  # Arduino INPUT (0x01) → Protocol INPUT (0)
+            2: 1,  # Arduino OUTPUT (0x02) → Protocol OUTPUT (1)
+            5: 2,  # Arduino INPUT_PULLUP (0x05) → Protocol INPUT_PULLUP (2)
+        }
+
+        # Check if it's a known Arduino value and normalize
+        if v in ARDUINO_TO_PROTOCOL:
+            return ARDUINO_TO_PROTOCOL[v]
+
+        # Value 0 is already Protocol INPUT (no Arduino equivalent sends 0)
+        if v == 0:
+            return 0
+
+        # Unknown value (3, 4, 6-255) - log warning and pass through
+        # This allows future Arduino modes to be tolerated
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"Unknown GPIO mode value: {v} (0x{v:02X}). "
+            f"Passing through unchanged. "
+            f"Known Arduino values: [1 (INPUT), 2 (OUTPUT), 5 (INPUT_PULLUP)]"
+        )
+        return v
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -418,16 +483,31 @@ class GpioUsageItem(BaseModel):
     )
 
 
+class I2CBusInfo(BaseModel):
+    """I2C Bus information with connected devices."""
+    sda_pin: int = Field(..., description="SDA pin number (typically 21)")
+    scl_pin: int = Field(..., description="SCL pin number (typically 22)")
+    is_available: bool = Field(..., description="Whether I2C bus is available (always true for shared bus)")
+    devices: List[dict] = Field(default_factory=list, description="List of I2C devices on bus")
+
+
+class OneWireBusInfo(BaseModel):
+    """OneWire Bus information with connected devices."""
+    gpio: int = Field(..., description="OneWire bus GPIO pin")
+    is_available: bool = Field(..., description="Whether OneWire bus is available (always true for shared bus)")
+    devices: List[dict] = Field(default_factory=list, description="List of OneWire devices on bus")
+
+
 class GpioStatusResponse(BaseModel):
     """
     Vollständiger GPIO-Belegungsstatus für einen ESP.
 
-    Kombiniert:
-    - Statisch reservierte System-Pins
-    - DB-konfigurierte Sensoren/Aktoren
-    - ESP-gemeldeter Status (aus Heartbeat)
+    Multi-Value Sensor Support (bus-aware):
+    - I2C sensors share GPIO 21/22 (bus pins)
+    - OneWire sensors share GPIO (bus pin)
+    - Analog/Digital sensors have exclusive GPIO
 
-    Phase: 2 (GPIO Validation)
+    Phase: 2 (GPIO Validation) + Multi-Value Support
     """
 
     esp_id: str = Field(
@@ -440,12 +520,30 @@ class GpioStatusResponse(BaseModel):
     )
     reserved: List[GpioUsageItem] = Field(
         default_factory=list,
-        description="List of reserved/in-use GPIO pins",
+        description="List of reserved/in-use GPIO pins (Analog/Digital only, backwards-compat)",
     )
     system: List[int] = Field(
         default_factory=list,
         description="List of system-reserved GPIO pins (Flash, UART, etc.)",
     )
+
+    # =========================================================================
+    # MULTI-VALUE SENSOR SUPPORT (Bus-aware)
+    # =========================================================================
+    reserved_gpios: List[int] = Field(
+        default_factory=list,
+        description="Exclusively reserved GPIOs (Analog/Digital sensors only)",
+    )
+    i2c_bus: Optional[I2CBusInfo] = Field(
+        None,
+        description="I2C bus status with connected devices (shared bus)",
+    )
+    onewire_buses: List[OneWireBusInfo] = Field(
+        default_factory=list,
+        description="OneWire bus status with connected devices (shared buses)",
+    )
+    # =========================================================================
+
     hardware_type: str = Field(
         "ESP32_WROOM",
         description="ESP32 hardware type (affects valid GPIO range)",

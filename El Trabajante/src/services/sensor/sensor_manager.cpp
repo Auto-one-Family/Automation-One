@@ -8,6 +8,7 @@
 #include "../../utils/topic_builder.h"
 #include "../../utils/logger.h"
 #include "../../utils/time_manager.h"
+#include "../../utils/onewire_utils.h"  // For OneWire ROM-Code conversion
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
 #include "../../models/sensor_types.h"
@@ -85,17 +86,24 @@ void SensorManager::end() {
         LOG_WARNING("Sensor Manager not initialized");
         return;
     }
-    
-    // Release all GPIO pins
+
+    // Release GPIO pins for non-I2C sensors only
+    // I2C sensor GPIOs are managed by I2CBusManager
     for (uint8_t i = 0; i < sensor_count_; i++) {
         if (sensors_[i].active && sensors_[i].gpio != 255) {
-            gpio_manager_->releasePin(sensors_[i].gpio);
+            // Check if this is an I2C sensor
+            const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
+            bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+
+            if (!is_i2c_sensor) {
+                gpio_manager_->releasePin(sensors_[i].gpio);
+            }
         }
     }
-    
+
     sensor_count_ = 0;
     initialized_ = false;
-    
+
     LOG_INFO("Sensor Manager shutdown");
 }
 
@@ -136,7 +144,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         LOG_ERROR("Sensor Manager not initialized");
         return false;
     }
-    
+
     // Validate GPIO
     if (config.gpio == 255) {
         LOG_ERROR("Sensor Manager: Invalid GPIO (255)");
@@ -144,35 +152,72 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                                "Invalid GPIO for sensor");
         return false;
     }
-    
+
+    // Get sensor capability to determine interface type
+    const SensorCapability* capability = findSensorCapability(config.sensor_type);
+    bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+
     // Phase 7: Check if sensor already exists (runtime reconfiguration support)
     SensorConfig* existing = findSensorConfig(config.gpio);
     if (existing) {
+        // For I2C sensors: Also check if same sensor type exists on same I2C address
+        // (Multi-value sensors like SHT31 share GPIO but have different sensor_types)
+        if (is_i2c_sensor && existing->sensor_type != config.sensor_type) {
+            // Check if this is a multi-value sensor on same device
+            const SensorCapability* existing_cap = findSensorCapability(existing->sensor_type);
+            if (existing_cap && existing_cap->is_i2c &&
+                existing_cap->i2c_address == capability->i2c_address &&
+                String(existing_cap->device_type) == String(capability->device_type)) {
+                // Same I2C device, different value type - this is allowed
+                // Find an empty slot for the new sensor type
+                if (sensor_count_ >= MAX_SENSORS) {
+                    LOG_ERROR("Sensor Manager: Maximum sensor count reached");
+                    return false;
+                }
+
+                // Add as new sensor (multi-value support)
+                sensors_[sensor_count_] = config;
+                sensors_[sensor_count_].active = true;
+                sensor_count_++;
+
+                if (!configManager.saveSensorConfig(config)) {
+                    LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+                } else {
+                    LOG_INFO("  ✅ Configuration persisted to NVS");
+                }
+
+                LOG_INFO("Sensor Manager: Added multi-value sensor '" + config.sensor_type +
+                         "' on GPIO " + String(config.gpio) + " (I2C 0x" +
+                         String(capability->i2c_address, HEX) + ")");
+                return true;
+            }
+        }
+
         // Runtime reconfiguration: Update existing sensor
         LOG_INFO("Sensor Manager: Updating existing sensor on GPIO " + String(config.gpio));
-        
+
         // Check if sensor type changed
         bool type_changed = (existing->sensor_type != config.sensor_type);
         if (type_changed) {
             LOG_INFO("  Sensor type changed: " + existing->sensor_type + " → " + config.sensor_type);
         }
-        
+
         // Update configuration
         *existing = config;
         existing->active = true;
-        
+
         // Phase 7: Persist to NVS immediately
         if (!configManager.saveSensorConfig(config)) {
             LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
         } else {
             LOG_INFO("  ✅ Configuration persisted to NVS");
         }
-        
-        LOG_INFO("Sensor Manager: Updated sensor on GPIO " + String(config.gpio) + 
+
+        LOG_INFO("Sensor Manager: Updated sensor on GPIO " + String(config.gpio) +
                  " (" + config.sensor_type + ")");
         return true;
     }
-    
+
     // New sensor: Check if we have space
     if (sensor_count_ >= MAX_SENSORS) {
         LOG_ERROR("Sensor Manager: Maximum sensor count reached");
@@ -180,40 +225,227 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                                "Maximum sensor count reached");
         return false;
     }
-    
+
+    // ============================================
+    // INTERFACE-SPECIFIC CONFIGURATION
+    // ============================================
+    if (is_i2c_sensor) {
+        // I2C Sensor: Use I2C bus, NO GPIO reservation needed
+        // GPIO 21/22 are already reserved by I2CBusManager as "system"/"I2C_SDA"/"I2C_SCL"
+
+        // Check 1: I2C bus must be initialized
+        if (!i2c_bus_->isInitialized()) {
+            LOG_ERROR("Sensor Manager: I2C bus not initialized");
+            errorTracker.trackError(ERROR_I2C_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                   "I2C bus not initialized for I2C sensor");
+            return false;
+        }
+
+        // Check 2: I2C address conflict detection
+        // (Different device type on same I2C address = conflict)
+        uint8_t i2c_address = capability->i2c_address;
+        for (uint8_t i = 0; i < sensor_count_; i++) {
+            if (!sensors_[i].active) continue;
+
+            const SensorCapability* existing_cap = findSensorCapability(sensors_[i].sensor_type);
+            if (existing_cap && existing_cap->is_i2c &&
+                existing_cap->i2c_address == i2c_address) {
+                // Same I2C address - check if same device type (allowed for multi-value)
+                if (String(existing_cap->device_type) != String(capability->device_type)) {
+                    LOG_ERROR("Sensor Manager: I2C address 0x" + String(i2c_address, HEX) +
+                              " already in use by different device type '" +
+                              String(existing_cap->device_type) + "'");
+                    errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_ERROR,
+                                           "I2C address conflict");
+                    return false;
+                }
+                // Same device type on same address is OK (multi-value sensor)
+            }
+        }
+
+        // Optional: Check if I2C device is present (skip in simulation)
+        if (!i2c_bus_->isDevicePresent(i2c_address)) {
+            LOG_WARNING("Sensor Manager: I2C device at 0x" + String(i2c_address, HEX) +
+                        " not responding (may be simulation mode)");
+            // Don't fail - Wokwi simulation doesn't have real I2C devices
+        }
+
+        // Add I2C sensor (NO GPIO reservation!)
+        sensors_[sensor_count_] = config;
+        sensors_[sensor_count_].active = true;
+        sensor_count_++;
+
+        if (!configManager.saveSensorConfig(config)) {
+            LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+        } else {
+            LOG_INFO("  ✅ Configuration persisted to NVS");
+        }
+
+        LOG_INFO("Sensor Manager: Configured I2C sensor '" + config.sensor_type +
+                 "' at address 0x" + String(i2c_address, HEX) +
+                 " (GPIO " + String(config.gpio) + " is I2C bus)");
+
+        return true;
+    }
+
+    // Non-I2C sensor (Analog, Digital, OneWire): Standard GPIO reservation
     // Server-Centric Deviation (Hardware-Protection-Layer):
     // GPIO-Conflict-Check als Defense-in-Depth (siehe actuator_manager.cpp).
-    // Check GPIO availability
-    if (!gpio_manager_->isPinAvailable(config.gpio)) {
-        LOG_ERROR("Sensor Manager: GPIO " + String(config.gpio) + " not available");
-        errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
-                               "GPIO conflict for sensor");
-        return false;
-    }
     
-    // Reserve GPIO
-    if (!gpio_manager_->requestPin(config.gpio, "sensor", config.sensor_name.c_str())) {
-        LOG_ERROR("Sensor Manager: Failed to reserve GPIO " + String(config.gpio));
-        errorTracker.trackError(ERROR_GPIO_RESERVED, ERROR_SEVERITY_ERROR,
-                               "Failed to reserve GPIO");
-        return false;
-    }
+    // ============================================
+    // ONEWIRE SENSOR HANDLING (DS18B20, DS18S20, DS1822)
+    // ============================================
+    // OneWire sensors share a single bus pin - special GPIO handling required
+    bool is_onewire = (capability && !capability->is_i2c && 
+                       config.sensor_type.indexOf("ds18b20") >= 0);
     
+    if (is_onewire) {
+        LOG_DEBUG("SensorManager: OneWire sensor detected: " + config.sensor_type);
+        
+        // 1. Validate ROM-Code format (must be 16 hex chars)
+        if (config.onewire_address.length() != 16) {
+            LOG_ERROR("SensorManager: Invalid OneWire ROM-Code length (expected 16, got " + 
+                     String(config.onewire_address.length()) + ")");
+            errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                   "Invalid OneWire ROM-Code length");
+            return false;
+        }
+        
+        // 2. Parse and validate ROM-Code
+        uint8_t rom[8];
+        if (!OneWireUtils::hexStringToRom(config.onewire_address, rom)) {
+            LOG_ERROR("SensorManager: Failed to parse OneWire ROM-Code: " + 
+                     config.onewire_address);
+            errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                   "Failed to parse OneWire ROM-Code");
+            return false;
+        }
+        
+        if (!OneWireUtils::isValidRom(rom)) {
+            // CRC invalid - log as WARNING (may be transmission error) but continue
+            // Server can do additional validation if needed
+            LOG_WARNING("SensorManager: OneWire ROM-Code CRC invalid: " + 
+                       config.onewire_address + " - continuing anyway (server will validate)");
+            errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_CRC, ERROR_SEVERITY_WARNING,
+                                   ("ROM CRC invalid: " + config.onewire_address).c_str());
+            // Don't return false - CRC errors are warnings, not hard failures
+        }
+        
+        // 2b. Duplicate ROM-Code Check (prevent same device being registered twice)
+        for (uint8_t i = 0; i < sensor_count_; i++) {
+            if (sensors_[i].onewire_address == config.onewire_address) {
+                LOG_ERROR("SensorManager: OneWire ROM-Code already registered: " + 
+                         config.onewire_address + " on GPIO " + String(sensors_[i].gpio));
+                errorTracker.trackError(ERROR_ONEWIRE_DUPLICATE_ROM, ERROR_SEVERITY_ERROR,
+                                       ("Duplicate ROM: " + config.onewire_address).c_str());
+                return false;
+            }
+        }
+        
+        // 3. GPIO-Sharing Check (3 cases for shared OneWire bus)
+        String owner = gpio_manager_->getPinOwner(config.gpio);
+        String expected_owner = "onewire_bus/" + String(config.gpio);
+        
+        if (owner.length() == 0) {
+            // CASE 1: Pin free → Reserve with shared owner name
+            if (!gpio_manager_->requestPin(config.gpio, "sensor", expected_owner.c_str())) {
+                LOG_ERROR("SensorManager: Failed to reserve GPIO " + String(config.gpio) + 
+                         " for OneWire bus");
+                errorTracker.trackError(ERROR_GPIO_RESERVED, ERROR_SEVERITY_ERROR,
+                                       "Failed to reserve GPIO for OneWire");
+                return false;
+            }
+            LOG_INFO("SensorManager: Reserved GPIO " + String(config.gpio) + 
+                    " for OneWire bus (owner: " + expected_owner + ")");
+        } else if (owner == expected_owner) {
+            // CASE 2: Pin already reserved for OneWire → Sharing OK
+            LOG_INFO("SensorManager: Sharing OneWire bus on GPIO " + String(config.gpio) + 
+                    " (existing owner: " + owner + ")");
+        } else {
+            // CASE 3: Pin used by other device → ERROR
+            LOG_ERROR("SensorManager: GPIO " + String(config.gpio) + 
+                     " already in use by: " + owner + " (expected: free or " + 
+                     expected_owner + ")");
+            errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
+                                   "GPIO conflict for OneWire sensor");
+            return false;
+        }
+        
+        // 4. Single-Bus Check (architecture allows only one OneWire bus)
+        if (onewire_bus_->isInitialized()) {
+            uint8_t current_pin = onewire_bus_->getPin();
+            if (current_pin != config.gpio) {
+                LOG_ERROR("SensorManager: OneWire bus already active on GPIO " + 
+                         String(current_pin) + ", cannot use GPIO " + String(config.gpio) + 
+                         " (single-bus architecture)");
+                errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                       "Single-bus conflict");
+                return false;
+            }
+            LOG_DEBUG("SensorManager: OneWire bus already initialized on GPIO " + 
+                     String(current_pin));
+        } else {
+            // First OneWire sensor → Initialize bus
+            if (!onewire_bus_->begin(config.gpio)) {
+                LOG_ERROR("SensorManager: Failed to initialize OneWire bus on GPIO " + 
+                         String(config.gpio));
+                errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                                       "OneWire bus init failed");
+                return false;
+            }
+            LOG_INFO("SensorManager: OneWire bus initialized on GPIO " + String(config.gpio));
+        }
+        
+        // 5. Verify device presence on bus
+        if (!onewire_bus_->isDevicePresent(rom)) {
+            LOG_ERROR("SensorManager: OneWire device " + config.onewire_address + 
+                     " not found on bus (GPIO " + String(config.gpio) + ")");
+            errorTracker.trackError(ERROR_ONEWIRE_NO_DEVICES, ERROR_SEVERITY_ERROR,
+                                   "OneWire device not found");
+            return false;
+        }
+        
+        LOG_INFO("SensorManager: OneWire device " + config.onewire_address + 
+                " verified on GPIO " + String(config.gpio) + 
+                " (type: " + OneWireUtils::getDeviceType(rom) + ")");
+                
+        // Skip standard GPIO reservation (already handled above)
+    } else {
+        // ============================================
+        // STANDARD GPIO SENSOR (Analog, Digital)
+        // ============================================
+        // Check GPIO availability
+        if (!gpio_manager_->isPinAvailable(config.gpio)) {
+            LOG_ERROR("Sensor Manager: GPIO " + String(config.gpio) + " not available");
+            errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
+                                   "GPIO conflict for sensor");
+            return false;
+        }
+
+        // Reserve GPIO
+        if (!gpio_manager_->requestPin(config.gpio, "sensor", config.sensor_name.c_str())) {
+            LOG_ERROR("Sensor Manager: Failed to reserve GPIO " + String(config.gpio));
+            errorTracker.trackError(ERROR_GPIO_RESERVED, ERROR_SEVERITY_ERROR,
+                                   "Failed to reserve GPIO");
+            return false;
+        }
+    }
+
     // Add sensor
     sensors_[sensor_count_] = config;
     sensors_[sensor_count_].active = true;
     sensor_count_++;
-    
+
     // Phase 7: Persist to NVS immediately
     if (!configManager.saveSensorConfig(config)) {
         LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
     } else {
         LOG_INFO("  ✅ Configuration persisted to NVS");
     }
-    
-    LOG_INFO("Sensor Manager: Configured new sensor on GPIO " + String(config.gpio) + 
-             " (" + config.sensor_type + ")");
-    
+
+    LOG_INFO("Sensor Manager: Configured " + String(is_onewire ? "OneWire" : "GPIO") + 
+             " sensor '" + config.sensor_type + "' on GPIO " + String(config.gpio));
+
     return true;
 }
 
@@ -222,19 +454,27 @@ bool SensorManager::removeSensor(uint8_t gpio) {
         LOG_ERROR("Sensor Manager not initialized");
         return false;
     }
-    
+
     SensorConfig* config = findSensorConfig(gpio);
     if (!config) {
         LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " not found");
         return false;
     }
-    
+
     LOG_INFO("Sensor Manager: Removing sensor on GPIO " + String(gpio));
-    
-    // Release GPIO
-    gpio_manager_->releasePin(gpio);
-    LOG_INFO("  ✅ GPIO " + String(gpio) + " released");
-    
+
+    // Check if this is an I2C sensor (don't release GPIO - managed by I2CBusManager)
+    const SensorCapability* capability = findSensorCapability(config->sensor_type);
+    bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+
+    if (!is_i2c_sensor) {
+        // Non-I2C sensor: Release GPIO
+        gpio_manager_->releasePin(gpio);
+        LOG_INFO("  ✅ GPIO " + String(gpio) + " released");
+    } else {
+        LOG_INFO("  ℹ️ I2C sensor - GPIO managed by I2C bus");
+    }
+
     // Remove sensor (shift array)
     for (uint8_t i = 0; i < sensor_count_; i++) {
         if (sensors_[i].gpio == gpio) {
@@ -248,14 +488,14 @@ bool SensorManager::removeSensor(uint8_t gpio) {
             break;
         }
     }
-    
+
     // Phase 7: Persist removal to NVS immediately
     if (!configManager.removeSensorConfig(gpio)) {
         LOG_ERROR("Sensor Manager: Failed to remove sensor config from NVS");
     } else {
         LOG_INFO("  ✅ Configuration removed from NVS");
     }
-    
+
     LOG_INFO("Sensor Manager: Removed sensor on GPIO " + String(gpio));
     return true;
 }
@@ -345,16 +585,98 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
             String device_type = String(capability->device_type);
             
             if (device_type == "ds18b20") {
-                // OneWire sensor (requires ROM code - simplified for now)
-                int16_t raw_temp = 0;
-                uint8_t rom[8] = {0};  // TODO: Store ROM code in SensorConfig
-                if (readRawOneWire(gpio, rom, raw_temp)) {
-                    raw_value = (uint32_t)raw_temp;
-                } else {
+                // ============================================
+                // ONEWIRE SENSOR (DS18B20) - Enhanced with Retry + Sanity
+                // ============================================
+                
+                // 1. Validate ROM-Code presence
+                if (config->onewire_address.length() != 16) {
                     reading_out.valid = false;
-                    reading_out.error_message = "OneWire read failed";
+                    reading_out.error_message = "OneWire ROM-Code missing or invalid length";
+                    LOG_ERROR("SensorManager: DS18B20 ROM-Code missing for GPIO " + String(gpio));
+                    errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_LENGTH, ERROR_SEVERITY_ERROR,
+                                           "ROM-Code missing for measurement");
                     return false;
                 }
+                
+                // 2. Parse ROM-Code
+                uint8_t rom[8];
+                if (!OneWireUtils::hexStringToRom(config->onewire_address, rom)) {
+                    reading_out.valid = false;
+                    reading_out.error_message = "OneWire ROM-Code parse failed";
+                    LOG_ERROR("SensorManager: Failed to parse ROM-Code: " + config->onewire_address);
+                    errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_FORMAT, ERROR_SEVERITY_ERROR,
+                                           ("ROM parse failed: " + config->onewire_address).c_str());
+                    return false;
+                }
+                
+                // 3. Check OneWire bus status
+                if (!onewire_bus_ || !onewire_bus_->isInitialized()) {
+                    reading_out.valid = false;
+                    reading_out.error_message = "OneWire bus not initialized";
+                    LOG_ERROR("SensorManager: OneWire bus not ready for measurement");
+                    errorTracker.trackError(ERROR_ONEWIRE_BUS_NOT_INITIALIZED, ERROR_SEVERITY_ERROR,
+                                           "Bus not initialized for read");
+                    return false;
+                }
+                
+                // 4. Read RAW temperature with RETRY LOGIC (3 attempts, 100ms delay)
+                int16_t raw_temp = 0;
+                bool read_success = false;
+                const uint8_t MAX_RETRIES = 3;
+                const uint16_t RETRY_DELAY_MS = 100;
+                
+                for (uint8_t retry = 0; retry < MAX_RETRIES; retry++) {
+                    if (readRawOneWire(gpio, rom, raw_temp)) {
+                        read_success = true;
+                        if (retry > 0) {
+                            LOG_INFO("SensorManager: OneWire read succeeded on attempt " + 
+                                    String(retry + 1) + " for " + config->onewire_address);
+                        }
+                        break;
+                    }
+                    
+                    if (retry < MAX_RETRIES - 1) {
+                        LOG_WARNING("SensorManager: OneWire read attempt " + String(retry + 1) + 
+                                   " failed for " + config->onewire_address + ", retrying...");
+                        delay(RETRY_DELAY_MS);
+                    }
+                }
+                
+                if (!read_success) {
+                    reading_out.valid = false;
+                    reading_out.error_message = "OneWire read failed after " + String(MAX_RETRIES) + " attempts";
+                    LOG_ERROR("SensorManager: OneWire read failed after " + String(MAX_RETRIES) + 
+                             " retries for device " + config->onewire_address + " on GPIO " + String(gpio));
+                    errorTracker.trackError(ERROR_ONEWIRE_READ_TIMEOUT, ERROR_SEVERITY_ERROR,
+                                           ("Read timeout: " + config->onewire_address).c_str());
+                    return false;
+                }
+                
+                // 5. SANITY CHECK: Validate temperature range
+                // DS18B20 range: -55°C to +125°C = raw -880 to +2000 (in 1/16°C units)
+                // We use a slightly wider range to account for edge cases
+                const int16_t RAW_MIN = -900;   // ~-56.25°C
+                const int16_t RAW_MAX = 2100;   // ~+131.25°C
+                
+                if (raw_temp < RAW_MIN || raw_temp > RAW_MAX) {
+                    // Out of range - log WARNING but still report (server decides)
+                    LOG_WARNING("SensorManager: DS18B20 raw value " + String(raw_temp) + 
+                               " out of typical range [" + String(RAW_MIN) + ", " + String(RAW_MAX) + 
+                               "] for " + config->onewire_address + " - reporting anyway");
+                    reading_out.quality = "suspect";  // Server can use this hint
+                } else {
+                    reading_out.quality = "good";
+                }
+                
+                // 6. Store RAW value and metadata for MQTT payload
+                raw_value = (uint32_t)raw_temp;
+                reading_out.onewire_address = config->onewire_address;
+                reading_out.raw_mode = true;  // Always true for DS18B20 (Server-Centric)
+                
+                LOG_DEBUG("SensorManager: DS18B20 read: " + config->onewire_address + 
+                         " = " + String(raw_temp) + " RAW (GPIO " + String(gpio) + 
+                         ", quality=" + reading_out.quality + ")");
             } else {
                 // Analog sensor (pH, EC, Moisture, etc.)
                 raw_value = readRawAnalog(gpio);
@@ -370,11 +692,25 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
             // Likely analog sensor
             raw_value = readRawAnalog(gpio);
         } else if (lower_type.indexOf("ds18b20") >= 0 || lower_type.indexOf("onewire") >= 0) {
-            // Likely OneWire sensor
+            // Likely OneWire sensor - use ROM-Code from config
+            if (config->onewire_address.length() != 16) {
+                reading_out.valid = false;
+                reading_out.error_message = "OneWire ROM-Code missing";
+                LOG_ERROR("SensorManager: DS18B20 ROM-Code missing (fallback path)");
+                return false;
+            }
+            
+            uint8_t rom[8];
+            if (!OneWireUtils::hexStringToRom(config->onewire_address, rom)) {
+                reading_out.valid = false;
+                reading_out.error_message = "OneWire ROM-Code parse failed";
+                return false;
+            }
+            
             int16_t raw_temp = 0;
-            uint8_t rom[8] = {0};
             if (readRawOneWire(gpio, rom, raw_temp)) {
                 raw_value = (uint32_t)raw_temp;
+                reading_out.onewire_address = config->onewire_address;
             } else {
                 reading_out.valid = false;
                 reading_out.error_message = "OneWire read failed";
@@ -727,11 +1063,31 @@ bool SensorManager::readRawI2C(uint8_t gpio, uint8_t device_address,
 
 bool SensorManager::readRawOneWire(uint8_t gpio, const uint8_t rom[8], int16_t& raw_value) {
     if (!initialized_ || !onewire_bus_) {
+        LOG_ERROR("SensorManager: Not initialized or OneWire bus missing");
         return false;
     }
     
-    // Use OneWire bus manager
-    return onewire_bus_->readRawTemperature(rom, raw_value);
+    // Verify OneWire bus is initialized
+    if (!onewire_bus_->isInitialized()) {
+        LOG_ERROR("SensorManager: OneWire bus not initialized");
+        return false;
+    }
+    
+    // Verify GPIO matches bus pin (safety check)
+    if (onewire_bus_->getPin() != gpio) {
+        LOG_ERROR("SensorManager: OneWire bus on GPIO " + String(onewire_bus_->getPin()) + 
+                 ", requested GPIO " + String(gpio));
+        return false;
+    }
+    
+    // Read RAW temperature from device
+    if (!onewire_bus_->readRawTemperature(rom, raw_value)) {
+        LOG_WARNING("SensorManager: Failed to read OneWire device " + 
+                   OneWireUtils::romToHexString(rom));
+        return false;
+    }
+    
+    return true;
 }
 
 // ============================================
@@ -837,7 +1193,25 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     payload += "\"ts\":";
     payload += String((unsigned long)unix_ts);
     payload += ",";
-    payload += "\"raw_mode\":true";  // Always true - ESP32 sends raw data for server processing
+    
+    // raw_mode from Reading (Server-Centric: true = server processes RAW data)
+    payload += "\"raw_mode\":";
+    payload += (reading.raw_mode ? "true" : "false");
+    
+    // OneWire Address (for device identification on shared bus)
+    if (!reading.onewire_address.isEmpty()) {
+        payload += ",\"onewire_address\":\"";
+        payload += reading.onewire_address;
+        payload += "\"";
+    }
+    
+    // Quality hint (if set by sanity checks)
+    if (!reading.quality.isEmpty()) {
+        payload += ",\"quality\":\"";
+        payload += reading.quality;
+        payload += "\"";
+    }
+    
     payload += "}";
     
     return payload;

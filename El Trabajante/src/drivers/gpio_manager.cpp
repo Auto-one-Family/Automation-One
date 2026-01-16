@@ -668,4 +668,3 @@ bool GPIOManager::disableSafeModeForSubzone(const String& subzone_id) {
   LOG_INFO("GPIOManager: Safe-Mode disabled for subzone: " + subzone_id);
   return true;
 }
-

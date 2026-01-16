@@ -18,8 +18,6 @@ import {
   ChevronDown,
   LayoutDashboard,
   Cpu,
-  Thermometer,
-  Power,
   Workflow,
   Activity,
   FileText,

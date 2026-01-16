@@ -225,6 +225,118 @@ export interface TriggerMeasurementResponse {
   message: string
 }
 
+// ===========================================================================
+// OneWire Scan Types (Phase 6 - DS18B20 Support)
+// ===========================================================================
+
+/**
+ * OneWire device found during bus scan.
+ * 
+ * Each device has a unique 64-bit ROM address (16 hex characters).
+ * Device type is determined by family code (first byte).
+ * 
+ * OneWire Multi-Device Support:
+ * - Multiple DS18B20 sensors can share the same GPIO pin (bus topology)
+ * - Scan results are enriched with already_configured flag to distinguish
+ *   new devices from those already in the database
+ */
+export interface OneWireDevice {
+  /** ROM code: 16 hex characters, e.g., "28FF641E8D3C0C79" */
+  rom_code: string
+  /** Device type: ds18b20, ds18s20, ds1822, unknown */
+  device_type: string
+  /** GPIO pin the device was found on */
+  pin: number
+  // =========================================================================
+  // OneWire Multi-Device Support (GPIO-Sharing)
+  // =========================================================================
+  /** True if this device is already configured in database */
+  already_configured?: boolean
+  /** Sensor name if already configured (for display in UI) */
+  sensor_name?: string | null
+}
+
+/**
+ * Response from OneWire bus scan.
+ * 
+ * Server: POST /api/v1/sensors/esp/{esp_id}/onewire/scan
+ * 
+ * OneWire Multi-Device Support:
+ * - Devices are enriched with already_configured flag
+ * - new_count indicates how many devices are NOT yet in database
+ * - Frontend can use this to show which devices are new vs already configured
+ */
+export interface OneWireScanResponse {
+  success: boolean
+  message: string
+  devices: OneWireDevice[]
+  /** Total number of devices found on bus */
+  found_count: number
+  // =========================================================================
+  // OneWire Multi-Device Support (GPIO-Sharing)
+  // =========================================================================
+  /** Number of NEW devices (not yet configured in database) */
+  new_count?: number
+  pin: number
+  esp_id: string
+  scan_duration_ms?: number
+}
+
+// ===========================================================================
+// OneWire Scan API Functions (Phase 6)
+// ===========================================================================
+
+export const oneWireApi = {
+  /**
+   * Scan OneWire bus for connected devices.
+   * 
+   * Server sends MQTT command to ESP, ESP scans bus, returns found devices.
+   * Timeout: 10 seconds on server side.
+   * 
+   * Server: POST /api/v1/sensors/esp/{esp_id}/onewire/scan?pin=4
+   * 
+   * @param espId - ESP device ID (e.g., "ESP_12AB34CD")
+   * @param pin - GPIO pin for OneWire bus (default: 4)
+   * @returns Scan response with found devices
+   * 
+   * @example
+   * const result = await oneWireApi.scanBus('ESP_12AB34CD', 4)
+   * console.log(`Found ${result.found_count} devices`)
+   * result.devices.forEach(d => console.log(d.rom_code))
+   */
+  async scanBus(espId: string, pin: number = 4): Promise<OneWireScanResponse> {
+    const response = await api.post<OneWireScanResponse>(
+      `/sensors/esp/${espId}/onewire/scan`,
+      null,
+      { params: { pin } }
+    )
+    return response.data
+  },
+
+  /**
+   * Get all configured OneWire sensors for an ESP.
+   * 
+   * Server: GET /api/v1/sensors/esp/{esp_id}/onewire
+   * 
+   * @param espId - ESP device ID
+   * @param pin - Optional filter by GPIO pin
+   * @returns Array of sensor configurations
+   */
+  async listSensors(
+    espId: string,
+    pin?: number
+  ): Promise<{ sensors: import('@/types').SensorConfigResponse[]; total: number }> {
+    const response = await api.get<{
+      sensors: import('@/types').SensorConfigResponse[]
+      total: number
+    }>(`/sensors/esp/${espId}/onewire`, { params: pin !== undefined ? { pin } : {} })
+    return response.data
+  },
+}
+
+
+
+
 
 
 

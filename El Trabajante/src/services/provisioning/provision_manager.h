@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <DNSServer.h>  // Captive Portal DNS
 #include "../../models/system_types.h"
 #include "../../services/config/config_manager.h"
 #include "../../utils/logger.h"
@@ -147,13 +148,19 @@ private:
   String ap_password_;
   String esp_id_;
   
+  // DNS Server for Captive Portal Detection
+  // Windows/macOS perform DNS lookups to detect captive portals
+  // Without DNS response, OS rejects connection with "No internet" error
+  DNSServer dns_server_;
+  static const uint8_t DNS_PORT = 53;
+  
   // Timeouts (const für Memory-Effizienz)
   static const unsigned long AP_MODE_TIMEOUT_MS = 600000;      // 10 minutes
   static const unsigned long WAITING_TIMEOUT_MS = 300000;      // 5 minutes
   static const unsigned long REBOOT_DELAY_MS = 2000;           // 2 seconds
   static const unsigned long HTTP_TIMEOUT_MS = 10000;          // 10 seconds
   static const uint8_t MAX_RETRY_COUNT = 3;
-  static const uint8_t MAX_CLIENTS = 1;                        // Nur God-Kaiser
+  static const uint8_t MAX_CLIENTS = 2;                        // God-Kaiser + 1 Admin-Client
   
   // ============================================
   // PRIVATE METHODS - SETUP

@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "../models/system_types.h"
+#include "../models/watchdog_types.h"
 
 // ============================================
 // HEALTH SNAPSHOT STRUCTURE
@@ -20,6 +21,17 @@ struct HealthSnapshot {
     uint8_t sensor_count;
     uint8_t actuator_count;
     SystemState system_state;
+    
+    // ─────────────────────────────────────────────────────
+    // WATCHDOG STATUS (Industrial-Grade)
+    // ─────────────────────────────────────────────────────
+    WatchdogMode watchdog_mode;          // PROVISIONING / PRODUCTION / DISABLED
+    unsigned long watchdog_timeout_ms;   // Current timeout value
+    unsigned long last_watchdog_feed;    // Last feed timestamp
+    const char* last_feed_component;     // Component ID
+    uint32_t watchdog_feed_count;        // Total feeds since boot
+    uint8_t watchdog_timeouts_24h;       // Timeouts in last 24h
+    bool watchdog_timeout_pending;       // Timeout flag set?
 };
 
 // ============================================
@@ -86,6 +98,9 @@ private:
 extern HealthMonitor& healthMonitor;
 
 #endif // ERROR_HANDLING_HEALTH_MONITOR_H
+
+
+
 
 
 

@@ -249,7 +249,7 @@ class ZoneAckHandler:
             message: Error message (if any)
         """
         try:
-            ws_manager = WebSocketManager.get_instance()
+            ws_manager = await WebSocketManager.get_instance()
 
             event_data = {
                 "esp_id": esp_id,

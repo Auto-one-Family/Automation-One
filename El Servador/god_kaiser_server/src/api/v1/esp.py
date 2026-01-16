@@ -821,12 +821,12 @@ async def get_gpio_status(
     current_user: ActiveUser,
 ) -> GpioStatusResponse:
     """
-    Get GPIO pin status for an ESP device.
+    Get GPIO pin status for an ESP device (bus-aware).
 
-    Combines:
-    - Statically reserved system pins (Flash, UART, Boot)
-    - Database-configured sensors/actuators
-    - ESP-reported GPIO status (from heartbeat)
+    Multi-Value Sensor Support:
+    - I2C sensors share GPIO 21/22 (bus pins)
+    - OneWire sensors share GPIO (bus pin)
+    - Analog/Digital sensors have exclusive GPIO
 
     Args:
         esp_id: ESP device ID
@@ -834,9 +834,9 @@ async def get_gpio_status(
         current_user: Authenticated user
 
     Returns:
-        GpioStatusResponse with available, reserved, and system GPIO lists
+        GpioStatusResponse with bus-aware GPIO status
 
-    Phase: 2 (GPIO Validation)
+    Phase: 2 (GPIO Validation) + Multi-Value Support
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
@@ -849,7 +849,62 @@ async def get_gpio_status(
             detail=f"ESP device '{esp_id}' not found",
         )
 
-    # Use GpioValidationService to get all used GPIOs
+    # Get all sensors for this ESP
+    all_sensors = await sensor_repo.get_by_esp(device.id)
+
+    # Separate by interface type
+    analog_digital = [s for s in all_sensors if s.interface_type in ["ANALOG", "DIGITAL"]]
+    i2c_sensors = [s for s in all_sensors if s.interface_type == "I2C"]
+    onewire_sensors = [s for s in all_sensors if s.interface_type == "ONEWIRE"]
+
+    # Reserved GPIOs (only Analog/Digital)
+    reserved_gpios = [s.gpio for s in analog_digital if s.gpio is not None]
+
+    # I2C Bus Info
+    i2c_bus_info = None
+    if i2c_sensors:
+        i2c_bus_info = {
+            "sda_pin": 21,
+            "scl_pin": 22,
+            "is_available": True,  # I2C bus is always shareable
+            "devices": [
+                {
+                    "i2c_address": f"0x{s.i2c_address:02X}" if s.i2c_address else None,
+                    "sensor_type": s.sensor_type,
+                    "sensor_name": s.sensor_name
+                }
+                for s in i2c_sensors
+            ]
+        }
+
+    # OneWire Bus Info (group by GPIO)
+    onewire_by_gpio = {}
+    for sensor in onewire_sensors:
+        gpio = sensor.gpio or 4  # Default to GPIO 4 if NULL
+        if gpio not in onewire_by_gpio:
+            onewire_by_gpio[gpio] = []
+        onewire_by_gpio[gpio].append({
+            "onewire_address": sensor.onewire_address,
+            "sensor_type": sensor.sensor_type,
+            "sensor_name": sensor.sensor_name
+        })
+
+    onewire_buses = [
+        {
+            "gpio": gpio,
+            "is_available": True,  # OneWire bus is always shareable
+            "devices": devices
+        }
+        for gpio, devices in onewire_by_gpio.items()
+    ]
+
+    # Calculate available GPIOs
+    # All GPIOs except reserved ones are available
+    # ESP32 WROOM: GPIO 0-39 (exclude input-only 34-39 for output)
+    all_gpios = set(range(0, 40))
+    available_gpios = [g for g in all_gpios if g not in reserved_gpios and g not in [34, 35, 36, 37, 38, 39]]
+
+    # Use GpioValidationService for backwards-compat "reserved" field
     gpio_validator = GpioValidationService(
         session=db,
         sensor_repo=sensor_repo,
@@ -858,8 +913,6 @@ async def get_gpio_status(
     )
 
     used_gpios = await gpio_validator.get_all_used_gpios(device.id)
-
-    # Convert to GpioUsageItem schema
     reserved_items = [
         GpioUsageItem(
             gpio=g["gpio"],
@@ -872,12 +925,6 @@ async def get_gpio_status(
         for g in used_gpios
     ]
 
-    # Calculate available GPIOs (ESP32-WROOM has GPIO 0-39)
-    # Exclude input-only pins that can't be used for output (34, 35, 36, 39)
-    all_gpios = set(range(40))
-    used_gpio_numbers = {g["gpio"] for g in used_gpios}
-    available_gpios = sorted(all_gpios - used_gpio_numbers - SYSTEM_RESERVED_PINS)
-
     # Get hardware type and last ESP report timestamp
     hardware_type = device.hardware_type or "ESP32_WROOM"
     last_esp_report = None
@@ -886,9 +933,12 @@ async def get_gpio_status(
 
     return GpioStatusResponse(
         esp_id=esp_id,
-        available=available_gpios,
-        reserved=reserved_items,
+        available=sorted(available_gpios),
+        reserved=reserved_items,  # Backwards-compat
         system=sorted(SYSTEM_RESERVED_PINS),
+        reserved_gpios=sorted(reserved_gpios),  # New: Analog/Digital only
+        i2c_bus=i2c_bus_info,  # New: I2C bus status
+        onewire_buses=onewire_buses,  # New: OneWire buses
         hardware_type=hardware_type,
         last_esp_report=last_esp_report,
     )

@@ -359,18 +359,6 @@ bool MQTTClient::isConnected() {
 }
 
 void MQTTClient::reconnect() {
-    // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_entry\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:221\",\"message\":\"reconnect() called\",\"data\":{\"is_connected\":");
-    Serial.print(isConnected() ? "true" : "false");
-    Serial.print(",\"mqtt_state\":");
-    Serial.print(mqtt_.state());
-    Serial.print(",\"reconnect_attempts\":");
-    Serial.print(reconnect_attempts_);
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
-    // #endregion
-    
     if (isConnected()) {
         LOG_DEBUG("MQTT already connected");
         circuit_breaker_.recordSuccess();  // Reset on successful connection
@@ -381,15 +369,24 @@ void MQTTClient::reconnect() {
     // CIRCUIT BREAKER CHECK (Phase 6+)
     // ============================================
     if (!circuit_breaker_.allowRequest()) {
-        // #region agent log
-        Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_circuit_breaker\",\"timestamp\":");
-        Serial.print(millis());
-        Serial.print(",\"location\":\"mqtt_client.cpp:231\",\"message\":\"Reconnect blocked by Circuit Breaker\",\"data\":{\"circuit_open\":true},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
-        // #endregion
-        LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
+        // Rate-limit debug messages when circuit breaker is OPEN (max once per second)
+        static unsigned long last_circuit_breaker_log = 0;
+        unsigned long now = millis();
+        if (now - last_circuit_breaker_log > 1000) {
+            last_circuit_breaker_log = now;
+            // #region agent log
+            Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_circuit_breaker\",\"timestamp\":");
+            Serial.print(now);
+            Serial.print(",\"location\":\"mqtt_client.cpp:383\",\"message\":\"Reconnect blocked by Circuit Breaker\",\"data\":{\"circuit_open\":true,\"failure_count\":");
+            Serial.print(circuit_breaker_.getFailureCount());
+            Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+            // #endregion
+            LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
+        }
         return;  // Skip reconnect attempt
     }
     
+    // Check if we should attempt reconnect (respects exponential backoff)
     if (!shouldAttemptReconnect()) {
         return;
     }
@@ -401,10 +398,11 @@ void MQTTClient::reconnect() {
     LOG_INFO("Attempting MQTT reconnection (attempt " +
              String(reconnect_attempts_) + ")");
 
+    // Debug log only when reconnect is actually attempted (after all checks)
     // #region agent log
     Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_attempt\",\"timestamp\":");
     Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:243\",\"message\":\"About to call connectToBroker() for reconnect\",\"data\":{\"attempt\":");
+    Serial.print(",\"location\":\"mqtt_client.cpp:407\",\"message\":\"About to call connectToBroker() for reconnect\",\"data\":{\"attempt\":");
     Serial.print(reconnect_attempts_);
     Serial.print(",\"server\":\"");
     Serial.print(current_config_.server);
@@ -412,7 +410,9 @@ void MQTTClient::reconnect() {
     Serial.print(current_config_.port);
     Serial.print(",\"server_length\":");
     Serial.print(current_config_.server.length());
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+    Serial.print(",\"circuit_breaker_state\":\"");
+    Serial.print(circuit_breaker_.isOpen() ? "OPEN" : (circuit_breaker_.isClosed() ? "CLOSED" : "HALF_OPEN"));
+    Serial.print("\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
     // #endregion
 
     if (!connectToBroker()) {
@@ -603,6 +603,17 @@ void MQTTClient::setCallback(std::function<void(const String&, const String&)> c
 // ============================================
 // HEARTBEAT SYSTEM
 // ============================================
+static uint8_t toProtocolGpioMode(uint8_t arduino_mode) {
+    // Map Arduino pinMode values to protocol enum (0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP).
+    if (arduino_mode == INPUT_PULLUP) {
+        return 2;
+    }
+    if (arduino_mode == OUTPUT) {
+        return 1;
+    }
+    return 0;
+}
+
 void MQTTClient::publishHeartbeat(bool force) {
     unsigned long current_time = millis();
 
@@ -647,12 +658,19 @@ void MQTTClient::publishHeartbeat(bool force) {
         payload += "\"gpio\":" + String(pin.pin) + ",";
         payload += "\"owner\":\"" + String(pin.owner) + "\",";
         payload += "\"component\":\"" + String(pin.component_name) + "\",";
-        payload += "\"mode\":" + String(pin.mode) + ",";
+        payload += "\"mode\":" + String(toProtocolGpioMode(pin.mode)) + ",";
         payload += "\"safe\":" + String(pin.in_safe_mode ? "true" : "false");
         payload += "}";
     }
     payload += "],";
-    payload += "\"gpio_reserved_count\":" + String(reservedPins.size());
+    payload += "\"gpio_reserved_count\":" + String(reservedPins.size()) + ",";
+    
+    // ============================================
+    // CONFIG STATUS (Observability - Phase 1-3)
+    // ============================================
+    // Include configuration diagnostics for server observability
+    payload += "\"config_status\":";
+    payload += configManager.getDiagnosticsJSON();
 
     payload += "}";
     
@@ -833,6 +851,10 @@ bool MQTTClient::hasOfflineMessages() const {
 
 uint16_t MQTTClient::getOfflineMessageCount() const {
     return offline_buffer_count_;
+}
+
+CircuitState MQTTClient::getCircuitBreakerState() const {
+    return circuit_breaker_.getState();
 }
 
 // ============================================

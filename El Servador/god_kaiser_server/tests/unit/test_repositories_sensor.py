@@ -153,6 +153,151 @@ class TestSensorRepositoryConfig:
 
 
 @pytest.mark.asyncio
+class TestSensorRepositoryOneWire:
+    """Test SensorRepository OneWire operations (DS18B20 support)"""
+
+    async def test_get_by_esp_gpio_type_and_onewire_found(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test 4-way lookup for OneWire sensor."""
+        # Create a OneWire sensor with ROM code
+        config = await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=4,
+            sensor_type="ds18b20",
+            sensor_name="DS18B20 Sensor 1",
+            interface_type="ONEWIRE",
+            onewire_address="28FF641E8D3C0C79",
+            enabled=True,
+            pi_enhanced=True,
+        )
+
+        # Lookup by all 4 criteria
+        retrieved = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+            sample_esp_device.id, 4, "ds18b20", "28FF641E8D3C0C79"
+        )
+
+        assert retrieved is not None
+        assert retrieved.id == config.id
+        assert retrieved.onewire_address == "28FF641E8D3C0C79"
+
+    async def test_get_by_esp_gpio_type_and_onewire_not_found(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test 4-way lookup with non-existent ROM code."""
+        # Create sensor with one ROM code
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=4,
+            sensor_type="ds18b20",
+            sensor_name="DS18B20 Sensor 1",
+            interface_type="ONEWIRE",
+            onewire_address="28FF641E8D3C0C79",
+            enabled=True,
+        )
+
+        # Lookup with different ROM code
+        retrieved = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+            sample_esp_device.id, 4, "ds18b20", "28FFNONEXISTENT"
+        )
+
+        assert retrieved is None
+
+    async def test_multiple_ds18b20_on_same_gpio(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test multiple DS18B20 sensors on same GPIO (OneWire bus sharing)."""
+        # Create 3 DS18B20 sensors on same GPIO pin
+        rom_codes = [
+            "28FF641E8D3C0C79",
+            "28FF123456789ABC",
+            "28FFABCDEF012345",
+        ]
+
+        for rom in rom_codes:
+            await sensor_repo.create(
+                esp_id=sample_esp_device.id,
+                gpio=4,  # Same GPIO!
+                sensor_type="ds18b20",
+                sensor_name=f"DS18B20 {rom[:8]}",
+                interface_type="ONEWIRE",
+                onewire_address=rom,
+                enabled=True,
+            )
+
+        # Lookup each sensor individually
+        for rom in rom_codes:
+            retrieved = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+                sample_esp_device.id, 4, "ds18b20", rom
+            )
+            assert retrieved is not None
+            assert retrieved.onewire_address == rom
+
+    async def test_get_by_onewire_address(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test lookup by OneWire address only."""
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=4,
+            sensor_type="ds18b20",
+            sensor_name="DS18B20 Sensor",
+            interface_type="ONEWIRE",
+            onewire_address="28FF641E8D3C0C79",
+            enabled=True,
+        )
+
+        retrieved = await sensor_repo.get_by_onewire_address(
+            sample_esp_device.id, "28FF641E8D3C0C79"
+        )
+
+        assert retrieved is not None
+        assert retrieved.onewire_address == "28FF641E8D3C0C79"
+
+    async def test_get_all_by_interface_onewire(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test retrieval of all OneWire sensors for ESP."""
+        # Create OneWire sensors
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=4,
+            sensor_type="ds18b20",
+            sensor_name="DS18B20 Sensor 1",
+            interface_type="ONEWIRE",
+            onewire_address="28FF641E8D3C0C79",
+            enabled=True,
+        )
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=4,
+            sensor_type="ds18b20",
+            sensor_name="DS18B20 Sensor 2",
+            interface_type="ONEWIRE",
+            onewire_address="28FF123456789ABC",
+            enabled=True,
+        )
+
+        # Create non-OneWire sensor
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=34,
+            sensor_type="temperature",
+            sensor_name="Analog Temp",
+            interface_type="ANALOG",
+            enabled=True,
+        )
+
+        # Get all OneWire sensors
+        onewire_sensors = await sensor_repo.get_all_by_interface(
+            sample_esp_device.id, "ONEWIRE"
+        )
+
+        assert len(onewire_sensors) == 2
+        assert all(s.interface_type == "ONEWIRE" for s in onewire_sensors)
+
+
+@pytest.mark.asyncio
 class TestSensorRepositoryData:
     """Test SensorRepository data operations"""
 

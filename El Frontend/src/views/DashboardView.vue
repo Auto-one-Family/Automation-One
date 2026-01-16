@@ -30,6 +30,7 @@ import ESPSettingsPopover from '@/components/esp/ESPSettingsPopover.vue'
 import ZoneGroup from '@/components/zones/ZoneGroup.vue'
 import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnectionOverlay.vue'
 import SensorSidebar from '@/components/dashboard/SensorSidebar.vue'
+import ActuatorSidebar from '@/components/dashboard/ActuatorSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 
@@ -515,8 +516,11 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
         </button>
       </div>
 
-      <!-- Sensor Sidebar (rechte Seite) -->
-      <SensorSidebar />
+      <!-- Sidebars Container (rechte Seite, vertikal gestapelt) -->
+      <div class="sidebars-container">
+        <SensorSidebar />
+        <ActuatorSidebar />
+      </div>
     </div>
 
     <!-- Fixed Bottom Bar for Unassigned Devices -->
@@ -724,11 +728,28 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
   }
 }
 
-/* Dashboard Main Layout - Flex Container für Zones + Sidebar */
+/* Dashboard Main Layout - Flex Container für Zones + Sidebars */
 .dashboard-main-layout {
   display: flex;
   gap: 0;
   min-height: 400px;
+}
+
+/* Sidebars Container - vertikal gestapelt */
+.sidebars-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  /* Beide Sidebars teilen sich den vertikalen Platz */
+  max-height: calc(100vh - 200px);
+  overflow: hidden;
+}
+
+/* Jede Sidebar bekommt flex: 1 für gleichmäßige Aufteilung */
+.sidebars-container > :deep(*) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Zone groups wrapper for Cross-ESP overlay */

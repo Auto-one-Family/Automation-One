@@ -192,15 +192,6 @@ const combinedData = computed(() => {
   return combined
 })
 
-/** Prüft ob historische Daten vorhanden sind */
-const hasHistoricalData = computed(() => {
-  for (const sensor of props.sensors) {
-    const data = sensorData.value.get(sensor.id) || []
-    if (data.length > 0) return true
-  }
-  return false
-})
-
 /** Prüft ob Live-Daten vorhanden sind */
 const hasLiveData = computed(() => {
   for (const sensor of props.sensors) {
@@ -226,7 +217,7 @@ const computedYRange = computed(() => {
   let valueCount = 0
 
   // Sammle alle Y-Werte von allen Sensoren
-  for (const [sensorId, readings] of combinedData.value.entries()) {
+  for (const [_sensorId, readings] of combinedData.value.entries()) {
     for (const reading of readings) {
       const value = reading.processed_value ?? reading.raw_value
       if (typeof value === 'number' && !isNaN(value)) {

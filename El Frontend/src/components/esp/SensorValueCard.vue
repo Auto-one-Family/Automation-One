@@ -158,6 +158,13 @@ const statusIconMap: Record<string, typeof AlertTriangle> = {
   'Pause': Pause,
   'HelpCircle': HelpCircle,
 }
+
+// Map SensorStatusVariant to BadgeVariant ('error' → 'danger')
+type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'gray'
+const badgeVariant = computed((): BadgeVariant => {
+  const variant = sensorStatus.value.variant
+  return variant === 'error' ? 'danger' : variant
+})
 </script>
 
 <template>
@@ -194,7 +201,7 @@ const statusIconMap: Record<string, typeof AlertTriangle> = {
         <!-- Phase 2E: Operating Mode Badge (nur wenn nicht continuous) -->
         <Badge
           v-if="sensor.operating_mode && sensor.operating_mode !== 'continuous'"
-          :variant="sensorStatus.variant"
+          :variant="badgeVariant"
           size="sm"
           :title="sensorStatus.label"
         >
@@ -208,7 +215,7 @@ const statusIconMap: Record<string, typeof AlertTriangle> = {
         <!-- Phase 2E: Stale-Warnung (nur bei continuous + stale) -->
         <Badge
           v-if="sensor.operating_mode === 'continuous' && sensor.is_stale"
-          variant="error"
+          variant="danger"
           size="sm"
           :title="sensorStatus.label"
         >
@@ -513,6 +520,9 @@ const statusIconMap: Record<string, typeof AlertTriangle> = {
   }
 }
 </style>
+
+
+
 
 
 

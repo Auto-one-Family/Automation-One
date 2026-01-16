@@ -313,3 +313,7 @@ String WiFiManager::getSSID() const {
     return WiFi.SSID();
 }
 
+
+CircuitState WiFiManager::getCircuitBreakerState() const {
+    return circuit_breaker_.getState();
+}

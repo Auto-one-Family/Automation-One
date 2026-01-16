@@ -14,8 +14,10 @@
 | **Maintenance Jobs** | `.claude/PAKET_D_MAINTENANCE_JOBS_IMPROVED.md` | Server: `src/services/maintenance/`<br>Frontend: `El Frontend/src/views/MaintenanceView.vue` |
 | **Frontend + Server starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.4 | - |
 | **Services stoppen/neu starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.3 | - |
-| **Server-Logs prüfen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5 | `El Servador/god_kaiser_server/logs/god_kaiser.log` |
-| **Server-Logs analysieren (KI-Workflow)** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5.9 | Read/Grep Tools, JSON-Format |
+| **Server-Logs prüfen** | [Section 14.3: Server Logs](#143-server-logs-god-kaiser) | `El Servador/god_kaiser_server/logs/god_kaiser.log` |
+| **ESP32 Logs prüfen** | [Section 14.2: ESP32 Logs](#142-esp32-logs) | Serial Monitor: `pio device monitor` |
+| **MQTT Traffic debuggen** | [Section 14.4: MQTT Debugging](#144-mqtt-traffic-debugging) | `mosquitto_sub -h localhost -t "kaiser/#" -v` |
+| **Debugging Quick Reference** | [Section 14.5: Debugging](#145-debugging-quick-reference) | ESP32, Server, MQTT Troubleshooting |
 | **Frontend Bug debuggen (aktuell)** | `El Frontend/Docs/Bugs_Found_2.md` | Event-Loop Bug, aktuelle Issues |
 | **Frontend Bug debuggen (historisch)** | `El Frontend/Docs/Bugs_Found.md` | Production-Ready Bugs |
 | **MQTT verstehen** | `El Trabajante/docs/Mqtt_Protocoll.md` | ESP: `src/services/communication/mqtt_client.*`<br>Server: `.claude/CLAUDE_SERVER.md` → [Section 4](.claude/CLAUDE_SERVER.md#4-mqtt-topic-referenz-server-perspektive) |
@@ -1045,8 +1047,327 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
 
 ---
 
-**Letzte Aktualisierung:** 2026-01-05
-**Version:** 4.9 (CI/CD & GitHub Actions Dokumentation)
+## 14. Logging & Debugging - Vollständige Referenz
+
+Diese Sektion dokumentiert ALLE Logging-Systeme im AutomationOne Framework und wie ein Entwickler Zugang zu Debug-Informationen erhält.
+
+### 14.1 Übersicht: Was loggt wo?
+
+| Gerät | Log-Ausgabe | Speicherort | Zugriffsmethode |
+|-------|-------------|-------------|-----------------|
+| **ESP32** | Serial Console | UART (kein File) | `pio device monitor` |
+| **ESP32** | MQTT Diagnostics | Broker → Server | `mosquitto_sub -t "kaiser/god/esp/+/system/diagnostics"` |
+| **Server** | JSON Logs | `logs/god_kaiser.log` | `tail -f` / Read Tool |
+| **Mosquitto** | MQTT Topic (LIVE) | `$SYS/broker/log/#` | `mosquitto_sub -t "$SYS/broker/log/#" -v` |
+| **Mosquitto** | Log-Datei | `logs/mosquitto.log` | Nach Service-Stop lesbar |
+| **Frontend** | Browser Console | Browser DevTools | F12 → Console |
+
+---
+
+### 14.2 ESP32 Logs
+
+#### Serial Monitor (Primär für Entwicklung)
+
+**Zugriff:**
+```bash
+cd "El Trabajante"
+~/.platformio/penv/Scripts/platformio.exe device monitor --baud 115200
+```
+
+**Features:**
+- Echtzeit-Output mit Farben und Timestamps
+- ESP32 Exception-Decoder für Crash-Analyse
+- Auto-Save zu `.pio/build/esp32_dev/monitor.log` (via `log2file` Filter)
+
+**Output-Format:**
+```
+[      1234] [INFO    ] System initialized
+[      5678] [DEBUG   ] Sensor reading: 25.4C
+[      8901] [ERROR   ] MQTT publish failed
+```
+
+**Log-Level ändern (Code):**
+```cpp
+Logger& logger = Logger::getInstance();
+logger.setLogLevel(LOG_DEBUG);    // DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+**Log-Level ändern (platformio.ini):**
+```ini
+build_flags =
+    -DCORE_DEBUG_LEVEL=3      # 0=None, 1=Error, 2=Warn, 3=Info, 4=Debug
+```
+
+#### MQTT Diagnostics (Remote Monitoring)
+
+**Topic:** `kaiser/god/esp/{esp_id}/system/diagnostics`
+
+**Automatisches Publishing:** Alle 60 Sekunden + bei signifikanten Änderungen
+
+**Payload:**
+```json
+{
+  "ts": 3600,
+  "esp_id": "ESP_12AB34CD",
+  "heap_free": 98304,
+  "heap_fragmentation": 15,
+  "uptime_seconds": 3600,
+  "error_count": 2,
+  "wifi_connected": true,
+  "wifi_rssi": -45,
+  "mqtt_connected": true,
+  "sensor_count": 3,
+  "system_state": "OPERATIONAL"
+}
+```
+
+**Zugriff:**
+```bash
+mosquitto_sub -h localhost -p 1883 -t "kaiser/god/esp/+/system/diagnostics" -v
+```
+
+#### ESP32 Logger-Komponenten
+
+| Komponente | Datei | Funktion |
+|------------|-------|----------|
+| **Logger** | `src/utils/logger.h/.cpp` | Zentrales Logging, Circular Buffer (50 Einträge) |
+| **ErrorTracker** | `src/error_handling/error_tracker.h/.cpp` | Error-History (50 Einträge), Severity-Tracking |
+| **HealthMonitor** | `src/error_handling/health_monitor.h/.cpp` | MQTT Diagnostics Publishing |
+
+---
+
+### 14.3 Server Logs (God-Kaiser)
+
+#### Log-Datei
+
+**Pfad:** `El Servador/god_kaiser_server/logs/god_kaiser.log`
+
+**Absoluter Pfad:** `c:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Servador\god_kaiser_server\logs\god_kaiser.log`
+
+**Format:** JSON (strukturiert, eine Zeile pro Eintrag)
+
+```json
+{
+  "timestamp": "2026-01-11 10:23:45",
+  "level": "INFO",
+  "logger": "src.mqtt.handlers.sensor_handler",
+  "message": "Sensor data received from ESP_12AB34CD",
+  "module": "sensor_handler",
+  "function": "handle",
+  "line": 87
+}
+```
+
+#### Zugriffsmethoden
+
+**Live-Monitoring (Terminal):**
+```bash
+# Letzte 100 Zeilen
+tail -100 "El Servador/god_kaiser_server/logs/god_kaiser.log"
+
+# Live verfolgen (Ctrl+C zum Stoppen)
+tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
+
+# Nur Fehler zeigen
+tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log" | grep -i "error\|critical"
+```
+
+**KI-Agenten Workflow (Read/Grep Tools):**
+```
+# Letzte Einträge lesen
+Read Tool: file_path=logs/god_kaiser.log, limit=100
+
+# Nach Fehlern suchen
+Grep Tool: pattern="ERROR|CRITICAL|exception", path=logs/god_kaiser.log, output_mode=content, -C=5
+```
+
+#### Log-Konfiguration
+
+**Über .env Datei:**
+```env
+LOG_LEVEL=INFO                      # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FORMAT=json                     # json oder text
+LOG_FILE_PATH=logs/god_kaiser.log
+LOG_FILE_MAX_BYTES=10485760         # 10MB - Rotation bei Überschreitung
+LOG_FILE_BACKUP_COUNT=5             # 5 Backup-Dateien behalten
+```
+
+**Temporär mit DEBUG starten:**
+```bash
+cd "El Servador/god_kaiser_server"
+LOG_LEVEL=DEBUG poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### Log-Rotation
+
+- **Trigger:** Bei 10MB Dateigröße
+- **Backups:** `god_kaiser.log.1` bis `.5` (älteste wird gelöscht)
+- **Automatisch:** Keine manuelle Aktion nötig
+
+---
+
+### 14.4 MQTT Traffic Debugging
+
+#### Mosquitto Broker Logs (LIVE via MQTT)
+
+**Über MQTT Topic subscriben (EMPFOHLEN - funktioniert während Service läuft):**
+```cmd
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "$SYS/broker/log/#" -v
+```
+
+**Output:**
+```
+$SYS/broker/log/N 2026-01-11T01:34:34: New connection from ::1:55869 on port 1883.
+$SYS/broker/log/N 2026-01-11T01:34:34: New client connected from ::1 as ESP_12AB34CD
+$SYS/broker/log/M/subscribe 2026-01-11T01:34:35: ESP_12AB34CD 0 kaiser/god/esp/+/actuator/+/command
+```
+
+**Log-Datei (nach Service-Stop lesbar):**
+```
+El Servador/god_kaiser_server/logs/mosquitto.log
+```
+
+#### Alle MQTT-Nachrichten sehen
+
+```cmd
+# ALLE Topics im System
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/#" -v
+
+# Nur Sensor-Daten
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+
+# Nur Actuator-Commands
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/god/esp/+/actuator/+/command" -v
+
+# Nur Heartbeats
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
+
+# Spezifisches ESP Device
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/god/esp/ESP_12AB34CD/#" -v
+```
+
+#### Test-Nachricht senden
+
+```cmd
+"C:\Program Files\mosquitto\mosquitto_pub.exe" -h localhost -t "kaiser/god/esp/TEST_ESP/sensor/34/data" -m "{\"ts\":1735818000,\"gpio\":34,\"value\":25.5,\"raw_mode\":true}"
+```
+
+#### Mosquitto Service verwalten (Admin-CMD)
+
+```cmd
+# Service Status prüfen
+netstat -ano | findstr 1883
+
+# Service neu starten
+net stop mosquitto && net start mosquitto
+
+# Config neu laden (nach Änderungen)
+net stop mosquitto && copy "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Servador\god_kaiser_server\mosquitto_full_logging.conf" "C:\Program Files\mosquitto\mosquitto.conf" && net start mosquitto
+```
+
+#### Mosquitto Config
+
+**Projekt-Config:** `El Servador/god_kaiser_server/mosquitto_full_logging.conf`
+
+**Features:**
+- Logging in Datei + MQTT Topic (`$SYS/broker/log/#`)
+- Alle Log-Types aktiviert (error, warning, notice, info, debug, subscribe, unsubscribe)
+- Timestamps im ISO 8601 Format
+- Anonyme Verbindungen erlaubt (Development)
+
+---
+
+### 14.5 Debugging Quick Reference
+
+#### Problem: ESP32 sendet keine Daten
+
+1. **Serial Monitor prüfen:**
+   ```bash
+   pio device monitor
+   ```
+   → Suche nach `MQTT connected` oder `WiFi connected`
+
+2. **MQTT-Traffic prüfen:**
+   ```bash
+   mosquitto_sub -h localhost -t "kaiser/#" -v
+   ```
+   → Kommen Nachrichten an?
+
+3. **Server-Logs prüfen:**
+   ```bash
+   tail -f logs/god_kaiser.log | grep -i "esp"
+   ```
+
+#### Problem: Server empfängt keine MQTT-Nachrichten
+
+1. **Mosquitto läuft?**
+   ```bash
+   netstat -ano | findstr "1883"
+   ```
+
+2. **Server mit Broker verbunden?**
+   ```bash
+   grep "MQTT connected" logs/god_kaiser.log
+   ```
+
+3. **Handler registriert?**
+   ```bash
+   grep "Registered.*MQTT handlers" logs/god_kaiser.log
+   ```
+
+#### Problem: Actuator reagiert nicht
+
+1. **Command im Server-Log?**
+   ```bash
+   grep "actuator.*command" logs/god_kaiser.log
+   ```
+
+2. **Command auf MQTT-Topic?**
+   ```bash
+   mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/command" -v
+   ```
+
+3. **ESP32 Serial Monitor:**
+   → Suche nach `actuator` oder `command`
+
+---
+
+### 14.6 Log-Pattern-Referenz
+
+| Pattern in Logs | Bedeutung | Aktion |
+|-----------------|-----------|--------|
+| `MQTT connected with result code: 0` | Server verbunden ✅ | OK |
+| `Registered X MQTT handlers` | Handler aktiv ✅ | OK |
+| `Subscribed to: kaiser/god/esp/+/...` | Subscription aktiv ✅ | OK |
+| `Handler returned False` | Handler-Fehler ⚠️ | Payload prüfen |
+| `MQTT broker unavailable` | Verbindung verloren ⚠️ | Mosquitto prüfen |
+| `Queue bound to different event loop` | AsyncIO Bug ❌ | Siehe Bug O in Bugs_Found_2.md |
+| `Device X timed out` | ESP offline | Normal für inaktive Mocks |
+
+---
+
+### 14.7 Vollständige Datei-Referenz
+
+| Komponente | Log-Datei | Konfig-Datei |
+|------------|-----------|--------------|
+| **ESP32 Serial** | `.pio/build/esp32_dev/monitor.log` | `platformio.ini` |
+| **Server** | `logs/god_kaiser.log` | `src/core/logging_config.py`, `.env` |
+| **Mosquitto** | `C:/Program Files/mosquitto/mosquitto.log` | `mosquitto.conf` |
+| **GitHub Actions** | `gh run view <id> --log` | `.github/workflows/*.yml` |
+
+---
+
+**Letzte Aktualisierung:** 2026-01-11
+**Version:** 5.0 (Logging & Debugging Dokumentation)
+
+> **Änderungen in v5.0 (Logging & Debugging Dokumentation):**
+> - **Neue Section 14:** Vollständige Logging & Debugging Referenz für ESP32, Server und MQTT
+> - **ESP32 Logging:** Serial Monitor, MQTT Diagnostics, Logger-Komponenten dokumentiert
+> - **Server Logging:** JSON-Format, Log-Rotation, Konfiguration via .env dokumentiert
+> - **MQTT Traffic Debugging:** mosquitto_sub Befehle, Test-Nachrichten, Broker-Logs dokumentiert
+> - **Debugging Quick Reference:** Troubleshooting-Workflows für häufige Probleme
+> - **Log-Pattern-Referenz:** Wichtige Log-Patterns mit Bedeutung und Aktion
+> - **Quick Reference erweitert:** 4 neue Einträge für Logs und Debugging hinzugefügt
 
 > **Änderungen in v4.9 (CI/CD & GitHub Actions Dokumentation):**
 > - **Neue Section 13:** Vollständige CI/CD & GitHub Actions Dokumentation

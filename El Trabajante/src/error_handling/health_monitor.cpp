@@ -7,12 +7,16 @@
 #include "../error_handling/error_tracker.h"
 #include "../utils/topic_builder.h"
 #include "../models/error_codes.h"
+#include "../models/watchdog_types.h"
 
 // ============================================
 // EXTERNAL GLOBAL VARIABLES (from main.cpp)
 // ============================================
 extern SystemConfig g_system_config;
 extern KaiserZone g_kaiser;
+extern WatchdogConfig g_watchdog_config;
+extern WatchdogDiagnostics g_watchdog_diagnostics;
+extern volatile bool g_watchdog_timeout_flag;
 
 // ============================================
 // GLOBAL HEALTH MONITOR INSTANCE
@@ -91,6 +95,17 @@ HealthSnapshot HealthMonitor::getCurrentSnapshot() const {
     
     // System state
     snapshot.system_state = g_system_config.current_state;
+    
+    // ─────────────────────────────────────────────────────
+    // WATCHDOG STATUS
+    // ─────────────────────────────────────────────────────
+    snapshot.watchdog_mode = g_watchdog_config.mode;
+    snapshot.watchdog_timeout_ms = g_watchdog_config.timeout_ms;
+    snapshot.last_watchdog_feed = g_watchdog_diagnostics.last_feed_time;
+    snapshot.last_feed_component = g_watchdog_diagnostics.last_feed_component;
+    snapshot.watchdog_feed_count = g_watchdog_diagnostics.feed_count;
+    snapshot.watchdog_timeouts_24h = getWatchdogCountLast24h();
+    snapshot.watchdog_timeout_pending = g_watchdog_timeout_flag;
     
     return snapshot;
 }

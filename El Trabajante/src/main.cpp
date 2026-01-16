@@ -16,6 +16,7 @@
 #include "utils/topic_builder.h"
 #include "utils/json_helpers.h"
 #include "models/system_types.h"
+#include "models/watchdog_types.h"
 #include "services/communication/wifi_manager.h"
 #include "services/communication/mqtt_client.h"
 
@@ -23,6 +24,19 @@
 #include "drivers/i2c_bus.h"
 #include "drivers/onewire_bus.h"
 #include "drivers/pwm_controller.h"
+
+// OneWire utilities for ROM-Code conversion (Phase 4: OneWire-Scan)
+#include "utils/onewire_utils.h"
+
+// ============================================
+// CONDITIONAL HARDWARE CONFIGURATION INCLUDES
+// ============================================
+// Phase 4: Required for DEFAULT_ONEWIRE_PIN in OneWire-Scan command
+#ifdef XIAO_ESP32C3
+    #include "config/hardware/xiao_esp32c3.h"
+#else
+    #include "config/hardware/esp32_dev.h"
+#endif
 
 // Phase 4: Sensor System
 #include "services/sensor/sensor_manager.h"
@@ -53,6 +67,13 @@ KaiserZone g_kaiser;
 MasterZone g_master;
 
 // ============================================
+// WATCHDOG GLOBALS (Industrial-Grade)
+// ============================================
+WatchdogConfig g_watchdog_config;
+WatchdogDiagnostics g_watchdog_diagnostics;
+volatile bool g_watchdog_timeout_flag = false;
+
+// ============================================
 // FORWARD DECLARATIONS
 // ============================================
 void handleSensorConfig(const String& payload);
@@ -65,6 +86,15 @@ void handleSensorCommand(const String& topic, const String& payload);  // Phase 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+
+// Helper: ErrorTracker MQTT Publish Callback (Observability - Phase 1-3)
+// Fire-and-forget - no error handling to prevent recursion
+void errorTrackerMqttCallback(const char* topic, const char* payload) {
+  if (mqttClient.isConnected()) {
+    mqttClient.publish(topic, payload, 0);  // QoS 0 = fire-and-forget
+  }
+}
+
 // Helper: Send Subzone ACK
 void sendSubzoneAck(const String& subzone_id, const String& status, const String& error_message) {
   String ack_topic = TopicBuilder::buildSubzoneAckTopic();
@@ -73,12 +103,12 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
   ack_doc["status"] = status;
   ack_doc["subzone_id"] = subzone_id;
   ack_doc["timestamp"] = millis() / 1000;
-  
+
   if (status == "error" && error_message.length() > 0) {
     ack_doc["error_code"] = ERROR_SUBZONE_CONFIG_SAVE_FAILED;
     ack_doc["message"] = error_message;
   }
-  
+
   String ack_payload;
   serializeJson(ack_doc, ack_payload);
   mqttClient.publish(ack_topic, ack_payload, 1);
@@ -115,24 +145,18 @@ void setup() {
   Serial.printf("Free Heap: %d bytes\n\n", ESP.getFreeHeap());
 
   // ============================================
-  // STEP 2.3: WATCHDOG CONFIGURATION (CRITICAL!)
+  // STEP 2.3: WATCHDOG CONFIGURATION (INDUSTRIAL-GRADE)
   // ============================================
-  // Configure Watchdog to 30 seconds (no panic mode)
-  // This prevents watchdog resets during:
-  // - Factory Reset (10s button hold)
-  // - Provisioning (10min timeout)
-  // - Long-running operations
+  // Watchdog initialization is CONDITIONAL based on provisioning status
+  // See STEP 6.5 below for conditional watchdog initialization
   //
   // NOTE: Skipped in Wokwi simulation because:
   // - esp_task_wdt_* functions may not be fully supported in Wokwi's virtual environment
   // - Watchdog behavior in simulation differs from real hardware
   // - Avoids potential early crash before any serial output
-  #ifndef WOKWI_SIMULATION
-  esp_task_wdt_init(30, false);  // 30s timeout, don't panic
-  esp_task_wdt_add(NULL);        // Add current task to watchdog
-  Serial.println("✅ Watchdog configured: 30s timeout, no panic");
-  #else
+  #ifdef WOKWI_SIMULATION
   Serial.println("[WOKWI] Watchdog skipped (not supported in simulation)");
+  g_watchdog_config.mode = WatchdogMode::WDT_DISABLED;
   #endif
 
   // ============================================
@@ -209,20 +233,20 @@ void setup() {
   // Wokwi simulation: Skip boot button check, log for debugging
   Serial.println("[WOKWI] Boot button check skipped (no physical button in simulation)");
   #endif // WOKWI_SIMULATION
-  
+
   // ============================================
   // STEP 3: GPIO SAFE-MODE (CRITICAL - FIRST!)
   // ============================================
   // MUST be first to prevent hardware damage from undefined GPIO states
   gpioManager.initializeAllPinsToSafeMode();
-  
+
   // ============================================
   // STEP 4: LOGGER (Foundation for all modules)
   // ============================================
   logger.begin();
   logger.setLogLevel(LOG_INFO);
   LOG_INFO("Logger system initialized");
-  
+
   // ============================================
   // STEP 5: STORAGE MANAGER (NVS access layer)
   // ============================================
@@ -230,7 +254,7 @@ void setup() {
     LOG_ERROR("StorageManager initialization failed!");
     // Continue anyway (can work without persistence)
   }
-  
+
   // ============================================
   // STEP 6: CONFIG MANAGER (Load configurations)
   // ============================================
@@ -238,12 +262,12 @@ void setup() {
   if (!configManager.loadAllConfigs()) {
     LOG_WARNING("Some configurations failed to load - using defaults");
   }
-  
+
   // Load configs into global variables
   configManager.loadWiFiConfig(g_wifi_config);
   configManager.loadZoneConfig(g_kaiser, g_master);
   configManager.loadSystemConfig(g_system_config);
-  
+
   configManager.printConfigurationStatus();
 
   // ═══════════════════════════════════════════════════
@@ -296,15 +320,89 @@ void setup() {
   }
 
   // ═══════════════════════════════════════════════════
-  // STEP 6.5: PROVISIONING CHECK (Phase 6)
+  // STEP 6.5: CONDITIONAL WATCHDOG INITIALIZATION (Industrial-Grade)
+  // ═══════════════════════════════════════════════════
+  // Check if provisioning needed BEFORE watchdog init
+  bool provisioning_needed = !g_wifi_config.configured ||
+                             g_wifi_config.ssid.length() == 0;
+
+  #ifndef WOKWI_SIMULATION
+  if (provisioning_needed) {
+    // PROVISIONING MODE WATCHDOG
+    LOG_INFO("╔════════════════════════════════════════╗");
+    LOG_INFO("║   PROVISIONING MODE WATCHDOG          ║");
+    LOG_INFO("╚════════════════════════════════════════╝");
+
+    esp_task_wdt_init(300, false);  // 300s timeout, no panic
+    esp_task_wdt_add(NULL);
+
+    LOG_INFO("✅ Watchdog: 300s timeout, error-log only");
+    LOG_INFO("   Feed requirement: Every 60s");
+    LOG_INFO("   Purpose: Detect firmware hangs during setup");
+    LOG_INFO("   Recovery: Manual reset button available");
+
+    g_watchdog_config.mode = WatchdogMode::PROVISIONING;
+    g_watchdog_config.timeout_ms = 300000;
+    g_watchdog_config.feed_interval_ms = 60000;
+    g_watchdog_config.panic_enabled = false;
+
+  } else {
+    // PRODUCTION MODE WATCHDOG
+    LOG_INFO("╔════════════════════════════════════════╗");
+    LOG_INFO("║   PRODUCTION MODE WATCHDOG            ║");
+    LOG_INFO("╚════════════════════════════════════════╝");
+
+    esp_task_wdt_init(60, true);  // 60s timeout, panic=true
+    esp_task_wdt_add(NULL);
+
+    LOG_INFO("✅ Watchdog: 60s timeout, auto-reboot enabled");
+    LOG_INFO("   Feed requirement: Every 10s");
+    LOG_INFO("   Purpose: Automatic recovery from firmware hangs");
+    LOG_INFO("   Recovery: Hard reset → clean boot");
+
+    g_watchdog_config.mode = WatchdogMode::PRODUCTION;
+    g_watchdog_config.timeout_ms = 60000;
+    g_watchdog_config.feed_interval_ms = 10000;
+    g_watchdog_config.panic_enabled = true;
+  }
+  #endif
+
+  // Initialize watchdog diagnostics
+  g_watchdog_diagnostics = WatchdogDiagnostics();
+  g_watchdog_timeout_flag = false;
+
+  // Check if last reboot was due to watchdog timeout
+  if (esp_reset_reason() == ESP_RST_TASK_WDT) {
+    LOG_WARNING("==============================================");
+    LOG_WARNING("ESP REBOOTED DUE TO WATCHDOG TIMEOUT");
+    LOG_WARNING("==============================================");
+
+    // TODO: Load diagnostic info from NVS (after StorageManager integration)
+    // WatchdogDiagnostics diag;
+    // if (storageManager.loadWatchdogDiagnostics(diag)) {
+    //   LOG_INFO("Last Feed: " + String(diag.last_feed_component));
+    //   LOG_INFO("System State: " + String(diag.system_state));
+    // }
+
+    // Check: 3× Watchdog in 24h?
+    uint8_t watchdog_count = getWatchdogCountLast24h();
+    if (watchdog_count >= 3) {
+      LOG_CRITICAL("3× Watchdog in 24h → SAFE MODE ACTIVATED");
+      // TODO: Enter Safe-Mode (after Safe-Mode implementation)
+      // enterSafeMode(SAFE_MODE_WATCHDOG_THRESHOLD);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // STEP 6.6: PROVISIONING CHECK (Phase 6)
   // ═══════════════════════════════════════════════════
   // Check if ESP needs provisioning (no config or empty SSID)
-  if (!g_wifi_config.configured || g_wifi_config.ssid.length() == 0) {
+  if (provisioning_needed) {
     LOG_INFO("╔════════════════════════════════════════╗");
     LOG_INFO("║   NO CONFIG - STARTING PROVISIONING   ║");
     LOG_INFO("╚════════════════════════════════════════╝");
     LOG_INFO("ESP is not provisioned. Starting AP-Mode...");
-    
+
     // Initialize Provision Manager
     if (!provisionManager.begin()) {
       // ✅ FIX #3: CRITICAL FAILURE - Hardware Safe-Mode
@@ -334,7 +432,7 @@ void setup() {
       }
       // ❌ NIEMALS return - ESP bleibt im Safe-Mode sichtbar!
     }
-    
+
     // Start AP-Mode
     if (provisionManager.startAPMode()) {
       LOG_INFO("╔════════════════════════════════════════╗");
@@ -345,7 +443,7 @@ void setup() {
       LOG_INFO("Open browser: http://192.168.4.1");
       LOG_INFO("");
       LOG_INFO("Waiting for configuration (timeout: 10 minutes)...");
-      
+
       // Block until config received (or timeout: 10 minutes)
       if (provisionManager.waitForConfig(600000)) {
         // ✅ SUCCESS: Config received
@@ -427,20 +525,20 @@ void setup() {
   }
 
   LOG_INFO("Configuration found - starting normal flow");
-  
+
   // ============================================
   // STEP 7: ERROR TRACKER (Error history)
   // ============================================
   errorTracker.begin();
-  
+
   // ============================================
   // STEP 8: TOPIC BUILDER (MQTT topics)
   // ============================================
   TopicBuilder::setEspId(g_system_config.esp_id.c_str());
   TopicBuilder::setKaiserId(g_kaiser.kaiser_id.c_str());
-  
+
   LOG_INFO("TopicBuilder configured with ESP ID: " + g_system_config.esp_id);
-  
+
   // ============================================
   // STEP 9: PHASE 1 COMPLETE
   // ============================================
@@ -454,14 +552,14 @@ void setup() {
   LOG_INFO("  ✅ Config Manager");
   LOG_INFO("  ✅ Error Tracker");
   LOG_INFO("  ✅ Topic Builder");
-  
+
   // Print memory stats
   LOG_INFO("=== Memory Status (Phase 1) ===");
   LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
   LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
   LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
   LOG_INFO("=====================");
-  
+
   // ============================================
   // STEP 10: PHASE 2 - COMMUNICATION LAYER (with Circuit Breaker - Phase 6+)
   // ============================================
@@ -469,13 +567,13 @@ void setup() {
   LOG_INFO("║   Phase 2: Communication Layer         ║");
   LOG_INFO("║   (with Circuit Breaker Protection)    ║");
   LOG_INFO("╚════════════════════════════════════════╝");
-  
+
   // WiFi Manager (Circuit Breaker: 10 failures → 60s timeout)
   if (!wifiManager.begin()) {
     LOG_ERROR("WiFiManager initialization failed!");
     return;
   }
-  
+
   WiFiConfig wifi_config = configManager.getWiFiConfig();
   if (!wifiManager.connect(wifi_config)) {
     LOG_ERROR("WiFi connection failed");
@@ -483,13 +581,13 @@ void setup() {
   } else {
     LOG_INFO("WiFi connected successfully");
   }
-  
+
   // MQTT Client (Circuit Breaker: 5 failures → 30s timeout)
   if (!mqttClient.begin()) {
     LOG_ERROR("MQTTClient initialization failed!");
     return;
   }
-  
+
   MQTTConfig mqtt_config;
   mqtt_config.server = wifi_config.server_address;
   mqtt_config.port = wifi_config.mqtt_port;
@@ -498,18 +596,25 @@ void setup() {
   mqtt_config.password = wifi_config.mqtt_password;  // Can be empty (Anonymous)
   mqtt_config.keepalive = 60;
   mqtt_config.timeout = 10;
-  
+
   if (!mqttClient.connect(mqtt_config)) {
     LOG_ERROR("MQTT connection failed");
     LOG_WARNING("System will continue but MQTT features unavailable");
   } else {
     LOG_INFO("MQTT connected successfully");
-    
+
+    // ============================================
+    // ENABLE ERRORTRACKER MQTT PUBLISHING (Observability)
+    // ============================================
+    // Now that MQTT is connected, enable error publishing to server
+    errorTracker.setMqttPublishCallback(errorTrackerMqttCallback, g_system_config.esp_id);
+    LOG_INFO("ErrorTracker MQTT publishing enabled");
+
     // Phase 7: Send initial heartbeat for ESP discovery/registration
     // force=true bypasses throttle check (fix for initial heartbeat being blocked)
     mqttClient.publishHeartbeat(true);
     LOG_INFO("Initial heartbeat sent for ESP registration");
-    
+
     // Subscribe to critical topics
     String system_command_topic = TopicBuilder::buildSystemCommandTopic();
     String config_topic = TopicBuilder::buildConfigTopic();
@@ -518,20 +623,20 @@ void setup() {
     String actuator_command_wildcard = actuator_command_topic;
     actuator_command_wildcard.replace("/0/command", "/+/command");
     String esp_emergency_topic = TopicBuilder::buildActuatorEmergencyTopic();
-    
+
     // Phase 7: Zone assignment topic
     String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
     if (g_kaiser.kaiser_id.length() == 0) {
       zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
     }
-    
+
     mqttClient.subscribe(system_command_topic);
     mqttClient.subscribe(config_topic);
     mqttClient.subscribe(broadcast_emergency_topic);
     mqttClient.subscribe(actuator_command_wildcard);
     mqttClient.subscribe(esp_emergency_topic);
     mqttClient.subscribe(zone_assign_topic);
-    
+
     // Phase 9: Subzone management topics
     String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
     String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
@@ -549,12 +654,12 @@ void setup() {
     mqttClient.subscribe(sensor_command_wildcard);
 
     LOG_INFO("Subscribed to system + actuator + zone + subzone + sensor command topics");
-    
+
     // Set MQTT callback for message routing (Phase 4)
     mqttClient.setCallback([](const String& topic, const String& payload) {
       LOG_INFO("MQTT message received: " + topic);
       LOG_DEBUG("Payload: " + payload);
-      
+
       // Handle sensor configuration
       String config_topic = String(TopicBuilder::buildConfigTopic());
       if (topic == config_topic) {
@@ -562,7 +667,7 @@ void setup() {
         handleActuatorConfig(payload);
         return;
       }
-      
+
       // Actuator commands
       String actuator_command_prefix = String(TopicBuilder::buildActuatorCommandTopic(0));
       actuator_command_prefix.replace("/0/command", "/");
@@ -651,58 +756,154 @@ void setup() {
         }
         return;
       }
-      
+
       // System commands (factory reset, etc.)
       String system_command_topic = String(TopicBuilder::buildSystemCommandTopic());
+
+      // DEBUG: Log topic comparison
+      LOG_INFO("System command topic check:");
+      LOG_INFO("  Received: " + topic);
+      LOG_INFO("  Expected: " + system_command_topic);
+      LOG_INFO("  Match: " + String(topic == system_command_topic ? "YES" : "NO"));
+
       if (topic == system_command_topic) {
+        LOG_INFO("Topic matched! Parsing JSON payload...");
+        LOG_INFO("Payload: " + payload);
+
         // Parse JSON payload
         DynamicJsonDocument doc(256);
         DeserializationError error = deserializeJson(doc, payload);
-        
-        if (!error) {
-          String command = doc["command"].as<String>();
-          bool confirm = doc["confirm"] | false;
-          
-          if (command == "factory_reset" && confirm) {
-            LOG_WARNING("╔════════════════════════════════════════╗");
-            LOG_WARNING("║  FACTORY RESET via MQTT               ║");
-            LOG_WARNING("╚════════════════════════════════════════╝");
-            
-            // Acknowledge command
-            String response = "{\"status\":\"factory_reset_initiated\",\"esp_id\":\"" + 
-                            configManager.getESPId() + "\"}";
-            mqttClient.publish(system_command_topic + "/response", response);
-            
-            // Clear configs
-            configManager.resetWiFiConfig();
-            KaiserZone kaiser;
-            MasterZone master;
-            configManager.saveZoneConfig(kaiser, master);
-            
-            LOG_INFO("✅ Configuration cleared via MQTT");
-            LOG_INFO("Rebooting in 3 seconds...");
-            delay(3000);
-            ESP.restart();
+
+        if (error) {
+          LOG_ERROR("JSON parse error: " + String(error.c_str()));
+          LOG_ERROR("Raw payload: " + payload);
+          return;
+        }
+
+        // JSON parsed successfully
+        String command = doc["command"].as<String>();
+        bool confirm = doc["confirm"] | false;
+        LOG_INFO("Command parsed: '" + command + "'");
+
+        if (command == "factory_reset" && confirm) {
+          LOG_WARNING("╔════════════════════════════════════════╗");
+          LOG_WARNING("║  FACTORY RESET via MQTT               ║");
+          LOG_WARNING("╚════════════════════════════════════════╝");
+
+          // Acknowledge command
+          String response = "{\"status\":\"factory_reset_initiated\",\"esp_id\":\"" +
+                          configManager.getESPId() + "\"}";
+          mqttClient.publish(system_command_topic + "/response", response);
+
+          // Clear configs
+          configManager.resetWiFiConfig();
+          KaiserZone kaiser;
+          MasterZone master;
+          configManager.saveZoneConfig(kaiser, master);
+
+          LOG_INFO("✅ Configuration cleared via MQTT");
+          LOG_INFO("Rebooting in 3 seconds...");
+          delay(3000);
+          ESP.restart();
+        }
+        // ============================================
+        // ONEWIRE SCAN COMMAND (Phase 4)
+        // ============================================
+        else if (command == "onewire/scan") {
+          LOG_INFO("╔════════════════════════════════════════╗");
+          LOG_INFO("║  ONEWIRE SCAN COMMAND RECEIVED        ║");
+          LOG_INFO("╚════════════════════════════════════════╝");
+
+          uint8_t pin = doc["pin"] | HardwareConfig::DEFAULT_ONEWIRE_PIN;
+          LOG_INFO("OneWire scan on GPIO " + String(pin));
+
+          if (!oneWireBusManager.isInitialized()) {
+            LOG_INFO("Initializing OneWire bus on GPIO " + String(pin));
+            if (!oneWireBusManager.begin(pin)) {
+              LOG_ERROR("Failed to initialize OneWire bus on GPIO " + String(pin));
+              String error_response = "{\"error\":\"Failed to initialize OneWire bus\",\"pin\":" +
+                                     String(pin) + "}";
+              mqttClient.publish(system_command_topic + "/response", error_response);
+              return;
+            }
+          } else {
+            uint8_t current_pin = oneWireBusManager.getPin();
+            if (current_pin != pin) {
+              LOG_WARNING("OneWire bus active on GPIO " + String(current_pin) +
+                         ", ignoring scan request for GPIO " + String(pin));
+              String error_response = "{\"error\":\"OneWire bus already on different pin\",\"requested_pin\":" +
+                                     String(pin) + ",\"active_pin\":" + String(current_pin) + "}";
+              mqttClient.publish(system_command_topic + "/response", error_response);
+              return;
+            }
           }
+
+          uint8_t rom_codes[10][8];
+          uint8_t found_count = 0;
+
+          LOG_INFO("Scanning OneWire bus...");
+          if (!oneWireBusManager.scanDevices(rom_codes, 10, found_count)) {
+            LOG_ERROR("OneWire bus scan failed");
+            String error_response = "{\"error\":\"OneWire scan failed\",\"pin\":" + String(pin) + "}";
+            mqttClient.publish(system_command_topic + "/response", error_response);
+            return;
+          }
+
+          LOG_INFO("OneWire scan complete: " + String(found_count) + " devices found");
+
+          String response = "{\"devices\":[";
+          for (uint8_t i = 0; i < found_count; i++) {
+            if (i > 0) response += ",";
+            response += "{";
+            response += "\"rom_code\":\"";
+            response += OneWireUtils::romToHexString(rom_codes[i]);
+            response += "\",";
+            response += "\"device_type\":\"";
+            response += OneWireUtils::getDeviceType(rom_codes[i]);
+            response += "\",";
+            response += "\"pin\":";
+            response += String(pin);
+            response += "}";
+          }
+          response += "],\"found_count\":";
+          response += String(found_count);
+          response += "}";
+
+          String scan_result_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/onewire/scan_result";
+          LOG_INFO("Publishing scan result to: " + scan_result_topic);
+          mqttClient.publish(scan_result_topic, response);
+
+          String ack_response = "{\"command\":\"onewire/scan\",\"status\":\"ok\",\"found_count\":";
+          ack_response += String(found_count);
+          ack_response += ",\"pin\":";
+          ack_response += String(pin);
+          ack_response += "}";
+          mqttClient.publish(system_command_topic + "/response", ack_response);
+
+          LOG_INFO("OneWire scan result published");
+        }
+        // Unknown command
+        else {
+          LOG_WARNING("Unknown system command: '" + command + "'");
         }
         return;
       }
-      
+
       // Phase 7: Zone Assignment Handler
       String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
       if (g_kaiser.kaiser_id.length() == 0) {
         zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
       }
-      
+
       if (topic == zone_assign_topic) {
         LOG_INFO("╔════════════════════════════════════════╗");
         LOG_INFO("║  ZONE ASSIGNMENT RECEIVED             ║");
         LOG_INFO("╚════════════════════════════════════════╝");
-        
+
         // Parse JSON payload
         DynamicJsonDocument doc(512);
         DeserializationError error = deserializeJson(doc, payload);
-        
+
         if (!error) {
           String zone_id = doc["zone_id"].as<String>();
           String master_zone_id = doc["master_zone_id"].as<String>();
@@ -738,7 +939,7 @@ void setup() {
               // Update TopicBuilder with new kaiser_id
               TopicBuilder::setKaiserId(kaiser_id.c_str());
             }
-            
+
             // Send acknowledgment
             String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
             DynamicJsonDocument ack_doc(256);
@@ -747,26 +948,26 @@ void setup() {
             ack_doc["zone_id"] = zone_id;
             ack_doc["master_zone_id"] = master_zone_id;
             ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
-            
+
             String ack_payload;
             serializeJson(ack_doc, ack_payload);
             mqttClient.publish(ack_topic, ack_payload);
-            
+
             LOG_INFO("✅ Zone assignment successful");
             LOG_INFO("ESP is now part of zone: " + zone_id);
-            
+
             // Update system state
             g_system_config.current_state = STATE_ZONE_CONFIGURED;
             configManager.saveSystemConfig(g_system_config);
-            
+
             // Send updated heartbeat (force=true to immediately notify server of zone change)
             mqttClient.publishHeartbeat(true);
           } else {
             LOG_ERROR("❌ Failed to save zone configuration");
-            
+
             // Send error acknowledgment
             String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
-            String error_response = "{\"esp_id\":\"" + g_system_config.esp_id + 
+            String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
                                    "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
                                    ",\"message\":\"Failed to save zone config\"}";
             mqttClient.publish(ack_topic, error_response);
@@ -776,45 +977,45 @@ void setup() {
         }
         return;
       }
-      
+
       // Phase 9: Subzone Assignment Handler
       String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
       if (topic == subzone_assign_topic) {
         LOG_INFO("╔════════════════════════════════════════╗");
         LOG_INFO("║  SUBZONE ASSIGNMENT RECEIVED          ║");
         LOG_INFO("╚════════════════════════════════════════╝");
-        
+
         DynamicJsonDocument doc(1024);  // Größerer Buffer für GPIO-Array
         DeserializationError error = deserializeJson(doc, payload);
-        
+
         if (!error) {
           String subzone_id = doc["subzone_id"].as<String>();
           String subzone_name = doc["subzone_name"].as<String>();
           String parent_zone_id = doc["parent_zone_id"].as<String>();
           JsonArray gpios_array = doc["assigned_gpios"];
           bool safe_mode_active = doc["safe_mode_active"] | true;
-          
+
           // Validation 1: subzone_id required
           if (subzone_id.length() == 0) {
             LOG_ERROR("Subzone assignment failed: subzone_id is empty");
             sendSubzoneAck(subzone_id, "error", "subzone_id is required");
             return;
           }
-          
+
           // Validation 2: parent_zone_id muss mit ESP-Zone übereinstimmen
           if (parent_zone_id.length() > 0 && parent_zone_id != g_kaiser.zone_id) {
             LOG_ERROR("Subzone assignment failed: parent_zone_id doesn't match ESP zone");
             sendSubzoneAck(subzone_id, "error", "parent_zone_id mismatch");
             return;
           }
-          
+
           // Validation 3: Zone muss zugewiesen sein
           if (!g_kaiser.zone_assigned) {
             LOG_ERROR("Subzone assignment failed: ESP zone not assigned");
             sendSubzoneAck(subzone_id, "error", "ESP zone not assigned");
             return;
           }
-          
+
           // Build SubzoneConfig
           SubzoneConfig subzone_config;
           subzone_config.subzone_id = subzone_id;
@@ -822,20 +1023,20 @@ void setup() {
           subzone_config.parent_zone_id = parent_zone_id.length() > 0 ? parent_zone_id : g_kaiser.zone_id;
           subzone_config.safe_mode_active = safe_mode_active;
           subzone_config.created_timestamp = doc["timestamp"] | millis() / 1000;
-          
+
           // Parse GPIO-Array
           for (JsonVariant gpio_value : gpios_array) {
             uint8_t gpio = gpio_value.as<uint8_t>();
             subzone_config.assigned_gpios.push_back(gpio);
           }
-          
+
           // Validate config
           if (!configManager.validateSubzoneConfig(subzone_config)) {
             LOG_ERROR("Subzone assignment failed: validation failed");
             sendSubzoneAck(subzone_id, "error", "subzone config validation failed");
             return;
           }
-          
+
           // Assign GPIOs to subzone via GPIO-Manager
           bool all_assigned = true;
           for (uint8_t gpio : subzone_config.assigned_gpios) {
@@ -851,34 +1052,34 @@ void setup() {
               break;
             }
           }
-          
+
           if (!all_assigned) {
             sendSubzoneAck(subzone_id, "error", "GPIO assignment failed");
             return;
           }
-          
+
           // Safe-Mode aktivieren wenn requested
           if (safe_mode_active) {
             if (!gpioManager.enableSafeModeForSubzone(subzone_id)) {
               LOG_WARNING("Failed to enable safe-mode for subzone, but assignment continues");
             }
           }
-          
+
           // Save to NVS
           if (!configManager.saveSubzoneConfig(subzone_config)) {
             LOG_ERROR("Failed to save subzone config to NVS");
             sendSubzoneAck(subzone_id, "error", "NVS save failed");
             return;
           }
-          
+
           // Calculate sensor/actuator counts
           subzone_config.sensor_count = 0;
           subzone_config.actuator_count = 0;
           // TODO: Iterate through sensors/actuators and count those with matching subzone_id
-          
+
           // Success ACK
           sendSubzoneAck(subzone_id, "subzone_assigned", "");
-          
+
           LOG_INFO("✅ Subzone assignment successful: " + subzone_id);
         } else {
           LOG_ERROR("Failed to parse subzone assignment JSON");
@@ -886,49 +1087,49 @@ void setup() {
         }
         return;
       }
-      
+
       // Phase 9: Subzone Removal Handler
       String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
       if (topic == subzone_remove_topic) {
         LOG_INFO("╔════════════════════════════════════════╗");
         LOG_INFO("║  SUBZONE REMOVAL RECEIVED             ║");
         LOG_INFO("╚════════════════════════════════════════╝");
-        
+
         DynamicJsonDocument doc(256);
         DeserializationError error = deserializeJson(doc, payload);
-        
+
         if (!error) {
           String subzone_id = doc["subzone_id"].as<String>();
-          
+
           if (subzone_id.length() == 0) {
             LOG_ERROR("Subzone removal failed: subzone_id is empty");
             return;
           }
-          
+
           // Load config to get GPIOs
           SubzoneConfig config;
           if (!configManager.loadSubzoneConfig(subzone_id, config)) {
             LOG_WARNING("Subzone " + subzone_id + " not found for removal");
             return;
           }
-          
+
           // Remove GPIOs from subzone
           for (uint8_t gpio : config.assigned_gpios) {
             gpioManager.removePinFromSubzone(gpio);
           }
-          
+
           // Remove from NVS
           configManager.removeSubzoneConfig(subzone_id);
-          
+
           LOG_INFO("✅ Subzone removed: " + subzone_id);
         }
         return;
       }
-      
+
       // Additional message handlers can be added here
     });
   }
-  
+
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 2: Communication Layer READY  ║");
   LOG_INFO("╚════════════════════════════════════════╝");
@@ -936,14 +1137,14 @@ void setup() {
   LOG_INFO("  ✅ WiFi Manager");
   LOG_INFO("  ✅ MQTT Client");
   LOG_INFO("");
-  
+
   // Print memory stats
   LOG_INFO("=== Memory Status (Phase 2) ===");
   LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
   LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
   LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
   LOG_INFO("=====================");
-  
+
   // ============================================
   // STEP 10.5: PHASE 7 - HEALTH MONITOR
   // ============================================
@@ -956,24 +1157,24 @@ void setup() {
     healthMonitor.setPublishInterval(60000);  // 60 seconds
     healthMonitor.setChangeDetectionEnabled(true);
   }
-  
+
   // ============================================
   // STEP 11: PHASE 3 - HARDWARE ABSTRACTION LAYER
   // ============================================
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 3: Hardware Abstraction Layer  ║");
   LOG_INFO("╚════════════════════════════════════════╝");
-  
+
   // I2C Bus Manager
   if (!i2cBusManager.begin()) {
     LOG_ERROR("I2C Bus Manager initialization failed!");
-    errorTracker.trackError(ERROR_I2C_INIT_FAILED, 
+    errorTracker.trackError(ERROR_I2C_INIT_FAILED,
                            ERROR_SEVERITY_CRITICAL,
                            "I2C begin() failed");
   } else {
     LOG_INFO("I2C Bus Manager initialized");
   }
-  
+
   // OneWire Bus Manager
   if (!oneWireBusManager.begin()) {
     LOG_ERROR("OneWire Bus Manager initialization failed!");
@@ -983,7 +1184,7 @@ void setup() {
   } else {
     LOG_INFO("OneWire Bus Manager initialized");
   }
-  
+
   // PWM Controller
   if (!pwmController.begin()) {
     LOG_ERROR("PWM Controller initialization failed!");
@@ -993,7 +1194,7 @@ void setup() {
   } else {
     LOG_INFO("PWM Controller initialized");
   }
-  
+
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 3: Hardware Abstraction READY  ║");
   LOG_INFO("╚════════════════════════════════════════╝");
@@ -1002,21 +1203,21 @@ void setup() {
   LOG_INFO("  ✅ OneWire Bus Manager");
   LOG_INFO("  ✅ PWM Controller");
   LOG_INFO("");
-  
+
   // Print memory stats
   LOG_INFO("=== Memory Status (Phase 3) ===");
   LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
   LOG_INFO("Min Free Heap: " + String(ESP.getMinFreeHeap()) + " bytes");
   LOG_INFO("Heap Size: " + String(ESP.getHeapSize()) + " bytes");
   LOG_INFO("=====================");
-  
+
   // ============================================
   // STEP 12: PHASE 4 - SENSOR SYSTEM
   // ============================================
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 4: Sensor System               ║");
   LOG_INFO("╚════════════════════════════════════════╝");
-  
+
   // Sensor Manager
   if (!sensorManager.begin()) {
     LOG_ERROR("Sensor Manager initialization failed!");
@@ -1039,14 +1240,14 @@ void setup() {
       }
     }
   }
-  
+
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 4: Sensor System READY         ║");
   LOG_INFO("╚════════════════════════════════════════╝");
   LOG_INFO("Modules Initialized:");
   LOG_INFO("  ✅ Sensor Manager");
   LOG_INFO("");
-  
+
   // Print memory stats
   LOG_INFO("=== Memory Status (Phase 4) ===");
   LOG_INFO("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
@@ -1085,9 +1286,168 @@ void setup() {
 }
 
 // ============================================
+// WATCHDOG FUNCTIONS (Industrial-Grade)
+// ============================================
+
+/**
+ * @brief Feed Watchdog mit Kontext und Circuit-Breaker-Check
+ * @param component_id ID der Komponente (für Diagnostics)
+ * @return true wenn Feed erfolgreich, false wenn blockiert
+ */
+bool feedWatchdog(const char* component_id) {
+  // ─────────────────────────────────────────────────────
+  // 1. Circuit Breaker Check (nur in Production Mode)
+  // ─────────────────────────────────────────────────────
+  if (g_watchdog_config.mode == WatchdogMode::PRODUCTION) {
+    // WiFi Circuit Breaker OPEN? → Service down!
+    if (wifiManager.getCircuitBreakerState() == CircuitState::OPEN) {
+      errorTracker.logApplicationError(
+        ERROR_WATCHDOG_FEED_BLOCKED,
+        "Watchdog feed blocked: WiFi Circuit Breaker OPEN"
+      );
+      return false;  // Feed blockiert
+    }
+
+    // MQTT Circuit Breaker OPEN?
+    if (mqttClient.getCircuitBreakerState() == CircuitState::OPEN) {
+      errorTracker.logApplicationError(
+        ERROR_WATCHDOG_FEED_BLOCKED,
+        "Watchdog feed blocked: MQTT Circuit Breaker OPEN"
+      );
+      return false;
+    }
+
+    // Critical Errors?
+    if (errorTracker.hasCriticalErrors()) {
+      errorTracker.logApplicationError(
+        ERROR_WATCHDOG_FEED_BLOCKED_CRITICAL,
+        "Watchdog feed blocked: Critical errors active"
+      );
+      return false;
+    }
+
+    // System State Check
+    if (g_system_config.current_state == STATE_ERROR) {
+      return false;  // Error-State → Watchdog-Feed blockiert
+    }
+  }
+
+  // ─────────────────────────────────────────────────────
+  // 2. Feed Watchdog
+  // ─────────────────────────────────────────────────────
+  #ifndef WOKWI_SIMULATION
+  esp_task_wdt_reset();
+  #endif
+
+  // ─────────────────────────────────────────────────────
+  // 3. Update Diagnostics
+  // ─────────────────────────────────────────────────────
+  g_watchdog_diagnostics.last_feed_time = millis();
+  g_watchdog_diagnostics.last_feed_component = component_id;
+  g_watchdog_diagnostics.feed_count++;
+
+  return true;
+}
+
+/**
+ * @brief Handle Watchdog Timeout (wird in loop() aufgerufen)
+ */
+void handleWatchdogTimeout() {
+  if (!g_watchdog_timeout_flag) return;
+
+  // ─────────────────────────────────────────────────────
+  // 1. Track Critical Error
+  // ─────────────────────────────────────────────────────
+  errorTracker.trackError(
+    ERROR_WATCHDOG_TIMEOUT,
+    ERROR_SEVERITY_CRITICAL,
+    "Watchdog timeout detected"
+  );
+
+  // ─────────────────────────────────────────────────────
+  // 2. Sammle Diagnostic Info
+  // ─────────────────────────────────────────────────────
+  WatchdogDiagnostics diag;
+  diag.timestamp = millis();
+  diag.system_state = g_system_config.current_state;
+  diag.last_feed_component = g_watchdog_diagnostics.last_feed_component;
+  diag.last_feed_time = g_watchdog_diagnostics.last_feed_time;
+  diag.wifi_breaker_state = wifiManager.getCircuitBreakerState();
+  diag.mqtt_breaker_state = mqttClient.getCircuitBreakerState();
+  diag.error_count = errorTracker.getErrorCount();
+  diag.heap_free = ESP.getFreeHeap();
+
+  // ─────────────────────────────────────────────────────
+  // 3. Speichere in NVS (für Post-Reboot-Analyse)
+  // ─────────────────────────────────────────────────────
+  // TODO: Implement after StorageManager integration
+  // storageManager.saveWatchdogDiagnostics(diag);
+
+  // ─────────────────────────────────────────────────────
+  // 4. Health Snapshot (MQTT-Publish wenn möglich)
+  // ─────────────────────────────────────────────────────
+  if (mqttClient.isConnected()) {
+    healthMonitor.publishSnapshot();
+  }
+
+  // ─────────────────────────────────────────────────────
+  // 5. Mode-Specific Action
+  // ─────────────────────────────────────────────────────
+  if (g_watchdog_config.mode == WatchdogMode::PRODUCTION) {
+    // Production: Panic wird automatisch triggern (panic=true)
+    LOG_CRITICAL("Production Mode Watchdog Timeout → ESP will reset");
+  } else {
+    // Provisioning: Kein Panic, nur Log
+    LOG_WARNING("Provisioning Mode Watchdog Timeout → Manual reset available");
+
+    // Blinke LED als Signal
+    for (int i = 0; i < 5; i++) {
+      digitalWrite(LED_PIN, HIGH);
+      delay(100);
+      digitalWrite(LED_PIN, LOW);
+      delay(100);
+    }
+  }
+
+  g_watchdog_timeout_flag = false;
+}
+
+/**
+ * @brief Get Watchdog timeout count in last 24 hours
+ * @return Anzahl der Watchdog-Timeouts in letzten 24h
+ */
+uint8_t getWatchdogCountLast24h() {
+  // TODO: Implement after StorageManager integration
+  // Read from NVS and count timeouts in last 24h
+  return 0;
+}
+
+// ============================================
 // LOOP - Phase 2 Communication Monitoring + Phase 4/5 Operations
 // ============================================
 void loop() {
+  // ─────────────────────────────────────────────────────
+  // WATCHDOG FEED (Industrial-Grade)
+  // ─────────────────────────────────────────────────────
+  static unsigned long last_feed_time = 0;
+
+  if (g_watchdog_config.mode != WatchdogMode::WDT_DISABLED) {
+    unsigned long feed_interval = g_watchdog_config.feed_interval_ms;
+    if (millis() - last_feed_time >= feed_interval) {
+      if (feedWatchdog("MAIN_LOOP")) {
+        last_feed_time = millis();
+        // Feed successful
+      } else {
+        // Feed blocked → Watchdog wird timeout
+        // Error wird getrackt in feedWatchdog()
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────
+  // WATCHDOG TIMEOUT HANDLER
+  // ─────────────────────────────────────────────────────
+  handleWatchdogTimeout();
   // ═══════════════════════════════════════════════════
   // ✅ FIX #1: STATE_SAFE_MODE_PROVISIONING HANDLING
   // ═══════════════════════════════════════════════════
@@ -1110,7 +1470,7 @@ void loop() {
       ESP.restart();  // ✅ Reboot → Normal-Flow startet
     }
 
-    delay(10);  // Prevent watchdog issues
+    delay(10);  // Provisioning Mode: No Watchdog active, no reset needed
     return;     // ✅ Skip normal loop logic
   }
 
@@ -1129,7 +1489,7 @@ void loop() {
   // Phase 2: Communication monitoring (with Circuit Breaker - Phase 6+)
   wifiManager.loop();      // Monitor WiFi connection (Circuit Breaker integrated)
   mqttClient.loop();       // Process MQTT messages + heartbeat (Circuit Breaker integrated)
-  
+
   // Phase 4: Sensor measurements
   sensorManager.performAllMeasurements();
 
@@ -1140,13 +1500,13 @@ void loop() {
     actuatorManager.publishAllActuatorStatus();
     last_actuator_status = millis();
   }
-  
+
   // ============================================
   // PHASE 7: HEALTH MONITORING (automatic via HealthMonitor)
   // ============================================
   healthMonitor.loop();  // Publishes automatically if needed
-  
-  delay(10);  // Small delay to prevent watchdog issues
+
+  delay(10);  // Small delay (gives CPU to scheduler)
 }
 
 // ============================================

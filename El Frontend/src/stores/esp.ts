@@ -9,11 +9,17 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
 import { debugApi } from '@/api/debug'
-import { sensorsApi } from '@/api/sensors'
+import { sensorsApi, oneWireApi, type OneWireDevice, type OneWireScanResponse } from '@/api/sensors'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
-import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponse, ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem } from '@/types'
+import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem, MultiValueEntry } from '@/types'
+import {
+  getDeviceTypeFromSensorType,
+  getMultiValueDeviceConfigBySensorType,
+  inferInterfaceType,
+  getDefaultI2CAddress
+} from '@/utils/sensorDefaults'
 
 /**
  * Extract error message from Axios error response.
@@ -139,12 +145,51 @@ export const useEspStore = defineStore('esp', () => {
     devices.value.filter(device => device.is_zone_master === true)
   )
 
-  /**
-   * Check if device is Mock ESP
-   */
-  function isMock(deviceId: string): boolean {
-    return espApi.isMockEsp(deviceId)
+/**
+ * Check if device is Mock ESP
+ */
+function isMock(deviceId: string): boolean {
+  return espApi.isMockEsp(deviceId)
+}
+
+/**
+ * Find device by esp_id with UUID fallback (DEFENSIVE PROGRAMMING).
+ *
+ * CRITICAL: Server SHOULD always send device_id (e.g., "ESP_00000001").
+ * However, if UUID slips through (e.g., "8f67d252-8aaa-4a87-9577-fb18e7ad7979"),
+ * we try to match by internal id as a fallback.
+ *
+ * This prevents frontend breakage if server-side bug occurs.
+ *
+ * @param espId - Either device_id (expected) or UUID (fallback)
+ * @returns Device index and device, or null if not found
+ */
+function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESPDevice } | null {
+  // Primary lookup: by device_id (expected)
+  let index = devices.value.findIndex(d => getDeviceId(d) === espId)
+
+  if (index !== -1) {
+    return { index, device: devices.value[index] }
   }
+
+  // Fallback: Check if espId looks like UUID (contains dashes and 36 chars)
+  if (espId.includes('-') && espId.length === 36) {
+    console.warn(
+      `[ESP Store] Received UUID "${espId}" instead of device_id. ` +
+      `Server should send device_id! Trying fallback lookup...`
+    )
+
+    // Try matching by internal id field (UUID from database)
+    index = devices.value.findIndex(d => d.id === espId)
+
+    if (index !== -1) {
+      console.info(`[ESP Store] Fallback lookup successful: ${espId} → ${getDeviceId(devices.value[index])}`)
+      return { index, device: devices.value[index] }
+    }
+  }
+
+  return null
+}
 
   /**
    * Get normalized device ID
@@ -353,6 +398,189 @@ export const useEspStore = defineStore('esp', () => {
       reserved: mergedReserved,
       last_esp_report: new Date().toISOString()
     })
+  }
+
+  // =========================================================================
+  // OneWire Scan State & Actions (Phase 6 - DS18B20 Support)
+  // =========================================================================
+
+  /**
+   * OneWire scan state for each ESP device.
+   * Tracks scanning status, results, and user selections.
+   */
+  interface OneWireScanState {
+    isScanning: boolean
+    scanResults: OneWireDevice[]
+    selectedRomCodes: string[]
+    scanError: string | null
+    lastScanTimestamp: number | null
+    lastScanPin: number | null
+  }
+
+  // OneWire scan states per ESP
+  const oneWireScanStates = ref<Record<string, OneWireScanState>>({})
+
+  /**
+   * Get or initialize OneWire scan state for an ESP.
+   * 
+   * @param espId - ESP device ID
+   * @returns OneWire scan state (creates if not exists)
+   */
+  function getOneWireScanState(espId: string): OneWireScanState {
+    if (!oneWireScanStates.value[espId]) {
+      oneWireScanStates.value[espId] = {
+        isScanning: false,
+        scanResults: [],
+        selectedRomCodes: [],
+        scanError: null,
+        lastScanTimestamp: null,
+        lastScanPin: null
+      }
+    }
+    return oneWireScanStates.value[espId]
+  }
+
+  /**
+   * Scan OneWire bus for devices.
+   * 
+   * Sends MQTT command to ESP, waits for scan result (10s timeout).
+   * Updates scan state with results or error.
+   * 
+   * @param espId - ESP device ID
+   * @param pin - GPIO pin for OneWire bus (default: 4)
+   */
+  async function scanOneWireBus(espId: string, pin: number = 4): Promise<OneWireScanResponse> {
+    const state = getOneWireScanState(espId)
+    state.isScanning = true
+    state.scanError = null
+    state.scanResults = []
+    state.selectedRomCodes = []
+    
+    const toast = useToast()
+    
+    try {
+      const response = await oneWireApi.scanBus(espId, pin)
+      
+      state.scanResults = response.devices
+      state.lastScanTimestamp = Date.now()
+      state.lastScanPin = pin
+      
+      if (response.found_count === 0) {
+        toast.warning(`Keine OneWire-Geräte auf GPIO ${pin} gefunden`, {
+          duration: 6000
+        })
+      } else {
+        toast.success(
+          `${response.found_count} OneWire-Gerät(e) auf GPIO ${pin} gefunden`,
+          { duration: 5000 }
+        )
+      }
+      
+      return response
+      
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string }; status?: number } }
+      
+      // Extract error message based on status code
+      let errorMsg = 'Scan fehlgeschlagen'
+      
+      if (axiosError.response?.status === 404) {
+        errorMsg = 'ESP-Gerät nicht gefunden'
+      } else if (axiosError.response?.status === 503) {
+        errorMsg = 'ESP-Gerät ist offline'
+      } else if (axiosError.response?.status === 504) {
+        errorMsg = `ESP antwortet nicht (Timeout). Ist OneWire-Bus auf GPIO ${pin} konfiguriert?`
+      } else if (axiosError.response?.data?.detail) {
+        errorMsg = axiosError.response.data.detail
+      }
+      
+      state.scanError = errorMsg
+      
+      toast.error(`OneWire-Scan fehlgeschlagen: ${errorMsg}`, {
+        duration: 8000
+      })
+      
+      throw err
+    } finally {
+      state.isScanning = false
+    }
+  }
+
+  /**
+   * Clear OneWire scan results and state.
+   * 
+   * Called when modal closes or user wants to reset.
+   * 
+   * @param espId - ESP device ID
+   */
+  function clearOneWireScan(espId: string): void {
+    const state = getOneWireScanState(espId)
+    state.scanResults = []
+    state.selectedRomCodes = []
+    state.scanError = null
+    // Keep lastScanTimestamp and lastScanPin for reference
+  }
+
+  /**
+   * Toggle ROM code selection for multi-select.
+   * 
+   * @param espId - ESP device ID
+   * @param romCode - ROM code to toggle
+   */
+  function toggleRomSelection(espId: string, romCode: string): void {
+    const state = getOneWireScanState(espId)
+    const index = state.selectedRomCodes.indexOf(romCode)
+    
+    if (index > -1) {
+      state.selectedRomCodes.splice(index, 1)
+    } else {
+      state.selectedRomCodes.push(romCode)
+    }
+  }
+
+  /**
+   * Select all discovered devices.
+   * 
+   * @param espId - ESP device ID
+   */
+  function selectAllOneWireDevices(espId: string): void {
+    const state = getOneWireScanState(espId)
+    state.selectedRomCodes = state.scanResults.map(d => d.rom_code)
+  }
+
+  /**
+   * Deselect all devices.
+   *
+   * @param espId - ESP device ID
+   */
+  function deselectAllOneWireDevices(espId: string): void {
+    const state = getOneWireScanState(espId)
+    state.selectedRomCodes = []
+  }
+
+  /**
+   * Select specific ROM codes (replaces current selection).
+   * 
+   * OneWire Multi-Device Support: Used to select only NEW (non-configured) devices.
+   * 
+   * @param espId - ESP device ID
+   * @param romCodes - Array of ROM codes to select
+   */
+  function selectSpecificRomCodes(espId: string, romCodes: string[]): void {
+    const state = getOneWireScanState(espId)
+    state.selectedRomCodes = [...romCodes]
+  }
+
+  /**
+   * Check if a ROM code is currently selected.
+   * 
+   * @param espId - ESP device ID
+   * @param romCode - ROM code to check
+   * @returns true if selected
+   */
+  function isRomCodeSelected(espId: string, romCode: string): boolean {
+    const state = getOneWireScanState(espId)
+    return state.selectedRomCodes.includes(romCode)
   }
 
   // Actions
@@ -674,13 +902,27 @@ export const useEspStore = defineStore('esp', () => {
         // =========================================================================
         // REAL-ESP: Sensor-API verwenden (NEU in Phase 2B)
         // =========================================================================
+        // Infer interface type from sensor_type
+        const interfaceType = inferInterfaceType(config.sensor_type)
+        const defaultI2CAddress = getDefaultI2CAddress(config.sensor_type)
+
         const realConfig: SensorConfigCreate = {
           esp_id: deviceId,
           gpio: config.gpio,
           sensor_type: config.sensor_type,
           name: config.name || null,
           enabled: true,
+          // =========================================================================
+          // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+          // =========================================================================
+          interface_type: config.interface_type || interfaceType,
+          // I2C: Use default address from registry (e.g., SHT31 → 0x44)
+          i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+          // OneWire: Use provided ROM address (from scan) or null (server auto-generates)
+          onewire_address: config.onewire_address || null,
+          // =========================================================================
           // Operating Mode Felder (Phase 2B)
+          // =========================================================================
           operating_mode: (config.operating_mode as SensorConfigCreate['operating_mode']) || 'continuous',
           timeout_seconds: config.timeout_seconds ?? 180,
           timeout_warning_enabled: (config.timeout_seconds ?? 180) > 0,
@@ -769,13 +1011,25 @@ export const useEspStore = defineStore('esp', () => {
         // =========================================================================
         // REAL-ESP: Sensor-API mit Partial Update
         // =========================================================================
+        // Infer interface type from existing sensor_type
+        const interfaceType = inferInterfaceType(existingSensor.sensor_type)
+        const defaultI2CAddress = getDefaultI2CAddress(existingSensor.sensor_type)
+
         const realConfig: SensorConfigCreate = {
           esp_id: deviceId,
           gpio: gpio,
           sensor_type: existingSensor.sensor_type,
           name: config.name !== undefined ? config.name : existingSensor.name,
           enabled: config.enabled !== undefined ? config.enabled : true,
+          // =========================================================================
+          // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+          // =========================================================================
+          interface_type: interfaceType,
+          i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+          onewire_address: null, // Server preserves existing address on update
+          // =========================================================================
           // Operating Mode Felder (Phase 2F)
+          // =========================================================================
           operating_mode: config.operating_mode !== undefined
             ? (config.operating_mode as SensorConfigCreate['operating_mode'] ?? undefined)
             : (existingSensor.operating_mode as SensorConfigCreate['operating_mode'] ?? undefined),
@@ -991,7 +1245,7 @@ export const useEspStore = defineStore('esp', () => {
       // - timestamp: Unix ms from heartbeat handler (MQTT) - 13 digits
       // - timestamp: Unix seconds from old handlers - 10 digits
       // - last_seen: ISO string from MOCK-FIX (esp.py PATCH)
-      let newLastSeen: string | undefined = device.last_seen
+      let newLastSeen: string | undefined = device.last_seen ?? undefined
       if (data.timestamp) {
         const ts = data.timestamp > 10000000000 ? data.timestamp : data.timestamp * 1000
         newLastSeen = new Date(ts).toISOString()
@@ -1093,27 +1347,188 @@ export const useEspStore = defineStore('esp', () => {
   /**
    * Handle sensor_data WebSocket event
    * Updates sensor value in corresponding device for live updates
+   *
+   * Phase 6: HYBRID LOGIC
+   * 1. Known multi-value sensors → Group by GPIO using registry
+   * 2. Unknown multi-value → Dynamic detection when multiple types on same GPIO
+   * 3. Single-value sensors → Unchanged behavior
    */
   function handleSensorData(message: any): void {
     const data = message.data
     const espId = data.esp_id || data.device_id
     const gpio = data.gpio
+    const sensorType = data.sensor_type
 
     if (!espId || gpio === undefined) return
 
     const device = devices.value.find(d => getDeviceId(d) === espId)
     if (!device?.sensors) return
 
-    const sensor = (device.sensors as any[]).find(s => s.gpio === gpio)
-    if (!sensor) return
+    const sensors = device.sensors as MockSensor[]
 
-    // Map server payload → frontend MockSensor
-    if (data.value !== undefined) sensor.raw_value = data.value
-    if (data.quality) sensor.quality = data.quality
-    if (data.unit) sensor.unit = data.unit
+    // HYBRID LOGIC:
+    // 1. Check if this is a KNOWN multi-value sensor type (Registry)
+    const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
+
+    if (knownDeviceType) {
+      // KNOWN MULTI-VALUE: Use registry metadata
+      handleKnownMultiValueSensor(sensors, data, knownDeviceType)
+      return
+    }
+
+    // 2. Check if there's already a sensor on this GPIO with different type
+    const existingSensor = sensors.find(s => s.gpio === gpio)
+
+    if (existingSensor && existingSensor.sensor_type !== sensorType && !existingSensor.is_multi_value) {
+      // DYNAMIC DETECTION: Multiple types on same GPIO = multi-value!
+      handleDynamicMultiValueSensor(existingSensor, data)
+      return
+    }
+
+    // 3. Single-value sensor (or first value of unknown multi-value)
+    handleSingleValueSensorData(sensors, data)
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // HANDLER 1: KNOWN MULTI-VALUE (Registry-based)
+  // ════════════════════════════════════════════════════════════════════════════
+  function handleKnownMultiValueSensor(
+    sensors: MockSensor[],
+    data: any,
+    deviceType: string
+  ): void {
+    // Find existing sensor by GPIO (not by sensor_type!)
+    let sensor = sensors.find(s => s.gpio === data.gpio)
+
+    const deviceConfig = getMultiValueDeviceConfigBySensorType(data.sensor_type)
+
+    if (!sensor) {
+      // Create new multi-value sensor with registry metadata
+      sensor = {
+        gpio: data.gpio,
+        sensor_type: data.sensor_type,
+        name: deviceConfig?.label ?? data.sensor_type,
+        raw_value: data.value,
+        unit: data.unit,
+        quality: data.quality ?? 'good',
+        raw_mode: true,
+        last_read: new Date().toISOString(),
+        // Multi-value fields
+        device_type: deviceType,
+        is_multi_value: true,
+        multi_values: {}
+      }
+      sensors.push(sensor)
+    }
+
+    // Ensure multi_values object exists
+    if (!sensor.multi_values) {
+      sensor.multi_values = {}
+      sensor.is_multi_value = true
+      sensor.device_type = deviceType
+    }
+
+    // Update the specific value
+    sensor.multi_values[data.sensor_type] = {
+      value: data.value,
+      unit: data.unit,
+      quality: data.quality ?? 'good',
+      timestamp: Date.now(),
+      sensorType: data.sensor_type
+    }
+
+    // Update primary value (first in config order)
+    if (deviceConfig) {
+      const primaryType = deviceConfig.values[0]?.sensorType
+      if (sensor.multi_values[primaryType]) {
+        sensor.raw_value = sensor.multi_values[primaryType].value
+        sensor.unit = sensor.multi_values[primaryType].unit
+      }
+    }
+
+    // Update worst quality
+    sensor.quality = getWorstQuality(Object.values(sensor.multi_values))
     sensor.last_read = data.timestamp
       ? new Date(data.timestamp * 1000).toISOString()
       : new Date().toISOString()
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // HANDLER 2: DYNAMIC MULTI-VALUE (Auto-detected)
+  // ════════════════════════════════════════════════════════════════════════════
+  function handleDynamicMultiValueSensor(
+    existingSensor: MockSensor,
+    data: any
+  ): void {
+    // Convert existing single-value sensor to multi-value
+    if (!existingSensor.is_multi_value) {
+      existingSensor.is_multi_value = true
+      existingSensor.device_type = null  // Unknown device
+      existingSensor.multi_values = {
+        // Add existing value
+        [existingSensor.sensor_type]: {
+          value: existingSensor.raw_value,
+          unit: existingSensor.unit,
+          quality: existingSensor.quality,
+          timestamp: Date.now(),
+          sensorType: existingSensor.sensor_type
+        }
+      }
+      // Update name to indicate multi-value
+      existingSensor.name = `Multi-Sensor GPIO ${existingSensor.gpio}`
+    }
+
+    // Add new value
+    existingSensor.multi_values![data.sensor_type] = {
+      value: data.value,
+      unit: data.unit,
+      quality: data.quality ?? 'good',
+      timestamp: Date.now(),
+      sensorType: data.sensor_type
+    }
+
+    // Update worst quality
+    existingSensor.quality = getWorstQuality(Object.values(existingSensor.multi_values!))
+    existingSensor.last_read = data.timestamp
+      ? new Date(data.timestamp * 1000).toISOString()
+      : new Date().toISOString()
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // HANDLER 3: SINGLE-VALUE (unchanged behavior)
+  // ════════════════════════════════════════════════════════════════════════════
+  function handleSingleValueSensorData(sensors: MockSensor[], data: any): void {
+    const sensor = sensors.find(
+      s => s.gpio === data.gpio && s.sensor_type === data.sensor_type
+    )
+
+    if (sensor) {
+      // Update existing
+      if (data.value !== undefined) sensor.raw_value = data.value
+      if (data.quality) sensor.quality = data.quality
+      if (data.unit) sensor.unit = data.unit
+      sensor.last_read = data.timestamp
+        ? new Date(data.timestamp * 1000).toISOString()
+        : new Date().toISOString()
+    }
+    // Note: We don't create new sensors here via WebSocket - they must be added via API
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // HELPER: Get worst quality from multi-values
+  // ════════════════════════════════════════════════════════════════════════════
+  function getWorstQuality(values: MultiValueEntry[]): QualityLevel {
+    const qualityOrder: QualityLevel[] = ['excellent', 'good', 'fair', 'poor', 'bad', 'stale', 'error']
+
+    let worstIndex = 0
+    for (const value of values) {
+      const index = qualityOrder.indexOf(value.quality)
+      if (index > worstIndex) {
+        worstIndex = index
+      }
+    }
+
+    return qualityOrder[worstIndex]
   }
 
   /**
@@ -1305,22 +1720,22 @@ export const useEspStore = defineStore('esp', () => {
    *   timestamp: number
    * }
    */
-  function handleSensorHealth(message: { data: SensorHealthEvent }): void {
-    const event = message.data
+  function handleSensorHealth(message: any): void {
+    const event = message.data as SensorHealthEvent
 
     if (!event.esp_id || event.gpio === undefined) {
       console.warn('[ESP Store] sensor_health missing esp_id or gpio')
       return
     }
 
-    // Find the device
-    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === event.esp_id)
-    if (deviceIndex === -1) {
+    // Find the device (with UUID fallback for robustness)
+    const result = findDeviceByEspIdDefensive(event.esp_id)
+    if (!result) {
       console.debug(`[ESP Store] sensor_health: Device not found: ${event.esp_id}`)
       return
     }
 
-    const device = devices.value[deviceIndex]
+    const { index: deviceIndex, device } = result
     if (!device.sensors) {
       console.debug(`[ESP Store] sensor_health: Device ${event.esp_id} has no sensors`)
       return
@@ -1488,6 +1903,17 @@ export const useEspStore = defineStore('esp', () => {
     fetchGpioStatus,
     clearGpioStatus,
     updateGpioStatusFromHeartbeat,
+
+    // OneWire Scan (Phase 6 - DS18B20 Support)
+    oneWireScanStates,
+    getOneWireScanState,
+    scanOneWireBus,
+    clearOneWireScan,
+    toggleRomSelection,
+    selectAllOneWireDevices,
+    deselectAllOneWireDevices,
+    selectSpecificRomCodes,
+    isRomCodeSelected,
   }
 })
 

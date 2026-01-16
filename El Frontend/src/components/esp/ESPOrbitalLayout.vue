@@ -16,13 +16,14 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
+import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime } from '@/utils/formatters'
 import SensorSatellite from './SensorSatellite.vue'
 import ActuatorSatellite from './ActuatorSatellite.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
+import GpioPicker from './GpioPicker.vue'
 import Badge from '@/components/common/Badge.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
@@ -31,12 +32,28 @@ import { sensorsApi } from '@/api/sensors'
 import { getStateInfo } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
+import { useToast } from '@/composables/useToast'
+import { useGpioStatus } from '@/composables/useGpioStatus'
 import {
   SENSOR_TYPE_CONFIG,
   getSensorUnit,
   getSensorDefault,
-  getSensorTypeOptions
+  getSensorTypeOptions,
+  // Phase 6: Multi-Value Sensor Support
+  getDeviceTypeFromSensorType,
+  getSensorTypesForDevice,
+  getMultiValueDeviceConfig
 } from '@/utils/sensorDefaults'
+import {
+  getActuatorLabel,
+  getActuatorTypeOptions,
+  isPwmActuator,
+  supportsAuxGpio,
+  supportsInvertedLogic,
+  getActuatorSafetyDefaults
+} from '@/utils/actuatorDefaults'
+import { getRecommendedGpios } from '@/utils/gpioConfig'
+import type { MockActuatorConfig } from '@/types'
 
 interface Props {
   /** The ESP device data */
@@ -54,6 +71,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
+const toast = useToast()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
@@ -76,11 +94,6 @@ const analysisExpanded = ref(false)
 
 // Track if chart was auto-opened (to auto-close when drag ends)
 const wasAutoOpened = ref(false)
-
-// Check if a sensor from this ESP is being dragged (for visual feedback)
-const isSensorBeingDraggedFromThisEsp = computed(() =>
-  dragStore.isDraggingSensor && dragStore.draggingSensorEspId === espId.value
-)
 
 // Handle sensor dropped into analysis zone
 function handleSensorDrop(sensor: ChartSensor) {
@@ -114,6 +127,12 @@ const newSensor = ref<MockSensorConfig & { operating_mode?: string; timeout_seco
 // Sensor type options for dropdown
 const sensorTypeOptions = getSensorTypeOptions()
 
+// GPIO Validation State (Phase 5 GpioPicker Integration)
+const sensorGpioValid = ref(false)
+
+// OneWire scan pin (Phase 6 - must be declared before watchers that use it)
+const oneWireScanPin = ref(4)
+
 // Watch for sensor type changes and update unit/initial value + Operating Mode (Phase 2B)
 watch(() => newSensor.value.sensor_type, (newType) => {
   const config = SENSOR_TYPE_CONFIG[newType]
@@ -123,6 +142,18 @@ watch(() => newSensor.value.sensor_type, (newType) => {
     // Operating Mode aktualisieren (Phase 2B)
     newSensor.value.operating_mode = config.recommendedMode || 'continuous'
     newSensor.value.timeout_seconds = config.recommendedTimeout ?? 180
+  }
+  
+  // DS18B20/OneWire: Auto-set GPIO to scan pin (Phase 6)
+  if (newType.toLowerCase().includes('ds18b20')) {
+    newSensor.value.gpio = oneWireScanPin.value
+  }
+})
+
+// Watch oneWireScanPin: Auto-update GPIO when scan pin changes (Phase 6)
+watch(oneWireScanPin, (newPin) => {
+  if (isOneWireSensor.value) {
+    newSensor.value.gpio = newPin
   }
 })
 
@@ -140,19 +171,213 @@ const recommendedMode = computed(() => {
 })
 
 /**
- * Empfohlener Timeout für den ausgewählten Sensor-Typ.
- */
-const recommendedTimeout = computed(() => {
-  const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
-  return config?.recommendedTimeout ?? 180
-})
-
-/**
  * Ob der ausgewählte Sensor-Typ On-Demand unterstützt.
  */
 const supportsOnDemand = computed(() => {
   const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
   return config?.supportsOnDemand ?? false
+})
+
+// ============================================================================
+// ONEWIRE SCAN HELPERS (Phase 6 - DS18B20)
+// ============================================================================
+
+/**
+ * Check if selected sensor type is a OneWire sensor (DS18B20).
+ */
+const isOneWireSensor = computed(() => {
+  const sensorType = newSensor.value.sensor_type.toLowerCase()
+  return sensorType.includes('ds18b20')
+})
+
+/**
+ * Get OneWire scan state for current device.
+ */
+const oneWireScanState = computed(() => {
+  return espStore.getOneWireScanState(espId.value)
+})
+
+/**
+ * Get only NEW (not yet configured) devices from scan results.
+ * 
+ * OneWire Multi-Device Support: Filter out already_configured devices
+ * so we only show/count NEW devices that can be added.
+ */
+const newOneWireDevices = computed(() => {
+  return oneWireScanState.value.scanResults.filter(
+    device => !device.already_configured
+  )
+})
+
+/**
+ * Count of NEW (not yet configured) devices.
+ */
+const newOneWireDeviceCount = computed(() => {
+  return newOneWireDevices.value.length
+})
+
+/**
+ * Count of SELECTED new devices (only devices that can actually be added).
+ */
+const selectedNewDeviceCount = computed(() => {
+  const state = oneWireScanState.value
+  return newOneWireDevices.value.filter(device =>
+    state.selectedRomCodes.includes(device.rom_code)
+  ).length
+})
+
+/**
+ * Check if all NEW (not already configured) devices are selected.
+ * 
+ * OneWire Multi-Device Support: Only consider new devices for "select all".
+ */
+const allOneWireDevicesSelected = computed(() => {
+  const newDevices = newOneWireDevices.value
+  if (newDevices.length === 0) return false
+  return newDevices.every(device =>
+    oneWireScanState.value.selectedRomCodes.includes(device.rom_code)
+  )
+})
+
+/**
+ * Check if a device is already configured (helper for template).
+ */
+function isDeviceConfigured(romCode: string): boolean {
+  const device = oneWireScanState.value.scanResults.find(d => d.rom_code === romCode)
+  return device?.already_configured ?? false
+}
+
+/**
+ * Trigger OneWire bus scan on the ESP.
+ */
+async function handleOneWireScan() {
+  try {
+    await espStore.scanOneWireBus(espId.value, oneWireScanPin.value)
+  } catch (err) {
+    console.error('[ESPOrbitalLayout] OneWire scan failed:', err)
+  }
+}
+
+/**
+ * Format ROM code for display (with colons).
+ * "28FF641E8D3C0C79" → "28:FF:64:1E:8D:3C:0C:79"
+ */
+function formatRomCode(rom: string): string {
+  return rom.match(/.{1,2}/g)?.join(':') || rom
+}
+
+/**
+ * Shorten ROM code for compact display.
+ * "28FF641E8D3C0C79" → "28FF...0C79"
+ */
+function shortenRomCode(rom: string): string {
+  if (rom.length <= 8) return rom
+  return `${rom.slice(0, 4)}...${rom.slice(-4)}`
+}
+
+/**
+ * Toggle device selection in scan results.
+ * 
+ * OneWire Multi-Device Support: Prevents toggling already_configured devices.
+ */
+function toggleOneWireDevice(romCode: string) {
+  // Don't allow toggling already_configured devices
+  if (isDeviceConfigured(romCode)) {
+    return
+  }
+  espStore.toggleRomSelection(espId.value, romCode)
+}
+
+/**
+ * Select or deselect all NEW OneWire devices.
+ * 
+ * OneWire Multi-Device Support: Only toggles new devices, not already_configured ones.
+ */
+function toggleAllOneWireDevices() {
+  if (allOneWireDevicesSelected.value) {
+    // Deselect all
+    espStore.deselectAllOneWireDevices(espId.value)
+  } else {
+    // Select only NEW (not already_configured) devices
+    const newRomCodes = newOneWireDevices.value.map(d => d.rom_code)
+    espStore.selectSpecificRomCodes(espId.value, newRomCodes)
+  }
+}
+
+/**
+ * Add multiple OneWire sensors (bulk add from scan results).
+ * 
+ * OneWire Multi-Device Support: Skips already_configured devices.
+ */
+async function addMultipleOneWireSensors() {
+  const state = oneWireScanState.value
+  
+  // Filter to only NEW (not already_configured) devices
+  const romCodesToAdd = state.selectedRomCodes.filter(romCode => {
+    const device = state.scanResults.find(d => d.rom_code === romCode)
+    return device && !device.already_configured
+  })
+  
+  if (romCodesToAdd.length === 0) {
+    toast.warning('Bitte wähle mindestens ein neues Gerät aus')
+    return
+  }
+  
+  const pin = oneWireScanPin.value
+  let successCount = 0
+  let failCount = 0
+  
+  for (const romCode of romCodesToAdd) {
+    try {
+      // Find device info from scan results
+      const device = state.scanResults.find(d => d.rom_code === romCode)
+      const deviceType = device?.device_type || 'ds18b20'
+      
+      const config = {
+        sensor_type: deviceType.toUpperCase(),  // DS18B20
+        gpio: pin,
+        onewire_address: romCode,
+        interface_type: 'ONEWIRE' as const,
+        operating_mode: 'continuous',
+        timeout_seconds: 180,
+        raw_mode: true,
+        name: `Temp ${romCode.slice(-4)}`,  // Auto-name: "Temp 0C79"
+      }
+      
+      await espStore.addSensor(espId.value, config)
+      successCount++
+      
+    } catch (err) {
+      console.error(`[ESPOrbitalLayout] Failed to add OneWire sensor ${romCode}:`, err)
+      failCount++
+    }
+  }
+  
+  // Summary toast
+  if (successCount > 0 && failCount === 0) {
+    toast.success(`${successCount} DS18B20-Sensor(en) erfolgreich hinzugefügt`)
+  } else if (successCount > 0 && failCount > 0) {
+    toast.warning(`${successCount} erfolgreich, ${failCount} fehlgeschlagen`)
+  } else if (failCount > 0) {
+    toast.error(`Alle ${failCount} Sensor(en) fehlgeschlagen`)
+  }
+  
+  // Reset and close modal
+  espStore.clearOneWireScan(espId.value)
+  showAddSensorModal.value = false
+  resetNewSensor()
+  
+  // Refresh GPIO status after adding sensors
+  espStore.fetchGpioStatus(espId.value)
+}
+
+// Watch for modal close to cleanup scan state
+watch(() => showAddSensorModal.value, (isOpen) => {
+  if (!isOpen) {
+    // Clear scan results when modal closes
+    espStore.clearOneWireScan(espId.value)
+    oneWireScanPin.value = 4  // Reset to default pin
+  }
 })
 
 // Reset new sensor form to defaults (Phase 2B: Operating Mode erweitert)
@@ -169,6 +394,173 @@ function resetNewSensor() {
     // Operating Mode reset (Phase 2B)
     operating_mode: 'continuous',
     timeout_seconds: 180
+  }
+  // Reset GPIO validation state
+  sensorGpioValid.value = false
+}
+
+/**
+ * Handle GPIO validation changes from GpioPicker.
+ * Updates the validation state for the Add Sensor button.
+ *
+ * @param valid - Whether the selected GPIO is valid
+ * @param message - Validation error message (if any)
+ */
+function onSensorGpioValidation(valid: boolean, message: string | null): void {
+  sensorGpioValid.value = valid
+  if (!valid && message) {
+    console.debug('[ESPOrbitalLayout] GPIO validation:', message)
+  }
+}
+
+// =============================================================================
+// ADD ACTUATOR STATE (Phase 7)
+// =============================================================================
+const showAddActuatorModal = ref(false)
+const defaultActuatorType = 'relay'
+
+// New actuator form state
+const newActuator = ref<MockActuatorConfig>({
+  gpio: 0,
+  aux_gpio: 255,              // 255 = nicht verwendet (ESP32 Default)
+  actuator_type: defaultActuatorType,
+  name: '',
+  state: false,
+  pwm_value: 0,
+  min_value: 0,
+  max_value: 100,
+  // Safety-Felder (aus ESP32 RuntimeProtection)
+  max_runtime_seconds: 0,     // 0 = kein Timeout
+  cooldown_seconds: 0,        // 0 = kein Cooldown
+  inverted_logic: false,      // LOW = ON
+})
+
+// Actuator type options for dropdown
+const actuatorTypeOptions = getActuatorTypeOptions()
+
+// GPIO Validation State for actuator
+const actuatorGpioValid = ref(false)
+const actuatorAuxGpioValid = ref(true) // aux_gpio is optional, default valid
+
+// Computed for aux_gpio to handle undefined→null conversion for GpioPicker
+const actuatorAuxGpio = computed({
+  get: (): number | null => newActuator.value.aux_gpio ?? 255,
+  set: (value: number | null) => { newActuator.value.aux_gpio = value }
+})
+
+// Watch for actuator type changes and update safety defaults
+watch(() => newActuator.value.actuator_type, (newType) => {
+  const defaults = getActuatorSafetyDefaults(newType)
+  newActuator.value.max_runtime_seconds = defaults.maxRuntime
+  newActuator.value.cooldown_seconds = defaults.cooldown
+  // Reset aux_gpio if new type doesn't support it
+  if (!supportsAuxGpio(newType)) {
+    newActuator.value.aux_gpio = 255
+  }
+  // Reset inverted_logic if new type doesn't support it
+  if (!supportsInvertedLogic(newType)) {
+    newActuator.value.inverted_logic = false
+  }
+})
+
+// Reset new actuator form to defaults
+function resetNewActuator() {
+  const defaults = getActuatorSafetyDefaults(defaultActuatorType)
+  newActuator.value = {
+    gpio: 0,
+    aux_gpio: 255,
+    actuator_type: defaultActuatorType,
+    name: '',
+    state: false,
+    pwm_value: 0,
+    min_value: 0,
+    max_value: 100,
+    max_runtime_seconds: defaults.maxRuntime,
+    cooldown_seconds: defaults.cooldown,
+    inverted_logic: false,
+  }
+  actuatorGpioValid.value = false
+  actuatorAuxGpioValid.value = true
+}
+
+/**
+ * Handle GPIO validation changes from GpioPicker for actuator.
+ */
+function onActuatorGpioValidation(valid: boolean, message: string | null): void {
+  actuatorGpioValid.value = valid
+  if (!valid && message) {
+    console.debug('[ESPOrbitalLayout] Actuator GPIO validation:', message)
+  }
+}
+
+/**
+ * Handle aux GPIO validation changes from GpioPicker for valve.
+ */
+function onActuatorAuxGpioValidation(valid: boolean, message: string | null): void {
+  // aux_gpio=255 means "not used", which is always valid
+  actuatorAuxGpioValid.value = valid || newActuator.value.aux_gpio === 255
+  if (!valid && message && newActuator.value.aux_gpio !== 255) {
+    console.debug('[ESPOrbitalLayout] Actuator aux GPIO validation:', message)
+  }
+}
+
+// Error-Code-Mapping für benutzerfreundliche Meldungen (ESP32 → Frontend)
+const ACTUATOR_ERROR_MESSAGES: Record<number, string> = {
+  1050: 'Aktor-Status konnte nicht gesetzt werden',
+  1051: 'Aktor-Initialisierung fehlgeschlagen',
+  1052: 'Aktor nicht gefunden',
+  1053: 'GPIO-Konflikt mit einem Sensor',
+  1001: 'GPIO ist vom System reserviert',
+  1002: 'GPIO wird bereits verwendet',
+  1030: 'PWM-Controller konnte nicht initialisiert werden',
+  1031: 'Alle PWM-Kanäle sind belegt (max. 16)',
+}
+
+// Add actuator to ESP
+async function addActuator() {
+  try {
+    await espStore.addActuator(espId.value, {
+      gpio: newActuator.value.gpio,
+      actuator_type: newActuator.value.actuator_type,
+      name: newActuator.value.name || undefined,
+      state: newActuator.value.state,
+      pwm_value: newActuator.value.pwm_value,
+      aux_gpio: newActuator.value.aux_gpio !== 255 ? newActuator.value.aux_gpio : undefined,
+      inverted_logic: newActuator.value.inverted_logic,
+      max_runtime_seconds: newActuator.value.max_runtime_seconds,
+      cooldown_seconds: newActuator.value.cooldown_seconds,
+    })
+
+    const actuatorLabel = getActuatorLabel(newActuator.value.actuator_type)
+    toast.success(`Aktor "${actuatorLabel}" auf GPIO ${newActuator.value.gpio} hinzugefügt`)
+
+    showAddActuatorModal.value = false
+    resetNewActuator()
+
+    // Refresh ESP data und GPIO-Status
+    await Promise.all([
+      espStore.fetchAll(),
+      espStore.fetchGpioStatus(espId.value)
+    ])
+  } catch (error: any) {
+    // HTTP 409 GPIO_CONFLICT
+    if (error?.response?.status === 409) {
+      const detail = error.response.data?.detail
+      if (detail?.error === 'GPIO_CONFLICT') {
+        toast.error(`GPIO ${detail.gpio} nicht verfügbar: ${detail.message}`)
+        await espStore.fetchGpioStatus(espId.value)
+        return
+      }
+    }
+    // Config Response mit Error-Code (WebSocket Event)
+    if (error?.error_code) {
+      const friendlyMsg = ACTUATOR_ERROR_MESSAGES[error.error_code] || `Fehler ${error.error_code}`
+      toast.error(`${friendlyMsg}: ${error.detail || ''}`)
+      return
+    }
+    // Generic Error
+    const errorMsg = error?.response?.data?.detail || error?.message || 'Unbekannter Fehler'
+    toast.error(`Fehler beim Hinzufügen des Aktors: ${errorMsg}`)
   }
 }
 
@@ -269,35 +661,36 @@ function onDragEnter(event: DragEvent) {
   log('dragenter', {
     isDraggingSensorType: dragStore.isDraggingSensorType,
     isDraggingSensor: dragStore.isDraggingSensor,
+    isDraggingActuatorType: dragStore.isDraggingActuatorType,
     types: Array.from(types),
     isVueDraggable,
     target: (event.target as Element)?.className?.slice?.(0, 50) || (event.target as Element)?.tagName,
   })
 
-  // KRITISCH: Wenn weder SensorType noch Sensor gedraggt wird,
+  // KRITISCH: Wenn weder SensorType noch Sensor noch ActuatorType gedraggt wird,
   // ist es wahrscheinlich ein VueDraggable-Event (ESP-Card-Reordering)
   // In diesem Fall NICHT reagieren, um VueDraggable nicht zu stören!
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
     log('dragenter IGNORED - likely VueDraggable ESP-Card reordering')
     return
   }
 
-  // Only react visually if dragging a sensor type from sidebar (for adding new sensors)
-  if (dragStore.isDraggingSensorType) {
+  // React visually if dragging a sensor or actuator type from sidebar (for adding new items)
+  if (dragStore.isDraggingSensorType || dragStore.isDraggingActuatorType) {
     isDragOver.value = true
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy'
     }
-    log('isDragOver = true (sensor type from sidebar)')
+    log('isDragOver = true (sensor/actuator type from sidebar)')
   }
   // Sensor-Satellite-Drags (für Chart) werden durchgelassen zur AnalysisDropZone
 }
 
 function onDragOver(event: DragEvent) {
-  // KRITISCH: Wenn weder SensorType noch Sensor gedraggt wird,
+  // KRITISCH: Wenn weder SensorType noch Sensor noch ActuatorType gedraggt wird,
   // ist es wahrscheinlich ein VueDraggable-Event (ESP-Card-Reordering)
   // In diesem Fall NICHT preventDefault() aufrufen, um VueDraggable nicht zu stören!
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
     // VueDraggable ESP-Card-Reordering - durchlassen ohne Intervention
     return
   }
@@ -305,8 +698,8 @@ function onDragOver(event: DragEvent) {
   // KRITISCH: preventDefault() muss aufgerufen werden um Drop zu erlauben!
   // Ohne preventDefault() zeigt der Browser "nicht zulässig" (roter Kreis)
 
-  if (dragStore.isDraggingSensorType) {
-    // Sensor-Typ aus Sidebar → Drop auf ESP-Card erlauben (zum Hinzufügen)
+  if (dragStore.isDraggingSensorType || dragStore.isDraggingActuatorType) {
+    // Sensor/Aktor-Typ aus Sidebar → Drop auf ESP-Card erlauben (zum Hinzufügen)
     event.preventDefault()
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy'
@@ -323,7 +716,7 @@ function onDragOver(event: DragEvent) {
 
 function onDragLeave(event: DragEvent) {
   // KRITISCH: Ignorieren wenn es ein VueDraggable-Event ist
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
     return
   }
 
@@ -338,7 +731,7 @@ function onDragLeave(event: DragEvent) {
 
 function onDrop(event: DragEvent) {
   // KRITISCH: Ignorieren wenn es ein VueDraggable-Event ist
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor) {
+  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
     log('DROP IGNORED - likely VueDraggable ESP-Card reordering')
     return
   }
@@ -367,13 +760,50 @@ function onDrop(event: DragEvent) {
       newSensor.value.sensor_type = payload.sensorType
       newSensor.value.unit = getSensorUnit(payload.sensorType)
       newSensor.value.raw_value = getSensorDefault(payload.sensorType)
-      // Find next available GPIO
+      // Find next available GPIO - Phase 5: Dynamic GPIO Selection
+      // Priority 1: Use actual available GPIOs from server (dynamicAvailableGpios)
+      // Priority 2: Fall back to recommended GPIOs for sensor type if status not loaded
       const usedGpios = sensors.value.map(s => s.gpio)
-      const availableGpios = [32, 33, 34, 35, 36, 39, 25, 26, 27, 14, 12, 13]
-      const nextGpio = availableGpios.find(g => !usedGpios.includes(g)) || 0
+      let candidateGpios: number[]
+
+      if (dynamicAvailableGpios.value.length > 0) {
+        // Server knows which GPIOs are available
+        candidateGpios = dynamicAvailableGpios.value
+      } else {
+        // Fallback: sensor-type-specific recommendations filtered by already-used
+        const recommendedForType = getRecommendedGpios(payload.sensorType, 'sensor')
+        candidateGpios = recommendedForType.filter(g => !usedGpios.includes(g))
+      }
+
+      const nextGpio = candidateGpios[0] || 0
       newSensor.value.gpio = nextGpio
       // Open modal
       showAddSensorModal.value = true
+    } else if (payload.action === 'add-actuator') {
+      log('DROP - add-actuator action, opening modal')
+      // Pre-fill form with dragged actuator type
+      newActuator.value.actuator_type = payload.actuatorType
+      // Apply safety defaults for this type
+      const defaults = getActuatorSafetyDefaults(payload.actuatorType)
+      newActuator.value.max_runtime_seconds = defaults.maxRuntime
+      newActuator.value.cooldown_seconds = defaults.cooldown
+      // Find next available GPIO for actuators (no input_only pins!)
+      const usedActuatorGpios = actuators.value.map(a => a.gpio)
+      let candidateGpios: number[]
+
+      if (dynamicAvailableGpios.value.length > 0) {
+        // Server knows which GPIOs are available
+        candidateGpios = dynamicAvailableGpios.value
+      } else {
+        // Fallback: actuator-type-specific recommendations filtered by already-used
+        const recommendedForType = getRecommendedGpios(payload.actuatorType, 'actuator')
+        candidateGpios = recommendedForType.filter(g => !usedActuatorGpios.includes(g))
+      }
+
+      const nextGpio = candidateGpios[0] || 0
+      newActuator.value.gpio = nextGpio
+      // Open modal
+      showAddActuatorModal.value = true
     } else if (payload.type === 'sensor') {
       log('DROP - sensor for chart, should be handled by AnalysisDropZone')
     } else {
@@ -387,20 +817,75 @@ function onDrop(event: DragEvent) {
 // Add sensor to ESP
 // Phase 2B: Keine isMock-Blockade mehr!
 // Der Store entscheidet welche API verwendet wird.
+// Phase 5: Toast-Notifications und HTTP 409 Error-Handling hinzugefügt
+// Phase 6: Multi-Value Sensor Support (SHT31, BMP280, etc.)
 async function addSensor() {
   try {
-    await espStore.addSensor(espId.value, {
-      ...newSensor.value,
-      // Operating Mode Felder für Real-ESPs
-      operating_mode: newSensor.value.operating_mode,
-      timeout_seconds: newSensor.value.timeout_seconds,
-    })
+    const deviceType = getDeviceTypeFromSensorType(newSensor.value.sensor_type)
+
+    if (deviceType) {
+      // MULTI-VALUE: Register ALL sensor_types for this device (PARALLEL!)
+      const sensorTypes = getSensorTypesForDevice(deviceType)
+      const deviceConfig = getMultiValueDeviceConfig(deviceType)
+
+      // Add all sensor_types in parallel
+      await Promise.all(
+        sensorTypes.map(sensorType =>
+          espStore.addSensor(espId.value, {
+            gpio: newSensor.value.gpio,
+            sensor_type: sensorType,
+            name: newSensor.value.name || deviceConfig?.label,
+            subzone_id: newSensor.value.subzone_id,
+            // Operating Mode Felder für Real-ESPs
+            operating_mode: newSensor.value.operating_mode,
+            timeout_seconds: newSensor.value.timeout_seconds,
+          })
+        )
+      )
+
+      // Success Toast
+      toast.success(`${deviceConfig?.label ?? deviceType} auf GPIO ${newSensor.value.gpio} hinzugefügt (${sensorTypes.length} Messwerte)`)
+    } else {
+      // SINGLE-VALUE: Normal behavior
+      await espStore.addSensor(espId.value, {
+        ...newSensor.value,
+        // Operating Mode Felder für Real-ESPs
+        operating_mode: newSensor.value.operating_mode,
+        timeout_seconds: newSensor.value.timeout_seconds,
+      })
+
+      // Success Toast
+      const sensorLabel = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]?.label || newSensor.value.sensor_type
+      toast.success(`Sensor "${sensorLabel}" auf GPIO ${newSensor.value.gpio} hinzugefügt`)
+    }
+
     showAddSensorModal.value = false
     resetNewSensor()
-    // Refresh ESP data
-    await espStore.fetchAll()
-  } catch (error) {
+
+    // Refresh ESP data und GPIO-Status
+    await Promise.all([
+      espStore.fetchAll(),
+      espStore.fetchGpioStatus(espId.value)
+    ])
+  } catch (error: any) {
     console.error('[ESPOrbitalLayout] Failed to add sensor:', error)
+
+    // Handle GPIO conflict (HTTP 409) - Phase 5
+    if (error?.response?.status === 409) {
+      const detail = error.response.data?.detail
+      if (detail?.error === 'GPIO_CONFLICT') {
+        const conflictInfo = detail.message || `Belegt von ${detail.conflict_component}`
+        toast.error(`GPIO ${detail.gpio} nicht verfügbar: ${conflictInfo}`)
+        // Refresh GPIO status to get current state
+        await espStore.fetchGpioStatus(espId.value)
+      } else {
+        toast.error(`GPIO-Konflikt: ${detail?.message || 'Der GPIO-Pin ist bereits belegt.'}`)
+      }
+    } else {
+      // Generic error
+      const errorMsg = error?.response?.data?.detail || error?.message || 'Unbekannter Fehler'
+      toast.error(`Fehler beim Hinzufügen des Sensors: ${errorMsg}`)
+    }
   }
 }
 
@@ -509,14 +994,21 @@ async function saveEditSensor() {
       ? editingSensor.value.schedule_config
       : undefined
 
-    await espStore.updateSensorConfig(espId.value, editingSensor.value.gpio, {
+    const gpio = editingSensor.value.gpio
+    const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
+
+    await espStore.updateSensorConfig(espId.value, gpio, {
       name: editingSensor.value.name,
       operating_mode: editingSensor.value.operating_mode,
       timeout_seconds: editingSensor.value.timeout_seconds,
       schedule_config: scheduleConfig,
     })
 
-    console.log(`[ESPOrbitalLayout] Sensor GPIO ${editingSensor.value.gpio} aktualisiert`)
+    console.log(`[ESPOrbitalLayout] Sensor GPIO ${gpio} aktualisiert`)
+
+    // Success Toast (Phase 5)
+    toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) aktualisiert`)
+
     showEditSensorModal.value = false
     editingSensor.value = null
 
@@ -574,6 +1066,47 @@ async function triggerMeasureNow() {
   }
 }
 
+/**
+ * Remove sensor from ESP (only for Mock ESPs)
+ * Closes the edit modal and deletes the sensor via API
+ */
+async function removeSensor() {
+  if (!editingSensor.value) return
+  if (!isMock.value) {
+    toast.error('Sensor löschen ist nur für Mock ESPs verfügbar')
+    return
+  }
+
+  const gpio = editingSensor.value.gpio
+  const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
+
+  // Confirmation dialog
+  if (!confirm(`Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`)) {
+    return
+  }
+
+  isEditSaving.value = true
+  editError.value = null
+
+  try {
+    await espStore.removeSensor(espId.value, gpio)
+    console.log(`[ESPOrbitalLayout] Sensor GPIO ${gpio} entfernt`)
+    toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) entfernt`)
+
+    // Close modal
+    showEditSensorModal.value = false
+    editingSensor.value = null
+
+    // Refresh ESP data
+    await espStore.fetchAll()
+  } catch (err: any) {
+    console.error('[ESPOrbitalLayout] Failed to remove sensor:', err)
+    editError.value = err.message || 'Fehler beim Entfernen des Sensors'
+  } finally {
+    isEditSaving.value = false
+  }
+}
+
 // =============================================================================
 // Refs
 // =============================================================================
@@ -602,6 +1135,9 @@ const espId = computed(() => {
 const isMock = computed(() => {
   return espApi.isMockEsp(espId.value)
 })
+
+// GPIO Status für dynamische GPIO-Auswahl (Phase 5)
+const { availableGpios: dynamicAvailableGpios } = useGpioStatus(espId)
 
 const isOnline = computed(() => {
   return props.device?.status === 'online' || props.device?.connected === true
@@ -942,7 +1478,7 @@ watch(
     class="esp-horizontal-layout"
     :class="{
       'esp-horizontal-layout--has-items': totalItems > 0,
-      'esp-horizontal-layout--can-drop': dragStore.isDraggingSensorType,
+      'esp-horizontal-layout--can-drop': dragStore.isDraggingSensorType || dragStore.isDraggingActuatorType,
       'esp-horizontal-layout--drag-over': isDragOver
     }"
     :data-esp-id="espId"
@@ -967,6 +1503,9 @@ watch(
         :value="sensor.processed_value ?? sensor.raw_value"
         :quality="sensor.quality as QualityLevel"
         :unit="sensor.unit"
+        :device-type="sensor.device_type"
+        :multi-values="sensor.multi_values"
+        :is-multi-value="sensor.is_multi_value"
         :selected="selectedGpio === sensor.gpio && selectedType === 'sensor'"
         :show-connections="showConnections"
         class="esp-horizontal-layout__satellite"
@@ -1168,30 +1707,204 @@ watch(
 
         <!-- Modal Body -->
         <div class="modal-body">
-          <!-- GPIO + Sensor Type Row -->
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">GPIO</label>
-              <input
-                v-model.number="newSensor.gpio"
-                type="number"
-                min="0"
-                max="39"
-                class="form-input"
-              />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Sensor-Typ</label>
-              <select v-model="newSensor.sensor_type" class="form-select">
-                <option
-                  v-for="option in sensorTypeOptions"
-                  :key="option.value"
-                  :value="option.value"
+          <!-- Sensor Type Selection -->
+          <div class="form-group">
+            <label class="form-label">Sensor-Typ</label>
+            <select v-model="newSensor.sensor_type" class="form-select">
+              <option
+                v-for="option in sensorTypeOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+
+          <!-- ================================================================== -->
+          <!-- ONEWIRE SCAN SECTION (Phase 6 - DS18B20)                           -->
+          <!-- Nur sichtbar wenn DS18B20 ausgewählt ist                           -->
+          <!-- ================================================================== -->
+          <div v-if="isOneWireSensor" class="onewire-scan-section">
+            <!-- Scan Header -->
+            <div class="onewire-scan-header">
+              <h4 class="onewire-scan-title">
+                <Thermometer :size="16" class="text-blue-400" />
+                OneWire-Bus scannen
+              </h4>
+              <div class="onewire-scan-controls">
+                <!-- GPIO Pin Selection -->
+                <select v-model="oneWireScanPin" class="form-select form-select--sm">
+                  <option :value="4">GPIO 4</option>
+                  <option :value="5">GPIO 5</option>
+                  <option :value="13">GPIO 13</option>
+                  <option :value="14">GPIO 14</option>
+                  <option :value="15">GPIO 15</option>
+                  <option :value="16">GPIO 16</option>
+                  <option :value="17">GPIO 17</option>
+                  <option :value="18">GPIO 18</option>
+                  <option :value="19">GPIO 19</option>
+                  <option :value="21">GPIO 21</option>
+                  <option :value="22">GPIO 22</option>
+                  <option :value="23">GPIO 23</option>
+                  <option :value="25">GPIO 25</option>
+                  <option :value="26">GPIO 26</option>
+                  <option :value="27">GPIO 27</option>
+                  <option :value="32">GPIO 32</option>
+                  <option :value="33">GPIO 33</option>
+                </select>
+                
+                <!-- Scan Button -->
+                <button
+                  type="button"
+                  class="btn btn--scan"
+                  :disabled="oneWireScanState.isScanning"
+                  @click="handleOneWireScan"
                 >
-                  {{ option.label }}
-                </option>
-              </select>
+                  <Loader2 v-if="oneWireScanState.isScanning" class="animate-spin" :size="16" />
+                  <ScanLine v-else :size="16" />
+                  {{ oneWireScanState.isScanning ? 'Scanne...' : 'Bus scannen' }}
+                </button>
+              </div>
             </div>
+            
+            <!-- Scan Results -->
+            <div v-if="oneWireScanState.scanResults.length > 0" class="onewire-scan-results">
+              <div class="onewire-scan-results-header">
+                <span class="onewire-scan-results-count">
+                  {{ oneWireScanState.scanResults.length }} Gerät(e) gefunden
+                  <span v-if="newOneWireDeviceCount < oneWireScanState.scanResults.length" class="text-gray-400">
+                    ({{ newOneWireDeviceCount }} neu)
+                  </span>
+                </span>
+                <!-- Only show select-all button if there are new devices -->
+                <button
+                  v-if="newOneWireDeviceCount > 0"
+                  type="button"
+                  class="btn btn--ghost btn--xs"
+                  @click="toggleAllOneWireDevices"
+                >
+                  <CheckSquare v-if="allOneWireDevicesSelected" :size="14" />
+                  <Square v-else :size="14" />
+                  {{ allOneWireDevicesSelected ? 'Alle abwählen' : 'Alle auswählen' }}
+                </button>
+              </div>
+              
+              <!-- Device List -->
+              <div class="onewire-device-list">
+                <label
+                  v-for="device in oneWireScanState.scanResults"
+                  :key="device.rom_code"
+                  class="onewire-device-item"
+                  :class="{
+                    'onewire-device-item--selected': oneWireScanState.selectedRomCodes.includes(device.rom_code) && !device.already_configured,
+                    'onewire-device-item--configured': device.already_configured
+                  }"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="oneWireScanState.selectedRomCodes.includes(device.rom_code)"
+                    :disabled="device.already_configured"
+                    @change="toggleOneWireDevice(device.rom_code)"
+                  />
+                  
+                  <div class="onewire-device-info">
+                    <code 
+                      class="onewire-rom-code" 
+                      :class="{ 'text-gray-500': device.already_configured }"
+                      :title="formatRomCode(device.rom_code)"
+                    >
+                      {{ shortenRomCode(device.rom_code) }}
+                    </code>
+                    <!-- Status Badge: Neu vs Konfiguriert -->
+                    <Badge 
+                      v-if="device.already_configured" 
+                      variant="secondary" 
+                      size="xs"
+                      :title="`Bereits konfiguriert als: ${device.sensor_name || 'Unbenannt'}`"
+                    >
+                      <Check :size="10" class="mr-0.5" />
+                      {{ device.sensor_name || 'Konfiguriert' }}
+                    </Badge>
+                    <Badge v-else variant="success" size="xs">
+                      Neu
+                    </Badge>
+                  </div>
+                  
+                  <Thermometer 
+                    :size="16" 
+                    :class="device.already_configured ? 'text-gray-500' : 'text-blue-400'" 
+                  />
+                </label>
+              </div>
+              
+              <!-- Bulk Add Button (only show if new devices are selected) -->
+              <button
+                v-if="selectedNewDeviceCount > 0"
+                type="button"
+                class="btn btn--primary w-full onewire-bulk-add-btn"
+                @click="addMultipleOneWireSensors"
+              >
+                <Plus :size="16" />
+                {{ selectedNewDeviceCount }} {{ selectedNewDeviceCount === 1 ? 'neuen Sensor' : 'neue Sensoren' }} hinzufügen
+              </button>
+              
+              <!-- All configured message -->
+              <div 
+                v-else-if="newOneWireDeviceCount === 0" 
+                class="onewire-all-configured"
+              >
+                <Check :size="16" class="text-green-400" />
+                <span>Alle gefundenen Geräte sind bereits konfiguriert</span>
+              </div>
+            </div>
+            
+            <!-- Scan Error -->
+            <div v-else-if="oneWireScanState.scanError" class="onewire-scan-error">
+              <AlertCircle :size="16" />
+              <span>{{ oneWireScanState.scanError }}</span>
+            </div>
+            
+            <!-- Empty State: Nach Scan, aber 0 Geräte gefunden -->
+            <div 
+              v-else-if="!oneWireScanState.isScanning && oneWireScanState.lastScanTimestamp && oneWireScanState.scanResults.length === 0" 
+              class="onewire-scan-empty onewire-scan-empty--no-devices"
+            >
+              <AlertCircle :size="20" class="text-yellow-400" />
+              <div class="onewire-scan-empty-content">
+                <p class="onewire-scan-empty-title">Keine OneWire-Geräte gefunden</p>
+                <p class="onewire-scan-empty-hint">
+                  • Überprüfe die Verkabelung (Datenleitung an GPIO {{ oneWireScanPin }})<br>
+                  • Stelle sicher, dass ein 4.7kΩ Pull-up-Widerstand installiert ist<br>
+                  • Versuche einen anderen GPIO-Pin
+                </p>
+              </div>
+            </div>
+            
+            <!-- Initial State: Noch nicht gescannt -->
+            <div v-else-if="!oneWireScanState.isScanning" class="onewire-scan-empty">
+              <Info :size="16" />
+              <span>Klicke "Bus scannen" um OneWire-Geräte auf GPIO {{ oneWireScanPin }} zu finden</span>
+            </div>
+            
+            <!-- Scanning Indicator -->
+            <div v-else class="onewire-scan-loading">
+              <Loader2 class="animate-spin" :size="24" />
+              <span>Scanne OneWire-Bus auf GPIO {{ oneWireScanPin }}...</span>
+            </div>
+          </div>
+
+          <!-- GPIO Selection (NUR für Nicht-OneWire Sensoren!) -->
+          <!-- DS18B20 nutzt den GPIO aus dem OneWire-Scan-Pin-Selector -->
+          <div v-if="!isOneWireSensor" class="form-group">
+            <label class="form-label">GPIO</label>
+            <GpioPicker
+              v-model="newSensor.gpio"
+              :esp-id="espId"
+              :sensor-type="newSensor.sensor_type"
+              variant="dropdown"
+              @validation-change="onSensorGpioValidation"
+            />
           </div>
 
           <!-- ================================================================== -->
@@ -1295,7 +2008,160 @@ watch(
           <button class="btn btn--secondary" @click="showAddSensorModal = false">
             Abbrechen
           </button>
-          <button class="btn btn--primary" @click="addSensor">
+          <!-- Single sensor add button (NUR für Nicht-OneWire Sensoren) -->
+          <!-- DS18B20 nutzt den Bulk-Add-Button nach OneWire-Scan -->
+          <button
+            v-if="!isOneWireSensor"
+            class="btn btn--primary"
+            :disabled="!sensorGpioValid"
+            @click="addSensor"
+          >
+            Hinzufügen
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- =======================================================================
+       ADD ACTUATOR MODAL (Phase 7)
+       ======================================================================= -->
+  <Teleport to="body">
+    <div v-if="showAddActuatorModal" class="modal-overlay" @click.self="showAddActuatorModal = false">
+      <div class="modal-content">
+        <!-- Modal Header -->
+        <div class="modal-header">
+          <h3 class="modal-title">Aktor hinzufügen</h3>
+          <button class="modal-close" @click="showAddActuatorModal = false">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body">
+          <!-- GPIO -->
+          <div class="form-group">
+            <label class="form-label">GPIO Pin</label>
+            <GpioPicker
+              v-model="newActuator.gpio"
+              :esp-id="espId"
+              component-category="actuator"
+              :show-recommendations="true"
+              @validation="onActuatorGpioValidation"
+            />
+          </div>
+
+          <!-- Actuator Type -->
+          <div class="form-group">
+            <label class="form-label">Aktor-Typ</label>
+            <select v-model="newActuator.actuator_type" class="form-select">
+              <option v-for="opt in actuatorTypeOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Name (optional) -->
+          <div class="form-group">
+            <label class="form-label">Name (optional)</label>
+            <input
+              v-model="newActuator.name"
+              type="text"
+              class="form-input"
+              placeholder="z.B. Wasserpumpe 1"
+              maxlength="100"
+            />
+          </div>
+
+          <!-- Aux GPIO (only for valves) -->
+          <div v-if="supportsAuxGpio(newActuator.actuator_type)" class="form-group">
+            <label class="form-label">
+              Aux-GPIO (Direction-Pin)
+              <span class="form-label-hint">Optional - für H-Bridge Ventile</span>
+            </label>
+            <GpioPicker
+              v-model="actuatorAuxGpio"
+              :esp-id="espId"
+              component-category="actuator"
+              :show-recommendations="true"
+              :allow-empty="true"
+              empty-value="255"
+              empty-label="Nicht verwendet"
+              @validation="onActuatorAuxGpioValidation"
+            />
+          </div>
+
+          <!-- PWM Value (only for PWM actuators) -->
+          <div v-if="isPwmActuator(newActuator.actuator_type)" class="form-group">
+            <label class="form-label">
+              PWM-Wert
+              <span class="form-label-hint">{{ Math.round((newActuator.pwm_value || 0) * 100) }}%</span>
+            </label>
+            <input
+              v-model.number="newActuator.pwm_value"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              class="form-range"
+            />
+          </div>
+
+          <!-- Max Runtime (only for pumps) -->
+          <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
+            <label class="form-label">
+              Max. Laufzeit
+              <span class="form-label-hint">Sekunden (0 = kein Limit)</span>
+            </label>
+            <input
+              v-model.number="newActuator.max_runtime_seconds"
+              type="number"
+              min="0"
+              max="86400"
+              class="form-input"
+              placeholder="3600"
+            />
+          </div>
+
+          <!-- Cooldown (only for pumps) -->
+          <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
+            <label class="form-label">
+              Cooldown
+              <span class="form-label-hint">Sekunden zwischen Aktivierungen</span>
+            </label>
+            <input
+              v-model.number="newActuator.cooldown_seconds"
+              type="number"
+              min="0"
+              max="3600"
+              class="form-input"
+              placeholder="30"
+            />
+          </div>
+
+          <!-- Inverted Logic (for all except PWM) -->
+          <div v-if="supportsInvertedLogic(newActuator.actuator_type)" class="form-group form-group--checkbox">
+            <label class="form-checkbox">
+              <input
+                v-model="newActuator.inverted_logic"
+                type="checkbox"
+              />
+              <span class="form-checkbox-label">Invertierte Logik (LOW = ON)</span>
+            </label>
+            <p class="form-hint">Für Relais-Module die bei LOW schalten</p>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer">
+          <button class="btn btn--secondary" @click="showAddActuatorModal = false">
+            Abbrechen
+          </button>
+          <button
+            class="btn btn--primary"
+            :disabled="!actuatorGpioValid || (supportsAuxGpio(newActuator.actuator_type) && !actuatorAuxGpioValid)"
+            @click="addActuator"
+          >
             Hinzufügen
           </button>
         </div>
@@ -1507,7 +2373,22 @@ watch(
         </div>
 
         <!-- Modal Footer -->
-        <div class="modal-footer">
+        <div class="modal-footer modal-footer--with-delete">
+          <!-- Delete Button (nur für Mock ESPs) -->
+          <button
+            v-if="isMock"
+            class="btn btn--danger btn--icon"
+            :disabled="isEditSaving"
+            title="Sensor entfernen"
+            @click="removeSensor"
+          >
+            <Trash2 :size="16" />
+            Entfernen
+          </button>
+
+          <!-- Spacer für rechte Ausrichtung der anderen Buttons -->
+          <div class="modal-footer__spacer" />
+
           <button
             class="btn btn--secondary"
             :disabled="isEditSaving"
@@ -2268,6 +3149,37 @@ watch(
   border-top: 1px solid var(--glass-border);
 }
 
+.modal-footer--with-delete {
+  justify-content: flex-start;
+}
+
+.modal-footer__spacer {
+  flex: 1;
+}
+
+/* Delete Button Styling */
+.btn--danger {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--color-error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.btn--danger:hover {
+  background-color: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.btn--danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
 /* Form Elements */
 .form-row {
   display: grid;
@@ -2605,6 +3517,317 @@ watch(
 }
 .h-3 {
   height: 0.75rem;
+}
+
+/* =============================================================================
+   OneWire Scan Section (Phase 6 - DS18B20 Support)
+   ============================================================================= */
+
+.onewire-scan-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.05) 0%,
+    rgba(96, 165, 250, 0.08) 100%
+  );
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 0.5rem;
+}
+
+.onewire-scan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.onewire-scan-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #ffffff);
+  margin: 0;
+}
+
+.onewire-scan-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.form-select--sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  width: auto;
+  min-width: 100px;
+}
+
+.btn--scan {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(
+    135deg,
+    #3b82f6 0%,
+    #60a5fa 100%
+  );
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn--scan:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(96, 165, 250, 0.4);
+}
+
+.btn--scan:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Scan Results */
+.onewire-scan-results {
+  margin-top: 1rem;
+}
+
+.onewire-scan-results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.onewire-scan-results-count {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #9ca3af);
+  font-weight: 500;
+}
+
+.btn--ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--color-text-secondary, #9ca3af);
+}
+
+.btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-primary, #ffffff);
+}
+
+.btn--xs {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  gap: 0.25rem;
+}
+
+/* Device List */
+.onewire-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.onewire-device-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--color-bg-secondary, rgba(30, 33, 42, 0.8));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.onewire-device-item:hover {
+  border-color: rgba(96, 165, 250, 0.4);
+  background: var(--color-bg-tertiary, rgba(40, 43, 52, 0.9));
+}
+
+.onewire-device-item--selected {
+  border-color: rgba(96, 165, 250, 0.6);
+  background: rgba(96, 165, 250, 0.1);
+}
+
+/* OneWire Multi-Device Support: Already configured devices */
+.onewire-device-item--configured {
+  border-color: rgba(156, 163, 175, 0.3);
+  background: rgba(107, 114, 128, 0.05);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.onewire-device-item--configured:hover {
+  border-color: rgba(156, 163, 175, 0.3);
+  background: rgba(107, 114, 128, 0.05);
+}
+
+.onewire-device-item--configured input[type="checkbox"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* All devices already configured message */
+.onewire-all-configured {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: 0.375rem;
+  color: #34d399;
+  font-size: 0.8125rem;
+  margin-top: 0.5rem;
+}
+
+.onewire-device-item input[type="checkbox"] {
+  width: 1.125rem;
+  height: 1.125rem;
+  cursor: pointer;
+  accent-color: #60a5fa;
+}
+
+.onewire-device-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.onewire-rom-code {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+/* Bulk Add Button */
+.onewire-bulk-add-btn {
+  margin-top: 0.5rem;
+}
+
+/* Scan Error */
+.onewire-scan-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 0.375rem;
+  color: #f87171;
+  font-size: 0.8125rem;
+  margin-top: 1rem;
+}
+
+.onewire-scan-error svg {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+/* Scan Empty State */
+.onewire-scan-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--color-bg-tertiary, rgba(40, 43, 52, 0.5));
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 0.375rem;
+  color: var(--color-text-secondary, #9ca3af);
+  font-size: 0.8125rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* No Devices Found State (after scan with 0 results) */
+.onewire-scan-empty--no-devices {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-style: solid;
+  padding: 1rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.onewire-scan-empty--no-devices svg {
+  color: #fbbf24;
+}
+
+.onewire-scan-empty-content {
+  text-align: left;
+  width: 100%;
+}
+
+.onewire-scan-empty-title {
+  font-weight: 600;
+  color: var(--color-text-primary, #ffffff);
+  margin-bottom: 0.5rem;
+}
+
+.onewire-scan-empty-hint {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #9ca3af);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Scan Loading State */
+.onewire-scan-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  color: var(--color-text-secondary, #9ca3af);
+  font-size: 0.875rem;
+  margin-top: 1rem;
+}
+
+.onewire-scan-loading svg {
+  color: #60a5fa;
+}
+
+/* Spin animation for Loader2 */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Text color utilities */
+.text-blue-400 {
+  color: #60a5fa;
+}
+
+/* Width utility */
+.w-full {
+  width: 100%;
 }
 </style>
 

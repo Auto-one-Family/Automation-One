@@ -78,6 +78,9 @@ public:
     // Monitoring
     void loop();  // Call in main loop
     
+    // Circuit Breaker Access (for Watchdog integration)
+    CircuitState getCircuitBreakerState() const;
+    
 private:
     MQTTClient();
     ~MQTTClient();

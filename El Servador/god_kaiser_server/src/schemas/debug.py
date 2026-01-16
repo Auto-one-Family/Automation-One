@@ -64,6 +64,27 @@ class MockSensorConfig(BaseModel):
     quality: QualityLevel = Field(QualityLevel.GOOD, description="Data quality")
     raw_mode: bool = Field(True, description="Send raw values (Pi-Enhanced processing)")
 
+    # =========================================================================
+    # MULTI-VALUE SENSOR SUPPORT (I2C/OneWire) - DS18B20 Integration
+    # =========================================================================
+    interface_type: Optional[str] = Field(
+        None,
+        pattern=r"^(I2C|ONEWIRE|ANALOG|DIGITAL)$",
+        description="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred from sensor_type if not provided)"
+    )
+    onewire_address: Optional[str] = Field(
+        None,
+        max_length=16,
+        description="OneWire ROM address for DS18B20 sensors (16 hex chars, e.g., '28FF641E8D3C0C79')"
+    )
+    i2c_address: Optional[int] = Field(
+        None,
+        ge=0,
+        le=127,
+        description="I2C address for I2C sensors (e.g., 0x44 = 68 for SHT31)"
+    )
+    # =========================================================================
+
     # Simulation Parameters (NEW - Paket B.1)
     interval_seconds: float = Field(
         30.0,

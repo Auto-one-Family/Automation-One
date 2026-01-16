@@ -78,6 +78,9 @@ from .esp import (
 # Sensor schemas
 from .sensor import (
     CalibrationPoint,
+    OneWireDevice,
+    OneWireScanRequest,
+    OneWireScanResponse,
     SensorCalibrateRequest,
     SensorCalibrateResponse,
     SensorConfigBase,
@@ -255,6 +258,9 @@ __all__ = [
     "ESPRestartRequest",
     # Sensor
     "CalibrationPoint",
+    "OneWireDevice",
+    "OneWireScanRequest",
+    "OneWireScanResponse",
     "SensorCalibrateRequest",
     "SensorCalibrateResponse",
     "SensorConfigBase",

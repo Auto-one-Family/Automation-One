@@ -73,7 +73,6 @@ import Badge from '@/components/common/Badge.vue'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { espApi, type ESPDevice } from '@/api/esp'
-import type { OfflineInfo } from '@/types'
 import { useEspStore } from '@/stores/esp'
 
 interface Props {

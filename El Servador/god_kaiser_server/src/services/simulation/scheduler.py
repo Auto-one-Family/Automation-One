@@ -9,8 +9,13 @@ Jeder Mock-ESP bekommt:
 
 Job-IDs folgen dem Pattern:
 - Heartbeat: "mock_{esp_id}_heartbeat"
-- Sensor: "mock_{esp_id}_sensor_{gpio}"
+- Sensor: "mock_{esp_id}_sensor_{gpio}_{sensor_type}" (MULTI-VALUE SUPPORT)
 - Auto-Off: "mock_{esp_id}_auto_off_{gpio}"
+
+MULTI-VALUE SUPPORT:
+- Sensor configs are keyed by "{gpio}_{sensor_type}" (e.g., "21_sht31_temp")
+- Each sensor_type gets its own job, even on the same GPIO
+- SHT31: Creates "21_sht31_temp" + "21_sht31_humidity" jobs on same GPIO 21
 """
 
 import json
@@ -316,6 +321,9 @@ class SimulationScheduler:
         """
         Lädt Sensor-Config aus DB und startet Sensor-Jobs.
 
+        MULTI-VALUE SUPPORT: Keys are now "{gpio}_{sensor_type}" format.
+        Each sensor_type gets its own job, even on the same GPIO.
+
         Args:
             esp_id: ESP Device ID
             runtime: Mock Runtime
@@ -334,32 +342,42 @@ class SimulationScheduler:
 
         scheduler = get_central_scheduler()
 
-        for gpio_str, sensor_config in sensors.items():
+        for sensor_key, sensor_config in sensors.items():
             try:
-                gpio = int(gpio_str)
+                # MULTI-VALUE: Key is "{gpio}_{sensor_type}" or legacy "{gpio}"
+                sensor_type = sensor_config.get("sensor_type", "GENERIC")
+
+                # Extract GPIO from key or config
+                if "_" in sensor_key and not sensor_key.isdigit():
+                    # New format: "{gpio}_{sensor_type}"
+                    gpio = int(sensor_key.split("_")[0])
+                else:
+                    # Legacy format: just GPIO or from config
+                    gpio = sensor_config.get("gpio", int(sensor_key))
+
                 interval = sensor_config.get("interval_seconds", 30.0)
 
-                # Sensor-Job erstellen
-                job_id = f"mock_{esp_id}_sensor_{gpio}"
+                # MULTI-VALUE: Job-ID includes sensor_type
+                job_id = f"mock_{esp_id}_sensor_{gpio}_{sensor_type}"
                 scheduler.add_interval_job(
                     job_id=job_id,
                     func=self._sensor_job,
                     seconds=interval,
-                    args=[esp_id, gpio],
+                    args=[esp_id, gpio, sensor_type],  # Pass sensor_type to job
                     category=JobCategory.MOCK_ESP,
                     start_immediately=True
                 )
 
-                # Track in Runtime
-                runtime.active_sensor_jobs[gpio] = job_id
+                # Track in Runtime using sensor_key (gpio_type)
+                runtime.active_sensor_jobs[sensor_key] = job_id
 
                 logger.debug(
                     f"[{esp_id}] Started sensor job: GPIO {gpio}, "
-                    f"interval {interval}s, type {sensor_config.get('sensor_type')}"
+                    f"type {sensor_type}, interval {interval}s"
                 )
 
-            except ValueError as e:
-                logger.error(f"Invalid GPIO '{gpio_str}' in sensor config: {e}")
+            except (ValueError, KeyError) as e:
+                logger.error(f"Invalid sensor key '{sensor_key}' in config: {e}")
 
     async def stop_mock(self, esp_id: str) -> bool:
         """
@@ -500,7 +518,8 @@ class SimulationScheduler:
         self,
         esp_id: str,
         gpio: int,
-        interval_seconds: float = 30.0
+        interval_seconds: float = 30.0,
+        sensor_type: str = "GENERIC"
     ) -> bool:
         """
         Fügt dynamisch einen Sensor-Job hinzu (während Simulation läuft).
@@ -508,10 +527,13 @@ class SimulationScheduler:
         Diese Methode wird von der API aufgerufen wenn ein Sensor zu einem
         laufenden Mock hinzugefügt wird.
 
+        MULTI-VALUE SUPPORT: Each sensor_type on the same GPIO gets its own job.
+
         Args:
             esp_id: ESP Device ID
             gpio: GPIO Pin
             interval_seconds: Sensor-Intervall
+            sensor_type: Sensor type (e.g., "sht31_temp", "sht31_humidity")
 
         Returns:
             True wenn Job erfolgreich hinzugefügt
@@ -521,36 +543,40 @@ class SimulationScheduler:
             logger.warning(f"Cannot add sensor job: Mock {esp_id} not running")
             return False
 
+        # MULTI-VALUE: Use gpio_sensor_type as key
+        sensor_key = f"{gpio}_{sensor_type}"
+
         # Prüfe ob Sensor bereits aktiv
-        if gpio in runtime.active_sensor_jobs:
-            logger.warning(f"[{esp_id}] Sensor GPIO {gpio} already active")
+        if sensor_key in runtime.active_sensor_jobs:
+            logger.warning(f"[{esp_id}] Sensor {sensor_key} already active")
             return False
 
         scheduler = get_central_scheduler()
 
-        # Sensor-Job erstellen
-        job_id = f"mock_{esp_id}_sensor_{gpio}"
+        # MULTI-VALUE: Job-ID includes sensor_type
+        job_id = f"mock_{esp_id}_sensor_{gpio}_{sensor_type}"
         scheduler.add_interval_job(
             job_id=job_id,
             func=self._sensor_job,
             seconds=interval_seconds,
-            args=[esp_id, gpio],
+            args=[esp_id, gpio, sensor_type],  # Pass sensor_type to job
             category=JobCategory.MOCK_ESP,
             start_immediately=True
         )
 
-        # Track in Runtime
-        runtime.active_sensor_jobs[gpio] = job_id
+        # Track in Runtime using sensor_key
+        runtime.active_sensor_jobs[sensor_key] = job_id
 
         logger.info(
-            f"[{esp_id}] Added sensor job: GPIO {gpio}, interval {interval_seconds}s"
+            f"[{esp_id}] Added sensor job: GPIO {gpio}, type {sensor_type}, interval {interval_seconds}s"
         )
         return True
 
     async def trigger_immediate_sensor_publish(
         self,
         esp_id: str,
-        gpio: int
+        gpio: int,
+        sensor_type: str = "GENERIC"
     ) -> bool:
         """
         Triggert sofortigen Sensor-Publish (für initialen Wert nach Sensor-Erstellung).
@@ -558,9 +584,12 @@ class SimulationScheduler:
         Diese Methode wird von der API aufgerufen um einen Sensor-Wert sofort zu
         publishen, anstatt auf das nächste Intervall zu warten.
 
+        MULTI-VALUE SUPPORT: Requires sensor_type to identify the correct sensor.
+
         Args:
             esp_id: ESP Device ID
             gpio: GPIO Pin
+            sensor_type: Sensor type (e.g., "sht31_temp")
 
         Returns:
             True wenn Publish erfolgreich
@@ -571,24 +600,33 @@ class SimulationScheduler:
             return False
 
         try:
-            # Führe den Sensor-Job direkt aus
-            await self._sensor_job(esp_id, gpio)
-            logger.info(f"[{esp_id}] Immediate sensor publish for GPIO {gpio}")
+            # Führe den Sensor-Job direkt aus (mit sensor_type)
+            await self._sensor_job(esp_id, gpio, sensor_type)
+            logger.info(f"[{esp_id}] Immediate sensor publish for GPIO {gpio} type {sensor_type}")
             return True
         except Exception as e:
             logger.error(f"[{esp_id}] Immediate publish failed: {e}")
             return False
 
-    def remove_sensor_job(self, esp_id: str, gpio: int) -> bool:
+    def remove_sensor_job(
+        self,
+        esp_id: str,
+        gpio: int,
+        sensor_type: Optional[str] = None
+    ) -> bool:
         """
         Entfernt dynamisch einen Sensor-Job (während Simulation läuft).
 
         Diese Methode wird von der API aufgerufen wenn ein Sensor von einem
         laufenden Mock entfernt wird.
 
+        MULTI-VALUE SUPPORT: If sensor_type is provided, removes only that
+        specific sensor job. If not provided, removes ALL jobs on that GPIO.
+
         Args:
             esp_id: ESP Device ID
             gpio: GPIO Pin
+            sensor_type: Optional sensor type (e.g., "sht31_temp")
 
         Returns:
             True wenn Job erfolgreich entfernt
@@ -598,31 +636,39 @@ class SimulationScheduler:
             logger.warning(f"Cannot remove sensor job: Mock {esp_id} not running")
             return False
 
-        # Prüfe ob Sensor aktiv
-        if gpio not in runtime.active_sensor_jobs:
-            logger.warning(f"[{esp_id}] Sensor GPIO {gpio} not active")
-            return False
-
         scheduler = get_central_scheduler()
+        removed_any = False
 
-        # Job entfernen
-        job_id = runtime.active_sensor_jobs[gpio]
-        removed = scheduler.remove_job(job_id)
+        if sensor_type:
+            # MULTI-VALUE: Remove specific sensor_type on GPIO
+            sensor_key = f"{gpio}_{sensor_type}"
+            if sensor_key in runtime.active_sensor_jobs:
+                job_id = runtime.active_sensor_jobs[sensor_key]
+                if scheduler.remove_job(job_id):
+                    del runtime.active_sensor_jobs[sensor_key]
+                    removed_any = True
+                    logger.info(f"[{esp_id}] Removed sensor job: {sensor_key}")
+        else:
+            # BACKWARDS COMPAT: Remove all sensors on this GPIO
+            keys_to_remove = [
+                k for k in runtime.active_sensor_jobs
+                if k == str(gpio) or k.startswith(f"{gpio}_")
+            ]
+            for sensor_key in keys_to_remove:
+                job_id = runtime.active_sensor_jobs[sensor_key]
+                if scheduler.remove_job(job_id):
+                    del runtime.active_sensor_jobs[sensor_key]
+                    removed_any = True
+                    logger.info(f"[{esp_id}] Removed sensor job: {sensor_key}")
 
-        if removed:
-            # Remove from Runtime
-            del runtime.active_sensor_jobs[gpio]
-
-            # Clean up drift state
+        # Clean up drift state for this GPIO
+        if removed_any:
             if gpio in runtime.drift_values:
                 del runtime.drift_values[gpio]
             if gpio in runtime.drift_directions:
                 del runtime.drift_directions[gpio]
 
-            logger.info(f"[{esp_id}] Removed sensor job: GPIO {gpio}")
-            return True
-
-        return False
+        return removed_any
 
     # ================================================================
     # JOB IMPLEMENTATIONS
@@ -705,28 +751,29 @@ class SimulationScheduler:
             "safe_mode": runtime.emergency_stopped
         }
 
-    async def _sensor_job(self, esp_id: str, gpio: int) -> None:
+    async def _sensor_job(self, esp_id: str, gpio: int, sensor_type: str = "GENERIC") -> None:
         """
         Sensor Job - wird vom Scheduler aufgerufen.
 
         Sendet simulierte Sensor-Daten identisch zu echtem ESP32.
 
+        MULTI-VALUE SUPPORT: Uses "{gpio}_{sensor_type}" key to load config.
+
         Args:
             esp_id: ESP Device ID
             gpio: GPIO Pin
+            sensor_type: Sensor type (e.g., "sht31_temp", "sht31_humidity")
         """
         runtime = self._runtimes.get(esp_id)
         if not runtime or not self._mqtt_publish:
             return
 
-        # Lade Sensor-Config aus DB (wird über _db_session geladen)
-        # Für Performance: Cache in Runtime (TODO: Optimization)
-        # Aktuell: Wird bei start_mock() einmalig geladen
+        # MULTI-VALUE: Use gpio_sensor_type as key
+        sensor_key = f"{gpio}_{sensor_type}"
 
         # Sensor-Wert berechnen
         try:
             # Load sensor config from DB via async context
-            # This is a simplified approach - in production, cache config in runtime
             from ...db.session import get_session
             from ...db.repositories import ESPRepository
 
@@ -735,15 +782,20 @@ class SimulationScheduler:
                 device = await esp_repo.get_by_device_id(esp_id)
 
                 if not device or not device.device_metadata:
-                    logger.warning(f"[{esp_id}] No device metadata for sensor {gpio}")
+                    logger.warning(f"[{esp_id}] No device metadata for sensor {sensor_key}")
                     return
 
                 sim_config = device.device_metadata.get("simulation_config", {})
                 sensors = sim_config.get("sensors", {})
-                sensor_config = sensors.get(str(gpio))
+
+                # MULTI-VALUE: Try new key format first, fallback to legacy
+                sensor_config = sensors.get(sensor_key)
+                if not sensor_config:
+                    # Fallback: Try legacy format (gpio only)
+                    sensor_config = sensors.get(str(gpio))
 
                 if not sensor_config:
-                    logger.warning(f"[{esp_id}] Sensor {gpio} not in config")
+                    logger.warning(f"[{esp_id}] Sensor {sensor_key} not in config")
                     return
 
                 # Berechne Sensor-Wert
@@ -758,16 +810,14 @@ class SimulationScheduler:
                 topic = TopicBuilder.build_sensor_data_topic(esp_id, gpio, runtime.kaiser_id)
 
                 # Build Payload (Format wie echter ESP - raw_value ist der korrekte Wert)
-                # HINWEIS: "raw" wurde entfernt, da es den Wert falsch mit 100 multiplizierte
-                # Der sensor_handler verwendet payload.get("raw", payload.get("raw_value"))
-                # und fällt jetzt korrekt auf raw_value zurück
+                # MULTI-VALUE: sensor_type from parameter, not from config (for precision)
                 payload = {
                     "ts": int(time.time() * 1000),  # MILLISEKUNDEN (KRITISCH!)
                     "esp_id": esp_id,
                     "gpio": gpio,
-                    "sensor_type": sensor_config.get("sensor_type", "GENERIC"),
-                    "raw_value": value,       # FLOAT - Der korrekte Sensor-Wert
-                    "raw_mode": True,         # BOOLEAN (KRITISCH! - Required by handler)
+                    "sensor_type": sensor_type,   # Use parameter for precision
+                    "raw_value": value,           # FLOAT - Der korrekte Sensor-Wert
+                    "raw_mode": True,             # BOOLEAN (KRITISCH! - Required by handler)
                     "value": value,
                     "unit": sensor_config.get("unit", ""),
                     "quality": sensor_config.get("quality", "good"),
@@ -778,14 +828,14 @@ class SimulationScheduler:
                 # MQTT Publish
                 self._mqtt_publish(topic, payload, 0)
                 logger.debug(
-                    f"[{esp_id}] Sensor {gpio} published: "
-                    f"{value:.2f} {sensor_config.get('unit', '')}"
+                    f"[{esp_id}] Sensor {sensor_key} published: "
+                    f"{value:.2f} {sensor_config.get('unit', '')} (type={sensor_type})"
                 )
 
                 break  # Exit async for loop
 
         except Exception as e:
-            logger.error(f"[{esp_id}] Sensor {gpio} job failed: {e}", exc_info=True)
+            logger.error(f"[{esp_id}] Sensor {sensor_key} job failed: {e}", exc_info=True)
 
     def _calculate_sensor_value(
         self,

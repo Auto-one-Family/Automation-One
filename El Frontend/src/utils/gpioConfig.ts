@@ -510,6 +510,104 @@ export function getCategoryColorClass(category: GpioCategory): string {
 }
 
 // =============================================================================
+// GPIO RECOMMENDATIONS (Phase 5)
+// =============================================================================
+
+/**
+ * Get recommended GPIOs for a specific sensor/actuator type.
+ *
+ * Returns pins that are particularly suitable based on:
+ * - Electrical characteristics (ADC for analog sensors)
+ * - Common usage patterns
+ * - Hardware limitations
+ *
+ * @param componentType - Sensor or actuator type (e.g., "DS18B20", "pH", "pump")
+ * @param category - 'sensor' or 'actuator' (default: 'sensor')
+ * @returns Array of recommended GPIO numbers
+ *
+ * @example
+ * getRecommendedGpios('DS18B20', 'sensor')  // [4, 5, 13, 14, 15]
+ * getRecommendedGpios('pH', 'sensor')       // [32, 33, 34, 35, 36, 39] (ADC pins)
+ * getRecommendedGpios('pump', 'actuator')   // [4, 5, 12, 13, ...]
+ */
+export function getRecommendedGpios(
+  componentType: string,
+  category: 'sensor' | 'actuator' = 'sensor'
+): number[] {
+  // Sensor/Actuator type-based recommendations
+  const recommendations: Record<string, number[]> = {
+    // Temperature sensors (OneWire) - general purpose GPIOs
+    'ds18b20': [4, 5, 13, 14, 15],
+    'temperature': [4, 5, 13, 14, 15],
+
+    // I2C sensors - standard I2C pins
+    'sht31': [21, 22],
+    'bme280': [21, 22],
+    'aht20': [21, 22],
+    'humidity': [21, 22],
+    'i2c': [21, 22],
+
+    // Analog sensors - ADC-capable pins only (ADC1: 32-39)
+    'ph': [32, 33, 34, 35, 36, 39],
+    'ec': [32, 33, 34, 35, 36, 39],
+    'moisture': [32, 33, 34, 35, 36, 39],
+    'soil_moisture': [32, 33, 34, 35, 36, 39],
+    'water_level': [32, 33, 34, 35, 36, 39],
+    'light': [32, 33, 34, 35, 36, 39],
+    'ldr': [32, 33, 34, 35, 36, 39],
+    'analog': [32, 33, 34, 35, 36, 39],
+
+    // CO2 sensors (usually I2C or UART)
+    'co2': [21, 22, 16, 17],
+    'scd30': [21, 22],
+    'scd40': [21, 22],
+
+    // Pressure sensors (I2C)
+    'pressure': [21, 22],
+    'bmp280': [21, 22],
+
+    // Flow sensors (digital pulse counting)
+    'flow': [4, 5, 13, 14, 15, 16, 17, 18, 19],
+
+    // Actuators - output-capable GPIOs (avoid strapping pins)
+    'relay': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+    'pump': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+    'valve': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+    'heater': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+    'cooler': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27],
+
+    // PWM actuators - PWM-capable pins
+    'pwm': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27],
+    'fan': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+    'led': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+    'dimmer': [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 25, 26, 27],
+  }
+
+  const normalizedType = componentType.toLowerCase().trim()
+
+  // Direct match
+  if (recommendations[normalizedType]) {
+    return recommendations[normalizedType]
+  }
+
+  // Partial match (e.g., "ds18b20_temperature" matches "ds18b20")
+  for (const [key, gpios] of Object.entries(recommendations)) {
+    if (normalizedType.includes(key) || key.includes(normalizedType)) {
+      return gpios
+    }
+  }
+
+  // Default based on category
+  if (category === 'actuator') {
+    // Actuators: output-capable GPIOs
+    return [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
+  }
+
+  // Sensors: all general-purpose GPIOs
+  return [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
+}
+
+// =============================================================================
 // DYNAMIC STATUS INTEGRATION (Phase 3)
 // =============================================================================
 

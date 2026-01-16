@@ -56,10 +56,10 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     # Hardware Configuration
-    gpio: Mapped[int] = mapped_column(
+    gpio: Mapped[Optional[int]] = mapped_column(
         Integer,
-        nullable=False,
-        doc="GPIO pin number",
+        nullable=True,
+        doc="GPIO pin number (nullable for I2C/OneWire bus devices)",
     )
 
     # Sensor Information
@@ -74,6 +74,36 @@ class SensorConfig(Base, TimestampMixin):
         String(100),
         nullable=False,
         doc="Human-readable sensor name",
+    )
+
+    # =========================================================================
+    # MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+    # =========================================================================
+    # Interface type identifies how the sensor communicates with ESP32
+
+    interface_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        doc="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL",
+    )
+
+    i2c_address: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,  # Indexed for fast I2C address conflict checks
+        doc="I2C address (required for I2C sensors, e.g., 68 for 0x44)",
+    )
+
+    onewire_address: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        doc="OneWire device address (required for OneWire sensors)",
+    )
+
+    provides_values: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="List of value types this sensor provides (for multi-value sensors, e.g., ['sht31_temp', 'sht31_humidity'])",
     )
 
     enabled: Mapped[bool] = mapped_column(
@@ -187,8 +217,10 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     # Table Constraints
+    # MULTI-VALUE SUPPORT: Erlaubt mehrere sensor_types pro GPIO
+    # z.B. SHT31 auf GPIO 21: sht31_temp + sht31_humidity
     __table_args__ = (
-        UniqueConstraint("esp_id", "gpio", name="unique_esp_gpio_sensor"),
+        UniqueConstraint("esp_id", "gpio", "sensor_type", name="unique_esp_gpio_sensor_type"),
         Index("idx_sensor_type_enabled", "sensor_type", "enabled"),
     )
 

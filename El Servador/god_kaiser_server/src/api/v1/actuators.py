@@ -326,7 +326,9 @@ async def create_or_update_actuator(
     validation_result = await gpio_validator.validate_gpio_available(
         esp_db_id=esp_device.id,
         gpio=gpio,
-        exclude_actuator_id=existing.id if existing else None
+        exclude_actuator_id=existing.id if existing else None,
+        purpose="actuator",
+        interface_type="DIGITAL"
     )
 
     if not validation_result.available:

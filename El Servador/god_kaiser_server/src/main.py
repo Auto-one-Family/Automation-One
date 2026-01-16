@@ -40,6 +40,7 @@ from .mqtt.handlers import (
     actuator_alert_handler,
     config_handler,
     discovery_handler,
+    error_handler,
     heartbeat_handler,
     lwt_handler,
     sensor_handler,
@@ -249,6 +250,14 @@ async def lifespan(app: FastAPI):
             lwt_handler.handle_lwt
         )
         logger.info(f"LWT handler registered: kaiser/{kaiser_id}/esp/+/system/will")
+        # Error Event Handler (DS18B20/OneWire errors, GPIO conflicts, etc.)
+        # Topic: kaiser/{kaiser_id}/esp/+/system/error
+        # ESP32 publishes hardware/config errors to this topic for server processing
+        _subscriber_instance.register_handler(
+            f"kaiser/{kaiser_id}/esp/+/system/error",
+            error_handler.handle_error_event
+        )
+        logger.info(f"Error handler registered: kaiser/{kaiser_id}/esp/+/system/error")
 
         logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 

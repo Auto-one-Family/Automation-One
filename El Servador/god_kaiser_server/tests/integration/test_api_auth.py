@@ -374,8 +374,6 @@ class TestLoginFormTokenVersion:
             me_response = await client.get(
                 "/api/v1/auth/me",
                 headers={"Authorization": f"Bearer {token}"},
-            )
-
-        # Should be rejected because token_version is outdated
+            )        # Should be rejected because token_version is outdated
         assert me_response.status_code == 401
         assert "invalidated" in me_response.json()["detail"].lower()

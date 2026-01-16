@@ -464,6 +464,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
         """
         Add sensor to simulation_config.
 
+        MULTI-VALUE SUPPORT: Key is now "{gpio}_{sensor_type}" to allow
+        multiple sensor types on the same GPIO (e.g., SHT31: temp + humidity).
+
         Args:
             device_id: ESP Device ID
             gpio: GPIO Pin
@@ -485,8 +488,15 @@ class ESPRepository(BaseRepository[ESPDevice]):
         if "sensors" not in sim_config:
             sim_config["sensors"] = {}
 
-        # Add sensor
-        sim_config["sensors"][str(gpio)] = sensor_config
+        # MULTI-VALUE FIX: Use "{gpio}_{sensor_type}" as key to support
+        # multiple sensor types on same GPIO (e.g., SHT31 temp + humidity)
+        sensor_type = sensor_config.get("sensor_type", "GENERIC")
+        sensor_key = f"{gpio}_{sensor_type}"
+
+        # Store gpio in config for backwards compatibility
+        sensor_config["gpio"] = gpio
+
+        sim_config["sensors"][sensor_key] = sensor_config
         device.device_metadata["simulation_config"] = sim_config
         device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -497,14 +507,20 @@ class ESPRepository(BaseRepository[ESPDevice]):
     async def remove_sensor_from_mock(
         self,
         device_id: str,
-        gpio: int
+        gpio: int,
+        sensor_type: Optional[str] = None
     ) -> bool:
         """
         Remove sensor from simulation_config.
 
+        MULTI-VALUE SUPPORT: If sensor_type is provided, removes only that
+        specific sensor. If not provided, removes ALL sensors on that GPIO
+        (backwards compatible behavior).
+
         Args:
             device_id: ESP Device ID
             gpio: GPIO Pin
+            sensor_type: Optional sensor type (e.g., "sht31_temp")
 
         Returns:
             True if successfully removed
@@ -516,15 +532,32 @@ class ESPRepository(BaseRepository[ESPDevice]):
         sim_config = device.device_metadata.get("simulation_config", {})
         sensors = sim_config.get("sensors", {})
 
-        if str(gpio) in sensors:
-            del sensors[str(gpio)]
+        removed = False
+
+        if sensor_type:
+            # MULTI-VALUE: Remove specific sensor_type on GPIO
+            sensor_key = f"{gpio}_{sensor_type}"
+            if sensor_key in sensors:
+                del sensors[sensor_key]
+                removed = True
+        else:
+            # BACKWARDS COMPAT: Remove all sensors on this GPIO
+            # Check both old format (gpio only) and new format (gpio_type)
+            keys_to_remove = [
+                k for k in sensors
+                if k == str(gpio) or k.startswith(f"{gpio}_")
+            ]
+            for key in keys_to_remove:
+                del sensors[key]
+                removed = True
+
+        if removed:
             device.device_metadata["simulation_config"]["sensors"] = sensors
             device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
             flag_modified(device, "device_metadata")
             await self.session.flush()
-            return True
 
-        return False
+        return removed
 
     async def add_actuator_to_mock(
         self,

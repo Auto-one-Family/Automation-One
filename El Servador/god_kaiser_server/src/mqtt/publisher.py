@@ -278,23 +278,37 @@ class Publisher:
 
         Args:
             esp_id: ESP device ID
-            command: System command (REBOOT, OTA_UPDATE, FACTORY_RESET, etc.)
+            command: System command (REBOOT, OTA_UPDATE, FACTORY_RESET, onewire/scan, etc.)
             params: Optional command parameters
             retry: Enable retry on failure
 
         Returns:
             True if publish successful
+        
+        Note:
+            Most commands are uppercased (REBOOT, OTA_UPDATE, etc.) but some 
+            path-like commands (onewire/scan) are preserved as-is because
+            ESP32 expects lowercase for these.
         """
         topic = TopicBuilder.build_system_command_topic(esp_id)
+        
+        # Preserve case for path-like commands (ESP32 expects lowercase)
+        # Examples: "onewire/scan", "sensor/measure"
+        CASE_SENSITIVE_COMMANDS = ["onewire/scan", "sensor/measure"]
+        if "/" in command and command.lower() in CASE_SENSITIVE_COMMANDS:
+            normalized_command = command.lower()
+        else:
+            normalized_command = command.upper()
+        
         payload = {
-            "command": command.upper(),
+            "command": normalized_command,
             "params": params or {},
             "timestamp": int(time.time()),
         }
 
         qos = constants.QOS_CONFIG  # QoS 2 (Exactly once)
 
-        logger.info(f"Publishing system command to {esp_id}: {command}")
+        logger.info(f"Publishing system command to {esp_id}: {normalized_command}")
         return self._publish_with_retry(topic, payload, qos, retry)
 
     def publish_pi_enhanced_response(

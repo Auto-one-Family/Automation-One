@@ -22,12 +22,16 @@ import {
 } from 'lucide-vue-next'
 
 // Import utilities
-import { 
-  SENSOR_TYPE_CONFIG, 
-  getSensorUnit, 
+import {
+  SENSOR_TYPE_CONFIG,
+  getSensorUnit,
   getSensorDefault,
   getSensorLabel,
-  getSensorTypeOptions
+  getSensorTypeOptions,
+  // Phase 6: Multi-Value Sensor Support
+  getDeviceTypeFromSensorType,
+  getSensorTypesForDevice,
+  getMultiValueDeviceConfig
 } from '@/utils/sensorDefaults'
 import { 
   getStateInfo, 
@@ -46,6 +50,12 @@ import {
 import Badge from '@/components/common/Badge.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
+import GpioPicker from '@/components/esp/GpioPicker.vue'
+
+// Composables
+import { useToast } from '@/composables/useToast'
+
+const toast = useToast()
 
 const route = useRoute()
 const router = useRouter()
@@ -123,6 +133,18 @@ const editingSensorPublish = ref(true)
 const batchSensorValues = ref<Record<number, number>>({})
 const batchPublish = ref(true)
 
+// GPIO Picker validation state
+const sensorGpioValid = ref(false)
+const actuatorGpioValid = ref(false)
+
+function onSensorGpioValidation(valid: boolean, _message: string | null) {
+  sensorGpioValid.value = valid
+}
+
+function onActuatorGpioValidation(valid: boolean, _message: string | null) {
+  actuatorGpioValid.value = valid
+}
+
 // Quality options for select
 const qualityOptions = Object.entries(QUALITY_LABELS).map(([value, label]) => ({
   value,
@@ -169,28 +191,98 @@ async function clearEmergency() {
   await espStore.clearEmergency(espId.value)
 }
 
+// Phase 6: Multi-Value Sensor Support
 async function addSensor() {
   if (!isMock.value) return
-  await espStore.addSensor(espId.value, newSensor.value)
-  showAddSensorModal.value = false
-  // Reset with correct defaults
-  newSensor.value = { 
-    gpio: 0, 
-    sensor_type: defaultSensorType, 
-    name: '', 
-    subzone_id: '', 
-    raw_value: getSensorDefault(defaultSensorType), 
-    unit: getSensorUnit(defaultSensorType), 
-    quality: 'good', 
-    raw_mode: true 
+  try {
+    const deviceType = getDeviceTypeFromSensorType(newSensor.value.sensor_type)
+
+    if (deviceType) {
+      // MULTI-VALUE: Register ALL sensor_types for this device (PARALLEL!)
+      const sensorTypes = getSensorTypesForDevice(deviceType)
+      const deviceConfig = getMultiValueDeviceConfig(deviceType)
+
+      // Add all sensor_types in parallel
+      await Promise.all(
+        sensorTypes.map(sensorType =>
+          espStore.addSensor(espId.value, {
+            gpio: newSensor.value.gpio,
+            sensor_type: sensorType,
+            name: newSensor.value.name || deviceConfig?.label,
+            subzone_id: newSensor.value.subzone_id,
+            raw_value: getSensorDefault(sensorType),
+            unit: getSensorUnit(sensorType),
+            quality: 'good',
+            raw_mode: true
+          })
+        )
+      )
+
+      // Success Toast
+      toast.success(`${deviceConfig?.label ?? deviceType} auf GPIO ${newSensor.value.gpio} hinzugefügt (${sensorTypes.length} Messwerte)`)
+    } else {
+      // SINGLE-VALUE: Normal behavior
+      await espStore.addSensor(espId.value, newSensor.value)
+      toast.success('Sensor hinzugefügt')
+    }
+
+    showAddSensorModal.value = false
+    // Reset with correct defaults
+    newSensor.value = {
+      gpio: 0,
+      sensor_type: defaultSensorType,
+      name: '',
+      subzone_id: '',
+      raw_value: getSensorDefault(defaultSensorType),
+      unit: getSensorUnit(defaultSensorType),
+      quality: 'good',
+      raw_mode: true
+    }
+    // Reset validation state
+    sensorGpioValid.value = false
+  } catch (error: any) {
+    // Handle GPIO conflict (HTTP 409)
+    if (error?.response?.status === 409) {
+      const detail = error.response.data?.detail
+      if (detail?.error === 'GPIO_CONFLICT') {
+        const conflictInfo = detail.message || `Belegt von ${detail.conflict_component}`
+        toast.error(`GPIO ${detail.gpio} nicht verfügbar: ${conflictInfo}`)
+        // Refresh GPIO status
+        await espStore.fetchGpioStatus(espId.value)
+      } else {
+        toast.error(`GPIO-Konflikt: ${detail?.message || 'Der GPIO-Pin ist bereits belegt.'}`)
+      }
+    } else {
+      toast.error(`Fehler beim Hinzufügen des Sensors: ${error?.message || 'Unbekannter Fehler'}`)
+    }
   }
 }
 
 async function addActuator() {
   if (!isMock.value) return
-  await espStore.addActuator(espId.value, newActuator.value)
-  showAddActuatorModal.value = false
-  newActuator.value = { gpio: 0, actuator_type: 'relay', name: '', state: false, pwm_value: 0 }
+  try {
+    await espStore.addActuator(espId.value, newActuator.value)
+    toast.success('Aktor hinzugefügt')
+    showAddActuatorModal.value = false
+    newActuator.value = { gpio: 0, actuator_type: 'relay', name: '', state: false, pwm_value: 0 }
+    // Reset validation state
+    actuatorGpioValid.value = false
+  } catch (error: any) {
+    // Handle GPIO conflict (HTTP 409)
+    if (error?.response?.status === 409) {
+      const detail = error.response.data?.detail
+      if (detail?.error === 'GPIO_CONFLICT') {
+        const conflictInfo = detail.message || `Belegt von ${detail.conflict_component}`
+        toast.error(`GPIO ${detail.gpio} nicht verfügbar: ${conflictInfo}`)
+        // Refresh GPIO status
+        await espStore.fetchGpioStatus(espId.value)
+      } else {
+        toast.error(`GPIO-Konflikt: ${detail?.message || 'Der GPIO-Pin ist bereits belegt.'}`)
+      }
+    } else {
+      toast.error(`Fehler beim Hinzufügen des Aktors: ${error?.message || 'Unbekannter Fehler'}`)
+    }
+  }
 }
 
 function startEditSensor(gpio: number, currentValue: number, quality: QualityLevel) {
@@ -672,7 +764,13 @@ async function saveName() {
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="label">GPIO</label>
-                <input v-model.number="newSensor.gpio" type="number" min="0" max="39" class="input" />
+                <GpioPicker
+                  v-model="newSensor.gpio"
+                  :esp-id="espId"
+                  :sensor-type="newSensor.sensor_type"
+                  variant="dropdown"
+                  @validation-change="onSensorGpioValidation"
+                />
               </div>
               <div>
                 <label class="label">Sensor-Typ</label>
@@ -707,7 +805,7 @@ async function saveName() {
           </div>
           <div class="modal-footer">
             <button class="btn-secondary flex-1" @click="showAddSensorModal = false">Abbrechen</button>
-            <button class="btn-primary flex-1" @click="addSensor">Hinzufügen</button>
+            <button class="btn-primary flex-1" :disabled="!sensorGpioValid" @click="addSensor">Hinzufügen</button>
           </div>
         </div>
       </div>
@@ -778,7 +876,13 @@ async function saveName() {
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="label">GPIO</label>
-                <input v-model.number="newActuator.gpio" type="number" min="0" max="39" class="input" />
+                <GpioPicker
+                  v-model="newActuator.gpio"
+                  :esp-id="espId"
+                  :actuator-type="newActuator.actuator_type"
+                  variant="dropdown"
+                  @validation-change="onActuatorGpioValidation"
+                />
               </div>
               <div>
                 <label class="label">Typ</label>
@@ -798,7 +902,7 @@ async function saveName() {
           </div>
           <div class="modal-footer">
             <button class="btn-secondary flex-1" @click="showAddActuatorModal = false">Abbrechen</button>
-            <button class="btn-primary flex-1" @click="addActuator">Hinzufügen</button>
+            <button class="btn-primary flex-1" :disabled="!actuatorGpioValid" @click="addActuator">Hinzufügen</button>
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@
 #include "../../services/config/config_manager.h"
 #include "../../services/config/storage_manager.h"
 #include "../../models/error_codes.h"
+#include "../../models/watchdog_types.h"
 #include <ArduinoJson.h>
 
 // ============================================
@@ -249,14 +250,51 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
   LOG_INFO("Waiting for configuration (timeout: " + String(timeout_ms / 1000) + " seconds)");
   
   unsigned long start_time = millis();
+  unsigned long last_feed_time = millis();
+  
+  // ─────────────────────────────────────────────────────
+  // INDUSTRIAL-GRADE THROTTLED LOGGING (Siemens-Style)
+  // ─────────────────────────────────────────────────────
+  unsigned long last_feed_log_time = millis();
+  const unsigned long LOG_THROTTLE_MS = 300000;  // Log every 5 minutes (not every feed)
+  uint32_t feed_count = 0;
+  uint32_t feed_failures = 0;
   
   while (millis() - start_time < timeout_ms) {
+    // ─────────────────────────────────────────────────────
+    // WATCHDOG FEED (every 60s in Provisioning Mode)
+    // ─────────────────────────────────────────────────────
+    if (millis() - last_feed_time >= 60000) {  // 60s interval
+      if (feedWatchdog("PROVISIONING")) {
+        last_feed_time = millis();
+        feed_count++;
+        
+        // ─────────────────────────────────────────────────
+        // THROTTLED LOGGING (every 5 minutes, not every feed)
+        // Pattern: Siemens S7-1500 Lifecycle Logging
+        // ─────────────────────────────────────────────────
+        if (millis() - last_feed_log_time >= LOG_THROTTLE_MS) {
+          unsigned long uptime_sec = (millis() - start_time) / 1000;
+          LOG_INFO("🔄 Provisioning alive: " + String(uptime_sec) + 
+                   "s uptime, " + String(feed_count) + " watchdog feeds");
+          last_feed_log_time = millis();
+        }
+      } else {
+        feed_failures++;
+        LOG_WARNING("⚠️ Watchdog feed blocked (failure #" + String(feed_failures) + ")");
+        // Continue anyway - user can manually reset
+      }
+    }
+    
     // Process HTTP requests
     loop();
     
     // Check if config received
     if (config_received_) {
+      unsigned long elapsed_sec = (millis() - start_time) / 1000;
       LOG_INFO("✅ Configuration received successfully");
+      LOG_INFO("📊 Provisioning summary: " + String(feed_count) + " feeds, " +
+               String(feed_failures) + " failures over " + String(elapsed_sec) + "s");
       transitionTo(PROVISION_COMPLETE);
       return true;
     }
@@ -268,9 +306,16 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
       return false;
     }
     
-    // Small delay to prevent watchdog issues
+    // Small delay
     delay(10);
   }
+  
+  // ─────────────────────────────────────────────────────
+  // FINAL SUMMARY (Industrial Diagnostics)
+  // ─────────────────────────────────────────────────────
+  unsigned long total_time_sec = (millis() - start_time) / 1000;
+  LOG_INFO("📊 Provisioning summary: " + String(feed_count) + " feeds, " +
+           String(feed_failures) + " failures over " + String(total_time_sec) + "s");
   
   // Timeout reached
   LOG_ERROR("❌ Wait timeout reached");
@@ -280,6 +325,10 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
 
 void ProvisionManager::stop() {
   LOG_INFO("Stopping Provision Manager");
+  
+  // Stop DNS Server (Captive Portal)
+  dns_server_.stop();
+  LOG_INFO("DNS Server stopped");
   
   // Stop HTTP Server
   if (server_) {
@@ -435,6 +484,12 @@ void ProvisionManager::enterSafeMode() {
 // LOOP (Call regularly during provisioning)
 // ============================================
 void ProvisionManager::loop() {
+  // Process DNS requests for Captive Portal
+  // This is non-blocking and must be called frequently
+  // Handles Windows/macOS captive portal detection queries
+  dns_server_.processNextRequest();
+  
+  // Process HTTP requests
   if (server_ && (state_ == PROVISION_AP_MODE || state_ == PROVISION_WAITING_CONFIG)) {
     server_->handleClient();
   }
@@ -449,9 +504,13 @@ bool ProvisionManager::startWiFiAP() {
   String ssid = "AutoOne-" + esp_id_;
   String password = "provision";
   
+  // Explicitly set Access Point mode (ESP32-C3 safety)
+  // softAP() sets this automatically, but explicit is safer
+  WiFi.mode(WIFI_AP);
+  
   // Configure AP
   // softAP(ssid, password, channel, hidden, max_connections)
-  bool success = WiFi.softAP(ssid.c_str(), password.c_str(), 1, 0, 1);
+  bool success = WiFi.softAP(ssid.c_str(), password.c_str(), 1, 0, MAX_CLIENTS);
   
   if (!success) {
     LOG_ERROR("Failed to start WiFi AP");
@@ -469,7 +528,28 @@ bool ProvisionManager::startWiFiAP() {
   LOG_INFO("  Password: " + password);
   LOG_INFO("  IP Address: " + ip.toString());
   LOG_INFO("  Channel: 1");
-  LOG_INFO("  Max Connections: 1");
+  LOG_INFO("  Max Connections: " + String(MAX_CLIENTS));
+  
+  // ============================================
+  // DNS SERVER FOR CAPTIVE PORTAL DETECTION
+  // ============================================
+  // Windows/macOS perform DNS lookups to detect captive portals
+  // Without DNS response, OS rejects connection with "No internet" error
+  // Solution: Redirect all DNS queries to AP IP → Client opens browser automatically
+  
+  LOG_INFO("Starting DNS Server for Captive Portal...");
+  
+  bool dns_started = dns_server_.start(DNS_PORT, "*", ip);
+  
+  if (!dns_started) {
+    LOG_WARNING("Failed to start DNS Server - Captive Portal may not work");
+    LOG_WARNING("  Windows/macOS might reject connection");
+    // Continue without DNS - AP still works, just less convenient
+  } else {
+    LOG_INFO("✅ DNS Server started:");
+    LOG_INFO("  Port: 53");
+    LOG_INFO("  Redirect: All DNS queries -> " + ip.toString());
+  }
   
   return true;
 }

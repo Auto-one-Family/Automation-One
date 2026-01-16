@@ -57,6 +57,53 @@ class SensorRepository(BaseRepository[SensorConfig]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_all_by_esp_and_gpio(
+        self, esp_id: uuid.UUID, gpio: int
+    ) -> list[SensorConfig]:
+        """
+        Get ALL sensors on a specific GPIO (Multi-Value Support).
+
+        For multi-value sensors like SHT31, multiple sensor_configs
+        can exist on the same GPIO (e.g., sht31_temp + sht31_humidity).
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number
+
+        Returns:
+            List of SensorConfig instances on this GPIO
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id, SensorConfig.gpio == gpio
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_esp_gpio_and_type(
+        self, esp_id: uuid.UUID, gpio: int, sensor_type: str
+    ) -> Optional[SensorConfig]:
+        """
+        Get sensor by ESP ID, GPIO, and sensor_type (Multi-Value Support).
+
+        For multi-value sensors, this returns the specific sensor_type
+        on a GPIO (e.g., only sht31_temp, not sht31_humidity).
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number
+            sensor_type: Sensor type string (e.g., 'sht31_temp')
+
+        Returns:
+            SensorConfig or None if not found
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.gpio == gpio,
+            SensorConfig.sensor_type == sensor_type
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_esp(self, esp_id: uuid.UUID) -> list[SensorConfig]:
         """
         Get all sensors for an ESP device.
@@ -625,3 +672,125 @@ class SensorRepository(BaseRepository[SensorConfig]):
         )
         result = await self.session.execute(stmt)
         return {source: count for source, count in result.all()}
+
+    # =========================================================================
+    # MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
+    # =========================================================================
+
+    async def get_by_i2c_address(
+        self, esp_id: uuid.UUID, i2c_address: int
+    ) -> Optional[SensorConfig]:
+        """
+        Get sensor by ESP ID and I2C address.
+
+        Used for validating I2C address conflicts.
+
+        Args:
+            esp_id: ESP device UUID
+            i2c_address: I2C address (0-127)
+
+        Returns:
+            SensorConfig or None if not found
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.interface_type == "I2C",
+            SensorConfig.i2c_address == i2c_address
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_onewire_address(
+        self,
+        esp_id: uuid.UUID,
+        onewire_address: str
+    ) -> Optional[SensorConfig]:
+        """
+        Get sensor by ESP ID and OneWire device address.
+
+        Used for validating OneWire address conflicts.
+
+        Args:
+            esp_id: ESP device UUID
+            onewire_address: OneWire device address (16 char hex string)
+
+        Returns:
+            SensorConfig or None if not found
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.interface_type == "ONEWIRE",
+            SensorConfig.onewire_address == onewire_address
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_esp_gpio_type_and_onewire(
+        self,
+        esp_id: uuid.UUID,
+        gpio: int,
+        sensor_type: str,
+        onewire_address: str
+    ) -> Optional[SensorConfig]:
+        """
+        Get sensor by ESP ID, GPIO, sensor_type, AND OneWire address (4-way lookup).
+
+        **Use-Case:** Multiple DS18B20 OneWire sensors on same GPIO pin.
+        Each sensor has unique 64-bit ROM address (onewire_address).
+
+        This is the most specific lookup for OneWire sensors, ensuring
+        we match the exact device when multiple DS18B20s share a bus.
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number (OneWire bus pin, e.g., 4)
+            sensor_type: Sensor type (e.g., 'ds18b20')
+            onewire_address: OneWire ROM code (16 hex chars, e.g., '28FF641E8D3C0C79')
+
+        Returns:
+            SensorConfig if found, None otherwise
+
+        Example:
+            # ESP has 3 DS18B20 sensors on GPIO 4
+            # Lookup specific sensor by ROM code
+            sensor = await repo.get_by_esp_gpio_type_and_onewire(
+                esp_id=uuid,
+                gpio=4,
+                sensor_type='ds18b20',
+                onewire_address='28FF641E8D3C0C79'
+            )
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.gpio == gpio,
+            SensorConfig.sensor_type == sensor_type,
+            SensorConfig.onewire_address == onewire_address
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_all_by_interface(
+        self,
+        esp_id: uuid.UUID,
+        interface_type: str
+    ) -> list[SensorConfig]:
+        """
+        Get all sensors of a specific interface type for an ESP.
+
+        Useful for:
+        - Listing all I2C sensors (to show I2C bus status)
+        - Listing all OneWire sensors (to show OneWire bus status)
+
+        Args:
+            esp_id: ESP device UUID
+            interface_type: Interface type (I2C, ONEWIRE, ANALOG, DIGITAL)
+
+        Returns:
+            List of SensorConfig instances
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.interface_type == interface_type
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

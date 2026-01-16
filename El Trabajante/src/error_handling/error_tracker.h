@@ -41,6 +41,14 @@ struct ErrorEntry {
 };
 
 // ============================================
+// MQTT PUBLISH CALLBACK TYPE
+// ============================================
+// Fire-and-forget callback for publishing errors to MQTT
+// Parameters: topic, payload
+// Note: Must NOT call errorTracker methods (recursion prevention!)
+typedef void (*MqttErrorPublishCallback)(const char* topic, const char* payload);
+
+// ============================================
 // ERROR TRACKER CLASS
 // ============================================
 class ErrorTracker {
@@ -72,6 +80,28 @@ public:
   bool hasCriticalErrors() const;
   void clearErrors();
   
+  // ============================================
+  // MQTT PUBLISHING (Observability - Phase 1-3)
+  // ============================================
+  /**
+   * @brief Set MQTT publish callback for error observability
+   * 
+   * When set, errors will be published to MQTT topic for server logging.
+   * Callback is fire-and-forget - no error handling to prevent recursion.
+   * 
+   * @param callback Function pointer to publish errors
+   * @param esp_id ESP ID for topic building
+   * 
+   * Topic format: kaiser/god/esp/{esp_id}/system/error
+   * Payload format: {"error_code":1020,"severity":2,"message":"...","ts":123456789}
+   */
+  void setMqttPublishCallback(MqttErrorPublishCallback callback, const String& esp_id);
+  
+  /**
+   * @brief Disable MQTT publishing (e.g., when MQTT disconnects)
+   */
+  void clearMqttPublishCallback();
+  
   // Utilities
   static const char* getCategoryString(uint16_t error_code);
   static ErrorCategory getCategory(uint16_t error_code);
@@ -88,9 +118,16 @@ private:
   size_t error_buffer_index_;
   size_t error_count_;
   
+  // MQTT Publishing (Observability)
+  MqttErrorPublishCallback mqtt_callback_;
+  String mqtt_esp_id_;
+  bool mqtt_publishing_enabled_;
+  bool mqtt_publish_in_progress_;  // Recursion guard
+  
   // Helper methods
   void addToBuffer(uint16_t error_code, ErrorSeverity severity, const char* message);
   void logErrorToLogger(uint16_t error_code, ErrorSeverity severity, const char* message);
+  void publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message);
 };
 
 // ============================================
