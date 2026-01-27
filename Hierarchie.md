@@ -669,8 +669,9 @@
   - Werden in MQTT-Payloads übertragen (sensor_manager.cpp, actuator_manager.cpp)
 
 ### 9.3 ESP-ID Format
-- **Format:** `ESP_{8 alphanumeric chars}` (z.B. `ESP_12AB34CD`)
-- **Generierung:** Aus MAC-Adresse beim ersten Boot
+- **Format:** `ESP_{6-8 hex chars}` (z.B. `ESP_D0B19C` oder `ESP_12AB34CD`)
+- **Erlaubte Zeichen:** `A-F`, `0-9` (uppercase hex)
+- **Generierung:** Aus MAC-Adresse beim ersten Boot (6 Hex aus letzten 3 MAC-Bytes)
 - **Speicherung:** NVS Namespace `system_config`, Key `esp_id`
 - **Code-Location (ESP32):** `El Trabajante/src/services/config/config_manager.cpp:299`
 - **Code-Location (Server):** `El Servador/god_kaiser_server/src/db/models/esp.py:52`

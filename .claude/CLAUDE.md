@@ -1,3 +1,4 @@
+chrome://settings/search 
 # AutomationOne Framework - KI-Agenten Dokumentation
 
 > **Für KI-Agenten:** Maßgebliche Referenz für ESP32-Firmware-Entwicklung auf industriellem Niveau
@@ -826,7 +827,7 @@ El Servador/god_kaiser_server/      # Python FastAPI Server (~15.000+ Zeilen)
 - **Sensor-Daten:** MUSS `raw_mode: true` enthalten (Required Field seit 2025-12-08)
 - **Heartbeat:** MUSS `heap_free` enthalten (nicht `free_heap` - ESP32-Standard)
 - **Timestamps:** Unix-Timestamp in Sekunden (nicht Millisekunden)
-- **ESP-ID Format:** `ESP_{8 alphanumeric chars}` (z.B. `ESP_12AB34CD`)
+- **ESP-ID Format:** `ESP_{6-8 hex chars}` (z.B. `ESP_D0B19C` oder `ESP_12AB34CD`)
 
 ### Device-Registration
 - **KRITISCH:** ESPs MÜSSEN zuerst via REST API registriert werden (`POST /api/v1/esp/register`)
