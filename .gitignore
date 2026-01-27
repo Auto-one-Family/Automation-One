@@ -11,6 +11,8 @@
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+nul
+**/nul
 .vscode/
 .idea/
 *.swp
