@@ -347,6 +347,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <div class="event-details-wrapper">
   <!-- Backdrop for click-outside (Desktop only) -->
   <div
     v-if="!isMobile"
@@ -622,6 +623,7 @@ onUnmounted(() => {
         </Transition>
       </section>
     </div>
+  </div>
   </div>
 </template>
 

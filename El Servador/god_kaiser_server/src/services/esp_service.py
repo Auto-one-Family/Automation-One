@@ -27,8 +27,10 @@ from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.logging_config import get_logger
+from ..db.models.audit_log import AuditEventType, AuditSeverity, AuditSourceType
 from ..db.models.esp import ESPDevice
 from ..db.repositories import ESPRepository
+from ..db.repositories.audit_log_repo import AuditLogRepository
 from ..mqtt.publisher import Publisher
 
 logger = get_logger(__name__)
@@ -447,10 +449,61 @@ class ESPService:
             status_note = "" if is_online else f" (device is {device.status}, message queued)"
             result["message"] = f"Config sent to {device_id}{status_note}"
             logger.info(f"Config sent to {device_id}: {list(config.keys())}")
+
+            # Audit log: config published
+            try:
+                audit_repo = AuditLogRepository(self.esp_repo.session)
+                await audit_repo.create(
+                    event_type=AuditEventType.CONFIG_PUBLISHED,
+                    severity=AuditSeverity.INFO,
+                    source_type=AuditSourceType.ESP32,
+                    source_id=device_id,
+                    status="success",
+                    message=f"Config sent to {device_id}",
+                    details={
+                        "esp_id": device_id,
+                        "config_keys": list(config.keys()),
+                        "device_status": device.status or "unknown",
+                        "sensor_count": len(config.get("sensors", [])),
+                        "actuator_count": len(config.get("actuators", [])),
+                    },
+                )
+            except Exception as audit_err:
+                logger.warning(f"Failed to write audit log for config publish: {audit_err}")
+
+            # WebSocket broadcast: config published
+            try:
+                from ..websocket.manager import WebSocketManager
+                ws_manager = await WebSocketManager.get_instance()
+                await ws_manager.broadcast("config_published", {
+                    "esp_id": device_id,
+                    "config_keys": list(config.keys()),
+                })
+            except Exception:
+                pass  # WebSocket broadcast is best-effort
         else:
             result["message"] = f"Failed to publish config to {device_id}"
             result["error_code"] = ConfigErrorCode.CONFIG_PUBLISH_FAILED
             logger.error(f"Failed to send config to {device_id}")
+
+            # Audit log: config publish failed
+            try:
+                audit_repo = AuditLogRepository(self.esp_repo.session)
+                await audit_repo.create(
+                    event_type=AuditEventType.CONFIG_FAILED,
+                    severity=AuditSeverity.ERROR,
+                    source_type=AuditSourceType.ESP32,
+                    source_id=device_id,
+                    status="failed",
+                    message=f"Failed to publish config to {device_id}",
+                    details={
+                        "esp_id": device_id,
+                        "config_keys": list(config.keys()),
+                        "error": "MQTT publish failed",
+                    },
+                )
+            except Exception as audit_err:
+                logger.warning(f"Failed to write audit log for config failure: {audit_err}")
 
         return result
 

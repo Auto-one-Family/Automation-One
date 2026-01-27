@@ -105,7 +105,7 @@ export function getEventCategory(event: UnifiedEvent): EventCategory {
   }
 
   // Actuator Events (Amber)
-  const actuatorEvents = ['actuator_status', 'actuator_response', 'actuator_alert']
+  const actuatorEvents = ['actuator_status', 'actuator_response', 'actuator_alert', 'actuator_command', 'actuator_command_failed']
   if (actuatorEvents.includes(type)) {
     return 'actuators'
   }
@@ -183,6 +183,12 @@ export function transformEventMessage(event: UnifiedEvent): TransformedMessage {
       return transformActuatorResponse(event, data)
     case 'actuator_alert':
       return transformActuatorAlert(event, data)
+    case 'actuator_command':
+      return transformActuatorCommand(event, data)
+    case 'actuator_command_failed':
+      return transformActuatorCommandFailed(event, data)
+    case 'config_published':
+      return transformConfigPublished(event, data)
     case 'device_offline':
       return transformDeviceOffline(event, data)
     case 'device_online':
@@ -413,6 +419,56 @@ function transformLWT(event: UnifiedEvent, _data: Record<string, unknown>): Tran
     description: `Gerät ${espId} hat die Verbindung unerwartet verloren (Last Will Testament)`,
     icon: 'Unplug',
     category: 'esp-status',
+  }
+}
+
+function transformActuatorCommand(event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
+  const command = (data.command || 'Befehl') as string
+  const gpio = event.gpio ?? data.gpio
+  const value = data.value as number | undefined
+  const issuedBy = (data.issued_by || 'API') as string
+
+  const valueStr = value !== undefined && value !== 1.0 ? ` (${Math.round(value * 100)}%)` : ''
+
+  return {
+    type: 'actuator_command',
+    title: 'AKTOR-BEFEHL',
+    titleDE: 'Befehl gesendet',
+    summary: `${command}${valueStr} · GPIO ${gpio} · von ${issuedBy}`,
+    description: `Aktor-Befehl "${command}" wurde an GPIO ${gpio} gesendet. Quelle: ${issuedBy}`,
+    icon: 'Zap',
+    category: 'actuators',
+  }
+}
+
+function transformActuatorCommandFailed(event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
+  const command = (data.command || 'Befehl') as string
+  const gpio = event.gpio ?? data.gpio
+  const error = (data.error || 'Unbekannter Fehler') as string
+
+  return {
+    type: 'actuator_command_failed',
+    title: 'AKTOR-BEFEHL FEHLGESCHLAGEN',
+    titleDE: 'Befehl fehlgeschlagen',
+    summary: `${command} · GPIO ${gpio} · ${error}`,
+    description: `Aktor-Befehl "${command}" an GPIO ${gpio} fehlgeschlagen: ${error}`,
+    icon: 'XCircle',
+    category: 'actuators',
+  }
+}
+
+function transformConfigPublished(event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
+  const espId = event.esp_id || (data.esp_id as string) || 'Unbekannt'
+  const configKeys = (data.config_keys || []) as string[]
+
+  return {
+    type: 'config_published',
+    title: 'KONFIGURATION GESENDET',
+    titleDE: 'Config gesendet',
+    summary: `Config an ${espId} gesendet`,
+    description: `Konfiguration an ${espId} gesendet. Keys: ${configKeys.join(', ') || 'keine'}`,
+    icon: 'Settings',
+    category: 'system',
   }
 }
 

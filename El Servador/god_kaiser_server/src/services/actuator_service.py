@@ -9,6 +9,7 @@ from typing import Optional
 
 from ..core.logging_config import get_logger
 from ..db.repositories import ActuatorRepository, ESPRepository
+from ..db.repositories.audit_log_repo import AuditLogRepository
 from ..db.session import get_session
 from ..mqtt.publisher import Publisher
 from .safety_service import SafetyService
@@ -101,9 +102,34 @@ class ActuatorService:
                             issued_by=issued_by,
                             error_message=safety_result.error,
                         )
+                        # Audit log: safety check failed
+                        audit_repo = AuditLogRepository(session)
+                        await audit_repo.log_actuator_command(
+                            esp_id=esp_id,
+                            gpio=gpio,
+                            command=command,
+                            value=value,
+                            issued_by=issued_by,
+                            success=False,
+                            error_message=f"Safety check failed: {safety_result.error}",
+                        )
                         await session.commit()
                     break
-                
+
+                # WebSocket broadcast: command failed
+                try:
+                    from ..websocket.manager import WebSocketManager
+                    ws_manager = await WebSocketManager.get_instance()
+                    await ws_manager.broadcast("actuator_command_failed", {
+                        "esp_id": esp_id,
+                        "gpio": gpio,
+                        "command": command,
+                        "error": safety_result.error,
+                        "issued_by": issued_by,
+                    })
+                except Exception:
+                    pass  # WebSocket broadcast is best-effort
+
                 return False
             
             # Log warnings if any
@@ -157,6 +183,17 @@ class ActuatorService:
                         issued_by=issued_by,
                         error_message="MQTT publish failed",
                     )
+                    # Audit log: MQTT publish failed
+                    audit_repo = AuditLogRepository(session)
+                    await audit_repo.log_actuator_command(
+                        esp_id=esp_id,
+                        gpio=gpio,
+                        command=command,
+                        value=value,
+                        issued_by=issued_by,
+                        success=False,
+                        error_message="MQTT publish failed",
+                    )
                     await session.commit()
                     return False
                 
@@ -174,8 +211,32 @@ class ActuatorService:
                         "safety_warnings": safety_result.warnings,
                     },
                 )
+                # Audit log: command sent successfully
+                audit_repo = AuditLogRepository(session)
+                await audit_repo.log_actuator_command(
+                    esp_id=esp_id,
+                    gpio=gpio,
+                    command=command,
+                    value=value,
+                    issued_by=issued_by,
+                    success=True,
+                )
                 await session.commit()
-                
+
+                # WebSocket broadcast: command sent
+                try:
+                    from ..websocket.manager import WebSocketManager
+                    ws_manager = await WebSocketManager.get_instance()
+                    await ws_manager.broadcast("actuator_command", {
+                        "esp_id": esp_id,
+                        "gpio": gpio,
+                        "command": command,
+                        "value": value,
+                        "issued_by": issued_by,
+                    })
+                except Exception:
+                    pass  # WebSocket broadcast is best-effort
+
                 logger.info(
                     f"Actuator command sent: esp_id={esp_id}, gpio={gpio}, "
                     f"command={command}, value={value}, duration={duration}, "

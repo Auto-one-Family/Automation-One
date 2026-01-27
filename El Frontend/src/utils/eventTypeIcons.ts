@@ -43,9 +43,9 @@ import {
 /**
  * Mapping von Event-Types zu Lucide Icons.
  *
- * Gemappte Event-Types (31):
+ * Gemappte Event-Types (33):
  * - Sensor: sensor_data, sensor_health
- * - Actuator: actuator_status, actuator_response, actuator_alert
+ * - Actuator: actuator_status, actuator_response, actuator_alert, actuator_command, actuator_command_failed
  * - ESP: esp_health
  * - Config: config_response, config_published, config_failed
  * - Device Lifecycle: device_discovered, device_rediscovered, device_approved,
@@ -65,6 +65,8 @@ const EVENT_TYPE_ICONS: Record<string, LucideIcon> = {
   actuator_status: Power,
   actuator_response: Power,
   actuator_alert: AlertOctagon,
+  actuator_command: Zap,
+  actuator_command_failed: XCircle,
 
   // ESP Health
   esp_health: Cpu,

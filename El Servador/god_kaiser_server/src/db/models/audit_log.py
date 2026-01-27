@@ -213,6 +213,10 @@ class AuditEventType:
     DEVICE_REDISCOVERED = "device_rediscovered"
     LWT_RECEIVED = "lwt_received"
 
+    # Actuator Command Events
+    ACTUATOR_COMMAND = "actuator_command"
+    ACTUATOR_COMMAND_FAILED = "actuator_command_failed"
+
     # Error Events
     MQTT_ERROR = "mqtt_error"
     DATABASE_ERROR = "database_error"

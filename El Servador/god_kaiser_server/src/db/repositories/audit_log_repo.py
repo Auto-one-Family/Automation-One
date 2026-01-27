@@ -237,6 +237,74 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             details=details or {},
         )
     
+    async def log_actuator_command(
+        self,
+        esp_id: str,
+        gpio: int,
+        command: str,
+        value: float = 1.0,
+        issued_by: str = "unknown",
+        success: bool = True,
+        duration_ms: Optional[int] = None,
+        error_message: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> AuditLog:
+        """
+        Log an actuator command event.
+
+        Args:
+            esp_id: ESP device ID
+            gpio: GPIO pin number
+            command: Command type (ON, OFF, PWM, TOGGLE)
+            value: Command value (0.0-1.0)
+            issued_by: Who issued the command
+            success: Whether the command was sent successfully
+            duration_ms: Execution duration in milliseconds
+            error_message: Error description if success=False
+            correlation_id: For correlating with response events
+
+        Returns:
+            Created AuditLog entry
+        """
+        event_type = (
+            AuditEventType.ACTUATOR_COMMAND if success
+            else AuditEventType.ACTUATOR_COMMAND_FAILED
+        )
+        severity = AuditSeverity.INFO if success else AuditSeverity.ERROR
+
+        if success:
+            message = f"Actuator command '{command}' sent to GPIO {gpio}"
+            if value != 1.0:
+                message += f" with value {value}"
+        else:
+            message = f"Actuator command '{command}' to GPIO {gpio} failed"
+            if error_message:
+                message += f": {error_message}"
+
+        details: dict[str, Any] = {
+            "esp_id": esp_id,
+            "gpio": gpio,
+            "command": command,
+            "value": value,
+            "issued_by": issued_by,
+            "success": success,
+        }
+        if duration_ms is not None:
+            details["duration_ms"] = duration_ms
+        if error_message:
+            details["error_message"] = error_message
+
+        return await self.create(
+            event_type=event_type,
+            severity=severity,
+            source_type=AuditSourceType.ESP32,
+            source_id=esp_id,
+            status="success" if success else "failed",
+            message=message,
+            details=details,
+            correlation_id=correlation_id,
+        )
+
     # =========================================================================
     # Query Methods
     # =========================================================================

@@ -2343,16 +2343,24 @@ def _filter_log_entry(
             return False
     
     # Time filters
+    # Log timestamps are in server-local time (naive datetime).
+    # Query params from the frontend arrive as UTC-aware datetimes (ISO with Z).
+    # We must convert query times to local naive datetimes before comparing.
     if entry.timestamp and (start_time or end_time):
         try:
             # Parse timestamp (handle both formats)
             ts_str = entry.timestamp.replace("T", " ").split(".")[0]
             entry_time = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-            
-            if start_time and entry_time < start_time.replace(tzinfo=None, microsecond=0):
-                return False
-            if end_time and entry_time > end_time.replace(tzinfo=None, microsecond=0):
-                return False
+
+            # Convert timezone-aware query times to local naive datetimes
+            if start_time:
+                st = start_time.astimezone().replace(tzinfo=None) if start_time.tzinfo else start_time
+                if entry_time < st.replace(microsecond=0):
+                    return False
+            if end_time:
+                et = end_time.astimezone().replace(tzinfo=None) if end_time.tzinfo else end_time
+                if entry_time > et.replace(microsecond=0):
+                    return False
         except ValueError:
             pass  # Can't parse timestamp, include entry anyway
     
@@ -2453,8 +2461,11 @@ async def query_logs(
 
     # Read and parse logs (reverse order for newest first)
     all_entries: List[LogEntry] = []
+    MAX_MATCHED = 10000
+    MAX_LINES_SCANNED = 100000  # Stop scanning after 100k lines total
 
     try:
+        lines_scanned = 0
         for log_path in log_paths:
             if not log_path.exists():
                 continue
@@ -2464,6 +2475,10 @@ async def query_logs(
 
             # Process in reverse (newest first)
             for line in reversed(lines):
+                lines_scanned += 1
+                if lines_scanned > MAX_LINES_SCANNED:
+                    break
+
                 if not line.strip():
                     continue
 
@@ -2471,11 +2486,10 @@ async def query_logs(
                 if entry and _filter_log_entry(entry, level, module, search, start_time, end_time):
                     all_entries.append(entry)
 
-                # Limit scanning for performance (max 10000 entries)
-                if len(all_entries) >= 10000:
+                if len(all_entries) >= MAX_MATCHED:
                     break
 
-            if len(all_entries) >= 10000:
+            if len(all_entries) >= MAX_MATCHED or lines_scanned > MAX_LINES_SCANNED:
                 break
     except Exception as e:
         logger.error(f"Error reading log file: {e}")

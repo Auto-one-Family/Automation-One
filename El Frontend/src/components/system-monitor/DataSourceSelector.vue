@@ -71,9 +71,11 @@
             <div class="filter-dropdown">
               <label class="dropdown-label">ESP</label>
               <select
+                ref="espFilterRef"
                 :value="espId"
                 @change="updateEspId(($event.target as HTMLSelectElement).value)"
                 class="dropdown-select"
+                :class="{ 'dropdown-select--highlighted': espFilterHighlighted }"
               >
                 <option value="">Alle ESPs</option>
                 <option v-for="id in uniqueEspIds" :key="id" :value="id">{{ id }}</option>
@@ -198,7 +200,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import {
   AlertCircle,
   Activity,
@@ -288,6 +290,10 @@ const getInitialSources = (): DataSource[] => {
 }
 
 const selectedSources = ref<DataSource[]>(getInitialSources())
+
+// ESP Filter Highlight State
+const espFilterHighlighted = ref(false)
+const espFilterRef = ref<HTMLSelectElement | null>(null)
 
 // Custom Date Picker State
 const showCustomPicker = ref(false)
@@ -427,6 +433,19 @@ function clearCustomRange() {
 // ============================================================================
 // Watchers
 // ============================================================================
+
+// Highlight ESP filter when value is set programmatically (from parent)
+watch(() => props.espId, (newVal, oldVal) => {
+  if (newVal && newVal !== oldVal) {
+    espFilterHighlighted.value = true
+    nextTick(() => {
+      espFilterRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+    setTimeout(() => {
+      espFilterHighlighted.value = false
+    }, 2000)
+  }
+})
 
 // Persist DataSource selection to localStorage
 watch(selectedSources, (newSources) => {
@@ -670,6 +689,23 @@ onMounted(() => {
 .dropdown-select:hover:not(:focus) {
   border-color: rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.06);
+}
+
+.dropdown-select--highlighted {
+  animation: filter-highlight 2s ease-out;
+}
+
+@keyframes filter-highlight {
+  0% {
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.5);
+    border-color: #60a5fa;
+    background: rgba(96, 165, 250, 0.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+  }
 }
 
 /* =============================================================================

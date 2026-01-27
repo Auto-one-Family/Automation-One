@@ -268,6 +268,8 @@ function expandTimeWindow() {
   startTime.value = new Date(center.getTime() - 5 * 60 * 1000).toISOString()
   endTime.value = new Date(center.getTime() + 5 * 60 * 1000).toISOString()
 
+  // Clear file selection to search across all log files
+  selectedFile.value = ''
   page.value = 1
   loadLogs()
 }
@@ -410,6 +412,13 @@ onMounted(async () => {
   }
 
   await loadLogFiles()
+
+  // When time window is set from props, clear file selection
+  // so the backend searches across ALL log files
+  if (startTime.value && endTime.value) {
+    selectedFile.value = ''
+  }
+
   await loadLogs()
 })
 
