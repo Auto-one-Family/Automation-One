@@ -25,6 +25,7 @@ class TestSensorRepositoryConfig:
             gpio=34,
             sensor_type="temperature",
             sensor_name="Temperature Sensor",
+            interface_type="ANALOG",
             enabled=True,
             pi_enhanced=True,
         )
@@ -51,6 +52,7 @@ class TestSensorRepositoryConfig:
             gpio=34,
             sensor_type="temperature",
             sensor_name="Temp Sensor",
+            interface_type="ANALOG",
             enabled=True,
         )
 
@@ -59,6 +61,7 @@ class TestSensorRepositoryConfig:
             gpio=35,
             sensor_type="humidity",
             sensor_name="Humidity Sensor",
+            interface_type="ANALOG",
             enabled=True,
         )
 
@@ -75,6 +78,7 @@ class TestSensorRepositoryConfig:
             gpio=34,
             sensor_type="temperature",
             sensor_name="Enabled Sensor",
+            interface_type="ANALOG",
             enabled=True,
         )
 
@@ -83,6 +87,7 @@ class TestSensorRepositoryConfig:
             gpio=35,
             sensor_type="humidity",
             sensor_name="Disabled Sensor",
+            interface_type="ANALOG",
             enabled=False,
         )
 
@@ -100,6 +105,7 @@ class TestSensorRepositoryConfig:
             gpio=34,
             sensor_type="temperature",
             sensor_name="Pi-Enhanced Sensor",
+            interface_type="ANALOG",
             enabled=True,
             pi_enhanced=True,
         )
@@ -109,6 +115,7 @@ class TestSensorRepositoryConfig:
             gpio=35,
             sensor_type="humidity",
             sensor_name="Local Sensor",
+            interface_type="ANALOG",
             enabled=True,
             pi_enhanced=False,
         )
@@ -127,6 +134,7 @@ class TestSensorRepositoryConfig:
             gpio=34,
             sensor_type="temperature",
             sensor_name="Temp Sensor 1",
+            interface_type="ANALOG",
             enabled=True,
         )
 
@@ -135,6 +143,7 @@ class TestSensorRepositoryConfig:
             gpio=35,
             sensor_type="temperature",
             sensor_name="Temp Sensor 2",
+            interface_type="ANALOG",
             enabled=True,
         )
 
@@ -143,6 +152,7 @@ class TestSensorRepositoryConfig:
             gpio=36,
             sensor_type="humidity",
             sensor_name="Humidity Sensor",
+            interface_type="ANALOG",
             enabled=True,
         )
 

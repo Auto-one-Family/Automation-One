@@ -39,7 +39,6 @@ from ...schemas import (
     ActuatorConfigCreate,
     ActuatorConfigListResponse,
     ActuatorConfigResponse,
-    ActuatorConfigUpdate,
     ActuatorHistoryResponse,
     ActuatorState,
     ActuatorStatusResponse,
@@ -789,7 +788,7 @@ async def delete_actuator(
     )
     
     # Delete actuator
-    deleted = await actuator_repo.delete(actuator.id)
+    await actuator_repo.delete(actuator.id)
     await db.commit()
     
     logger.info(f"Actuator deleted: {esp_id} GPIO {gpio} by {current_user.username}")

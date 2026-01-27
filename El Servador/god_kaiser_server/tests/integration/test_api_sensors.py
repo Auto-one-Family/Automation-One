@@ -44,6 +44,7 @@ async def test_sensor(db_session: AsyncSession, test_esp: ESPDevice):
         gpio=34,
         sensor_type="ph",
         sensor_name="Test pH Sensor",
+        interface_type="ANALOG",
         enabled=True,
         sample_interval_ms=30000,
         pi_enhanced=True,

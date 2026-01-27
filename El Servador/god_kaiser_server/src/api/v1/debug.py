@@ -16,11 +16,8 @@ All endpoints require admin authentication.
 
 import json
 import math
-import os
 import re
-import shutil
 import uuid
-import warnings
 import zipfile
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -34,7 +31,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
-from ...db.base import Base
 from ...db.session import get_session
 from ...schemas.debug import (
     ActuatorCommandRequest,
@@ -47,14 +43,12 @@ from ...schemas.debug import (
     MockESPListResponse,
     MockESPMessagesResponse,
     MockESPResponse,
-    MockESPUpdate,
     MockSensorConfig,
     MockSensorResponse,
     MockActuatorResponse,
     SetActuatorStateRequest,
     SetSensorValueRequest,
     StateTransitionRequest,
-    GPIOPathParams,
 )
 from ...schemas.debug_db import (
     ALLOWED_TABLES,
@@ -69,11 +63,9 @@ from ...schemas.debug_db import (
     TableListResponse,
     TableSchema,
 )
-from ...schemas.api_response import APIResponse
 from ...core.exceptions import (
     ESPNotFoundError,
     SimulationNotRunningError,
-    ValidationException,
 )
 from ...services.audit_retention_service import AuditRetentionService
 from ...db.repositories import ESPRepository, SensorRepository
@@ -161,11 +153,6 @@ def _build_mock_esp_response(
     if runtime_status:
         uptime = int(runtime_status.get("uptime_seconds", 0))
     
-    # Get simulation state
-    simulation_state = "stopped"
-    if device.device_metadata:
-        simulation_state = device.device_metadata.get("simulation_state", "stopped")
-
     # Get auto_heartbeat from DB config (fallback to simulation_active for backwards compatibility)
     auto_heartbeat_config = sim_config.get("auto_heartbeat", simulation_active)
 
@@ -847,7 +834,7 @@ async def add_sensor(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to add sensor to database"
+            detail="Failed to add sensor to database"
         )
 
     # 1.5 Create SensorConfig entry if it doesn't exist (fixes Bug P)
@@ -1130,7 +1117,7 @@ async def set_manual_sensor_override(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to set manual override"
+            detail="Failed to set manual override"
         )
 
     await db.commit()
@@ -1486,9 +1473,6 @@ async def simulate_actuator_command(
         )
     
     # Build mock MQTT topic and payload
-    runtime = sim_scheduler.get_runtime(esp_id)
-    kaiser_id = runtime.kaiser_id if runtime else "god"
-
     from ...mqtt.topics import TopicBuilder
     import json
     import time
@@ -1715,13 +1699,9 @@ async def clear_messages(
     db: DBSession,
     scheduler: SimulationSchedulerDep,
 ):
-    """Clear message history for a mock ESP."""
-    cleared = await manager.clear_messages(esp_id)
-    if not cleared:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
-        )
+    """Clear message history for a mock ESP. (Deprecated - no-op)"""
+    # Deprecated: SimulationScheduler does not track message history
+    return None
 
 
 # =============================================================================
@@ -2433,24 +2413,35 @@ async def query_logs(
 ) -> LogsResponse:
     """
     Query server logs with filtering.
-    
+
     Reads logs in reverse order (newest first) for better performance.
     Supports filtering by log level, module name, search text, and time range.
+
+    When start_time/end_time are set and no specific file is selected,
+    automatically searches across ALL log files to find entries in the time range.
     """
     settings = get_settings()
-    
-    # Determine which file to read
+    log_dir = Path(settings.logging.file_path).parent
+
+    # Determine which file(s) to read
     if file:
-        log_path = Path(settings.logging.file_path).parent / file
-        if not log_path.exists():
+        log_paths = [log_dir / file]
+        if not log_paths[0].exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Log file '{file}' not found"
             )
+    elif start_time or end_time:
+        # Multi-file search: scan all log files when time range is specified
+        log_paths = sorted(
+            log_dir.glob("god_kaiser.log*"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True
+        ) if log_dir.exists() else []
     else:
-        log_path = Path(settings.logging.file_path)
-    
-    if not log_path.exists():
+        log_paths = [Path(settings.logging.file_path)]
+
+    if not log_paths or not any(p.exists() for p in log_paths):
         return LogsResponse(
             success=True,
             logs=[],
@@ -2459,24 +2450,31 @@ async def query_logs(
             page_size=page_size,
             has_more=False
         )
-    
+
     # Read and parse logs (reverse order for newest first)
     all_entries: List[LogEntry] = []
-    
+
     try:
-        with open(log_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        # Process in reverse (newest first)
-        for line in reversed(lines):
-            if not line.strip():
+        for log_path in log_paths:
+            if not log_path.exists():
                 continue
-            
-            entry = _parse_log_line(line)
-            if entry and _filter_log_entry(entry, level, module, search, start_time, end_time):
-                all_entries.append(entry)
-            
-            # Limit scanning for performance (max 10000 entries)
+
+            with open(log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            # Process in reverse (newest first)
+            for line in reversed(lines):
+                if not line.strip():
+                    continue
+
+                entry = _parse_log_line(line)
+                if entry and _filter_log_entry(entry, level, module, search, start_time, end_time):
+                    all_entries.append(entry)
+
+                # Limit scanning for performance (max 10000 entries)
+                if len(all_entries) >= 10000:
+                    break
+
             if len(all_entries) >= 10000:
                 break
     except Exception as e:
@@ -2485,6 +2483,10 @@ async def query_logs(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error reading log file: {str(e)}"
         )
+
+    # Sort by timestamp (newest first) when merging multiple files
+    if len(log_paths) > 1 and all_entries:
+        all_entries.sort(key=lambda e: e.timestamp if hasattr(e, 'timestamp') else '', reverse=True)
     
     # Pagination
     total_count = len(all_entries)
@@ -2901,12 +2903,10 @@ async def update_config(
         )
     
     # Update the config
-    new_value = json.dumps(update_data.config_value) if not isinstance(update_data.config_value, str) else update_data.config_value
-    
     await db.execute(
         text("""
-            UPDATE system_config 
-            SET config_value = :value, updated_at = :updated_at 
+            UPDATE system_config
+            SET config_value = :value, updated_at = :updated_at
             WHERE config_key = :key
         """),
         {
@@ -3808,7 +3808,7 @@ async def trigger_maintenance_job(
         from ...core.scheduler import get_central_scheduler
         
         maintenance_service = get_maintenance_service()
-        scheduler = get_central_scheduler()
+        get_central_scheduler()  # Verify scheduler is running
         
         # Map job name to full job ID
         job_id_map = {

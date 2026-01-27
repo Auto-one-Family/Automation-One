@@ -20,10 +20,13 @@ References:
 - db/session.py (Database session)
 """
 
-from typing import Annotated, AsyncGenerator, Optional
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Annotated, Any, AsyncGenerator, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -376,10 +379,6 @@ APIKey = Annotated[str, Depends(verify_api_key)]
 
 # Simple in-memory rate limiter
 # For production: Use Redis-based implementation
-import time
-from collections import defaultdict
-from dataclasses import dataclass
-
 try:
     import redis.asyncio as redis  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -669,7 +668,6 @@ def get_safety_service(db: DBSession):
 def get_actuator_service(db: DBSession):
     """Get ActuatorService instance."""
     from ..db.repositories import ActuatorRepository, ESPRepository
-    from ..mqtt.publisher import Publisher
     from ..services.actuator_service import ActuatorService
     from ..services.safety_service import SafetyService
 
@@ -739,7 +737,7 @@ def get_audit_log_repo(db: DBSession):
 
 
 # Type aliases for service dependencies (for consistent usage)
-MQTTPublisher = Annotated["Publisher", Depends(get_mqtt_publisher)]  # type: ignore
+MQTTPublisher = Annotated[Any, Depends(get_mqtt_publisher)]
 
 
 async def get_config_builder_dep(db: DBSession):
@@ -789,7 +787,7 @@ def get_simulation_scheduler():
 
 # Type alias for simulation scheduler dependency
 # IMPORTANT: Named 'SimulationSchedulerDep' to avoid shadowing the actual class name
-SimulationSchedulerDep = Annotated["SimulationScheduler", Depends(get_simulation_scheduler)]  # type: ignore
+SimulationSchedulerDep = Annotated[Any, Depends(get_simulation_scheduler)]
 
 
 # =============================================================================
@@ -825,4 +823,4 @@ def get_sensor_scheduler_service(db: DBSession):
 
 
 # Type alias for sensor scheduler service dependency
-SensorSchedulerServiceDep = Annotated["SensorSchedulerService", Depends(get_sensor_scheduler_service)]  # type: ignore
+SensorSchedulerServiceDep = Annotated[Any, Depends(get_sensor_scheduler_service)]

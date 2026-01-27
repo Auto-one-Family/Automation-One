@@ -84,6 +84,7 @@ class SensorConfig(Base, TimestampMixin):
     interface_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
+        default="ANALOG",
         doc="Interface type: I2C, ONEWIRE, ANALOG, DIGITAL",
     )
 
@@ -219,8 +220,10 @@ class SensorConfig(Base, TimestampMixin):
     # Table Constraints
     # MULTI-VALUE SUPPORT: Erlaubt mehrere sensor_types pro GPIO
     # z.B. SHT31 auf GPIO 21: sht31_temp + sht31_humidity
+    # ONEWIRE SUPPORT: Erlaubt mehrere DS18B20 auf demselben GPIO (Bus-Sharing)
+    # onewire_address ist nullable → NULL != NULL in UNIQUE (PostgreSQL + SQLite)
     __table_args__ = (
-        UniqueConstraint("esp_id", "gpio", "sensor_type", name="unique_esp_gpio_sensor_type"),
+        UniqueConstraint("esp_id", "gpio", "sensor_type", "onewire_address", name="unique_esp_gpio_sensor_type_onewire"),
         Index("idx_sensor_type_enabled", "sensor_type", "enabled"),
     )
 
