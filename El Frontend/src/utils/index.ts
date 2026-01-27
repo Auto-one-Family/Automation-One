@@ -1,6 +1,6 @@
 /**
  * Utils Index
- * 
+ *
  * Central export point for all utility functions and configurations.
  */
 
@@ -12,6 +12,28 @@ export * from './labels'
 
 // Formatting utilities
 export * from './formatters'
+
+// Error code translation (German)
+export * from './errorCodeTranslator'
+
+// Database column translation (German)
+export * from './databaseColumnTranslator'
+
+// Log message translation (German)
+export * from './logMessageTranslator'
+
+// WiFi signal strength utilities
+export * from './wifiStrength'
+
+// Zone color utilities
+export * from './zoneColors'
+
+// Actuator defaults
+export * from './actuatorDefaults'
+
+// NOTE: gpioConfig is NOT exported here due to naming conflict
+// (getCategoryLabel exists in both gpioConfig and errorCodeTranslator)
+// Import directly: import { ... } from '@/utils/gpioConfig'
 
 
 

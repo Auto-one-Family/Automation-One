@@ -7,7 +7,17 @@
 
 import api from './index'
 import { debugApi } from './debug'
-import type { MockESP, MockESPCreate, OfflineInfo, GpioStatusResponse } from '@/types'
+import type { 
+  MockESP, 
+  MockESPCreate, 
+  OfflineInfo, 
+  GpioStatusResponse,
+  PendingESPDevice,
+  PendingDevicesListResponse,
+  ESPApprovalRequest,
+  ESPApprovalResponse,
+  ESPRejectionRequest
+} from '@/types'
 
 // =============================================================================
 // Type Definitions
@@ -50,7 +60,7 @@ export interface ESPDevice {
   firmware_version?: string
   hardware_type?: string              // ESP32_WROOM, XIAO_ESP32_C3, MOCK_ESP32
   capabilities?: Record<string, unknown>
-  status?: string                     // online, offline, error, unknown
+  status?: string                     // pending_approval, approved, online, offline, rejected, error, unknown
   last_seen?: string | null           // ISO timestamp of last heartbeat
   metadata?: Record<string, unknown>
   sensor_count?: number
@@ -637,6 +647,59 @@ export const espApi = {
    */
   isMockEsp(espId: string): boolean {
     return isMockEsp(espId)
+  },
+
+  // ===========================================================================
+  // Discovery/Approval API (Phase: Device Discovery)
+  // ===========================================================================
+
+  /**
+   * Get list of pending (unapproved) devices.
+   * 
+   * @returns Array of pending devices awaiting approval
+   */
+  async getPendingDevices(): Promise<PendingESPDevice[]> {
+    const response = await api.get<PendingDevicesListResponse>('/esp/devices/pending')
+    return response.data.devices || []
+  },
+
+  /**
+   * Approve a pending device.
+   * 
+   * @param deviceId - Device ID to approve (e.g., "ESP_D0B19C")
+   * @param data - Optional approval data (name, zone assignment)
+   * @returns Approval response with device status
+   */
+  async approveDevice(
+    deviceId: string,
+    data?: ESPApprovalRequest
+  ): Promise<ESPApprovalResponse> {
+    const response = await api.post<ESPApprovalResponse>(
+      `/esp/devices/${deviceId}/approve`,
+      data || {}
+    )
+    return response.data
+  },
+
+  /**
+   * Reject a pending device.
+   * 
+   * Device will enter cooldown (5 minutes) before it can be rediscovered.
+   * 
+   * @param deviceId - Device ID to reject
+   * @param reason - Reason for rejection (required)
+   * @returns Rejection response with cooldown info
+   */
+  async rejectDevice(
+    deviceId: string,
+    reason: string
+  ): Promise<ESPApprovalResponse> {
+    const data: ESPRejectionRequest = { reason }
+    const response = await api.post<ESPApprovalResponse>(
+      `/esp/devices/${deviceId}/reject`,
+      data
+    )
+    return response.data
   },
 }
 

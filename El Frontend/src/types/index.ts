@@ -4,6 +4,127 @@
 export * from './gpio'
 
 // =============================================================================
+// WebSocket Event Types (System Monitor)
+// =============================================================================
+export * from './websocket-events'
+
+// =============================================================================
+// Discovery/Approval Types (Phase: Device Discovery)
+// =============================================================================
+
+/**
+ * Pending ESP device awaiting approval.
+ * Discovered via heartbeat but not yet approved by admin.
+ *
+ * Time Fields:
+ * - discovered_at: When device was FIRST discovered (historical)
+ * - last_seen: When device was LAST active (use for "vor X Zeit" display)
+ */
+export interface PendingESPDevice {
+  /** Device ID (e.g., ESP_D0B19C) */
+  device_id: string
+  /** When device was first discovered (historical) */
+  discovered_at: string
+  /** When device was last active - use this for "vor X Zeit" display */
+  last_seen?: string | null
+  /** IP address of the device */
+  ip_address?: string | null
+  /** Zone ID if pre-assigned */
+  zone_id?: string | null
+  /** Free heap memory in bytes */
+  heap_free?: number | null
+  /** WiFi signal strength in dBm */
+  wifi_rssi?: number | null
+  /** Number of configured sensors */
+  sensor_count: number
+  /** Number of configured actuators */
+  actuator_count: number
+  /** Number of heartbeats received while pending */
+  heartbeat_count: number
+  /** Hardware type (ESP32_WROOM, etc.) */
+  hardware_type?: string | null
+  /** Time since discovery in a human-readable format */
+  time_ago?: string
+}
+
+/**
+ * Request to approve a pending device.
+ */
+export interface ESPApprovalRequest {
+  /** Optional friendly name for the device */
+  name?: string | null
+  /** Optional zone ID to assign */
+  zone_id?: string | null
+  /** Optional zone name (creates zone if not exists) */
+  zone_name?: string | null
+}
+
+/**
+ * Request to reject a pending device.
+ */
+export interface ESPRejectionRequest {
+  /** Reason for rejection (required) */
+  reason: string
+}
+
+/**
+ * Response from approval/rejection endpoints.
+ */
+export interface ESPApprovalResponse {
+  success: boolean
+  message: string
+  device_id: string
+  status: string
+  approved_by?: string | null
+  approved_at?: string | null
+  rejection_reason?: string | null
+}
+
+/**
+ * Response containing list of pending devices.
+ */
+export interface PendingDevicesListResponse {
+  success: boolean
+  devices: PendingESPDevice[]
+  count: number
+  message: string
+}
+
+/**
+ * WebSocket event for device discovery.
+ */
+export interface DeviceDiscoveredEvent {
+  device_id: string
+  discovered_at: string
+  ip_address?: string | null
+  heap_free?: number | null
+  wifi_rssi?: number | null
+  sensor_count: number
+  actuator_count: number
+  hardware_type?: string | null
+}
+
+/**
+ * WebSocket event for device approval.
+ */
+export interface DeviceApprovedEvent {
+  device_id: string
+  approved_by: string
+  approved_at: string
+  status: string
+}
+
+/**
+ * WebSocket event for device rejection.
+ */
+export interface DeviceRejectedEvent {
+  device_id: string
+  rejection_reason: string
+  rejected_at: string
+  cooldown_until: string
+}
+
+// =============================================================================
 // Auth Types
 // =============================================================================
 export interface User {
@@ -244,6 +365,11 @@ export type MessageType =
   // Configuration events
   | 'config_response'
   | 'zone_assignment'
+  // Discovery/Approval events (Phase: Device Discovery)
+  | 'device_discovered'
+  | 'device_approved'
+  | 'device_rejected'
+  | 'device_rediscovered'
   // System events (future use)
   | 'logic_execution'
   | 'system_event'
