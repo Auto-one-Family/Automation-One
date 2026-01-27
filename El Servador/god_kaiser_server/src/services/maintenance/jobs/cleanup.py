@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import MaintenanceSettings
 from src.core.logging_config import get_logger
 from src.db.models.actuator import ActuatorHistory
+from src.db.models.esp_heartbeat import ESPHeartbeatLog
 from src.db.models.sensor import SensorData
 
 logger = get_logger(__name__)
@@ -518,5 +519,185 @@ class OrphanedMocksCleanup:
             "orphaned_found": orphaned_count + old_stopped_count,
             "deleted": deleted_count,
             "warned": warned_count
+        }
+
+
+class HeartbeatLogCleanup:
+    """
+    Heartbeat Log Cleanup Job
+
+    NOTE: This cleanup is ENABLED by default (unlike other cleanups)
+    because heartbeat logs are voluminous (1440 records/device/day).
+
+    Default retention: 7 days
+    Default dry_run: True (safety first)
+
+    Features:
+    - Dry-Run Mode (zählt nur, löscht nicht) - Default: True
+    - Batch-Processing (verhindert DB-Lock)
+    - Safety-Limits (Max Records pro Run)
+    - Transparency (loggt was gelöscht wird)
+    """
+
+    def __init__(self, session: AsyncSession, settings: MaintenanceSettings):
+        self.session = session
+        self.settings = settings
+        self.logger = get_logger(f"{__name__}.HeartbeatLogCleanup")
+
+    async def execute(self) -> Dict[str, Any]:
+        """
+        Führt Heartbeat Log Cleanup aus
+
+        Returns:
+            dict: {
+                "dry_run": bool,
+                "records_found": int,
+                "records_deleted": int,
+                "batches_processed": int,
+                "cutoff_date": str,
+                "duration_seconds": float,
+                "status": str
+            }
+        """
+        # ────────────────────────────────────────────────────
+        # SAFETY CHECK 1: Ist Cleanup aktiviert?
+        # ────────────────────────────────────────────────────
+        if not self.settings.heartbeat_log_retention_enabled:
+            self.logger.info(
+                "Heartbeat log cleanup is DISABLED. "
+                "Set HEARTBEAT_LOG_RETENTION_ENABLED=true to activate."
+            )
+            return {
+                "dry_run": False,
+                "records_found": 0,
+                "records_deleted": 0,
+                "batches_processed": 0,
+                "cutoff_date": None,
+                "duration_seconds": 0,
+                "status": "disabled"
+            }
+
+        start_time = datetime.now(timezone.utc)
+        dry_run = self.settings.heartbeat_log_cleanup_dry_run
+        retention_days = self.settings.heartbeat_log_retention_days
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
+        # ────────────────────────────────────────────────────
+        # PHASE 1: Zähle zu löschende Records
+        # ────────────────────────────────────────────────────
+        total_records_result = await self.session.execute(
+            select(func.count(ESPHeartbeatLog.id))
+        )
+        total_records = total_records_result.scalar() or 0
+
+        records_to_delete_result = await self.session.execute(
+            select(func.count(ESPHeartbeatLog.id))
+            .where(ESPHeartbeatLog.timestamp < cutoff_date)
+        )
+        records_to_delete = records_to_delete_result.scalar() or 0
+
+        if records_to_delete == 0:
+            self.logger.info(
+                f"No heartbeat logs older than {cutoff_date.date()} found. "
+                "Cleanup not needed."
+            )
+            return {
+                "dry_run": dry_run,
+                "records_found": 0,
+                "records_deleted": 0,
+                "batches_processed": 0,
+                "cutoff_date": cutoff_date.isoformat(),
+                "duration_seconds": 0,
+                "status": "nothing_to_delete"
+            }
+
+        # ────────────────────────────────────────────────────
+        # PHASE 2: Dry-Run oder echte Deletion?
+        # ────────────────────────────────────────────────────
+        if dry_run:
+            self.logger.warning(
+                f"🔍 DRY-RUN MODE: Would delete {records_to_delete:,} heartbeat logs "
+                f"older than {cutoff_date.date()}. Total records: {total_records:,}. "
+                "Set HEARTBEAT_LOG_CLEANUP_DRY_RUN=false to actually delete."
+            )
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+            return {
+                "dry_run": True,
+                "records_found": records_to_delete,
+                "records_deleted": 0,
+                "batches_processed": 0,
+                "cutoff_date": cutoff_date.isoformat(),
+                "duration_seconds": duration,
+                "status": "dry_run"
+            }
+
+        # ────────────────────────────────────────────────────
+        # PHASE 3: Batch-Deletion
+        # ────────────────────────────────────────────────────
+        batch_size = self.settings.heartbeat_log_cleanup_batch_size
+        max_batches = self.settings.heartbeat_log_cleanup_max_batches
+
+        total_deleted = 0
+        batches_processed = 0
+
+        self.logger.info(
+            f"Starting heartbeat log cleanup: {records_to_delete:,} records to delete "
+            f"(cutoff: {cutoff_date.date()}, retention: {retention_days} days)"
+        )
+
+        while batches_processed < max_batches:
+            try:
+                # Find IDs to delete (batch)
+                stmt = (
+                    select(ESPHeartbeatLog.id)
+                    .where(ESPHeartbeatLog.timestamp < cutoff_date)
+                    .limit(batch_size)
+                )
+                result = await self.session.execute(stmt)
+                batch_ids = [row[0] for row in result.fetchall()]
+
+                if not batch_ids:
+                    break  # Keine Records mehr
+
+                # Delete batch
+                delete_stmt = delete(ESPHeartbeatLog).where(ESPHeartbeatLog.id.in_(batch_ids))
+                delete_result = await self.session.execute(delete_stmt)
+                deleted_count = delete_result.rowcount
+                await self.session.commit()
+
+                total_deleted += deleted_count
+                batches_processed += 1
+
+                self.logger.debug(
+                    f"Batch {batches_processed}: Deleted {deleted_count} heartbeat logs "
+                    f"({total_deleted:,}/{records_to_delete:,})"
+                )
+
+                if deleted_count < batch_size:
+                    break  # Letzter Batch
+
+            except Exception as e:
+                self.logger.error(
+                    f"Error in batch {batches_processed}: {e}",
+                    exc_info=True
+                )
+                await self.session.rollback()
+                break
+
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+
+        self.logger.info(
+            f"✅ Heartbeat log cleanup completed: {total_deleted:,} records deleted "
+            f"in {batches_processed} batches ({duration:.2f}s)"
+        )
+
+        return {
+            "dry_run": False,
+            "records_found": records_to_delete,
+            "records_deleted": total_deleted,
+            "batches_processed": batches_processed,
+            "cutoff_date": cutoff_date.isoformat(),
+            "duration_seconds": duration,
+            "status": "success"
         }
 

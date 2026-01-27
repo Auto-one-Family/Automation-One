@@ -24,7 +24,7 @@ Status: IMPLEMENTED
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,13 +35,14 @@ from ..db.models.enums import DataSource
 from ..db.models.sensor import SensorData
 from ..db.models.actuator import ActuatorHistory
 from ..db.repositories.system_config_repo import SystemConfigRepository
+from .audit_backup_service import AuditBackupService
 
 logger = get_logger(__name__)
 
 
 # Default retention configuration
 DEFAULT_RETENTION_CONFIG = {
-    "enabled": True,
+    "enabled": False,  # Safety-First: User muss explizit aktivieren
     "default_days": 30,
     "severity_days": {
         AuditSeverity.INFO: 14,
@@ -86,12 +87,13 @@ class AuditRetentionService:
     def __init__(self, session: AsyncSession):
         """
         Initialize AuditRetentionService.
-        
+
         Args:
             session: Async database session
         """
         self.session = session
         self.config_repo = SystemConfigRepository(session)
+        self.backup_service = AuditBackupService(session)
     
     # =========================================================================
     # Configuration Management
@@ -228,35 +230,55 @@ class AuditRetentionService:
     async def cleanup(
         self,
         dry_run: bool = False,
+        create_backup: bool = True,
+        user_id: Optional[str] = None,
+        include_preview_events: bool = False,
+        preview_limit: int = 20,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """
         Run cleanup based on retention policy.
-        
+
         Deletes old audit logs according to configured retention periods.
         Uses batch deletion for performance on large datasets.
-        
+
         Args:
-            dry_run: If True, calculate but don't delete
-            
+            dry_run: If True, calculate but don't delete (preview mode)
+            create_backup: If True, create JSON backup before deletion
+            user_id: Optional user ID for audit trail
+            include_preview_events: If True, include event details in response (for UI preview)
+            preview_limit: Maximum number of events to include in preview (default: 20)
+            force: If True, run cleanup even if auto-retention is disabled (for manual cleanup)
+
         Returns:
             Dict with cleanup results:
-            - deleted_count: Total records deleted
+            - deleted_count: Total records deleted (or would be deleted in dry_run)
             - deleted_by_severity: Count per severity level
             - duration_ms: Operation duration
             - dry_run: Whether this was a dry run
             - errors: Any errors encountered
+            - retention_enabled: Whether auto-retention is enabled
+            - backup_id: Backup ID if backup was created
+            - preview_events: List of events (if include_preview_events=True)
+            - preview_limited: True if more events exist than shown in preview
         """
         start_time = datetime.now(timezone.utc)
         config = await self.get_config()
-        
-        if not config["enabled"] and not dry_run:
+
+        # IMPORTANT: For dry_run, ALWAYS calculate preview counts
+        # regardless of enabled status. This allows users to see what
+        # WOULD be deleted if they enable retention.
+        # Only block ACTUAL deletion when disabled AND not forced (manual cleanup).
+        # force=True allows manual cleanup even when auto-retention is disabled.
+        if not config["enabled"] and not dry_run and not force:
             return {
                 "deleted_count": 0,
                 "deleted_by_severity": {},
                 "duration_ms": 0,
                 "dry_run": dry_run,
                 "skipped": True,
-                "reason": "Retention cleanup is disabled",
+                "retention_enabled": False,
+                "reason": "Retention cleanup is disabled. Enable in retention settings first.",
             }
         
         results = {
@@ -265,67 +287,137 @@ class AuditRetentionService:
             "duration_ms": 0,
             "dry_run": dry_run,
             "errors": [],
+            "retention_enabled": config["enabled"],
+            "backup_id": None,
+            "preview_events": None,
+            "preview_limited": False,
         }
-        
+
         now = datetime.now(timezone.utc)
         batch_size = config["batch_size"]
-        
+        default_days = config["default_days"]
+
+        # =====================================================================
+        # PHASE 1: Count and optionally collect events to delete
+        # =====================================================================
+
+        # Collect all events that match deletion criteria (for backup)
+        all_events_to_delete: List[AuditLog] = []
+        # Collect events for preview (limited)
+        preview_events: List[AuditLog] = []
+        preview_events_needed = preview_limit if (dry_run and include_preview_events) else 0
+
         # Process each severity level
-        for severity, retention_days in config["severity_days"].items():
+        # Use min(default_days, severity_days) so that default_days acts as
+        # a MAXIMUM retention period. This allows users to set a global cap:
+        # - default_days=30, severity_info=14 → use 14 (severity is stricter)
+        # - default_days=1, severity_info=14 → use 1 (default is stricter/global cap)
+        for severity, severity_retention in config["severity_days"].items():
+            retention_days = min(default_days, severity_retention)
             cutoff_date = now - timedelta(days=retention_days)
-            
+
             try:
                 # Build delete conditions
                 conditions = [
                     AuditLog.severity == severity,
                     AuditLog.created_at < cutoff_date,
                 ]
-                
+
                 # Preserve emergency stops if configured
                 if config["preserve_emergency_stops"]:
                     conditions.append(AuditLog.event_type != "emergency_stop")
-                
+
                 if dry_run:
                     # Count what would be deleted
                     count_stmt = select(func.count(AuditLog.id)).where(and_(*conditions))
                     result = await self.session.execute(count_stmt)
                     count = result.scalar_one()
-                else:
-                    # Delete in batches
-                    count = 0
-                    while True:
-                        # Find IDs to delete
-                        id_stmt = (
-                            select(AuditLog.id)
+
+                    if count > 0:
+                        results["deleted_by_severity"][severity] = count
+                        results["deleted_count"] += count
+
+                    # Fetch preview events if requested and we still need more
+                    if include_preview_events and len(preview_events) < preview_events_needed:
+                        remaining_needed = preview_events_needed - len(preview_events)
+                        preview_stmt = (
+                            select(AuditLog)
                             .where(and_(*conditions))
-                            .limit(batch_size)
+                            .order_by(AuditLog.created_at.desc())
+                            .limit(remaining_needed)
                         )
-                        id_result = await self.session.execute(id_stmt)
-                        ids_to_delete = [row[0] for row in id_result.all()]
-                        
-                        if not ids_to_delete:
-                            break
-                        
-                        # Delete batch
-                        delete_stmt = delete(AuditLog).where(AuditLog.id.in_(ids_to_delete))
-                        await self.session.execute(delete_stmt)
-                        await self.session.flush()
-                        
-                        count += len(ids_to_delete)
-                        
-                        # Safety: limit total deletions per run
-                        if count >= batch_size * 10:
-                            logger.warning(
-                                f"Cleanup limit reached for {severity}: {count} records"
-                            )
-                            break
-                
-                if count > 0:
-                    results["deleted_by_severity"][severity] = count
-                    results["deleted_count"] += count
-                    
+                        preview_result = await self.session.execute(preview_stmt)
+                        preview_events.extend(list(preview_result.scalars().all()))
+                else:
+                    # Collect events for backup (limit to prevent memory issues)
+                    # Maximum 10 * batch_size events per severity for backup
+                    max_backup_events = batch_size * 10
+                    events_stmt = (
+                        select(AuditLog)
+                        .where(and_(*conditions))
+                        .order_by(AuditLog.created_at.asc())
+                        .limit(max_backup_events)
+                    )
+                    events_result = await self.session.execute(events_stmt)
+                    severity_events = list(events_result.scalars().all())
+                    all_events_to_delete.extend(severity_events)
+
+                    if severity_events:
+                        results["deleted_by_severity"][severity] = len(severity_events)
+                        results["deleted_count"] += len(severity_events)
+
             except Exception as e:
-                error_msg = f"Error cleaning up {severity} logs: {str(e)}"
+                error_msg = f"Error processing {severity} logs: {str(e)}"
+                results["errors"].append(error_msg)
+                logger.error(error_msg)
+
+        # =====================================================================
+        # PHASE 2: Create backup before deletion (if not dry_run)
+        # =====================================================================
+
+        if not dry_run and all_events_to_delete and create_backup:
+            try:
+                backup_metadata = {
+                    "operation": "retention_cleanup",
+                    "user_id": user_id,
+                    "retention_config": {
+                        "default_days": config["default_days"],
+                        "severity_days": {str(k): v for k, v in config["severity_days"].items()},
+                        "preserve_emergency_stops": config["preserve_emergency_stops"],
+                    },
+                    "timestamp": now.isoformat(),
+                }
+                backup_id = await self.backup_service.create_backup(
+                    events=all_events_to_delete,
+                    metadata=backup_metadata,
+                )
+                results["backup_id"] = backup_id
+                logger.info(f"Backup created before cleanup: {backup_id}")
+            except Exception as e:
+                error_msg = f"Backup creation failed: {str(e)}"
+                results["errors"].append(error_msg)
+                logger.error(error_msg)
+                # Continue with deletion even if backup fails (user opted for cleanup)
+
+        # =====================================================================
+        # PHASE 3: Delete events (if not dry_run)
+        # =====================================================================
+
+        if not dry_run and all_events_to_delete:
+            try:
+                # Delete in batches by ID
+                event_ids = [e.id for e in all_events_to_delete]
+
+                for i in range(0, len(event_ids), batch_size):
+                    batch_ids = event_ids[i:i + batch_size]
+                    delete_stmt = delete(AuditLog).where(AuditLog.id.in_(batch_ids))
+                    await self.session.execute(delete_stmt)
+                    await self.session.flush()
+
+                logger.info(f"Deleted {len(event_ids)} audit log events")
+
+            except Exception as e:
+                error_msg = f"Error deleting events: {str(e)}"
                 results["errors"].append(error_msg)
                 logger.error(error_msg)
         
@@ -374,46 +466,114 @@ class AuditRetentionService:
                 description="Last audit log cleanup timestamp",
                 is_secret=False,
             )
-        
+
         end_time = datetime.now(timezone.utc)
         results["duration_ms"] = int((end_time - start_time).total_seconds() * 1000)
-        
-        if not dry_run:
+
+        # =====================================================================
+        # PHASE 4: Create audit trail entry for the cleanup operation
+        # =====================================================================
+
+        if not dry_run and results["deleted_count"] > 0:
+            try:
+                # Create audit log entry for this cleanup operation
+                cleanup_audit = AuditLog(
+                    event_type="audit_cleanup_executed",
+                    severity=AuditSeverity.WARNING,  # Warning because data was deleted
+                    source_type="user" if user_id else "system",
+                    source_id=user_id or "scheduler",
+                    status="success",
+                    message=f"Audit log cleanup: {results['deleted_count']} events deleted",
+                    details={
+                        "deleted_count": results["deleted_count"],
+                        "deleted_by_severity": {str(k): v for k, v in results["deleted_by_severity"].items()},
+                        "backup_id": results.get("backup_id"),
+                        "retention_config": {
+                            "default_days": config["default_days"],
+                            "severity_days": {str(k): v for k, v in config["severity_days"].items()},
+                            "preserve_emergency_stops": config["preserve_emergency_stops"],
+                        },
+                        "duration_ms": results["duration_ms"],
+                    },
+                )
+                self.session.add(cleanup_audit)
+                await self.session.flush()
+                logger.debug("Audit trail created for cleanup operation")
+            except Exception as e:
+                # Non-critical: log but don't fail the cleanup
+                logger.warning(f"Failed to create audit trail for cleanup: {e}")
+
             logger.info(
                 f"Audit cleanup completed: {results['deleted_count']} records deleted "
-                f"in {results['duration_ms']}ms"
+                f"in {results['duration_ms']}ms (backup: {results.get('backup_id')})"
             )
-        
+
+        # =====================================================================
+        # PHASE 5: Add preview events to result (if dry_run and requested)
+        # =====================================================================
+
+        if dry_run and include_preview_events and preview_events:
+            # Sort preview events by timestamp (newest first)
+            preview_events.sort(key=lambda e: e.created_at, reverse=True)
+            # Limit to preview_limit
+            preview_events = preview_events[:preview_limit]
+
+            results["preview_events"] = [
+                {
+                    "id": str(e.id),  # UUID to string
+                    "event_type": e.event_type,
+                    "severity": e.severity,
+                    "message": e.message or "",
+                    "device_id": e.source_id,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in preview_events
+            ]
+            results["preview_limited"] = results["deleted_count"] > len(preview_events)
+
         return results
     
     # =========================================================================
     # Statistics
     # =========================================================================
     
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(
+        self,
+        error_cutoff_time: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
         """
         Get audit log statistics for dashboard display.
-        
+
+        Args:
+            error_cutoff_time: If provided, count errors/criticals only after this time.
+                              Other statistics (total, event_type, etc.) are always all-time.
+
         Returns:
             Dict with statistics:
-            - total_count: Total audit log entries
-            - count_by_severity: Count per severity level
-            - count_by_event_type: Count per event type
+            - total_count: Total audit log entries (all-time)
+            - count_by_severity: Count per severity level (time-filtered if cutoff provided)
+            - count_by_event_type: Count per event type (all-time)
             - oldest_entry: Timestamp of oldest entry
             - newest_entry: Timestamp of newest entry
             - storage_estimate_mb: Estimated storage usage
             - retention_config: Current retention configuration
         """
         stats: Dict[str, Any] = {}
-        
-        # Total count
+
+        # Total count (always all-time)
         stats["total_count"] = await self._get_total_count()
-        
-        # Count by severity
+
+        # Count by severity (with optional time filter)
         severity_stmt = select(
             AuditLog.severity,
             func.count(AuditLog.id).label("count"),
-        ).group_by(AuditLog.severity)
+        )
+
+        # Apply time filter if provided
+        if error_cutoff_time is not None:
+            severity_stmt = severity_stmt.where(AuditLog.created_at >= error_cutoff_time)
+
+        severity_stmt = severity_stmt.group_by(AuditLog.severity)
         severity_result = await self.session.execute(severity_stmt)
         stats["count_by_severity"] = {
             row.severity: row.count for row in severity_result.all()
@@ -467,6 +627,31 @@ class AuditRetentionService:
         stmt = select(func.count(AuditLog.id))
         result = await self.session.execute(stmt)
         return result.scalar_one()
+
+    async def get_next_scheduled_cleanup_time(self) -> Optional[datetime]:
+        """
+        Calculate when the next scheduled auto-cleanup will run.
+
+        Auto-cleanup runs daily at 03:00 UTC.
+
+        Returns:
+            Next scheduled cleanup time, or None if auto-cleanup is disabled
+        """
+        config = await self.get_config()
+
+        if not config.get("enabled", False):
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        # Next 03:00 UTC
+        next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+
+        # If today's 03:00 has already passed, schedule for tomorrow
+        if next_run <= now:
+            next_run += timedelta(days=1)
+
+        return next_run
 
     # =========================================================================
     # Test Data Cleanup (Phase 6)
