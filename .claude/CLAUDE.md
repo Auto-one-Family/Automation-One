@@ -38,6 +38,13 @@ chrome://settings/search
 | **Wokwi Development Workflow** | `.claude/Next Steps/1.Wokwiki.md` Section 14 | KI startet Services, User startet Wokwi manuell |
 | **Wokwi-ESP registrieren** | `poetry run python scripts/seed_wokwi_esp.py` | ESP_00000001 in DB (El Servador/.../scripts/) |
 | **Wokwi Bug-Dokumentation** | `.claude/Next Steps/1.Wokwiki.md` Section 13 | Timezone-Bug, ESP ID Bug, Standby-Bug |
+| **El Trabajante Roadmap** | `El Trabajante/docs/Roadmap.md` | Phasen-Status, Modul-Matrix, nächste Schritte |
+| **El Trabajante CHANGELOG** | `El Trabajante/CHANGELOG.md` | Versionshistorie, Phase 1–9 |
+| **Provisioning (ESP)** | `El Trabajante/docs/Dynamic Zones and Provisioning/` | AP-Mode, Zero-Touch, PROVISIONING.md |
+| **Sensor-Registry** | `El Trabajante/src/models/sensor_registry.h` | ESP32↔Server Sensor-Type-Mapping, Multi-Value |
+| **Config-Response** | `El Trabajante/src/services/config/config_response.h` | ConfigResponseBuilder, PARTIAL_SUCCESS |
+| **Watchdog (ESP32)** | `El Trabajante/src/models/watchdog_types.h` | WatchdogMode, feedWatchdog(), main.cpp |
+| **Wokwi Szenarien** | `El Trabajante/tests/wokwi/scenarios/` | 01-boot, 02-sensor, 03-actuator, 04-zone, 05-emergency, 06-config |
 
 ---
 
@@ -136,65 +143,94 @@ El Trabajante/                     # ESP32 Firmware (~13.300 Zeilen)
 │   │   ├── onewire_bus.*          # OneWire-Bus (DS18B20)
 │   │   └── pwm_controller.*       # PWM-Steuerung für Aktoren
 │   ├── services/
-│   │   ├── sensor/                # ⭐ SensorManager, PiEnhancedProcessor
-│   │   │   └── sensor_drivers/    # DS18B20, SHT31, PH, Generic I2C Drivers
+│   │   ├── sensor/                # ⭐ SensorManager, PiEnhancedProcessor, SensorFactory
+│   │   │   └── sensor_drivers/    # DS18B20, SHT31, PH, i2c_sensor_generic, isensor_driver
 │   │   ├── actuator/              # ⭐ ActuatorManager, SafetyController
-│   │   │   └── actuator_drivers/  # Pump, Valve, PWM Drivers
-│   │   ├── communication/         # ⭐ MQTTClient, WiFiManager, HTTPClient
-│   │   ├── config/                # ConfigManager, StorageManager
-│   │   └── provisioning/          # Zone-Assignment
+│   │   │   └── actuator_drivers/  # Pump, Valve, PWM, iactuator_driver
+│   │   ├── communication/         # ⭐ MQTTClient, WiFiManager, HTTPClient, WebServer, NetworkDiscovery
+│   │   ├── config/                # ConfigManager, StorageManager, ConfigResponseBuilder, LibraryManager, WiFiConfig
+│   │   └── provisioning/          # ⭐ ProvisionManager (AP-Mode, Zero-Touch, Zone-Assignment)
 │   ├── models/                    # ⭐ Types, Error Codes, MQTT Messages
-│   │   ├── error_codes.h          # ALLE Error-Codes definiert
-│   │   ├── sensor_types.h         # SensorConfig, SensorType
-│   │   ├── actuator_types.h       # ActuatorConfig, ActuatorType
-│   │   └── system_types.h         # SystemState, ZoneConfig
+│   │   ├── error_codes.h          # ALLE Error-Codes (1000–4999 + ConfigErrorCode enum)
+│   │   ├── config_types.h        # ConfigStatus, ConfigType, ConfigFailureItem, ConfigResponsePayload
+│   │   ├── sensor_types.h        # SensorConfig, SensorType
+│   │   ├── sensor_registry.*     # SensorCapability, findSensorCapability, Server↔ESP Type-Mapping
+│   │   ├── actuator_types.h     # ActuatorConfig, ActuatorType
+│   │   ├── system_types.h       # SystemState, ZoneConfig, KaiserZone, MasterZone
+│   │   ├── watchdog_types.h     # WatchdogMode, WatchdogConfig, feedWatchdog (main.cpp)
+│   │   └── mqtt_messages.h      # MQTT-Payload-Strukturen
 │   ├── error_handling/            # ErrorTracker, CircuitBreaker, HealthMonitor
-│   ├── utils/                     # Logger, TopicBuilder, TimeManager
-│   └── config/hardware/           # Board-spezifische Configs
-│       ├── xiao_esp32c3.h         # XIAO-spezifische Pins
-│       └── esp32_dev.h            # ESP32-Dev-Board Pins
+│   ├── utils/                     # Logger, TopicBuilder, TimeManager, data_buffer, json_helpers, onewire_utils, string_helpers
+│   └── config/
+│       ├── hardware/              # Board-spezifische Configs
+│       │   ├── xiao_esp32c3.h     # XIAO-spezifische Pins
+│       │   └── esp32_dev.h        # ESP32-Dev-Board Pins
+│       ├── feature_flags.h        # (reserviert)
+│       └── system_config.h        # (reserviert)
 ├── docs/                          # ⭐ Technische Dokumentation
 │   ├── API_REFERENCE.md           # Modul-API-Referenz (~3.300 Zeilen)
 │   ├── Mqtt_Protocoll.md          # MQTT-Spezifikation (~3.600 Zeilen)
 │   ├── MQTT_CLIENT_API.md         # MQTT-Client-API (~1.300 Zeilen)
-│   ├── NVS_KEYS.md                # NVS-Speicher-Keys (~300 Zeilen)
-│   ├── Roadmap.md                 # Aktueller Status (~150 Zeilen)
+│   ├── NVS_KEYS.md                # NVS-Speicher-Keys (wifi_config, zone_config, subzone_config)
+│   ├── Roadmap.md                 # Phasen-Status, Modul-Matrix (~150 Zeilen)
 │   ├── System_Overview.md         # Codebase-Analyse (~2.500 Zeilen)
-│   └── system-flows/              # 9 Ablauf-Diagramme (inkl. Subzone-Management)
-└── platformio.ini                 # Build-Konfiguration
+│   ├── Dynamic Zones and Provisioning/  # PROVISIONING.md, DYNAMIC_ZONES_IMPLEMENTATION.md, INTEGRATION_GUIDE
+│   └── system-flows/              # 9 Ablauf-Diagramme (inkl. 09-subzone-management-flow)
+├── tests/wokwi/                   # Wokwi-Simulation
+│   ├── boot_test.yaml, mqtt_connection.yaml
+│   ├── scenarios/                 # 01-boot, 02-sensor, 03-actuator, 04-zone, 05-emergency, 06-config
+│   └── helpers/mqtt_inject.py
+├── platformio.ini                 # esp32_dev, seeed_xiao_esp32c3, wokwi_simulation
+├── CHANGELOG.md                   # Versionshistorie (Phase 1–9)
+└── wokwi.toml, diagram.json       # Wokwi CLI & Hardware-Config
 ```
 
 ---
 
 ## 4. MQTT-Protokoll (Verifiziert)
 
-### Topic-Schema (aus TopicBuilder)
+### Topic-Schema (TopicBuilder + main.cpp)
 
-**ESP → God-Kaiser (Publish):**
+**TopicBuilder-Methoden** (`src/utils/topic_builder.h`): Sensor/Actuator/System/Config/Subzone – siehe Tabelle unten. **Zone-Topics** `zone/assign` und `zone/ack` werden in **main.cpp** aus `g_kaiser.kaiser_id` und `g_system_config.esp_id` gebaut (kein TopicBuilder).
+
+**ESP → God-Kaiser (Publish) – TopicBuilder:**  
+`buildSensorDataTopic(gpio)`, `buildSensorBatchTopic()`, `buildSensorResponseTopic(gpio)` (Phase 2C),  
+`buildActuatorStatusTopic(gpio)`, `buildActuatorResponseTopic(gpio)`, `buildActuatorAlertTopic(gpio)`, `buildActuatorEmergencyTopic()`,  
+`buildSystemHeartbeatTopic()`, `buildSystemDiagnosticsTopic()`, `buildSystemErrorTopic()`,  
+`buildConfigResponseTopic()`, `buildSubzoneAckTopic()`, `buildSubzoneStatusTopic()`, `buildSubzoneSafeTopic()`.
+
+**ESP → God-Kaiser (Publish) – main.cpp:**  
+`kaiser/{kaiser_id}/esp/{esp_id}/zone/ack` (Zone-Assignment-Ack).
+
+**God-Kaiser → ESP (Subscribe) – main.cpp:**  
+`kaiser/god/esp/{esp_id}/zone/assign` (wenn unassigned) bzw. `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`.
+
+**God-Kaiser → ESP (Subscribe) – TopicBuilder:**  
+`buildActuatorCommandTopic(gpio)`, `buildSystemCommandTopic()`, `buildConfigTopic()`, `buildBroadcastEmergencyTopic()`,  
+`buildSubzoneAssignTopic()`, `buildSubzoneRemoveTopic()`;  
+`buildSensorCommandTopic(gpio)` (Phase 2C On-Demand);  
+`buildSystemHeartbeatAckTopic()` (Phase 2 Device-Approval).
+
+**Kurz-Referenz (Patterns):**
 ```
 kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data       # Sensor-Daten
+kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/response   # Phase 2C On-Demand-Response
 kaiser/{kaiser_id}/esp/{esp_id}/sensor/batch             # Batch-Daten
-kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status   # Aktor-Status
-kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response # Command-Response
-kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert    # Aktor-Alerts
-kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency       # ESP-spezifischer Emergency
-kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat         # Heartbeat (alle 60s)
-kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics       # Health-Diagnostics
-kaiser/{kaiser_id}/esp/{esp_id}/config_response          # Config-Acknowledgment
-kaiser/{kaiser_id}/esp/{esp_id}/zone/ack                 # Zone-Assignment-Ack
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status|response|alert
+kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency      # ESP-spezifischer Emergency
+kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat       # Heartbeat (alle 60s)
+kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack   # Server→ESP Device-Status (Phase 2)
+kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics     # Health-Diagnostics
+kaiser/{kaiser_id}/esp/{esp_id}/system/error           # System-Fehler (Phase 0 Bug-Fix)
+kaiser/{kaiser_id}/esp/{esp_id}/config_response        # Config-Acknowledgment
+kaiser/{kaiser_id}/esp/{esp_id}/zone/assign            # Zone-Assignment (main.cpp baut Topic)
+kaiser/{kaiser_id}/esp/{esp_id}/zone/ack               # Zone-ACK (main.cpp)
+kaiser/{kaiser_id}/esp/{esp_id}/subzone/assign|remove|ack|status|safe  # Phase 9
+kaiser/broadcast/emergency                             # Emergency-Stop (alle ESPs)
 ```
 
-**God-Kaiser → ESP (Subscribe):**
-```
-kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command  # Aktor-Befehle
-kaiser/{kaiser_id}/esp/{esp_id}/actuator/+/command       # Wildcard für alle Aktoren
-kaiser/{kaiser_id}/esp/{esp_id}/system/command           # System-Befehle
-kaiser/{kaiser_id}/esp/{esp_id}/config                   # Config-Updates
-kaiser/{kaiser_id}/esp/{esp_id}/zone/assign              # Zone-Assignment
-kaiser/broadcast/emergency                               # Emergency-Stop (alle ESPs)
-```
-
-**Default kaiser_id:** `god`
+**Default kaiser_id:** `god`  
+**TopicBuilder:** Buffer-Validierung via `validateTopicBuffer()` (Overflow/Truncation-Schutz).
 
 **Vollständige Spezifikation:** `El Trabajante/docs/Mqtt_Protocoll.md`
 
@@ -202,41 +238,44 @@ kaiser/broadcast/emergency                               # Emergency-Stop (alle 
 
 ## 5. Error-Codes (Verifiziert aus error_codes.h)
 
-### Hardware (1000-1999)
+**Bereiche:** HARDWARE 1000–1999 | SERVICE 2000–2999 | COMMUNICATION 3000–3999 | APPLICATION 4000–4999.
+
+### Hardware (1000–1999)
 ```cpp
-ERROR_GPIO_RESERVED         1001   // Pin bereits reserviert
-ERROR_GPIO_CONFLICT         1002   // GPIO-Konflikt
-ERROR_GPIO_INIT_FAILED      1003   // Hardware-Init fehlgeschlagen
-ERROR_I2C_INIT_FAILED       1010   // I2C-Initialisierung fehlgeschlagen
-ERROR_I2C_DEVICE_NOT_FOUND  1011   // I2C-Gerät nicht gefunden
-ERROR_SENSOR_READ_FAILED    1040   // Sensor antwortet nicht
-ERROR_SENSOR_INIT_FAILED    1041   // Sensor-Init fehlgeschlagen
-ERROR_ACTUATOR_SET_FAILED   1050   // Aktor-Command fehlgeschlagen
-ERROR_ACTUATOR_INIT_FAILED  1051   // Aktor-Init fehlgeschlagen
+ERROR_GPIO_RESERVED|CONFLICT|INIT_FAILED|INVALID_MODE|READ_FAILED|WRITE_FAILED  1001–1006
+ERROR_I2C_INIT_FAILED|DEVICE_NOT_FOUND|READ_FAILED|WRITE_FAILED|BUS_ERROR      1010–1014
+ERROR_ONEWIRE_* (INIT_FAILED, NO_DEVICES, READ_FAILED, INVALID_ROM_*, DEVICE_NOT_FOUND, …)  1020–1029
+ERROR_PWM_INIT_FAILED|CHANNEL_FULL|SET_FAILED                              1030–1032
+ERROR_SENSOR_READ_FAILED|INIT_FAILED|NOT_FOUND|TIMEOUT                     1040–1043
+ERROR_ACTUATOR_SET_FAILED|INIT_FAILED|NOT_FOUND|CONFLICT                   1050–1053
 ```
 
-### Service (2000-2999)
+### Service (2000–2999), inkl. Subzone (2500–2599)
 ```cpp
-ERROR_NVS_INIT_FAILED       2001   // NVS-Initialisierung fehlgeschlagen
-ERROR_NVS_READ_FAILED       2002   // NVS-Lesen fehlgeschlagen
-ERROR_NVS_WRITE_FAILED      2003   // NVS-Schreiben fehlgeschlagen
-ERROR_CONFIG_INVALID        2010   // Ungültige Konfiguration
-ERROR_CONFIG_MISSING        2011   // Konfiguration fehlt
-ERROR_CONFIG_LOAD_FAILED    2012   // Config-Laden fehlgeschlagen
+ERROR_NVS_* (2001–2005), ERROR_CONFIG_* (2010–2014), ERROR_LOGGER_* (2020–2021), ERROR_STORAGE_* (2030–2032)
+ERROR_SUBZONE_INVALID_ID|GPIO_CONFLICT|PARENT_MISMATCH|NOT_FOUND|GPIO_INVALID|SAFE_MODE_FAILED|CONFIG_SAVE_FAILED  2500–2506
 ```
 
-### Communication (3000-3999)
+### Communication (3000–3999)
 ```cpp
-ERROR_WIFI_INIT_FAILED      3001   // WiFi-Init fehlgeschlagen
-ERROR_WIFI_CONNECT_TIMEOUT  3002   // WiFi-Timeout
-ERROR_WIFI_CONNECT_FAILED   3003   // WiFi-Verbindung fehlgeschlagen
-ERROR_MQTT_INIT_FAILED      3010   // MQTT-Init fehlgeschlagen
-ERROR_MQTT_CONNECT_FAILED   3011   // MQTT-Verbindung fehlgeschlagen
-ERROR_MQTT_PUBLISH_FAILED   3012   // Publish fehlgeschlagen
-ERROR_MQTT_SUBSCRIBE_FAILED 3013   // Subscribe fehlgeschlagen
+ERROR_WIFI_* (3001–3005), ERROR_MQTT_* (3010–3016), ERROR_HTTP_* (3020–3023), ERROR_NETWORK_* (3030–3032)
 ```
 
-**Vollständige Liste:** `El Trabajante/src/models/error_codes.h`
+### Application (4000–4999), inkl. Watchdog & Device-Approval
+```cpp
+ERROR_STATE_* (4001–4003), ERROR_OPERATION_* (4010–4012), ERROR_COMMAND_* (4020–4022)
+ERROR_PAYLOAD_* (4030–4032), ERROR_MEMORY_* (4040–4042), ERROR_SYSTEM_* (4050–4052)
+ERROR_TASK_* (4060–4062), ERROR_WATCHDOG_TIMEOUT|FEED_BLOCKED|FEED_BLOCKED_CRITICAL  4070–4072
+ERROR_DEVICE_REJECTED|APPROVAL_TIMEOUT|APPROVAL_REVOKED  4200–4202  // Phase 2 Device-Approval
+```
+
+### ConfigErrorCode (Enum, config_response / ConfigResponseBuilder)
+```cpp
+NONE, JSON_PARSE_ERROR, VALIDATION_FAILED, GPIO_CONFLICT, NVS_WRITE_FAILED, TYPE_MISMATCH, MISSING_FIELD, OUT_OF_RANGE, UNKNOWN_ERROR
+```
+**Helpers:** `configErrorCodeToString()`, `stringToConfigErrorCode()` in `error_codes.h`.
+
+**Vollständige Liste inkl. getErrorDescription():** `El Trabajante/src/models/error_codes.h`
 
 ---
 
@@ -297,6 +336,7 @@ SensorManager& sensorManager = SensorManager::getInstance();
 ActuatorManager& actuatorManager = ActuatorManager::getInstance();
 ConfigManager& configManager = ConfigManager::getInstance();
 GPIOManager& gpioManager = GPIOManager::getInstance();
+ProvisionManager& provisionManager = ProvisionManager::getInstance();
 ```
 
 ### Wichtigste Dateien für Code-Änderungen
@@ -304,12 +344,22 @@ GPIOManager& gpioManager = GPIOManager::getInstance();
 | Modul | Header | Implementation | Verantwortlichkeit |
 |-------|--------|----------------|-------------------|
 | **SensorManager** | `services/sensor/sensor_manager.h` | `sensor_manager.cpp` | Sensor-Orchestrierung, RAW-Daten |
+| **SensorFactory** | `services/sensor/sensor_factory.h` | `sensor_factory.cpp` | Sensor-Instanzerstellung, Typ-Mapping |
+| **SensorRegistry** | `models/sensor_registry.h` | `sensor_registry.cpp` | ESP↔Server Sensor-Type, Multi-Value, I2C-Address |
 | **ActuatorManager** | `services/actuator/actuator_manager.h` | `actuator_manager.cpp` | Aktor-Control, Safety |
+| **SafetyController** | `services/actuator/safety_controller.h` | `safety_controller.cpp` | Emergency-Stop, Subzone-Isolation |
 | **MQTTClient** | `services/communication/mqtt_client.h` | `mqtt_client.cpp` | MQTT Pub/Sub, Heartbeat |
-| **ConfigManager** | `services/config/config_manager.h` | `config_manager.cpp` | NVS-Config laden/speichern |
+| **ConfigManager** | `services/config/config_manager.h` | `config_manager.cpp` | NVS-Config (WiFi/Zone/Subzone), laden/speichern |
+| **ConfigResponseBuilder** | `services/config/config_response.h` | `config_response.cpp` | Config-Response MQTT, PARTIAL_SUCCESS, publishWithFailures |
+| **ProvisionManager** | `services/provisioning/provision_manager.h` | `provision_manager.cpp` | AP-Mode, Zero-Touch, needsProvisioning, startAPMode |
 | **GPIOManager** | `drivers/gpio_manager.h` | `gpio_manager.cpp` | Pin-Reservation, Safe-Mode |
-| **TopicBuilder** | `utils/topic_builder.h` | `topic_builder.cpp` | MQTT-Topic-Generierung |
+| **TopicBuilder** | `utils/topic_builder.h` | `topic_builder.cpp` | MQTT-Topic-Generierung, validateTopicBuffer |
 | **ErrorTracker** | `error_handling/error_tracker.h` | `error_tracker.cpp` | Error-Logging, History |
+| **HealthMonitor** | `error_handling/health_monitor.h` | `health_monitor.cpp` | Health-Snapshot, MQTT-Diagnostics |
+| **TimeManager** | `utils/time_manager.h` | `time_manager.cpp` | NTP, Timestamp-Hilfen (Phase 8) |
+
+### Weitere Utils (konsistent nutzen)
+`utils/data_buffer.*`, `utils/json_helpers.h`, `utils/onewire_utils.*`, `utils/string_helpers.*` – bei entsprechender Aufgabe verwenden.
 
 ---
 
@@ -361,7 +411,7 @@ cd "El Servador" && poetry run pytest god_kaiser_server/tests/ -v
 - ✅ Error-Codes aus `error_codes.h`
 - ✅ GPIOManager für Pin-Operationen
 - ✅ ActuatorManager für Aktor-Befehle (Safety-Checks automatisch integriert)
-- ✅ TopicBuilder für MQTT-Topics
+- ✅ TopicBuilder für MQTT-Topics (Zone-Topics `zone/assign`, `zone/ack` werden in main.cpp gebaut – bestehendes Pattern beibehalten)
 - ✅ Build-Check vor Commit
 
 ---
@@ -369,18 +419,25 @@ cd "El Servador" && poetry run pytest god_kaiser_server/tests/ -v
 ## 9. Feature Flags (platformio.ini)
 
 ```ini
-# Kernel-Features (ALLE aktiv)
+# Kernel-Features (ALLE aktiv in esp32_dev / seeed_xiao_esp32c3)
 -DDYNAMIC_LIBRARY_SUPPORT=1     # OTA Library Support
 -DHIERARCHICAL_ZONES=1          # Zone-System
 -DOTA_LIBRARY_ENABLED=1         # OTA Updates
 -DSAFE_MODE_PROTECTION=1        # GPIO Safe-Mode
 -DZONE_MASTER_ENABLED=1         # Zone-Master
--DCONFIG_ENABLE_THREAD_SAFETY   # Mutex-Schutz
+-DCONFIG_ENABLE_THREAD_SAFETY   # Mutex-Schutz (StorageManager)
+
+# Logging (Serieller Monitor)
+-DCORE_DEBUG_LEVEL=2            # Xiao; 3 für esp32_dev
+-DCONFIG_ARDUHAL_LOG_COLORS=0  # Keine ANSI-Farben (Kompatibilität Serial Monitor)
 
 # Board-spezifisch
-XIAO_ESP32C3_MODE=1             # MAX_SENSORS=10, MAX_ACTUATORS=6
-ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
+-DXIAO_ESP32C3_MODE=1           # MAX_SENSORS=10, MAX_ACTUATORS=6, MAX_LIBRARY_SIZE=32768
+-DESP32_DEV_MODE=1              # MAX_SENSORS=20, MAX_ACTUATORS=12, MAX_LIBRARY_SIZE=65536
 ```
+
+**Wokwi-Simulation** (`[env:wokwi_simulation]`):  
+`-DWOKWI_SIMULATION=1`, `-DWOKWI_WIFI_SSID`, `-DWOKWI_MQTT_HOST`, `-DWOKWI_ESP_ID` – siehe `platformio.ini`.
 
 ---
 
@@ -388,15 +445,21 @@ ESP32_DEV_MODE=1                # MAX_SENSORS=20, MAX_ACTUATORS=12
 
 | Aufgabe | Primäre Doku | Zusätzlich |
 |---------|--------------|------------|
-| MQTT verstehen | `docs/Mqtt_Protocoll.md` | `docs/MQTT_CLIENT_API.md` |
-| Sensor hinzufügen | Server: `El Servador/.../sensors/sensor_libraries/active/` | ESP-Driver: `src/services/sensor/sensor_drivers/` |
-| Aktor hinzufügen | `docs/API_REFERENCE.md` (ActuatorManager) | `src/services/actuator/actuator_drivers/` |
-| NVS-Keys | `docs/NVS_KEYS.md` | `src/services/config/storage_manager.*` |
-| System-Flow | `docs/system-flows/` | `docs/System_Overview.md` |
-| Tests schreiben | `El Servador/docs/ESP32_TESTING.md` | `.claude/TEST_WORKFLOW.md` |
+| MQTT verstehen | `El Trabajante/docs/Mqtt_Protocoll.md` | `docs/MQTT_CLIENT_API.md` |
+| TopicBuilder / Zone-Topics | `src/utils/topic_builder.h` | Zone/assign, zone/ack in `main.cpp` (Zeilen ~712, ~981, ~1032) |
+| Sensor hinzufügen | Server: `El Servador/.../sensors/sensor_libraries/active/` | ESP: `src/services/sensor/sensor_drivers/`, `models/sensor_registry.*` |
+| Aktor hinzufügen | `docs/API_REFERENCE.md` (ActuatorManager, SafetyController) | `src/services/actuator/actuator_drivers/` |
+| NVS-Keys | `El Trabajante/docs/NVS_KEYS.md` | `src/services/config/storage_manager.*` (wifi_config, zone_config, subzone_config) |
+| Subzone-Management | `El Trabajante/docs/system-flows/09-subzone-management-flow.md` | NVS_KEYS Subzone-Keys, TopicBuilder buildSubzone* |
+| Provisioning | `El Trabajante/docs/Dynamic Zones and Provisioning/PROVISIONING.md` | `src/services/provisioning/provision_manager.*` |
+| Config-Response | `src/models/config_types.h`, `src/services/config/config_response.h` | ConfigStatus, ConfigFailureItem, publishWithFailures |
+| Watchdog | `El Trabajante/src/models/watchdog_types.h` | `main.cpp` (feedWatchdog, handleWatchdogTimeout) |
+| System-Flow | `El Trabajante/docs/system-flows/` | `docs/System_Overview.md` |
+| Tests schreiben | `El Servador/docs/ESP32_TESTING.md` | `.claude/TEST_WORKFLOW.md`, `El Trabajante/tests/wokwi/` |
 | Live-Updates verstehen | `.claude/PAKET_F_ANALYSE.md` | `El Frontend/src/services/websocket.ts` |
 | Simulation verstehen | `.cursor/plans/paket_x_-_vollständige_migration_zu_industrietauglichem_system_bc5638d4.plan.md` | `El Servador/god_kaiser_server/src/services/simulation/scheduler.py` |
-| Error-Handling | `src/models/error_codes.h` | `src/error_handling/` |
+| Error-Codes | `El Trabajante/src/models/error_codes.h` | `getErrorDescription()`, ConfigErrorCode enum |
+| El Trabajante Roadmap/CHANGELOG | `El Trabajante/docs/Roadmap.md`, `El Trabajante/CHANGELOG.md` | Phasen-Status, Modul-Matrix |
 
 ---
 
@@ -881,19 +944,22 @@ El Servador/god_kaiser_server/      # Python FastAPI Server (~15.000+ Zeilen)
 
 ---
 
-## 12. Aktueller Entwicklungsstand
+## 12. Aktueller Entwicklungsstand (El Trabajante)
 
 | Phase | Status | Module |
 |-------|--------|--------|
-| Phase 0-7 | ✅ COMPLETE | GPIO, Logger, Config, WiFi, MQTT, I2C, OneWire, Sensor, Actuator, Error |
-| Phase 8 | ⏳ NEXT | Integration & Final Testing |
-| Phase 9 | ✅ COMPLETE | Subzone-Management, Pin-Level Zone-Gruppierung |
+| Phase 0–7 | ✅ COMPLETE | GPIO Safe-Mode, Logger, Config, WiFi, MQTT, HTTP, I2C, OneWire, PWM, Sensor, Actuator, Error, HealthMonitor, CircuitBreaker |
+| Phase 8 | ⏳ NEXT | Integration & Final Testing, TimeManager (NTP) |
+| Phase 9 | ✅ COMPLETE | Subzone-Management, Pin-Level Zone-Gruppierung, TopicBuilder Subzone-Topics |
 | Paket X | ✅ COMPLETE | SimulationScheduler Migration (industrietaugliche Simulation) |
 | Paket F | ✅ COMPLETE | WebSocket Live-Updates im Frontend |
 
-**Code-Qualität:** 5.0/5 (Production-Ready)
-**Implementierte Zeilen:** ~13.300 (ESP32) + ~15.000+ (Server) + ~7.000 (Frontend)
-**Neue Features:** Subzone-Management, SimulationScheduler, WebSocket Live-Updates
+**El Trabajante Kern-Module:** SensorManager, SensorFactory, SensorRegistry, ActuatorManager, SafetyController, ConfigManager, ConfigResponseBuilder, ProvisionManager, MQTTClient, WiFiManager, GPIOManager, TopicBuilder, ErrorTracker, HealthMonitor, TimeManager.  
+**Models:** error_codes.h (inkl. Subzone, Watchdog, ConfigErrorCode), config_types.h, sensor_registry, watchdog_types.h.
+
+**Code-Qualität:** 5.0/5 (Production-Ready)  
+**Implementierte Zeilen:** ~13.300 (ESP32) + ~15.000+ (Server) + ~7.000 (Frontend)  
+**Quellen:** `El Trabajante/docs/Roadmap.md`, `El Trabajante/CHANGELOG.md`
 
 ---
 
@@ -1358,8 +1424,18 @@ net stop mosquitto && copy "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-o
 
 ---
 
-**Letzte Aktualisierung:** 2026-01-11
-**Version:** 5.0 (Logging & Debugging Dokumentation)
+**Letzte Aktualisierung:** 2026-01-27
+**Version:** 5.1 (El Trabajante Codebase-Analyse & Hauptdoku-Update)
+
+> **Änderungen in v5.1 (El Trabajante Codebase-Analyse):**
+> - **Quick Reference:** Einträge für Roadmap, CHANGELOG, Provisioning, Sensor-Registry, Config-Response, Watchdog, Wokwi-Szenarien
+> - **Section 3 Verzeichnisstruktur:** config_types.h, sensor_registry.*, watchdog_types.h, mqtt_messages.h; ConfigResponseBuilder, LibraryManager, WiFiConfig, ProvisionManager, SensorFactory; WebServer, NetworkDiscovery; data_buffer, json_helpers, onewire_utils, string_helpers; docs/Dynamic Zones and Provisioning; tests/wokwi/scenarios; CHANGELOG.md, wokwi.toml, diagram.json
+> - **Section 4 MQTT:** TopicBuilder-Methoden vs. main.cpp (zone/assign, zone/ack); Phase 2C Sensor command/response, heartbeat/ack, system/error; Phase 9 Subzone-Topics; validateTopicBuffer
+> - **Section 5 Error-Codes:** Erweiterte Bereiche (GPIO 1004–1006, I2C 1012–1014, OneWire 1020–1029, PWM 1030–1032, Sensor/Actuator 1042–1053, Subzone 2500–2506, NVS/Config/Logger/Storage, WiFi/MQTT/HTTP/Network, Application/Watchdog/Device-Approval); ConfigErrorCode enum
+> - **Section 7 Kritische Module:** SensorFactory, SensorRegistry, SafetyController, ConfigResponseBuilder, ProvisionManager, HealthMonitor, TimeManager; Weitere Utils (data_buffer, json_helpers, onewire_utils, string_helpers)
+> - **Section 9 Feature Flags:** CONFIG_ARDUHAL_LOG_COLORS, CORE_DEBUG_LEVEL, CONFIG_ENABLE_THREAD_SAFETY; Wokwi-Simulation env
+> - **Section 10 Dokumentations-Matrix:** TopicBuilder/Zone-Topics, Subzone-Management, Provisioning, Config-Response, Watchdog, Error-Codes, Roadmap/CHANGELOG
+> - **Section 12 Entwicklungsstand:** El-Trabajante-Kern-Module und Models; Verweis auf Roadmap.md, CHANGELOG.md
 
 > **Änderungen in v5.0 (Logging & Debugging Dokumentation):**
 > - **Neue Section 14:** Vollständige Logging & Debugging Referenz für ESP32, Server und MQTT

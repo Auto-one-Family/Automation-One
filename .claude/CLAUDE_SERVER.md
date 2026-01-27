@@ -1,23 +1,28 @@
 # CLAUDE_SERVER.md - God-Kaiser Server Referenz für KI-Agenten
 
-**Version:** 3.2
-**Letzte Aktualisierung:** 2026-01-05
+**Version:** 5.0
+**Letzte Aktualisierung:** 2026-01-27
 **Zweck:** Zentrale Referenz für Claude, um bei jeder Server-Aufgabe die richtigen Dateien, Patterns und Konventionen zu finden.
 
 > **📖 ESP32-Firmware Dokumentation:** Siehe `.claude/CLAUDE.md` für ESP32-spezifische Details
 > **🔄 Cross-Referenzen:** Beide Dokumentationen verweisen jetzt aufeinander für vollständigen Kontext
 > **🛠️ Service-Management:** Siehe `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 für Start/Stop/Logs
 
-> **Letzte Änderungen (2025-12-08 - v3.0):**
-> - **Vollständige Code-Analyse:** Alle kritischen Dateien analysiert und dokumentiert
-> - **MQTT-Architektur:** Subscriber mit Thread-Pool, Handler-Registrierung in main.py dokumentiert
-> - **Topic-Struktur:** Vollständige Topic-Referenz aus `constants.py` und `topics.py`
-> - **Publisher-Methoden:** Alle Publisher-Methoden mit QoS-Levels dokumentiert
-> - **Safety-Service:** Integration in ActuatorService dokumentiert
-> - **Logic-Engine:** Background-Task-Architektur und Evaluation-Flow dokumentiert
-> - **Heartbeat-Handler:** Unbekannte Geräte werden abgelehnt (kein Auto-Discovery)
-> - **Sensor-Validierung:** `raw_mode` ist Required Field
-> - **Verzeichnisstruktur:** Mit tatsächlichem Code vollständig abgeglichen
+> **Letzte Änderungen (2026-01-27 - v5.0 – Vollständige Codebase-Abgleich & Konsistenz):**
+> - **API v1 Router:** Abgleich mit `src/api/v1/__init__.py`: Nur auth, audit, debug, errors, esp, sensors, sensor_type_defaults, actuators, health, logic, users, zone, subzone, sequences sind in `api_v1_router` inkludiert. ai, kaiser, library existieren als Dateien, sind aber nicht inkludiert; WebSocket wird in `main.py` via `websocket_realtime.router` unter `/api/v1` gemountet.
+> - **Startup/Shutdown:** Sequenz mit `main.py` Zeile-für-Zeile abgeglichen (Step 0–6 Startup, Step 1–6 Shutdown inkl. SequenceActionExecutor, MaintenanceService vor Scheduler).
+> - **Verzeichnisstruktur:** Services um `gpio_validation_service.py`, Logic um `logic/actions/sequence_executor.py`, `logic/safety/` (conflict_manager, loop_detector, rate_limiter), Maintenance-Jobs um `sensor_health.py` ergänzt; DB-Models um `sensor_type_defaults.py`, `esp_heartbeat.py` ergänzt.
+> - **Settings:** Alle 19 Settings-Klassen aus `config.py` bestätigt (inkl. ResilienceSettings); Environment-Variable `environment` und `log_level` auf Root-Settings-Ebene.
+> - **Alembic:** Migrations-Liste um vorhandene Versionen aus `alembic/versions/` ergänzt (multi_value_sensor, merge, audit_log_indexes, data_source, discovery_approval, esp_heartbeat_logs, last_command/error_message, master_zone_id, sensor_operating_modes, subzone_configs, token_blacklist, token_version, config_status, fix_sensor_unique_multivalue).
+>
+> **Frühere Änderungen (2026-01-27 - v4.0 – Codebase-Analyse El Servador):**
+> - **Startup/Shutdown:** Vollständige Sequenz aus `main.py` abgeglichen (Security-Validation, Resilience, Central Scheduler, SimulationScheduler, MaintenanceService, Mock-ESP Recovery, Sensor-Type-Auto-Registration, Scheduled-Sensor-Job-Recovery, LWT/Error-Handler, Paket-G Mock-Actuator-Handler)
+> - **API v1 Router:** Alle aktuellen Router dokumentiert: audit, auth, errors, esp, sensors, sensor_type_defaults, actuators, health, logic, debug, users, zone, subzone, sequences
+> - **MQTT-Handler:** Zone-ACK, Subzone-ACK, LWT (`system/will`), Error-Event (`system/error`), Mock-Actuator-Command-Handler (Paket G) ergänzt
+> - **Konfiguration:** MaintenanceSettings, ResilienceSettings, alle 18+ Settings-Klassen und Env-Namen dokumentiert
+> - **Services:** MaintenanceService, SimulationScheduler, AuditRetentionService, AuditBackupService, EventAggregatorService, SensorSchedulerService, SensorTypeRegistration
+> - **Core:** Resilience (Circuit Breaker, Retry, Timeout), CentralScheduler, exception_handlers, esp32_error_mapping
+> - **Verzeichnisstruktur:** Mit tatsächlichem Code (api/v1, mqtt/handlers, services, db/models, core) abgeglichen
 >
 > **Frühere Änderungen (2025-12-18 - Industrial Production Implementation):**
 > - **Audit-Log System:** Vollständiges Retention-System mit Frontend-Steuerung
@@ -117,11 +122,13 @@
 | **Sensor-Datenverarbeitung** | Empfängt RAW-Daten von ESPs, verarbeitet mit Python-Libraries | `src/mqtt/handlers/sensor_handler.py`, `src/sensors/library_loader.py` |
 | **Actuator-Steuerung** | Validiert und sendet Commands an ESPs | `src/mqtt/handlers/actuator_handler.py`, `src/services/actuator_service.py` |
 | **Cross-ESP-Logik** | If-Sensor-Then-Actuator über mehrere ESPs | `src/services/logic_engine.py` |
-| **Geräteverwaltung** | ESP-Registry, Zonen, Konfiguration | `src/services/esp_service.py`, `src/services/zone_service.py` |
-| **Persistenz** | Sensor-Daten, Configs, User, Logs | `src/db/models/`, `src/db/repositories/` |
-| **REST API** | Frontend-Kommunikation | `src/api/v1/` |
+| **Geräteverwaltung** | ESP-Registry, Zonen, Subzonen, Konfiguration | `src/services/esp_service.py`, `src/services/zone_service.py`, `src/services/subzone_service.py` |
+| **Persistenz** | Sensor-Daten, Configs, User, Audit-Logs | `src/db/models/`, `src/db/repositories/` |
+| **REST API** | Frontend-Kommunikation | `src/api/v1/` (api_v1_router: audit, auth, debug, errors, esp, sensors, sensor_type_defaults, actuators, health, logic, zone, subzone, sequences, users); WebSocket via `main.py` unter `/api/v1` |
 | **WebSocket** | Realtime-Updates ans Frontend | `src/websocket/manager.py` |
-| **God-Integration** | KI-Schnittstelle (zukünftig) | `src/services/ai_service.py` |
+| **Maintenance & Cleanup** | Data-Safe Cleanup, Health-Checks, Stats (Paket D) | `src/services/maintenance/service.py` |
+| **Simulation (Mock-ESP)** | Mock-ESP Heartbeat/Sensor, Recovery (Paket X/G) | `src/services/simulation/scheduler.py` |
+| **Audit & Retention** | Audit-Log, Retention, Backup, Cleanup-Preview | `src/services/audit_retention_service.py`, `src/api/v1/audit.py` |
 
 ### 1.3 Architektur-Prinzip: Server-Centric
 
@@ -144,41 +151,41 @@ Server sendet:    Actuator-Commands, Config-Updates
 
 **Startup-Flow in `src/main.py` (lifespan startup):**
 
-1. **Database Initialization** (`init_db()`)
-   - Erstellt Tabellen wenn `settings.database.auto_init == True`
-   - Engine wird erstellt auch wenn auto_init=False
-
+0. **Security Validation** – JWT-Secret-Check (Production: Abbruch bei Default), MQTT-TLS-Warnung  
+0.5. **Resilience Patterns** – `ResilienceRegistry`, Circuit Breaker (external_api), später DB-Circuit-Breaker nach `init_db`  
+1. **Database Initialization** (`init_db()` / `get_engine()`)
+   - Tabellen wenn `settings.database.auto_init == True`; Engine auch bei auto_init=False  
 2. **MQTT Client Connection** (`MQTTClient.get_instance().connect()`)
-   - Singleton-Pattern
-   - Auto-Reconnect mit Exponential Backoff
-   - TLS/SSL Support wenn konfiguriert
+   - Singleton, Auto-Reconnect, TLS/SSL wenn konfiguriert  
+3. **MQTT Handler Registration** (`Subscriber` mit `settings.mqtt.subscriber_max_workers`)
+   - `set_main_loop(asyncio.get_running_loop())` (Bug-O-Fix: Event-Loop für Async-Handler)
+   - `kaiser_id` aus `settings.hierarchy.kaiser_id`
+   - Registrierte Handler: `sensor/+/data`, `actuator/+/status`, `actuator/+/response`, `actuator/+/alert`, `system/heartbeat`, `discovery/esp32_nodes`, `config_response`, `zone/ack`, `subzone/ack`, `system/will` (LWT), `system/error` (Error-Event), plus Paket G: `actuator/+/command`, `actuator/emergency`, `kaiser/broadcast/emergency` (Mock-Actuator-Handler)  
+3.4. **Central Scheduler** – `init_central_scheduler()`  
+3.4.1. **SimulationScheduler** – `init_simulation_scheduler(mqtt_publish_callback)`  
+3.4.2. **MaintenanceService** – `init_maintenance_service(scheduler, session_factory, mqtt_client, settings)` → `start()`  
+3.5. **Mock-ESP Recovery** – `SimulationScheduler.recover_mocks(session)` (Paket X)  
+3.6. **Sensor Type Auto-Registration** – `auto_register_sensor_types(session)` (Phase 2A)  
+3.7. **Scheduled Sensor Job Recovery** – `SensorSchedulerService.recover_all_jobs(session)` (Phase 2H)  
+4. **MQTT Topic Subscription** – `Subscriber.subscribe_all()` (nur wenn bereits connected)  
+5. **WebSocket Manager** – `WebSocketManager.get_instance()` → `initialize()`  
+6. **Service Initialization** (eine DB-Session)
+   - `SafetyService` → `ActuatorService` → `LogicEngine` (Condition/Action-Evaluators, ConflictManager, RateLimiter) → `LogicScheduler`  
+   - `set_logic_engine(_logic_engine)` für Handler  
 
-3. **MQTT Handler Registration** (`Subscriber.register_handler()`)
-   - Handler werden für Topic-Patterns registriert
-   - `kaiser_id` wird dynamisch aus Config geladen
-   - Alle Handler in `main.py:99-129` registriert
+**Shutdown-Flow (Reihenfolge kritisch):**
+1. Logic Scheduler stoppen  
+2. Logic Engine stoppen  
+2.1. SequenceActionExecutor cleanup/shutdown  
+2.3. MaintenanceService stop (vor Scheduler-Shutdown)  
+2.4. SimulationScheduler: `stop_all_mocks()`  
+2.5. Central Scheduler: `shutdown_central_scheduler()`  
+3. WebSocket Manager shutdown  
+4. MQTT Subscriber shutdown (wait=True, timeout=30s)  
+5. MQTT Client disconnect  
+6. Database Engine dispose  
 
-4. **MQTT Topic Subscription** (`Subscriber.subscribe_all()`)
-   - QoS wird automatisch basierend auf Topic-Typ gesetzt
-   - Heartbeat: QoS 0, Config: QoS 2, Rest: QoS 1
-
-5. **WebSocket Manager Initialization** (`WebSocketManager.get_instance()`)
-   - Singleton-Pattern
-   - Connection-Management für Realtime-Updates
-
-6. **Service Initialization** (in DB Session)
-   - `SafetyService` → `ActuatorService` → `LogicEngine`
-   - `LogicEngine.start()` startet Background-Task
-   - Global instance wird gesetzt via `set_logic_engine()`
-
-**Shutdown-Flow:**
-1. Logic Engine stoppen (`LogicEngine.stop()`)
-2. WebSocket Manager shutdown
-3. MQTT Subscriber Thread-Pool shutdown (wait=True, timeout=30s)
-4. MQTT Client disconnect
-5. Database Engine dispose
-
-**Code-Location:** `src/main.py:55-230`
+**Code-Location:** `src/main.py` (lifespan ~Zeilen 85–415)
 
 ---
 
@@ -202,32 +209,56 @@ El Servador/
 │   │   │   ├── schemas.py            # Shared Schemas
 │   │   │   ├── sensor_processing.py  # Real-Time Sensor Processing API
 │   │   │   └── v1/                   # API Version 1
-│   │   │       ├── __init__.py       # Router-Aggregation
+│   │   │       ├── __init__.py       # ⭐ Router-Aggregation (api_v1_router)
 │   │   │       ├── audit.py          # ⭐ Audit Log Management & Retention
 │   │   │       ├── auth.py           # Login, Register, Token Refresh
 │   │   │       ├── esp.py            # ESP CRUD, Status
 │   │   │       ├── sensors.py        # Sensor Config, Data Query
-│   │   │       ├── actuators.py      # Actuator Control, Status
+│   │   │       ├── sensor_type_defaults.py  # Phase 2A – Sensor Operating Modes
+│   │   │       ├── actuators.py     # Actuator Control, Status
 │   │   │       ├── logic.py          # Automation Rules CRUD
 │   │   │       ├── health.py         # Health Checks, Metrics
-│   │   │       ├── kaiser.py         # Kaiser Node Management
-│   │   │       ├── library.py        # Sensor Library Management
-│   │   │       ├── ai.py             # AI Service Integration
-│   │   │       └── websocket/        # WebSocket Endpoints
+│   │   │       ├── debug.py         # Mock-ESP, DB-Explorer
+│   │   │       ├── errors.py         # DS18B20/Error-Event-Integration
+│   │   │       ├── sequences.py      # Phase 3 – Sequence Actions
+│   │   │       ├── zone.py           # Zone Assignment
+│   │   │       ├── subzone.py        # Phase 9 – Subzone Management
+│   │   │       ├── users.py          # User Management
+│   │   │       ├── kaiser.py         # (vorhanden, nicht in api_v1_router)
+│   │   │       ├── library.py        # (vorhanden, nicht in api_v1_router)
+│   │   │       ├── ai.py             # (vorhanden, nicht in api_v1_router)
+│   │   │       └── websocket/        # in main.py unter /api/v1 gemountet
 │   │   │           └── realtime.py   # Realtime Updates
 │   │   │
 │   │   ├── services/                 # 🧠 BUSINESS LOGIC
 │   │   │   ├── audit_retention_service.py # ⭐ Audit Log Retention & Cleanup
+│   │   │   ├── audit_backup_service.py    # JSON/ZIP Backup
 │   │   │   ├── esp_service.py        # ⭐ ESP Registration, Discovery, Config Publishing
 │   │   │   ├── sensor_service.py     # ⭐ Sensor Config, Data Processing
+│   │   │   ├── sensor_scheduler_service.py # Phase 2H – Scheduled Sensor Jobs
+│   │   │   ├── sensor_type_registration.py # Phase 2A – Auto-Registration
 │   │   │   ├── actuator_service.py   # ⭐ Command Validation, Execution
 │   │   │   ├── logic_engine.py       # ⭐ Cross-ESP Automation Engine
 │   │   │   ├── logic_service.py      # Automation Rule CRUD Service
+│   │   │   ├── logic/                # Conditions, Actions, Safety
+│   │   │   │   ├── conditions/       # Sensor, Time, Hysteresis, Compound
+│   │   │   │   ├── actions/          # Actuator, Delay, Notification, Sequence
+│   │   │   │   └── safety/           # ConflictManager, RateLimiter, LoopDetector
 │   │   │   ├── library_service.py    # Sensor Library Management
 │   │   │   ├── safety_service.py     # Safety Controller, Emergency Stop
 │   │   │   ├── health_service.py     # Health Checks, Metrics
-│   │   │   ├── kaiser_service.py     # Kaiser Node Management
+│   │   │   ├── gpio_validation_service.py # GPIO-Konflikt-Prüfung
+│   │   │   ├── maintenance/         # Paket D – Maintenance Jobs
+│   │   │   │   ├── service.py        # MaintenanceService
+│   │   │   │   └── jobs/             # cleanup.py, sensor_health.py
+│   │   │   ├── simulation/          # Paket X/G – Mock-ESP
+│   │   │   │   ├── scheduler.py      # SimulationScheduler
+│   │   │   │   └── actuator_handler.py # MQTT-Command-Handler für Mocks
+│   │   │   ├── kaiser_service.py     # Kaiser Node Management (geplant)
 │   │   │   ├── ai_service.py         # God Layer Integration (Future)
+│   │   │   ├── event_aggregator_service.py # DataSource, EventAggregator
+│   │   │   ├── config_builder.py    # ESP32 Config Payload Builder
+│   │   │   ├── mqtt_auth_service.py  # Mosquitto Passwd-Verwaltung
 │   │   │   └── god_client.py         # HTTP Client für God-Layer
 │   │   │
 │   │   ├── mqtt/                     # 📡 MQTT LAYER
@@ -242,8 +273,12 @@ El Servador/
 │   │   │       ├── actuator_alert_handler.py # Actuator Alerts
 │   │   │       ├── heartbeat_handler.py # ESP Heartbeats, Registration
 │   │   │       ├── config_handler.py # Config Responses
-│   │   │       ├── discovery_handler.py # ESP Discovery (falls vorhanden)
-│   │   │       └── kaiser_handler.py # Kaiser Node Messages
+│   │   │       ├── zone_ack_handler.py # Phase 7 Zone ACK
+│   │   │       ├── subzone_ack_handler.py # Phase 9 Subzone ACK
+│   │   │       ├── lwt_handler.py # LWT Instant Offline
+│   │   │       ├── error_handler.py # system/error
+│   │   │       ├── discovery_handler.py # ESP Discovery (deprecated)
+│   │   │       └── kaiser_handler.py
 │   │   │
 │   │   ├── websocket/                # 🔴 REALTIME
 │   │   │   ├── manager.py            # Connection Management
@@ -254,14 +289,20 @@ El Servador/
 │   │   │   ├── models/               # SQLAlchemy Models
 │   │   │   │   ├── __init__.py       # Model Exports
 │   │   │   │   ├── esp.py            # ESP Device Model
+│   │   │   │   ├── esp_heartbeat.py  # ESP Heartbeat Logs
 │   │   │   │   ├── sensor.py         # SensorConfig, SensorData
+│   │   │   │   ├── sensor_type_defaults.py # Phase 2A Operating Modes
 │   │   │   │   ├── actuator.py       # ActuatorConfig, ActuatorState
 │   │   │   │   ├── logic.py          # AutomationRule Model
 │   │   │   │   ├── logic_validation.py # Logic Validation Helpers
 │   │   │   │   ├── user.py           # User, Role, Permission
+│   │   │   │   ├── auth.py           # TokenBlacklist
+│   │   │   │   ├── audit_log.py      # AuditLog
 │   │   │   │   ├── kaiser.py         # Kaiser Node Model
 │   │   │   │   ├── library.py        # SensorLibrary Model
 │   │   │   │   ├── system.py         # SystemConfig, SystemLog
+│   │   │   │   ├── subzone.py        # SubzoneConfig
+│   │   │   │   ├── enums.py          # DataSource etc.
 │   │   │   │   └── ai.py             # AI Service Models
 │   │   │   └── repositories/         # Repository Pattern
 │   │   │       ├── base.py           # BaseRepository (CRUD)
@@ -433,8 +474,8 @@ processor = CO2Processor()
 **Szenario:** User will einen neuen Endpoint `/api/v1/dashboard/summary`.
 
 **Zu analysierende Dateien:**
-1. `src/api/v1/system.py` - Beispiel-Endpoint
-2. `src/api/deps.py` - Dependency Injection
+1. `src/api/v1/health.py` – Beispiel-Endpoint (oder einen bestehenden Router)
+2. `src/api/deps.py` – Dependency Injection (bzw. `src/api/dependencies.py`)
 3. `src/schemas/common.py` - Response Schemas
 4. `src/services/` - Welcher Service benötigt?
 
@@ -477,11 +518,7 @@ async def get_dashboard_summary(
     }
 ```
 
-**Router registrieren in `src/main.py`:**
-```python
-from .api.v1 import dashboard
-app.include_router(dashboard.router, prefix="/api/v1")
-```
+**Router registrieren:** Neue v1-Router in `src/api/v1/__init__.py` inkludieren (`api_v1_router.include_router(xyz_router)`). Die App mountet bereits `api_v1_router` unter `/api` in `src/main.py`.
 
 ---
 
@@ -739,18 +776,27 @@ poetry run alembic upgrade head
 
 | Topic Pattern | Handler | QoS | Beschreibung | Code-Location |
 |--------------|---------|-----|--------------|---------------|
-| `kaiser/{kaiser_id}/esp/+/sensor/+/data` | `sensor_handler.handle_sensor_data` | 1 | Sensor-Rohdaten | `main.py:101` |
-| `kaiser/{kaiser_id}/esp/+/actuator/+/status` | `actuator_handler.handle_actuator_status` | 1 | Actuator-Status | `main.py:105` |
-| `kaiser/{kaiser_id}/esp/+/actuator/+/response` | `actuator_response_handler.handle_actuator_response` | 1 | Command-Responses | `main.py:109` |
-| `kaiser/{kaiser_id}/esp/+/actuator/+/alert` | `actuator_alert_handler.handle_actuator_alert` | 1 | Actuator-Alerts | `main.py:114` |
-| `kaiser/{kaiser_id}/esp/+/system/heartbeat` | `heartbeat_handler.handle_heartbeat` | 0 | ESP Heartbeats | `main.py:119` |
-| `kaiser/{kaiser_id}/discovery/esp32_nodes` | `discovery_handler.handle_discovery` | 1 | ESP Discovery (deprecated) | `main.py:123` |
-| `kaiser/{kaiser_id}/esp/+/config_response` | `config_handler.handle_config_ack` | 2 | Config-Bestätigungen | `main.py:127` |
+| `kaiser/{kaiser_id}/esp/+/sensor/+/data` | `sensor_handler.handle_sensor_data` | 1 | Sensor-Rohdaten | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/status` | `actuator_handler.handle_actuator_status` | 1 | Actuator-Status | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/response` | `actuator_response_handler.handle_actuator_response` | 1 | Command-Responses | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/alert` | `actuator_alert_handler.handle_actuator_alert` | 1 | Actuator-Alerts | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/system/heartbeat` | `heartbeat_handler.handle_heartbeat` | 0 | ESP Heartbeats | `main.py` |
+| `kaiser/{kaiser_id}/discovery/esp32_nodes` | `discovery_handler.handle_discovery` | 1 | ESP Discovery (deprecated) | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/config_response` | `config_handler.handle_config_ack` | 2 | Config-Bestätigungen | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/zone/ack` | `zone_ack_handler.handle_zone_ack` | 1 | Zone Assignment ACK (Phase 7) | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/subzone/ack` | `subzone_ack_handler.handle_subzone_ack` | 1 | Subzone ACK (Phase 9) | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/system/will` | `lwt_handler.handle_lwt` | 1 | LWT – Instant Offline | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/system/error` | `error_handler.handle_error_event` | 1 | Hardware/Config Errors | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/actuator/+/command` | `mock_actuator_command_handler` (Paket G) | 2 | Mock-ESP Actuator Commands | `main.py` |
+| `kaiser/{kaiser_id}/esp/+/actuator/emergency` | `mock_actuator_command_handler` | 2 | Mock Emergency | `main.py` |
+| `kaiser/broadcast/emergency` | `mock_actuator_command_handler` | 2 | Broadcast Emergency (Mocks) | `main.py` |
 
 **Wichtig:**
 - `{kaiser_id}` wird dynamisch aus `settings.hierarchy.kaiser_id` geladen (Standard: `"god"`)
 - QoS-Level werden automatisch von `Subscriber.subscribe_all()` basierend auf Topic-Typ gesetzt
-- Handler werden in einem Thread-Pool ausgeführt (max_workers=10) für nicht-blockierende Verarbeitung
+- Handler werden in einem Thread-Pool ausgeführt (`MQTT_SUBSCRIBER_MAX_WORKERS`, default 10)
+- **Bug-O-Fix:** `set_main_loop(asyncio.get_running_loop())` für Async-Handler (Python 3.12+ Event-Loop)
+- **Paket G:** `actuator/+/command` und Emergency-Topics werden zusätzlich von Mock-Actuator-Handler bedient (SimulationScheduler)
 
 ### 4.2 Topics auf die der Server PUBLISHED
 
@@ -866,10 +912,29 @@ poetry run alembic upgrade head
 - **Connection-State:** `is_connected()` für Status-Checks
 
 **Topic-Builder (`src/mqtt/topics.py`):**
-- **Build-Methoden:** `build_actuator_command_topic()`, `build_sensor_config_topic()`, etc.
-- **Parse-Methoden:** `parse_sensor_data_topic()`, `parse_heartbeat_topic()`, etc.
+- **Build-Methoden:** `build_actuator_command_topic()`, `build_sensor_config_topic()`, `build_zone_assign_topic()`, `build_subzone_assign_topic()`, `build_subzone_remove_topic()`, `build_subzone_safe_topic()`, etc.
+- **Parse-Methoden:** `parse_sensor_data_topic()`, `parse_heartbeat_topic()`, `parse_lwt_topic()`, `parse_system_error_topic()`, `parse_zone_ack_topic()`, `parse_subzone_ack_topic()`, etc.
 - **Wildcard-Matching:** `matches_subscription()` für Topic-Pattern-Matching
 - **Validation:** `validate_esp_id()`, `validate_gpio()` für Input-Validierung
+
+### 4.5 Configuration (config.py)
+
+**Settings-Zusammensetzung** (`get_settings()` → `Settings`):
+- `database`, `mqtt`, `server`, `security`, `cors`, `hierarchy`, `performance`, `logging`
+- `esp32`, `sensor`, `actuator`, `websocket`, `redis`, `external_services`, `notification`
+- `development`, **`maintenance`**, **`resilience`**
+- **`environment`** (development|staging|production), **`log_level`**
+
+**MaintenanceSettings** (Paket D – Data-Safe):
+- Sensor-/Command-/Audit-/Heartbeat-Log-Cleanup (default: DISABLED bzw. Dry-Run)
+- Health-Check-Intervalle, Stats-Aggregation, Orphaned-Mock-Cleanup
+- Env: `SENSOR_DATA_RETENTION_ENABLED`, `AUDIT_LOG_RETENTION_ENABLED`, etc.
+
+**ResilienceSettings:**
+- Circuit Breaker (MQTT, Database, External API): Failure-Threshold, Recovery/Half-Open-Timeout
+- Env: `CIRCUIT_BREAKER_MQTT_FAILURE_THRESHOLD`, `CIRCUIT_BREAKER_DB_*`, etc.
+
+**Code-Location:** `src/core/config.py`
 
 ---
 
@@ -1088,10 +1153,21 @@ python -m alembic downgrade -1
 python -m alembic history
 ```
 
-**Vorhandene Migrationen:**
-| Revision | Beschreibung | Datum |
-|----------|--------------|-------|
-| `c6fb9c8567b5` | Add last_command and error_message to ActuatorState | 2025-12-03 |
+**Vorhandene Migrationen (Auswahl aus `alembic/versions/`):**
+| Datei/Revision | Beschreibung |
+|----------------|---------------|
+| `add_last_command_and_error_message_to_ActuatorState.py` | ActuatorState: last_command, error_message |
+| `add_audit_log_indexes.py` | Audit-Log Performance-Indizes |
+| `add_sensor_operating_modes.py` | Sensor Operating Modes (Phase 2A) |
+| `add_subzone_configs_table.py` | Subzone-Tabelle (Phase 9) |
+| `add_token_blacklist_table.py` | Token Blacklist |
+| `add_esp_heartbeat_logs.py` | ESP Heartbeat Logs |
+| `add_master_zone_id_to_esp_device.py` | master_zone_id für ESPDevice |
+| `add_data_source_field.py` | data_source Feld |
+| `add_discovery_approval_fields.py` | Discovery/Approval-Felder |
+| `001_add_multi_value_sensor_support.py` | Multi-Value-Sensor-Unterstützung |
+| `ee8733fb484d_*` (config_status) | Config-Status-Felder für Sensoren/Aktoren |
+| `fix_sensor_unique_constraint_multivalue.py` | Sensor Unique-Constraint Anpassung |
 
 **Bei Problemen:**
 - `alembic/env.py` verwendet relative Imports (`from src.db.base import Base`)
@@ -1240,8 +1316,15 @@ Vor jedem Commit prüfen:
 | **Cross-ESP-Logik** | [Section 3.5: Automation Rule](#35-aufgabe-cross-esp-automation-rule-implementieren) | `El Servador/god_kaiser_server/src/services/logic_engine.py` | `El Servador/god_kaiser_server/src/services/logic_engine.py` | LogicEngine, Rule Evaluation, Condition Matching |
 | **Database-Models** | [Section 3.4: Database Model](#34-aufgabe-database-model-hinzufügen) | `El Servador/god_kaiser_server/src/db/models/` | `El Servador/god_kaiser_server/src/db/models/` | SQLAlchemy Models, Relationships, Migrations |
 | **ESP-Management** | `El Servador/god_kaiser_server/src/services/esp_service.py` | `El Servador/god_kaiser_server/src/db/repositories/esp_repo.py` | `El Servador/god_kaiser_server/src/services/esp_service.py` | ESP Registration, Discovery, Health Monitoring |
-| **Zone-Management** | `El Trabajante/docs/Dynamic Zones and Provisioning/` | `El Servador/god_kaiser_server/src/services/zone_service.py` | `El Servador/god_kaiser_server/src/services/zone_service.py` | Zone Hierarchy, Assignment, Master/Sub Zones |
-| **Zone Assignment** | `El Trabajante/docs/system-flows/08-zone-assignment-flow.md` | **ZU IMPLEMENTIEREN** | **ZU IMPLEMENTIEREN** | MQTT Zone Assignment Publisher, REST API Endpoint |
+| **Zone-Management** | `El Trabajante/docs/Dynamic Zones and Provisioning/` | `El Servador/god_kaiser_server/src/services/zone_service.py` | `zone_service.py`, `zone_ack_handler.py` | Zone Hierarchy, Assignment, zone/ack |
+| **Subzone-Management** | `El Trabajante/docs/system-flows/09-subzone-management-flow.md` | `src/services/subzone_service.py` | `subzone_ack_handler.py`, `mqtt/topics.py` (build_subzone_*) | Subzone Assign/Remove/Safe, subzone/ack |
+| **Maintenance Jobs** | `.claude/PAKET_D_MAINTENANCE_JOBS_IMPROVED.md` | `src/services/maintenance/service.py` | `maintenance/jobs/cleanup.py` | Cleanup, Health-Checks, Stats (Data-Safe, Dry-Run default) |
+| **Simulation (Mock-ESP)** | Paket X / Paket G | `src/services/simulation/scheduler.py` | `init_simulation_scheduler`, `recover_mocks`, Mock-Actuator-Handler | SimulationScheduler, DB-First, Recovery |
+| **Audit Retention** | Runtime Config (SystemConfig) | `src/services/audit_retention_service.py` | `src/api/v1/audit.py` | Retention, Cleanup, Backup, Preview |
+| **Debug/Mock-ESP API** | Paket B – DB as Single Source of Truth | `src/api/v1/debug.py` | SimulationScheduler, Schemas (debug, debug_db) | Mock-ESP CRUD, DB-Explorer |
+| **Error-Events (ESP32)** | DS18B20/OneWire, GPIO Errors | `src/mqtt/handlers/error_handler.py` | `src/api/v1/errors.py` | system/error Topic, Frontend-Integration |
+| **Sequences** | Phase 3 – Sequence Actions | `src/api/v1/sequences.py` | `logic/actions/sequence_executor.py` | Sequenced Actuator/Notification Actions |
+| **Sensor Type Defaults** | Phase 2A – Operating Modes | `src/api/v1/sensor_type_defaults.py` | `sensor_type_registration.py`, `sensor_scheduler_service` | Scheduled/On-Demand, Auto-Registration |
 
 ### Service-Module Übersicht
 
@@ -1353,33 +1436,35 @@ Vor jedem Commit prüfen:
 
 | Modul | Status | Dateien | Tests |
 |-------|--------|---------|-------|
-| **MQTT Client** | ✅ | `src/mqtt/client.py`, `src/mqtt/subscriber.py`, `src/mqtt/publisher.py` | ✅ |
-| **MQTT Handlers** | ✅ | `src/mqtt/handlers/sensor_handler.py`, `src/mqtt/handlers/actuator_handler.py`, `src/mqtt/handlers/heartbeat_handler.py` | ✅ |
-| **Sensor Processing** | ✅ | `src/sensors/library_loader.py`, `src/sensors/sensor_libraries/active/` | ✅ |
-| **Database Models** | ✅ | `src/db/models/` | ✅ |
+| **MQTT Client** | ✅ | `src/mqtt/client.py`, `subscriber.py`, `publisher.py`, `topics.py` | ✅ |
+| **MQTT Handlers** | ✅ | sensor, actuator, response, alert, heartbeat, config, **zone_ack**, **subzone_ack**, **lwt**, **error**, discovery | ✅ |
+| **Sensor Processing** | ✅ | `library_loader.py`, `sensor_libraries/active/`, `sensor_type_registry.py` | ✅ |
+| **Database Models** | ✅ | `src/db/models/` (esp, esp_heartbeat, sensor, actuator, logic, audit_log, subzone, system, …) | ✅ |
 | **Database Repositories** | ✅ | `src/db/repositories/` | ✅ |
 | **Database Migrations** | ✅ | `alembic/versions/`, `alembic/env.py` | ✅ |
-| **ESP32 Testing** | ✅ | `tests/esp32/` (~140 Tests) | ✅ |
-| **Integration Tests** | ✅ | `tests/integration/test_server_esp32_integration.py` (34 Tests) | ✅ |
-| **Core Config** | ✅ | `src/core/config.py`, `src/core/config_mapping.py`, `src/core/error_codes.py` | ✅ |
-| **Audit System** | ✅ | `src/services/audit_retention_service.py`, `src/api/v1/audit.py`, `src/db/models/audit_log.py` | ✅ |
+| **Core Config** | ✅ | `config.py` (18+ Settings), `config_mapping.py`, `error_codes.py`, **resilience/** | ✅ |
+| **Audit System** | ✅ | `audit_retention_service.py`, `audit_backup_service.py`, `api/v1/audit.py` | ✅ |
+| **MaintenanceService** | ✅ | `services/maintenance/service.py`, `jobs/cleanup.py` (Paket D, Data-Safe) | ✅ |
+| **SimulationScheduler** | ✅ | `services/simulation/scheduler.py`, `actuator_handler.py` (Paket X/G) | ✅ |
+| **Zone/Subzone** | ✅ | `zone_service.py`, `subzone_service.py`, zone_ack/subzone_ack Handler, `topics.py` | ✅ |
+| **Logic Engine** | ✅ | `logic_engine.py`, `logic_scheduler.py`, conditions/actions/safety (Conflict, RateLimit) | ✅ |
+| **Debug API** | ✅ | `api/v1/debug.py` (Mock-ESP, DB-Explorer), SimulationScheduler DB-First | ✅ |
+| **Resilience** | ✅ | `core/resilience/` (Circuit Breaker, Retry, Timeout), init in main.py | ✅ |
+| **Exception Handling** | ✅ | `exception_handlers.py`, `GodKaiserException` (Paket X) | ✅ |
 
-### 🟡 Teilweise implementiert (In Progress)
+### 🟡 Teilweise implementiert / Erweiterbar
 
-| Modul | Status | Dateien | TODO |
-|-------|--------|---------|------|
-| **REST API** | 🟡 | `src/api/v1/` | Viele Endpoints sind Placeholder |
-| **Logic Engine** | 🟡 | `src/services/logic_engine.py` | Rule Evaluation teilweise |
-| **Actuator Service** | 🟡 | `src/services/actuator_service.py` | Command Validation teilweise |
-| **WebSocket** | 🟡 | `src/websocket/manager.py` | Realtime Updates teilweise |
+| Modul | Status | Dateien | Hinweis |
+|-------|--------|---------|--------|
+| **REST API** | 🟡 | `api/v1/` (audit, auth, debug, errors, esp, sensors, actuators, logic, zone, subzone, sequences, …) | Viele Endpoints produktiv, einzelne Placeholder |
+| **WebSocket** | 🟡 | `websocket/manager.py` | Realtime-Updates (Paket F) integriert |
 
-### ⏳ Geplant (Not Implemented)
+### ⏳ Geplant / Optional
 
 | Modul | Status | Dateien | Priorität |
 |-------|--------|---------|-----------|
-| **AI Service** | ⏳ | `src/services/ai_service.py` | 🟢 Medium |
-| **Kaiser Service** | ⏳ | `src/services/kaiser_service.py` | 🟡 High (für Skalierung) |
-| **Scheduler Service** | ⏳ | `src/services/scheduler_service.py` | 🟢 Medium |
+| **AI Service** | ⏳ | `ai_service.py` | 🟢 Medium |
+| **Kaiser Service** | ⏳ | `kaiser_service.py` | 🟡 High (Skalierung) |
 
 ---
 
@@ -1412,29 +1497,47 @@ Vor jedem Commit prüfen:
 - **Database Init:** `El Servador/god_kaiser_server/src/db/session.py`
 
 ### Core Configuration
-- **Settings:** `El Servador/god_kaiser_server/src/core/config.py` (Pydantic BaseSettings)
-- **Config Mapping:** `El Servador/god_kaiser_server/src/core/config_mapping.py` (Field Mapping Engine für ESP32 Payloads)
-- **Error Codes:** `El Servador/god_kaiser_server/src/core/error_codes.py` (Unified Error Codes Server + ESP32)
-- **Constants:** `El Servador/god_kaiser_server/src/core/constants.py` (MQTT Topics, Sensor Types, GPIO Ranges)
-- **Logging:** `El Servador/god_kaiser_server/src/core/logging_config.py`
-- **Security:** `El Servador/god_kaiser_server/src/core/security.py` (JWT, Password Hashing)
+- **Settings:** `src/core/config.py` (18+ Pydantic-Klassen: Database, MQTT, Maintenance, Resilience, …)
+- **Config Mapping:** `src/core/config_mapping.py` (Field Mapping für ESP32-Payloads)
+- **Error Codes:** `src/core/error_codes.py` (Unified 1000–5999)
+- **ESP32 Error Mapping:** `src/core/esp32_error_mapping.py` (ESP32→Server)
+- **Constants:** `src/core/constants.py` (MQTT Topics, GPIO, Sensor-Types)
+- **Exception Handlers:** `src/core/exception_handlers.py` (GodKaiserException, General)
+- **Resilience:** `src/core/resilience/` (Circuit Breaker, Retry, Timeout, Registry)
+- **Scheduler:** `src/core/scheduler.py` (CentralScheduler)
+- **Logging:** `src/core/logging_config.py`
+- **Security:** `src/core/security.py` (JWT, Password Hashing)
 
 ### MQTT Layer
 - **Client:** `El Servador/god_kaiser_server/src/mqtt/client.py` (Singleton, Paho-MQTT Wrapper)
 - **Subscriber:** `El Servador/god_kaiser_server/src/mqtt/subscriber.py` (Thread-Pool, Handler-Routing)
 - **Publisher:** `El Servador/god_kaiser_server/src/mqtt/publisher.py` (High-Level Publishing, Retry-Logic)
 - **Topics:** `El Servador/god_kaiser_server/src/mqtt/topics.py` (Topic-Builder, Parser, Validation)
-- **Sensor Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py` (Pi-Enhanced Processing)
-- **Actuator Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/actuator_handler.py` (Status Updates)
-- **Heartbeat Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` (Device Registration)
+- **Sensor Handler:** `src/mqtt/handlers/sensor_handler.py` (Pi-Enhanced Processing)
+- **Actuator Handler:** `src/mqtt/handlers/actuator_handler.py` (Status Updates)
+- **Heartbeat Handler:** `src/mqtt/handlers/heartbeat_handler.py` (Device Registration)
+- **Zone ACK Handler:** `src/mqtt/handlers/zone_ack_handler.py` (Phase 7)
+- **Subzone ACK Handler:** `src/mqtt/handlers/subzone_ack_handler.py` (Phase 9)
+- **LWT Handler:** `src/mqtt/handlers/lwt_handler.py` (Instant Offline)
+- **Error Handler:** `src/mqtt/handlers/error_handler.py` (system/error)
 
 ### Business Logic
-- **Audit Retention:** `El Servador/god_kaiser_server/src/services/audit_retention_service.py` (Log Cleanup, Retention Policies)
-- **ESP Service:** `El Servador/god_kaiser_server/src/services/esp_service.py` (Registration, Health Tracking, Config Publishing)
-- **Sensor Service:** `El Servador/god_kaiser_server/src/services/sensor_service.py` (Config, Data Processing)
-- **Actuator Service:** `El Servador/god_kaiser_server/src/services/actuator_service.py` (Command Execution, Safety Integration)
-- **Safety Service:** `El Servador/god_kaiser_server/src/services/safety_service.py` (Emergency Stop, Validation)
-- **Logic Engine:** `El Servador/god_kaiser_server/src/services/logic_engine.py` (Background-Task, Rule Evaluation)
+- **Audit Retention:** `src/services/audit_retention_service.py` (Retention, Cleanup, SystemConfig)
+- **Audit Backup:** `src/services/audit_backup_service.py` (JSON/ZIP Backup)
+- **Event Aggregator:** `src/services/event_aggregator_service.py` (DataSource, EventAggregator)
+- **ESP Service:** `src/services/esp_service.py` (Registration, Config Publishing)
+- **Sensor Service:** `src/services/sensor_service.py` (Config, Data Processing)
+- **Sensor Scheduler:** `src/services/sensor_scheduler_service.py` (Phase 2H Scheduled Jobs)
+- **Sensor Type Registration:** `src/services/sensor_type_registration.py` (Phase 2A Auto-Registration)
+- **Actuator Service:** `src/services/actuator_service.py` (Command Execution, Safety Integration)
+- **Safety Service:** `src/services/safety_service.py` (Emergency Stop, Validation)
+- **GPIO Validation:** `src/services/gpio_validation_service.py` (GPIO-Konflikt-Prüfung)
+- **Logic Engine:** `src/services/logic_engine.py` (Background-Task, Conditions/Actions)
+- **MaintenanceService:** `src/services/maintenance/service.py` (Paket D, Cleanup/Health/Stats)
+- **SimulationScheduler:** `src/services/simulation/scheduler.py` (Paket X, Mock-ESP, Recovery)
+- **Zone/Subzone:** `src/services/zone_service.py`, `src/services/subzone_service.py`
+- **Config Builder:** `src/services/config_builder.py` (ESP32 Config Payload Builder)
+- **MQTT Auth:** `src/services/mqtt_auth_service.py` (Mosquitto Passwd-Verwaltung)
 
 ### Sensor Processing
 - **Library Loader:** `El Servador/god_kaiser_server/src/sensors/library_loader.py` (Dynamic Import via importlib)
@@ -1768,5 +1871,5 @@ poetry run pytest tests/unit/test_xyz.py::test_failed_function -xvs
 
 **Ende der CLAUDE_SERVER.md**
 
-**Letzte Aktualisierung:** 2026-01-05
-**Version:** 3.2 (CI/CD Integration dokumentiert)
+**Letzte Aktualisierung:** 2026-01-27  
+**Version:** 5.0 (Vollständiger Codebase-Abgleich: api_v1_router-Includes, Verzeichnisstruktur services/logic/maintenance/simulation, Startup/Shutdown, Alembic-Migrations, Settings 19 Klassen)

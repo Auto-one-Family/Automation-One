@@ -1,8 +1,8 @@
 # System-Hierarchie & Architektur - AutomationOne Framework
 
 > **Zweck:** Präzise Systemdokumentation für Entwickler - zeigt aktuelle Implementierung, Vision und Code-Locations  
-> **Orientierung:** Basierend auf tatsächlichem Code in `El Trabajante/` und `El Servador/`  
-> **Referenz:** `.claude/CLAUDE.md` (ESP32) und `.claude/CLAUDE_SERVER.md` (Server)
+> **Orientierung:** Basierend auf tatsächlichem Code in `El Trabajante/`, `El Servador/` und `El Frontend/`  
+> **Referenz:** `.claude/CLAUDE.md` (ESP32), `.claude/CLAUDE_SERVER.md` (Server), `.claude/CLAUDE_FRONTEND.md` (Frontend)
 
 ---
 
@@ -18,90 +18,68 @@
   - Extern (wenn God-Kaiser auf Pi5) - separate Hardware/Cloud
   - Integriert (wenn God-Kaiser auf Jetson) - KI direkt im God-Kaiser
 - **System bleibt robust:** Funktioniert von einfach (God-Kaiser + ESPs) bis komplex (mit Kaiser-Nodes, KI, etc.)
+- **Frontend kommuniziert NUR mit Server:** El Frontend ist eigenständige Komponente, keine Direktverbindung zu ESP32.
 
-### 1.1 Vollständige Hierarchie-Struktur
+### 1.1 Aktuelles System (Stand 2026-01-27)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ LAYER 1: God (KI/Analytics Layer) - OPTIONAL, MODULAR                  │
-│ Status: 📋 Geplant                                                       │
-│ Rolle: KI/Analytics, Predictions, Model Training                        │
-│ Hardware-Optionen:                                                       │
-│   - Option A: Separater Jetson/Cloud (wenn God-Kaiser auf Pi5)          │
-│   - Option B: Integriert im God-Kaiser (wenn God-Kaiser auf Jetson)    │
-│ Kommunikation: HTTP REST API (konfigurierbar)                           │
-│ Code-Location: Noch nicht implementiert                                 │
-│ Wichtig: Modular hinzufügbar, flexibel je nach God-Kaiser-Hardware    │
+│ El Frontend (Vue 3 + TypeScript + Vite + Pinia + Tailwind)               │
+│ Status: ✅ Production-Ready                                              │
+│ Code: El Frontend/src/                                                    │
+│ Doku: .claude/CLAUDE_FRONTEND.md                                          │
+│ Rolle: Web UI – Dashboard, Sensoren/Aktoren, System Monitor,              │
+│        Zone-Management, Pending Devices, Real-time WebSocket              │
 └─────────────────────────────────────────────────────────────────────────┘
-                            ↕ HTTP REST (geplant, optional)
+                    ↕ HTTP REST API + WebSocket
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ LAYER 2: God-Kaiser Server - HARDWARE-FLEXIBEL                          │
-│                                                                          │
-│ OPTION A: Raspberry Pi 5 (✅ Aktuell implementiert)                    │
-│ OPTION B: Jetson Nano/Orin (📋 Geplant - mit integrierter KI)          │
-│                                                                          │
-│ Status: 🚧 In Entwicklung (MQTT-Layer vollständig, REST API teilweise implementiert)│
-│ Rolle: Control Hub, MQTT Broker, Database, Logic Engine, Library Storage │
-│ Code-Location: El Servador/god_kaiser_server/                            │
-│ Dokumentation: .claude/CLAUDE_SERVER.md                                  │
-│                                                                          │
-│ WICHTIG: God-Kaiser fungiert auch direkt als Kaiser!                   │
-│ - Verwendet kaiser_id = "god" für direkte ESP-Steuerung                │
-│ - Kann ESPs direkt ansteuern (ohne Kaiser-Nodes)                        │
-│ - Kaiser-Nodes sind optional für Skalierung                            │
-│                                                                          │
-│ KERN-FUNKTIONEN (alle implementiert):                                   │
-│ - Sensor-Datenverarbeitung mit dynamischen Python-Libraries             │
-│ - Cross-ESP Automation Engine (Logic Engine)                            │
-│ - Actuator-Steuerung mit Safety-Checks                                  │
-│ - ESP-Geräteverwaltung und Zone-Management                              │
-│ - MQTT-Broker (Mosquitto) mit TLS/mTLS                                  │
-│ - Database Layer (PostgreSQL/SQLite)                                   │
-│ - WebSocket für Real-time Updates                                       │
-│ - Direkte ESP-Steuerung via MQTT (kaiser_id="god")                      │
-│                                                                          │
-│ KI-INTEGRATION (flexibel je nach Hardware):                             │
-│ - Option A (Pi5): KI extern auf Jetson/Cloud (HTTP REST)                │
-│ - Option B (Jetson): KI direkt integriert im God-Kaiser                │
+│ God-Kaiser Server (FastAPI + PostgreSQL)                                 │
+│ Status: ✅ Production-Ready                                              │
+│ Fungiert auch als Kaiser (kaiser_id="god")                               │
+│ Code: El Servador/god_kaiser_server/                                      │
+│ Doku: .claude/CLAUDE_SERVER.md                                            │
+│ Rolle: Control Hub, MQTT Broker, Logic Engine, Maintenance,              │
+│        SimulationScheduler, Audit/Retention, REST API v1                 │
 └─────────────────────────────────────────────────────────────────────────┘
-                            ↕ MQTT (TLS, Port 8883)
-        ┌───────────────────┴───────────────────┐
-        │                                       │
-        ▼                                       ▼
-┌──────────────────────────┐          ┌──────────────────────────┐
-│ LAYER 3: Kaiser-Nodes    │          │ LAYER 3: Kaiser-Nodes    │
-│ (Raspberry Pi Zero/3)    │          │ (Raspberry Pi Zero/3)    │
-│ Status: 📋 Geplant        │          │ Status: 📋 Geplant        │
-│ Rolle: Relay Node für     │          │ Rolle: Relay Node für     │
-│        Skalierung         │          │        Skalierung         │
-│ Code-Location: Noch nicht │          │ Code-Location: Noch nicht │
-│ implementiert             │          │ implementiert             │
-│ Wichtig: OPTIONAL - God-  │          │ Wichtig: OPTIONAL - God-  │
-│          Kaiser kann      │          │          Kaiser kann      │
-│          ESPs direkt      │          │          ESPs direkt      │
-│          steuern          │          │          steuern          │
-└──────────────────────────┘          └──────────────────────────┘
-        │                                       │
-        └───────────────┬───────────────────────┘
-                        │
-                        ▼
-            ┌───────────────────────┐
-            │ LAYER 4: ESP32-Agenten│
-            │ (WROOM/XIAO C3)       │
-            │ Status: ✅ Production-Ready│
-            │ Rolle: Sensor-Auslesung, │
-            │        Aktor-Steuerung   │
-            │ Code-Location: El Trabajante/│
-            │ Dokumentation: .claude/CLAUDE.md│
-            │ Kommunikation: Direkt mit God-Kaiser│
-            │             (kaiser_id="god") oder│
-            │             via Kaiser-Node (optional)│
-            └───────────────────────┘
+                    ↕ MQTT (TLS, Port 8883)
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ESP32-Agenten (C++ Firmware)                                             │
+│ Status: ✅ Production-Ready                                              │
+│ Code: El Trabajante/                                                      │
+│ Doku: .claude/CLAUDE.md                                                   │
+│ Rolle: Sensor-Auslesung, Aktor-Steuerung, Provisioning,                  │
+│        Config-Response, Watchdog, Wokwi-Simulation                        │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### 1.2 Geplante Erweiterungen (Zukunft – unverändert beibehalten)
+
+> **HINWEIS:** Diese Features sind für zukünftige Versionen geplant. Das aktuelle System funktioniert vollständig ohne diese Erweiterungen. God-Kaiser fungiert direkt als Kaiser (kaiser_id="god").
+
+- **Layer 1: God** – KI/Analytics Layer (Optional, Modular)
+- **Layer 3: Kaiser-Nodes** – Skalierungs-Relay-Nodes (Optional)
+- **Jetson-Integration** – Alternative Hardware für God-Kaiser
+- **Hardware-Detection** – Automatische Pi5/Jetson-Erkennung
+
+Detaillierte Beschreibung der geplanten Architektur (God, Kaiser-Nodes, KI-Plugin-System, Hardware-Optionen) siehe **Section 3: Vision & Geplante Architektur**.
 
 ---
 
-## 2. Aktuelle Implementierung (Was ist fertig?)
+## 2. Aktuelle Implementierung (Was ist fertig? – Stand 2026-01-27)
+
+### 2.0 El Frontend – Implementierte Komponenten
+
+**Status:** ✅ Production-Ready | **Code:** `El Frontend/src/` | **Doku:** `.claude/CLAUDE_FRONTEND.md`
+
+El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP REST + WebSocket). Keine Direktverbindung zu ESP32.
+
+- **System Monitor:** Eine View mit Tabs: Ereignisse | Logs | Datenbank | MQTT (konsolidiert aus DatabaseExplorer, LogViewer, AuditLog, MqttLog)
+- **Pending Devices:** Discovery/Approval-Flow für neue ESP-Geräte
+- **GPIO-Status-Management:** GPIO-Status pro ESP, GpioPicker, ESPSettingsPopover
+- **WebSocket Real-time:** esp_health, sensor_data, actuator_status, config_response, zone_assignment, sensor_health, device_discovered/approved/rejected
+- **Zone Drag & Drop:** ZoneAssignmentPanel, ZoneGroup, useZoneDragDrop
+- **ESP Store:** Mock + Real ESP unified API, Pending Devices, GPIO-Status-Map
+- **Views:** Dashboard, Sensoren/Aktoren (Tabs), Logic, System Monitor (4 Tabs), User Management, System Config, Load Test, Maintenance, Settings
 
 ### 2.1 God-Kaiser Server - Implementierte Komponenten
 
@@ -203,16 +181,17 @@
 - **Migrations:** `El Servador/god_kaiser_server/alembic/`
   - Alembic für Schema-Versioning
 
-#### ✅ REST API (In Entwicklung)
+#### ✅ REST API (Production-Ready)
 - **Endpoints:** `El Servador/god_kaiser_server/src/api/v1/`
-  - ESP-Endpoints: `esp.py` (CRUD, Registration)
-  - Sensor-Endpoints: `sensors.py`
-  - Actuator-Endpoints: `actuators.py`
-  - Logic-Endpoints: `logic.py`
-  - Kaiser-Endpoints: `kaiser.py` (Skeleton)
-  - AI-Endpoints: `ai.py` (Skeleton)
+  - ESP, Sensors, Actuators, Logic, Zone, Subzone, Audit, Debug, Health, Users, Sequences, Sensor-Type-Defaults
+  - Kaiser/AI/Library als Skeleton (nicht in api_v1_router)
 - **Schemas:** `El Servador/god_kaiser_server/src/schemas/`
   - Pydantic-Models für Request/Response-Validation
+- **SimulationScheduler:** Ersetzt MockESPManager – industrietaugliche Mock-ESP-Simulation, Recovery nach Server-Restart
+- **MaintenanceService:** Cleanup-Jobs, Sensor-Health, Stats-Aggregation (Paket D)
+- **AuditRetentionService / AuditBackupService:** Retention-Policies, Cleanup-Preview, JSON/ZIP-Backup
+- **Central Scheduler:** APScheduler, Maintenance vor Scheduler-Shutdown
+- **Resilience:** Circuit Breaker, Retry, Timeout (ResilienceRegistry)
 
 #### ✅ WebSocket (Vollständig implementiert)
 - **WebSocket-Manager:** `El Servador/god_kaiser_server/src/websocket/manager.py`
@@ -225,18 +204,25 @@
 #### ✅ Vollständig Production-Ready
 - **Code-Location:** `El Trabajante/src/`
 - **Dokumentation:** `.claude/CLAUDE.md`
-- **Status:** ~13.300 Zeilen Code, 41+ Tests, Production-Ready
+- **Status:** ~13.300 Zeilen Code, 60+ Module, Production-Ready
 - **Kern-Module:**
   - SensorManager: RAW-Daten-Auslesung, Pi-Enhanced-Request
+  - SensorRegistry: ESP↔Server Sensor-Type-Mapping, Multi-Value-Support
   - ActuatorManager: Command-Handling, Safety-Controller
   - MQTTClient: Pub/Sub, Heartbeat, Topic-Building
   - ConfigManager: NVS-Persistenz
+  - ConfigResponseBuilder: Config-ACK MQTT, PARTIAL_SUCCESS, publishWithFailures
   - GPIOManager: Safe-Mode, Pin-Reservation
   - CircuitBreaker: Für Pi-Enhanced-Requests
+  - ProvisionManager: AP-Mode, Zero-Touch, Zone-Assignment
+  - Watchdog-System: WatchdogMode, feedWatchdog (main.cpp)
+  - Wokwi-Simulation: wokwi_simulation-Env, Szenarien in tests/wokwi/scenarios/
 
 ---
 
 ## 3. Vision & Geplante Architektur
+
+> **HINWEIS:** Diese Features sind für zukünftige Versionen geplant. Das aktuelle System funktioniert vollständig ohne diese Erweiterungen. God-Kaiser fungiert direkt als Kaiser (kaiser_id="god"). Die folgenden Abschnitte dokumentieren Robins Vision für die Zukunft und werden **unverändert beibehalten**.
 
 ### 3.1 God-Kaiser Server - Vollständige Funktionalität
 
@@ -409,29 +395,17 @@
 
 ### 3.4 Frontend - User-Interface
 
-**Status:** Debug-Dashboard ✅ implementiert, Production Frontend 📋 geplant
+**Aktueller Stand (2026-01-27):** El Frontend ist **Production-Ready**. Es existiert eine einheitliche Web-App (Vue 3 + TypeScript + Vite + Pinia + Tailwind) mit System Monitor (4 Tabs), Pending Devices, Zone-Management, WebSocket Real-time usw. – siehe Section 2.0 und `.claude/CLAUDE_FRONTEND.md`. Die nachstehend aufgeführten „Production Frontend“-Funktionen sind **weiterhin geplant** und werden nicht entfernt.
 
-#### Debug-Dashboard (✅ Implementiert)
-**Technologie:** Vue 3 + TypeScript + Tailwind CSS (Dark Theme)
+#### Bereits implementiert (El Frontend, Production-Ready)
+- **System Monitor:** Ereignisse | Logs | Datenbank | MQTT (eine View, 4 Tabs)
+- **Mock-ESP & Real-ESP:** Unified API, ESP-Management, Zone Drag & Drop
+- **Pending Devices:** Discovery/Approval, GPIO-Status
+- **User Management, Load Test, System Config,** WebSocket-Client, JWT, Pinia
+- **Code-Location:** `El Frontend/src/` | **Doku:** `.claude/CLAUDE_FRONTEND.md`
 
-**Funktionen:**
-- **Mock-ESP Management:** Vollständige Simulation echter ESP32-Geräte
-- **Database Explorer:** Live-Abfragen aller Tabellen mit Filtern/Pagination
-- **MQTT Live-Log:** Real-time MQTT-Nachrichten-Anzeige mit WebSocket
-- **System Logs:** Server-Logs mit Filter- und Suchfunktionen
-- **User Management:** CRUD-Operationen für Benutzer (Admin-only)
-- **Load Testing:** Performance-Tests mit vielen Mock-ESPs
-- **System Config:** Key-Value Konfiguration bearbeiten
-
-**Code-Location:** `El Frontend/` (vollständig implementiert)
-- Vue 3 + TypeScript + Tailwind CSS
-- Pinia für State-Management
-- Axios mit JWT-Interceptor
-- WebSocket-Client für Real-time Updates
-- Dokumentation: `El Frontend/Docs/Developer_Onboarding.md`
-
-#### Production Frontend (📋 Geplant)
-**Konzept:** Vollständiges User-Interface für alle System-Funktionen.
+#### Production Frontend – Zusätzliche Funktionen (📋 Geplant, unverändert beibehalten)
+**Konzept:** Erweiterungen für vollständiges User-Interface für alle System-Funktionen.
 
 **Funktionen (Geplant):**
 - **Dashboard Builder:** User erstellt eigene Dashboards mit Drag & Drop
@@ -520,6 +494,7 @@
 |----------|-------|-------|
 | **ESP32-Doku** | `.claude/CLAUDE.md` | Vollständige ESP32-Referenz |
 | **Server-Doku** | `.claude/CLAUDE_SERVER.md` | Vollständige Server-Referenz |
+| **Frontend-Doku** | `.claude/CLAUDE_FRONTEND.md` | Vollständige Frontend-Referenz (Vue 3, System Monitor, Pending Devices) |
 | **MQTT-Protokoll** | `El Trabajante/docs/Mqtt_Protocoll.md` | MQTT-Spezifikation |
 | **API-Referenz** | `El Trabajante/docs/API_REFERENCE.md` | ESP32-API-Referenz |
 
@@ -599,38 +574,51 @@
 
 ---
 
-## 8. Status-Übersicht
+## 8. Status-Übersicht (Stand 2026-01-27)
 
-### ✅ Vollständig implementiert:
-- ESP32-Firmware (Production-Ready)
-- Sensor-Library-System (dynamisch ladbar)
-- Logic-Engine (Cross-ESP-Automation)
-- Actuator-Steuerung (mit Safety-Checks)
-- ESP-Geräteverwaltung
-- MQTT-Infrastruktur (TLS/mTLS)
-- Database-Layer (PostgreSQL/SQLite)
-- WebSocket (Real-time Updates)
-- Heartbeat-System
-- Debug Frontend (Vue 3 + Tailwind)
+### ✅ Production-Ready (implementiert):
 
-### 🚧 In Entwicklung:
-- Vollständige REST API Endpoints
-- Production User Frontend
+**El Trabajante (ESP32 Firmware):**
+- ~13.300 Zeilen C++ Code, 60+ Module
+- Sensor/Actuator-Management, Sensor-Registry (Multi-Value), Config-Response-Builder
+- MQTT-Kommunikation, Provisioning-System, Watchdog-System
+- Safety-Controller, GPIO Safe-Mode, Wokwi-Simulation
+- Doku: `.claude/CLAUDE.md`
 
-### 📋 Geplant:
-- Kaiser-Node-Client (selektives Download-System, optional für Skalierung)
-- KI-Plugin-System (modulare Integration)
-  - Option A: Extern (wenn God-Kaiser auf Pi5) - separate Hardware/Cloud
-  - Option B: Integriert (wenn God-Kaiser auf Jetson) - KI direkt im God-Kaiser
-- Hardware-Detection (automatische Erkennung Pi5 vs. Jetson)
-- Chat-Interface (Natural Language Processing)
-- Vollständige Remote-Zugriff-Konfiguration
-- Monitoring & Observability
-- Backup-System
+**El Servador (God-Kaiser Server):**
+- FastAPI + PostgreSQL, MQTT-Handler für alle Topics
+- Logic Engine (Cross-ESP-Automation), MaintenanceService, SimulationScheduler
+- AuditRetentionService, AuditBackupService, Central Scheduler
+- REST API v1 (14 Router inkl. audit, debug, sequences, sensor_type_defaults)
+- WebSocket Real-time, Resilience (Circuit Breaker, Retry)
+- Doku: `.claude/CLAUDE_SERVER.md`
+
+**El Frontend (Web UI):**
+- Vue 3 + TypeScript + Pinia + Tailwind
+- System Monitor (4 Tabs: Ereignisse | Logs | Datenbank | MQTT)
+- ESP-Management mit Drag & Drop, Pending Devices (Discovery/Approval)
+- Real-time WebSocket Updates, Zone-Management, GPIO-Status
+- Doku: `.claude/CLAUDE_FRONTEND.md`
+
+### 📋 Geplant (Zukunft – unverändert beibehalten):
+- **Layer 1: God** – KI/Analytics Layer (Optional, Modular)
+- **Layer 3: Kaiser-Nodes** – Skalierungs-Relay-Nodes (Optional)
+- **Jetson-Integration** – Alternative Hardware für God-Kaiser
+- **Hardware-Detection** – Automatische Pi5/Jetson-Erkennung
+- **KI-Plugin-System** – Modulare Integration (Option A: extern / Option B: integriert)
+- **Chat-Interface** – Natural Language Processing
+- Vollständige Remote-Zugriff-Konfiguration, Monitoring & Observability
 
 ---
 
 ## 9. Wichtige Architektur-Entscheidungen
+
+### 9.0 Frontend- und Konsolidierungs-Entscheidungen (Stand 2026-01-27)
+
+- **Frontend-Architektur:** Server-Centric – Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP REST + WebSocket). Keine Direktverbindung zu ESP32.
+- **System-Monitor-Konsolidierung:** Eine View mit Tabs (Ereignisse | Logs | Datenbank | MQTT) ersetzt vier separate Views (DatabaseExplorer, LogViewer, AuditLog, MqttLog). Deep-Links via `?tab=…` und `useQueryFilters` für URL↔Filter-Sync.
+- **Pending-Devices-Flow:** Discovery → Approval/Rejection → Registration. WebSocket-Events `device_discovered`, `device_approved`, `device_rejected`.
+- **Mock ESP vs. Real ESP:** Unified API im Frontend – automatisches Routing über `isMockEsp(espId)`; Mock-ESP über Debug-API, Real-ESP über ESP-API. Server-seitig: SimulationScheduler (ersetzt MockESPManager).
 
 ### 9.1 Kaiser-ID System
 - **Aktuell:** Alle ESPs verwenden `kaiser_id = "god"` (Default)
@@ -716,7 +704,22 @@
 
 ---
 
-**Letzte Aktualisierung:** 2025-12  
-**Version:** 1.1  
-**Basiert auf:** Code-Analyse von `El Trabajante/` und `El Servador/` (Stand: 2025-01)
+**Letzte Aktualisierung:** 2026-01-27  
+**Version:** 2.0  
+**Basiert auf:** Code-Analyse von `El Trabajante/`, `El Servador/` und `El Frontend/` (Stand: 2026-01)
+
+---
+
+## Changelog (Version 2.0, 2026-01-27)
+
+**Aktualisiert:**
+- Section 1.1: Neues Diagramm „Aktuelles System“ mit **El Frontend** als oberster Komponente, God-Kaiser, ESP32 (3 Komponenten). Geplante Erweiterungen (God, Kaiser-Nodes, Jetson) in Section 1.2 als Kurzübersicht, Verweis auf Section 3.
+- Section 2: **El Frontend** neu dokumentiert (2.0). God-Kaiser (2.1): REST API als Production-Ready, SimulationScheduler, MaintenanceService, AuditRetention/Backup, Central Scheduler, Resilience. ESP32 (2.2): SensorRegistry, ConfigResponseBuilder, ProvisionManager, Watchdog, Wokwi.
+- Section 3: Hinweis-Box ergänzt – geplante Features bleiben unverändert.
+- Section 8: Status-Übersicht auf 2026-01-27 gebracht; drei Komponenten (El Trabajante, El Servador, El Frontend) als Production-Ready; Geplante Erweiterungen explizit „unverändert beibehalten“.
+- Section 9: Neue Unter-section 9.0 – Frontend-Architektur (Server-Centric), System-Monitor-Konsolidierung, Pending-Devices-Flow, Mock vs. Real ESP.
+- Referenz- und Orientierungszeilen: El Frontend + CLAUDE_FRONTEND.md ergänzt.
+
+**Beibehalten (Zukunftspläne):**
+- Layer 1 God, Layer 3 Kaiser-Nodes, Jetson-Integration, Hardware-Detection, KI-Plugin-System, Chat-Interface und alle Details in Section 3 (Vision & Geplante Architektur) unverändert.
 

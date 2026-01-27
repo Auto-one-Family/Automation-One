@@ -4,14 +4,17 @@
 
 ---
 
-## Letzte Aktualisierung: 2025-01-02
+## Letzte Aktualisierung: 2026-01-27
 
-**Cleanup & Dokumentation:**
-- Leere Component-Ordner entfernt (7 Stück)
-- Deprecated `useRealTimeData.ts` entfernt (ersetzt durch `useWebSocket.ts`)
-- Ungenutzte Legacy-Views entfernt (`MockEspView.vue`, `MockEspDetailView.vue`)
-- Ungenutzter `mockEsp.ts` Store entfernt (durch unified `esp.ts` ersetzt)
-- Vollständige Ordnerstruktur dokumentiert
+**Version 6.0 – System Monitor & Konsolidierung:**
+- **System Monitor View** (`SystemMonitorView.vue`) ersetzt DatabaseExplorer, LogViewer, AuditLog, MqttLog – eine View mit Tabs: Ereignisse | Logs | Datenbank | MQTT
+- Neue Komponenten-Ordner: `system-monitor/`, `filters/`
+- Neue Composables: `useQueryFilters.ts` (URL↔Filter-Sync), `useGpioStatus.ts` (GPIO-Status pro ESP)
+- Neue Types: `gpio.ts`, `websocket-events.ts`
+- Neue Utils: `actuatorDefaults`, `eventTransformer`, `eventTypeIcons`, `logMessageTranslator`, `logSummaryGenerator`, `databaseColumnTranslator`, `errorCodeTranslator`
+- ESP Store: Pending Devices (Discovery/Approval), GPIO-Status; WebSocket-Events `sensor_health`, `device_discovered`, `device_approved`, `device_rejected`
+- Entfernte View-Dateien (nur Redirects): DatabaseExplorerView, LogViewerView, AuditLogView, MqttLogView → alle zu `/system-monitor?tab=…`
+- Dashboard-Komponenten: `ActuatorSidebar.vue`, `ComponentSidebar.vue`; ESP: `ESPSettingsPopover.vue`, `GpioPicker.vue`, `PendingDevicesPanel.vue`
 
 ---
 
@@ -25,17 +28,18 @@
 | **Bug debuggen** | `El Frontend/Docs/Bugs_and_Phases/` | Nach Phasen sortiert |
 | **API-Endpoint finden** | Section "API-Layer" unten | `src/api/` |
 | **WebSocket verstehen** | Section "WebSocket-System" unten | `src/services/websocket.ts` |
-| **Zone zuweisen** | Section "Zone Naming" unten | `src/components/zones/` |
+| **Zone zuweisen** | Section "Zone Management" unten | `src/components/zones/` |
 | **ESP-Gerät verwalten** | Section "ESP Store" unten | `src/stores/esp.ts` |
+| **System Monitor (Ereignisse/Logs/DB/MQTT)** | Section "System Monitor" unten | `src/views/SystemMonitorView.vue`, `src/components/system-monitor/` |
 | **Komponente finden** | Section "Ordnerstruktur" unten | `src/components/` |
 
 ---
 
-## 1. Ordnerstruktur (Stand: 2025-01-02)
+## 1. Ordnerstruktur (Stand: 2026-01-27)
 
 ```
 El Frontend/src/
-├── api/                      # HTTP API Clients (15 Dateien)
+├── api/                      # HTTP API Clients (16 Dateien)
 │   ├── index.ts              # Axios-Instanz, Interceptors, Token-Refresh
 │   ├── auth.ts               # Login, Logout, Setup, Refresh, Me
 │   ├── esp.ts                # ⭐ Unified ESP API (Mock + Real)
@@ -48,12 +52,12 @@ El Frontend/src/
 │   ├── audit.ts              # Audit Log Query + Stats
 │   ├── config.ts             # System Configuration
 │   ├── database.ts           # Database Explorer
-│   ├── logs.ts               # Log Viewer
+│   ├── logs.ts               # ⭐ Log Viewer + Log-Management (Statistics, Cleanup)
 │   ├── loadtest.ts           # Load Testing
 │   └── users.ts              # User Management
 │
-├── components/               # Vue 3 Komponenten (10 Unterordner)
-│   ├── common/               # ⭐ Wiederverwendbare UI-Bausteine (10 Dateien)
+├── components/               # Vue 3 Komponenten (12 Unterordner)
+│   ├── common/               # ⭐ Wiederverwendbare UI-Bausteine (13 Dateien + index)
 │   │   ├── Button.vue        # Standard Button
 │   │   ├── Input.vue         # Form Input
 │   │   ├── Select.vue        # Form Select
@@ -65,24 +69,26 @@ El Frontend/src/
 │   │   ├── LoadingState.vue  # Loading State mit Message
 │   │   ├── EmptyState.vue    # Empty State mit Action
 │   │   ├── ErrorState.vue    # Error State mit Retry
-│   │   ├── ToastContainer.vue # Toast Notifications
-│   │   └── index.ts          # Re-Exports
+│   │   ├── ToastContainer.vue # Toast Notifications (von App.vue direkt importiert)
+│   │   └── index.ts          # Re-Exports (ohne ToastContainer)
 │   │
 │   ├── layout/               # App Layout (3 Dateien)
 │   │   ├── MainLayout.vue    # Haupt-Layout mit Sidebar
 │   │   ├── AppHeader.vue     # Top Header
 │   │   └── AppSidebar.vue    # Seitenleiste Navigation
 │   │
-│   ├── dashboard/            # Dashboard-spezifisch (6 Dateien)
+│   ├── dashboard/            # Dashboard-spezifisch (9 Dateien + index)
 │   │   ├── StatCard.vue      # KPI-Kacheln
 │   │   ├── ActionBar.vue     # Top Action Bar
 │   │   ├── SensorSidebar.vue # Sensor-Kategorien Sidebar
+│   │   ├── ActuatorSidebar.vue # Aktor-Kategorien Sidebar
+│   │   ├── ComponentSidebar.vue # Sensoren+Aktoren kombinierte Sidebar
 │   │   ├── StatusPill.vue    # Status-Badge
 │   │   ├── UnassignedDropBar.vue # Unassigned Devices Zone
 │   │   ├── CrossEspConnectionOverlay.vue # Logic-Verbindungen
-│   │   └── index.ts          # Re-Exports
+│   │   └── index.ts
 │   │
-│   ├── esp/                  # ESP Device Darstellung (7 Dateien)
+│   ├── esp/                  # ESP Device Darstellung (10 Dateien + index)
 │   │   ├── ESPCard.vue       # ⭐ Device Card (Status, Health)
 │   │   ├── ESPOrbitalLayout.vue # Orbital-Layout für Sensoren
 │   │   ├── SensorSatellite.vue # Sensor im Orbital-Layout
@@ -90,7 +96,10 @@ El Frontend/src/
 │   │   ├── SensorValueCard.vue # Sensor-Wert Display
 │   │   ├── ConnectionLines.vue # Logic-Rule Verbindungslinien
 │   │   ├── AnalysisDropZone.vue # Analyse Drop Zone
-│   │   └── index.ts          # Re-Exports
+│   │   ├── ESPSettingsPopover.vue # ESP-Einstellungen Popover
+│   │   ├── GpioPicker.vue    # GPIO-Pin-Auswahl
+│   │   ├── PendingDevicesPanel.vue # Pending Devices (Discovery/Approval)
+│   │   └── index.ts         # Re-Exports (ESPCard, SensorValueCard, …; ohne ESPSettingsPopover/GpioPicker/PendingDevicesPanel)
 │   │
 │   ├── database/             # Database Explorer (6 Dateien)
 │   │   ├── DataTable.vue     # Daten-Tabelle
@@ -107,16 +116,41 @@ El Frontend/src/
 │   ├── charts/               # Chart-Komponenten (1 Datei)
 │   │   └── MultiSensorChart.vue # Multi-Sensor Chart
 │   │
+│   ├── filters/              # ⭐ Filter-Komponenten (neu)
+│   │   ├── UnifiedFilterBar.vue # Wiederverwendbare Filter-Leiste (StatusFilter, TypeFilter, TimeRange)
+│   │   └── index.ts
+│   │
+│   ├── system-monitor/       # ⭐ System Monitor (neu, ersetzt eigene Views)
+│   │   ├── MonitorTabs.vue   # Tab-Leiste + Live-Toggle (events|logs|database|mqtt)
+│   │   ├── MonitorFilterPanel.vue # Filter (ESP, Level, Zeit, Event-Typen)
+│   │   ├── UnifiedEventList.vue # Ereignisliste mit virtuellem Scroll
+│   │   ├── EventDetailsPanel.vue # Ereignis-Detail mit Fehlercode-Übersetzung
+│   │   ├── EventsTab.vue     # Ereignis-Tab-Container
+│   │   ├── ServerLogsTab.vue # Server-Log-Viewer (Polling)
+│   │   ├── DatabaseTab.vue   # Datenbank-Tabellen-Explorer
+│   │   ├── MqttTrafficTab.vue # MQTT-Nachrichten-Viewer
+│   │   ├── LogManagementPanel.vue # Log-Verwaltung (Cleanup, Statistiken)
+│   │   ├── AutoCleanupStatusBanner.vue # Auto-Cleanup-Status
+│   │   ├── CleanupPanel.vue  # Cleanup-Konfiguration
+│   │   ├── CleanupPreview.vue # Cleanup-Vorschau
+│   │   ├── DataSourceSelector.vue # Datenquellen-Auswahl
+│   │   ├── PreviewEventCard.vue # Ereignis-Karte für Vorschau
+│   │   ├── RssiIndicator.vue # RSSI-Anzeige
+│   │   ├── MonitorHeader.vue # @deprecated – in MonitorTabs integriert
+│   │   └── index.ts         # Re-Exports (MonitorTabs, MonitorFilterPanel, …)
+│   │
 │   └── modals/               # Modal Dialoge (1 Datei)
 │       └── CreateMockEspModal.vue # Mock ESP erstellen
 │
-├── composables/              # Vue 3 Composables (6 Dateien)
+├── composables/              # Vue 3 Composables (9 Dateien)
 │   ├── useWebSocket.ts       # ⭐ WebSocket Integration
 │   ├── useToast.ts           # Toast Notifications (Singleton)
 │   ├── useModal.ts           # Modal State Management
-│   ├── useSwipeNavigation.ts # Mobile Swipe Gesten
+│   ├── useSwipeNavigation.ts # Mobile Swipe Gesten (useSidebarSwipe, useEdgeSwipe)
 │   ├── useZoneDragDrop.ts    # Zone Drag & Drop Logic
 │   ├── useConfigResponse.ts  # Config Response Handler
+│   ├── useQueryFilters.ts    # ⭐ URL↔Filter-Sync (System Monitor, MonitorCategory, TimeRange)
+│   ├── useGpioStatus.ts      # ⭐ GPIO-Status pro ESP (useEspStore, types/gpio)
 │   └── index.ts              # Re-Exports
 │
 ├── services/                 # Singleton Services (1 Datei)
@@ -124,47 +158,58 @@ El Frontend/src/
 │
 ├── stores/                   # Pinia State Management (5 Stores)
 │   ├── auth.ts               # ⭐ Authentication State
-│   ├── esp.ts                # ⭐ ESP Devices (Mock + Real unified)
+│   ├── esp.ts                # ⭐ ESP Devices (Mock + Real, Pending, GPIO-Status)
 │   ├── logic.ts              # Automation Rules
 │   ├── database.ts           # Database Explorer State
 │   └── dragState.ts          # Drag & Drop State
 │
-├── types/                    # TypeScript Types (2 Dateien)
-│   ├── index.ts              # ⭐ Haupt-Types (636 Zeilen)
-│   └── logic.ts              # Logic-spezifische Types
+├── types/                    # TypeScript Types (4 Dateien)
+│   ├── index.ts              # ⭐ Haupt-Types (ESP, Sensor, Actuator, PendingESPDevice, …)
+│   ├── logic.ts              # Logic-spezifische Types
+│   ├── gpio.ts               # ⭐ GpioStatusResponse, GpioPinStatus, GpioUsageItem, …
+│   └── websocket-events.ts   # ⭐ System-Monitor-Event-Types
 │
-├── utils/                    # Utility Functions (6 Dateien)
+├── utils/                    # Utility Functions (14 Dateien, index exportiert die meisten)
 │   ├── formatters.ts         # ⭐ Date, Number, Sensor Formatierung
 │   ├── labels.ts             # UI Label Mappings (Deutsch)
 │   ├── sensorDefaults.ts     # ⭐ Sensor Type Registry (20+ Types)
-│   ├── gpioConfig.ts         # GPIO Pin Konfiguration
+│   ├── actuatorDefaults.ts   # ⭐ Aktor-Typ-Defaults
+│   ├── gpioConfig.ts         # GPIO Pin Konfiguration (nicht aus index – Namenskonflikt)
 │   ├── wifiStrength.ts       # WiFi Signal Berechnung
 │   ├── zoneColors.ts         # Zone Farben
-│   └── index.ts              # Re-Exports
+│   ├── errorCodeTranslator.ts # Fehlercode → deutscher Text
+│   ├── databaseColumnTranslator.ts # DB-Spalten → Anzeige
+│   ├── logMessageTranslator.ts # Log-Nachrichten-Übersetzung
+│   ├── logSummaryGenerator.ts # Log-Zusammenfassungen
+│   ├── eventTransformer.ts   # Event-Transformation (System Monitor)
+│   ├── eventTypeIcons.ts     # Event-Typ → Icon
+│   └── index.ts              # Re-Exports (ohne gpioConfig)
 │
-├── views/                    # Page Views (15 Dateien)
-│   ├── DashboardView.vue     # ⭐ Dashboard + ESP-Übersicht (/)
-│   ├── DevicesView.vue       # ⚠️ DEPRECATED → Redirect zu /
-│   ├── DeviceDetailView.vue  # ⚠️ DEPRECATED → Redirect zu /?openSettings={id}
+├── views/                    # Page Views (11 Dateien – Stand 2026-01-27)
+│   ├── DashboardView.vue    # ⭐ Dashboard + ESP-Übersicht (/), ?openSettings={id}
 │   ├── SensorsView.vue       # ⭐ Komponenten mit Tabs: Sensoren | Aktoren (/sensors)
-│   ├── ActuatorsView.vue     # ⚠️ DEPRECATED → Redirect zu /sensors?tab=actuators
 │   ├── LogicView.vue         # Automation Rules (/logic)
-│   ├── DatabaseExplorerView.vue # Database Explorer (/database)
-│   ├── AuditLogView.vue      # Audit Logs (/audit)
-│   ├── MqttLogView.vue       # MQTT Logs (/mqtt-log)
+│   ├── SystemMonitorView.vue # ⭐ System Monitor: Ereignisse|Logs|Datenbank|MQTT (/system-monitor)
+│   ├── UserManagementView.vue # User Management (/users)
+│   ├── SystemConfigView.vue  # System Config (/system-config)
 │   ├── LoadTestView.vue      # Load Testing (/load-test)
 │   ├── MaintenanceView.vue   # Maintenance Jobs (/maintenance)
-│   ├── SystemConfigView.vue  # System Config (/system-config)
-│   ├── UserManagementView.vue # User Management (/users)
 │   ├── SettingsView.vue      # Einstellungen (/settings)
 │   ├── LoginView.vue         # Login (/login)
-│   ├── SetupView.vue         # Initial Setup (/setup)
-│   └── LogViewerView.vue     # Log Viewer (/logs)
+│   └── SetupView.vue         # Initial Setup (/setup)
+│
+│   # Entfernte View-Dateien (nur noch Redirects in router/index.ts):
+│   # /devices → / | /devices/:espId → /?openSettings={espId}
+│   # /actuators → /sensors?tab=actuators
+│   # /database → /system-monitor?tab=database
+│   # /logs → /system-monitor?tab=logs
+│   # /audit → /system-monitor?tab=events
+│   # /mqtt-log → /system-monitor?tab=mqtt
 │
 ├── router/                   # Vue Router (1 Datei)
-│   └── index.ts              # Routes + Navigation Guards
+│   └── index.ts              # Routes + Navigation Guards (createWebHistory)
 │
-├── App.vue                   # Root Component
+├── App.vue                   # Root Component (checkAuthStatus, espStore.cleanupWebSocket)
 ├── main.ts                   # Entry Point
 ├── style.css                 # Global Styles (Tailwind)
 └── vite-env.d.ts             # Vite Type Definitions
@@ -204,7 +249,7 @@ baseURL: '/api/v1'
 | `audit.ts` | `/audit/*` | Audit Log Query + Stats |
 | `config.ts` | `/config/*` | System Configuration |
 | `database.ts` | `/database/*` | Database Explorer |
-| `logs.ts` | `/logs/*` | Log Viewer |
+| `logs.ts` | `/logs/*` | Log Viewer + Log-Management (Statistics, Cleanup) |
 | `loadtest.ts` | `/loadtest/*` | Load Testing |
 | `users.ts` | `/users/*` | User Management |
 
@@ -305,12 +350,36 @@ cleanupWebSocket()      // Handler entfernen ✅
 
 ```typescript
 // Empfangene Events:
-'esp_health'      → handleEspHealth()      // Heartbeat Updates
-'sensor_data'     → handleSensorData()     // Live Sensor Values
-'actuator_status' → handleActuatorStatus() // Actuator State
-'actuator_alert'  → handleActuatorAlert()  // Emergency/Timeout
-'config_response' → handleConfigResponse() // Config ACK
-'zone_assignment' → handleZoneAssignment() // Zone ACK
+'esp_health'         → handleEspHealth()      // Heartbeat Updates
+'sensor_data'        → handleSensorData()     // Live Sensor Values
+'actuator_status'    → handleActuatorStatus() // Actuator State
+'actuator_alert'     → handleActuatorAlert()  // Emergency/Timeout
+'config_response'    → handleConfigResponse() // Config ACK
+'zone_assignment'    → handleZoneAssignment() // Zone ACK
+'sensor_health'      → (Maintenance/Phase 2E)
+'device_discovered'  → Pending Devices Discovery
+'device_approved'    → Pending Devices Approval
+'device_rejected'    → Pending Devices Rejection
+```
+
+### esp.ts – Erweiterungen (Pending Devices, GPIO-Status)
+
+```typescript
+// State (zusätzlich)
+pendingDevices: PendingESPDevice[]
+isPendingLoading: boolean
+gpioStatusMap: Map<string, GpioStatusResponse>
+gpioStatusLoading: Map<string, boolean>
+
+// Getters
+getGpioStatusForEsp(espId): GpioStatusResponse | null
+getAvailableGpios(espId): number[]
+
+// Actions (Pending/GPIO)
+fetchPendingDevices()
+approveDevice(deviceId, request?)
+rejectDevice(deviceId, request?)
+fetchGpioStatus(espId)
 ```
 
 ---
@@ -385,36 +454,53 @@ interface WebSocketFilters {
 
 ## 5. Routing (`router/index.ts`)
 
-### Routen-Struktur
+### Routen-Struktur (Stand: 2026-01-27)
 
 ```typescript
 // Public Routes
 '/login'  → LoginView.vue
 '/setup'  → SetupView.vue
 
-// Protected Routes (requiresAuth: true)
+// Protected Routes (requiresAuth: true, unter MainLayout)
 '/'               → DashboardView.vue (mit ?openSettings={id} Support)
 '/sensors'        → SensorsView.vue (Tabs: Sensoren | Aktoren)
 '/logic'          → LogicView.vue
-'/mqtt-log'       → MqttLogView.vue
-'/audit'          → AuditLogView.vue
 '/settings'       → SettingsView.vue
+'/system-monitor' → SystemMonitorView.vue (requiresAdmin, Tabs: events|logs|database|mqtt)
 
 // Admin Routes (requiresAdmin: true)
-'/database'       → DatabaseExplorerView.vue
-'/logs'           → LogViewerView.vue
 '/users'          → UserManagementView.vue
 '/system-config'  → SystemConfigView.vue
 '/load-test'      → LoadTestView.vue
 '/maintenance'    → MaintenanceView.vue
 
-// Redirects (Stand: 2025-01-04)
-'/devices'        → redirect to '/'
-'/devices/:espId' → redirect to '/?openSettings={espId}'
-'/actuators'      → redirect to '/sensors?tab=actuators'
-'/mock-esp'       → redirect to '/'
-'/mock-esp/:espId' → redirect to '/?openSettings={espId}'
+// Redirects (Stand: 2026-01-27)
+'/devices'         → '/'
+'/devices/:espId'  → '/?openSettings={espId}'
+'/mock-esp'        → '/'
+'/mock-esp/:espId' → '/?openSettings={espId}'
+'/actuators'       → '/sensors?tab=actuators'
+'/database'        → '/system-monitor?tab=database'
+'/logs'            → '/system-monitor?tab=logs'
+'/audit'           → '/system-monitor?tab=events'
+'/mqtt-log'        → '/system-monitor?tab=mqtt'
 ```
+
+### 5.1 System Monitor (View & Tabs)
+
+**View:** `src/views/SystemMonitorView.vue`  
+**Route:** `/system-monitor` (requiresAdmin). Query-Parameter `tab` steuert den aktiven Tab.
+
+| Tab-ID    | Bedeutung      | Komponenten (Auszug)      |
+|-----------|----------------|---------------------------|
+| `events`  | Ereignisse     | EventsTab, UnifiedEventList, EventDetailsPanel, MonitorFilterPanel |
+| `logs`    | Server-Logs    | ServerLogsTab, LogManagementPanel |
+| `database`| Datenbank      | DatabaseTab (DataTable, FilterPanel, …) |
+| `mqtt`    | MQTT-Traffic   | MqttTrafficTab |
+
+**Composable:** `useQueryFilters` – synchronisiert Filter (ESP, Level, TimeRange, category) mit URL-Query für Deep-Links und ESP-Card → System-Monitor-Navigation.
+
+**Relevante API:** `src/api/logs.ts` (Log-Viewer + Log-Management: Statistics, Cleanup), `src/api/audit.ts`, `src/api/database.ts`.
 
 ### Navigation Guards
 
@@ -482,6 +568,19 @@ getQualityInfo(quality): { label, colorClass }
 getStateInfo(state): { label, variant }
 getActuatorTypeLabel(type): string
 ```
+
+### Weitere Utils (Stand 2026-01-27)
+
+| Datei | Zweck |
+|-------|--------|
+| `actuatorDefaults.ts` | Aktor-Typ-Defaults (Labels, Konfiguration) |
+| `errorCodeTranslator.ts` | Fehlercode → deutscher Text (System Monitor / Events) |
+| `databaseColumnTranslator.ts` | DB-Spaltennamen → Anzeige-Labels |
+| `logMessageTranslator.ts` | Log-Nachrichten-Übersetzung |
+| `logSummaryGenerator.ts` | Log-Zusammenfassungen |
+| `eventTransformer.ts` | Event-Daten für System-Monitor-Listen |
+| `eventTypeIcons.ts` | Event-Typ → Icon-Mapping |
+| `gpioConfig.ts` | GPIO Pin Konfiguration (direkt importieren, nicht aus `@/utils` – Namenskonflikt mit errorCodeTranslator) |
 
 ---
 
@@ -608,6 +707,8 @@ cleanupWebSocket() {
 | WebSocket disconnected | Token expired | Seite neu laden |
 | Mock ESP nicht gefunden | Server neugestartet | Mock ESP neu erstellen |
 | Zone-Zuweisung fehlgeschlagen | ESP offline | Heartbeat triggern |
+| System Monitor Tab leer | Falsche `tab`-Query / API-Fehler | URL prüfen (`?tab=events|logs|database|mqtt`), Netzwerk/Console prüfen |
+| gpioConfig Import-Fehler | Namenskonflikt mit errorCodeTranslator | `import { … } from '@/utils/gpioConfig'` (nicht aus `@/utils`) |
 
 ---
 
@@ -631,5 +732,60 @@ cleanupWebSocket() {
 
 ---
 
-**Version:** 5.0 (Cleanup & Dokumentation Update)
-**Letzte Aktualisierung:** 2025-01-02
+## Changelog (Version 6.0, 2026-01-27)
+
+**Views**
+- Neu: `SystemMonitorView.vue` – konsolidierte View mit Tabs Ereignisse | Logs | Datenbank | MQTT
+- Entfernt (nur Redirects): DatabaseExplorerView, LogViewerView, AuditLogView, MqttLogView; DevicesView, DeviceDetailView, ActuatorsView waren bereits in v5 durch Redirects ersetzt, Dateien existieren nicht mehr
+
+**Components**
+- Neu: Ordner `system-monitor/` (MonitorTabs, MonitorFilterPanel, UnifiedEventList, EventDetailsPanel, ServerLogsTab, DatabaseTab, MqttTrafficTab, LogManagementPanel, …)
+- Neu: Ordner `filters/` (UnifiedFilterBar)
+- Neu in dashboard: ActuatorSidebar.vue, ComponentSidebar.vue
+- Neu in esp: ESPSettingsPopover.vue, GpioPicker.vue, PendingDevicesPanel.vue
+
+**Composables**
+- Neu: `useQueryFilters.ts` – URL↔Filter-Sync für System Monitor (MonitorCategory, TimeRange, SeverityLevel)
+- Neu: `useGpioStatus.ts` – GPIO-Status pro ESP (nutzt espStore, types/gpio)
+
+**Types**
+- Neu: `gpio.ts` (GpioStatusResponse, GpioPinStatus, GpioUsageItem, …)
+- Neu: `websocket-events.ts` (System-Monitor-Event-Types)
+
+**Utils**
+- Neu: actuatorDefaults, errorCodeTranslator, databaseColumnTranslator, logMessageTranslator, logSummaryGenerator, eventTransformer, eventTypeIcons
+
+**Stores (esp.ts)**
+- Neu: pendingDevices, isPendingLoading, gpioStatusMap, gpioStatusLoading; fetchPendingDevices, approveDevice, rejectDevice, fetchGpioStatus; getGpioStatusForEsp, getAvailableGpios
+- WebSocket-Events erweitert: sensor_health, device_discovered, device_approved, device_rejected
+
+**Routing**
+- Neue Route: `/system-monitor` → SystemMonitorView.vue
+- Redirects: /database, /logs, /audit, /mqtt-log → /system-monitor?tab=…
+
+**API**
+- `logs.ts`: Log-Management-Typen und -Endpoints (Statistics, Cleanup) ergänzt – siehe `src/api/logs.ts`
+
+---
+
+### Change-Summary (Version 6.0, 2026-01-27)
+
+| Metrik | Wert |
+|--------|------|
+| **Neue View-Dateien** | 1 (SystemMonitorView.vue) |
+| **Entfernte View-Dateien** | 7 (DevicesView, DeviceDetailView, ActuatorsView, DatabaseExplorerView, LogViewerView, AuditLogView, MqttLogView – nur noch Redirects) |
+| **Neue Komponenten-Ordner** | 2 (system-monitor/, filters/) |
+| **Neue Komponenten (Dateien)** | ~18 in system-monitor, 1 in filters; je 2 in dashboard und esp |
+| **Neue Composables** | 2 (useQueryFilters, useGpioStatus) |
+| **Neue Type-Dateien** | 2 (gpio.ts, websocket-events.ts) |
+| **Neue Utils** | 7 (actuatorDefaults, errorCodeTranslator, databaseColumnTranslator, logMessageTranslator, logSummaryGenerator, eventTransformer, eventTypeIcons) |
+| **Neue Sections/Unterabschnitte** | 5.1 System Monitor; Erweiterungen in Section 3 (ESP Store), Section 6 (Utils), Section 10 (Troubleshooting) |
+
+**Wichtigste Änderungen:** Konsolidierung von Database-, Log-, Audit- und MQTT-Views in eine System-Monitor-View mit Tabs; Pending-Devices- und GPIO-Status-Integration im ESP Store; URL-Filter-Sync für System Monitor (useQueryFilters); neue Types/Utils für Events, Logs und Fehlercodes.
+
+**Diskrepanzen Frontend ↔ Server:** Keine systematisch geprüft; API-Basis bleibt `/api/v1`. Für Abgleich mit Server-Endpoints siehe `.claude/CLAUDE_SERVER.md`.
+
+---
+
+**Version:** 6.0 (System Monitor & Dokumentations-Update)
+**Letzte Aktualisierung:** 2026-01-27
