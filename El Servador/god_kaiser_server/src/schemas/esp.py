@@ -40,9 +40,9 @@ class ESPDeviceBase(BaseModel):
 
     device_id: str = Field(
         ...,
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
-        description="ESP device ID (format: ESP_XXXXXXXX for real devices or MOCK_XXX for mock devices)",
-        examples=["ESP_12AB34CD", "MOCK_TEST01"],
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
+        description="ESP device ID (format: ESP_XXXXXX to ESP_XXXXXXXX for real devices or MOCK_XXX for mock devices)",
+        examples=["ESP_D0B19C", "ESP_12AB34CD", "MOCK_TEST01"],
     )
     name: Optional[str] = Field(
         None,
@@ -1090,4 +1090,147 @@ class ConfigResponsePayload(BaseModel):
                 ]
             }
         }
+    )
+
+
+# =============================================================================
+# Discovery/Approval Schemas
+# =============================================================================
+
+
+class PendingESPDevice(BaseModel):
+    """
+    Pending ESP device awaiting approval.
+
+    Represents a device that has been discovered via heartbeat
+    but has not yet been approved by an administrator.
+
+    Time Fields:
+    - discovered_at: When device was FIRST discovered (historical)
+    - last_seen: When device was LAST active (for UI "vor X Zeit" display)
+    """
+
+    device_id: str = Field(
+        ...,
+        description="ESP device ID",
+        examples=["ESP_D0B19C", "ESP_12AB34CD"],
+    )
+    discovered_at: datetime = Field(
+        ...,
+        description="When device was first discovered (historical)",
+    )
+    last_seen: Optional[datetime] = Field(
+        None,
+        description="When device was last active (last heartbeat). Use this for 'vor X Zeit' display.",
+    )
+    zone_id: Optional[str] = Field(
+        None,
+        description="Zone ID from heartbeat",
+    )
+    heap_free: Optional[int] = Field(
+        None,
+        description="Free heap memory from latest heartbeat (bytes)",
+    )
+    wifi_rssi: Optional[int] = Field(
+        None,
+        description="WiFi signal strength from latest heartbeat (dBm)",
+    )
+    sensor_count: int = Field(
+        0,
+        description="Number of sensors reported in latest heartbeat",
+    )
+    actuator_count: int = Field(
+        0,
+        description="Number of actuators reported in latest heartbeat",
+    )
+    heartbeat_count: int = Field(
+        0,
+        description="Number of heartbeats received while pending",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PendingDevicesListResponse(BaseResponse):
+    """
+    List of pending ESP devices awaiting approval.
+    """
+    
+    devices: List[PendingESPDevice] = Field(
+        default_factory=list,
+        description="List of pending devices",
+    )
+    count: int = Field(
+        0,
+        description="Total pending devices",
+    )
+
+
+class ESPApprovalRequest(BaseModel):
+    """
+    Request to approve an ESP device.
+    
+    Optional fields allow admin to assign name and zone during approval.
+    """
+    
+    name: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Optional device name",
+        examples=["Greenhouse Sensor Node 1"],
+    )
+    zone_id: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Optional zone assignment",
+        examples=["greenhouse-zone-a"],
+    )
+    zone_name: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Optional zone name",
+        examples=["Greenhouse Zone A"],
+    )
+
+
+class ESPRejectionRequest(BaseModel):
+    """
+    Request to reject an ESP device.
+    
+    Reason is required for audit trail.
+    """
+    
+    reason: str = Field(
+        ...,
+        max_length=500,
+        min_length=1,
+        description="Reason for rejection (required)",
+        examples=["Unknown device - not part of authorized hardware inventory"],
+    )
+
+
+class ESPApprovalResponse(BaseResponse):
+    """
+    Response after approving or rejecting an ESP device.
+    """
+    
+    device_id: str = Field(
+        ...,
+        description="ESP device ID",
+    )
+    status: str = Field(
+        ...,
+        description="New device status (approved or rejected)",
+    )
+    approved_by: Optional[str] = Field(
+        None,
+        description="Username who approved (if approved)",
+    )
+    approved_at: Optional[datetime] = Field(
+        None,
+        description="Approval timestamp (if approved)",
+    )
+    rejection_reason: Optional[str] = Field(
+        None,
+        description="Rejection reason (if rejected)",
     )

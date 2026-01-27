@@ -384,12 +384,10 @@ class ESPRepository(BaseRepository[ESPDevice]):
         esp_suffix = esp_suffix.zfill(6)[-6:]
         mock_mac = f"MO:CK:{esp_suffix[0:2]}:{esp_suffix[2:4]}:{esp_suffix[4:6]}:00"
 
-        # Build device name
-        short_id = device_id.replace("ESP_MOCK_", "").replace("ESP_", "")
-        if zone_name:
-            db_name = f"Mock ESP ({zone_name}) [{short_id}]"
-        else:
-            db_name = f"Mock ESP {short_id}"
+        # Build device name (kurz und menschenverständlich)
+        # Nur letzte 4 Zeichen der ID für Unterscheidung, da zone_name separat angezeigt wird
+        short_id = device_id[-4:].upper()  # z.B. "A733" aus "MOCK_067EA733"
+        db_name = f"Mock #{short_id}"
 
         # Build simulation config
         sim_config = simulation_config or {"sensors": {}, "actuators": {}}

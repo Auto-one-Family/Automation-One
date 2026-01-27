@@ -57,6 +57,8 @@ from .esp import (
     AssignKaiserRequest,
     AssignKaiserResponse,
     DiscoveredESP,
+    ESPApprovalRequest,
+    ESPApprovalResponse,
     ESPCommandResponse,
     ESPConfigResponse,
     ESPConfigUpdate,
@@ -71,8 +73,11 @@ from .esp import (
     ESPHealthSummary,
     ESPHealthSummaryResponse,
     ESPListFilter,
+    ESPRejectionRequest,
     ESPResetRequest,
     ESPRestartRequest,
+    PendingDevicesListResponse,
+    PendingESPDevice,
 )
 
 # Sensor schemas
@@ -240,6 +245,8 @@ __all__ = [
     "AssignKaiserRequest",
     "AssignKaiserResponse",
     "DiscoveredESP",
+    "ESPApprovalRequest",
+    "ESPApprovalResponse",
     "ESPCommandResponse",
     "ESPConfigResponse",
     "ESPConfigUpdate",
@@ -254,8 +261,11 @@ __all__ = [
     "ESPHealthSummary",
     "ESPHealthSummaryResponse",
     "ESPListFilter",
+    "ESPRejectionRequest",
     "ESPResetRequest",
     "ESPRestartRequest",
+    "PendingDevicesListResponse",
+    "PendingESPDevice",
     # Sensor
     "CalibrationPoint",
     "OneWireDevice",

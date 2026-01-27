@@ -27,7 +27,7 @@ class SensorThresholdCondition(BaseModel):
     Example:
         {
             "type": "sensor_threshold",  # or "sensor" for shorthand
-            "esp_id": "ESP_A1",
+            "esp_id": "ESP_12AB34",
             "gpio": 34,
             "sensor_type": "temperature",
             "operator": ">",
@@ -38,7 +38,11 @@ class SensorThresholdCondition(BaseModel):
     type: Literal["sensor_threshold", "sensor"] = Field(
         ..., description="Condition type ('sensor_threshold' or 'sensor')"
     )
-    esp_id: str = Field(..., description="ESP device ID", min_length=1)
+    esp_id: str = Field(
+        ...,
+        description="ESP device ID",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
+    )
     gpio: int = Field(..., description="GPIO pin number", ge=0, le=50)
     sensor_type: Optional[str] = Field(
         None, description="Sensor type (e.g., 'temperature'). Optional for 'sensor' shorthand."
@@ -136,7 +140,7 @@ class ActuatorCommandAction(BaseModel):
     Example:
         {
             "type": "actuator_command",  # or "actuator" for shorthand
-            "esp_id": "ESP_B2",
+            "esp_id": "ESP_12AB34",
             "gpio": 18,
             "command": "PWM",
             "value": 0.75,
@@ -147,7 +151,11 @@ class ActuatorCommandAction(BaseModel):
     type: Literal["actuator_command", "actuator"] = Field(
         ..., description="Action type ('actuator_command' or 'actuator')"
     )
-    esp_id: str = Field(..., description="ESP device ID", min_length=1)
+    esp_id: str = Field(
+        ...,
+        description="ESP device ID",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
+    )
     gpio: int = Field(..., description="GPIO pin number", ge=0, le=50)
     command: Optional[Literal["ON", "OFF", "PWM", "TOGGLE"]] = Field(
         None, description="Actuator command. Optional for 'actuator' shorthand."

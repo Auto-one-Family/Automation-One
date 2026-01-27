@@ -97,7 +97,7 @@ class SensorConfigCreate(SensorConfigBase):
 
     esp_id: str = Field(
         ...,
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="ESP device ID",
         examples=["ESP_12AB34CD"],
     )
@@ -422,7 +422,7 @@ class SensorDataQuery(BaseModel):
     
     esp_id: Optional[str] = Field(
         None,
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="Filter by ESP device ID",
     )
     gpio: Optional[int] = Field(
@@ -585,7 +585,7 @@ class SensorListFilter(BaseModel):
     
     esp_id: Optional[str] = Field(
         None,
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="Filter by ESP device ID",
     )
     sensor_type: Optional[str] = Field(
@@ -630,7 +630,7 @@ class SensorProcessRequest(BaseModel):
     esp_id: str = Field(
         ...,
         description="ESP device ID (format: ESP_XXXXXXXX)",
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         examples=["ESP_12AB34CD"],
     )
     gpio: int = Field(
@@ -756,7 +756,7 @@ class SensorCalibrateRequest(BaseModel):
     
     esp_id: str = Field(
         ...,
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="ESP device ID",
     )
     gpio: int = Field(

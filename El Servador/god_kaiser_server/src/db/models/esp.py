@@ -139,7 +139,7 @@ class ESPDevice(Base, TimestampMixin):
         default="offline",
         nullable=False,
         index=True,
-        doc="Device status (online, offline, error, unknown)",
+        doc="Device status: online, offline, error, unknown, pending_approval, approved, rejected",
     )
 
     last_seen: Mapped[Optional[datetime]] = mapped_column(
@@ -153,6 +153,37 @@ class ESPDevice(Base, TimestampMixin):
         String(20),
         nullable=True,
         doc="Health status (healthy, degraded, unhealthy, critical)",
+    )
+
+    # Discovery/Approval Audit Fields
+    discovered_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        doc="Timestamp when device was first discovered via heartbeat",
+    )
+
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        doc="Timestamp when device was approved by admin",
+    )
+
+    approved_by: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Username of admin who approved the device",
+    )
+
+    rejection_reason: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        doc="Reason for rejection (if status=rejected)",
+    )
+
+    last_rejection_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        doc="Timestamp of last rejection (for cooldown calculation)",
     )
 
     # Metadata

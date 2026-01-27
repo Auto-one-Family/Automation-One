@@ -133,27 +133,33 @@ ALLOWED_TABLES = {
     "esp_ownership",           # Devices - Device ownership
     "sensor_configs",          # Sensors - Configuration
     "sensor_data",             # Sensors - Time-Series data
+    "sensor_type_defaults",    # Sensors - Type defaults configuration
     "actuator_configs",        # Actuators - Configuration
     "actuator_states",         # Actuators - Current state
     "actuator_history",        # Actuators - Time-Series history
     "cross_esp_logic",         # Automation - Logic rules
     "logic_execution_history", # Automation - Execution history
+    "subzone_configs",         # Zones - Subzone management (Phase 9)
     "library_metadata",        # System - Sensor libraries
     "system_config",           # System - Configuration
+    "audit_logs",              # System - Audit trail
     "ai_predictions",          # KI/Analytics - AI predictions
 }
 
-# Time-series tables that should have default time limits
+# Time-series tables with their timestamp column names
+# Maps table_name -> timestamp_column for default time filtering
 TIME_SERIES_TABLES = {
-    "sensor_data",
-    "actuator_history",
-    "logic_execution_history",
+    "sensor_data": "timestamp",
+    "actuator_history": "timestamp",
+    "logic_execution_history": "executed_at",
+    "audit_logs": "created_at",
 }
 
 # Fields that should be masked (not returned) for security
 MASKED_FIELDS = {
     "user_accounts": ["password_hash"],
     "token_blacklist": ["token_hash"],
+    "audit_logs": ["ip_address"],  # Mask client IP addresses for privacy
 }
 
 # Default time limit for time-series tables (24 hours in seconds)

@@ -13,6 +13,7 @@ from . import (  # noqa: F401
     auth,  # TokenBlacklist model
     enums,  # Shared enums (DataSource, SensorOperatingMode, etc.)
     esp,
+    esp_heartbeat,  # ESP Heartbeat History (Time-Series)
     kaiser,
     library,
     logic,
@@ -30,6 +31,7 @@ from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType 
 from .auth import TokenBlacklist  # noqa: F401
 from .enums import DataSource, SensorOperatingMode  # noqa: F401
 from .esp import ESPDevice  # noqa: F401
+from .esp_heartbeat import ESPHeartbeatLog, HeartbeatHealthStatus, determine_health_status  # noqa: F401
 from .kaiser import KaiserRegistry, ESPOwnership  # noqa: F401
 from .library import LibraryMetadata  # noqa: F401
 from .logic import CrossESPLogic, LogicExecutionHistory  # noqa: F401
@@ -47,6 +49,7 @@ __all__ = [
     "auth",
     "enums",
     "esp",
+    "esp_heartbeat",
     "kaiser",
     "library",
     "logic",
@@ -69,6 +72,9 @@ __all__ = [
     "AuditSourceType",
     "TokenBlacklist",
     "ESPDevice",
+    "ESPHeartbeatLog",
+    "HeartbeatHealthStatus",
+    "determine_health_status",
     "KaiserRegistry",
     "ESPOwnership",
     "LibraryMetadata",

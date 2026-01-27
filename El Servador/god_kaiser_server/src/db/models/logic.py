@@ -77,7 +77,7 @@ class CrossESPLogic(Base, TimestampMixin):
         nullable=False,
         doc=(
             "Trigger conditions (sensor thresholds, time windows, etc.). "
-            "Example: {'type': 'sensor_threshold', 'esp_id': 'ESP_A1', 'gpio': 34, "
+            "Example: {'type': 'sensor_threshold', 'esp_id': 'ESP_12AB34', 'gpio': 34, "
             "'sensor_type': 'temperature', 'operator': '>', 'value': 25.0}"
         ),
     )
@@ -96,7 +96,7 @@ class CrossESPLogic(Base, TimestampMixin):
         nullable=False,
         doc=(
             "Actions to execute when triggered. "
-            "Example: [{'type': 'actuator_command', 'esp_id': 'ESP_B2', 'gpio': 18, "
+            "Example: [{'type': 'actuator_command', 'esp_id': 'ESP_12AB34', 'gpio': 18, "
             "'actuator_type': 'pump', 'value': 0.75, 'duration_seconds': 60}]"
         ),
     )

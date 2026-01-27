@@ -203,8 +203,8 @@ class MockESPCreate(BaseModel):
     """Request to create a new mock ESP32."""
     esp_id: str = Field(
         ...,
-        pattern=r"^(ESP_[A-Za-z0-9]{8}|MOCK_[A-Za-z0-9]+)$",
-        description="ESP device ID (format: ESP_XXXXXXXX or MOCK_XXXXXX)"
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
+        description="ESP device ID (format: ESP_XXXXXX to ESP_XXXXXXXX or MOCK_XXXXXX)"
     )
     zone_id: Optional[str] = Field(None, description="Zone ID (technical, auto-generated from zone_name if not provided)")
     zone_name: Optional[str] = Field(None, description="Human-readable zone name (e.g., 'Zelt 1', 'Gewächshaus')")

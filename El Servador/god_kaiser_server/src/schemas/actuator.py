@@ -131,9 +131,9 @@ class ActuatorConfigCreate(ActuatorConfigBase):
     
     esp_id: str = Field(
         ...,
-        pattern=r"^ESP_[A-Z0-9]{8}$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="ESP device ID",
-        examples=["ESP_12AB34CD"],
+        examples=["ESP_D0B19C", "ESP_12AB34CD", "MOCK_TEST01"],
     )
     enabled: bool = Field(
         True,
@@ -442,7 +442,7 @@ class EmergencyStopRequest(BaseModel):
     
     esp_id: Optional[str] = Field(
         None,
-        pattern=r"^ESP_[A-Z0-9]{8}$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="Specific ESP to stop (None = all ESPs)",
     )
     gpio: Optional[int] = Field(
@@ -586,7 +586,7 @@ class ActuatorListFilter(BaseModel):
     
     esp_id: Optional[str] = Field(
         None,
-        pattern=r"^(ESP_[A-F0-9]{8}|MOCK_[A-Z0-9]+)$",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
         description="Filter by ESP device ID",
     )
     actuator_type: Optional[str] = Field(

@@ -204,7 +204,15 @@ class AuditEventType:
     SERVICE_STOP = "service_stop"
     DEVICE_REGISTERED = "device_registered"
     DEVICE_OFFLINE = "device_offline"
-    
+
+    # ESP Lifecycle Events
+    DEVICE_DISCOVERED = "device_discovered"
+    DEVICE_APPROVED = "device_approved"
+    DEVICE_REJECTED = "device_rejected"
+    DEVICE_ONLINE = "device_online"
+    DEVICE_REDISCOVERED = "device_rediscovered"
+    LWT_RECEIVED = "lwt_received"
+
     # Error Events
     MQTT_ERROR = "mqtt_error"
     DATABASE_ERROR = "database_error"
