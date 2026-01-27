@@ -416,6 +416,45 @@ class MaintenanceSettings(BaseSettings):
     )
 
     # ─────────────────────────────────────────────────────────
+    # HEARTBEAT LOG CLEANUP (DEFAULT: ENABLED with 7 days)
+    # ─────────────────────────────────────────────────────────
+    # NOTE: Heartbeat logs are voluminous (1440/device/day).
+    # Unlike other cleanups, this is ENABLED by default to prevent
+    # unbounded table growth. 7 days provides sufficient history
+    # for monitoring and diagnostics.
+    heartbeat_log_retention_enabled: bool = Field(
+        default=True,
+        alias="HEARTBEAT_LOG_RETENTION_ENABLED",
+        description="Enable heartbeat log cleanup (Default: ENABLED - 365 day retention)",
+    )
+    heartbeat_log_retention_days: int = Field(
+        default=365,
+        alias="HEARTBEAT_LOG_RETENTION_DAYS",
+        ge=1,
+        le=3650,
+        description="Days to keep heartbeat logs (default: 365 days / 1 year)",
+    )
+    heartbeat_log_cleanup_dry_run: bool = Field(
+        default=True,
+        alias="HEARTBEAT_LOG_CLEANUP_DRY_RUN",
+        description="Safety: Dry-Run mode (counts only, no deletion) - Default: True",
+    )
+    heartbeat_log_cleanup_batch_size: int = Field(
+        default=5000,
+        alias="HEARTBEAT_LOG_CLEANUP_BATCH_SIZE",
+        ge=100,
+        le=50000,
+        description="Max records per batch (larger batches for heartbeat volume)",
+    )
+    heartbeat_log_cleanup_max_batches: int = Field(
+        default=100,
+        alias="HEARTBEAT_LOG_CLEANUP_MAX_BATCHES",
+        ge=1,
+        le=1000,
+        description="Max batches per run",
+    )
+
+    # ─────────────────────────────────────────────────────────
     # ORPHANED MOCKS CLEANUP (DEFAULT: WARN ONLY)
     # ─────────────────────────────────────────────────────────
     orphaned_mock_cleanup_enabled: bool = Field(

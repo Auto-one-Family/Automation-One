@@ -52,7 +52,14 @@ class ESP32HardwareError(IntEnum):
     ONEWIRE_INIT_FAILED = 1020
     ONEWIRE_NO_DEVICES = 1021
     ONEWIRE_READ_FAILED = 1022
-    
+    ONEWIRE_INVALID_ROM_LENGTH = 1023
+    ONEWIRE_INVALID_ROM_FORMAT = 1024
+    ONEWIRE_INVALID_ROM_CRC = 1025
+    ONEWIRE_DEVICE_NOT_FOUND = 1026
+    ONEWIRE_BUS_NOT_INITIALIZED = 1027
+    ONEWIRE_READ_TIMEOUT = 1028
+    ONEWIRE_DUPLICATE_ROM = 1029
+
     PWM_INIT_FAILED = 1030
     PWM_CHANNEL_FULL = 1031
     PWM_SET_FAILED = 1032
@@ -89,6 +96,15 @@ class ESP32ServiceError(IntEnum):
     STORAGE_INIT_FAILED = 2030
     STORAGE_READ_FAILED = 2031
     STORAGE_WRITE_FAILED = 2032
+
+    # Subzone Management Errors (2500-2599)
+    SUBZONE_INVALID_ID = 2500
+    SUBZONE_GPIO_CONFLICT = 2501
+    SUBZONE_PARENT_MISMATCH = 2502
+    SUBZONE_NOT_FOUND = 2503
+    SUBZONE_GPIO_INVALID = 2504
+    SUBZONE_SAFE_MODE_FAILED = 2505
+    SUBZONE_CONFIG_SAVE_FAILED = 2506
 
 
 class ESP32CommunicationError(IntEnum):
@@ -148,6 +164,16 @@ class ESP32ApplicationError(IntEnum):
     TASK_FAILED = 4060
     TASK_TIMEOUT = 4061
     TASK_QUEUE_FULL = 4062
+
+    # Watchdog Errors (4070-4079)
+    WATCHDOG_TIMEOUT = 4070
+    WATCHDOG_FEED_BLOCKED = 4071
+    WATCHDOG_FEED_BLOCKED_CRITICAL = 4072
+
+    # Device Discovery & Approval (4200-4209)
+    DEVICE_REJECTED = 4200
+    APPROVAL_TIMEOUT = 4201
+    APPROVAL_REVOKED = 4202
 
 
 # ESP32 ConfigErrorCode (string-based, mirrors enum in error_codes.h)
@@ -300,7 +326,14 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     1020: "Failed to initialize OneWire bus",
     1021: "No OneWire devices found on bus",
     1022: "Failed to read from OneWire device",
-    
+    1023: "OneWire ROM-Code must be 16 hex characters",
+    1024: "OneWire ROM-Code contains invalid characters (expected 0-9, A-F)",
+    1025: "OneWire ROM-Code CRC validation failed (corrupted or fake ROM)",
+    1026: "OneWire device not present on bus (check wiring)",
+    1027: "OneWire bus not initialized (call begin() first)",
+    1028: "OneWire device read timeout (device not responding)",
+    1029: "OneWire ROM-Code already registered for another sensor",
+
     1030: "Failed to initialize PWM controller",
     1031: "All PWM channels already in use",
     1032: "Failed to set PWM duty cycle",
@@ -334,7 +367,16 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     2030: "Failed to initialize storage manager",
     2031: "Failed to read from storage",
     2032: "Failed to write to storage",
-    
+
+    # Subzone Management Errors (2500-2599)
+    2500: "Invalid subzone_id format (must be 1-32 chars, alphanumeric + underscore)",
+    2501: "GPIO already assigned to different subzone",
+    2502: "parent_zone_id doesn't match ESP zone assignment",
+    2503: "Subzone doesn't exist",
+    2504: "GPIO not in safe pins list",
+    2505: "Safe-mode activation failed for subzone",
+    2506: "Failed to save subzone configuration to NVS",
+
     # Communication (3000-3999)
     3001: "Failed to initialize WiFi module",
     3002: "WiFi connection timeout",
@@ -387,6 +429,16 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     4060: "FreeRTOS task failed",
     4061: "FreeRTOS task timeout",
     4062: "FreeRTOS task queue is full",
+
+    # Watchdog Errors (4070-4079)
+    4070: "Watchdog timeout detected (system hang)",
+    4071: "Watchdog feed blocked: Circuit breakers open",
+    4072: "Watchdog feed blocked: Critical errors active",
+
+    # Device Discovery & Approval (4200-4209)
+    4200: "Device rejected by server administrator",
+    4201: "Timeout waiting for server approval",
+    4202: "Previously approved device was revoked",
 }
 
 # ESP32 ConfigErrorCode descriptions

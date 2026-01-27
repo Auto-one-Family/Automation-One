@@ -29,6 +29,7 @@ MQTT_TOPIC_ESP_CONFIG_ACTUATOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/actuato
 MQTT_TOPIC_ESP_CONFIG = "kaiser/{kaiser_id}/esp/{esp_id}/config"  # Combined sensor/actuator config
 MQTT_TOPIC_ESP_SYSTEM_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/system/command"
 MQTT_TOPIC_ESP_PI_ENHANCED_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/response"
+MQTT_TOPIC_ESP_HEARTBEAT_ACK = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack"  # Phase 2: Heartbeat-ACK
 
 # Zone Assignment (Phase 7 - Hierarchical Zones)
 MQTT_TOPIC_ESP_ZONE_ASSIGN = "kaiser/{kaiser_id}/esp/{esp_id}/zone/assign"  # God-Kaiser → ESP

@@ -80,10 +80,10 @@ def validate_esp_id(esp_id: str) -> tuple[bool, Optional[str]]:
     if not esp_id:
         return False, "ESP ID cannot be empty"
 
-    # ESP ID format: ESP_XXXXXXXX (alphanumeric + underscore)
-    pattern = r"^ESP_[A-Za-z0-9_]+$"
+    # ESP ID format: ESP_{6-8 hex chars} or MOCK_{alphanumeric}
+    pattern = r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$"
     if not re.match(pattern, esp_id):
-        return False, "ESP ID must match format 'ESP_XXXXXXXX' (alphanumeric + underscore)"
+        return False, "ESP ID must match format 'ESP_XXXXXX' (6-8 hex characters) or 'MOCK_XXX'"
 
     if len(esp_id) > 64:
         return False, "ESP ID exceeds maximum length (64 characters)"

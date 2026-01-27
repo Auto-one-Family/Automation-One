@@ -151,6 +151,26 @@ class TopicBuilder:
         )
 
     @staticmethod
+    def build_heartbeat_ack_topic(esp_id: str) -> str:
+        """
+        Build heartbeat ACK topic (Phase 2: Server → ESP).
+
+        Sends device approval status back to ESP after each heartbeat.
+        Allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
+        without requiring a reboot.
+
+        Args:
+            esp_id: ESP device ID
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_HEARTBEAT_ACK,
+            esp_id=esp_id
+        )
+
+    @staticmethod
     def build_pi_enhanced_response_topic(esp_id: str, gpio: int) -> str:
         """
         Build Pi-Enhanced response topic.
@@ -916,13 +936,13 @@ class TopicBuilder:
         Validate ESP ID format.
 
         Args:
-            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            esp_id: ESP device ID (e.g., ESP_D0B19C or ESP_12AB34CD)
 
         Returns:
             True if valid format
         """
-        # Pattern: ESP_{8 alphanumeric chars}
-        pattern = r"^ESP_[A-Z0-9]{8}$"
+        # Pattern: ESP_{6-8 hex chars}
+        pattern = r"^ESP_[A-F0-9]{6,8}$"
         return bool(re.match(pattern, esp_id))
 
     @staticmethod
