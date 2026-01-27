@@ -36,6 +36,7 @@ from typing import List, Optional
 from pydantic import ValidationError
 
 from ...core.error_codes import ConfigErrorCode, get_error_code_description
+from ...core.esp32_error_mapping import get_config_error_info
 from ...core.logging_config import get_logger
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.esp_repo import ESPRepository
@@ -48,18 +49,8 @@ from ..topics import TopicBuilder
 logger = get_logger(__name__)
 
 
-# ESP32 Config Error Code mapping (from error_codes.h)
-ESP32_ERROR_CODES = {
-    "NONE": "Success",
-    "JSON_PARSE_ERROR": "Invalid JSON format received",
-    "VALIDATION_FAILED": "Config validation failed on ESP32",
-    "GPIO_CONFLICT": "GPIO already in use by another sensor/actuator",
-    "NVS_WRITE_FAILED": "NVS storage full or corrupted",
-    "TYPE_MISMATCH": "Field type mismatch",
-    "MISSING_FIELD": "Required field missing",
-    "OUT_OF_RANGE": "Value out of valid range",
-    "UNKNOWN_ERROR": "Unexpected error on ESP32",
-}
+# ESP32 Config Error Code mapping
+# Deutsche Übersetzungen aus esp32_error_mapping.py (get_config_error_info)
 
 
 class ConfigHandler:
@@ -149,8 +140,12 @@ class ConfigHandler:
                         f"{failure.get('error', 'UNKNOWN')} - {failure.get('detail', 'No details')}"
                     )
             else:
-                # Full failure
-                error_description = ESP32_ERROR_CODES.get(error_code, f"Unknown error: {error_code}")
+                # Full failure - Hole deutsche Übersetzung
+                error_info = get_config_error_info(error_code) if error_code else None
+                error_description = (
+                    error_info["message"] if error_info
+                    else f"Unbekannter Fehler: {error_code}"
+                )
                 failed_item = payload.get("failed_item", {})
 
                 logger.error(
@@ -180,6 +175,10 @@ class ConfigHandler:
             try:
                 async with resilient_session() as session:
                     audit_repo = AuditLogRepository(session)
+                    # Hole deutsche Beschreibung für Audit-Log
+                    audit_error_info = get_config_error_info(error_code) if error_code else None
+                    audit_error_desc = audit_error_info["message"] if audit_error_info else None
+
                     await audit_repo.log_config_response(
                         esp_id=esp_id,
                         config_type=config_type,
@@ -187,7 +186,7 @@ class ConfigHandler:
                         count=count,
                         message=message,
                         error_code=error_code if status != "success" else None,
-                        error_description=ESP32_ERROR_CODES.get(error_code) if error_code else None,
+                        error_description=audit_error_desc,
                         failed_item=payload.get("failed_item") if status != "success" else None,
                     )
                     await session.commit()
@@ -196,10 +195,13 @@ class ConfigHandler:
                 # Don't fail the handler if audit logging fails
                 logger.warning(f"Failed to store config response in audit log: {audit_error}")
 
-            # WebSocket Broadcast (Phase 4 extended)
+            # WebSocket Broadcast (Phase 4 extended) - Mit deutschen Übersetzungen
             try:
                 from ...websocket.manager import WebSocketManager
                 ws_manager = await WebSocketManager.get_instance()
+
+                # Hole deutsche Error-Info für WebSocket-Broadcast
+                ws_error_info = get_config_error_info(error_code) if error_code else None
 
                 broadcast_payload = {
                     "esp_id": esp_id,
@@ -207,14 +209,38 @@ class ConfigHandler:
                     "status": status,
                     "count": count,
                     "failed_count": failed_count,
-                    "message": message,
+                    # Deutsche Message verwenden wenn verfügbar
+                    "message": (
+                        ws_error_info["message"] if ws_error_info and status != "success"
+                        else message
+                    ),
                     "timestamp": int(datetime.now(timezone.utc).timestamp())
                 }
 
-                # Include error details for failed/partial configs
+                # Include error details for failed/partial configs - DEUTSCHE TEXTE
                 if status != "success":
                     broadcast_payload["error_code"] = error_code
-                    broadcast_payload["error_description"] = ESP32_ERROR_CODES.get(error_code, "Unknown error")
+                    broadcast_payload["error_description"] = (
+                        ws_error_info["message"] if ws_error_info
+                        else f"Unbekannter Fehler: {error_code}"
+                    )
+                    broadcast_payload["severity"] = (
+                        ws_error_info["severity"].lower() if ws_error_info
+                        else "error"
+                    )
+                    # Deutsche Troubleshooting-Schritte
+                    broadcast_payload["troubleshooting"] = (
+                        ws_error_info["troubleshooting"] if ws_error_info
+                        else []
+                    )
+                    broadcast_payload["recoverable"] = (
+                        ws_error_info["recoverable"] if ws_error_info
+                        else True
+                    )
+                    broadcast_payload["user_action_required"] = (
+                        ws_error_info["user_action_required"] if ws_error_info
+                        else True
+                    )
                     # Phase 4: Include failures array
                     if failures:
                         broadcast_payload["failures"] = failures

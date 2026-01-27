@@ -120,7 +120,7 @@ class ZoneAckHandler:
                 device = await esp_repo.get_by_device_id(esp_id_str)
                 if not device:
                     logger.warning(
-                        f"[{ConfigErrorCode.ESP_NOT_FOUND}] "
+                        f"[{ConfigErrorCode.ESP_DEVICE_NOT_FOUND}] "
                         f"Zone ACK from unknown device: {esp_id_str}"
                     )
                     return False

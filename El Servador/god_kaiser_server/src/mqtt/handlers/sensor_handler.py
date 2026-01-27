@@ -30,6 +30,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...utils.sensor_formatters import format_sensor_message
 from ...core.resilience import (
     ServiceUnavailableError,
     with_timeout_fallback,
@@ -283,14 +284,27 @@ class SensorDataHandler:
                     try:
                         from ...websocket.manager import WebSocketManager
                         ws_manager = await WebSocketManager.get_instance()
+
+                        # Einheitliche Message generieren (Server-Centric)
+                        display_value = processed_value if processed_value is not None else raw_value
+                        message = format_sensor_message(
+                            sensor_type=sensor_type,
+                            gpio=gpio,
+                            value=display_value,
+                            unit=unit,
+                        )
+
                         await ws_manager.broadcast("sensor_data", {
                             "esp_id": esp_id_str,
+                            "message": message,  # Menschenverstandliche Message
+                            "severity": "info",
+                            "device_id": esp_id_str,
                             "gpio": gpio,
                             "sensor_type": sensor_type,
-                            "value": processed_value or raw_value,
+                            "value": display_value,
                             "unit": unit,
                             "quality": quality,
-                            "timestamp": esp32_timestamp_raw
+                            "timestamp": esp32_timestamp_raw,
                         })
                     except Exception as e:
                         logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")

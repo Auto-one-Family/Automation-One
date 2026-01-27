@@ -30,6 +30,7 @@ Alert Types:
 from datetime import datetime, timezone
 from typing import Optional
 
+from ...core.esp32_error_mapping import get_actuator_alert_info
 from ...core.logging_config import get_logger
 from ...db.repositories import ActuatorRepository, ESPRepository
 from ...db.session import resilient_session
@@ -171,15 +172,32 @@ class ActuatorAlertHandler:
                 await session.commit()
 
                 # Step 7: WebSocket broadcast (non-blocking, critical for dashboard)
+                # Mit deutschen Übersetzungen für das Frontend
                 try:
                     from ...websocket.manager import WebSocketManager
                     ws_manager = await WebSocketManager.get_instance()
+
+                    # Hole deutsche Alert-Informationen
+                    alert_info = get_actuator_alert_info(alert_type)
+
+                    # Deutsche Message verwenden, falls ESP-Message leer oder generisch
+                    german_message = alert_info["message"] if alert_info else message
+                    # Falls ESP eine spezifische Message hat, diese anhängen
+                    if message and message != alert_type:
+                        german_message = f"{alert_info['message']} - {message}" if alert_info else message
+
                     await ws_manager.broadcast("actuator_alert", {
                         "esp_id": esp_id_str,
                         "gpio": gpio,
                         "alert_type": alert_type,
-                        "severity": severity,
-                        "message": message,
+                        "severity": alert_info["severity"].lower() if alert_info else severity,
+                        "category": alert_info["category"] if alert_info else "SYSTEM",
+                        # Deutsche Meldung
+                        "message": german_message,
+                        # Deutsche Troubleshooting-Schritte
+                        "troubleshooting": alert_info["troubleshooting"] if alert_info else [],
+                        "recoverable": alert_info["recoverable"] if alert_info else True,
+                        "user_action_required": alert_info["user_action_required"] if alert_info else False,
                         "zone_id": zone_id,
                         "timestamp": payload.get("ts", 0)
                     })

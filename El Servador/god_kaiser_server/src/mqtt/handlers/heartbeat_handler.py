@@ -20,15 +20,21 @@ Error Codes:
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import json
+import time as time_module
+
 from ...core.error_codes import (
     ConfigErrorCode,
     ValidationErrorCode,
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
 from ...db.models.esp import ESPDevice
-from ...db.repositories import ESPRepository
+from ...db.models.esp_heartbeat import determine_health_status
+from ...db.repositories import ESPRepository, ESPHeartbeatRepository
+from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
 from ..topics import TopicBuilder
 
@@ -112,20 +118,91 @@ class HeartbeatHandler:
                 
                 if not esp_device:
                     # ============================================
-                    # REJECT: Unknown ESP device - not registered
+                    # NEW DEVICE: Auto-Discovery
                     # ============================================
-                    # Note: Auto-discovery is disabled. Devices must be
-                    # registered via the REST API before sending heartbeats.
-                    # Use POST /api/v1/esp/register to register new devices.
-                    logger.warning(
-                        f"[{ConfigErrorCode.ESP_DEVICE_NOT_FOUND}] "
-                        f"❌ Heartbeat rejected: Unknown device {esp_id_str}. "
-                        f"Device must be registered first via API. - "
-                        f"{get_error_code_description(ConfigErrorCode.ESP_DEVICE_NOT_FOUND)}"
+                    esp_device, status_msg = await self._discover_new_device(
+                        session, esp_repo, esp_id_str, payload
                     )
-                    return False
+                    if not esp_device:
+                        # Rate limited - silently ignore
+                        logger.debug(f"Discovery rate limited for {esp_id_str}: {status_msg}")
+                        return True  # Don't log as error
+                    
+                    # Broadcast discovery event
+                    await self._broadcast_device_discovered(esp_id_str, payload)
+                    await session.commit()
 
-                # Step 5: Update device status and last_seen
+                    # Phase 2: ACK with pending_approval status
+                    await self._send_heartbeat_ack(
+                        esp_id=esp_id_str,
+                        status="pending_approval",
+                        config_available=False
+                    )
+                    return True
+                
+                # ============================================
+                # EXISTING DEVICE: Status-based processing
+                # ============================================
+                status = esp_device.status
+                
+                if status == "rejected":
+                    # Check cooldown before rediscovery
+                    if await self._check_rejection_cooldown(esp_device):
+                        await self._rediscover_device(esp_device, payload, session)
+                        await self._broadcast_device_rediscovered(esp_id_str, payload)
+                        await session.commit()
+                        return True
+                    else:
+                        # Still in cooldown - notify ESP of rejection
+                        logger.debug(f"Rejected device {esp_id_str} in cooldown, ignoring")
+
+                        # Phase 2: ACK - ESP knows it's rejected
+                        await self._send_heartbeat_ack(
+                            esp_id=esp_id_str,
+                            status="rejected",
+                            config_available=False
+                        )
+                        return True
+                
+                if status == "pending_approval":
+                    # Update heartbeat count but don't process normally
+                    await self._update_pending_heartbeat(esp_device, payload)
+                    await session.commit()
+                    logger.debug(f"Pending device {esp_id_str} heartbeat recorded")
+
+                    # Phase 2: ACK - ESP knows it's still pending
+                    await self._send_heartbeat_ack(
+                        esp_id=esp_id_str,
+                        status="pending_approval",
+                        config_available=False
+                    )
+                    return True
+                
+                if status == "approved":
+                    # First heartbeat after approval -> set to online
+                    esp_device.status = "online"
+                    logger.info(f"✅ Device {esp_id_str} now online after approval")
+
+                    # Audit Logging: device_online (status change approved → online)
+                    try:
+                        audit_repo = AuditLogRepository(session)
+                        await audit_repo.log_device_event(
+                            esp_id=esp_id_str,
+                            event_type=AuditEventType.DEVICE_ONLINE,
+                            status="success",
+                            message=f"Device came online after admin approval",
+                            details={
+                                "previous_status": "approved",
+                                "heap_free": payload.get("heap_free", payload.get("free_heap")),
+                                "wifi_rssi": payload.get("wifi_rssi"),
+                                "uptime": payload.get("uptime"),
+                            },
+                            severity=AuditSeverity.INFO,
+                        )
+                    except Exception as audit_error:
+                        logger.warning(f"Failed to audit log device_online: {audit_error}")
+
+                # Step 5: Update device status and last_seen (for online/approved devices)
                 # Use timezone-aware datetime for consistency with timeout checks
                 ts_value = payload["ts"] / 1000 if payload["ts"] > 1e10 else payload["ts"]
                 last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
@@ -140,8 +217,24 @@ class HeartbeatHandler:
                 # Commit transaction
                 await session.commit()
 
-                # Determine device source for logging
+                # ============================================
+                # HEARTBEAT HISTORY LOGGING (Time-Series)
+                # ============================================
+                # Non-blocking: Errors are logged but don't fail the handler
                 device_source = self._detect_device_source(esp_device, payload)
+                try:
+                    heartbeat_repo = ESPHeartbeatRepository(session)
+                    await heartbeat_repo.log_heartbeat(
+                        esp_uuid=esp_device.id,
+                        device_id=esp_id_str,
+                        payload=payload,
+                        data_source=device_source,
+                    )
+                    await session.commit()
+                except Exception as hb_log_error:
+                    logger.warning(f"Failed to log heartbeat history for {esp_id_str}: {hb_log_error}")
+                    # Non-critical - don't fail the heartbeat handler
+
                 source_indicator = f"[{device_source.upper()}]" if device_source != DataSource.PRODUCTION.value else ""
 
                 logger.debug(
@@ -162,12 +255,30 @@ class HeartbeatHandler:
                 try:
                     from ...websocket.manager import WebSocketManager
                     ws_manager = await WebSocketManager.get_instance()
+
+                    # Build unified message (Server-Centric: Single Source of Truth)
+                    # Same format as EventAggregatorService._transform_heartbeat_to_unified()
+                    heap_free = payload.get("heap_free", payload.get("free_heap", 0))
+                    heap_kb = heap_free // 1024 if heap_free else 0
+                    wifi_rssi = payload.get("wifi_rssi", 0)
+                    uptime = payload.get("uptime", 0)
+
+                    ws_message = f"{esp_id_str} online ({heap_kb}KB frei, RSSI: {wifi_rssi}dBm)"
+                    if uptime and uptime > 0:
+                        hours = uptime // 3600
+                        minutes = (uptime % 3600) // 60
+                        if hours > 0:
+                            ws_message += f" | Uptime: {hours}h {minutes}m"
+                        elif minutes > 0:
+                            ws_message += f" | Uptime: {minutes}m"
+
                     await ws_manager.broadcast("esp_health", {
                         "esp_id": esp_id_str,
                         "status": "online",
-                        "heap_free": payload.get("heap_free", payload.get("free_heap")),
-                        "wifi_rssi": payload.get("wifi_rssi"),
-                        "uptime": payload.get("uptime"),
+                        "message": ws_message,  # Unified message for Frontend
+                        "heap_free": heap_free,
+                        "wifi_rssi": wifi_rssi,
+                        "uptime": uptime,
                         "sensor_count": payload.get("sensor_count", payload.get("active_sensors", 0)),
                         "actuator_count": payload.get("actuator_count", payload.get("active_actuators", 0)),
                         "timestamp": payload.get("ts"),
@@ -183,6 +294,17 @@ class HeartbeatHandler:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to broadcast ESP health via WebSocket: {e}")
+
+                # ============================================
+                # Phase 2: Send Heartbeat-ACK to ESP
+                # ============================================
+                # Allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
+                # without requiring a reboot after admin approval
+                await self._send_heartbeat_ack(
+                    esp_id=esp_id_str,
+                    status="online",  # Device is now online
+                    config_available=await self._has_pending_config(esp_device)
+                )
 
                 return True
 
@@ -204,19 +326,13 @@ class HeartbeatHandler:
         payload: dict
     ) -> Optional[ESPDevice]:
         """
-        Auto-register a new ESP device from heartbeat data.
+        Auto-register a new ESP device from heartbeat data with pending_approval status.
 
         This implements "Discovery via Heartbeat" - ESP32 sends initial
-        heartbeat on startup, server auto-registers if unknown.
+        heartbeat on startup, server auto-registers as pending_approval.
 
-        CURRENTLY UNUSED: Auto-discovery is disabled for security reasons.
-        ESPs must be manually registered via REST API first.
-
-        FUTURE USE CASE: Could be used for Auto-Reconnect scenarios where:
-        - ESP loses connection temporarily
-        - Server database is reset but ESP is still running
-        - ESP sends heartbeat with stored configuration
-        - Server re-registers ESP automatically
+        The device must be approved by an administrator before it can
+        operate normally. This ensures security in industrial environments.
 
         Args:
             session: Database session
@@ -233,20 +349,21 @@ class HeartbeatHandler:
             master_zone_id = payload.get("master_zone_id", "")
             zone_assigned = payload.get("zone_assigned", False)
             
-            # Create new ESP device
+            # Create new ESP device with pending_approval status
             new_esp = ESPDevice(
                 device_id=esp_id,
                 hardware_type="ESP32_WROOM",  # Default, can be updated later
-                status="online",
+                status="pending_approval",  # Requires admin approval
+                discovered_at=datetime.now(timezone.utc),  # Audit field
                 capabilities={
                     "max_sensors": 20,  # Default for ESP32_WROOM
                     "max_actuators": 12,
                     "features": ["heartbeat", "sensors", "actuators"],
                 },
-                metadata={
-                    "discovered_via": "heartbeat",
-                    "discovered_at": datetime.now(timezone.utc).isoformat(),
-                    "auto_registered": True,
+                device_metadata={
+                    "discovery_source": "heartbeat",
+                    "initial_heartbeat": payload,
+                    "heartbeat_count": 1,
                     "zone_id": zone_id,
                     "master_zone_id": master_zone_id,
                     "zone_assigned": zone_assigned,
@@ -260,7 +377,7 @@ class HeartbeatHandler:
             await session.flush()  # Get ID without committing
             
             logger.info(
-                f"✅ Auto-registered new ESP: {esp_id} "
+                f"🔔 New ESP discovered: {esp_id} (pending_approval) "
                 f"(Zone: {zone_id or 'unassigned'}, "
                 f"Sensors: {payload.get('sensor_count', 0)}, "
                 f"Actuators: {payload.get('actuator_count', 0)})"
@@ -271,6 +388,206 @@ class HeartbeatHandler:
         except Exception as e:
             logger.error(f"Error auto-registering ESP {esp_id}: {e}", exc_info=True)
             return None
+    
+    # =========================================================================
+    # Discovery/Approval Helper Methods
+    # =========================================================================
+    
+    async def _discover_new_device(
+        self,
+        session,
+        esp_repo: ESPRepository,
+        esp_id: str,
+        payload: dict
+    ) -> tuple[Optional[ESPDevice], str]:
+        """
+        Discover new device with rate limiting.
+        
+        Args:
+            session: Database session
+            esp_repo: ESP repository
+            esp_id: ESP device ID
+            payload: Heartbeat payload
+        
+        Returns:
+            Tuple of (device, status_message)
+        """
+        from ...services.esp_service import _discovery_rate_limiter
+        
+        # Check rate limits
+        allowed, reason = _discovery_rate_limiter.can_discover(esp_id)
+        if not allowed:
+            return None, reason
+        
+        # Create pending device
+        new_esp = await self._auto_register_esp(session, esp_repo, esp_id, payload)
+        if new_esp:
+            _discovery_rate_limiter.record_discovery(esp_id)
+
+            # Audit Logging: device_discovered
+            try:
+                audit_repo = AuditLogRepository(session)
+                await audit_repo.log_device_event(
+                    esp_id=esp_id,
+                    event_type=AuditEventType.DEVICE_DISCOVERED,
+                    status="success",
+                    message=f"New ESP device discovered via heartbeat",
+                    details={
+                        "zone_id": payload.get("zone_id"),
+                        "heap_free": payload.get("heap_free", payload.get("free_heap")),
+                        "wifi_rssi": payload.get("wifi_rssi"),
+                        "sensor_count": payload.get("sensor_count", 0),
+                        "actuator_count": payload.get("actuator_count", 0),
+                    },
+                    severity=AuditSeverity.INFO,
+                )
+            except Exception as audit_error:
+                logger.warning(f"Failed to audit log device_discovered: {audit_error}")
+
+        return new_esp, "discovered"
+    
+    async def _check_rejection_cooldown(
+        self,
+        esp_device: ESPDevice,
+        cooldown_seconds: int = 300
+    ) -> bool:
+        """
+        Check if rejection cooldown has expired.
+        
+        Args:
+            esp_device: ESP device model
+            cooldown_seconds: Cooldown period in seconds (default 5 minutes)
+        
+        Returns:
+            True if cooldown expired (can rediscover), False otherwise
+        """
+        if not esp_device.last_rejection_at:
+            return True
+        
+        last_rejection = esp_device.last_rejection_at
+        if last_rejection.tzinfo is None:
+            last_rejection = last_rejection.replace(tzinfo=timezone.utc)
+        
+        cooldown = timedelta(seconds=cooldown_seconds)
+        return (datetime.now(timezone.utc) - last_rejection) >= cooldown
+    
+    async def _rediscover_device(
+        self,
+        esp_device: ESPDevice,
+        payload: dict,
+        session
+    ) -> None:
+        """
+        Rediscover a previously rejected device.
+        
+        Args:
+            esp_device: ESP device model
+            payload: Heartbeat payload
+            session: Database session
+        """
+        old_status = esp_device.status
+        esp_device.status = "pending_approval"
+        esp_device.rejection_reason = None
+
+        metadata = esp_device.device_metadata or {}
+        metadata["rediscovered_at"] = datetime.now(timezone.utc).isoformat()
+        metadata["rediscovery_heartbeat"] = payload
+        metadata["heartbeat_count"] = metadata.get("heartbeat_count", 0) + 1
+        esp_device.device_metadata = metadata
+        esp_device.last_seen = datetime.now(timezone.utc)
+
+        logger.info(f"🔔 Device rediscovered: {esp_device.device_id} (pending_approval again)")
+
+        # Audit Logging: device_rediscovered
+        try:
+            audit_repo = AuditLogRepository(session)
+            await audit_repo.log_device_event(
+                esp_id=esp_device.device_id,
+                event_type=AuditEventType.DEVICE_REDISCOVERED,
+                status="pending",
+                message=f"Previously rejected device is sending heartbeats again",
+                details={
+                    "previous_status": old_status,
+                    "zone_id": payload.get("zone_id"),
+                    "heap_free": payload.get("heap_free", payload.get("free_heap")),
+                    "wifi_rssi": payload.get("wifi_rssi"),
+                },
+                severity=AuditSeverity.WARNING,
+            )
+        except Exception as audit_error:
+            logger.warning(f"Failed to audit log device_rediscovered: {audit_error}")
+    
+    async def _update_pending_heartbeat(
+        self,
+        esp_device: ESPDevice,
+        payload: dict
+    ) -> None:
+        """
+        Update pending device heartbeat count.
+        
+        Args:
+            esp_device: ESP device model
+            payload: Heartbeat payload
+        """
+        metadata = esp_device.device_metadata or {}
+        metadata["heartbeat_count"] = metadata.get("heartbeat_count", 0) + 1
+        metadata["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+        esp_device.device_metadata = metadata
+        esp_device.last_seen = datetime.now(timezone.utc)
+    
+    async def _broadcast_device_discovered(
+        self,
+        esp_id: str,
+        payload: dict
+    ) -> None:
+        """
+        Broadcast device_discovered WebSocket event.
+        
+        Args:
+            esp_id: ESP device ID
+            payload: Heartbeat payload
+        """
+        try:
+            from ...websocket.manager import WebSocketManager
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast("device_discovered", {
+                "esp_id": esp_id,
+                "device_id": esp_id,  # Frontend expects device_id
+                "discovered_at": datetime.now(timezone.utc).isoformat(),
+                "zone_id": payload.get("zone_id"),
+                "heap_free": payload.get("heap_free", payload.get("free_heap")),
+                "wifi_rssi": payload.get("wifi_rssi"),
+                "sensor_count": payload.get("sensor_count", 0),
+                "actuator_count": payload.get("actuator_count", 0),
+            })
+            logger.info(f"📡 Broadcast device_discovered for {esp_id}")
+        except Exception as e:
+            logger.warning(f"Failed to broadcast device_discovered: {e}")
+    
+    async def _broadcast_device_rediscovered(
+        self,
+        esp_id: str,
+        payload: dict
+    ) -> None:
+        """
+        Broadcast device_rediscovered WebSocket event.
+        
+        Args:
+            esp_id: ESP device ID
+            payload: Heartbeat payload
+        """
+        try:
+            from ...websocket.manager import WebSocketManager
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast("device_rediscovered", {
+                "esp_id": esp_id,
+                "device_id": esp_id,  # Frontend expects device_id
+                "rediscovered_at": datetime.now(timezone.utc).isoformat(),
+                "zone_id": payload.get("zone_id"),
+            })
+            logger.info(f"📡 Broadcast device_rediscovered for {esp_id}")
+        except Exception as e:
+            logger.warning(f"Failed to broadcast device_rediscovered: {e}")
     
     async def _update_esp_metadata(
         self, 
@@ -592,6 +909,83 @@ class HeartbeatHandler:
             f"sensors={active_sensors}, actuators={active_actuators}, errors={error_count}"
         )
 
+    async def _send_heartbeat_ack(
+        self,
+        esp_id: str,
+        status: str,
+        config_available: bool = False
+    ) -> bool:
+        """
+        Send heartbeat ACK to ESP device (Phase 2: Bidirectional Approval).
+
+        Sends device approval status back to ESP after each heartbeat.
+        This allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
+        without requiring a reboot after admin approval.
+
+        Fire-and-Forget Pattern:
+        - ESP does NOT block waiting for this ACK
+        - QoS 0 (at most once) - not critical if missed
+        - Next heartbeat will trigger another ACK
+
+        Args:
+            esp_id: ESP device ID (e.g., "ESP_12AB34CD")
+            status: Current device status from DB
+                    ("pending_approval", "approved", "online", "offline", "rejected")
+            config_available: True if server has pending config for this device
+
+        Returns:
+            True if publish successful, False otherwise
+        """
+        try:
+            # Import MQTTClient only when needed (avoid circular imports)
+            from ..client import MQTTClient
+
+            # Build ACK topic
+            topic = TopicBuilder.build_heartbeat_ack_topic(esp_id)
+
+            # Build payload
+            payload = {
+                "status": status,
+                "config_available": config_available,
+                "server_time": int(time_module.time())
+            }
+
+            # Get MQTT client instance
+            mqtt_client = MQTTClient.get_instance()
+
+            # Publish with QoS 0 (fire-and-forget, not critical)
+            success = mqtt_client.publish(topic, json.dumps(payload), qos=0)
+
+            if success:
+                logger.debug(f"Heartbeat ACK sent to {esp_id}: status={status}")
+            else:
+                # Not critical - ESP will receive next ACK on next heartbeat
+                logger.warning(f"Failed to send heartbeat ACK to {esp_id}")
+
+            return success
+
+        except Exception as e:
+            # Not critical - don't fail the heartbeat handler
+            logger.warning(f"Error sending heartbeat ACK to {esp_id}: {e}")
+            return False
+
+    async def _has_pending_config(self, esp_device: ESPDevice) -> bool:
+        """
+        Check if server has unsent configuration for this ESP.
+
+        Currently returns False (placeholder for future config-push system).
+        ESP32 polls for config separately via config topic.
+
+        Args:
+            esp_device: ESPDevice instance
+
+        Returns:
+            True if there is pending configuration, False otherwise
+        """
+        # TODO: Implement when config-push tracking is added
+        # For now, always return False (ESP32 polls config)
+        return False
+
     async def check_device_timeouts(self) -> dict:
         """
         Check for devices that haven't sent heartbeat recently.
@@ -630,6 +1024,24 @@ class HeartbeatHandler:
                                 f"Device {device.device_id} timed out. "
                                 f"Last seen: {device.last_seen}"
                             )
+
+                            # Audit Logging: device_offline (heartbeat timeout)
+                            try:
+                                audit_repo = AuditLogRepository(session)
+                                await audit_repo.log_device_event(
+                                    esp_id=device.device_id,
+                                    event_type=AuditEventType.DEVICE_OFFLINE,
+                                    status="success",
+                                    message=f"Device timed out - no heartbeat for {HEARTBEAT_TIMEOUT_SECONDS}s",
+                                    details={
+                                        "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+                                        "timeout_threshold_seconds": HEARTBEAT_TIMEOUT_SECONDS,
+                                        "reason": "heartbeat_timeout",
+                                    },
+                                    severity=AuditSeverity.WARNING,
+                                )
+                            except Exception as audit_error:
+                                logger.warning(f"Failed to audit log device_offline: {audit_error}")
 
                 # Commit transaction
                 await session.commit()
