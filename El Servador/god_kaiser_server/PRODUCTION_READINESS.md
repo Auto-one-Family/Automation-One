@@ -235,7 +235,7 @@ else:
 
 | Input Type | Validation | Error Handling |
 |------------|------------|----------------|
-| **ESP Device ID** | Format: `ESP_[A-Z0-9]{8}` | ValidationException (400) | ✅ Regex |
+| **ESP Device ID** | Format: `ESP_[A-F0-9]{6,8}` or `MOCK_[A-Z0-9]+` | ValidationException (400) | ✅ Regex |
 | **GPIO Pin** | Range: 0-39 (ESP32) | ValidationException (400) | ✅ Range Check |
 | **PWM Value** | Range: 0.0-1.0 | ValidationException (400) mit Hinweis | ✅ Float Range |
 | **Zone ID** | Format: `[a-z0-9_-]+` | ValidationException (400) | ✅ Regex |

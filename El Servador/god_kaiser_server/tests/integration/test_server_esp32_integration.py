@@ -208,17 +208,24 @@ class TestTopicParsing:
         assert result["type"] == "heartbeat"
     
     def test_validate_esp_id_format(self):
-        """Validate ESP ID format matches spec."""
-        # Valid formats
+        """Validate ESP ID format matches spec (6-8 hex characters)."""
+        # Valid formats - 8 hex
         assert TopicBuilder.validate_esp_id("ESP_12AB34CD") is True
         assert TopicBuilder.validate_esp_id("ESP_AABBCCDD") is True
         assert TopicBuilder.validate_esp_id("ESP_00000000") is True
+        # Valid formats - 6 hex (real ESP from MAC)
+        assert TopicBuilder.validate_esp_id("ESP_D0B19C") is True
+        assert TopicBuilder.validate_esp_id("ESP_AABBCC") is True
+        # Valid formats - 7 hex
+        assert TopicBuilder.validate_esp_id("ESP_12AB34C") is True
         
         # Invalid formats
-        assert TopicBuilder.validate_esp_id("ESP_12AB34C") is False  # too short
-        assert TopicBuilder.validate_esp_id("ESP_12AB34CDE") is False  # too long
-        assert TopicBuilder.validate_esp_id("esp_12AB34CD") is False  # lowercase
+        assert TopicBuilder.validate_esp_id("ESP_12AB3") is False  # 5 hex - too short
+        assert TopicBuilder.validate_esp_id("ESP_12AB34CDE") is False  # 9 hex - too long
+        assert TopicBuilder.validate_esp_id("esp_12AB34CD") is False  # lowercase prefix
+        assert TopicBuilder.validate_esp_id("ESP_12ab34cd") is False  # lowercase hex
         assert TopicBuilder.validate_esp_id("12AB34CD") is False  # no prefix
+        assert TopicBuilder.validate_esp_id("ESP_GHIJKLMN") is False  # non-hex chars
 
 
 # =============================================================================
@@ -1025,11 +1032,12 @@ class TestHeartbeatHandlerProcessing:
     
     @pytest.mark.asyncio
     async def test_handle_heartbeat_unknown_device(self, test_session: AsyncSession):
-        """Handle heartbeat from unknown device."""
+        """Handle heartbeat from unknown device - Auto-Discovery creates device with pending_approval."""
         from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler
-        
+        from src.db.repositories.esp_repo import ESPRepository
+
         handler = HeartbeatHandler()
-        
+
         topic = "kaiser/god/esp/ESP_UNKNOWN1/heartbeat"
         payload = {
             "ts": int(time.time()),
@@ -1037,16 +1045,27 @@ class TestHeartbeatHandlerProcessing:
             "free_heap": 245760,
             "wifi_rssi": -65,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.heartbeat_handler.resilient_session', mock_resilient_session):
-            result = await handler.handle_heartbeat(topic, payload)
+        # Mock MQTTClient for heartbeat ACK (Phase 2)
+        mock_mqtt = MagicMock()
+        mock_mqtt.publish = MagicMock(return_value=True)
 
-        # Should fail - device not registered
-        assert result is False
+        with patch('src.mqtt.handlers.heartbeat_handler.resilient_session', mock_resilient_session):
+            with patch('src.mqtt.client.MQTTClient.get_instance', return_value=mock_mqtt):
+                result = await handler.handle_heartbeat(topic, payload)
+
+        # Auto-Discovery: unknown device is registered with pending_approval status
+        assert result is True
+
+        # Verify device was created with pending_approval status
+        esp_repo = ESPRepository(test_session)
+        device = await esp_repo.get_by_device_id("ESP_UNKNOWN1")
+        assert device is not None
+        assert device.status == "pending_approval"
 
 
 # =============================================================================
