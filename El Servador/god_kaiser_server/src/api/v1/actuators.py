@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ...core.logging_config import get_logger
 from ...db.models.actuator import ActuatorConfig, ActuatorState as ActuatorStateModel
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...mqtt.publisher import Publisher
 from ...schemas import (
     ActuatorCommand,
@@ -687,7 +688,27 @@ async def emergency_stop(
             details.append(device_result)
     
     await db.commit()
-    
+
+    # ───────────────────────────────────────────────────────────
+    # AUDIT LOGGING: Emergency Stop (non-blocking via try-except)
+    # ───────────────────────────────────────────────────────────
+    try:
+        audit_repo = AuditLogRepository(db)
+        await audit_repo.log_emergency_stop(
+            user_id=str(current_user.id),
+            username=current_user.username,
+            reason=request.reason,
+            devices_stopped=devices_stopped,
+            actuators_stopped=actuators_stopped,
+            details={
+                "esp_id": request.esp_id,
+                "gpio": request.gpio,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    except Exception as audit_error:
+        logger.warning(f"Failed to audit log emergency_stop: {audit_error}")
+
     logger.critical(
         f"EMERGENCY STOP executed by {current_user.username}: "
         f"{devices_stopped} devices, {actuators_stopped} actuators stopped. "

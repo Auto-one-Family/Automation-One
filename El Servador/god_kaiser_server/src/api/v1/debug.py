@@ -322,7 +322,27 @@ async def create_mock_esp(
                 logger.warning(f"SimulationScheduler not available: {e}")
 
         logger.info(f"Admin {current_user.username} created mock ESP: {config.esp_id}")
-        
+
+        # WebSocket Broadcast: Notify Frontend about new Mock-ESP
+        try:
+            from ...websocket.manager import WebSocketManager
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast("device_discovered", {
+                "esp_id": config.esp_id,
+                "device_id": config.esp_id,
+                "status": device.status,
+                "zone_id": config.zone_id,
+                "zone_name": config.zone_name,
+                "hardware_type": "MOCK_ESP32",
+                "simulation_active": simulation_started,
+                "created_by": current_user.username,
+                "sensor_count": len(config.sensors),
+                "actuator_count": len(config.actuators),
+            })
+            logger.info(f"📡 WebSocket broadcast: device_discovered for {config.esp_id}")
+        except Exception as ws_error:
+            logger.warning(f"Failed to broadcast device_discovered: {ws_error}")
+
         # Build response
         return _build_mock_esp_response(device, simulation_active=simulation_started)
         
@@ -828,32 +848,45 @@ async def add_sensor(
             detail=f"Failed to add sensor to database"
         )
 
-    # 1.5 Create SensorConfig entry (fixes Bug P)
+    # 1.5 Create SensorConfig entry if it doesn't exist (fixes Bug P)
+    # Check first to avoid IntegrityError and session rollback issues
     sensor_repo = SensorRepository(db)
-    try:
-        await sensor_repo.create(
-            esp_id=device.id,
-            gpio=config.gpio,
-            sensor_type=config.sensor_type,
-            sensor_name=config.name or f"{config.sensor_type}_{config.gpio}",
-            enabled=True,
-            pi_enhanced=False,
-            sample_interval_ms=int(sensor_config["interval_seconds"] * 1000),
-            # =====================================================================
-            # MULTI-VALUE SENSOR SUPPORT (DS18B20, SHT31, etc.)
-            # =====================================================================
-            interface_type=interface_type,
-            onewire_address=getattr(config, "onewire_address", None),
-            i2c_address=getattr(config, "i2c_address", None),
-            sensor_metadata={
-                "source": "mock_esp",
-                "unit": config.unit,
-                "subzone_id": config.subzone_id,
-            }
-        )
-        logger.debug(f"Created SensorConfig for {esp_id} GPIO {config.gpio} (type={interface_type})")
-    except Exception as e:
-        logger.warning(f"Failed to create SensorConfig for GPIO {config.gpio}: {e}")
+    existing_sensor = await sensor_repo.get_by_esp_gpio_and_type(
+        device.id, config.gpio, config.sensor_type
+    )
+
+    if existing_sensor:
+        logger.debug(f"SensorConfig already exists for {esp_id} GPIO {config.gpio} type {config.sensor_type}, skipping creation")
+    else:
+        try:
+            await sensor_repo.create(
+                esp_id=device.id,
+                gpio=config.gpio,
+                sensor_type=config.sensor_type,
+                sensor_name=config.name or f"{config.sensor_type}_{config.gpio}",
+                enabled=True,
+                pi_enhanced=False,
+                sample_interval_ms=int(sensor_config["interval_seconds"] * 1000),
+                # =====================================================================
+                # MULTI-VALUE SENSOR SUPPORT (DS18B20, SHT31, etc.)
+                # =====================================================================
+                interface_type=interface_type,
+                onewire_address=getattr(config, "onewire_address", None),
+                i2c_address=getattr(config, "i2c_address", None),
+                sensor_metadata={
+                    "source": "mock_esp",
+                    "unit": config.unit,
+                    "subzone_id": config.subzone_id,
+                }
+            )
+            logger.debug(f"Created SensorConfig for {esp_id} GPIO {config.gpio} (type={interface_type})")
+        except Exception as e:
+            # Race condition fallback - sensor was created between check and create
+            # Rollback the failed insert to clear pending transaction state
+            await db.rollback()
+            # Re-apply the mock config (rollback undid it)
+            await esp_repo.add_sensor_to_mock(esp_id, config.gpio, sensor_config)
+            logger.warning(f"Failed to create SensorConfig for GPIO {config.gpio} (race condition): {e}")
 
     await db.commit()
 
@@ -2016,11 +2049,11 @@ async def query_table(
         
         # For time-series tables, add default time filter if not provided
         if table_name in TIME_SERIES_TABLES:
-            timestamp_col = "timestamp"
+            timestamp_col = TIME_SERIES_TABLES[table_name]
             has_timestamp_filter = any(
-                key.startswith("timestamp") for key in parsed_filters.keys()
+                key.startswith(timestamp_col) for key in parsed_filters.keys()
             )
-            
+
             if not has_timestamp_filter:
                 # Default to last 24 hours
                 cutoff = datetime.now(timezone.utc) - timedelta(hours=DEFAULT_TIME_SERIES_LIMIT_HOURS)

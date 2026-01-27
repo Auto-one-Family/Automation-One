@@ -91,7 +91,7 @@ async def assign_subzone(
         str,
         Path(
             description="ESP device ID",
-            pattern=r"^ESP_[A-Z0-9]{6,8}$",
+            pattern=r"^ESP_[A-F0-9]{6,8}$",
             examples=["ESP_AB12CD"],
         ),
     ],
@@ -156,7 +156,7 @@ async def remove_subzone(
         str,
         Path(
             description="ESP device ID",
-            pattern=r"^ESP_[A-Z0-9]{6,8}$",
+            pattern=r"^ESP_[A-F0-9]{6,8}$",
         ),
     ],
     subzone_id: Annotated[
@@ -220,7 +220,7 @@ async def get_subzones(
         str,
         Path(
             description="ESP device ID",
-            pattern=r"^ESP_[A-Z0-9]{6,8}$",
+            pattern=r"^ESP_[A-F0-9]{6,8}$",
         ),
     ],
     session: DBSession,
@@ -253,7 +253,7 @@ async def get_subzone(
         str,
         Path(
             description="ESP device ID",
-            pattern=r"^ESP_[A-Z0-9]{6,8}$",
+            pattern=r"^ESP_[A-F0-9]{6,8}$",
         ),
     ],
     subzone_id: Annotated[
@@ -313,7 +313,7 @@ async def enable_safe_mode(
         str,
         Path(
             description="ESP device ID",
-            pattern=r"^ESP_[A-Z0-9]{6,8}$",
+            pattern=r"^ESP_[A-F0-9]{6,8}$",
         ),
     ],
     subzone_id: Annotated[
@@ -380,7 +380,7 @@ async def disable_safe_mode(
         str,
         Path(
             description="ESP device ID",
-            pattern=r"^ESP_[A-Z0-9]{6,8}$",
+            pattern=r"^ESP_[A-F0-9]{6,8}$",
         ),
     ],
     subzone_id: Annotated[

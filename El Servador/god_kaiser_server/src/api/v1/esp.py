@@ -24,16 +24,21 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md (System commands)
 """
 
+from datetime import datetime, timezone
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.logging_config import get_logger
+from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...mqtt.publisher import Publisher
 from ...schemas import (
     AssignKaiserRequest,
     AssignKaiserResponse,
+    ESPApprovalRequest,
+    ESPApprovalResponse,
     ESPCommandResponse,
     ESPConfigResponse,
     ESPConfigUpdate,
@@ -43,9 +48,12 @@ from ...schemas import (
     ESPDeviceUpdate,
     ESPDiscoveryResponse,
     ESPHealthResponse,
+    ESPRejectionRequest,
     ESPResetRequest,
     ESPRestartRequest,
     DiscoveredESP,
+    PendingDevicesListResponse,
+    PendingESPDevice,
 )
 from ...schemas.esp import GpioStatusResponse, GpioUsageItem
 from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
@@ -128,6 +136,7 @@ async def list_devices(
     actuator_repo = ActuatorRepository(db)
     
     # Get all devices (with filters)
+    # By default, exclude pending_approval devices - they should be accessed via /devices/pending
     if zone_id:
         devices = await esp_repo.get_by_zone(zone_id)
     elif status_filter:
@@ -136,6 +145,10 @@ async def list_devices(
         devices = await esp_repo.get_by_hardware_type(hardware_type)
     else:
         devices = await esp_repo.get_all()
+
+    # Filter out pending_approval devices unless explicitly requested
+    if status_filter != "pending_approval":
+        devices = [d for d in devices if d.status != "pending_approval"]
     
     # Apply pagination
     total_items = len(devices)
@@ -183,7 +196,68 @@ async def list_devices(
 
 
 # =============================================================================
-# Get Device
+# Discovery/Approval Endpoints (BEFORE wildcard routes!)
+# =============================================================================
+# CRITICAL: These specific routes MUST come BEFORE /devices/{esp_id}
+# Otherwise FastAPI will match "pending" as esp_id parameter → 404
+
+
+@router.get(
+    "/devices/pending",
+    response_model=PendingDevicesListResponse,
+    summary="List pending ESP devices",
+    description="Get all ESP devices awaiting approval.",
+)
+async def list_pending_devices(
+    db: DBSession,
+    current_user: OperatorUser,
+) -> PendingDevicesListResponse:
+    """
+    List all pending ESP devices.
+
+    Returns devices that have been discovered via heartbeat
+    but have not yet been approved by an administrator.
+
+    Requires operator or admin role.
+
+    Args:
+        db: Database session
+        current_user: Operator or admin user
+
+    Returns:
+        List of pending devices
+    """
+    esp_repo = ESPRepository(db)
+    devices = await esp_repo.get_by_status("pending_approval")
+
+    pending_devices = []
+    for device in devices:
+        metadata = device.device_metadata or {}
+        initial_heartbeat = metadata.get("initial_heartbeat", {})
+
+        # Use last_seen for current activity, discovered_at for historical reference
+        # last_seen is updated on every heartbeat, discovered_at only on first discovery
+        pending_devices.append(PendingESPDevice(
+            device_id=device.device_id,
+            discovered_at=device.discovered_at or device.created_at,
+            last_seen=device.last_seen,  # Current activity timestamp (for UI "vor X Zeit")
+            zone_id=metadata.get("zone_id"),
+            heap_free=initial_heartbeat.get("heap_free", initial_heartbeat.get("free_heap")),
+            wifi_rssi=initial_heartbeat.get("wifi_rssi"),
+            sensor_count=initial_heartbeat.get("sensor_count", 0),
+            actuator_count=initial_heartbeat.get("actuator_count", 0),
+            heartbeat_count=metadata.get("heartbeat_count", 0),
+        ))
+
+    return PendingDevicesListResponse(
+        success=True,
+        devices=pending_devices,
+        count=len(pending_devices),
+    )
+
+
+# =============================================================================
+# Get Device (AFTER specific routes)
 # =============================================================================
 
 
@@ -1054,4 +1128,223 @@ async def get_discovery(
         new_count=sum(1 for d in discovered if not d.is_registered),
         devices=discovered,
         scan_duration_ms=0,
+    )
+
+
+# =============================================================================
+# Approve/Reject Device Endpoints
+# =============================================================================
+
+
+@router.post(
+    "/devices/{esp_id}/approve",
+    response_model=ESPApprovalResponse,
+    responses={
+        200: {"description": "Device approved"},
+        404: {"description": "Device not found"},
+        400: {"description": "Device not in pending state"},
+    },
+    summary="Approve ESP device",
+    description="Approve a pending ESP device for normal operation.",
+)
+async def approve_device(
+    esp_id: str,
+    request: ESPApprovalRequest,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> ESPApprovalResponse:
+    """
+    Approve a pending ESP device.
+    
+    After approval, device will become 'online' on next heartbeat.
+    
+    Args:
+        esp_id: ESP device ID
+        request: Approval request with optional name/zone
+        db: Database session
+        current_user: Operator or admin user
+        
+    Returns:
+        Approval response
+        
+    Raises:
+        HTTPException: 404 if not found, 400 if not pending
+    """
+    esp_repo = ESPRepository(db)
+    device = await esp_repo.get_by_device_id(esp_id)
+    
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ESP device '{esp_id}' not found",
+        )
+    
+    if device.status not in ("pending_approval", "rejected"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Device '{esp_id}' is not pending approval (status: {device.status})",
+        )
+    
+    # Capture old status before update
+    old_status = device.status
+
+    # Update device
+    device.status = "approved"
+    device.approved_at = datetime.now(timezone.utc)
+    device.approved_by = current_user.username
+    device.rejection_reason = None
+
+    if request.name:
+        device.name = request.name
+    if request.zone_id:
+        device.zone_id = request.zone_id
+    if request.zone_name:
+        device.zone_name = request.zone_name
+
+    # Audit Logging: device_approved
+    try:
+        audit_repo = AuditLogRepository(db)
+        await audit_repo.log_device_event(
+            esp_id=esp_id,
+            event_type=AuditEventType.DEVICE_APPROVED,
+            status="success",
+            message=f"Device approved by {current_user.username}",
+            details={
+                "approved_by": current_user.username,
+                "approved_by_id": str(current_user.id),
+                "previous_status": old_status,
+                "zone_id": device.zone_id,
+                "zone_name": device.zone_name,
+            },
+            severity=AuditSeverity.INFO,
+        )
+    except Exception as audit_error:
+        logger.warning(f"Failed to audit log device_approved: {audit_error}")
+
+    await db.commit()
+
+    # Broadcast approval event
+    try:
+        from ...websocket.manager import WebSocketManager
+        ws_manager = await WebSocketManager.get_instance()
+        await ws_manager.broadcast("device_approved", {
+            "device_id": esp_id,  # Frontend expects device_id, not esp_id
+            "approved_by": current_user.username,
+            "approved_at": device.approved_at.isoformat(),
+            "status": "approved",
+        })
+    except Exception as e:
+        logger.warning(f"Failed to broadcast device_approved: {e}")
+
+    logger.info(f"✅ Device approved: {esp_id} by {current_user.username}")
+    
+    return ESPApprovalResponse(
+        success=True,
+        message=f"Device '{esp_id}' approved successfully",
+        device_id=esp_id,
+        status="approved",
+        approved_by=current_user.username,
+        approved_at=device.approved_at,
+    )
+
+
+@router.post(
+    "/devices/{esp_id}/reject",
+    response_model=ESPApprovalResponse,
+    responses={
+        200: {"description": "Device rejected"},
+        404: {"description": "Device not found"},
+        400: {"description": "Device not in pending state"},
+    },
+    summary="Reject ESP device",
+    description="Reject a pending ESP device. Device can be rediscovered after 5 minute cooldown.",
+)
+async def reject_device(
+    esp_id: str,
+    request: ESPRejectionRequest,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> ESPApprovalResponse:
+    """
+    Reject a pending ESP device.
+    
+    Rejected devices are ignored for 5 minutes, then can rediscover.
+    
+    Args:
+        esp_id: ESP device ID
+        request: Rejection request with reason
+        db: Database session
+        current_user: Operator or admin user
+        
+    Returns:
+        Rejection response
+        
+    Raises:
+        HTTPException: 404 if not found, 400 if not in valid state
+    """
+    esp_repo = ESPRepository(db)
+    device = await esp_repo.get_by_device_id(esp_id)
+    
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ESP device '{esp_id}' not found",
+        )
+    
+    if device.status not in ("pending_approval", "approved", "online"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Device '{esp_id}' cannot be rejected (status: {device.status})",
+        )
+
+    # Capture old status before update
+    old_status = device.status
+
+    # Update device
+    device.status = "rejected"
+    device.rejection_reason = request.reason
+    device.last_rejection_at = datetime.now(timezone.utc)
+
+    # Audit Logging: device_rejected
+    try:
+        audit_repo = AuditLogRepository(db)
+        await audit_repo.log_device_event(
+            esp_id=esp_id,
+            event_type=AuditEventType.DEVICE_REJECTED,
+            status="success",
+            message=f"Device rejected by {current_user.username}: {request.reason}",
+            details={
+                "rejected_by": current_user.username,
+                "rejected_by_id": str(current_user.id),
+                "rejection_reason": request.reason,
+                "previous_status": old_status,
+            },
+            severity=AuditSeverity.WARNING,
+        )
+    except Exception as audit_error:
+        logger.warning(f"Failed to audit log device_rejected: {audit_error}")
+
+    await db.commit()
+
+    # Broadcast rejection event
+    try:
+        from ...websocket.manager import WebSocketManager
+        ws_manager = await WebSocketManager.get_instance()
+        await ws_manager.broadcast("device_rejected", {
+            "device_id": esp_id,  # Frontend expects device_id, not esp_id
+            "rejection_reason": request.reason,  # Frontend expects rejection_reason, not reason
+            "rejected_at": device.last_rejection_at.isoformat(),
+            "cooldown_until": None,  # No cooldown implemented yet
+        })
+    except Exception as e:
+        logger.warning(f"Failed to broadcast device_rejected: {e}")
+
+    logger.warning(f"❌ Device rejected: {esp_id} by {current_user.username}, reason: {request.reason}")
+    
+    return ESPApprovalResponse(
+        success=True,
+        message=f"Device '{esp_id}' rejected",
+        device_id=esp_id,
+        status="rejected",
+        rejection_reason=request.reason,
     )
