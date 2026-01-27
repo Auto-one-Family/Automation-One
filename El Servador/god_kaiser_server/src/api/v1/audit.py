@@ -832,6 +832,7 @@ async def run_retention_cleanup(
     db: DBSession,
     current_user: ActiveUser,  # Changed: Accept any active user, check permissions below
     dry_run: bool = Query(False, description="Simulate without deleting"),
+    create_backup: bool = Query(True, description="Create JSON backup before deletion"),
     include_preview_events: bool = Query(
         False,
         description="Include event details in preview (for UI display)"
@@ -880,6 +881,7 @@ async def run_retention_cleanup(
     try:
         result = await retention_service.cleanup(
             dry_run=dry_run,
+            create_backup=create_backup,
             include_preview_events=include_preview_events,
             preview_limit=preview_limit,
             force=True,  # Manual cleanup always allowed, even if auto-retention disabled

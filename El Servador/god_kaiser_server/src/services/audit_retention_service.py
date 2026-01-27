@@ -45,10 +45,10 @@ DEFAULT_RETENTION_CONFIG = {
     "enabled": False,  # Safety-First: User muss explizit aktivieren
     "default_days": 30,
     "severity_days": {
-        AuditSeverity.INFO: 14,
-        AuditSeverity.WARNING: 30,
-        AuditSeverity.ERROR: 90,
-        AuditSeverity.CRITICAL: 365,
+        AuditSeverity.INFO: 30,
+        AuditSeverity.WARNING: 90,
+        AuditSeverity.ERROR: 365,
+        AuditSeverity.CRITICAL: 0,  # 0 = never delete
     },
     "max_records": 0,  # 0 = unlimited, useful for small systems
     "batch_size": 1000,  # Records per deletion batch
@@ -183,8 +183,8 @@ class AuditRetentionService:
         
         if severity_days is not None:
             for sev, days in severity_days.items():
-                if days < 1:
-                    raise ValueError(f"Retention for {sev} must be at least 1 day")
+                if days < 0:
+                    raise ValueError(f"Retention for {sev} cannot be negative (use 0 for never delete)")
                 if days > 3650:
                     raise ValueError(f"Retention for {sev} cannot exceed 3650 days")
             current["severity_days"].update(severity_days)
@@ -313,6 +313,9 @@ class AuditRetentionService:
         # - default_days=30, severity_info=14 → use 14 (severity is stricter)
         # - default_days=1, severity_info=14 → use 1 (default is stricter/global cap)
         for severity, severity_retention in config["severity_days"].items():
+            # 0 = never delete this severity
+            if severity_retention == 0:
+                continue
             retention_days = min(default_days, severity_retention)
             cutoff_date = now - timedelta(days=retention_days)
 
@@ -349,22 +352,36 @@ class AuditRetentionService:
                         preview_result = await self.session.execute(preview_stmt)
                         preview_events.extend(list(preview_result.scalars().all()))
                 else:
-                    # Collect events for backup (limit to prevent memory issues)
-                    # Maximum 10 * batch_size events per severity for backup
-                    max_backup_events = batch_size * 10
-                    events_stmt = (
-                        select(AuditLog)
-                        .where(and_(*conditions))
-                        .order_by(AuditLog.created_at.asc())
-                        .limit(max_backup_events)
-                    )
-                    events_result = await self.session.execute(events_stmt)
-                    severity_events = list(events_result.scalars().all())
-                    all_events_to_delete.extend(severity_events)
+                    # Step 1: Count ALL events to delete (no limit)
+                    count_stmt = select(func.count(AuditLog.id)).where(and_(*conditions))
+                    count_result = await self.session.execute(count_stmt)
+                    count = count_result.scalar_one()
 
-                    if severity_events:
-                        results["deleted_by_severity"][severity] = len(severity_events)
-                        results["deleted_count"] += len(severity_events)
+                    if count > 0:
+                        results["deleted_by_severity"][severity] = count
+                        results["deleted_count"] += count
+
+                    # Step 2: Collect events for backup (with limit - OK for backup)
+                    if create_backup and count > 0:
+                        max_backup_events = batch_size * 10
+                        events_stmt = (
+                            select(AuditLog)
+                            .where(and_(*conditions))
+                            .order_by(AuditLog.created_at.asc())
+                            .limit(max_backup_events)
+                        )
+                        events_result = await self.session.execute(events_stmt)
+                        all_events_to_delete.extend(list(events_result.scalars().all()))
+
+                    # Step 3: Delete ALL matching events (NO LIMIT)
+                    if count > 0:
+                        delete_stmt = delete(AuditLog).where(and_(*conditions))
+                        delete_result = await self.session.execute(delete_stmt)
+                        await self.session.flush()
+                        actual_deleted = delete_result.rowcount
+                        # Update with actual count from DB
+                        results["deleted_by_severity"][severity] = actual_deleted
+                        results["deleted_count"] = results["deleted_count"] - count + actual_deleted
 
             except Exception as e:
                 error_msg = f"Error processing {severity} logs: {str(e)}"
@@ -399,28 +416,6 @@ class AuditRetentionService:
                 logger.error(error_msg)
                 # Continue with deletion even if backup fails (user opted for cleanup)
 
-        # =====================================================================
-        # PHASE 3: Delete events (if not dry_run)
-        # =====================================================================
-
-        if not dry_run and all_events_to_delete:
-            try:
-                # Delete in batches by ID
-                event_ids = [e.id for e in all_events_to_delete]
-
-                for i in range(0, len(event_ids), batch_size):
-                    batch_ids = event_ids[i:i + batch_size]
-                    delete_stmt = delete(AuditLog).where(AuditLog.id.in_(batch_ids))
-                    await self.session.execute(delete_stmt)
-                    await self.session.flush()
-
-                logger.info(f"Deleted {len(event_ids)} audit log events")
-
-            except Exception as e:
-                error_msg = f"Error deleting events: {str(e)}"
-                results["errors"].append(error_msg)
-                logger.error(error_msg)
-        
         # Apply max_records limit if configured
         if config["max_records"] > 0 and not dry_run:
             try:

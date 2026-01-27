@@ -9,7 +9,7 @@ with ESP32 firmware.
 """
 
 import re
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ..core import constants
 from ..core.logging_config import get_logger

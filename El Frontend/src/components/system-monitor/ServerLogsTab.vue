@@ -7,6 +7,9 @@
  * - Polling with Play/Pause button (3s interval)
  * - CSV export functionality
  * - Expandable log entries with full details
+ * - Human-readable summaries (original message always preserved)
+ * - Border + glow design per log level (consistent with Events tab)
+ * - Log management panel for file cleanup
  * - Mobile-responsive design
  *
  * @see El Servador/god_kaiser_server/src/core/logging_config.py - Logging Configuration
@@ -14,6 +17,8 @@
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { logsApi, type LogEntry, type LogLevel, type LogFile, type LogQueryParams } from '@/api/logs'
+import { generateSummary, formatCategoryLabel, type LogSummary } from '@/utils/logSummaryGenerator'
+import LogManagementPanel from './LogManagementPanel.vue'
 import {
   Play,
   Pause,
@@ -31,7 +36,21 @@ import {
   FileText,
   Copy,
   Check,
+  Settings,
+  FileJson,
+  Clock,
+  X,
+  Maximize2,
 } from 'lucide-vue-next'
+
+// ============================================================================
+// Props
+// ============================================================================
+
+const props = defineProps<{
+  initialStartTime?: string
+  initialEndTime?: string
+}>()
 
 // ============================================================================
 // Constants
@@ -49,6 +68,39 @@ const LOG_LEVELS: { value: LogLevel | ''; label: string; icon: typeof Info; colo
   { value: 'ERROR', label: 'Fehler', icon: XCircle, color: 'text-red-400' },
   { value: 'CRITICAL', label: 'Kritisch', icon: AlertCircle, color: 'text-red-600' },
 ]
+
+// Level colors for border + glow (consistent with Events tab)
+const LEVEL_COLORS: Record<string, { border: string; glow: string; tint: string }> = {
+  DEBUG: {
+    border: '#6B7280',
+    glow: 'rgba(107, 114, 128, 0.4)',
+    tint: 'transparent',
+  },
+  INFO: {
+    border: '#3B82F6',
+    glow: 'rgba(59, 130, 246, 0.4)',
+    tint: 'rgba(59, 130, 246, 0.02)',
+  },
+  WARNING: {
+    border: '#F59E0B',
+    glow: 'rgba(245, 158, 11, 0.4)',
+    tint: 'rgba(245, 158, 11, 0.03)',
+  },
+  ERROR: {
+    border: '#EF4444',
+    glow: 'rgba(239, 68, 68, 0.4)',
+    tint: 'rgba(239, 68, 68, 0.04)',
+  },
+  CRITICAL: {
+    border: '#DC2626',
+    glow: 'rgba(220, 38, 38, 0.5)',
+    tint: 'rgba(239, 68, 68, 0.06)',
+  },
+}
+
+function getLevelColors(level: string) {
+  return LEVEL_COLORS[level] || LEVEL_COLORS.DEBUG
+}
 
 // ============================================================================
 // State
@@ -72,9 +124,20 @@ const moduleFilter = ref('')
 const searchQuery = ref('')
 const page = ref(1)
 
+// Zeitfenster-Filter (Feature 1.2)
+const startTime = ref<string>('')
+const endTime = ref<string>('')
+
 // Expanded state
 const expandedIds = ref<Set<number>>(new Set())
-const copiedId = ref<number | null>(null)
+const copiedMessageId = ref<number | null>(null)
+const copiedJsonId = ref<number | null>(null)
+
+// Management panel state
+const showManagement = ref(false)
+
+// Summary cache
+const summaryCache = new WeakMap<LogEntry, LogSummary | null>()
 
 // ============================================================================
 // Computed
@@ -87,6 +150,8 @@ const currentQueryParams = computed<LogQueryParams>(() => ({
   file: selectedFile.value || undefined,
   page: page.value,
   page_size: PAGE_SIZE,
+  start_time: startTime.value || undefined,
+  end_time: endTime.value || undefined,
 }))
 
 // ============================================================================
@@ -151,12 +216,10 @@ function togglePolling() {
   isPolling.value = !isPolling.value
 
   if (isPolling.value) {
-    // Start polling
     pollInterval.value = setInterval(() => {
       loadLogs()
     }, POLL_INTERVAL)
   } else {
-    // Stop polling
     if (pollInterval.value) {
       clearInterval(pollInterval.value)
       pollInterval.value = null
@@ -181,6 +244,34 @@ function applyFilters() {
   loadLogs()
 }
 
+function formatTimeWindow(start: string, end: string): string {
+  const s = new Date(start)
+  const e = new Date(end)
+  return `${s.toLocaleTimeString('de-DE')} - ${e.toLocaleTimeString('de-DE')}`
+}
+
+function clearTimeWindow() {
+  startTime.value = ''
+  endTime.value = ''
+  page.value = 1
+  loadLogs()
+}
+
+function expandTimeWindow() {
+  if (!startTime.value || !endTime.value) return
+
+  const start = new Date(startTime.value)
+  const end = new Date(endTime.value)
+  const center = new Date((start.getTime() + end.getTime()) / 2)
+
+  // Expand to ±5 minutes (instead of ±30 seconds)
+  startTime.value = new Date(center.getTime() - 5 * 60 * 1000).toISOString()
+  endTime.value = new Date(center.getTime() + 5 * 60 * 1000).toISOString()
+
+  page.value = 1
+  loadLogs()
+}
+
 function clearLogs() {
   logs.value = []
   expandedIds.value.clear()
@@ -194,17 +285,38 @@ function toggleExpand(index: number) {
   }
 }
 
-async function copyLogEntry(log: LogEntry, index: number) {
+function getSummary(log: LogEntry): LogSummary | null {
+  if (summaryCache.has(log)) {
+    return summaryCache.get(log)!
+  }
+  const summary = generateSummary(log)
+  summaryCache.set(log, summary)
+  return summary
+}
+
+async function copyMessage(log: LogEntry, index: number) {
   try {
-    const text = JSON.stringify(log, null, 2)
-    await navigator.clipboard.writeText(text)
-    copiedId.value = index
-    setTimeout(() => {
-      copiedId.value = null
-    }, 2000)
+    await navigator.clipboard.writeText(log.message)
+    copiedMessageId.value = index
+    setTimeout(() => { copiedMessageId.value = null }, 2000)
   } catch (e) {
     console.error('[ServerLogsTab] Failed to copy:', e)
   }
+}
+
+async function copyAsJson(log: LogEntry, index: number) {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(log, null, 2))
+    copiedJsonId.value = index
+    setTimeout(() => { copiedJsonId.value = null }, 2000)
+  } catch (e) {
+    console.error('[ServerLogsTab] Failed to copy:', e)
+  }
+}
+
+function handleCleanupSuccess() {
+  loadLogFiles()
+  loadLogs()
 }
 
 // ============================================================================
@@ -212,11 +324,9 @@ async function copyLogEntry(log: LogEntry, index: number) {
 // ============================================================================
 
 function exportToCsv() {
-  // CSV Header
   const headers = ['Zeitstempel', 'Level', 'Logger', 'Modul', 'Funktion', 'Zeile', 'Nachricht']
   const rows = [headers.join(';')]
 
-  // CSV Rows
   logs.value.forEach(log => {
     const row = [
       formatTimestamp(log.timestamp),
@@ -225,7 +335,6 @@ function exportToCsv() {
       log.module || '',
       log.function || '',
       log.line?.toString() || '',
-      // Escape double quotes and wrap in quotes
       `"${(log.message || '').replace(/"/g, '""')}"`,
     ]
     rows.push(row.join(';'))
@@ -278,18 +387,12 @@ function getLevelConfig(level: string) {
 
 function getLevelClass(level: string): string {
   switch (level) {
-    case 'DEBUG':
-      return 'log-level--debug'
-    case 'INFO':
-      return 'log-level--info'
-    case 'WARNING':
-      return 'log-level--warning'
-    case 'ERROR':
-      return 'log-level--error'
-    case 'CRITICAL':
-      return 'log-level--critical'
-    default:
-      return 'log-level--debug'
+    case 'DEBUG': return 'log-level--debug'
+    case 'INFO': return 'log-level--info'
+    case 'WARNING': return 'log-level--warning'
+    case 'ERROR': return 'log-level--error'
+    case 'CRITICAL': return 'log-level--critical'
+    default: return 'log-level--debug'
   }
 }
 
@@ -298,6 +401,14 @@ function getLevelClass(level: string): string {
 // ============================================================================
 
 onMounted(async () => {
+  // Feature 1.2: Props initialisieren falls vorhanden
+  if (props.initialStartTime) {
+    startTime.value = props.initialStartTime
+  }
+  if (props.initialEndTime) {
+    endTime.value = props.initialEndTime
+  }
+
   await loadLogFiles()
   await loadLogs()
 })
@@ -306,7 +417,6 @@ onUnmounted(() => {
   stopPolling()
 })
 
-// Watch for file changes
 watch(selectedFile, () => {
   page.value = 1
   loadLogs()
@@ -352,6 +462,17 @@ watch(selectedFile, () => {
             @keyup.enter="applyFilters"
           />
         </div>
+        <!-- Zeitfenster-Chip (Feature 1.2) -->
+        <div v-if="startTime && endTime" class="time-window-chip">
+          <Clock :size="14" />
+          <span>{{ formatTimeWindow(startTime, endTime) }}</span>
+          <button class="time-window-chip__expand" @click="expandTimeWindow" title="Zeitfenster auf ±5 Min erweitern">
+            <Maximize2 :size="12" />
+          </button>
+          <button class="time-window-chip__clear" @click="clearTimeWindow" title="Zeitfilter entfernen">
+            <X :size="12" />
+          </button>
+        </div>
       </div>
 
       <div class="logs-toolbar__actions">
@@ -385,6 +506,16 @@ watch(selectedFile, () => {
           <span class="btn-label">CSV</span>
         </button>
 
+        <!-- Management -->
+        <button
+          class="btn-ghost btn-sm"
+          @click="showManagement = true"
+          title="Log-Verwaltung"
+        >
+          <Settings class="w-4 h-4" />
+          <span class="btn-label">Verwaltung</span>
+        </button>
+
         <!-- Clear -->
         <button
           class="btn-ghost btn-sm btn-ghost--danger"
@@ -399,7 +530,7 @@ watch(selectedFile, () => {
     <!-- Info Bar -->
     <div class="logs-info">
       <span class="logs-info__count">
-        {{ logs.length }} von {{ totalCount.toLocaleString() }} Einträgen
+        {{ logs.length }} von {{ totalCount.toLocaleString() }} Eintraegen
       </span>
       <span v-if="isPolling" class="logs-info__polling">
         <span class="logs-info__dot"></span>
@@ -422,10 +553,29 @@ watch(selectedFile, () => {
         <span>Logs werden geladen...</span>
       </div>
 
-      <!-- Empty State -->
+      <!-- Empty State - Time Window -->
+      <div v-else-if="logs.length === 0 && startTime && endTime" class="logs-empty">
+        <FileText class="logs-empty__icon" />
+        <p class="logs-empty__title">Keine Server-Logs in diesem Zeitfenster</p>
+        <p class="logs-empty__text">
+          Zwischen {{ formatTime(startTime) }} und {{ formatTime(endTime) }}
+          wurden keine Log-Eintraege gefunden.
+        </p>
+        <div class="logs-empty__actions">
+          <button class="btn-secondary btn-sm" @click="expandTimeWindow">
+            <Maximize2 class="w-4 h-4" />
+            Zeitfenster erweitern
+          </button>
+          <button class="btn-ghost btn-sm" @click="clearTimeWindow">
+            Filter entfernen
+          </button>
+        </div>
+      </div>
+
+      <!-- Empty State - General -->
       <div v-else-if="logs.length === 0" class="logs-empty">
         <FileText class="logs-empty__icon" />
-        <p class="logs-empty__text">Keine Log-Einträge gefunden</p>
+        <p class="logs-empty__text">Keine Log-Eintraege gefunden</p>
       </div>
 
       <!-- Log Entries -->
@@ -434,6 +584,12 @@ watch(selectedFile, () => {
           v-for="(log, index) in logs"
           :key="index"
           class="log-entry"
+          :class="{ 'log-entry--critical': log.level === 'CRITICAL' }"
+          :style="{
+            '--level-border': getLevelColors(log.level).border,
+            '--level-glow': getLevelColors(log.level).glow,
+            '--level-tint': getLevelColors(log.level).tint,
+          }"
         >
           <!-- Entry Header -->
           <div class="log-entry__header" @click="toggleExpand(index)">
@@ -456,50 +612,91 @@ watch(selectedFile, () => {
           <!-- Expanded Details -->
           <Transition name="expand">
             <div v-if="expandedIds.has(index)" class="log-entry__details">
+
+              <!-- Summary (if available) -->
+              <div v-if="getSummary(log)" class="log-detail-summary">
+                <span class="log-detail-summary__icon">{{ getSummary(log)!.icon }}</span>
+                <div class="log-detail-summary__content">
+                  <span class="log-detail-summary__title">{{ getSummary(log)!.title }}</span>
+                  <span
+                    v-if="getSummary(log)!.description"
+                    class="log-detail-summary__desc"
+                  >{{ getSummary(log)!.description }}</span>
+                </div>
+              </div>
+
+              <!-- Details Grid -->
               <div class="log-details__grid">
                 <div class="log-details__item">
                   <span class="log-details__label">Zeitstempel</span>
                   <span class="log-details__value">{{ formatTimestamp(log.timestamp) }}</span>
                 </div>
                 <div class="log-details__item">
+                  <span class="log-details__label">Level</span>
+                  <span :class="['log-level', getLevelClass(log.level)]">
+                    {{ log.level }}
+                  </span>
+                </div>
+                <div class="log-details__item">
                   <span class="log-details__label">Modul</span>
-                  <span class="log-details__value">{{ log.module || 'N/A' }}</span>
+                  <span class="log-details__value log-details__value--mono">{{ log.module || 'N/A' }}</span>
                 </div>
-                <div class="log-details__item">
+                <div v-if="log.function" class="log-details__item">
                   <span class="log-details__label">Funktion</span>
-                  <span class="log-details__value">{{ log.function || 'N/A' }}</span>
+                  <span class="log-details__value log-details__value--mono">{{ log.function }}</span>
                 </div>
-                <div class="log-details__item">
+                <div v-if="log.line" class="log-details__item">
                   <span class="log-details__label">Zeile</span>
-                  <span class="log-details__value">{{ log.line || 'N/A' }}</span>
+                  <span class="log-details__value log-details__value--mono">{{ log.line }}</span>
+                </div>
+                <div v-if="getSummary(log)" class="log-details__item">
+                  <span class="log-details__label">Kategorie</span>
+                  <span
+                    class="log-category-badge"
+                    :data-category="getSummary(log)!.category"
+                  >{{ formatCategoryLabel(getSummary(log)!.category) }}</span>
                 </div>
               </div>
 
-              <!-- Full Message -->
+              <!-- Original Message (ALWAYS shown in full) -->
               <div class="log-details__section">
                 <div class="log-details__section-header">
-                  <span class="log-details__section-title">Vollständige Nachricht</span>
-                  <button
-                    class="log-details__copy"
-                    @click.stop="copyLogEntry(log, index)"
-                  >
-                    <component :is="copiedId === index ? Check : Copy" class="w-3.5 h-3.5" />
-                    {{ copiedId === index ? 'Kopiert!' : 'JSON kopieren' }}
-                  </button>
+                  <div class="log-details__section-title-group">
+                    <span class="log-details__section-title">Original-Nachricht</span>
+                    <span class="log-details__section-hint">(unveraendert)</span>
+                  </div>
                 </div>
                 <pre class="log-details__code">{{ log.message }}</pre>
               </div>
 
               <!-- Exception (if present) -->
               <div v-if="log.exception" class="log-details__section log-details__section--error">
-                <span class="log-details__section-title">Exception</span>
+                <span class="log-details__section-title log-details__section-title--error">Exception</span>
                 <pre class="log-details__code log-details__code--error">{{ log.exception }}</pre>
               </div>
 
               <!-- Extra Data (if present) -->
               <div v-if="log.extra && Object.keys(log.extra).length > 0" class="log-details__section">
-                <span class="log-details__section-title">Extra-Daten</span>
-                <pre class="log-details__code">{{ JSON.stringify(log.extra, null, 2) }}</pre>
+                <span class="log-details__section-title">Zusaetzliche Daten</span>
+                <pre class="log-details__code log-details__code--extra">{{ JSON.stringify(log.extra, null, 2) }}</pre>
+              </div>
+
+              <!-- Actions -->
+              <div class="log-details__actions">
+                <button
+                  class="log-details__action-btn"
+                  @click.stop="copyMessage(log, index)"
+                >
+                  <component :is="copiedMessageId === index ? Check : Copy" class="w-3.5 h-3.5" />
+                  {{ copiedMessageId === index ? 'Kopiert!' : 'Nachricht kopieren' }}
+                </button>
+                <button
+                  class="log-details__action-btn"
+                  @click.stop="copyAsJson(log, index)"
+                >
+                  <component :is="copiedJsonId === index ? Check : FileJson" class="w-3.5 h-3.5" />
+                  {{ copiedJsonId === index ? 'Kopiert!' : 'Als JSON kopieren' }}
+                </button>
               </div>
             </div>
           </Transition>
@@ -518,6 +715,15 @@ watch(selectedFile, () => {
         </div>
       </template>
     </div>
+
+    <!-- Log Management Panel -->
+    <Teleport to="body">
+      <LogManagementPanel
+        v-if="showManagement"
+        @close="showManagement = false"
+        @cleanup-success="handleCleanupSuccess"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -537,7 +743,12 @@ watch(selectedFile, () => {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  background-color: var(--color-bg-secondary);
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.04) 0%,
+    rgba(139, 92, 246, 0.04) 50%,
+    rgba(236, 72, 153, 0.04) 100%
+  );
   border-bottom: 1px solid var(--glass-border);
   flex-wrap: wrap;
 }
@@ -753,14 +964,27 @@ watch(selectedFile, () => {
 }
 
 /* =============================================================================
-   Log Entry
+   Log Entry - Border + Glow Design
    ============================================================================= */
 .log-entry {
   border-bottom: 1px solid var(--glass-border);
+  border-left: 3px solid var(--level-border, #6B7280);
+  box-shadow: inset 3px 0 8px var(--level-glow, transparent);
+  background-color: var(--level-tint, transparent);
+  transition: background-color 0.2s ease;
 }
 
 .log-entry:hover {
-  background-color: var(--color-bg-secondary);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.log-entry--critical {
+  animation: pulse-critical 2s ease-in-out infinite;
+}
+
+@keyframes pulse-critical {
+  0%, 100% { background-color: rgba(239, 68, 68, 0.06); }
+  50% { background-color: rgba(239, 68, 68, 0.12); }
 }
 
 .log-entry__header {
@@ -847,17 +1071,64 @@ watch(selectedFile, () => {
 }
 
 /* =============================================================================
-   Log Details
+   Log Details - Glasmorphism Panel
    ============================================================================= */
 .log-entry__details {
-  padding: 0.75rem 1rem 1rem 2.5rem;
-  background-color: var(--color-bg-tertiary);
-  border-top: 1px solid var(--glass-border);
+  margin: 0.5rem 1rem 0.75rem 2.5rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: rgba(15, 15, 20, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+/* Summary Section */
+.log-detail-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.08) 0%,
+    rgba(139, 92, 246, 0.08) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.log-detail-summary__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.log-detail-summary__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.log-detail-summary__title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.log-detail-summary__desc {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+/* Details Grid */
 .log-details__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
@@ -878,15 +1149,84 @@ watch(selectedFile, () => {
 
 .log-details__value {
   font-size: 0.8125rem;
-  font-family: var(--font-mono);
   color: var(--color-text-secondary);
 }
 
+.log-details__value--mono {
+  font-family: var(--font-mono);
+}
+
+/* Category Badge */
+.log-category-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  border-radius: 0.25rem;
+  width: fit-content;
+}
+
+.log-category-badge[data-category="scheduler"] {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: rgb(192, 132, 252);
+}
+
+.log-category-badge[data-category="sensor"] {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: rgb(52, 211, 153);
+}
+
+.log-category-badge[data-category="heartbeat"] {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: rgb(96, 165, 250);
+}
+
+.log-category-badge[data-category="mqtt"] {
+  background-color: rgba(20, 184, 166, 0.15);
+  color: rgb(45, 212, 191);
+}
+
+.log-category-badge[data-category="config"] {
+  background-color: rgba(107, 114, 128, 0.2);
+  color: rgb(156, 163, 175);
+}
+
+.log-category-badge[data-category="maintenance"] {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: rgb(251, 191, 36);
+}
+
+.log-category-badge[data-category="websocket"] {
+  background-color: rgba(99, 102, 241, 0.15);
+  color: rgb(129, 140, 248);
+}
+
+.log-category-badge[data-category="actuator"] {
+  background-color: rgba(236, 72, 153, 0.15);
+  color: rgb(244, 114, 182);
+}
+
+.log-category-badge[data-category="auth"] {
+  background-color: rgba(251, 191, 36, 0.15);
+  color: rgb(251, 191, 36);
+}
+
+.log-category-badge[data-category="error"] {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: rgb(248, 113, 113);
+}
+
+.log-category-badge[data-category="system"] {
+  background-color: rgba(107, 114, 128, 0.15);
+  color: rgb(156, 163, 175);
+}
+
+/* Sections */
 .log-details__section {
   margin-bottom: 0.75rem;
 }
 
-.log-details__section:last-child {
+.log-details__section:last-of-type {
   margin-bottom: 0;
 }
 
@@ -897,6 +1237,12 @@ watch(selectedFile, () => {
   margin-bottom: 0.375rem;
 }
 
+.log-details__section-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .log-details__section-title {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -905,27 +1251,18 @@ watch(selectedFile, () => {
   color: var(--color-text-muted);
 }
 
+.log-details__section-title--error {
+  color: rgb(248, 113, 113);
+}
+
+.log-details__section-hint {
+  font-size: 0.6875rem;
+  font-style: italic;
+  color: rgba(156, 163, 175, 0.5);
+}
+
 .log-details__section--error .log-details__section-title {
   color: var(--color-danger);
-}
-
-.log-details__copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.6875rem;
-  color: var(--color-text-muted);
-  background: none;
-  border: 1px solid var(--glass-border);
-  border-radius: 0.25rem;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.log-details__copy:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-text-muted);
 }
 
 .log-details__code {
@@ -934,7 +1271,8 @@ watch(selectedFile, () => {
   font-family: var(--font-mono);
   line-height: 1.5;
   color: var(--color-text-secondary);
-  background-color: var(--color-bg-primary);
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 0.375rem;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -945,6 +1283,43 @@ watch(selectedFile, () => {
 .log-details__code--error {
   background-color: rgba(220, 38, 38, 0.1);
   color: rgb(248, 113, 113);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.log-details__code--extra {
+  background-color: rgba(59, 130, 246, 0.08);
+  color: rgb(147, 197, 253);
+  border-color: rgba(59, 130, 246, 0.15);
+}
+
+/* Actions */
+.log-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.log-details__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.log-details__action-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 /* =============================================================================
@@ -974,6 +1349,25 @@ watch(selectedFile, () => {
 /* =============================================================================
    Mobile Responsive
    ============================================================================= */
+@media (max-width: 479px) {
+  .log-details__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .log-entry__details {
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+  }
+
+  .log-details__actions {
+    flex-direction: column;
+  }
+
+  .log-details__action-btn {
+    justify-content: center;
+  }
+}
+
 @media (max-width: 768px) {
   .logs-toolbar {
     flex-direction: column;
@@ -1016,15 +1410,88 @@ watch(selectedFile, () => {
     width: 100%;
     margin-top: 0.25rem;
     padding-left: 1.5rem;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 
   .log-entry__details {
-    padding-left: 1rem;
-    padding-right: 0.5rem;
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
   }
 
   .log-details__grid {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* =============================================================================
+   Time Window Chip (Feature 1.2)
+   ============================================================================= */
+.time-window-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem 0.375rem 0.625rem;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #a78bfa;
+}
+
+.time-window-chip__expand,
+.time-window-chip__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.time-window-chip__expand:hover {
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.time-window-chip__clear:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+/* =============================================================================
+   Empty State Enhancements
+   ============================================================================= */
+.logs-empty__title {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin: 0 0 0.25rem;
+}
+
+.logs-empty__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 479px) {
+  .logs-empty__actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  .logs-empty__actions .btn-secondary,
+  .logs-empty__actions .btn-ghost {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

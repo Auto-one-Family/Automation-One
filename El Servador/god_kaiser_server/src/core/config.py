@@ -163,7 +163,7 @@ class LoggingSettings(BaseSettings):
     format: str = Field(default="json", alias="LOG_FORMAT")
     file_path: str = Field(default="logs/god_kaiser.log", alias="LOG_FILE_PATH")
     file_max_bytes: int = Field(default=10485760, alias="LOG_FILE_MAX_BYTES", ge=1024)
-    file_backup_count: int = Field(default=5, alias="LOG_FILE_BACKUP_COUNT", ge=0, le=100)
+    file_backup_count: int = Field(default=100, alias="LOG_FILE_BACKUP_COUNT", ge=0, le=1000)
 
     @field_validator("level")
     @classmethod

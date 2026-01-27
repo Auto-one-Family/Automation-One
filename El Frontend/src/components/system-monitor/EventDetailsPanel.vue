@@ -45,6 +45,8 @@ import {
   Clock,
   Thermometer,
   Zap,
+  Filter,
+  FileText,
 } from 'lucide-vue-next'
 
 // ============================================================================
@@ -60,6 +62,8 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   close: []
+  'filter-device': [espId: string]
+  'show-server-logs': [event: UnifiedEvent]
 }>()
 
 // ============================================================================
@@ -210,6 +214,14 @@ function formatTimestamp(timestamp: string): string {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function formatEventTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString('de-DE', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -429,6 +441,24 @@ onUnmounted(() => {
           <div v-if="event.gpio !== undefined" class="detail-item">
             <span class="detail-label">GPIO</span>
             <span class="detail-value font-mono">{{ event.gpio }}</span>
+          </div>
+
+          <!-- Action Buttons -->
+          <div v-if="event.esp_id" class="detail-item detail-item--full detail-item--actions">
+            <button
+              class="action-btn action-btn--filter"
+              @click="emit('filter-device', event.esp_id!)"
+            >
+              <Filter :size="14" />
+              Alle Events von {{ event.esp_id }}
+            </button>
+            <button
+              class="action-btn action-btn--logs"
+              @click="emit('show-server-logs', event)"
+            >
+              <FileText :size="14" />
+              Server-Logs um {{ formatEventTime(event.timestamp) }}
+            </button>
           </div>
         </div>
       </section>
@@ -1135,6 +1165,57 @@ onUnmounted(() => {
 .json-copy-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--color-text-primary);
+}
+
+/* === ACTION BUTTONS === */
+.detail-item--actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+.action-btn--filter:hover {
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #60a5fa;
+}
+
+.action-btn--logs:hover {
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+}
+
+@media (max-width: 480px) {
+  .detail-item--actions {
+    flex-direction: column;
+  }
+
+  .action-btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .json-content {

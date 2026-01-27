@@ -18,8 +18,10 @@ import json
 import math
 import os
 import re
+import shutil
 import uuid
 import warnings
+import zipfile
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -2257,6 +2259,48 @@ class LogFilesResponse(BaseModel):
     log_directory: str
 
 
+class LogFileInfo(BaseModel):
+    """Detailed log file information."""
+    name: str
+    size_mb: float
+    size_bytes: int
+    modified_at: str
+    entry_count: Optional[int] = None
+    is_current: bool = False
+
+
+class LogStatisticsResponse(BaseModel):
+    """Response for log statistics."""
+    success: bool = True
+    total_size_mb: float
+    total_size_bytes: int
+    file_count: int
+    files: List[LogFileInfo]
+
+
+class LogCleanupResponse(BaseModel):
+    """Response for log cleanup operations."""
+    success: bool = True
+    dry_run: bool
+    files_to_delete: List[str]
+    total_size_mb: float
+    deleted_count: int = 0
+    backup_url: Optional[str] = None
+
+
+class LogDeleteResponse(BaseModel):
+    """Response for single log file deletion."""
+    success: bool = True
+    deleted: bool
+    filename: str
+    size_mb: float
+    backup_url: Optional[str] = None
+
+
+# In-memory store for temporary backup references
+_log_backups: Dict[str, Dict[str, Any]] = {}
+
+
 def _parse_log_line(line: str) -> Optional[LogEntry]:
     """Parse a single log line (JSON format)."""
     try:
@@ -2325,9 +2369,9 @@ def _filter_log_entry(
             ts_str = entry.timestamp.replace("T", " ").split(".")[0]
             entry_time = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
             
-            if start_time and entry_time < start_time.replace(tzinfo=None):
+            if start_time and entry_time < start_time.replace(tzinfo=None, microsecond=0):
                 return False
-            if end_time and entry_time > end_time.replace(tzinfo=None):
+            if end_time and entry_time > end_time.replace(tzinfo=None, microsecond=0):
                 return False
         except ValueError:
             pass  # Can't parse timestamp, include entry anyway
@@ -2460,6 +2504,296 @@ async def query_logs(
         page=page,
         page_size=page_size,
         has_more=end_idx < total_count
+    )
+
+
+# =============================================================================
+# Log Management (Statistics, Cleanup, Delete, Backup)
+# =============================================================================
+
+
+def _get_log_files_info(log_dir: Path, current_log_name: str) -> List[LogFileInfo]:
+    """Get detailed info for all log files in directory."""
+    files: List[LogFileInfo] = []
+    if not log_dir.exists():
+        return files
+
+    for f in sorted(log_dir.glob("*.log*"), key=lambda x: x.stat().st_mtime, reverse=True):
+        stat = f.stat()
+        # Count lines for entry estimation (fast: just count newlines)
+        try:
+            entry_count = sum(1 for line in open(f, "r", encoding="utf-8", errors="replace") if line.strip())
+        except Exception:
+            entry_count = None
+
+        files.append(LogFileInfo(
+            name=f.name,
+            size_mb=round(stat.st_size / (1024 * 1024), 2),
+            size_bytes=stat.st_size,
+            modified_at=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            entry_count=entry_count,
+            is_current=f.name == current_log_name,
+        ))
+    return files
+
+
+def _create_log_backup(log_dir: Path, filenames: List[str]) -> Optional[str]:
+    """Create a ZIP backup of specified log files. Returns backup_id."""
+    backup_id = str(uuid.uuid4())[:8]
+    backup_dir = log_dir / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    backup_path = backup_dir / f"logs_backup_{backup_id}.zip"
+
+    try:
+        with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in filenames:
+                fpath = log_dir / fname
+                if fpath.exists():
+                    zf.write(fpath, fname)
+
+        _log_backups[backup_id] = {
+            "path": str(backup_path),
+            "created_at": datetime.now(timezone.utc),
+            "files": filenames,
+        }
+        return backup_id
+    except Exception as e:
+        logger.error(f"Failed to create log backup: {e}")
+        return None
+
+
+def _cleanup_expired_backups() -> None:
+    """Remove backups older than 1 hour."""
+    now = datetime.now(timezone.utc)
+    expired = [
+        bid for bid, info in _log_backups.items()
+        if (now - info["created_at"]).total_seconds() > 3600
+    ]
+    for bid in expired:
+        try:
+            backup_path = Path(_log_backups[bid]["path"])
+            if backup_path.exists():
+                backup_path.unlink()
+        except Exception:
+            pass
+        del _log_backups[bid]
+
+
+@router.get(
+    "/logs/statistics",
+    response_model=LogStatisticsResponse,
+    summary="Log Statistics",
+    description="Get log file statistics including sizes and entry counts.",
+)
+async def get_log_statistics(
+    current_user: AdminUser,
+) -> LogStatisticsResponse:
+    """Get statistics about all log files."""
+    settings = get_settings()
+    log_path = Path(settings.logging.file_path)
+    log_dir = log_path.parent
+
+    files = _get_log_files_info(log_dir, log_path.name)
+    total_bytes = sum(f.size_bytes for f in files)
+
+    logger.info(f"Admin {current_user.username} requested log statistics")
+
+    return LogStatisticsResponse(
+        total_size_mb=round(total_bytes / (1024 * 1024), 2),
+        total_size_bytes=total_bytes,
+        file_count=len(files),
+        files=files,
+    )
+
+
+@router.post(
+    "/logs/cleanup",
+    response_model=LogCleanupResponse,
+    summary="Cleanup Logs",
+    description="Delete selected log files with optional dry-run preview and backup.",
+)
+async def cleanup_logs(
+    current_user: AdminUser,
+    dry_run: bool = Query(default=True, description="Preview only, don't delete"),
+    files: Optional[List[str]] = Query(default=None, description="Files to delete (empty = all non-current)"),
+    create_backup: bool = Query(default=True, description="Create ZIP backup before deletion"),
+) -> LogCleanupResponse:
+    """Cleanup log files with dry-run support."""
+    _cleanup_expired_backups()
+
+    settings = get_settings()
+    log_path = Path(settings.logging.file_path)
+    log_dir = log_path.parent
+    current_name = log_path.name
+
+    # Determine files to delete
+    if files:
+        files_to_delete = [f for f in files if f != current_name]
+    else:
+        # All non-current log files
+        if log_dir.exists():
+            files_to_delete = [
+                f.name for f in log_dir.glob("*.log*")
+                if f.name != current_name and f.is_file()
+            ]
+        else:
+            files_to_delete = []
+
+    # Calculate total size
+    total_bytes = 0
+    for fname in files_to_delete:
+        fpath = log_dir / fname
+        if fpath.exists():
+            total_bytes += fpath.stat().st_size
+
+    total_mb = round(total_bytes / (1024 * 1024), 2)
+
+    if dry_run:
+        logger.info(
+            f"Admin {current_user.username} previewed log cleanup: "
+            f"{len(files_to_delete)} files, {total_mb} MB"
+        )
+        return LogCleanupResponse(
+            dry_run=True,
+            files_to_delete=files_to_delete,
+            total_size_mb=total_mb,
+        )
+
+    # Create backup if requested
+    backup_url = None
+    if create_backup and files_to_delete:
+        backup_id = _create_log_backup(log_dir, files_to_delete)
+        if backup_id:
+            backup_url = f"/api/v1/debug/logs/backup/{backup_id}"
+
+    # Delete files
+    deleted_count = 0
+    for fname in files_to_delete:
+        fpath = log_dir / fname
+        try:
+            if fpath.exists():
+                fpath.unlink()
+                deleted_count += 1
+        except Exception as e:
+            logger.error(f"Failed to delete log file {fname}: {e}")
+
+    logger.info(
+        f"Admin {current_user.username} cleaned up logs: "
+        f"{deleted_count}/{len(files_to_delete)} files deleted, {total_mb} MB freed"
+    )
+
+    return LogCleanupResponse(
+        dry_run=False,
+        files_to_delete=files_to_delete,
+        total_size_mb=total_mb,
+        deleted_count=deleted_count,
+        backup_url=backup_url,
+    )
+
+
+@router.delete(
+    "/logs/{filename}",
+    response_model=LogDeleteResponse,
+    summary="Delete Log File",
+    description="Delete a single log file. The current active log file cannot be deleted.",
+)
+async def delete_log_file(
+    filename: str,
+    current_user: AdminUser,
+    create_backup: bool = Query(default=False, description="Create backup before deletion"),
+) -> LogDeleteResponse:
+    """Delete a single log file."""
+    settings = get_settings()
+    log_path = Path(settings.logging.file_path)
+    log_dir = log_path.parent
+    current_name = log_path.name
+
+    # Protection: cannot delete current log
+    if filename == current_name:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Cannot delete the current active log file '{current_name}'"
+        )
+
+    target = log_dir / filename
+    if not target.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log file '{filename}' not found"
+        )
+
+    # Security: prevent path traversal
+    try:
+        target.resolve().relative_to(log_dir.resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid filename"
+        )
+
+    size_mb = round(target.stat().st_size / (1024 * 1024), 2)
+
+    backup_url = None
+    if create_backup:
+        backup_id = _create_log_backup(log_dir, [filename])
+        if backup_id:
+            backup_url = f"/api/v1/debug/logs/backup/{backup_id}"
+
+    try:
+        target.unlink()
+    except Exception as e:
+        logger.error(f"Failed to delete log file {filename}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete file: {str(e)}"
+        )
+
+    logger.info(f"Admin {current_user.username} deleted log file: {filename} ({size_mb} MB)")
+
+    return LogDeleteResponse(
+        deleted=True,
+        filename=filename,
+        size_mb=size_mb,
+        backup_url=backup_url,
+    )
+
+
+@router.get(
+    "/logs/backup/{backup_id}",
+    summary="Download Log Backup",
+    description="Download a previously created log backup as ZIP file.",
+)
+async def download_log_backup(
+    backup_id: str,
+    current_user: AdminUser,
+):
+    """Download a log backup ZIP file."""
+    from fastapi.responses import FileResponse
+
+    _cleanup_expired_backups()
+
+    if backup_id not in _log_backups:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backup '{backup_id}' not found or expired"
+        )
+
+    backup_info = _log_backups[backup_id]
+    backup_path = Path(backup_info["path"])
+
+    if not backup_path.exists():
+        del _log_backups[backup_id]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Backup file no longer exists"
+        )
+
+    logger.info(f"Admin {current_user.username} downloaded log backup: {backup_id}")
+
+    return FileResponse(
+        path=str(backup_path),
+        filename=backup_path.name,
+        media_type="application/zip",
     )
 
 

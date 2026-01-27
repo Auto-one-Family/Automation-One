@@ -230,6 +230,10 @@ const customEndDate = ref<string | undefined>(undefined)
 // Restored events highlighting (from backup restore)
 const restoredEventIds = ref<Set<string>>(new Set())
 
+// Server-Logs Zeitfenster (Feature 1.2)
+const logsStartTime = ref<string | undefined>()
+const logsEndTime = ref<string | undefined>()
+
 // Toast notification state
 const toastMessage = ref<string | null>(null)
 const toastType = ref<'success' | 'error' | 'info'>('success')
@@ -1056,6 +1060,26 @@ function handleTabChange(tabId: TabId) {
   activeTab.value = tabId
 }
 
+function handleFilterDevice(espId: string) {
+  filterEspId.value = espId
+  activeTab.value = 'events'
+  selectedEvent.value = null
+
+  // Show toast with filtered event count
+  nextTick(() => {
+    const count = filteredEvents.value.length
+    showToast(`${count} Event${count !== 1 ? 's' : ''} für ${espId} gefunden`, 'info')
+  })
+}
+
+function handleShowServerLogs(event: UnifiedEvent) {
+  const timestamp = new Date(event.timestamp).getTime()
+  logsStartTime.value = new Date(timestamp - 30000).toISOString()
+  logsEndTime.value = new Date(timestamp + 30000).toISOString()
+  activeTab.value = 'logs'
+  selectedEvent.value = null
+}
+
 /**
  * Handle data source selection change
  *
@@ -1232,6 +1256,14 @@ watch(
   { deep: true }
 )
 
+// Logs-Zeitfenster zurücksetzen bei Tab-Wechsel weg von logs
+watch(activeTab, (newTab) => {
+  if (newTab !== 'logs') {
+    logsStartTime.value = undefined
+    logsEndTime.value = undefined
+  }
+})
+
 // Auto-scroll to active tab on mobile
 watch(activeTab, (newTab) => {
   if (isMobile.value) {
@@ -1350,6 +1382,8 @@ watch(activeTab, (newTab) => {
       <!-- Server Logs Tab -->
       <ServerLogsTab
         v-else-if="activeTab === 'logs'"
+        :initial-start-time="logsStartTime"
+        :initial-end-time="logsEndTime"
       />
 
       <!-- Database Tab -->
@@ -1371,6 +1405,8 @@ watch(activeTab, (newTab) => {
         :event="selectedEvent"
         :event-type-labels="EVENT_TYPE_LABELS"
         @close="closeEventDetails"
+        @filter-device="handleFilterDevice"
+        @show-server-logs="handleShowServerLogs"
       />
     </Transition>
 

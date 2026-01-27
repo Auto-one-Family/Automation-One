@@ -473,7 +473,7 @@ onUnmounted(() => {
                 class="event-item"
                 :class="[
                   `event-item--category-${getCategoryClass(event)}`,
-                  `event-item--severity-${event.severity}`,
+                  `event-item--severity-${event.severity}`
                 ]"
                 :data-category="getCategoryClass(event)"
                 :data-severity="event.severity"
@@ -1061,6 +1061,7 @@ onUnmounted(() => {
     opacity: 1;
   }
 }
+
 
 /* Mobile adjustments for date separators */
 @media (max-width: 768px) {
