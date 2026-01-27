@@ -24,8 +24,10 @@ public:
   static const char* buildActuatorAlertTopic(uint8_t gpio);     // Phase 5
   static const char* buildActuatorEmergencyTopic();             // Phase 5
   static const char* buildSystemHeartbeatTopic();               // Pattern 5
+  static const char* buildSystemHeartbeatAckTopic();            // Phase 2: Heartbeat-ACK (Server → ESP)
   static const char* buildSystemCommandTopic();                 // Pattern 6
   static const char* buildSystemDiagnosticsTopic();             // Phase 7
+  static const char* buildSystemErrorTopic();                   // Phase 0 Bug-Fix
   static const char* buildConfigTopic();                        // Pattern 7
   static const char* buildConfigResponseTopic();
   static const char* buildBroadcastEmergencyTopic();            // Pattern 8

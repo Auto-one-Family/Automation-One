@@ -727,17 +727,28 @@ void MQTTClient::clearTestPublishHook() {
 }
 
 bool MQTTClient::shouldAttemptReconnect() const {
-    // Don't attempt if max attempts reached
-    if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
-        return false;
+    // ✅ FIX: MAX_RECONNECT_ATTEMPTS-Check ENTFERNT (2026-01-20)
+    // Root-Cause für Watchdog-Timeout: Nach 10 Reconnect-Versuchen wurde
+    // shouldAttemptReconnect()=false, Circuit Breaker blieb OPEN,
+    // feedWatchdog() wurde blockiert → Watchdog Timeout → Reboot.
+    // Der Circuit Breaker regelt die Fehlerbehandlung bereits ausreichend.
+    // Siehe: .claude/Next Steps/Hardware_Tests/Phase_1_Weiterführung.md
+
+    // ✅ FIX #2: HALF_OPEN bypasses exponential backoff (2026-01-20)
+    // Race Condition: Wenn Circuit Breaker auf HALF_OPEN wechselt, aber
+    // reconnect_delay_ms_ > halfopen_timeout (10s), wird nie ein Reconnect
+    // versucht und HALF_OPEN timeout zurück zu OPEN ohne Test.
+    // Bei HALF_OPEN sofort Reconnect versuchen - das ist der Sinn von HALF_OPEN!
+    if (circuit_breaker_.getState() == CircuitState::HALF_OPEN) {
+        return true;  // Sofort versuchen, kein Backoff!
     }
-    
+
     // Wait for reconnect delay (exponential backoff)
     unsigned long current_time = millis();
     if (current_time - last_reconnect_attempt_ < reconnect_delay_ms_) {
         return false;
     }
-    
+
     return true;
 }
 

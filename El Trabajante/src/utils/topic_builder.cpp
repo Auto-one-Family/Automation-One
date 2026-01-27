@@ -125,8 +125,17 @@ const char* TopicBuilder::buildActuatorEmergencyTopic() {
 
 // Pattern 5: kaiser/god/esp/{esp_id}/system/heartbeat
 const char* TopicBuilder::buildSystemHeartbeatTopic() {
-  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
                          "kaiser/%s/esp/%s/system/heartbeat",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// Phase 2: kaiser/god/esp/{esp_id}/system/heartbeat/ack
+// Server → ESP: Acknowledgment mit Device-Status (approved/pending/rejected)
+const char* TopicBuilder::buildSystemHeartbeatAckTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/system/heartbeat/ack",
                          kaiser_id_, esp_id_);
   return validateTopicBuffer(written);
 }
@@ -141,8 +150,16 @@ const char* TopicBuilder::buildSystemCommandTopic() {
 
 // Phase 7: kaiser/god/esp/{esp_id}/system/diagnostics
 const char* TopicBuilder::buildSystemDiagnosticsTopic() {
-  int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
                          "kaiser/%s/esp/%s/system/diagnostics",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// Phase 0 Bug-Fix: kaiser/god/esp/{esp_id}/system/error
+const char* TopicBuilder::buildSystemErrorTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/system/error",
                          kaiser_id_, esp_id_);
   return validateTopicBuffer(written);
 }

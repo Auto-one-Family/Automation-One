@@ -43,6 +43,28 @@ public:
   // System Configuration (NEU für Phase 1)
   bool loadSystemConfig(SystemConfig& config);
   bool saveSystemConfig(const SystemConfig& config);
+
+  // ============================================
+  // DEVICE APPROVAL STATUS (Phase 1: Pending Approval)
+  // ============================================
+  /**
+   * @brief Check if device has been approved by server
+   * @return true if device was approved, false if pending or rejected
+   */
+  bool isDeviceApproved() const;
+
+  /**
+   * @brief Set device approval status
+   * @param approved true if approved, false if rejected/pending
+   * @param timestamp Unix timestamp of approval decision (0 if pending)
+   */
+  void setDeviceApproved(bool approved, time_t timestamp = 0);
+
+  /**
+   * @brief Get approval timestamp
+   * @return Unix timestamp when approval was granted (0 if not approved)
+   */
+  time_t getApprovalTimestamp() const;
   
   // ============================================
   // SENSOR CONFIGURATION (PHASE 4)

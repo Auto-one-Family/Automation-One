@@ -1136,6 +1136,58 @@ bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
 }
 
 // ============================================
+// DEVICE APPROVAL STATUS (Phase 1: Pending Approval)
+// ============================================
+// NVS Keys (compact, ≤15 chars)
+static const char* NVS_DEV_APPROVED = "dev_appr";      // bool: approved status
+static const char* NVS_APPR_TS = "appr_ts";            // uint32: approval timestamp
+
+bool ConfigManager::isDeviceApproved() const {
+  // Use system_config namespace for approval status
+  if (!storageManager.beginNamespace("system_config", true)) {
+    LOG_WARNING("ConfigManager: Cannot read approval status - namespace error");
+    return false;  // Default to not approved on error
+  }
+
+  bool approved = storageManager.getBool(NVS_DEV_APPROVED, false);
+  storageManager.endNamespace();
+
+  return approved;
+}
+
+void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
+  if (!storageManager.beginNamespace("system_config", false)) {
+    LOG_ERROR("ConfigManager: Cannot save approval status - namespace error");
+    return;
+  }
+
+  storageManager.putBool(NVS_DEV_APPROVED, approved);
+  if (timestamp > 0) {
+    storageManager.putULong(NVS_APPR_TS, (unsigned long)timestamp);
+  }
+
+  storageManager.endNamespace();
+
+  if (approved) {
+    LOG_INFO("ConfigManager: Device approval saved (approved=true, ts=" +
+             String((unsigned long)timestamp) + ")");
+  } else {
+    LOG_INFO("ConfigManager: Device approval cleared (pending/rejected)");
+  }
+}
+
+time_t ConfigManager::getApprovalTimestamp() const {
+  if (!storageManager.beginNamespace("system_config", true)) {
+    return 0;
+  }
+
+  unsigned long ts = storageManager.getULong(NVS_APPR_TS, 0);
+  storageManager.endNamespace();
+
+  return (time_t)ts;
+}
+
+// ============================================
 // CONFIGURATION STATUS (Guide-konform)
 // ============================================
 bool ConfigManager::isConfigurationComplete() const {

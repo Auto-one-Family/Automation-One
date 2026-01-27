@@ -6,104 +6,270 @@
 #include <ArduinoJson.h>
 
 // ============================================
-// HTML LANDING PAGE (Captive Portal)
+// HTML LANDING PAGE (Captive Portal with Form)
 // ============================================
 const char* ProvisionManager::HTML_LANDING_PAGE = R"rawliteral(
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AutomationOne - Provisioning</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutomationOne - ESP32 Setup</title>
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 50px auto;
-      padding: 20px;
-      background: #f5f5f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 16px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    .card {
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     }
     h1 {
+      font-size: 1.5rem;
       color: #1976d2;
-      border-bottom: 2px solid #1976d2;
-      padding-bottom: 10px;
+      margin-bottom: 4px;
+      text-align: center;
     }
-    .info {
-      background: #e3f2fd;
-      padding: 15px;
-      border-radius: 5px;
-      margin: 20px 0;
-      border-left: 4px solid #1976d2;
+    .subtitle {
+      color: #666;
+      font-size: 0.85rem;
+      text-align: center;
+      margin-bottom: 20px;
     }
-    .info p {
-      margin: 8px 0;
-      font-size: 14px;
+    .section {
+      margin-bottom: 20px;
     }
-    .status {
-      color: #ff9800;
-      font-weight: bold;
+    .section-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #1976d2;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
-    .label {
-      font-weight: bold;
-      display: inline-block;
-      width: 140px;
+    .field { margin-bottom: 14px; }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: #333;
+      margin-bottom: 4px;
+      font-weight: 500;
     }
-    ol {
-      background: white;
-      padding: 20px 20px 20px 40px;
-      border-radius: 5px;
+    .required::after { content: " *"; color: #d32f2f; }
+    input[type="text"], input[type="password"], input[type="number"] {
+      width: 100%;
+      padding: 12px 14px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      background: #fff;
     }
-    li {
-      margin: 10px 0;
-      line-height: 1.6;
+    input:focus {
+      outline: none;
+      border-color: #1976d2;
+      box-shadow: 0 0 0 3px rgba(25,118,210,0.1);
     }
-    code {
-      background: #263238;
-      color: #aed581;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-family: 'Courier New', monospace;
+    .hint {
+      font-size: 0.75rem;
+      color: #888;
+      margin-top: 4px;
     }
-    .api-section {
-      background: white;
-      padding: 15px;
-      border-radius: 5px;
-      margin: 15px 0;
+    .password-wrapper { position: relative; }
+    .toggle-pwd {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1.1rem;
+      color: #666;
+      padding: 4px;
+    }
+    .toggle-pwd:hover { color: #1976d2; }
+    .error-box {
+      background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+      border: 1px solid #ef9a9a;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      color: #c62828;
+    }
+    .error-box strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.9rem;
+    }
+    .error-box span { font-size: 0.85rem; }
+    .submit-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.2s;
+      margin-top: 8px;
+    }
+    .submit-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(25,118,210,0.4);
+    }
+    .submit-btn:active { transform: translateY(0); }
+    .submit-btn:disabled {
+      background: #bdbdbd;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .footer {
+      text-align: center;
+      font-size: 0.7rem;
+      color: rgba(255,255,255,0.8);
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+    .footer p { margin: 2px 0; }
+    .divider {
+      height: 1px;
+      background: #e0e0e0;
+      margin: 16px 0;
     }
   </style>
 </head>
 <body>
-  <h1>🤖 AutomationOne ESP32</h1>
+  <div class="container">
+    <div class="card">
+      <h1>AutomationOne Setup</h1>
+      <p class="subtitle">ESP-ID: %ESP_ID%</p>
 
-  <div class="info">
-    <p><span class="label">ESP ID:</span> %ESP_ID%</p>
-    <p><span class="label">MAC Address:</span> %MAC_ADDRESS%</p>
-    <p><span class="label">Chip Model:</span> %CHIP_MODEL%</p>
-    <p><span class="label">Status:</span> <span class="status">Waiting for configuration</span></p>
-    <p><span class="label">Uptime:</span> %UPTIME% seconds</p>
-    <p><span class="label">Free Heap:</span> %HEAP_FREE% bytes</p>
+      %ERROR_BOX%
+
+      <form id="provisionForm">
+        <div class="section">
+          <div class="section-title">WiFi-Verbindung</div>
+          <div class="field">
+            <label class="required">WiFi-Netzwerk (SSID)</label>
+            <input type="text" name="ssid" id="ssid" maxlength="32"
+                   value="%WIFI_SSID%" placeholder="Netzwerkname eingeben" required>
+          </div>
+          <div class="field">
+            <label class="required">WiFi-Passwort</label>
+            <div class="password-wrapper">
+              <input type="password" name="password" id="password" maxlength="63"
+                     placeholder="Passwort eingeben">
+              <button type="button" class="toggle-pwd" onclick="togglePwd()">&#128065;</button>
+            </div>
+            <p class="hint">Leer lassen fuer offene Netzwerke</p>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section">
+          <div class="section-title">Server-Verbindung</div>
+          <div class="field">
+            <label class="required">Server-IP</label>
+            <input type="text" name="server_address" id="server_address"
+                   value="%SERVER_IP%" placeholder="192.168.0.198" required
+                   pattern="^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$">
+          </div>
+          <div class="field">
+            <label>MQTT-Port</label>
+            <input type="number" name="mqtt_port" id="mqtt_port"
+                   value="%MQTT_PORT%" min="1" max="65535" placeholder="8883">
+            <p class="hint">Standard: 8883 (TLS) oder 1883 (unverschluesselt)</p>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section">
+          <div class="section-title">Zone (Optional)</div>
+          <div class="field">
+            <label>Zone-Name</label>
+            <input type="text" name="zone_name" id="zone_name"
+                   value="%ZONE_NAME%" maxlength="64" placeholder="z.B. Gewaechshaus Nord">
+            <p class="hint">Wenn leer: ESP erscheint als "Nicht zugewiesen"</p>
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="submitBtn">
+          Speichern &amp; Verbinden
+        </button>
+      </form>
+    </div>
+
+    <div class="footer">
+      <p>%ESP_ID% | Firmware v4.0.0</p>
+      <p>Heap: %HEAP_FREE% bytes | Uptime: %UPTIME%s</p>
+    </div>
   </div>
 
-  <h2>📋 Provisioning Instructions</h2>
-  <ol>
-    <li>Open the <strong>God-Kaiser web interface</strong></li>
-    <li>Navigate to <strong>"ESP Provisioning"</strong></li>
-    <li>Select this device from the list</li>
-    <li>Configure WiFi credentials and Zone settings</li>
-    <li>Click <strong>"Provision"</strong></li>
-    <li>Wait for ESP to reboot (~5 seconds)</li>
-  </ol>
+  <script>
+    function togglePwd() {
+      var p = document.getElementById('password');
+      p.type = p.type === 'password' ? 'text' : 'password';
+    }
 
-  <h2>🔌 API Information</h2>
-  <div class="api-section">
-    <p><strong>Provision:</strong> <code>POST http://192.168.4.1/provision</code></p>
-    <p><strong>Status:</strong> <code>GET http://192.168.4.1/status</code></p>
-    <p><strong>Reset:</strong> <code>POST http://192.168.4.1/reset</code></p>
-  </div>
+    document.getElementById('provisionForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.textContent = 'Verbinde...';
 
-  <p style="text-align: center; color: #666; margin-top: 40px;">
-    AutomationOne v4.0 | El Trabajante
-  </p>
+      var data = {
+        ssid: document.getElementById('ssid').value,
+        password: document.getElementById('password').value,
+        server_address: document.getElementById('server_address').value,
+        mqtt_port: parseInt(document.getElementById('mqtt_port').value) || 8883,
+        kaiser_id: "god"
+      };
+
+      var zoneName = document.getElementById('zone_name').value;
+      if (zoneName && zoneName.trim().length > 0) {
+        data.zone_name = zoneName.trim();
+      }
+
+      fetch('/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          btn.textContent = 'Neustart...';
+          btn.style.background = 'linear-gradient(135deg, #43a047 0%, #2e7d32 100%)';
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Speichern & Verbinden';
+          alert('Fehler: ' + res.message);
+        }
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = 'Speichern & Verbinden';
+        alert('Verbindungsfehler: ' + err.message);
+      });
+    });
+  </script>
 </body>
 </html>
 )rawliteral";
@@ -164,6 +330,21 @@ bool ProvisionManager::begin() {
   }
 
   LOG_INFO("ESP ID: " + esp_id_);
+
+  // Check if last connection failed (config exists but provisioning was triggered)
+  // This happens when WiFi connection fails after 3 attempts
+  WiFiConfig wifi_config = configManager.getWiFiConfig();
+  if (wifi_config.configured && wifi_config.ssid.length() > 0) {
+    // Config exists, but provisioning was triggered
+    // → Last connection attempt must have failed
+    last_connection_failed_ = true;
+    last_error_message_ = "Verbindung zum Netzwerk '" + wifi_config.ssid +
+                          "' fehlgeschlagen. Bitte Zugangsdaten pruefen.";
+    LOG_WARNING("Previous connection failed - showing error in form");
+  } else {
+    last_connection_failed_ = false;
+    last_error_message_ = "";
+  }
 
   initialized_ = true;
   state_ = PROVISION_IDLE;
@@ -619,14 +800,52 @@ bool ProvisionManager::startMDNS() {
 void ProvisionManager::handleRoot() {
   LOG_DEBUG("HTTP GET /");
 
+  // Load stored configuration for form pre-fill
+  WiFiConfig wifi_config = configManager.getWiFiConfig();
+  KaiserZone kaiser = configManager.getKaiser();
+
   String html = String(HTML_LANDING_PAGE);
 
-  // Replace placeholders
+  // Basic placeholders
   html.replace("%ESP_ID%", esp_id_);
-  html.replace("%MAC_ADDRESS%", WiFi.macAddress());
-  html.replace("%CHIP_MODEL%", ESP.getChipModel());
   html.replace("%UPTIME%", String(getUptimeSeconds()));
   html.replace("%HEAP_FREE%", String(ESP.getFreeHeap()));
+
+  // Form pre-fill placeholders (with HTML escaping for security)
+  html.replace("%WIFI_SSID%", htmlEscape(wifi_config.ssid));
+  // NOTE: Password is NEVER pre-filled for security reasons
+
+  // Server IP: Use stored value, Wokwi defaults, or fallback
+  String server_ip = wifi_config.server_address;
+  #ifdef WOKWI_SIMULATION
+  if (server_ip.length() == 0) {
+    server_ip = "host.wokwi.internal";  // Wokwi host access
+  }
+  #else
+  if (server_ip.length() == 0) {
+    server_ip = "192.168.0.198";  // Default server IP
+  }
+  #endif
+  html.replace("%SERVER_IP%", htmlEscape(server_ip));
+
+  // MQTT Port: Use stored value or default
+  uint16_t mqtt_port = wifi_config.mqtt_port > 0 ? wifi_config.mqtt_port : 8883;
+  #ifdef WOKWI_SIMULATION
+  mqtt_port = wifi_config.mqtt_port > 0 ? wifi_config.mqtt_port : 1883;  // Wokwi uses non-TLS
+  #endif
+  html.replace("%MQTT_PORT%", String(mqtt_port));
+
+  // Zone Name pre-fill
+  html.replace("%ZONE_NAME%", htmlEscape(kaiser.zone_name));
+
+  // Error box: Show if last connection failed
+  String errorBox = "";
+  if (last_connection_failed_) {
+    errorBox = "<div class=\"error-box\"><strong>Verbindung fehlgeschlagen</strong><span>";
+    errorBox += htmlEscape(last_error_message_);
+    errorBox += "</span></div>";
+  }
+  html.replace("%ERROR_BOX%", errorBox);
 
   server_->send(200, "text/html", html);
 
@@ -703,7 +922,7 @@ void ProvisionManager::handleProvision() {
   LOG_INFO("✅ WiFi configuration saved to NVS");
 
   // Extract and save Zone Config (optional)
-  if (doc.containsKey("kaiser_id") || doc.containsKey("master_zone_id")) {
+  if (doc.containsKey("kaiser_id") || doc.containsKey("master_zone_id") || doc.containsKey("zone_name")) {
     KaiserZone kaiser = configManager.getKaiser();
     MasterZone master = configManager.getMasterZone();
 
@@ -717,10 +936,45 @@ void ProvisionManager::handleProvision() {
       LOG_INFO("  Master Zone ID: " + master.master_zone_id);
     }
 
+    // NEW: zone_name processing (Server generates zone_id automatically)
+    if (doc.containsKey("zone_name")) {
+      kaiser.zone_name = doc["zone_name"].as<String>();
+      LOG_INFO("  Zone Name: " + kaiser.zone_name);
+    }
+
     if (configManager.saveZoneConfig(kaiser, master)) {
       LOG_INFO("✅ Zone configuration saved to NVS");
     } else {
       LOG_WARNING("⚠️ Failed to save zone configuration (non-critical)");
+    }
+  }
+
+  // Reset error state on successful config save
+  last_connection_failed_ = false;
+  last_error_message_ = "";
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CRITICAL FIX: Reset system state BEFORE reboot
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Problem: STATE_SAFE_MODE_PROVISIONING was persisted in NVS but never cleared
+  // after successful provisioning. This caused an infinite reboot loop:
+  //   Boot → load config (valid) → STATE_SAFE_MODE_PROVISIONING (persisted)
+  //   → skip WiFi → loop() sees valid config → "KONFIGURATION EMPFANGEN!" → reboot
+  //
+  // Solution: Reset state to STATE_BOOT before reboot so normal boot flow
+  // proceeds with WiFi connection attempt on next boot.
+  // ═══════════════════════════════════════════════════════════════════════════
+  SystemConfig sys_config = configManager.getSystemConfig();
+  if (sys_config.current_state == STATE_SAFE_MODE_PROVISIONING ||
+      sys_config.current_state == STATE_SAFE_MODE) {
+    LOG_INFO("Resetting system state from " + String(sys_config.current_state) +
+             " to STATE_BOOT");
+    sys_config.current_state = STATE_BOOT;
+    sys_config.safe_mode_reason = "";  // Clear safe mode reason
+    sys_config.boot_count = 0;         // Reset boot counter (stable config now)
+    if (!configManager.saveSystemConfig(sys_config)) {
+      LOG_ERROR("Failed to save system config - state reset may not persist!");
+      // Continue anyway - better to try than to stay in broken state
     }
   }
 
@@ -936,5 +1190,15 @@ void ProvisionManager::sendJsonSuccess(const String& message) {
 
 unsigned long ProvisionManager::getUptimeSeconds() const {
   return millis() / 1000;
+}
+
+String ProvisionManager::htmlEscape(const String& input) {
+  String output = input;
+  output.replace("&", "&amp;");
+  output.replace("<", "&lt;");
+  output.replace(">", "&gt;");
+  output.replace("\"", "&quot;");
+  output.replace("'", "&#39;");
+  return output;
 }
 

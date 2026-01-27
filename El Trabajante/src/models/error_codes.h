@@ -145,6 +145,11 @@
 #define ERROR_WATCHDOG_FEED_BLOCKED 4071  // Watchdog feed blocked: Circuit breakers open
 #define ERROR_WATCHDOG_FEED_BLOCKED_CRITICAL 4072  // Watchdog feed blocked: Critical errors active
 
+// Device Discovery & Approval (Phase 2) - 4200-4209
+#define ERROR_DEVICE_REJECTED       4200  // Device rejected by server administrator
+#define ERROR_APPROVAL_TIMEOUT      4201  // Timeout waiting for server approval
+#define ERROR_APPROVAL_REVOKED      4202  // Previously approved device was revoked
+
 // ============================================
 // CONFIGURATION RESPONSE ERROR CODES (Enum)
 // ============================================
@@ -340,6 +345,11 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_WATCHDOG_TIMEOUT: return "Watchdog timeout detected (system hang)";
     case ERROR_WATCHDOG_FEED_BLOCKED: return "Watchdog feed blocked: Circuit breakers open";
     case ERROR_WATCHDOG_FEED_BLOCKED_CRITICAL: return "Watchdog feed blocked: Critical errors active";
+
+    // Device Discovery & Approval (Phase 2)
+    case ERROR_DEVICE_REJECTED: return "Device rejected by server administrator";
+    case ERROR_APPROVAL_TIMEOUT: return "Timeout waiting for server approval";
+    case ERROR_APPROVAL_REVOKED: return "Previously approved device was revoked";
 
     default: return "Unknown error code";
   }

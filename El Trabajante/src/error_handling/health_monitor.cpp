@@ -227,8 +227,10 @@ String HealthMonitor::getSnapshotJSON() const {
         case STATE_ZONE_CONFIGURED: state_str = "ZONE_CONFIGURED"; break;
         case STATE_SENSORS_CONFIGURED: state_str = "SENSORS_CONFIGURED"; break;
         case STATE_OPERATIONAL: state_str = "OPERATIONAL"; break;
+        case STATE_PENDING_APPROVAL: state_str = "PENDING_APPROVAL"; break;
         case STATE_LIBRARY_DOWNLOADING: state_str = "LIBRARY_DOWNLOADING"; break;
         case STATE_SAFE_MODE: state_str = "SAFE_MODE"; break;
+        case STATE_SAFE_MODE_PROVISIONING: state_str = "SAFE_MODE_PROVISIONING"; break;
         case STATE_ERROR: state_str = "ERROR"; break;
         default: state_str = "UNKNOWN"; break;
     }

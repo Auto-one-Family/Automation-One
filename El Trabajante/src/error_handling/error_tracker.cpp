@@ -1,5 +1,7 @@
 #include "error_tracker.h"
 #include "../utils/logger.h"
+#include "../utils/topic_builder.h"
+#include "../utils/time_manager.h"
 
 // ============================================
 // GLOBAL ERROR TRACKER INSTANCE
@@ -282,21 +284,31 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
   if (!mqtt_publishing_enabled_ || mqtt_publish_in_progress_) {
     return;
   }
-  
+
   // Guard: Must have callback
   if (mqtt_callback_ == nullptr) {
     return;
   }
-  
+
   // Set recursion guard
   mqtt_publish_in_progress_ = true;
-  
-  // Build topic: kaiser/god/esp/{esp_id}/system/error
-  String topic = "kaiser/god/esp/" + mqtt_esp_id_ + "/system/error";
-  
-  // Build payload (JSON)
+
+  // ✅ Phase 0 Fix: Use TopicBuilder for consistent topic generation
+  const char* topic = TopicBuilder::buildSystemErrorTopic();
+
+  // ✅ Defensive: Skip publish if topic generation failed (buffer overflow/encoding error)
+  if (topic == nullptr || topic[0] == '\0') {
+    mqtt_publish_in_progress_ = false;
+    return;
+  }
+
+  // ✅ Phase 0 Fix: Use Unix timestamp from TimeManager
+  time_t unix_ts = timeManager.getUnixTimestamp();
+  // Fallback to 0 if NTP not synced (server will use server-time)
+
+  // Build payload (JSON) - Server-compatible format
   String payload;
-  payload.reserve(200);
+  payload.reserve(256);
   payload = "{";
   payload += "\"error_code\":";
   payload += String(error_code);
@@ -308,14 +320,22 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
   // Escape quotes in message for valid JSON
   String escaped_msg = String(message);
   escaped_msg.replace("\"", "\\\"");
+  escaped_msg.replace("\n", "\\n");
   payload += escaped_msg;
-  payload += "\",\"ts\":";
+  // ✅ Phase 0 Fix: Add context field (empty object for now, extensible)
+  payload += "\",\"context\":{";
+  payload += "\"esp_id\":\"";
+  payload += mqtt_esp_id_;
+  payload += "\",\"uptime_ms\":";
   payload += String(millis());
   payload += "}";
-  
+  payload += ",\"ts\":";
+  payload += String((unsigned long)unix_ts);
+  payload += "}";
+
   // Fire-and-forget publish (no error handling - prevent recursion!)
-  mqtt_callback_(topic.c_str(), payload.c_str());
-  
+  mqtt_callback_(topic, payload.c_str());
+
   // Clear recursion guard
   mqtt_publish_in_progress_ = false;
 }

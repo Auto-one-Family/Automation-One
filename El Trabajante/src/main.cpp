@@ -270,6 +270,36 @@ void setup() {
 
   configManager.printConfigurationStatus();
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DEFENSIVE FIX: Detect and repair inconsistent state after provisioning
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Problem: If STATE_SAFE_MODE_PROVISIONING is persisted but valid WiFi config
+  // exists, ESP enters infinite reboot loop. This can happen if:
+  //   1. Power loss during state transition
+  //   2. Bug in provisioning flow (now fixed in provision_manager.cpp)
+  //   3. Manual NVS manipulation
+  //
+  // Solution: If we have valid config but are in provisioning safe-mode,
+  // reset state and attempt normal WiFi connection.
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (g_system_config.current_state == STATE_SAFE_MODE_PROVISIONING &&
+      g_wifi_config.configured &&
+      g_wifi_config.ssid.length() > 0) {
+    LOG_WARNING("╔════════════════════════════════════════╗");
+    LOG_WARNING("║  INCONSISTENT STATE DETECTED          ║");
+    LOG_WARNING("╚════════════════════════════════════════╝");
+    LOG_WARNING("State: STATE_SAFE_MODE_PROVISIONING but valid config exists");
+    LOG_WARNING("SSID: " + g_wifi_config.ssid);
+    LOG_WARNING("Repairing: Resetting state to STATE_BOOT");
+
+    g_system_config.current_state = STATE_BOOT;
+    g_system_config.safe_mode_reason = "";
+    g_system_config.boot_count = 0;  // Reset boot counter to prevent false boot-loop detection
+    configManager.saveSystemConfig(g_system_config);
+
+    LOG_INFO("State repaired - proceeding with normal boot flow");
+  }
+
   // ═══════════════════════════════════════════════════
   // PHASE 2: BOOT-LOOP-DETECTION (Robustness + Overflow-Safe)
   // ═══════════════════════════════════════════════════
@@ -577,7 +607,61 @@ void setup() {
   WiFiConfig wifi_config = configManager.getWiFiConfig();
   if (!wifiManager.connect(wifi_config)) {
     LOG_ERROR("WiFi connection failed");
-    LOG_WARNING("System will continue but WiFi features unavailable");
+
+    // ═══════════════════════════════════════════════════
+    // NEW: WiFi failure triggers Provisioning Portal
+    // ═══════════════════════════════════════════════════
+    LOG_CRITICAL("╔════════════════════════════════════════╗");
+    LOG_CRITICAL("║  WIFI CONNECTION FAILED               ║");
+    LOG_CRITICAL("║  Opening Provisioning Portal...       ║");
+    LOG_CRITICAL("╚════════════════════════════════════════╝");
+
+    // Update system state
+    g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+    g_system_config.safe_mode_reason = "WiFi connection to '" + wifi_config.ssid + "' failed";
+    configManager.saveSystemConfig(g_system_config);
+
+    // Initialize and start Provisioning Manager
+    if (!provisionManager.begin()) {
+      LOG_CRITICAL("ProvisionManager initialization failed!");
+      // LED blink pattern for hardware failure
+      pinMode(LED_PIN, OUTPUT);
+      while (true) {
+        for (int i = 0; i < 5; i++) {
+          digitalWrite(LED_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED_PIN, LOW);
+          delay(200);
+        }
+        delay(2000);
+      }
+    }
+
+    if (provisionManager.startAPMode()) {
+      LOG_INFO("╔════════════════════════════════════════╗");
+      LOG_INFO("║  PROVISIONING PORTAL ACTIVE           ║");
+      LOG_INFO("╚════════════════════════════════════════╝");
+      LOG_INFO("Connect to: AutoOne-" + g_system_config.esp_id);
+      LOG_INFO("Password: provision");
+      LOG_INFO("Open browser: http://192.168.4.1");
+      LOG_INFO("");
+      LOG_INFO("Correct your WiFi credentials in the form.");
+      LOG_INFO("setup() complete - loop() will handle provisioning");
+      return;  // Exit setup() early - loop() will handle provisioning
+    } else {
+      LOG_CRITICAL("Failed to start AP Mode!");
+      // LED blink pattern for AP failure
+      pinMode(LED_PIN, OUTPUT);
+      while (true) {
+        for (int i = 0; i < 4; i++) {
+          digitalWrite(LED_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED_PIN, LOW);
+          delay(200);
+        }
+        delay(2000);
+      }
+    }
   } else {
     LOG_INFO("WiFi connected successfully");
   }
@@ -653,7 +737,11 @@ void setup() {
     }
     mqttClient.subscribe(sensor_command_wildcard);
 
-    LOG_INFO("Subscribed to system + actuator + zone + subzone + sensor command topics");
+    // Phase 2: Heartbeat-ACK topic (Server → ESP for approval status)
+    String heartbeat_ack_topic = TopicBuilder::buildSystemHeartbeatAckTopic();
+    mqttClient.subscribe(heartbeat_ack_topic);
+
+    LOG_INFO("Subscribed to system + actuator + zone + subzone + sensor + heartbeat-ack topics");
 
     // Set MQTT callback for message routing (Phase 4)
     mqttClient.setCallback([](const String& topic, const String& payload) {
@@ -1126,8 +1214,119 @@ void setup() {
         return;
       }
 
+      // ============================================
+      // Phase 2: Heartbeat-ACK Handler (Server → ESP)
+      // ============================================
+      // Server sends ACK after each heartbeat with device approval status
+      // This allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
+      // without requiring a reboot after admin approval
+      String heartbeat_ack_topic = TopicBuilder::buildSystemHeartbeatAckTopic();
+      if (topic == heartbeat_ack_topic) {
+        LOG_DEBUG("Heartbeat ACK received");
+
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (error) {
+          LOG_WARNING("Heartbeat ACK parse error: " + String(error.c_str()));
+          return;
+        }
+
+        const char* status = doc["status"] | "unknown";
+        bool config_available = doc["config_available"] | false;
+        unsigned long server_time = doc["server_time"] | 0;
+
+        LOG_DEBUG("  Status: " + String(status) + ", Config available: " +
+                  String(config_available ? "yes" : "no"));
+
+        // ============================================
+        // Status-based State Transitions
+        // ============================================
+
+        if (strcmp(status, "approved") == 0 || strcmp(status, "online") == 0) {
+          // Server has approved this ESP
+          if (g_system_config.current_state == STATE_PENDING_APPROVAL) {
+            LOG_INFO("╔════════════════════════════════════════╗");
+            LOG_INFO("║   DEVICE APPROVED BY SERVER            ║");
+            LOG_INFO("╚════════════════════════════════════════╝");
+            LOG_INFO("Transitioning from PENDING_APPROVAL to OPERATIONAL");
+
+            // Persist approval status to NVS
+            time_t approval_ts = server_time > 0 ? (time_t)server_time : timeManager.getUnixTimestamp();
+            configManager.setDeviceApproved(true, approval_ts);
+
+            // State transition - NO REBOOT REQUIRED
+            g_system_config.current_state = STATE_OPERATIONAL;
+            configManager.saveSystemConfig(g_system_config);
+
+            LOG_INFO("  → Sensors/Actuators now ENABLED");
+            LOG_INFO("  → Full operational mode active");
+
+            // Note: Config will arrive via separate config topic if available
+            if (config_available) {
+              LOG_INFO("  → Server has config available - awaiting config push");
+            }
+          }
+          // If already OPERATIONAL: Normal operation, no action needed
+        }
+        else if (strcmp(status, "pending_approval") == 0) {
+          // ESP is still pending approval
+          if (g_system_config.current_state != STATE_PENDING_APPROVAL) {
+            LOG_INFO("Server reports: PENDING APPROVAL - entering limited mode");
+            g_system_config.current_state = STATE_PENDING_APPROVAL;
+            // Do NOT persist to NVS - this is a transient state
+          }
+        }
+        else if (strcmp(status, "rejected") == 0) {
+          // ESP has been rejected by admin
+          LOG_WARNING("╔════════════════════════════════════════╗");
+          LOG_WARNING("║   DEVICE REJECTED BY SERVER            ║");
+          LOG_WARNING("╚════════════════════════════════════════╝");
+
+          // Track error for diagnostics
+          errorTracker.trackError(
+            ERROR_DEVICE_REJECTED,
+            ERROR_SEVERITY_ERROR,
+            "Device rejected by server administrator"
+          );
+
+          // Clear approval flag
+          configManager.setDeviceApproved(false, 0);
+
+          // Enter error state
+          g_system_config.current_state = STATE_ERROR;
+          configManager.saveSystemConfig(g_system_config);
+
+          LOG_WARNING("  → Device in ERROR state");
+          LOG_WARNING("  → Manual intervention required");
+        }
+        else {
+          LOG_DEBUG("Unknown heartbeat ACK status: " + String(status));
+        }
+
+        return;
+      }
+
       // Additional message handlers can be added here
     });
+
+    // ============================================
+    // PHASE 1E: INITIAL APPROVAL CHECK
+    // ============================================
+    // After MQTT subscriptions are complete, check if device is approved.
+    // If not approved → enter PENDING_APPROVAL state (limited operation)
+    // If approved → continue to OPERATIONAL state (normal operation)
+    if (!configManager.isDeviceApproved()) {
+      // New device or not yet approved → Limited operation mode
+      g_system_config.current_state = STATE_PENDING_APPROVAL;
+      LOG_INFO("Device not yet approved - entering PENDING_APPROVAL state");
+      LOG_INFO("  → WiFi/MQTT active (heartbeats + diagnostics)");
+      LOG_INFO("  → Sensors/Actuators DISABLED until approval");
+    } else {
+      // Previously approved → Normal operation
+      g_system_config.current_state = STATE_OPERATIONAL;
+      LOG_INFO("Device previously approved - continuing normal operation");
+    }
   }
 
   LOG_INFO("╔════════════════════════════════════════╗");
@@ -1309,12 +1508,18 @@ bool feedWatchdog(const char* component_id) {
     }
 
     // MQTT Circuit Breaker OPEN?
+    // ✅ FIX (2026-01-20): MQTT CB blockiert Watchdog NICHT mehr!
+    // Grund: ESP kann lokal weiterarbeiten (Sensoren, Aktoren) auch wenn MQTT down ist.
+    // MQTT-Ausfall ist "degraded mode", nicht "critical failure".
+    // Nur WiFi CB bleibt kritisch (ohne WiFi kann ESP nichts tun).
     if (mqttClient.getCircuitBreakerState() == CircuitState::OPEN) {
-      errorTracker.logApplicationError(
-        ERROR_WATCHDOG_FEED_BLOCKED,
-        "Watchdog feed blocked: MQTT Circuit Breaker OPEN"
-      );
-      return false;
+      // Rate-limited warning (max once per 10 seconds)
+      static unsigned long last_mqtt_cb_warning = 0;
+      if (millis() - last_mqtt_cb_warning > 10000) {
+        last_mqtt_cb_warning = millis();
+        LOG_WARNING("MQTT Circuit Breaker OPEN - running in degraded mode");
+      }
+      // Continue with watchdog feed - don't block!
     }
 
     // Critical Errors?
@@ -1458,12 +1663,24 @@ void loop() {
     // ProvisionManager.loop() für HTTP-Request-Handling
     provisionManager.loop();
 
-    // ✅ CHECK: Wurde Konfiguration empfangen?
-    if (g_wifi_config.configured && g_wifi_config.ssid.length() > 0) {
-      // Config wurde via HTTP API empfangen und gespeichert!
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRITICAL FIX: Check if config was NEWLY received via HTTP, not just exists
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Problem: Previous check used (g_wifi_config.configured && g_wifi_config.ssid.length() > 0)
+    // This was TRUE immediately at boot if config was loaded from NVS, causing
+    // instant reboot → infinite loop.
+    //
+    // Solution: Use provisionManager.isConfigReceived() which is only TRUE after
+    // HTTP POST /provision successfully saves new config in this session.
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (provisionManager.isConfigReceived()) {
+      // Config wurde via HTTP API empfangen und gespeichert (in this session)!
       LOG_INFO("╔════════════════════════════════════════╗");
       LOG_INFO("║  ✅ KONFIGURATION EMPFANGEN!          ║");
       LOG_INFO("╚════════════════════════════════════════╝");
+
+      // Reload config to get fresh values
+      configManager.loadWiFiConfig(g_wifi_config);
       LOG_INFO("WiFi SSID: " + g_wifi_config.ssid);
       LOG_INFO("Rebooting to apply configuration...");
       delay(2000);
@@ -1472,6 +1689,28 @@ void loop() {
 
     delay(10);  // Provisioning Mode: No Watchdog active, no reset needed
     return;     // ✅ Skip normal loop logic
+  }
+
+  // ═══════════════════════════════════════════════════
+  // ✅ PHASE 1: STATE_PENDING_APPROVAL HANDLING
+  // ═══════════════════════════════════════════════════
+  // ESP ist registriert aber noch nicht vom Server genehmigt
+  // → WiFi/MQTT Verbindung halten (Heartbeats senden)
+  // → Sensoren/Aktoren NICHT aktivieren
+  // → Warte auf Approval-Message vom Server
+  if (g_system_config.current_state == STATE_PENDING_APPROVAL) {
+    // Maintain communication (send heartbeats, receive approval)
+    wifiManager.loop();
+    mqttClient.loop();
+    healthMonitor.loop();  // Publish diagnostics (includes system_state)
+
+    // Note: Initial approval check happens in setup() (Phase 1E)
+    // When approved via Frontend, server updates device status in DB
+    // On next ESP reboot, configManager.isDeviceApproved() returns true
+    // → Transition to STATE_OPERATIONAL happens automatically
+
+    delay(100);  // Slower loop in pending mode (no sensor/actuator work)
+    return;      // ✅ Skip sensor/actuator operations
   }
 
   // ═══════════════════════════════════════════════════

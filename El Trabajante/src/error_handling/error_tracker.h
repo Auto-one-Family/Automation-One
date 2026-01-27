@@ -85,15 +85,26 @@ public:
   // ============================================
   /**
    * @brief Set MQTT publish callback for error observability
-   * 
+   *
    * When set, errors will be published to MQTT topic for server logging.
    * Callback is fire-and-forget - no error handling to prevent recursion.
-   * 
+   *
    * @param callback Function pointer to publish errors
    * @param esp_id ESP ID for topic building
-   * 
-   * Topic format: kaiser/god/esp/{esp_id}/system/error
-   * Payload format: {"error_code":1020,"severity":2,"message":"...","ts":123456789}
+   *
+   * Topic format: kaiser/{kaiser_id}/esp/{esp_id}/system/error
+   *
+   * Payload format (Server-compatible):
+   * {
+   *   "error_code": 1020,
+   *   "severity": 2,
+   *   "category": "HARDWARE",
+   *   "message": "Sensor read failed",
+   *   "context": {"esp_id": "ESP_12AB34", "uptime_ms": 123456},
+   *   "ts": 1735818000
+   * }
+   *
+   * Note: ts=0 if NTP not synced (server uses server-time as fallback)
    */
   void setMqttPublishCallback(MqttErrorPublishCallback callback, const String& esp_id);
   

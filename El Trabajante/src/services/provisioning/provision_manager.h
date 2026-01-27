@@ -141,6 +141,10 @@ private:
   uint8_t retry_count_;
   bool initialized_;
   bool config_received_;
+
+  // Error Tracking for Retry Display
+  bool last_connection_failed_ = false;
+  String last_error_message_ = "";
   
   // WiFi & Server
   WebServer* server_;
@@ -255,6 +259,14 @@ private:
    * @param message Success-Message
    */
   void sendJsonSuccess(const String& message);
+
+  /**
+   * Escapes HTML special characters for safe output
+   * Prevents XSS when displaying user-provided data
+   * @param input Raw string to escape
+   * @return HTML-safe string
+   */
+  String htmlEscape(const String& input);
   
   // ============================================
   // PRIVATE METHODS - STATE MACHINE
