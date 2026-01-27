@@ -23,12 +23,7 @@ async function handleLogoutAll() {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-bold text-dark-100">Settings</h1>
-      <p class="text-dark-400 mt-1">Application configuration</p>
-    </div>
-
+  <div class="h-full overflow-auto space-y-6">
     <!-- User Info -->
     <div class="card">
       <div class="card-header flex items-center gap-3">
@@ -101,7 +96,7 @@ async function handleLogoutAll() {
           <p><span class="text-dark-400">Frontend:</span> <span class="text-dark-200">El Frontend v1.0.0</span></p>
           <p><span class="text-dark-400">Stack:</span> <span class="text-dark-200">Vue 3 + TypeScript + Tailwind CSS</span></p>
           <p><span class="text-dark-400">Backend:</span> <span class="text-dark-200">God-Kaiser Server (FastAPI)</span></p>
-          <p><span class="text-dark-400">Purpose:</span> <span class="text-dark-200">AutomationOne Debug Dashboard</span></p>
+          <p><span class="text-dark-400">Purpose:</span> <span class="text-dark-200">AutomationOne Steuerungszentrale</span></p>
         </div>
       </div>
     </div>

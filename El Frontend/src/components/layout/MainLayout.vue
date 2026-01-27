@@ -17,7 +17,8 @@ function closeSidebar() {
 </script>
 
 <template>
-  <div class="min-h-screen flex bg-dark-950">
+  <!-- ⭐ h-screen statt min-h-screen: Feste Höhe für korrekte Flex-Kette -->
+  <div class="h-screen flex bg-dark-950 overflow-hidden">
     <!-- Mobile Overlay -->
     <Transition name="fade">
       <div
@@ -39,7 +40,8 @@ function closeSidebar() {
       <AppHeader @toggle-sidebar="toggleSidebar" />
 
       <!-- Page Content -->
-      <main class="flex-1 p-4 md:p-6 overflow-auto">
+      <!-- ⭐ FIX: overflow-hidden + min-h-0 für korrekte Flex-Kette, Views haben eigene Scroll-Container -->
+      <main class="flex-1 p-4 md:p-6 overflow-hidden min-h-0">
         <RouterView />
       </main>
     </div>

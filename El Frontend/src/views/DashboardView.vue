@@ -17,9 +17,7 @@ import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import {
   Plus,
   Filter,
-  GitBranch,
-  Wifi,
-  Info
+  GitBranch
 } from 'lucide-vue-next'
 
 // Components
@@ -29,9 +27,9 @@ import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
 import ESPSettingsPopover from '@/components/esp/ESPSettingsPopover.vue'
 import ZoneGroup from '@/components/zones/ZoneGroup.vue'
 import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnectionOverlay.vue'
-import SensorSidebar from '@/components/dashboard/SensorSidebar.vue'
-import ActuatorSidebar from '@/components/dashboard/ActuatorSidebar.vue'
+import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
+import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 
 const router = useRouter()
@@ -49,7 +47,8 @@ const activeStatusFilters = ref<Set<StatusFilter>>(new Set())
 
 // Modal states
 const showCreateMockModal = ref(false)
-const showRealEspInfo = ref(false)
+const showPendingDevices = ref(false)
+const pendingButtonAnchor = ref<HTMLElement | null>(null)
 
 // Settings popover state (Phase 2)
 const settingsDevice = ref<ESPDevice | null>(null)
@@ -60,6 +59,7 @@ const showCrossEspConnections = ref(true)
 
 onMounted(() => {
   espStore.fetchAll()
+  espStore.fetchPendingDevices()  // Fetch pending devices for Discovery/Approval
   logicStore.fetchRules()
   // Subscribe to WebSocket for live logic execution updates
   logicStore.subscribeToWebSocket()
@@ -106,6 +106,7 @@ watch(
 // Status counts for ActionBar pills
 const onlineCount = computed(() => espStore.onlineDevices.length)
 const offlineCount = computed(() => espStore.offlineDevices.length)
+const pendingCount = computed(() => espStore.pendingCount)
 
 const warningCount = computed(() =>
   espStore.devices.filter(device => {
@@ -363,68 +364,40 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
   // ESP Store is updated via WebSocket event from server
   // Card will automatically move to correct ZoneGroup via reactive computed
 }
+
+/**
+ * Handle opening pending devices panel
+ * Captures the button element for anchor-based positioning
+ */
+function handleOpenPendingDevices(event: MouseEvent) {
+  pendingButtonAnchor.value = event.currentTarget as HTMLElement
+  showPendingDevices.value = true
+}
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Page Header -->
-    <div>
-      <h1 class="text-2xl font-bold" style="color: var(--color-text-primary)">Dashboard</h1>
-      <p style="color: var(--color-text-muted)" class="mt-1">AutomationOne System-Übersicht</p>
-    </div>
-
+  <div class="h-full overflow-auto space-y-6">
     <!-- Action Bar (replaces StatCards and Status Filters) -->
+    <!-- Type Filter is now consolidated into ActionBar (Robin UX feedback) -->
     <ActionBar
       :online-count="onlineCount"
       :offline-count="offlineCount"
       :warning-count="warningCount"
       :safe-mode-count="safeModeCount"
+      :pending-count="pendingCount"
       :active-filters="activeStatusFilters"
       :has-problems="hasProblems"
       :problem-message="problemMessage"
+      :filter-type="filterType"
+      :total-count="counts.all"
+      :mock-count="counts.mock"
+      :real-count="counts.real"
       @toggle-filter="toggleStatusFilter"
+      @update:filter-type="filterType = $event"
       @create-mock-esp="showCreateMockModal = true"
-      @show-real-esp-info="showRealEspInfo = true"
       @open-settings="() => {}"
+      @open-pending-devices="handleOpenPendingDevices"
     />
-
-    <!-- Type Filter (compact row) -->
-    <div class="flex flex-wrap items-center gap-3">
-      <div class="filter-group">
-        <span class="filter-label">Typ:</span>
-        <div class="filter-buttons">
-          <button
-            :class="['filter-btn', filterType === 'all' ? 'filter-btn--active' : '']"
-            @click="filterType = 'all'"
-          >
-            Alle ({{ counts.all }})
-          </button>
-          <button
-            :class="['filter-btn', filterType === 'mock' ? 'filter-btn--active filter-btn--mock' : '']"
-            @click="filterType = 'mock'"
-          >
-            Mock ({{ counts.mock }})
-          </button>
-          <button
-            :class="['filter-btn', filterType === 'real' ? 'filter-btn--active filter-btn--real' : '']"
-            @click="filterType = 'real'"
-          >
-            Real ({{ counts.real }})
-          </button>
-        </div>
-      </div>
-
-      <!-- Active filter indicator -->
-      <div v-if="activeStatusFilters.size > 0" class="flex items-center gap-2 text-sm">
-        <span class="text-gray-400">Filter aktiv:</span>
-        <button
-          class="text-emerald-400 hover:text-emerald-300 underline"
-          @click="activeStatusFilters = new Set()"
-        >
-          Zurücksetzen
-        </button>
-      </div>
-    </div>
 
     <!-- Loading -->
     <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
@@ -516,11 +489,8 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
         </button>
       </div>
 
-      <!-- Sidebars Container (rechte Seite, vertikal gestapelt) -->
-      <div class="sidebars-container">
-        <SensorSidebar />
-        <ActuatorSidebar />
-      </div>
+      <!-- Komponenten-Sidebar (rechte Seite) -->
+      <ComponentSidebar />
     </div>
 
     <!-- Fixed Bottom Bar for Unassigned Devices -->
@@ -530,6 +500,13 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
     <CreateMockEspModal
       v-model="showCreateMockModal"
       @created="onMockEspCreated"
+    />
+
+    <!-- Pending Devices Panel (Discovery/Approval) -->
+    <PendingDevicesPanel
+      v-model:is-open="showPendingDevices"
+      :anchor-el="pendingButtonAnchor"
+      @close="showPendingDevices = false"
     />
 
     <!-- ESP Settings Popover (Phase 2, 3 & 4) -->
@@ -545,52 +522,6 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
       @zone-updated="handleZoneUpdated"
     />
 
-    <!-- Real ESP Info Dialog -->
-    <Teleport to="body">
-      <div
-        v-if="showRealEspInfo"
-        class="modal-overlay"
-        @click.self="showRealEspInfo = false"
-      >
-        <div class="info-dialog">
-          <div class="info-dialog__header">
-            <Wifi class="w-6 h-6 text-emerald-400" />
-            <h3 class="info-dialog__title">Echten ESP32 verbinden</h3>
-          </div>
-          <div class="info-dialog__body">
-            <p class="mb-3">
-              Echte ESP32-Geräte verbinden sich automatisch über MQTT mit dem System.
-            </p>
-            <div class="info-steps">
-              <div class="info-step">
-                <span class="info-step__number">1</span>
-                <span>Flash die AutomationOne Firmware auf deinen ESP32</span>
-              </div>
-              <div class="info-step">
-                <span class="info-step__number">2</span>
-                <span>Konfiguriere WiFi und MQTT-Server in der Firmware</span>
-              </div>
-              <div class="info-step">
-                <span class="info-step__number">3</span>
-                <span>Der ESP erscheint automatisch im Dashboard</span>
-              </div>
-            </div>
-            <p class="text-sm text-gray-400 mt-4">
-              <Info class="w-4 h-4 inline mr-1" />
-              Siehe <code class="text-emerald-400">El Trabajante/</code> für die ESP32-Firmware
-            </p>
-          </div>
-          <div class="info-dialog__footer">
-            <button
-              class="btn-primary w-full"
-              @click="showRealEspInfo = false"
-            >
-              Verstanden
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -630,59 +561,6 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
 }
 
 /* Hover handled by ESPCard itself */
-
-/* Filter group */
-.filter-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.filter-label {
-  font-size: 0.875rem;
-  color: var(--color-text-muted);
-}
-
-.filter-buttons {
-  display: flex;
-  gap: 0.25rem;
-  background-color: var(--color-bg-tertiary);
-  padding: 0.25rem;
-  border-radius: 0.5rem;
-}
-
-.filter-btn {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border-radius: 0.375rem;
-  color: var(--color-text-muted);
-  transition: all 0.2s;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-
-.filter-btn:hover {
-  color: var(--color-text-primary);
-}
-
-.filter-btn--active {
-  background-color: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-}
-
-.filter-btn--mock.filter-btn--active {
-  color: var(--color-mock);
-}
-
-.filter-btn--real.filter-btn--active {
-  color: var(--color-real);
-}
-
-.filter-btn--success.filter-btn--active {
-  color: var(--color-success);
-}
 
 /* Zone groups container - compact spacing */
 .zone-groups-container {
@@ -733,23 +611,6 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
   display: flex;
   gap: 0;
   min-height: 400px;
-}
-
-/* Sidebars Container - vertikal gestapelt */
-.sidebars-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  /* Beide Sidebars teilen sich den vertikalen Platz */
-  max-height: calc(100vh - 200px);
-  overflow: hidden;
-}
-
-/* Jede Sidebar bekommt flex: 1 für gleichmäßige Aufteilung */
-.sidebars-container > :deep(*) {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
 }
 
 /* Zone groups wrapper for Cross-ESP overlay */
@@ -812,90 +673,4 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
   backdrop-filter: blur(4px);
 }
 
-/* Info dialog */
-.info-dialog {
-  width: 100%;
-  max-width: 26rem;
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
-  box-shadow: var(--glass-shadow);
-  overflow: hidden;
-}
-
-.info-dialog__header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 1.25rem;
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.info-dialog__title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.info-dialog__body {
-  padding: 1.25rem;
-  color: var(--color-text-secondary);
-}
-
-.info-dialog__footer {
-  padding: 1rem 1.25rem;
-  border-top: 1px solid var(--glass-border);
-}
-
-/* Info steps */
-.info-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
-
-.info-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  font-size: 0.875rem;
-}
-
-.info-step__number {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
-  border-radius: 50%;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: white;
-  flex-shrink: 0;
-}
-
-/* Primary button (reused from global styles) */
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
-  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
-  color: white;
-  font-weight: 500;
-  border-radius: 0.5rem;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-primary:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.3);
-}
 </style>

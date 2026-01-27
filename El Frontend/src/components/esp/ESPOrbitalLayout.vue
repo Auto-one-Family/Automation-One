@@ -1570,7 +1570,7 @@ watch(
             <template v-else>
               <div
                 class="esp-info-compact__name-display"
-                title="Doppelklick zum Bearbeiten"
+                :title="displayName ? `${displayName}\n(Doppelklick zum Bearbeiten)` : 'Doppelklick zum Bearbeiten'"
                 @dblclick.stop="startEditName"
               >
                 <h3 :class="['esp-info-compact__title', { 'esp-info-compact__title--empty': !displayName }]">
@@ -1817,9 +1817,9 @@ watch(
                       {{ shortenRomCode(device.rom_code) }}
                     </code>
                     <!-- Status Badge: Neu vs Konfiguriert -->
-                    <Badge 
-                      v-if="device.already_configured" 
-                      variant="secondary" 
+                    <Badge
+                      v-if="device.already_configured"
+                      variant="gray"
                       size="xs"
                       :title="`Bereits konfiguriert als: ${device.sensor_name || 'Unbenannt'}`"
                     >
@@ -2598,12 +2598,14 @@ watch(
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-text-primary);
-  word-break: break-word;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   margin: 0;
+  max-width: 140px;
+  /* Fade-out Gradient für lange Namen (statt harter Ellipsis) */
+  mask-image: linear-gradient(to right, black 75%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 75%, transparent 100%);
 }
 
 .esp-info-compact__title--empty {
@@ -2874,7 +2876,7 @@ watch(
 }
 
 .connection-dot:hover {
-  transform: scale(1.3);
+  box-shadow: 0 0 8px currentColor;
 }
 
 .connection-dot.good {

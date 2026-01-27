@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { LogOut, User, ChevronDown, Menu } from 'lucide-vue-next'
+import { useWebSocket } from '@/composables/useWebSocket'
+import { LogOut, User, ChevronDown, Menu, Wifi, WifiOff } from 'lucide-vue-next'
 
 // Emit for sidebar toggle
 const emit = defineEmits<{
@@ -12,6 +13,37 @@ const emit = defineEmits<{
 const router = useRouter()
 const authStore = useAuthStore()
 const showUserMenu = ref(false)
+
+// WebSocket Connection Status
+const { isConnected, connectionStatus } = useWebSocket({ autoConnect: true })
+
+// Computed: Server Status Text
+const serverStatusText = computed(() => {
+  switch (connectionStatus.value) {
+    case 'connected':
+      return 'Server verbunden'
+    case 'connecting':
+      return 'Verbinde...'
+    case 'error':
+      return 'Verbindungsfehler'
+    default:
+      return 'Server getrennt'
+  }
+})
+
+// Computed: Server Status Class
+const serverStatusClass = computed(() => {
+  switch (connectionStatus.value) {
+    case 'connected':
+      return 'server-status--connected'
+    case 'connecting':
+      return 'server-status--connecting'
+    case 'error':
+      return 'server-status--error'
+    default:
+      return 'server-status--disconnected'
+  }
+})
 
 async function handleLogout() {
   await authStore.logout()
@@ -33,16 +65,21 @@ async function handleLogout() {
 
       <!-- Page Title (can be dynamic via route meta) -->
       <h2 class="text-base md:text-lg font-semibold text-dark-100">
-        {{ $route.meta.title || 'Debug Dashboard' }}
+        {{ $route.meta.title || 'AutomationOne' }}
       </h2>
     </div>
 
     <!-- Right Side -->
     <div class="flex items-center gap-4">
-      <!-- Connection Status -->
-      <div class="flex items-center gap-2 text-sm">
-        <span class="status-online animate-pulse"></span>
-        <span class="text-dark-400">Server Connected</span>
+      <!-- Server Connection Status -->
+      <div
+        class="server-status"
+        :class="serverStatusClass"
+        :title="serverStatusText"
+      >
+        <span class="status-dot" :class="{ 'animate-pulse': connectionStatus === 'connecting' || isConnected }"></span>
+        <component :is="isConnected ? Wifi : WifiOff" class="w-4 h-4" />
+        <span class="hidden md:inline">{{ serverStatusText }}</span>
       </div>
 
       <!-- User Menu -->
@@ -89,3 +126,81 @@ async function handleLogout() {
     @click="showUserMenu = false"
   />
 </template>
+
+<style scoped>
+/* =============================================================================
+   Server Connection Status - Iridescent Badge
+   ============================================================================= */
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+  flex-shrink: 0;
+}
+
+/* Connected - Green Glow */
+.server-status--connected {
+  color: rgb(52, 211, 153);
+  background: linear-gradient(135deg,
+    rgba(52, 211, 153, 0.2) 0%,
+    rgba(52, 211, 153, 0.1) 100%
+  );
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  box-shadow: 0 0 15px rgba(52, 211, 153, 0.2);
+}
+
+.server-status--connected .status-dot {
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* Connecting - Yellow Glow */
+.server-status--connecting {
+  color: rgb(251, 191, 36);
+  background: linear-gradient(135deg,
+    rgba(251, 191, 36, 0.2) 0%,
+    rgba(251, 191, 36, 0.1) 100%
+  );
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  box-shadow: 0 0 15px rgba(251, 191, 36, 0.2);
+}
+
+/* Disconnected - Red Glow */
+.server-status--disconnected,
+.server-status--error {
+  color: rgb(239, 68, 68);
+  background: linear-gradient(135deg,
+    rgba(239, 68, 68, 0.2) 0%,
+    rgba(239, 68, 68, 0.1) 100%
+  );
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
+}
+
+/* Pulse Animation */
+.animate-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+</style>

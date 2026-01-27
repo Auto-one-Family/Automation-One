@@ -1,6 +1,6 @@
-# El Frontend - AutomationOne Debug Dashboard
+# El Frontend - AutomationOne Control Panel
 
-> **Vue 3 + TypeScript + Tailwind CSS Debug Dashboard**
+> **Vue 3 + TypeScript + Tailwind CSS Control Panel**
 > **Status:** Ready for Development
 
 ## Features

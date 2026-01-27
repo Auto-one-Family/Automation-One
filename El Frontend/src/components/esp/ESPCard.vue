@@ -68,6 +68,7 @@ import {
   Check,
   X,
   Power,
+  Activity,
 } from 'lucide-vue-next'
 import Badge from '@/components/common/Badge.vue'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
@@ -243,17 +244,24 @@ const connectionStatus = computed(() => {
   return props.esp.status || 'unknown'
 })
 
-// Primary status info - ALWAYS shows connection status (Online/Offline)
+// Primary status info - ALWAYS shows connection/approval status
+// Extended for Phase 3C: Pending-Mode Integration
 const stateInfo = computed(() => {
   const status = connectionStatus.value
-  if (status === 'online') {
-    return { label: 'Online', variant: 'success' }
-  } else if (status === 'offline') {
-    return { label: 'Offline', variant: 'gray' }
-  } else if (status === 'error') {
-    return { label: 'Fehler', variant: 'danger' }
+
+  // Status-to-UI mapping (consistent with server status values)
+  const statusMap: Record<string, { label: string; variant: string }> = {
+    // Approval-Flow Status (Phase 3C)
+    pending_approval: { label: 'Wartet auf Freigabe', variant: 'warning' },
+    approved: { label: 'Freigegeben', variant: 'info' },
+    rejected: { label: 'Abgelehnt', variant: 'danger' },
+    // Connection Status
+    online: { label: 'Online', variant: 'success' },
+    offline: { label: 'Offline', variant: 'gray' },
+    error: { label: 'Fehler', variant: 'danger' },
   }
-  return { label: 'Unbekannt', variant: 'gray' }
+
+  return statusMap[status] ?? { label: 'Unbekannt', variant: 'gray' }
 })
 
 // Secondary state info for Mock ESPs - only shown for notable states (SAFE_MODE, ERROR)
@@ -624,7 +632,7 @@ const offlineTimeAbsolute = computed(() => {
               <div
                 class="esp-card__name-display"
                 @click="startEditName"
-                title="Klicken zum Bearbeiten"
+                :title="displayName ? `${displayName}\n(Klicken zum Bearbeiten)` : 'Klicken zum Bearbeiten'"
               >
                 <span :class="['esp-card__name', { 'esp-card__name--empty': !displayName }]">
                   {{ displayName || 'Unbenannt' }}
@@ -866,6 +874,22 @@ const offlineTimeAbsolute = computed(() => {
             Details
           </RouterLink>
 
+          <!-- System Monitor: View Logs -->
+          <RouterLink
+            :to="{
+              path: '/system-monitor',
+              query: {
+                tab: 'events',
+                esp: espId,
+                timeRange: '1h'
+              }
+            }"
+            class="esp-card__action-btn esp-card__action-btn--logs"
+            title="Logs anzeigen"
+          >
+            <Activity class="w-4 h-4" />
+          </RouterLink>
+
           <!-- Mock ESP: Heartbeat -->
           <button
             v-if="isMock"
@@ -1026,6 +1050,9 @@ const offlineTimeAbsolute = computed(() => {
   margin: -0.25rem -0.5rem;
   border-radius: 0.375rem;
   transition: background-color 0.15s ease;
+  min-width: 0; /* Erlaubt Text-Truncation in Flexbox */
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .esp-card__name-display:hover {
@@ -1041,6 +1068,22 @@ const offlineTimeAbsolute = computed(() => {
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1.3;
+  /* Fade-out für lange Namen */
+  display: block;
+  max-width: 180px; /* Begrenzt Namen-Breite */
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+  /* Gradient-Mask für smooth Fade-out */
+  mask-image: linear-gradient(to right, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+}
+
+/* Responsive: Kürzere max-width auf kleineren Screens */
+@media (max-width: 480px) {
+  .esp-card__name {
+    max-width: 120px;
+  }
 }
 
 .esp-card__name--empty {
@@ -1516,6 +1559,17 @@ const offlineTimeAbsolute = computed(() => {
   color: #f472b6;
   background-color: rgba(244, 114, 182, 0.1);
   border-color: rgba(244, 114, 182, 0.3);
+}
+
+/* Logs button - blue accent */
+.esp-card__action-btn--logs {
+  text-decoration: none;
+}
+
+.esp-card__action-btn--logs:hover {
+  color: var(--color-info);
+  background-color: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
 }
 
 /* Delete button - red accent */

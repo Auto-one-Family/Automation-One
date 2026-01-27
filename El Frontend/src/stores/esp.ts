@@ -13,7 +13,14 @@ import { sensorsApi, oneWireApi, type OneWireDevice, type OneWireScanResponse } 
 import { useWebSocket } from '@/composables/useWebSocket'
 import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
-import type { MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem, MultiValueEntry } from '@/types'
+import type { 
+  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, 
+  ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, 
+  StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, 
+  GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem, MultiValueEntry,
+  PendingESPDevice, ESPApprovalRequest, ESPApprovalResponse,
+  DeviceDiscoveredEvent, DeviceApprovedEvent, DeviceRejectedEvent
+} from '@/types'
 import {
   getDeviceTypeFromSensorType,
   getMultiValueDeviceConfigBySensorType,
@@ -85,6 +92,12 @@ export const useEspStore = defineStore('esp', () => {
   const gpioStatusMap = ref<Map<string, GpioStatusResponse>>(new Map())
   const gpioStatusLoading = ref<Map<string, boolean>>(new Map())
 
+  // =========================================================================
+  // Pending Devices State (Discovery/Approval Phase)
+  // =========================================================================
+  const pendingDevices = ref<PendingESPDevice[]>([])
+  const isPendingLoading = ref(false)
+
   // WebSocket integration
   // Note: Server broadcasts these types from MQTT handlers:
   // - esp_health (heartbeat_handler.py)
@@ -93,11 +106,16 @@ export const useEspStore = defineStore('esp', () => {
   // - actuator_alert (actuator_alert_handler.py)
   // - config_response (config_handler.py)
   // - sensor_health (maintenance/jobs/sensor_health.py) - Phase 2E
+  // - device_discovered, device_approved, device_rejected (Discovery/Approval Phase)
   const ws = useWebSocket({
     autoConnect: true,
     autoReconnect: true,
     filters: {
-      types: ['esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 'config_response', 'zone_assignment', 'sensor_health'] as MessageType[],
+      types: [
+        'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 
+        'config_response', 'zone_assignment', 'sensor_health',
+        'device_discovered', 'device_approved', 'device_rejected'
+      ] as MessageType[],
     },
   })
 
@@ -144,6 +162,9 @@ export const useEspStore = defineStore('esp', () => {
   const masterZoneDevices = computed(() =>
     devices.value.filter(device => device.is_zone_master === true)
   )
+
+  // Pending devices count for ActionBar badge
+  const pendingCount = computed(() => pendingDevices.value.length)
 
 /**
  * Check if device is Mock ESP
@@ -650,6 +671,95 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       throw err
     } finally {
       isLoading.value = false
+    }
+  }
+
+  // ===========================================================================
+  // Pending Devices Actions (Discovery/Approval Phase)
+  // ===========================================================================
+
+  /**
+   * Fetch all pending (unapproved) devices.
+   * Called on initial load and after approval/rejection.
+   */
+  async function fetchPendingDevices(): Promise<void> {
+    isPendingLoading.value = true
+    error.value = null
+
+    try {
+      const devices = await espApi.getPendingDevices()
+      pendingDevices.value = devices
+      console.debug(`[ESP Store] Fetched ${devices.length} pending devices`)
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, 'Failed to fetch pending devices')
+      console.error('[ESP Store] Failed to fetch pending devices:', err)
+    } finally {
+      isPendingLoading.value = false
+    }
+  }
+
+  /**
+   * Approve a pending device.
+   * 
+   * @param deviceId - Device ID to approve
+   * @param data - Optional approval data (name, zone)
+   * @returns Approval response
+   */
+  async function approveDevice(
+    deviceId: string,
+    data?: ESPApprovalRequest
+  ): Promise<ESPApprovalResponse> {
+    error.value = null
+    const toast = useToast()
+
+    try {
+      const response = await espApi.approveDevice(deviceId, data)
+      
+      // Remove from pending list
+      pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== deviceId)
+      
+      // Toast notification
+      toast.success(`Gerät ${deviceId} wurde genehmigt`, { duration: 4000 })
+      
+      // Refresh device list to show the newly approved device
+      fetchAll()
+      
+      return response
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to approve device ${deviceId}`)
+      toast.error(`Fehler beim Genehmigen: ${error.value}`, { duration: 6000 })
+      throw err
+    }
+  }
+
+  /**
+   * Reject a pending device.
+   * 
+   * @param deviceId - Device ID to reject
+   * @param reason - Reason for rejection
+   * @returns Rejection response
+   */
+  async function rejectDevice(
+    deviceId: string,
+    reason: string
+  ): Promise<ESPApprovalResponse> {
+    error.value = null
+    const toast = useToast()
+
+    try {
+      const response = await espApi.rejectDevice(deviceId, reason)
+      
+      // Remove from pending list
+      pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== deviceId)
+      
+      // Toast notification
+      toast.info(`Gerät ${deviceId} wurde abgelehnt`, { duration: 4000 })
+      
+      return response
+    } catch (err: unknown) {
+      error.value = extractErrorMessage(err, `Failed to reject device ${deviceId}`)
+      toast.error(`Fehler beim Ablehnen: ${error.value}`, { duration: 6000 })
+      throw err
     }
   }
 
@@ -1700,6 +1810,93 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     }
   }
 
+  // ===========================================================================
+  // Discovery/Approval WebSocket Handlers
+  // ===========================================================================
+
+  /**
+   * Handle device_discovered WebSocket event.
+   * Adds new device to pending list and shows toast notification.
+   */
+  function handleDeviceDiscovered(message: any): void {
+    const data = message.data as DeviceDiscoveredEvent
+    const toast = useToast()
+
+    if (!data.device_id) {
+      console.warn('[ESP Store] device_discovered missing device_id')
+      return
+    }
+
+    console.info(`[ESP Store] New device discovered: ${data.device_id}`)
+
+    // Add to pending list if not already present
+    const exists = pendingDevices.value.some(d => d.device_id === data.device_id)
+    if (!exists) {
+      const newPending: PendingESPDevice = {
+        device_id: data.device_id,
+        discovered_at: data.discovered_at || new Date().toISOString(),
+        ip_address: data.ip_address,
+        heap_free: data.heap_free,
+        wifi_rssi: data.wifi_rssi,
+        sensor_count: data.sensor_count || 0,
+        actuator_count: data.actuator_count || 0,
+        heartbeat_count: 1,
+        hardware_type: data.hardware_type,
+      }
+      pendingDevices.value.push(newPending)
+    }
+
+    // Toast notification
+    toast.info(`Neues Gerät entdeckt: ${data.device_id}`, { duration: 4000 })
+  }
+
+  /**
+   * Handle device_approved WebSocket event.
+   * Removes device from pending list.
+   */
+  function handleDeviceApproved(message: any): void {
+    const data = message.data as DeviceApprovedEvent
+    const toast = useToast()
+
+    if (!data.device_id) {
+      console.warn('[ESP Store] device_approved missing device_id')
+      return
+    }
+
+    console.info(`[ESP Store] Device approved: ${data.device_id} by ${data.approved_by}`)
+
+    // Remove from pending list
+    pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
+
+    // Toast notification (only if not triggered by this client)
+    toast.success(`Gerät ${data.device_id} wurde genehmigt`, { duration: 4000 })
+
+    // Refresh device list
+    fetchAll()
+  }
+
+  /**
+   * Handle device_rejected WebSocket event.
+   * Removes device from pending list.
+   */
+  function handleDeviceRejected(message: any): void {
+    const data = message.data as DeviceRejectedEvent
+    const toast = useToast()
+
+    if (!data.device_id) {
+      console.warn('[ESP Store] device_rejected missing device_id')
+      return
+    }
+
+    console.info(`[ESP Store] Device rejected: ${data.device_id} - ${data.rejection_reason}`)
+
+    // Remove from pending list
+    pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
+
+    // Toast notification
+    toast.warning(`Gerät ${data.device_id} wurde abgelehnt`, { duration: 4000 })
+  }
+
   /**
    * Handle sensor_health WebSocket event (Phase 2E).
    * Updates sensor stale status based on timeout violations.
@@ -1735,7 +1932,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       return
     }
 
-    const { index: deviceIndex, device } = result
+    const { device } = result
     if (!device.sensors) {
       console.debug(`[ESP Store] sensor_health: Device ${event.esp_id} has no sensors`)
       return
@@ -1807,6 +2004,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('config_response', handleConfigResponse),
       ws.on('zone_assignment', handleZoneAssignment),
       ws.on('sensor_health', handleSensorHealth),  // Phase 2E
+      // Discovery/Approval Phase
+      ws.on('device_discovered', handleDeviceDiscovered),
+      ws.on('device_approved', handleDeviceApproved),
+      ws.on('device_rejected', handleDeviceRejected),
     )
 
     // BUG U FIX: Register callback to refresh ESP data when WebSocket connects/reconnects
@@ -1845,6 +2046,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     selectedDeviceId,
     isLoading,
     error,
+    
+    // Pending Devices State (Discovery/Approval)
+    pendingDevices,
+    isPendingLoading,
+    pendingCount,
 
     // Getters
     selectedDevice,
@@ -1868,6 +2074,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     getHealth,
     restartDevice,
     resetDevice,
+    
+    // Pending Device Actions (Discovery/Approval)
+    fetchPendingDevices,
+    approveDevice,
+    rejectDevice,
     
     // Mock ESP specific actions
     triggerHeartbeat,

@@ -8,10 +8,11 @@
  *
  * Features:
  * - Sensor-Typen gruppiert nach Kategorien (Temperatur, Wasser, Boden, etc.)
- * - Kollabierbare Kategorien
+ * - Smart Collapse: Kategorien mit nur 1 Element werden direkt angezeigt
  * - Lucide Icons (konsistent mit Rest der App)
  * - Globaler Drag-State via dragStateStore
- * - Kompakte Darstellung (80px breit)
+ * - Responsive Design mit clamp() für besseres Zoom-Verhalten
+ * - Verbesserte Tooltips mit vollständigem Namen + Beschreibung
  */
 
 import { ref, computed, watch, type Component } from 'vue'
@@ -228,12 +229,14 @@ function toggleSidebar() {
           v-for="category in categorizedSensorTypes"
           :key="category.id"
           class="sensor-category"
+          :class="{ 'sensor-category--single': category.types.length === 1 }"
         >
-          <!-- Category Header (clickable to expand/collapse) -->
+          <!-- Category Header: Nur klickbar wenn > 1 Element -->
           <button
-            class="sensor-category__header"
+            v-if="category.types.length > 1"
+            class="sensor-category__header sensor-category__header--collapsible"
             @click="toggleCategory(category.id)"
-            :title="`${category.name} ${expandedCategories.has(category.id) ? 'einklappen' : 'ausklappen'}`"
+            :title="`${category.name} (${category.types.length}) ${expandedCategories.has(category.id) ? 'einklappen' : 'ausklappen'}`"
           >
             <component
               :is="category.iconComponent"
@@ -247,14 +250,23 @@ function toggleSidebar() {
               :size="14"
             />
           </button>
+          <!-- Für Kategorien mit nur 1 Element: Kein Collapse, direkt Label -->
+          <div v-else class="sensor-category__header sensor-category__header--static">
+            <component
+              :is="category.iconComponent"
+              class="sensor-category__icon"
+              :size="14"
+            />
+            <span class="sensor-category__name">{{ category.name }}</span>
+          </div>
 
           <!-- Category Content (sensor types) -->
-          <Transition name="collapse">
+          <!-- Bei > 1 Element: Collapsible -->
+          <Transition v-if="category.types.length > 1" name="collapse">
             <div
               v-if="expandedCategories.has(category.id)"
               class="sensor-category__content"
             >
-              <!-- ISSUE-001 fix: Use reactive class binding instead of direct DOM manipulation -->
               <div
                 v-for="sensor in category.types"
                 :key="sensor.type"
@@ -263,7 +275,7 @@ function toggleSidebar() {
                 draggable="true"
                 @dragstart="onSensorTypeDragStart($event, sensor)"
                 @dragend="onSensorTypeDragEnd"
-                :title="sensor.config.description"
+                :title="`${sensor.config.label}\n${sensor.config.description || ''}`"
               >
                 <component
                   :is="sensor.iconComponent"
@@ -275,6 +287,27 @@ function toggleSidebar() {
               </div>
             </div>
           </Transition>
+          <!-- Bei 1 Element: Immer sichtbar, ohne Animation -->
+          <div v-else class="sensor-category__content sensor-category__content--always-visible">
+            <div
+              v-for="sensor in category.types"
+              :key="sensor.type"
+              class="sensor-type"
+              :class="{ 'sensor-type--dragging': draggingSensorType === sensor.type }"
+              draggable="true"
+              @dragstart="onSensorTypeDragStart($event, sensor)"
+              @dragend="onSensorTypeDragEnd"
+              :title="`${sensor.config.label}\n${sensor.config.description || ''}`"
+            >
+              <component
+                :is="sensor.iconComponent"
+                class="sensor-type__icon"
+                :size="20"
+                :stroke-width="1.5"
+              />
+              <span class="sensor-type__label">{{ sensor.shortLabel }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -284,8 +317,10 @@ function toggleSidebar() {
 <style scoped>
 .sensor-sidebar {
   position: relative;
-  width: 100px;
-  min-width: 100px;
+  /* Responsive width: min 80px, preferred 100px, max 120px bei Zoom */
+  width: clamp(80px, 6rem, 120px);
+  min-width: clamp(80px, 6rem, 120px);
+  flex-shrink: 0;
   background: var(--color-bg-secondary);
   border-left: 1px solid var(--glass-border);
   display: flex;
@@ -382,14 +417,33 @@ function toggleSidebar() {
   background: transparent;
   border: none;
   border-radius: 0.25rem;
-  cursor: pointer;
   color: var(--color-text-secondary);
   transition: all 0.15s ease;
 }
 
-.sensor-category__header:hover {
+/* Collapsible Header (mit Chevron) - interaktiv */
+.sensor-category__header--collapsible {
+  cursor: pointer;
+}
+
+.sensor-category__header--collapsible:hover {
   background: rgba(167, 139, 250, 0.08);
   color: var(--color-text-primary);
+}
+
+/* Static Header (ohne Chevron) - nicht interaktiv */
+.sensor-category__header--static {
+  cursor: default;
+  padding-bottom: 0.25rem;
+}
+
+/* Kategorien mit nur 1 Element: Kompakter */
+.sensor-category--single {
+  padding-bottom: 0.25rem;
+}
+
+.sensor-category--single .sensor-category__content--always-visible {
+  padding-top: 0;
 }
 
 .sensor-category__icon {
@@ -398,7 +452,7 @@ function toggleSidebar() {
   opacity: 0.8;
 }
 
-.sensor-category__header:hover .sensor-category__icon {
+.sensor-category__header--collapsible:hover .sensor-category__icon {
   opacity: 1;
 }
 
@@ -418,7 +472,7 @@ function toggleSidebar() {
   transition: transform 0.2s ease;
 }
 
-.sensor-category__header:hover .sensor-category__chevron {
+.sensor-category__header--collapsible:hover .sensor-category__chevron {
   color: var(--color-text-secondary);
 }
 
@@ -470,7 +524,6 @@ function toggleSidebar() {
 .sensor-type:hover {
   background: rgba(167, 139, 250, 0.12);
   border-color: var(--color-iridescent-1);
-  transform: scale(1.02);
   box-shadow: 0 2px 8px rgba(167, 139, 250, 0.15);
 }
 
@@ -481,7 +534,6 @@ function toggleSidebar() {
 .sensor-type:active,
 .sensor-type--dragging {
   cursor: grabbing;
-  transform: scale(0.95);
   opacity: 0.7;
   border-color: var(--color-iridescent-2);
   box-shadow: 0 0 12px rgba(167, 139, 250, 0.4);

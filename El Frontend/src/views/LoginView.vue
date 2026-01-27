@@ -63,7 +63,7 @@ async function handleLogin() {
           <Cpu class="w-10 h-10" />
         </div>
         <h1 class="login-title">AutomationOne</h1>
-        <p class="login-subtitle">Debug Dashboard</p>
+        <p class="login-subtitle">Steuerungszentrale</p>
       </div>
 
       <!-- Login Card with Glass Effect -->

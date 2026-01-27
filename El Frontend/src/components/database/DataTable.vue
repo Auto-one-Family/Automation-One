@@ -16,17 +16,20 @@ const emit = defineEmits<{
   rowClick: [record: Record<string, unknown>]
 }>()
 
-// Visible columns (limit to prevent horizontal overflow)
+/**
+ * Visible columns - uses pre-filtered columns from parent component
+ *
+ * The parent (DatabaseTab) is responsible for filtering columns
+ * based on defaultVisible from databaseColumnTranslator.
+ *
+ * Robin's Prinzipien:
+ * - Timestamps FIRST (created_at, last_seen)
+ * - IDs NEVER visible (id, zone_id, user_id)
+ * - Limit to 8 columns to prevent horizontal overflow
+ */
 const visibleColumns = computed(() => {
-  // Prioritize: primary key, then non-json columns
-  const sorted = [...props.columns].sort((a, b) => {
-    if (a.primary_key) return -1
-    if (b.primary_key) return 1
-    if (a.type === 'json') return 1
-    if (b.type === 'json') return -1
-    return 0
-  })
-  return sorted.slice(0, 8) // Show max 8 columns
+  // Parent already filtered/ordered, just limit count
+  return props.columns.slice(0, 8)
 })
 
 /**

@@ -706,9 +706,7 @@ Backend:
   - api/v1/debug.py               # Log-Viewer-Endpoints
   - core/logging_config.py        # Logging-Konfiguration
   - config/logging.yaml           # Log-Datei-Pfade
-```
-
-#### UserManagementView
+```#### UserManagementView
 ```
 Frontend:
   - src/views/UserManagementView.vue
@@ -873,9 +871,7 @@ Backend:
   - core/security.py              # JWT-Token-Generierung, Password-Hashing
   - db/repositories/user_repo.py  # User-Abfragen
   - db/models/token_blacklist.py  # Token-Invalidierung
-```
-
-### 8.4 MQTT-Integration
+```### 8.4 MQTT-Integration
 
 ```
 Pfad: El Servador/god_kaiser_server/src/mqtt/

@@ -421,10 +421,9 @@ function handleDragEnd(event: DragEvent) {
   max-width: 220px;
 }
 
-/* Hover state - elevated feel */
+/* Hover state - elevated feel (ohne transform um Layout-Springen zu vermeiden) */
 .sensor-satellite:hover {
   border-color: rgba(56, 189, 248, 0.3);
-  transform: translateY(-3px) scale(1.02);
   background: linear-gradient(
     135deg,
     rgba(28, 31, 40, 0.98) 0%,
@@ -487,7 +486,7 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite:hover .sensor-satellite__icon {
-  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .sensor-satellite__icon--success {
@@ -670,7 +669,7 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite:hover .sensor-satellite__quality-dot {
-  transform: scale(1.15);
+  box-shadow: 0 0 10px currentColor;
 }
 
 .sensor-satellite__quality-text {

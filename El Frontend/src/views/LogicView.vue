@@ -5,12 +5,8 @@ import { GitBranch, Plus } from 'lucide-vue-next'
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-dark-100">Logic Rules</h1>
-        <p class="text-dark-400 mt-1">Automation rules and conditions</p>
-      </div>
+  <div class="h-full overflow-auto space-y-6">
+    <div class="flex justify-end">
       <button class="btn-primary">
         <Plus class="w-4 h-4 mr-2" />
         Create Rule

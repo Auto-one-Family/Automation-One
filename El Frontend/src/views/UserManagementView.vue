@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { usersApi, type User, type UserCreate, type UserUpdate, type UserRole } from '@/api/users'
 import { useAuthStore } from '@/stores/auth'
 import {
-  Users, Plus, Edit, Trash2, Key, RefreshCw, AlertCircle, Check, X,
+  Plus, Edit, Trash2, Key, RefreshCw, AlertCircle, Check, X,
   Shield, Eye, Settings, UserCheck, UserX
 } from 'lucide-vue-next'
 
@@ -227,20 +227,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Header -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div>
-        <h1 class="text-2xl font-bold text-dark-100 flex items-center gap-3">
-          <Users class="w-7 h-7 text-green-400" />
-          User Management
-        </h1>
-        <p class="text-sm text-dark-400 mt-1">
-          Manage user accounts and permissions
-        </p>
-      </div>
-
-      <div class="flex items-center gap-2">
+  <div class="h-full overflow-auto space-y-6">
+    <!-- Header Actions -->
+    <div class="flex flex-wrap items-center gap-2 justify-end">
         <button class="btn-secondary" @click="openChangePasswordModal">
           <Key class="w-4 h-4 mr-2" />
           Change My Password
@@ -249,7 +238,6 @@ onMounted(() => {
           <Plus class="w-4 h-4 mr-2" />
           Add User
         </button>
-      </div>
     </div>
 
     <!-- Alerts -->

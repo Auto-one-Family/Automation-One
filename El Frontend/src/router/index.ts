@@ -28,6 +28,7 @@ const router = createRouter({
           path: '',
           name: 'dashboard',
           component: () => import('@/views/DashboardView.vue'),
+          meta: { title: 'Dashboard' },
         },
         // DEPRECATED 2025-01-04: DevicesView → Dashboard redirect
         {
@@ -56,56 +57,66 @@ const router = createRouter({
             query: { openSettings: to.params.espId as string },
           }),
         },
+        // DEPRECATED 2026-01-23: DatabaseExplorerView → System Monitor
         {
           path: 'database',
           name: 'database',
-          component: () => import('@/views/DatabaseExplorerView.vue'),
-          meta: { requiresAdmin: true },
+          redirect: '/system-monitor?tab=database',
         },
+        // DEPRECATED 2026-01-23: LogViewerView → System Monitor
         {
           path: 'logs',
           name: 'logs',
-          component: () => import('@/views/LogViewerView.vue'),
-          meta: { requiresAdmin: true },
+          redirect: '/system-monitor?tab=logs',
         },
+        {
+          path: 'system-monitor',
+          name: 'system-monitor',
+          component: () => import('@/views/SystemMonitorView.vue'),
+          meta: { requiresAdmin: true, title: 'System Monitor' },
+        },
+        // DEPRECATED 2026-01-24: AuditLogView → System Monitor (Phase 1 Konsolidierung)
+        // Alle Funktionen sind in SystemMonitorView Tab "Ereignisse" verfügbar
         {
           path: 'audit',
           name: 'audit',
-          component: () => import('@/views/AuditLogView.vue'),
+          redirect: '/system-monitor?tab=events',
         },
         {
           path: 'users',
           name: 'users',
           component: () => import('@/views/UserManagementView.vue'),
-          meta: { requiresAdmin: true },
+          meta: { requiresAdmin: true, title: 'Benutzerverwaltung' },
         },
         {
           path: 'system-config',
           name: 'system-config',
           component: () => import('@/views/SystemConfigView.vue'),
-          meta: { requiresAdmin: true },
+          meta: { requiresAdmin: true, title: 'Systemkonfiguration' },
         },
         {
           path: 'load-test',
           name: 'load-test',
           component: () => import('@/views/LoadTestView.vue'),
-          meta: { requiresAdmin: true },
+          meta: { requiresAdmin: true, title: 'Last-Tests' },
         },
+        // DEPRECATED 2026-01-23: MqttLogView → System Monitor
         {
           path: 'mqtt-log',
           name: 'mqtt-log',
-          component: () => import('@/views/MqttLogView.vue'),
+          redirect: '/system-monitor?tab=mqtt',
         },
         {
           path: 'maintenance',
           name: 'maintenance',
           component: () => import('@/views/MaintenanceView.vue'),
-          meta: { requiresAdmin: true },
+          meta: { requiresAdmin: true, title: 'Wartung' },
         },
         {
           path: 'sensors',
           name: 'sensors',
           component: () => import('@/views/SensorsView.vue'),
+          meta: { title: 'Komponenten' },
         },
         // DEPRECATED 2025-01-04: ActuatorsView → SensorsView with tab query
         {
@@ -117,11 +128,13 @@ const router = createRouter({
           path: 'logic',
           name: 'logic',
           component: () => import('@/views/LogicView.vue'),
+          meta: { title: 'Automatisierung' },
         },
         {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
+          meta: { title: 'Einstellungen' },
         },
       ],
     },

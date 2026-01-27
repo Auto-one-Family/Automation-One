@@ -294,17 +294,10 @@ function getQualityColor(quality: string): string {
 </script>
 
 <template>
-  <div class="space-y-4 md:space-y-6">
+  <div class="h-full overflow-auto space-y-4 md:space-y-6">
     <!-- Header with Tabs -->
     <div class="flex flex-col gap-4">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 class="text-xl md:text-2xl font-bold text-dark-100">Komponenten</h1>
-          <p class="text-dark-400 mt-1 text-sm md:text-base">
-            Sensoren und Aktoren aller Mock ESPs
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
+      <div class="flex flex-wrap gap-2 justify-end">
           <button
             class="btn-secondary flex items-center gap-2"
             @click="showFilters = !showFilters"
@@ -327,7 +320,6 @@ function getQualityColor(quality: string): string {
             <span class="sm:hidden">E-Stop</span>
           </button>
         </div>
-      </div>
 
       <!-- Tab Navigation -->
       <div class="tab-navigation">

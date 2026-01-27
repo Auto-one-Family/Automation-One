@@ -1,31 +1,27 @@
 <script setup lang="ts">
 /**
  * AppSidebar Component
- * 
- * Main navigation sidebar with:
- * - Grouped navigation items
- * - Collapsible groups
- * - Admin-only sections
- * - Iridescent active state
+ *
+ * Flat navigation sidebar with:
+ * - Direct links (no nested groups)
+ * - Visual dividers between sections
+ * - Admin-only items (conditional)
  * - Mobile responsive
  */
 
-import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
   X,
-  ChevronDown,
   LayoutDashboard,
   Cpu,
   Workflow,
-  Activity,
-  FileText,
+  Monitor,
   Users,
-  Database,
   Settings,
+  Wrench,
   Zap,
-  MessageSquare,
+  UserCog,
 } from 'lucide-vue-next'
 
 // Props & Emits for mobile responsive
@@ -40,109 +36,6 @@ const emit = defineEmits<{
 const route = useRoute()
 const authStore = useAuthStore()
 
-// Collapsed state for groups (persisted to localStorage)
-const collapsedGroups = ref<Set<string>>(new Set())
-
-// Load collapsed state from localStorage
-const loadCollapsedState = () => {
-  try {
-    const saved = localStorage.getItem('sidebar_collapsed_groups')
-    if (saved) {
-      collapsedGroups.value = new Set(JSON.parse(saved))
-    }
-  } catch {
-    // Ignore errors
-  }
-}
-
-// Save collapsed state to localStorage
-const saveCollapsedState = () => {
-  try {
-    localStorage.setItem(
-      'sidebar_collapsed_groups', 
-      JSON.stringify([...collapsedGroups.value])
-    )
-  } catch {
-    // Ignore errors
-  }
-}
-
-loadCollapsedState()
-
-// Toggle group collapsed state
-const toggleGroup = (groupId: string) => {
-  if (collapsedGroups.value.has(groupId)) {
-    collapsedGroups.value.delete(groupId)
-  } else {
-    collapsedGroups.value.add(groupId)
-  }
-  saveCollapsedState()
-}
-
-// Check if group is collapsed
-const isGroupCollapsed = (groupId: string) => collapsedGroups.value.has(groupId)
-
-// Navigation structure
-interface NavItem {
-  name: string
-  to: string
-  icon?: typeof LayoutDashboard
-}
-
-interface NavGroup {
-  id: string
-  label?: string
-  icon?: typeof LayoutDashboard
-  adminOnly?: boolean
-  items: NavItem[]
-}
-
-const navigationGroups: NavGroup[] = [
-  {
-    id: 'main',
-    items: [
-      { name: 'Dashboard', to: '/', icon: LayoutDashboard },
-      // Komponenten: Combined Sensors & Actuators view with tabs
-      { name: 'Komponenten', to: '/sensors', icon: Cpu },
-    ]
-  },
-  {
-    id: 'automation',
-    label: 'Automation',
-    icon: Workflow,
-    items: [
-      { name: 'Regeln', to: '/logic', icon: Workflow },
-      // { name: 'Verlauf', to: '/logic/history', icon: History },
-    ]
-  },
-  {
-    id: 'monitoring',
-    label: 'Monitoring',
-    icon: Activity,
-    items: [
-      { name: 'MQTT Live', to: '/mqtt-log', icon: MessageSquare },
-      { name: 'Server Logs', to: '/logs', icon: FileText },
-    ]
-  },
-  {
-    id: 'admin',
-    label: 'Administration',
-    icon: Settings,
-    adminOnly: true,
-    items: [
-      { name: 'Benutzer', to: '/users', icon: Users },
-      { name: 'Datenbank', to: '/database', icon: Database },
-      { name: 'System', to: '/system-config', icon: Settings },
-      { name: 'Last-Tests', to: '/load-test', icon: Zap },
-    ]
-  }
-]
-
-// Filter groups based on admin status
-const filteredGroups = computed(() => 
-  navigationGroups.filter(group => !group.adminOnly || authStore.isAdmin)
-)
-
 // Check if a route is active
 function isActive(to: string): boolean {
   if (to === '/') {
@@ -151,24 +44,10 @@ function isActive(to: string): boolean {
   return route.path.startsWith(to)
 }
 
-// Check if any item in a group is active
-function isGroupActive(group: NavGroup): boolean {
-  return group.items.some(item => isActive(item.to))
-}
-
 // Handle nav click - close sidebar on mobile
 function handleNavClick() {
   emit('close')
 }
-
-// Auto-expand groups when a child is active
-watch(() => route.path, () => {
-  for (const group of navigationGroups) {
-    if (group.label && isGroupActive(group)) {
-      collapsedGroups.value.delete(group.id)
-    }
-  }
-}, { immediate: true })
 </script>
 
 <template>
@@ -192,70 +71,105 @@ watch(() => route.path, () => {
       </button>
     </div>
 
-    <!-- Navigation -->
+    <!-- Navigation: Flat links -->
     <nav class="sidebar__nav">
-      <template v-for="group in filteredGroups" :key="group.id">
-        <!-- Group without header (main) -->
-        <div v-if="!group.label" class="sidebar__group">
-          <RouterLink
-            v-for="item in group.items"
-            :key="item.to"
-            :to="item.to"
-            :class="[
-              'sidebar__link',
-              isActive(item.to) ? 'sidebar__link--active' : ''
-            ]"
-            @click="handleNavClick"
-          >
-            <component v-if="item.icon" :is="item.icon" class="sidebar__link-icon" />
-            <span>{{ item.name }}</span>
-          </RouterLink>
-        </div>
-        
-        <!-- Group with header (collapsible) -->
-        <div v-else class="sidebar__group">
-          <button
-            class="sidebar__group-header"
-            :class="{ 'sidebar__group-header--active': isGroupActive(group) }"
-            @click="toggleGroup(group.id)"
-          >
-            <div class="sidebar__group-header-left">
-              <component v-if="group.icon" :is="group.icon" class="sidebar__group-icon" />
-              <span class="sidebar__group-label">{{ group.label }}</span>
-            </div>
-            <ChevronDown 
-              :class="[
-                'sidebar__group-chevron',
-                isGroupCollapsed(group.id) ? '' : 'sidebar__group-chevron--open'
-              ]"
-            />
-          </button>
-          
-          <!-- Collapsible items -->
-          <div 
-            v-show="!isGroupCollapsed(group.id)"
-            class="sidebar__group-items"
-          >
-            <RouterLink
-              v-for="item in group.items"
-              :key="item.to"
-              :to="item.to"
-              :class="[
-                'sidebar__link sidebar__link--nested',
-                isActive(item.to) ? 'sidebar__link--active' : ''
-              ]"
-              @click="handleNavClick"
-            >
-              <component v-if="item.icon" :is="item.icon" class="sidebar__link-icon" />
-              <span>{{ item.name }}</span>
-            </RouterLink>
-          </div>
-        </div>
+      <!-- Haupt-Navigation -->
+      <RouterLink
+        to="/"
+        :class="['sidebar__link', isActive('/') ? 'sidebar__link--active' : '']"
+        @click="handleNavClick"
+      >
+        <LayoutDashboard class="sidebar__link-icon" />
+        <span>Dashboard</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/sensors"
+        :class="['sidebar__link', isActive('/sensors') ? 'sidebar__link--active' : '']"
+        @click="handleNavClick"
+      >
+        <Cpu class="sidebar__link-icon" />
+        <span>Komponenten</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/logic"
+        :class="['sidebar__link', isActive('/logic') ? 'sidebar__link--active' : '']"
+        @click="handleNavClick"
+      >
+        <Workflow class="sidebar__link-icon" />
+        <span>Regeln</span>
+      </RouterLink>
+
+      <!-- Divider -->
+      <div class="sidebar__divider" />
+
+      <!-- Monitoring -->
+      <RouterLink
+        to="/system-monitor"
+        :class="['sidebar__link', isActive('/system-monitor') ? 'sidebar__link--active' : '']"
+        @click="handleNavClick"
+      >
+        <Monitor class="sidebar__link-icon" />
+        <span>System Monitor</span>
+      </RouterLink>
+
+      <!-- Admin Section -->
+      <template v-if="authStore.isAdmin">
+        <!-- Divider -->
+        <div class="sidebar__divider" />
+
+        <RouterLink
+          to="/users"
+          :class="['sidebar__link', isActive('/users') ? 'sidebar__link--active' : '']"
+          @click="handleNavClick"
+        >
+          <Users class="sidebar__link-icon" />
+          <span>Benutzer</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/system-config"
+          :class="['sidebar__link', isActive('/system-config') ? 'sidebar__link--active' : '']"
+          @click="handleNavClick"
+        >
+          <Settings class="sidebar__link-icon" />
+          <span>System</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/maintenance"
+          :class="['sidebar__link', isActive('/maintenance') ? 'sidebar__link--active' : '']"
+          @click="handleNavClick"
+        >
+          <Wrench class="sidebar__link-icon" />
+          <span>Wartung</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/load-test"
+          :class="['sidebar__link', isActive('/load-test') ? 'sidebar__link--active' : '']"
+          @click="handleNavClick"
+        >
+          <Zap class="sidebar__link-icon" />
+          <span>Last-Tests</span>
+        </RouterLink>
       </template>
     </nav>
 
-    <!-- User Info -->
+    <!-- Footer: Settings & User Info -->
     <div class="sidebar__footer">
+      <!-- Settings Link (visible for all users) -->
+      <RouterLink
+        to="/settings"
+        :class="['sidebar__link', isActive('/settings') ? 'sidebar__link--active' : '']"
+        @click="handleNavClick"
+      >
+        <UserCog class="sidebar__link-icon" />
+        <span>Einstellungen</span>
+      </RouterLink>
+
+      <!-- User Info -->
       <div class="sidebar__user">
         <div class="sidebar__user-avatar">
           {{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}
@@ -336,80 +250,28 @@ watch(() => route.path, () => {
 .sidebar__nav {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1rem 0.75rem;
 }
 
-.sidebar__group {
-  margin-bottom: 0.5rem;
+/* Divider between sections */
+.sidebar__divider {
+  height: 1px;
+  background-color: var(--glass-border);
+  margin: 0.75rem 0.5rem;
 }
 
-/* Group header (collapsible) */
-.sidebar__group-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.625rem 1rem;
-  border-radius: 0.5rem;
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  transition: all 0.2s;
-  cursor: pointer;
-  background: transparent;
-  border: none;
-}
-
-.sidebar__group-header:hover {
-  color: var(--color-text-secondary);
-  background-color: var(--color-bg-tertiary);
-}
-
-.sidebar__group-header--active {
-  color: var(--color-iridescent-1);
-}
-
-.sidebar__group-header-left {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sidebar__group-icon {
-  width: 1rem;
-  height: 1rem;
-}
-
-.sidebar__group-chevron {
-  width: 1rem;
-  height: 1rem;
-  transition: transform 0.2s;
-}
-
-.sidebar__group-chevron--open {
-  transform: rotate(180deg);
-}
-
-.sidebar__group-items {
-  margin-top: 0.25rem;
-  margin-left: 0.5rem;
-  padding-left: 0.5rem;
-  border-left: 1px solid var(--glass-border);
-}
-
-/* Navigation links */
+/* Navigation links - FLAT */
 .sidebar__link {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.625rem 1rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.25rem;
   border-radius: 0.5rem;
   color: var(--color-text-secondary);
   font-size: 0.875rem;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   text-decoration: none;
   min-height: 44px; /* Touch target */
 }
@@ -417,6 +279,11 @@ watch(() => route.path, () => {
 .sidebar__link:hover {
   color: var(--color-text-primary);
   background-color: var(--color-bg-tertiary);
+  transform: translateX(2px);
+}
+
+.sidebar__link:active {
+  transform: translateX(0);
 }
 
 .sidebar__link--active {
@@ -426,8 +293,8 @@ watch(() => route.path, () => {
   margin-left: -2px;
 }
 
-.sidebar__link--nested {
-  padding-left: 1rem;
+.sidebar__link--active:hover {
+  transform: none;
 }
 
 .sidebar__link-icon {
@@ -438,7 +305,7 @@ watch(() => route.path, () => {
 
 /* Footer / User info */
 .sidebar__footer {
-  padding: 1rem;
+  padding: 1rem 0.75rem;
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
@@ -447,6 +314,7 @@ watch(() => route.path, () => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  margin-top: 0.75rem;
 }
 
 .sidebar__user-avatar {

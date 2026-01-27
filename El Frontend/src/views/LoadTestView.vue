@@ -130,19 +130,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Header -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div>
-        <h1 class="text-2xl font-bold text-dark-100 flex items-center gap-3">
-          <Zap class="w-7 h-7 text-orange-400" />
-          Load Testing
-        </h1>
-        <p class="text-sm text-dark-400 mt-1">
-          Create mock ESPs and simulate sensor activity
-        </p>
-      </div>
-
+  <div class="h-full overflow-auto space-y-6">
+    <!-- Header Actions -->
+    <div class="flex justify-end">
       <button
         class="btn-secondary"
         :disabled="isLoading"

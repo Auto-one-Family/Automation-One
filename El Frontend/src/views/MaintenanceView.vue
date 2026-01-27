@@ -1,10 +1,5 @@
 <template>
   <div class="maintenance-view">
-    <div class="page-header">
-      <h1>🔧 Maintenance & Monitoring</h1>
-      <p class="subtitle">System-Wartung und Überwachung</p>
-    </div>
-
     <!-- Service Status -->
     <div class="status-section">
       <h2>Service Status</h2>
@@ -272,6 +267,8 @@ onMounted(() => {
 
 <style scoped>
 .maintenance-view {
+  height: 100%;
+  overflow-y: auto;
   padding: 1.5rem;
   max-width: 1400px;
   margin: 0 auto;
