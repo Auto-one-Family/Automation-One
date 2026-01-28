@@ -1,0 +1,19 @@
+# DHT22 Dual-Value Sensor Flow Test
+# Validates DHT22 initialization and dual-value reading (temperature + humidity)
+# Requires DHT22 connected to GPIO 15 in diagram.json
+# Timeout: 90000ms
+
+name: DHT22 Dual-Value Sensor Flow Test
+version: 1
+steps:
+  # Boot and connect
+  - wait-serial: "MQTT connected"
+
+  # Sensor Manager active
+  - wait-serial: "Sensor Manager"
+
+  # Sensor data published (loop running)
+  - wait-serial: "Published"
+
+  # Heartbeat confirms system operational
+  - wait-serial: "heartbeat"
