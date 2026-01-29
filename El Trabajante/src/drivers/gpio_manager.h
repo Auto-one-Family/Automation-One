@@ -238,4 +238,3 @@ private:
 extern GPIOManager& gpioManager;
 
 #endif // DRIVERS_GPIO_MANAGER_H
-

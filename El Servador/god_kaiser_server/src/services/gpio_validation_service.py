@@ -494,3 +494,4 @@ class GpioValidationService:
             Menschenlesbarer Name oder Fallback
         """
         return SYSTEM_PIN_NAMES.get(gpio, f"System GPIO {gpio}")
+

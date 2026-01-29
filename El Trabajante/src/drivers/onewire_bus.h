@@ -130,4 +130,3 @@ private:
 extern OneWireBusManager& oneWireBusManager;
 
 #endif // DRIVERS_ONEWIRE_BUS_H
-

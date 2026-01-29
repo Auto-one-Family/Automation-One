@@ -513,4 +513,3 @@ String I2CBusManager::getBusStatus() const {
     status += "]";
     return status;
 }
-

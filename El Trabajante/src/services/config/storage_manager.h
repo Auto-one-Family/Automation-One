@@ -83,4 +83,3 @@ private:
 extern StorageManager& storageManager;
 
 #endif
-
