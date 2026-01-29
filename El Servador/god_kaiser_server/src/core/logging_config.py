@@ -10,6 +10,15 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .config import get_settings
+from .request_context import get_request_id
+
+
+class RequestIdFilter(logging.Filter):
+    """Filter that adds request_id to every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = get_request_id() or "-"
+        return True
 
 
 class JSONFormatter(logging.Formatter):
@@ -34,6 +43,11 @@ class JSONFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
         }
+
+        # Add request_id for request correlation
+        request_id = getattr(record, "request_id", "-")
+        if request_id and request_id != "-":
+            log_data["request_id"] = request_id
 
         # Add exception info if present
         if record.exc_info:
@@ -92,12 +106,15 @@ def setup_logging() -> None:
     # Remove existing handlers to avoid duplicates
     root_logger.handlers.clear()
 
+    # Add request_id filter to root logger (applies to all handlers)
+    root_logger.addFilter(RequestIdFilter())
+
     # Create formatters
     if settings.logging.format == "json":
         formatter = JSONFormatter(datefmt="%Y-%m-%d %H:%M:%S")
     else:
         formatter = TextFormatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            fmt="%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
@@ -118,7 +135,7 @@ def setup_logging() -> None:
 
     # Use text formatter for console (easier to read)
     console_formatter = TextFormatter(
-        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        fmt="%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     console_handler.setFormatter(console_formatter)

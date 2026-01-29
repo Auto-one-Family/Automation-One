@@ -628,6 +628,10 @@ app = FastAPI(
 
 # ===== MIDDLEWARE =====
 
+# Request-ID middleware (must be added before CORS so it wraps the full request)
+from .middleware.request_id import RequestIdMiddleware
+app.add_middleware(RequestIdMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -635,6 +639,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 # ===== ROUTES =====

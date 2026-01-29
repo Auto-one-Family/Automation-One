@@ -21,6 +21,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md
 """
 
+import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -386,12 +387,15 @@ class ESPService:
         """
         from ..core.error_codes import ConfigErrorCode
 
+        correlation_id = str(uuid.uuid4())
+
         result = {
             "success": False,
             "sent": False,
             "device_status": "unknown",
             "message": "",
             "error_code": None,
+            "correlation_id": correlation_id,
         }
 
         # Get device
@@ -436,10 +440,11 @@ class ESPService:
                     "MQTT broker will queue message until device reconnects."
                 )
 
-        # Publish config via MQTT
+        # Publish config via MQTT (inject correlation_id for Phase 3 tracking)
+        config_with_correlation = {**config, "correlation_id": correlation_id}
         success = self.publisher.publish_config(
             esp_id=device_id,
-            config=config,
+            config=config_with_correlation,
         )
 
         result["sent"] = True
@@ -460,12 +465,14 @@ class ESPService:
                     source_id=device_id,
                     status="success",
                     message=f"Config sent to {device_id}",
+                    correlation_id=correlation_id,
                     details={
                         "esp_id": device_id,
                         "config_keys": list(config.keys()),
                         "device_status": device.status or "unknown",
                         "sensor_count": len(config.get("sensors", [])),
                         "actuator_count": len(config.get("actuators", [])),
+                        "correlation_id": correlation_id,
                     },
                 )
             except Exception as audit_err:
@@ -478,6 +485,7 @@ class ESPService:
                 await ws_manager.broadcast("config_published", {
                     "esp_id": device_id,
                     "config_keys": list(config.keys()),
+                    "correlation_id": correlation_id,
                 })
             except Exception:
                 pass  # WebSocket broadcast is best-effort
@@ -496,14 +504,29 @@ class ESPService:
                     source_id=device_id,
                     status="failed",
                     message=f"Failed to publish config to {device_id}",
+                    correlation_id=correlation_id,
                     details={
                         "esp_id": device_id,
                         "config_keys": list(config.keys()),
                         "error": "MQTT publish failed",
+                        "correlation_id": correlation_id,
                     },
                 )
             except Exception as audit_err:
                 logger.warning(f"Failed to write audit log for config failure: {audit_err}")
+
+            # WebSocket broadcast: config failed
+            try:
+                from ..websocket.manager import WebSocketManager
+                ws_manager = await WebSocketManager.get_instance()
+                await ws_manager.broadcast("config_failed", {
+                    "esp_id": device_id,
+                    "config_keys": list(config.keys()) if config else [],
+                    "error": "MQTT publish failed",
+                    "correlation_id": correlation_id,
+                })
+            except Exception:
+                pass  # WebSocket broadcast is best-effort
 
         return result
 
