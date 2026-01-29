@@ -2219,6 +2219,7 @@ class LogEntry(BaseModel):
     function: Optional[str] = None
     line: Optional[int] = None
     exception: Optional[str] = None
+    request_id: Optional[str] = None
     extra: Optional[Dict[str, Any]] = None
 
 
@@ -2283,6 +2284,10 @@ _log_backups: Dict[str, Dict[str, Any]] = {}
 
 def _parse_log_line(line: str) -> Optional[LogEntry]:
     """Parse a single log line (JSON format)."""
+    _KNOWN_JSON_KEYS = {
+        "timestamp", "level", "logger", "message", "module",
+        "function", "line", "exception", "request_id",
+    }
     try:
         data = json.loads(line.strip())
         return LogEntry(
@@ -2294,13 +2299,24 @@ def _parse_log_line(line: str) -> Optional[LogEntry]:
             function=data.get("function"),
             line=data.get("line"),
             exception=data.get("exception"),
-            extra={k: v for k, v in data.items() if k not in {
-                "timestamp", "level", "logger", "message", "module", "function", "line", "exception"
-            }} or None
+            request_id=data.get("request_id"),
+            extra={k: v for k, v in data.items() if k not in _KNOWN_JSON_KEYS} or None
         )
     except json.JSONDecodeError:
         # Try parsing as text format
-        # Format: "2025-01-01 12:00:00 - logger - LEVEL - message"
+        # New format: "2025-01-01 12:00:00 - logger - LEVEL - [req-id] - message"
+        pattern_with_rid = r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) - (\w+) - \[([^\]]+)\] - (.*)$'
+        match = re.match(pattern_with_rid, line.strip())
+        if match:
+            rid = match.group(4)
+            return LogEntry(
+                timestamp=match.group(1),
+                logger=match.group(2),
+                level=match.group(3),
+                request_id=rid if rid != "-" else None,
+                message=match.group(5)
+            )
+        # Legacy format: "2025-01-01 12:00:00 - logger - LEVEL - message"
         pattern = r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) - (\w+) - (.*)$'
         match = re.match(pattern, line.strip())
         if match:
@@ -2321,9 +2337,14 @@ def _filter_log_entry(
     module: Optional[str],
     search: Optional[str],
     start_time: Optional[datetime],
-    end_time: Optional[datetime]
+    end_time: Optional[datetime],
+    request_id: Optional[str] = None,
 ) -> bool:
     """Check if a log entry matches the filters."""
+    # Request-ID filter (exact match)
+    if request_id and entry.request_id != request_id:
+        return False
+
     # Level filter
     if level:
         level_order = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -2415,6 +2436,7 @@ async def query_logs(
     search: Optional[str] = Query(default=None, description="Search in message text"),
     start_time: Optional[datetime] = Query(default=None, description="Start time filter"),
     end_time: Optional[datetime] = Query(default=None, description="End time filter"),
+    request_id: Optional[str] = Query(default=None, description="Filter by request_id (exact match)"),
     file: Optional[str] = Query(default=None, description="Specific log file to read"),
     page: int = Query(default=1, ge=1, description="Page number"),
     page_size: int = Query(default=100, ge=1, le=1000, description="Entries per page")
@@ -2439,8 +2461,8 @@ async def query_logs(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Log file '{file}' not found"
             )
-    elif start_time or end_time:
-        # Multi-file search: scan all log files when time range is specified
+    elif start_time or end_time or request_id:
+        # Multi-file search: scan all log files when time range or request_id is specified
         log_paths = sorted(
             log_dir.glob("god_kaiser.log*"),
             key=lambda x: x.stat().st_mtime,
@@ -2483,7 +2505,7 @@ async def query_logs(
                     continue
 
                 entry = _parse_log_line(line)
-                if entry and _filter_log_entry(entry, level, module, search, start_time, end_time):
+                if entry and _filter_log_entry(entry, level, module, search, start_time, end_time, request_id):
                     all_entries.append(entry)
 
                 if len(all_entries) >= MAX_MATCHED:

@@ -372,6 +372,7 @@ async def get_error_codes(
         
         error_codes.append(ErrorCodeInfoResponse(
             error_code=code,
+            title=info.get("message_de"),
             category=info.get("category", "UNKNOWN"),
             severity=info.get("severity", "ERROR"),
             message=info.get("message_user_de", f"Error code: {code}"),
@@ -425,6 +426,7 @@ async def get_error_code_info(
     
     return ErrorCodeInfoResponse(
         error_code=error_code,
+        title=error_info.get("message_de"),
         category=error_info.get("category", "UNKNOWN"),
         severity=error_info.get("severity", "ERROR"),
         message=error_info.get("message", f"Error code: {error_code}"),
