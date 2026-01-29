@@ -81,3 +81,7 @@ docs/.vuepress/dist
 docs/.vuepress/.cache
 docs/.vuepress/.temp
 
+
+# Backup files
+El Servador/god_kaiser_server/backups/
+**/backups/
