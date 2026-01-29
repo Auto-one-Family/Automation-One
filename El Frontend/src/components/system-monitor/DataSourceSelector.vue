@@ -63,6 +63,23 @@
         <!-- Divider -->
         <div class="filter-divider" />
 
+        <!-- Row 1.5: Grouping Toggle -->
+        <div class="filter-row">
+          <span class="filter-row-label">Ansicht</span>
+          <button
+            class="grouping-toggle"
+            :class="{ 'grouping-toggle--active': groupingEnabled }"
+            @click="emit('update:groupingEnabled', !groupingEnabled)"
+            title="Events nach Zeitfenster gruppieren"
+          >
+            <Layers class="icon" />
+            <span class="grouping-toggle__label">Gruppiert</span>
+          </button>
+        </div>
+
+        <!-- Divider -->
+        <div class="filter-divider" />
+
         <!-- Row 2: Filter Controls -->
         <div class="filter-row filter-row--wrap">
           <span class="filter-row-label">Filter</span>
@@ -211,7 +228,8 @@ import {
   AlertTriangle,
   AlertOctagon,
   Calendar,
-  X
+  X,
+  Layers,
 } from 'lucide-vue-next'
 import { getSeverityLabel } from '@/utils/errorCodeTranslator'
 
@@ -236,6 +254,8 @@ interface Props {
   // Custom Date Range (for 'custom' timeRange)
   customStartDate?: string
   customEndDate?: string
+  // Grouping
+  groupingEnabled?: boolean
 }
 
 const props = defineProps<Props>()
@@ -250,6 +270,8 @@ const emit = defineEmits<{
   // Custom Date Range changes
   'update:customStartDate': [value: string | undefined]
   'update:customEndDate': [value: string | undefined]
+  // Grouping
+  'update:groupingEnabled': [value: boolean]
 }>()
 
 // ============================================================================
@@ -1115,6 +1137,50 @@ onMounted(() => {
   .level-icon {
     width: 0.75rem;
     height: 0.75rem;
+  }
+}
+
+/* =============================================================================
+   Grouping Toggle
+   ============================================================================= */
+
+.grouping-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.grouping-toggle .icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.grouping-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.grouping-toggle--active {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #60a5fa;
+}
+
+.grouping-toggle__label {
+  font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .grouping-toggle__label {
+    display: none;
   }
 }
 </style>

@@ -50,6 +50,7 @@ import {
 const props = defineProps<{
   initialStartTime?: string
   initialEndTime?: string
+  initialRequestId?: string
 }>()
 
 // ============================================================================
@@ -128,6 +129,9 @@ const page = ref(1)
 const startTime = ref<string>('')
 const endTime = ref<string>('')
 
+// Request-ID-Filter (Phase 4: precise log correlation)
+const requestId = ref<string>('')
+
 // Expanded state
 const expandedIds = ref<Set<number>>(new Set())
 const copiedMessageId = ref<number | null>(null)
@@ -152,6 +156,7 @@ const currentQueryParams = computed<LogQueryParams>(() => ({
   page_size: PAGE_SIZE,
   start_time: startTime.value || undefined,
   end_time: endTime.value || undefined,
+  request_id: requestId.value || undefined,
 }))
 
 // ============================================================================
@@ -253,6 +258,12 @@ function formatTimeWindow(start: string, end: string): string {
 function clearTimeWindow() {
   startTime.value = ''
   endTime.value = ''
+  page.value = 1
+  loadLogs()
+}
+
+function clearRequestIdFilter() {
+  requestId.value = ''
   page.value = 1
   loadLogs()
 }
@@ -404,18 +415,26 @@ function getLevelClass(level: string): string {
 
 onMounted(async () => {
   // Feature 1.2: Props initialisieren falls vorhanden
-  if (props.initialStartTime) {
-    startTime.value = props.initialStartTime
-  }
-  if (props.initialEndTime) {
-    endTime.value = props.initialEndTime
+  if (props.initialRequestId) {
+    // Phase 4: Precise log correlation via request_id
+    requestId.value = props.initialRequestId
+    // Clear time filters when using request_id
+    startTime.value = ''
+    endTime.value = ''
+  } else {
+    if (props.initialStartTime) {
+      startTime.value = props.initialStartTime
+    }
+    if (props.initialEndTime) {
+      endTime.value = props.initialEndTime
+    }
   }
 
   await loadLogFiles()
 
-  // When time window is set from props, clear file selection
+  // When time window or request_id is set from props, clear file selection
   // so the backend searches across ALL log files
-  if (startTime.value && endTime.value) {
+  if ((startTime.value && endTime.value) || requestId.value) {
     selectedFile.value = ''
   }
 
@@ -470,6 +489,14 @@ watch(selectedFile, () => {
             placeholder="Suchen..."
             @keyup.enter="applyFilters"
           />
+        </div>
+        <!-- Request-ID-Chip (Phase 4) -->
+        <div v-if="requestId" class="time-window-chip">
+          <FileText :size="14" />
+          <span>Request-ID: {{ requestId.slice(0, 8) }}...</span>
+          <button class="time-window-chip__clear" @click="clearRequestIdFilter" title="Request-ID Filter entfernen">
+            <X :size="12" />
+          </button>
         </div>
         <!-- Zeitfenster-Chip (Feature 1.2) -->
         <div v-if="startTime && endTime" class="time-window-chip">

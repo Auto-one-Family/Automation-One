@@ -15,13 +15,13 @@
  * @emits open-cleanup-panel - When cleanup button is clicked (admin only)
  */
 
-import { Activity, FileText, Database, MessageSquare, Play, Pause, Download } from 'lucide-vue-next'
+import { Activity, FileText, Database, MessageSquare, HeartPulse, Play, Pause, Download } from 'lucide-vue-next'
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type TabId = 'events' | 'logs' | 'database' | 'mqtt'
+export type TabId = 'events' | 'logs' | 'database' | 'mqtt' | 'health'
 
 interface Tab {
   id: TabId
@@ -66,6 +66,7 @@ const tabs: Tab[] = [
   { id: 'logs', label: 'Server Logs', icon: FileText },
   { id: 'database', label: 'Datenbank', icon: Database },
   { id: 'mqtt', label: 'MQTT Traffic', icon: MessageSquare },
+  { id: 'health', label: 'Health', icon: HeartPulse },
 ]
 
 // ============================================================================
