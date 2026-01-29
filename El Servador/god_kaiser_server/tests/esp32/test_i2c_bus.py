@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.esp32,
-    pytest.mark.i2c,
 ]
 
 
