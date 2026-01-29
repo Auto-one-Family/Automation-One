@@ -15,7 +15,7 @@ steps:
   # Heartbeat with sensor count
   - wait-serial: "heartbeat"
 
-  # After MQTT injection (parallel):
+  # After MQTT injection (sequential):
   # 1. GPIO 5 ON:  {"command":"ON","value":1.0}
   # 2. GPIO 13 PWM: {"command":"PWM","value":0.7}
   # 3. GPIO 14 ON:  {"command":"ON","value":1.0}
@@ -23,5 +23,5 @@ steps:
   - wait-serial: "Actuator"
   - wait-serial: "Actuator"
 
-  # After MQTT injection: Cleanup - all OFF
+  # Cleanup: any OFF command
   - wait-serial: "Actuator"

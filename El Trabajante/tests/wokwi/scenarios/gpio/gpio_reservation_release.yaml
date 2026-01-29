@@ -1,0 +1,101 @@
+# GPIO-RES-004 & GPIO-RES-005: Pin Release and Re-Reserve
+# ========================================================
+# Validates that:
+# - releasePin(gpio) returns true and frees the pin
+# - Released pin can be re-reserved by another component
+# - Releasing non-reserved pin returns false
+#
+# Test IDs: GPIO-RES-004, GPIO-RES-005
+# Priority: HIGH
+# Requirement:
+#   - releasePin(4) -> true, then requestPin(4, ...) -> true
+#   - releasePin(99) -> false (not found)
+#
+# Test Scenario:
+#   1. Configure sensor on GPIO 4
+#   2. Remove sensor (via config with active=false)
+#   3. Verify pin is released back to safe mode
+#   4. Configure different component on GPIO 4 (should succeed)
+#
+# Firmware reference: gpio_manager.cpp lines 136-162
+
+name: GPIO Pin Release and Re-Reserve
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # STEP 1: Reserve GPIO 4 for sensor
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 4,
+              "sensor_type": "temp_ds18b20",
+              "sensor_name": "TempSensor1",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify reservation succeeds
+  - wait-serial: "Pin 4 allocated"
+
+  # Wait for config to be applied
+  - delay: 1000
+
+  # STEP 2: Remove sensor (release pin)
+  # Setting active=false should trigger pin release
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 4,
+              "sensor_type": "temp_ds18b20",
+              "sensor_name": "TempSensor1",
+              "active": false
+            }]
+          }
+        }
+
+  # Verify pin is released
+  - wait-serial: "released"
+
+  # Verify pin returns to safe mode
+  - wait-serial: "safe mode"
+
+  # Wait for release to complete
+  - delay: 1000
+
+  # STEP 3: Re-reserve same GPIO for actuator (should succeed)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 4,
+              "actuator_type": "pump",
+              "actuator_name": "WaterPump",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify re-reservation succeeds
+  # Pin was released, so new allocation should work
+  - wait-serial: "Pin 4 allocated"
+  - wait-serial: "WaterPump"

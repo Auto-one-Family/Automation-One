@@ -1,0 +1,98 @@
+# GPIO-RES-006: Owner and Component Tracking
+# ===========================================
+# Validates that GPIO Manager correctly tracks owner and
+# component_name for reserved pins, enabling detailed error
+# messages and debugging.
+#
+# Test ID: GPIO-RES-006
+# Priority: MEDIUM
+# Requirement: After reservation, getPinInfo(4)->owner == "sensor"
+#
+# GPIOPinInfo Structure:
+#   - owner: "sensor", "actuator", "system"
+#   - component_name: "DS18B20", "WaterPump", "I2C_SDA"
+#
+# This information is used in:
+#   - Error messages for conflict detection
+#   - Heartbeat GPIO status reporting
+#   - Debug logging
+#
+# Firmware reference: gpio_manager.cpp lines 113-124
+
+name: GPIO Owner and Component Tracking
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure sensor with specific name
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 4,
+              "sensor_type": "temp_ds18b20",
+              "sensor_name": "GreenhouseTemp",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify allocation message includes component name
+  - wait-serial: "GreenhouseTemp"
+
+  # Wait for heartbeat (every 60s in normal operation, but first one is sent on MQTT connect)
+  # Heartbeat should contain GPIO status with owner information
+
+  # Trigger a heartbeat manually or wait for periodic one
+  # The heartbeat payload should include gpio_status array
+
+  # Configure actuator with specific name
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 5,
+              "actuator_type": "pump",
+              "actuator_name": "IrrigationPump",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify actuator allocation includes name
+  - wait-serial: "IrrigationPump"
+
+  # Now try to cause a conflict to verify owner is shown in error
+  - delay: 500
+
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 5,
+              "sensor_type": "analog",
+              "sensor_name": "ConflictTest",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify error message contains the existing owner's component name
+  - wait-serial: "IrrigationPump"
+  - wait-serial: "conflict"

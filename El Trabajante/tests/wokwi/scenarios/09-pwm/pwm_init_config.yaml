@@ -1,0 +1,26 @@
+# PWM Controller Configuration Verification Test
+# Test-ID: PWM-INIT-003, PWM-INIT-004
+# Validates that PWM controller loads correct hardware configuration
+# Expected: 16 channels, 1000Hz, 12-bit resolution for ESP32 WROOM
+# Timeout: 90000ms
+
+name: PWM Controller Configuration Verification
+version: 1
+steps:
+  # Wait for boot
+  - wait-serial: "Boot started"
+
+  # Wait for PWM initialization with config details
+  - wait-serial: "PWM Config:"
+
+  # Verify channel count (ESP32 WROOM = 16)
+  - wait-serial: "Channels=16"
+
+  # Verify default frequency (1000 Hz)
+  - wait-serial: "Freq=1000Hz"
+
+  # Verify default resolution (12 bits)
+  - wait-serial: "Resolution=12 bits"
+
+  # Wait for successful initialization
+  - wait-serial: "PWM Controller initialized successfully"

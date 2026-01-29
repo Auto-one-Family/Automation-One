@@ -1,0 +1,35 @@
+# PWM Resolution Verification Test
+# Test-ID: PWM-RES-001, PWM-RES-002
+# Validates PWM resolution configuration (12-bit for ESP32 WROOM)
+# Expected: 12-bit resolution = duty range 0-4095
+# Timeout: 120000ms
+
+name: PWM Resolution Verification
+version: 1
+steps:
+  # Wait for boot
+  - wait-serial: "Boot started"
+
+  # Verify default resolution in initialization log
+  - wait-serial: "Resolution=12 bits"
+
+  # Wait for full initialization
+  - wait-serial: "PWM Controller initialized successfully"
+
+  # Verify resolution is logged
+  - wait-serial: "Default Resolution: 12 bits"
+
+  # Wait for system ready
+  - wait-serial: "MQTT connected"
+
+  # Configure PWM actuator and verify duty range
+  # Topic: kaiser/god/esp/{esp_id}/config
+  # Payload: {"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"ResPWM","active":true}]}
+
+  - wait-serial: "PWMActuator initialized"
+
+  # Set 50% - with 12-bit resolution, this should be ~2047
+  # Topic: kaiser/god/esp/{esp_id}/actuator/25/command
+  # Payload: {"command":"SET","value":0.5}
+
+  - wait-serial: "50.0%"

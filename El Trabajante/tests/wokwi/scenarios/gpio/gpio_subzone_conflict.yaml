@@ -1,0 +1,87 @@
+# GPIO-SUB-006: Subzone Pin Conflict Detection
+# =============================================
+# Validates that a GPIO pin cannot be assigned to multiple
+# subzones simultaneously, preventing configuration conflicts.
+#
+# Test ID: GPIO-SUB-006
+# Priority: HIGH
+# Requirement: Pin 4 in Subzone A, then assignPinToSubzone(4, "B") returns false
+#
+# Conflict Scenario:
+#   1. Assign GPIO 4 to subzone "irrigation"
+#   2. Try to assign GPIO 4 to subzone "ventilation"
+#   3. Second assignment should FAIL with conflict error
+#
+# This prevents ambiguous ownership where a pin could be
+# controlled by multiple subzone emergency stops.
+#
+# Firmware reference: gpio_manager.cpp lines 499-518
+
+name: Subzone Pin Conflict Detection
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure sensor on GPIO 4
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 4,
+              "sensor_type": "temp_ds18b20",
+              "sensor_name": "SharedSensor",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify sensor is configured
+  - wait-serial: "Pin 4 allocated"
+
+  # Assign GPIO 4 to FIRST subzone
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
+          "payload": {
+            "subzone_id": "subzone_alpha",
+            "gpios": [4]
+          }
+        }
+
+  # Verify first assignment succeeds
+  - wait-serial: "subzone_alpha"
+
+  # Wait for assignment to complete
+  - delay: 500
+
+  # Try to assign SAME GPIO 4 to DIFFERENT subzone
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
+          "payload": {
+            "subzone_id": "subzone_beta",
+            "gpios": [4]
+          }
+        }
+
+  # Verify conflict is detected
+  - wait-serial: "already assigned"
+  - wait-serial: "subzone_alpha"
+
+  # Verify GPIO 4 is still in original subzone (not changed)
+  # The error message should indicate the existing subzone owner
