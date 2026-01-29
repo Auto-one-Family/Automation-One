@@ -104,8 +104,8 @@ class TestI2CInitialization:
 
     async def test_i2c_init_reported_in_heartbeat(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-INIT-001: Verify I2C initialization status in heartbeat.
@@ -113,7 +113,7 @@ class TestI2CInitialization:
         Expected: Heartbeat payload includes i2c_initialized: true
         """
         # Arrange
-        heartbeat_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/heartbeat"
+        heartbeat_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/heartbeat"
 
         # Act
         heartbeat_payload = {
@@ -126,7 +126,7 @@ class TestI2CInitialization:
             "sensor_count": 3,
             "actuator_count": 1
         }
-        await mock_esp_client.publish(heartbeat_topic, json.dumps(heartbeat_payload))
+        await mqtt_test_client.publish(heartbeat_topic, json.dumps(heartbeat_payload))
 
         # Assert
         # Handler should process heartbeat without error
@@ -136,8 +136,8 @@ class TestI2CInitialization:
 
     async def test_i2c_init_failure_reported(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-INIT-003: Verify I2C initialization failure is reported.
@@ -145,7 +145,7 @@ class TestI2CInitialization:
         Expected: System error published with ERROR_I2C_INIT_FAILED
         """
         # Arrange
-        error_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/error"
+        error_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/error"
 
         # Act
         error_payload = {
@@ -159,7 +159,7 @@ class TestI2CInitialization:
                 "reason": "Wire.begin() returned false"
             }
         }
-        await mock_esp_client.publish(error_topic, json.dumps(error_payload))
+        await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
         # Assert
         assert error_payload["error_code"] == 1010
@@ -177,8 +177,8 @@ class TestI2CBusScanning:
 
     async def test_i2c_scan_results_in_diagnostics(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-SCAN-001: Verify I2C scan results are included in diagnostics.
@@ -186,12 +186,12 @@ class TestI2CBusScanning:
         Expected: Diagnostics include list of found I2C addresses
         """
         # Arrange
-        diagnostics_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/diagnostics"
+        diagnostics_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/diagnostics"
 
         # Act
         diagnostics_payload = {
             "ts": int(datetime.now().timestamp()),
-            "esp_id": registered_esp.esp_id,
+            "esp_id": sample_esp_device.device_id,
             "heap_free": 95000,
             "i2c_status": {
                 "initialized": True,
@@ -202,7 +202,7 @@ class TestI2CBusScanning:
                 "last_scan_ts": int(datetime.now().timestamp())
             }
         }
-        await mock_esp_client.publish(diagnostics_topic, json.dumps(diagnostics_payload))
+        await mqtt_test_client.publish(diagnostics_topic, json.dumps(diagnostics_payload))
 
         # Assert
         i2c_status = diagnostics_payload["i2c_status"]
@@ -213,8 +213,8 @@ class TestI2CBusScanning:
 
     async def test_i2c_device_not_found_error(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-SCAN-005: Verify device not found error is reported.
@@ -222,7 +222,7 @@ class TestI2CBusScanning:
         Expected: Error published when trying to access non-existent device
         """
         # Arrange
-        error_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/error"
+        error_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/error"
 
         # Act
         error_payload = {
@@ -236,7 +236,7 @@ class TestI2CBusScanning:
                 "wire_error": 2  # NACK on address
             }
         }
-        await mock_esp_client.publish(error_topic, json.dumps(error_payload))
+        await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
         # Assert
         assert error_payload["error_code"] == 1011
@@ -254,8 +254,8 @@ class TestI2CCommunication:
 
     async def test_i2c_sensor_data_received(
         self,
-        mock_esp_client,
-        registered_esp,
+        mqtt_test_client,
+        sample_esp_device,
         i2c_sensor_data_payload
     ):
         """
@@ -264,10 +264,10 @@ class TestI2CCommunication:
         Expected: Sensor data with raw_mode:true is processed
         """
         # Arrange
-        sensor_topic = f"kaiser/god/esp/{registered_esp.esp_id}/sensor/21/data"
+        sensor_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/sensor/21/data"
 
         # Act
-        await mock_esp_client.publish(sensor_topic, json.dumps(i2c_sensor_data_payload))
+        await mqtt_test_client.publish(sensor_topic, json.dumps(i2c_sensor_data_payload))
 
         # Assert
         assert i2c_sensor_data_payload["raw_mode"] is True
@@ -276,8 +276,8 @@ class TestI2CCommunication:
 
     async def test_i2c_multi_device_data(
         self,
-        mock_esp_client,
-        registered_esp,
+        mqtt_test_client,
+        sample_esp_device,
         sht31_sensor_config,
         bmp280_sensor_config
     ):
@@ -308,10 +308,10 @@ class TestI2CCommunication:
         }
 
         # Act
-        sensor_topic = f"kaiser/god/esp/{registered_esp.esp_id}/sensor/21/data"
-        await mock_esp_client.publish(sensor_topic, json.dumps(sht31_data))
+        sensor_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/sensor/21/data"
+        await mqtt_test_client.publish(sensor_topic, json.dumps(sht31_data))
         await asyncio.sleep(0.1)
-        await mock_esp_client.publish(sensor_topic, json.dumps(bmp280_data))
+        await mqtt_test_client.publish(sensor_topic, json.dumps(bmp280_data))
 
         # Assert - both payloads are valid
         assert sht31_data["i2c_address"] == 0x44
@@ -319,8 +319,8 @@ class TestI2CCommunication:
 
     async def test_i2c_read_failure_reported(
         self,
-        mock_esp_client,
-        registered_esp,
+        mqtt_test_client,
+        sample_esp_device,
         i2c_error_payload
     ):
         """
@@ -329,10 +329,10 @@ class TestI2CCommunication:
         Expected: Error with ERROR_I2C_READ_FAILED and context
         """
         # Arrange
-        error_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/error"
+        error_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/error"
 
         # Act
-        await mock_esp_client.publish(error_topic, json.dumps(i2c_error_payload))
+        await mqtt_test_client.publish(error_topic, json.dumps(i2c_error_payload))
 
         # Assert
         assert i2c_error_payload["error_code"] == 1012
@@ -351,8 +351,8 @@ class TestI2CErrorHandling:
 
     async def test_i2c_bus_error_critical(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-ERR-003: Verify bus error is reported with CRITICAL severity.
@@ -360,7 +360,7 @@ class TestI2CErrorHandling:
         Expected: ERROR_I2C_BUS_ERROR with CRITICAL severity
         """
         # Arrange
-        error_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/error"
+        error_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/error"
 
         # Act
         error_payload = {
@@ -373,7 +373,7 @@ class TestI2CErrorHandling:
                 "operation": "init_verification"
             }
         }
-        await mock_esp_client.publish(error_topic, json.dumps(error_payload))
+        await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
         # Assert
         assert error_payload["error_code"] == 1014
@@ -382,8 +382,8 @@ class TestI2CErrorHandling:
 
     async def test_i2c_write_failure_reported(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-ERR-001: Verify write failure (NACK) is reported.
@@ -391,7 +391,7 @@ class TestI2CErrorHandling:
         Expected: ERROR_I2C_WRITE_FAILED with wire error code
         """
         # Arrange
-        error_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/error"
+        error_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/error"
 
         # Act
         error_payload = {
@@ -405,7 +405,7 @@ class TestI2CErrorHandling:
                 "wire_error": 3  # NACK on data
             }
         }
-        await mock_esp_client.publish(error_topic, json.dumps(error_payload))
+        await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
         # Assert
         assert error_payload["error_code"] == 1013
@@ -413,8 +413,8 @@ class TestI2CErrorHandling:
 
     async def test_i2c_error_tracking_in_diagnostics(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         I2C-ERR-005: Verify I2C errors are tracked in diagnostics.
@@ -422,12 +422,12 @@ class TestI2CErrorHandling:
         Expected: Diagnostics include I2C error count and last error
         """
         # Arrange
-        diagnostics_topic = f"kaiser/god/esp/{registered_esp.esp_id}/system/diagnostics"
+        diagnostics_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/system/diagnostics"
 
         # Act
         diagnostics_payload = {
             "ts": int(datetime.now().timestamp()),
-            "esp_id": registered_esp.esp_id,
+            "esp_id": sample_esp_device.device_id,
             "error_count": 2,
             "errors": [
                 {"code": 1012, "count": 1, "last_ts": int(datetime.now().timestamp()) - 30},
@@ -443,7 +443,7 @@ class TestI2CErrorHandling:
                 }
             }
         }
-        await mock_esp_client.publish(diagnostics_topic, json.dumps(diagnostics_payload))
+        await mqtt_test_client.publish(diagnostics_topic, json.dumps(diagnostics_payload))
 
         # Assert
         assert diagnostics_payload["error_count"] == 2
@@ -462,8 +462,8 @@ class TestI2CSensorConfiguration:
 
     async def test_i2c_sensor_config_success(
         self,
-        mock_esp_client,
-        registered_esp,
+        mqtt_test_client,
+        sample_esp_device,
         sht31_sensor_config
     ):
         """
@@ -472,8 +472,8 @@ class TestI2CSensorConfiguration:
         Expected: Config response with SUCCESS status
         """
         # Arrange
-        config_topic = f"kaiser/god/esp/{registered_esp.esp_id}/config"
-        response_topic = f"kaiser/god/esp/{registered_esp.esp_id}/config_response"
+        config_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/config"
+        response_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/config_response"
 
         config_payload = {
             "config_type": "sensor",
@@ -482,7 +482,7 @@ class TestI2CSensorConfiguration:
         }
 
         # Act
-        await mock_esp_client.publish(config_topic, json.dumps(config_payload))
+        await mqtt_test_client.publish(config_topic, json.dumps(config_payload))
 
         # Expected response (mock)
         expected_response = {
@@ -499,8 +499,8 @@ class TestI2CSensorConfiguration:
 
     async def test_i2c_sensor_config_invalid_address(
         self,
-        mock_esp_client,
-        registered_esp
+        mqtt_test_client,
+        sample_esp_device
     ):
         """
         Verify invalid I2C address is rejected in config.
@@ -508,7 +508,7 @@ class TestI2CSensorConfiguration:
         Expected: Config response with FAILURE status
         """
         # Arrange
-        config_topic = f"kaiser/god/esp/{registered_esp.esp_id}/config"
+        config_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/config"
 
         invalid_config = {
             "config_type": "sensor",
@@ -522,7 +522,7 @@ class TestI2CSensorConfiguration:
         }
 
         # Act
-        await mock_esp_client.publish(config_topic, json.dumps(invalid_config))
+        await mqtt_test_client.publish(config_topic, json.dumps(invalid_config))
 
         # Expected response
         expected_response = {
@@ -545,7 +545,7 @@ class TestI2CParameterValidation:
     Tests for I2C parameter validation (mock-based).
     """
 
-    def test_valid_i2c_address_range(self):
+    async def test_valid_i2c_address_range(self):
         """
         Verify valid I2C address range is 0x08-0x77.
         """
@@ -558,7 +558,7 @@ class TestI2CParameterValidation:
         for addr in invalid_addresses:
             assert not (0x08 <= addr <= 0x77), f"Address 0x{addr:02X} should be invalid"
 
-    def test_i2c_error_code_mapping(self):
+    async def test_i2c_error_code_mapping(self):
         """
         Verify I2C error codes are correctly defined.
         """
@@ -586,8 +586,8 @@ class TestI2CIntegration:
 
     async def test_full_i2c_sensor_flow(
         self,
-        mock_esp_client,
-        registered_esp,
+        mqtt_test_client,
+        sample_esp_device,
         sht31_sensor_config,
         i2c_sensor_data_payload
     ):
@@ -597,7 +597,7 @@ class TestI2CIntegration:
         Expected: Complete flow without errors
         """
         ts = int(datetime.now().timestamp())
-        esp_id = registered_esp.esp_id
+        esp_id = sample_esp_device.device_id
 
         # 1. Configure sensor
         config_topic = f"kaiser/god/esp/{esp_id}/config"
@@ -606,11 +606,11 @@ class TestI2CIntegration:
             "action": "add",
             "sensor": sht31_sensor_config
         }
-        await mock_esp_client.publish(config_topic, json.dumps(config_payload))
+        await mqtt_test_client.publish(config_topic, json.dumps(config_payload))
 
         # 2. Sensor data published
         sensor_topic = f"kaiser/god/esp/{esp_id}/sensor/21/data"
-        await mock_esp_client.publish(sensor_topic, json.dumps(i2c_sensor_data_payload))
+        await mqtt_test_client.publish(sensor_topic, json.dumps(i2c_sensor_data_payload))
 
         # 3. Heartbeat confirms sensor count
         heartbeat_topic = f"kaiser/god/esp/{esp_id}/system/heartbeat"
@@ -622,7 +622,7 @@ class TestI2CIntegration:
             "i2c_initialized": True,
             "i2c_device_count": 1
         }
-        await mock_esp_client.publish(heartbeat_topic, json.dumps(heartbeat_payload))
+        await mqtt_test_client.publish(heartbeat_topic, json.dumps(heartbeat_payload))
 
         # Assert
         assert heartbeat_payload["sensor_count"] == 1

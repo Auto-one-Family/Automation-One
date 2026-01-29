@@ -315,23 +315,33 @@ class TestConcurrentCommands:
 
 
 class TestInMemoryMQTTClient:
-    """Test in-memory MQTT test client for brokerless workflows."""
+    """Test in-memory MQTT test client for brokerless workflows.
 
-    def test_publish_and_wait_for_message(self, mqtt_test_client):
-        mqtt_test_client.publish("kaiser/god/esp/test/command", {"cmd": "ping"})
+    NOTE: These tests validate the InMemoryMQTTTestClient mock infrastructure,
+    not the real MQTT system. The mock is used by other tests (e.g., test_i2c_bus.py)
+    to simulate MQTT communication without a real broker.
+
+    The mock's publish() is async to be compatible with async test code,
+    even though the real MQTTClient.publish() is synchronous.
+    """
+
+    async def test_publish_and_wait_for_message(self, mqtt_test_client):
+        """Test that published messages can be retrieved with wait_for_message()."""
+        await mqtt_test_client.publish("kaiser/god/esp/test/command", {"cmd": "ping"})
         message = mqtt_test_client.wait_for_message("kaiser/god/esp/test/command", timeout=1)
 
         assert message["topic"] == "kaiser/god/esp/test/command"
         assert message["payload"]["cmd"] == "ping"
 
-    def test_subscribe_callback_invoked(self, mqtt_test_client):
+    async def test_subscribe_callback_invoked(self, mqtt_test_client):
+        """Test that subscribe callbacks are invoked when messages are published."""
         calls = []
 
         def on_message(msg):
             calls.append(msg)
 
         mqtt_test_client.subscribe("kaiser/god/esp/test/response", callback=on_message)
-        mqtt_test_client.publish("kaiser/god/esp/test/response", {"ok": True})
+        await mqtt_test_client.publish("kaiser/god/esp/test/response", {"ok": True})
 
         assert len(calls) == 1
         assert calls[0]["payload"]["ok"] is True

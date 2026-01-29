@@ -24,8 +24,8 @@ class InMemoryMQTTTestClient:
         self._messages: List[Dict[str, Any]] = []
         self._subscribers: defaultdict[str, List[Callable[[Dict[str, Any]], None]]] = defaultdict(list)
 
-    def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False) -> None:
-        """Store message and notify subscribers."""
+    async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False) -> None:
+        """Store message and notify subscribers (async-compatible)."""
         message = {
             "topic": topic,
             "payload": payload,
