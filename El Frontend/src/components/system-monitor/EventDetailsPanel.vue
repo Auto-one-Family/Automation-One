@@ -23,12 +23,15 @@
  * @emits close - When close button is clicked, ESC pressed, or click outside
  */
 
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { UnifiedEvent } from '@/types/websocket-events'
 import { getSeverityLabel } from '@/utils/errorCodeTranslator'
 import { getEventIcon } from '@/utils/eventTypeIcons'
 import { getEventCategory, transformEventMessage, formatUptime, formatMemory } from '@/utils/eventTransformer'
+import { auditApi } from '@/api/audit'
 import RssiIndicator from './RssiIndicator.vue'
+import EventTimeline from './EventTimeline.vue'
+import TroubleshootingPanel from '@/components/error/TroubleshootingPanel.vue'
 import {
   X,
   Copy,
@@ -47,6 +50,10 @@ import {
   Zap,
   Filter,
   FileText,
+  GitBranch,
+  ChevronRight,
+  Loader2,
+  Check,
 } from 'lucide-vue-next'
 
 // ============================================================================
@@ -64,6 +71,7 @@ const emit = defineEmits<{
   close: []
   'filter-device': [espId: string]
   'show-server-logs': [event: UnifiedEvent]
+  'select-event': [event: UnifiedEvent]
 }>()
 
 // ============================================================================
@@ -83,6 +91,23 @@ const dragOffset = ref(0)
 
 // Click-Outside state
 const isVisible = ref(false)
+
+// Correlated events state (Phase 3)
+const correlatedEvents = ref<UnifiedEvent[]>([])
+const isLoadingCorrelated = ref(false)
+const correlatedError = ref<string | null>(null)
+const isCorrelatedSectionOpen = ref(true)
+
+const hasCorrelationId = computed(() => Boolean(props.event?.correlation_id))
+
+
+const correlationLatency = computed(() => {
+  if (correlatedEvents.value.length < 2) return null
+  const timestamps = correlatedEvents.value
+    .map(e => new Date(e.timestamp).getTime())
+    .sort((a, b) => a - b)
+  return timestamps[timestamps.length - 1] - timestamps[0]
+})
 
 // ============================================================================
 // Computed - Event Analysis
@@ -193,6 +218,10 @@ const errorDetails = computed(() => {
     message: (data.message || props.event.message || 'Unbekannter Fehler') as string,
     failedCount: typeof data.failed_count === 'number' ? data.failed_count : undefined,
     failures: data.failures as Array<{ gpio?: number; reason?: string }> | undefined,
+    // Phase 3: Troubleshooting from enriched error_event
+    troubleshooting: data.troubleshooting as string[] | undefined,
+    userActionRequired: data.user_action_required as boolean | undefined,
+    title: data.title as string | undefined,
   }
 })
 
@@ -324,6 +353,91 @@ function handleKeydown(e: KeyboardEvent) {
     handleClose()
   }
 }
+
+// ============================================================================
+// Correlated Events (Phase 3)
+// ============================================================================
+
+async function loadCorrelatedEvents() {
+  if (!props.event?.correlation_id) {
+    correlatedEvents.value = []
+    return
+  }
+
+  isLoadingCorrelated.value = true
+  correlatedError.value = null
+
+  try {
+    const auditLogs = await auditApi.getCorrelatedEvents(props.event.correlation_id)
+    // Transform AuditLog to minimal UnifiedEvent for display
+    correlatedEvents.value = auditLogs.map(log => ({
+      id: log.id,
+      timestamp: log.created_at,
+      event_type: log.event_type,
+      severity: log.severity,
+      source: log.source_type === 'esp' ? 'esp' as const : 'server' as const,
+      esp_id: log.source_id || undefined,
+      message: log.message || '',
+      correlation_id: log.correlation_id || undefined,
+      data: log.details || {},
+    }))
+  } catch {
+    correlatedError.value = 'Fehler beim Laden der zugehörigen Events'
+  } finally {
+    isLoadingCorrelated.value = false
+  }
+}
+
+function toggleCorrelatedSection() {
+  isCorrelatedSectionOpen.value = !isCorrelatedSectionOpen.value
+}
+
+function formatLatency(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60000).toFixed(1)}min`
+}
+
+// State for copy feedback
+const copiedCorrelationId = ref(false)
+
+// Latenz-Badge Farbklasse
+function getLatencyBadgeClass(ms: number): string {
+  if (ms < 100) return 'latency-badge--fast'
+  if (ms <= 500) return 'latency-badge--medium'
+  return 'latency-badge--slow'
+}
+
+// Timeline Event-Auswahl
+function handleTimelineEventSelect(selectedEvt: UnifiedEvent) {
+  emit('select-event', selectedEvt)
+}
+
+// Korrelations-ID kopieren
+async function copyCorrelationId() {
+  if (!props.event?.correlation_id) return
+  try {
+    await navigator.clipboard.writeText(props.event.correlation_id)
+    copiedCorrelationId.value = true
+    setTimeout(() => {
+      copiedCorrelationId.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
+}
+
+watch(
+  () => props.event?.correlation_id,
+  (newId) => {
+    if (newId) {
+      loadCorrelatedEvents()
+    } else {
+      correlatedEvents.value = []
+    }
+  },
+  { immediate: true }
+)
 
 // ============================================================================
 // Lifecycle
@@ -458,7 +572,7 @@ onUnmounted(() => {
               @click="emit('show-server-logs', event)"
             >
               <FileText :size="14" />
-              Server-Logs um {{ formatEventTime(event.timestamp) }}
+              {{ event.request_id ? 'Server-Logs (Request-ID)' : `Server-Logs um ${formatEventTime(event.timestamp)}` }}
             </button>
           </div>
         </div>
@@ -598,14 +712,94 @@ onUnmounted(() => {
               </li>
             </ul>
           </div>
+
+          <!-- Phase 3: Troubleshooting Steps -->
+          <TroubleshootingPanel
+            v-if="errorDetails.troubleshooting && errorDetails.troubleshooting.length > 0"
+            :steps="errorDetails.troubleshooting"
+            :user-action-required="errorDetails.userActionRequired ?? false"
+            :severity="event.severity"
+            class="error-troubleshooting"
+          />
         </div>
+      </section>
+
+      <!-- =========================================================================
+           EVENT-VERLAUF (TIMELINE) SECTION (Phase 5.1)
+           ========================================================================= -->
+      <section v-if="hasCorrelationId" class="panel-section panel-section--correlated">
+        <div class="correlated-header" @click="toggleCorrelatedSection">
+          <div class="correlated-header__left">
+            <GitBranch class="w-4 h-4" style="color: #60a5fa;" />
+            <span class="correlated-header__title">Event-Verlauf</span>
+            <span v-if="correlatedEvents.length > 1" class="correlated-header__count">
+              {{ correlatedEvents.length }}
+            </span>
+          </div>
+          <div class="correlated-header__right">
+            <span
+              v-if="correlationLatency !== null"
+              class="latency-badge"
+              :class="getLatencyBadgeClass(correlationLatency)"
+            >
+              <Clock class="w-3 h-3" />
+              {{ formatLatency(correlationLatency) }}
+            </span>
+            <ChevronRight
+              class="w-4 h-4 correlated-chevron"
+              :class="{ 'correlated-chevron--open': isCorrelatedSectionOpen }"
+            />
+          </div>
+        </div>
+
+        <Transition name="slide">
+          <div v-if="isCorrelatedSectionOpen" class="correlated-content">
+            <!-- Loading -->
+            <div v-if="isLoadingCorrelated" class="correlated-state">
+              <Loader2 class="w-4 h-4 animate-spin" />
+              <span>Lade Event-Verlauf...</span>
+            </div>
+
+            <!-- Error -->
+            <div v-else-if="correlatedError" class="correlated-state correlated-state--error">
+              <AlertCircle class="w-4 h-4" />
+              <span>{{ correlatedError }}</span>
+              <button class="retry-btn" @click="loadCorrelatedEvents">
+                Erneut versuchen
+              </button>
+            </div>
+
+            <!-- Timeline -->
+            <EventTimeline
+              v-else
+              :events="correlatedEvents"
+              :current-event-id="event.id"
+              :total-latency-ms="correlationLatency"
+              @select-event="handleTimelineEventSelect"
+            />
+
+            <!-- Correlation ID Footer -->
+            <div class="correlation-id-footer">
+              <span class="correlation-id-label">Korrelations-ID:</span>
+              <code class="correlation-id-value">{{ event.correlation_id }}</code>
+              <button
+                class="copy-correlation-btn"
+                @click="copyCorrelationId"
+                :title="copiedCorrelationId ? 'Kopiert!' : 'ID kopieren'"
+              >
+                <Check v-if="copiedCorrelationId" class="w-3 h-3" />
+                <Copy v-else class="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </Transition>
       </section>
 
       <!-- =========================================================================
            TECHNISCHE DETAILS (JSON) SECTION
            ========================================================================= -->
       <section class="panel-section panel-section--json">
-        <button class="json-toggle" @click="toggleJson">
+        <div class="json-toggle" role="button" tabindex="0" @click="toggleJson" @keydown.enter="toggleJson">
           <span class="json-toggle__label">
             <component :is="jsonExpanded ? ChevronUp : ChevronDown" class="w-4 h-4" />
             <span>Technische Details (JSON)</span>
@@ -614,7 +808,7 @@ onUnmounted(() => {
             <component :is="jsonCopied ? CheckCircle2 : Copy" class="w-4 h-4" />
             {{ jsonCopied ? 'Kopiert!' : 'Kopieren' }}
           </button>
-        </button>
+        </div>
 
         <Transition name="slide">
           <div v-if="jsonExpanded" class="json-content">
@@ -749,11 +943,22 @@ onUnmounted(() => {
   border: 1px solid rgba(245, 158, 11, 0.25);
 }
 
-.severity-badge--error,
-.severity-badge--critical {
+.severity-badge--error {
   background: rgba(239, 68, 68, 0.15);
   color: #f87171;
   border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.severity-badge--critical {
+  background: rgba(220, 38, 38, 0.2);
+  color: #fca5a5;
+  border: 2px solid rgba(220, 38, 38, 0.4);
+  animation: critical-badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes critical-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
 }
 
 .panel-close {
@@ -1361,5 +1566,172 @@ onUnmounted(() => {
   .details-backdrop {
     display: none; /* Mobile uses swipe-to-close instead */
   }
+}
+
+/* ============================================================================
+   CORRELATED EVENTS SECTION (Phase 3)
+   ============================================================================ */
+.correlated-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.correlated-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.correlated-header__left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.correlated-header__title {
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.correlated-header__count {
+  padding: 0.125rem 0.5rem;
+  background: rgba(96, 165, 250, 0.15);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #60a5fa;
+}
+
+.correlated-header__right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Latenz-Badge mit Farbcodierung */
+.latency-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.latency-badge--fast {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.latency-badge--medium {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.latency-badge--slow {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+}
+
+.correlated-chevron {
+  color: #707080;
+  transition: transform 0.2s;
+}
+
+.correlated-chevron--open {
+  transform: rotate(90deg);
+}
+
+.correlated-content {
+  padding: 0.75rem;
+}
+
+.correlated-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  font-size: 0.875rem;
+  color: #707080;
+}
+
+.correlated-state--error {
+  color: #f87171;
+}
+
+.correlation-id-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.75rem;
+}
+
+.correlation-id-label {
+  color: #707080;
+}
+
+.correlation-id-value {
+  flex: 1;
+  padding: 0.125rem 0.375rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.25rem;
+  font-family: monospace;
+  font-size: 0.6875rem;
+  color: #b0b0c0;
+  word-break: break-all;
+}
+
+.copy-correlation-btn {
+  padding: 0.375rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 0.25rem;
+  color: #707080;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.copy-correlation-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary, #f0f0f5);
+}
+
+.retry-btn {
+  margin-left: auto;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.25rem;
+  color: #a0a0b0;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.retry-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary, #f0f0f5);
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

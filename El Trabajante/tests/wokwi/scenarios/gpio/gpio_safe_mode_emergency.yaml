@@ -1,0 +1,128 @@
+# GPIO-SAFE-003: Emergency Safe-Mode for ALL Pins
+# ================================================
+# Validates that enableSafeModeForAllPins() correctly:
+# 1. De-energizes ALL OUTPUT pins (digitalWrite LOW)
+# 2. Sets ALL pins to INPUT_PULLUP
+# 3. Clears ALL owner information
+# 4. Sets in_safe_mode = true for ALL pins
+#
+# Test ID: GPIO-SAFE-003
+# Priority: CRITICAL (Safety)
+# Requirement: ALL pins must be in safe mode after emergency
+#
+# Critical Implementation Order:
+#   1. digitalWrite(pin, LOW)     <- De-energize FIRST
+#   2. delayMicroseconds(10)      <- Hardware settle time
+#   3. pinMode(pin, INPUT_PULLUP) <- Then safe mode
+#   4. Clear owner/component_name
+#   5. Set in_safe_mode = true
+#
+# This order prevents electrical spikes during mode transition.
+#
+# Firmware reference: gpio_manager.cpp lines 170-211
+
+name: Emergency Safe-Mode for ALL Pins
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure multiple actuators (multiple OUTPUT pins)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [
+              {
+                "gpio": 5,
+                "actuator_type": "pump",
+                "actuator_name": "WaterPump",
+                "active": true
+              },
+              {
+                "gpio": 14,
+                "actuator_type": "valve",
+                "actuator_name": "DrainValve",
+                "active": true
+              },
+              {
+                "gpio": 15,
+                "actuator_type": "relay",
+                "actuator_name": "LightRelay",
+                "active": true
+              }
+            ]
+          }
+        }
+
+  # Verify all actuators are configured
+  - wait-serial: "Pin 5 allocated"
+  - wait-serial: "Pin 14 allocated"
+  - wait-serial: "Pin 15 allocated"
+
+  # Wait for configuration to complete
+  - delay: 1000
+
+  # Turn ON multiple actuators
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": { "command": "ON" }
+        }
+
+  - delay: 200
+
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/14/command",
+          "payload": { "command": "ON" }
+        }
+
+  - delay: 200
+
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/15/command",
+          "payload": { "command": "ON" }
+        }
+
+  # Verify actuators are ON
+  - delay: 500
+
+  # TRIGGER BROADCAST EMERGENCY STOP
+  # This should put ALL pins into safe mode immediately
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/broadcast/emergency",
+          "payload": {
+            "command": "STOP",
+            "reason": "System-wide emergency test"
+          }
+        }
+
+  # Verify emergency safe-mode is activated
+  - wait-serial: "Emergency safe-mode activated"
+
+  # Verify de-energize happens for outputs
+  - wait-serial: "de-energized"
+
+  # Verify all pins returned to safe mode
+  - wait-serial: "All pins returned to safe mode"

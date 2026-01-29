@@ -32,6 +32,7 @@
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import type { UnifiedEvent } from '@/types/websocket-events'
+import type { EventOrGroup } from '@/types/event-grouping'
 import { getEventIcon } from '@/utils/eventTypeIcons'
 import { getEventCategory, transformEventMessage } from '@/utils/eventTransformer'
 import RssiIndicator from './RssiIndicator.vue'
@@ -44,6 +45,7 @@ import {
   Server,
   Calendar,
   RotateCcw,
+  ChevronRight,
 } from 'lucide-vue-next'
 
 // ============================================================================
@@ -52,6 +54,8 @@ import {
 
 interface Props {
   events: UnifiedEvent[]
+  groupedEvents: EventOrGroup[]
+  groupingEnabled: boolean
   isPaused: boolean
   eventTypeLabels: Record<string, string>
   restoredEventIds?: Set<string>
@@ -59,6 +63,8 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   restoredEventIds: () => new Set<string>(),
+  groupingEnabled: false,
+  groupedEvents: () => [],
 })
 
 const emit = defineEmits<{
@@ -66,10 +72,35 @@ const emit = defineEmits<{
 }>()
 
 // ============================================================================
+// Grouping State
+// ============================================================================
+
+const expandedGroupIds = ref<Set<string>>(new Set())
+
+function toggleGroupExpansion(groupId: string) {
+  const newSet = new Set(expandedGroupIds.value)
+  if (newSet.has(groupId)) {
+    newSet.delete(groupId)
+  } else {
+    newSet.add(groupId)
+  }
+  expandedGroupIds.value = newSet
+}
+
+function isGroupExpanded(groupId: string): boolean {
+  return expandedGroupIds.value.has(groupId)
+}
+
+function formatTimeSpan(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+// ============================================================================
 // Virtual Scrolling State
 // ============================================================================
 
-const VIRTUAL_SCROLL_THRESHOLD = 200
+const VIRTUAL_SCROLL_THRESHOLD = 10000  // ⭐ Page-Scroll: Effektiv deaktiviert
 const ITEM_HEIGHT = 60 // Approximate height of each item in pixels
 const BUFFER_SIZE = 10 // Extra items to render above/below viewport
 
@@ -81,7 +112,11 @@ const containerHeight = ref(0)
 // Computed
 // ============================================================================
 
-const shouldUseVirtualScroll = computed(() => props.events.length > VIRTUAL_SCROLL_THRESHOLD)
+const shouldUseVirtualScroll = computed(() => {
+  // Disable virtual scroll when grouping is active (variable-height items)
+  if (props.groupingEnabled) return false
+  return props.events.length > VIRTUAL_SCROLL_THRESHOLD
+})
 
 const visibleRange = computed(() => {
   if (!shouldUseVirtualScroll.value) {
@@ -425,7 +460,174 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <!-- Event List -->
+    <!-- Grouped Event List (Phase 5.2) -->
+    <div
+      v-else-if="groupingEnabled"
+      ref="containerRef"
+      class="event-list"
+    >
+      <template v-for="item in groupedEvents" :key="item.type === 'event' ? item.data.id : item.data.id">
+        <!-- Single Event -->
+        <div
+          v-if="item.type === 'event'"
+          class="event-item"
+          :class="[
+            `event-item--category-${getCategoryClass(item.data)}`,
+            `event-item--severity-${item.data.severity}`
+          ]"
+          @click="handleSelect(item.data)"
+        >
+          <div class="event-item__category-bar" />
+          <div class="event-item__icon">
+            <component :is="getEventIcon(item.data.event_type)" class="w-4 h-4" />
+          </div>
+          <div class="event-item__time">
+            {{ formatTime(item.data.timestamp) }}
+          </div>
+          <div class="event-item__content">
+            <span class="event-item__type">{{ eventTypeLabels[item.data.event_type] || item.data.event_type }}</span>
+            <span class="event-item__message">{{ getTransformedMessage(item.data).summary }}</span>
+          </div>
+          <div class="event-item__meta">
+            <RssiIndicator v-if="hasRssiData(item.data)" :rssi="getRssiValue(item.data)" :show-value="true" />
+            <span v-if="item.data.esp_id" class="event-item__esp">{{ item.data.esp_id }}</span>
+            <span v-if="item.data.gpio !== undefined" class="event-item__gpio">GPIO {{ item.data.gpio }}</span>
+            <span v-if="item.data.error_code" class="event-item__error">{{ item.data.error_code }}</span>
+          </div>
+          <component :is="getSeverityIcon(item.data.severity)" class="event-item__severity w-4 h-4" />
+        </div>
+
+        <!-- Event Group -->
+        <div
+          v-else
+          class="event-group"
+          :class="{
+            'event-group--expanded': isGroupExpanded(item.data.id),
+            'event-group--emergency': item.data.isEmergency
+          }"
+        >
+          <!-- Group Header -->
+          <div
+            class="event-group__header"
+            :class="item.data.isEmergency
+              ? 'event-group__header--emergency'
+              : `event-group__header--${item.data.dominantCategory}`"
+            @click="toggleGroupExpansion(item.data.id)"
+          >
+            <div class="event-group__expand-icon">
+              <ChevronRight
+                class="w-4 h-4"
+                :class="{ 'event-group__chevron--rotated': isGroupExpanded(item.data.id) }"
+              />
+            </div>
+
+            <!-- Emergency Badge -->
+            <div v-if="item.data.isEmergency" class="event-group__emergency-badge">
+              <AlertOctagon class="w-4.5 h-4.5" />
+            </div>
+
+            <div class="event-group__content">
+              <div class="event-group__title">{{ item.data.label }}</div>
+
+              <!-- Emergency Info -->
+              <div v-if="item.data.isEmergency && item.data.emergencyDetails" class="event-group__emergency-info">
+                <span class="event-group__emergency-reason">{{ item.data.emergencyDetails.reason }}</span>
+                <span class="event-group__emergency-gpios">
+                  {{ item.data.emergencyDetails.affectedGpios.length }} Aktoren betroffen
+                </span>
+              </div>
+
+              <!-- Standard Meta -->
+              <div v-else class="event-group__meta">
+                <span class="event-group__count">{{ item.data.count }} Events</span>
+                <span class="event-group__timespan">&pm;{{ formatTimeSpan(item.data.timeSpanMs) }}</span>
+                <span v-if="item.data.espIds.length === 1" class="event-group__esp">{{ item.data.espIds[0] }}</span>
+                <span v-else-if="item.data.espIds.length > 1" class="event-group__esp">{{ item.data.espIds.length }} Geräte</span>
+              </div>
+            </div>
+
+            <div class="event-group__right">
+              <span v-if="item.data.isEmergency" class="event-group__count-badge event-group__count-badge--emergency">
+                {{ item.data.count }}
+              </span>
+              <time class="event-group__time">{{ formatTime(item.data.startTime) }}</time>
+            </div>
+          </div>
+
+          <!-- Group Children (expanded) -->
+          <Transition name="group-expand">
+            <div v-if="isGroupExpanded(item.data.id)" class="event-group__children">
+
+              <!-- Emergency Summary Panel -->
+              <div v-if="item.data.isEmergency && item.data.emergencyDetails" class="event-group__emergency-summary">
+                <div class="emergency-summary">
+                  <div class="emergency-summary__header">
+                    <AlertOctagon class="w-4 h-4" />
+                    <span>Notfall-Details</span>
+                  </div>
+                  <div class="emergency-summary__content">
+                    <div class="emergency-summary__row">
+                      <span class="emergency-summary__label">Auslöser:</span>
+                      <span class="emergency-summary__value">{{ item.data.emergencyDetails.triggeredBy }}</span>
+                    </div>
+                    <div class="emergency-summary__row">
+                      <span class="emergency-summary__label">Grund:</span>
+                      <span class="emergency-summary__value">{{ item.data.emergencyDetails.reason }}</span>
+                    </div>
+                    <div v-if="item.data.emergencyDetails.affectedGpios.length > 0" class="emergency-summary__row">
+                      <span class="emergency-summary__label">Betroffene GPIOs:</span>
+                      <span class="emergency-summary__value emergency-summary__gpios">
+                        <code v-for="gpio in item.data.emergencyDetails.affectedGpios" :key="gpio" class="gpio-badge">
+                          {{ gpio }}
+                        </code>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Events -->
+              <div
+                v-for="event in item.data.events"
+                :key="event.id"
+                class="event-item event-item--nested"
+                :class="[
+                  `event-item--category-${getCategoryClass(event)}`,
+                  `event-item--severity-${event.severity}`,
+                  { 'event-item--trigger': item.data.isEmergency && item.data.emergencyDetails && event.id === item.data.emergencyDetails.triggerEvent.id }
+                ]"
+                @click.stop="handleSelect(event)"
+              >
+                <div class="event-item__category-bar" />
+                <div class="event-item__icon">
+                  <component :is="getEventIcon(event.event_type)" class="w-4 h-4" />
+                </div>
+                <div class="event-item__time">
+                  {{ formatTime(event.timestamp) }}
+                </div>
+                <div class="event-item__content">
+                  <span class="event-item__type">{{ eventTypeLabels[event.event_type] || event.event_type }}</span>
+                  <span class="event-item__message">{{ getTransformedMessage(event).summary }}</span>
+                </div>
+                <div class="event-item__meta">
+                  <span
+                    v-if="item.data.isEmergency && item.data.emergencyDetails && event.id === item.data.emergencyDetails.triggerEvent.id"
+                    class="event-item__trigger-badge"
+                  >TRIGGER</span>
+                  <RssiIndicator v-if="hasRssiData(event)" :rssi="getRssiValue(event)" :show-value="true" />
+                  <span v-if="event.esp_id" class="event-item__esp">{{ event.esp_id }}</span>
+                  <span v-if="event.gpio !== undefined" class="event-item__gpio">GPIO {{ event.gpio }}</span>
+                  <span v-if="event.error_code" class="event-item__error">{{ event.error_code }}</span>
+                </div>
+                <component :is="getSeverityIcon(event.severity)" class="event-item__severity w-4 h-4" />
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </template>
+    </div>
+
+    <!-- Event List (ungrouped) -->
     <div
       v-else
       ref="containerRef"
@@ -591,11 +793,10 @@ onUnmounted(() => {
 
 <style scoped>
 .event-list-container {
-  flex: 1;  /* ⭐ FIX: Nur flex: 1, KEIN height: 100% - Flexbox bestimmt Höhe automatisch */
-  overflow: hidden;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;  /* ⭐ KRITISCH: Erlaubt Flexbox-Child die korrekte Höhenberechnung */
+  /* ⭐ Page-Scroll: Kein overflow: hidden - Events fließen in die Seite */
 }
 
 .monitor-empty {
@@ -623,10 +824,9 @@ onUnmounted(() => {
 }
 
 .event-list {
-  flex: 1;  /* ⭐ FIX: Nur flex: 1, KEIN height: 100% - Flexbox bestimmt Höhe automatisch */
-  overflow-y: auto;  /* ⭐ EINZIGER SCROLL-CONTAINER! */
-  min-height: 0;  /* ⭐ KRITISCH: Erlaubt Flexbox die Größe korrekt zu berechnen */
-  position: relative;  /* ⭐ Für absolute positionierte Virtual Scroll Children */
+  flex: 1;
+  /* ⭐ Page-Scroll: Kein overflow-y: auto - Seite scrollt als Ganzes */
+  position: relative;
 }
 
 .event-list--virtual {
@@ -1094,6 +1294,320 @@ onUnmounted(() => {
   .event-item__restored-badge svg {
     width: 0.625rem;
     height: 0.625rem;
+  }
+}
+
+/* ============================================================================
+   Event Groups (Phase 5.2)
+   ============================================================================ */
+
+.event-group {
+  margin-bottom: 0.125rem;
+}
+
+.event-group__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--glass-border);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-left: 3px solid transparent;
+}
+
+.event-group__header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.event-group--expanded .event-group__header {
+  border-bottom-color: transparent;
+}
+
+/* Category colors for group headers */
+.event-group__header--esp-status { border-left-color: #3b82f6; }
+.event-group__header--sensors { border-left-color: #10b981; }
+.event-group__header--actuators { border-left-color: #f59e0b; }
+.event-group__header--system { border-left-color: #8b5cf6; }
+
+.event-group__expand-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.event-group__chevron--rotated {
+  transform: rotate(90deg);
+  transition: transform 0.2s;
+}
+
+.event-group__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.event-group__title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  margin-bottom: 0.125rem;
+}
+
+.event-group__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.event-group__count {
+  padding: 0.125rem 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+.event-group__timespan {
+  font-family: var(--font-mono, monospace);
+}
+
+.event-group__esp {
+  font-family: var(--font-mono, monospace);
+}
+
+.event-group__time {
+  font-size: 0.8125rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* Group Children */
+.event-group__children {
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.01);
+  overflow: hidden;
+}
+
+.event-item--nested {
+  padding-left: 2.5rem;
+}
+
+.event-item--nested::before {
+  content: '';
+  position: absolute;
+  left: 1.25rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Expand/Collapse Transition */
+.group-expand-enter-active,
+.group-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.group-expand-enter-from,
+.group-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+
+.group-expand-enter-to,
+.group-expand-leave-from {
+  max-height: 2000px;
+}
+
+/* ============================================================================
+   Emergency Group Styles (Phase 5.3)
+   ============================================================================ */
+
+.event-group--emergency::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.03) 0%, rgba(239, 68, 68, 0.01) 100%);
+  border-radius: 0.5rem;
+  pointer-events: none;
+}
+
+.event-group--emergency {
+  position: relative;
+}
+
+.event-group__header--emergency {
+  border-left-color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.event-group__header--emergency:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.event-group__emergency-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background: rgba(239, 68, 68, 0.15);
+  border-radius: 0.5rem;
+  color: #ef4444;
+  flex-shrink: 0;
+  animation: emergency-pulse 2s ease-in-out infinite;
+}
+
+@keyframes emergency-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.event-group__emergency-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.event-group__emergency-reason {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.event-group__emergency-gpios {
+  font-size: 0.6875rem;
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.event-group__right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.event-group__count-badge--emergency {
+  padding: 0.125rem 0.5rem;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  font-weight: 600;
+  font-size: 0.75rem;
+  border-radius: 9999px;
+}
+
+/* Emergency Summary Panel */
+.event-group__emergency-summary {
+  padding: 0.75rem;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.1);
+}
+
+.emergency-summary {
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.emergency-summary__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.emergency-summary__content {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.emergency-summary__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.emergency-summary__label {
+  color: var(--color-text-muted);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.emergency-summary__value {
+  color: var(--color-text-primary);
+}
+
+.emergency-summary__gpios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.gpio-badge {
+  padding: 0.125rem 0.5rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 0.25rem;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: #ef4444;
+}
+
+/* Trigger Event Highlight */
+.event-item--trigger {
+  background: rgba(239, 68, 68, 0.05) !important;
+}
+
+.event-item__trigger-badge {
+  padding: 0.125rem 0.5rem;
+  background: #ef4444;
+  color: white;
+  font-size: 0.625rem;
+  font-weight: 700;
+  border-radius: 0.25rem;
+  letter-spacing: 0.05em;
+}
+
+/* Emergency expanded children */
+.event-group--emergency .event-group__children {
+  border-color: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.02);
+}
+
+/* Mobile adjustments for groups */
+@media (max-width: 768px) {
+  .event-group__header {
+    padding: 0.625rem 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .event-group__time {
+    display: none;
+  }
+
+  .event-group__meta {
+    gap: 0.5rem;
+  }
+
+  .emergency-summary__row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .emergency-summary__label {
+    min-width: auto;
   }
 }
 </style>

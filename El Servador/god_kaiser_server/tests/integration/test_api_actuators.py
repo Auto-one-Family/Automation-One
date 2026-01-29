@@ -20,7 +20,7 @@ from src.main import app
 async def test_esp(db_session: AsyncSession):
     """Create a test ESP device."""
     esp = ESPDevice(
-        device_id="ESP_ACTUAT00",
+        device_id="ESP_AC000001",
         name="Actuator Test ESP",
         ip_address="192.168.1.110",
         mac_address="AA:BB:CC:DD:EE:01",
@@ -146,10 +146,10 @@ class TestCreateActuator:
         """Test creating an actuator."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                f"/api/v1/actuators/{test_esp.device_id}/6",
+                f"/api/v1/actuators/{test_esp.device_id}/25",
                 json={
                     "esp_id": test_esp.device_id,
-                    "gpio": 6,
+                    "gpio": 25,
                     "actuator_type": "pwm",
                     "name": "New PWM Actuator",
                     "enabled": True,
@@ -157,10 +157,10 @@ class TestCreateActuator:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
-        assert data["gpio"] == 6
+        assert data["gpio"] == 25
         assert data["actuator_type"] == "pwm"
         assert data["name"] == "New PWM Actuator"
 
@@ -269,7 +269,7 @@ class TestEmergencyStop:
 
 class TestGetStatus:
     """Test actuator status endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_get_status(self, auth_headers: dict, test_actuator: ActuatorConfig, test_esp: ESPDevice):
         """Test getting actuator status."""
@@ -278,10 +278,95 @@ class TestGetStatus:
                 f"/api/v1/actuators/{test_esp.device_id}/{test_actuator.gpio}/status",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["esp_id"] == test_esp.device_id
         assert data["gpio"] == test_actuator.gpio
         assert "state" in data
+
+
+class TestDeleteActuator:
+    """Test actuator deletion."""
+
+    @pytest.mark.asyncio
+    async def test_delete_actuator(self, auth_headers: dict, test_actuator: ActuatorConfig, test_esp: ESPDevice):
+        """Test deleting an actuator."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                f"/api/v1/actuators/{test_esp.device_id}/{test_actuator.gpio}",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["gpio"] == test_actuator.gpio
+
+    @pytest.mark.asyncio
+    async def test_delete_actuator_not_found(self, auth_headers: dict, test_esp: ESPDevice):
+        """Test deleting non-existent actuator."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                f"/api/v1/actuators/{test_esp.device_id}/99",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 404
+
+
+class TestActuatorHistory:
+    """Test actuator history endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_get_history(self, auth_headers: dict, test_actuator: ActuatorConfig, test_esp: ESPDevice):
+        """Test getting actuator command history."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                f"/api/v1/actuators/{test_esp.device_id}/{test_actuator.gpio}/history",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+
+class TestActuatorAuth:
+    """Test authentication requirements for actuator endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_command_without_auth(self, test_actuator: ActuatorConfig, test_esp: ESPDevice):
+        """Test sending command without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/actuators/{test_esp.device_id}/{test_actuator.gpio}/command",
+                json={"command": "ON", "value": 1.0, "duration": 60},
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_emergency_stop_without_auth(self):
+        """Test emergency stop without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/actuators/emergency_stop",
+                json={"reason": "Unauthorized attempt"},
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_create_actuator_without_auth(self, test_esp: ESPDevice):
+        """Test creating actuator without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/actuators/{test_esp.device_id}/10",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 10,
+                    "actuator_type": "digital",
+                    "name": "Unauthorized Actuator",
+                },
+            )
+
+        assert response.status_code == 401
 

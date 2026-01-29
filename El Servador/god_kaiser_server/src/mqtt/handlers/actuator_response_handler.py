@@ -77,6 +77,7 @@ class ActuatorResponseHandler:
             value = payload.get("value", 0.0)
             success = payload.get("success", False)
             message = payload.get("message", "")
+            correlation_id = payload.get("correlation_id")
 
             logger.debug(
                 f"Processing actuator response: esp_id={esp_id_str}, gpio={gpio}, "
@@ -119,6 +120,21 @@ class ActuatorResponseHandler:
                     },
                 )
 
+                # Step 5b: Audit log with correlation_id for event linking
+                if correlation_id:
+                    from ...db.repositories.audit_log_repo import AuditLogRepository
+                    audit_repo = AuditLogRepository(session)
+                    await audit_repo.log_actuator_command(
+                        esp_id=esp_id_str,
+                        gpio=gpio,
+                        command=command,
+                        value=value,
+                        issued_by="esp32_response",
+                        success=success,
+                        error_message=None if success else message,
+                        correlation_id=correlation_id,
+                    )
+
                 # Commit transaction
                 await session.commit()
 
@@ -138,15 +154,18 @@ class ActuatorResponseHandler:
                 try:
                     from ...websocket.manager import WebSocketManager
                     ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast("actuator_response", {
+                    broadcast_data = {
                         "esp_id": esp_id_str,
                         "gpio": gpio,
                         "command": command,
                         "value": value,
                         "success": success,
                         "message": message,
-                        "timestamp": payload.get("ts", 0)
-                    })
+                        "timestamp": payload.get("ts", 0),
+                    }
+                    if correlation_id:
+                        broadcast_data["correlation_id"] = correlation_id
+                    await ws_manager.broadcast("actuator_response", broadcast_data)
                 except Exception as e:
                     logger.debug(f"WebSocket broadcast skipped: {e}")
 

@@ -101,9 +101,14 @@ class TestSystemPinRejection:
 
     @pytest.mark.asyncio
     async def test_non_system_pins_not_rejected_by_default(self, gpio_service):
-        """Non-system GPIOs sollten verfügbar sein (ohne andere Konflikte)."""
+        """Non-system GPIOs sollten verfügbar sein (ohne andere Konflikte).
+
+        Note: GPIO 21/22 sind jetzt durch Fix #3 (I2C Pin Protection) für I2C reserviert
+        und werden für ANALOG-Sensoren abgelehnt. Daher sind sie hier nicht mehr in der Liste.
+        """
         esp_id = uuid.uuid4()
-        non_system_gpios = [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33]
+        # GPIO 21/22 entfernt - sie sind jetzt durch I2C Pin Protection (Fix #3) reserviert
+        non_system_gpios = [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33]
 
         for gpio in non_system_gpios:
             result = await gpio_service.validate_gpio_available(esp_id, gpio)
@@ -350,15 +355,24 @@ class TestEspReportedStatus:
     async def test_esp_reported_system_pin_rejected(
         self, mock_session, mock_sensor_repo, mock_actuator_repo, mock_esp_repo
     ):
-        """ESP-gemeldeter System-Pin wird erkannt."""
-        esp_id = uuid.uuid4()
-        gpio = 21  # I2C SDA - might be reported by ESP as system
+        """ESP-gemeldeter System-Pin wird erkannt.
 
-        # Mock: ESP meldet GPIO 21 als system
+        Note: Verwende GPIO 15 (nicht 21), da GPIO 21 jetzt durch Fix #3 (I2C Pin Protection)
+        bereits VOR der ESP-Status-Prüfung abgelehnt wird.
+
+        Dieser Test simuliert: ESP meldet GPIO 15 als "system" (z.B. weil der ESP
+        diesen Pin intern für etwas verwendet). Der Server sollte diese Meldung
+        respektieren und den GPIO ablehnen.
+        """
+        esp_id = uuid.uuid4()
+        gpio = 15  # Ein normaler GPIO, der vom ESP als "system" gemeldet wird
+
+        # Mock: ESP meldet GPIO 15 als system (z.B. für externe Peripherie)
         mock_device = MagicMock()
+        mock_device.hardware_type = "ESP32_WROOM"  # Wichtig für Board-Constraints!
         mock_device.device_metadata = {
             "gpio_status": [
-                {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False}
+                {"gpio": 15, "owner": "system", "component": "EXTERNAL_PERIPHERAL", "mode": 1, "safe": False}
             ]
         }
         mock_esp_repo.get_by_id.return_value = mock_device

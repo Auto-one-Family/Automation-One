@@ -16,12 +16,12 @@
  * @see SystemMonitorView.vue - Parent component
  */
 
-import { defineProps, defineEmits } from 'vue'
 // No icons needed - status bar removed
 import DataSourceSelector from './DataSourceSelector.vue'
 import UnifiedEventList from './UnifiedEventList.vue'
 import type { UnifiedEvent } from '@/types'
 import type { DataSource } from '@/api/audit'
+import type { EventOrGroup } from '@/types/event-grouping'
 
 // ============================================================================
 // Types
@@ -36,6 +36,7 @@ type TimeRange = 'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'custom'
 interface Props {
   // Event data
   filteredEvents: UnifiedEvent[]
+  groupedEvents: EventOrGroup[]
   totalAvailableEvents: number
   hasMoreEvents: boolean
   isLoadingMore: boolean
@@ -50,6 +51,8 @@ interface Props {
   // Custom Date Range (for 'custom' timeRange)
   customStartDate?: string
   customEndDate?: string
+  // Grouping
+  groupingEnabled: boolean
 }
 
 defineProps<Props>()
@@ -71,6 +74,8 @@ const emit = defineEmits<{
   // Actions
   'load-more': []
   'select': [event: UnifiedEvent]
+  // Grouping
+  'update:groupingEnabled': [value: boolean]
 }>()
 
 // ============================================================================
@@ -118,12 +123,14 @@ function selectEvent(event: UnifiedEvent) {
         :unique-esp-ids="uniqueEspIds"
         :custom-start-date="customStartDate"
         :custom-end-date="customEndDate"
+        :grouping-enabled="groupingEnabled"
         @change="handleDataSourcesChange"
         @update:esp-id="handleEspIdChange"
         @update:levels="handleLevelsChange"
         @update:time-range="handleTimeRangeChange"
         @update:custom-start-date="handleCustomStartDateChange"
         @update:custom-end-date="handleCustomEndDateChange"
+        @update:grouping-enabled="(v: boolean) => emit('update:groupingEnabled', v)"
       />
     </div>
 
@@ -131,6 +138,8 @@ function selectEvent(event: UnifiedEvent) {
     <div class="events-list">
       <UnifiedEventList
         :events="filteredEvents"
+        :grouped-events="groupedEvents"
+        :grouping-enabled="groupingEnabled"
         :is-paused="isPaused"
         :event-type-labels="eventTypeLabels"
         :restored-event-ids="restoredEventIds"
@@ -148,8 +157,7 @@ function selectEvent(event: UnifiedEvent) {
   display: flex;
   flex-direction: column;
   flex: 1;  /* ⭐ FIX: Nutze flex: 1 statt height: 100% für korrekte Flexbox-Hierarchie */
-  overflow: hidden;
-  min-height: 0;  /* ⭐ KRITISCH: Erlaubt Flexbox-Children korrekte Höhenberechnung */
+  /* ⭐ Page-Scroll: Kein overflow: hidden - Seite scrollt als Ganzes */
 }
 
 /* =============================================================================
@@ -165,11 +173,9 @@ function selectEvent(event: UnifiedEvent) {
    ============================================================================= */
 .events-list {
   flex: 1;
-  overflow: hidden;  /* ⭐ FIX: NICHT auto! UnifiedEventList hat eigenen Scroll-Container */
-  min-height: 0;  /* ⭐ KRITISCH: Erlaubt Virtual Scroll Container korrekte Höhenberechnung */
+  /* ⭐ Page-Scroll: Kein overflow - Events fließen natürlich in die Seite */
   display: flex;
   flex-direction: column;
-  /* KEIN background, KEIN border, KEIN border-radius */
 }
 
 </style>

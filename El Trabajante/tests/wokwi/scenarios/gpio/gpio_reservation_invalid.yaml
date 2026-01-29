@@ -1,0 +1,102 @@
+# GPIO-RES-003 & GPIO-RES-007: Invalid Pin Rejection
+# ===================================================
+# Validates that GPIO Manager rejects requests for:
+# - Reserved pins (GPIO 0, 1, 2, 3, 12, 13)
+# - Input-only pins used as OUTPUT (GPIO 34, 35, 36, 39)
+#
+# Test IDs: GPIO-RES-003, GPIO-RES-007
+# Priority: CRITICAL (Safety)
+# Requirement:
+#   - requestPin(6, ...) returns false (Flash pin)
+#   - requestPin(34, ...) for actuator returns false (INPUT-only)
+#
+# Reserved Pins (ESP32 WROOM):
+#   0  - Boot Button
+#   1  - UART0 TX
+#   2  - Boot Strapping
+#   3  - UART0 RX
+#   12 - Flash Voltage
+#   13 - Flash Voltage
+#
+# Input-Only Pins:
+#   34, 35, 36, 39 - Cannot be used as OUTPUT
+#
+# Firmware reference: gpio_manager.cpp lines 98-102, 218-231
+
+name: Invalid GPIO Pin Rejection
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # TEST 1: Try to use reserved pin (GPIO 12 - Flash)
+  # This should be rejected because GPIO 12 is a reserved pin
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 12,
+              "sensor_type": "analog",
+              "sensor_name": "InvalidSensor",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify reserved pin is rejected
+  - wait-serial: "reserved pin"
+
+  # Wait before next test
+  - delay: 500
+
+  # TEST 2: Try to use UART pin (GPIO 1 - TX)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 1,
+              "sensor_type": "analog",
+              "sensor_name": "UARTSensor",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify UART pin is rejected
+  - wait-serial: "reserved pin 1"
+
+  # Wait before next test
+  - delay: 500
+
+  # TEST 3: Try to configure actuator on INPUT-only pin (GPIO 34)
+  # GPIO 34 cannot be used as OUTPUT - only INPUT
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 34,
+              "actuator_type": "pump",
+              "actuator_name": "InvalidPump",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify INPUT-only pin rejection for OUTPUT
+  # Note: GPIO 34 is not in SAFE_GPIO_PINS array
+  - wait-serial: "not in safe pins"

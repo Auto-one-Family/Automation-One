@@ -1,0 +1,108 @@
+# HW-PWM-001 to HW-PWM-005: PWM Configuration
+# ============================================
+# Validates PWM configuration is correctly applied to actuators.
+#
+# Test IDs: HW-PWM-001, HW-PWM-003, HW-PWM-004, HW-PWM-005
+# Priority: MEDIUM
+# Requirement:
+#   - PWM channels are available (WROOM: 16, XIAO: 6)
+#   - PWM resolution is 12-bit (0-4095)
+#   - PWM frequency is 1000 Hz
+#   - PWM actuators respond to commands
+#
+# PWM Configuration:
+#   ESP32-WROOM-32: PWM_CHANNELS=16, PWM_RESOLUTION=12, PWM_FREQUENCY=1000
+#   XIAO ESP32-C3:  PWM_CHANNELS=6,  PWM_RESOLUTION=12, PWM_FREQUENCY=1000
+#
+# Firmware references:
+#   - esp32_dev.h lines 84-86: PWM constants
+#   - pwm_controller.cpp: PWM channel management
+#   - actuator_manager.cpp: PWM actuator control
+
+name: PWM Configuration Verification
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure a PWM-capable actuator (LED with dimming)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 5,
+              "actuator_type": "led",
+              "actuator_name": "PWM_LED",
+              "active": true,
+              "pwm_enabled": true
+            }]
+          }
+        }
+
+  # Verify actuator is configured
+  - wait-serial: "Actuator"
+
+  # Wait for config to be applied
+  - delay: 1500
+
+  # Send PWM command at 50% duty cycle
+  # Value 0.5 maps to ~2048 on 12-bit resolution
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": {
+            "command": "PWM",
+            "value": 0.5
+          }
+        }
+
+  # Verify PWM command is processed
+  - wait-serial: "PWM"
+
+  # Wait for status update
+  - delay: 1000
+
+  # Verify actuator status is published
+  - wait-serial: "actuator"
+
+  # Send PWM command at 100% (full ON)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": {
+            "command": "PWM",
+            "value": 1.0
+          }
+        }
+
+  # Verify command processed
+  - wait-serial: "PWM"
+
+  # Send PWM command at 0% (OFF)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": {
+            "command": "OFF",
+            "value": 0
+          }
+        }
+
+  # Verify OFF command processed
+  - wait-serial: "OFF"

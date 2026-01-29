@@ -159,6 +159,14 @@ class AuditLog(Base, TimestampMixin):
         index=True,
         doc="Correlation ID for tracing related events",
     )
+
+    # Request-ID (for server-log correlation)
+    request_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+        doc="HTTP request ID for server-log correlation",
+    )
     
     def __repr__(self) -> str:
         return (

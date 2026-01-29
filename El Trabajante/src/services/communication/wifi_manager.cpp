@@ -1,6 +1,9 @@
 #include "wifi_manager.h"
 #include "../../models/error_codes.h"
 #include "../../utils/time_manager.h"
+#ifdef ESP_PLATFORM
+#include "esp_task_wdt.h"
+#endif
 
 // ============================================
 // CONSTANTS
@@ -133,6 +136,12 @@ bool WiFiManager::connectToNetwork() {
 
             return false;
         }
+        // FIX #2: Non-blocking wait with watchdog feed
+        // WiFi connect can take up to 20s - feed watchdog to prevent reset
+        yield();
+        #ifdef ESP_PLATFORM
+        esp_task_wdt_reset();
+        #endif
         delay(100);
     }
 
@@ -215,18 +224,12 @@ void WiFiManager::reconnect() {
     reconnect_attempts_++;
     last_reconnect_attempt_ = millis();
     
-    LOG_INFO("Attempting WiFi reconnection (attempt " + 
-             String(reconnect_attempts_) + "/" + 
-             String(MAX_RECONNECT_ATTEMPTS) + ")");
-    
+    LOG_INFO("Attempting WiFi reconnection (attempt " +
+             String(reconnect_attempts_) + ")");
+
     if (!connectToNetwork()) {
         // connectToNetwork already calls circuit_breaker_.recordFailure()
-        
-        if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
-            LOG_CRITICAL("Max WiFi reconnection attempts reached");
-            errorTracker.logCommunicationError(ERROR_WIFI_CONNECT_FAILED, 
-                                               "Max reconnection attempts reached");
-        }
+        // FIX #1: MAX_RECONNECT_ATTEMPTS check entfernt - Circuit Breaker regelt dies
     } else {
         // ✅ RECONNECT SUCCESS
         // connectToNetwork already calls circuit_breaker_.recordSuccess()
@@ -265,17 +268,27 @@ void WiFiManager::handleDisconnection() {
 }
 
 bool WiFiManager::shouldAttemptReconnect() const {
-    // Don't attempt if max attempts reached
-    if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+    // FIX #1: MAX_RECONNECT_ATTEMPTS entfernt (wie MQTT-Client, Zeile 730-734)
+    // Circuit Breaker regelt Retry-Limit: 10 Failures → OPEN → 60s Pause → Recovery
+    // MAX_RECONNECT_ATTEMPTS war redundant und verhinderte Recovery.
+
+    // FIX #5: HALF_OPEN bypasses reconnect interval (wie MQTT-Client, Zeile 742-744)
+    // Bei HALF_OPEN sofort Reconnect versuchen - das ist der Sinn von HALF_OPEN!
+    if (circuit_breaker_.getState() == CircuitState::HALF_OPEN) {
+        return true;
+    }
+
+    // Circuit Breaker Check
+    if (circuit_breaker_.isOpen()) {
         return false;
     }
-    
+
     // Wait for reconnect interval
     unsigned long current_time = millis();
     if (current_time - last_reconnect_attempt_ < RECONNECT_INTERVAL_MS) {
         return false;
     }
-    
+
     return true;
 }
 

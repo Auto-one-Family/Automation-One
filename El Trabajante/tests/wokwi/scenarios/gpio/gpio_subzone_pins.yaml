@@ -1,0 +1,83 @@
+# GPIO-SUB-003: Get Subzone Pins List
+# ====================================
+# Validates that getSubzonePins(subzone_id) returns correct
+# list of GPIO pins assigned to a subzone.
+#
+# Test ID: GPIO-SUB-003
+# Priority: MEDIUM
+# Requirement: getSubzonePins("irrigation") returns [4, 5, 6]
+#
+# Use Case:
+#   - Query all pins in a subzone for status reporting
+#   - Bulk operations on subzone (safe-mode, etc.)
+#   - Heartbeat includes subzone information
+#
+# Firmware reference: gpio_manager.cpp lines 566-572
+
+name: Get Subzone Pins List
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure multiple sensors/actuators for a subzone
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [
+              {
+                "gpio": 4,
+                "sensor_type": "temp_ds18b20",
+                "sensor_name": "ClimateTemp",
+                "active": true
+              }
+            ],
+            "actuators": [
+              {
+                "gpio": 5,
+                "actuator_type": "fan",
+                "actuator_name": "ClimateFan",
+                "active": true
+              },
+              {
+                "gpio": 14,
+                "actuator_type": "valve",
+                "actuator_name": "ClimateVent",
+                "active": true
+              }
+            ]
+          }
+        }
+
+  # Verify all components configured
+  - wait-serial: "Pin 4 allocated"
+  - wait-serial: "Pin 5 allocated"
+  - wait-serial: "Pin 14 allocated"
+
+  # Assign all to climate_control subzone
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
+          "payload": {
+            "subzone_id": "climate_control",
+            "gpios": [4, 5, 14]
+          }
+        }
+
+  # Verify all pins assigned to subzone
+  - wait-serial: "climate_control"
+
+  # The subzone status should list all 3 GPIOs
+  # This is reported in subzone ACK or status messages
+  - wait-serial: "subzone"

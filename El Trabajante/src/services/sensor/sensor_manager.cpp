@@ -13,6 +13,21 @@
 #include "../../models/error_codes.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
+#include <map>
+
+// ============================================
+// DS18B20 SPECIAL VALUE DETECTION (Defense-in-Depth)
+// ============================================
+// RAW = Temperature × 16 (12-bit resolution)
+// -127°C = -2032 RAW: Sensor disconnected, CRC failure, or bus error
+// +85°C = +1360 RAW: Power-on reset value (factory default before first conversion)
+constexpr int16_t DS18B20_RAW_SENSOR_FAULT = -2032;   // -127°C: Disconnected/CRC fail
+constexpr int16_t DS18B20_RAW_POWER_ON_RESET = 1360;  // +85°C: Factory default
+constexpr int16_t DS18B20_RAW_MIN_VALID = -880;       // -55°C: Datasheet minimum
+constexpr int16_t DS18B20_RAW_MAX_VALID = 2000;       // +125°C: Datasheet maximum
+
+// Track first reading per sensor (key: gpio_romcode, value: reading count)
+static std::map<String, uint32_t> ds18b20_reading_counts;
 
 // ============================================
 // GLOBAL INSTANCE
@@ -646,25 +661,108 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 if (!read_success) {
                     reading_out.valid = false;
                     reading_out.error_message = "OneWire read failed after " + String(MAX_RETRIES) + " attempts";
-                    LOG_ERROR("SensorManager: OneWire read failed after " + String(MAX_RETRIES) + 
+                    LOG_ERROR("SensorManager: OneWire read failed after " + String(MAX_RETRIES) +
                              " retries for device " + config->onewire_address + " on GPIO " + String(gpio));
                     errorTracker.trackError(ERROR_ONEWIRE_READ_TIMEOUT, ERROR_SEVERITY_ERROR,
                                            ("Read timeout: " + config->onewire_address).c_str());
                     return false;
                 }
-                
-                // 5. SANITY CHECK: Validate temperature range
-                // DS18B20 range: -55°C to +125°C = raw -880 to +2000 (in 1/16°C units)
-                // We use a slightly wider range to account for edge cases
-                const int16_t RAW_MIN = -900;   // ~-56.25°C
-                const int16_t RAW_MAX = 2100;   // ~+131.25°C
-                
-                if (raw_temp < RAW_MIN || raw_temp > RAW_MAX) {
-                    // Out of range - log WARNING but still report (server decides)
-                    LOG_WARNING("SensorManager: DS18B20 raw value " + String(raw_temp) + 
-                               " out of typical range [" + String(RAW_MIN) + ", " + String(RAW_MAX) + 
-                               "] for " + config->onewire_address + " - reporting anyway");
-                    reading_out.quality = "suspect";  // Server can use this hint
+
+                // ============================================
+                // 5. DS18B20 SPECIAL VALUE DETECTION (Defense-in-Depth)
+                // ============================================
+                // Track readings per sensor for power-on-reset detection
+                String sensor_key = String(gpio) + "_" + config->onewire_address;
+                uint32_t reading_count = ds18b20_reading_counts[sensor_key]++;
+
+                // 5a. SENSOR FAULT: -127°C (RAW = -2032)
+                // This indicates: disconnected sensor, CRC failure, or bus error
+                // CRITICAL: Do NOT publish this value - it's not a temperature!
+                if (raw_temp == DS18B20_RAW_SENSOR_FAULT) {
+                    LOG_ERROR("SensorManager: DS18B20 SENSOR FAULT detected: -127°C (GPIO " +
+                              String(gpio) + ", ROM: " + config->onewire_address + ")");
+                    LOG_ERROR("  → Possible causes: Sensor disconnected, CRC failure, bus wiring issue");
+
+                    errorTracker.trackError(
+                        ERROR_DS18B20_SENSOR_FAULT,
+                        ERROR_SEVERITY_ERROR,
+                        ("DS18B20 fault (-127°C) on GPIO " + String(gpio) +
+                         " ROM " + config->onewire_address).c_str()
+                    );
+
+                    // Do NOT publish - error is reported via ErrorTracker (dedicated MQTT topic)
+                    reading_out.valid = false;
+                    reading_out.error_message = "DS18B20 sensor fault: -127°C (disconnected or CRC failure)";
+                    reading_out.quality = "error";
+                    return false;
+                }
+
+                // 5b. POWER-ON-RESET: 85°C (RAW = 1360) - ONLY on first reading
+                // After power-up, DS18B20 reports 85°C until first conversion completes
+                // CRITICAL: Only reject on FIRST reading; after that, 85°C could be real (fire!)
+                if (raw_temp == DS18B20_RAW_POWER_ON_RESET && reading_count == 0) {
+                    LOG_WARNING("SensorManager: DS18B20 power-on reset detected: 85°C (GPIO " +
+                               String(gpio) + ", ROM: " + config->onewire_address + ")");
+                    LOG_INFO("  → First reading after boot - triggering retry with conversion delay...");
+
+                    // Wait for conversion to complete (750ms for 12-bit resolution)
+                    delay(100);  // Short delay, then retry
+
+                    // Retry the read
+                    int16_t retry_raw = 0;
+                    if (readRawOneWire(gpio, rom, retry_raw)) {
+                        if (retry_raw == DS18B20_RAW_POWER_ON_RESET) {
+                            // Still 85°C after retry - accept it (could be fire or faulty sensor)
+                            LOG_WARNING("SensorManager: DS18B20 still 85°C after retry - accepting as potentially valid");
+                            raw_temp = retry_raw;
+                            // Fall through to normal processing
+                        } else if (retry_raw == DS18B20_RAW_SENSOR_FAULT) {
+                            // Retry returned fault
+                            LOG_ERROR("SensorManager: DS18B20 retry returned sensor fault (-127°C)");
+                            errorTracker.trackError(
+                                ERROR_DS18B20_SENSOR_FAULT,
+                                ERROR_SEVERITY_ERROR,
+                                ("DS18B20 fault after power-on retry on GPIO " + String(gpio)).c_str()
+                            );
+                            reading_out.valid = false;
+                            reading_out.error_message = "DS18B20 sensor fault after power-on retry";
+                            reading_out.quality = "error";
+                            return false;
+                        } else {
+                            // Good value on retry
+                            LOG_INFO("SensorManager: DS18B20 retry successful: " +
+                                    String(retry_raw * 0.0625) + "°C (was power-on 85°C)");
+                            raw_temp = retry_raw;
+                        }
+                    } else {
+                        // Retry read failed
+                        LOG_ERROR("SensorManager: DS18B20 retry read failed after power-on reset");
+                        errorTracker.trackError(
+                            ERROR_DS18B20_POWER_ON_RESET,
+                            ERROR_SEVERITY_WARNING,
+                            ("DS18B20 power-on reset, retry failed on GPIO " + String(gpio)).c_str()
+                        );
+                        reading_out.valid = false;
+                        reading_out.error_message = "DS18B20 retry failed after power-on reset";
+                        reading_out.quality = "error";
+                        return false;
+                    }
+                }
+
+                // 5c. RANGE VALIDATION: Check datasheet limits (-55°C to +125°C)
+                if (raw_temp < DS18B20_RAW_MIN_VALID || raw_temp > DS18B20_RAW_MAX_VALID) {
+                    LOG_WARNING("SensorManager: DS18B20 raw value " + String(raw_temp) +
+                               " (" + String(raw_temp * 0.0625) + "°C) out of datasheet range " +
+                               "[" + String(DS18B20_RAW_MIN_VALID) + ", " + String(DS18B20_RAW_MAX_VALID) +
+                               "] for " + config->onewire_address);
+
+                    errorTracker.trackError(
+                        ERROR_DS18B20_OUT_OF_RANGE,
+                        ERROR_SEVERITY_WARNING,
+                        ("DS18B20 out of range: " + String(raw_temp * 0.0625) + "°C").c_str()
+                    );
+
+                    reading_out.quality = "suspect";  // Server decides whether to use
                 } else {
                     reading_out.quality = "good";
                 }

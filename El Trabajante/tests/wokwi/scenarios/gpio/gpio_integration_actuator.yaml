@@ -1,0 +1,119 @@
+# GPIO-INT-002: Actuator Manager Integration
+# ==========================================
+# Validates that ActuatorManager correctly uses GPIO Manager
+# for pin reservation and mode configuration.
+#
+# Test ID: GPIO-INT-002
+# Priority: HIGH
+# Requirement: actuatorManager.configureActuator() calls gpioManager.requestPin() and configurePinMode()
+#
+# Integration Flow:
+#   1. MQTT config arrives with actuator definition
+#   2. ActuatorManager processes config
+#   3. ActuatorManager calls gpioManager.requestPin(gpio, "actuator", name)
+#   4. ActuatorManager calls gpioManager.configurePinMode(gpio, OUTPUT)
+#   5. GPIO Manager reserves pin and sets OUTPUT mode
+#   6. Actuator becomes operational
+#
+# Firmware reference:
+#   - actuator_manager.cpp (configureActuator method)
+#   - gpio_manager.cpp (requestPin, configurePinMode methods)
+
+name: Actuator Manager GPIO Integration
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for Actuator Manager initialization
+  - wait-serial: "Actuator Manager initialized"
+
+  # Wait for Safety Controller initialization
+  - wait-serial: "Safety Controller initialized"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure binary actuator (pump)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 5,
+              "actuator_type": "pump",
+              "actuator_name": "WaterPump",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify GPIO Manager allocates pin
+  - wait-serial: "Pin 5 allocated"
+  - wait-serial: "actuator"
+
+  # Verify actuator name is tracked
+  - wait-serial: "WaterPump"
+
+  # Verify config response is successful
+  - wait-serial: "config_response"
+
+  # Wait for actuator to be ready
+  - delay: 500
+
+  # Test actuator command (verifies GPIO is correctly configured as OUTPUT)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": {
+            "command": "ON"
+          }
+        }
+
+  # Verify actuator responds (GPIO is working as OUTPUT)
+  - wait-serial: "GPIO 5"
+
+  # Configure PWM actuator (fan)
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 14,
+              "actuator_type": "fan",
+              "actuator_name": "VentFan",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify PWM actuator allocation
+  - wait-serial: "Pin 14 allocated"
+  - wait-serial: "VentFan"
+
+  # Test PWM command
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/14/command",
+          "payload": {
+            "command": "PWM",
+            "value": 0.5
+          }
+        }
+
+  # Verify PWM response
+  - wait-serial: "GPIO 14"

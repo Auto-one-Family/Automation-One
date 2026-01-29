@@ -22,9 +22,11 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Response
+from sqlalchemy import and_, desc, select
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
+from ...db.models.audit_log import AuditLog, AuditSourceType
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...mqtt.client import MQTTClient
 from ...schemas import (
@@ -39,7 +41,7 @@ from ...schemas import (
     SystemResourceHealth,
     WebSocketHealth,
 )
-from ...schemas.health import ESPHealthSummaryResponse
+from ...schemas.health import ESPHealthSummaryResponse, RecentError
 from ...websocket.manager import WebSocketManager
 from ..deps import ActiveUser, DBSession
 
@@ -245,24 +247,35 @@ async def esp_health_summary(
     rssi_values = []
     
     device_items = []
+    problem_device_ids: list[str] = []
+
     for device in devices:
         sensor_count = await sensor_repo.count_by_esp(device.id)
         actuator_count = await actuator_repo.count_by_esp(device.id)
-        
+
         total_sensors += sensor_count
         total_actuators += actuator_count
-        
+
         # Get health data from device_metadata
         health_data = device.device_metadata.get("health", {}) if device.device_metadata else {}
         heap_free = health_data.get("heap_free")
         wifi_rssi = health_data.get("wifi_rssi")
         uptime = health_data.get("uptime")
-        
+
         if heap_free and device.status == "online":
             heap_values.append(heap_free)
         if wifi_rssi and device.status == "online":
             rssi_values.append(wifi_rssi)
-        
+
+        # Track problem devices for error lookup
+        is_problem = (
+            device.status in ("offline", "error")
+            or (heap_free is not None and heap_free < 20000)
+            or (wifi_rssi is not None and wifi_rssi < -80)
+        )
+        if is_problem:
+            problem_device_ids.append(device.device_id)
+
         device_items.append(ESPHealthItem(
             device_id=device.device_id,
             name=device.name,
@@ -274,6 +287,42 @@ async def esp_health_summary(
             sensor_count=sensor_count,
             actuator_count=actuator_count,
         ))
+
+    # Fetch recent errors for problem devices from audit log
+    if problem_device_ids:
+        stmt = (
+            select(AuditLog)
+            .where(
+                and_(
+                    AuditLog.source_type == AuditSourceType.ESP32,
+                    AuditLog.source_id.in_(problem_device_ids),
+                    AuditLog.severity.in_(["warning", "error", "critical"]),
+                )
+            )
+            .order_by(desc(AuditLog.created_at))
+            .limit(50)
+        )
+        result = await db.execute(stmt)
+        audit_entries = list(result.scalars().all())
+
+        # Group by device_id, max 5 per device
+        errors_by_device: dict[str, list[RecentError]] = {}
+        for entry in audit_entries:
+            did = entry.source_id
+            if did not in errors_by_device:
+                errors_by_device[did] = []
+            if len(errors_by_device[did]) < 5:
+                errors_by_device[did].append(RecentError(
+                    timestamp=entry.created_at,
+                    severity=entry.severity,
+                    category=entry.event_type,
+                    message=entry.message or entry.error_description or entry.event_type,
+                ))
+
+        # Attach errors to device items
+        for item in device_items:
+            if item.device_id in errors_by_device:
+                item.recent_errors = errors_by_device[item.device_id]
     
     # Calculate averages
     avg_heap = sum(heap_values) / len(heap_values) if heap_values else None

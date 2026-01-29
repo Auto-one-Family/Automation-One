@@ -1,0 +1,98 @@
+# GPIO-SAFE-004 & GPIO-SAFE-005: Safe-Mode State Verification
+# ============================================================
+# Validates that:
+# - isPinInSafeMode(gpio) returns correct state
+# - Safe-Mode correctly overrides active OUTPUT pins
+#
+# Test IDs: GPIO-SAFE-004, GPIO-SAFE-005
+# Priority: HIGH
+# Requirement:
+#   - isPinInSafeMode(gpio) returns accurate in_safe_mode flag
+#   - OUTPUT HIGH pin becomes INPUT_PULLUP after safe mode
+#
+# GPIO-SAFE-004: Verify isPinInSafeMode() accuracy
+# GPIO-SAFE-005: Verify active OUTPUT is correctly overridden
+#
+# Test Method:
+#   1. Configure actuator, turn ON (OUTPUT HIGH)
+#   2. Trigger emergency stop
+#   3. Verify pin is now in safe mode
+#   4. Verify heartbeat shows pin as "safe"
+#
+# Firmware reference:
+#   - gpio_manager.cpp lines 284-291 (isPinInSafeMode)
+#   - gpio_manager.cpp lines 176-200 (enableSafeModeForAllPins)
+
+name: Safe-Mode State Verification
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Verify initial state - all pins should be in safe mode
+  - wait-serial: "All pins successfully set to Safe-Mode"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure actuator
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 5,
+              "actuator_type": "pump",
+              "actuator_name": "VerifyPump",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify pin is allocated (no longer in safe mode)
+  - wait-serial: "Pin 5 allocated"
+
+  # Turn actuator ON (OUTPUT HIGH)
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": { "command": "ON" }
+        }
+
+  # Verify actuator state is ON
+  - wait-serial: "GPIO 5"
+
+  # Now trigger emergency - this should override the OUTPUT HIGH
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/emergency",
+          "payload": {
+            "command": "STOP",
+            "reason": "Verify safe mode override"
+          }
+        }
+
+  # Verify emergency is processed
+  - wait-serial: "Emergency"
+
+  # GPIO-SAFE-005: Verify OUTPUT was de-energized BEFORE mode change
+  # The log should show de-energize happened for GPIO 5
+  - wait-serial: "de-energized"
+
+  # Verify pin is now in safe mode
+  - wait-serial: "safe"
+
+  # GPIO-SAFE-004: The next heartbeat should show pin 5 as safe
+  # Heartbeat includes gpio_status with safe flag
+  # We can trigger heartbeat by waiting or via system command

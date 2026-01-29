@@ -26,6 +26,8 @@ import { useEspStore } from '@/stores/esp'
 import { detectCategory } from '@/utils/errorCodeTranslator'
 import { auditApi, type AuditStatistics, type StatisticsTimeRange, type DataSource, type UnifiedEventFromAPI } from '@/api/audit'
 import type { UnifiedEvent } from '@/types/websocket-events'
+import type { EventOrGroup, GroupingOptions } from '@/types/event-grouping'
+import { groupEventsByTimeWindow } from '@/utils/eventGrouper'
 import type { WebSocketMessage } from '@/services/websocket'
 import { X, CheckCircle } from 'lucide-vue-next'
 
@@ -38,6 +40,8 @@ import EventsTab from '@/components/system-monitor/EventsTab.vue'
 import ServerLogsTab from '@/components/system-monitor/ServerLogsTab.vue'
 import DatabaseTab from '@/components/system-monitor/DatabaseTab.vue'
 import MqttTrafficTab from '@/components/system-monitor/MqttTrafficTab.vue'
+import HealthTab from '@/components/system-monitor/HealthTab.vue'
+import HealthSummaryBar from '@/components/system-monitor/HealthSummaryBar.vue'
 import CleanupPanel from '@/components/system-monitor/CleanupPanel.vue'
 
 // ============================================================================
@@ -175,6 +179,12 @@ const showStats = ref(false)
 // Mobile state
 const isMobile = ref(false)
 
+// Health Summary Bar state
+import { getFleetHealth, type FleetHealthDevice } from '@/api/health'
+const healthDevices = ref<FleetHealthDevice[]>([])
+const isHealthLoading = ref(false)
+const healthExpanded = ref(false)
+
 // Event Loading State
 const eventLoadHours = ref<number | null>(null) // null = load ALL events (default)
 const isLoadingMore = ref(false)
@@ -230,9 +240,27 @@ const customEndDate = ref<string | undefined>(undefined)
 // Restored events highlighting (from backup restore)
 const restoredEventIds = ref<Set<string>>(new Set())
 
-// Server-Logs Zeitfenster (Feature 1.2)
+// Server-Logs Zeitfenster (Feature 1.2) + Request-ID (Phase 4)
 const logsStartTime = ref<string | undefined>()
 const logsEndTime = ref<string | undefined>()
+const logsRequestId = ref<string | undefined>()
+
+// Grouping state (Phase 5.2)
+const groupingEnabled = ref(localStorage.getItem('systemMonitor.groupingEnabled') === 'true')
+const groupingOptions = computed<GroupingOptions>(() => ({
+  enabled: groupingEnabled.value,
+  windowMs: 5000,
+  minGroupSize: 2,
+}))
+
+const groupedEvents = computed<EventOrGroup[]>(() => {
+  return groupEventsByTimeWindow(filteredEvents.value, groupingOptions.value)
+})
+
+function handleGroupingToggle(value: boolean) {
+  groupingEnabled.value = value
+  localStorage.setItem('systemMonitor.groupingEnabled', String(value))
+}
 
 // Toast notification state
 const toastMessage = ref<string | null>(null)
@@ -1046,9 +1074,32 @@ function transformAggregatedEventToUnified(apiEvent: UnifiedEventFromAPI): Unifi
     error_category: metadata.error_code ? detectCategory(metadata.error_code as string | number) : undefined,
     gpio: metadata.gpio as number | undefined,
     device_type: (metadata.sensor_type || metadata.actuator_type) as string | undefined,
+    // Phase 3: Correlation ID for event tracking
+    correlation_id: (metadata.correlation_id as string) || undefined,
+    // Phase 4: Request ID for server-log correlation
+    request_id: (metadata.request_id as string) || undefined,
     data: metadata,
     // Phase 4: Tag as server-loaded event (already filtered by server, skip client-side filter)
     _sourceType: 'server',
+  }
+}
+
+// ============================================================================
+// Methods - Health Summary
+// ============================================================================
+
+let healthRefreshInterval: ReturnType<typeof setInterval> | null = null
+
+async function loadHealthData() {
+  if (isMobile.value) return
+  isHealthLoading.value = true
+  try {
+    const response = await getFleetHealth()
+    healthDevices.value = response.devices
+  } catch (error) {
+    console.error('Failed to load health data:', error)
+  } finally {
+    isHealthLoading.value = false
   }
 }
 
@@ -1073,9 +1124,18 @@ function handleFilterDevice(espId: string) {
 }
 
 function handleShowServerLogs(event: UnifiedEvent) {
-  const timestamp = new Date(event.timestamp).getTime()
-  logsStartTime.value = new Date(timestamp - 30000).toISOString()
-  logsEndTime.value = new Date(timestamp + 30000).toISOString()
+  if (event.request_id) {
+    // Phase 4: Precise log correlation via request_id
+    logsRequestId.value = event.request_id
+    logsStartTime.value = undefined
+    logsEndTime.value = undefined
+  } else {
+    // Fallback: time window (±30s) for events without request_id
+    logsRequestId.value = undefined
+    const timestamp = new Date(event.timestamp).getTime()
+    logsStartTime.value = new Date(timestamp - 30000).toISOString()
+    logsEndTime.value = new Date(timestamp + 30000).toISOString()
+  }
   activeTab.value = 'logs'
   selectedEvent.value = null
 }
@@ -1220,12 +1280,26 @@ onMounted(async () => {
 
   // Ensure ESP Store has current data for header ESP count
   espStore.fetchAll()
+
+  // Load health data for Health Summary Bar (desktop only)
+  if (!isMobile.value) {
+    loadHealthData()
+    healthRefreshInterval = setInterval(() => {
+      if (!isMobile.value && activeTab.value === 'events') {
+        loadHealthData()
+      }
+    }, 30000)
+  }
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   wsUnsubscribers.forEach(unsub => unsub())
   wsUnsubscribers.length = 0
+  if (healthRefreshInterval) {
+    clearInterval(healthRefreshInterval)
+    healthRefreshInterval = null
+  }
 })
 
 // Watch for URL changes (deep-linking from other views)
@@ -1261,6 +1335,7 @@ watch(activeTab, (newTab) => {
   if (newTab !== 'logs') {
     logsStartTime.value = undefined
     logsEndTime.value = undefined
+    logsRequestId.value = undefined
   }
 })
 
@@ -1353,10 +1428,22 @@ watch(activeTab, (newTab) => {
 
     <!-- Content -->
     <main class="monitor-content">
+      <!-- Health Summary Bar - nur im Events Tab, nur Desktop -->
+      <HealthSummaryBar
+        v-if="activeTab === 'events' && !isMobile"
+        :devices="healthDevices"
+        :is-loading="isHealthLoading"
+        :expanded="healthExpanded"
+        @update:expanded="healthExpanded = $event"
+        @filter-device="handleFilterDevice"
+      />
+
       <!-- Events Tab (with integrated filter controls) -->
       <EventsTab
         v-if="activeTab === 'events'"
         :filtered-events="filteredEvents"
+        :grouped-events="groupedEvents"
+        :grouping-enabled="groupingEnabled"
         :total-available-events="totalAvailableEvents"
         :has-more-events="hasMoreEvents"
         :is-loading-more="isLoadingMore"
@@ -1375,6 +1462,7 @@ watch(activeTab, (newTab) => {
         @update:filter-time-range="filterTimeRange = $event"
         @update:custom-start-date="customStartDate = $event"
         @update:custom-end-date="customEndDate = $event"
+        @update:grouping-enabled="handleGroupingToggle"
         @load-more="handleLoadMore"
         @select="selectEvent"
       />
@@ -1384,11 +1472,19 @@ watch(activeTab, (newTab) => {
         v-else-if="activeTab === 'logs'"
         :initial-start-time="logsStartTime"
         :initial-end-time="logsEndTime"
+        :initial-request-id="logsRequestId"
       />
 
       <!-- Database Tab -->
       <DatabaseTab
         v-else-if="activeTab === 'database'"
+      />
+
+      <!-- Health Tab -->
+      <HealthTab
+        v-else-if="activeTab === 'health'"
+        :filter-esp-id="filterEspId"
+        @filter-device="handleFilterDevice"
       />
 
       <!-- MQTT Traffic Tab - v-show statt v-if damit Messages weiter gesammelt werden -->
@@ -1407,6 +1503,7 @@ watch(activeTab, (newTab) => {
         @close="closeEventDetails"
         @filter-device="handleFilterDevice"
         @show-server-logs="handleShowServerLogs"
+        @select-event="selectEvent"
       />
     </Transition>
 
@@ -1472,8 +1569,7 @@ watch(activeTab, (newTab) => {
 .system-monitor {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;  /* ⭐ KRITISCH: Erlaubt Flexbox-Children korrekte Höhenberechnung */
+  min-height: 100vh;  /* ⭐ Page-Scroll: Mindesthöhe statt fixe Höhe */
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
 }
@@ -1483,8 +1579,7 @@ watch(activeTab, (newTab) => {
   flex: 1;
   display: flex;  /* ⭐ FIX: Flexbox für Kinder (EventsTab, ServerLogsTab, etc.) */
   flex-direction: column;
-  overflow: hidden;
-  min-height: 0;  /* ⭐ KRITISCH: Erlaubt Flexbox-Children korrekte Höhenberechnung */
+  /* ⭐ Page-Scroll: Kein overflow: hidden - Seite scrollt als Ganzes */
 }
 
 /* .monitor-tab-content ENTFERNT - nicht verwendet, könnte Verwirrung stiften */

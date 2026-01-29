@@ -213,7 +213,7 @@ class TestQueryData:
 
 class TestSensorStats:
     """Test sensor statistics."""
-    
+
     @pytest.mark.asyncio
     async def test_get_sensor_stats(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
         """Test getting sensor statistics."""
@@ -222,9 +222,87 @@ class TestSensorStats:
                 f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}/stats",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert "stats" in data
+
+
+class TestSensorDataBySource:
+    """Test sensor data query by source."""
+
+    @pytest.mark.asyncio
+    async def test_query_by_source(self, auth_headers: dict, test_sensor: SensorConfig):
+        """Test querying sensor data by source."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/sensors/data/by-source/production",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_query_data_stats_by_source(self, auth_headers: dict):
+        """Test getting data stats by source."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/sensors/data/stats/by-source",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+
+class TestSensorAuth:
+    """Test authentication requirements for sensor endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_create_sensor_without_auth(self, test_esp: ESPDevice):
+        """Test creating sensor without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/36",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 36,
+                    "sensor_type": "temperature",
+                    "name": "Unauthorized Sensor",
+                },
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_delete_sensor_without_auth(self, test_sensor: SensorConfig, test_esp: ESPDevice):
+        """Test deleting sensor without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
+            )
+
+        assert response.status_code == 401
+
+
+class TestSensorValidation:
+    """Test sensor input validation."""
+
+    @pytest.mark.asyncio
+    async def test_create_duplicate_sensor(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
+        """Test creating sensor on already-used GPIO."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": test_sensor.gpio,
+                    "sensor_type": "temperature",
+                    "name": "Duplicate Sensor",
+                },
+                headers=auth_headers,
+            )
+
+        # Should reject duplicate GPIO
+        assert response.status_code in [400, 409]
 

@@ -1,0 +1,85 @@
+# GPIO-SAFE-001 & GPIO-SAFE-002: Single Pin Safe-Mode Control
+# ============================================================
+# Validates that:
+# - enableSafeModeForPin(gpio) sets mode to INPUT_PULLUP
+# - disableSafeModeForPin(gpio) clears the in_safe_mode flag
+#
+# Test IDs: GPIO-SAFE-001, GPIO-SAFE-002
+# Priority: HIGH
+# Requirement:
+#   - enableSafeModeForPin(4) -> mode == INPUT_PULLUP, in_safe_mode == true
+#   - disableSafeModeForPin(4) -> in_safe_mode == false
+#
+# Note: Single-pin safe mode is typically used during:
+#   - Sensor/Actuator reconfiguration
+#   - Error recovery for specific components
+#   - Maintenance operations
+#
+# Firmware reference: gpio_manager.cpp (implicit in enableSafeModeForSubzone)
+
+name: Single Pin Safe-Mode Enable and Disable
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure actuator on GPIO 5 (will be used as OUTPUT)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [{
+              "gpio": 5,
+              "actuator_type": "pump",
+              "actuator_name": "TestPump",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify actuator is configured
+  - wait-serial: "Pin 5 allocated"
+
+  # Wait for actuator to be operational
+  - delay: 1000
+
+  # Turn actuator ON
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": {
+            "command": "ON"
+          }
+        }
+
+  # Verify actuator is ON
+  - wait-serial: "GPIO 5"
+
+  # Trigger ESP-specific emergency stop
+  # This should put GPIO 5 into safe mode
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/emergency",
+          "payload": {
+            "command": "STOP",
+            "reason": "Test safe mode"
+          }
+        }
+
+  # Verify safe mode is activated for actuator pin
+  - wait-serial: "Emergency"
+
+  # Verify pin returns to safe state
+  - wait-serial: "safe"

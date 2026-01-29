@@ -1,0 +1,26 @@
+# PWM Controller Initialization Success Test
+# Test-ID: PWM-INIT-001
+# Validates that PWM controller initializes correctly during boot
+# Expected: "PWM Controller initialized successfully" in serial output
+# Timeout: 90000ms
+
+name: PWM Controller Initialization Success
+version: 1
+steps:
+  # Wait for boot sequence to start
+  - wait-serial: "Boot started"
+
+  # Wait for PWM Controller initialization start
+  - wait-serial: "PWM Controller initialization started"
+
+  # Verify PWM configuration is loaded
+  - wait-serial: "PWM Config:"
+
+  # Wait for successful initialization
+  - wait-serial: "PWM Controller initialized successfully"
+
+  # Verify board type is logged
+  - wait-serial: "Board:"
+
+  # Verify channel count is logged
+  - wait-serial: "Channels:"

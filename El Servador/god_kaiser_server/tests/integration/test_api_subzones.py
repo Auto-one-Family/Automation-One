@@ -43,7 +43,7 @@ async def test_esp_with_zone(db_session: AsyncSession) -> ESPDevice:
     Note: device_id must match API pattern: ^ESP_[A-Z0-9]{6,8}$
     """
     device = ESPDevice(
-        device_id="ESP_APITEST1",  # 8 chars after ESP_, valid format
+        device_id="ESP_A00000E1",  # 8 chars after ESP_, valid format
         name="API Test ESP",
         ip_address="192.168.1.200",
         mac_address="AA:BB:CC:DD:EE:FF",
@@ -68,7 +68,7 @@ async def test_esp_no_zone(db_session: AsyncSession) -> ESPDevice:
     Note: device_id must match API pattern: ^ESP_[A-Z0-9]{6,8}$
     """
     device = ESPDevice(
-        device_id="ESP_NOZONE01",  # 8 chars after ESP_, valid format
+        device_id="ESP_B0000001",  # 8 chars after ESP_, valid format
         name="No Zone ESP",
         ip_address="192.168.1.201",
         mac_address="AA:BB:CC:DD:EE:EE",
@@ -207,7 +207,7 @@ class TestSubzoneAssignmentAPI:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.post(
-                "/api/v1/subzone/devices/ESP_NONEXIST/subzones/assign",
+                "/api/v1/subzone/devices/ESP_FF000000/subzones/assign",
                 json=request_data,
                 headers=auth_headers,
             )
@@ -249,7 +249,7 @@ class TestSubzoneAssignmentAPI:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.post(
-                "/api/v1/subzone/devices/ESP_TESTXX/subzones/assign",
+                "/api/v1/subzone/devices/ESP_EE000000/subzones/assign",
                 json=request_data,
                 headers=auth_headers,
             )
@@ -269,7 +269,7 @@ class TestSubzoneAssignmentAPI:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.post(
-                "/api/v1/subzone/devices/ESP_TESTXX/subzones/assign",
+                "/api/v1/subzone/devices/ESP_EE000000/subzones/assign",
                 json=request_data,
                 headers=auth_headers,
             )
@@ -395,7 +395,7 @@ class TestSubzoneQueryAPI:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.get(
-                "/api/v1/subzone/devices/ESP_NONEXIST/subzones",
+                "/api/v1/subzone/devices/ESP_FF000000/subzones",
                 headers=auth_headers,
             )
 
@@ -462,7 +462,7 @@ class TestSafeModeAPI:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.post(
-                "/api/v1/subzone/devices/ESP_NONEXIST/subzones/test/safe-mode",
+                "/api/v1/subzone/devices/ESP_FF000000/subzones/test/safe-mode",
                 json={"reason": "test"},
                 headers=auth_headers,
             )
@@ -508,7 +508,7 @@ class TestSubzoneRemovalAPI:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.delete(
-                "/api/v1/subzone/devices/ESP_NONEXIST/subzones/test_subzone",
+                "/api/v1/subzone/devices/ESP_FF000000/subzones/test_subzone",
                 headers=auth_headers,
             )
 

@@ -547,6 +547,7 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   command.value = extractJSONFloat(payload, "value", 0.0f);
   command.duration_s = extractJSONUInt32(payload, "duration", 0);
   command.timestamp = millis();
+  command.correlation_id = extractJSONString(payload, "correlation_id");
 
   bool success = false;
   if (command.command.equalsIgnoreCase("ON")) {
@@ -675,7 +676,7 @@ bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
   return true;
 }
 
-bool ActuatorManager::handleActuatorConfig(const String& payload) {
+bool ActuatorManager::handleActuatorConfig(const String& payload, const String& correlation_id) {
   LOG_INFO("Handling actuator configuration from MQTT");
 
   DynamicJsonDocument doc(4096);
@@ -684,7 +685,8 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
     String message = "Failed to parse actuator config JSON: " + String(error.c_str());
     LOG_ERROR(message);
     ConfigResponseBuilder::publishError(
-        ConfigType::ACTUATOR, ConfigErrorCode::JSON_PARSE_ERROR, message);
+        ConfigType::ACTUATOR, ConfigErrorCode::JSON_PARSE_ERROR, message,
+        JsonVariantConst(), correlation_id);
     return false;
   }
 
@@ -693,7 +695,8 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
     String message = "Actuator config missing 'actuators' array";
     LOG_ERROR(message);
     ConfigResponseBuilder::publishError(
-        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message);
+        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,
+        JsonVariantConst(), correlation_id);
     return false;
   }
 
@@ -702,7 +705,8 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
     String message = "Actuator config array is empty";
     LOG_WARNING(message);
     ConfigResponseBuilder::publishError(
-        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message);
+        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,
+        JsonVariantConst(), correlation_id);
     return false;
   }
   uint8_t configured = 0;
@@ -721,7 +725,8 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
         error_code = ConfigErrorCode::VALIDATION_FAILED;
       }
       ConfigResponseBuilder::publishError(
-          ConfigType::ACTUATOR, error_code, parse_error, failed_variant);
+          ConfigType::ACTUATOR, error_code, parse_error, failed_variant,
+          correlation_id);
       continue;
     }
 
@@ -729,7 +734,8 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
       String message = "Failed to configure actuator on GPIO " + String(config.gpio);
       LOG_ERROR(message);
       ConfigResponseBuilder::publishError(
-          ConfigType::ACTUATOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant);
+          ConfigType::ACTUATOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant,
+          correlation_id);
       continue;
     }
 
@@ -738,7 +744,8 @@ bool ActuatorManager::handleActuatorConfig(const String& payload) {
 
   if (configured == total) {
     String message = "Configured " + String(configured) + " actuator(s) successfully";
-    ConfigResponseBuilder::publishSuccess(ConfigType::ACTUATOR, configured, message);
+    ConfigResponseBuilder::publishSuccess(ConfigType::ACTUATOR, configured, message,
+                                          correlation_id);
     return true;
   }
 
@@ -809,6 +816,9 @@ String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,
   payload += "\"duration\":" + String(command.duration_s) + ",";
   payload += "\"success\":" + String(success ? "true" : "false") + ",";
   payload += "\"message\":\"" + message + "\"";
+  if (command.correlation_id.length() > 0) {
+    payload += ",\"correlation_id\":\"" + command.correlation_id + "\"";
+  }
   payload += "}";
   return payload;
 }

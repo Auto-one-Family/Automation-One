@@ -351,6 +351,8 @@ class EventAggregatorService:
                 "status": log.status,
                 "error_code": log.error_code,
                 "error_description": log.error_description,
+                "request_id": log.request_id,
+                "correlation_id": log.correlation_id,
                 **(log.details or {})
             }
         }

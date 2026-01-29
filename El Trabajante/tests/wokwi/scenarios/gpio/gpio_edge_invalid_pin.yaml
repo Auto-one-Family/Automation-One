@@ -1,0 +1,96 @@
+# GPIO-EDGE-005: Invalid Pin Number Handling
+# ===========================================
+# Validates that getPinInfo() and other methods handle
+# invalid/out-of-range GPIO numbers gracefully.
+#
+# Test ID: GPIO-EDGE-005
+# Priority: LOW
+# Requirement: getPinInfo(255) returns empty/invalid GPIOPinInfo
+#
+# Invalid Pin Scenarios:
+#   - GPIO 255 (way out of range)
+#   - GPIO 40+ (ESP32 max is 39)
+#   - GPIO in reserved range but not safe
+#
+# GPIOPinInfo for invalid pin:
+#   - pin: 255 (invalid marker)
+#   - owner[0]: '\0' (empty)
+#   - component_name[0]: '\0' (empty)
+#
+# Firmware reference: gpio_manager.cpp lines 304-312 (getPinInfo empty return)
+
+name: Invalid GPIO Pin Number Handling
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Test 1: Try to configure sensor on out-of-range GPIO (255)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 255,
+              "sensor_type": "analog",
+              "sensor_name": "InvalidGPIO",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify pin is rejected (not in safe pins list)
+  - wait-serial: "not in safe pins"
+
+  # Wait before next test
+  - delay: 500
+
+  # Test 2: Try to configure on GPIO 50 (beyond ESP32 range)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 50,
+              "sensor_type": "analog",
+              "sensor_name": "OutOfRangeGPIO",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify pin is rejected
+  - wait-serial: "not in safe pins"
+
+  # Wait before next test
+  - delay: 500
+
+  # Test 3: Try to configure on GPIO 6 (Flash - reserved but different error)
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 6,
+              "sensor_type": "analog",
+              "sensor_name": "FlashGPIO",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify Flash pin is rejected (reserved OR not in safe list)
+  # GPIO 6-11 are internal flash pins, completely blocked
+  - wait-serial: "reserved"

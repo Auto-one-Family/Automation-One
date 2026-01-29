@@ -2,7 +2,8 @@
 
 bool ConfigResponseBuilder::publishSuccess(ConfigType type,
                                            uint8_t count,
-                                           const String& message) {
+                                           const String& message,
+                                           const String& correlation_id) {
   ConfigResponsePayload payload;
   payload.status = ConfigStatus::SUCCESS;
   payload.type = type;
@@ -10,13 +11,15 @@ bool ConfigResponseBuilder::publishSuccess(ConfigType type,
   payload.message = message;
   payload.error_code = "NONE";
   payload.failed_item.clear();
+  payload.correlation_id = correlation_id;
   return publish(payload);
 }
 
 bool ConfigResponseBuilder::publishError(ConfigType type,
                                          ConfigErrorCode error_code,
                                          const String& message,
-                                         JsonVariantConst failed_item) {
+                                         JsonVariantConst failed_item,
+                                         const String& correlation_id) {
   ConfigResponsePayload payload;
   payload.status = ConfigStatus::ERROR;
   payload.type = type;
@@ -24,6 +27,7 @@ bool ConfigResponseBuilder::publishError(ConfigType type,
   payload.message = message;
   payload.error_code = String(configErrorCodeToString(error_code));
   payload.failed_item.clear();
+  payload.correlation_id = correlation_id;
 
   if (!failed_item.isNull()) {
     payload.failed_item.set(failed_item);
@@ -66,6 +70,11 @@ String ConfigResponseBuilder::buildJsonPayload(const ConfigResponsePayload& payl
     }
   }
 
+  // Phase 3: Include correlation_id for event tracking
+  if (payload.correlation_id.length() > 0) {
+    doc["correlation_id"] = payload.correlation_id;
+  }
+
   String json;
   serializeJson(doc, json);
   return json;
@@ -79,7 +88,8 @@ bool ConfigResponseBuilder::publishWithFailures(
     ConfigType type,
     uint8_t success_count,
     uint8_t fail_count,
-    const std::vector<ConfigFailureItem>& failures) {
+    const std::vector<ConfigFailureItem>& failures,
+    const String& correlation_id) {
 
   // Determine status based on counts
   ConfigStatus status;
@@ -91,7 +101,7 @@ bool ConfigResponseBuilder::publishWithFailures(
     status = ConfigStatus::ERROR;
   }
 
-  String json_payload = buildJsonPayloadWithFailures(type, status, success_count, fail_count, failures);
+  String json_payload = buildJsonPayloadWithFailures(type, status, success_count, fail_count, failures, correlation_id);
   String topic = String(TopicBuilder::buildConfigResponseTopic());
 
   bool published = mqttClient.safePublish(topic, json_payload, 1);
@@ -112,7 +122,8 @@ String ConfigResponseBuilder::buildJsonPayloadWithFailures(
     ConfigStatus status,
     uint8_t success_count,
     uint8_t fail_count,
-    const std::vector<ConfigFailureItem>& failures) {
+    const std::vector<ConfigFailureItem>& failures,
+    const String& correlation_id) {
 
   // Calculate document size: base + failures array
   // Base: ~200 bytes, each failure: ~100 bytes
@@ -160,6 +171,11 @@ String ConfigResponseBuilder::buildJsonPayloadWithFailures(
       doc["failures_truncated"] = true;
       doc["total_failures"] = failures.size();
     }
+  }
+
+  // Phase 3: Include correlation_id for event tracking
+  if (correlation_id.length() > 0) {
+    doc["correlation_id"] = correlation_id;
   }
 
   String json;

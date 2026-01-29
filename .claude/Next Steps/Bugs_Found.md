@@ -266,3 +266,159 @@ src/views/DeviceDetailView.vue          # Device Configuration
 ---
 
 **Nächster Schritt:** Ein Entwickler sollte die Multi-Value Sensor Logik von El Trabajante bis Frontend durchgehen und ein konsistentes Datenmodell für I2C-Sensoren definieren.
+
+---
+
+# Wokwi Szenario-Tests: Bug Report (2026-01-28)
+
+> **Datum:** 2026-01-28
+> **Getestet:** 9 neue Wokwi-Szenarien (E2E Sensor/Actuator/Emergency/Combined Flows)
+> **Ergebnis:** Alle 9 Szenarien FAIL — MQTT-Verbindung blockiert
+> **Firmware-Build:** SUCCESS (wokwi_simulation, 87.1% Flash)
+
+---
+
+## Bug A: MQTT "Connection reset by peer" in Wokwi-Simulation (BLOCKER)
+
+**Betrifft:** Alle 9 Szenarien
+**Schweregrad:** BLOCKER — kein einziges Szenario kann MQTT-basierte Steps erreichen
+
+**Erwarteter Output:**
+```
+MQTT connected
+```
+
+**Tatsächlicher Output:**
+```
+[  6318][E][WiFiClient.cpp:275] connect(): socket error on fd 48, errno: 104, "Connection reset by peer"
+[      6372] [ERROR   ] MQTT connection failed, rc=-2
+[      7162] [WARNING ] CircuitBreaker [MQTT]: Failure recorded (count: 1/5)
+...
+[     37578] [ERROR   ] CircuitBreaker [MQTT]: Failure threshold reached → OPEN
+Timeout: simulation did not finish in 90000ms
+```
+
+**Ablauf:**
+1. ESP32 bootet korrekt (alle 5 Phasen READY)
+2. WiFi verbindet erfolgreich (`WiFi connected! IP: 10.13.37.2`)
+3. MQTT-Verbindung zu `host.wokwi.internal:1883` schlägt fehl mit `errno: 104` (Connection reset by peer)
+4. 6 Reconnect-Versuche, alle fehlgeschlagen
+5. CircuitBreaker öffnet nach 5 Failures → keine weiteren Reconnects
+6. Szenario timeout
+
+**Umgebung:**
+- Wokwi CLI v0.19.1, `gateway = true` in `wokwi.toml`
+- Mosquitto läuft als Windows-Service auf `0.0.0.0:1883` (verifiziert via `netstat`)
+- `mosquitto_pub` von localhost funktioniert einwandfrei
+- Windows 10/11
+
+**Vermutete Ursache:**
+Windows Firewall blockiert eingehende TCP-Verbindungen von der Wokwi-Simulation-Netzwerkschicht (10.13.37.x) auf Port 1883. Mosquitto hört auf allen Interfaces, aber die Wokwi-Gateway-Bridge wird von der Firewall als externe Verbindung behandelt.
+
+**Mögliche Fixes (nicht getestet):**
+1. Windows Firewall Regel für Port 1883 eingehend (von allen Quellen) erlauben
+2. Windows Firewall komplett deaktivieren (nur zum Testen)
+3. Mosquitto-Konfiguration prüfen (`allow_anonymous true` + `listener 1883 0.0.0.0`)
+
+**Hinweis:** In GitHub Actions CI funktioniert dieser Flow, da Docker-Container im gleichen Netzwerk laufen und keine Firewall-Regeln greifen.
+
+---
+
+## Szenario-Ergebnisse im Detail
+
+| # | Szenario | Ergebnis | Fehlgeschlagener Step |
+|---|----------|----------|----------------------|
+| 1 | `02-sensor/sensor_ds18b20_full_flow.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 3/6) |
+| 2 | `02-sensor/sensor_dht22_full_flow.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/4) |
+| 3 | `02-sensor/sensor_analog_flow.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/4) |
+| 4 | `03-actuator/actuator_binary_full_flow.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/4) |
+| 5 | `03-actuator/actuator_pwm_full_flow.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/4) |
+| 6 | `03-actuator/actuator_timeout_e2e.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/4) |
+| 7 | `05-emergency/emergency_stop_full_flow.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/5) |
+| 8 | `07-combined/combined_sensor_actuator.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/5) |
+| 9 | `07-combined/multi_device_parallel.yaml` | FAIL | `wait-serial: "MQTT connected"` (Step 1/6) |
+
+**Alle Szenarien scheitern am identischen Punkt:** Die MQTT-Verbindung zu `host.wokwi.internal:1883` wird mit `errno: 104` ("Connection reset by peer") abgelehnt.
+
+---
+
+## Was funktioniert (verifiziert aus Serial Output)
+
+Trotz MQTT-Failure konnte aus dem Serial Output bestätigt werden:
+
+| Komponente | Status | Beweis |
+|-----------|--------|--------|
+| Boot-Sequenz | OK | Alle 5 Phasen READY |
+| GPIO Safe-Mode | OK | "All pins successfully set to Safe-Mode" |
+| WiFi-Verbindung | OK | "WiFi connected! IP: 10.13.37.2, RSSI: -77 dBm" |
+| ConfigManager | OK | "All Phase 1 configurations loaded successfully" |
+| ESP ID | OK | "Using Wokwi ESP ID: ESP_00000001" |
+| I2C Reservation | OK | "I2C pins auto-reserved (SDA: GPIO 21, SCL: GPIO 22)" |
+| OneWire Bus | OK | Initialisiert (Phase 3) |
+| Sensor Manager | OK | "Phase 4: Sensor System READY" |
+| Actuator Manager | OK | "Phase 5: Actuator System READY" |
+| Circuit Breaker | OK | Öffnet korrekt nach 5 Failures |
+
+---
+
+## Bug B: Phase 2 meldet "READY" trotz MQTT-Failure
+
+**Szenario:** Alle (beobachtet in DS18B20 Full Flow)
+**Erwartetes Verhalten:** Phase 2 sollte als FAILED oder WARNING gemeldet werden wenn MQTT nicht verbunden ist
+**Tatsächliches Verhalten:**
+```
+[      6372] [ERROR   ] MQTT connection failed, rc=-2
+[      6385] [WARNING ] System will continue but MQTT features unavailable
+[      6407] [INFO    ] ║   Phase 2: Communication Layer READY
+```
+
+**Vermutete Ursache:** Das Design erlaubt explizit das Weiterlaufen ohne MQTT (graceful degradation). Ob "READY" hier korrekt ist oder "DEGRADED" besser wäre, ist eine Design-Entscheidung.
+
+**Schweregrad:** LOW — funktionales Verhalten, keine Fehlfunktion. Möglicherweise beabsichtigt.
+
+---
+
+## Bug C: Szenarien erfordern MQTT-Injection, aber kein automatischer Mechanismus
+
+**Betrifft:** Szenarien 4-9 (actuator, emergency, combined)
+**Beschreibung:** Die Szenarien `actuator_binary_full_flow.yaml`, `actuator_pwm_full_flow.yaml`, `actuator_timeout_e2e.yaml`, `emergency_stop_full_flow.yaml`, `combined_sensor_actuator.yaml`, `multi_device_parallel.yaml` erwarten `wait-serial: "Actuator"` nach MQTT-Injection-Commands, aber die YAML-Szenarien selbst haben **keinen Mechanismus für MQTT-Injection**. Die Injection muss extern (parallel in einem separaten Prozess) ausgeführt werden.
+
+**Konsequenz:** Diese Szenarien können nur in der CI-Umgebung (GitHub Actions) korrekt laufen, wo der Workflow Wokwi im Hintergrund startet und dann `mosquitto_pub` für die Injection aufruft. Lokal müsste man manuell parallel `mosquitto_pub` ausführen.
+
+**Schweregrad:** MEDIUM — Design-Limitation, kein Bug. Die CI-Workflow-Datei (`wokwi-tests.yml`) implementiert dies korrekt.
+
+---
+
+**Zusammenfassung:** Der einzige echte Blocker ist **Bug A** (Firewall/Netzwerk). Sobald MQTT-Verbindung funktioniert, können die 3 passiven Sensor-Szenarien (1-3) sofort durchlaufen. Die 6 aktiven Szenarien (4-9) benötigen zusätzlich externe MQTT-Injection.
+
+---
+
+# Test-Run 2 (2026-01-28, nach Firewall-Fix)
+
+## Ergebnis: Firewall-Fix hat Problem NICHT behoben
+
+| # | Szenario | Ergebnis | Fehlgeschlagener Step |
+|---|----------|----------|-----------------------|
+| 1 | sensor_ds18b20_full_flow | **FAIL** | `wait-serial: "MQTT connected"` (Step 3) |
+| 2 | sensor_dht22_full_flow | **FAIL** | `wait-serial: "MQTT connected"` (Step 1) |
+| 3 | sensor_analog_flow | **FAIL** | `wait-serial: "MQTT connected"` (Step 1) |
+| 4-9 | actuator/emergency/combined | **FAIL** | Nicht separat getestet — identischer Blocker (MQTT) |
+
+### Beobachtungen
+
+- **WiFi verbindet erfolgreich:** `WiFi connected! IP: 10.13.37.2` (OK)
+- **MQTT schlägt fehl:** `MQTT connect attempt 1 failed, rc=-1 (errno: 104, "Connection reset by peer")` (identisch zu Test-Run 1)
+- **Mosquitto läuft:** Service aktiv, Port 1883 gebunden, `mosquitto_pub` von localhost funktioniert
+- **Circuit Breaker:** Öffnet nach 6 Fehlversuchen, blockiert dann alle weiteren Reconnect-Versuche
+
+### Analyse
+
+Die Windows-Firewall-Regel (Port 1883 eingehend erlauben) hat das Problem nicht gelöst. Die Ursache liegt tiefer:
+
+1. **Wokwi Gateway-Bridge:** `host.wokwi.internal` wird zu einer IP aufgelöst, die über die Wokwi Cloud-Simulation zum Host-Rechner zurücktunnelt. Die Firewall-Regel greift möglicherweise nicht für diesen Tunnel-Traffic.
+2. **Mosquitto Binding:** Mosquitto bindet auf `0.0.0.0:1883`, sollte also alle Interfaces akzeptieren. Aber der Wokwi-Traffic kommt ggf. über einen unerwarteten Netzwerkpfad.
+3. **Mögliche nächste Schritte:**
+   - Prüfen ob `host.wokwi.internal` korrekt aufgelöst wird (DNS innerhalb Wokwi-Simulation)
+   - Mosquitto-Logs auf eingehende Verbindungsversuche prüfen (`$SYS/broker/log/#`)
+   - Wokwi-Support kontaktieren: Gateway-Networking unter Windows 11 möglicherweise anders als unter Linux/macOS
+   - Alternative: Nur in CI (GitHub Actions/Linux) testen — dort funktioniert der Gateway nachweislich

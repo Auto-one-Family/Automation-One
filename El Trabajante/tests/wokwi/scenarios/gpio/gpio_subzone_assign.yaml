@@ -1,0 +1,87 @@
+# GPIO-SUB-001 & GPIO-SUB-002: Subzone Pin Assignment and Removal
+# ===============================================================
+# Validates that:
+# - assignPinToSubzone(gpio, subzone_id) assigns pin to subzone
+# - removePinFromSubzone(gpio) removes pin from subzone
+#
+# Test IDs: GPIO-SUB-001, GPIO-SUB-002
+# Priority: HIGH
+# Requirement:
+#   - assignPinToSubzone(4, "irrigation") returns true
+#   - removePinFromSubzone(4) returns true
+#
+# Subzone Management (Phase 9):
+#   - Pin-level isolation for zone grouping
+#   - Emergency stop can target specific subzones
+#   - Sensors and actuators can be grouped by subzone
+#
+# Firmware reference: gpio_manager.cpp lines 479-564
+
+name: Subzone Pin Assignment and Removal
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # First, configure sensor on GPIO 4
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "sensors": [{
+              "gpio": 4,
+              "sensor_type": "temp_ds18b20",
+              "sensor_name": "IrrigationTemp",
+              "subzone": "irrigation_zone",
+              "active": true
+            }]
+          }
+        }
+
+  # Verify sensor is configured
+  - wait-serial: "Pin 4 allocated"
+
+  # Wait for configuration
+  - delay: 500
+
+  # GPIO-SUB-001: Assign pin to subzone via subzone assignment
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
+          "payload": {
+            "subzone_id": "irrigation_zone",
+            "gpios": [4, 5, 14]
+          }
+        }
+
+  # Verify subzone assignment
+  - wait-serial: "assigned to subzone"
+  - wait-serial: "irrigation_zone"
+
+  # Wait for assignment to complete
+  - delay: 500
+
+  # GPIO-SUB-002: Remove pin from subzone
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/remove",
+          "payload": {
+            "subzone_id": "irrigation_zone",
+            "gpios": [4]
+          }
+        }
+
+  # Verify pin removal
+  - wait-serial: "removed from subzone"

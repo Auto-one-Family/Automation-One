@@ -27,6 +27,7 @@ export interface AuditLog {
   error_description: string | null
   ip_address: string | null
   correlation_id: string | null
+  request_id: string | null
   created_at: string
 }
 
@@ -326,6 +327,17 @@ export const auditApi = {
 
     const response = await api.get<AggregatedEventsResponse>(
       `/audit/events/aggregated?${params.toString()}`
+    )
+    return response.data
+  },
+
+  /**
+   * Get all events with the same correlation_id.
+   * Enables tracking of related events (e.g., config_published → config_response).
+   */
+  async getCorrelatedEvents(correlationId: string, limit: number = 50): Promise<AuditLog[]> {
+    const response = await api.get<AuditLog[]>(
+      `/audit/events/correlated/${encodeURIComponent(correlationId)}?limit=${limit}`
     )
     return response.data
   },

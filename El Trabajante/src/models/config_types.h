@@ -61,6 +61,7 @@ struct ConfigResponsePayload {
   String message;
   String error_code;
   DynamicJsonDocument failed_item;
+  String correlation_id;  // Phase 3: Event correlation tracking
 
   ConfigResponsePayload()
       : status(ConfigStatus::SUCCESS),
@@ -68,7 +69,8 @@ struct ConfigResponsePayload {
         count(0),
         message(""),
         error_code(""),
-        failed_item(256) {}
+        failed_item(256),
+        correlation_id("") {}
 
   bool hasFailedItem() const {
     return !failed_item.isNull() && failed_item.size() > 0;

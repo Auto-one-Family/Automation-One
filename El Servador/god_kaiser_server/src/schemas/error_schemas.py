@@ -269,13 +269,17 @@ class ErrorSummaryResponse(BaseResponse):
 class ErrorCodeInfoResponse(BaseModel):
     """
     Information about a specific error code.
-    
+
     Used for error code lookup/reference endpoints.
     """
-    
+
     error_code: int = Field(
         ...,
         description="Error code",
+    )
+    title: Optional[str] = Field(
+        None,
+        description="Short German error title (e.g. 'MQTT-Publish fehlgeschlagen')",
     )
     category: str = Field(
         ...,
@@ -287,7 +291,7 @@ class ErrorCodeInfoResponse(BaseModel):
     )
     message: str = Field(
         ...,
-        description="User-friendly error message",
+        description="User-friendly error description (detailed)",
     )
     troubleshooting: List[str] = Field(
         default_factory=list,

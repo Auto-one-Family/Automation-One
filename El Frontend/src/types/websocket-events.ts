@@ -143,12 +143,20 @@ export interface ErrorEvent extends WebSocketEventBase {
     esp_name?: string
     error_log_id?: string
     error_code: number | string
+    /** Short German error title (e.g. "MQTT-Publish fehlgeschlagen") */
+    title?: string
     category: string
+    /** Detailed user-friendly description */
     message: string
+    /** Ordered troubleshooting steps in German */
     troubleshooting?: string[]
     user_action_required: boolean
     recoverable: boolean
+    /** Link to relevant documentation */
+    docs_link?: string | null
     context?: Record<string, unknown>
+    /** Unix timestamp from ESP32 payload */
+    timestamp?: number
   }
 }
 
@@ -238,6 +246,165 @@ export interface DBRecordChangedEvent extends WebSocketEventBase {
 }
 
 // =============================================================================
+// ACTUATOR COMMAND LIFECYCLE EVENTS
+// =============================================================================
+
+/**
+ * Actuator command sent event
+ * Sent when server successfully publishes command to MQTT
+ */
+export interface ActuatorCommandEvent extends WebSocketEventBase {
+  event: 'actuator_command'
+  severity: 'info'
+  source_type: 'system'
+  data: {
+    esp_id: string
+    gpio: number
+    command: string
+    value?: number
+    issued_by?: string
+    correlation_id?: string
+  }
+}
+
+/**
+ * Actuator command failed event
+ * Sent when server cannot publish command (safety check, MQTT failure)
+ */
+export interface ActuatorCommandFailedEvent extends WebSocketEventBase {
+  event: 'actuator_command_failed'
+  severity: 'error'
+  source_type: 'system'
+  data: {
+    esp_id: string
+    gpio: number
+    command: string
+    value?: number
+    error: string
+    issued_by?: string
+    correlation_id?: string
+  }
+}
+
+// =============================================================================
+// CONFIG PUBLISH LIFECYCLE EVENTS
+// =============================================================================
+
+/**
+ * Config published event
+ * Sent when config is successfully published to ESP via MQTT
+ */
+export interface ConfigPublishedEvent extends WebSocketEventBase {
+  event: 'config_published'
+  severity: 'info'
+  source_type: 'system'
+  data: {
+    esp_id: string
+    config_keys: string[]
+    correlation_id?: string
+  }
+}
+
+/**
+ * Config failed event
+ * Sent when config publishing fails
+ */
+export interface ConfigFailedEvent extends WebSocketEventBase {
+  event: 'config_failed'
+  severity: 'error'
+  source_type: 'system'
+  data: {
+    esp_id: string
+    config_keys: string[]
+    error: string
+    correlation_id?: string
+  }
+}
+
+// =============================================================================
+// SEQUENCE EVENTS (Automation)
+// =============================================================================
+
+/**
+ * Sequence started event
+ */
+export interface SequenceStartedEvent extends WebSocketEventBase {
+  event: 'sequence_started'
+  severity: 'info'
+  source_type: 'scheduler'
+  data: {
+    sequence_id: string
+    rule_id?: string
+    rule_name?: string
+    total_steps: number
+    description?: string
+  }
+}
+
+/**
+ * Sequence step progress event
+ */
+export interface SequenceStepEvent extends WebSocketEventBase {
+  event: 'sequence_step'
+  severity: 'info'
+  source_type: 'scheduler'
+  data: {
+    sequence_id: string
+    step: number
+    step_name: string
+    total_steps: number
+    progress_percent: number
+    status: string
+  }
+}
+
+/**
+ * Sequence completed event
+ */
+export interface SequenceCompletedEvent extends WebSocketEventBase {
+  event: 'sequence_completed'
+  severity: 'info'
+  source_type: 'scheduler'
+  data: {
+    sequence_id: string
+    status: string
+    success: boolean
+    duration_seconds?: number
+    steps_completed?: number
+    steps_failed?: number
+    error?: string
+    error_code?: string
+  }
+}
+
+/**
+ * Sequence error event
+ */
+export interface SequenceErrorEvent extends WebSocketEventBase {
+  event: 'sequence_error'
+  severity: 'error'
+  source_type: 'scheduler'
+  data: {
+    sequence_id: string
+    error_code?: string
+    message: string
+  }
+}
+
+/**
+ * Sequence cancelled event
+ */
+export interface SequenceCancelledEvent extends WebSocketEventBase {
+  event: 'sequence_cancelled'
+  severity: 'warning'
+  source_type: 'scheduler'
+  data: {
+    sequence_id: string
+    reason?: string
+  }
+}
+
+// =============================================================================
 // EVENT TYPE UNION
 // =============================================================================
 
@@ -255,12 +422,21 @@ export type WebSocketEvent =
   | DeviceRejectedEvent
   | ActuatorResponseEvent
   | ActuatorAlertEvent
+  | ActuatorCommandEvent
+  | ActuatorCommandFailedEvent
   | ZoneAssignmentEvent
   | LogicExecutionEvent
   | SystemEvent
   | SensorHealthEvent
   | NotificationEvent
   | ErrorEvent
+  | ConfigPublishedEvent
+  | ConfigFailedEvent
+  | SequenceStartedEvent
+  | SequenceStepEvent
+  | SequenceCompletedEvent
+  | SequenceErrorEvent
+  | SequenceCancelledEvent
   | ServerLogEvent
   | DBRecordChangedEvent
 
@@ -518,6 +694,10 @@ export interface UnifiedEvent {
   gpio?: number
   /** Sensor or actuator type */
   device_type?: string
+  /** Correlation ID for tracking related events (Phase 3) */
+  correlation_id?: string
+  /** Request ID for server-log correlation (Phase 4) */
+  request_id?: string
   /** Raw event data */
   data: Record<string, unknown>
   /**

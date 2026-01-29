@@ -40,8 +40,8 @@ function closeSidebar() {
       <AppHeader @toggle-sidebar="toggleSidebar" />
 
       <!-- Page Content -->
-      <!-- ⭐ FIX: overflow-hidden + min-h-0 für korrekte Flex-Kette, Views haben eigene Scroll-Container -->
-      <main class="flex-1 p-4 md:p-6 overflow-hidden min-h-0">
+      <!-- ⭐ Page-Scroll: overflow-y-auto erlaubt Scrollen der gesamten Seite -->
+      <main class="flex-1 p-4 md:p-6 overflow-y-auto min-h-0">
         <RouterView />
       </main>
     </div>

@@ -72,6 +72,9 @@ class ActuatorService:
             True if command was sent successfully, False otherwise
         """
         try:
+            # Generate correlation_id for end-to-end command tracking
+            correlation_id = str(uuid.uuid4())
+
             # Step 1: Safety validation (CRITICAL - MUST be called before every command!)
             safety_result = await self.safety_service.validate_actuator_command(
                 esp_id=esp_id,
@@ -112,6 +115,7 @@ class ActuatorService:
                             issued_by=issued_by,
                             success=False,
                             error_message=f"Safety check failed: {safety_result.error}",
+                            correlation_id=correlation_id,
                         )
                         await session.commit()
                     break
@@ -126,6 +130,7 @@ class ActuatorService:
                         "command": command,
                         "error": safety_result.error,
                         "issued_by": issued_by,
+                        "correlation_id": correlation_id,
                     })
                 except Exception:
                     pass  # WebSocket broadcast is best-effort
@@ -165,6 +170,7 @@ class ActuatorService:
                     value=value,  # Already validated as 0.0-1.0
                     duration=duration,
                     retry=True,
+                    correlation_id=correlation_id,
                 )
                 
                 if not success:
@@ -193,10 +199,28 @@ class ActuatorService:
                         issued_by=issued_by,
                         success=False,
                         error_message="MQTT publish failed",
+                        correlation_id=correlation_id,
                     )
                     await session.commit()
+
+                    # WebSocket broadcast: MQTT publish failed
+                    try:
+                        from ..websocket.manager import WebSocketManager
+                        ws_manager = await WebSocketManager.get_instance()
+                        await ws_manager.broadcast("actuator_command_failed", {
+                            "esp_id": esp_id,
+                            "gpio": gpio,
+                            "command": command,
+                            "value": value,
+                            "error": "MQTT publish failed",
+                            "issued_by": issued_by,
+                            "correlation_id": correlation_id,
+                        })
+                    except Exception:
+                        pass  # WebSocket broadcast is best-effort
+
                     return False
-                
+
                 # Step 4: Log successful command
                 await actuator_repo.log_command(
                     esp_id=esp_device.id,
@@ -220,6 +244,7 @@ class ActuatorService:
                     value=value,
                     issued_by=issued_by,
                     success=True,
+                    correlation_id=correlation_id,
                 )
                 await session.commit()
 
@@ -233,6 +258,7 @@ class ActuatorService:
                         "command": command,
                         "value": value,
                         "issued_by": issued_by,
+                        "correlation_id": correlation_id,
                     })
                 except Exception:
                     pass  # WebSocket broadcast is best-effort

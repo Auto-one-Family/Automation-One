@@ -1764,12 +1764,19 @@ void handleSensorConfig(const String& payload) {
     return;
   }
 
+  // Phase 3: Extract correlation_id for event tracking
+  String correlationId = "";
+  if (doc.containsKey("correlation_id")) {
+    correlationId = doc["correlation_id"].as<String>();
+  }
+
   JsonArray sensors = doc["sensors"].as<JsonArray>();
   if (sensors.isNull()) {
     String message = "Sensor config missing 'sensors' array";
     LOG_ERROR(message);
     ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message);
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message,
+        JsonVariantConst(), correlationId);
     return;
   }
 
@@ -1778,7 +1785,8 @@ void handleSensorConfig(const String& payload) {
     String message = "Sensor config array is empty";
     LOG_WARNING(message);
     ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message);
+        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message,
+        JsonVariantConst(), correlationId);
     return;
   }
 
@@ -1805,7 +1813,8 @@ void handleSensorConfig(const String& payload) {
       ConfigType::SENSOR,
       success_count,
       fail_count,
-      failures);
+      failures,
+      correlationId);
 }
 
 // ============================================
@@ -1979,7 +1988,17 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
 
 void handleActuatorConfig(const String& payload) {
   LOG_INFO("Handling actuator configuration from MQTT");
-  actuatorManager.handleActuatorConfig(payload);
+
+  // Phase 3: Extract correlation_id for event tracking
+  String correlationId = "";
+  DynamicJsonDocument tempDoc(256);
+  if (deserializeJson(tempDoc, payload) == DeserializationError::Ok) {
+    if (tempDoc.containsKey("correlation_id")) {
+      correlationId = tempDoc["correlation_id"].as<String>();
+    }
+  }
+
+  actuatorManager.handleActuatorConfig(payload, correlationId);
 }
 
 // ============================================

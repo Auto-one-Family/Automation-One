@@ -50,6 +50,7 @@ class AuditLogResponse(BaseModel):
     error_description: Optional[str]
     ip_address: Optional[str]
     correlation_id: Optional[str]
+    request_id: Optional[str]
     created_at: datetime
     
     class Config:
@@ -360,6 +361,7 @@ async def list_audit_logs(
             error_description=log.error_description,
             ip_address=log.ip_address,
             correlation_id=log.correlation_id,
+            request_id=log.request_id,
             created_at=log.created_at,
         )
         for log in logs
@@ -560,6 +562,51 @@ async def get_aggregated_events(
 
 
 @router.get(
+    "/events/correlated/{correlation_id}",
+    response_model=List[AuditLogResponse],
+    summary="Get correlated events",
+    description="Returns all audit events with the same correlation_id.",
+)
+async def get_correlated_events(
+    correlation_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+) -> List[AuditLogResponse]:
+    """
+    Returns all audit events that share the same correlation_id.
+
+    Enables tracking of related events such as:
+    - config_published → config_response
+    - actuator_command → actuator_response
+
+    Events are sorted chronologically (oldest first).
+    """
+    audit_repo = AuditLogRepository(db)
+    events = await audit_repo.get_by_correlation_id(correlation_id, limit=limit)
+
+    return [
+        AuditLogResponse(
+            id=str(log.id),
+            event_type=log.event_type,
+            severity=log.severity,
+            source_type=log.source_type,
+            source_id=log.source_id,
+            status=log.status,
+            message=log.message,
+            details=log.details or {},
+            error_code=log.error_code,
+            error_description=log.error_description,
+            ip_address=log.ip_address,
+            correlation_id=log.correlation_id,
+            request_id=log.request_id,
+            created_at=log.created_at,
+        )
+        for log in events
+    ]
+
+
+@router.get(
     "/errors",
     response_model=List[AuditLogResponse],
     summary="Get recent errors",
@@ -591,6 +638,7 @@ async def get_recent_errors(
             error_description=log.error_description,
             ip_address=log.ip_address,
             correlation_id=log.correlation_id,
+            request_id=log.request_id,
             created_at=log.created_at,
         )
         for log in logs
@@ -628,6 +676,7 @@ async def get_esp_config_history(
             error_description=log.error_description,
             ip_address=log.ip_address,
             correlation_id=log.correlation_id,
+            request_id=log.request_id,
             created_at=log.created_at,
         )
         for log in logs

@@ -82,7 +82,7 @@ class WebSocketService {
    * Generate a client ID (UUID-like format)
    */
   private generateClientId(): string {
-    return `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    return `client_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
   }
 
   /**
@@ -439,7 +439,7 @@ class WebSocketService {
    * If WebSocket is connecting, subscription is queued and sent after connection
    */
   subscribe(filters: WebSocketFilters, callback: (message: WebSocketMessage) => void): string {
-    const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
 
     this.subscriptions.set(subscriptionId, { filters, callback })
 

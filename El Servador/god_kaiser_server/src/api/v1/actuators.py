@@ -23,6 +23,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md (Actuator topics)
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
@@ -708,12 +709,55 @@ async def emergency_stop(
     except Exception as audit_error:
         logger.warning(f"Failed to audit log emergency_stop: {audit_error}")
 
+    # ───────────────────────────────────────────────────────────
+    # MQTT BROADCAST: Emergency Stop for late-joining ESPs
+    # ───────────────────────────────────────────────────────────
+    try:
+        broadcast_payload = json.dumps({
+            "command": "EMERGENCY_STOP",
+            "reason": request.reason,
+            "issued_by": current_user.username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "devices_stopped": devices_stopped,
+            "actuators_stopped": actuators_stopped,
+        })
+        publisher.client.publish(
+            topic="kaiser/broadcast/emergency",
+            payload=broadcast_payload,
+            qos=1,
+            retain=True,
+        )
+        logger.info("MQTT broadcast emergency stop published on kaiser/broadcast/emergency")
+    except Exception as mqtt_error:
+        logger.warning(f"Failed to publish MQTT emergency broadcast: {mqtt_error}")
+
+    # ───────────────────────────────────────────────────────────
+    # WEBSOCKET BROADCAST: Emergency Stop (non-blocking)
+    # ───────────────────────────────────────────────────────────
+    try:
+        from ...websocket.manager import WebSocketManager
+        ws_manager = await WebSocketManager.get_instance()
+        ws_payload: dict = {
+            "esp_id": request.esp_id or "ALL",
+            "actuator_type": "all",
+            "alert_type": "emergency_stop",
+            "reason": request.reason,
+            "devices_stopped": devices_stopped,
+            "actuators_stopped": actuators_stopped,
+            "issued_by": current_user.username,
+        }
+        if request.gpio is not None:
+            ws_payload["gpio"] = request.gpio
+        await ws_manager.broadcast("actuator_alert", ws_payload)
+    except Exception as ws_error:
+        logger.warning(f"Failed to broadcast emergency_stop WebSocket event: {ws_error}")
+
     logger.critical(
         f"EMERGENCY STOP executed by {current_user.username}: "
         f"{devices_stopped} devices, {actuators_stopped} actuators stopped. "
         f"Reason: {request.reason}"
     )
-    
+
     return EmergencyStopResponse(
         success=True,
         message="Emergency stop executed",

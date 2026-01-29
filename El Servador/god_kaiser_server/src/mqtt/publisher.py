@@ -69,6 +69,7 @@ class Publisher:
         value: float,
         duration: int = 0,
         retry: bool = True,
+        correlation_id: Optional[str] = None,
     ) -> bool:
         """
         Publish actuator command to ESP.
@@ -80,6 +81,7 @@ class Publisher:
             value: Command value (0.0-1.0 for PWM, 0.0/1.0 for binary)
             duration: Duration in seconds (0 = unlimited)
             retry: Enable retry on failure
+            correlation_id: UUID for end-to-end command tracking
 
         Returns:
             True if publish successful
@@ -91,6 +93,8 @@ class Publisher:
             "duration": duration,
             "timestamp": int(time.time()),
         }
+        if correlation_id:
+            payload["correlation_id"] = correlation_id
 
         qos = constants.QOS_ACTUATOR_COMMAND  # QoS 2 (Exactly once)
 

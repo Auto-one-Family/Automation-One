@@ -43,6 +43,10 @@ class DS18B20Processor(BaseSensorProcessor):
     - Library: DallasTemperature + OneWire
     - GPIO: Any (e.g., GPIO17)
     - Multiple sensors on same bus: Supported (unique 64-bit ROM address)
+
+    Special Value Detection (Defense-in-Depth):
+    - -127°C (RAW -2032): Sensor fault (disconnected, CRC failure)
+    - +85°C (RAW 1360): Power-on reset value (factory default)
     """
 
     # =========================================================================
@@ -60,6 +64,11 @@ class DS18B20Processor(BaseSensorProcessor):
     TEMP_TYPICAL_MIN = -10.0  # °C (typical operating range)
     TEMP_TYPICAL_MAX = 85.0  # °C (typical operating range)
     RESOLUTION = 0.0625  # °C (12-bit mode)
+
+    # DS18B20 Special RAW Values (Defense-in-Depth)
+    # RAW = Temperature × 16 (12-bit resolution)
+    RAW_SENSOR_FAULT = -2032  # -127°C: Sensor disconnected or CRC failure
+    RAW_POWER_ON_RESET = 1360  # +85°C: Factory default before first conversion
 
     def get_sensor_type(self) -> str:
         """Return sensor type identifier."""
@@ -121,6 +130,34 @@ class DS18B20Processor(BaseSensorProcessor):
         original_raw_value = raw_value  # Keep original for metadata
 
         if raw_mode:
+            # ==================================================================
+            # SPECIAL VALUE DETECTION (Defense-in-Depth)
+            # ESP should filter these, but server validates as backup
+            # ==================================================================
+            raw_int = int(raw_value)
+
+            # Check for sensor fault: -127°C (RAW = -2032)
+            if raw_int == self.RAW_SENSOR_FAULT:
+                return ProcessingResult(
+                    value=0.0,
+                    unit="°C",
+                    quality="error",
+                    metadata={
+                        "error": "DS18B20 sensor fault: -127°C indicates disconnected sensor or CRC failure",
+                        "error_code": 1060,  # ERROR_DS18B20_SENSOR_FAULT
+                        "raw_mode": raw_mode,
+                        "original_raw_value": original_raw_value,
+                    },
+                )
+
+            # Check for power-on reset: +85°C (RAW = 1360)
+            # Note: This check is a backup - ESP should handle first-reading detection
+            # If we see 85°C here, it likely passed ESP's retry, so could be real
+            if raw_int == self.RAW_POWER_ON_RESET:
+                # Log warning but DON'T reject - could be real temperature (fire!)
+                # ESP handles first-reading; if it gets here, ESP already validated
+                pass  # Accept, but add warning in metadata below
+
             # DS18B20 12-bit resolution: 1 LSB = 0.0625°C
             # RAW value is signed 16-bit: -55°C = -880, +125°C = +2000
             raw_value = float(raw_value) * self.RESOLUTION

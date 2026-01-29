@@ -133,8 +133,9 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     
     LOG_DEBUG("PiEnhancedProcessor: Sending request to " + url);
     
-    HTTPResponse response = http_client_->post(url.c_str(), payload.c_str(), 
-                                               "application/json", 5000);
+    // FIX #3: Timeout 5000ms → 2500ms (LAN-realistisch, CB ist primärer Schutz)
+    HTTPResponse response = http_client_->post(url.c_str(), payload.c_str(),
+                                               "application/json", 2500);
     
     // ============================================
     // HANDLE RESPONSE

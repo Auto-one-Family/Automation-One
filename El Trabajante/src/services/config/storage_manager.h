@@ -35,6 +35,8 @@ public:
   uint16_t getUInt16(const char* key, uint16_t default_value = 0);
   bool putBool(const char* key, bool value);
   bool getBool(const char* key, bool default_value = false);
+  bool putFloat(const char* key, float value);
+  float getFloat(const char* key, float default_value = 0.0f);
   bool putULong(const char* key, unsigned long value);
   unsigned long getULong(const char* key, unsigned long default_value = 0);
   
@@ -49,6 +51,8 @@ public:
   
   // Namespace Utilities
   bool clearNamespace();
+  bool eraseKey(const char* key);
+  bool eraseAll();
   bool keyExists(const char* key);
   size_t getFreeEntries();
   

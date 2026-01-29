@@ -26,6 +26,11 @@
 #define ERROR_I2C_READ_FAILED       1012
 #define ERROR_I2C_WRITE_FAILED      1013
 #define ERROR_I2C_BUS_ERROR         1014
+// I2C Bus-Recovery (1015-1018)
+#define ERROR_I2C_BUS_STUCK               1015  // SDA or SCL stuck low
+#define ERROR_I2C_BUS_RECOVERY_STARTED    1016  // Recovery attempt initiated
+#define ERROR_I2C_BUS_RECOVERY_FAILED     1017  // Recovery attempt failed
+#define ERROR_I2C_BUS_RECOVERED           1018  // Recovery successful
 
 #define ERROR_ONEWIRE_INIT_FAILED   1020
 #define ERROR_ONEWIRE_NO_DEVICES    1021
@@ -51,6 +56,12 @@
 #define ERROR_ACTUATOR_INIT_FAILED  1051
 #define ERROR_ACTUATOR_NOT_FOUND    1052
 #define ERROR_ACTUATOR_CONFLICT     1053
+
+// DS18B20-specific Temperature Errors (1060-1069)
+#define ERROR_DS18B20_SENSOR_FAULT        1060  // -127°C: Sensor disconnected or CRC failure
+#define ERROR_DS18B20_POWER_ON_RESET      1061  // 85°C on first read: No conversion done
+#define ERROR_DS18B20_OUT_OF_RANGE        1062  // Temperature outside valid range
+#define ERROR_DS18B20_DISCONNECTED_RUNTIME 1063  // Device was present, now gone
 
 // Subzone Management Errors (2500-2599) - SERVICE RANGE
 #define ERROR_SUBZONE_INVALID_ID          2500  // Invalid subzone_id format
@@ -234,6 +245,10 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_I2C_READ_FAILED: return "Failed to read from I2C device";
     case ERROR_I2C_WRITE_FAILED: return "Failed to write to I2C device";
     case ERROR_I2C_BUS_ERROR: return "I2C bus error (SDA/SCL stuck or timeout)";
+    case ERROR_I2C_BUS_STUCK: return "I2C bus stuck (SDA or SCL held low by slave device)";
+    case ERROR_I2C_BUS_RECOVERY_STARTED: return "I2C bus recovery initiated";
+    case ERROR_I2C_BUS_RECOVERY_FAILED: return "I2C bus recovery failed after max attempts";
+    case ERROR_I2C_BUS_RECOVERED: return "I2C bus recovered successfully";
 
     case ERROR_ONEWIRE_INIT_FAILED: return "Failed to initialize OneWire bus";
     case ERROR_ONEWIRE_NO_DEVICES: return "No OneWire devices found on bus";
@@ -259,6 +274,12 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_ACTUATOR_INIT_FAILED: return "Failed to initialize actuator";
     case ERROR_ACTUATOR_NOT_FOUND: return "Actuator not configured or not found";
     case ERROR_ACTUATOR_CONFLICT: return "Actuator GPIO conflict with sensor";
+
+    // DS18B20-specific Temperature Errors (1060-1069)
+    case ERROR_DS18B20_SENSOR_FAULT: return "DS18B20 sensor fault: -127°C indicates disconnected sensor or CRC failure";
+    case ERROR_DS18B20_POWER_ON_RESET: return "DS18B20 power-on reset: 85°C indicates no conversion was performed";
+    case ERROR_DS18B20_OUT_OF_RANGE: return "DS18B20 temperature outside valid range (-55°C to +125°C)";
+    case ERROR_DS18B20_DISCONNECTED_RUNTIME: return "DS18B20 device was present but is now disconnected";
 
     // Subzone Management Errors (2500-2599)
     case ERROR_SUBZONE_INVALID_ID: return "Invalid subzone_id format (must be 1-32 chars, alphanumeric + underscore)";

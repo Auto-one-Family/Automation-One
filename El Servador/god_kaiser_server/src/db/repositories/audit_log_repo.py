@@ -18,6 +18,7 @@ from typing import Any, Optional
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.request_context import get_request_id
 from ..models.audit_log import (
     AuditEventType,
     AuditLog,
@@ -47,6 +48,12 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         """
         super().__init__(AuditLog, session)
     
+    async def create(self, **data: Any) -> AuditLog:
+        """Override to auto-inject request_id from context."""
+        if "request_id" not in data or data["request_id"] is None:
+            data["request_id"] = get_request_id()
+        return await super().create(**data)
+
     # =========================================================================
     # Event Recording Methods
     # =========================================================================
@@ -61,6 +68,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         error_code: Optional[str] = None,
         error_description: Optional[str] = None,
         failed_item: Optional[dict] = None,
+        correlation_id: Optional[str] = None,
     ) -> AuditLog:
         """
         Log a configuration response from ESP32.
@@ -74,7 +82,8 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             error_code: ESP32 error code (on failure)
             error_description: Human-readable error description
             failed_item: Failed config item details (on failure)
-            
+            correlation_id: For correlating with config_published events
+
         Returns:
             Created AuditLog entry
         """
@@ -99,8 +108,52 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             details=details,
             error_code=error_code,
             error_description=error_description,
+            correlation_id=correlation_id,
         )
     
+    async def get_by_correlation_id(
+        self,
+        correlation_id: str,
+        limit: int = 50,
+    ) -> list[AuditLog]:
+        """
+        Find all audit events with the same correlation_id.
+
+        Enables tracking of related events, e.g.:
+        - config_published → config_response
+        - actuator_command → actuator_response
+
+        Args:
+            correlation_id: The correlation ID (UUID) to search for
+            limit: Maximum number of results
+
+        Returns:
+            List of AuditLog entries, sorted chronologically (oldest first)
+        """
+        stmt = (
+            select(AuditLog)
+            .where(AuditLog.correlation_id == correlation_id)
+            .order_by(AuditLog.created_at.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_request_id(
+        self,
+        request_id: str,
+        limit: int = 50,
+    ) -> list[AuditLog]:
+        """Find all audit events with the same request_id."""
+        stmt = (
+            select(AuditLog)
+            .where(AuditLog.request_id == request_id)
+            .order_by(AuditLog.created_at.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def log_mqtt_error(
         self,
         source_id: str,

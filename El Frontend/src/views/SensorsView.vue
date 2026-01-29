@@ -17,8 +17,8 @@ import {
   ChevronDown,
   ChevronUp,
   Power,
-  AlertTriangle,
 } from 'lucide-vue-next'
+import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 
 type TabType = 'sensors' | 'actuators'
 type ActuatorStateFilter = 'on' | 'off' | 'emergency'
@@ -266,15 +266,7 @@ function toggleStateFilter(state: ActuatorStateFilter) {
 // Actuator Actions
 // =============================================================================
 async function toggleActuator(espId: string, gpio: number, currentState: boolean) {
-  await espStore.setActuatorState(espId, gpio, !currentState)
-}
-
-async function emergencyStopAll() {
-  if (confirm('Emergency-Stop für ALLE ESPs auslösen?')) {
-    for (const esp of espStore.devices) {
-      await espStore.emergencyStop(espStore.getDeviceId(esp), 'Globaler Emergency-Stop über UI')
-    }
-  }
+  await espStore.sendActuatorCommand(espId, gpio, currentState ? 'OFF' : 'ON')
 }
 
 // =============================================================================
@@ -310,15 +302,7 @@ function getQualityColor(quality: string): string {
             <component :is="showFilters ? ChevronUp : ChevronDown" class="w-4 h-4" />
           </button>
           <!-- Emergency Stop (only on actuators tab) -->
-          <button
-            v-if="activeTab === 'actuators'"
-            class="btn-danger flex items-center gap-2"
-            @click="emergencyStopAll"
-          >
-            <AlertTriangle class="w-4 h-4" />
-            <span class="hidden sm:inline">Emergency Stop All</span>
-            <span class="sm:hidden">E-Stop</span>
-          </button>
+          <EmergencyStopButton v-if="activeTab === 'actuators'" />
         </div>
 
       <!-- Tab Navigation -->

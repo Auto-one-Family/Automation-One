@@ -443,6 +443,42 @@ class SensorDataHandler:
                 "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
             }
 
+        # Validate quality field (optional, but must be valid if present)
+        quality = payload.get("quality")
+        if quality is not None:
+            valid_qualities = ["good", "fair", "poor", "suspect", "error", "unknown"]
+            if quality not in valid_qualities:
+                return {
+                    "valid": False,
+                    "error": f"Invalid quality value: '{quality}'. Must be one of {valid_qualities}",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+            # If ESP reports quality as "error", log a warning
+            if quality == "error":
+                logger.warning(
+                    f"ESP reported quality='error' for sensor data: "
+                    f"esp_id={payload.get('esp_id')}, gpio={payload.get('gpio')}, "
+                    f"sensor_type={payload.get('sensor_type')}"
+                )
+
+        # Validate error_code field (optional, ESP reports sensor-specific errors)
+        error_code = payload.get("error_code")
+        if error_code is not None:
+            if not isinstance(error_code, int):
+                return {
+                    "valid": False,
+                    "error": "Field 'error_code' must be integer",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+            # Log any non-zero error codes from ESP
+            if error_code != 0:
+                logger.warning(
+                    f"ESP reported error_code={error_code} for sensor: "
+                    f"esp_id={payload.get('esp_id')}, gpio={payload.get('gpio')}"
+                )
+
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
 
     def _detect_data_source(self, esp_device, payload: dict) -> str:

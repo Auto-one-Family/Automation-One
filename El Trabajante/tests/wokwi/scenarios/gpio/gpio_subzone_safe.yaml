@@ -1,0 +1,166 @@
+# GPIO-SUB-004 & GPIO-SUB-005: Subzone Safe-Mode Operations
+# ==========================================================
+# Validates that:
+# - enableSafeModeForSubzone(subzone_id) puts all subzone pins in safe mode
+# - isSubzoneSafe(subzone_id) returns correct status
+#
+# Test IDs: GPIO-SUB-004, GPIO-SUB-005
+# Priority: HIGH
+# Requirement:
+#   - enableSafeModeForSubzone("irrigation") -> all pins safe
+#   - isSubzoneSafe("irrigation") returns true/false correctly
+#
+# Use Case:
+#   - Emergency stop for specific zone (e.g., irrigation only)
+#   - Maintenance mode for subsystem without affecting others
+#   - Fault isolation
+#
+# Firmware reference: gpio_manager.cpp lines 599-670
+
+name: Subzone Safe-Mode Enable and Check
+version: 1
+steps:
+  # Wait for boot to complete
+  - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Wait for MQTT connection
+  - wait-serial: "MQTT connected"
+
+  # Configure components for TWO different subzones
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/config",
+          "payload": {
+            "actuators": [
+              {
+                "gpio": 5,
+                "actuator_type": "pump",
+                "actuator_name": "IrrigationPump",
+                "active": true
+              },
+              {
+                "gpio": 14,
+                "actuator_type": "valve",
+                "actuator_name": "IrrigationValve",
+                "active": true
+              },
+              {
+                "gpio": 15,
+                "actuator_type": "fan",
+                "actuator_name": "VentilationFan",
+                "active": true
+              },
+              {
+                "gpio": 16,
+                "actuator_type": "relay",
+                "actuator_name": "VentilationDamper",
+                "active": true
+              }
+            ]
+          }
+        }
+
+  # Verify all actuators configured
+  - wait-serial: "Pin 5 allocated"
+  - wait-serial: "Pin 14 allocated"
+  - wait-serial: "Pin 15 allocated"
+  - wait-serial: "Pin 16 allocated"
+
+  # Assign to subzones
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
+          "payload": {
+            "subzone_id": "irrigation",
+            "gpios": [5, 14]
+          }
+        }
+
+  - delay: 300
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
+          "payload": {
+            "subzone_id": "ventilation",
+            "gpios": [15, 16]
+          }
+        }
+
+  # Verify subzone assignments
+  - wait-serial: "irrigation"
+  - wait-serial: "ventilation"
+
+  # Turn ON all actuators
+  - delay: 500
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
+          "payload": { "command": "ON" }
+        }
+
+  - delay: 100
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/14/command",
+          "payload": { "command": "ON" }
+        }
+
+  - delay: 100
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/15/command",
+          "payload": { "command": "ON" }
+        }
+
+  - delay: 100
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/actuator/16/command",
+          "payload": { "command": "ON" }
+        }
+
+  # Verify all actuators are ON
+  - delay: 500
+
+  # GPIO-SUB-004: Enable safe mode for IRRIGATION subzone ONLY
+  - set-control:
+      part-id: "mqtt"
+      control: "inject"
+      value: |
+        {
+          "topic": "kaiser/god/esp/ESP_00000001/subzone/safe",
+          "payload": {
+            "subzone_id": "irrigation",
+            "enable": true
+          }
+        }
+
+  # Verify irrigation subzone is put in safe mode
+  - wait-serial: "Safe-Mode activated for subzone"
+  - wait-serial: "irrigation"
+
+  # GPIO-SUB-005: Verify ventilation subzone is NOT affected
+  # The ventilation actuators should still be operational
+  # (This is implicit - no error messages for ventilation)

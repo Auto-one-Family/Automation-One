@@ -271,11 +271,20 @@ class DetailedHealthResponse(BaseResponse):
 # =============================================================================
 
 
+class RecentError(BaseModel):
+    """Recent error/event for an ESP device."""
+
+    timestamp: datetime = Field(..., description="Event timestamp")
+    severity: str = Field(..., description="Event severity (info, warning, error, critical)")
+    category: str = Field(..., description="Event category (heartbeat, mqtt, config, etc.)")
+    message: str = Field(..., description="Human-readable error message")
+
+
 class ESPHealthItem(BaseModel):
     """
     Single ESP health status.
     """
-    
+
     device_id: str = Field(..., description="ESP device ID")
     name: Optional[str] = Field(None, description="Device name")
     status: str = Field(
@@ -289,6 +298,10 @@ class ESPHealthItem(BaseModel):
     wifi_rssi: Optional[int] = Field(None, description="WiFi RSSI (dBm)")
     sensor_count: int = Field(0, description="Active sensors", ge=0)
     actuator_count: int = Field(0, description="Active actuators", ge=0)
+    recent_errors: List[RecentError] = Field(
+        default_factory=list,
+        description="Recent error events for this device (max 5)",
+    )
 
 
 class ESPHealthSummaryResponse(BaseResponse):

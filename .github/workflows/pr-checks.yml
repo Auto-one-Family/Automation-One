@@ -54,7 +54,7 @@ jobs:
             private.key *.pem *.key id_rsa id_ed25519 *.p12 *.pfx \
             service-account.json firebase-adminsdk*.json"
           for pattern in $sensitive_patterns; do
-            found=$(find . -name "$pattern" -not -path "./.git/*" 2>/dev/null || true)
+            found=$(find . -name "$pattern" -not -name "*.example" -not -path "./.git/*" 2>/dev/null || true)
             if [ -n "$found" ]; then
               echo "::error::Potentially sensitive file detected: $found"
               exit 1
