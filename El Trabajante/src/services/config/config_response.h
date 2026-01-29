@@ -16,12 +16,14 @@
  */
 class ConfigResponseBuilder {
 public:
-  static bool publishSuccess(ConfigType type, uint8_t count, const String& message);
+  static bool publishSuccess(ConfigType type, uint8_t count, const String& message,
+                             const String& correlation_id = "");
 
   static bool publishError(ConfigType type,
                            ConfigErrorCode error_code,
                            const String& message,
-                           JsonVariantConst failed_item = JsonVariantConst());
+                           JsonVariantConst failed_item = JsonVariantConst(),
+                           const String& correlation_id = "");
 
   static bool publish(const ConfigResponsePayload& payload);
 
@@ -43,7 +45,8 @@ public:
       ConfigType type,
       uint8_t success_count,
       uint8_t fail_count,
-      const std::vector<ConfigFailureItem>& failures);
+      const std::vector<ConfigFailureItem>& failures,
+      const String& correlation_id = "");
 
 private:
   static String buildJsonPayload(const ConfigResponsePayload& payload);
@@ -52,7 +55,8 @@ private:
       ConfigStatus status,
       uint8_t success_count,
       uint8_t fail_count,
-      const std::vector<ConfigFailureItem>& failures);
+      const std::vector<ConfigFailureItem>& failures,
+      const String& correlation_id = "");
 };
 
 #endif  // SERVICES_CONFIG_CONFIG_RESPONSE_H

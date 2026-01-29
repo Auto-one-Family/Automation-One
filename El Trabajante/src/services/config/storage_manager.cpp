@@ -1,5 +1,6 @@
 #include "storage_manager.h"
 #include "../../utils/logger.h"
+#include <nvs_flash.h>
 
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
 namespace {
@@ -364,8 +365,52 @@ bool StorageManager::getBool(const char* key, bool default_value) {
     LOG_ERROR("StorageManager: No namespace open for getBool");
     return default_value;
   }
-  
+
   return preferences_.getBool(key, default_value);
+}
+
+// Float operations
+bool StorageManager::putFloat(const char* key, float value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for putFloat");
+    return false;
+  }
+
+  if (!checkNVSQuota(key)) {
+    return false;
+  }
+
+  size_t bytes = preferences_.putFloat(key, value);
+  if (bytes == 0) {
+    LOG_ERROR("StorageManager: Failed to write float key: " + String(key));
+    return false;
+  }
+
+  LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value, 4));
+  return true;
+}
+
+float StorageManager::getFloat(const char* key, float default_value) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return default_value;
+  }
+#endif
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for getFloat");
+    return default_value;
+  }
+
+  float value = preferences_.getFloat(key, default_value);
+  LOG_DEBUG("StorageManager: Read " + String(key) + " = " + String(value, 4));
+  return value;
 }
 
 // Unsigned long operations
@@ -432,6 +477,66 @@ bool StorageManager::clearNamespace() {
   }
   
   return success;
+}
+
+bool StorageManager::eraseKey(const char* key) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
+  if (!namespace_open_) {
+    LOG_ERROR("StorageManager: No namespace open for eraseKey");
+    return false;
+  }
+
+  bool success = preferences_.remove(key);
+  if (success) {
+    LOG_INFO("StorageManager: Erased key: " + String(key));
+  } else {
+    // remove() returns false if key didn't exist, which is acceptable
+    LOG_DEBUG("StorageManager: Key not found or already erased: " + String(key));
+  }
+
+  // Return true even if key didn't exist (idempotent operation)
+  return true;
+}
+
+bool StorageManager::eraseAll() {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  StorageLockGuard guard(nvs_mutex_);
+  if (!guard.locked()) {
+    return false;
+  }
+#endif
+
+  LOG_WARNING("StorageManager: FACTORY RESET - Erasing ALL NVS data!");
+
+  // Close any open namespace first
+  if (namespace_open_) {
+    preferences_.end();
+    namespace_open_ = false;
+    LOG_DEBUG("StorageManager: Closed namespace before erase: " + String(current_namespace_));
+    current_namespace_[0] = '\0';
+  }
+
+  // Erase entire NVS partition
+  esp_err_t err = nvs_flash_erase();
+  if (err != ESP_OK) {
+    LOG_ERROR("StorageManager: Failed to erase NVS flash, error: " + String(err));
+    return false;
+  }
+
+  // Re-initialize NVS after erase
+  err = nvs_flash_init();
+  if (err != ESP_OK) {
+    LOG_ERROR("StorageManager: Failed to re-initialize NVS flash, error: " + String(err));
+    return false;
+  }
+
+  LOG_INFO("StorageManager: Factory reset complete - NVS erased and re-initialized");
+  return true;
 }
 
 bool StorageManager::keyExists(const char* key) {
