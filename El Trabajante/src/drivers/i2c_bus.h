@@ -91,8 +91,19 @@ public:
     bool isInitialized() const { return initialized_; }
 
     // Get detailed bus status for debugging
-    // Format: "I2C[SDA:4,SCL:5,Freq:100kHz,Init:true]"
+    // Format: "I2C[SDA:4,SCL:5,Freq:100kHz,Init:true,RecoveryAttempts:0]"
     String getBusStatus() const;
+
+    // ============================================
+    // I2C BUS RECOVERY
+    // ============================================
+    // Attempt to recover a stuck I2C bus by sending 9 clock pulses
+    // and generating a STOP condition. Returns true if bus is functional.
+    bool recoverBus();
+
+    // Check if recovery is needed and attempt it (max 3 attempts per minute)
+    // Returns true if recovery was successful, false otherwise
+    bool attemptRecoveryIfNeeded(uint8_t error_code);
 
 private:
     // ============================================

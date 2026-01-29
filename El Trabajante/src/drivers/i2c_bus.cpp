@@ -6,6 +6,18 @@
 #include "../models/error_codes.h"
 
 // ============================================
+// I2C BUS RECOVERY CONFIGURATION
+// ============================================
+// Maximum recovery attempts within cooldown period
+constexpr uint8_t I2C_MAX_RECOVERY_ATTEMPTS = 3;
+// Reset recovery counter after this time (ms)
+constexpr unsigned long I2C_RECOVERY_COOLDOWN_MS = 60000;  // 1 minute
+
+// Recovery state tracking (persistent across calls)
+static uint8_t i2c_recovery_attempt_count = 0;
+static unsigned long i2c_last_recovery_time = 0;
+
+// ============================================
 // CONDITIONAL HARDWARE CONFIGURATION INCLUDES
 // ============================================
 #ifdef XIAO_ESP32C3
@@ -246,15 +258,42 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
     Wire.beginTransmission(device_address);
     Wire.write(register_address);
     uint8_t error = Wire.endTransmission(false);  // false = repeated start
-    
-    if (error != 0) {
-        LOG_ERROR("I2C write register failed: device 0x" + String(device_address, HEX) + 
+
+    // Handle bus errors with recovery
+    if (error == 4 || error == 5) {
+        LOG_WARNING("I2C bus error detected (code " + String(error) +
+                    ") while addressing device 0x" + String(device_address, HEX));
+
+        // Attempt recovery
+        if (attemptRecoveryIfNeeded(error)) {
+            // Recovery successful - retry the read ONCE
+            LOG_INFO("I2C: Retrying read after recovery...");
+
+            Wire.beginTransmission(device_address);
+            Wire.write(register_address);
+            error = Wire.endTransmission(false);
+
+            if (error == 0) {
+                LOG_INFO("I2C: Retry successful after recovery");
+                // Fall through to read data
+            } else {
+                LOG_ERROR("I2C: Retry failed after recovery (error " + String(error) + ")");
+                errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
+                                       ("I2C retry failed: device 0x" + String(device_address, HEX)).c_str());
+                return false;
+            }
+        } else {
+            LOG_ERROR("I2C: Recovery not possible or failed");
+            errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
+                                   ("I2C bus error: device 0x" + String(device_address, HEX)).c_str());
+            return false;
+        }
+    } else if (error != 0) {
+        // Other errors (NACK, etc.) - not a bus issue
+        LOG_ERROR("I2C write register failed: device 0x" + String(device_address, HEX) +
                   ", error " + String(error));
-        uint16_t code = (error == 4 || error == 5) ? ERROR_I2C_BUS_ERROR : ERROR_I2C_DEVICE_NOT_FOUND;
-        String msg = "Device 0x" + String(device_address, HEX) + " register write error (" + String(error) + ")";
-        errorTracker.trackError(code,
-                               (code == ERROR_I2C_BUS_ERROR) ? ERROR_SEVERITY_CRITICAL : ERROR_SEVERITY_WARNING,
-                               msg.c_str());
+        errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_WARNING,
+                               ("Device 0x" + String(device_address, HEX) + " not responding").c_str());
         return false;
     }
     
@@ -345,6 +384,123 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
 }
 
 // ============================================
+// I2C BUS RECOVERY
+// ============================================
+bool I2CBusManager::recoverBus() {
+    LOG_WARNING("I2C: Bus recovery initiated (attempt " +
+                String(i2c_recovery_attempt_count + 1) + "/" +
+                String(I2C_MAX_RECOVERY_ATTEMPTS) + ")");
+
+    errorTracker.trackError(
+        ERROR_I2C_BUS_RECOVERY_STARTED,
+        ERROR_SEVERITY_WARNING,
+        "I2C bus recovery initiated"
+    );
+
+    // Step 1: End current I2C session
+    Wire.end();
+    delay(10);
+
+    // Step 2: Manual clock pulse to release stuck slaves
+    // If a slave is holding SDA low, clocking SCL can release it
+    // This is the standard I2C bus recovery procedure (9 clock pulses)
+    pinMode(scl_pin_, OUTPUT);
+    pinMode(sda_pin_, INPUT_PULLUP);  // Let SDA float with pull-up
+
+    for (int i = 0; i < 9; i++) {
+        digitalWrite(scl_pin_, LOW);
+        delayMicroseconds(5);
+        digitalWrite(scl_pin_, HIGH);
+        delayMicroseconds(5);
+
+        // Check if SDA is released
+        if (digitalRead(sda_pin_) == HIGH) {
+            LOG_DEBUG("I2C: SDA released after " + String(i + 1) + " clock pulses");
+            break;
+        }
+    }
+
+    // Step 3: Generate STOP condition to reset all slaves
+    // STOP = SDA rising while SCL is high
+    pinMode(sda_pin_, OUTPUT);
+    digitalWrite(sda_pin_, LOW);
+    delayMicroseconds(5);
+    digitalWrite(scl_pin_, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(sda_pin_, HIGH);  // SDA high while SCL high = STOP
+    delayMicroseconds(10);
+
+    // Step 4: Re-initialize I2C
+    if (!Wire.begin(sda_pin_, scl_pin_, frequency_)) {
+        LOG_ERROR("I2C: Bus recovery failed - could not reinitialize");
+        errorTracker.trackError(
+            ERROR_I2C_BUS_RECOVERY_FAILED,
+            ERROR_SEVERITY_ERROR,
+            "I2C bus recovery failed: Wire.begin() returned false"
+        );
+        return false;
+    }
+
+    // Step 5: Verify bus is functional
+    Wire.beginTransmission(0x00);  // General call address
+    uint8_t error = Wire.endTransmission();
+
+    // Error 2 (NACK) is expected, Error 4 means bus still broken
+    if (error == 4) {
+        LOG_ERROR("I2C: Bus still stuck after recovery attempt");
+        errorTracker.trackError(
+            ERROR_I2C_BUS_RECOVERY_FAILED,
+            ERROR_SEVERITY_ERROR,
+            "I2C bus still stuck after recovery"
+        );
+        return false;
+    }
+
+    LOG_INFO("I2C: Bus recovery successful");
+    errorTracker.trackError(
+        ERROR_I2C_BUS_RECOVERED,
+        ERROR_SEVERITY_WARNING,  // Warning level for visibility in logs
+        "I2C bus recovered successfully"
+    );
+
+    return true;
+}
+
+bool I2CBusManager::attemptRecoveryIfNeeded(uint8_t error_code) {
+    // Only attempt recovery for bus errors (4) and timeouts (5)
+    if (error_code != 4 && error_code != 5) {
+        return false;  // Not a recoverable error
+    }
+
+    LOG_WARNING("I2C: Bus error detected (code " + String(error_code) + "), checking recovery eligibility");
+
+    // Check cooldown period - reset counter after 1 minute of no errors
+    unsigned long now = millis();
+    if (now - i2c_last_recovery_time > I2C_RECOVERY_COOLDOWN_MS) {
+        i2c_recovery_attempt_count = 0;  // Reset counter
+        LOG_DEBUG("I2C: Recovery counter reset (cooldown expired)");
+    }
+
+    // Check if we've exceeded max attempts
+    if (i2c_recovery_attempt_count >= I2C_MAX_RECOVERY_ATTEMPTS) {
+        LOG_ERROR("I2C: Max recovery attempts (" + String(I2C_MAX_RECOVERY_ATTEMPTS) +
+                  ") reached - bus disabled until cooldown");
+        errorTracker.trackError(
+            ERROR_I2C_BUS_ERROR,
+            ERROR_SEVERITY_CRITICAL,
+            "I2C bus permanently failed after max recovery attempts"
+        );
+        return false;
+    }
+
+    // Attempt recovery
+    i2c_recovery_attempt_count++;
+    i2c_last_recovery_time = now;
+
+    return recoverBus();
+}
+
+// ============================================
 // STATUS QUERIES
 // ============================================
 String I2CBusManager::getBusStatus() const {
@@ -353,6 +509,7 @@ String I2CBusManager::getBusStatus() const {
     status += ",SCL:" + String(scl_pin_);
     status += ",Freq:" + String(frequency_ / 1000) + "kHz";
     status += ",Init:" + String(initialized_ ? "true" : "false");
+    status += ",RecoveryAttempts:" + String(i2c_recovery_attempt_count);
     status += "]";
     return status;
 }
