@@ -909,7 +909,7 @@ jobs:
           timeout 150 wokwi-cli . \
             --timeout 120000 \
             --scenario tests/wokwi/scenarios/03-actuator/actuator_timeout_e2e.yaml \
-            2>&1 | tee actuator_timeout_e2e.log &
+            2>&1 | tee actuator_timeout_flow.log &
           WOKWI_PID=$!
           sleep 25
 
@@ -1045,17 +1045,16 @@ jobs:
           WOKWI_PID=$!
           sleep 25
 
-          # Parallel actuator commands
+          # Send actuator commands (sequential to avoid bare wait deadlock)
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
-            -m '{"command":"ON","value":1.0}' &
+            -m '{"command":"ON","value":1.0}'
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/13/command" \
-            -m '{"command":"PWM","value":0.7}' &
+            -m '{"command":"PWM","value":0.7}'
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/14/command" \
-            -m '{"command":"ON","value":1.0}' &
-          wait
+            -m '{"command":"ON","value":1.0}'
           sleep 10
 
           # Cleanup: all OFF
@@ -1224,7 +1223,7 @@ jobs:
           done
 
           # E2E Actuator Flow tests
-          for test_file in actuator_binary_full_flow:Actuator:Binary_Full_Flow actuator_pwm_full_flow:Actuator:PWM_Full_Flow actuator_timeout_e2e:timeout:Timeout_E2E; do
+          for test_file in actuator_binary_full_flow:Actuator:Binary_Full_Flow actuator_pwm_full_flow:Actuator:PWM_Full_Flow actuator_timeout_flow:timeout:Timeout_E2E; do
             IFS=: read -r file pattern label <<< "$test_file"
             if [ -f "all-logs/${file}.log" ]; then
               if grep -qi "$pattern" "all-logs/${file}.log"; then
