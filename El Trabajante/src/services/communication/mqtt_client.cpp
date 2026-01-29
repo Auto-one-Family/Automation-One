@@ -537,21 +537,25 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
         return publish(topic, payload, qos);  // Single attempt only
     }
     
-    for (uint8_t i = 0; i < retries; i++) {
-        if (publish(topic, payload, qos)) {
-            return true;
-        }
-        
-        // Don't retry if Circuit Breaker opened during attempts
-        if (circuit_breaker_.isOpen()) {
-            LOG_DEBUG("SafePublish: Circuit Breaker OPENED, stopping retries");
-            break;
-        }
-        
-        delay(100);
+    // FIX #4: Reduced retries (1 retry) with yield() instead of delay()
+    // Circuit Breaker regelt Retry-Logik auf höherer Ebene
+    if (publish(topic, payload, qos)) {
+        return true;
     }
-    
-    LOG_ERROR("SafePublish failed after retries");
+
+    // Don't retry if Circuit Breaker opened
+    if (circuit_breaker_.isOpen()) {
+        LOG_DEBUG("SafePublish: Circuit Breaker OPENED after first attempt");
+        return false;
+    }
+
+    yield();  // Non-blocking statt delay(100)
+
+    if (publish(topic, payload, qos)) {
+        return true;
+    }
+
+    LOG_ERROR("SafePublish failed after retry");
     return false;
 }
 

@@ -66,6 +66,7 @@ struct ActuatorCommand {
   float value = 0.0f;         // 0.0 - 1.0 (PWM) or binary (>=0.5)
   uint32_t duration_s = 0;    // Optional hold duration
   unsigned long timestamp = 0;
+  String correlation_id = ""; // End-to-end command tracking (UUID from server)
 };
 
 struct ActuatorStatus {
