@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { LogOut, User, ChevronDown, Menu, Wifi, WifiOff } from 'lucide-vue-next'
+import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 
 // Emit for sidebar toggle
 const emit = defineEmits<{
@@ -71,6 +72,9 @@ async function handleLogout() {
 
     <!-- Right Side -->
     <div class="flex items-center gap-4">
+      <!-- Emergency Stop Button -->
+      <EmergencyStopButton />
+
       <!-- Server Connection Status -->
       <div
         class="server-status"
