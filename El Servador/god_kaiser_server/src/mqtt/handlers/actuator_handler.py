@@ -191,19 +191,41 @@ class ActuatorStatusHandler:
                         f"gpio={gpio}, error={error}"
                     )
 
+                # Extract correlation_id for end-to-end command tracking
+                correlation_id = payload.get("correlation_id")
+
+                # Audit log: actuator status with correlation
+                if correlation_id:
+                    from ...db.repositories.audit_log_repo import AuditLogRepository
+                    audit_repo = AuditLogRepository(session)
+                    await audit_repo.log_actuator_command(
+                        esp_id=esp_id_str,
+                        gpio=gpio,
+                        command=last_command or state,
+                        value=value,
+                        issued_by="esp32_status",
+                        success=error is None,
+                        error_message=error,
+                        correlation_id=correlation_id,
+                    )
+                    await session.commit()
+
                 # WebSocket Broadcast
                 try:
                     from ...websocket.manager import WebSocketManager
                     ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast("actuator_status", {
+                    broadcast_data = {
                         "esp_id": esp_id_str,
                         "gpio": gpio,
                         "actuator_type": actuator_type,
                         "state": state,
                         "value": value,
                         "emergency": payload.get("emergency", "normal"),
-                        "timestamp": esp32_timestamp_raw
-                    })
+                        "timestamp": esp32_timestamp_raw,
+                    }
+                    if correlation_id:
+                        broadcast_data["correlation_id"] = correlation_id
+                    await ws_manager.broadcast("actuator_status", broadcast_data)
                 except Exception as e:
                     logger.warning(f"Failed to broadcast actuator status via WebSocket: {e}")
 

@@ -187,6 +187,13 @@ class ErrorEventHandler:
                         from ...websocket.manager import WebSocketManager
 
                         ws_manager = await WebSocketManager.get_instance()
+                        # Build title: short German label (message_de) or fallback
+                        error_title = (
+                            error_info.get("message_de", f"Fehler {error_code_int}")
+                            if error_info
+                            else f"Fehler {error_code_int}"
+                        )
+
                         await ws_manager.broadcast(
                             "error_event",
                             {
@@ -196,6 +203,7 @@ class ErrorEventHandler:
                                 "error_code": error_code_int,
                                 "severity": severity,
                                 "category": payload.get("category"),
+                                "title": error_title,
                                 "message": error_description,
                                 "troubleshooting": (
                                     error_info["troubleshooting"] if error_info else []
@@ -205,6 +213,9 @@ class ErrorEventHandler:
                                 ),
                                 "recoverable": (
                                     error_info["recoverable"] if error_info else True
+                                ),
+                                "docs_link": (
+                                    error_info.get("docs_link") if error_info else None
                                 ),
                                 "context": payload.get("context", {}),
                                 "timestamp": payload.get("timestamp"),

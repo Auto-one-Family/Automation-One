@@ -120,6 +120,7 @@ class ConfigHandler:
             message = payload.get("message", "")
             error_code = payload.get("error_code", "")
             failures = payload.get("failures", [])
+            correlation_id = payload.get("correlation_id")
 
             # Step 4: Log response based on status
             if status == "success":
@@ -188,6 +189,7 @@ class ConfigHandler:
                         error_code=error_code if status != "success" else None,
                         error_description=audit_error_desc,
                         failed_item=payload.get("failed_item") if status != "success" else None,
+                        correlation_id=correlation_id,
                     )
                     await session.commit()
                     logger.debug(f"Config response stored in audit log: {esp_id}")
@@ -214,7 +216,8 @@ class ConfigHandler:
                         ws_error_info["message"] if ws_error_info and status != "success"
                         else message
                     ),
-                    "timestamp": int(datetime.now(timezone.utc).timestamp())
+                    "timestamp": int(datetime.now(timezone.utc).timestamp()),
+                    "correlation_id": correlation_id,
                 }
 
                 # Include error details for failed/partial configs - DEUTSCHE TEXTE
