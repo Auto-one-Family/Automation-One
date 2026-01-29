@@ -566,4 +566,3 @@ size_t StorageManager::getFreeEntries() {
   
   return preferences_.freeEntries();
 }
-

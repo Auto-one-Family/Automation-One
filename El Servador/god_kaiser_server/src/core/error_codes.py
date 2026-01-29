@@ -671,4 +671,3 @@ def get_esp32_config_error_codes() -> List[Dict]:
         {"code": code, "description": desc}
         for code, desc in ESP32_CONFIG_ERROR_DESCRIPTIONS.items()
     ]
-

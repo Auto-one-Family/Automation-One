@@ -132,4 +132,3 @@ private:
 extern I2CBusManager& i2cBusManager;
 
 #endif // DRIVERS_I2C_BUS_H
-

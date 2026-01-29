@@ -300,4 +300,3 @@ String OneWireBusManager::getBusStatus() const {
     status += "]";
     return status;
 }
-
