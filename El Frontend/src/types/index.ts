@@ -370,9 +370,23 @@ export type MessageType =
   | 'device_approved'
   | 'device_rejected'
   | 'device_rediscovered'
-  // System events (future use)
+  // Actuator command lifecycle
+  | 'actuator_command'
+  | 'actuator_command_failed'
+  // Config publish lifecycle
+  | 'config_published'
+  | 'config_failed'
+  // Sequence events (automation)
+  | 'sequence_started'
+  | 'sequence_step'
+  | 'sequence_completed'
+  | 'sequence_error'
+  | 'sequence_cancelled'
+  // System events
   | 'logic_execution'
   | 'system_event'
+  | 'notification'
+  | 'error_event'
 
 export interface MqttMessage {
   id: string

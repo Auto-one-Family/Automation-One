@@ -21,6 +21,7 @@ export interface LogEntry {
   function?: string
   line?: number
   exception?: string
+  request_id?: string
   extra?: Record<string, unknown>
 }
 
@@ -54,6 +55,7 @@ export interface LogQueryParams {
   search?: string
   start_time?: string
   end_time?: string
+  request_id?: string
   file?: string
   page?: number
   page_size?: number
@@ -118,6 +120,7 @@ export const logsApi = {
     if (params.search) queryParams.set('search', params.search)
     if (params.start_time) queryParams.set('start_time', params.start_time)
     if (params.end_time) queryParams.set('end_time', params.end_time)
+    if (params.request_id) queryParams.set('request_id', params.request_id)
     if (params.file) queryParams.set('file', params.file)
     if (params.page) queryParams.set('page', params.page.toString())
     if (params.page_size) queryParams.set('page_size', params.page_size.toString())
