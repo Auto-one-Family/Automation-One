@@ -496,6 +496,7 @@ class MockESP32Client:
             "actuator_get": self._handle_actuator_get,
             "sensor_read": self._handle_sensor_read,
             "sensor_batch": self._handle_sensor_batch,
+            "config": self._handle_config,
             "config_get": self._handle_config_get,
             "config_set": self._handle_config_set,
             "emergency_stop": self._handle_emergency_stop,
@@ -763,6 +764,94 @@ class MockESP32Client:
             "data": {
                 "sensors": readings,
                 "count": len(readings)
+            },
+            "timestamp": time.time()
+        }
+
+    def _handle_config(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
+        """
+        Handle full config command (sensors, actuators, zone, etc.).
+
+        This simulates the ESP32 receiving a config message from the server
+        with sensor and actuator configurations to apply.
+        """
+        configured_sensors = []
+        configured_actuators = []
+        failures = []
+
+        # Process sensors configuration
+        sensors_config = params.get("sensors", [])
+        for sensor_cfg in sensors_config:
+            gpio = sensor_cfg.get("gpio")
+            if gpio is None:
+                failures.append({"field": "gpio", "error": "missing"})
+                continue
+
+            sensor_type = sensor_cfg.get("sensor_type", "analog")
+            sensor_name = sensor_cfg.get("sensor_name", sensor_cfg.get("name", ""))
+            active = sensor_cfg.get("active", True)
+
+            if active:
+                # Create sensor state
+                self.sensors[gpio] = SensorState(
+                    gpio=gpio,
+                    sensor_type=sensor_type,
+                    raw_value=0.0,
+                    name=sensor_name or f"{sensor_type}_{gpio}",
+                    quality="good"
+                )
+                configured_sensors.append(gpio)
+
+        # Process actuators configuration
+        actuators_config = params.get("actuators", [])
+        for actuator_cfg in actuators_config:
+            gpio = actuator_cfg.get("gpio")
+            if gpio is None:
+                failures.append({"field": "gpio", "error": "missing"})
+                continue
+
+            actuator_type = actuator_cfg.get("actuator_type", "relay")
+            actuator_name = actuator_cfg.get("actuator_name", actuator_cfg.get("name", ""))
+            active = actuator_cfg.get("active", True)
+
+            if active:
+                # Create actuator state
+                self.actuators[gpio] = ActuatorState(
+                    gpio=gpio,
+                    actuator_type=actuator_type,
+                    state=False,
+                    pwm_value=0.0,
+                    name=actuator_name or f"{actuator_type}_{gpio}"
+                )
+                configured_actuators.append(gpio)
+
+        # Publish config response
+        status = "ok" if not failures else "partial"
+        response_payload = {
+            "esp_id": self.esp_id,
+            "command_id": command_id,
+            "status": status,
+            "configured_sensors": configured_sensors,
+            "configured_actuators": configured_actuators,
+            "failures": failures,
+            "timestamp": time.time()
+        }
+
+        self.published_messages.append({
+            "topic": TopicBuilder.build_config_response_topic(self.esp_id, self.kaiser_id),
+            "payload": response_payload,
+            "qos": 1,
+            "retain": False
+        })
+
+        return {
+            "status": status,
+            "command": "config",
+            "command_id": command_id,
+            "data": {
+                "configured_sensors": configured_sensors,
+                "configured_actuators": configured_actuators,
+                "failures": failures
             },
             "timestamp": time.time()
         }
@@ -1414,6 +1503,10 @@ class MockESP32Client:
     def get_actuator_state(self, gpio: int) -> Optional[ActuatorState]:
         """Get current actuator state (for test assertions)."""
         return self.actuators.get(gpio)
+
+    def get_sensor_state(self, gpio: int) -> Optional[SensorState]:
+        """Get current sensor state (for test assertions)."""
+        return self.sensors.get(gpio)
 
     def set_sensor_value(
         self,

@@ -305,14 +305,25 @@ class RealESP32Client:
     def get_actuator_state(self, gpio: int) -> Optional[Any]:
         """
         Get current actuator state (requires querying via MQTT).
-        
+
         Note: This is a simplified implementation for testing.
         """
         response = self.handle_command("actuator_get", {"gpio": gpio})
         if response.get("status") == "ok":
             return response.get("data")
         return None
-    
+
+    def get_sensor_state(self, gpio: int) -> Optional[Any]:
+        """
+        Get current sensor state (requires querying via MQTT).
+
+        Note: This is a simplified implementation for testing.
+        """
+        response = self.handle_command("sensor_get", {"gpio": gpio})
+        if response.get("status") == "ok":
+            return response.get("data")
+        return None
+
     def set_sensor_value(self, gpio: int, raw_value: float, sensor_type: str = "analog"):
         """
         Set sensor value for testing.
