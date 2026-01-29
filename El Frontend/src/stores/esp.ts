@@ -10,6 +10,7 @@ import { ref, computed } from 'vue'
 import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
 import { debugApi } from '@/api/debug'
 import { sensorsApi, oneWireApi, type OneWireDevice, type OneWireScanResponse } from '@/api/sensors'
+import { actuatorsApi } from '@/api/actuators'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
@@ -112,9 +113,14 @@ export const useEspStore = defineStore('esp', () => {
     autoReconnect: true,
     filters: {
       types: [
-        'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert', 
+        'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert',
         'config_response', 'zone_assignment', 'sensor_health',
-        'device_discovered', 'device_approved', 'device_rejected'
+        'device_discovered', 'device_approved', 'device_rejected', 'device_rediscovered',
+        'actuator_response', 'actuator_command', 'actuator_command_failed',
+        'config_published', 'config_failed',
+        'sequence_started', 'sequence_step', 'sequence_completed', 'sequence_error', 'sequence_cancelled',
+        'logic_execution',
+        'notification', 'error_event', 'system_event',
       ] as MessageType[],
     },
   })
@@ -1424,34 +1430,44 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   function handleActuatorAlert(message: { data: Record<string, unknown> }): void {
     const data = message.data
     const espId = data.esp_id as string || data.device_id as string
-    const gpio = data.gpio as number
+    const gpio = data.gpio as number | undefined
     const alertType = data.alert_type as string
 
-    if (!espId || gpio === undefined) {
-      console.warn('[ESP Store] actuator_alert missing esp_id or gpio')
+    if (!espId) {
+      console.warn('[ESP Store] actuator_alert missing esp_id')
       return
     }
 
-    const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (!device?.actuators) {
-      console.debug(`[ESP Store] Device ${espId} not found or has no actuators`)
-      return
+    const isEmergencyAlert = alertType === 'emergency_stop' || alertType === 'runtime_protection' || alertType === 'safety_violation'
+
+    // "ALL" means all devices affected (system-wide emergency)
+    const targetDevices = espId === 'ALL'
+      ? devices.value
+      : devices.value.filter(d => getDeviceId(d) === espId)
+
+    for (const device of targetDevices) {
+      if (!device?.actuators) continue
+      const actuators = device.actuators as { gpio: number; emergency_stopped?: boolean; state?: boolean }[]
+
+      if (gpio === undefined) {
+        // No gpio = all actuators on device affected
+        if (isEmergencyAlert) {
+          for (const act of actuators) {
+            act.emergency_stopped = true
+            act.state = false
+          }
+        }
+      } else {
+        const actuator = actuators.find(a => a.gpio === gpio)
+        if (!actuator) continue
+        if (isEmergencyAlert) {
+          actuator.emergency_stopped = true
+          actuator.state = false
+        }
+      }
     }
 
-    const actuator = (device.actuators as { gpio: number; emergency_stopped?: boolean; state?: boolean }[])
-      .find(a => a.gpio === gpio)
-    if (!actuator) {
-      console.debug(`[ESP Store] Actuator GPIO ${gpio} not found on ${espId}`)
-      return
-    }
-
-    // Emergency alerts set emergency_stopped flag
-    if (alertType === 'emergency_stop' || alertType === 'runtime_protection' || alertType === 'safety_violation') {
-      actuator.emergency_stopped = true
-      actuator.state = false
-    }
-
-    console.info(`[ESP Store] Actuator alert: ${espId} GPIO ${gpio} - ${alertType}`)
+    console.info(`[ESP Store] Actuator alert: ${espId} GPIO ${gpio ?? 'ALL'} - ${alertType}`)
   }
 
   /**
@@ -1979,6 +1995,351 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   // =============================================================================
+  // WebSocket Handlers: Actuator Feedback & Notifications (Phase UI/UX 1)
+  // =============================================================================
+
+  /**
+   * Handle actuator_response WebSocket event
+   * Shows toast when ESP confirms command execution
+   */
+  function handleActuatorResponse(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string || data.device_id as string
+    const gpio = data.gpio as number
+    const success = data.success as boolean
+    const command = data.command as string
+    const errorCode = data.error_code as number | undefined
+    const msg = data.message as string | undefined
+
+    if (!espId) return
+
+    const toast = useToast()
+    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
+
+    if (success) {
+      toast.success(`${deviceName} GPIO ${gpio}: ${command} bestätigt`)
+    } else {
+      toast.error(
+        `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen${errorCode ? ` (${errorCode})` : ''}${msg ? ` – ${msg}` : ''}`,
+        { persistent: true }
+      )
+    }
+  }
+
+  /**
+   * Handle notification WebSocket event
+   * Shows toast from server notifications (logic rules, system)
+   */
+  function handleNotification(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const title = data.title as string || 'Benachrichtigung'
+    const msg = data.message as string || ''
+    const priority = data.priority as string || 'normal'
+
+    const toast = useToast()
+    const toastType = priority === 'high' ? 'warning' : 'info'
+    toast.show({ message: `${title}: ${msg}`, type: toastType, persistent: priority === 'high' })
+  }
+
+  /**
+   * Handle error_event WebSocket event
+   * Shows toast with troubleshooting info
+   */
+  function handleErrorEvent(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string || data.source_id as string
+    const severity = data.severity as string || 'error'
+    const title = data.title as string | undefined
+    const msg = data.message as string || 'Unbekannter Fehler'
+    const errorCode = data.error_code as number | undefined
+    const userActionRequired = data.user_action_required as boolean | undefined
+    const troubleshooting = data.troubleshooting as string[] | undefined
+
+    const toast = useToast()
+    const deviceName = espId
+      ? (devices.value.find(d => getDeviceId(d) === espId)?.name || espId)
+      : 'System'
+
+    // Use title (short) if available, otherwise fall back to message
+    const displayTitle = title || msg
+    const displayMsg = userActionRequired
+      ? `${deviceName}: ${displayTitle} — Handlungsbedarf`
+      : `${deviceName}: ${displayTitle}${errorCode ? ` (${errorCode})` : ''}`
+
+    // Build action for troubleshooting details if available
+    const actions: Array<{ label: string; onClick: () => void; variant?: 'primary' | 'secondary' }> = []
+    if (troubleshooting && troubleshooting.length > 0) {
+      actions.push({
+        label: 'Details',
+        variant: 'secondary',
+        onClick: () => {
+          // Emit a custom event so the SystemMonitor can show the ErrorDetailsModal
+          window.dispatchEvent(new CustomEvent('show-error-details', {
+            detail: {
+              error_code: errorCode,
+              title: title || `Fehler ${errorCode}`,
+              description: msg,
+              severity,
+              troubleshooting,
+              user_action_required: userActionRequired ?? false,
+              esp_id: espId,
+              esp_name: deviceName,
+              docs_link: data.docs_link as string | null | undefined,
+              context: data.context as Record<string, unknown> | undefined,
+              timestamp: data.timestamp as string | undefined,
+            },
+          }))
+        },
+      })
+    }
+
+    toast.show({
+      message: displayMsg,
+      type: severity === 'critical' ? 'error' : severity === 'warning' ? 'warning' : 'error',
+      persistent: severity === 'critical' || severity === 'error',
+      actions: actions.length > 0 ? actions : undefined,
+    })
+  }
+
+  /**
+   * Handle system_event WebSocket event
+   * Shows info toast for system events
+   */
+  function handleSystemEvent(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const msg = data.message as string || 'System-Ereignis'
+
+    const toast = useToast()
+    toast.info(msg)
+  }
+
+  // =============================================================================
+  // Phase 2: Actuator Command Lifecycle Handlers
+  // =============================================================================
+
+  /**
+   * Handle actuator_command WebSocket event
+   * Notifies that a command was sent to an ESP (not yet confirmed)
+   */
+  function handleActuatorCommand(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string
+    const gpio = data.gpio as number
+    const command = data.command as string
+    if (!espId) return
+
+    const toast = useToast()
+    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
+    toast.info(`${deviceName} GPIO ${gpio}: ${command} gesendet`)
+  }
+
+  /**
+   * Handle actuator_command_failed WebSocket event
+   * Notifies that a command could NOT be sent to ESP (MQTT/safety failure)
+   */
+  function handleActuatorCommandFailed(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string
+    const gpio = data.gpio as number
+    const error = data.error as string || 'Unbekannter Fehler'
+    if (!espId) return
+
+    const toast = useToast()
+    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
+    toast.error(
+      `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen – ${error}`,
+      { persistent: true }
+    )
+  }
+
+  // =============================================================================
+  // Phase 2: Config Publish Lifecycle Handlers
+  // =============================================================================
+
+  /**
+   * Handle config_published WebSocket event
+   * Notifies that config was sent to ESP via MQTT
+   */
+  function handleConfigPublished(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string
+    if (!espId) return
+
+    const toast = useToast()
+    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
+    const keys = data.config_keys as string[] | undefined
+    const detail = keys?.length ? ` (${keys.join(', ')})` : ''
+    toast.info(`Konfiguration für ${deviceName} gesendet${detail}`)
+  }
+
+  /**
+   * Handle config_failed WebSocket event
+   * Notifies that config publishing failed
+   */
+  function handleConfigFailed(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string
+    const error = data.error as string || 'Unbekannter Fehler'
+    if (!espId) return
+
+    const toast = useToast()
+    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
+    toast.error(
+      `Konfiguration für ${deviceName} fehlgeschlagen: ${error}`,
+      { persistent: true }
+    )
+  }
+
+  // =============================================================================
+  // Phase 2: Device Rediscovery Handler
+  // =============================================================================
+
+  /**
+   * Handle device_rediscovered WebSocket event
+   * Known device came back online after disconnect
+   */
+  function handleDeviceRediscovered(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const espId = data.esp_id as string || data.device_id as string
+    if (!espId) return
+
+    // Update device status to online
+    const device = devices.value.find(d => getDeviceId(d) === espId)
+    if (device) {
+      device.status = 'online'
+      device.last_seen = new Date().toISOString()
+    }
+
+    const toast = useToast()
+    const deviceName = device?.name || espId
+    toast.info(`${deviceName} ist wieder online`)
+  }
+
+  // =============================================================================
+  // Phase 2: Sequence Handlers (Automation)
+  // =============================================================================
+
+  /**
+   * Handle sequence_started WebSocket event
+   */
+  function handleSequenceStarted(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const name = data.rule_name as string || data.description as string || `Sequenz ${data.sequence_id}`
+    const toast = useToast()
+    toast.info(`Sequenz gestartet: ${name}`)
+  }
+
+  /**
+   * Handle sequence_step WebSocket event
+   * No toast - progress updates are too frequent
+   */
+  function handleSequenceStep(_message: { data: Record<string, unknown> }): void {
+    // No toast - would flood the UI
+    // Could be used for progress tracking in future UI components
+  }
+
+  /**
+   * Handle sequence_completed WebSocket event
+   */
+  function handleSequenceCompleted(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const success = data.success as boolean
+    const toast = useToast()
+
+    if (success) {
+      toast.success('Sequenz erfolgreich abgeschlossen')
+    } else {
+      const error = data.error as string || 'Unbekannter Fehler'
+      toast.error(`Sequenz fehlgeschlagen: ${error}`, { persistent: true })
+    }
+  }
+
+  /**
+   * Handle sequence_error WebSocket event
+   */
+  function handleSequenceError(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const msg = data.message as string || 'Unbekannter Sequenz-Fehler'
+    const toast = useToast()
+    toast.error(`Sequenz-Fehler: ${msg}`, { persistent: true })
+  }
+
+  /**
+   * Handle sequence_cancelled WebSocket event
+   */
+  function handleSequenceCancelled(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const reason = data.reason as string
+    const toast = useToast()
+    toast.warning(reason ? `Sequenz abgebrochen: ${reason}` : 'Sequenz abgebrochen')
+  }
+
+  // =============================================================================
+  // Actuator Commands (Real ESP + Mock)
+  // =============================================================================
+
+  /**
+   * Send actuator command to real or mock ESP.
+   * For real ESPs: calls REST API → MQTT → ESP.
+   * For mock ESPs: calls debug API.
+   * Toast feedback comes via WebSocket events.
+   */
+  async function sendActuatorCommand(
+    deviceId: string,
+    gpio: number,
+    command: 'ON' | 'OFF' | 'PWM' | 'TOGGLE',
+    value?: number
+  ): Promise<void> {
+    const toast = useToast()
+
+    if (isMock(deviceId)) {
+      // Mock path: use debug API
+      try {
+        const state = command === 'ON' || command === 'TOGGLE'
+        await debugApi.setActuatorState(deviceId, gpio, state, value)
+        await fetchDevice(deviceId)
+      } catch (err: unknown) {
+        const msg = extractErrorMessage(err, 'Mock-Befehl konnte nicht gesendet werden')
+        toast.error(msg, { persistent: true })
+        throw err
+      }
+      return
+    }
+
+    // Real ESP: use actuator command API
+    try {
+      await actuatorsApi.sendCommand(deviceId, gpio, {
+        command,
+        value: value ?? (command === 'ON' ? 1.0 : 0.0),
+      })
+      toast.info(`Befehl ${command} an ${deviceId} GPIO ${gpio} gesendet…`)
+    } catch (err: unknown) {
+      const msg = extractErrorMessage(err, 'Befehl konnte nicht gesendet werden')
+      toast.error(msg, { persistent: true })
+      throw err
+    }
+  }
+
+  /**
+   * Emergency stop all actuators (real API, not mock-only).
+   */
+  async function emergencyStopAll(reason: string = 'Manueller Notfall-Stopp über UI'): Promise<void> {
+    const toast = useToast()
+    try {
+      const result = await actuatorsApi.emergencyStop({ reason })
+      toast.show({
+        message: `NOTFALL-STOPP: ${result.actuators_stopped} Aktoren auf ${result.devices_stopped} Geräten gestoppt`,
+        type: 'warning',
+        persistent: true,
+      })
+    } catch (err: unknown) {
+      const msg = extractErrorMessage(err, 'Notfall-Stopp fehlgeschlagen')
+      toast.error(msg, { persistent: true })
+      throw err
+    }
+  }
+
+  // =============================================================================
   // WebSocket Registration
   // =============================================================================
   // NOTE: Pinia stores don't have lifecycle hooks like Vue components.
@@ -2008,6 +2369,22 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('device_discovered', handleDeviceDiscovered),
       ws.on('device_approved', handleDeviceApproved),
       ws.on('device_rejected', handleDeviceRejected),
+      // Phase UI/UX 1: Feedback & Notifications
+      ws.on('actuator_response', handleActuatorResponse),
+      ws.on('notification', handleNotification),
+      ws.on('error_event', handleErrorEvent),
+      ws.on('system_event', handleSystemEvent),
+      // Phase UI/UX 2: Full Event Coverage
+      ws.on('actuator_command', handleActuatorCommand),
+      ws.on('actuator_command_failed', handleActuatorCommandFailed),
+      ws.on('config_published', handleConfigPublished),
+      ws.on('config_failed', handleConfigFailed),
+      ws.on('device_rediscovered', handleDeviceRediscovered),
+      ws.on('sequence_started', handleSequenceStarted),
+      ws.on('sequence_step', handleSequenceStep),
+      ws.on('sequence_completed', handleSequenceCompleted),
+      ws.on('sequence_error', handleSequenceError),
+      ws.on('sequence_cancelled', handleSequenceCancelled),
     )
 
     // BUG U FIX: Register callback to refresh ESP data when WebSocket connects/reconnects
@@ -2080,6 +2457,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     approveDevice,
     rejectDevice,
     
+    // Actuator Commands (Real + Mock)
+    sendActuatorCommand,
+    emergencyStopAll,
+
     // Mock ESP specific actions
     triggerHeartbeat,
     setState,

@@ -36,6 +36,9 @@ interface ToastState {
 // Default durations
 const DEFAULT_DURATION = 5000
 const ERROR_DURATION = 8000
+const MAX_TOASTS = 20
+const MAX_PERSISTENT_TOASTS = 10
+const DEDUP_WINDOW_MS = 2000
 
 // Singleton state - shared across all components
 const state = reactive<ToastState>({
@@ -44,7 +47,7 @@ const state = reactive<ToastState>({
 
 // Generate unique ID
 function generateId(): string {
-  return `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  return `toast-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
 }
 
 export function useToast() {
@@ -53,6 +56,16 @@ export function useToast() {
    * @returns Toast ID for programmatic removal
    */
   function show(options: ToastOptions): string {
+    const now = Date.now()
+
+    // Dedup: skip if identical toast exists within time window
+    const duplicate = state.toasts.find(
+      t => t.message === options.message && t.type === options.type && (now - t.createdAt) < DEDUP_WINDOW_MS
+    )
+    if (duplicate) {
+      return duplicate.id
+    }
+
     const id = generateId()
     const duration = options.duration ??
       (options.type === 'error' ? ERROR_DURATION : DEFAULT_DURATION)
@@ -61,7 +74,28 @@ export function useToast() {
       ...options,
       id,
       duration,
-      createdAt: Date.now()
+      createdAt: now
+    }
+
+    // Enforce max limits: remove oldest non-persistent toasts first
+    while (state.toasts.length >= MAX_TOASTS) {
+      const oldestNonPersistent = state.toasts.findIndex(t => !t.persistent)
+      if (oldestNonPersistent !== -1) {
+        state.toasts.splice(oldestNonPersistent, 1)
+      } else {
+        state.toasts.shift()
+      }
+    }
+
+    // Enforce persistent toast limit
+    if (options.persistent) {
+      const persistentCount = state.toasts.filter(t => t.persistent).length
+      if (persistentCount >= MAX_PERSISTENT_TOASTS) {
+        const oldestPersistent = state.toasts.findIndex(t => t.persistent)
+        if (oldestPersistent !== -1) {
+          state.toasts.splice(oldestPersistent, 1)
+        }
+      }
     }
 
     state.toasts.push(toast)
