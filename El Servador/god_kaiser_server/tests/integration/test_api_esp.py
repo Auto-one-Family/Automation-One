@@ -215,7 +215,7 @@ class TestDeviceHealth:
 
 class TestDeviceCommands:
     """Test device command endpoints."""
-    
+
     @pytest.mark.asyncio
     async def test_restart_device(self, auth_headers: dict, test_esp: ESPDevice):
         """Test restarting a device."""
@@ -228,10 +228,10 @@ class TestDeviceCommands:
                 },
                 headers=auth_headers,
             )
-        
+
         # May fail if MQTT not connected, but endpoint should be reachable
         assert response.status_code in [200, 500]
-    
+
     @pytest.mark.asyncio
     async def test_factory_reset_requires_confirm(self, auth_headers: dict, test_esp: ESPDevice):
         """Test that factory reset requires confirmation."""
@@ -244,6 +244,130 @@ class TestDeviceCommands:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 400
+
+
+class TestDeleteDevice:
+    """Test device deletion."""
+
+    @pytest.mark.asyncio
+    async def test_delete_device(self, auth_headers: dict, db_session: AsyncSession):
+        """Test deleting a device."""
+        # Create a device to delete
+        esp = ESPDevice(
+            device_id="ESP_DELETE01",
+            name="Delete Me",
+            ip_address="192.168.1.199",
+            mac_address="DD:DD:DD:DD:DD:DD",
+            firmware_version="2.0.0",
+            hardware_type="ESP32_WROOM",
+            status="online",
+            device_metadata={},
+        )
+        db_session.add(esp)
+        await db_session.commit()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                "/api/v1/esp/devices/ESP_DELETE01",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 204
+
+        # Verify deleted
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/esp/devices/ESP_DELETE01",
+                headers=auth_headers,
+            )
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_device_not_found(self, auth_headers: dict):
+        """Test deleting non-existent device."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                "/api/v1/esp/devices/ESP_NOTEXIST",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 404
+
+
+class TestDevicePagination:
+    """Test device listing pagination."""
+
+    @pytest.mark.asyncio
+    async def test_list_with_page_size(self, auth_headers: dict, test_esp: ESPDevice):
+        """Test listing with page_size parameter."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/esp/devices",
+                params={"page_size": 1},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["data"]) <= 1
+        assert data["pagination"]["page_size"] == 1
+
+
+class TestDeviceGpioStatus:
+    """Test device GPIO status endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_get_gpio_status(self, auth_headers: dict, test_esp: ESPDevice):
+        """Test getting GPIO status for a device."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                f"/api/v1/esp/devices/{test_esp.device_id}/gpio-status",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+
+class TestDeviceAuth:
+    """Test authentication requirements for device endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_register_without_auth(self):
+        """Test registering device without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/esp/devices",
+                json={
+                    "device_id": "ESP_NOAUTH01",
+                    "ip_address": "192.168.1.200",
+                    "mac_address": "FF:FF:FF:FF:FF:FF",
+                    "firmware_version": "2.0.0",
+                    "hardware_type": "ESP32_WROOM",
+                },
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_update_without_auth(self, test_esp: ESPDevice):
+        """Test updating device without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.patch(
+                f"/api/v1/esp/devices/{test_esp.device_id}",
+                json={"name": "Hacked Name"},
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_delete_without_auth(self, test_esp: ESPDevice):
+        """Test deleting device without authentication."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                f"/api/v1/esp/devices/{test_esp.device_id}",
+            )
+
+        assert response.status_code == 401
 
