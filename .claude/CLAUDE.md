@@ -16,7 +16,15 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | Python, FastAPI, MQTT-Handler, Database, API | `server-development` |
 | Vue 3, TypeScript, Pinia, WebSocket, Dashboard | `frontend-development` |
 
-## Agenten (Debugging)
+## Dev-Agenten (Pattern-konforme Implementierung)
+
+| Agent | Trigger-Keywords |
+|-------|------------------|
+| `esp32-dev` | Sensor hinzufuegen, Driver erstellen, NVS Key, GPIO, implementieren ESP32 |
+| `server-dev` | Handler erstellen, Repository erweitern, Service, Schema, implementieren Server |
+| `mqtt-dev` | Topic hinzufuegen, Publisher, Subscriber, Payload Schema, MQTT implementieren |
+
+## Debug-Agenten (Log-Analyse)
 
 | Agent | Trigger-Keywords |
 |-------|------------------|
@@ -44,9 +52,9 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 ## Workflow
 
 ```
-SKILL → ANALYSE → REFERENZ → IMPLEMENTIEREN → VERIFIZIEREN
+SKILL → DEV-AGENT → ANALYSE → PLAN → IMPLEMENTIEREN → VERIFIZIEREN
 ```
 
 ---
 
-*Details in Skills. Commands in `system-control`. Diese Datei ist NUR Router.*
+*Details in Skills/Dev-Agents. Commands in `system-control`. Diese Datei ist NUR Router.*
