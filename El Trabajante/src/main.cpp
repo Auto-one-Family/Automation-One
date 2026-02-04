@@ -110,7 +110,14 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
   }
 
   String ack_payload;
-  serializeJson(ack_doc, ack_payload);
+  size_t written = serializeJson(ack_doc, ack_payload);
+  if (written == 0 || ack_payload.length() == 0) {
+    LOG_ERROR("JSON serialization failed for Subzone ACK: " + subzone_id);
+    // Fallback: Send minimal ACK with required fields
+    ack_payload = "{\"esp_id\":\"" + g_system_config.esp_id +
+                 "\",\"status\":\"error\",\"subzone_id\":\"" + subzone_id +
+                 "\",\"message\":\"serialization_failed\",\"timestamp\":0}";
+  }
   mqttClient.publish(ack_topic, ack_payload, 1);
 }
 
@@ -848,12 +855,6 @@ void setup() {
       // System commands (factory reset, etc.)
       String system_command_topic = String(TopicBuilder::buildSystemCommandTopic());
 
-      // DEBUG: Log topic comparison
-      LOG_INFO("System command topic check:");
-      LOG_INFO("  Received: " + topic);
-      LOG_INFO("  Expected: " + system_command_topic);
-      LOG_INFO("  Match: " + String(topic == system_command_topic ? "YES" : "NO"));
-
       if (topic == system_command_topic) {
         LOG_INFO("Topic matched! Parsing JSON payload...");
         LOG_INFO("Payload: " + payload);
@@ -970,9 +971,193 @@ void setup() {
 
           LOG_INFO("OneWire scan result published");
         }
+        // ============================================
+        // STATUS COMMAND (BUG-009 FIX)
+        // ============================================
+        else if (command == "status") {
+          LOG_INFO("╔════════════════════════════════════════╗");
+          LOG_INFO("║  STATUS COMMAND RECEIVED              ║");
+          LOG_INFO("╚════════════════════════════════════════╝");
+
+          // Build status response (similar to heartbeat)
+          time_t unix_timestamp = timeManager.getUnixTimestamp();
+
+          DynamicJsonDocument response_doc(1024);
+          response_doc["command"] = "status";
+          response_doc["success"] = true;
+          response_doc["esp_id"] = g_system_config.esp_id;
+          response_doc["state"] = static_cast<int>(g_system_config.current_state);
+          response_doc["uptime"] = millis() / 1000;
+          response_doc["heap_free"] = ESP.getFreeHeap();
+          response_doc["wifi_rssi"] = WiFi.RSSI();
+          response_doc["sensor_count"] = sensorManager.getActiveSensorCount();
+          response_doc["actuator_count"] = actuatorManager.getActiveActuatorCount();
+          response_doc["zone_id"] = g_kaiser.zone_id;
+          response_doc["zone_assigned"] = g_kaiser.zone_assigned;
+          response_doc["ts"] = (unsigned long)unix_timestamp;
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+          LOG_INFO("Status command response sent");
+        }
+        // ============================================
+        // DIAGNOSTICS COMMAND (BUG-009 FIX)
+        // ============================================
+        else if (command == "diagnostics") {
+          LOG_INFO("╔════════════════════════════════════════╗");
+          LOG_INFO("║  DIAGNOSTICS COMMAND RECEIVED         ║");
+          LOG_INFO("╚════════════════════════════════════════╝");
+
+          // Build extended diagnostics response
+          time_t unix_timestamp = timeManager.getUnixTimestamp();
+
+          DynamicJsonDocument response_doc(2048);
+          response_doc["command"] = "diagnostics";
+          response_doc["success"] = true;
+          response_doc["esp_id"] = g_system_config.esp_id;
+
+          // System info
+          response_doc["state"] = static_cast<int>(g_system_config.current_state);
+          response_doc["uptime"] = millis() / 1000;
+          response_doc["heap_free"] = ESP.getFreeHeap();
+          response_doc["heap_min"] = ESP.getMinFreeHeap();
+          response_doc["chip_model"] = ESP.getChipModel();
+          response_doc["chip_revision"] = ESP.getChipRevision();
+          response_doc["flash_size"] = ESP.getFlashChipSize();
+          response_doc["sdk_version"] = ESP.getSdkVersion();
+
+          // WiFi info
+          response_doc["wifi_rssi"] = WiFi.RSSI();
+          response_doc["wifi_ssid"] = WiFi.SSID();
+          response_doc["wifi_ip"] = WiFi.localIP().toString();
+          response_doc["wifi_mac"] = WiFi.macAddress();
+
+          // Zone info
+          response_doc["zone_id"] = g_kaiser.zone_id;
+          response_doc["master_zone_id"] = g_kaiser.master_zone_id;
+          response_doc["kaiser_id"] = g_kaiser.kaiser_id;
+          response_doc["zone_assigned"] = g_kaiser.zone_assigned;
+
+          // Hardware counts
+          response_doc["sensor_count"] = sensorManager.getActiveSensorCount();
+          response_doc["actuator_count"] = actuatorManager.getActiveActuatorCount();
+
+          // Boot info
+          response_doc["boot_count"] = g_system_config.boot_count;
+
+          // Config status
+          response_doc["config_status"] = serialized(configManager.getDiagnosticsJSON());
+
+          response_doc["ts"] = (unsigned long)unix_timestamp;
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+          LOG_INFO("Diagnostics command response sent");
+        }
+        // ============================================
+        // GET_CONFIG COMMAND (BUG-009 FIX)
+        // ============================================
+        else if (command == "get_config") {
+          LOG_INFO("╔════════════════════════════════════════╗");
+          LOG_INFO("║  GET_CONFIG COMMAND RECEIVED          ║");
+          LOG_INFO("╚════════════════════════════════════════╝");
+
+          DynamicJsonDocument response_doc(2048);
+          response_doc["command"] = "get_config";
+          response_doc["success"] = true;
+          response_doc["esp_id"] = g_system_config.esp_id;
+
+          // Zone configuration
+          JsonObject zone = response_doc.createNestedObject("zone");
+          zone["zone_id"] = g_kaiser.zone_id;
+          zone["master_zone_id"] = g_kaiser.master_zone_id;
+          zone["zone_name"] = g_kaiser.zone_name;
+          zone["kaiser_id"] = g_kaiser.kaiser_id;
+          zone["zone_assigned"] = g_kaiser.zone_assigned;
+
+          // Get sensor list
+          JsonArray sensors = response_doc.createNestedArray("sensors");
+          uint8_t sensor_count = sensorManager.getActiveSensorCount();
+          for (uint8_t i = 0; i < sensor_count && i < 20; i++) {
+            // Get sensor info via manager (simplified - just count for now)
+          }
+          response_doc["sensor_count"] = sensor_count;
+
+          // Get actuator list
+          JsonArray actuators = response_doc.createNestedArray("actuators");
+          uint8_t actuator_count = actuatorManager.getActiveActuatorCount();
+          response_doc["actuator_count"] = actuator_count;
+
+          response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+          LOG_INFO("Get_config command response sent");
+        }
+        // ============================================
+        // SAFE_MODE COMMAND (BUG-009 FIX)
+        // ============================================
+        else if (command == "safe_mode") {
+          LOG_WARNING("╔════════════════════════════════════════╗");
+          LOG_WARNING("║  SAFE_MODE COMMAND RECEIVED           ║");
+          LOG_WARNING("╚════════════════════════════════════════╝");
+
+          // Activate emergency stop on all actuators
+          safetyController.emergencyStopAll("Safe mode activated via MQTT command");
+
+          DynamicJsonDocument response_doc(256);
+          response_doc["command"] = "safe_mode";
+          response_doc["success"] = true;
+          response_doc["esp_id"] = g_system_config.esp_id;
+          response_doc["message"] = "Safe mode activated - all actuators stopped";
+          response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+          LOG_WARNING("Safe mode activated via command");
+        }
+        // ============================================
+        // EXIT_SAFE_MODE COMMAND (BUG-009 FIX)
+        // ============================================
+        else if (command == "exit_safe_mode") {
+          LOG_INFO("╔════════════════════════════════════════╗");
+          LOG_INFO("║  EXIT_SAFE_MODE COMMAND RECEIVED      ║");
+          LOG_INFO("╚════════════════════════════════════════╝");
+
+          // Clear emergency stop on all actuators
+          safetyController.clearEmergencyStop();
+
+          DynamicJsonDocument response_doc(256);
+          response_doc["command"] = "exit_safe_mode";
+          response_doc["success"] = true;
+          response_doc["esp_id"] = g_system_config.esp_id;
+          response_doc["message"] = "Safe mode deactivated - actuators can be controlled";
+          response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+          LOG_INFO("Safe mode deactivated via command");
+        }
         // Unknown command
         else {
           LOG_WARNING("Unknown system command: '" + command + "'");
+
+          // Send error response for unknown commands
+          DynamicJsonDocument response_doc(256);
+          response_doc["command"] = command;
+          response_doc["success"] = false;
+          response_doc["esp_id"] = g_system_config.esp_id;
+          response_doc["error"] = "Unknown command";
+          response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
         }
         return;
       }
@@ -1038,7 +1223,13 @@ void setup() {
             ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
 
             String ack_payload;
-            serializeJson(ack_doc, ack_payload);
+            size_t written = serializeJson(ack_doc, ack_payload);
+            if (written == 0 || ack_payload.length() == 0) {
+              LOG_ERROR("JSON serialization failed for Zone ACK");
+              // Fallback: Send minimal ACK with required ts field
+              ack_payload = "{\"esp_id\":\"" + g_system_config.esp_id +
+                           "\",\"status\":\"error\",\"message\":\"serialization_failed\",\"ts\":0}";
+            }
             mqttClient.publish(ack_topic, ack_payload);
 
             LOG_INFO("✅ Zone assignment successful");
@@ -1231,6 +1422,12 @@ void setup() {
           LOG_WARNING("Heartbeat ACK parse error: " + String(error.c_str()));
           return;
         }
+
+        // ============================================
+        // REGISTRATION GATE OPEN (Bug #1 Fix)
+        // ============================================
+        // ANY valid heartbeat ACK = Server hat uns registriert
+        mqttClient.confirmRegistration();
 
         const char* status = doc["status"] | "unknown";
         bool config_available = doc["config_available"] | false;
@@ -1866,6 +2063,11 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
   }
 
   JsonHelpers::extractString(sensor_obj, "subzone_id", config.subzone_id, "");
+
+  // BUG-ONEWIRE-CONFIG-001 FIX: Extract OneWire ROM-Code for OneWire sensors
+  // Server sends 16 hex chars (e.g. "28FF641E8D3C0C79") for DS18B20
+  // Empty string for non-OneWire sensors is valid (analog, I2C, etc.)
+  JsonHelpers::extractString(sensor_obj, "onewire_address", config.onewire_address, "");
 
   bool bool_value = true;
   if (JsonHelpers::extractBool(sensor_obj, "active", bool_value, true)) {

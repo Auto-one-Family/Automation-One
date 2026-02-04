@@ -769,6 +769,50 @@ class SensorRepository(BaseRepository[SensorConfig]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_esp_gpio_type_and_i2c(
+        self,
+        esp_id: uuid.UUID,
+        gpio: int,
+        sensor_type: str,
+        i2c_address: int
+    ) -> Optional[SensorConfig]:
+        """
+        Get sensor by ESP ID, GPIO, sensor_type, AND I2C address (4-way lookup).
+
+        **Use-Case:** Multiple I2C sensors of same type at different addresses.
+        For example: 2x SHT31 sensors at 0x44 and 0x45 on same I2C bus.
+
+        This is the most specific lookup for I2C sensors, ensuring
+        we match the exact device when multiple same-type sensors exist.
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number (I2C bus SDA pin, e.g., 21)
+            sensor_type: Sensor type (e.g., 'sht31_temp', 'sht31_humidity')
+            i2c_address: I2C device address (7-bit, 0-127)
+
+        Returns:
+            SensorConfig if found, None otherwise
+
+        Example:
+            # ESP has 2x SHT31 sensors at 0x44 and 0x45
+            # Lookup specific sensor by I2C address
+            sensor = await repo.get_by_esp_gpio_type_and_i2c(
+                esp_id=uuid,
+                gpio=21,
+                sensor_type='sht31_temp',
+                i2c_address=0x44
+            )
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.gpio == gpio,
+            SensorConfig.sensor_type == sensor_type,
+            SensorConfig.i2c_address == i2c_address
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_all_by_interface(
         self,
         esp_id: uuid.UUID,

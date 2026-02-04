@@ -80,7 +80,13 @@ public:
     
     // Circuit Breaker Access (for Watchdog integration)
     CircuitState getCircuitBreakerState() const;
-    
+
+    // ============================================
+    // REGISTRATION GATE (Bug #1 Fix)
+    // ============================================
+    bool isRegistrationConfirmed() const;
+    void confirmRegistration();
+
 private:
     MQTTClient();
     ~MQTTClient();
@@ -115,7 +121,14 @@ private:
     
     // Circuit Breaker (Phase 6+)
     CircuitBreaker circuit_breaker_;
-    
+
+    // ============================================
+    // REGISTRATION GATE (Bug #1 Fix)
+    // ============================================
+    bool registration_confirmed_;
+    unsigned long registration_start_ms_;
+    static const unsigned long REGISTRATION_TIMEOUT_MS = 10000;
+
     // Helper methods
     bool connectToBroker();
     bool attemptMQTTConnection(const String& last_will_topic, const String& last_will_message);  // ✅ FIX #2: Port fallback helper

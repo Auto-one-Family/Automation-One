@@ -98,7 +98,13 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
   }
   
   if (!preferences_.begin(namespace_name, read_only)) {
-    LOG_ERROR("StorageManager: Failed to open namespace: " + String(namespace_name));
+    // For read-only access, a missing namespace is expected (e.g., new device without subzones)
+    // Only log ERROR for write access failures, use DEBUG for read-only
+    if (read_only) {
+      LOG_DEBUG("StorageManager: Namespace not found (expected for new device): " + String(namespace_name));
+    } else {
+      LOG_ERROR("StorageManager: Failed to open namespace for write: " + String(namespace_name));
+    }
     return false;
   }
   

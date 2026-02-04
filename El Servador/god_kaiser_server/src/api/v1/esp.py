@@ -11,13 +11,15 @@ Provides:
 - POST /devices - Register new ESP
 - PATCH /devices/{esp_id} - Update ESP
 - DELETE /devices/{esp_id} - Delete ESP (for orphaned mocks/decommissioned HW)
-- POST /devices/{esp_id}/config - Update config via MQTT
 - POST /devices/{esp_id}/restart - Restart command
 - POST /devices/{esp_id}/reset - Factory reset
 - GET /devices/{esp_id}/health - Health metrics
 - GET /devices/{esp_id}/gpio-status - GPIO pin availability (Phase 2)
 - POST /devices/{esp_id}/assign_kaiser - Assign to Kaiser
 - GET /discovery - Network discovery results
+
+Note: Config-Push to ESP32 happens AUTOMATICALLY via Sensor/Actuator CRUD APIs.
+See api/v1/sensors.py and api/v1/actuators.py for details.
 
 References:
 - .claude/PI_SERVER_REFACTORING.md (Lines 125-133)
@@ -594,72 +596,20 @@ async def delete_device(
 
 
 # =============================================================================
-# Config Update
+# Config-Push Architektur
 # =============================================================================
-
-
-@router.post(
-    "/devices/{esp_id}/config",
-    response_model=ESPConfigResponse,
-    responses={
-        200: {"description": "Config sent"},
-        404: {"description": "Device not found"},
-    },
-    summary="Update ESP configuration",
-    description="Send configuration update to ESP via MQTT.",
-)
-async def update_device_config(
-    esp_id: str,
-    request: ESPConfigUpdate,
-    db: DBSession,
-    current_user: OperatorUser,
-    publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
-) -> ESPConfigResponse:
-    """
-    Send configuration update to ESP.
-    
-    Args:
-        esp_id: ESP device ID
-        request: Configuration update
-        db: Database session
-        current_user: Operator or admin user
-        publisher: MQTT publisher
-        
-    Returns:
-        Config update response
-    """
-    esp_repo = ESPRepository(db)
-    
-    device = await esp_repo.get_by_device_id(esp_id)
-    if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
-    
-    # Build config payload
-    config_data = request.model_dump(exclude_unset=True)
-    
-    # Publish via MQTT
-    from ...mqtt.topics import TopicBuilder
-    topic = TopicBuilder.build_config_topic(esp_id)
-    
-    success = publisher._publish_with_retry(
-        topic=topic,
-        payload=config_data,
-        qos=2,
-        retry=True,
-    )
-    
-    logger.info(f"Config sent to {esp_id}: {config_data} by {current_user.username}")
-    
-    return ESPConfigResponse(
-        success=success,
-        message="Configuration sent" if success else "Failed to send configuration",
-        device_id=esp_id,
-        config_sent=success,
-        config_acknowledged=False,  # ACK is async
-    )
+#
+# ESP32 Config-Push erfolgt AUTOMATISCH nach Sensor/Actuator CRUD-Operationen.
+# Der Pfad ist:
+#
+#   api/v1/sensors.py oder api/v1/actuators.py
+#       → ConfigPayloadBuilder.build_combined_config()
+#       → esp_service.send_config()
+#       → MQTT Topic: kaiser/{kaiser_id}/esp/{esp_id}/config
+#
+# Ein manueller Config-Push-Endpoint existiert nicht.
+# Für Feld-Mappings siehe: core/config_mapping.py (DEFAULT_SENSOR_MAPPINGS)
+# =============================================================================
 
 
 # =============================================================================

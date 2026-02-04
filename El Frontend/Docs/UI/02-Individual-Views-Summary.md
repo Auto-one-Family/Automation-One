@@ -741,9 +741,7 @@ Backend:
 ### Was der User sieht:
 - Alle Aktoren aus allen ESPs in tabellarischer Übersicht
 - Live-Status via WebSocket (actuator_status Events)
-- Emergency-Stop Status pro Aktor
-
-### User kann einstellen:
+- Emergency-Stop Status pro Aktor### User kann einstellen:
 ✅ **VOLLSTÄNDIG:**
 - Aktor ein-/ausschalten (ON/OFF Toggle)
 - Emergency-Stop Status sehen

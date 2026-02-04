@@ -19,8 +19,15 @@ nul
 *.swo
 *.swn
 *.log
-logs/
 npm-debug.log*
+
+# ========== DEBUG LOGS ==========
+# Log-Inhalte ignorieren, aber Struktur behalten
+logs/current/*
+!logs/current/.gitkeep
+logs/archive/*
+!logs/archive/.gitkeep
+!logs/README.md
 yarn-debug.log*
 *.tmp
 *.temp

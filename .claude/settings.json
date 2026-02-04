@@ -5,13 +5,14 @@
   },
   "context": {
     "alwaysInclude": [
-      "CLAUDE.md",
-      ".claude/CLAUDE_SERVER.md",
-      ".claude/README.md",
-      ".claude/commands/README.md",
-      "El Trabajante/platformio.ini"
+      ".claude/claude.md",
+      ".claude/rules/rules.md"
     ],
     "maxTokens": 200000
+  },
+  "skills": {
+    "directory": ".claude/skills",
+    "autoLoad": true
   },
   "taskManagement": {
     "enabled": true,
@@ -19,46 +20,60 @@
   },
   "testing": {
     "esp32": {
-      "framework": "pytest",
-      "location": "El Servador/god_kaiser_server/tests/esp32/",
-      "command": "cd \"El Servador\" && poetry run pytest god_kaiser_server/tests/esp32/ -v"
+      "framework": "platformio",
+      "location": "El Trabajante/tests/",
+      "command": "cd \"El Trabajante\" && pio test"
     },
     "server": {
       "framework": "pytest",
       "location": "El Servador/god_kaiser_server/tests/",
-      "command": "cd \"El Servador\" && poetry run pytest -v --tb=short"
+      "command": "cd \"El Servador/god_kaiser_server\" && poetry run pytest -v --tb=short --no-cov"
     },
-    "legacy": {
-      "framework": "platformio",
-      "defaultEnvironment": "esp32_dev",
-      "outputFile": "test_output.log",
-      "parseFormat": "unity",
-      "status": "archived"
+    "wokwi": {
+      "framework": "wokwi-cli",
+      "location": "El Trabajante/tests/wokwi/",
+      "command": "cd \"El Trabajante\" && wokwi-cli . --timeout 90000 --serial-log-file wokwi.log"
     }
   },
   "build": {
     "esp32": {
-      "environments": ["seeed_xiao_esp32c3", "esp32_dev"],
+      "environments": ["seeed_xiao_esp32c3", "esp32_dev", "wokwi_simulation"],
       "defaultEnvironment": "esp32_dev",
-      "command": "cd \"El Trabajante\" && ~/.platformio/penv/Scripts/platformio.exe run -e"
+      "command": "cd \"El Trabajante\" && pio run -e"
+    },
+    "server": {
+      "command": "cd \"El Servador/god_kaiser_server\" && poetry install"
+    },
+    "frontend": {
+      "command": "cd \"El Frontend\" && npm install && npm run build"
+    }
+  },
+  "run": {
+    "server": {
+      "command": "cd \"El Servador/god_kaiser_server\" && poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000"
+    },
+    "frontend": {
+      "command": "cd \"El Frontend\" && npm run dev"
     }
   },
   "git": {
     "autoCommit": false,
-    "commitMessageTemplate": "<type>: <subject>\n\n<body>",
-    "requireTests": true
+    "commitMessageTemplate": "<type>(<scope>): <subject>\n\n<body>",
+    "requireTests": false,
+    "conventionalCommits": true
   },
-  "workflows": {
-    "preCommit": [
-      "/full-test"
-    ],
-    "afterESP32Change": [
-      "/esp-build",
-      "/esp-test"
-    ],
-    "afterServerChange": [
-      "/server-test",
-      "/esp-test"
-    ]
+  "paths": {
+    "esp32": "El Trabajante",
+    "server": "El Servador/god_kaiser_server",
+    "frontend": "El Frontend",
+    "docs": {
+      "esp32": "El Trabajante/docs",
+      "server": "El Servador/docs",
+      "frontend": "El Frontend/Docs",
+      "mqtt": "El Trabajante/docs/Mqtt_Protocoll.md",
+      "skills": ".claude/skills",
+      "reference": ".claude/reference",
+      "rules": ".claude/rules"
+    }
   }
 }

@@ -660,6 +660,17 @@ async def root():
     }
 
 
+# Health endpoint (standard path for E2E tests and monitoring)
+@app.get("/health", tags=["health"])
+async def health():
+    """Simple health check endpoint for monitoring and E2E tests."""
+    mqtt_client = MQTTClient.get_instance()
+    return {
+        "status": "healthy" if mqtt_client.is_connected() else "degraded",
+        "mqtt_connected": mqtt_client.is_connected(),
+    }
+
+
 # ===== API v1 ROUTERS =====
 
 # Include all v1 API endpoints
@@ -696,3 +707,4 @@ if __name__ == "__main__":
         reload=settings.environment == "development",
         log_level=settings.log_level.lower(),
     )
+# Reload trigger Fr, 30. Jan 2026 04:31:31

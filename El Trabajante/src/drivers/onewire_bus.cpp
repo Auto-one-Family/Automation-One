@@ -73,7 +73,10 @@ bool OneWireBusManager::begin(uint8_t pin) {
     // ============================================
     // GPIO SAFETY VALIDATION
     // ============================================
-    if (!gpioManager.requestPin(pin_, "sensor", "OneWireBus")) {
+    // Use bus-sharing owner format: "bus/onewire/{pin}"
+    // This allows SensorManager to recognize the pin as a shared OneWire bus
+    String bus_owner = "bus/onewire/" + String(pin_);
+    if (!gpioManager.requestPin(pin_, bus_owner.c_str(), "OneWireBus")) {
         LOG_ERROR("Failed to reserve OneWire pin " + String(pin_));
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,

@@ -43,7 +43,7 @@ MQTTClient& MQTTClient::getInstance() {
 // ============================================
 // CONSTRUCTOR / DESTRUCTOR
 // ============================================
-MQTTClient::MQTTClient() 
+MQTTClient::MQTTClient()
     : mqtt_(wifi_client_),
       offline_buffer_count_(0),
       last_reconnect_attempt_(0),
@@ -52,7 +52,9 @@ MQTTClient::MQTTClient()
       initialized_(false),
       anonymous_mode_(true),
       last_heartbeat_(0),
-      circuit_breaker_("MQTT", 5, 30000, 10000) {
+      circuit_breaker_("MQTT", 5, 30000, 10000),
+      registration_confirmed_(false),
+      registration_start_ms_(0) {
   // Circuit Breaker configured:
   // - 5 failures → OPEN
   // - 30s recovery timeout
@@ -242,6 +244,13 @@ bool MQTTClient::connectToBroker() {
 
         // Reset Circuit Breaker on successful connection (Phase 6+)
         circuit_breaker_.recordSuccess();
+
+        // ============================================
+        // REGISTRATION GATE RESET (Bug #1 Fix)
+        // ============================================
+        registration_confirmed_ = false;
+        registration_start_ms_ = millis();
+        LOG_INFO("Registration gate closed - awaiting heartbeat ACK");
 
         // Process offline buffer
         processOfflineBuffer();
@@ -484,6 +493,35 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     }
 
     // ============================================
+    // REGISTRATION GATE CHECK (Bug #1 Fix)
+    // ============================================
+    // Heartbeat Topics sind IMMER erlaubt (für initiale Registration)
+    bool is_heartbeat = topic.indexOf("/system/heartbeat") != -1 &&
+                        topic.indexOf("/heartbeat/ack") == -1;
+
+    if (!registration_confirmed_ && !is_heartbeat) {
+        // Check timeout: Nach 10s Gate automatisch öffnen (Fallback)
+        if (registration_start_ms_ > 0 &&
+            (millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
+            LOG_WARNING("Registration timeout - opening gate (fallback)");
+            registration_confirmed_ = true;
+        } else {
+            LOG_DEBUG("Publish blocked (awaiting registration): " + topic);
+            return false;
+        }
+    }
+
+    // ============================================
+    // EMPTY PAYLOAD GUARD (Bug #2 Fix)
+    // ============================================
+    if (payload.length() == 0) {
+        LOG_ERROR("Empty payload blocked for topic: " + topic);
+        errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID,
+                                           ("Empty payload for: " + topic).c_str());
+        return false;
+    }
+
+    // ============================================
     // CONNECTION CHECK
     // ============================================
     if (!isConnected()) {
@@ -683,6 +721,23 @@ void MQTTClient::publishHeartbeat(bool force) {
 }
 
 // ============================================
+// REGISTRATION GATE (Bug #1 Fix)
+// ============================================
+bool MQTTClient::isRegistrationConfirmed() const {
+    return registration_confirmed_;
+}
+
+void MQTTClient::confirmRegistration() {
+    if (!registration_confirmed_) {
+        registration_confirmed_ = true;
+        LOG_INFO("╔════════════════════════════════════════╗");
+        LOG_INFO("║  REGISTRATION CONFIRMED BY SERVER     ║");
+        LOG_INFO("╚════════════════════════════════════════╝");
+        LOG_INFO("Gate opened - publishes now allowed");
+    }
+}
+
+// ============================================
 // MONITORING
 // ============================================
 void MQTTClient::loop() {
@@ -707,14 +762,21 @@ void MQTTClient::loop() {
 
 void MQTTClient::handleDisconnection() {
     static bool disconnection_logged = false;
-    
+
+    // ============================================
+    // REGISTRATION GATE RESET (Bug #1 Fix)
+    // ============================================
+    registration_confirmed_ = false;
+    registration_start_ms_ = 0;
+    LOG_DEBUG("Registration gate closed due to disconnect");
+
     if (!disconnection_logged) {
         LOG_WARNING("MQTT disconnected");
-        errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT, 
+        errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT,
                                            "MQTT connection lost");
         disconnection_logged = true;
     }
-    
+
     reconnect();
     
     if (isConnected()) {
@@ -792,6 +854,12 @@ void MQTTClient::processOfflineBuffer() {
 }
 
 bool MQTTClient::addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos) {
+    // Bug #2 Fix: Don't buffer empty payloads
+    if (payload.length() == 0) {
+        LOG_WARNING("Empty payload rejected from offline buffer: " + topic);
+        return false;
+    }
+
     if (offline_buffer_count_ >= MAX_OFFLINE_MESSAGES) {
         LOG_ERROR("Offline buffer full, dropping message");
         errorTracker.logCommunicationError(ERROR_MQTT_BUFFER_FULL, 

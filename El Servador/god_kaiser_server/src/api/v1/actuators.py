@@ -2,6 +2,7 @@
 Actuator Management API Endpoints
 
 Phase: 5 (Week 9-10) - API Layer
+Updated: 2026-01-30 - Fixed ActuatorState attribute access (current_value, last_command_timestamp)
 Priority: 🔴 CRITICAL
 Status: IMPLEMENTED
 
@@ -102,9 +103,9 @@ def _model_to_schema_response(
         servo_min_pulse=servo_min_pulse,
         servo_max_pulse=servo_max_pulse,
         metadata=user_metadata or None,
-        current_value=state.value if state else None,
-        is_active=state.is_active if state else False,
-        last_command_at=state.last_command_at if state else None,
+        current_value=state.current_value if state else None,
+        is_active=(state.state == "active") if state else False,
+        last_command_at=state.last_command_timestamp if state else None,
         created_at=actuator.created_at,
         updated_at=actuator.updated_at,
     )
@@ -431,27 +432,45 @@ async def send_command(
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
+        # BUG-006 Fix: Detailed error message with hint
+        logger.warning(f"Actuator command failed: ESP '{esp_id}' not found in database")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
+            detail={
+                "error": "ESP_NOT_FOUND",
+                "message": f"ESP device '{esp_id}' not found",
+                "hint": "ESP must send heartbeat to register. Check if ESP is online and connected to MQTT.",
+            },
         )
-    
+
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
+        # BUG-006 Fix: Detailed error message with hint
+        logger.warning(
+            f"Actuator command failed: No actuator on GPIO {gpio} for ESP '{esp_id}'"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
+            detail={
+                "error": "ACTUATOR_NOT_FOUND",
+                "message": f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
+                "hint": f"Create actuator first via PUT /api/v1/actuators/{esp_id}/{gpio}",
+            },
         )
-    
+
     if not actuator.enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Actuator is disabled",
+            detail={
+                "error": "ACTUATOR_DISABLED",
+                "message": "Actuator is disabled",
+                "hint": "Enable actuator via PUT request with enabled=true",
+            },
         )
-    
+
     # Send command via service (includes safety validation)
     success = await actuator_service.send_command(
         esp_id=esp_id,
@@ -541,14 +560,15 @@ async def get_status(
     state = await actuator_repo.get_state(esp_device.id, gpio)
     
     # Build state response
+    # NOTE: ActuatorState model uses: current_value, state (str), last_command_timestamp
     state_response = ActuatorState(
         gpio=gpio,
         mode=actuator.actuator_type,
-        value=state.value if state else 0.0,
-        is_active=state.is_active if state else False,
+        value=state.current_value if state else 0.0,
+        is_active=(state.state == "active") if state else False,
         last_command=state.last_command if state else None,
-        last_command_at=state.last_command_at if state else None,
-        runtime_seconds=None,  # Would calculate from last_command_at
+        last_command_at=state.last_command_timestamp if state else None,
+        runtime_seconds=None,  # Would calculate from last_command_timestamp
     )
     
     # Optionally include config

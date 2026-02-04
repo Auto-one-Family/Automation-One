@@ -262,10 +262,7 @@ class ZoneAckHandler:
             if message:
                 event_data["message"] = message
 
-            await ws_manager.broadcast(
-                event_type="zone_assignment",
-                data=event_data,
-            )
+            await ws_manager.broadcast("zone_assignment", event_data)
 
             logger.debug(f"Broadcasted zone_assignment event for {esp_id}")
 

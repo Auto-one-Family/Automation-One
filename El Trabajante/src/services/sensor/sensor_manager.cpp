@@ -4,6 +4,7 @@
 #include "../config/config_manager.h"
 #include "../../drivers/gpio_manager.h"
 #include "../../drivers/i2c_bus.h"
+#include "../../drivers/i2c_sensor_protocol.h"
 #include "../../drivers/onewire_bus.h"
 #include "../../utils/topic_builder.h"
 #include "../../utils/logger.h"
@@ -193,6 +194,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 // Add as new sensor (multi-value support)
                 sensors_[sensor_count_] = config;
                 sensors_[sensor_count_].active = true;
+                sensors_[sensor_count_].i2c_address = capability->i2c_address;  // Store I2C address
                 sensor_count_++;
 
                 if (!configManager.saveSensorConfig(config)) {
@@ -288,6 +290,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         // Add I2C sensor (NO GPIO reservation!)
         sensors_[sensor_count_] = config;
         sensors_[sensor_count_].active = true;
+        sensors_[sensor_count_].i2c_address = i2c_address;  // Store I2C address for MQTT payload
         sensor_count_++;
 
         if (!configManager.saveSensorConfig(config)) {
@@ -358,29 +361,24 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         }
         
         // 3. GPIO-Sharing Check (3 cases for shared OneWire bus)
+        // Owner convention: "bus/onewire/{gpio}" for shared bus pins
         String owner = gpio_manager_->getPinOwner(config.gpio);
-        String expected_owner = "onewire_bus/" + String(config.gpio);
-        
+
         if (owner.length() == 0) {
-            // CASE 1: Pin free → Reserve with shared owner name
-            if (!gpio_manager_->requestPin(config.gpio, "sensor", expected_owner.c_str())) {
-                LOG_ERROR("SensorManager: Failed to reserve GPIO " + String(config.gpio) + 
-                         " for OneWire bus");
-                errorTracker.trackError(ERROR_GPIO_RESERVED, ERROR_SEVERITY_ERROR,
-                                       "Failed to reserve GPIO for OneWire");
-                return false;
-            }
-            LOG_INFO("SensorManager: Reserved GPIO " + String(config.gpio) + 
-                    " for OneWire bus (owner: " + expected_owner + ")");
-        } else if (owner == expected_owner) {
-            // CASE 2: Pin already reserved for OneWire → Sharing OK
-            LOG_INFO("SensorManager: Sharing OneWire bus on GPIO " + String(config.gpio) + 
-                    " (existing owner: " + owner + ")");
+            // CASE A: Pin free → Bus will be initialized below (which reserves the pin)
+            // No explicit reservation here - OneWireBusManager::begin() handles it
+            LOG_DEBUG("SensorManager: GPIO " + String(config.gpio) +
+                     " is free, OneWire bus will reserve it");
+        } else if (owner.startsWith("bus/onewire/")) {
+            // CASE B: OneWire bus already exists → Sharing allowed
+            // No new requestPin() needed - bus already owns the GPIO
+            LOG_INFO("SensorManager: Using existing OneWire bus on GPIO " + String(config.gpio) +
+                    " (owner: " + owner + ")");
         } else {
-            // CASE 3: Pin used by other device → ERROR
-            LOG_ERROR("SensorManager: GPIO " + String(config.gpio) + 
-                     " already in use by: " + owner + " (expected: free or " + 
-                     expected_owner + ")");
+            // CASE C: Pin used by something else → Conflict
+            LOG_ERROR("SensorManager: GPIO " + String(config.gpio) +
+                     " already in use by: " + owner +
+                     " (expected: free or bus/onewire/" + String(config.gpio) + ")");
             errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
                                    "GPIO conflict for OneWire sensor");
             return false;
@@ -857,6 +855,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     reading_out.timestamp = millis();
     reading_out.valid = processed.valid;
     reading_out.error_message = processed.error_message;
+    reading_out.i2c_address = config->i2c_address;  // Copy I2C address for MQTT payload
     
     // Update config
     config->last_raw_value = raw_value;
@@ -902,15 +901,26 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
         LOG_ERROR("Sensor Manager: Multi-value sensor must be I2C");
         return 0;
     }
-    
-    uint8_t buffer[6] = {0};
+
+    // ============================================
+    // UNIFIED I2C MULTI-VALUE SENSOR READING
+    // ============================================
+    // Uses protocol-aware readSensorRaw() for all I2C sensors
+    // Protocol selection is automatic based on device_type
+    // One I2C read for ALL values (no duplicate transactions)
+    uint8_t buffer[16] = {0};  // Buffer for multi-value sensors (up to 8 bytes for BME280)
     uint8_t device_addr = capability->i2c_address;
-    
-    // Read sensor data (6 bytes for SHT31: temp MSB, temp LSB, CRC, hum MSB, hum LSB, CRC)
-    if (!readRawI2C(gpio, device_addr, 0x00, buffer, 6)) {
-        LOG_ERROR("Sensor Manager: I2C read failed for multi-value sensor");
+    size_t bytes_read = 0;
+
+    if (!i2c_bus_->readSensorRaw(device_type, device_addr, buffer, sizeof(buffer), bytes_read)) {
+        LOG_ERROR("Sensor Manager: I2C read failed for " + device_type);
         return 0;
     }
+
+    LOG_DEBUG("Sensor Manager: " + device_type + " raw data (" + String(bytes_read) + " bytes): " +
+              String(buffer[0], HEX) + " " + String(buffer[1], HEX) + " " +
+              String(buffer[2], HEX) + " " + String(buffer[3], HEX) + " " +
+              String(buffer[4], HEX) + " " + String(buffer[5], HEX));
     
     // Create readings for each value type
     uint8_t created_count = 0;
@@ -918,24 +928,11 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     for (uint8_t i = 0; i < value_count; i++) {
         SensorReading& reading = readings_out[created_count];
         
-        // Extract raw value based on value type
-        uint32_t raw_value = 0;
+        // Extract raw value using protocol definition
+        // This uses the I2CSensorProtocol registry to correctly parse
+        // multi-value sensor responses based on byte offsets and endianness
         String value_type = value_types[i];
-        
-        if (device_type == "sht31") {
-            if (value_type == "sht31_temp") {
-                // Temperature: bytes 0-1
-                raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
-            } else if (value_type == "sht31_humidity") {
-                // Humidity: bytes 3-4
-                raw_value = (uint32_t)(buffer[3] << 8 | buffer[4]);
-            }
-        } else if (device_type == "bmp280") {
-            // BMP280: Both values come from same register read
-            // For now, use first 2 bytes (pressure)
-            // TODO: Implement proper BMP280 register reading
-            raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
-        }
+        uint32_t raw_value = extractRawValue(device_type, value_type, buffer, bytes_read);
         
         // Normalize sensor type
         String server_sensor_type = getServerSensorType(value_type);
@@ -962,6 +959,7 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
         reading.timestamp = millis();
         reading.valid = processed.valid;
         reading.error_message = processed.error_message;
+        reading.i2c_address = config->i2c_address;  // Copy I2C address for MQTT payload
         
         if (success && processed.valid) {
             created_count++;
@@ -1302,7 +1300,13 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
         payload += reading.onewire_address;
         payload += "\"";
     }
-    
+
+    // I2C Address (for device identification when multiple I2C sensors)
+    if (reading.i2c_address != 0) {
+        payload += ",\"i2c_address\":";
+        payload += String(reading.i2c_address);
+    }
+
     // Quality hint (if set by sanity checks)
     if (!reading.quality.isEmpty()) {
         payload += ",\"quality\":\"";

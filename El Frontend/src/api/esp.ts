@@ -592,35 +592,22 @@ export const espApi = {
     }
   },
 
-  /**
-   * Update ESP configuration via MQTT
-   *
-   * Note: Mock ESPs don't support MQTT config updates. Use the debug API
-   * for Mock ESP state changes.
-   */
-  async updateConfig(
-    espId: string,
-    config: Record<string, unknown>
-  ): Promise<ESPConfigResponse> {
-    const normalizedId = normalizeEspId(espId)
-
-    if (isMockEsp(normalizedId)) {
-      // Mock ESPs don't support config updates via MQTT
-      console.info(`[ESP API] Config updates via MQTT not available for Mock ESP ${normalizedId}`)
-      return {
-        success: false, // Changed to false - config wasn't actually sent
-        device_id: normalizedId,
-        config_sent: false,
-        config_acknowledged: false,
-      }
-    } else {
-      const response = await api.post<ESPConfigResponse>(
-        `/esp/devices/${normalizedId}/config`,
-        config
-      )
-      return response.data
-    }
-  },
+  // ===========================================================================
+  // ESP32 Config-Push Architektur
+  // ===========================================================================
+  //
+  // Config-Push zu ESP32-Geräten erfolgt AUTOMATISCH durch das Backend nach
+  // Sensor/Actuator CRUD-Operationen. Das Frontend muss keinen separaten
+  // Config-Push triggern.
+  //
+  // Ablauf:
+  //   1. Frontend ruft sensorsApi.create() oder actuatorsApi.create() auf
+  //   2. Backend speichert in DB und triggert automatisch Config-Push
+  //   3. ESP32 erhält Config via MQTT
+  //
+  // Für manuelle Konfiguration einzelner Sensoren/Aktoren die entsprechenden
+  // CRUD-Methoden in sensorsApi und actuatorsApi verwenden.
+  // ===========================================================================
 
   /**
    * Get GPIO status for an ESP device.

@@ -706,13 +706,33 @@ class ESPHealthSummaryResponse(BaseResponse):
 # =============================================================================
 
 
+# =============================================================================
+# ESP32 Config-Push Architektur
+# =============================================================================
+#
+# Config-Payloads für ESP32-Geräte werden über folgenden Pfad generiert:
+#
+#   1. Sensor/Actuator CRUD-Operation (api/v1/sensors.py, api/v1/actuators.py)
+#   2. ConfigPayloadBuilder.build_combined_config() (services/config_builder.py)
+#   3. ConfigMappingEngine mit DEFAULT_SENSOR_MAPPINGS (core/config_mapping.py)
+#   4. esp_service.send_config() → MQTT Publisher
+#
+# Feld-Mappings für den ESP32-Payload werden in core/config_mapping.py definiert.
+#
+# HINWEIS: Ein manueller Config-Push-Endpoint existiert NICHT.
+# Configs werden automatisch nach Sensor/Actuator CRUD-Operationen gesendet.
+# =============================================================================
+
+
 class ESPConfigUpdate(BaseModel):
     """
-    ESP configuration update request.
-    
-    Sent to ESP via MQTT.
+    ESP system configuration update request (WiFi, MQTT, intervals).
+
+    Note: This schema is for SYSTEM-LEVEL settings only (WiFi, MQTT broker, intervals).
+    Sensor/Actuator configuration is handled automatically via the CRUD APIs
+    (see api/v1/sensors.py and api/v1/actuators.py).
     """
-    
+
     wifi_ssid: Optional[str] = Field(
         None,
         max_length=32,
@@ -750,7 +770,7 @@ class ESPConfigUpdate(BaseModel):
         pattern=r"^(DEBUG|INFO|WARNING|ERROR)$",
         description="Log level",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {

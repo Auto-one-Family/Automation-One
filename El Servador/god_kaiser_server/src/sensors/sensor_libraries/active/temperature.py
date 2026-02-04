@@ -151,12 +151,26 @@ class DS18B20Processor(BaseSensorProcessor):
                 )
 
             # Check for power-on reset: +85°C (RAW = 1360)
-            # Note: This check is a backup - ESP should handle first-reading detection
-            # If we see 85°C here, it likely passed ESP's retry, so could be real
+            # Note: This value indicates sensor may not have completed first conversion.
+            # While 85°C could be a real temperature (fire!), we mark it as "suspect"
+            # to alert operators that this is a known power-on reset default value.
+            # The data is still processed but flagged for review.
             if raw_int == self.RAW_POWER_ON_RESET:
-                # Log warning but DON'T reject - could be real temperature (fire!)
-                # ESP handles first-reading; if it gets here, ESP already validated
-                pass  # Accept, but add warning in metadata below
+                # Convert to Celsius and return with suspect quality
+                converted_value = float(raw_int) * self.RESOLUTION  # 85.0°C
+                return ProcessingResult(
+                    value=converted_value,
+                    unit="°C",
+                    quality="suspect",
+                    metadata={
+                        "warning": "DS18B20 power-on reset value (85°C) detected. "
+                                   "This may indicate sensor not yet initialized or actual high temperature.",
+                        "warning_code": 1061,  # ERROR_DS18B20_POWER_ON_RESET
+                        "raw_mode": raw_mode,
+                        "original_raw_value": original_raw_value,
+                        "requires_verification": True,
+                    },
+                )
 
             # DS18B20 12-bit resolution: 1 LSB = 0.0625°C
             # RAW value is signed 16-bit: -55°C = -880, +125°C = +2000
@@ -380,12 +394,14 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
     SHT31 I2C Temperature Sensor Processor.
 
     The SHT31 is a digital temperature and humidity sensor using I2C communication.
-    ESP32-side processing (Adafruit_SHT31 library) already converts raw sensor
-    data to Celsius, so this processor focuses on:
-    - Validation of temperature range
-    - Optional calibration offset
-    - Unit conversion (°C, °F)
-    - Quality assessment
+
+    Supports TWO modes:
+    1. RAW Mode (Pi-Enhanced): ESP sends 16-bit unsigned integer, server converts
+       - raw_value = 27445 → -45 + (175 * 27445 / 65535) = 23.5°C
+       - Set params["raw_mode"] = True
+    2. Pre-Converted Mode: ESP sends temperature in °C (legacy)
+       - raw_value = 23.5 → 23.5°C (direct)
+       - Set params["raw_mode"] = False (default for backward compatibility)
 
     Sensor Specifications:
     - Temperature Range: -40°C to +125°C
@@ -394,11 +410,15 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
     - Accuracy: ±0.2°C (0°C to +65°C)
     - Humidity Sensor: Same chip (see SHT31HumidityProcessor)
 
+    RAW Value Conversion (Sensirion Datasheet):
+    - Formula: temp_celsius = -45 + (175 * raw_value / 65535.0)
+    - RAW Range: 0 - 65535 (16-bit unsigned)
+    - Example: raw=27445 → -45 + (175 * 27445 / 65535) = 23.5°C
+
     ESP32 Setup:
-    - Library: Adafruit_SHT31
     - I2C: GPIO21 (SDA), GPIO22 (SCL)
     - Address: 0x44 (default) or 0x45 (if ADR pin connected to VIN)
-    - Multiple sensors: Use different I2C addresses
+    - Command: 0x24, 0x00 (Single Shot, High Repeatability)
     """
 
     # =========================================================================
@@ -417,6 +437,11 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
     TEMP_TYPICAL_MAX = 65.0  # °C (typical accuracy range)
     RESOLUTION = 0.01  # °C (typical)
 
+    # RAW Mode Conversion (Pi-Enhanced)
+    RAW_CONVERSION_OFFSET = -45.0
+    RAW_CONVERSION_SCALE = 175.0
+    RAW_MAX_VALUE = 65535.0
+
     def get_sensor_type(self) -> str:
         """Return sensor type identifier."""
         return "sht31_temp"
@@ -430,11 +455,22 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
         """
         Process SHT31 temperature reading.
 
+        Supports TWO modes:
+        1. RAW Mode (Pi-Enhanced): ESP sends 16-bit unsigned integer, server converts
+           - raw_value = 27445 → -45 + (175 * 27445 / 65535) = 23.5°C
+           - Set params["raw_mode"] = True
+        2. Pre-Converted Mode: ESP sends temperature in °C
+           - raw_value = 23.5 → 23.5°C (direct)
+           - Set params["raw_mode"] = False (default for backward compatibility)
+
         Args:
-            raw_value: Temperature in °C (from Adafruit_SHT31 library)
+            raw_value: Temperature value
+                - If raw_mode=True: 16-bit unsigned integer (0-65535)
+                - If raw_mode=False: Temperature in °C (pre-converted)
             calibration: Optional calibration data
                 - "offset": float - Temperature offset correction (°C)
             params: Optional processing parameters
+                - "raw_mode": bool - Whether value is RAW 16-bit (default: False)
                 - "unit": str - Output unit ("celsius" or "fahrenheit")
                 - "decimal_places": int - Decimal places for rounding (default: 1)
 
@@ -442,32 +478,58 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
             ProcessingResult with temperature value, unit, quality assessment
 
         Example:
-            # Basic usage
+            # RAW Mode (Pi-Enhanced) - ESP sends 16-bit integer
+            result = processor.process(
+                raw_value=27445,  # 16-bit RAW
+                params={"raw_mode": True}
+            )
+            # result.value = 23.5 (converted), result.unit = "°C"
+
+            # Pre-Converted Mode (backward compatible)
             result = processor.process(raw_value=23.5)
             # result.value = 23.5, result.unit = "°C", result.quality = "good"
-
-            # With calibration offset
-            result = processor.process(
-                raw_value=23.5,
-                calibration={"offset": -0.3}
-            )
-            # result.value = 23.2
-
-            # Fahrenheit conversion
-            result = processor.process(
-                raw_value=20.0,
-                params={"unit": "fahrenheit"}
-            )
-            # result.value = 68.0, result.unit = "°F"
         """
-        # Step 1: Validate raw value
+        # Step 0: Check for RAW mode (Pi-Enhanced)
+        raw_mode = params.get("raw_mode", False) if params else False
+        original_raw_value = raw_value  # Keep original for metadata
+
+        if raw_mode:
+            # ==================================================================
+            # RAW MODE CONVERSION (Sensirion Datasheet)
+            # Formula: temp_celsius = -45 + (175 * raw_value / 65535.0)
+            # ==================================================================
+            raw_int = int(raw_value)
+
+            # Validate RAW value range (0-65535)
+            if raw_int < 0 or raw_int > 65535:
+                return ProcessingResult(
+                    value=0.0,
+                    unit="°C",
+                    quality="error",
+                    metadata={
+                        "error": f"SHT31 RAW value {raw_int} out of range (0-65535)",
+                        "raw_mode": raw_mode,
+                        "original_raw_value": original_raw_value,
+                    },
+                )
+
+            # Convert RAW to Celsius
+            raw_value = self.RAW_CONVERSION_OFFSET + (
+                self.RAW_CONVERSION_SCALE * float(raw_int) / self.RAW_MAX_VALUE
+            )
+
+        # Step 1: Validate converted value (now in Celsius)
         validation = self.validate(raw_value)
         if not validation.valid:
             return ProcessingResult(
                 value=0.0,
                 unit="°C",
                 quality="error",
-                metadata={"error": validation.error},
+                metadata={
+                    "error": validation.error,
+                    "raw_mode": raw_mode,
+                    "original_raw_value": original_raw_value if raw_mode else None,
+                },
             )
 
         # Step 2: Apply calibration offset (if provided)
@@ -507,6 +569,14 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
                 "raw_celsius": raw_value,
                 "calibrated": calibrated,
                 "warnings": validation.warnings,
+                # RAW mode metadata (Pi-Enhanced)
+                "raw_mode": raw_mode,
+                "original_raw_value": original_raw_value if raw_mode else None,
+                "conversion_formula": (
+                    f"-45 + (175 * {int(original_raw_value)} / 65535)"
+                    if raw_mode
+                    else None
+                ),
             },
         )
 

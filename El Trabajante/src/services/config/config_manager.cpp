@@ -23,7 +23,9 @@ ConfigManager& ConfigManager::getInstance() {
 ConfigManager::ConfigManager()
   : wifi_config_loaded_(false),
     zone_config_loaded_(false),
-    system_config_loaded_(false) {
+    system_config_loaded_(false),
+    subzone_count_cache_(0),
+    subzone_count_initialized_(false) {
 }
 
 // ============================================
@@ -684,6 +686,9 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   storageManager.endNamespace();
 
   if (success) {
+    // BUG-005 FIX: Update cache after saving subzone
+    subzone_count_cache_ = count;
+    subzone_count_initialized_ = true;
     LOG_INFO("ConfigManager: Subzone config saved successfully (index " + String(index) + ")");
   } else {
     LOG_ERROR("ConfigManager: Failed to save subzone config");
@@ -966,6 +971,10 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
   }
 
   storageManager.endNamespace();
+
+  // BUG-005 FIX: Invalidate cache after removing subzone (force re-read on next access)
+  subzone_count_initialized_ = false;
+
   LOG_INFO("ConfigManager: Subzone " + subzone_id + " removed");
   return true;
 }
@@ -1003,18 +1012,33 @@ bool ConfigManager::validateSubzoneConfig(const SubzoneConfig& config) const {
 
 uint8_t ConfigManager::getSubzoneCount() const {
   // ============================================
-  // PHASE 1E-C: Use cached count or index map
+  // BUG-005 FIX: Use cached count to avoid NVS access every heartbeat
   // ============================================
+  // The ESP32 Preferences library logs an ERROR when opening a non-existent
+  // namespace in read-only mode (expected for new devices without subzones).
+  // By caching the count, we only access NVS once instead of every 60 seconds.
 
+  // Return cached value if already initialized
+  if (subzone_count_initialized_) {
+    return subzone_count_cache_;
+  }
+
+  // First-time access: Query NVS and cache the result
+  // Note: If namespace doesn't exist, beginNamespace returns false (expected for new devices)
   if (!storageManager.beginNamespace("subzone_config", true)) {
+    // Namespace doesn't exist = 0 subzones (expected for new device)
+    subzone_count_cache_ = 0;
+    subzone_count_initialized_ = true;
     return 0;
   }
 
-  // Try new indexed pattern first (uses cached count)
+  // Try new indexed pattern first (uses NVS cached count)
   uint8_t count = storageManager.getUInt8(NVS_SZ_COUNT, 0);
 
   if (count > 0) {
     storageManager.endNamespace();
+    subzone_count_cache_ = count;
+    subzone_count_initialized_ = true;
     return count;
   }
 
@@ -1026,6 +1050,8 @@ uint8_t ConfigManager::getSubzoneCount() const {
       if (index_map[i] == ',') count++;
     }
     storageManager.endNamespace();
+    subzone_count_cache_ = count;
+    subzone_count_initialized_ = true;
     return count;
   }
 
@@ -1034,6 +1060,8 @@ uint8_t ConfigManager::getSubzoneCount() const {
   storageManager.endNamespace();
 
   if (subzone_ids_str.length() == 0) {
+    subzone_count_cache_ = 0;
+    subzone_count_initialized_ = true;
     return 0;
   }
 
@@ -1044,6 +1072,8 @@ uint8_t ConfigManager::getSubzoneCount() const {
     }
   }
 
+  subzone_count_cache_ = count;
+  subzone_count_initialized_ = true;
   return count;
 }
 
