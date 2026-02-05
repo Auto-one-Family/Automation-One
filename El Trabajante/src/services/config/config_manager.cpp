@@ -5,6 +5,7 @@
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
+#include "../../models/sensor_registry.h"  // For I2C sensor detection
 #include <WiFi.h>
 
 // ============================================
@@ -1981,15 +1982,26 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
 }
 
 bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
-  // GPIO must be valid (not 255)
-  if (config.gpio == 255) {
-    LOG_WARNING("ConfigManager: Invalid GPIO (255)");
+  // Sensor type must not be empty (check first - needed for I2C lookup)
+  if (config.sensor_type.length() == 0) {
+    LOG_WARNING("ConfigManager: Sensor type is empty");
     return false;
   }
 
-  // Sensor type must not be empty
-  if (config.sensor_type.length() == 0) {
-    LOG_WARNING("ConfigManager: Sensor type is empty");
+  // Check if it's an I2C sensor using SensorCapability Registry
+  const SensorCapability* capability = findSensorCapability(config.sensor_type);
+  bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+
+  // For I2C sensors: Skip GPIO validation (they use shared I2C bus GPIO 21/22)
+  if (is_i2c_sensor) {
+    LOG_INFO("ConfigManager: I2C sensor '" + config.sensor_type +
+             "' - GPIO validation skipped (uses I2C bus)");
+    return true;
+  }
+
+  // For non-I2C sensors: Standard GPIO validation
+  if (config.gpio == 255) {
+    LOG_WARNING("ConfigManager: Invalid GPIO (255)");
     return false;
   }
 
