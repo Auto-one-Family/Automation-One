@@ -1,6 +1,15 @@
 ---
 name: esp32-development
-description: ESP32 El Trabajante Firmware-Entwicklung. Verwenden bei C++, PlatformIO, Sensor, Actuator, GPIO, MQTT, NVS, Safety, Wokwi.
+description: |
+  ESP32 El Trabajante Firmware-Entwicklung für AutomationOne IoT-Framework.
+  Verwenden bei: C++, PlatformIO, Sensor hinzufügen, Actuator erstellen,
+  Driver implementieren, Service erweitern, NVS-Key hinzufügen, MQTT erweitern,
+  Error-Code definieren, GPIO-Logik, Config-Struktur, Pattern finden,
+  Manager erweitern, Safety-Controller, HealthMonitor, ErrorTracker,
+  I2C-Protokoll, OneWire-Bus, PWM-Controller, Wokwi-Simulation.
+  NICHT verwenden für: Server-seitige Logic, Python-Code, Log-Analyse.
+  Abgrenzung: esp32-debug für Log-Analyse, server-dev für Server-Code.
+allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
 # ESP32 Development Skill
@@ -10,7 +19,24 @@ description: ESP32 El Trabajante Firmware-Entwicklung. Verwenden bei C++, Platfo
 
 ---
 
-## Quick Reference
+## 0. Quick Reference - Was suche ich?
+
+| Ich will... | Primäre Quelle | Code-Location |
+|-------------|----------------|---------------|
+| **Sensor hinzufügen** | [Sensor-Workflow](#sensor-workflow) | `services/sensor/sensor_manager.h` |
+| **Actuator hinzufügen** | [Actuator-Workflow](#actuator-workflow) | `services/actuator/actuator_manager.h` |
+| **MQTT Topic erweitern** | [MQTT-Patterns](#mqtt-patterns) | `utils/topic_builder.h` |
+| **Error-Code definieren** | [Error-Handling](#error-handling) | `models/error_codes.h` |
+| **Config/NVS Key** | MODULE_REGISTRY.md | `services/config/config_manager.h` |
+| **GPIO reservieren** | MODULE_REGISTRY.md | `drivers/gpio_manager.h` |
+| **Safety implementieren** | [Safety-Patterns](#safety-patterns) | `services/actuator/safety_controller.h` |
+| **Driver erstellen** | [Actuator-Workflow](#actuator-workflow) | `services/actuator/actuator_drivers/` |
+| **Build verifizieren** | [Build Commands](#build-commands) | `platformio.ini` |
+| **Startup verstehen** | [Init-Reihenfolge](#initialisierungs-reihenfolge-maincpp) | `src/main.cpp` |
+
+---
+
+## Ordnerstruktur
 ```
 El Trabajante/
 ├── src/
@@ -78,11 +104,11 @@ cd "El Trabajante" && pio device monitor
 8. TopicBuilder::setEspId/setKaiserId
 9. WiFiManager.begin() + connect()
 10. MQTTClient.begin() + connect()
-11. I2CBusManager.begin() + OneWireBusManager.begin()
+10.5 HealthMonitor.begin()  ← Nach MQTT, vor Hardware-Init
+11. I2CBusManager.begin() + OneWireBusManager.begin() + PWMController.begin()
 12. SensorManager.begin()
-13. ActuatorManager.begin()
-14. SafetyController.begin()
-15. HealthMonitor.begin()
+13. SafetyController.begin()  ← VOR ActuatorManager!
+14. ActuatorManager.begin()
 ```
 
 **KRITISCH:** GPIOManager MUSS als erstes initialisiert werden!
@@ -118,8 +144,16 @@ config.sensor_type = "ds18b20";     // Server-definiert
 config.sensor_name = "Temp1";
 config.raw_mode = true;             // IMMER true
 config.measurement_interval_ms = 30000;
-config.onewire_address = "28FF..."; // Für OneWire
+config.onewire_address = "28FF..."; // Für OneWire (64-bit ROM)
+config.i2c_address = 0x44;          // Für I2C (7-bit Adresse)
 ```
+
+**Interface-spezifische Felder:**
+
+| Interface | Config-Feld | MQTT-Payload | Beschreibung |
+|-----------|-------------|--------------|--------------|
+| OneWire | `onewire_address` | `onewire_address` | 64-bit ROM-Code (16 Hex-Zeichen) |
+| I2C | `i2c_address` | `i2c_address` | 7-bit Adresse (0-127) |
 
 ### Sensor-Registry Mapping
 
@@ -328,6 +362,20 @@ private:
 extern XManager& xManager;
 XManager& xManager = XManager::getInstance();
 ```
+
+---
+
+## Referenz-Dokumentation
+
+| Referenz | Pfad | Wann lesen? |
+|----------|------|-------------|
+| **MQTT Topics** | `.claude/reference/api/MQTT_TOPICS.md` | MQTT Topic hinzufügen/erweitern |
+| **Error Codes** | `.claude/reference/errors/ERROR_CODES.md` | Fehlerbehandlung implementieren (1000-4999) |
+| **Architecture** | `.claude/reference/patterns/ARCHITECTURE_DEPENDENCIES.md` | Manager erweitern, Dependencies verstehen |
+| **Communication Flows** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Datenfluss ESP32↔Server verstehen |
+| **Module APIs** | `MODULE_REGISTRY.md` | Vollständige API-Details, Method-Signaturen |
+
+> **Progressive Disclosure:** Referenzen NUR laden wenn die spezifische Aufgabe es erfordert.
 
 ---
 

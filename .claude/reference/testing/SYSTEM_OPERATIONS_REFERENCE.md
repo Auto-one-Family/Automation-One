@@ -1,7 +1,61 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 1.0 | **Erstellt:** 2026-02-02
+> **Version:** 1.1 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-04
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+
+---
+
+## 0. Schnellstart & Authentifizierung
+
+### 0.1 Test-Credentials
+
+| Username | Password | Rolle | Verwendung |
+|----------|----------|-------|------------|
+| Robin | Robin123! | Admin | Development & Testing |
+
+### 0.2 Login (Bash)
+
+```bash
+# Login und Token holen
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "Robin", "password": "Robin123!"}'
+
+# Token aus Response extrahieren und verwenden:
+TOKEN="<access_token aus Response>"
+
+# Authentifizierte Requests:
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/...
+```
+
+### 0.3 Login (PowerShell)
+
+```powershell
+# Variante 1: JSON-Escaping
+curl -X POST http://localhost:8000/api/v1/auth/login `
+  -H "Content-Type: application/json" `
+  -d '{\"username\": \"Robin\", \"password\": \"Robin123!\"}'
+
+# Variante 2: Here-String (empfohlen)
+$body = @{username="Robin"; password="Robin123!"} | ConvertTo-Json
+curl -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" -d $body
+
+# Token speichern
+$response = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/login" `
+  -Method POST -ContentType "application/json" -Body $body
+$TOKEN = $response.access_token
+```
+
+### 0.4 Windows-Umgebung
+
+```powershell
+# MQTT Tools Pfade (müssen im PATH sein oder vollständig angeben):
+# C:\Program Files\mosquitto\mosquitto_sub.exe
+# C:\Program Files\mosquitto\mosquitto_pub.exe
+
+# Beispiel mit vollständigem Pfad:
+& "C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/#" -v
+```
 
 ---
 
@@ -1081,6 +1135,94 @@ curl -X POST http://localhost:8000/api/v1/debug/mock-esp/MOCK_ID/heartbeat
 # 6. Aufräumen
 curl -X DELETE http://localhost:8000/api/v1/debug/mock-esp/MOCK_ID
 ```
+
+---
+
+### 6.6 Flow-Verifikation: MQTT parallel beobachten
+
+**Prinzip:** Bei jeder Operation den **kompletten Kommunikationsfluss** verifizieren - nicht nur "Befehl gesendet", sondern "Befehl gesendet → empfangen → verarbeitet → Antwort erhalten".
+
+```bash
+# Terminal 1: MQTT Traffic beobachten (ERST starten!)
+mosquitto_sub -h localhost -t "kaiser/#" -v
+
+# Terminal 2: Operation ausführen
+curl -X POST http://localhost:8000/api/v1/actuators/ESP_XXXXX/5/command \
+  -H "Content-Type: application/json" -d '{"command": "ON"}'
+```
+
+**Erwarteter Flow für Actuator-Command:**
+
+```
+1. [API]     POST /actuators/.../command      → HTTP 202
+2. [MQTT →]  kaiser/god/esp/ESP_XXX/actuator/5/command   {"command":"ON"...}
+3. [MQTT ←]  kaiser/god/esp/ESP_XXX/actuator/5/response  {"success":true...}
+4. [MQTT ←]  kaiser/god/esp/ESP_XXX/actuator/5/status    {"state":"ON"...}
+```
+
+**Wenn Schritt 3 oder 4 fehlt:** ESP hat nicht geantwortet → esp32-debug konsultieren.
+
+---
+
+### 6.7 Sensor-Daten Flow verifizieren
+
+```bash
+# MQTT beobachten
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+
+# Erwarteter Flow (alle 30s bei aktivem Sensor):
+# kaiser/god/esp/ESP_XXX/sensor/4/data {"ts":...,"gpio":4,"raw":2048,"raw_mode":true}
+```
+
+**Kein Traffic?** Prüfen:
+1. ESP online? → `curl http://localhost:8000/api/v1/esp/devices/ESP_XXX`
+2. Sensor konfiguriert? → `curl http://localhost:8000/api/v1/sensors/ESP_XXX`
+3. ESP Serial-Log → esp32-debug
+
+---
+
+### 6.8 Config-Push Flow verifizieren
+
+```bash
+# Terminal 1: Config-Topics beobachten
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/config*" -v
+
+# Terminal 2: Config pushen (z.B. Sensor hinzufügen)
+curl -X POST http://localhost:8000/api/v1/sensors/ESP_XXX/4 \
+  -H "Content-Type: application/json" \
+  -d '{"sensor_type": "DS18B20", "name": "Temp1", "enabled": true}'
+```
+
+**Erwarteter Flow:**
+
+```
+1. [API]     POST /sensors/ESP_XXX/4           → HTTP 201
+2. [MQTT →]  kaiser/god/esp/ESP_XXX/config     {"sensors":[...]...}
+3. [MQTT ←]  kaiser/god/esp/ESP_XXX/config_response  {"config_applied":true}
+```
+
+**config_applied:false?** → ESP konnte Config nicht anwenden → esp32-debug
+
+---
+
+### 6.9 Operations-Checkliste
+
+Nach jeder Operation prüfen:
+
+| Schritt | Prüfung | Tool |
+|---------|---------|------|
+| 1. API Response | HTTP 2xx erhalten? | curl Output |
+| 2. MQTT Outbound | Server hat Message gesendet? | mosquitto_sub |
+| 3. MQTT Inbound | ESP hat geantwortet? | mosquitto_sub |
+| 4. State Updated | DB/API zeigt neuen State? | curl GET |
+
+**Delegation bei Problemen:**
+
+| Wenn fehlt | Problem | Delegieren an |
+|------------|---------|---------------|
+| Schritt 2 | Server-Problem | **server-debug** |
+| Schritt 3 | ESP-Problem | **esp32-debug** |
+| Schritt 4 | DB-Problem | **db-inspector** |
 
 ---
 

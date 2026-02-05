@@ -580,11 +580,12 @@ cd "El Trabajante" && pio run -e esp32_dev
 
 ### Dokumentation
 
-| Datei | Zweck |
-|-------|-------|
-| `.claude/reference/api/MQTT_TOPICS.md` | Vollstaendige Topic-Referenz |
-| `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Sequenz-Diagramme |
-| `El Trabajante/docs/Mqtt_Protocoll.md` | ESP32 Protokoll-Spezifikation |
+| Datei | Zweck | Wann lesen? |
+|-------|-------|-------------|
+| `.claude/reference/api/MQTT_TOPICS.md` | Vollstaendige Topic-Referenz | Topic hinzufuegen/pruefen |
+| `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Sequenz-Diagramme | Flow verstehen |
+| `.claude/reference/errors/ERROR_CODES.md` | Error-Codes | Validation-Fehler |
+| `El Trabajante/docs/Mqtt_Protocoll.md` | ESP32 Protokoll-Spezifikation | ESP32-seitige Details |
 
 ### Code-Referenzen
 

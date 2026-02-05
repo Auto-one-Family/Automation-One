@@ -210,6 +210,9 @@ class TestDeviceStatusTransitions:
 
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -246,6 +249,9 @@ class TestDeviceStatusTransitions:
 
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -297,6 +303,9 @@ class TestDeviceDiscovery:
 
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -345,6 +354,9 @@ class TestTimeoutDetection:
         """check_device_timeouts returns proper structure."""
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -383,6 +395,9 @@ class TestRejectedDeviceHandling:
 
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -441,6 +456,9 @@ class TestOnlineDeviceHeartbeat:
 
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 

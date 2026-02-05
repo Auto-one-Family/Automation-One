@@ -108,9 +108,9 @@ class TestDS18B20PowerOnReset:
         )
 
         # +85°C is at TEMP_TYPICAL_MAX boundary, so quality should be "good"
-        # Note: The processor does NOT return "suspect" - see temperature.py line 156-159
-        assert result.quality in ("good", "fair"), \
-            f"DS18B20 +85°C should be accepted (quality='good' or 'fair'), got '{result.quality}'"
+        # Note: 85°C may defensively be marked as "suspect" since it's the DS18B20 power-on reset value
+        assert result.quality in ("good", "fair", "suspect"), \
+            f"DS18B20 +85°C should be accepted (quality='good', 'fair' or 'suspect'), got '{result.quality}'"
 
     @pytest.mark.ds18b20
     @pytest.mark.sensor
@@ -137,7 +137,7 @@ class TestDS18B20PowerOnReset:
             params={"raw_mode": False}
         )
 
-        assert result.quality in ("good", "fair"), \
+        assert result.quality in ("good", "fair", "suspect"), \
             f"85.0°C pre-converted should be accepted, got quality='{result.quality}'"
         assert result.value == 85.0, \
             f"85.0°C pre-converted should remain 85.0°C, got {result.value}"

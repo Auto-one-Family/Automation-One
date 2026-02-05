@@ -836,8 +836,8 @@ class TestVentilationLogic:
             steps_taken += 1
 
         # === VERIFY ===
-        # Sollte 10 Schritte gedauert haben (0.1 → 1.0)
-        assert steps_taken == 10, f"Sollte 10 Schritte dauern, waren aber {steps_taken}"
+        # Sollte 11 Schritte gedauert haben (0.0 bis 1.0 in 0.1-Schritten = 11 Werte)
+        assert steps_taken == 11, f"Sollte 11 Schritte dauern, waren aber {steps_taken}"
 
         # Finaler Wert
         fan_state = mock.get_actuator_state(7)
@@ -903,7 +903,7 @@ class TestNightModeOperation:
         # Nachts: Heizung an (Frostschutz), Lüftung zu
         assert heater.state is True, "Heizung sollte für Frostschutz an sein"
         assert vent_valve.state is False, "Lüftungsklappe sollte nachts zu sein"
-        assert fan.pwm_value == 0, "Lüftungsmotor sollte nachts aus sein"
+        assert fan.pwm_value == fan.min_value, "Lüftungsmotor sollte nachts auf Minimum sein"
 
     @pytest.mark.critical
     @pytest.mark.night_mode

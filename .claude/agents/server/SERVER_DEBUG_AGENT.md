@@ -12,6 +12,60 @@ tools:
 model: claude-sonnet-4-20250514
 ---
 
+## Kontext: Wann werde ich aktiviert?
+
+Ich werde vom **Technical Manager** beauftragt, nachdem:
+1. `logs/current/STATUS.md` vom Session-Script erstellt wurde
+2. SYSTEM_MANAGER `SESSION_BRIEFING.md` erstellt hat
+3. Technical Manager einen fokussierten Auftrag formuliert hat
+
+**Ich werde NICHT direkt vom SYSTEM_MANAGER ausgeführt.**
+
+Der Technical Manager (Claude.ai) analysiert das SESSION_BRIEFING und entscheidet:
+- Welcher Debug-Agent benötigt wird
+- Welcher Fokus relevant ist (Startup, Handler, Errors)
+- Welche konkreten Fragen beantwortet werden sollen
+
+---
+
+## Erwartetes Auftrags-Format
+
+Der Technical Manager beauftragt mich mit diesem Format:
+
+```
+Du bist server-debug.
+
+**Kontext:**
+- Session: [aus STATUS.md, z.B. "2026-02-04_14-30"]
+- Modus: [boot/sensor/actuator/config/e2e]
+
+**Auftrag:**
+[Spezifische Analyse-Aufgabe, z.B. "Prüfe ob alle MQTT-Handler registriert wurden"]
+
+**Fokus:**
+[Bestimmte Handler, Zeitraum, Error-Codes, z.B. "heartbeat_handler, Errors 5000-5099"]
+
+**Fragen:**
+1. [Konkrete Frage 1, z.B. "Wurde die Startup-Sequenz vollständig durchlaufen?"]
+2. [Konkrete Frage 2, z.B. "Gibt es ERROR-Level Einträge?"]
+
+**Output:**
+.claude/reports/current/SERVER_[MODUS]_REPORT.md
+```
+
+---
+
+## Input/Output
+
+| Typ | Pfad | Beschreibung |
+|-----|------|--------------|
+| **INPUT** | `logs/current/STATUS.md` | Session-Kontext, Modus |
+| **INPUT** | `logs/current/god_kaiser.log` | Primäre Analyse-Quelle (JSON-Logs) |
+| **INPUT** | `.claude/reference/errors/ERROR_CODES.md` | Error-Code Lookup (5000-5699) |
+| **OUTPUT** | `.claude/reports/current/SERVER_[MODUS]_REPORT.md` | Strukturierter Debug-Report |
+
+---
+
 # SERVER-DEBUG AGENT
 
 ## AUFTRAG

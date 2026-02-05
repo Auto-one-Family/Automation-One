@@ -331,7 +331,7 @@ class TestLoginFormTokenVersion:
     @pytest.mark.asyncio
     async def test_login_form_includes_token_version(self, test_user: User):
         """Login form tokens should include token_version for logout-all."""
-        import jwt
+        from jose import jwt
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -344,7 +344,7 @@ class TestLoginFormTokenVersion:
 
         # Decode token (without verification) and check for token_version
         token = data["access_token"]
-        payload = jwt.decode(token, options={"verify_signature": False})
+        payload = jwt.decode(token, key="", options={"verify_signature": False})
 
         # CRITICAL: token_version must be present for logout-all to work
         assert "token_version" in payload, "token_version missing from login/form tokens"
@@ -353,7 +353,7 @@ class TestLoginFormTokenVersion:
     @pytest.mark.asyncio
     async def test_login_form_tokens_rejected_after_logout_all(self, test_user: User, db_session: AsyncSession):
         """Test that login/form tokens are invalidated after logout all devices."""
-        import jwt
+        from jose import jwt
 
         # Step 1: Login via form
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

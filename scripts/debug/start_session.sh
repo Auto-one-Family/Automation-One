@@ -2,7 +2,7 @@
 # ============================================================================
 # start_session.sh - Debug-Session für Multi-Agent Workflow
 # ============================================================================
-# Version: 3.0 (Robuste ESP32-Optionen, Server-Handling verbessert)
+# Version: 4.0 (SYSTEM_MANAGER Integration, schlanke STATUS.md)
 #
 # Usage: ./scripts/debug/start_session.sh [session-name] [--with-server] [--mode MODE]
 #
@@ -441,6 +441,19 @@ if [ -n "$MQTT_PID" ]; then
     MQTT_STATUS="✅ Aktiv (PID: $MQTT_PID)"
 fi
 
+# Git Status erfassen
+GIT_BRANCH=$(git branch --show-current 2>/dev/null || echo "nicht verfügbar")
+GIT_LAST_COMMIT=$(git log --oneline -1 2>/dev/null || echo "nicht verfügbar")
+GIT_CHANGES=$(git status --short 2>/dev/null | wc -l | tr -d ' ')
+if [ "$GIT_CHANGES" = "0" ]; then
+    GIT_STATUS_TEXT="✅ Keine uncommitted Änderungen"
+else
+    GIT_STATUS_TEXT="⚠️ $GIT_CHANGES uncommitted Änderungen"
+fi
+
+# Docker Status erfassen
+DOCKER_STATUS=$(docker compose ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || echo "Docker nicht aktiv oder nicht installiert")
+
 cat > "$LOGS_DIR/STATUS.md" << 'EOF'
 # 🎯 Debug-Session Status
 
@@ -453,6 +466,43 @@ echo "- **Session-ID:** $SESSION_ID" >> "$LOGS_DIR/STATUS.md"
 echo "- **Gestartet:** $(date +"%Y-%m-%d %H:%M:%S")" >> "$LOGS_DIR/STATUS.md"
 echo "- **Server:** $SERVER_STATUS" >> "$LOGS_DIR/STATUS.md"
 echo "- **MQTT Capture:** $MQTT_STATUS" >> "$LOGS_DIR/STATUS.md"
+
+# Git Status in STATUS.md
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "## Git Status" >> "$LOGS_DIR/STATUS.md"
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "- **Branch:** $GIT_BRANCH" >> "$LOGS_DIR/STATUS.md"
+echo "- **Letzter Commit:** $GIT_LAST_COMMIT" >> "$LOGS_DIR/STATUS.md"
+echo "- **Status:** $GIT_STATUS_TEXT" >> "$LOGS_DIR/STATUS.md"
+
+# Docker Status in STATUS.md
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "## Docker Status" >> "$LOGS_DIR/STATUS.md"
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo '```' >> "$LOGS_DIR/STATUS.md"
+echo "$DOCKER_STATUS" >> "$LOGS_DIR/STATUS.md"
+echo '```' >> "$LOGS_DIR/STATUS.md"
+
+# Hardware-Setup Placeholder für User
+cat >> "$LOGS_DIR/STATUS.md" << 'HARDWAREEOF'
+
+---
+
+## 🔌 Hardware-Setup
+
+> **WICHTIG:** Vor "session gestartet" ausfüllen!
+
+| GPIO | Komponente | Typ | Interface | Status |
+|------|------------|-----|-----------|--------|
+| ? | ? | Sensor/Actuator | ? | ? |
+
+**Beispiel für E2E:**
+| GPIO | Komponente | Typ | Interface | Status |
+|------|------------|-----|-----------|--------|
+| 4 | DS18B20 | Sensor | OneWire | angeschlossen |
+| 26 | Olimex PWR-SWITCH | Actuator | Digital | angeschlossen |
+
+HARDWAREEOF
 
 cat >> "$LOGS_DIR/STATUS.md" << 'STATICEOF'
 
@@ -749,110 +799,156 @@ Nach Abschluss aller Tests müssen ALLE Punkte erfüllt sein:
 E2EPHASESEOF
 fi
 
-# Agent-Aktivierung mit Variable-Expansion
+# Agent-Aktivierung - SYSTEM_MANAGER Workflow
 cat >> "$LOGS_DIR/STATUS.md" << AGENTEOF
 
-## 🤖 Agent-Aktivierung
+---
 
-> **Kopiere den jeweiligen Block in ein neues VS Code Claude-Chat-Fenster.**
-> **WICHTIG:** Agents lesen zuerst ihr Profil, dann diese STATUS.md!
+## 🤖 Agent-Workflow: SYSTEM_MANAGER
 
-### esp32-debug
+> **SYSTEM_MANAGER erstellt Briefing - führt KEINE Agents aus!**
 
-\`\`\`
-Analysiere mit esp32-debug den ${TEST_MODE}-Vorgang.
-Lies zuerst logs/current/STATUS.md für den Session-Kontext.
-Fokus: ${MODE_DESCRIPTION}
-Schreibe Report nach .claude/reports/current/ESP32_${TEST_MODE}_REPORT.md
-\`\`\`
+---
 
-### server-debug
+### Schritt 1: Plan Mode aktivieren
 
 \`\`\`
-Analysiere mit server-debug die ${TEST_MODE}-Verarbeitung.
-Lies zuerst logs/current/STATUS.md für den Session-Kontext.
-Fokus: Backend-Handler, MQTT-Empfang, Database-Operationen.
-Schreibe Report nach .claude/reports/current/SERVER_${TEST_MODE}_REPORT.md
+Shift+Tab → bis "⏸ plan mode on" erscheint
 \`\`\`
 
-### mqtt-debug
+### Schritt 2: Session starten
 
 \`\`\`
-Analysiere mit mqtt-debug die MQTT-Kommunikation.
-Lies zuerst logs/current/STATUS.md für den Session-Kontext.
-Fokus: Topic-Patterns, Payload-Struktur, Message-Sequenzen.
-Schreibe Report nach .claude/reports/current/MQTT_${TEST_MODE}_REPORT.md
+session gestartet
+\`\`\`
+
+### Schritt 3: SYSTEM_MANAGER arbeitet
+
+Der SYSTEM_MANAGER wird automatisch aktiviert und:
+
+1. **Liest** diese STATUS.md
+2. **Analysiert** System-Status (Server, MQTT, Git)
+3. **Empfiehlt** Agents für Technical Manager:
+   - \`esp32-debug\` → wenn Serial-Log vorhanden
+   - \`server-debug\` → wenn Server-Errors
+   - \`mqtt-debug\` → wenn MQTT-Probleme
+   - \`db-inspector\` → wenn Daten-Inkonsistenzen
+4. **Erstellt** \`.claude/reports/current/SESSION_BRIEFING.md\`
+5. **FERTIG** (führt keine Agents aus!)
+
+### Schritt 4: Technical Manager übernimmt
+
+Nach dem SESSION_BRIEFING:
+
+1. Plan Mode verlassen: \`Shift+Tab\`
+2. SESSION_BRIEFING.md lesen
+3. Fokussierte Entwickler-Aufträge formulieren
+4. Entscheiden: Debug-Agent oder Dev-Agent?
+
+### Schritt 5: User aktiviert Agent
+
+1. Agent-Auftrag in VS Code eingeben
+2. Agent führt Analyse/Implementation durch
+3. Report wird erstellt
+
+---
+
+### Wichtig
+
+SYSTEM_MANAGER ≠ Agent-Orchestrator
+SYSTEM_MANAGER = Briefing-Ersteller für Technical Manager
+
+---
+
+### SYSTEM_MANAGER Referenz
+
+| Attribut | Wert |
+|----------|------|
+| **Agent-Pfad** | \`.claude/agents/System Manager/system-manager.md\` |
+| **Skill-Pfad** | \`.claude/skills/System Manager/SKILL.md\` |
+| **Modus** | Plan Mode PFLICHT |
+| **Output** | \`.claude/reports/current/SESSION_BRIEFING.md\` |
+
+---
+
+### Verfügbare Debug-Agents (für Edit Mode)
+
+| Agent | Log-Datei | Report-Pfad |
+|-------|-----------|-------------|
+| esp32-debug | \`logs/current/esp32_serial.log\` | \`ESP32_${TEST_MODE}_REPORT.md\` |
+| server-debug | \`logs/current/god_kaiser.log\` | \`SERVER_${TEST_MODE}_REPORT.md\` |
+| mqtt-debug | \`logs/current/mqtt_traffic.log\` | \`MQTT_${TEST_MODE}_REPORT.md\` |
+
+---
+
+### Fallback: Manuelle Agent-Aktivierung
+
+Falls SYSTEM_MANAGER nicht verfügbar:
+
+\`\`\`bash
+# In separaten VS Code Chat-Windows:
+
+# ESP32 Debug
+Du bist esp32-debug. Lies logs/current/STATUS.md und analysiere logs/current/esp32_serial.log
+
+# Server Debug
+Du bist server-debug. Lies logs/current/STATUS.md und analysiere logs/current/god_kaiser.log
+
+# MQTT Debug
+Du bist mqtt-debug. Lies logs/current/STATUS.md und analysiere logs/current/mqtt_traffic.log
 \`\`\`
 
 AGENTEOF
 
-# E2E Multi-Agent Workflow (nur wenn TEST_MODE="E2E")
+# E2E: Hinweis für SYSTEM_MANAGER
 if [ "$TEST_MODE" = "E2E" ]; then
 cat >> "$LOGS_DIR/STATUS.md" << 'E2EAGENTEOF'
 
-### E2E Multi-Agent Workflow
-
-Für E2E-Tests alle drei Agenten aktivieren (in separaten Chat-Fenstern):
-
 ---
 
-**1. ESP32 Hardware-Analyse:**
+### E2E-Modus: Erweiterte Hardware-Verifikation
 
-```
-Analysiere mit esp32-debug den kompletten Hardware-Flow.
-Lies zuerst logs/current/STATUS.md für den Session-Kontext.
-Fokus: Boot → WiFi → MQTT → Config → Sensor → Actuator.
-Schreibe Report nach .claude/reports/current/ESP32_E2E_REPORT.md
-```
+> **Hinweis für SYSTEM_MANAGER:** E2E-Tests erfordern Hardware-Checks.
 
----
+**Zusätzliche Prüfpunkte:**
+- DS18B20 Sensor-Discovery (ROM-Code erkannt?)
+- Actuator GPIO-Reservation (GPIO 26 reserviert?)
+- Sensor-Readings (Temperatur-Werte plausibel?)
+- Actuator-Commands (ON/OFF physisch ausgeführt?)
 
-**2. Server Backend-Analyse:**
-
-```
-Analysiere mit server-debug die Backend-Verarbeitung.
-Lies zuerst logs/current/STATUS.md für den Session-Kontext.
-Fokus: Heartbeat-Empfang, Config-Push, Sensor-Processing.
-Schreibe Report nach .claude/reports/current/SERVER_E2E_REPORT.md
-```
-
----
-
-**3. MQTT Traffic-Analyse:**
-
-```
-Analysiere mit mqtt-debug den Message-Flow.
-Lies zuerst logs/current/STATUS.md für den Session-Kontext.
-Fokus: Sequenz Heartbeat→Config→Sensor, Timing, QoS.
-Schreibe Report nach .claude/reports/current/MQTT_E2E_REPORT.md
-```
+**Delegations-Empfehlung:**
+- esp32-debug: Sensor/Actuator Init prüfen
+- server-debug: Data-Processing verifizieren
+- mqtt-debug: Command→Response Sequenzen validieren
 
 E2EAGENTEOF
 fi
 
 # Finale Checkliste
-cat >> "$LOGS_DIR/STATUS.md" << 'FINALEOF'
+cat >> "$LOGS_DIR/STATUS.md" << FINALEOF
 
 ---
 
-## 📊 Finale Checkliste
+## 📊 Session-Abschluss Checkliste
 
-Nach Abschluss aller Agent-Analysen:
+### SYSTEM_MANAGER Workflow
 
-**BOOT-Sequenz:**
-- Boot-Banner erscheint (ESP32)
-- WiFi Connected (ESP32)
-- MQTT Connected (ESP32)
-- Heartbeat gesendet (ESP32 + MQTT)
-- Heartbeat empfangen (Server)
+- [ ] Plan Mode aktiviert (⏸)
+- [ ] "session gestartet" gesendet
+- [ ] SESSION_BRIEFING.md erstellt
+- [ ] Technical Manager hat Briefing gelesen
 
-**CONFIG-Flow:**
-- Zone-Assignment gesendet (MQTT)
-- Zone empfangen (ESP32)
-- Zone-ACK gesendet (MQTT)
-- Zone-ACK verarbeitet (Server)
+### Agent-Reports (nach Edit Mode)
 
-**Keine kritischen Fehler in allen drei Logs.**
+- [ ] ESP32_${TEST_MODE}_REPORT.md erstellt
+- [ ] SERVER_${TEST_MODE}_REPORT.md erstellt
+- [ ] MQTT_${TEST_MODE}_REPORT.md erstellt
+
+### Session beenden
+
+\`\`\`bash
+./scripts/debug/stop_session.sh
+\`\`\`
 
 ---
 
@@ -975,15 +1071,22 @@ echo ""
 echo " ⚠️  WICHTIG: Terminal mit ESP32-Befehl offen lassen bis Session endet!"
 echo ""
 echo " ┌─────────────────────────────────────────────────────────────────"
-echo " │ 🤖 DANACH: Agents aktivieren"
+echo " │ 🤖 DANACH: SYSTEM_MANAGER aktivieren"
 echo " ├─────────────────────────────────────────────────────────────────"
 echo " │"
-echo " │ Öffne logs/current/STATUS.md für kopierfertige Agent-Befehle"
+echo " │ 1. VS Code öffnen mit Claude Extension"
 echo " │"
-echo " │ In separaten VS Code Fenstern:"
-echo " │   • Agent 1 (ESP32):   Analysiert esp32_serial.log"
-echo " │   • Agent 2 (Server):  Analysiert god_kaiser.log"
-echo " │   • Agent 3 (MQTT):    Analysiert mqtt_traffic.log"
+echo " │ 2. Plan Mode aktivieren:"
+echo " │    Shift+Tab → bis '⏸ plan mode on' erscheint"
+echo " │"
+echo " │ 3. Session starten:"
+echo " │    > session gestartet"
+echo " │"
+echo " │ 4. SYSTEM_MANAGER erstellt SESSION_BRIEFING.md"
+echo " │"
+echo " │ 5. Technical Manager übernimmt (Plan Mode verlassen)"
+echo " │"
+echo " │ Agent-Pfad: .claude/agents/System Manager/system-manager.md"
 echo " │"
 echo " └─────────────────────────────────────────────────────────────────"
 echo ""

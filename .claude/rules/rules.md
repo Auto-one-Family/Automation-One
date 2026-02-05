@@ -1,3 +1,8 @@
+---
+paths:
+  - "**"
+---
+
 # AutomationOne - Entwicklungsregeln
 
 > **IMMER befolgen. Keine Ausnahmen.**

@@ -20,8 +20,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 **Zweck:** Maßgebliche Referenz für Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~8.000+ Zeilen TypeScript/Vue)
 
-> **📖 Server-Dokumentation:** Siehe `.claude/skills/server/CLAUDE_SERVER.md`
-> **📖 ESP32-Firmware:** Siehe `.claude/skills/esp32/CLAUDE_Esp32.md`
+> **📖 Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
+> **📖 ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
 > **🛠️ Service-Management:** Siehe `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0
 
 ---
@@ -715,8 +715,8 @@ cleanupWebSocket() {
 | **WebSocket Events** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Real-time Events |
 | **Error Codes** | `.claude/reference/errors/ERROR_CODES.md` | ESP32 + Server Fehler |
 | **Datenflüsse** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Kommunikationsmuster |
-| Backend-Architektur | `.claude/skills/server/CLAUDE_SERVER.md` | Server-Details |
-| ESP32 Firmware | `.claude/skills/esp32/CLAUDE_Esp32.md` | Firmware-Details |
+| Backend-Architektur | `.claude/skills/server-development/SKILL.md` | Server-Details |
+| ESP32 Firmware | `.claude/skills/esp32-development/SKILL.md` | Firmware-Details |
 | MQTT Protokoll | `.claude/reference/api/MQTT_TOPICS.md` | Topic-Referenz |
 | **Test-Workflow** | `.claude/reference/testing/TEST_WORKFLOW.md` | NUR auf Anfrage |
 | **Log-Locations** | `.claude/reference/debugging/LOG_LOCATIONS.md` | Bei Debugging |

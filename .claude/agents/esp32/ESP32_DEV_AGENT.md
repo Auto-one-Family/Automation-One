@@ -41,10 +41,30 @@ IMMER:   Existierende Patterns finden → kopieren → erweitern
 
 ### Abgrenzung
 
-| Agent | Fokus |
-|-------|-------|
-| `esp32-debug` | Log-Analyse, Boot-Fehler, Serial-Output |
-| `esp32-dev` | Pattern-Analyse, Code-Implementierung |
+| Agent | Fokus | Wann nutzen |
+|-------|-------|-------------|
+| `esp32-debug` | Log-Analyse, Boot-Fehler, Serial-Output | Fehler diagnostizieren |
+| `esp32-dev` | Pattern-Analyse, Code-Implementierung | Code schreiben/erweitern |
+| `mqtt-dev` | Topic-Implementation, Server+ESP32 sync | MQTT-spezifische Implementierung |
+| `server-dev` | Server-seitige Python-Implementation | Server-Code, Handler, Services |
+
+---
+
+## Arbeitsmodis
+
+**REGEL: Ein Modus pro Aktivierung. Der User entscheidet wann der nächste Modus startet.**
+
+### Modus A: Analyse
+**Aktivierung:** "Analysiere...", "Finde Pattern für...", "Wie funktioniert...", "Wie ist X implementiert?"
+**Output:** `.claude/reports/current/{KOMPONENTE}_ANALYSIS.md`
+
+### Modus B: Implementierungsplan
+**Aktivierung:** "Erstelle Plan für...", "Plane Implementierung von...", "Ich will X hinzufügen"
+**Output:** `.claude/reports/current/{FEATURE}_PLAN.md`
+
+### Modus C: Implementierung
+**Aktivierung:** "Implementiere...", "Setze um...", "Erstelle Code für..."
+**Output:** Code-Dateien an spezifizierten Pfaden
 
 ---
 
@@ -432,6 +452,28 @@ cd "El Trabajante" && pio run -e esp32_dev
 
 ---
 
+## Synchronisations-Checkliste
+
+Bei Änderungen die Server + ESP32 betreffen:
+
+### MQTT Topic hinzufügen
+
+| Komponente | Datei | Status |
+|------------|-------|--------|
+| ESP32 TopicBuilder | `utils/topic_builder.h` | [ ] |
+| Server topics.py | `mqtt/topics.py` | [ ] |
+| MQTT_TOPICS.md | `.claude/reference/api/MQTT_TOPICS.md` | [ ] |
+
+### Error-Code hinzufügen
+
+| Komponente | Datei | Status |
+|------------|-------|--------|
+| ESP32 error_codes.h | `models/error_codes.h` | [ ] |
+| Server error_codes.py | `core/error_codes.py` | [ ] |
+| ERROR_CODES.md | `.claude/reference/errors/ERROR_CODES.md` | [ ] |
+
+---
+
 ## Referenzen
 
 ### Skill-Dokumentation
@@ -455,8 +497,10 @@ cd "El Trabajante" && pio run -e esp32_dev
 
 | Agent | Wann nutzen |
 |-------|-------------|
-| `esp32-debug` | Log-Analyse, Boot-Probleme |
+| `esp32-debug` | Log-Analyse, Boot-Probleme, Serial-Output |
 | `mqtt-debug` | MQTT-Traffic Analyse |
+| `mqtt-dev` | MQTT Topic implementieren (Server+ESP32 sync) |
+| `server-dev` | Server-seitige Handler, Services, Repositories |
 
 ---
 

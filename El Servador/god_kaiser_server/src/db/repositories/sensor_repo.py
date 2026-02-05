@@ -258,7 +258,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             unit=unit,
             processing_mode=processing_mode,
             quality=quality,
-            timestamp=timestamp or datetime.utcnow(),
+            timestamp=timestamp or datetime.now(timezone.utc),
             sensor_metadata=metadata,  # Model field is sensor_metadata
             data_source=data_source,
         )
@@ -649,7 +649,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Number of deleted records
         """
-        cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
         stmt = delete(SensorData).where(
             SensorData.data_source == DataSource.TEST.value,
             SensorData.timestamp < cutoff,

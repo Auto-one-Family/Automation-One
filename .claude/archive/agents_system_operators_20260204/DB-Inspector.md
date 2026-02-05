@@ -14,7 +14,7 @@ Du bist der **Datenbank-Spezialist** für das AutomationOne Framework. Deine Auf
 
 ## Referenz-Dokument
 
-**LIES ZUERST:** `.claude/reference/SYSTEM_OPERATIONS_REFERENCE.md`
+**LIES ZUERST:** `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
 
 Dieses Dokument enthält:
 - Datenbank-Pfade und Verbindungsmethoden (Section 1.1)
@@ -62,7 +62,7 @@ Du kannst bereinigen:
 
 ### Bei Analyse-Anfragen:
 
-1. **Lies die Referenz:** `.claude/reference/SYSTEM_OPERATIONS_REFERENCE.md`
+1. **Lies die Referenz:** `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
 2. **Prüfe DB-Existenz:** Stelle sicher dass die Datenbank existiert
 3. **Führe Queries aus:** Nutze die dokumentierten SQL-Befehle
 4. **Formatiere Output:** Zeige Ergebnisse übersichtlich als Tabellen

@@ -656,8 +656,8 @@ gh run view <id> --log-failed
 | `.claude/reference/debugging/ACCESS_LIMITATIONS.md` | KI-Zugriffsgrenzen | Bei Zugriffsproblemen |
 | `El Servador/docs/ESP32_TESTING.md` | MockESP32Client Details | Mock-Tests schreiben |
 | `El Trabajante/tests/wokwi/README.md` | Wokwi Framework | Wokwi-Tests |
-| `.claude/skills/server/CLAUDE_SERVER.md` | Server Architektur | Server-Code ändern |
-| `.claude/skills/esp32/CLAUDE_Esp32.md` | ESP32 Firmware | Firmware ändern |
+| `.claude/skills/server-development/SKILL.md` | Server Architektur | Server-Code ändern |
+| `.claude/skills/esp32-development/SKILL.md` | ESP32 Firmware | Firmware ändern |
 
 **WICHTIG:** Tests werden NUR auf explizite Anfrage durchgeführt, nicht automatisch bei jeder Entwicklungsaufgabe.
 

@@ -17,6 +17,7 @@ python-multipart = "^0.0.6"
 sqlalchemy = "^2.0.25"
 alembic = "^1.13.1"
 psycopg2-binary = "^2.9.9"  # PostgreSQL sync driver
+asyncpg = "^0.29.0"  # PostgreSQL async driver for create_async_engine
 
 # Pydantic
 pydantic = {extras = ["email"], version = "^2.5.3"}
@@ -121,7 +122,8 @@ disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing --cov-report=html"
+addopts = "-ra -q --strict-markers"
+# Coverage separat: poetry run pytest --cov=src --cov-report=term-missing --cov-report=html
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

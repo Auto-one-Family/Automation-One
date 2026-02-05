@@ -9,7 +9,7 @@ PATTERN: Kein Singleton - wird als Dependency injiziert
 import asyncio
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import logging
 
@@ -120,7 +120,7 @@ class ConflictManager:
         mutex = self._get_mutex(actuator_key)
 
         async with mutex:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             existing_lock = self._locks.get(actuator_key)
 
             # Cleanup: Abgelaufene Locks entfernen
@@ -233,7 +233,7 @@ class ConflictManager:
 
     def get_locked_actuators(self) -> Dict[str, ActuatorLock]:
         """Returns alle aktuell gelockten Actuatoren."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return {
             key: lock for key, lock in self._locks.items()
             if lock.expires_at is None or lock.expires_at > now
@@ -241,7 +241,7 @@ class ConflictManager:
 
     def get_stats(self) -> dict:
         """Returns Statistiken für Monitoring."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         active_locks = sum(
             1 for lock in self._locks.values()
             if lock.expires_at is None or lock.expires_at > now

@@ -772,7 +772,7 @@ GET /api/v1/esp/{esp_id}
 **Beschreibung:** Watchdog-Timeout erkannt (System-Hang).
 
 **Ausgelöst in:**
-- `main.cpp:1567` - `watchdog_task()`
+- `main.cpp:1764` - `feedWatchdog()`
 
 **Symptom:**
 ```
@@ -907,7 +907,7 @@ GET /api/v1/actuators/{actuator_id}/locks
 | 3020 | HTTP_INIT_FAILED | pi_enhanced_processor.cpp:52 |
 | 4020 | COMMAND_INVALID | actuator_manager.cpp:358 |
 | 4050 | SYSTEM_INIT_FAILED | main.cpp:1352 |
-| 4070 | WATCHDOG_TIMEOUT | main.cpp:1567 |
+| 4070 | WATCHDOG_TIMEOUT | main.cpp:1764 |
 | 4071 | WATCHDOG_FEED_BLOCKED | main.cpp:1504 |
 | 4072 | WATCHDOG_FEED_BLOCKED_CRITICAL | main.cpp:1528 |
 | 4200 | DEVICE_REJECTED | main.cpp:1288 |

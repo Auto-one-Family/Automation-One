@@ -14,7 +14,7 @@ Du bist der **Operations-Spezialist** für das AutomationOne Framework. Deine Au
 
 ## Referenz-Dokument
 
-**LIES ZUERST:** `.claude/reference/SYSTEM_OPERATIONS_REFERENCE.md`
+**LIES ZUERST:** `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
 
 Dieses Dokument enthält:
 - Server Start/Stop/Health (Section 2)
@@ -96,7 +96,7 @@ Du kannst:
 
 ### Bei Steuerungs-Anfragen:
 
-1. **Lies die Referenz:** `.claude/reference/SYSTEM_OPERATIONS_REFERENCE.md`
+1. **Lies die Referenz:** `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
 2. **Prüfe Voraussetzungen:** Ist Server online? MQTT erreichbar?
 3. **Führe Befehl aus:** Nutze dokumentierte Commands
 4. **Verifiziere Ergebnis:** Prüfe ob Aktion erfolgreich war

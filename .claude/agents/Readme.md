@@ -12,7 +12,7 @@
 | **esp32-debug** | `esp32-debug.md` | ESP32 Serial-Log Analyse | Read, Grep, Glob |
 | **server-debug** | `server-debug.md` | God-Kaiser Server-Log Analyse | Read, Grep, Glob |
 | **mqtt-debug** | `mqtt-debug.md` | MQTT Traffic Analyse | Read, Grep, Glob |
-| **provisioning-debug** | `provisioning-debug.md` | Provisioning Flow Debugging | Read, Grep, Glob |
+| **meta-analyst** | `meta-analyst.md` | Cross-Report-Analyse & Problemvergleich | Read, Grep, Glob |
 | **db-inspector** | `db-inspector.md` | Datenbank-Inspektion & Cleanup | Read, Bash, Grep, Glob |
 | **system-control** | `system-control.md` | System-Steuerung & Operations | Read, Bash, Grep, Glob |
 
@@ -88,7 +88,7 @@ Alle Debug-Agenten lesen `logs/current/STATUS.md` für Session-Kontext:
 | esp32-debug | ESP32 Serial | `logs/current/esp32_serial.log` |
 | server-debug | Server JSON | `logs/current/god_kaiser.log` |
 | mqtt-debug | MQTT Traffic | `logs/current/mqtt_traffic.log` |
-| provisioning-debug | Alle drei | - |
+| meta-analyst | Alle Reports in reports/current/ | - |
 
 ---
 
@@ -116,11 +116,22 @@ Die Agenten wurden von der alten Unterordner-Struktur ins flache Format migriert
 | `agents/esp32/ESP32_DEBUG_AGENT.md` | `agents/esp32-debug.md` |
 | `agents/server/SERVER_DEBUG_AGENT.md` | `agents/server-debug.md` |
 | `agents/mqtt/MQTT_DEBUG_AGENT.md` | `agents/mqtt-debug.md` |
-| `agents/Provisioning/PROVISIONING_DEBUG_AGENT.md` | `agents/provisioning-debug.md` |
+| `agents/Provisioning/PROVISIONING_DEBUG_AGENT.md` | `agents/meta-analyst.md` |
 | `agents/System_Operators/DB-Inspector.md` | `agents/db-inspector.md` |
 | `agents/System_Operators/System-Control.md` | `agents/system-control.md` |
 
 Backups der alten Dateien: `.claude/archive/agents_backup_20260202/`
+
+---
+
+## Session-Orchestrator
+
+| Agent | Pfad | Modus |
+|-------|------|-------|
+| **system-manager** | `System Manager/system-manager.md` | Plan Mode PFLICHT |
+
+**Funktion:** Erstellt SESSION_BRIEFING.md für Technical Manager
+**Skill:** `.claude/skills/System Manager/SKILL.md`
 
 ---
 

@@ -20,15 +20,16 @@ description: Vollständige API-Referenz aller ESP32-Module. Laden bei Bedarf fü
 | ConfigManager | `services/config/config_manager.h` | ✅ | STEP 6 |
 | ProvisionManager | `services/provisioning/provision_manager.h` | ✅ | STEP 6.6 |
 | ErrorTracker | `error_handling/error_tracker.h` | ✅ | STEP 7 |
-| WiFiManager | `services/communication/wifi_manager.h` | ✅ | STEP 10 |
+| WiFiManager | `services/communication/wifi_manager.h` | ✅ | STEP 9 |
+| TimeManager | `utils/time_manager.h` | ✅ | Nach WiFi (NTP) |
 | MQTTClient | `services/communication/mqtt_client.h` | ✅ | STEP 10 |
+| HealthMonitor | `error_handling/health_monitor.h` | ✅ | STEP 10.5 |
 | I2CBusManager | `drivers/i2c_bus.h` | ✅ | STEP 11 |
 | OneWireBusManager | `drivers/onewire_bus.h` | ✅ | STEP 11 |
 | PWMController | `drivers/pwm_controller.h` | ✅ | STEP 11 |
-| SensorManager | `services/sensor/sensor_manager.h` | ✅ | Nach MQTT |
-| ActuatorManager | `services/actuator/actuator_manager.h` | ✅ | Nach Sensor |
-| SafetyController | `services/actuator/safety_controller.h` | ✅ | Nach Actuator |
-| HealthMonitor | `error_handling/health_monitor.h` | ✅ | Nach Safety |
+| SensorManager | `services/sensor/sensor_manager.h` | ✅ | STEP 12 |
+| SafetyController | `services/actuator/safety_controller.h` | ✅ | STEP 13 (vor Actuator!) |
+| ActuatorManager | `services/actuator/actuator_manager.h` | ✅ | STEP 14 |
 
 ---
 
@@ -247,7 +248,48 @@ extern MQTTClient& mqttClient;
 
 ---
 
-## 6. SafetyController
+## 6. TimeManager
+
+**Pfad:** `src/utils/time_manager.h/.cpp`
+
+**Dependencies:** WiFiManager (NTP benötigt WiFi)
+```cpp
+class TimeManager {
+public:
+    static TimeManager& getInstance();
+
+    // Lifecycle
+    bool begin();                              // Nach WiFi-Connect aufrufen
+    void loop();                               // Für Auto-Resync
+
+    // Timestamp Access
+    time_t getUnixTimestamp() const;           // Sekunden seit 1970
+    uint64_t getUnixTimestampMs() const;       // Millisekunden-Präzision
+    String getFormattedTime(const char* format = "%Y-%m-%dT%H:%M:%SZ") const;
+
+    // Status
+    bool isSynchronized() const;               // NTP sync erfolgreich?
+    bool isSyncFresh() const;                  // Sync noch aktuell? (<1h)
+    unsigned long getTimeSinceSync() const;    // ms seit letztem Sync
+    String getSyncStatus() const;              // Debug-String
+
+    // Manual Control
+    bool forceResync();                        // Erzwingt neuen NTP-Sync
+    void setNTPServers(const char* primary, const char* secondary = nullptr,
+                       const char* tertiary = nullptr);
+};
+
+extern TimeManager& timeManager;
+```
+
+**Wichtige Konstanten:**
+- `NTP_SYNC_TIMEOUT_MS`: 10000 (10s max für Initial-Sync)
+- `NTP_RESYNC_INTERVAL_MS`: 3600000 (Re-Sync alle Stunde)
+- `NTP_MIN_VALID_TIMESTAMP`: 1700000000 (~2023-11)
+
+---
+
+## 7. SafetyController
 
 **Pfad:** `src/services/actuator/safety_controller.h/.cpp`
 ```cpp
@@ -289,7 +331,7 @@ extern SafetyController& safetyController;
 
 ---
 
-## 7. TopicBuilder
+## 8. TopicBuilder
 
 **Pfad:** `src/utils/topic_builder.h/.cpp`
 ```cpp
@@ -338,7 +380,7 @@ public:
 
 ---
 
-## 8. ErrorTracker
+## 9. ErrorTracker
 
 **Pfad:** `src/error_handling/error_tracker.h/.cpp`
 ```cpp
@@ -372,7 +414,7 @@ extern ErrorTracker& errorTracker;
 
 ---
 
-## 9. HealthMonitor
+## 10. HealthMonitor
 
 **Pfad:** `src/error_handling/health_monitor.h/.cpp`
 

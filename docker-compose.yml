@@ -1,0 +1,162 @@
+# AutomationOne - Docker Compose Development Stack
+# ==============================================
+# Startet alle Services für lokale Entwicklung:
+# - el-servador: FastAPI Backend
+# - el-frontend: Vue 3 Dashboard
+# - postgres: PostgreSQL Database
+# - mqtt-broker: Eclipse Mosquitto
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose logs -f        # Follow logs
+#   docker-compose down           # Stop all services
+#   docker-compose down -v        # Stop and remove volumes
+
+version: "3.9"
+
+services:
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: automationone-postgres
+    environment:
+      POSTGRES_USER: god_kaiser
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: god_kaiser_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U god_kaiser -d god_kaiser_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - automationone-net
+    restart: unless-stopped
+
+  # ============================================
+  # Eclipse Mosquitto MQTT Broker
+  # ============================================
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: automationone-mqtt
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # WebSocket
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automationone-net
+    restart: unless-stopped
+
+  # ============================================
+  # God-Kaiser Server (FastAPI Backend)
+  # ============================================
+  el-servador:
+    build:
+      context: ./El Servador
+      dockerfile: Dockerfile
+    container_name: automationone-server
+    environment:
+      # Database
+      DATABASE_URL: postgresql+asyncpg://god_kaiser:password@postgres:5432/god_kaiser_db
+      DATABASE_AUTO_INIT: "true"
+      # MQTT
+      MQTT_BROKER_HOST: mqtt-broker
+      MQTT_BROKER_PORT: "1883"
+      MQTT_WEBSOCKET_PORT: "9001"
+      # Server
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8000"
+      SERVER_RELOAD: "true"
+      # Security (CHANGE IN PRODUCTION!)
+      JWT_SECRET_KEY: dev-secret-key-change-in-production
+      # Environment
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+      # CORS (allow frontend)
+      CORS_ALLOWED_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live-reload: Mount source code
+      - ./El Servador/god_kaiser_server/src:/app/src:ro
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - automationone-net
+    restart: unless-stopped
+
+  # ============================================
+  # El Frontend (Vue 3 Dev Server)
+  # ============================================
+  el-frontend:
+    build:
+      context: ./El Frontend
+      dockerfile: Dockerfile
+    container_name: automationone-frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      # Live-reload: Mount source code (exclude node_modules)
+      - ./El Frontend/src:/app/src:ro
+      - ./El Frontend/public:/app/public:ro
+      - ./El Frontend/index.html:/app/index.html:ro
+      - ./El Frontend/vite.config.ts:/app/vite.config.ts:ro
+      - ./El Frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./El Frontend/tailwind.config.js:/app/tailwind.config.js:ro
+      - ./El Frontend/postcss.config.js:/app/postcss.config.js:ro
+    depends_on:
+      - el-servador
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - automationone-net
+    restart: unless-stopped
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  postgres_data:
+    name: automationone-postgres-data
+  mosquitto_data:
+    name: automationone-mosquitto-data
+  mosquitto_log:
+    name: automationone-mosquitto-log
+
+# ============================================
+# Network
+# ============================================
+networks:
+  automationone-net:
+    name: automationone-net
+    driver: bridge

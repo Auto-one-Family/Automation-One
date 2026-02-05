@@ -38,14 +38,14 @@ allowed-tools: Read
 └────────┬────────┘          └─────────┬─────────┘          └────────┬─────────┘
          │                             │                             │
          │ 1. performAllMeasurements() │                             │
-         │    [sensor_manager.cpp:987] │                             │
+         │    [sensor_manager.cpp:985] │                             │
          │                             │                             │
          │ 2. MQTT Publish             │                             │
          │    QoS 1, Topic:            │                             │
          │    kaiser/god/esp/{esp_id}/ │                             │
          │    sensor/{gpio}/data       │                             │
          │─────────────────────────────►                             │
-         │    [sensor_manager.cpp:1241]│                             │
+         │    [sensor_manager.cpp:1226]│                             │
          │                             │                             │
          │                             │ 3. handle_sensor_data()     │
          │                             │    [sensor_handler.py:79]   │
@@ -75,9 +75,9 @@ allowed-tools: Read
 
 | Schritt | Datei | Methode | Zeile |
 |---------|-------|---------|-------|
-| 1 | `sensor_manager.cpp` | `performAllMeasurements()` | 987 |
-| 2 | `sensor_manager.cpp` | `publishSensorReading()` | 1228 |
-| 3 | `sensor_manager.cpp` | `buildMQTTPayload()` | 1248 |
+| 1 | `sensor_manager.cpp` | `performAllMeasurements()` | 985 |
+| 2 | `sensor_manager.cpp` | `publishSensorReading()` | 1226 |
+| 3 | `sensor_manager.cpp` | `buildMQTTPayload()` | 1246 |
 | 4 | `topic_builder.cpp` | `buildSensorDataTopic()` | 53 |
 | 5 | `mqtt_client.cpp` | `publish()` | 469 |
 | 6 | `sensor_handler.py` | `handle_sensor_data()` | 79 |
@@ -105,9 +105,36 @@ allowed-tools: Read
   "quality": "good",
   "raw_mode": true,
   "subzone_id": "zone_a",
-  "onewire_address": "28FF123456789ABC"
+  "onewire_address": "28FF123456789ABC",
+  "i2c_address": 68
 }
 ```
+
+### Sensor-Interface-spezifische Unterscheidung
+
+| Interface | Identifikator | Lookup-Strategie |
+|-----------|---------------|------------------|
+| Analog/Digital | - | 3-way: esp_id + gpio + sensor_type |
+| OneWire (DS18B20) | `onewire_address` (64-bit ROM) | 4-way: + onewire_address |
+| I2C (SHT31, BMP280, BME280) | `i2c_address` (7-bit) | 4-way: + i2c_address |
+
+**I2C-Adress-Konfiguration:**
+- SHT31: 0x44 (ADDR→GND), 0x45 (ADDR→VCC)
+- BMP280/BME280: 0x76 (SDO→GND), 0x77 (SDO→VCC)
+
+### Architektur-Abweichung: BMP280/BME280
+
+**Abweichung vom Server-Centric Prinzip:**
+
+BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensationsformel (~50 Zeilen C-Code mit 12-18 Kalibrierungswerten) wird ESP32-seitig durch die Adafruit_BMP280/BME280 Library ausgeführt.
+
+| Sensor | RAW-Mode | Kompensation | Server-Aufgabe |
+|--------|----------|--------------|----------------|
+| SHT31 | ✅ Ja | Server | Konvertierung: -45 + 175×raw/65535 |
+| BMP280 | ❌ Nein | ESP32 (Adafruit) | Validierung, Unit-Konvertierung |
+| BME280 | ❌ Nein | ESP32 (Adafruit) | Validierung, Unit-Konvertierung |
+
+**Begründung:** Bosch-Kalibrierungsdaten (dig_T1-T3, dig_P1-P9, dig_H1-H6) sind im Sensor-EEPROM gespeichert und werden von der Adafruit-Library beim Init ausgelesen. Eine Server-seitige Kompensation würde erfordern, diese Daten via MQTT zu übertragen - unnötige Komplexität.
 
 **WebSocket Event (Server→Frontend):**
 ```json

@@ -89,6 +89,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "library_name": "dallas_temp",
   "library_version": "1.0.0",
   "raw_mode": true,
+  "onewire_address": "28FF123456789ABC",
+  "i2c_address": 68,
   "meta": {
     "vref": 3300,
     "samples": 10,
@@ -111,7 +113,14 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `raw` / `raw_value` | float | Raw ADC/Sensor-Wert |
 | `raw_mode` | bool | **REQUIRED** - true = Server verarbeitet |
 
-**Optional Fields:** `value`, `unit`, `quality`, `subzone_id`, `sensor_name`, `library_name`, `library_version`, `meta`
+**Optional Fields:** `value`, `unit`, `quality`, `subzone_id`, `sensor_name`, `library_name`, `library_version`, `meta`, `onewire_address`, `i2c_address`
+
+**Interface-spezifische Felder:**
+
+| Feld | Typ | Bedingung | Beschreibung |
+|------|-----|-----------|--------------|
+| `onewire_address` | string | OneWire-Sensoren | 64-bit ROM-Code (16 Hex-Zeichen, z.B. "28FF641E8D3C0C79") |
+| `i2c_address` | int | I2C-Sensoren | 7-bit I2C-Adresse (0-127, z.B. 68 für 0x44) |
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSensorDataTopic()` (Zeile 38)
@@ -222,9 +231,20 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "command": "ON",
   "value": 1.0,
   "duration": 0,
-  "timestamp": 1234567890
+  "timestamp": 1234567890,
+  "correlation_id": "cmd_abc123"
 }
 ```
+
+**Fields:**
+
+| Feld | Typ | Required | Beschreibung |
+|------|-----|----------|--------------|
+| `command` | string | Ja | ON, OFF, PWM, TOGGLE |
+| `value` | float | Nein | 0.0 - 1.0 für PWM |
+| `duration` | int | Nein | Sekunden (0 = unbegrenzt) |
+| `timestamp` | int | Ja | Unix Timestamp |
+| `correlation_id` | string | Nein | End-to-End Tracking ID für Response-Korrelation |
 
 **Commands:**
 

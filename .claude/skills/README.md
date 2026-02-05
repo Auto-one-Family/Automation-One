@@ -29,9 +29,22 @@ allowed-tools: Read
 ├── server-development/
 │   ├── SKILL.md                # Server-Entwicklung
 │   └── databases.md            # PostgreSQL Schema, Migrations
-└── frontend-development/
-    └── SKILL.md                # Frontend-Entwicklung
+├── frontend-development/
+│   └── SKILL.md                # Frontend-Entwicklung
+└── System Manager/
+    ├── SKILL.md                # Session-Orchestrator
+    └── session-planning.md     # Detail-Templates
 ```
+
+## Session-Planning (Plan Mode)
+
+| Skill | Pfad | Agent |
+|-------|------|-------|
+| **System-Manager** | `System Manager/SKILL.md` | system-manager |
+
+**Funktion:** Erstellt SESSION_BRIEFING.md für Technical Manager
+**Modus:** Plan Mode (Shift+Tab → ⏸) - PFLICHT
+**Agent:** `.claude/agents/System Manager/system-manager.md`
 
 ## Zusätzliche Referenz-Dateien
 
