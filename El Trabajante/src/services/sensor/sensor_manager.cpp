@@ -301,7 +301,8 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         LOG_INFO("Sensor Manager: Configured I2C sensor '" + config.sensor_type +
                  "' at address 0x" + String(i2c_address, HEX) +
-                 " (GPIO " + String(config.gpio) + " is I2C bus)");
+                 " (GPIO " + String(config.gpio) + " is I2C bus)" +
+                 " [sensor_count=" + String(sensor_count_) + ", active=true]");
 
         return true;
     }
@@ -535,15 +536,17 @@ bool SensorManager::hasSensorOnGPIO(uint8_t gpio) const {
 
 uint8_t SensorManager::getActiveSensorCount() const {
     if (!initialized_) {
+        LOG_DEBUG("getActiveSensorCount: NOT initialized, returning 0");
         return 0;
     }
-    
+
     uint8_t count = 0;
     for (uint8_t i = 0; i < sensor_count_; i++) {
         if (sensors_[i].active) {
             count++;
         }
     }
+    LOG_DEBUG("getActiveSensorCount: sensor_count_=" + String(sensor_count_) + ", active=" + String(count));
     return count;
 }
 
@@ -912,10 +915,12 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     uint8_t device_addr = capability->i2c_address;
     size_t bytes_read = 0;
 
+    LOG_INFO("SensorManager: I2C READ START for " + device_type + " addr=0x" + String(device_addr, HEX));
     if (!i2c_bus_->readSensorRaw(device_type, device_addr, buffer, sizeof(buffer), bytes_read)) {
         LOG_ERROR("Sensor Manager: I2C read failed for " + device_type);
         return 0;
     }
+    LOG_INFO("SensorManager: I2C READ COMPLETE, bytes=" + String(bytes_read));
 
     LOG_DEBUG("Sensor Manager: " + device_type + " raw data (" + String(bytes_read) + " bytes): " +
               String(buffer[0], HEX) + " " + String(buffer[1], HEX) + " " +
@@ -944,9 +949,11 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
         raw_data.raw_value = raw_value;
         raw_data.timestamp = millis();
         raw_data.metadata = "{}";
-        
+
+        LOG_INFO("SensorManager: PiEnhancedProcessor START for " + server_sensor_type + " raw=" + String(raw_value));
         ProcessedSensorData processed;
         bool success = pi_processor_->sendRawData(raw_data, processed);
+        LOG_INFO("SensorManager: PiEnhancedProcessor END success=" + String(success ? "YES" : "NO"));
         
         // Fill reading output
         reading.gpio = gpio;
@@ -963,18 +970,22 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
         
         if (success && processed.valid) {
             created_count++;
-            
+
             // Publish reading via MQTT
+            LOG_INFO("SensorManager: MQTT PUBLISH START for " + server_sensor_type);
             publishSensorReading(reading);
+            LOG_INFO("SensorManager: MQTT PUBLISH END for " + server_sensor_type);
+        } else {
+            LOG_INFO("SensorManager: Skipping publish - success=" + String(success ? "YES" : "NO") + " valid=" + String(processed.valid ? "YES" : "NO"));
         }
     }
-    
+
     // Update config
     config->last_raw_value = readings_out[0].raw_value;  // Use first reading
     config->last_reading = millis();
-    
-    LOG_INFO("Sensor Manager: Multi-value measurement created " + String(created_count) + " readings");
-    
+
+    LOG_INFO("SensorManager: MULTI-VALUE COMPLETE, created " + String(created_count) + " readings");
+
     return created_count;
 }
 
@@ -983,15 +994,20 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
 // Begründung: Minimiert MQTT-Traffic, Server-Control via measurement_interval Config.
 // Dokumentiert in: docs/ZZZ.md - "Server-Centric Pragmatic Deviations"
 void SensorManager::performAllMeasurements() {
+    LOG_INFO("SensorManager::performAllMeasurements() ENTER");
+
     if (!initialized_) {
+        LOG_INFO("SensorManager: Not initialized, returning");
         return;
     }
 
     unsigned long now = millis();
+    LOG_INFO("SensorManager: sensor_count=" + String(sensor_count_));
 
     // ✅ Phase 2C: Pro-Sensor Iteration with Mode-Check
     // (Removed global interval check - each sensor has its own interval)
     for (uint8_t i = 0; i < sensor_count_; i++) {
+        LOG_INFO("SensorManager: Processing sensor[" + String(i) + "] GPIO=" + String(sensors_[i].gpio) + " type=" + sensors_[i].sensor_type);
         // Check 1: Sensor must be active
         if (!sensors_[i].active) {
             continue;
@@ -1029,11 +1045,14 @@ void SensorManager::performAllMeasurements() {
         // ✅ Continuous Mode: Perform measurement
         // Check if this is a multi-value sensor
         const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
+        LOG_INFO("SensorManager: sensor[" + String(i) + "] is_multi_value=" + String(capability && capability->is_multi_value ? "YES" : "NO"));
 
         if (capability && capability->is_multi_value) {
             // Multi-value sensor - create multiple readings
+            LOG_INFO("SensorManager: MULTI-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading readings[4];  // Max 4 values per sensor
             uint8_t count = performMultiValueMeasurement(sensors_[i].gpio, readings, 4);
+            LOG_INFO("SensorManager: MULTI-VALUE measurement END count=" + String(count));
 
             // Readings are already published by performMultiValueMeasurement
             if (count == 0) {
@@ -1043,20 +1062,26 @@ void SensorManager::performAllMeasurements() {
             }
         } else {
             // Single-value sensor - standard measurement
+            LOG_INFO("SensorManager: SINGLE-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading reading;
             if (performMeasurement(sensors_[i].gpio, reading)) {
+                LOG_INFO("SensorManager: SINGLE-VALUE measurement OK, publishing");
                 // Publish via MQTT
                 publishSensorReading(reading);
                 sensors_[i].last_reading = now;  // Update timestamp
+            } else {
+                LOG_INFO("SensorManager: SINGLE-VALUE measurement FAILED");
             }
         }
 
         // Feed watchdog between sensor measurements to prevent timeout
+        LOG_INFO("SensorManager: sensor[" + String(i) + "] DONE, yielding");
         yield();
     }
 
     // Update global timestamp for compatibility
     last_measurement_time_ = now;
+    LOG_INFO("SensorManager::performAllMeasurements() EXIT");
 }
 
 // ============================================

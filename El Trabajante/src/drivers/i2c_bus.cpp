@@ -302,8 +302,10 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
     }
     
     // Read data
+    LOG_INFO("I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
     size_t received = Wire.requestFrom(device_address, (uint8_t)length);
-    
+    LOG_INFO("I2C: requestFrom END received=" + String(received));
+
     if (received != length) {
         LOG_ERROR("I2C read: Expected " + String(length) + " bytes, got " + String(received));
         String msg = "Incomplete read from 0x" + String(device_address, HEX);
@@ -810,10 +812,13 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
 
     // Step 3: Read data directly (no register address)
     size_t requested = protocol->expected_bytes;
+    LOG_INFO("I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(requested));
     size_t received = Wire.requestFrom(i2c_address, (uint8_t)requested);
+    LOG_INFO("I2C CMD: requestFrom END received=" + String(received));
 
     // Timeout handling for slow sensors
     unsigned long start = millis();
+    LOG_INFO("I2C CMD: Waiting for Wire.available()...");
     while (Wire.available() < (int)requested) {
         if (millis() - start > I2C_READ_TIMEOUT_MS) {
             LOG_ERROR("I2C: Read timeout for " + String(protocol->sensor_type));
@@ -824,6 +829,8 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
         yield();  // Feed watchdog
     }
 
+    LOG_INFO("I2C CMD: Wire.available() ready");
+
     if (received != requested) {
         LOG_ERROR("I2C: Incomplete read from " + String(protocol->sensor_type) +
                   " (expected " + String(requested) + ", got " + String(received) + ")");
@@ -833,10 +840,12 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
     }
 
     // Read bytes into buffer
+    LOG_INFO("I2C CMD: Reading " + String(received) + " bytes from buffer...");
     for (size_t i = 0; i < received; i++) {
         buffer[i] = Wire.read();
     }
     bytes_read = received;
+    LOG_INFO("I2C CMD: Read complete, bytes_read=" + String(bytes_read));
 
     return true;
 }

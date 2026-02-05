@@ -1679,6 +1679,14 @@ void setup() {
   LOG_INFO("╔════════════════════════════════════════╗");
   LOG_INFO("║   Phase 5: Actuator System READY      ║");
   LOG_INFO("╚════════════════════════════════════════╝");
+
+  // === DIAGNOSTIK: System State nach Setup ===
+  LOG_INFO("=== POST-SETUP DIAGNOSTICS ===");
+  LOG_INFO("System State: " + String(g_system_config.current_state));
+  LOG_INFO("Critical Errors: " + String(errorTracker.hasCriticalErrors() ? "YES" : "NO"));
+  LOG_INFO("WiFi CB State: " + String(static_cast<int>(wifiManager.getCircuitBreakerState())));
+  LOG_INFO("Active Sensors: " + String(sensorManager.getActiveSensorCount()));
+  LOG_INFO("==============================");
 }
 
 // ============================================
@@ -1730,6 +1738,7 @@ bool feedWatchdog(const char* component_id) {
 
     // System State Check
     if (g_system_config.current_state == STATE_ERROR) {
+      LOG_WARNING("Watchdog feed BLOCKED: System in STATE_ERROR");
       return false;  // Error-State → Watchdog-Feed blockiert
     }
   }
@@ -1828,6 +1837,21 @@ uint8_t getWatchdogCountLast24h() {
 // LOOP - Phase 2 Communication Monitoring + Phase 4/5 Operations
 // ============================================
 void loop() {
+  // === DIAGNOSTIK: First Loop Entry ===
+  static bool first_loop_logged = false;
+  if (!first_loop_logged) {
+    LOG_INFO("=== FIRST LOOP ITERATION ===");
+    LOG_INFO("Entering loop() for the first time");
+    LOG_INFO("System State: " + String(g_system_config.current_state));
+    LOG_INFO("Critical Errors: " + String(errorTracker.hasCriticalErrors() ? "YES" : "NO"));
+    first_loop_logged = true;
+  }
+
+  // === LOOP TRACING (Debug Blockade) ===
+  static uint32_t loop_count = 0;
+  loop_count++;
+  LOG_INFO("LOOP[" + String(loop_count) + "] START");
+
   // ─────────────────────────────────────────────────────
   // WATCHDOG FEED (Industrial-Grade)
   // ─────────────────────────────────────────────────────
@@ -1845,11 +1869,13 @@ void loop() {
       }
     }
   }
+  LOG_INFO("LOOP[" + String(loop_count) + "] WATCHDOG_FEED OK");
 
   // ─────────────────────────────────────────────────────
   // WATCHDOG TIMEOUT HANDLER
   // ─────────────────────────────────────────────────────
   handleWatchdogTimeout();
+  LOG_INFO("LOOP[" + String(loop_count) + "] WATCHDOG_TIMEOUT_HANDLER OK");
   // ═══════════════════════════════════════════════════
   // ✅ FIX #1: STATE_SAFE_MODE_PROVISIONING HANDLING
   // ═══════════════════════════════════════════════════
@@ -1923,25 +1949,36 @@ void loop() {
   }
 
   // Phase 2: Communication monitoring (with Circuit Breaker - Phase 6+)
+  LOG_INFO("LOOP[" + String(loop_count) + "] WIFI_START");
   wifiManager.loop();      // Monitor WiFi connection (Circuit Breaker integrated)
+  LOG_INFO("LOOP[" + String(loop_count) + "] WIFI OK");
+  LOG_INFO("LOOP[" + String(loop_count) + "] MQTT_START");
   mqttClient.loop();       // Process MQTT messages + heartbeat (Circuit Breaker integrated)
+  LOG_INFO("LOOP[" + String(loop_count) + "] MQTT OK");
 
   // Phase 4: Sensor measurements
+  LOG_INFO("LOOP[" + String(loop_count) + "] SENSOR_START");
   sensorManager.performAllMeasurements();
+  LOG_INFO("LOOP[" + String(loop_count) + "] SENSOR OK");
 
   // Phase 5: Actuator maintenance
+  LOG_INFO("LOOP[" + String(loop_count) + "] ACTUATOR_START");
   actuatorManager.processActuatorLoops();
   static unsigned long last_actuator_status = 0;
   if (millis() - last_actuator_status > 30000) {
     actuatorManager.publishAllActuatorStatus();
     last_actuator_status = millis();
   }
+  LOG_INFO("LOOP[" + String(loop_count) + "] ACTUATOR OK");
 
   // ============================================
   // PHASE 7: HEALTH MONITORING (automatic via HealthMonitor)
   // ============================================
+  LOG_INFO("LOOP[" + String(loop_count) + "] HEALTH_START");
   healthMonitor.loop();  // Publishes automatically if needed
+  LOG_INFO("LOOP[" + String(loop_count) + "] HEALTH OK");
 
+  LOG_INFO("LOOP[" + String(loop_count) + "] END");
   delay(10);  // Small delay (gives CPU to scheduler)
 }
 
