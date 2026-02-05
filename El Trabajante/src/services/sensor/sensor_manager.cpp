@@ -1050,6 +1050,9 @@ void SensorManager::performAllMeasurements() {
                 sensors_[i].last_reading = now;  // Update timestamp
             }
         }
+
+        // Feed watchdog between sensor measurements to prevent timeout
+        yield();
     }
 
     // Update global timestamp for compatibility

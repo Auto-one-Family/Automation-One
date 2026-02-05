@@ -101,12 +101,15 @@ bool I2CBusManager::begin() {
     
     if (!wire_init) {
         LOG_ERROR("I2C Wire.begin() failed");
-        errorTracker.trackError(ERROR_I2C_INIT_FAILED, 
+        errorTracker.trackError(ERROR_I2C_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,
                                "Wire.begin() returned false");
         return false;
     }
-    
+
+    // Set Wire timeout to prevent indefinite blocking on unresponsive sensors
+    Wire.setTimeOut(100);  // 100ms timeout for Wire operations
+
     // Verify I2C bus is functional by attempting a quick scan
     Wire.beginTransmission(0x00);  // General call address
     uint8_t error = Wire.endTransmission();
@@ -802,6 +805,7 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
     // Step 2: Wait for conversion
     if (protocol->conversion_time_ms > 0) {
         delay(protocol->conversion_time_ms);
+        yield();  // Feed watchdog after blocking delay
     }
 
     // Step 3: Read data directly (no register address)
