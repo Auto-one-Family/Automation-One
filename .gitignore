@@ -92,3 +92,10 @@ docs/.vuepress/.temp
 # Backup files
 El Servador/god_kaiser_server/backups/
 **/backups/
+
+# ========== DOCKER ==========
+docker-compose.override.yml
+
+# Backups
+backups/*.sql.gz
+backups/*.sql
