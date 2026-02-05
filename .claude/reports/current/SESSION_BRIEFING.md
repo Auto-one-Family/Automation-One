@@ -1,509 +1,270 @@
-# SESSION_BRIEFING.md
+# Session Briefing - End-to-End Provisioning Test
 
-**Erstellt:** 2026-02-05
-**Session:** Neue Debug/Development Session
-**System Manager Version:** 2.0
-
----
-
-## 1. PROJEKT-GRUNDLAGEN
-
-### 1.1 Architektur
-
-**AutomationOne** ist ein IoT-Framework für Gewächshausautomation mit **Server-Zentrischem Prinzip:**
-
-```
-El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante (ESP32)
-```
-
-| Komponente | Technologie | Rolle |
-|------------|-------------|-------|
-| **El Frontend** | Vue 3, TypeScript, Pinia, Tailwind | Dashboard, Visualisierung |
-| **El Servador** | Python, FastAPI, SQLAlchemy, MQTT | ALLE Intelligenz, Business-Logic |
-| **El Trabajante** | C++, PlatformIO, ESP32 | Dummer Agent - RAW-Daten senden, Commands empfangen |
-
-**KRITISCH:** ESP32 implementiert **KEINE** Business-Logic. Alle Entscheidungen erfolgen auf dem Server.
-
-### 1.2 Konventionen
-
-| Bereich | Konvention | Beispiel |
-|---------|------------|----------|
-| ESP32 C++ | snake_case | `sensor_manager`, `handle_mqtt_message` |
-| Python | snake_case | `sensor_service`, `handle_sensor_data` |
-| Vue/TS | camelCase | `sensorData`, `handleSensorUpdate` |
-| Error-Codes ESP32 | 1000-4999 | 1011 = I2C_ERROR |
-| Error-Codes Server | 5000-5999 | 5001 = ESP_DEVICE_NOT_FOUND |
+**Timestamp:** 2026-02-05T17:47:00+01:00
+**Ziel:** Kompletter End-to-End-Test des Provisioning-Flows mit ESP32-WROOM + SHT31
+**Hardware:** 1× ESP32-WROOM (esp32dev), 1× SHT31 an I2C (Adresse 0x44)
 
 ---
 
-## 2. AKTUELLER SYSTEM-STATUS
+## 1. Systemzustand
 
-### 2.1 Git-Status
+### 1.1 Docker Services
 
-| Attribut | Wert |
-|----------|------|
-| **Branch** | `feature/docs-cleanup` |
-| **Uncommitted Changes** | ~50+ Dateien (Agents, Skills, Server-Code) |
-| **Letzter Commit** | `f2d2405` - feat(agents): Dev-Agents für Server und MQTT hinzugefügt |
+| Container | Image | Status | Health | Ports | Uptime |
+|-----------|-------|--------|--------|-------|--------|
+| automationone-server | auto-one-el-servador | Up | healthy | 8000:8000 | 16 min |
+| automationone-postgres | postgres:16-alpine | Up | healthy | 5432:5432 | 16 min |
+| automationone-mqtt | eclipse-mosquitto:2 | Up | healthy | 1883:1883, 9001:9001 | 16 min |
+| automationone-frontend | auto-one-el-frontend | Up | healthy | 5173:5173 | 16 min |
 
-**Hinweis:** Viele `.claude/` Dokumentations-Dateien wurden reorganisiert (Agents, Skills, Referenzen).
+**Ergebnis:** Alle 4 Services healthy
 
-### 2.2 Services
+### 1.2 Server Health
 
-| Service | Port | Status |
-|---------|------|--------|
-| **MQTT Broker (Mosquitto)** | 1883 | ✅ RUNNING (Windows Service) |
-| **Server (FastAPI)** | 8000 | ❌ NOT RUNNING |
-
-**→ Server muss vor Debug-Sessions gestartet werden:**
-```bash
-cd "El Servador/god_kaiser_server" && poetry run uvicorn src.main:app --reload
+```json
+{"status":"healthy","mqtt_connected":true}
 ```
 
-### 2.3 Letzte Reports
+- Server operational
+- MQTT-Verbindung aktiv
+- Maintenance-Jobs laufen (Health-Checks alle 30s/60s)
 
-| Report | Pfad |
-|--------|------|
-| Agent-Duplikat-Analyse | `.claude/reports/current/AGENT_DUPLICATE_ANALYSIS.md` |
-| Dokumentations-Inventar | `.claude/reports/current/DOCUMENTATION_INVENTORY.md` |
+### 1.3 Datenbank
 
----
+- **Status:** Frisch initialisiert
+- **ESP-Devices:** 0 (leer)
+- **User:** Admin erstellt (16:47:32 UTC)
+- **Credentials:** god_kaiser / god_kaiser_db / password
 
-## 3. SESSION-KONTEXT
-
-### 3.1 Hardware-Konfiguration
-
-**⚠️ Keine Hardware-Info angegeben.**
-
-Für Hardware-Tests bitte angeben:
-- ESP32: physisch oder Wokwi?
-- Sensoren: welche an welchem GPIO?
-- Aktoren: welche an welchem GPIO?
-
-### 3.2 Test-Fokus
-
-**⚠️ Kein spezifischer Test-Fokus angegeben.**
-
-Mögliche Fokus-Bereiche:
-- Boot-Sequenz verifizieren
-- Sensor-Datenfluss testen
-- Actuator-Commands testen
-- E2E-Flow verifizieren
-- Bug-Fixing (BUG-006, BUG-008)
-
----
-
-## 4. AGENT-KOMPENDIUM
-
-### 4.1 Operators (System-Steuerung)
-
-#### system-control
-
-**Domäne:** Systemsteuerung, Server/MQTT-Operations, Hardware-Operationen
-
-**Aktivieren wenn:**
-- Server starten/stoppen
-- MQTT-Traffic live beobachten
-- REST-API Aufrufe ausführen
-- ESP32 flashen und monitoren
-- Debug-Sessions koordinieren
-
-**Benötigte Inputs:**
-- Welche Operation soll ausgeführt werden?
-- Ziel-ESP-ID (falls relevant)
-
-**Optimale Arbeitsweise:**
-1. Referenz lesen: `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
-2. Voraussetzungen prüfen (Server online? MQTT erreichbar?)
-3. Befehl ausführen
-4. Ergebnis verifizieren
-
-**Output:** Operations-Bericht mit Timestamps, MQTT-Flow-Dokumentation
-
-**NICHT aktivieren für:** Log-Analyse, DB-Queries, Code-Änderungen
-
----
-
-#### db-inspector
-
-**Domäne:** Datenbank-Inspektion und Cleanup (SQLite/PostgreSQL)
-
-**Aktivieren wenn:**
-- Device-Registrierung prüfen
-- Sensor-Daten verifizieren
-- Audit-Logs analysieren
-- Orphaned Records finden
-- Stale Data bereinigen
-- Schema prüfen
-
-**Benötigte Inputs:**
-- Was soll geprüft werden? (ESPs, Sensoren, Aktoren, Logs)
-- Cleanup nötig? (Bestätigung erforderlich!)
-
-**Optimale Arbeitsweise:**
-1. Referenz lesen: Section 1 in SYSTEM_OPERATIONS_REFERENCE.md
-2. DB-Existenz prüfen
-3. SELECT vor DELETE (immer!)
-4. Kaskaden beachten bei Löschungen
-
-**Output:** Strukturierte Tabellen, Cleanup-Empfehlungen
-
-**NICHT aktivieren für:** Server-Logs, MQTT-Traffic, Code-Änderungen
-
----
-
-### 4.2 Debug-Agents (Log-Analyse)
-
-#### esp32-debug
-
-**Domäne:** ESP32 Serial-Log Analyse
-
-**Aktivieren wenn:**
-- Boot-Probleme
-- WiFi/MQTT-Verbindungsfehler
-- Sensor-Initialisierung fehlgeschlagen
-- GPIO-Fehler
-- Watchdog-Resets
-- Error-Codes 1000-4999
-
-**Benötigte Inputs:**
-- Session-Kontext aus `logs/current/STATUS.md`
-- Serial-Log aus `logs/current/esp32_serial.log`
-- Test-Modus: BOOT/CONFIG/SENSOR/ACTUATOR/E2E
-
-**Optimale Arbeitsweise:**
-1. STATUS.md lesen (Modus, erwartete Patterns)
-2. Boot-Sequenz verifizieren
-3. JEDEN [ERROR] und [CRITICAL] dokumentieren
-4. Timing analysieren
-
-**Output:** `.claude/reports/current/ESP32_[MODUS]_REPORT.md`
-
-**NICHT aktivieren für:** Server-Logs, MQTT-Traffic, DB-Queries
-
----
-
-#### server-debug
-
-**Domäne:** Server-Log Analyse (god_kaiser.log)
-
-**Aktivieren wenn:**
-- Handler-Fehler
-- Startup-Probleme
-- Error-Codes 5000-5699
-- Database-Operationen fehlgeschlagen
-- WebSocket-Events
-
-**Benötigte Inputs:**
-- Session-Kontext aus `logs/current/STATUS.md`
-- Server-Log aus `logs/current/god_kaiser.log`
-- Fokus: boot/sensor/actuator/config/e2e
-
-**Optimale Arbeitsweise:**
-1. STATUS.md lesen
-2. JSON-Logs parsen (jede Zeile = ein JSON-Objekt)
-3. Nach Level filtern: CRITICAL > ERROR > WARNING
-4. Logger-Namen → Handler zuordnen
-
-**Output:** `.claude/reports/current/SERVER_[MODUS]_REPORT.md`
-
-**NICHT aktivieren für:** ESP32 Serial-Logs, MQTT-Traffic (Topics/Payloads)
-
----
-
-#### mqtt-debug
-
-**Domäne:** MQTT-Traffic Analyse (mosquitto_sub -v Logs)
-
-**Aktivieren wenn:**
-- Message-Sequenzen validieren
-- Fehlende Responses identifizieren
-- Timing-Gaps analysieren
-- Payload-Struktur prüfen
-- LWT-Messages untersuchen
-
-**Benötigte Inputs:**
-- Session-Kontext aus `logs/current/STATUS.md`
-- MQTT-Traffic aus `logs/current/mqtt_traffic.log`
-- Fokus: heartbeat/sensor/actuator/config/e2e
-
-**Optimale Arbeitsweise:**
-1. STATUS.md lesen
-2. Traffic parsen: Topic + Payload trennen
-3. Request-Response-Paare matchen
-4. Timing zwischen Messages analysieren
-
-**Output:** `.claude/reports/current/MQTT_[MODUS]_REPORT.md`
-
-**NICHT aktivieren für:** ESP32-internes Verhalten, Server-Handler-Verhalten
-
----
-
-#### meta-analyst
-
-**Domäne:** Cross-Report-Analyse, Widersprüche, Problemketten
-
-**Aktivieren wenn:**
-- Alle Debug-Agents abgeschlossen
-- CONSOLIDATED_REPORT.md erstellt
-- TM möchte Report-Vergleich
-- Widersprüche zwischen Reports vermuten
-- Zeitliche Problemsequenzen analysieren
-- LETZTE Analyse-Instanz im Test-Flow
-
-**Benötigte Inputs:**
-- ALLE DREI Logs: esp32_serial.log, mqtt_traffic.log, god_kaiser.log
-- Problem-Beschreibung
-
-**Optimale Arbeitsweise:**
-1. Log-Validierung ZUERST (Timestamps prüfen!)
-2. Alle drei Logs lesen
-3. Error-Codes dekodieren (rc=-2 = Timeout)
-4. Ein Root-Cause identifizieren
-
-**Output:** `.claude/reports/current/PROVISIONING_REPORT.md`
-
-**NICHT aktivieren für:** Sensor-Daten, Actuator-Commands, Business-Logik
-
----
-
-### 4.3 Dev-Agents (Pattern-konforme Implementierung)
-
-#### esp32-dev
-
-**Domäne:** ESP32 C++ Code-Implementierung
-
-**Aktivieren wenn:**
-- Sensor hinzufügen
-- Actuator erstellen
-- Driver implementieren
-- Service erweitern
-- NVS-Key hinzufügen
-- MQTT erweitern (ESP32-Seite)
-- Error-Code definieren
-- GPIO-Logik
-
-**Benötigte Inputs:**
-- Was soll implementiert werden?
-- Welches existierende Pattern soll erweitert werden?
-
-**Optimale Arbeitsweise:**
-1. SKILL.md lesen: `.claude/skills/esp32-development/SKILL.md`
-2. MODULE_REGISTRY.md lesen
-3. Ähnliche Implementation in Codebase finden
-4. Pattern kopieren und erweitern
-5. `pio run -e esp32_dev` verifizieren
-
-**Output:** Analyse-Report, Implementierungsplan, oder Code-Dateien
-
-**NICHT aktivieren für:** Server-Code, Log-Analyse, Python-Code
-
----
-
-#### server-dev
-
-**Domäne:** Server Python Code-Implementierung
-
-**Aktivieren wenn:**
-- MQTT Handler hinzufügen
-- REST Endpoint erstellen
-- Repository erweitern
-- Service implementieren
-- Pydantic Schema erstellen
-- Database Model hinzufügen
-- Sensor Library erstellen
-- Logic Engine erweitern
-
-**Benötigte Inputs:**
-- Was soll implementiert werden?
-- Welches existierende Pattern soll erweitert werden?
-
-**Optimale Arbeitsweise:**
-1. SKILL.md lesen: `.claude/skills/server-development/SKILL.md`
-2. Ähnliche Implementation finden
-3. Pattern kopieren und erweitern
-4. `poetry run pytest` verifizieren
-
-**Output:** Analyse-Report, Implementierungsplan, oder Code-Dateien
-
-**NICHT aktivieren für:** ESP32-Code, Log-Analyse, C++ Code
-
----
-
-#### mqtt-dev
-
-**Domäne:** MQTT Topic-Implementation (Server UND ESP32)
-
-**Aktivieren wenn:**
-- Neues Topic hinzufügen
-- Handler erstellen
-- Publisher erweitern
-- Subscriber erweitern
-- Payload-Schema definieren
-- QoS festlegen
-
-**Benötigte Inputs:**
-- Topic-Spezifikation
-- Richtung: ESP→Server, Server→ESP, bidirektional
-- Payload-Struktur
-
-**Optimale Arbeitsweise:**
-1. MQTT_TOPICS.md lesen
-2. Server topics.py prüfen
-3. ESP32 topic_builder.h prüfen
-4. **BEIDE Seiten synchron implementieren**
-
-**Output:** Analyse-Report, Implementierungsplan, oder Code-Dateien (Server + ESP32)
-
-**NICHT aktivieren für:** Log-Analyse, Traffic-Debugging
-
----
-
-## 5. REFERENZ-VERZEICHNIS
-
-| Referenz | Pfad | Inhalt |
-|----------|------|--------|
-| **SYSTEM_OPERATIONS** | `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` | Alle Befehle, Credentials, Workflows |
-| **COMMUNICATION_FLOWS** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | 7 Datenflüsse mit Code-Locations |
-| **ERROR_CODES** | `.claude/reference/errors/ERROR_CODES.md` | ESP32: 1000-4999, Server: 5000-5999 |
-| **MQTT_TOPICS** | `.claude/reference/api/MQTT_TOPICS.md` | Topic-Schema, Payloads, QoS |
-
-### Skill-Dokumentation
-
-| Skill | Pfad |
-|-------|------|
-| ESP32 Development | `.claude/skills/esp32-development/SKILL.md` |
-| Server Development | `.claude/skills/server-development/SKILL.md` |
-| Frontend Development | `.claude/skills/frontend-development/SKILL.md` |
-
----
-
-## 6. WORKFLOW-STRUKTUR
-
-### 6.1 Typischer Test-Workflow
+### 1.4 Alembic-Migrations-Status
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         TEST-SESSION WORKFLOW                            │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  1. SESSION-START                                                        │
-│     └── SESSION_BRIEFING.md lesen (dieses Dokument)                     │
-│     └── Hardware-Info und Test-Fokus bereitstellen                      │
-│                                                                          │
-│  2. SYSTEM VORBEREITEN (system-control)                                  │
-│     └── Server starten: cd "El Servador/god_kaiser_server" &&           │
-│         poetry run uvicorn src.main:app --reload                        │
-│     └── MQTT-Broker starten (falls nicht läuft)                         │
-│     └── Health-Check: curl http://localhost:8000/health                 │
-│                                                                          │
-│  3. OPERATIONEN AUSFÜHREN (system-control)                               │
-│     └── ESP flashen/starten                                             │
-│     └── MQTT-Traffic beobachten                                         │
-│     └── API-Calls ausführen                                             │
-│                                                                          │
-│  4. LOGS ANALYSIEREN (Debug-Agents)                                      │
-│     └── esp32-debug: Serial-Log                                         │
-│     └── server-debug: god_kaiser.log                                    │
-│     └── mqtt-debug: mqtt_traffic.log                                    │
-│                                                                          │
-│  5. FIX IMPLEMENTIEREN (Dev-Agents, falls nötig)                         │
-│     └── esp32-dev: ESP32 C++ Code                                       │
-│     └── server-dev: Server Python Code                                  │
-│     └── mqtt-dev: MQTT Topics (beide Seiten)                            │
-│                                                                          │
-│  6. VERIFIZIEREN                                                         │
-│     └── Build: pio run / pytest                                         │
-│     └── Test wiederholen                                                │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+HEAD: 950ad9ce87bb
 ```
 
-### 6.2 Agent-Entscheidungshilfe
+**Letzte Migration:** `Add i2c_address to sensor unique constraint`
+- Ermöglicht mehrere I2C-Sensoren am gleichen Bus mit unterschiedlichen Adressen
+- Relevanz für SHT31: Unterstützt 0x44 und 0x45
 
-| Situation | Agent |
-|-----------|-------|
-| Server/MQTT starten, API-Calls | `system-control` |
-| DB prüfen, Cleanup | `db-inspector` |
-| ESP32 Serial-Log analysieren | `esp32-debug` |
-| Server-Log analysieren | `server-debug` |
-| MQTT-Traffic analysieren | `mqtt-debug` |
-| Cross-Report-Analyse | `meta-analyst` |
-| ESP32 Code schreiben | `esp32-dev` |
-| Server Code schreiben | `server-dev` |
-| MQTT Topic implementieren | `mqtt-dev` |
-
-### 6.3 Debug-Agent nach Log-Quelle
-
-| Log-Quelle | Pfad | Debug-Agent |
-|------------|------|-------------|
-| ESP32 Serial | `logs/current/esp32_serial.log` | `esp32-debug` |
-| Server | `logs/current/god_kaiser.log` | `server-debug` |
-| MQTT Traffic | `logs/current/mqtt_traffic.log` | `mqtt-debug` |
+**Status:** Auf HEAD - alle Migrationen angewendet
 
 ---
 
-## 7. FÜR DEN TECHNICAL MANAGER
+## 2. Codebase-Readiness für SHT31-Test
 
-### 7.1 Wie orchestrieren
+### 2.1 ESP32-Seite (El Trabajante)
 
-1. **system-control ZUERST** - Startet Services, generiert Logs
-2. **Debug-Agents nach Bedarf** - Analysieren die generierten Logs
-3. **Dev-Agents nur bei Code-Änderungen** - Pattern-konform implementieren
+| Komponente | Status | Datei |
+|------------|--------|-------|
+| I2C Bus Manager | Implementiert | `src/drivers/i2c_bus.cpp` |
+| SHT31 Protocol Definition | Implementiert | `src/drivers/i2c_sensor_protocol.cpp:21` |
+| SensorConfig mit i2c_address | Implementiert | `src/models/sensor_types.h:46` |
+| SensorReading mit i2c_address | Implementiert | `src/models/sensor_types.h:94` |
 
-### 7.2 Agent-Befehle formulieren
+**SHT31 Protocol Details:**
+- Sensor-Type: `"sht31"`
+- Command: `0x24 0x00` (High Repeatability, No Clock Stretching)
+- Measurement Delay: 20ms
+- Response: 6 Bytes (temp_msb, temp_lsb, crc, hum_msb, hum_lsb, crc)
+- CRC-8 Polynomial: 0x31
+- Default I2C-Adressen: 0x44 (ADDR Pin LOW), 0x45 (ADDR Pin HIGH)
 
-Beispiel-Format für Agent-Aufträge:
+### 2.2 Server-Seite (El Servador)
 
+| Komponente | Status | Datei |
+|------------|--------|-------|
+| SHT31 Temperature Processor | Implementiert | `sensor_libraries/active/temperature.py` |
+| SHT31 Humidity Processor | Implementiert | `sensor_libraries/active/humidity.py` |
+| I2C-Address in DB-Schema | Implementiert | Alembic 950ad9ce87bb |
+| Heartbeat Handler (Pending Detection) | Implementiert | `mqtt/handlers/heartbeat_handler.py` |
+
+### 2.3 Provisioning-Flow Status
+
+| Phase | Implementiert | Bemerkung |
+|-------|---------------|-----------|
+| ESP sendet Heartbeat | Ja | Unregistriertes Gerät → `pending_approval` |
+| Server erkennt neues Gerät | Ja | Tracking in Memory + DB |
+| Admin sieht Pending Devices | Ja | GET `/esp/devices/pending` |
+| Admin approved Device | Ja | POST `/esp/devices/{id}/approve` |
+| Server sendet Config | Ja | Via MQTT nach Approval |
+| ESP bestätigt Config | Ja | `config_response` Topic |
+
+---
+
+## 3. Relevante REST-Endpoints für den Test
+
+### 3.1 Authentication
+
+| Endpoint | Method | Beschreibung |
+|----------|--------|--------------|
+| `/api/v1/auth/login` | POST | Login (admin/password) |
+| `/api/v1/auth/me` | GET | User-Info verifizieren |
+
+### 3.2 Provisioning-Flow
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/api/v1/esp/devices/pending` | GET | Operator | **Pending Devices auflisten** |
+| `/api/v1/esp/devices/{esp_id}/approve` | POST | Operator | **Device genehmigen** |
+| `/api/v1/esp/devices/{esp_id}/reject` | POST | Operator | Device ablehnen |
+
+**Approval Request Body:**
+```json
+{
+  "name": "Gewächshaus Sensor 1",
+  "zone_id": "greenhouse",
+  "zone_name": "Gewächshaus"
+}
 ```
-Du bist [agent-name].
 
-**Kontext:**
-- Session: [Datum/Zeit]
-- Modus: [BOOT/CONFIG/SENSOR/ACTUATOR/E2E]
+### 3.3 Nach Approval
 
-**Auftrag:**
-[Spezifische Aufgabe]
+| Endpoint | Method | Beschreibung |
+|----------|--------|--------------|
+| `/api/v1/esp/devices` | GET | Alle registrierten ESPs |
+| `/api/v1/esp/devices/{esp_id}` | GET | ESP-Details |
+| `/api/v1/esp/devices/{esp_id}/config` | POST | Sensor/Actuator-Config senden |
+| `/api/v1/sensors` | GET | Alle Sensoren |
+| `/api/v1/sensors/by-esp/{esp_id}` | GET | Sensoren nach ESP |
+| `/api/v1/sensors/{sensor_id}/data` | GET | Sensor-Daten (historisch) |
 
-**Fokus:**
-[Bestimmte Dateien, Topics, Error-Codes]
+---
 
-**Fragen:**
-1. [Konkrete Frage 1]
-2. [Konkrete Frage 2]
+## 4. Relevante MQTT-Topics für den Test
 
-**Output:**
-[Pfad zum Report]
+### 4.1 ESP → Server (Provisioning)
+
+| Topic | QoS | Beschreibung |
+|-------|-----|--------------|
+| `kaiser/god/esp/{esp_id}/system/heartbeat` | 0 | Heartbeat (60s Intervall) |
+| `kaiser/god/esp/{esp_id}/config_response` | 2 | Config-Bestätigung |
+
+### 4.2 Server → ESP
+
+| Topic | QoS | Beschreibung |
+|-------|-----|--------------|
+| `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | 0 | Heartbeat ACK mit Status |
+| `kaiser/god/esp/{esp_id}/config` | 2 | Sensor/Actuator-Konfiguration |
+
+### 4.3 Sensor-Datenfluss (nach Config)
+
+| Topic | QoS | Beschreibung |
+|-------|-----|--------------|
+| `kaiser/god/esp/{esp_id}/sensor/{gpio}/data` | 1 | Sensor-Rohdaten |
+
+**Sensor-Data Payload (SHT31):**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_XXXXXXXX",
+  "gpio": 21,
+  "sensor_type": "sht31_temp",
+  "raw": 25000,
+  "raw_mode": true,
+  "i2c_address": 68,
+  "quality": "good"
+}
 ```
 
-### 7.3 Wichtige Hinweise
+**Hinweis:** i2c_address = 68 (dezimal) = 0x44 (hex)
 
-- **Server und MQTT sind aktuell NICHT gestartet** - Vor Tests starten!
-- **Branch feature/docs-cleanup** - Dokumentations-Änderungen uncommitted
-- **BUG-006 und BUG-008** - Höchste Priorität, wahrscheinlich zusammenhängend
-- **Keine Hardware-Info** - Für Hardware-Tests muss der User diese angeben
+---
 
-### 7.4 Quick-Commands
+## 5. Bekannte Risiken und Potenzielle Blocker
+
+### 5.1 Kritisch
+
+| Risiko | Beschreibung | Prüfung erforderlich |
+|--------|--------------|---------------------|
+| ESP32-Firmware nicht aktuell | SHT31-Support erst kürzlich hinzugefügt | `pio run` Build verifizieren |
+| I2C-Verdrahtung | SDA/SCL vertauscht oder Pull-Ups fehlen | Hardware-Prüfung |
+
+### 5.2 Mittel
+
+| Risiko | Beschreibung | Workaround |
+|--------|--------------|------------|
+| WiFi-Konfiguration | ESP muss SSID/Passwort kennen | NVS-Config oder Hotspot-Mode |
+| MQTT-Broker Adresse | ESP muss Server-IP kennen | NVS-Config |
+| SHT31-Adresse Konflikt | Falls 0x45 statt 0x44 | ADDR-Pin prüfen |
+
+### 5.3 Niedrig
+
+| Risiko | Beschreibung |
+|--------|--------------|
+| Heap-Fragmentierung | Bei längerem Betrieb möglich |
+| Watchdog-Timeout | Falls I2C-Read zu lange blockiert |
+
+---
+
+## 6. Empfohlene Test-Reihenfolge
+
+### Phase 1: Vorbereitung
+
+1. **Frontend öffnen:** http://localhost:5173
+2. **Login:** admin / (Setup-Passwort)
+3. **ESP32 flashen:** `pio run -t upload`
+4. **ESP32 Serial Monitor:** `pio device monitor`
+
+### Phase 2: Provisioning
+
+5. **ESP32 bootet** → Heartbeats an Server
+6. **Server-Logs beobachten:** Pending Device erkannt?
+7. **Frontend:** Pending Devices prüfen (oder REST-API)
+8. **Approve Device** mit Name/Zone
+
+### Phase 3: Konfiguration
+
+9. **Config-Push verifizieren:** ESP32 Serial Log
+10. **Config-Response prüfen:** Server-Log
+
+### Phase 4: Sensor-Daten
+
+11. **SHT31-Messung starten:** Automatisch nach Config
+12. **MQTT-Traffic beobachten:** `sensor/{gpio}/data` Topics
+13. **Server-Processing:** Rohdaten → verarbeitete Werte
+14. **Frontend:** Sensor-Daten anzeigen
+
+### Phase 5: Verifikation
+
+15. **DB prüfen:** Sensor-Einträge, Messwerte
+16. **Historische Daten:** `/sensors/{id}/data` Endpoint
+17. **Health-Status:** ESP online, Sensor aktiv
+
+---
+
+## 7. Monitoring-Befehle
 
 ```bash
-# Server starten
-cd "El Servador/god_kaiser_server" && poetry run uvicorn src.main:app --reload
+# Server-Logs (live)
+docker logs -f automationone-server
 
-# Health Check
-curl http://localhost:8000/health
+# MQTT-Traffic beobachten
+mosquitto_sub -h localhost -t "kaiser/god/esp/#" -v
 
-# MQTT beobachten
-mosquitto_sub -h localhost -t "kaiser/#" -v
+# DB-Abfragen
+docker exec -it automationone-postgres psql -U god_kaiser -d god_kaiser_db
 
-# ESP32 flashen
-cd "El Trabajante" && pio run -e esp32_dev -t upload
-
-# Serial Monitor
-cd "El Trabajante" && pio device monitor
+# ESP32 Serial
+pio device monitor -b 115200
 ```
 
 ---
 
-**Ende des Session-Briefings**
+## 8. Zusammenfassung
 
-*System Manager v2.0 - Erklärt das System, entscheidet NICHTS*
+| Aspekt | Status |
+|--------|--------|
+| Docker-Stack | Healthy |
+| Datenbank | Frisch, leer, auf HEAD |
+| Server | Operational, MQTT verbunden |
+| ESP32 SHT31-Support | Code vorhanden |
+| Server SHT31-Processing | Implementiert |
+| Provisioning-Flow | Vollständig implementiert |
+| REST-Endpoints | Dokumentiert |
+| MQTT-Topics | Dokumentiert |
+
+**System ist bereit für den End-to-End-Test.**
+
+---
+
+*Erstellt von: system-manager | Für: Technical Manager*
