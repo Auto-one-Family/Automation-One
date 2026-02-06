@@ -129,6 +129,17 @@ echo "[1/7] Ordner vorbereiten..."
 mkdir -p "$LOGS_ARCHIVE"
 mkdir -p "$REPORTS_ARCHIVE"
 
+# Archiviere vorherige Session-Logs (falls vorhanden)
+if ls "$LOGS_DIR"/*.log 1>/dev/null 2>&1 || ls "$LOGS_DIR"/*.md 1>/dev/null 2>&1; then
+    ARCHIVE_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    ARCHIVE_DIR="$PROJECT_ROOT/logs/archive/${ARCHIVE_TIMESTAMP}"
+    mkdir -p "$ARCHIVE_DIR"
+    cp -f "$LOGS_DIR"/*.log "$ARCHIVE_DIR/" 2>/dev/null || true
+    cp -f "$LOGS_DIR"/*.md "$ARCHIVE_DIR/" 2>/dev/null || true
+    cp -f "$REPORTS_DIR"/*.md "$ARCHIVE_DIR/" 2>/dev/null || true
+    echo "📦 Vorherige Session archiviert: $ARCHIVE_DIR"
+fi
+
 # logs/current/ leeren
 if [ -d "$LOGS_DIR" ]; then
     rm -f "$LOGS_DIR"/*.log 2>/dev/null || true
@@ -150,35 +161,43 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# Schritt 2: MQTT Broker prüfen
+# Schritt 2: Docker-Stack prüfen
 # ----------------------------------------------------------------------------
 echo ""
-echo "[2/7] MQTT Broker prüfen..."
+echo "[2/7] Docker-Stack prüfen..."
 
-MQTT_OK=false
-if $IS_WINDOWS; then
-    if /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -q ":1883"; then
-        MQTT_OK=true
-    fi
-else
-    if netstat -tuln 2>/dev/null | grep -q ":1883 "; then
-        MQTT_OK=true
-    fi
-fi
-
-if $MQTT_OK; then
-    echo "      ✓ MQTT Broker läuft (Port 1883)"
-else
-    echo "      ✗ MQTT Broker NICHT erreichbar!"
-    echo ""
-    echo "      Bitte Mosquitto starten:"
-    if $IS_WINDOWS; then
-        echo "        net start mosquitto     (Windows Dienst)"
-    fi
-    echo "        mosquitto               (manuell)"
-    echo ""
+# Docker-Stack Status prüfen
+echo "🐳 Prüfe Docker-Stack..."
+if ! command -v docker &>/dev/null; then
+    echo "❌ Docker nicht gefunden. Bitte Docker Desktop starten."
     exit 1
 fi
+
+DOCKER_STATUS=$(docker compose ps --format json 2>/dev/null || echo "")
+if [ -z "$DOCKER_STATUS" ]; then
+    echo "⚠️  Docker-Stack nicht gestartet. Starte mit: docker compose up -d"
+    exit 1
+fi
+
+# Prüfe ob alle 4 Core-Services healthy sind
+UNHEALTHY=$(docker compose ps --format json | python3 -c "
+import sys, json
+services = [json.loads(line) for line in sys.stdin if line.strip()]
+for s in services:
+    health = s.get('Health', 'unknown')
+    if health != 'healthy':
+        print(f\"  ⚠️  {s.get('Service', '?')}: {s.get('State', '?')} ({health})\")
+" 2>/dev/null)
+
+if [ -n "$UNHEALTHY" ]; then
+    echo "⚠️  Nicht alle Services healthy:"
+    echo "$UNHEALTHY"
+    echo ""
+    echo "Trotzdem fortfahren? (y/N)"
+    read -r response
+    [ "$response" != "y" ] && exit 1
+fi
+echo "✅ Docker-Stack: Alle Services healthy"
 
 # ----------------------------------------------------------------------------
 # Schritt 3: Server prüfen / starten
@@ -187,176 +206,108 @@ echo ""
 echo "[3/7] Server prüfen..."
 
 SERVER_OK=false
-SERVER_PID=""
-POETRY_CMD=""
 
-# Funktion: Server-PID über Port 8000 finden (robust für Windows)
-get_server_pid_by_port() {
-    if $IS_WINDOWS; then
-        # Windows: netstat -ano zeigt PID, LISTENING (EN) oder ABHÖREN (DE)
-        # grep -a für binary-safe (Umlaut-Probleme)
-        /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -a ":8000" | grep -a "LISTENING\|ABH" | awk '{print $5}' | head -1
-    else
-        # Linux/Mac: lsof oder netstat
-        lsof -ti:8000 2>/dev/null || netstat -tlnp 2>/dev/null | grep ":8000" | awk '{print $7}' | cut -d'/' -f1
-    fi
-}
+# LEGACY: Server-PID-Tracking – ersetzt durch Docker-Health
+# SERVER_PID=""
+# POETRY_CMD=""
 
-# Funktion: Poetry finden (robust für Windows Git Bash)
-find_poetry() {
-    # Option 1: Im PATH
-    if command -v poetry &> /dev/null; then
-        echo "poetry"
-        return 0
-    fi
+# LEGACY: get_server_pid_by_port – ersetzt durch Docker-Flow
+# get_server_pid_by_port() {
+#     if $IS_WINDOWS; then
+#         /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -a ":8000" | grep -a "LISTENING\|ABH" | awk '{print $5}' | head -1
+#     else
+#         lsof -ti:8000 2>/dev/null || netstat -tlnp 2>/dev/null | grep ":8000" | awk '{print $7}' | cut -d'/' -f1
+#     fi
+# }
 
-    # Option 2: Windows AppData (Python Scripts)
-    if [[ -n "$APPDATA" && -f "$APPDATA/Python/Scripts/poetry.exe" ]]; then
-        echo "$APPDATA/Python/Scripts/poetry.exe"
-        return 0
-    fi
+# LEGACY: Poetry-Suche – ersetzt durch Docker-Flow
+# find_poetry() {
+#     # Option 1: Im PATH
+#     if command -v poetry &> /dev/null; then
+#         echo "poetry"
+#         return 0
+#     fi
+#
+#     # Option 2: Windows AppData (Python Scripts)
+#     if [[ -n "$APPDATA" && -f "$APPDATA/Python/Scripts/poetry.exe" ]]; then
+#         echo "$APPDATA/Python/Scripts/poetry.exe"
+#         return 0
+#     fi
+#
+#     # Option 3: Windows LocalAppData (pip user install)
+#     if [[ -n "$LOCALAPPDATA" && -f "$LOCALAPPDATA/Programs/Python/Python313/Scripts/poetry.exe" ]]; then
+#         echo "$LOCALAPPDATA/Programs/Python/Python313/Scripts/poetry.exe"
+#         return 0
+#     fi
+#
+#     # Option 4: User home local bin
+#     if [[ -f "$HOME/.local/bin/poetry" ]]; then
+#         echo "$HOME/.local/bin/poetry"
+#         return 0
+#     fi
+#
+#     # Option 5: Windows User profile
+#     if [[ -n "$USERPROFILE" ]]; then
+#         # Konvertiere Windows-Pfad zu Unix-Pfad
+#         local user_profile_unix=$(echo "$USERPROFILE" | sed 's|\\|/|g' | sed 's|C:|/c|')
+#         if [[ -f "$user_profile_unix/AppData/Local/Programs/Python/Python313/Scripts/poetry.exe" ]]; then
+#             echo "$user_profile_unix/AppData/Local/Programs/Python/Python313/Scripts/poetry.exe"
+#             return 0
+#         fi
+#     fi
+#
+#     return 1
+# }
 
-    # Option 3: Windows LocalAppData (pip user install)
-    if [[ -n "$LOCALAPPDATA" && -f "$LOCALAPPDATA/Programs/Python/Python313/Scripts/poetry.exe" ]]; then
-        echo "$LOCALAPPDATA/Programs/Python/Python313/Scripts/poetry.exe"
-        return 0
-    fi
+# Prüfe Server-Health via Docker
+SERVER_HEALTH=$(docker compose ps el-servador --format json 2>/dev/null | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if line.strip():
+        s = json.loads(line.strip())
+        print(s.get('Health', 'unknown'))
+" 2>/dev/null)
 
-    # Option 4: User home local bin
-    if [[ -f "$HOME/.local/bin/poetry" ]]; then
-        echo "$HOME/.local/bin/poetry"
-        return 0
-    fi
-
-    # Option 5: Windows User profile
-    if [[ -n "$USERPROFILE" ]]; then
-        # Konvertiere Windows-Pfad zu Unix-Pfad
-        local user_profile_unix=$(echo "$USERPROFILE" | sed 's|\\|/|g' | sed 's|C:|/c|')
-        if [[ -f "$user_profile_unix/AppData/Local/Programs/Python/Python313/Scripts/poetry.exe" ]]; then
-            echo "$user_profile_unix/AppData/Local/Programs/Python/Python313/Scripts/poetry.exe"
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
-if $IS_WINDOWS; then
-    # Auf Windows: LISTENING (EN) oder ABHÖREN (DE) - grep mit -a für binary-safe
-    if /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -a ":8000" | grep -a -q "LISTENING\|ABH"; then
-        SERVER_OK=true
-        SERVER_PID=$(get_server_pid_by_port)
-    fi
-else
-    if netstat -tuln 2>/dev/null | grep -q ":8000 "; then
-        SERVER_OK=true
-        SERVER_PID=$(get_server_pid_by_port)
-    fi
+if [ "$SERVER_HEALTH" = "healthy" ]; then
+    SERVER_OK=true
+    echo "      ✓ El Servador: healthy (via Docker)"
 fi
 
 if $SERVER_OK; then
-    echo "      ✓ Server läuft bereits (Port 8000, PID: $SERVER_PID)"
-    # Server wurde nicht von uns gestartet
-    WITH_SERVER=false
-    SERVER_PID=""
-elif $WITH_SERVER; then
-    echo "      ⏳ Server wird gestartet (--with-server)..."
+    echo "      ✓ Server läuft bereits"
+elif [ "$WITH_SERVER" = true ]; then
+    echo "🔄 Server-Restart via Docker..."
+    docker compose restart el-servador
 
-    # Poetry finden
-    POETRY_CMD=$(find_poetry)
-    if [[ -z "$POETRY_CMD" ]]; then
-        echo "      ✗ Poetry nicht gefunden!"
-        echo ""
-        echo "        Installieren mit:"
-        echo "          curl -sSL https://install.python-poetry.org | python3 -"
-        echo "        Oder:"
-        echo "          pip install poetry"
-        echo ""
-        exit 1
-    fi
-    echo "      ✓ Poetry gefunden: $POETRY_CMD"
-
-    # Prüfe ob Dependencies installiert sind
-    if ! (cd "$SERVER_DIR" && "$POETRY_CMD" check &> /dev/null); then
-        echo "      ⏳ Dependencies werden installiert..."
-        (cd "$SERVER_DIR" && "$POETRY_CMD" install --no-interaction) || {
-            echo "      ✗ poetry install fehlgeschlagen!"
-            exit 1
-        }
-    fi
-
-    # Server im Hintergrund starten
-    # WICHTIG: Im god_kaiser_server Verzeichnis ist der Modul-Pfad "src.main:app"
-    (
-        cd "$SERVER_DIR"
-        "$POETRY_CMD" run uvicorn src.main:app --host 0.0.0.0 --port 8000 2>&1
-    ) > "$LOGS_DIR/server_console.log" 2>&1 &
-    SHELL_PID=$!
-
-    # Warten bis Server bereit ist (max 30s)
-    echo "      ⏳ Warte auf Server-Start..."
-    WAIT_COUNT=0
-    while [ $WAIT_COUNT -lt 30 ]; do
+    echo "⏳ Warte auf Server Health..."
+    RETRY=0
+    MAX_RETRY=30
+    while [ $RETRY -lt $MAX_RETRY ]; do
+        HEALTH=$(docker compose ps el-servador --format json | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if line.strip():
+        s = json.loads(line.strip())
+        print(s.get('Health', 'unknown'))
+" 2>/dev/null)
+        if [ "$HEALTH" = "healthy" ]; then
+            SERVER_OK=true
+            echo "✅ El Servador: healthy"
+            break
+        fi
+        RETRY=$((RETRY + 1))
         sleep 1
-        ((WAIT_COUNT++)) || true
-
-        if $IS_WINDOWS; then
-            # LISTENING (EN) oder ABHÖREN (DE), grep -a für binary-safe
-            if /c/Windows/System32/netstat.exe -ano 2>/dev/null | grep -a ":8000" | grep -a -q "LISTENING\|ABH"; then
-                SERVER_OK=true
-                # Hole echte PID über Port (nicht Shell-PID)
-                SERVER_PID=$(get_server_pid_by_port)
-                break
-            fi
-        else
-            if netstat -tuln 2>/dev/null | grep -q ":8000 "; then
-                SERVER_OK=true
-                SERVER_PID=$(get_server_pid_by_port)
-                break
-            fi
-        fi
-
-        # Fortschritt anzeigen
-        if [ $((WAIT_COUNT % 5)) -eq 0 ]; then
-            echo "      ⏳ ... ${WAIT_COUNT}s"
-        fi
-
-        # Prüfe ob Prozess noch läuft (frühe Fehler erkennen)
-        if ! kill -0 $SHELL_PID 2>/dev/null; then
-            echo "      ✗ Server-Prozess beendet!"
-            echo ""
-            echo "      Letzte Zeilen aus server_console.log:"
-            tail -20 "$LOGS_DIR/server_console.log" 2>/dev/null || echo "      (Log nicht verfügbar)"
-            echo ""
-            exit 1
-        fi
     done
 
-    if $SERVER_OK; then
-        echo "      ✓ Server gestartet (Port 8000, PID: $SERVER_PID)"
-
-        # Health-Check zur Bestätigung
-        sleep 1
-        if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "      ✓ Health-Check erfolgreich"
-        else
-            echo "      ⚠ Health-Check fehlgeschlagen (Server läuft aber evtl. noch nicht vollständig)"
-        fi
-    else
-        echo "      ✗ Server konnte nicht gestartet werden!"
-        echo ""
-        echo "      Letzte Zeilen aus server_console.log:"
-        tail -20 "$LOGS_DIR/server_console.log" 2>/dev/null || echo "      (Log nicht verfügbar)"
-        echo ""
-        exit 1
+    if [ $RETRY -eq $MAX_RETRY ]; then
+        echo "❌ El Servador nicht healthy nach ${MAX_RETRY}s"
+        echo "   Logs: docker compose logs --tail=20 el-servador"
     fi
 else
-    echo "      ⚠ Server läuft NICHT (Port 8000)"
+    echo "      ⚠ Server nicht healthy"
     echo ""
     echo "        Option 1: Session mit --with-server neu starten"
-    echo "        Option 2: Server manuell starten:"
-    echo "          cd \"El Servador/god_kaiser_server\""
-    echo "          poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    echo "        Option 2: docker compose restart el-servador"
     echo ""
 fi
 
@@ -387,41 +338,36 @@ fi
 echo ""
 echo "[5/7] MQTT Capture starten..."
 
-MOSQUITTO_SUB=""
-if command -v mosquitto_sub &> /dev/null; then
-    MOSQUITTO_SUB="mosquitto_sub"
-elif [[ -f "/c/Program Files/mosquitto/mosquitto_sub.exe" ]]; then
-    MOSQUITTO_SUB="/c/Program Files/mosquitto/mosquitto_sub.exe"
-fi
-
+# MQTT Capture via Docker mit Timestamps
 MQTT_PID=""
-if [[ -n "$MOSQUITTO_SUB" ]]; then
-    "$MOSQUITTO_SUB" -h localhost -t "kaiser/#" -v > "$LOGS_DIR/mqtt_traffic.log" 2>&1 &
+
+# Prüfe ob mqtt-broker Container läuft
+MQTT_RUNNING=$(docker compose ps mqtt-broker --format json 2>/dev/null | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if line.strip():
+        s = json.loads(line.strip())
+        print(s.get('State', 'unknown'))
+" 2>/dev/null)
+
+if [ "$MQTT_RUNNING" = "running" ]; then
+    # MQTT Capture mit Timestamps via Docker
+    docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v 2>/dev/null | while IFS= read -r line; do
+        echo "[$(date -Iseconds)] $line"
+    done > "$LOGS_DIR/mqtt_traffic.log" &
     MQTT_PID=$!
 
     sleep 1
 
-    # Windows: Hole echten PID
-    if $IS_WINDOWS; then
-        REAL_PID=$(tasklist //FI "IMAGENAME eq mosquitto_sub.exe" //FO CSV //NH 2>/dev/null | head -1 | cut -d',' -f2 | tr -d '"')
-        if [[ -n "$REAL_PID" && "$REAL_PID" =~ ^[0-9]+$ ]]; then
-            MQTT_PID="$REAL_PID"
-            echo "      ✓ MQTT Capture gestartet (PID: $MQTT_PID)"
-        else
-            echo "      ✗ MQTT Capture fehlgeschlagen"
-            MQTT_PID=""
-        fi
+    if kill -0 $MQTT_PID 2>/dev/null; then
+        echo "      ✓ MQTT Capture gestartet (PID: $MQTT_PID, via Docker)"
     else
-        if kill -0 $MQTT_PID 2>/dev/null; then
-            echo "      ✓ MQTT Capture gestartet (PID: $MQTT_PID)"
-        else
-            echo "      ✗ MQTT Capture fehlgeschlagen"
-            MQTT_PID=""
-        fi
+        echo "      ✗ MQTT Capture fehlgeschlagen"
+        MQTT_PID=""
     fi
 else
-    echo "      ✗ mosquitto_sub nicht gefunden!"
-    echo "        Bitte Mosquitto-Clients installieren"
+    echo "      ✗ mqtt-broker Container nicht running!"
+    echo "        Starte mit: docker compose up -d mqtt-broker"
 fi
 
 # ----------------------------------------------------------------------------
@@ -482,6 +428,57 @@ echo "" >> "$LOGS_DIR/STATUS.md"
 echo '```' >> "$LOGS_DIR/STATUS.md"
 echo "$DOCKER_STATUS" >> "$LOGS_DIR/STATUS.md"
 echo '```' >> "$LOGS_DIR/STATUS.md"
+
+# Docker Container Details
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "## Docker-Stack Details" >> "$LOGS_DIR/STATUS.md"
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "| Container | Image | Status | Health | Uptime | Ports |" >> "$LOGS_DIR/STATUS.md"
+echo "|-----------|-------|--------|--------|--------|-------|" >> "$LOGS_DIR/STATUS.md"
+docker compose ps --format json | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if not line.strip(): continue
+    s = json.loads(line.strip())
+    name = s.get('Name', '?')
+    image = s.get('Image', '?')
+    state = s.get('State', '?')
+    health = s.get('Health', '-')
+    status = s.get('Status', '?')
+    ports = s.get('Publishers', [])
+    port_str = ', '.join(f\"{p.get('PublishedPort','')}:{p.get('TargetPort','')}\" for p in ports if p.get('PublishedPort'))
+    print(f'| {name} | {image} | {state} | {health} | {status} | {port_str} |')
+" >> "$LOGS_DIR/STATUS.md" 2>/dev/null
+
+# Container-Ressourcen
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "## Container-Ressourcen" >> "$LOGS_DIR/STATUS.md"
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "| Container | CPU % | RAM Usage | RAM Limit | Net I/O |" >> "$LOGS_DIR/STATUS.md"
+echo "|-----------|-------|-----------|-----------|---------|" >> "$LOGS_DIR/STATUS.md"
+docker stats --no-stream --format "| {{.Name}} | {{.CPUPerc}} | {{.MemUsage}} | {{.MemPerc}} | {{.NetIO}} |" >> "$LOGS_DIR/STATUS.md" 2>/dev/null
+
+# Docker Versions
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "## Docker Environment" >> "$LOGS_DIR/STATUS.md"
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "- Docker Engine: $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'N/A')" >> "$LOGS_DIR/STATUS.md"
+echo "- Compose: $(docker compose version --short 2>/dev/null || echo 'N/A')" >> "$LOGS_DIR/STATUS.md"
+
+# Log-Pfade Übersicht
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "## Log-Pfade" >> "$LOGS_DIR/STATUS.md"
+echo "" >> "$LOGS_DIR/STATUS.md"
+echo "| Bereich | Pfad | Status |" >> "$LOGS_DIR/STATUS.md"
+echo "|---------|------|--------|" >> "$LOGS_DIR/STATUS.md"
+for logdir in server mqtt postgres esp32; do
+    if [ -d "$PROJECT_ROOT/logs/$logdir" ]; then
+        COUNT=$(ls -1 "$PROJECT_ROOT/logs/$logdir"/*.log 2>/dev/null | wc -l)
+        echo "| $logdir | logs/$logdir/ | ${COUNT} Log-Dateien |" >> "$LOGS_DIR/STATUS.md"
+    else
+        echo "| $logdir | logs/$logdir/ | ⚠️ Verzeichnis fehlt |" >> "$LOGS_DIR/STATUS.md"
+    fi
+done
 
 # Hardware-Setup Placeholder für User
 cat >> "$LOGS_DIR/STATUS.md" << 'HARDWAREEOF'
