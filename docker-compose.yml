@@ -20,15 +20,18 @@ services:
     image: postgres:16-alpine
     container_name: automationone-postgres
     environment:
-      POSTGRES_USER: god_kaiser
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: god_kaiser_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./logs/postgres:/var/log/postgresql
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U god_kaiser -d god_kaiser_db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,7 +51,7 @@ services:
     volumes:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
+      - ./logs/mqtt:/mosquitto/log
     healthcheck:
       test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
       interval: 30s
@@ -66,9 +69,14 @@ services:
       context: ./El Servador
       dockerfile: Dockerfile
     container_name: automationone-server
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       # Database
-      DATABASE_URL: postgresql+asyncpg://god_kaiser:password@postgres:5432/god_kaiser_db
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       DATABASE_AUTO_INIT: "true"
       # MQTT
       MQTT_BROKER_HOST: mqtt-broker
@@ -79,7 +87,7 @@ services:
       SERVER_PORT: "8000"
       SERVER_RELOAD: "true"
       # Security (CHANGE IN PRODUCTION!)
-      JWT_SECRET_KEY: dev-secret-key-change-in-production
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       # Environment
       ENVIRONMENT: development
       LOG_LEVEL: INFO
@@ -90,7 +98,7 @@ services:
     volumes:
       # Live-reload: Mount source code
       - ./El Servador/god_kaiser_server/src:/app/src:ro
-      - ./logs:/app/logs
+      - ./logs/server:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,6 +122,11 @@ services:
       context: ./El Frontend
       dockerfile: Dockerfile
     container_name: automationone-frontend
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
@@ -148,8 +161,6 @@ volumes:
     name: automationone-postgres-data
   mosquitto_data:
     name: automationone-mosquitto-data
-  mosquitto_log:
-    name: automationone-mosquitto-log
 
 # ============================================
 # Network

@@ -3,7 +3,7 @@ COMPOSE := docker compose
 COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
 
-.PHONY: help up down dev test logs logs-server shell-server db-migrate db-backup db-restore mqtt-sub status health
+.PHONY: help up down dev test logs logs-server shell-server db-migrate db-status db-backup db-restore mqtt-sub status health
 
 help:
 	@echo "AutomationOne Docker Commands:"
@@ -15,6 +15,7 @@ help:
 	@echo "  make logs-server - Follow server logs"
 	@echo "  make shell-server- Shell into server"
 	@echo "  make db-migrate  - Run migrations"
+	@echo "  make db-status   - Show migration status"
 	@echo "  make db-backup   - Backup database"
 	@echo "  make db-restore  - Restore (FILE=path)"
 	@echo "  make mqtt-sub    - Subscribe all topics"
@@ -59,6 +60,10 @@ db-migrate:
 
 db-rollback:
 	docker exec -it automationone-server python -m alembic downgrade -1
+
+db-status:
+	docker exec -it automationone-server python -m alembic current
+	docker exec -it automationone-server python -m alembic history --verbose -l 5
 
 db-backup:
 	@mkdir -p backups
