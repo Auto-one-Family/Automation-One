@@ -27,6 +27,12 @@ logs/current/*
 !logs/current/.gitkeep
 logs/archive/*
 !logs/archive/.gitkeep
+logs/postgres/*
+!logs/postgres/.gitkeep
+logs/mqtt/*
+!logs/mqtt/.gitkeep
+logs/server/*.log*
+!logs/server/.gitkeep
 !logs/README.md
 yarn-debug.log*
 *.tmp
