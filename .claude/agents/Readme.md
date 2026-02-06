@@ -1,20 +1,37 @@
 # Debug-Agenten
 
-> **Version:** 3.0 | **Aktualisiert:** 2026-02-02
+> **Version:** 3.1 | **Aktualisiert:** 2026-02-06
 > **Format:** Offizielles Claude Code Agent-Format
 
 ---
 
 ## Verfügbare Agenten
 
+### Debug-Agenten (Log-Analyse)
+
 | Agent | Datei | Beschreibung | Tools |
 |-------|-------|--------------|-------|
 | **esp32-debug** | `esp32-debug.md` | ESP32 Serial-Log Analyse | Read, Grep, Glob |
-| **server-debug** | `server-debug.md` | God-Kaiser Server-Log Analyse | Read, Grep, Glob |
-| **mqtt-debug** | `mqtt-debug.md` | MQTT Traffic Analyse | Read, Grep, Glob |
+| **server-debug** | `server/server-debug-agent.md` | God-Kaiser Server-Log Analyse | Read, Grep, Glob |
+| **mqtt-debug** | `mqtt/mqtt-debug-agent.md` | MQTT Traffic Analyse | Read, Grep, Glob |
+| **frontend-debug** | `frontend/frontend-debug-agent.md` | Frontend Build/Runtime Analyse | Read, Grep, Glob |
 | **meta-analyst** | `meta-analyst.md` | Cross-Report-Analyse & Problemvergleich | Read, Grep, Glob |
+
+### System-Operators
+
+| Agent | Datei | Beschreibung | Tools |
+|-------|-------|--------------|-------|
 | **db-inspector** | `db-inspector.md` | Datenbank-Inspektion & Cleanup | Read, Bash, Grep, Glob |
 | **system-control** | `system-control.md` | System-Steuerung & Operations | Read, Bash, Grep, Glob |
+
+### Dev-Agenten (Pattern-konforme Implementierung)
+
+| Agent | Datei | Beschreibung | Tools |
+|-------|-------|--------------|-------|
+| **esp32-dev** | `esp32/esp32-dev-agent.md` | ESP32 Firmware-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
+| **server-dev** | `server/server_dev_agent.md` | Server-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
+| **mqtt-dev** | `mqtt/mqtt_dev_agent.md` | MQTT-Protokoll-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
+| **frontend-dev** | `frontend/frontend_dev_agent.md` | Frontend-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
 
 ---
 
@@ -86,8 +103,9 @@ Alle Debug-Agenten lesen `logs/current/STATUS.md` für Session-Kontext:
 | Agent | Primärer Log | Pfad |
 |-------|--------------|------|
 | esp32-debug | ESP32 Serial | `logs/current/esp32_serial.log` |
-| server-debug | Server JSON | `logs/current/god_kaiser.log` |
-| mqtt-debug | MQTT Traffic | `logs/current/mqtt_traffic.log` |
+| server-debug | Server JSON | `logs/server/god_kaiser.log` |
+| mqtt-debug | MQTT Traffic | `logs/mqtt/mqtt_traffic.log` |
+| frontend-debug | Frontend Build/Console | `El Frontend/` (Vite Output) |
 | meta-analyst | Alle Reports in reports/current/ | - |
 
 ---
@@ -107,20 +125,29 @@ Format: `[AGENT]_[MODUS]_REPORT.md`
 
 ---
 
-## Migration von v2.x
+## Ordnerstruktur
 
-Die Agenten wurden von der alten Unterordner-Struktur ins flache Format migriert:
-
-| Alt | Neu |
-|-----|-----|
-| `agents/esp32/ESP32_DEBUG_AGENT.md` | `agents/esp32-debug.md` |
-| `agents/server/SERVER_DEBUG_AGENT.md` | `agents/server-debug.md` |
-| `agents/mqtt/MQTT_DEBUG_AGENT.md` | `agents/mqtt-debug.md` |
-| `agents/Provisioning/PROVISIONING_DEBUG_AGENT.md` | `agents/meta-analyst.md` |
-| `agents/System_Operators/DB-Inspector.md` | `agents/db-inspector.md` |
-| `agents/System_Operators/System-Control.md` | `agents/system-control.md` |
-
-Backups der alten Dateien: `.claude/archive/agents_backup_20260202/`
+```
+.claude/agents/
+├── Readme.md                        # Dieser Index
+├── esp32-debug.md                   # ESP32 Debug (flach)
+├── meta-analyst.md                  # Meta-Analyst (flach)
+├── db-inspector.md                  # DB Inspector (flach)
+├── system-control.md                # System Control (flach)
+├── esp32/
+│   └── esp32-dev-agent.md          # ESP32 Dev
+├── server/
+│   ├── server-debug-agent.md       # Server Debug
+│   └── server_dev_agent.md         # Server Dev
+├── mqtt/
+│   ├── mqtt-debug-agent.md         # MQTT Debug
+│   └── mqtt_dev_agent.md           # MQTT Dev
+├── frontend/
+│   ├── frontend-debug-agent.md     # Frontend Debug
+│   └── frontend_dev_agent.md       # Frontend Dev
+└── System Manager/
+    └── system-manager.md           # Session-Orchestrator
+```
 
 ---
 

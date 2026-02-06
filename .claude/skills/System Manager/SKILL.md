@@ -130,10 +130,11 @@ Ziel: [Was soll getestet werden]
 git status --short && git branch --show-current
 git log --oneline -3
 
-# Server prüfen (Windows)
-netstat -ano | findstr "8000" || echo "Server: NOT RUNNING"
+# Docker-Stack prüfen (EMPFOHLEN)
+docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 
-# MQTT-Broker prüfen
+# Alternativ: Port-Check (Windows)
+netstat -ano | findstr "8000" || echo "Server: NOT RUNNING"
 netstat -ano | findstr "1883" || echo "MQTT: NOT RUNNING"
 
 # Bug-Liste

@@ -15,7 +15,10 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | ESP32, C++, Sensor, Aktor, GPIO, PlatformIO, Wokwi | `esp32-development` |
 | Python, FastAPI, MQTT-Handler, Database, API | `server-development` |
 | Vue 3, TypeScript, Pinia, WebSocket, Dashboard | `frontend-development` |
+| MQTT Topic, Publisher, Subscriber, Payload-Schema, QoS | `mqtt-development` |
 | Reports sammeln, konsolidieren, Session-Ende, TM-Übergabe | `collect-reports` |
+| /do, Plan ausführen, Implementierung starten | `do` |
+| /updatedocs, Docs aktualisieren, Doku-Update nach Änderungen | `updatedocs` |
 
 ## Dev-Agenten (Pattern-konforme Implementierung)
 
@@ -55,6 +58,7 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | `esp32-debug` | Serial, Boot, NVS, GPIO-Fehler, Watchdog, Crash |
 | `server-debug` | FastAPI, Handler, Error 5xxx, god_kaiser.log |
 | `mqtt-debug` | Topic, Payload, QoS, Publish, Subscribe, Broker |
+| `frontend-debug` | Build-Error, TypeScript, Vite, WebSocket, Pinia, Vue-Component |
 
 ## Meta-Analyse (Cross-Report)
 
@@ -68,7 +72,10 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 |------|--------|
 | `reference/api/` | MQTT_TOPICS, REST_ENDPOINTS, WEBSOCKET_EVENTS |
 | `reference/errors/` | ERROR_CODES (ESP32: 1000-4999, Server: 5000-5999) |
-| `reference/patterns/` | COMMUNICATION_FLOWS, ARCHITECTURE |
+| `reference/patterns/` | COMMUNICATION_FLOWS, ARCHITECTURE_DEPENDENCIES, vs_claude_best_practice |
+| `reference/debugging/` | LOG_LOCATIONS, CI_PIPELINE, ACCESS_LIMITATIONS |
+| `reference/testing/` | TEST_WORKFLOW, SYSTEM_OPERATIONS_REFERENCE |
+| `reference/security/` | PRODUCTION_CHECKLIST |
 
 ## Regeln
 
@@ -97,7 +104,7 @@ Der Technical Manager (TM) ist eine externe Claude-Instanz in claude.ai – hat 
 4. User kopiert SESSION_BRIEFING.md zum Technical Manager (claude.ai, extern)
 5. TM analysiert Briefing, formuliert Agent-Befehle (einzeln pro Agent)
 6. User führt system-control ZUERST aus → generiert Log-Daten, Operations-Bericht
-7. User führt Debug-Agents EINZELN aus (esp32-debug, server-debug, mqtt-debug) → jeder schreibt eigenen Report
+7. User führt Debug-Agents EINZELN aus (esp32-debug, server-debug, mqtt-debug, frontend-debug) → jeder schreibt eigenen Report
 8. User ruft /collect-reports auf → CONSOLIDATED_REPORT.md
 9. User kopiert CONSOLIDATED_REPORT.md zum TM
 10. TM analysiert, aktiviert meta-analyst für Cross-Report-Vergleich
@@ -123,6 +130,7 @@ Der Technical Manager (TM) ist eine externe Claude-Instanz in claude.ai – hat 
 | | - `esp32-debug` | ESP32 Serial-Log | ESP32_*_REPORT.md |
 | | - `server-debug` | Server JSON-Log | SERVER_*_REPORT.md |
 | | - `mqtt-debug` | MQTT-Traffic | MQTT_*_REPORT.md |
+| | - `frontend-debug` | Frontend Build/Runtime | FRONTEND_*_REPORT.md |
 | 4 | `/collect-reports` | Konsolidiert alle Reports | CONSOLIDATED_REPORT.md → zum TM |
 | 5 | `meta-analyst` | Cross-Report-Vergleich, Widersprüche finden | META_ANALYSIS.md |
 

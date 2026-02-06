@@ -1,7 +1,7 @@
 ---
 name: frontend-development
 description: |
-  El Frontend Vue 3 Dashboard Entwicklung für AutomationOne IoT-Framework.
+  El Frontend Vue 3 Dashboard Entwicklung fuer AutomationOne IoT-Framework.
   Verwenden bei: Vue 3, TypeScript, Vite, Pinia, Tailwind CSS, Axios,
   WebSocket, Dashboard, ESP-Card, Sensor-Satellite, Actuator-Satellite,
   Zone-Management, Drag-Drop, System-Monitor, Database-Explorer, Log-Viewer,
@@ -15,357 +15,361 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 6.1 (SKILL.md Format)
-**Letzte Aktualisierung:** 2026-02-01
-**Zweck:** Maßgebliche Referenz für Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
+**Version:** 7.0
+**Letzte Aktualisierung:** 2026-02-06
+**Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~8.000+ Zeilen TypeScript/Vue)
 
-> **📖 Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
-> **📖 ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
-> **🛠️ Service-Management:** Siehe `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0
+> **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
+> **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
 
 ---
 
 ## 0. Quick Reference - Was suche ich?
 
-| Ich will... | Primäre Quelle | Code-Location |
-|-------------|----------------|---------------|
-| **Server + Frontend starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0 | - |
-| **Services stoppen/neu starten** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.3 | - |
-| **Server-Logs prüfen** | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` Section 0.5 | - |
-| **Bug debuggen** | `El Frontend/Docs/Bugs_and_Phases/` | Nach Phasen sortiert |
-| **API-Endpoint finden** | `.claude/reference/api/REST_ENDPOINTS.md` | ~170 Endpoints dokumentiert |
-| **WebSocket verstehen** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Alle Events mit Payloads |
-| **Zone zuweisen** | [Section 7: Zone Management](#7-zone-management) | `src/components/zones/` |
-| **ESP-Gerät verwalten** | [Section 3: ESP Store](#3-state-management-pinia-stores) | `src/stores/esp.ts` |
-| **System Monitor** | [Section 5.1: System Monitor](#51-system-monitor-view--tabs) | `src/views/SystemMonitorView.vue` |
-| **Komponente finden** | [Section 1: Ordnerstruktur](#1-ordnerstruktur) | `src/components/` |
+| Ich will... | Primaere Quelle | Code-Location |
+|-------------|-----------------|---------------|
+| **Server + Frontend starten** | `make dev` oder Docker | - |
+| **API-Endpoint finden** | `.claude/reference/api/REST_ENDPOINTS.md` | ~170 Endpoints |
+| **WebSocket verstehen** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Events mit Payloads |
+| **Zone zuweisen** | [Section 12: Drag & Drop](#12-drag--drop-system) | `src/components/zones/` |
+| **ESP-Geraet verwalten** | [Section 5: State Management](#5-state-management-pinia) | `src/stores/esp.ts` |
+| **System Monitor** | [Section 10: Router](#10-router--navigation) | `SystemMonitorView.vue` |
+| **Komponente finden** | [Section 2: Ordnerstruktur](#2-ordnerstruktur) | `src/components/` |
 | **Error-Codes verstehen** | `.claude/reference/errors/ERROR_CODES.md` | ESP32 + Server Codes |
-| **Datenflüsse verstehen** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Frontend↔Server↔ESP32 |
+| **Farben/Design** | [Section 11: Farbsystem](#11-farbsystem--design) | `src/style.css` |
 
 ---
 
-## 1. Ordnerstruktur
+## 1. Projekt-Setup
+
+### Tech-Stack (aus package.json)
+
+| Paket | Version | Zweck |
+|-------|---------|-------|
+| vue | ^3.5.13 | Framework (Composition API + Script Setup) |
+| vue-router | ^4.5.0 | Routing + Navigation Guards |
+| pinia | ^2.3.0 | State Management |
+| axios | ^1.10.0 | HTTP-Client mit Interceptors |
+| chart.js | ^4.5.0 | Diagramme |
+| vue-chartjs | ^5.3.2 | Chart.js Vue-Wrapper |
+| lucide-vue-next | ^0.468.0 | Icons |
+| date-fns | ^4.1.0 | Datum-Utilities |
+| @vueuse/core | ^10.11.1 | Vue Composition Utilities |
+| vue-draggable-plus | ^0.6.0 | Drag & Drop |
+| vite | ^6.2.4 | Build Tool |
+| tailwindcss | ^3.4.17 | CSS Framework |
+| typescript | ~5.7.2 | Type Safety |
+
+### Build-Konfiguration
+
+**vite.config.ts:**
+```typescript
+// Port: 5173 (Dev)
+// Proxy: /api → http://el-servador:8000
+// Proxy: /ws → ws://el-servador:8000
+// Alias: @ → ./src/
+```
+
+**tsconfig.json:**
+```typescript
+// strict: true
+// noUnusedLocals: true
+// noUnusedParameters: true
+// paths: @/* → ./src/*
+```
+
+### Docker
+
+- Container: `automationone-frontend`
+- Port: 3000 (Prod) / 5173 (Dev)
+- Volume: `./El Frontend:/app`
+
+### Make-Targets
+
+```bash
+make dev          # Docker Dev mit hot-reload
+make build        # Production build
+make logs         # el-frontend Container Logs
+docker exec automationone-frontend npm run build  # Build im Container
+```
+
+---
+
+## 2. Ordnerstruktur
 
 ```
 El Frontend/src/
-├── api/                      # HTTP API Clients (16 Dateien)
-│   ├── index.ts              # Axios-Instanz, Interceptors, Token-Refresh
-│   ├── auth.ts               # Login, Logout, Setup, Refresh, Me
-│   ├── esp.ts                # ⭐ Unified ESP API (Mock + Real)
-│   ├── sensors.ts            # Sensor CRUD + History + Stats
-│   ├── actuators.ts          # Actuator Control
-│   ├── zones.ts              # Zone Assignment
-│   ├── subzones.ts           # Subzone Management
-│   ├── logic.ts              # Cross-ESP Automation Rules
-│   ├── debug.ts              # Mock ESP Simulation
-│   ├── audit.ts              # Audit Log Query + Stats
-│   ├── config.ts             # System Configuration
-│   ├── database.ts           # Database Explorer
-│   ├── logs.ts               # ⭐ Log Viewer + Log-Management
-│   ├── loadtest.ts           # Load Testing
-│   └── users.ts              # User Management
-│
-├── components/               # Vue 3 Komponenten (12 Unterordner)
-│   ├── common/               # ⭐ Wiederverwendbare UI-Bausteine (13 Dateien)
-│   │   ├── Button.vue, Input.vue, Select.vue, Toggle.vue
-│   │   ├── Badge.vue, Card.vue, Modal.vue, Spinner.vue
-│   │   ├── LoadingState.vue, EmptyState.vue, ErrorState.vue
-│   │   ├── ToastContainer.vue
-│   │   └── index.ts          # Re-Exports (ohne ToastContainer)
-│   │
-│   ├── layout/               # App Layout (3 Dateien)
-│   │   ├── MainLayout.vue    # Haupt-Layout mit Sidebar
-│   │   ├── AppHeader.vue     # Top Header
-│   │   └── AppSidebar.vue    # Seitenleiste Navigation
-│   │
-│   ├── dashboard/            # Dashboard-spezifisch (9 Dateien)
-│   │   ├── StatCard.vue      # KPI-Kacheln
-│   │   ├── ActionBar.vue     # Top Action Bar
-│   │   ├── SensorSidebar.vue # Sensor-Kategorien Sidebar
-│   │   ├── ActuatorSidebar.vue # Aktor-Kategorien Sidebar
-│   │   ├── ComponentSidebar.vue # Kombinierte Sidebar
-│   │   ├── StatusPill.vue, UnassignedDropBar.vue
-│   │   ├── CrossEspConnectionOverlay.vue
-│   │   └── index.ts
-│   │
-│   ├── esp/                  # ESP Device Darstellung (10 Dateien)
-│   │   ├── ESPCard.vue       # ⭐ Device Card (Status, Health)
-│   │   ├── ESPOrbitalLayout.vue # Orbital-Layout für Sensoren
-│   │   ├── SensorSatellite.vue # Sensor im Orbital-Layout
-│   │   ├── ActuatorSatellite.vue # Actuator im Orbital-Layout
-│   │   ├── SensorValueCard.vue # Sensor-Wert Display
-│   │   ├── ConnectionLines.vue # Logic-Rule Verbindungslinien
-│   │   ├── AnalysisDropZone.vue
-│   │   ├── ESPSettingsPopover.vue # ESP-Einstellungen
-│   │   ├── GpioPicker.vue    # GPIO-Pin-Auswahl
-│   │   ├── PendingDevicesPanel.vue # Pending Devices
-│   │   └── index.ts
-│   │
-│   ├── database/             # Database Explorer (6 Dateien)
-│   │   ├── DataTable.vue, FilterPanel.vue, Pagination.vue
-│   │   ├── RecordDetailModal.vue, SchemaInfoPanel.vue
-│   │   └── TableSelector.vue
-│   │
-│   ├── zones/                # Zone Management (2 Dateien)
-│   │   ├── ZoneAssignmentPanel.vue # ⭐ Zone-Zuweisung
-│   │   └── ZoneGroup.vue     # Drag & Drop Container
-│   │
-│   ├── charts/               # Chart-Komponenten
-│   │   └── MultiSensorChart.vue
-│   │
-│   ├── filters/              # ⭐ Filter-Komponenten
-│   │   ├── UnifiedFilterBar.vue # Wiederverwendbare Filter-Leiste
-│   │   └── index.ts
-│   │
-│   ├── system-monitor/       # ⭐ System Monitor (18 Dateien)
-│   │   ├── MonitorTabs.vue   # Tab-Leiste + Live-Toggle
-│   │   ├── MonitorFilterPanel.vue # Filter
-│   │   ├── UnifiedEventList.vue # Ereignisliste
-│   │   ├── EventDetailsPanel.vue # Detail mit Fehlercode
-│   │   ├── EventsTab.vue, ServerLogsTab.vue
-│   │   ├── DatabaseTab.vue, MqttTrafficTab.vue
-│   │   ├── LogManagementPanel.vue, CleanupPanel.vue
-│   │   ├── CleanupPreview.vue, DataSourceSelector.vue
-│   │   ├── AutoCleanupStatusBanner.vue
-│   │   ├── PreviewEventCard.vue, RssiIndicator.vue
-│   │   └── index.ts
-│   │
+├── api/           # 16 API-Module
+│   ├── index.ts       # Axios Instance + Interceptors (~89 Zeilen)
+│   ├── auth.ts        # Login, Logout, Token Refresh
+│   ├── esp.ts         # ESP Device Management
+│   ├── sensors.ts     # Sensor CRUD + History
+│   ├── actuators.ts   # Actuator Commands
+│   ├── zones.ts       # Zone Assignment
+│   ├── logic.ts       # Automation Rules
+│   └── ...
+├── components/    # Vue Komponenten (12 Unterverzeichnisse)
+│   ├── common/        # Modal, Toast, Skeleton (13 Dateien)
+│   ├── layout/        # MainLayout, AppHeader, AppSidebar
+│   ├── dashboard/     # Dashboard subcomponents (9 Dateien)
+│   ├── esp/           # ESPCard, ESPOrbitalLayout (10 Dateien)
+│   ├── zones/         # ZoneGroup, ZoneAssignmentPanel
+│   ├── charts/        # MultiSensorChart
+│   ├── system-monitor/ # 18 Dateien
+│   ├── filters/       # UnifiedFilterBar
 │   └── modals/
-│       └── CreateMockEspModal.vue
-│
-├── composables/              # Vue 3 Composables (9 Dateien)
-│   ├── useWebSocket.ts       # ⭐ WebSocket Integration
-│   ├── useToast.ts           # Toast Notifications (Singleton)
-│   ├── useModal.ts           # Modal State Management
-│   ├── useSwipeNavigation.ts # Mobile Swipe Gesten
-│   ├── useZoneDragDrop.ts    # Zone Drag & Drop Logic
-│   ├── useConfigResponse.ts  # Config Response Handler
-│   ├── useQueryFilters.ts    # ⭐ URL↔Filter-Sync
-│   ├── useGpioStatus.ts      # ⭐ GPIO-Status pro ESP
-│   └── index.ts
-│
-├── services/                 # Singleton Services
-│   └── websocket.ts          # ⭐ WebSocket Service
-│
-├── stores/                   # Pinia State Management (5 Stores)
-│   ├── auth.ts               # ⭐ Authentication State
-│   ├── esp.ts                # ⭐ ESP Devices (Mock + Real)
-│   ├── logic.ts              # Automation Rules
-│   ├── database.ts           # Database Explorer State
-│   └── dragState.ts          # Drag & Drop State
-│
-├── types/                    # TypeScript Types (4 Dateien)
-│   ├── index.ts              # ⭐ Haupt-Types (ESP, Sensor, Actuator)
-│   ├── logic.ts              # Logic-spezifische Types
-│   ├── gpio.ts               # ⭐ GPIO-Status Types
-│   └── websocket-events.ts   # ⭐ System-Monitor Events
-│
-├── utils/                    # Utility Functions (14 Dateien)
-│   ├── formatters.ts         # ⭐ Date, Number, Sensor
-│   ├── labels.ts             # UI Label Mappings (Deutsch)
-│   ├── sensorDefaults.ts     # ⭐ Sensor Type Registry (20+)
-│   ├── actuatorDefaults.ts   # ⭐ Aktor-Typ-Defaults
-│   ├── gpioConfig.ts         # GPIO Pin Konfiguration
-│   ├── wifiStrength.ts       # WiFi Signal Berechnung
-│   ├── zoneColors.ts         # Zone Farben
-│   ├── errorCodeTranslator.ts # Fehlercode → Text
-│   ├── databaseColumnTranslator.ts
-│   ├── logMessageTranslator.ts
-│   ├── logSummaryGenerator.ts
-│   ├── eventTransformer.ts   # Event-Transformation
-│   ├── eventTypeIcons.ts     # Event-Typ → Icon
-│   └── index.ts              # Re-Exports (ohne gpioConfig)
-│
-├── views/                    # Page Views (11 Dateien)
-│   ├── DashboardView.vue     # ⭐ Dashboard (/), ?openSettings={id}
-│   ├── SensorsView.vue       # ⭐ Sensoren | Aktoren (/sensors)
-│   ├── LogicView.vue         # Automation Rules (/logic)
-│   ├── SystemMonitorView.vue # ⭐ System Monitor (/system-monitor)
-│   ├── UserManagementView.vue # User Management (/users)
-│   ├── SystemConfigView.vue  # System Config (/system-config)
-│   ├── LoadTestView.vue      # Load Testing (/load-test)
-│   ├── MaintenanceView.vue   # Maintenance Jobs (/maintenance)
-│   ├── SettingsView.vue      # Einstellungen (/settings)
-│   ├── LoginView.vue         # Login (/login)
-│   └── SetupView.vue         # Initial Setup (/setup)
-│
-├── router/
-│   └── index.ts              # Routes + Navigation Guards
-│
-├── App.vue                   # Root Component
-├── main.ts                   # Entry Point
-├── style.css                 # Global Styles (Tailwind)
-└── vite-env.d.ts
+├── composables/   # 8 Composables
+│   ├── useWebSocket.ts
+│   ├── useToast.ts
+│   ├── useModal.ts
+│   ├── useQueryFilters.ts
+│   ├── useGpioStatus.ts
+│   ├── useZoneDragDrop.ts
+│   ├── useSwipeNavigation.ts
+│   └── useConfigResponse.ts
+├── router/        # Route-Definitionen + Guards
+├── services/      # WebSocket Singleton
+│   └── websocket.ts   # ~625 Zeilen
+├── stores/        # 5 Pinia Stores
+│   ├── auth.ts
+│   ├── esp.ts         # ~2500 Zeilen
+│   ├── logic.ts
+│   ├── dragState.ts   # ~464 Zeilen
+│   └── database.ts
+├── types/         # 4 Type-Dateien (~2106 Zeilen)
+│   ├── index.ts           # ~979 Zeilen
+│   ├── websocket-events.ts # ~748 Zeilen
+│   ├── logic.ts
+│   └── gpio.ts
+├── utils/         # 9 Utility-Module
+│   ├── formatters.ts      # ~631 Zeilen
+│   ├── labels.ts
+│   ├── sensorDefaults.ts
+│   ├── actuatorDefaults.ts
+│   ├── errorCodeTranslator.ts
+│   └── ...
+├── views/         # 11 View-Komponenten
+├── main.ts        # Bootstrap
+├── App.vue        # Root Component
+└── style.css      # CSS Variablen (~800 Zeilen)
 ```
 
 ---
 
-## 2. API-Layer
+## 3. Component-Entwicklung
 
-> **Vollständige REST-API-Referenz:** `.claude/reference/api/REST_ENDPOINTS.md`
+### Neue Komponente erstellen - Checkliste
 
-### Axios-Instanz (`api/index.ts`)
+1. TypeScript Interface in `types/index.ts` (wenn neue Datenstruktur)
+2. Komponente in `src/components/{bereich}/` erstellen
+3. `<script setup lang="ts">` verwenden
+4. Props typisieren mit `defineProps<Props>()`
+5. Events typisieren mit `defineEmits<{...}>()`
+6. Composables fuer wiederverwendbare Logik
+7. Tailwind + CSS Variables fuer Styling
+8. @/ Imports verwenden (KEINE relativen ../.. Pfade)
+9. Cleanup in `onUnmounted()` fuer Subscriptions
+10. `npm run build` zur Verifikation
+
+### Komponentenhierarchie (Dashboard)
+
+```
+DashboardView.vue
+├── ActionBar.vue (Status-Pills, Filter)
+├── ZoneGroupsContainer (CSS Grid)
+│   └── ZoneGroup.vue (VueDraggable)
+│       └── ESPOrbitalLayout.vue (3-Spalten)
+│           ├── SensorSatellite.vue[] (links)
+│           ├── ESPCard.vue (center)
+│           └── ActuatorSatellite.vue[] (rechts)
+├── ComponentSidebar.vue (rechts)
+├── CrossEspConnectionOverlay.vue (SVG)
+├── UnassignedDropBar.vue (bottom)
+├── PendingDevicesPanel.vue (slide-over)
+└── ESPSettingsPopover.vue (floating)
+```
+
+### Standard Component Template
+
+```vue
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useEspStore } from '@/stores/esp'
+import { useToast } from '@/composables/useToast'
+import type { MockESP } from '@/types'
+
+// Props
+interface Props {
+  deviceId: string
+  showDetails?: boolean
+}
+const props = defineProps<Props>()
+
+// Emits
+const emit = defineEmits<{
+  (e: 'update', device: MockESP): void
+  (e: 'delete'): void
+}>()
+
+// Stores & Composables
+const espStore = useEspStore()
+const { showSuccess, showError } = useToast()
+
+// Local State
+const isLoading = ref(false)
+
+// Computed
+const device = computed(() =>
+  espStore.devices.find(d => d.esp_id === props.deviceId)
+)
+
+// Methods
+async function handleAction(): Promise<void> {
+  isLoading.value = true
+  try {
+    await espStore.fetchDevice(props.deviceId)
+    showSuccess('Erfolgreich')
+  } catch (e) {
+    showError(e instanceof Error ? e.message : 'Fehler')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Lifecycle
+onMounted(() => { /* init */ })
+onUnmounted(() => { /* cleanup */ })
+</script>
+
+<template>
+  <div class="card">
+    <!-- Content -->
+  </div>
+</template>
+```
+
+---
+
+## 4. Type-System
+
+### Kerntypen (types/index.ts)
+
+| Type | Zeilen | Beschreibung |
+|------|--------|--------------|
+| MockESP / ESPDevice | 275-294 | Device mit Sensors, Actuators, Status |
+| MockSensor | 234-263 | Sensor mit Multi-Value Support |
+| MockActuator | 265-273 | Actuator mit PWM |
+| QualityLevel | - | 'excellent' \| 'good' \| 'fair' \| 'poor' \| 'bad' \| 'stale' \| 'error' |
+| MockSystemState | - | 12 States: BOOT, WIFI_SETUP, WIFI_CONNECTED, MQTT_CONNECTING, MQTT_CONNECTED, AWAITING_USER_CONFIG, ZONE_CONFIGURED, SENSORS_CONFIGURED, OPERATIONAL, LIBRARY_DOWNLOADING, SAFE_MODE, ERROR |
+
+### WebSocket Events (types/websocket-events.ts)
+
+| Event | Data | Woher |
+|-------|------|-------|
+| sensor_data | esp_id, gpio, value, quality | MQTT→Server→WS |
+| actuator_status | esp_id, gpio, state | MQTT→Server→WS |
+| esp_health | esp_id, status, heap, rssi | Heartbeat→Server→WS |
+| config_response | esp_id, status, error_code | ESP→MQTT→Server→WS |
+| device_discovered | esp_id, hardware_type | Auto-Discovery |
+| error_event | esp_id, error_code, troubleshooting | ESP→Server→WS |
+| server_log | level, message, exception | Server intern |
+
+**WICHTIG:** Type-Aenderungen IMMER mit Server-Team abstimmen!
+WebSocket-Events = Kontrakt zwischen Frontend und Backend.
+
+### Logic Types (types/logic.ts)
+
+- LogicRule: Conditions + Actions + Cooldown
+- SensorCondition: Vergleichsoperatoren + between
+- ActuatorAction: ON/OFF/PWM/TOGGLE + Duration
+
+### GPIO Types (types/gpio.ts)
+
+- GpioUsageItem: Pin-Belegung
+- GpioStatusResponse: Freie/Belegte/System-Pins
+
+---
+
+## 5. State Management (Pinia)
+
+### Store-Architektur
+
+| Store | Datei | State | Wichtigste Actions |
+|-------|-------|-------|-------------------|
+| auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
+| esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap |
+| logic | stores/logic.ts | rules[], activeExecutions | fetchRules, toggleRule, crossEspConnections |
+| dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
+| database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
+
+### Store-Konventionen
+
+- **Setup Stores** (Composition API, NICHT Options API)
+- `ref()` fuer State, `computed()` fuer Getters
+- Async Actions mit try/catch + Toast-Feedback
+- WebSocket-Events in Store-Actions verarbeiten
+- KEIN direkter API-Call aus Komponenten
+
+### ESP Store WebSocket-Integration
 
 ```typescript
-// Base URL
+// Pattern: WebSocket Event → Store Update → Reactive Render
+const wsUnsubscribers: (() => void)[] = []
+
+function initWebSocket(): void {
+  const ws = WebSocketService.getInstance()
+
+  wsUnsubscribers.push(
+    ws.on('sensor_data', (msg) => {
+      const device = devices.value.find(d => d.esp_id === msg.esp_id)
+      if (device) {
+        const sensor = device.sensors.find(s => s.gpio === msg.gpio)
+        if (sensor) {
+          sensor.raw_value = msg.data.value
+          sensor.quality = msg.data.quality
+        }
+      }
+    })
+  )
+}
+
+function cleanupWebSocket(): void {
+  wsUnsubscribers.forEach(unsub => unsub())
+  wsUnsubscribers.length = 0
+}
+```
+
+---
+
+## 6. Server-Verbindung
+
+### HTTP-Client (api/index.ts)
+
+```typescript
+// Axios Instance
 baseURL: '/api/v1'
+timeout: 30000
 
 // Request Interceptor
-- Fügt Bearer Token aus authStore hinzu
+- JWT Bearer Token hinzufuegen
 
 // Response Interceptor
-- 401 → refreshTokens() → Retry
-- Refresh fehlgeschlagen → Logout + Redirect /login
-- Infinite Loop Prevention für Auth-Endpoints
+- 401 → Auto Token-Refresh bei 401
+- Auth-Endpoints ueberspringen Refresh (Anti-Loop)
+
+// Helper Functions
+get<T>, post<T>, put<T>, del<T>, patch<T>
 ```
 
-### API-Module
+### Neuen API-Endpunkt hinzufuegen
 
-| Modul | Endpoints | Beschreibung |
-|-------|-----------|--------------|
-| `auth.ts` | `/auth/*` | Login, Logout, Setup, Refresh, Me |
-| `esp.ts` | `/esp/*`, `/debug/*` | ⭐ Unified Mock + Real ESP API |
-| `sensors.ts` | `/sensors/*` | Sensor CRUD + History + Stats |
-| `actuators.ts` | `/actuators/*` | Actuator Control |
-| `zones.ts` | `/zone/*` | Zone Assignment/Removal |
-| `subzones.ts` | `/subzone/*` | Subzone Management |
-| `logic.ts` | `/logic/*` | Cross-ESP Automation Rules |
-| `debug.ts` | `/debug/*` | Mock ESP Simulation |
-| `audit.ts` | `/audit/*` | Audit Log Query + Stats |
-| `config.ts` | `/config/*` | System Configuration |
-| `database.ts` | `/database/*` | Database Explorer |
-| `logs.ts` | `/logs/*` | Log Viewer + Management |
-| `loadtest.ts` | `/loadtest/*` | Load Testing |
-| `users.ts` | `/users/*` | User Management |
+1. Funktion in passendes `api/*.ts` Modul
+2. Response-Type in `types/index.ts`
+3. Store-Action die API-Modul aufruft
+4. Komponente ruft Store-Action auf
 
-### ESP API - Unified Routing (`esp.ts`)
-
-```typescript
-// Erkennt automatisch Mock vs Real ESP
-function isMockEsp(espId: string): boolean {
-  return espId.startsWith('ESP_MOCK_') ||
-         espId.startsWith('MOCK_') ||
-         espId.includes('MOCK')
-}
-
-// Routed automatisch zu korrektem Endpoint
-async getDevice(espId: string): Promise<ESPDevice> {
-  if (isMockEsp(espId)) {
-    return mergeWithDbData(debugApi.getMockEsp(espId))
-  }
-  return api.get(`/esp/devices/${espId}`)
-}
-```
-
----
-
-## 3. State Management (Pinia Stores)
-
-### auth.ts - Authentication
-
-```typescript
-// State
-user: User | null
-accessToken: string | null
-refreshToken: string | null
-setupRequired: boolean | null
-isLoading: boolean
-error: string | null
-
-// Getters
-isAuthenticated: boolean
-isAdmin: boolean
-isOperator: boolean
-
-// Actions
-checkAuthStatus()   // Prüft Setup + Token
-login(credentials)  // Login → Tokens + User
-setup(data)         // Initial Setup
-refreshTokens()     // Token Refresh
-logout(logoutAll)   // Logout + WebSocket Cleanup
-clearAuth()         // Tokens löschen
-
-// LocalStorage Keys
-'el_frontend_access_token'
-'el_frontend_refresh_token'
-```
-
-### esp.ts - ESP Devices (Unified)
-
-```typescript
-// State
-devices: ESPDevice[]
-selectedDeviceId: string | null
-isLoading: boolean
-error: string | null
-pendingDevices: PendingESPDevice[]
-isPendingLoading: boolean
-gpioStatusMap: Map<string, GpioStatusResponse>
-gpioStatusLoading: Map<string, boolean>
-
-// Getters
-selectedDevice
-deviceCount
-onlineDevices / offlineDevices
-mockDevices / realDevices
-devicesByZone(zoneId)
-masterZoneDevices
-getGpioStatusForEsp(espId): GpioStatusResponse | null
-getAvailableGpios(espId): number[]
-
-// Actions
-fetchAll(params?)       // Alle Geräte laden
-fetchDevice(deviceId)   // Einzelnes Gerät
-createDevice(config)    // Mock oder Real erstellen
-updateDevice(id, update) // Update (DB)
-deleteDevice(deviceId)  // Löschen
-
-// Mock-spezifisch
-triggerHeartbeat(id)
-setState(id, state)
-setAutoHeartbeat(id, enabled)
-addSensor(id, config)
-setSensorValue(id, gpio, value)
-removeSensor(id, gpio)
-addActuator(id, config)
-setActuatorState(id, gpio, state)
-emergencyStop(id) / clearEmergency(id)
-
-// Pending Devices / GPIO
-fetchPendingDevices()
-approveDevice(deviceId, request?)
-rejectDevice(deviceId, request?)
-fetchGpioStatus(espId)
-
-// WebSocket
-initWebSocket()         // Handler registrieren
-cleanupWebSocket()      // Handler entfernen
-```
-
-### WebSocket Event Handlers im ESP Store
-
-```typescript
-// Empfangene Events:
-'esp_health'         → handleEspHealth()      // Heartbeat Updates
-'sensor_data'        → handleSensorData()     // Live Sensor Values
-'actuator_status'    → handleActuatorStatus() // Actuator State
-'actuator_alert'     → handleActuatorAlert()  // Emergency/Timeout
-'config_response'    → handleConfigResponse() // Config ACK
-'zone_assignment'    → handleZoneAssignment() // Zone ACK
-'sensor_health'      → (Maintenance/Phase 2E)
-'device_discovered'  → Pending Devices Discovery
-'device_approved'    → Pending Devices Approval
-'device_rejected'    → Pending Devices Rejection
-```
-
----
-
-## 4. WebSocket-System
-
-> **Vollständige Event-Referenz:** `.claude/reference/api/WEBSOCKET_EVENTS.md`
-
-### Service (`services/websocket.ts`)
+### WebSocket Service (services/websocket.ts)
 
 ```typescript
 class WebSocketService {
@@ -379,44 +383,79 @@ class WebSocketService {
   getStatus(): 'disconnected' | 'connecting' | 'connected' | 'error'
 
   // Subscriptions
-  subscribe(filters, callback): string  // Returns subscriptionId
+  subscribe(filters, callback): string
   unsubscribe(subscriptionId): void
-  on(type, callback): () => void        // Type-specific listener
+  on(type, callback): () => void  // Returns unsubscribe fn
 
   // Features
-  - Auto-Reconnect mit Exponential Backoff
-  - Token-Expiry Tracking
-  - Rate Limiting (10 msg/sec)
-  - Visibility Handling (Tab-Switches)
-  - Message Queue während 'connecting'
+  - Reconnect: Exponential Backoff 1s → 30s max
+  - Rate-Limit: MAX_MESSAGES_PER_SECOND = 10
+  - Tab-Visibility: Schneller Reconnect bei Aktivierung
+  - JWT in Query-Parameter (kein Custom Header bei WS)
 }
 ```
 
-### Composable (`composables/useWebSocket.ts`)
+### useWebSocket Composable
 
 ```typescript
-function useWebSocket(options?: {
-  autoConnect?: boolean      // default: true
-  autoReconnect?: boolean    // default: true
-  filters?: WebSocketFilters
-}) {
-  // State
-  isConnected: Ref<boolean>
-  isConnecting: Ref<boolean>
-  connectionError: Ref<string | null>
-  connectionStatus: ComputedRef<string>
-  lastMessage: Ref<WebSocketMessage | null>
+const { on, cleanup, isConnected } = useWebSocket()
 
-  // Actions
-  connect(): Promise<void>
-  disconnect(): void
-  subscribe(filters, callback?): string
-  unsubscribe(): void
-  on(type, callback): () => void  // Returns unsubscribe fn
-  updateFilters(filters): void
-  cleanup(): void  // Call in onUnmounted
-}
+// Registriere Handler
+const unsubscribe = on('sensor_data', handleSensorData)
+
+// Cleanup in onUnmounted
+onUnmounted(() => {
+  cleanup()
+})
 ```
+
+---
+
+## 7. API-Layer
+
+### Axios-Instanz (`api/index.ts`)
+
+```typescript
+// Base URL
+baseURL: '/api/v1'
+
+// Request Interceptor
+- Fuegt Bearer Token aus authStore hinzu
+
+// Response Interceptor
+- 401 → refreshTokens() → Retry
+- Refresh fehlgeschlagen → Logout + Redirect /login
+- Infinite Loop Prevention fuer Auth-Endpoints
+```
+
+### API-Module
+
+| Modul | Endpoints | Beschreibung |
+|-------|-----------|--------------|
+| `auth.ts` | `/auth/*` | Login, Logout, Setup, Refresh, Me |
+| `esp.ts` | `/esp/*`, `/debug/*` | Unified Mock + Real ESP API |
+| `sensors.ts` | `/sensors/*` | Sensor CRUD + History + Stats |
+| `actuators.ts` | `/actuators/*` | Actuator Control |
+| `zones.ts` | `/zone/*` | Zone Assignment/Removal |
+| `logic.ts` | `/logic/*` | Cross-ESP Automation Rules |
+| `debug.ts` | `/debug/*` | Mock ESP Simulation |
+| `audit.ts` | `/audit/*` | Audit Log Query + Stats |
+| `logs.ts` | `/logs/*` | Log Viewer + Management |
+
+---
+
+## 8. WebSocket-System
+
+### Service (`services/websocket.ts`)
+
+**URL-Pattern:** `ws[s]://host/api/v1/ws/realtime/{clientId}?token={jwt}`
+
+| Feature | Wert |
+|---------|------|
+| Reconnect | Exponential Backoff 1s → 30s max + 10% Jitter |
+| Rate-Limit | 10 messages/second client-side |
+| Tab-Visibility | Schneller Reconnect bei Tab-Aktivierung |
+| Subscription | Filter-basiert (types, esp_ids, sensor_types) |
 
 ### Filter-Typen
 
@@ -431,91 +470,39 @@ interface WebSocketFilters {
 
 ---
 
-## 5. Routing (`router/index.ts`)
+## 9. Utilities
 
-### Routen-Struktur
+### formatters.ts (~631 Zeilen)
 
-```typescript
-// Public Routes
-'/login'  → LoginView.vue
-'/setup'  → SetupView.vue
+German-lokalisierte Formatter:
 
-// Protected Routes (requiresAuth: true)
-'/'               → DashboardView.vue (?openSettings={id})
-'/sensors'        → SensorsView.vue (Tabs: Sensoren | Aktoren)
-'/logic'          → LogicView.vue
-'/settings'       → SettingsView.vue
-'/system-monitor' → SystemMonitorView.vue (requiresAdmin)
+| Funktion | Beispiel Output |
+|----------|-----------------|
+| formatDateTime(date) | "15.12.2024, 14:30" |
+| formatNumber(23.46) | "23,46" (Komma-Dezimal) |
+| formatHeapSize(bytes) | "128 KB" |
+| formatUptime(seconds) | "1d 1h 1m" |
+| formatRssi(dBm) | "-65 dBm (Gut)" |
+| formatSensorValue(value, type) | "23,5 °C" |
+| formatRelativeTime(date) | "vor 5 Minuten" |
 
-// Admin Routes (requiresAdmin: true)
-'/users'          → UserManagementView.vue
-'/system-config'  → SystemConfigView.vue
-'/load-test'      → LoadTestView.vue
-'/maintenance'    → MaintenanceView.vue
+### labels.ts
 
-// Redirects
-'/devices'         → '/'
-'/devices/:espId'  → '/?openSettings={espId}'
-'/mock-esp'        → '/'
-'/mock-esp/:espId' → '/?openSettings={espId}'
-'/actuators'       → '/sensors?tab=actuators'
-'/database'        → '/system-monitor?tab=database'
-'/logs'            → '/system-monitor?tab=logs'
-'/audit'           → '/system-monitor?tab=events'
-'/mqtt-log'        → '/system-monitor?tab=mqtt'
-```
-
-### 5.1 System Monitor (View & Tabs)
-
-**View:** `src/views/SystemMonitorView.vue`
-**Route:** `/system-monitor` (requiresAdmin)
-**Query-Parameter:** `tab` steuert den aktiven Tab
-
-| Tab-ID | Bedeutung | Komponenten |
-|--------|-----------|-------------|
-| `events` | Ereignisse | EventsTab, UnifiedEventList, EventDetailsPanel |
-| `logs` | Server-Logs | ServerLogsTab, LogManagementPanel |
-| `database` | Datenbank | DatabaseTab (DataTable, FilterPanel) |
-| `mqtt` | MQTT-Traffic | MqttTrafficTab |
-
-**Composable:** `useQueryFilters` – synchronisiert Filter mit URL-Query für Deep-Links
-
-**Relevante API:** `src/api/logs.ts`, `src/api/audit.ts`, `src/api/database.ts`
-
-### Navigation Guards
+Zentrale deutsche Labels:
 
 ```typescript
-beforeEach(async (to, from, next) => {
-  // 1. checkAuthStatus() wenn noch nicht geprüft
-  // 2. Redirect zu /setup wenn setupRequired
-  // 3. Redirect zu /login wenn nicht authentifiziert
-  // 4. Redirect zu / wenn nicht Admin aber requiresAdmin
-  // 5. Redirect zu / wenn eingeloggt und auf /login oder /setup
-})
+QUALITY_LABELS: { excellent: "Ausgezeichnet", good: "Gut", ... }
+STATE_LABELS: { OPERATIONAL: "Betriebsbereit", ... }
+ACTUATOR_TYPE_LABELS: { relay: "Relais", pump: "Pumpe", ... }
 ```
 
----
+### errorCodeTranslator.ts
 
-## 6. Utilities
-
-### formatters.ts
-
-| Funktion | Beschreibung | Beispiel |
-|----------|--------------|----------|
-| `formatRelativeTime(date)` | Relative Zeit | "vor 5 Minuten" |
-| `formatDateTime(date)` | Datum + Zeit | "02.01.2025, 14:30" |
-| `formatTime(date)` | Nur Zeit | "14:30:45" |
-| `formatNumber(n, decimals)` | Zahl formatieren | "1.234,56" |
-| `formatSensorValue(value, type)` | Sensor-Wert + Unit | "23.5 °C" |
-| `formatUptime(seconds)` | Uptime | "2d 5h 30m" |
-| `formatHeapSize(bytes)` | Speicher | "45.2 KB" |
-| `formatRssi(dBm)` | WiFi Signal | "-65 dBm (Gut)" |
-| `getDataFreshness(timestamp)` | Aktualität | "fresh" / "stale" |
+Error-Codes (1xxx-5xxx) → Deutsche Beschreibungen
 
 ### sensorDefaults.ts
 
 ```typescript
-// 20+ Sensor-Typen mit Konfiguration
 SENSOR_TYPE_CONFIG: Record<string, {
   label: string      // "Temperatur (DS18B20)"
   unit: string       // "°C"
@@ -529,68 +516,157 @@ SENSOR_TYPE_CONFIG: Record<string, {
 
 // Helper Functions
 getSensorUnit(type): string
-getSensorDefault(type): number
 getSensorLabel(type): string
-getSensorTypeOptions(): { value, label }[]
+getSensorDefault(type): number
 isValidSensorValue(type, value): boolean
 ```
 
-### labels.ts
+---
+
+## 10. Router & Navigation
+
+### Route-Struktur
 
 ```typescript
-// Deutsche Label-Mappings
-QUALITY_LABELS: Record<QualityLevel, string>
-STATE_LABELS: Record<SystemState, string>
-ACTUATOR_TYPE_LABELS: Record<ActuatorType, string>
+// Public Routes
+'/login'  → LoginView.vue
+'/setup'  → SetupView.vue
 
-// Helper Functions
-getQualityInfo(quality): { label, colorClass }
-getStateInfo(state): { label, variant }
-getActuatorTypeLabel(type): string
+// Protected Routes (requiresAuth: true)
+'/'               → DashboardView.vue (?openSettings={id})
+'/sensors'        → SensorsView.vue (Tabs: Sensoren | Aktoren)
+'/logic'          → LogicView.vue
+'/settings'       → SettingsView.vue
+
+// Admin Routes (requiresAdmin: true)
+'/system-monitor' → SystemMonitorView.vue
+'/users'          → UserManagementView.vue
+'/system-config'  → SystemConfigView.vue
+'/load-test'      → LoadTestView.vue
+'/maintenance'    → MaintenanceView.vue
+
+// Deprecated Redirects
+'/devices'   → '/'
+'/database'  → '/system-monitor?tab=database'
+'/logs'      → '/system-monitor?tab=logs'
+'/audit'     → '/system-monitor?tab=events'
+'/mqtt-log'  → '/system-monitor?tab=mqtt'
+'/actuators' → '/sensors?tab=actuators'
 ```
 
-### Weitere Utils
+### Navigation Guards
 
-| Datei | Zweck |
-|-------|-------|
-| `actuatorDefaults.ts` | Aktor-Typ-Defaults |
-| `errorCodeTranslator.ts` | Fehlercode → deutscher Text |
-| `databaseColumnTranslator.ts` | DB-Spalten → Anzeige |
-| `logMessageTranslator.ts` | Log-Nachrichten-Übersetzung |
-| `logSummaryGenerator.ts` | Log-Zusammenfassungen |
-| `eventTransformer.ts` | Event-Transformation |
-| `eventTypeIcons.ts` | Event-Typ → Icon |
-| `gpioConfig.ts` | GPIO Pin Konfiguration (direkt importieren!) |
+```typescript
+beforeEach(async (to, from, next) => {
+  // 1. Initial Auth-Status Check (einmalig)
+  // 2. Setup-Redirect (kein Admin → /setup)
+  // 3. Auth-Check (nicht eingeloggt → /login)
+  // 4. Admin-Check (kein Admin → /dashboard)
+  // 5. Login-Redirect (eingeloggt → weg von /login)
+})
+```
 
-**WICHTIG:** `gpioConfig.ts` direkt importieren (`@/utils/gpioConfig`), nicht aus `@/utils` wegen Namenskonflikt.
+### Neue Route hinzufuegen
+
+1. View-Komponente in `src/views/`
+2. Route in `router/index.ts` mit `meta: { requiresAuth, requiresAdmin?, title }`
+3. Sidebar-Eintrag in `components/layout/AppSidebar.vue`
+4. Falls Admin: `requiresAdmin: true`
 
 ---
 
-## 7. Zone Management
+## 11. Farbsystem & Design
 
-### Zwei-Feld-System
+### CSS Variables (style.css)
 
-| Feld | Typ | Beispiel | Verwendung |
-|------|-----|----------|------------|
-| `zone_id` | Technisch | `zelt_1` | MQTT Topics, DB, API |
-| `zone_name` | Display | `Zelt 1` | UI-Anzeige |
+Alle Farben ueber CSS Variables definiert.
+**KEINE hardcoded Hex-Werte in Komponenten!**
 
-### Automatische ID-Generierung
+```css
+/* Background (3 Stufen) */
+--color-bg-primary: #0a0a0f
+--color-bg-secondary: #12121a
+--color-bg-tertiary: #1a1a24
 
-```typescript
-// ZoneAssignmentPanel.vue
-function generateZoneId(zoneName: string): string {
-  // "Gewächshaus Nord" → "gewaechshaus_nord"
-  return zoneName
-    .toLowerCase()
-    .replace(/ä/g, 'ae').replace(/ö/g, 'oe')
-    .replace(/ü/g, 'ue').replace(/ß/g, 'ss')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
+/* Text (3 Stufen) */
+--color-text-primary: #f0f0f5
+--color-text-secondary: #b0b0c0
+--color-text-muted: #707080
+
+/* Iridescent (4 Stufen) */
+--color-iridescent-1: #60a5fa  /* Blau */
+--color-iridescent-2: #818cf8  /* Indigo */
+--color-iridescent-3: #a78bfa  /* Lila */
+--color-iridescent-4: #c084fc  /* Violet */
+
+/* Status */
+--color-success: #34d399
+--color-warning: #fbbf24
+--color-error: #f87171
+--color-info: #60a5fa
+
+/* Mock/Real */
+--color-mock: #a78bfa  /* Lila */
+--color-real: #22d3ee  /* Cyan */
+```
+
+### Glassmorphism-Klassen
+
+```css
+.glass-panel {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-overlay {
+  background: rgba(10, 10, 15, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+.iridescent-border {
+  /* Gradient-Border via background-clip */
+}
+
+.water-reflection {
+  /* Shimmer-Animation (4s loop) */
 }
 ```
 
-### Drag & Drop Flow
+### Zone-Farben
+
+Dynamisch aus 8-Farben-Palette via Hash der Zone-ID.
+Gleiche Zone = immer gleiche Farbe (deterministisch).
+
+---
+
+## 12. Drag & Drop System
+
+### Dual-System
+
+| System | Library | Was | Wohin |
+|--------|---------|-----|-------|
+| Zone-Drag | VueDraggable | ESP-Card | Andere Zone |
+| Sensor-Drag | Native HTML5 | SensorSatellite | Chart-Panel |
+| Component-Drag | Native HTML5 | Sidebar-Item | ESP-Card |
+
+### DragState Store
+
+```typescript
+// State
+isDragging: boolean
+isDraggingSensor: boolean
+isDraggingComponent: boolean
+dragPayload: any
+
+// Features
+- 30-Sekunden Timeout (Safety Reset)
+- Global dragend + Escape-Listener
+- Konfliktvermeidung: Sensor-Drag deaktiviert waehrend ESP-Drag
+- Stats-Tracking (totalDrags, successfulDrops, timeouts)
+```
+
+### Zone-Assignment Flow
 
 ```
 1. VueDraggable @add Event
@@ -603,18 +679,44 @@ function generateZoneId(zoneName: string): string {
    └─> POST /api/v1/zone/devices/{id}/assign
 
 4. Server: DB Update + MQTT Publish
-   └─> kaiser/{id}/esp/{esp_id}/zone/assign
 
 5. ESP32: Speichert in NVS, sendet ACK
 
-6. Server: Empfängt ACK, broadcastet WebSocket
+6. Server: Empfaengt ACK, broadcastet WebSocket
 
 7. Frontend: espStore.fetchAll() → UI aktualisiert
+   └─> History-Push (fuer Undo, max 20 Eintraege)
+   └─> Toast: Erfolg/Fehler
 ```
 
 ---
 
-## 8. Mock ESP Architektur
+## 13. Entwicklungs-Workflows
+
+### Neue Sensor-Anzeige
+
+1. Type in `types/index.ts` erweitern
+2. `SensorSatellite.vue` anpassen (falls neue Darstellung)
+3. WS-Event Handler in espStore registrieren
+4. `labels.ts` + `formatters.ts` ergaenzen
+
+### Neues Dashboard-Widget
+
+1. Komponente in `components/dashboard/` erstellen
+2. In `DashboardView.vue` einbinden
+3. CSS: Tailwind + `glass-panel` fuer Konsistenz
+4. Daten aus Store beziehen (nicht direkt API)
+
+### Feature mit Settings
+
+1. Setting-UI in `SettingsView.vue` oder `ESPSettingsPopover`
+2. API-Call ueber `api/*.ts` Modul
+3. Store-Action fuer Persistenz
+4. Toast-Feedback bei Erfolg/Fehler
+
+---
+
+## 14. Mock ESP Architektur
 
 ### Dual-Storage
 
@@ -640,7 +742,19 @@ Mock ESP erstellen (POST /v1/debug/mock-esp)
 
 ---
 
-## 9. Lifecycle & Cleanup
+## 15. Bekannte Luecken / Offene Punkte
+
+| Feature | Status | Hinweis |
+|---------|--------|---------|
+| Dark/Light Mode Toggle | CSS vorhanden, kein UI | Dark Theme ONLY |
+| PWA/Offline-First | Nicht implementiert | - |
+| i18n | Hardcoded German | Kein Mehrsprachigkeit |
+| E2E Tests | Nicht vorhanden | - |
+| ESPOrbitalLayout | Name irrefuehrend | Ist 3-Spalten Grid, NICHT orbital |
+
+---
+
+## 16. Lifecycle & Cleanup
 
 ### App.vue
 
@@ -669,7 +783,7 @@ async function logout() {
 // Auto-Init bei Store-Erstellung
 initWebSocket()
 
-// Cleanup-Funktion für App-Unmount
+// Cleanup-Funktion fuer App-Unmount
 cleanupWebSocket() {
   wsUnsubscribers.forEach(unsub => unsub())
   wsUnsubscribers.length = 0
@@ -679,241 +793,72 @@ cleanupWebSocket() {
 
 ---
 
-## 10. Fehlerquellen / Troubleshooting
+## 17. Fehlerquellen / Troubleshooting
 
-> **📚 Vollständige Error-Code Referenz:** `.claude/reference/errors/ERROR_CODES.md`
-> Server-Fehler (5000-5699) und ESP32-Fehler (1000-4999) mit Lösungen
-
-| Problem | Ursache | Lösung |
-|---------|---------|--------|
-| 401-Refresh-Loop | Korrupte Tokens | LocalStorage löschen |
-| "Not enough segments" | JWT ungültig | Inkognito / Neu einloggen |
-| Setup hängt | DB nicht leer | Server-DB neu erstellen |
+| Problem | Ursache | Loesung |
+|---------|---------|---------|
+| 401-Refresh-Loop | Korrupte Tokens | LocalStorage loeschen |
+| "Not enough segments" | JWT ungueltig | Inkognito / Neu einloggen |
+| Setup haengt | DB nicht leer | Server-DB neu erstellen |
 | WebSocket disconnected | Token expired | Seite neu laden |
 | Mock ESP nicht gefunden | Server neugestartet | Mock ESP neu erstellen |
 | Zone-Zuweisung fehlgeschlagen | ESP offline | Heartbeat triggern |
-| System Monitor Tab leer | Falsche `tab`-Query | URL prüfen (`?tab=events`) |
 | gpioConfig Import-Fehler | Namenskonflikt | Direkt importieren |
 
 ---
 
-## 11. Dokumentations-Matrix
+## 18. Regeln fuer Code-Aenderungen
 
-### Frontend-spezifisch
+### NIEMALS
 
-| Dokument | Pfad | Inhalt |
-|----------|------|--------|
-| Service-Management | `El Frontend/Docs/DEBUG_ARCHITECTURE.md` | Start/Stop/Logs |
-| Bug-Dokumentation | `El Frontend/Docs/Bugs_and_Phases/` | Nach Phasen sortiert |
-| API-Referenz | `El Frontend/Docs/APIs.md` | REST-Endpunkte |
+- API-Endpunkte ohne Server-Abgleich aendern
+- WebSocket-Events ohne Backend-Kompatibilitaet
+- Types ohne vollstaendige Definition
+- Stores ohne Cleanup-Logik
+- Options API statt Composition API
+- Direkte API-Calls in Komponenten
+- Relative Imports (../.. statt @/ Alias)
+- Inline Styles oder !important
+- Light Mode Styles (nur Dark Theme)
 
-### System-übergreifend
+### IMMER
 
-| Dokument | Pfad | Inhalt |
-|----------|------|--------|
-| **REST API Referenz** | `.claude/reference/api/REST_ENDPOINTS.md` | Alle ~170 Endpoints |
-| **WebSocket Events** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Real-time Events |
-| **Error Codes** | `.claude/reference/errors/ERROR_CODES.md` | ESP32 + Server Fehler |
-| **Datenflüsse** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Kommunikationsmuster |
-| Backend-Architektur | `.claude/skills/server-development/SKILL.md` | Server-Details |
-| ESP32 Firmware | `.claude/skills/esp32-development/SKILL.md` | Firmware-Details |
-| MQTT Protokoll | `.claude/reference/api/MQTT_TOPICS.md` | Topic-Referenz |
-| **Test-Workflow** | `.claude/reference/testing/TEST_WORKFLOW.md` | NUR auf Anfrage |
-| **Log-Locations** | `.claude/reference/debugging/LOG_LOCATIONS.md` | Bei Debugging |
-
----
-
-## 12. KI-Agenten Workflow
-
-### Schritt-für-Schritt Anleitung
-
-**SCHRITT 1: Aufgabe identifizieren**
-- Was soll geändert werden?
-- Welches Modul ist betroffen? (Section 1, 11)
-- Bug-Fix, Feature oder Refactoring?
-
-**SCHRITT 2: Dokumentation konsultieren**
-- Nutze Tabelle in Section 11
-- **Immer zuerst lesen:** Relevante Doku vollständig
-- Bei API-Änderungen: Server-Dokumentation prüfen
-
-**SCHRITT 3: Code-Location finden**
-- Nutze Ordnerstruktur aus Section 1
-- Verstehe Abhängigkeiten (Stores, Composables, API)
-- Prüfe bestehende Implementierungen
-
-**SCHRITT 4: Änderungen implementieren**
-- Vue 3 Composition API verwenden
-- TypeScript Types aus `src/types/` nutzen
-- Bestehende Composables wiederverwenden
-- Pinia Store für State Management
-
-**SCHRITT 5: Testen**
-- Browser DevTools Console prüfen
-- WebSocket-Verbindung testen
-- API-Responses verifizieren
-
-### Regeln für Code-Änderungen
-
-**NIEMALS:**
-- ❌ API-Endpunkte ohne Server-Abgleich ändern
-- ❌ WebSocket-Events ohne Backend-Kompatibilität
-- ❌ Types ohne vollständige Definition
-- ❌ Stores ohne Cleanup-Logik
-
-**IMMER:**
-- ✅ TypeScript Types verwenden
-- ✅ Composables für wiederverwendbare Logik
-- ✅ API-Calls über `src/api/` Module
-- ✅ Pinia Stores für State Management
-- ✅ Cleanup in `onUnmounted`
-- ✅ Deutsche Labels in `utils/labels.ts`
-
----
-
-## 13. Komponenten-Patterns
-
-### Standard Vue 3 Component
-
-```vue
-<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useEspStore } from '@/stores/esp'
-import { useWebSocket } from '@/composables'
-import type { ESPDevice } from '@/types'
-
-// Props
-const props = defineProps<{
-  deviceId: string
-}>()
-
-// Emits
-const emit = defineEmits<{
-  (e: 'update', device: ESPDevice): void
-}>()
-
-// Stores
-const espStore = useEspStore()
-
-// Composables
-const { on, cleanup } = useWebSocket()
-
-// State
-const isLoading = ref(false)
-
-// Computed
-const device = computed(() => 
-  espStore.devices.find(d => d.esp_id === props.deviceId)
-)
-
-// Methods
-async function loadDevice() {
-  isLoading.value = true
-  await espStore.fetchDevice(props.deviceId)
-  isLoading.value = false
-}
-
-// Lifecycle
-onMounted(() => {
-  loadDevice()
-  on('esp_health', handleHealth)
-})
-
-onUnmounted(() => {
-  cleanup()
-})
-</script>
-
-<template>
-  <div v-if="device">
-    <!-- Content -->
-  </div>
-</template>
-```
-
-### Composable Pattern
-
-```typescript
-// composables/useFeature.ts
-import { ref, computed, onUnmounted } from 'vue'
-
-export function useFeature(options?: FeatureOptions) {
-  // State
-  const data = ref<Data | null>(null)
-  const isLoading = ref(false)
-  const error = ref<string | null>(null)
-
-  // Computed
-  const hasData = computed(() => data.value !== null)
-
-  // Methods
-  async function load() {
-    isLoading.value = true
-    error.value = null
-    try {
-      data.value = await api.getData()
-    } catch (e) {
-      error.value = e.message
-    } finally {
-      isLoading.value = false
-    }
-  }
-
-  function cleanup() {
-    data.value = null
-  }
-
-  // Auto-cleanup
-  onUnmounted(cleanup)
-
-  return {
-    data,
-    isLoading,
-    error,
-    hasData,
-    load,
-    cleanup
-  }
-}
-```
+- TypeScript Types verwenden
+- Composables fuer wiederverwendbare Logik
+- API-Calls ueber `src/api/` Module
+- Pinia Stores fuer State Management
+- Cleanup in `onUnmounted`
+- Deutsche Labels in `utils/labels.ts`
+- `npm run build` zur Verifikation
 
 ---
 
 ## Referenz-Dokumentation
-
-> Diese Referenz-Dateien enthalten detaillierte Informationen und sollten bei Bedarf konsultiert werden:
 
 | Referenz | Pfad | Wann lesen? |
 |----------|------|-------------|
 | **REST API** | `.claude/reference/api/REST_ENDPOINTS.md` | API-Calls implementieren |
 | **WebSocket Events** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Real-time Features |
 | **Error Codes** | `.claude/reference/errors/ERROR_CODES.md` | Fehler debuggen/anzeigen |
-| **Datenflüsse** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | System-Kommunikation verstehen |
-| **MQTT Topics** | `.claude/reference/api/MQTT_TOPICS.md` | Backend-Kommunikation verstehen |
-| **Log-Locations** | `.claude/reference/debugging/LOG_LOCATIONS.md` | Logs analysieren |
-| **Tests** | `.claude/reference/testing/TEST_WORKFLOW.md` | Tests ausführen (NUR auf Anfrage) |
+| **Datenfluesse** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | System-Kommunikation |
+| **MQTT Topics** | `.claude/reference/api/MQTT_TOPICS.md` | Backend-Kommunikation |
 
 ---
 
 ## Versions-Historie
 
-**Version:** 6.1 (SKILL.md Format)
-**Letzte Aktualisierung:** 2026-02-01
+**Version:** 7.0
+**Letzte Aktualisierung:** 2026-02-06
 
-### Änderungen in v6.1
+### Aenderungen in v7.0
 
-- YAML Frontmatter mit `name`, `description`, `allowed-tools` hinzugefügt
-- Format für Claude Code VS Code Extension optimiert
-- Pfade aktualisiert für neue `.claude/skills/` Struktur
-- Section 12: KI-Agenten Workflow hinzugefügt
-- Section 13: Komponenten-Patterns hinzugefügt
-- Alle Inhalte vollständig erhalten
-
-### Vorherige Änderungen (v6.0)
-
-- **System Monitor View** ersetzt DatabaseExplorer, LogViewer, AuditLog, MqttLog
-- Neue Komponenten-Ordner: `system-monitor/`, `filters/`
-- Neue Composables: `useQueryFilters.ts`, `useGpioStatus.ts`
-- Neue Types: `gpio.ts`, `websocket-events.ts`
-- ESP Store: Pending Devices, GPIO-Status
-- WebSocket-Events erweitert
+- Projekt-Setup Section mit Tech-Stack Details
+- Component-Entwicklung Checkliste und Hierarchie
+- Type-System detaillierte Tabellen
+- Store-Architektur Uebersicht
+- Server-Verbindung erweitert
+- Drag & Drop System dokumentiert
+- Farbsystem & Design komplett
+- Bekannte Luecken dokumentiert
+- Entwicklungs-Workflows hinzugefuegt
+- Make-Targets dokumentiert

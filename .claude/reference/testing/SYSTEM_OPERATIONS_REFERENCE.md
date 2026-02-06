@@ -1,7 +1,8 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 1.1 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-04
+> **Version:** 2.0 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-06
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.0:** Docker-Flow als primärer Workflow, .env-Auslagerung, session.sh v4.0
 
 ---
 
@@ -56,6 +57,100 @@ $TOKEN = $response.access_token
 # Beispiel mit vollständigem Pfad:
 & "C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/#" -v
 ```
+
+---
+
+## 0.5 Docker-Workflow (PRIMÄR)
+
+> **Empfohlen:** Docker-Stack ist der primäre Workflow für Entwicklung und Debugging.
+
+### Stack starten/stoppen
+
+```bash
+# Stack starten (alle Services)
+docker compose up -d
+
+# Stack stoppen
+docker compose down
+
+# Stack stoppen und Volumes löschen
+docker compose down -v
+
+# Einzelnen Service neu starten
+docker compose restart el-servador
+docker compose restart mqtt-broker
+
+# Logs aller Services
+docker compose logs -f
+
+# Logs eines Services
+docker compose logs -f el-servador
+docker compose logs -f mqtt-broker
+docker compose logs -f postgres
+docker compose logs -f el-frontend
+```
+
+### Health-Checks
+
+```bash
+# Status aller Container
+docker compose ps
+
+# Health eines Services
+docker compose ps el-servador --format json
+
+# Container-Ressourcen
+docker stats --no-stream
+```
+
+### Debug-Session starten
+
+```bash
+# Session-Script (v4.0) - nutzt Docker-Stack
+./scripts/debug/start_session.sh [session-name] [--with-server] [--mode MODE]
+
+# Beispiele:
+./scripts/debug/start_session.sh boot-test
+./scripts/debug/start_session.sh sensor-test --mode sensor
+./scripts/debug/start_session.sh e2e-test --mode e2e --with-server
+```
+
+**Session-Script Features (v4.0):**
+- Docker-Stack Health-Check statt lokaler Services
+- MQTT-Capture mit Timestamps via Docker exec
+- Log-Archivierung nach `logs/archive/`
+- Erweiterte STATUS.md mit Docker-Container-Details
+
+### Log-Verzeichnisse
+
+| Verzeichnis | Inhalt |
+|-------------|--------|
+| `logs/server/` | Server JSON-Logs (Bind-Mount) |
+| `logs/mqtt/` | Mosquitto Broker-Logs (Bind-Mount) |
+| `logs/postgres/` | PostgreSQL Query-Logs (Bind-Mount) |
+| `logs/esp32/` | ESP32 Serial-Logs (manuell) |
+| `logs/current/` | Session-Logs (via start_session.sh) |
+| `logs/archive/` | Archivierte Session-Logs |
+
+### .env Konfiguration
+
+**Datei:** `.env` (Projektroot)
+
+```bash
+# PostgreSQL
+POSTGRES_USER=god_kaiser
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=god_kaiser_db
+
+# JWT
+JWT_SECRET_KEY=your_secure_jwt_secret
+
+# Optional: MQTT Auth
+MQTT_USERNAME=
+MQTT_PASSWORD=
+```
+
+> **WICHTIG:** Alle Secrets aus `docker-compose.yml` ausgelagert in `.env`
 
 ---
 
@@ -352,7 +447,26 @@ AND device_id NOT LIKE 'MOCK_%';
 
 ### 2.1 Start/Stop
 
-#### Server starten
+#### Via Docker (EMPFOHLEN)
+
+```bash
+# Server starten (Teil des Docker-Stacks)
+docker compose up -d el-servador
+
+# Server neu starten
+docker compose restart el-servador
+
+# Server stoppen
+docker compose stop el-servador
+
+# Server-Logs live
+docker compose logs -f el-servador
+
+# In Container Shell
+docker compose exec el-servador bash
+```
+
+#### Via Poetry (Lokal/Alternative)
 
 ```bash
 # Development (mit Hot-Reload)
@@ -372,7 +486,7 @@ cd "El Servador/god_kaiser_server"
 uvicorn src.main:app --reload
 ```
 
-#### Server stoppen
+#### Server stoppen (Poetry)
 
 ```bash
 # Graceful Shutdown (empfohlen)
@@ -442,43 +556,67 @@ curl http://localhost:8000/api/v1/health/metrics
 
 ### 2.3 Logs
 
-#### Log-Dateien
+#### Log-Dateien (Docker Bind-Mounts)
 
-| Datei | Inhalt |
-|-------|--------|
-| `logs/god_kaiser.log` | Haupt-Anwendungs-Log (JSON, rotiert) |
-| `logs/mosquitto.log` | MQTT-Broker-Log |
+| Pfad | Inhalt | Rotation |
+|------|--------|----------|
+| `logs/server/god_kaiser.log` | Server JSON-Logs | 10 Backups × 10MB |
+| `logs/mqtt/mosquitto.log` | Mosquitto Broker-Log | 50MB/Tag |
+| `logs/postgres/postgresql.log` | PostgreSQL Queries | 50MB/Tag |
 
-#### Logs lesen
+#### Via Docker (EMPFOHLEN)
 
 ```bash
-# Letzte 100 Zeilen
-tail -100 "El Servador/god_kaiser_server/logs/god_kaiser.log"
+# Server-Logs live
+docker compose logs -f el-servador
 
-# Live-Stream
-tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
+# Letzte 100 Zeilen
+docker compose logs --tail=100 el-servador
+
+# MQTT-Broker-Logs
+docker compose logs -f mqtt-broker
+
+# PostgreSQL-Logs
+docker compose logs -f postgres
+
+# Alle Services
+docker compose logs -f
+```
+
+#### Via Dateisystem
+
+```bash
+# Server-Logs (Docker Bind-Mount)
+tail -f logs/server/god_kaiser.log
+tail -100 logs/server/god_kaiser.log
 
 # Nur Fehler
-grep -E "ERROR|CRITICAL" "El Servador/god_kaiser_server/logs/god_kaiser.log"
+grep -E "ERROR|CRITICAL" logs/server/god_kaiser.log
 
 # MQTT-Events
-grep "mqtt" "El Servador/god_kaiser_server/logs/god_kaiser.log"
+grep "mqtt" logs/server/god_kaiser.log
 
 # Heartbeats filtern (oft zu viel Output)
-tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log" | grep -v "heartbeat"
+tail -f logs/server/god_kaiser.log | grep -v "heartbeat"
+
+# PostgreSQL Slow Queries (>100ms)
+grep "duration:" logs/postgres/postgresql.log
+
+# MQTT Broker-Logs
+tail -f logs/mqtt/mosquitto.log
 ```
 
 #### PowerShell (Windows)
 
 ```powershell
 # Letzte 50 Zeilen
-Get-Content "El Servador/god_kaiser_server/logs/god_kaiser.log" -Tail 50
+Get-Content "logs/server/god_kaiser.log" -Tail 50
 
 # Live-Stream
-Get-Content "El Servador/god_kaiser_server/logs/god_kaiser.log" -Tail 100 -Wait
+Get-Content "logs/server/god_kaiser.log" -Tail 100 -Wait
 
 # JSON parsen
-Get-Content "logs/god_kaiser.log" | ConvertFrom-Json |
+Get-Content "logs/server/god_kaiser.log" | ConvertFrom-Json |
   Where-Object { $_.level -eq "ERROR" } |
   Format-Table timestamp, message
 ```
@@ -759,6 +897,23 @@ curl http://localhost:8000/api/v1/auth/status
 ## 4. MQTT
 
 ### 4.1 Monitoring
+
+#### Via Docker (EMPFOHLEN)
+
+```bash
+# Alle Topics beobachten (via Docker)
+docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v
+
+# Mit Timestamps (wie in session.sh)
+docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v | while IFS= read -r line; do
+    echo "[$(date -Iseconds)] $line"
+done
+
+# Broker-Logs
+docker compose logs -f mqtt-broker
+```
+
+#### Via lokalen Client
 
 ```bash
 # Alle Topics beobachten
@@ -1084,20 +1239,40 @@ pio run -e esp32_dev -t upload
 
 ### 6.4 Debug-Session starten
 
-```bash
-# Terminal 1: Server mit Debug-Logs
-cd "El Servador/god_kaiser_server"
-LOG_LEVEL=DEBUG poetry run uvicorn src.main:app --reload
+#### Via session.sh (EMPFOHLEN)
 
-# Terminal 2: MQTT-Traffic beobachten
-mosquitto_sub -h localhost -t "kaiser/#" -v | ts '[%Y-%m-%d %H:%M:%S]'
+```bash
+# Session-Script startet automatisch:
+# - Docker-Stack Health-Check
+# - MQTT-Capture mit Timestamps
+# - Log-Archivierung
+# - STATUS.md für Agents
+
+./scripts/debug/start_session.sh boot-test
+./scripts/debug/start_session.sh sensor-test --mode sensor
+./scripts/debug/start_session.sh e2e-test --mode e2e
+
+# Session beenden
+./scripts/debug/stop_session.sh
+```
+
+#### Manuelle Debug-Session
+
+```bash
+# Terminal 1: Docker-Logs
+docker compose logs -f el-servador
+
+# Terminal 2: MQTT-Traffic (via Docker)
+docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v | while read line; do
+    echo "[$(date -Iseconds)] $line"
+done
 
 # Terminal 3: ESP Serial Monitor
 cd "El Trabajante"
-pio device monitor -b 115200
+pio device monitor -b 115200 | tee logs/current/esp32_serial.log
 
 # Terminal 4: Server-Logs (Errors only)
-tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log" | grep -E "ERROR|WARNING"
+tail -f logs/server/god_kaiser.log | grep -E "ERROR|WARNING"
 
 # Schnell-Check: Health
 curl -s http://localhost:8000/health | jq
@@ -1266,14 +1441,22 @@ grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10
 |------------|------|
 | **Server Main** | `El Servador/god_kaiser_server/src/main.py` |
 | **Server Config** | `El Servador/god_kaiser_server/src/core/config.py` |
-| **Server .env** | `El Servador/god_kaiser_server/.env` |
-| **Server Logs** | `El Servador/god_kaiser_server/logs/god_kaiser.log` |
-| **SQLite DB** | `El Servador/god_kaiser_server/god_kaiser_dev.db` |
+| **Environment** | `.env` (Projektroot) |
+| **Server Logs** | `logs/server/god_kaiser.log` (Docker Bind-Mount) |
+| **MQTT Logs** | `logs/mqtt/mosquitto.log` (Docker Bind-Mount) |
+| **PostgreSQL Logs** | `logs/postgres/postgresql.log` (Docker Bind-Mount) |
+| **ESP32 Logs** | `logs/esp32/` (manuell) |
+| **Session Logs** | `logs/current/` (via session.sh) |
+| **SQLite DB** | `El Servador/god_kaiser_server/god_kaiser_dev.db` (lokal) |
 | **ESP32 Main** | `El Trabajante/src/main.cpp` |
 | **ESP32 Config** | `El Trabajante/platformio.ini` |
 | **MQTT Protocol Doc** | `El Trabajante/docs/Mqtt_Protocoll.md` |
 | **Wokwi Config** | `El Trabajante/wokwi.toml` |
+| **Docker Compose** | `docker-compose.yml` |
+| **PostgreSQL Config** | `docker/postgres/postgresql.conf` |
+| **Mosquitto Config** | `docker/mosquitto/mosquitto.conf` |
+| **Session Script** | `scripts/debug/start_session.sh` (v4.0) |
 
 ---
 
-*Erstellt: 2026-02-02 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-06 | AutomationOne Debug-Operations-Reference*

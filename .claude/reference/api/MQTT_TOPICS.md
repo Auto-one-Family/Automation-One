@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.0 | **Aktualisiert:** 2026-02-01
+> **Version:** 2.1 | **Aktualisiert:** 2026-02-06
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
 
@@ -123,7 +123,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `i2c_address` | int | I2C-Sensoren | 7-bit I2C-Adresse (0-127, z.B. 68 für 0x44) |
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSensorDataTopic()` (Zeile 38)
+- **ESP32:** `topic_builder.cpp:buildSensorDataTopic()` (Zeile 53)
 - **Server:** `sensor_handler.py:handle_sensor_data()` (Zeile 77)
 
 **Quality-Levels:**
@@ -168,7 +168,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSensorBatchTopic()` (Zeile 50)
+- **ESP32:** `topic_builder.cpp:buildSensorBatchTopic()` (Zeile 61)
 - **Server:** `sensor_handler.py:handle_sensor_batch()` (Zeile 285)
 
 ---
@@ -212,7 +212,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSensorResponseTopic()` (Zeile 58)
+- **ESP32:** `topic_builder.cpp:buildSensorResponseTopic()` (Zeile 79)
 - **Server:** `main.py` Zeile 254 (Handler Registration)
 
 ---
@@ -299,7 +299,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `emergency` | string | normal, active, clearing, resuming |
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildActuatorStatusTopic()` (Zeile 72)
+- **ESP32:** `topic_builder.cpp:buildActuatorStatusTopic()` (Zeile 95)
 - **Server:** `actuator_handler.py:handle_actuator_status()` (Zeile 45)
 
 ---
@@ -338,7 +338,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildActuatorResponseTopic()` (Zeile 80)
+- **ESP32:** `topic_builder.cpp:buildActuatorResponseTopic()` (Zeile 103)
 - **Server:** `main.py` Zeile 239 (Handler Registration)
 
 ---
@@ -370,7 +370,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Hinweis:** `gpio: 255` = System-weiter Alert
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildActuatorAlertTopic()` (Zeile 88)
+- **ESP32:** `topic_builder.cpp:buildActuatorAlertTopic()` (Zeile 111)
 - **Server:** `main.py` Zeile 244 (Handler Registration)
 
 ---
@@ -524,7 +524,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSystemResponseTopic()` (Zeile 118)
+- **ESP32:** Direkt in `main.cpp` gebaut (keine TopicBuilder-Funktion)
 - **Server:** `main.py` Zeile 269 (Handler Registration)
 
 ---
@@ -556,7 +556,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSystemDiagnosticsTopic()` (Zeile 124)
+- **ESP32:** `topic_builder.cpp:buildSystemDiagnosticsTopic()` (Zeile 152)
 - **Server:** `main.py` Zeile 274 (Handler Registration)
 
 ---
@@ -592,7 +592,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - `critical`: Kritischer Fehler, Safe-Mode oder Reboot erforderlich
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSystemErrorTopic()` (Zeile 130)
+- **ESP32:** `topic_builder.cpp:buildSystemErrorTopic()` (Zeile 160)
 - **Server:** `main.py` Zeile 293 (Handler Registration)
 
 ---
@@ -625,7 +625,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildStatusTopic()` (Zeile 142)
+- **ESP32:** Direkt in `main.cpp` gebaut (keine TopicBuilder-Funktion)
 - **Server:** `main.py` Zeile 298 (Handler Registration)
 
 ---
@@ -647,7 +647,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSafeModeTopic()` (Zeile 148)
+- **ESP32:** Direkt in `main.cpp` gebaut (keine TopicBuilder-Funktion)
 - **Server:** `main.py` Zeile 303 (Handler Registration)
 
 ---
@@ -782,7 +782,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildConfigResponseTopic()` (Zeile 102)
+- **ESP32:** `topic_builder.cpp:buildConfigResponseTopic()` (Zeile 176)
 - **Server:** `main.py` Zeile 260 (Handler Registration)
 
 ---
@@ -829,7 +829,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildZoneAckTopic()` (Zeile 170)
+- **ESP32:** Direkt in `main.cpp` gebaut (keine TopicBuilder-Funktion)
 - **Server:** `main.py` Zeile 275 (Handler Registration)
 
 ---
@@ -898,7 +898,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **action-Werte:** `assigned`, `removed`
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSubzoneAckTopic()` (Zeile 186)
+- **ESP32:** `topic_builder.cpp:buildSubzoneAckTopic()` (Zeile 206)
 - **Server:** `main.py` Zeile 280 (Handler Registration)
 
 ---
@@ -923,7 +923,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSubzoneStatusTopic()` (Zeile 193)
+- **ESP32:** `topic_builder.cpp:buildSubzoneStatusTopic()` (Zeile 213)
 - **Server:** Noch nicht implementiert (Phase 9)
 
 ---
@@ -946,7 +946,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()` (Zeile 200)
+- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()` (Zeile 220)
 - **Server:** `topics.py:build_subzone_safe_topic()` (Zeile 192)
 
 ---

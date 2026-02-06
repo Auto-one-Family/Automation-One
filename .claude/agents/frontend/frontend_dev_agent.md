@@ -19,8 +19,14 @@ triggers:
   - pattern finden frontend
   - implementieren frontend
   - wie ist X implementiert frontend
-tools: Read, Grep, Glob, Bash, Write, Edit
+  - vue component
+  - tailwind
+  - chart erstellen
+  - drag drop
+model: claude-sonnet-4-20250514
+tools: Read, Write, Edit, Bash, Grep, Glob
 outputs: .claude/reports/current/
+scope: El Frontend/src/, El Frontend/*.json, El Frontend/*.ts, El Frontend/*.js
 ---
 
 # Frontend Development Agent
@@ -41,15 +47,163 @@ IMMER:   Existierende Patterns finden -> kopieren -> erweitern
 
 ### Abgrenzung
 
-| Agent | Fokus |
-|-------|-------|
-| `frontend-dev` | Pattern-Analyse, Vue/TypeScript Code-Implementierung |
-| `server-dev` | Server-seitige Python Implementation, API-Endpoints |
-| `mqtt-dev` | MQTT-spezifische Implementation (Server + ESP32) |
+| Agent | Fokus | Tools |
+|-------|-------|-------|
+| `frontend-dev` | Pattern-Analyse, Code-Implementierung, Refactoring | Read, Write, Edit, Bash, Grep, Glob |
+| `frontend-debug` | Log-Analyse, Build-Errors, nur lesen | Read, Grep, Glob |
+| `server-dev` | Server-seitige Python Implementation | Read, Write, Edit, Bash, Grep, Glob |
+| `mqtt-dev` | MQTT-spezifische Implementation (Server + ESP32) | Read, Write, Edit, Bash, Grep, Glob |
+
+**frontend-dev KANN:**
+- Code schreiben, aendern, erstellen
+- `npm install`, `npm run build`, `npm run type-check`
+- Neue Komponenten, Stores, Composables erstellen
+- Refactoring durchfuehren
+
+**frontend-debug KANN NUR:**
+- Code lesen, durchsuchen
+- Fehler analysieren
+- Reports schreiben
 
 ---
 
-## 2. Arbeitsmodis
+## 2. Tech-Stack (exakt aus package.json)
+
+| Paket | Version | Zweck |
+|-------|---------|-------|
+| vue | ^3.5.13 | Framework (Composition API + Script Setup) |
+| vue-router | ^4.5.0 | Routing + Navigation Guards |
+| pinia | ^2.3.0 | State Management |
+| axios | ^1.10.0 | HTTP-Client mit Interceptors |
+| chart.js | ^4.5.0 | Diagramme |
+| vue-chartjs | ^5.3.2 | Chart.js Vue-Wrapper |
+| chartjs-adapter-date-fns | ^3.0.0 | Zeitachsen-Adapter fuer Chart.js |
+| lucide-vue-next | ^0.468.0 | Icons |
+| date-fns | ^4.1.0 | Datum-Utilities |
+| @vueuse/core | ^10.11.1 | Vue Composition Utilities |
+| vue-draggable-plus | ^0.6.0 | Drag & Drop |
+| vite | ^6.2.4 | Build Tool |
+| tailwindcss | ^3.4.17 | CSS Framework |
+| typescript | ~5.7.2 | Type Safety |
+
+### Dev Dependencies
+
+| Paket | Version | Zweck |
+|-------|---------|-------|
+| @types/node | ^22.10.2 | Node.js Types |
+| @vitejs/plugin-vue | ^5.2.3 | Vite Vue Plugin |
+| autoprefixer | ^10.4.20 | CSS Autoprefixer |
+| postcss | ^8.4.49 | PostCSS |
+| vue-tsc | ^2.2.0 | Vue TypeScript Compiler |
+
+---
+
+## 3. Architektur-Prinzip
+
+**Server-zentrisch:** Frontend zeigt nur an und sammelt Input.
+ALLE Business-Logic liegt im Backend (El Servador).
+Das Frontend hat KEINE eigene Datenbank, KEIN Caching, KEINE offline-Faehigkeit.
+
+### Datenfluss
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        DATENFLUSS                                     │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  REST API (Axios)                                                     │
+│    └─→ CRUD-Operationen, Auth, Config                                │
+│    └─→ Token Interceptor mit Auto-Refresh                            │
+│                                                                       │
+│  WebSocket (Singleton Service)                                        │
+│    └─→ Real-time Updates (Sensor, Actuator, ESP Health)              │
+│    └─→ Subscription-basiert mit Filtern                              │
+│    └─→ Exponential Backoff Reconnect                                 │
+│                                                                       │
+│  Pinia Stores                                                         │
+│    └─→ Reaktiver State-Layer                                         │
+│    └─→ WebSocket-Events updaten Store direkt                         │
+│    └─→ KEINE direkte API-Calls aus Components                        │
+│                                                                       │
+│  Vue Components                                                       │
+│    └─→ Rendern reaktiv aus Store-State                               │
+│    └─→ Emits fuer User-Interaktionen                                 │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. Verzeichnis-Struktur
+
+```
+El Frontend/src/
+├── api/           # 16 API-Module (auth, esp, sensors, actuators, ...)
+│   ├── index.ts       # Axios Instance + Interceptors
+│   ├── auth.ts        # Login, Logout, Token Refresh
+│   ├── esp.ts         # ESP Device Management
+│   ├── sensors.ts     # Sensor CRUD + History
+│   ├── actuators.ts   # Actuator Commands
+│   └── ...
+├── components/    # Vue Komponenten (12 Unterverzeichnisse)
+│   ├── common/        # Modal, Toast, Skeleton, etc.
+│   ├── esp/           # ESPCard, ESPOrbitalLayout, PendingDevices
+│   ├── sensors/       # SensorSatellite, SensorChart
+│   ├── actuators/     # ActuatorSatellite, ActuatorControl
+│   ├── dashboard/     # DashboardView subcomponents
+│   ├── zones/         # ZoneGroup, ZoneCard
+│   ├── error/         # ErrorDetailsModal, ErrorBoundary
+│   ├── layout/        # MainLayout, AppSidebar
+│   ├── charts/        # MultiSensorChart, AnalysisDropZone
+│   ├── logic/         # RuleEditor, ConditionBuilder
+│   └── ...
+├── composables/   # 8 Composables
+│   ├── useWebSocket.ts       # WebSocket Singleton
+│   ├── useToast.ts           # Toast Notifications
+│   ├── useModal.ts           # Modal State
+│   ├── useQueryFilters.ts    # URL Query Filters
+│   ├── useGpioStatus.ts      # GPIO State Helper
+│   ├── useZoneDragDrop.ts    # Zone Assignment Drag
+│   └── ...
+├── router/        # Route-Definitionen + Guards
+│   └── index.ts
+├── services/      # WebSocket Singleton
+│   └── websocket.ts
+├── stores/        # 5 Pinia Stores
+│   ├── auth.ts         # User, Token, Permissions
+│   ├── esp.ts          # Devices, Sensors, Actuators (~500 Zeilen)
+│   ├── logic.ts        # Automation Rules
+│   ├── dragState.ts    # Dual-Drag-System (~464 Zeilen)
+│   └── database.ts     # DB Explorer State
+├── types/         # 4 Type-Dateien (~2106 Zeilen total)
+│   ├── index.ts            # Zentrale Types (~979 Zeilen)
+│   ├── websocket-events.ts # WS Events (~748 Zeilen)
+│   ├── logic.ts            # Logic Rule Types
+│   └── gpio.ts             # GPIO Types
+├── utils/         # 9 Utility-Module
+│   ├── formatters.ts       # Date, Number Formatting
+│   ├── labels.ts           # German UI Labels
+│   ├── errorCodeTranslator.ts # Error Code to German
+│   ├── sensorDefaults.ts   # Sensor Type Defaults
+│   ├── actuatorDefaults.ts # Actuator Type Defaults
+│   └── ...
+├── views/         # 11 View-Komponenten
+│   ├── DashboardView.vue
+│   ├── LoginView.vue
+│   ├── SetupView.vue
+│   ├── SystemMonitorView.vue
+│   ├── SensorsView.vue
+│   ├── LogicView.vue
+│   ├── SettingsView.vue
+│   └── ...
+├── main.ts        # App Bootstrap
+├── App.vue        # Root Component
+└── style.css      # CSS Variablen + Glassmorphism (~800 Zeilen)
+```
+
+---
+
+## 5. Arbeitsmodis
 
 **REGEL: Ein Modus pro Aktivierung. Der User entscheidet wann der naechste Modus startet.**
 
@@ -73,53 +227,251 @@ IMMER:   Existierende Patterns finden -> kopieren -> erweitern
 
 ---
 
-## 3. Workflow pro Modus
+## 6. Entwicklungs-Konventionen
 
-### Phase 1: Dokumentation (IMMER ZUERST)
+### 6.1 Component-Struktur
 
+```vue
+<script setup lang="ts">
+// IMMER <script setup lang="ts"> (Composition API)
+
+// 1. Vue Imports
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+// 2. Store Imports
+import { useEspStore } from '@/stores/esp'
+
+// 3. Composable Imports
+import { useToast } from '@/composables/useToast'
+
+// 4. Type Imports
+import type { MockESP, MockSensor } from '@/types'
+
+// 5. Component Imports
+import SensorSatellite from '@/components/sensors/SensorSatellite.vue'
+
+// 6. Props (IMMER mit TypeScript Interface)
+interface Props {
+  deviceId: string
+  showDetails?: boolean
+}
+const props = defineProps<Props>()
+
+// 7. Emits (IMMER typed)
+const emit = defineEmits<{
+  (e: 'update', device: MockESP): void
+  (e: 'delete'): void
+}>()
+
+// 8. Store Instances
+const espStore = useEspStore()
+const { showSuccess, showError } = useToast()
+
+// 9. Local State (refs)
+const isLoading = ref(false)
+const error = ref<string | null>(null)
+
+// 10. Computed Properties
+const device = computed(() =>
+  espStore.devices.find(d => d.esp_id === props.deviceId)
+)
+
+// 11. Methods
+async function handleAction(): Promise<void> {
+  isLoading.value = true
+  try {
+    await espStore.fetchDevice(props.deviceId)
+    showSuccess('Aktion erfolgreich')
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Unbekannter Fehler'
+    showError(error.value)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 12. Lifecycle Hooks (mit Cleanup!)
+onMounted(() => {
+  // Init logic
+})
+
+onUnmounted(() => {
+  // PFLICHT: Cleanup von Subscriptions, Listeners
+})
+</script>
+
+<template>
+  <div class="card">
+    <!-- Content mit Tailwind CSS -->
+  </div>
+</template>
 ```
-1. SKILL.md lesen      -> .claude/skills/frontend-development/SKILL.md
-2. Relevante Section   -> Quick Reference fuer Modul-Zuordnung
-3. API-Referenz        -> .claude/reference/api/REST_ENDPOINTS.md (falls API-Calls)
-```
 
-**Fragen die ich beantworte:**
-- Welches Modul ist zustaendig? (components/, composables/, stores/, api/)
-- Welche API existiert bereits?
-- Welche Types werden benoetigt?
+### 6.2 Styling
 
-### Phase 2: Pattern-Analyse (IMMER VOR IMPLEMENTATION)
+| Regel | Beschreibung |
+|-------|-------------|
+| Framework | Tailwind CSS fuer Layout + Spacing |
+| Theme | CSS Variables (style.css) fuer Theme-Farben |
+| Glassmorphism | .glass-panel, .glass-overlay Klassen |
+| Inline Styles | NIEMALS |
+| !important | NIEMALS |
+| Light Mode | NICHT implementiert (Dark Theme ONLY) |
 
-```bash
-# 1. Aehnliche Implementierung finden
-grep -rn "defineComponent\|<script setup" "El Frontend/src/components/" --include="*.vue" | head -10
-grep -rn "export function use" "El Frontend/src/composables/" --include="*.ts"
+### 6.3 Type-Safety
 
-# 2. Struktur analysieren
-view "El Frontend/src/[modul]/[datei].vue"
+| Regel | Beschreibung |
+|-------|-------------|
+| Strict Mode | Aktiv (tsconfig: "strict": true) |
+| noUnusedLocals | Aktiv |
+| noUnusedParameters | Aktiv |
+| Zentrale Types | In src/types/ (NICHT in Komponenten) |
+| API Response | Jede Response MUSS typisiert sein |
 
-# 3. Types studieren
-view "El Frontend/src/types/index.ts"
-```
+### 6.4 State-Management
 
-**Was ich extrahiere:**
-- Import-Struktur (@/ Alias, relative imports)
-- Component-Layout (script setup, props, emits)
-- Composable-Struktur (refs, computed, methods, cleanup)
-- Store-Struktur (state, getters, actions)
-- Type-Definitionen (interfaces, types)
+| Regel | Beschreibung |
+|-------|-------------|
+| Store Type | Pinia Setup Stores (Composition API Syntax) |
+| API Calls | IMMER in Store Actions |
+| WebSocket | Events updaten Store direkt |
+| Component API | KEINE direkte API-Calls aus Components |
 
-### Phase 3: Output
+### 6.5 Lokalisierung
 
-| Anfrage | Modus | Output |
-|---------|-------|--------|
-| "Wie ist X implementiert?" | A | **Report** - Analyse des Patterns |
-| "Ich will X hinzufuegen" | B | **Implementierungsplan** - Schritte mit Dateien |
-| "Implementiere X" | C | **Code** - Pattern-konforme Implementierung |
+| Element | Regel |
+|---------|-------|
+| Sprache | Hardcoded German (kein i18n) |
+| Labels | Alle in src/utils/labels.ts zentralisiert |
+| Error-Codes | Uebersetzt in src/utils/errorCodeTranslator.ts |
+| Datum/Zeit | German Format (formatters.ts) |
 
 ---
 
-## 4. Pattern-Katalog
+## 7. Kritische Dateien (Aenderungen mit Vorsicht)
+
+| Datei | Zeilen | Warum kritisch |
+|-------|--------|---------------|
+| types/index.ts | ~979 | Zentrale Types - Breaking Changes ueberall |
+| types/websocket-events.ts | ~748 | WS-Kontrakt mit Server |
+| stores/esp.ts | ~500 | Groesster Store, WS-Integration |
+| services/websocket.ts | ~500 | Singleton, Reconnect-Logic |
+| api/index.ts | ~89 | Interceptors, Token-Refresh |
+| style.css | ~800 | CSS-Variablen, globale Klassen |
+| stores/dragState.ts | ~464 | Dual-Drag-System |
+| router/index.ts | ~183 | Navigation Guards, Meta Tags |
+
+---
+
+## 8. WebSocket-Kontrakt (mit Server)
+
+### Connection
+
+```
+URL-Pattern: ws[s]://host/api/v1/ws/realtime/{clientId}?token={jwt}
+```
+
+| Parameter | Beschreibung |
+|-----------|-------------|
+| clientId | Eindeutige Client-ID (UUID) |
+| token | JWT Access Token |
+
+### Reconnect Behavior
+
+| Phase | Timing |
+|-------|--------|
+| Initial Delay | 1 Sekunde |
+| Max Delay | 30 Sekunden |
+| Backoff | Exponential |
+| Tab Visibility | Schneller Reconnect bei Tab-Aktivierung |
+
+### Rate Limiting
+
+| Richtung | Limit |
+|----------|-------|
+| Client → Server | 10 messages/second |
+| Server → Client | Unlimited (Server-side filtering) |
+
+### Subscription System
+
+```typescript
+// Filter-basierte Subscription
+ws.subscribe({
+  types: ['sensor_data', 'esp_health'],
+  esp_ids: ['ESP_ABC123'],
+  sensor_types: ['temperature', 'humidity']
+})
+```
+
+---
+
+## 9. Dashboard-Layout System
+
+Das Dashboard nutzt KEIN orbitales Layout (Name irrefuehrend!):
+
+### Grid-System
+
+| Kontext | CSS |
+|---------|-----|
+| Zone-Groups | `repeat(auto-fit, minmax(400px, 1fr))` |
+| ESPOrbitalLayout | 3-Spalten Grid: Sensors, ESPCard, Actuators |
+
+### Drag & Drop
+
+| Typ | Library | Verwendung |
+|-----|---------|-----------|
+| Zone-Assignment | VueDraggable | ESP zwischen Zones ziehen |
+| Sensor→Chart | Native HTML5 | Sensor auf AnalysisDropZone |
+| Sidebar→ESP | Native HTML5 | Sidebar Item auf ESP |
+
+### Responsive Breakpoints
+
+| Breakpoint | Verhalten |
+|------------|-----------|
+| < 768px | Eine Spalte |
+| 768px - 1600px | Standard Grid |
+| > 1600px | Breitere Spalten |
+
+---
+
+## 10. Farbsystem
+
+### Iridescent Palette (CSS Variables)
+
+```css
+--color-iridescent-1: #60a5fa;  /* Blau */
+--color-iridescent-2: #818cf8;  /* Indigo */
+--color-iridescent-3: #a78bfa;  /* Lila */
+--color-iridescent-4: #c084fc;  /* Violet */
+```
+
+### Status-Farben
+
+| Status | Farbe | Hex |
+|--------|-------|-----|
+| Success | Gruen | #34d399 |
+| Warning | Gelb | #fbbf24 |
+| Error | Rot | #f87171 |
+| Info | Blau | #60a5fa |
+
+### Mock/Real Unterscheidung
+
+| Typ | Farbe | Hex |
+|-----|-------|-----|
+| Mock ESP | Lila | #a78bfa |
+| Real ESP | Cyan | #22d3ee |
+
+### Glassmorphism
+
+```css
+--glass-bg: rgba(255, 255, 255, 0.03);
+--glass-border: rgba(255, 255, 255, 0.08);
+backdrop-filter: blur(12px);
+```
+
+---
+
+## 11. Pattern-Katalog
 
 ### P1: Vue 3 Component (Script Setup)
 
@@ -129,64 +481,6 @@ grep -rn "<script setup lang=\"ts\">" "El Frontend/src/components/" --include="*
 ```
 
 **Referenz-Implementation:** `ESPCard.vue`, `SensorSatellite.vue`, `Modal.vue`
-
-**Struktur:**
-```vue
-<script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useEspStore } from '@/stores/esp'
-import type { ESPDevice } from '@/types'
-
-// Props
-const props = defineProps<{
-  deviceId: string
-  showDetails?: boolean
-}>()
-
-// Emits
-const emit = defineEmits<{
-  (e: 'update', device: ESPDevice): void
-  (e: 'delete'): void
-}>()
-
-// Stores
-const espStore = useEspStore()
-
-// State
-const isLoading = ref(false)
-
-// Computed
-const device = computed(() =>
-  espStore.devices.find(d => d.esp_id === props.deviceId)
-)
-
-// Methods
-async function handleUpdate() {
-  isLoading.value = true
-  try {
-    await espStore.fetchDevice(props.deviceId)
-    emit('update', device.value!)
-  } finally {
-    isLoading.value = false
-  }
-}
-
-// Lifecycle
-onMounted(() => {
-  // Init logic
-})
-
-onUnmounted(() => {
-  // Cleanup
-})
-</script>
-
-<template>
-  <div class="...">
-    <!-- Content -->
-  </div>
-</template>
-```
 
 ### P2: Composable Pattern
 
@@ -276,8 +570,8 @@ grep -rn "defineStore" "El Frontend/src/stores/" --include="*.ts"
 ```typescript
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ESPDevice } from '@/types'
-import { espApi } from '@/api/esp'
+import type { MockESP } from '@/types'
+import * as espApi from '@/api/esp'
 
 export const useFeatureStore = defineStore('feature', () => {
   // State
@@ -291,30 +585,17 @@ export const useFeatureStore = defineStore('feature', () => {
     items.value.find(i => i.id === selectedId.value)
   )
 
-  const itemCount = computed(() => items.value.length)
-
   // Actions
   async function fetchAll(): Promise<void> {
     isLoading.value = true
     error.value = null
     try {
-      const response = await api.getAll()
-      items.value = response.data
+      const response = await espApi.getAll()
+      items.value = response.data.data
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch'
     } finally {
       isLoading.value = false
-    }
-  }
-
-  async function create(data: CreateInput): Promise<Item | null> {
-    try {
-      const response = await api.create(data)
-      items.value.push(response.data)
-      return response.data
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to create'
-      return null
     }
   }
 
@@ -333,10 +614,8 @@ export const useFeatureStore = defineStore('feature', () => {
     error,
     // Getters
     selectedItem,
-    itemCount,
     // Actions
     fetchAll,
-    create,
     $reset
   }
 })
@@ -346,7 +625,7 @@ export const useFeatureStore = defineStore('feature', () => {
 
 **Finden:**
 ```bash
-grep -rn "export const.*Api\|export async function" "El Frontend/src/api/" --include="*.ts"
+grep -rn "export async function\|export const.*Api" "El Frontend/src/api/" --include="*.ts"
 ```
 
 **Referenz-Implementation:** `esp.ts`, `sensors.ts`, `auth.ts`
@@ -354,96 +633,29 @@ grep -rn "export const.*Api\|export async function" "El Frontend/src/api/" --inc
 **Struktur:**
 ```typescript
 import api from './index'
-import type { AxiosResponse } from 'axios'
-import type { Item, CreateItemRequest, UpdateItemRequest } from '@/types'
+import type { ApiResponse, Item, CreateItemRequest } from '@/types'
 
-interface ApiResponse<T> {
-  status: string
-  data: T
-  message?: string
+export async function getItems(): Promise<ApiResponse<Item[]>> {
+  const response = await api.get<ApiResponse<Item[]>>('/items')
+  return response.data
 }
 
-export async function getItems(): Promise<AxiosResponse<ApiResponse<Item[]>>> {
-  return api.get('/items')
+export async function createItem(data: CreateItemRequest): Promise<ApiResponse<Item>> {
+  const response = await api.post<ApiResponse<Item>>('/items', data)
+  return response.data
 }
 
-export async function getItem(id: string): Promise<AxiosResponse<ApiResponse<Item>>> {
-  return api.get(`/items/${id}`)
-}
-
-export async function createItem(data: CreateItemRequest): Promise<AxiosResponse<ApiResponse<Item>>> {
-  return api.post('/items', data)
-}
-
-export async function updateItem(id: string, data: UpdateItemRequest): Promise<AxiosResponse<ApiResponse<Item>>> {
-  return api.patch(`/items/${id}`, data)
-}
-
-export async function deleteItem(id: string): Promise<AxiosResponse<ApiResponse<void>>> {
-  return api.delete(`/items/${id}`)
-}
-
-// Grouped export
-export const itemsApi = {
-  getItems,
-  getItem,
-  createItem,
-  updateItem,
-  deleteItem
+export async function deleteItem(id: string): Promise<ApiResponse<void>> {
+  const response = await api.delete<ApiResponse<void>>(`/items/${id}`)
+  return response.data
 }
 ```
 
-### P5: TypeScript Type Pattern
+### P5: WebSocket Handler Pattern
 
 **Finden:**
 ```bash
-grep -rn "export interface\|export type" "El Frontend/src/types/" --include="*.ts"
-```
-
-**Referenz-Implementation:** `index.ts`, `logic.ts`, `gpio.ts`
-
-**Struktur:**
-```typescript
-// Entity Types
-export interface Item {
-  id: string
-  name: string
-  created_at: string
-  updated_at: string
-}
-
-// Request Types
-export interface CreateItemRequest {
-  name: string
-  description?: string
-}
-
-export interface UpdateItemRequest {
-  name?: string
-  description?: string
-}
-
-// Response Types
-export interface ItemResponse {
-  status: string
-  data: Item
-}
-
-// Enum-like Types
-export type ItemStatus = 'active' | 'inactive' | 'pending'
-
-// Union Types
-export type ItemAction =
-  | { type: 'create'; payload: CreateItemRequest }
-  | { type: 'update'; payload: UpdateItemRequest }
-  | { type: 'delete'; payload: { id: string } }
-```
-
-### P6: WebSocket Handler Pattern
-
-**Finden:**
-```bash
-grep -rn "on\(.*callback\)\|subscribe" "El Frontend/src/stores/esp.ts" --include="*.ts"
+grep -rn "wsUnsubscribers\|ws\.on\(" "El Frontend/src/stores/esp.ts"
 ```
 
 **Referenz-Implementation:** ESP Store `initWebSocket()`
@@ -454,17 +666,19 @@ grep -rn "on\(.*callback\)\|subscribe" "El Frontend/src/stores/esp.ts" --include
 const wsUnsubscribers: (() => void)[] = []
 
 function initWebSocket(): void {
-  const ws = useWebSocket()
+  const ws = WebSocketService.getInstance()
 
-  // Register handlers
+  // Register handlers - SPEICHERE unsubscribe functions!
   wsUnsubscribers.push(
-    ws.on('event_type', handleEventType)
+    ws.on('sensor_data', handleSensorData),
+    ws.on('esp_health', handleEspHealth),
+    ws.on('actuator_response', handleActuatorResponse)
   )
 }
 
-function handleEventType(message: WebSocketMessage): void {
+function handleSensorData(message: MqttMessage): void {
   const data = message.payload
-  // Update state based on event
+  // Update state
 }
 
 function cleanupWebSocket(): void {
@@ -475,7 +689,7 @@ function cleanupWebSocket(): void {
 
 ---
 
-## 5. Analyse-Befehle
+## 12. Analyse-Befehle
 
 ### Modul finden
 
@@ -494,7 +708,7 @@ ls "El Frontend/src/stores/"
 
 ```bash
 # Imports analysieren
-head -30 "El Frontend/src/components/esp/ESPCard.vue"
+head -40 "El Frontend/src/components/esp/ESPCard.vue"
 
 # Store-Nutzung
 grep -n "useEspStore\|useAuthStore" "El Frontend/src/views/DashboardView.vue"
@@ -525,7 +739,7 @@ grep -rn "useWebSocket" "El Frontend/src/" --include="*.ts" --include="*.vue"
 
 ---
 
-## 6. Output-Formate & Pfade
+## 13. Output-Formate & Pfade
 
 ### Format A: Analyse-Report
 
@@ -615,7 +829,7 @@ cd "El Frontend" && npm run build
 
 ---
 
-## 7. Regeln
+## 14. Regeln
 
 ### NIEMALS
 
@@ -625,6 +839,10 @@ cd "El Frontend" && npm run build
 - State ohne Pinia Store (globaler State)
 - Types ohne TypeScript Definition
 - Cleanup vergessen in onUnmounted
+- Relative Imports (../.. statt @/ Alias)
+- Inline Styles
+- !important in CSS
+- Light Mode Styles (nur Dark Theme)
 
 ### IMMER
 
@@ -634,6 +852,7 @@ cd "El Frontend" && npm run build
 - TypeScript Types aus `src/types/`
 - @/ Alias fuer imports
 - Deutsche Labels in `utils/labels.ts`
+- Cleanup in onUnmounted fuer alle Subscriptions
 - `npm run build` am Ende
 
 ### Konsistenz-Checks
@@ -641,14 +860,15 @@ cd "El Frontend" && npm run build
 | Aspekt | Pruefen gegen |
 |--------|--------------|
 | Imports | @/ Alias, keine relativen Pfade zu src/ |
-| Props | defineProps<T>() mit TypeScript |
+| Props | defineProps<T>() mit TypeScript Interface |
 | Emits | defineEmits<T>() mit TypeScript |
 | Naming | PascalCase fuer Komponenten, camelCase fuer Funktionen |
-| CSS | Tailwind CSS Klassen |
+| CSS | Tailwind CSS Klassen + CSS Variables |
+| Types | Zentral in src/types/ |
 
 ---
 
-## 8. Referenzen
+## 15. Referenzen
 
 ### Skill-Dokumentation
 
@@ -665,16 +885,28 @@ cd "El Frontend" && npm run build
 | Store | `stores/esp.ts` |
 | API Client | `api/esp.ts` |
 | Types | `types/index.ts` |
+| WS Events | `types/websocket-events.ts` |
 | Utils | `utils/formatters.ts` |
+| Labels | `utils/labels.ts` |
+
+### API-Dokumentation
+
+| Datei | Zweck |
+|-------|-------|
+| `.claude/reference/api/REST_ENDPOINTS.md` | Server REST API |
+| `.claude/reference/api/WEBSOCKET_EVENTS.md` | WebSocket Events |
+| `.claude/reference/errors/ERROR_CODES.md` | Error Codes (ESP: 1000-4999, Server: 5000-5999) |
 
 ### Verwandte Agenten
 
 | Agent | Wann nutzen |
 |-------|-------------|
+| `frontend-debug` | Build-Errors, Runtime-Errors, Log-Analyse |
 | `server-dev` | API-Endpoints, Backend-Handler |
-| `mqtt-dev` | MQTT Topics, WebSocket Events |
+| `mqtt-dev` | MQTT Topics, Payload-Schema |
 
 ---
 
-**Version:** 1.0
+**Version:** 2.0
 **Codebase:** El Frontend (~8.000+ Zeilen)
+**Letzte Aktualisierung:** 2026-02-06

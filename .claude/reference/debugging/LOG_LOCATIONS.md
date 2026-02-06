@@ -1,8 +1,8 @@
 # Log-System - AutomationOne
 
-> **Version:** 2.1 | **Aktualisiert:** 2026-02-01
+> **Version:** 3.0 | **Aktualisiert:** 2026-02-06
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
-> **Änderungen 2.1:** Wokwi `--serial-log-file` Option dokumentiert, log2file Zuverlässigkeitsprobleme klargestellt
+> **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
 
 ---
 
@@ -20,6 +20,96 @@
 | [7. GitHub Actions](#7-github-actions-logs) | CI/CD Logs | Bei CI-Failures |
 | [8. Multi-Log Capture](#8-synchronisierte-multi-log-capture) | Mehrere Quellen gleichzeitig | Bei komplexem Debugging |
 | [9. Windows-Hinweise](#9-windows-spezifische-hinweise) | PowerShell, Git Bash, WSL | Bei Windows-Problemen |
+
+---
+
+## Docker Log Infrastructure (NEU in v3.0)
+
+### Log-Verzeichnisse (Bind-Mounts)
+
+| Verzeichnis | Container | Beschreibung |
+|-------------|-----------|--------------|
+| `logs/server/` | el-servador | FastAPI Server JSON-Logs |
+| `logs/mqtt/` | mqtt-broker | Mosquitto Broker Logs |
+| `logs/postgres/` | postgres | PostgreSQL Query/Connection Logs |
+| `logs/esp32/` | - | ESP32 Serial Logs (manuell) |
+| `logs/current/` | - | Session-Logs (via start_session.sh) |
+
+### Docker-Compose Konfiguration
+
+```yaml
+# Server-Logs
+el-servador:
+  volumes:
+    - ./logs/server:/app/logs
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# MQTT-Logs (Bind-Mount statt Named Volume)
+mqtt-broker:
+  volumes:
+    - ./logs/mqtt:/mosquitto/log
+
+# PostgreSQL-Logs
+postgres:
+  volumes:
+    - ./logs/postgres:/var/log/postgresql
+    - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+  command: postgres -c config_file=/etc/postgresql/postgresql.conf
+
+# Frontend-Logs (Docker json-file Driver)
+el-frontend:
+  logging:
+    driver: json-file
+    options:
+      max-size: "5m"
+      max-file: "3"
+```
+
+### PostgreSQL Logging-Konfiguration
+
+**Config:** `docker/postgres/postgresql.conf`
+
+| Setting | Wert | Beschreibung |
+|---------|------|--------------|
+| `log_statement` | `mod` | Nur INSERT/UPDATE/DELETE/DDL loggen |
+| `log_min_duration_statement` | `100` | SELECTs > 100ms loggen (Slow Query) |
+| `log_connections` | `on` | Verbindungen loggen |
+| `log_disconnections` | `on` | Trennungen loggen |
+| `log_lock_waits` | `on` | Lock-Waits loggen |
+| `log_rotation_age` | `1d` | Tägliche Rotation |
+| `log_rotation_size` | `50MB` | Max 50MB pro Log |
+
+### Frontend Global Error Handler
+
+**Datei:** `El Frontend/src/main.ts`
+
+```typescript
+// Vue Error Handler - structured JSON for Docker logs
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[Vue Error]', {
+    error: err.message,
+    stack: err.stack,
+    component: instance?.$options?.name,
+    info,
+    timestamp: new Date().toISOString()
+  })
+}
+```
+
+### .env-Auslagerung
+
+Alle Secrets wurden aus `docker-compose.yml` in `.env` ausgelagert:
+
+| Variable | Beschreibung |
+|----------|--------------|
+| `POSTGRES_USER` | PostgreSQL Benutzername |
+| `POSTGRES_PASSWORD` | PostgreSQL Passwort |
+| `POSTGRES_DB` | Datenbankname |
+| `JWT_SECRET_KEY` | JWT Signing Key |
 
 ---
 
@@ -121,17 +211,27 @@ gh run download <run-id>                                                       #
 | `format` | `json` | `LOG_FORMAT` |
 | `file_path` | `logs/god_kaiser.log` | `LOG_FILE_PATH` |
 | `file_max_bytes` | 10MB | `LOG_FILE_MAX_BYTES` |
-| `file_backup_count` | 100 | `LOG_FILE_BACKUP_COUNT` |
+| `file_backup_count` | 10 | `LOG_FILE_BACKUP_COUNT` |
 
 ### 2.2 Log-Pfad und Rotation
 
+**Lokaler Pfad (Poetry):**
 ```
 El Servador/god_kaiser_server/logs/
 ├── god_kaiser.log        # Aktuelle Log-Datei
 ├── god_kaiser.log.1      # Ältester Backup
 ├── god_kaiser.log.2
 ├── ...
-└── god_kaiser.log.100    # Neuester Backup
+└── god_kaiser.log.10     # Neuester Backup (max 10)
+```
+
+**Docker Bind-Mount:**
+```
+logs/server/              # Host-Verzeichnis (Docker Bind-Mount)
+├── god_kaiser.log        # Aktuelle Log-Datei
+├── god_kaiser.log.1
+├── ...
+└── god_kaiser.log.10
 ```
 
 ### 2.3 JSON Log-Format
@@ -733,9 +833,18 @@ mosquitto_sub -h localhost -t "kaiser/#" -v | ts '[%Y-%m-%d %H:%M:%S]' | tee mqt
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-01
-**Version:** 2.2
+**Letzte Aktualisierung:** 2026-02-06
+**Version:** 3.0
 **Changelog:**
+- 3.0: Docker-basierte Log-Infrastruktur
+  - Neue Log-Verzeichnisse: `logs/server/`, `logs/mqtt/`, `logs/postgres/`, `logs/esp32/`
+  - PostgreSQL-Logging aktiviert via `docker/postgres/postgresql.conf`
+  - Mosquitto-Logs: Named Volume → Bind-Mount `./logs/mqtt`
+  - Server backup_count: 100 → 10
+  - Frontend: Docker json-file Driver + Vue Global Error Handler
+  - `.env`-Auslagerung aller Secrets aus `docker-compose.yml`
+  - `restart: unless-stopped` für alle Core-Services
+  - `session.sh`: Docker-Flow statt Poetry, MQTT-Capture mit Timestamps
 - 2.2: ESP32 Logger-System (Firmware) und Architektur-Diagramm hinzugefügt
 - 2.1: Wokwi `--serial-log-file` Option dokumentiert, log2file Zuverlässigkeitsprobleme klargestellt
 - 2.0: Konsolidiert aus LOG_LOCATIONS, LOG_INFRASTRUCTURE, SERIAL_CAPTURE
