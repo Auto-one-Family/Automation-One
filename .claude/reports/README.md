@@ -20,10 +20,10 @@ reports/
 
 | Agent | Report-Datei |
 |-------|--------------|
-| ESP32_DEBUG_AGENT | `current/ESP32_REPORT.md` |
-| SERVER_DEBUG_AGENT | `current/SERVER_REPORT.md` |
-| MQTT_DEBUG_AGENT | `current/MQTT_REPORT.md` |
-| DEBUG_ORCHESTRATOR | `current/SYSTEM_REPORT.md` |
+| esp32-debug | `current/ESP32_REPORT.md` |
+| server-debug | `current/SERVER_REPORT.md` |
+| mqtt-debug | `current/MQTT_REPORT.md` |
+| meta-analyst | `current/SYSTEM_REPORT.md` |
 
 ## Report schreiben
 
