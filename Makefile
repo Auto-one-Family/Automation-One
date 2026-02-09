@@ -2,25 +2,53 @@
 COMPOSE := docker compose
 COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
+COMPOSE_E2E := -f docker-compose.yml -f docker-compose.e2e.yml
 
-.PHONY: help up down dev test logs logs-server shell-server db-migrate db-status db-backup db-restore mqtt-sub status health
+.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status
 
 help:
 	@echo "AutomationOne Docker Commands:"
-	@echo "  make up          - Start production stack"
-	@echo "  make dev         - Start with hot-reload"
-	@echo "  make test        - Start test environment"
-	@echo "  make down        - Stop all containers"
-	@echo "  make logs        - Follow all logs"
-	@echo "  make logs-server - Follow server logs"
-	@echo "  make shell-server- Shell into server"
-	@echo "  make db-migrate  - Run migrations"
-	@echo "  make db-status   - Show migration status"
-	@echo "  make db-backup   - Backup database"
-	@echo "  make db-restore  - Restore (FILE=path)"
-	@echo "  make mqtt-sub    - Subscribe all topics"
-	@echo "  make status      - Container status"
-	@echo "  make health      - Health check"
+	@echo ""
+	@echo "Stack Lifecycle:"
+	@echo "  make up            - Start production stack"
+	@echo "  make down          - Stop all containers"
+	@echo "  make dev           - Start with hot-reload"
+	@echo "  make dev-down      - Stop dev stack"
+	@echo "  make test          - Start test environment"
+	@echo "  make test-down     - Stop test stack + remove volumes"
+	@echo "  make build         - Rebuild all images"
+	@echo "  make clean         - Stop + remove all volumes (DESTRUCTIVE)"
+	@echo ""
+	@echo "E2E Testing:"
+	@echo "  make e2e-up        - Start E2E stack (Playwright)"
+	@echo "  make e2e-down      - Stop E2E stack"
+	@echo "  make e2e-test      - Run Playwright E2E tests"
+	@echo "  make e2e-test-ui   - Run Playwright with UI"
+	@echo ""
+	@echo "Logs & Monitoring:"
+	@echo "  make logs          - Follow all logs"
+	@echo "  make logs-server   - Follow server logs"
+	@echo "  make logs-mqtt     - Follow MQTT broker logs"
+	@echo "  make logs-frontend - Follow frontend logs"
+	@echo "  make logs-db       - Follow PostgreSQL logs"
+	@echo "  make mqtt-sub      - Subscribe kaiser/# topics"
+	@echo "  make status        - Container status"
+	@echo "  make health        - Server health check"
+	@echo ""
+	@echo "Shell & Database:"
+	@echo "  make shell-server  - Shell into server container"
+	@echo "  make shell-db      - PostgreSQL CLI"
+	@echo "  make db-migrate    - Run Alembic migrations"
+	@echo "  make db-rollback   - Rollback last migration"
+	@echo "  make db-status     - Show migration status"
+	@echo "  make db-backup     - Backup database"
+	@echo "  make db-restore    - Restore database (FILE=path)"
+	@echo ""
+	@echo "Monitoring Stack:"
+	@echo "  make monitor-up     - Start monitoring (Loki, Promtail, Prometheus, Grafana)"
+	@echo "  make monitor-down   - Stop monitoring stack"
+	@echo "  make monitor-logs   - Follow monitoring logs"
+	@echo "  make monitor-status - Monitoring container status"
 
 up:
 	$(COMPOSE) up -d
@@ -40,6 +68,18 @@ test:
 test-down:
 	$(COMPOSE) $(COMPOSE_TEST) down -v
 
+e2e-up:
+	$(COMPOSE) $(COMPOSE_E2E) up -d --wait
+
+e2e-down:
+	$(COMPOSE) $(COMPOSE_E2E) down
+
+e2e-test:
+	cd "El Frontend" && npx playwright test
+
+e2e-test-ui:
+	cd "El Frontend" && npx playwright test --ui
+
 logs:
 	$(COMPOSE) logs -f --tail=100
 
@@ -48,6 +88,12 @@ logs-server:
 
 logs-mqtt:
 	$(COMPOSE) logs -f --tail=100 mqtt-broker
+
+logs-frontend:
+	$(COMPOSE) logs -f --tail=100 el-frontend
+
+logs-db:
+	$(COMPOSE) logs -f --tail=100 postgres
 
 shell-server:
 	docker exec -it automationone-server /bin/bash
@@ -73,7 +119,7 @@ db-restore:
 	./scripts/docker/restore.sh $(FILE)
 
 mqtt-sub:
-	docker exec -it automationone-mqtt mosquitto_sub -h localhost -t "#" -v
+	docker exec -it automationone-mqtt mosquitto_sub -h localhost -t "kaiser/#" -v
 
 status:
 	$(COMPOSE) ps
@@ -86,3 +132,18 @@ build:
 
 clean:
 	$(COMPOSE) down -v --remove-orphans
+
+# ============================================
+# Monitoring Stack (Profile: monitoring)
+# ============================================
+monitor-up:
+	$(COMPOSE) --profile monitoring up -d
+
+monitor-down:
+	$(COMPOSE) --profile monitoring down
+
+monitor-logs:
+	$(COMPOSE) --profile monitoring logs -f --tail=100
+
+monitor-status:
+	$(COMPOSE) --profile monitoring ps
