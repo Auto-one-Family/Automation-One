@@ -20,6 +20,7 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
 
+    console.debug('[API]', config.method?.toUpperCase(), config.url)
     return config
   },
   (error: AxiosError) => {
@@ -29,7 +30,10 @@ api.interceptors.request.use(
 
 // Response interceptor - handle token refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.debug('[API]', response.config.method?.toUpperCase(), response.config.url, '→', response.status)
+    return response
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
     const authStore = useAuthStore()
@@ -66,6 +70,7 @@ api.interceptors.response.use(
       }
     }
 
+    console.error('[API]', error.config?.method?.toUpperCase(), error.config?.url, '→', error.response?.status || 'NETWORK_ERROR', error.message)
     return Promise.reject(error)
   }
 )

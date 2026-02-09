@@ -33,7 +33,7 @@ const DRAG_TIMEOUT_MS = 30000 // 30 Sekunden
  * Debug-Modus aktivieren (für Entwicklung)
  * IMMER aktiv für Drag-Debug - später wieder auf import.meta.env.DEV setzen
  */
-const DEBUG = true  // Force enabled for debugging
+const DEBUG = import.meta.env.VITE_LOG_LEVEL === 'debug'
 
 // =============================================================================
 // Types
