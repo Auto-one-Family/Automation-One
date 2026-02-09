@@ -34,7 +34,7 @@ Every new service MUST have:
 
 | Requirement | Example |
 |-------------|---------|
-| Healthcheck | `healthcheck: test: ["CMD", "curl", "-f", "http://localhost:8000/health"]` |
+| Healthcheck | `healthcheck: test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]` |
 | Restart Policy | `restart: unless-stopped` |
 | Defined Network | `networks: - automationone-network` |
 

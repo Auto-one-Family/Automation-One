@@ -1,60 +1,84 @@
 ---
 name: server-debug
-description: |
-  Server-Log Analyse für God-Kaiser Server (FastAPI/Python).
-  Analysiert JSON-Logs, MQTT-Handler-Verhalten, Startup-Sequenz,
-  Error-Codes 5000-5699, Database-Operationen, WebSocket-Events.
-  Liest Session-Kontext aus STATUS.md, schreibt strukturierte Reports.
-allowed-tools: Read, Grep, Glob
+description: "Server-Log Analyse für God-Kaiser Server (FastAPI/Python). Analysiert JSON-Logs, MQTT-Handler-Verhalten, Startup-Sequenz, Error-Codes 5000-5699, Database-Operationen, WebSocket-Events, Resilience-System, Exception-Hierarchie, Datenflüsse."
 ---
 
 # Server Debug - Skill Dokumentation
 
 > **Fokus:** FastAPI Backend Log-Analyse und Fehlerpfad-Diagnose
-> **Log-Quelle:** Container `/app/logs/god_kaiser.log` (~JSON-Format)
+> **Log-Quelle:** `logs/server/god_kaiser.log` (JSON, via Docker Bind-Mount `./logs/server/`)
 
 ---
 
-## 0. Quick Reference - Debug-Fokus
+## 1. Server-Modulstruktur
 
-| Ich analysiere... | Primäre Quelle | Grep-Pattern |
-|-------------------|----------------|--------------|
-| **Request-Tracing** | god_kaiser.log | `"request_id": "UUID"` |
-| **MQTT Handler Fehler** | god_kaiser.log | `src.mqtt.handlers` |
-| **Circuit Breaker Events** | god_kaiser.log | `[resilience]` |
-| **Unhandled Exceptions** | god_kaiser.log | `Unhandled exception` |
-| **Startup-Probleme** | god_kaiser.log | `God-Kaiser Server` |
-| **Error-Codes** | god_kaiser.log | `[5xxx]` |
+```
+El Servador/god_kaiser_server/src/
+├── main.py                    # Entry-Point (710 Zeilen, Lifespan)
+├── api/v1/                    # 14 Sub-Router + websocket/
+├── core/                      # Config, Exceptions, Resilience, Logging, Scheduler
+├── db/models/                 # 19 Tabellen in 15 Model-Dateien
+├── db/repositories/           # 15 Repositories (BaseRepository-Pattern)
+├── middleware/                 # RequestIdMiddleware
+├── mqtt/                      # Client, Subscriber, Publisher, Offline-Buffer
+│   └── handlers/              # 13 Handler + base_handler
+├── schemas/                   # Pydantic Schemas
+├── sensors/                   # Sensor-Processing-Libraries (Pi-Enhanced)
+├── services/                  # 23 Services + logic/ + maintenance/ + simulation/
+├── utils/                     # Data/MQTT/Network/Time Helpers
+└── websocket/                 # WebSocketManager Singleton
+```
 
-### Was ist NICHT mein Bereich?
-
-| Symptom | Weiterleiten an |
-|---------|----------------|
-| MQTT-Traffic auf Broker-Level | mqtt-debug |
-| ESP32 Serial-Logs | esp32-debug |
-| Frontend Build/Runtime | frontend-debug |
-| Datenbank-Schema/Migrations | db-inspector |
+**Zählung:** ~120 Python-Dateien, 14 API-Router, 13 MQTT-Handler, 23+ Services, 19 DB-Tabellen, 15 Repos
 
 ---
 
-## 1. Log-Location & Format
+## 2. Startup-Sequenz (20+ Steps)
 
-### Primäre Quelle
+| Step | Log-Pattern | Fehlschlag-Impact |
+|------|-------------|-------------------|
+| 0 | `God-Kaiser Server Starting...` | - |
+| 0.1 | `Validating security configuration...` | Server-Exit (Prod + Default-Key) |
+| 0.5 | `Initializing resilience patterns...` | Kein Circuit Breaker |
+| 0.5.1 | `external_api breaker registered` | API ungeschützt |
+| 1 | `Initializing database...` | Kein DB-Zugriff |
+| 1.1 | `Database initialized successfully` | - |
+| 1.2 | `[resilience] Database circuit breaker initialized` | DB ungeschützt |
+| 2 | `Connecting to MQTT broker...` | Auto-Reconnect (nicht-fatal) |
+| 2.1 | `MQTT client connected successfully` | - |
+| 3 | `Registering MQTT handlers...` | - |
+| 3.1 | `Main event loop set for MQTT subscriber` | - |
+| 3.2 | `Using KAISER_ID: {id}` | - |
+| 3.3 | `Registered {count} MQTT handlers` | - |
+| 3.4 | `Central Scheduler started` | Kein APScheduler |
+| 3.4.1 | `SimulationScheduler initialized` | Keine Mock-ESPs |
+| 3.4.2 | `MaintenanceService initialized and started` | Keine Maintenance |
+| 3.5 | `Mock-ESP recovery complete: {n} simulations restored` | Mock-ESPs weg (non-fatal) |
+| 3.6 | `Sensor type auto-registration: {n} new, {n} existing` | Defaults fehlen (non-fatal) |
+| 3.7 | `Sensor schedule recovery complete: {n} jobs` | Scheduled inaktiv (non-fatal) |
+| 4 | `Subscribing to MQTT topics...` / `MQTT subscriptions complete` | Topics fehlen |
+| 5 | `Initializing WebSocket Manager...` | Kein Real-Time |
+| 6 | `Initializing services...` | Logic/Safety/Actuator weg |
+| 6.1 | `Services initialized successfully` | - |
+| RES | `[resilience] Status: healthy={bool}` | - |
+| FINAL | `God-Kaiser Server Started Successfully` | - |
 
-| Attribut | Wert |
-|----------|------|
-| **Pfad (Container)** | `/app/logs/god_kaiser.log` |
-| **Pfad (Host)** | `El Servador/god_kaiser_server/logs/god_kaiser.log` |
-| **Format** | JSON (konfigurierbar via `LOG_FORMAT` env) |
-| **Rotation** | Konfigurierbar via Settings (Default: 10 MB, 5 Backup-Dateien) |
-| **Encoding** | UTF-8 |
-| **Zugriff** | `make logs-server` oder `make shell-server` |
+**Shutdown:** Logic Scheduler → Logic Engine → SequenceExecutor → Maintenance → Mock-ESP → Scheduler → WS → MQTT Subscriber → MQTT Client → DB Engine
 
-**Rotation-Settings:**
-- `settings.logging.file_max_bytes` (Default: 10485760 = 10 MB)
-- `settings.logging.file_backup_count` (Default: 5)
+**Failure-Patterns:**
 
-### JSON-Felder
+| Pattern | Bedeutung |
+|---------|-----------|
+| `SECURITY CRITICAL` | JWT-Secret nicht gesetzt → `.env` prüfen |
+| `Startup failed:` + Exception | Kritischer Fehler → Traceback analysieren |
+| `Failed to connect to MQTT` | Broker nicht erreichbar |
+| `[resilience]` + `unavailable` | Circuit Breaker bereits offen |
+
+---
+
+## 3. Logging-System
+
+### JSON-Log-Felder
 
 ```json
 {
@@ -65,554 +89,300 @@ allowed-tools: Read, Grep, Glob
   "module": "sensor_handler",
   "function": "handle_sensor_data",
   "line": 296,
-  "request_id": "abc123-def456"
+  "request_id": "abc123-def456",
+  "exception": "Traceback ..."
 }
 ```
 
-| Feld | Debug-Verwendung |
-|------|------------------|
-| `level` | Schweregrad-Filter (ERROR/CRITICAL zuerst) |
-| `logger` | Handler-Zuordnung (siehe Section 4) |
-| `message` | Details, enthält oft `[5xxx]` Error-Codes |
-| `line` | Code-Location für Entwickler |
-| `request_id` | Request-Tracing (UUID oder `-` bei MQTT-Handlers) |
-| `exception` | Voller Traceback (nur bei Fehlern mit `exc_info=True`) |
+**request_id:** UUID via `RequestIdMiddleware` für HTTP. MQTT-Handler: `request_id = "-"`.
+**Noise-Reduction:** paho.mqtt, urllib3, asyncio auf WARNING.
+**Rotation:** 10 MB, 10 Backups (`LOG_FILE_MAX_BYTES`, `LOG_FILE_BACKUP_COUNT`).
 
-### Noise-Reduction (bereits im System aktiv)
+### Logger→Handler-Zuordnung (21+)
 
-```python
-logging.getLogger("paho.mqtt").setLevel(logging.WARNING)
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-logging.getLogger("asyncio").setLevel(logging.WARNING)
-```
+| Logger | Verantwortung |
+|--------|---------------|
+| `src.main` | Startup, Shutdown, Lifespan |
+| `src.mqtt.client` | MQTT-Verbindung, Reconnect, Circuit Breaker |
+| `src.mqtt.subscriber` | Message-Routing, Handler-Dispatch |
+| `src.mqtt.handlers.sensor_handler` | Sensor-Daten |
+| `src.mqtt.handlers.heartbeat_handler` | Heartbeat, Discovery, Timeout |
+| `src.mqtt.handlers.actuator_handler` | Actuator-Status |
+| `src.mqtt.handlers.actuator_response_handler` | Command-Response |
+| `src.mqtt.handlers.actuator_alert_handler` | Actuator-Alerts |
+| `src.mqtt.handlers.config_handler` | Config-ACK |
+| `src.mqtt.handlers.discovery_handler` | ESP32 Discovery |
+| `src.mqtt.handlers.lwt_handler` | LWT Offline-Detection |
+| `src.mqtt.handlers.error_handler` | ESP32 Error-Events |
+| `src.mqtt.handlers.zone_ack_handler` | Zone-ACK |
+| `src.mqtt.handlers.subzone_ack_handler` | Subzone-ACK |
+| `src.mqtt.handlers.kaiser_handler` | Kaiser-Verarbeitung |
+| `src.db.session` | DB-Sessions, Circuit Breaker |
+| `src.websocket.manager` | WebSocket-Broadcasts |
+| `src.core.exception_handlers` | Global Exception Handling |
+| `src.services.maintenance.service` | Maintenance-Jobs |
+| `src.services.logic_engine` | Logic-Rule-Evaluation |
+| `src.services.logic_scheduler` | Timer-basierte Logic |
+| `src.services.simulation.scheduler` | Mock-ESP-Simulation |
 
 ---
 
-## 2. Request-Tracing
+## 4. Resilience-System
 
-Jeder HTTP-Request bekommt eine UUID via `RequestIdMiddleware` (Zeile 24-67 in `middleware/request_id.py`).
+### Circuit Breaker
 
-### Wie funktioniert es?
+| Breaker | Threshold | Recovery | Half-Open | Settings-Prefix |
+|---------|-----------|----------|-----------|-----------------|
+| **database** | 3 | 10s | 5s | `CIRCUIT_BREAKER_DB_*` |
+| **mqtt** | 5 | 30s | 10s | `CIRCUIT_BREAKER_MQTT_*` |
+| **external_api** | 5 | 60s | 15s | `CIRCUIT_BREAKER_API_*` |
 
-1. Client sendet Request (mit oder ohne `X-Request-ID` Header)
-2. Middleware generiert UUID falls nicht vorhanden
-3. UUID wird in ContextVar gespeichert (`RequestIdFilter`)
-4. Alle Log-Einträge während des Requests enthalten `request_id`
-5. Response erhält `X-Request-ID` Header
+State-Machine: `CLOSED → (failures >= threshold) → OPEN → (recovery) → HALF_OPEN → (success) → CLOSED`
 
-### Request-Tracing Grep-Pattern
+### Retry-Konfiguration
+
+| Setting | Default |
+|---------|---------|
+| `RETRY_MAX_ATTEMPTS` | 3 |
+| `RETRY_BASE_DELAY` | 1.0s |
+| `RETRY_MAX_DELAY` | 30.0s |
+| `RETRY_EXPONENTIAL_BASE` | 2.0 |
+| `RETRY_JITTER_ENABLED` | true |
+
+### Timeout-Konfiguration
+
+| Setting | Default |
+|---------|---------|
+| `TIMEOUT_MQTT_PUBLISH` | 5.0s |
+| `TIMEOUT_DB_QUERY` | 5.0s |
+| `TIMEOUT_DB_QUERY_COMPLEX` | 30.0s |
+| `TIMEOUT_EXTERNAL_API` | 10.0s |
+| `TIMEOUT_WEBSOCKET_SEND` | 2.0s |
+| `TIMEOUT_SENSOR_PROCESSING` | 1.0s |
+
+### Offline-Buffer
+
+- Max 1000 Messages (`OFFLINE_BUFFER_MAX_SIZE`)
+- Flush-Batch 50 (`OFFLINE_BUFFER_FLUSH_BATCH_SIZE`)
+- Automatischer Flush bei Reconnect
+
+### Log-Patterns Resilience
 
 ```bash
-# Bestimmten Request tracen
-grep "REQUEST_ID_HERE" /app/logs/god_kaiser.log
-
-# Alle Requests mit Dauer anzeigen
-grep "Request completed" /app/logs/god_kaiser.log
-
-# Langsame Requests (>1000ms)
-grep "duration=" /app/logs/god_kaiser.log | grep -E "duration=[0-9]{4,}"
+grep -i "\[resilience\]" logs/server/god_kaiser.log
+grep "Circuit Breaker" logs/server/god_kaiser.log
+grep "\[resilience\] Database" logs/server/god_kaiser.log
+grep "\[resilience\] MQTT" logs/server/god_kaiser.log
 ```
 
-### MQTT-Handler haben request_id = "-"
-
-MQTT-Handler laufen außerhalb des HTTP-Request-Kontexts, daher:
-- `request_id` = `-` (Bindestrich)
-- Korrelation über `esp_id` oder `topic` im Message-Feld
+| Log-Message | Bedeutung |
+|-------------|-----------|
+| `Database operation blocked by Circuit Breaker` | DB-Breaker OPEN → PostgreSQL prüfen |
+| `MQTT publish blocked by Circuit Breaker` | MQTT-Breaker OPEN → Mosquitto prüfen |
+| `CircuitBreaker reset on connect` | Service wieder verfügbar |
 
 ---
 
-## 3. Middleware-Chain (Reihenfolge!)
+## 5. Exception-Hierarchie + Error-Codes
 
-Die Middleware-Reihenfolge in FastAPI ist KRITISCH. Probleme hier können zu mysteriösen Fehlern führen.
+### Hierarchie
 
-**WICHTIG:** FastAPI/Starlette Middleware folgt LIFO (Last In, First Out). Die zuletzt hinzugefügte Middleware wird zuerst ausgeführt.
-
-| Position (Ausführung) | Middleware | Funktion | Fehler-Symptom |
-|-----------------------|------------|----------|----------------|
-| 1 | `CORSMiddleware` | Cross-Origin Validation | CORS-Fehler im Frontend |
-| 2 | `RequestIdMiddleware` | UUID generieren/extrahieren | Fehlende request_id in Logs |
-| 3 | Auth Dependencies | JWT Validation (pro Endpoint) | 401/403 Responses |
-
-**Code (main.py Zeile 631-643):**
-```python
-app.add_middleware(RequestIdMiddleware)  # Hinzugefügt zuerst
-app.add_middleware(CORSMiddleware, ...)  # Hinzugefügt zuletzt → ausgeführt zuerst
+```
+Exception
+├── GodKaiserException → WARNING, JSON {"success": false, "error": {...}}
+│   ├── ConfigError (5000-5099)
+│   ├── MQTTError (5100-5199)
+│   ├── ValidationError (5200-5299)
+│   ├── DatabaseError (5300-5399)
+│   ├── ServiceError (5400-5499)
+│   ├── AuditError (5500-5599)
+│   └── SequenceError (5600-5699)
+└── Exception → ERROR + Stack Trace, "INTERNAL_ERROR"
 ```
 
-### Middleware-Fehler im Log
+**Wichtig:** `general_exception_handler` feuert → Bug gefunden! Stack Trace = Root Cause.
 
-| Log-Pattern | Bedeutung | Lösung |
-|-------------|-----------|--------|
-| `Request failed: ... duration=Xms` | Exception während Request | Stack Trace prüfen |
-| `CORS preflight request` | OPTIONS Request | Prüfe `cors_origins` Setting |
+### Error-Code Ranges
+
+| Range | Kategorie | Häufige Codes |
+|-------|-----------|---------------|
+| 5000-5099 | CONFIG | 5001 ESP_NOT_FOUND, 5007 ESP_OFFLINE |
+| 5100-5199 | MQTT | 5104 CONNECTION_LOST, 5106 BROKER_UNAVAILABLE |
+| 5200-5299 | VALIDATION | 5201 INVALID_ESP_ID, 5205 MISSING_FIELD |
+| 5300-5399 | DATABASE | 5301 QUERY_FAILED, 5304 CONNECTION_FAILED |
+| 5400-5499 | SERVICE | 5402 CIRCUIT_BREAKER_OPEN, 5403 TIMEOUT |
+| 5500-5599 | AUDIT | 5501 AUDIT_LOG_FAILED |
+| 5600-5699 | SEQUENCE | 5610 SEQ_ALREADY_RUNNING, 5640 ACTUATOR_LOCKED, 5642 SAFETY_BLOCKED |
+
+Bei unbekanntem Code → `.claude/reference/errors/ERROR_CODES.md` konsultieren.
 
 ---
 
-## 4. Exception-Handler-Hierarchie
+## 6. Middleware-Chain (LIFO)
 
-Zwei globale Exception-Handler in `exception_handlers.py`:
-
-### 1. automation_one_exception_handler (Zeile 17-54)
-
-| Attribut | Wert |
-|----------|------|
-| **Fängt** | `GodKaiserException` (alle bekannten Fehler) |
-| **Log-Level** | WARNING |
-| **Response** | `{"success": false, "error": {"code": "...", "message": "..."}}` |
-
-**Log-Pattern:**
-```
-API error: ERROR_CODE - Error message
-```
-
-### 2. general_exception_handler (Zeile 57-85)
-
-| Attribut | Wert |
-|----------|------|
-| **Fängt** | `Exception` (alles andere) |
-| **Log-Level** | ERROR mit `exc_info=True` (Stack Trace!) |
-| **Response** | `{"success": false, "error": {"code": "INTERNAL_ERROR"}}` |
-
-**Log-Pattern:**
-```
-Unhandled exception: ExceptionType - Error message
-```
-
-**WICHTIG:** Wenn dieser Handler feuert → Bug gefunden! Der Stack Trace zeigt die Root Cause.
+| Position | Middleware | Funktion |
+|----------|-----------|----------|
+| 1 (zuerst) | `CORSMiddleware` | CORS-Validierung |
+| 2 | `RequestIdMiddleware` | UUID-Tracking pro Request |
+| 3 | Auth Dependencies | JWT-Token pro Endpoint |
 
 ---
 
-## 5. Circuit Breaker Diagnose
+## 7. Datenflüsse
 
-Drei Circuit Breaker im System (initialisiert in `main.py` Zeile 129-165):
+**HTTP:** Client → CORS → RequestID → Router → Auth → Service → Repo → DB → Response (X-Request-ID)
 
-**WICHTIG:** Alle Werte sind KONFIGURIERBAR via `settings.resilience.*` (nicht hardcoded!)
+**MQTT:** ESP32 → Broker → paho Client → Subscriber → ThreadPool → async Handler → Repo → DB → WS Broadcast → Frontend
 
-| Breaker | Datei | Setting-Prefix | Default |
-|---------|-------|----------------|---------|
-| **database** | `db/session.py` | `circuit_breaker_db_*` | 5/30s/10s |
-| **mqtt** | `mqtt/client.py` | `circuit_breaker_mqtt_*` | 5/30s/10s |
-| **external_api** | `main.py` | `circuit_breaker_api_*` | 3/60s/10s |
+**WebSocket:** Frontend → WS `/api/v1/ws/realtime` → WebSocketManager → subscribe(filters) → broadcast
 
-**Settings-Variablen:**
-- `CIRCUIT_BREAKER_DB_FAILURE_THRESHOLD` / `_RECOVERY_TIMEOUT` / `_HALF_OPEN_TIMEOUT`
-- `CIRCUIT_BREAKER_MQTT_FAILURE_THRESHOLD` / `_RECOVERY_TIMEOUT` / `_HALF_OPEN_TIMEOUT`
-- `CIRCUIT_BREAKER_API_FAILURE_THRESHOLD` / `_RECOVERY_TIMEOUT` / `_HALF_OPEN_TIMEOUT`
+**Startup:** uvicorn → lifespan() → Security → Resilience → DB → MQTT → Handlers → Scheduler → Simulation → Maintenance → Recovery → Subscribe → WS → Services → Ready
 
-### Circuit Breaker States
+**Kritisch:** Async-Handler MÜSSEN im Main-Event-Loop laufen (`asyncio.run_coroutine_threadsafe()`).
 
-```
-CLOSED → (failures >= threshold) → OPEN → (recovery_timeout) → HALF_OPEN → (success) → CLOSED
-                                           ↓
-                                     (failure) → OPEN
-```
+---
 
-### Log-Patterns für Circuit Breaker
+## 8. Health-Endpoints
+
+| Endpoint | Auth | Beschreibung |
+|----------|------|-------------|
+| `/api/v1/health/live` | Nein | Server-Prozess läuft? (immer 200) |
+| `/api/v1/health/ready` | Nein | DB + MQTT connected? |
+| `/api/v1/health/` | Nein | mqtt_connected Status |
+| `/api/v1/health/detailed` | Ja | DB/MQTT/WS/System + Circuit Breaker |
+| `/api/v1/health/esp` | Ja | ESP-Fleet (online/offline) |
+| `/api/v1/health/metrics` | Nein | Prometheus-Format |
+
+**Debug-Reihenfolge:** live → ready → detailed
+
+---
+
+## 9. Request-Tracing
+
+1. Client sendet Request (mit/ohne `X-Request-ID` Header)
+2. `RequestIdMiddleware` generiert UUID falls fehlend
+3. UUID in ContextVar → alle Logs enthalten `request_id`
+4. Response erhält `X-Request-ID` Header
+5. MQTT-Handler: `request_id = "-"`, Korrelation über `esp_id`/`topic`
+
+---
+
+## 10. Grep-Patterns
 
 ```bash
-# Alle Circuit Breaker Events
-grep -i "\[resilience\]" /app/logs/god_kaiser.log
+# Errors & Criticals
+grep '"level": "ERROR"' logs/server/god_kaiser.log
+grep '"level": "CRITICAL"' logs/server/god_kaiser.log
 
-# Circuit Breaker OPEN (Service blockiert)
-grep "Circuit Breaker" /app/logs/god_kaiser.log
+# Circuit Breaker / Resilience
+grep -i "circuit\|resilience" logs/server/god_kaiser.log
 
-# Database Circuit Breaker
-grep "\[resilience\] Database" /app/logs/god_kaiser.log
+# Request tracen
+grep "REQUEST_ID" logs/server/god_kaiser.log
 
-# MQTT Circuit Breaker
-grep "\[resilience\] MQTT" /app/logs/god_kaiser.log
-```
-
-### Typische Circuit Breaker Fehler
-
-| Log-Message | Bedeutung | Aktion |
-|-------------|-----------|--------|
-| `Database operation blocked by Circuit Breaker` | DB-Breaker OPEN | PostgreSQL prüfen |
-| `MQTT publish blocked by Circuit Breaker` | MQTT-Breaker OPEN | Mosquitto prüfen |
-| `CircuitBreaker reset on connect` | Breaker zurückgesetzt | Service wieder verfügbar |
-
----
-
-## 6. Fehlerpfad-Diagnose
-
-### DB-Connection weg
-
-**Symptome im Log:**
-```
-SQLAlchemy OperationalError
-[5301] Database query failed
-[resilience] Database operation blocked by Circuit Breaker
-```
-
-**Auswirkung:** Alle Endpoints außer `/v1/health/live` schlagen fehl
-
-**Recovery-Ablauf:**
-1. 5 Fehler → Circuit Breaker OPEN (30s)
-2. Nach 30s → HALF_OPEN (10s Test-Window)
-3. Erfolgreiche Query → CLOSED
-
-**Diagnose-Commands:**
-```bash
-# PostgreSQL Container Status
-docker-compose ps postgres
-
-# PostgreSQL Logs
-make logs-db
-```
-
----
-
-### MQTT-Broker weg
-
-**Symptome im Log:**
-```
-paho.mqtt WARNING/ERROR
-[5104] CONNECTION_LOST
-[5106] BROKER_UNAVAILABLE
-MQTT broker unavailable: Connection refused
-```
-
-**Auswirkung:**
-- Config-Push zu ESP32 fehlschlägt
-- Keine Sensor-Daten vom ESP32
-- ESP-Status wird nicht aktualisiert
-
-**Recovery:**
-- paho-mqtt Auto-Reconnect (exponential backoff, max 60s)
-- Bei Reconnect: automatische Re-Subscription
-- LWT-Handling für Offline-Detection
-
-**Diagnose-Commands:**
-```bash
-# Mosquitto Status
-docker-compose ps mosquitto
-
-# MQTT Logs
-make logs-mqtt
-```
-
----
-
-### Unerwartete Exception
-
-**Symptome im Log:**
-```
-level: ERROR
-Unhandled exception: ExceptionType - message
-```
-
-**Mit Stack Trace:**
-```json
-{
-  "exception": "Traceback (most recent call last):\n  File ..."
-}
-```
-
-**Aktion:**
-1. Stack Trace vollständig lesen
-2. Root Cause identifizieren (welche Zeile, welche Funktion)
-3. Bug dokumentieren mit Code-Location
-
----
-
-## 7. Error-Codes Server (5000-5999)
-
-### Ranges
-
-| Range | Kategorie | Typische Ursachen |
-|-------|-----------|-------------------|
-| **5000-5099** | CONFIG | ESP nicht gefunden, Config-Build fehlgeschlagen |
-| **5100-5199** | MQTT | Publish failed, Connection lost, Broker unavailable |
-| **5200-5299** | VALIDATION | Ungültige ESP-ID, GPIO, fehlende Felder |
-| **5300-5399** | DATABASE | Query failed, Integrity error, Connection lost |
-| **5400-5499** | SERVICE | Timeout, Rate limit, Circuit breaker open |
-| **5500-5599** | AUDIT | Audit logging fehlgeschlagen |
-| **5600-5699** | SEQUENCE | Actuator locked, Safety blocked, Sequence errors |
-
-### Häufige Error-Codes
-
-| Code | Name | Log-Pattern | Lösung |
-|------|------|-------------|--------|
-| 5001 | `ESP_DEVICE_NOT_FOUND` | `[5001] ESP device not found: {esp_id}` | ESP registrieren |
-| 5104 | `CONNECTION_LOST` | `[5104] MQTT connection lost` | Broker prüfen |
-| 5106 | `BROKER_UNAVAILABLE` | `[5106] MQTT broker unavailable` | Mosquitto Status |
-| 5201 | `INVALID_ESP_ID` | `[5201] Invalid ESP device ID format` | ESP-ID Format prüfen |
-| 5205 | `MISSING_REQUIRED_FIELD` | `[5205] Missing required field: {field}` | Payload prüfen |
-| 5301 | `QUERY_FAILED` | `[5301] Database query failed` | PostgreSQL prüfen |
-| 5402 | `CIRCUIT_BREAKER_OPEN` | `Circuit Breaker` | Service prüfen |
-| 5403 | `OPERATION_TIMEOUT` | `[5403] Service operation timed out` | Latenz-Problem |
-| 5640 | `SEQ_ACTUATOR_LOCKED` | `[5640] Actuator locked by sequence` | Sequenz stoppen |
-| 5642 | `SEQ_SAFETY_BLOCKED` | `[5642] Action blocked by safety` | Safety-Config |
-
-### Error-Code Grep-Pattern
-
-```bash
-# Alle Server-Errors finden
-grep -E "\[5[0-9]{3}\]" /app/logs/god_kaiser.log
-
-# Bestimmte Error-Range
-grep -E "\[53[0-9]{2}\]" /app/logs/god_kaiser.log  # DATABASE
-
-# Error-Code Lookup
-cat .claude/reference/errors/ERROR_CODES.md | grep "5301"
-```
-
----
-
-## 8. Health-Endpoints als Debug-Tool
-
-| Endpoint | Auth | Nutzen für Debug |
-|----------|------|-----------------|
-| `/v1/health/live` | Nein | Server überhaupt da? |
-| `/v1/health/ready` | Nein | DB + MQTT connected? |
-| `/v1/health/` | Nein | mqtt_connected Status |
-| `/v1/health/detailed` | JA | DB/MQTT/WS/System Details |
-| `/v1/health/esp` | JA | ESP-Fleet-Übersicht |
-| `/v1/health/metrics` | Nein | Prometheus-Format |
-
-### Debug-Reihenfolge
-
-```
-1. /v1/health/live     → Server-Prozess läuft?
-2. /v1/health/ready    → Kritische Dependencies OK?
-3. /v1/health/detailed → Was genau ist kaputt?
-```
-
-### Health-Check via curl
-
-```bash
-# Liveness (sollte immer 200 sein)
-curl http://localhost:8000/api/v1/health/live
-
-# Readiness (200 wenn DB+MQTT OK)
-curl http://localhost:8000/api/v1/health/ready
-
-# Detailed (braucht Auth-Token)
-curl -H "Authorization: Bearer TOKEN" http://localhost:8000/api/v1/health/detailed
-```
-
----
-
-## 9. Logger → Handler Zuordnung
-
-| Logger-Name | Handler-Datei | Verantwortung |
-|-------------|---------------|---------------|
-| `src.mqtt.handlers.sensor_handler` | sensor_handler.py | Sensor-Daten empfangen |
-| `src.mqtt.handlers.heartbeat_handler` | heartbeat_handler.py | Heartbeat, Discovery, Timeout |
-| `src.mqtt.handlers.actuator_handler` | actuator_handler.py | Actuator-Status |
-| `src.mqtt.handlers.actuator_response_handler` | actuator_response_handler.py | Command-Response |
-| `src.mqtt.handlers.actuator_alert_handler` | actuator_alert_handler.py | Actuator-Alerts |
-| `src.mqtt.handlers.config_handler` | config_handler.py | Config-ACK |
-| `src.mqtt.handlers.lwt_handler` | lwt_handler.py | LWT (Offline-Detection) |
-| `src.mqtt.handlers.error_handler` | error_handler.py | ESP32 Error-Events |
-| `src.mqtt.handlers.zone_ack_handler` | zone_ack_handler.py | Zone-Assignment-ACK |
-| `src.mqtt.handlers.subzone_ack_handler` | subzone_ack_handler.py | Subzone-ACK |
-| `src.mqtt.subscriber` | subscriber.py | MQTT-Routing |
-| `src.mqtt.client` | client.py | MQTT-Verbindung |
-| `src.websocket.manager` | manager.py | WebSocket-Broadcasts |
-| `src.db.session` | session.py | Database-Sessions |
-| `src.services.maintenance.service` | service.py | Maintenance-Jobs |
-
----
-
-## 10. Make-Targets & Grep-Patterns
-
-### Nützliche Make-Targets
-
-```bash
-# Server-Logs live (Docker)
-make logs-server
-
-# Shell im Server-Container
-make shell-server
-
-# Quick Health-Check
-make health
-
-# Alle Services Status
-make status
-```
-
-### Grep-Patterns für häufige Diagnosen
-
-```bash
-# Alle Errors
-grep '"level": "ERROR"' /app/logs/god_kaiser.log
-
-# Alle Criticals
-grep '"level": "CRITICAL"' /app/logs/god_kaiser.log
-
-# Circuit Breaker Events
-grep -i "circuit" /app/logs/god_kaiser.log
-
-# Bestimmten Request tracen
-grep "REQUEST_ID" /app/logs/god_kaiser.log
-
-# MQTT-bezogene Server-Logs
-grep -i "mqtt" /app/logs/god_kaiser.log
+# MQTT-bezogene Logs
+grep -i "mqtt" logs/server/god_kaiser.log
 
 # Unhandled Exceptions (Stack Traces)
-grep -A 20 "Unhandled exception" /app/logs/god_kaiser.log
+grep -A 20 "Unhandled exception" logs/server/god_kaiser.log
 
-# Startup-Sequenz prüfen
-grep "God-Kaiser Server" /app/logs/god_kaiser.log
+# Startup-Sequenz
+grep "God-Kaiser Server" logs/server/god_kaiser.log
+grep "Registered.*MQTT handlers" logs/server/god_kaiser.log
 
-# Handler-Registration
-grep "Registered.*MQTT handlers" /app/logs/god_kaiser.log
+# WebSocket
+grep -iE "websocket|ws_manager|broadcast" logs/server/god_kaiser.log
 
-# Langsame Requests (>1000ms) - vereinfacht
-grep "duration=" /app/logs/god_kaiser.log
+# Sensor-Processing (Pi-Enhanced)
+grep "pi_enhanced\|sensor.*process" logs/server/god_kaiser.log
+
+# Logic-Engine
+grep "logic.*evaluat\|logic.*trigger\|logic.*action" logs/server/god_kaiser.log
+
+# Sequence-Execution
+grep "sequence.*start\|sequence.*stop\|sequence.*step" logs/server/god_kaiser.log
+
+# Maintenance-Jobs
+grep "maintenance\|cleanup\|retention" logs/server/god_kaiser.log
+
+# Mock-ESP-Simulation
+grep "simulation\|mock.*esp\|mock.*actuator" logs/server/god_kaiser.log
+
+# Safety-Events
+grep "safety.*block\|safety.*check\|conflict.*detect" logs/server/god_kaiser.log
+
+# Error-Codes (alle Server-Errors)
+grep -E "\[5[0-9]{3}\]" logs/server/god_kaiser.log
+
+# Langsame Requests
+grep "duration=" logs/server/god_kaiser.log
 ```
 
 ---
 
-## 11. Startup-Sequenz (Modus: boot)
+## 11. DB-Tabellen Quick-Reference
 
-Erwartete Log-Reihenfolge bei erfolgreichem Server-Start (`main.py` Zeile 84-500):
+| Tabelle | Model | Schlüsselfelder |
+|---------|-------|-----------------|
+| `esp_devices` | ESPDevice | device_id, status, last_seen |
+| `sensor_configs` | SensorConfig | esp_device_id, gpio_pin, sensor_type |
+| `sensor_data` | SensorData | sensor_config_id, value, timestamp |
+| `sensor_type_defaults` | SensorTypeDefaults | sensor_type, unit, min/max |
+| `actuator_configs` | ActuatorConfig | esp_device_id, gpio_pin, actuator_type |
+| `actuator_states` | ActuatorState | actuator_config_id, current_state |
+| `actuator_history` | ActuatorHistory | actuator_config_id, action, timestamp |
+| `cross_esp_logic` | CrossESPLogic | name, conditions, actions, enabled |
+| `logic_execution_history` | LogicExecutionHistory | logic_id, result, timestamp |
+| `audit_logs` | AuditLog | action, entity_type, user_id |
+| `esp_heartbeat_logs` | ESPHeartbeatLog | esp_device_id, timestamp |
+| `user_accounts` | User | username, email, role |
+| `token_blacklist` | TokenBlacklist | token, expires_at |
+| `system_config` | SystemConfig | key, value |
+| `subzone_configs` | SubzoneConfig | zone_id, name |
+| `kaiser_registry` | KaiserRegistry | kaiser_id |
+| `esp_ownership` | ESPOwnership | kaiser_id, esp_device_id |
+| `library_metadata` | LibraryMetadata | name, version |
+| `ai_predictions` | AIPredictions | sensor_id, predicted_value |
 
-| Step | Log-Pattern | Status |
-|------|-------------|--------|
-| 0 | `God-Kaiser Server Starting...` | ⬜ |
-| 0.1 | `Validating security configuration...` | ⬜ |
-| 0.5 | `Initializing resilience patterns...` | ⬜ |
-| 1 | `Initializing database...` | ⬜ |
-| 1.1 | `Database initialized successfully` | ⬜ |
-| 1.2 | `[resilience] Database circuit breaker initialized` | ⬜ |
-| 2 | `Connecting to MQTT broker...` | ⬜ |
-| 2.1 | `MQTT client connected successfully` | ⬜ |
-| 3 | `Registering MQTT handlers...` | ⬜ |
-| 3.3 | `Registered {count} MQTT handlers` | ⬜ |
-| 3.4 | `Initializing Central Scheduler...` | ⬜ |
-| 3.4.1 | `SimulationScheduler initialized` | ⬜ |
-| 3.4.2 | `MaintenanceService initialized and started` | ⬜ |
-| 4 | `Subscribing to MQTT topics...` | ⬜ |
-| 4.1 | `MQTT subscriptions complete` | ⬜ |
-| 5 | `Initializing WebSocket Manager...` | ⬜ |
-| 6 | `Initializing services...` | ⬜ |
-| 6.1 | `Services initialized successfully` | ⬜ |
-| FINAL | `God-Kaiser Server Started Successfully` | ⬜ |
-
-### Failure-Patterns
-
-| Pattern in Message | Bedeutung | Empfehlung |
-|--------------------|-----------|------------|
-| `SECURITY CRITICAL` | JWT-Secret nicht gesetzt | `.env` prüfen: `JWT_SECRET_KEY` |
-| `Startup failed:` + Exception | Kritischer Fehler | Traceback analysieren |
-| `Failed to connect to MQTT` | Broker nicht erreichbar | Mosquitto Status prüfen |
-| `[resilience]` + `unavailable` | Circuit-Breaker bereits offen | Dependencies prüfen |
+**Queries:** Siehe Agent Quick-Commands (Section 5).
 
 ---
 
-## 12. Cross-Layer Weiterleitung
+## 12. Docker Quick-Reference
 
-| Server-Symptom | Weiterleiten an | Grund |
-|----------------|-----------------|-------|
-| `MQTT publish failed` | mqtt-debug | Broker-Level Problem |
-| `ESP heartbeat missing` | esp32-debug | ESP-Firmware Problem |
-| `Frontend WS disconnect` | frontend-debug | Client-Side Problem |
-| `DB constraint violation` | db-inspector | Schema/Daten Problem |
-| `Sensor data not arriving` | mqtt-debug + esp32-debug | Multi-Layer |
+| Service | Container | Port(s) |
+|---------|-----------|---------|
+| `el-servador` | `automationone-server` | 8000 |
+| `mqtt-broker` | `automationone-mqtt` | 1883, 9001 |
+| `postgres` | `automationone-postgres` | 5432 |
+| `el-frontend` | `automationone-frontend` | 5173 |
 
----
-
-## 13. Referenzen
-
-| Wann | Datei | Zweck |
-|------|-------|-------|
-| IMMER zuerst | `logs/current/STATUS.md` | Session-Kontext |
-| IMMER | `logs/current/god_kaiser.log` | Analyse-Quelle |
-| Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Code-Lookup |
-| Bei Handler-Details | `.claude/skills/server-development/SKILL.md` | Handler-Dokumentation |
-| Bei MQTT-Fragen | `.claude/reference/api/MQTT_TOPICS.md` | Topic-Schema |
+**Log Bind-Mounts:** `./logs/server/` → el-servador `/app/logs`, `./logs/mqtt/` → mqtt-broker, `./logs/postgres/` → postgres
 
 ---
 
-## 14. Report-Template
+## 13. Config-System Quick-Reference
 
-```markdown
-# Server Debug Report: [MODUS]
+| Settings-Klasse | Env-Prefix | Wichtigste Werte |
+|-----------------|------------|------------------|
+| `DatabaseSettings` | `DATABASE_*` | URL, pool_size(10), auto_init |
+| `MQTTSettings` | `MQTT_*` | broker_host, port(1883), keepalive(60) |
+| `ServerSettings` | `SERVER_*` | host, port(8000), workers(4) |
+| `SecuritySettings` | `JWT_*` | secret_key, algorithm(HS256), expire(30min) |
+| `CORSSettings` | `CORS_*` | allowed_origins |
+| `HierarchySettings` | `KAISER_ID` | kaiser_id("god") |
+| `LoggingSettings` | `LOG_*` | level(INFO), format(json), max_bytes(10MB) |
+| `ESP32Settings` | `ESP_*` | heartbeat_timeout(120s) |
+| `SensorSettings` | `SENSOR_*` | pi_enhanced, retention(90d) |
+| `ActuatorSettings` | `ACTUATOR_*` | command_timeout(10s), safety_checks |
+| `WebSocketSettings` | `WEBSOCKET_*` | max_connections(100), heartbeat(30s) |
+| `ResilienceSettings` | `CIRCUIT_BREAKER_*`, `RETRY_*`, `TIMEOUT_*` | CB thresholds, retry(3) |
+| `DevelopmentSettings` | `DEBUG_*` | debug_mode, mock_esp32 |
+| `MaintenanceSettings` | Various | retention_enabled(false!), dry_run(true!) |
+| `RedisSettings` / `ExternalServices` / `Notification` | `REDIS_*` / `GOD_LAYER_*` / `SMTP_*` | alle enabled(false) |
 
-**Session:** [aus STATUS.md]
-**Erstellt:** [Timestamp]
-**Log-Datei:** logs/current/god_kaiser.log
-**Zeilen analysiert:** [Anzahl]
-
----
-
-## 1. Zusammenfassung
-
-| Metrik | Wert |
-|--------|------|
-| CRITICAL | [Anzahl] |
-| ERROR | [Anzahl] |
-| WARNING | [Anzahl] |
-| Betroffene Handler | [Liste] |
-| Status | ✅ OK / ⚠️ WARNUNG / ❌ FEHLER |
-
----
-
-## 2. Startup-Sequenz (nur bei Modus: boot)
-
-| Step | Erwartet | Status | Timestamp |
-|------|----------|--------|-----------|
-| Database Init | `Database initialized successfully` | ✅/❌ | HH:MM:SS |
-| MQTT Connect | `MQTT client connected successfully` | ✅/❌ | HH:MM:SS |
-| Handler Registration | `Registered X MQTT handlers` | ✅/❌ | HH:MM:SS |
-| Final | `God-Kaiser Server Started Successfully` | ✅/❌ | HH:MM:SS |
+**Wichtig:** Cleanup-Jobs alle DISABLED per Default (Safety). JWT Default-Key → SECURITY CRITICAL in Production.
 
 ---
 
-## 3. Errors & Warnings
-
-### 3.1 CRITICAL (sofortige Aufmerksamkeit)
-
-| Timestamp | Logger | Code | Message |
-|-----------|--------|------|---------|
-| [Zeit] | [Logger-Name] | [5xxx] | [Message] |
-
-### 3.2 ERROR
-
-| Timestamp | Logger | Code | Message | Line |
-|-----------|--------|------|---------|------|
-| [Zeit] | [Logger-Name] | [5xxx] | [Message] | :XX |
-
-### 3.3 WARNING (relevant für Modus)
-
-| Timestamp | Logger | Message |
-|-----------|--------|---------|
-| [Zeit] | [Logger-Name] | [Message] |
-
----
-
-## 4. Handler-Analyse
-
-### [Handler-Name] (z.B. sensor_handler)
-
-**Status:** ✅ Funktioniert / ❌ Fehler
-
-**Erfolgreiche Operationen:** [Anzahl]
-**Fehlgeschlagene Operationen:** [Anzahl]
-
-**Log-Auszug (bei Fehlern):**
-```json
-{"timestamp": "...", "level": "ERROR", ...}
-```
-
-**Analyse:** [Was bedeutet dieser Fehler?]
-
-**Empfehlung:** [Was sollte geprüft werden?]
-
----
-
-## 5. Nächste Schritte
-
-1. [ ] [Konkrete Aktion basierend auf Findings]
-2. [ ] [Weitere Aktion]
-3. [ ] [Bei Bedarf: mqtt-debug/esp32-debug aktivieren]
-```
-
----
-
-**Version:** 1.0
-**Erstellt:** 2026-02-06
-**Basiert auf:** Server Code-Analyse (logging_config.py, exception_handlers.py, session.py, client.py, health.py, main.py)
+*Kompakter Skill für Server-Debug. Details in ERROR_CODES.md und server-development SKILL.md*

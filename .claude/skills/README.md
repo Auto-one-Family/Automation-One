@@ -20,14 +20,21 @@ allowed-tools: Read
 | **Frontend** (Vue 3, TypeScript, Pinia, WebSocket, Composables, Tailwind) | frontend-development | `.claude/skills/frontend-development/` |
 | **MQTT-Entwicklung** (Topic, Publisher, Subscriber, Payload-Schema, QoS) | mqtt-development | `.claude/skills/mqtt-development/` |
 | **Reports sammeln** (Konsolidieren, Session-Ende, TM-Übergabe) | collect-reports | `.claude/skills/collect-reports/` |
-| **Plan ausführen** (/do, Precision Execution, Implementierung nach Plan) | do | `.claude/skills/DO/` |
+| **System-Status sammeln** (IST-Stand aus Code für Verification) | collect-system-status | `.claude/skills/collect-system-status/` |
+| **Plan ausführen** (/do, Precision Execution, Implementierung nach Plan) | do | `.claude/skills/do/` |
 | **Docs aktualisieren** (/updatedocs, Doku-Update nach Code-Änderungen) | updatedocs | `.claude/skills/updatedocs/` |
 | **ESP32 Debug** (Serial-Log, Boot, NVS, GPIO-Fehler, Watchdog, Crash) | esp32-debug | `.claude/skills/esp32-debug/` |
 | **Server Debug** (FastAPI, Handler, Error 5xxx, god_kaiser.log) | server-debug | `.claude/skills/server-debug/` |
 | **MQTT Debug** (Topic, Payload, QoS, Broker-Traffic) | mqtt-debug | `.claude/skills/mqtt-debug/` |
+| **Frontend Debug** (Vite, WebSocket, Pinia, Build-Errors) | frontend-debug | `.claude/skills/frontend-debug/` |
 | **DB Inspector** (Schema, Query, Migration, Alembic, Cleanup) | db-inspector | `.claude/skills/db-inspector/` |
-| **System Control** (Start, Stop, Build, Flash, Commands) | system-control | `.claude/skills/system-control/` |
+| **System Control** (Start, Stop, Build, Flash, Briefing, Session-Planning) | system-control | `.claude/skills/system-control/` |
 | **Meta Analyst** (Cross-Report-Vergleich, Widersprüche, Problemketten) | meta-analyst | `.claude/skills/meta-analyst/` |
+| **Test-Log-Analyse** (pytest, Vitest, Playwright, Wokwi, CI) | test-log-analyst | `.claude/skills/test-log-analyst/` |
+| **Agent-Manager** (Flow vs. Agent, IST-SOLL, Korrekturen) | agent-manager | `.claude/skills/agent-manager/` |
+| **Git-Commit** (Changes analysieren, Conventional Commits) | git-commit | `.claude/skills/git-commit/` |
+| **Git-Health** (Repo-Analyse, CI, Branch-Protection) | git-health | `.claude/skills/git-health/` |
+| **Verify-Plan** (TM-Pläne gegen Codebase prüfen) | verify-plan | `.claude/skills/verify-plan/` |
 
 ## Skill-Ordner-Struktur
 
@@ -45,7 +52,9 @@ allowed-tools: Read
 │   └── SKILL.md                # MQTT Pattern-Entwicklung
 ├── collect-reports/
 │   └── SKILL.md                # Report-Konsolidierung
-├── DO/
+├── collect-system-status/
+│   └── SKILL.md                # System-Status-Erfassung
+├── do/
 │   └── SKILL.md                # Precision Execution
 ├── updatedocs/
 │   └── SKILL.md                # Dokumentations-Aktualisierung
@@ -61,20 +70,25 @@ allowed-tools: Read
 │   └── SKILL.md                # System-Steuerung
 ├── meta-analyst/
 │   └── SKILL.md                # Cross-Report-Analyse
-└── System Manager/
-    ├── SKILL.md                # Session-Orchestrator
-    └── session-planning.md     # Detail-Templates
+├── test-log-analyst/
+│   └── SKILL.md                # Test-Log-Analyse
+├── agent-manager/
+│   └── SKILL.md                # Agent-System-Korrektur
+├── git-commit/
+│   └── SKILL.md                # Git-Commit-Vorbereitung
+├── git-health/
+│   └── SKILL.md                # Git-/Repo-Analyse
+└── verify-plan/
+    └── SKILL.md                # TM-Plan Reality-Check
 ```
 
-## Session-Planning (Plan Mode)
+## Session-Briefing & Planning
 
 | Skill | Pfad | Agent |
 |-------|------|-------|
-| **System-Manager** | `System Manager/SKILL.md` | system-manager |
+| **system-control** | `system-control/SKILL.md` | system-control |
 
-**Funktion:** Erstellt SESSION_BRIEFING.md für Technical Manager
-**Modus:** Plan Mode (Shift+Tab → ⏸) - PFLICHT
-**Agent:** `.claude/agents/System Manager/system-manager.md`
+**Funktion:** Erstellt SESSION_BRIEFING.md für Technical Manager (Briefing-Modus) oder führt Operationen aus (Ops-Modus)
 
 ## Zusätzliche Referenz-Dateien
 

@@ -45,19 +45,20 @@ user-invocable: false
 
 ### Primar: Reports (IMMER lesen)
 
-```
-.claude/reports/current/
-├── SESSION_BRIEFING.md          # system-manager
-├── CONSOLIDATED_REPORT.md       # /collect-reports
-├── ESP32_DEBUG_*.md             # esp32-debug
-├── SERVER_DEBUG_*.md            # server-debug
-├── MQTT_DEBUG_*.md              # mqtt-debug
-├── FRONTEND_*.md                # frontend-debug
-├── SYSTEM_CONTROL_*.md          # system-control
-├── PROBLEM_CATALOG.md           # Problem-Sammlung
-├── *_DEV_*.md                   # Dev-Agent Outputs (z.B. ESP32_DEV_I2C_FIX.md)
-└── SKILL_ANALYSE_*.md           # Skill-Analysen
-```
+Exakte Report-Dateinamen der Debug-Agents:
+
+| Agent | Report-Datei |
+|-------|-------------|
+| esp32-debug | `ESP32_DEBUG_REPORT.md` |
+| server-debug | `SERVER_DEBUG_REPORT.md` |
+| mqtt-debug | `MQTT_DEBUG_REPORT.md` |
+| frontend-debug | `FRONTEND_DEBUG_REPORT.md` |
+| db-inspector | `DB_INSPECTOR_REPORT.md` |
+| system-control | `SESSION_BRIEFING.md` |
+| collect-reports | `CONSOLIDATED_REPORT.md` (optional) |
+| meta-analyst (self) | `META_ANALYSIS.md` |
+
+**Alle Reports in:** `.claude/reports/current/`
 
 ### Sekundar: Referenzen (fur Kontext)
 
@@ -66,7 +67,7 @@ user-invocable: false
 | `.claude/reference/errors/ERROR_CODES.md` | Error-Code Bedeutung & Cross-System Mapping |
 | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Layer-Flows, Timing-Erwartungen |
 | `.claude/reference/patterns/ARCHITECTURE_DEPENDENCIES.md` | Modul-Abhangigkeiten |
-| `logs/current/STATUS.md` | Session-Kontext |
+| `logs/current/STATUS.md` | Session-Kontext (optional) |
 
 ---
 
@@ -217,8 +218,7 @@ IF Cosmetic THEN [I]
 ## 7. Workflow
 
 ```
-1. STATUS.md lesen fur Session-Kontext
-   └→ Session-ID, Hardware-Info, Ziel
+1. Optional: STATUS.md lesen (wenn vorhanden → Session-Kontext)
 
 2. Glob: .claude/reports/current/*.md
    └→ ALLE Reports auflisten (ausser META_ANALYSIS.md selbst)
@@ -230,13 +230,14 @@ IF Cosmetic THEN [I]
 
 4. Timeline erstellen
    └→ Chronologisch alle Events sortieren
-   └→ Korrelierte Events gruppieren
+   └→ Korrelierte Events gruppieren (< 5s = wahrscheinlich korreliert)
 
 5. Widerspruchs-Analyse
    └→ Gleiche Events, unterschiedliche Beschreibung?
    └→ Dokumentieren ohne aufzulosen
 
 6. Kaskaden-Erkennung
+   └→ Cross-Layer Ketten: ESP32 → MQTT → Server → Frontend
    └→ Abhangigkeiten aus ARCHITECTURE_DEPENDENCIES.md
    └→ Flows aus COMMUNICATION_FLOWS.md
    └→ Error-Codes aus ERROR_CODES.md
@@ -378,7 +379,10 @@ IF Cosmetic THEN [I]
 | 5 | Vollstandigkeit prufen | Auch fehlende Reports |
 | 6 | Kausalitat nur wenn belegt | Nicht raten |
 | 7 | Root-Causes priorisieren | Dev-Flow Effizienz |
-| 8 | IMMER STATUS.md zuerst | Session-Kontext |
+| 8 | STATUS.md ist optional | Nutze wenn vorhanden |
+| 9 | CONSOLIDATED_REPORT optional | Arbeite direkt mit Einzel-Reports |
+| 10 | Eigenstandig erweitern | Bei Auffälligkeiten weitere Reports einbeziehen |
+| 11 | Report immer nach META_ANALYSIS.md | `.claude/reports/current/META_ANALYSIS.md` |
 
 ---
 
@@ -434,7 +438,7 @@ IF Cosmetic THEN [I]
 | mqtt-debug | MQTT Traffic analysieren | Vergleicht dessen Report |
 | frontend-debug | Frontend analysieren | Vergleicht dessen Report |
 | collect-reports | Reports konsolidieren | Liest CONSOLIDATED_REPORT |
-| system-manager | Session-Briefing | Liest SESSION_BRIEFING |
+| system-control | Session-Briefing | Liest SESSION_BRIEFING |
 
 **Meta-Analyst ist der EINZIGE Agent der Reports miteinander vergleicht.**
 

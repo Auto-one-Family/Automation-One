@@ -5,7 +5,7 @@ description: |
   Verwenden bei: /updatedocs Trigger, nach Implementierungen, nach Stack-Änderungen,
   nach neuen Services, Agents, Skills, Ports, Endpoints, Log-Pfaden.
   NICHT verwenden für: Neue Docs schreiben, Reports erstellen, Code-Änderungen.
-  Abgrenzung: collect-reports (Reports), system-manager (Session-Briefing)
+  Abgrenzung: collect-reports (Reports), system-control (Session-Briefing)
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
@@ -211,7 +211,7 @@ Wenn vorhanden, aktualisiere:
 | `scripts/debug/README.md` | Nutzungsanleitung, Argumente, Output |
 | `.claude/reference/debugging/LOG_LOCATIONS.md` | Falls Log-Pfade betroffen |
 | `.claude/skills/system-control/SKILL.md` | Falls Session-Befehle betroffen |
-| `.claude/skills/System Manager/SKILL.md` | Falls STATUS.md-Format betroffen |
+| `.claude/skills/system-control/SKILL.md` | Falls STATUS.md-Format betroffen |
 
 ### Docker-Compose Konfiguration geändert
 
@@ -219,6 +219,16 @@ Wenn vorhanden, aktualisiere:
 |-----|-------------------|
 | `.claude/rules/docker-rules.md` | Betroffene Regeln/Tabellen |
 | `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` | Betroffene Befehle |
+
+### Agent-Profile / Referenz geändert (agent_profiles.md, flow_reference.md)
+
+| Doc | Was aktualisieren |
+|-----|-------------------|
+| `.claude/reference/testing/agent_profiles.md` | Agent-Liste, Referenzen, SKILLS-ÜBERSICHT |
+| `.claude/reference/testing/flow_reference.md` | Flow-Schritte, Agent-Input, Output |
+| `.claude/agents/Readme.md` | STATUS.md vs. SC_REPORT, Log-Pfade, Agent-Index |
+| `.claude/skills/README.md` | Skill-Auswahl, Ordnerstruktur |
+| `.claude/CLAUDE.md` | Agent/Skill-Tabellen (falls betroffen) |
 
 ---
 

@@ -21,12 +21,12 @@ allowed-tools: Read, Bash, Grep, Glob
 
 | Ich will... | Primäre Quelle | Zugriff |
 |-------------|----------------|---------|
-| **Schema prüfen** | [Section 3: Schema-Übersicht](#3-schema-übersicht) | `make shell-db` |
+| **Schema prüfen** | [Section 3: Schema-Übersicht](#3-schema-übersicht) | `docker exec -it automationone-postgres psql -U god_kaiser -d god_kaiser_db` |
 | **Migration-Status** | [Section 4: Alembic Migrations](#4-alembic-migrations) | `alembic current` |
 | **Cleanup-Status** | [Section 6: Retention & Cleanup](#6-retention--cleanup) | Health-Endpoint |
 | **Index-Performance** | [Section 5: Indizes](#5-indizes-esp_heartbeat_logs) | `pg_stat_user_indexes` |
-| **Backup erstellen** | [Section 7: Backup/Restore](#7-backuprestore) | `make db-backup` |
-| **Restore durchführen** | [Section 7: Backup/Restore](#7-backuprestore) | `make db-restore` |
+| **Backup erstellen** | [Section 7: Backup/Restore](#7-backuprestore) | `./scripts/docker/backup.sh` |
+| **Restore durchführen** | [Section 7: Backup/Restore](#7-backuprestore) | `./scripts/docker/restore.sh` |
 | **Circuit Breaker prüfen** | [Section 9: Circuit Breaker](#9-circuit-breaker-db-seitig) | `/v1/health/detailed` |
 
 ---
@@ -44,16 +44,22 @@ allowed-tools: Read, Bash, Grep, Glob
 - Datenbank-Konsistenz-Checks
 - Orphaned Records finden und bereinigen
 
-### NICHT mein Bereich (delegieren an)
+### Erweiterte Eigenanalyse bei Auffälligkeiten
 
-| Situation | Delegieren an | Grund |
-|-----------|---------------|-------|
-| Server wirft DB-Fehler | `server-debug` | Server-Log Analyse |
-| MQTT Messages fehlen | `mqtt-debug` | MQTT-Traffic Analyse |
-| ESP sendet keine Daten | `esp32-debug` | Serial-Log Analyse |
-| API-Endpoint Probleme | `server-debug` | Handler-Analyse |
-| Schema-Änderung nötig | **Dev-Agent** | Code-Änderung |
-| Alembic Migration erstellen | **Dev-Agent** | Code-Änderung |
+Bei DB-bezogenen Problemen prüfst du eigenständig über Layer-Grenzen hinaus – keine Delegation nötig.
+
+| Auffälligkeit | Eigenständige Prüfung | Command |
+|---------------|----------------------|---------|
+| Server wirft DB-Fehler | Server-Log nach DB-Errors greppen | `grep -i "database\|sqlalchemy\|connection" logs/server/god_kaiser.log \| tail -20` |
+| DB-Container nicht erreichbar | Docker-Status prüfen | `docker compose ps automationone-postgres` |
+| DB nicht healthy | PostgreSQL-Healthcheck | `docker exec automationone-postgres pg_isready -U god_kaiser -d god_kaiser_db` |
+| Server-Health unklar | Health-Endpoint prüfen | `curl -s http://localhost:8000/api/v1/health/detailed` |
+| Container-Logs bei Fehlern | PostgreSQL-Logs lesen | `docker compose logs --tail=30 automationone-postgres` |
+| Migration-Status unklar | Alembic prüfen | `docker exec el-servador python -m alembic current` |
+
+> **Code-Änderungen** (Schema-Änderungen, neue Migrations) bleiben Dev-Agent Aufgabe.
+
+Vollständige Eigenanalyse-Referenz: [Section 10](#10-erweiterte-eigenanalyse)
 
 ---
 
@@ -74,7 +80,7 @@ allowed-tools: Read, Bash, Grep, Glob
 
 ```bash
 # Interaktive psql-Session
-make shell-db
+docker exec -it automationone-postgres psql -U god_kaiser -d god_kaiser_db
 
 # Einzelner Befehl
 docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT 1;"
@@ -162,29 +168,27 @@ Ermöglicht:
 | `add_discovery_approval_fields` | 2026-01-27 | Discovery/Approval Felder |
 | `add_esp_heartbeat_logs` | 2026-01-24 | esp_heartbeat_logs Tabelle |
 
-### Make-Targets
+### Docker-Compose Commands
 
 ```bash
 # Migrationen anwenden
-make db-migrate       # alembic upgrade head
+docker exec el-servador python -m alembic upgrade head
 
 # Letzte Migration rückgängig
-make db-rollback      # alembic downgrade -1
+docker exec el-servador python -m alembic downgrade -1
 ```
-
-**Hinweis:** `make db-status` Target existiert nicht. Status im Container prüfen:
 
 ### Prüf-Befehle (im Container)
 
 ```bash
 # Aktueller Migration-Status
-docker exec automationone-server python -m alembic current
+docker exec el-servador python -m alembic current
 
 # Migration-History
-docker exec automationone-server python -m alembic history
+docker exec el-servador python -m alembic history
 
 # Pending Migrations
-docker exec automationone-server python -m alembic heads
+docker exec el-servador python -m alembic heads
 ```
 
 ---
@@ -278,9 +282,6 @@ curl -X POST http://localhost:8000/api/v1/debug/maintenance/run-cleanup \
 
 ```bash
 # Backup erstellen
-make db-backup
-
-# Manuell
 ./scripts/docker/backup.sh
 ```
 
@@ -300,10 +301,10 @@ make db-backup
 
 ```bash
 # Restore von spezifischem Backup
-make db-restore FILE=backups/automationone_20260204_120000.sql.gz
+./scripts/docker/restore.sh backups/automationone_20260204_120000.sql.gz
 
 # Restore vom letzten Backup
-make db-restore FILE=latest
+./scripts/docker/restore.sh latest
 ```
 
 **ACHTUNG:** Restore = DESTRUKTIV. Immer vorher Backup machen!
@@ -442,15 +443,76 @@ curl http://localhost:8000/api/v1/health/detailed
 
 ---
 
-## 10. Workflow
+## 10. Erweiterte Eigenanalyse
+
+Bei Auffälligkeiten prüfst du eigenständig weiter – keine Delegation.
+
+| Auffälligkeit | Eigenständige Prüfung | Command |
+|---------------|----------------------|---------|
+| DB-Container down | Container-Status | `docker compose ps automationone-postgres` |
+| DB nicht erreichbar | Healthcheck | `docker exec automationone-postgres pg_isready -U god_kaiser -d god_kaiser_db` |
+| Server meldet DB-Fehler | Server-Health | `curl -s http://localhost:8000/api/v1/health/detailed` |
+| Circuit Breaker OPEN | Health-Details | `curl -s http://localhost:8000/api/v1/health/detailed` |
+| Migration-Status | Alembic prüfen | `docker exec el-servador python -m alembic current` |
+| Container-Logs | PostgreSQL-Logs | `docker compose logs --tail=30 automationone-postgres` |
+| Server-Log DB-Fehler | Grep nach DB-Errors | Grep `database\|sqlalchemy\|connection` in `logs/server/god_kaiser.log` |
+
+---
+
+## 10.1 Performance-Analyse (L14)
+
+### Index-Nutzung
+
+```sql
+-- Ungenutzte Indizes (idx_scan = 0)
+SELECT indexrelname, idx_scan, idx_tup_read
+FROM pg_stat_user_indexes
+WHERE schemaname = 'public' AND idx_scan = 0
+ORDER BY pg_relation_size(indexrelid) DESC;
+```
+
+### Table-Scans
+
+```sql
+-- Tabellen mit vielen Sequential Scans (Performance-Problem)
+SELECT relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch
+FROM pg_stat_user_tables
+WHERE seq_scan > 100
+ORDER BY seq_scan DESC;
+```
+
+### Tabellen-Bloat
+
+```sql
+-- Tote Zeilen (braucht VACUUM)
+SELECT relname, n_dead_tup, n_live_tup,
+  round(n_dead_tup::numeric / GREATEST(n_live_tup, 1) * 100, 2) as dead_pct
+FROM pg_stat_user_tables
+WHERE n_dead_tup > 100
+ORDER BY n_dead_tup DESC;
+```
+
+### Connection-Pool
+
+```sql
+-- Aktive vs. Idle Connections
+SELECT state, count(*) FROM pg_stat_activity
+WHERE datname = 'god_kaiser_db'
+GROUP BY state;
+```
+
+---
+
+## 10.2 Workflow
 
 ### Bei Analyse-Anfragen
 
 ```
-1. VERBINDUNG PRÜFEN → make shell-db oder docker healthcheck
+1. VERBINDUNG PRÜFEN → pg_isready oder docker healthcheck
 2. MIGRATION-STATUS  → alembic current
 3. QUERIES AUSFÜHREN → Diagnose-Queries aus Section 8
-4. ERGEBNIS FORMAT   → Tabellen, Empfehlungen
+4. PERFORMANCE       → Index-Nutzung, Table-Scans, Bloat (Section 10.1)
+5. ERGEBNIS FORMAT   → Tabellen, Empfehlungen
 ```
 
 ### Bei Cleanup-Anfragen
@@ -478,22 +540,65 @@ curl http://localhost:8000/api/v1/health/detailed
 
 ---
 
-## 11. Kritische Regeln
+## 11. Report-Template
 
-### NIEMALS
+**Output:** `.claude/reports/current/DB_INSPECTOR_REPORT.md`
 
-- DELETE ohne Bestätigung
-- Schema-Struktur ändern (das ist Dev-Agent Aufgabe)
-- Migrations erstellen/ändern
-- Produktionsdaten ohne Backup löschen
+```markdown
+# DB Inspector Report
 
-### IMMER
-
-- SELECT vor DELETE zeigen
-- Backup vor Restore prüfen
-- Kaskaden bei Löschungen beachten
-- Dry-Run Status bei Cleanup prüfen
+**Erstellt:** [Timestamp]
+**Modus:** A (Allgemeine Analyse) / B (Spezifisch: "[Problembeschreibung]")
+**Quellen:** [Auflistung analysierter Tabellen und Checks]
 
 ---
 
-*Kompakter Skill für DB-Inspektion. Details in SYSTEM_OPERATIONS_REFERENCE.md*
+## 1. Zusammenfassung
+[2-3 Sätze: Was wurde gefunden? Wie schwer? Handlungsbedarf?]
+
+## 2. Analysierte Quellen
+| Quelle | Status | Bemerkung |
+|--------|--------|-----------|
+| automationone-postgres | OK/FEHLER | [Container-Status] |
+| pg_isready | OK/FEHLER | [Healthcheck] |
+
+## 3. Befunde
+### 3.1 [Kategorie]
+- **Schwere:** Kritisch/Hoch/Mittel/Niedrig
+- **Detail:** [Beschreibung]
+- **Evidenz:** [SQL-Ergebnis oder Messwert]
+
+## 4. Extended Checks (eigenständig durchgeführt)
+| Check | Ergebnis |
+|-------|----------|
+| [pg_isready / curl / docker compose ps / alembic] | [Ergebnis] |
+
+## 5. Bewertung & Empfehlung
+- **Root Cause:** [Wenn identifizierbar]
+- **Nächste Schritte:** [Empfehlung]
+```
+
+---
+
+## 12. Referenzen
+
+| Wann | Datei | Zweck |
+|------|-------|-------|
+| Wenn vorhanden | `logs/current/STATUS.md` | Session-Kontext (optional) |
+| Bei Schema-Fragen | `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` | Schema, Queries |
+| Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Server-Errors 5300-5399 (DB) |
+| Bei Alembic | `El Servador/god_kaiser_server/alembic/versions/` | Migration History |
+| Bei Server-Logs | `logs/server/god_kaiser.log` | DB-bezogene Fehler |
+| Bei Flows | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Datenflüsse |
+
+---
+
+## 13. Regeln
+
+- **NIEMALS** Code ändern oder erstellen
+- **NIEMALS** DELETE ohne Bestätigung
+- **NIEMALS** Schema-Struktur ändern
+- **IMMER** SELECT vor DELETE zeigen
+- **STATUS.md** ist optional – nutze wenn vorhanden, arbeite ohne wenn nicht
+- **Eigenständig erweitern** bei Auffälligkeiten statt delegieren
+- **Report immer** nach `.claude/reports/current/DB_INSPECTOR_REPORT.md`

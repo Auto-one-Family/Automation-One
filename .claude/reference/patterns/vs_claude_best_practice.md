@@ -969,8 +969,7 @@ AutomationOne/
 │   │   ├── mqtt-debug.md
 │   │   ├── meta-analyst.md
 │   │   ├── db-inspector.md
-│   │   ├── system-control.md
-│   │   └── system-manager.md
+│   │   └── system-control.md
 │   │
 │   ├── skills/                      # Entwickler-Workflows
 │   │   ├── esp32-development/
@@ -996,8 +995,8 @@ AutomationOne/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    SYSTEM MANAGER                            │
-│                  (Plan Mode Orchestrator)                    │
+│                    system-control                            │
+│         (Briefing + Operations - einziger Einstieg)          │
 └─────────────────────────────────────────────────────────────┘
                               │
          ┌────────────────────┼────────────────────┐
@@ -1009,7 +1008,7 @@ AutomationOne/
 │ esp32-debug     │  │ esp32-dev       │  │ system-control  │
 │ server-debug    │  │ server-dev      │  │ db-inspector    │
 │ mqtt-debug      │  │ mqtt-dev        │  │                 │
-│ provisioning    │  │                 │  │                 │
+│ meta-analyst    │  │                 │  │                 │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 

@@ -2,7 +2,7 @@
 # ============================================================================
 # start_session.sh - Debug-Session für Multi-Agent Workflow
 # ============================================================================
-# Version: 4.0 (SYSTEM_MANAGER Integration, schlanke STATUS.md)
+# Version: 4.1 (system-control Integration, Briefing-Modus)
 #
 # Usage: ./scripts/debug/start_session.sh [session-name] [--with-server] [--mode MODE]
 #
@@ -796,14 +796,14 @@ Nach Abschluss aller Tests müssen ALLE Punkte erfüllt sein:
 E2EPHASESEOF
 fi
 
-# Agent-Aktivierung - SYSTEM_MANAGER Workflow
+# Agent-Aktivierung - system-control Workflow
 cat >> "$LOGS_DIR/STATUS.md" << AGENTEOF
 
 ---
 
-## 🤖 Agent-Workflow: SYSTEM_MANAGER
+## 🤖 Agent-Workflow: system-control
 
-> **SYSTEM_MANAGER erstellt Briefing - führt KEINE Agents aus!**
+> **system-control (Briefing-Modus) erstellt Briefing - führt KEINE Agents aus!**
 
 ---
 
@@ -819,9 +819,9 @@ Shift+Tab → bis "⏸ plan mode on" erscheint
 session gestartet
 \`\`\`
 
-### Schritt 3: SYSTEM_MANAGER arbeitet
+### Schritt 3: system-control arbeitet
 
-Der SYSTEM_MANAGER wird automatisch aktiviert und:
+system-control (Briefing-Modus) wird automatisch aktiviert und:
 
 1. **Liest** diese STATUS.md
 2. **Analysiert** System-Status (Server, MQTT, Git)
@@ -852,18 +852,18 @@ Nach dem SESSION_BRIEFING:
 
 ### Wichtig
 
-SYSTEM_MANAGER ≠ Agent-Orchestrator
-SYSTEM_MANAGER = Briefing-Ersteller für Technical Manager
+system-control ≠ Agent-Orchestrator
+system-control (Briefing-Modus) = Briefing-Ersteller für Technical Manager
 
 ---
 
-### SYSTEM_MANAGER Referenz
+### system-control Referenz
 
 | Attribut | Wert |
 |----------|------|
-| **Agent-Pfad** | \`.claude/agents/System Manager/system-manager.md\` |
-| **Skill-Pfad** | \`.claude/skills/System Manager/SKILL.md\` |
-| **Modus** | Plan Mode PFLICHT |
+| **Agent-Pfad** | \`.claude/agents/system-control.md\` |
+| **Skill-Pfad** | \`.claude/skills/system-control/SKILL.md\` |
+| **Modus** | Briefing- oder Ops-Modus |
 | **Output** | \`.claude/reports/current/SESSION_BRIEFING.md\` |
 
 ---
@@ -880,7 +880,7 @@ SYSTEM_MANAGER = Briefing-Ersteller für Technical Manager
 
 ### Fallback: Manuelle Agent-Aktivierung
 
-Falls SYSTEM_MANAGER nicht verfügbar:
+Falls system-control nicht verfügbar:
 
 \`\`\`bash
 # In separaten VS Code Chat-Windows:
@@ -897,7 +897,7 @@ Du bist mqtt-debug. Lies logs/current/STATUS.md und analysiere logs/current/mqtt
 
 AGENTEOF
 
-# E2E: Hinweis für SYSTEM_MANAGER
+# E2E: Hinweis für system-control
 if [ "$TEST_MODE" = "E2E" ]; then
 cat >> "$LOGS_DIR/STATUS.md" << 'E2EAGENTEOF'
 
@@ -905,7 +905,7 @@ cat >> "$LOGS_DIR/STATUS.md" << 'E2EAGENTEOF'
 
 ### E2E-Modus: Erweiterte Hardware-Verifikation
 
-> **Hinweis für SYSTEM_MANAGER:** E2E-Tests erfordern Hardware-Checks.
+> **Hinweis für system-control:** E2E-Tests erfordern Hardware-Checks.
 
 **Zusätzliche Prüfpunkte:**
 - DS18B20 Sensor-Discovery (ROM-Code erkannt?)
@@ -928,7 +928,7 @@ cat >> "$LOGS_DIR/STATUS.md" << FINALEOF
 
 ## 📊 Session-Abschluss Checkliste
 
-### SYSTEM_MANAGER Workflow
+### system-control Workflow
 
 - [ ] Plan Mode aktiviert (⏸)
 - [ ] "session gestartet" gesendet
@@ -1068,7 +1068,7 @@ echo ""
 echo " ⚠️  WICHTIG: Terminal mit ESP32-Befehl offen lassen bis Session endet!"
 echo ""
 echo " ┌─────────────────────────────────────────────────────────────────"
-echo " │ 🤖 DANACH: SYSTEM_MANAGER aktivieren"
+echo " │ 🤖 DANACH: system-control aktivieren"
 echo " ├─────────────────────────────────────────────────────────────────"
 echo " │"
 echo " │ 1. VS Code öffnen mit Claude Extension"
@@ -1079,11 +1079,11 @@ echo " │"
 echo " │ 3. Session starten:"
 echo " │    > session gestartet"
 echo " │"
-echo " │ 4. SYSTEM_MANAGER erstellt SESSION_BRIEFING.md"
+echo " │ 4. system-control erstellt SESSION_BRIEFING.md"
 echo " │"
 echo " │ 5. Technical Manager übernimmt (Plan Mode verlassen)"
 echo " │"
-echo " │ Agent-Pfad: .claude/agents/System Manager/system-manager.md"
+echo " │ Agent-Pfad: .claude/agents/system-control.md"
 echo " │"
 echo " └─────────────────────────────────────────────────────────────────"
 echo ""

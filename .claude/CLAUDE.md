@@ -19,6 +19,10 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | Reports sammeln, konsolidieren, Session-Ende, TM-Übergabe | `collect-reports` |
 | /do, Plan ausführen, Implementierung starten | `do` |
 | /updatedocs, Docs aktualisieren, Doku-Update nach Änderungen | `updatedocs` |
+| /test, Test-Failures, CI rot, pytest/Vitest/Playwright | `test-log-analyst` |
+| Agent-Flow prüfen, IST-SOLL, Agent-Korrektur | `agent-manager` |
+| Git-Commit vorbereiten, Changes analysieren | `git-commit` |
+| /verify-plan, TM-Plan Reality-Check | `verify-plan` |
 
 ## Dev-Agenten (Pattern-konforme Implementierung)
 
@@ -29,27 +33,20 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | `mqtt-dev` | Topic hinzufuegen, Publisher, Subscriber, Payload Schema, MQTT implementieren |
 | `frontend-dev` | Komponente, Composable, Store, View, WebSocket, Vue, implementieren Frontend |
 
-## Session-Orchestrator 
-
-| Agent | Trigger-Keywords | Modus |
-|-------|------------------|-------|
-| `system-manager` | Session-Start, Briefing, Projektstatus, Hardware-Test, "session gestartet" | Plan Mode |
-
-**Pfad:** `.claude/agents/System Manager/system-manager.md`
-**Output:** `.claude/reports/current/SESSION_BRIEFING.md`
-
-**Workflow:**
-1. Plan Mode aktivieren (Shift+Tab → ⏸)
-2. "session gestartet" senden
-3. SESSION_BRIEFING.md wird erstellt
-4. Edit Mode für andere Agents
-
-## System-Operator (Log-Generierung)
+## System-Operator & Session-Einstieg (konsolidiert)
 
 | Agent | Trigger-Keywords | Rolle |
 |-------|------------------|-------|
-| `system-control` | Start, Stop, Build, Flash, Commands | ERSTER Agent nach SESSION_BRIEFING - generiert Logs |
+| `system-control` | Session-Start, Briefing, Projektstatus, "session gestartet", "was ist der Stand", Start, Stop, Build, Flash, Commands | EINZIGER Einstieg: Briefing ODER Operationen. Erstellt SESSION_BRIEFING.md oder führt Operationen aus |
 | `db-inspector` | Schema, Query, Migration, Alembic | Datenbank-Inspektion & Cleanup |
+
+**system-control Pfad:** `.claude/agents/system-control.md`
+**Briefing-Output:** `.claude/reports/current/SESSION_BRIEFING.md`
+
+**Workflow:**
+1. "session gestartet" → system-control (Briefing-Modus) erstellt SESSION_BRIEFING.md
+2. Danach: system-control (Ops-Modus) führt Operationen aus, generiert Logs
+3. Debug-Agents analysieren Logs
 
 ## Debug-Agenten (Log-Analyse)
 
@@ -74,7 +71,7 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | `reference/errors/` | ERROR_CODES (ESP32: 1000-4999, Server: 5000-5999) |
 | `reference/patterns/` | COMMUNICATION_FLOWS, ARCHITECTURE_DEPENDENCIES, vs_claude_best_practice |
 | `reference/debugging/` | LOG_LOCATIONS, CI_PIPELINE, ACCESS_LIMITATIONS |
-| `reference/testing/` | TEST_WORKFLOW, SYSTEM_OPERATIONS_REFERENCE |
+| `reference/testing/` | agent_profiles, flow_reference, TEST_WORKFLOW, SYSTEM_OPERATIONS_REFERENCE |
 | `reference/security/` | PRODUCTION_CHECKLIST |
 
 ## Regeln
@@ -99,8 +96,8 @@ Der Technical Manager (TM) ist eine externe Claude-Instanz in claude.ai – hat 
 
 ```
 1. User führt `scripts/debug/start_session.sh` aus → `logs/current/STATUS.md` wird generiert
-2. User schreibt "Session gestartet" + Hardware-Info → system-manager aktiviert sich
-3. system-manager liest STATUS.md, erstellt SESSION_BRIEFING.md
+2. User schreibt "Session gestartet" + Hardware-Info → system-control (Briefing-Modus) aktiviert sich
+3. system-control liest STATUS.md, erstellt SESSION_BRIEFING.md
 4. User kopiert SESSION_BRIEFING.md zum Technical Manager (claude.ai, extern)
 5. TM analysiert Briefing, formuliert Agent-Befehle (einzeln pro Agent)
 6. User führt system-control ZUERST aus → generiert Log-Daten, Operations-Bericht
@@ -124,8 +121,8 @@ Der Technical Manager (TM) ist eine externe Claude-Instanz in claude.ai – hat 
 
 | Schritt | Agent/Skill | Funktion | Output |
 |---------|-------------|----------|--------|
-| 1 | `system-manager` | Erstellt Session-Briefing | SESSION_BRIEFING.md → zum TM |
-| 2 | `system-control` | Generiert Logs, führt Operationen aus | Operations-Bericht (MUSS VOR Debug-Agents) |
+| 1 | `system-control` (Briefing-Modus) | Erstellt Session-Briefing | SESSION_BRIEFING.md → zum TM |
+| 2 | `system-control` (Ops-Modus) | Generiert Logs, führt Operationen aus | Operations-Bericht (MUSS VOR Debug-Agents) |
 | 3 | Debug-Agents | Logs analysieren (einzeln, parallel möglich) | Individuelle Reports |
 | | - `esp32-debug` | ESP32 Serial-Log | ESP32_*_REPORT.md |
 | | - `server-debug` | Server JSON-Log | SERVER_*_REPORT.md |

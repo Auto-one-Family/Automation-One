@@ -1,7 +1,8 @@
-# Debug-Agenten
+# AutomationOne Agenten
 
-> **Version:** 3.1 | **Aktualisiert:** 2026-02-06
+> **Version:** 4.0 | **Aktualisiert:** 2026-02-08
 > **Format:** Offizielles Claude Code Agent-Format
+> **Agenten gesamt:** 13
 
 ---
 
@@ -22,7 +23,14 @@
 | Agent | Datei | Beschreibung | Tools |
 |-------|-------|--------------|-------|
 | **db-inspector** | `db-inspector.md` | Datenbank-Inspektion & Cleanup | Read, Bash, Grep, Glob |
-| **system-control** | `system-control.md` | System-Steuerung & Operations | Read, Bash, Grep, Glob |
+| **system-control** | `system-control.md` | System-Steuerung, Briefing, Session-Planning | Read, Write, Bash, Grep, Glob |
+
+### Utility-Agenten
+
+| Agent | Datei | Beschreibung | Tools |
+|-------|-------|--------------|-------|
+| **agent-manager** | `agent-manager/agent-manager.md` | Agent-Qualität, IST-SOLL, 7-Prinzipien-Check | Read, Write, Edit, Grep, Glob |
+| **test-log-analyst** | `testing/test-log-analyst.md` | Test-Log-Analyse (pytest, Vitest, Playwright, Wokwi) | Read, Grep, Glob, Bash |
 
 ### Dev-Agenten (Pattern-konforme Implementierung)
 
@@ -100,13 +108,14 @@ Alle Debug-Agenten lesen `logs/current/STATUS.md` für Session-Kontext:
 
 ## Log-Quellen
 
-| Agent | Primärer Log | Pfad |
-|-------|--------------|------|
-| esp32-debug | ESP32 Serial | `logs/current/esp32_serial.log` |
-| server-debug | Server JSON | `logs/server/god_kaiser.log` |
-| mqtt-debug | MQTT Traffic | `logs/mqtt/mqtt_traffic.log` |
-| frontend-debug | Frontend Build/Console | `El Frontend/` (Vite Output) |
-| meta-analyst | Alle Reports in reports/current/ | - |
+| Agent | Primärer Input | Log-Pfad |
+|-------|----------------|----------|
+| esp32-debug | Serial-Log, eigenständig | `logs/current/esp32_serial.log` |
+| server-debug | Server-Log, eigenständig | `logs/server/god_kaiser.log` |
+| mqtt-debug | MQTT-Traffic, eigenständig | `logs/mqtt/mqtt_traffic.log` |
+| frontend-debug | Source-Code, Container, eigenständig | `El Frontend/`, Docker-Logs |
+| db-inspector | PostgreSQL, eigenständig | Docker exec psql |
+| meta-analyst | Alle Reports | `.claude/reports/current/` |
 
 ---
 
@@ -114,14 +123,18 @@ Alle Debug-Agenten lesen `logs/current/STATUS.md` für Session-Kontext:
 
 Alle Agenten schreiben Reports nach: `.claude/reports/current/`
 
-Format: `[AGENT]_[MODUS]_REPORT.md`
+Format: Standardisierte Namen (kein Modus-Suffix)
 
-| Modus | Beispiel-Reports |
-|-------|------------------|
-| BOOT | `ESP32_BOOT_REPORT.md`, `SERVER_BOOT_REPORT.md`, `MQTT_BOOT_REPORT.md` |
-| CONFIG | `ESP32_CONFIG_REPORT.md`, `SERVER_CONFIG_REPORT.md`, `MQTT_CONFIG_REPORT.md` |
-| SENSOR | `ESP32_SENSOR_REPORT.md`, `SERVER_SENSOR_REPORT.md`, `MQTT_SENSOR_REPORT.md` |
-| ACTUATOR | `ESP32_ACTUATOR_REPORT.md`, `SERVER_ACTUATOR_REPORT.md`, `MQTT_ACTUATOR_REPORT.md` |
+| Agent | Report-Datei |
+|-------|-------------|
+| esp32-debug | `ESP32_DEBUG_REPORT.md` |
+| server-debug | `SERVER_DEBUG_REPORT.md` |
+| mqtt-debug | `MQTT_DEBUG_REPORT.md` |
+| frontend-debug | `FRONTEND_DEBUG_REPORT.md` |
+| db-inspector | `DB_INSPECTOR_REPORT.md` |
+| meta-analyst | `META_ANALYSIS.md` |
+| agent-manager | `AGENT_MANAGEMENT_REPORT.md` |
+| test-log-analyst | `.claude/reports/Testrunner/test.md` |
 
 ---
 
@@ -133,7 +146,11 @@ Format: `[AGENT]_[MODUS]_REPORT.md`
 ├── esp32-debug.md                   # ESP32 Debug (flach)
 ├── meta-analyst.md                  # Meta-Analyst (flach)
 ├── db-inspector.md                  # DB Inspector (flach)
-├── system-control.md                # System Control (flach)
+├── system-control.md                # System Control, Briefing (flach)
+├── agent-manager/
+│   └── agent-manager.md            # Agent-Manager (Qualität)
+├── testing/
+│   └── test-log-analyst.md         # Test-Log-Analyst
 ├── esp32/
 │   └── esp32-dev-agent.md          # ESP32 Dev
 ├── server/
@@ -142,23 +159,21 @@ Format: `[AGENT]_[MODUS]_REPORT.md`
 ├── mqtt/
 │   ├── mqtt-debug-agent.md         # MQTT Debug
 │   └── mqtt_dev_agent.md           # MQTT Dev
-├── frontend/
-│   ├── frontend-debug-agent.md     # Frontend Debug
-│   └── frontend_dev_agent.md       # Frontend Dev
-└── System Manager/
-    └── system-manager.md           # Session-Orchestrator
+└── frontend/
+    ├── frontend-debug-agent.md     # Frontend Debug
+    └── frontend_dev_agent.md       # Frontend Dev
 ```
 
 ---
 
-## Session-Orchestrator
+## Session-Briefing & Operations (konsolidiert)
 
 | Agent | Pfad | Modus |
 |-------|------|-------|
-| **system-manager** | `System Manager/system-manager.md` | Plan Mode PFLICHT |
+| **system-control** | `system-control.md` | Briefing- oder Ops-Modus |
 
-**Funktion:** Erstellt SESSION_BRIEFING.md für Technical Manager
-**Skill:** `.claude/skills/System Manager/SKILL.md`
+**Funktion:** Erstellt SESSION_BRIEFING.md (Briefing-Modus) oder führt Operationen aus (Ops-Modus)
+**Skill:** `.claude/skills/system-control/SKILL.md`
 
 ---
 

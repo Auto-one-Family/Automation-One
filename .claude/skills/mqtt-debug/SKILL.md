@@ -1,12 +1,13 @@
 ---
 name: mqtt-debug
 description: |
-  MQTT-Debug Skill für AutomationOne IoT-Framework.
-  Wissensbasis für MQTT-Traffic-Analyse, Broker-Health,
+  MQTT-Debug Skill fuer AutomationOne IoT-Framework.
+  Wissensbasis fuer MQTT-Traffic-Analyse, Broker-Health,
   Message-Flow-Debugging, Circuit Breaker Diagnose,
   Offline-Buffer-Status, Client-Disconnect-Analyse.
   Fokus: Was passiert auf MQTT-Protokoll-Ebene.
-allowed-tools: Read, Grep, Glob
+allowed-tools: Read, Grep, Glob, Bash
+context: inline
 ---
 
 # MQTT Debug Skill
@@ -16,623 +17,367 @@ allowed-tools: Read, Grep, Glob
 
 ---
 
-## 0. Quick Reference - Debug-Fokus
+## 1. Topic-Hierarchie
 
-| Ich analysiere... | Primäre Quelle | Sekundäre Quelle |
-|-------------------|----------------|------------------|
-| **MQTT-Traffic** | `logs/current/mqtt_traffic.log` | `make mqtt-sub` live |
-| **Broker-Health** | `make logs-mqtt` | `docker compose logs mqtt-broker` |
-| **ESP32 MQTT-Status** | `logs/current/esp32_serial.log` | Pattern: `[MQTT]` |
-| **Server MQTT-Status** | `logs/current/god_kaiser.log` | Logger: `src.mqtt.*` |
-| **Fehlende Messages** | Sequenz-Analyse | Cross-Layer-Korrelation |
-| **Connection-Issues** | Broker-Log + Serial-Log | Circuit Breaker Status |
+**Schema:** `kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}`
 
-### Schnell-Diagnose Befehle
+| # | Topic-Pattern | Richtung | QoS | Retain |
+|---|---------------|----------|-----|--------|
+| 1 | `.../sensor/{gpio}/data` | ESP→Server | 1 | false |
+| 2 | `.../sensor/batch` | ESP→Server | 1 | false |
+| 3 | `.../sensor/{gpio}/command` | Server→ESP | 2 | false |
+| 4 | `.../sensor/{gpio}/response` | ESP→Server | 1 | false |
+| 5 | `.../actuator/{gpio}/command` | Server→ESP | 2 | false |
+| 6 | `.../actuator/{gpio}/status` | ESP→Server | 1 | false |
+| 7 | `.../actuator/{gpio}/response` | ESP→Server | 1 | false |
+| 8 | `.../actuator/{gpio}/alert` | ESP→Server | 1 | false |
+| 9 | `.../actuator/emergency` | Server→ESP | 1 | false |
+| 10 | `.../system/heartbeat` | ESP→Server | 0 | false |
+| 11 | `.../system/heartbeat/ack` | Server→ESP | 0 | false |
+| 12 | `.../system/command` | Server→ESP | 2 | false |
+| 13 | `.../system/response` | ESP→Server | 1 | false |
+| 14 | `.../system/diagnostics` | ESP→Server | 0 | false |
+| 15 | `.../system/will` | Broker→Server | 1 | **true** |
+| 16 | `.../system/error` | ESP→Server | 1 | false |
+| 17 | `.../status` | ESP→Server | 1 | false |
+| 18 | `.../safe_mode` | ESP→Server | 1 | false |
+| 19 | `.../config` | Server→ESP | 2 | false |
+| 20 | `.../config_response` | ESP→Server | 2 | false |
+| 21 | `.../zone/assign` | Server→ESP | 1 | false |
+| 22 | `.../zone/ack` | ESP→Server | 1 | false |
+| 23 | `.../subzone/assign` | Server→ESP | 1 | false |
+| 24 | `.../subzone/remove` | Server→ESP | 1 | false |
+| 25 | `.../subzone/ack` | ESP→Server | 1 | false |
+| 26 | `.../subzone/status` | ESP→Server | 1 | false |
+| 27 | `.../subzone/safe` | Server→ESP | 1 | false |
+| 28 | `.../library/*` | bidirektional | 1 | false |
+| 29 | `.../mqtt/auth_update` | Server→ESP | 1 | false |
+| 30 | `.../mqtt/auth_status` | ESP→Server | 1 | false |
+| 31 | `kaiser/broadcast/emergency` | Server→ALL | 2 | false |
+| 32 | `kaiser/broadcast/system_update` | Server→ALL | 1 | false |
 
-| Ziel | Befehl |
-|------|--------|
-| Live MQTT-Traffic | `make mqtt-sub` |
-| Broker-Logs | `make logs-mqtt` |
-| Container-Status | `make status` |
-| Server-Health (inkl. MQTT) | `make health` |
-| ESP32 Serial | `make monitor` |
-
----
-
-## 1. Debug-Fokus & Abgrenzung
-
-### Mein Bereich
-
-- MQTT-Traffic-Analyse (Topic-Patterns, Payload-Validierung)
-- Broker-Health (Connection, Persistence, Queues)
-- Message-Flow-Probleme (fehlende Messages, falsche QoS)
-- Client-Disconnects (ESP32 und Server)
-- Offline-Buffer-Status (ESP32: 100 Messages, Server: unbegrenzt)
-- Circuit Breaker Status (ESP32: 5 failures → 30s OPEN)
-- Registration Gate (ESP32: 10s Timeout Fallback)
-- Last-Will-Testament (LWT) Analysis
-- Request-Response-Sequenzen (Heartbeat→ACK, Command→Response)
-
-### NICHT mein Bereich
-
-| Problem | Zuständiger Agent |
-|---------|-------------------|
-| Sensor-Hardware-Probleme | `esp32-debug` |
-| API/Handler-Fehler | `server-debug` |
-| Frontend WebSocket | `frontend-debug` |
-| Datenbankprobleme | `db-inspector` |
-| System-Operationen | `system-control` |
-
-### Abgrenzung zu anderen Debug-Agents
-
-```
-mqtt-debug: Was wird über MQTT gesendet? (Topics, Payloads, Timing)
-server-debug: Wie verarbeitet der Server es? (Handler-Logs)
-esp32-debug: Was passiert auf dem ESP32? (Serial-Logs, Hardware)
-```
+**QoS-Strategie:** QoS 0 = Latenz-optimiert (Heartbeat), QoS 1 = At-least-once (Daten), QoS 2 = Exactly-once (Commands)
 
 ---
 
-## 2. Log-Locations
+## 2. Communication Flows
 
-### Primäre Quellen
+| Flow | Beschreibung | Latenz | Kern-Topics |
+|------|-------------|--------|-------------|
+| **A** | Sensor-Daten (ESP→Server→Frontend) | 50-230ms | sensor/{gpio}/data → WS: sensor_data |
+| **B** | Actuator-Steuerung (Frontend→Server→ESP) | 100-290ms | actuator/{gpio}/command → response + status |
+| **C** | Emergency Stop (Server→ALL) | <100ms | broadcast/emergency → safe_mode + alert |
+| **D** | Heartbeat (ESP→Server→Frontend) | <1s | system/heartbeat → heartbeat/ack, WS: esp_health |
+| **E** | Config Update (Server→ESP) | <5s | config (QoS 2) → config_response (QoS 2) |
+| **F** | Zone Assignment (Server→ESP) | <5s | zone/assign → zone/ack |
+| **G** | Logic Engine (Sensor→Server→Actuator) | varies | sensor/data → Logic Engine → actuator/command (Cross-ESP) |
 
-| Quelle | Pfad | Format |
-|--------|------|--------|
-| MQTT-Traffic | `logs/current/mqtt_traffic.log` | `{topic} {json_payload}` |
-| Broker-Log | Docker Volume `/mosquitto/log/mosquitto.log` | Timestamp + Message |
-| ESP32 MQTT | `logs/current/esp32_serial.log` | `[MQTT]` Prefix |
-| Server MQTT | `logs/current/god_kaiser.log` | JSON, logger: `src.mqtt.*` |
-
-### Log-Zugriff
-
-```bash
-# MQTT-Traffic (mosquitto_sub -v Output)
-cat logs/current/mqtt_traffic.log
-
-# Broker-Logs via Docker
-make logs-mqtt
-docker compose logs -f mqtt-broker
-
-# ESP32 MQTT-Logs filtern
-grep "\[MQTT\]" logs/current/esp32_serial.log
-
-# Server MQTT-Logs filtern (JSON)
-grep '"logger":"src.mqtt' logs/current/god_kaiser.log
-```
-
-### Traffic-Log Format
-
-```
-kaiser/god/esp/ESP_12AB34CD/system/heartbeat {"esp_id":"ESP_12AB34CD","ts":1735818000,...}
-```
-
-**Parsing:**
-- Topic: Zeilenanfang bis erstes Leerzeichen
-- Payload: Alles nach erstem Leerzeichen (JSON)
+**Registration Gate Flow:** ESP connect → Gate CLOSED → Heartbeat (bypass) → ACK → Gate OPEN → alle Publishes erlaubt. Fallback: Gate oeffnet nach 10s.
 
 ---
 
-## 3. Diagnose-Patterns
+## 3. ESP32 MQTT-Client
 
-### Pattern A: Message fehlt
+**Dateien:** `El Trabajante/src/services/communication/mqtt_client.cpp` (~940 LOC), `topic_builder.cpp` (~225 LOC)
 
-**Checkliste:**
+### Circuit Breaker
 
-1. **Topic korrekt?**
-   - Vergleiche mit `MQTT_TOPICS.md` Schema
-   - Pattern: `kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio?}/{aktion?}`
-   - Häufiger Fehler: Falscher `kaiser_id` oder `esp_id`
+| Parameter | Wert |
+|-----------|------|
+| Failure Threshold | 5 → OPEN |
+| Recovery Timeout | 30s → HALF_OPEN |
+| Half-Open Test | 10s |
+| States | CLOSED → OPEN → HALF_OPEN → CLOSED/OPEN |
 
-2. **QoS passend?**
-   - QoS 0: Kann verloren gehen (Heartbeat, Diagnostics)
-   - QoS 1: At least once (Sensor-Daten, Status)
-   - QoS 2: Exactly once (Commands, Config)
-
-3. **Broker running?**
-   - `make status` → Container-Status
-   - `make health` → mqtt_connected prüfen
-   - Telnet-Test: `telnet localhost 1883`
-
-4. **Client connected?**
-   - Broker-Log: "New connection from" / "Client disconnected"
-   - ESP32: Circuit Breaker Status prüfen
-
-5. **Subscription aktiv?**
-   - Server: `subscriber.py` Handler-Registry
-   - Broker-Log: "subscribe" Messages
-
-6. **Circuit Breaker offen?**
-   - ESP32 Serial: `[MQTT] Circuit OPEN`
-   - Failure Count prüfen
-
-### Pattern B: Duplicate Messages
-
-**Checkliste:**
-
-1. **QoS 1** → Duplikate sind ERLAUBT (At Least Once)
-2. **QoS 2** → Duplikate sind ein BUG
-   - Broker-Problem: Persistence-Issue
-   - Client-Problem: Retry ohne Dedup
-
-**Code-Referenz:**
-- ESP32 Retry: `mqtt_client.cpp:569-600` (`safePublish()`)
-- Server Retry: `publisher.py:354-418` (`_publish_with_retry()`)
-
-### Pattern C: Client Disconnect
-
-**ESP32-Seite prüfen:**
-
-| Check | Location | Pattern |
-|-------|----------|---------|
-| Circuit Breaker | Serial-Log | `[MQTT] Circuit OPEN` |
-| WiFi-Status | Serial-Log | Error 3001-3005 |
-| Reconnect-Delay | Serial-Log | Exponential Backoff 1s → 60s |
-| LWT gesendet? | Broker-Log | `system/will` Topic |
-
-**Server-Seite prüfen:**
-
-| Check | Location | Pattern |
-|-------|----------|---------|
-| Circuit Breaker | god_kaiser.log | `[resilience]` |
-| paho.mqtt Status | god_kaiser.log | Logger `paho.mqtt` |
-| Offline-Buffer | god_kaiser.log | `OfflineBuffer:` |
-
-### Pattern D: Config Push fehlgeschlagen
-
-**Flow analysieren:**
-
-```
-T+0s    Server → ESP:  config (QoS 2)
-T+0.5s  ESP → Server:  config_response (QoS 2)
-```
-
-**Fehlerquellen:**
-
-| Symptom | Mögliche Ursache | Prüfen |
-|---------|------------------|--------|
-| Config nicht empfangen | Topic nicht subscribed | ESP Subscription-List |
-| Payload-Fehler | JSON-Format ungültig | Error 3016 im Serial |
-| GPIO-Conflict | Config-Validierung | Error 1002 im Serial |
-| Response verloren | QoS-Mismatch | Broker Persistence |
-
-### Pattern E: Heartbeat-Gaps
-
-**Erwartung:** Alle 60s ein Heartbeat
-
-**Analyse:**
-1. Timestamp-Differenz zwischen Heartbeats berechnen
-2. Gaps > 90s (50% Toleranz) sind problematisch
-3. Bei 300s (5min) wird ESP als offline markiert
-
-**Ursachen für Gaps:**
-- WiFi-Disconnect → Error 3004
-- MQTT Circuit Breaker OPEN → 30s Pause
-- ESP32 Watchdog Timeout → Reboot
-- Server nicht erreichbar → Messages gepuffert
-
----
-
-## 4. Error-Code Referenz (MQTT-spezifisch)
-
-### ESP32 MQTT Errors (3010-3016)
-
-| Code | Name | Wo geworfen | Debug-Aktion |
-|------|------|-------------|--------------|
-| 3010 | MQTT_INIT_FAILED | `mqtt_client.cpp` setup() | WiFi-Status prüfen |
-| 3011 | MQTT_CONNECT_FAILED | `mqtt_client.cpp` connect() | Broker erreichbar? |
-| 3012 | MQTT_PUBLISH_FAILED | `mqtt_client.cpp` safePublish() | Circuit Breaker? |
-| 3013 | MQTT_SUBSCRIBE_FAILED | `mqtt_client.cpp` subscribe() | Topic-Format? |
-| 3014 | MQTT_DISCONNECT | `mqtt_client.cpp` callback | Netzwerk? Broker restart? |
-| 3015 | MQTT_BUFFER_FULL | `mqtt_client.cpp` offline_buffer | 100 Messages erreicht |
-| 3016 | MQTT_PAYLOAD_INVALID | `mqtt_client.cpp` validate() | JSON-Format prüfen |
-
-### Server MQTT Errors (5101-5107)
-
-| Code | Name | Wo geworfen | Debug-Aktion |
-|------|------|-------------|--------------|
-| 5101 | PUBLISH_FAILED | `publisher.py` | Broker-Connection? |
-| 5102 | TOPIC_BUILD_FAILED | `publisher.py` | Template-Variablen? |
-| 5103 | PAYLOAD_SERIALIZATION | `publisher.py` | JSON-Schema? |
-| 5104 | CONNECTION_LOST | `client.py` | Reconnect-Status? |
-| 5105 | RETRY_EXHAUSTED | `publisher.py` | Circuit Breaker? |
-| 5106 | BROKER_UNAVAILABLE | `client.py` | Container running? |
-| 5107 | AUTHENTICATION_FAILED | `client.py` | mosquitto.conf? |
-
-### Vollständige Error-Codes
-
-Referenz: `.claude/reference/errors/ERROR_CODES.md`
-
----
-
-## 5. Circuit Breaker Details
-
-### ESP32 Circuit Breaker
-
-**Konfiguration:** (`mqtt_client.cpp:55-61`)
-
-| Parameter | Wert | Bedeutung |
-|-----------|------|-----------|
-| Failure Threshold | 5 | Nach 5 Fehlern → OPEN |
-| Recovery Timeout | 30s | Zeit bis HALF_OPEN |
-| Half-Open Test | 10s | Zeit für Test-Request |
-
-**States:**
-- **CLOSED:** Normal operation
-- **OPEN:** Alle Requests blockiert (30s)
-- **HALF_OPEN:** Ein Test-Request erlaubt
-
-**Serial-Log Pattern:**
-```
-[MQTT] Circuit OPEN (waiting for recovery)
-[MQTT] Circuit Breaker OPENED after reconnect failures
-```
-
-### Server Circuit Breaker
-
-**Via Resilience Registry:** `src/core/resilience/`
-
-**Logging Pattern:**
-```json
-{"logger": "src.core.resilience", "message": "[resilience] CircuitBreaker..."}
-```
-
----
-
-## 6. Offline-Buffer Details
-
-### ESP32 Offline-Buffer
-
-**Konfiguration:** (`mqtt_client.h`)
+### Offline Buffer
 
 | Parameter | Wert |
 |-----------|------|
 | MAX_OFFLINE_MESSAGES | 100 |
-| Verhalten bei voll | Neue Messages werden verworfen |
+| Verhalten bei voll | Neue Messages verworfen |
+| Flush | Nach Reconnect, alle Messages |
 
-**Code:** `mqtt_client.cpp:824-878`
+### Registration Gate
 
-**Serial-Log Pattern:**
-```
-[MQTT] Added to offline buffer (count: 42)
-[MQTT] Processing offline buffer (42 messages)
-[MQTT] Offline buffer full, dropping message
-```
+| Parameter | Wert |
+|-----------|------|
+| Timeout | 10s (REGISTRATION_TIMEOUT_MS) |
+| Heartbeat | Bypass (immer erlaubt) |
+| Alle anderen Publishes | Blockiert bis ACK oder Timeout |
 
-### Server Offline-Buffer
+### Reconnect
 
-**Konfiguration:** (`offline_buffer.py`)
+| Parameter | Wert |
+|-----------|------|
+| Base Delay | 1s |
+| Max Delay | 60s |
+| Berechnung | BASE * 2^attempts, capped |
 
-| Parameter | Default |
-|-----------|---------|
-| max_size | From settings (unbegrenzt) |
-| flush_batch_size | From settings |
+### LWT Setup
 
-**Features:**
-- Bounded deque (älteste Messages werden verworfen)
-- Thread-safe mit asyncio.Lock
-- Re-queue failed messages bei flush
-
-**Log Pattern:**
-```
-[resilience] OfflineBuffer: {n} messages buffered
-[resilience] OfflineBuffer: Flushed {n} messages
-```
+- Topic: `kaiser/{id}/esp/{esp_id}/system/will`
+- Payload: `{"status":"offline","reason":"unexpected_disconnect","timestamp":...}`
+- QoS: 1, **Retain: true**
 
 ---
 
-## 7. Registration Gate (ESP32)
+## 4. Server MQTT-Client
 
-**Zweck:** Verhindert Publishing vor Server-Acknowledgment
+**Core:** `El Servador/god_kaiser_server/src/mqtt/` (client.py, publisher.py, subscriber.py, topics.py, offline_buffer.py)
 
-**Timeout:** 10s Fallback (`REGISTRATION_TIMEOUT_MS`)
+### Client
 
-**Flow:**
-1. ESP32 verbindet → Gate CLOSED
-2. ESP32 sendet Heartbeat (erlaubt)
-3. Server sendet Heartbeat-ACK
-4. ESP32 empfängt ACK → Gate OPEN
-5. Alle anderen Publishes nun erlaubt
+- Singleton Pattern (`get_instance()`)
+- paho-mqtt, Auto-Reconnect (`reconnect_delay_set(min=1, max=60)`)
+- Circuit Breaker (configurable via settings)
+- Disconnect-Logging rate-limited (max 1 msg/60s)
 
-**Bei Timeout:** Gate öffnet automatisch nach 10s
+### Publisher
 
-**Serial-Log Pattern:**
-```
-[MQTT] Registration gate closed - awaiting heartbeat ACK
-[MQTT] REGISTRATION CONFIRMED BY SERVER
-[MQTT] Gate opened - publishes now allowed
-```
+- Retry mit Exponential Backoff + Jitter
+- Failed messages → Offline-Buffer
+- Actuator-Commands: QoS 2, Config: QoS 2
 
----
+### Subscriber
 
-## 8. Mosquitto-Config Referenz
+- Handler Registry, Thread Pool (max_workers=10)
+- Wildcard Matching via `TopicBuilder.matches_subscription()`
+- Async handlers im MAIN event loop (SQLAlchemy AsyncEngine Binding)
 
-**Datei:** `docker/mosquitto/mosquitto.conf`
+### Offline Buffer
 
-### Aktuelle Konfiguration
+- `collections.deque` (bounded), `asyncio.Lock` (Thread-Safety)
+- Auto-flush nach Reconnect, batch-weise mit 0.1s Delay
+- Failed messages werden vorne re-queued
 
-| Setting | Wert | Bedeutung |
-|---------|------|-----------|
-| listener | 1883 | MQTT Port |
-| listener | 9001 | WebSocket Port |
-| allow_anonymous | true | Keine Auth (DEV ONLY!) |
-| persistence | true | Messages überleben Restart |
-| max_inflight_messages | 20 | Parallele QoS 1/2 Messages |
-| max_queued_messages | 1000 | Queue-Größe pro Client |
-| message_size_limit | 262144 | 256KB max Payload |
-| connection_messages | true | Log connects/disconnects |
+### 13 Handler
 
-### Logging-Level
-
-```
-log_type error
-log_type warning
-log_type notice
-log_type information
-```
+| Handler | Topic-Pattern |
+|---------|---------------|
+| sensor_handler | `.../sensor/+/data` |
+| actuator_handler | `.../actuator/+/status` |
+| actuator_response_handler | `.../actuator/+/response` |
+| actuator_alert_handler | `.../actuator/+/alert` |
+| heartbeat_handler | `.../system/heartbeat` |
+| lwt_handler | `.../system/will` |
+| config_handler | `.../config_response` |
+| discovery_handler | `.../discovery/esp32_nodes` |
+| error_handler | `.../system/error` |
+| zone_ack_handler | `.../zone/ack` |
+| subzone_ack_handler | `.../subzone/ack` |
+| kaiser_handler | `.../actuator/+/command` (Mock-ESP, Paket G) |
 
 ---
 
-## 9. Topic-Referenz (Kurzform)
+## 5. Error-Codes Cross-Reference
 
-### Häufigste Topics für Debug
+### ESP32 (3010-3016)
 
-| Topic-Pattern | Richtung | QoS | Debug-Relevanz |
-|---------------|----------|-----|----------------|
-| `.../system/heartbeat` | ESP→Server | 0 | Lebenszeichen, Timing |
-| `.../system/heartbeat/ack` | Server→ESP | 0 | Registration, Status |
-| `.../sensor/{gpio}/data` | ESP→Server | 1 | Sensor-Daten-Flow |
-| `.../actuator/{gpio}/command` | Server→ESP | 2 | Command-Delivery |
-| `.../actuator/{gpio}/response` | ESP→Server | 1 | Command-ACK |
-| `.../config` | Server→ESP | 2 | Config-Push |
-| `.../config_response` | ESP→Server | 2 | Config-ACK |
-| `.../system/will` | Broker→Server | 1 | LWT (Offline) |
-| `.../system/error` | ESP→Server | 1 | Error-Events |
-| `kaiser/broadcast/emergency` | Server→ALL | 2 | Emergency Stop |
+| Code | Name | Debug-Aktion |
+|------|------|--------------|
+| 3010 | MQTT_INIT_FAILED | WiFi-Status pruefen |
+| 3011 | MQTT_CONNECT_FAILED | Broker erreichbar? |
+| 3012 | MQTT_PUBLISH_FAILED | Circuit Breaker? |
+| 3013 | MQTT_SUBSCRIBE_FAILED | Topic-Format? |
+| 3014 | MQTT_DISCONNECT | Netzwerk? Broker restart? |
+| 3015 | MQTT_BUFFER_FULL | 100 Messages erreicht |
+| 3016 | MQTT_PAYLOAD_INVALID | JSON-Format pruefen |
 
-### Vollständige Topic-Dokumentation
+### Server (5101-5107)
 
-Referenz: `.claude/reference/api/MQTT_TOPICS.md`
+| Code | Name | Debug-Aktion |
+|------|------|--------------|
+| 5101 | PUBLISH_FAILED | Broker-Connection? |
+| 5102 | TOPIC_BUILD_FAILED | Template-Variablen? |
+| 5103 | PAYLOAD_SERIALIZATION | JSON-Schema? |
+| 5104 | CONNECTION_LOST | Reconnect-Status? |
+| 5105 | RETRY_EXHAUSTED | Circuit Breaker? |
+| 5106 | BROKER_UNAVAILABLE | Container running? |
+| 5107 | AUTHENTICATION_FAILED | mosquitto.conf? |
 
----
+### Cross-Reference
 
-## 10. Sequenz-Erwartungen
+| ESP32 Error | Server Pendant | Bruchstelle |
+|-------------|---------------|-------------|
+| 3011 (Connect) | 5104 (Connection Lost) | Broker oder Netzwerk |
+| 3012 (Publish) | - | ESP-seitig |
+| 3015 (Buffer Full) | - | ESP Offline-Buffer |
+| - | 5101 (Publish) | Server-seitig |
+| - | 5106 (Broker Unavailable) | Docker/Container |
 
-### Heartbeat-Sequenz
-
-```
-T+0s    ESP → Server:  system/heartbeat
-T+0.1s  Server → ESP:  system/heartbeat/ack {"status":"online"}
-T+60s   ESP → Server:  system/heartbeat (nächster)
-```
-
-**Prüfpunkte:**
-- ACK innerhalb 1s
-- Status = "online" (nicht "pending_approval" oder "rejected")
-- Intervall ≈ 60s (±10%)
-
-### Command-Sequenz
-
-```
-T+0s    Server → ESP:  actuator/{gpio}/command
-T+0.1s  ESP → Server:  actuator/{gpio}/response {"success":true}
-T+0.2s  ESP → Server:  actuator/{gpio}/status
-```
-
-**Prüfpunkte:**
-- Response innerhalb 500ms
-- Status innerhalb 1s
-- `success: true` in Response
-
-### Config-Sequenz
-
-```
-T+0s    Server → ESP:  config (QoS 2)
-T+0.5s  ESP → Server:  config_response (QoS 2)
-```
-
-**Prüfpunkte:**
-- Response innerhalb 5s
-- `config_applied: true`
+Vollstaendige Referenz: `.claude/reference/errors/ERROR_CODES.md`
 
 ---
 
-## 11. Timing-Erwartungen
+## 6. Broker-Konfiguration
 
-### Intervalle
+### Development (`docker/mosquitto/mosquitto.conf`)
 
-| Metrik | Erwartung | Alarm wenn |
-|--------|-----------|------------|
-| Heartbeat | 60s | Gap > 90s |
-| Sensor-Daten | 30s (default) | Gap > 45s |
-| Device-Timeout | 300s | ESP offline |
+| Setting | Wert |
+|---------|------|
+| Listener | 1883 (MQTT), 9001 (WebSocket) |
+| Auth | anonymous (DEV ONLY) |
+| Persistence | true (Named Volume) |
+| max_inflight | 20 |
+| max_queued | 1000 |
+| message_size_limit | 256KB |
+| Logging | file + stdout, error/warning/notice/info/subscribe/unsubscribe |
 
-### Latenzen
+### CI (`.github/mosquitto/mosquitto.conf`)
 
-| Flow | Erwartung | Kritisch wenn |
-|------|-----------|---------------|
-| Heartbeat→ACK | <1s | >5s |
-| Command→Response | <500ms | >2s |
-| Config→Response | <1s | >5s |
-| Emergency Stop | <100ms | >500ms |
+| Unterschied | Wert |
+|-------------|------|
+| Persistence | false (stateless) |
+| Listener | Nur 1883 (kein WebSocket) |
+| Logging | Nur stderr |
 
----
+### Healthcheck
 
-## 12. Cross-Layer Korrelation
-
-### MQTT-Fehler → Andere Agents
-
-| MQTT-Symptom | Ursache könnte sein | Weiterleiten an |
-|--------------|--------------------|-|
-| ESP published nicht | WiFi/Hardware-Problem | esp32-debug |
-| Server empfängt nicht | Subscriber/Handler-Config | server-debug |
-| Frontend zeigt keine Live-Daten | WebSocket-Bridge-Problem | frontend-debug |
-| Messages kommen aber DB leer | DB-Write-Fehler | db-inspector |
-
-### Korrelations-Workflow
-
-1. **Traffic-Log prüfen:** Message wurde gesendet?
-2. **Broker-Log prüfen:** Message wurde empfangen/weitergeleitet?
-3. **Server-Log prüfen:** Handler wurde aufgerufen?
-4. **DB prüfen:** Daten wurden gespeichert?
+| Umgebung | Methode | Interval |
+|----------|---------|----------|
+| Dev | `mosquitto_sub -t $SYS/#` | 30s |
+| CI | `mosquitto_pub -t health/check` | 5s |
+| E2E | `mosquitto_pub -t health/check` | 3s |
 
 ---
 
-## 13. Make-Targets für Debug
+## 7. LWT + Retained Messages
 
-| Target | Zweck | Output |
-|--------|-------|--------|
-| `make mqtt-sub` | Alle Topics live beobachten | Terminal (Ctrl+C beenden) |
-| `make logs-mqtt` | Broker-Logs anzeigen | Mosquitto Log |
-| `make status` | Container-Status | Running/Stopped |
-| `make health` | Server-Health inkl. MQTT | JSON Response |
-| `make monitor` | ESP32 Serial-Monitor | Serial Output |
+### LWT Verhalten
 
----
+- ESP32 setzt LWT bei Connect (retain=true)
+- Broker sendet LWT bei unerwartetem Disconnect
+- Server `lwt_handler.py` setzt Device status="offline", Audit-Log, WS-Broadcast
 
-## 14. Report-Output
+### Stale-LWT Problem
 
-### Format
+- Nach ESP-Reconnect bleibt alte LWT-Message retained im Broker
+- ESP sendet keinen "online" retained → alte "offline" LWT bleibt
+- **Diagnose:** `mosquitto_sub -t "kaiser/god/esp/ESP_XXX/system/will" -v -C 1 -W 5 --retained-only`
 
-```
-.claude/reports/current/MQTT_[FOCUS]_REPORT.md
-```
+### Retained-Cleanup
 
-Beispiele:
-- `MQTT_HEARTBEAT_REPORT.md`
-- `MQTT_CONFIG_REPORT.md`
-- `MQTT_DISCONNECT_REPORT.md`
-
-### Severity-Schema
-
-| Tag | Bedeutung |
-|-----|-----------|
-| [K] | Kritisch - Sofortige Aufmerksamkeit |
-| [W] | Warnung - Sollte untersucht werden |
-| [I] | Info - Zur Dokumentation |
-
-### Report-Template
-
-```markdown
-# MQTT Debug Report: [FOCUS]
-
-**Session:** [aus STATUS.md]
-**Erstellt:** [Timestamp]
-**Log-Datei:** logs/current/mqtt_traffic.log
-**Messages analysiert:** [Anzahl]
+- Nur `system/will` sollte retained sein (alle anderen Topics retain=false)
+- Loeschen: `mosquitto_pub -t "kaiser/god/esp/ESP_XXX/system/will" -n -r`
+- **ACHTUNG:** Schreibende Operation, User-Bestaetigung erforderlich!
 
 ---
 
-## 1. Zusammenfassung
+## 8. Timing-Erwartungen
 
-| Metrik | Wert |
-|--------|------|
-| Gesamt-Messages | [n] |
-| ESP-Devices | [Liste] |
-| Fehler/Anomalien | [n] |
-| Status | ✅ OK / ⚠️ WARNUNG / ❌ FEHLER |
-
----
-
-## 2. Findings
-
-### [K] Kritische Probleme
-
-| Timestamp | Topic/ESP | Problem | Impact |
-|-----------|-----------|---------|--------|
-
-### [W] Warnungen
-
-| Timestamp | Topic/ESP | Problem | Empfehlung |
-|-----------|-----------|---------|------------|
-
-### [I] Beobachtungen
-
-[...]
+| Sequenz | Erwartung | Alarm | Kritisch |
+|---------|-----------|-------|----------|
+| Heartbeat-Intervall | 60s | Gap >90s | 300s = offline |
+| Heartbeat → ACK | <1s | >5s | - |
+| Command → Response | <500ms | >2s | - |
+| Config → Response | <1s | >5s | - |
+| Emergency → Stop | <100ms | >500ms | **SAFETY** |
+| Sensor-Daten | 30s default | Gap >45s | - |
 
 ---
 
-## 3. Sequenz-Analyse
+## 9. Payload-Pflichtfelder
 
-[Falls relevant]
-
----
-
-## 4. Empfehlungen
-
-1. [ ] [Konkrete Aktion]
-2. [ ] [Weitere Aktion]
-3. [ ] [Bei Bedarf: Anderen Agent aktivieren]
-```
+| Message-Typ | Pflichtfelder |
+|-------------|---------------|
+| **Heartbeat** | `ts`, `uptime`, `heap_free`/`free_heap`, `wifi_rssi` |
+| **Sensor-Data** | `ts`/`timestamp`, `esp_id`, `gpio`, `sensor_type`, `raw`/`raw_value`, `raw_mode` |
+| **Actuator-Status** | `ts`, `gpio`, `type`/`actuator_type`, `state`, `pwm`/`value`, `runtime_ms`, `emergency` |
+| **Config-Response** | `ts`, `esp_id`, `config_id`, `config_applied` |
+| **LWT** | `status` ("offline"), `reason`, `timestamp` |
 
 ---
 
-## 15. Code-Referenzen
+## 10. Diagnose-Patterns
 
-### ESP32 MQTT-Implementation
+### A: Message fehlt
 
-| Datei | Zeilen | Funktion |
-|-------|--------|----------|
-| `mqtt_client.cpp` | 87-280 | Connection Management |
-| `mqtt_client.cpp` | 370-448 | Reconnect + Circuit Breaker |
-| `mqtt_client.cpp` | 478-567 | Publish + Registration Gate |
-| `mqtt_client.cpp` | 569-598 | safePublish() mit Retry |
-| `mqtt_client.cpp` | 659-721 | Heartbeat Publishing |
-| `mqtt_client.cpp` | 824-878 | Offline Buffer Management |
+1. Topic korrekt? (Schema: `kaiser/{kaiser_id}/esp/{esp_id}/...`)
+2. QoS passend? (QoS 0 kann verloren gehen)
+3. Broker running? (`docker compose ps mqtt-broker`)
+4. Client connected? (Circuit Breaker Status)
+5. Subscription aktiv? (Broker-Log: "subscribe")
+6. Registration Gate blockiert? (10s Fallback)
 
-### Server MQTT-Implementation
+### B: Duplicate Messages
 
-| Datei | Funktion |
-|-------|----------|
-| `publisher.py` | High-level Publishing + Retry |
-| `subscriber.py` | Handler-Registry + Routing |
-| `offline_buffer.py` | Graceful Degradation |
-| `client.py` | Low-level MQTT Client |
-| `topics.py` | Topic Builder |
+- QoS 1: Duplikate erlaubt (At Least Once)
+- QoS 2: Duplikate = Bug
+- ESP32 `safePublish()` hat 1 Retry
+- Offline-Buffer Replay nach Reconnect
 
-### Handler-Registration
+### C: Client Disconnect
 
-`main.py` Zeilen 201-307 - Alle MQTT-Handler werden hier registriert.
+- ESP32: Circuit Breaker Serial-Log, WiFi-Errors (3001-3005), Exponential Backoff
+- Server: Resilience-Log `[resilience]`, paho.mqtt Logger, Offline-Buffer Status
 
----
+### D: Config Push fehlgeschlagen
 
-## 16. Regeln
+- Flow: Server → config (QoS 2) → ESP → config_response (QoS 2)
+- Fehler: Topic nicht subscribed, JSON ungueltig (3016), GPIO-Conflict (1002)
 
-### Dokumentations-Pflicht
+### E: Heartbeat-Gaps
 
-- JEDE fehlende Response MUSS im Report erscheinen
-- JEDES Timing-Problem (Gap > Erwartung) MUSS dokumentiert werden
-- JEDE LWT Message MUSS dokumentiert werden
-- JEDES `success: false` MUSS dokumentiert werden
+- Erwartung: 60s Intervall, Alarm >90s, Offline >300s
+- Ursachen: WiFi-Disconnect (3004), Circuit Breaker OPEN, Watchdog-Reboot
 
-### Abgrenzung strikt einhalten
+### F: Stale-LWT nach Reconnect
 
-- Ich analysiere NUR MQTT-Traffic und Broker-Status
-- Server-Handler-Verhalten → server-debug weiterleiten
-- ESP32-internes Verhalten → esp32-debug weiterleiten
-- Wenn Message gesendet aber nicht verarbeitet → beide Agents empfehlen
+- ESP online, aber alte "offline" LWT retained im Broker
+- Pruefe: `mosquitto_sub --retained-only` auf `system/will`
+- Loesung: Retained-Cleanup (mit User-Bestaetigung)
 
-### Log-Datei fehlt
+### G: Mock-ESP Routing
 
-Wenn `logs/current/mqtt_traffic.log` nicht existiert oder leer:
-
-```
-⚠️ MQTT-TRAFFIC NICHT VERFÜGBAR
-
-Die Datei logs/current/mqtt_traffic.log existiert nicht oder ist leer.
-
-Mögliche Ursachen:
-1. Session wurde ohne MQTT-Capture gestartet
-2. mosquitto_sub läuft nicht
-3. Kein MQTT-Traffic während der Session
-
-Prüfe:
-- Läuft mosquitto_sub? → system-control kann Status prüfen
-- Broker erreichbar? → make status, make health
-```
+- `kaiser_handler.py` routet Actuator-Commands fuer Mock-ESPs
+- Mock-ESP simuliert Response ohne echte Hardware
+- Relevant bei Server-Tests mit SimulationScheduler
 
 ---
 
-**Version:** 1.0
-**Erstellt:** 2026-02-05
-**Basiert auf:** mqtt_client.cpp, publisher.py, subscriber.py, offline_buffer.py, mosquitto.conf, MQTT_TOPICS.md, ERROR_CODES.md
+## 11. Docker Quick-Reference
+
+| Service | Container | Port(s) | Healthcheck |
+|---------|-----------|---------|-------------|
+| mqtt-broker | automationone-mqtt | 1883, 9001 | `mosquitto_sub -t $SYS/#` |
+| el-servador | automationone-server | 8000 | `curl /api/v1/health/live` |
+| postgres | automationone-postgres | 5432 | `pg_isready` |
+
+**Netzwerk:** `automationone-net` (bridge). Server verbindet via `mqtt-broker:1883` (Docker DNS).
+
+---
+
+## 12. Code-Locations
+
+### ESP32
+
+| Datei | Pfad |
+|-------|------|
+| mqtt_client.cpp | `El Trabajante/src/services/communication/mqtt_client.cpp` |
+| topic_builder.cpp | `El Trabajante/src/utils/topic_builder.cpp` |
+| main.cpp | `El Trabajante/src/main.cpp` |
+
+### Server Core
+
+| Datei | Pfad |
+|-------|------|
+| client.py | `El Servador/god_kaiser_server/src/mqtt/client.py` |
+| publisher.py | `El Servador/god_kaiser_server/src/mqtt/publisher.py` |
+| subscriber.py | `El Servador/god_kaiser_server/src/mqtt/subscriber.py` |
+| topics.py | `El Servador/god_kaiser_server/src/mqtt/topics.py` |
+| offline_buffer.py | `El Servador/god_kaiser_server/src/mqtt/offline_buffer.py` |
+
+### Server Handler
+
+`El Servador/god_kaiser_server/src/mqtt/handlers/` – 13 Handler (siehe Sektion 4)
+
+### Broker Config
+
+| Umgebung | Pfad |
+|----------|------|
+| Development | `docker/mosquitto/mosquitto.conf` |
+| CI | `.github/mosquitto/mosquitto.conf` |
+
+---
+
+*Kompakte Wissensbasis fuer MQTT-Debug. Details in MQTT_TOPICS.md und COMMUNICATION_FLOWS.md*

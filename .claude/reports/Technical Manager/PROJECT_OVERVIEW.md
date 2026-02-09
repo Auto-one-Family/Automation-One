@@ -158,7 +158,7 @@ Das Projekt nutzt Claude Code mit einer spezialisierten Agenten-Struktur:
 | `esp32-development` | ESP32 Firmware entwickeln | `.claude/skills/esp32-development/` |
 | `server-development` | Server-Code entwickeln | `.claude/skills/server-development/` |
 | `frontend-development` | Vue Dashboard entwickeln | `.claude/skills/frontend-development/` |
-| `System Manager` | Session-Orchestration | `.claude/skills/System Manager/` |
+| `system-control` | Session-Briefing, Operations | `.claude/skills/system-control/` |
 
 ### Dev-Agenten (Pattern-konforme Implementierung)
 
@@ -179,11 +179,11 @@ Das Projekt nutzt Claude Code mit einer spezialisierten Agenten-Struktur:
 | `db-inspector` | Datenbank inspizieren |
 | `system-control` | System starten/stoppen/builden |
 
-### Session-Orchestrator
+### Session-Briefing & Operations (konsolidiert)
 
 | Agent | Aufgabe |
 |-------|---------|
-| `system-manager` | Session-Briefings erstellen (Plan Mode) |
+| `system-control` | Session-Briefings erstellen (Briefing-Modus) oder Operationen ausführen (Ops-Modus) |
 
 ---
 

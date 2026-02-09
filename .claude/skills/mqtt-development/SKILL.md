@@ -655,9 +655,9 @@ persistence_location /mosquitto/data/
 ## 11. Make-Targets
 
 ```bash
-# MQTT-Traffic beobachten (alle Topics)
+# MQTT-Traffic beobachten (alle kaiser Topics)
 make mqtt-sub
-# → mosquitto_sub -h localhost -t "#" -v
+# → docker exec -it automationone-mqtt mosquitto_sub -h localhost -t "kaiser/#" -v
 
 # Broker-Logs anzeigen
 make logs-mqtt
