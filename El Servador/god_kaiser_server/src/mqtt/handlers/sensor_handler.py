@@ -265,13 +265,13 @@ class SensorDataHandler:
                     data_source = self._detect_data_source(esp_device, payload)
 
                     # Step 9: Save data to database
-                    # Convert ESP32 timestamp (millis since boot) to UTC datetime
-                    # Same pattern as heartbeat_handler: auto-detect millis vs seconds
+                    # Convert ESP32 timestamp (millis since boot) to naive UTC datetime
+                    # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
                     esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
                     esp32_timestamp = datetime.fromtimestamp(
                         esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
                         tz=timezone.utc
-                    )
+                    ).replace(tzinfo=None)
 
                     sensor_data = await sensor_repo.save_data(
                         esp_id=esp_device.id,

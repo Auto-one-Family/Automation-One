@@ -249,6 +249,11 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Created SensorData instance
         """
+        # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
+        ts = timestamp or datetime.now(timezone.utc)
+        if ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
+
         sensor_data = SensorData(
             esp_id=esp_id,
             gpio=gpio,
@@ -258,7 +263,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             unit=unit,
             processing_mode=processing_mode,
             quality=quality,
-            timestamp=timestamp or datetime.now(timezone.utc),
+            timestamp=ts,
             sensor_metadata=metadata,  # Model field is sensor_metadata
             data_source=data_source,
         )
