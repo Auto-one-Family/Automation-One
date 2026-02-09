@@ -105,3 +105,19 @@ docker-compose.override.yml
 # Backups
 backups/*.sql.gz
 backups/*.sql
+
+# ========== BUILD ARTIFACTS ==========
+debug_output.txt
+El\ Frontend/coverage/
+El\ Frontend/.playwright/
+El\ Frontend/vite.config.d.ts
+
+# ========== PYTHON CACHE ==========
+scripts/__pycache__/
+
+# ========== LOCAL SETTINGS ==========
+.claude/settings.local.json
+
+# ========== TEST ARTIFACTS ==========
+logs/wokwi/reports/*.xml
+logs/wokwi/reports/*.json
