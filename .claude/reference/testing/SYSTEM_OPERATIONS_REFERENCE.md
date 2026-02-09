@@ -1,7 +1,8 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.0 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-06
+> **Version:** 2.1 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-09
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.1:** Monitoring-Stack (Loki, Promtail, Prometheus, Grafana), Monitoring-Configs in Pfade
 > **Änderungen 2.0:** Docker-Flow als primärer Workflow, .env-Auslagerung, session.sh v4.0
 
 ---
@@ -1275,7 +1276,7 @@ pio device monitor -b 115200 | tee logs/current/esp32_serial.log
 tail -f logs/server/god_kaiser.log | grep -E "ERROR|WARNING"
 
 # Schnell-Check: Health
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:8000/api/v1/health/live | jq
 
 # Schnell-Check: ESP Status
 curl -s http://localhost:8000/api/v1/esp/devices | jq '.data[] | {device_id, status, last_seen}'
@@ -1418,7 +1419,7 @@ Nach jeder Operation prüfen:
 
 ```bash
 # Server erreichbar?
-curl -s http://localhost:8000/health | jq '.status'
+curl -s http://localhost:8000/api/v1/health/live | jq '.status'
 
 # MQTT erreichbar?
 mosquitto_pub -h localhost -t "test" -m "ping" && echo "OK"
@@ -1435,7 +1436,70 @@ grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10
 
 ---
 
-## 8. Wichtige Pfade
+## 8. Monitoring-Stack
+
+### 8.1 Starten/Stoppen
+
+```bash
+# Monitoring starten (Loki, Promtail, Prometheus, Grafana)
+make monitor-up
+# oder: docker compose --profile monitoring up -d
+
+# Monitoring stoppen (Core bleibt laufen)
+make monitor-down
+
+# Monitoring-Logs
+make monitor-logs
+
+# Monitoring-Status
+make monitor-status
+```
+
+### 8.2 Zugang
+
+| Tool | URL | Credentials |
+|------|-----|-------------|
+| Grafana | http://localhost:3000 | admin / GRAFANA_ADMIN_PASSWORD aus .env |
+| Prometheus | http://localhost:9090 | - |
+| Loki API | http://localhost:3100 | - |
+
+### 8.3 Loki-Queries (Log-Suche)
+
+```bash
+# Service-Logs via Loki API
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={service="el-servador"}' \
+  --data-urlencode 'limit=50'
+
+# Verfuegbare Labels
+curl -s http://localhost:3100/loki/api/v1/labels
+
+# Verfuegbare Services
+curl -s "http://localhost:3100/loki/api/v1/label/service/values"
+```
+
+### 8.4 Loki-Labels
+
+| Service | Label `service=` | Container-Name |
+|---------|-----------------|----------------|
+| Frontend | `el-frontend` | `automationone-frontend` |
+| Server | `el-servador` | `automationone-server` |
+| MQTT Broker | `mqtt-broker` | `automationone-mqtt` |
+| PostgreSQL | `postgres` | `automationone-postgres` |
+
+### 8.5 Prometheus-Metriken
+
+```bash
+# Server-Metriken
+curl -s http://localhost:8000/api/v1/health/metrics
+
+# Prometheus Targets pruefen
+curl -s http://localhost:9090/api/v1/targets | python -m json.tool
+```
+
+---
+
+## 9. Wichtige Pfade
 
 | Komponente | Pfad |
 |------------|------|
@@ -1447,7 +1511,6 @@ grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10
 | **PostgreSQL Logs** | `logs/postgres/postgresql.log` (Docker Bind-Mount) |
 | **ESP32 Logs** | `logs/esp32/` (manuell) |
 | **Session Logs** | `logs/current/` (via session.sh) |
-| **SQLite DB** | `El Servador/god_kaiser_server/god_kaiser_dev.db` (lokal) |
 | **ESP32 Main** | `El Trabajante/src/main.cpp` |
 | **ESP32 Config** | `El Trabajante/platformio.ini` |
 | **MQTT Protocol Doc** | `El Trabajante/docs/Mqtt_Protocoll.md` |
@@ -1455,8 +1518,12 @@ grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10
 | **Docker Compose** | `docker-compose.yml` |
 | **PostgreSQL Config** | `docker/postgres/postgresql.conf` |
 | **Mosquitto Config** | `docker/mosquitto/mosquitto.conf` |
+| **Loki Config** | `docker/loki/loki-config.yml` |
+| **Promtail Config** | `docker/promtail/config.yml` |
+| **Prometheus Config** | `docker/prometheus/prometheus.yml` |
+| **Grafana Provisioning** | `docker/grafana/provisioning/` |
 | **Session Script** | `scripts/debug/start_session.sh` (v4.0) |
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-06 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-09 | AutomationOne Debug-Operations-Reference*

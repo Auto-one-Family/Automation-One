@@ -833,9 +833,78 @@ mosquitto_sub -h localhost -t "kaiser/#" -v | ts '[%Y-%m-%d %H:%M:%S]' | tee mqt
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-06
-**Version:** 3.0
+## 12. Monitoring-Stack (Loki / Grafana / Prometheus)
+
+### 12.1 Voraussetzung
+
+Monitoring-Stack muss gestartet sein: `make monitor-up`
+
+### 12.2 Loki-Queries (Zentrales Log-System)
+
+```bash
+# Alle Server-Logs (letzte Stunde)
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={service="el-servador"}' \
+  --data-urlencode 'limit=100'
+
+# Nur Errors
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={service="el-servador"} |= "ERROR"' \
+  --data-urlencode 'limit=50'
+
+# MQTT-Broker Logs
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={service="mqtt-broker"}' \
+  --data-urlencode 'limit=50'
+
+# Frontend-Logs
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={service="el-frontend"}' \
+  --data-urlencode 'limit=50'
+
+# Verfuegbare Labels
+curl -s http://localhost:3100/loki/api/v1/labels
+
+# Services auflisten
+curl -s "http://localhost:3100/loki/api/v1/label/service/values"
+```
+
+### 12.3 Loki-Labels
+
+| Label | Beschreibung | Beispiel-Werte |
+|-------|-------------|----------------|
+| `service` | Docker Compose Service-Name | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres` |
+| `container` | Container-Name | `automationone-server`, `automationone-mqtt` |
+| `compose_service` | Identisch zu `service` | `el-servador` |
+| `compose_project` | Compose-Projekt | `auto-one` |
+| `stream` | Log-Stream | `stdout`, `stderr` |
+
+### 12.4 Grafana
+
+**URL:** http://localhost:3000 (admin / GRAFANA_ADMIN_PASSWORD aus .env)
+**Dashboard:** AutomationOne - System Health (`/d/automationone-system-health`)
+**Datasources:** Prometheus (default), Loki
+
+### 12.5 Prometheus-Metriken
+
+```bash
+# Server-Metriken (Prometheus-Format)
+curl -s http://localhost:8000/api/v1/health/metrics
+
+# Prometheus Targets
+curl -s http://localhost:9090/api/v1/targets
+```
+
+**Scrape-Config:** `docker/prometheus/prometheus.yml`
+**Scrape-Path:** `/api/v1/health/metrics` (nicht `/metrics`)
+**Interval:** 15s
+
+---
+
+**Letzte Aktualisierung:** 2026-02-09
+**Version:** 3.1
 **Changelog:**
+- 3.1: Monitoring-Stack Section (Loki-Queries, Labels, Grafana, Prometheus)
 - 3.0: Docker-basierte Log-Infrastruktur
   - Neue Log-Verzeichnisse: `logs/server/`, `logs/mqtt/`, `logs/postgres/`, `logs/esp32/`
   - PostgreSQL-Logging aktiviert via `docker/postgres/postgresql.conf`

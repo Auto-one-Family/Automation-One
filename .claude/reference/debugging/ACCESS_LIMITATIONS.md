@@ -308,11 +308,11 @@ echo $WOKWI_CLI_TOKEN || echo "Nicht gesetzt"
 # Server Logs existieren?
 ls -la "El Servador/god_kaiser_server/logs/"
 
-# MQTT Broker läuft?
-netstat -ano | findstr "1883" || echo "Broker nicht aktiv"
+# MQTT Broker läuft? (Docker-native, funktioniert in Git Bash)
+docker compose ps mqtt-broker --format "{{.Status}}" || echo "Broker nicht aktiv"
 ```
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-01
-**Version:** 1.0
+**Letzte Aktualisierung:** 2026-02-09
+**Version:** 1.1
