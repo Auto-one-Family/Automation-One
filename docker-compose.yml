@@ -130,6 +130,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
+      VITE_LOG_LEVEL: ${VITE_LOG_LEVEL:-debug}
     ports:
       - "5173:5173"
     volumes:
@@ -153,6 +154,129 @@ services:
       - automationone-net
     restart: unless-stopped
 
+  # ============================================
+  # Loki (Log Aggregation) - Profile: monitoring
+  # ============================================
+  loki:
+    image: grafana/loki:3.4
+    container_name: automationone-loki
+    profiles: ["monitoring"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - automationone-loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - automationone-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ============================================
+  # Promtail (Log Shipping) - Profile: monitoring
+  # ============================================
+  promtail:
+    image: grafana/promtail:3.4
+    container_name: automationone-promtail
+    profiles: ["monitoring"]
+    volumes:
+      - ./docker/promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - automationone-promtail-positions:/promtail-positions
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9080' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - automationone-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ============================================
+  # Prometheus (Metrics Collection) - Profile: monitoring
+  # ============================================
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: automationone-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - automationone-prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    depends_on:
+      el-servador:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - automationone-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ============================================
+  # Grafana (Dashboards) - Profile: monitoring
+  # ============================================
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: automationone-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - automationone-grafana-data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - automationone-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
 # ============================================
 # Volumes
 # ============================================
@@ -161,6 +285,10 @@ volumes:
     name: automationone-postgres-data
   mosquitto_data:
     name: automationone-mosquitto-data
+  automationone-loki-data:
+  automationone-prometheus-data:
+  automationone-grafana-data:
+  automationone-promtail-positions:
 
 # ============================================
 # Network
