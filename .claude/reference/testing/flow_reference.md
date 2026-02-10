@@ -1,8 +1,8 @@
 # AutomationOne — Flow-Referenz
 
-> **Version:** 1.1 | **Stand:** 2026-02-07
+> **Version:** 1.0 | **Stand:** 2026-02-06
 > **Zweck:** Definiert ALLE Arbeitsabläufe im AutomationOne Agent-System
-> **Genutzt von:** agent-manager (primär), system-control, Technical Manager
+> **Genutzt von:** agent-manager (primär), system-manager, Technical Manager
 > **Erweiterung:** Neue Flows werden als neue FLOW-Sektion am Ende angehängt
 
 ---
@@ -14,7 +14,6 @@
 | F1 | Test-Flow | Robin startet Session | META_ANALYSIS.md beim TM |
 | F2 | Dev-Flow | TM entscheidet nach Test-Flow | Implementierung verifiziert |
 | F3 | Docker-Monitoring Setup | Robin: "Monitoring aufsetzen" | Monitoring-Stack läuft |
-| F4 | Test-Log-Analyse | Robin: /test, "CI rot", "Test-Failures" | test.md im Testrunner-Report |
 
 ---
 
@@ -23,7 +22,7 @@
 ### F1.1 Überblick
 
 **Ziel:** Systematische Analyse des Systemzustands. Alle Probleme identifizieren, dokumentieren, priorisieren.
-**Trigger:** Robin führt `scripts/debug/start_session.sh` aus und schreibt "Session gestartet" in VS Code.
+**Trigger:** Robin führt `session.sh` aus und schreibt "Session gestartet" in VS Code.
 **Ergebnis:** META_ANALYSIS.md mit vollständiger Problemliste beim Technical Manager.
 
 ### F1.2 Schritte
@@ -38,8 +37,8 @@ SCHRITT 1: SESSION STARTEN
 ├── Danach: Robin schreibt in VS Code Claude: "Session gestartet" + Hardware-Info
 └── Nächster Schritt: → SCHRITT 2
 
-SCHRITT 2: SYSTEM-CONTROL (BRIEFING-MODUS) ERSTELLT BRIEFING
-├── Wer: system-control (Agent in VS Code, Briefing-Modus)
+SCHRITT 2: SYSTEM-MANAGER ERSTELLT BRIEFING
+├── Wer: system-manager (Agent in VS Code)
 ├── Trigger: "Session gestartet" im Chat
 ├── Liest: logs/current/STATUS.md + alle Referenz-Dokumentation
 ├── Erzeugt: .claude/reports/current/SESSION_BRIEFING.md
@@ -50,8 +49,8 @@ SCHRITT 2: SYSTEM-CONTROL (BRIEFING-MODUS) ERSTELLT BRIEFING
 │   ├── Agent-Kompendium (ALLE Agents mit Capabilities)
 │   ├── Referenz-Verzeichnis (alle verfügbaren Dokumente)
 │   └── Workflow-Struktur (wie Agents zusammenarbeiten)
-├── REGEL: system-control erstellt KEINE Agent-Befehle
-├── REGEL: system-control entscheidet NICHT welcher Agent läuft
+├── REGEL: system-manager erstellt KEINE Agent-Befehle
+├── REGEL: system-manager entscheidet NICHT welcher Agent läuft
 ├── Prinzip: Wissenstransfer, nicht Befehlsvorgabe
 └── Nächster Schritt: Robin kopiert SESSION_BRIEFING.md zum TM → SCHRITT 3
 
@@ -67,24 +66,18 @@ SCHRITT 3: TM ANALYSIERT UND FORMULIERT BEFEHLE
 │   3. DATEIEN: Welche Dateien lesen/ändern (vollständige Pfade)
 │   4. OUTPUT: Wohin das Ergebnis geschrieben wird
 │   5. REGELN: Was NICHT getan werden darf
-├── Befehlstemplate (Beispiel für Debug-Agent):
-│   Du bist [Agent-Name]. Kontext: Session läuft, SESSION_BRIEFING beim TM.
-│   Auftrag: Analysiere [Bereich]-Logs. Output: .claude/reports/current/[AGENT]_[MODUS]_REPORT.md
-│   Regeln: Read-Only, keine Code-Änderungen.
 ├── Gibt alle Befehle an Robin zurück
 └── Nächster Schritt: Robin führt system-control aus → SCHRITT 4
 
 SCHRITT 4: SYSTEM-CONTROL GENERIERT LOGS
 ├── Wer: system-control (Agent in VS Code)
 ├── Trigger: Robin kopiert TM-Befehl in VS Code Chat
-├── Aktion: Führt konkrete Befehlsketten aus (KEINE Log-Prüfung, KEINE Diagnose):
+├── Aktion: Führt konkrete Befehlsketten aus:
 │   - Docker-Container inspizieren
 │   - ESP32 verbinden (falls Hardware vorhanden)
 │   - MQTT-Traffic generieren/beobachten
 │   - API-Calls an El Servador auslösen
 │   - Datenbank-Queries ausführen
-├── Am Ende (optional): frontend_container.log Refresh: docker compose logs --tail=500 el-frontend
-│   - Loki-Exports (*_loki_*.log) erstellt start_session.sh bei Session-Start (bei --profile monitoring)
 ├── Erzeugt: .claude/reports/current/SYSTEM_CONTROL_REPORT.md
 │   Inhalt:
 │   ├── Ausgeführte Befehle mit Timestamps
@@ -97,13 +90,13 @@ SCHRITT 4: SYSTEM-CONTROL GENERIERT LOGS
 └── Nächster Schritt: Robin führt Debug-Agents einzeln aus → SCHRITT 5
 
 SCHRITT 5: DEBUG-AGENTS ANALYSIEREN (EINZELN)
-├── Wer: esp32-debug, server-debug, mqtt-debug, frontend-debug (je einzeln)
+├── Wer: esp32-debug, server-debug, mqtt-debug (je einzeln)
 ├── Trigger: Robin kopiert je einen TM-Befehl in VS Code Chat
 ├── Input pro Agent:
 │   - SYSTEM_CONTROL_REPORT.md (enthält STATUS.md-Infos + Befehlsergebnisse)
 │   - Bereichsspezifische Logs und Dateien
 │   - KEIN erneutes Laden von STATUS.md nötig (ist in SC-Report)
-├── Erzeugt je: .claude/reports/current/{AGENT}_[MODUS]_REPORT.md
+├── Erzeugt je: .claude/reports/current/{AGENT}_REPORT.md
 │   Inhalt:
 │   ├── Analysierte Quellen (was wurde gelesen)
 │   ├── Befunde nach Severity (CRITICAL / WARNING / INFO)
@@ -144,13 +137,13 @@ SCHRITT 8: META-ANALYST (LETZTE ANALYSE-INSTANZ)
     TM entscheidet: Weitere Analyse oder → F2 Dev-Flow
 ```
 
-### F1.3 Datenflussdiagramm
+### F1.3 Datenflussddiagramm
 
 ```
-start_session.sh ──→ STATUS.md
-                        │
-                        ▼
-          system-control (Briefing) ──→ SESSION_BRIEFING.md ──→ [zum TM]
+session.sh ──→ STATUS.md
+                  │
+                  ▼
+          system-manager ──→ SESSION_BRIEFING.md ──→ [zum TM]
                                                         │
                                                         ▼
                                                    TM formuliert
@@ -160,14 +153,14 @@ start_session.sh ──→ STATUS.md
                   ▼
           system-control ──→ SC_REPORT.md (enthält STATUS.md-Infos)
                   │
-        ┌─────────┼─────────┬─────────┐
-        ▼         ▼         ▼         ▼
-   esp32-debug server-debug mqtt-debug frontend-debug
-        │         │         │         │
-        ▼         ▼         ▼         ▼
-   ESP32_RPT   SERVER_RPT  MQTT_RPT  FRONTEND_RPT
-        │         │         │         │
-        └─────────┼─────────┼─────────┘
+        ┌─────────┼─────────┐
+        ▼         ▼         ▼
+   esp32-debug server-debug mqtt-debug
+        │         │         │
+        ▼         ▼         ▼
+   ESP32_RPT   SERVER_RPT  MQTT_RPT
+        │         │         │
+        └─────────┼─────────┘
                   ▼
           /collect-reports ──→ CONSOLIDATED_REPORT.md ──→ [zum TM]
                                                              │
@@ -187,16 +180,15 @@ start_session.sh ──→ STATUS.md
 
 ### F1.4 Validierungskriterien
 
-Der agent-manager prüft für F1. Gültige Modi für Debug-Reports: `BOOT`, `CONFIG`, `SENSOR`, `ACTUATOR`, `DEBUG`, `E2E`.
+Der agent-manager prüft für F1:
 
 | Schritt | Agent | Muss haben | Muss lesen | Muss erzeugen |
 |---------|-------|------------|------------|---------------|
-| 2 | system-control (Briefing-Modus) | Zugriff auf STATUS.md, alle Referenz-Docs | logs/current/STATUS.md | SESSION_BRIEFING.md |
+| 2 | system-manager | Zugriff auf STATUS.md, alle Referenz-Docs | logs/current/STATUS.md | SESSION_BRIEFING.md |
 | 4 | system-control | Bash-Zugriff, Docker-Befehle | STATUS.md, TM-Auftrag | SC_REPORT.md mit Timestamps |
-| 5 | esp32-debug | Read-Only Tools | SC_REPORT.md, ESP32-Logs | ESP32_[MODUS]_REPORT.md |
-| 5 | server-debug | Read-Only Tools | SC_REPORT.md, Server-Logs | SERVER_[MODUS]_REPORT.md |
-| 5 | mqtt-debug | Read-Only Tools | SC_REPORT.md, MQTT-Logs | MQTT_[MODUS]_REPORT.md |
-| 5 | frontend-debug | Read-Only Tools | SC_REPORT.md, Frontend-Logs | FRONTEND_[MODUS]_REPORT.md |
+| 5 | esp32-debug | Read-Only Tools | SC_REPORT.md, ESP32-Logs | ESP32_DEBUG_REPORT.md |
+| 5 | server-debug | Read-Only Tools | SC_REPORT.md, Server-Logs | SERVER_DEBUG_REPORT.md |
+| 5 | mqtt-debug | Read-Only Tools | SC_REPORT.md, MQTT-Logs | MQTT_DEBUG_REPORT.md |
 | 6 | /collect-reports | Read + Write | Alle Reports in current/ | CONSOLIDATED_REPORT.md |
 | 8 | meta-analyst | Read-Only Tools | ALLE Reports | META_ANALYSIS.md |
 
@@ -204,8 +196,8 @@ Der agent-manager prüft für F1. Gültige Modi für Debug-Reports: `BOOT`, `CON
 
 ```
 STATUS.md Informationen fließen so:
-STATUS.md → system-control (Briefing-Modus) → SESSION_BRIEFING.md → TM
-STATUS.md → system-control (Ops-Modus) → SC_REPORT.md → Debug-Agents
+STATUS.md → system-manager → SESSION_BRIEFING.md → TM
+STATUS.md → system-control → SC_REPORT.md → Debug-Agents
 
 Debug-Agents müssen STATUS.md NICHT separat laden weil:
 system-control bezieht STATUS.md-Infos in seinen Report ein.
@@ -308,63 +300,11 @@ Block 1 → Block 2 → Block 3 → Block 4
 
 | Block | Test-Command | Erwartung |
 |-------|-------------|-----------|
-| 2 | `curl http://localhost:3100/ready` (Windows: `curl.exe`) | "ready" |
+| 2 | `curl http://localhost:3100/ready` | "ready" |
 | 3 | Loki-Query nach Service-Logs | Log-Einträge vorhanden |
 | 5 | `curl http://localhost:8000/metrics` | Prometheus-Format |
 | 6 | Prometheus UI → Targets | el-servador = "UP" |
 | 8 | Grafana :3000 → Datasources | Loki + Prometheus grün |
-
----
-
-## F4: TEST-LOG-ANALYSE (Eigenständig)
-
-### F4.1 Überblick
-
-**Ziel:** Test-Framework-Output (pytest, Vitest, Playwright, Wokwi) analysieren – lokal und CI.
-**Trigger:** Robin: /test, "CI rot", "Test-Failures", "warum schlägt Test X fehl".
-**Ergebnis:** `.claude/reports/Testrunner/test.md` mit strukturierter Analyse.
-
-**Abgrenzung:** test-log-analyst ist NICHT Teil des F1 Test-Flows. Er analysiert Test-Outputs, nicht Runtime-Logs.
-
-### F4.2 Schritte
-
-```
-SCHRITT 1: ROBIN RUFT AGENT AUF
-├── Trigger: /test oder "CI rot" oder "Test-Failures" etc.
-├── Agent: test-log-analyst
-└── Nächster Schritt: → SCHRITT 2
-
-SCHRITT 2: BEFEHLSLISTE AUSGEBEN
-├── Wer: test-log-analyst
-├── Aktion: Gruppierte Befehle ausgeben (mit vollem Projektpfad)
-│   - Erster Befehl: cd "c:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one"
-│   - Backend: make test-be-capture
-│   - Frontend: make test-fe-unit
-│   - Wokwi: make wokwi-test-full
-│   - E2E: make e2e-up → make e2e-test → make e2e-down
-├── REGEL: PowerShell-kompatibel, Copy-Paste-fähig
-└── Nächster Schritt: Robin führt Befehle aus → SCHRITT 3
-
-SCHRITT 3: ROBIN SIGNALISIERT
-├── Robin: "fertig" oder "Fehler bei X" oder "abgebrochen"
-└── Nächster Schritt: → SCHRITT 4
-
-SCHRITT 4: LOG-ANALYSE UND REPORT-UPDATE
-├── Wer: test-log-analyst
-├── Liest: logs/backend/, logs/frontend/, logs/wokwi/reports/, logs/server/ (Test-Outputs)
-├── Optional: gh run view <run-id> --log (bei CI)
-├── Erzeugt/aktualisiert: .claude/reports/Testrunner/test.md
-│   Inhalt: Sektionen pro Bereich (pytest, Vitest, Playwright, Wokwi), Status, Fehler, Empfehlungen
-├── REGEL: Report fortlaufend aktualisieren (nicht einmalig)
-└── Ende
-```
-
-### F4.3 Validierungskriterien
-
-| Schritt | Agent | Muss haben | Muss erzeugen |
-|---------|-------|------------|---------------|
-| 2 | test-log-analyst | Bash für gh CLI | Befehlsliste |
-| 4 | test-log-analyst | Read, Grep, Glob, Bash | test.md |
 
 ---
 

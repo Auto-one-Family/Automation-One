@@ -16,13 +16,14 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | Python, FastAPI, MQTT-Handler, Database, API | `server-development` |
 | Vue 3, TypeScript, Pinia, WebSocket, Dashboard | `frontend-development` |
 | MQTT Topic, Publisher, Subscriber, Payload-Schema, QoS | `mqtt-development` |
-| Reports sammeln, konsolidieren, Session-Ende, TM-Übergabe | `collect-reports` |
+| Reports sammeln, konsolidieren, archivieren, beliebiger Ordner, TM-Übergabe | `collect-reports` |
 | /do, Plan ausführen, Implementierung starten | `do` |
 | /updatedocs, Docs aktualisieren, Doku-Update nach Änderungen | `updatedocs` |
 | /test, Test-Failures, CI rot, pytest/Vitest/Playwright | `test-log-analyst` |
 | Agent-Flow prüfen, IST-SOLL, Agent-Korrektur | `agent-manager` |
 | Git-Commit vorbereiten, Changes analysieren | `git-commit` |
 | /verify-plan, TM-Plan Reality-Check | `verify-plan` |
+| KI-Audit, Bereich auf KI-Fehler prüfen, Qualitätsaudit | `ki-audit` |
 
 ## Dev-Agenten (Pattern-konforme Implementierung)
 

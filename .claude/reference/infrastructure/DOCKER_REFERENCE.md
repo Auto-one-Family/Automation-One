@@ -1,7 +1,7 @@
 # Docker-Infrastruktur Referenz - AutomationOne
 
-**Version:** 1.0
-**Datum:** 2026-02-06
+**Version:** 1.5
+**Datum:** 2026-02-10
 **Zweck:** Vollstaendige Referenz fuer Docker-Stack Architektur und Befehle
 
 ---
@@ -34,12 +34,15 @@
 | promtail | automationone-promtail | grafana/promtail:3.4 | 9080 (intern) | monitoring | bash /dev/tcp/localhost/9080 |
 | prometheus | automationone-prometheus | prom/prometheus:v3.2.1 | 9090 | monitoring | wget /-/healthy |
 | grafana | automationone-grafana | grafana/grafana:11.5.2 | 3000 | monitoring | wget /api/health |
+| postgres-exporter | automationone-postgres-exporter | prometheuscommunity/postgres-exporter:v0.16.0 | 9187 | monitoring | wget /metrics |
+| mosquitto-exporter | automationone-mosquitto-exporter | sapcc/mosquitto-exporter:0.8.0 | 9234 | monitoring | wget /metrics |
+| pgadmin | automationone-pgadmin | dpage/pgadmin4:9.12 | 5050 | devtools | wget /misc/ping |
 
 ### 1.2 Compose-Dateien
 
 | Datei | Zweck | Verwendung |
 |-------|-------|------------|
-| docker-compose.yml | Basis-Stack (4 Core + 4 Monitoring) | `docker compose up -d` |
+| docker-compose.yml | Basis-Stack (4 Core + 6 Monitoring + 1 DevTools) | `docker compose up -d` |
 | docker-compose.dev.yml | Dev Overrides (Volume-Mounts, Reload) | `-f ... -f docker-compose.dev.yml` |
 | docker-compose.test.yml | Test Overrides (SQLite, Dummy-Postgres) | `-f ... -f docker-compose.test.yml` |
 | docker-compose.ci.yml | CI Overrides (tmpfs, schnelle Healthchecks) | In GitHub Actions |
@@ -62,6 +65,7 @@
 | automationone-loki-data | loki | Log-Storage | Persistent |
 | automationone-prometheus-data | prometheus | Metriken | Persistent |
 | automationone-grafana-data | grafana | Dashboards | Persistent |
+| automationone-pgadmin-data | pgadmin | Einstellungen, Queries | Persistent |
 
 **Bind-Mounts (Logs):**
 
@@ -114,12 +118,21 @@
 
 | Target | Befehl | Beschreibung |
 |--------|--------|--------------|
-| `make monitor-up` | `--profile monitoring up -d` | Start Monitoring (Loki, Promtail, Prometheus, Grafana) |
+| `make monitor-up` | `--profile monitoring up -d` | Start Monitoring (Loki, Promtail, Prometheus, Grafana, postgres-exporter, mosquitto-exporter) |
 | `make monitor-down` | `--profile monitoring down` | Stop Monitoring |
 | `make monitor-logs` | `--profile monitoring logs -f --tail=100` | Monitoring-Logs folgen |
 | `make monitor-status` | `--profile monitoring ps` | Monitoring-Status |
 
-### 2.5 CI (nur docker compose, kein make)
+### 2.5 DevTools Stack Targets
+
+| Target | Befehl | Beschreibung |
+|--------|--------|--------------|
+| `make devtools-up` | `--profile devtools up -d` | Start DevTools (pgAdmin) |
+| `make devtools-down` | `--profile devtools down` | Stop DevTools |
+| `make devtools-logs` | `--profile devtools logs -f --tail=100` | DevTools-Logs folgen |
+| `make devtools-status` | `--profile devtools ps` | DevTools-Status |
+
+### 2.6 CI (nur docker compose, kein make)
 
 CI wird in GitHub Actions via docker compose direkt gestartet:
 
@@ -128,7 +141,7 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
 docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
 ```
 
-### 2.6 Datenbank-Targets
+### 2.7 Datenbank-Targets
 
 | Target | Befehl | Beschreibung |
 |--------|--------|--------------|
@@ -140,7 +153,7 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
 | `make db-backup` | `scripts/docker/backup.sh` | Backup erstellen |
 | `make db-restore` | `scripts/docker/restore.sh FILE` | Backup wiederherstellen |
 
-### 2.7 Direkte Docker-Befehle
+### 2.8 Direkte Docker-Befehle
 
 ```bash
 # Container neu starten
@@ -160,7 +173,7 @@ docker exec -it automationone-mqtt mosquitto_sub -t "kaiser/#" -v
 docker compose build --no-cache el-servador
 ```
 
-### 2.8 Debugging-Befehle
+### 2.9 Debugging-Befehle
 
 ```bash
 # Container-Status pruefen
@@ -255,6 +268,8 @@ make e2e-up
 | POSTGRES_DB | DB-Name | god_kaiser_db |
 | JWT_SECRET_KEY | JWT Signing Key | secrets.token_urlsafe(32) |
 | GRAFANA_ADMIN_PASSWORD | Grafana Login | changeme |
+| PGADMIN_DEFAULT_EMAIL | pgAdmin Login-Email | admin@automationone.local |
+| PGADMIN_DEFAULT_PASSWORD | pgAdmin Login-Passwort | changeme |
 | WOKWI_CLI_TOKEN | Wokwi API Token | wok_... |
 
 **Wichtig:** `.env` ist in `.gitignore` - niemals committen!
@@ -308,7 +323,7 @@ services:
 | Config | docker/prometheus/prometheus.yml |
 | Scrape-Interval | 15s |
 | Retention | 7 Tage |
-| Targets | el-servador:8000/api/v1/health/metrics |
+| Targets | el-servador:8000/api/v1/health/metrics, postgres-exporter:9187/metrics |
 
 ### 5.4 Grafana (Dashboards)
 
@@ -321,6 +336,20 @@ services:
 | Provisioning | docker/grafana/provisioning/ |
 
 **Zugang:** http://localhost:3000
+
+### 5.5 pgAdmin (DevTools)
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Port | 5050 |
+| Profile | devtools |
+| Default Email | ${PGADMIN_DEFAULT_EMAIL} |
+| Default Password | ${PGADMIN_DEFAULT_PASSWORD} |
+| Pre-Provisioning | docker/pgadmin/servers.json |
+| Persistent Data | /var/lib/pgadmin (Named Volume) |
+
+**Zugang:** http://localhost:5050
+**Start:** `make devtools-up`
 
 ---
 
@@ -420,6 +449,9 @@ docker volume rm automationone-postgres-data
 | 1.0 | 2026-02-06 | Initiale Erstellung |
 | 1.1 | 2026-02-08 | Section 0 Stack-Nutzung, make logs-db in 2.1, Windows-Hinweis |
 | 1.2 | 2026-02-09 | Ghost-Targets entfernt (pgadmin, devtools, ci-*, watch), Monitoring-Targets ergaenzt, Promtail-Healthcheck korrigiert, Prometheus metrics_path korrigiert |
+| 1.3 | 2026-02-09 | postgres-exporter Service hinzugefuegt (9 Services total: 4 Core + 5 Monitoring), Prometheus 3 Scrape-Jobs, Instrumentator + psutil Metriken dokumentiert |
+| 1.4 | 2026-02-09 | pgAdmin DevTools hinzugefuegt (10 Services: 4 Core + 5 Monitoring + 1 DevTools), Profile devtools, Makefile devtools-Targets, Section 2.5 DevTools |
+| 1.5 | 2026-02-10 | mosquitto-exporter hinzugefuegt (11 Services: 4 Core + 6 Monitoring + 1 DevTools), Service-Tabelle korrigiert |
 
 ---
 

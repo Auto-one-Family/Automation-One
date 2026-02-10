@@ -9,7 +9,7 @@ allowed-tools: Read
 
 # AutomationOne Skills - Index
 
-> **Version:** 3.1 | **Aktualisiert:** 2026-02-06 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
+> **Version:** 3.2 | **Aktualisiert:** 2026-02-09 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
 
 ## Skill-Auswahl
 
@@ -19,7 +19,7 @@ allowed-tools: Read
 | **Server** (Python, FastAPI, PostgreSQL, MQTT-Handler, Logic-Engine, Alembic, pytest) | server-development | `.claude/skills/server-development/` |
 | **Frontend** (Vue 3, TypeScript, Pinia, WebSocket, Composables, Tailwind) | frontend-development | `.claude/skills/frontend-development/` |
 | **MQTT-Entwicklung** (Topic, Publisher, Subscriber, Payload-Schema, QoS) | mqtt-development | `.claude/skills/mqtt-development/` |
-| **Reports sammeln** (Konsolidieren, Session-Ende, TM-Übergabe) | collect-reports | `.claude/skills/collect-reports/` |
+| **Reports sammeln** (Konsolidieren, Archivieren, beliebiger Ordner, TM-Übergabe) | collect-reports | `.claude/skills/collect-reports/` |
 | **System-Status sammeln** (IST-Stand aus Code für Verification) | collect-system-status | `.claude/skills/collect-system-status/` |
 | **Plan ausführen** (/do, Precision Execution, Implementierung nach Plan) | do | `.claude/skills/do/` |
 | **Docs aktualisieren** (/updatedocs, Doku-Update nach Code-Änderungen) | updatedocs | `.claude/skills/updatedocs/` |
@@ -35,6 +35,7 @@ allowed-tools: Read
 | **Git-Commit** (Changes analysieren, Conventional Commits) | git-commit | `.claude/skills/git-commit/` |
 | **Git-Health** (Repo-Analyse, CI, Branch-Protection) | git-health | `.claude/skills/git-health/` |
 | **Verify-Plan** (TM-Pläne gegen Codebase prüfen) | verify-plan | `.claude/skills/verify-plan/` |
+| **KI-Audit** (Bereich auf KI-Fehler prüfen, Report/Fix auf Anfrage) | ki-audit | `.claude/skills/ki-audit/` |
 
 ## Skill-Ordner-Struktur
 
@@ -78,8 +79,10 @@ allowed-tools: Read
 │   └── SKILL.md                # Git-Commit-Vorbereitung
 ├── git-health/
 │   └── SKILL.md                # Git-/Repo-Analyse
-└── verify-plan/
-    └── SKILL.md                # TM-Plan Reality-Check
+├── verify-plan/
+│   └── SKILL.md                # TM-Plan Reality-Check
+└── ki-audit/
+    └── SKILL.md                # KI-Fehler-Audit (Report/Fix auf Anfrage)
 ```
 
 ## Session-Briefing & Planning

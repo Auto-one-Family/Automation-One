@@ -1441,7 +1441,7 @@ grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10
 ### 8.1 Starten/Stoppen
 
 ```bash
-# Monitoring starten (Loki, Promtail, Prometheus, Grafana)
+# Monitoring starten (Loki, Promtail, Prometheus, Grafana, postgres-exporter, mosquitto-exporter)
 make monitor-up
 # oder: docker compose --profile monitoring up -d
 
@@ -1462,6 +1462,7 @@ make monitor-status
 | Grafana | http://localhost:3000 | admin / GRAFANA_ADMIN_PASSWORD aus .env |
 | Prometheus | http://localhost:9090 | - |
 | Loki API | http://localhost:3100 | - |
+| pgAdmin | http://localhost:5050 | PGADMIN_DEFAULT_EMAIL / PGADMIN_DEFAULT_PASSWORD aus .env |
 
 ### 8.3 Loki-Queries (Log-Suche)
 

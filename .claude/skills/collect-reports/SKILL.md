@@ -3,39 +3,63 @@ name: collect-reports
 description: |
   Report-Konsolidierer für AutomationOne.
   Verwenden bei: "Reports sammeln", "Reports konsolidieren", "Report für TM",
-  "collect reports", "alle Reports zusammenfassen", Session-Ende, Übergabe an TM.
+  "collect reports", "alle Reports zusammenfassen", Session-Ende, Übergabe an TM,
+  "räum mal auf", "konsolidiere die Reports in {Ordner}".
   NICHT verwenden für: Einzelne Reports lesen, Report-Analyse, Debugging.
-  Output: .claude/reports/current/CONSOLIDATED_REPORT.md
-allowed-tools: Read, Glob, Write
+allowed-tools: Read, Glob, Write, Bash
 user-invocable: true
 ---
 
 # Collect-Reports Skill
 
-> **Zweck:** Konsolidiert alle Reports aus `.claude/reports/current/` in eine einzelne Datei für den Technical Manager (TM).
+> **Zweck:** Konsolidiert Reports aus einem beliebigen Ordner in ein zusammenhängendes Dokument. Archiviert die verarbeiteten Quell-Reports anschließend.
 
 ---
 
-## Workflow
+## Quellordner-Erkennung
 
-### 1. Reports sammeln
+Der Quellordner ist **nicht hardcoded**. Er kommt aus dem Kontext — Robin nennt ihn explizit oder er ergibt sich aus dem Auftrag.
 
-```bash
-# Alle .md Dateien aus reports/current/ auflisten
-Glob: .claude/reports/current/*.md
-```
+**Beispiele:**
+- "konsolidiere die Reports in `.technical-manager/inbox/agent-reports/`" → Ordner klar
+- "collect reports" (ohne Pfad) → Default: `.claude/reports/current/`
+- "räum mal `.technical-manager/inbox/system-logs/` auf" → Ordner klar
 
-**Ausschluss:** `CONSOLIDATED_REPORT.md` selbst (falls vorhanden)
+**Regel:** Wenn kein Ordner erkennbar → `.claude/reports/current/` als Default verwenden.
 
-### 2. Reports lesen
+---
 
-Für jede gefundene Datei:
-- Vollständigen Inhalt lesen
-- Dateiname merken
+## Workflow (3 Schritte)
 
-### 3. Konsolidierten Report erstellen
+### Schritt 1 — Inventar
 
-**Zieldatei:** `.claude/reports/current/CONSOLIDATED_REPORT.md`
+Scanne den Quellordner und gib Robin per Chatnachricht einen Überblick:
+
+1. **Glob** alle `.md` Dateien im Quellordner
+2. `CONSOLIDATED_REPORT.md` ausschließen (falls vorhanden)
+3. Jeden Report kurz lesen (Header, erste Zeilen) um Thema zu erkennen
+4. **Zusammenhänge identifizieren:**
+   - Thematisch (z.B. Debug-Report + Dev-Report zum selben Problem)
+   - Zeitlich (Timestamps vergleichen, Reihenfolge rekonstruieren)
+   - Als Kette (z.B. Analyse → Fix → Verifikation)
+   - Alleinstehende Reports markieren
+5. Robin den Überblick als Chatnachricht präsentieren:
+   - Welche Reports sind da
+   - Welche gehören zusammen (mit Begründung)
+   - Welche stehen allein
+
+**Bei wenigen Reports oder klarem Zusammenhang:** Direkt starten vorschlagen. Robin entscheidet.
+
+### Schritt 2 — Konsolidieren
+
+Eins nach dem anderen. Langsam, schrittweise, gründlich.
+
+1. Jeden Quell-Report **vollständig lesen** und verstehen bevor er eingearbeitet wird
+2. Konsolidierten Bericht als **zusammenhängendes Dokument** aufbauen
+3. **Nichts weglassen** was relevant ist — der Bericht muss so vollständig sein, dass jemand der die Einzelreports nie gesehen hat den kompletten Stand versteht
+4. Konsolidiertes Dokument in den **Quellordner** schreiben (oder Robin gibt Zielort vor)
+
+**Zieldatei:** `{Quellordner}/CONSOLIDATED_REPORT.md`
 
 **Struktur:**
 
@@ -44,25 +68,26 @@ Für jede gefundene Datei:
 
 **Erstellt:** {ISO-Timestamp}
 **Branch:** {aktueller Git-Branch}
+**Quellordner:** {Pfad}
 **Anzahl Reports:** {n}
 
 ## Einbezogene Reports
 
-| # | Report | Zeilen |
-|---|--------|--------|
-| 1 | SESSION_BRIEFING.md | 156 |
-| 2 | AGENT_DUPLICATE_ANALYSIS.md | 89 |
-| ... | ... | ... |
+| # | Report | Thema | Zeilen |
+|---|--------|-------|--------|
+| 1 | grafana-analysis-2026-02-09.md | Grafana Setup | 312 |
+| 2 | prometheus-analysis-2026-02-09.md | Prometheus Config | 198 |
+| ... | ... | ... | ... |
 
 ---
 
-## 1. SESSION_BRIEFING.md
+## 1. {Report-Name}
 
 {Vollständiger Inhalt des Reports}
 
 ---
 
-## 2. AGENT_DUPLICATE_ANALYSIS.md
+## 2. {Report-Name}
 
 {Vollständiger Inhalt des Reports}
 
@@ -78,12 +103,40 @@ Für jede gefundene Datei:
 
 ### INFO
 - {Aus Reports extrahierte Informationen}
-
----
-
-**Konsolidierter Report bereit.**
-Kopiere `.claude/reports/current/CONSOLIDATED_REPORT.md` zum Technical Manager.
 ```
+
+### Schritt 3 — Archivieren
+
+Quell-Reports die im konsolidierten Bericht enthalten sind werden in den Archiv-Ordner verschoben.
+
+**Archiv-Zuordnung:**
+
+| Quellordner | Archiv-Ordner |
+|-------------|---------------|
+| `.claude/reports/current/` | `.claude/reports/archive/` |
+| `.technical-manager/inbox/agent-reports/` | `.technical-manager/archive/` |
+| `.technical-manager/inbox/system-logs/` | `.technical-manager/archive/` |
+| Anderer Ordner | Robin gibt Archiv-Pfad vor, oder `archive/` Unterordner im selben Verzeichnis |
+
+**Archivierungs-Pattern erkennen:**
+Vor dem Verschieben den bestehenden Archiv-Ordner scannen und das vorhandene Muster übernehmen.
+
+Bekanntes Pattern in `.claude/reports/archive/`:
+```
+YYYY-MM-DD_HH-MM_beschreibung/
+  └── report1.md
+  └── report2.md
+```
+
+**Ablauf:**
+1. Archiv-Ordner anhand der Tabelle bestimmen
+2. Bestehendes Archiv-Pattern prüfen (Datums-Ordner vorhanden? Flat? Etc.)
+3. Neuen Archiv-Unterordner nach dem bestehenden Pattern erstellen
+4. **Nur Reports verschieben die tatsächlich konsolidiert wurden** — was nicht einbezogen wurde bleibt wo es ist
+5. Verschiebung per Bash: `mv {quelle} {archiv-ordner}/`
+6. Robin über die Verschiebung informieren
+
+**Wichtig:** `CONSOLIDATED_REPORT.md` wird NICHT archiviert — sie bleibt im Quellordner.
 
 ---
 
@@ -94,8 +147,8 @@ Suche in allen Reports nach:
 | Marker | Priorität |
 |--------|-----------|
 | `KRITISCH`, `CRITICAL`, `ERROR`, `FEHLER` | KRITISCH |
-| `WARNUNG`, `WARNING`, `WARN`, `⚠️` | WARNUNG |
-| `INFO`, `HINWEIS`, `NOTE`, `ℹ️` | INFO |
+| `WARNUNG`, `WARNING`, `WARN` | WARNUNG |
+| `INFO`, `HINWEIS`, `NOTE` | INFO |
 
 Zusätzlich:
 - Tabellenzeilen mit `❌` → KRITISCH
@@ -107,33 +160,41 @@ Zusätzlich:
 ## Ausführungsbeispiel
 
 ```
-1. Glob: .claude/reports/current/*.md
-   → Gefunden: SESSION_BRIEFING.md, AGENT_DUPLICATE_ANALYSIS.md, DOCUMENTATION_INVENTORY.md
+Robin: "konsolidiere die Reports in .technical-manager/inbox/agent-reports/"
 
-2. Read: Alle 3 Dateien
+1. Quellordner erkannt: .technical-manager/inbox/agent-reports/
 
-3. Analyse: Probleme extrahieren
-   - KRITISCH: Keine gefunden
-   - WARNUNG: 2 gefunden (aus AGENT_DUPLICATE_ANALYSIS.md)
-   - INFO: 5 gefunden
+2. Inventar:
+   Glob: .technical-manager/inbox/agent-reports/*.md
+   → 11 Reports gefunden
+   → Zusammenhänge: 5x Monitoring-Stack (Grafana, Prometheus, Promtail, Loki, pgAdmin),
+     3x system-control Korrekturen, 2x Dev-Reports, 1x agent-manager
+   → Robin: "11 Reports, 3 thematische Gruppen. Soll ich konsolidieren?"
 
-4. Write: CONSOLIDATED_REPORT.md
-   - Header mit Timestamp
-   - Tabelle der Reports
-   - Vollständiger Inhalt jedes Reports
-   - Priorisierte Problemliste
-   - Abschluss-Hinweis
+3. Robin: "ja"
+
+4. Konsolidieren:
+   → Jeden Report vollständig lesen und einarbeiten
+   → CONSOLIDATED_REPORT.md in .technical-manager/inbox/agent-reports/ schreiben
+
+5. Archivieren:
+   → Archiv-Ordner: .technical-manager/archive/
+   → Pattern prüfen (oder neuen Ordner erstellen)
+   → 11 Quell-Reports nach .technical-manager/archive/YYYY-MM-DD_HH-MM_beschreibung/ verschieben
+   → CONSOLIDATED_REPORT.md bleibt
 ```
 
 ---
 
 ## Regeln
 
-1. **Vollständig einbetten** – Reports NICHT zusammenfassen, vollständig kopieren
-2. **Reihenfolge** – Alphabetisch nach Dateiname
-3. **Selbst-Ausschluss** – `CONSOLIDATED_REPORT.md` NICHT einbeziehen
-4. **Immer überschreiben** – Vorherige `CONSOLIDATED_REPORT.md` ersetzen
-5. **Timestamp** – ISO-8601 Format mit Zeitzone
+1. **Vollständig einbetten** — Reports NICHT zusammenfassen, vollständig kopieren
+2. **Reihenfolge** — Thematisch gruppiert, innerhalb der Gruppe chronologisch
+3. **Selbst-Ausschluss** — `CONSOLIDATED_REPORT.md` NICHT einbeziehen und NICHT archivieren
+4. **Immer überschreiben** — Vorherige `CONSOLIDATED_REPORT.md` ersetzen
+5. **Timestamp** — ISO-8601 Format
+6. **Erst konsolidieren, dann archivieren** — Nie Dateien verschieben bevor der konsolidierte Bericht geschrieben ist
+7. **Nur Konsolidiertes archivieren** — Was nicht im Bericht ist, bleibt im Quellordner
 
 ---
 
@@ -145,8 +206,9 @@ Zusätzlich:
 - "collect reports"
 - "alle Reports zusammenfassen"
 - "Session-Übergabe"
-- "Briefing erstellen"
+- "räum mal auf"
+- "konsolidiere die Reports in {Ordner}"
 
 ---
 
-*Konsolidiert Reports für Technical Manager Übergabe.*
+*Konsolidiert Reports aus beliebigen Ordnern, archiviert verarbeitete Quellen.*
