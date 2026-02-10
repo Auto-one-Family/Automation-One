@@ -1,0 +1,277 @@
+# Grafana Alerting Provisioning - AutomationOne
+# Phase 1: UI-only Alerting (no webhook, no external service)
+#
+# Rules:
+# - 3 Critical: server-down, mqtt-disconnected, database-down
+# - 2 Warning: high-memory, esp-devices-offline
+#
+# Pipeline per rule: A (PromQL query) -> B (Reduce to last value) -> C (Threshold)
+# All datasource UIDs verified against datasources.yml (2026-02-09)
+# Evaluation intervals must be multiples of 10s (Grafana scheduler interval)
+
+apiVersion: 1
+
+groups:
+  # ============================================
+  # Critical Alerts (10s evaluation)
+  # ============================================
+  - orgId: 1
+    name: automationone-critical
+    folder: AutomationOne Alerts
+    interval: 10s
+    rules:
+      # Rule 1: Server Down
+      # Fires when Prometheus cannot scrape el-servador metrics endpoint
+      - uid: ao-server-down
+        title: "Server Down"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "up{job=\"el-servador\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "God-Kaiser Server ist nicht erreichbar"
+          description: "Prometheus kann /api/v1/health/metrics nicht scrapen seit >1m"
+        labels:
+          severity: critical
+          component: server
+
+      # Rule 2: MQTT Disconnected
+      # Fires when god_kaiser_mqtt_connected gauge drops to 0
+      - uid: ao-mqtt-disconnected
+        title: "MQTT Disconnected"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "god_kaiser_mqtt_connected"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "MQTT-Broker Verbindung verloren"
+          description: "god_kaiser_mqtt_connected == 0 seit >1m. Kein ESP32-Datenempfang moeglich."
+        labels:
+          severity: critical
+          component: mqtt
+
+      # Rule 3: Database Down
+      # Fires when postgres-exporter reports pg_up == 0
+      - uid: ao-database-down
+        title: "Database Down"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "pg_up"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "PostgreSQL nicht erreichbar"
+          description: "postgres-exporter meldet pg_up == 0 seit >1m"
+        labels:
+          severity: critical
+          component: database
+
+  # ============================================
+  # Warning Alerts (1m evaluation)
+  # ============================================
+  - orgId: 1
+    name: automationone-warnings
+    folder: AutomationOne Alerts
+    interval: 1m
+    rules:
+      # Rule 4: High Memory Usage
+      # Fires when server memory exceeds 85% for >5m
+      # Server health reports "degraded" at 90%
+      - uid: ao-high-memory
+        title: "High Memory Usage"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "god_kaiser_memory_percent"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [85]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Server Memory ueber 85%"
+          description: "god_kaiser_memory_percent > 85 seit >5m. Bei 90% wird Health-Status 'degraded'."
+        labels:
+          severity: warning
+          component: server
+
+      # Rule 5: ESP Devices Offline
+      # Fires when >50% of registered ESP devices are offline for >3m
+      # Guards: clamp_min prevents division-by-zero, esp_online > 0 ensures real devices exist
+      # Development note: 100 mock ESPs with ~32% offline will NOT trigger this rule
+      - uid: ao-esp-offline
+        title: "ESP Devices Offline"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 180
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "(god_kaiser_esp_offline / clamp_min(god_kaiser_esp_total, 1)) > 0.5 and god_kaiser_esp_online > 0"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 3m
+        annotations:
+          summary: "ESP32-Geraete offline"
+          description: "Mehr als 50% der registrierten ESP32-Geraete sind seit >3m offline. Guard: Mindestens ein Geraet muss online sein (verhindert False-Positives bei reinen Mock-Daten). Pruefen: Netzwerk, MQTT-Broker, ESP-Firmware."
+        labels:
+          severity: warning
+          component: esp32
