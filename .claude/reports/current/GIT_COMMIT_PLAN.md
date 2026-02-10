@@ -1,345 +1,201 @@
 # Git Commit Plan
 
-**Erstellt:** 2026-02-07
-**Branch:** feature/docs-cleanup
-**Ungepushte Commits:** 0 (vor diesem Plan)
-**Änderungen gesamt:** 117 modified, 1 staged (mosquitto-installer.exe delete), ~100+ untracked
+**Erstellt:** 2026-02-09  
+**Branch:** feature/docs-cleanup  
+**Ungepushte Commits:** 0 (vor diesem Plan)  
+**Änderungen gesamt:** 72 modified, 15 deleted, 38+ untracked (inkl. Verzeichnisse), 0 staged  
 
 ---
 
-## Hinweise: Nicht committen (empfohlen)
+## Commit 1: chore(docker): add monitoring stack config and Grafana alerting
 
-Diese Dateien/Verzeichnisse sollten **nicht** ins Repo:
-
-| Pfad | Grund |
-|------|-------|
-| `El Frontend/coverage/` | Generiert durch Vitest, in .gitignore aufnehmen |
-| `scripts/__pycache__/` | Python-Cache, in .gitignore aufnehmen |
-| `debug_output.txt` | Debug-Artefakt |
-| `.claude/settings.local.json` | Lokale Einstellungen, evtl. sensibel |
-
-**Vor dem ersten Commit:** `.gitignore` erweitern (siehe Commit 1).
-
----
-
-## Commit 1: chore(git): remove binary, extend gitignore for generated artifacts
-
-**Was:** Entfernt `mosquitto-installer.exe` (bereits in .gitignore, war versehentlich getrackt). Erweitert .gitignore um coverage, __pycache__, debug_output, settings.local – damit generierte/lokale Artefakte nicht versehentlich committed werden.
+**Was:** Docker-Compose um Monitoring-Services erweitern, Grafana-Dashboard und Prometheus/Promtail/PgAdmin anpassen, Grafana-Alerting-Regeln hinzufügen.
 
 **Dateien:**
-- `mosquitto-installer.exe` – BEREITS STAGED, Löschung
-- `.gitignore` – Erweiterung um `El Frontend/coverage/`, `scripts/__pycache__/`, `debug_output.txt`, `.claude/settings.local.json`
+- `docker-compose.yml` – neue/angepasste Services für Monitoring
+- `docker/grafana/provisioning/dashboards/system-health.json` – Dashboard-Anpassungen
+- `docker/pgadmin/servers.json` – Server-Config
+- `docker/prometheus/prometheus.yml` – Scrape-Config
+- `docker/promtail/config.yml` – Log-Pipeline
+- `docker/grafana/provisioning/alerting/` – neues Verzeichnis mit alert-rules.yml
 
 **Befehle:**
 ```bash
-git add .gitignore
-git commit -m "chore(git): remove binary, extend gitignore for generated artifacts"
+git add docker-compose.yml docker/grafana/provisioning/dashboards/system-health.json docker/pgadmin/servers.json docker/prometheus/prometheus.yml docker/promtail/config.yml docker/grafana/provisioning/alerting/
+git commit -m "chore(docker): add monitoring stack config and Grafana alerting"
 ```
 
 ---
 
-## Commit 2: refactor(server): remove sensor_processing HTTP API, add Prometheus metrics
+## Commit 2: chore(config): extend .env.example for Grafana, pgAdmin and Wokwi
 
-**Was:** Server-zentrische Architektur – sensor_processing.py (HTTP-HTTP-Anbindung) entfernt. Sensor-Verarbeitung erfolgt ausschließlich über MQTT. Prometheus-Instrumentierung für Monitoring hinzugefügt.
+**Was:** .env.example um Variablen für Monitoring (Grafana, pgAdmin) und optional Wokwi CI ergänzen.
 
 **Dateien:**
-- `El Servador/god_kaiser_server/src/main.py` – sensor_processing Router entfernt, Prometheus Instrumentator hinzugefügt
-- `El Servador/god_kaiser_server/src/api/sensor_processing.py` – gelöscht
-- `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py` – Anpassung (Import/Referenz)
-- `El Servador/god_kaiser_server/pyproject.toml` – prometheus_fastapi_instrumentator Dependency
+- `.env.example` – neue Einträge (z. B. GRAFANA_ADMIN_PASSWORD, PGADMIN_*, WOKWI_CLI_TOKEN)
 
 **Befehle:**
 ```bash
-git add "El Servador/god_kaiser_server/src/main.py"
-git add "El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py"
-git add "El Servador/god_kaiser_server/pyproject.toml"
-git rm "El Servador/god_kaiser_server/src/api/sensor_processing.py"
-git commit -m "refactor(server): remove sensor_processing HTTP API, add Prometheus metrics"
-```
-
----
-
-## Commit 3: refactor(firmware): server-centric mode, remove PiEnhancedProcessor and http_client
-
-**Was:** ESP32 sendet rohe Sensordaten via MQTT. PiEnhancedProcessor (HTTP-Anbindung) und http_client entfernt. Verarbeitung erfolgt ausschließlich auf dem Server.
-
-**Dateien:**
-- `El Trabajante/src/services/sensor/sensor_manager.cpp` – PiProcessor entfernt, raw data → MQTT
-- `El Trabajante/src/services/sensor/sensor_manager.h` – pi_processor_ Member entfernt
-- `El Trabajante/src/services/sensor/pi_enhanced_processor.cpp` – gelöscht
-- `El Trabajante/src/services/sensor/pi_enhanced_processor.h` – gelöscht
-- `El Trabajante/src/services/communication/http_client.cpp` – gelöscht
-- `El Trabajante/src/services/communication/http_client.h` – gelöscht
-- `El Trabajante/src/services/config/storage_manager.cpp` – Anpassung
-- `El Trabajante/src/drivers/pwm_controller.cpp` – kleinere Anpassung
-
-**Befehle:**
-```bash
-git add "El Trabajante/src/services/sensor/sensor_manager.cpp"
-git add "El Trabajante/src/services/sensor/sensor_manager.h"
-git add "El Trabajante/src/services/config/storage_manager.cpp"
-git add "El Trabajante/src/drivers/pwm_controller.cpp"
-git rm "El Trabajante/src/services/sensor/pi_enhanced_processor.cpp"
-git rm "El Trabajante/src/services/sensor/pi_enhanced_processor.h"
-git rm "El Trabajante/src/services/communication/http_client.cpp"
-git rm "El Trabajante/src/services/communication/http_client.h"
-git commit -m "refactor(firmware): server-centric mode, remove PiEnhancedProcessor and http_client"
-```
-
----
-
-## Commit 4: test(server): update e2e tests, add actuator and websocket tests
-
-**Was:** E2E-Tests an Server-Refactoring angepasst. Neue E2E-Tests: actuator_alert, actuator_direct_control, websocket_events. conftest und bestehende Tests aktualisiert.
-
-**Dateien:**
-- `El Servador/god_kaiser_server/tests/conftest.py`
-- `El Servador/god_kaiser_server/tests/e2e/conftest.py`
-- `El Servador/god_kaiser_server/tests/e2e/test_logic_engine_real_server.py`
-- `El Servador/god_kaiser_server/tests/e2e/test_real_server_scenarios.py`
-- `El Servador/god_kaiser_server/tests/e2e/test_sensor_workflow.py`
-- `El Servador/god_kaiser_server/tests/e2e/test_actuator_alert_e2e.py` – NEU
-- `El Servador/god_kaiser_server/tests/e2e/test_actuator_direct_control.py` – NEU
-- `El Servador/god_kaiser_server/tests/e2e/test_websocket_events.py` – NEU
-- `El Servador/god_kaiser_server/tests/unit/test_ds18b20_errors.py`
-
-**Befehle:**
-```bash
-git add "El Servador/god_kaiser_server/tests/"
-git commit -m "test(server): update e2e tests, add actuator and websocket tests"
-```
-
----
-
-## Commit 5: test(firmware): update Wokwi scenarios for consistency
-
-**Was:** Wokwi-Testszenarien an aktuelle API/Protokoll angepasst – actuator, zone, emergency, config, combined, hardware, pwm, gpio.
-
-**Dateien:**
-- `El Trabajante/tests/wokwi/scenarios/03-actuator/*.yaml` (6)
-- `El Trabajante/tests/wokwi/scenarios/04-zone/zone_assignment.yaml`
-- `El Trabajante/tests/wokwi/scenarios/05-emergency/*.yaml` (3)
-- `El Trabajante/tests/wokwi/scenarios/06-config/*.yaml` (2)
-- `El Trabajante/tests/wokwi/scenarios/07-combined/*.yaml` (2)
-- `El Trabajante/tests/wokwi/scenarios/09-hardware/*.yaml` (7)
-- `El Trabajante/tests/wokwi/scenarios/09-pwm/*.yaml` (5)
-- `El Trabajante/tests/wokwi/scenarios/gpio/*.yaml` (15)
-
-**Befehle:**
-```bash
-git add "El Trabajante/tests/wokwi/scenarios/"
-git commit -m "test(firmware): update Wokwi scenarios for consistency"
-```
-
----
-
-## Commit 6: feat(frontend): add Vitest, Playwright, unit and e2e tests
-
-**Was:** Vitest und Playwright für Unit- und E2E-Tests. Mocks (MSW), Composables/Store-Tests, E2E-Szenarien (auth, actuator, device-discovery, emergency, sensor-live).
-
-**Dateien:**
-- `El Frontend/package.json` – Vitest, Playwright, Testing Library, MSW
-- `El Frontend/package-lock.json`
-- `El Frontend/vitest.config.ts`
-- `El Frontend/playwright.config.ts`
-- `El Frontend/tests/` – setup, mocks, unit, e2e
-- `El Frontend/src/api/actuators.ts` – kleine Anpassung
-- `El Frontend/src/api/errors.ts` – kleine Anpassung
-- `El Frontend/Dockerfile` – Build-Anpassung
-- `El Frontend/.dockerignore`
-- `El Frontend/Docs/UI/02-Individual-Views-Summary.md`
-
-**Befehle:**
-```bash
-git add "El Frontend/package.json"
-git add "El Frontend/package-lock.json"
-git add "El Frontend/vitest.config.ts"
-git add "El Frontend/playwright.config.ts"
-git add "El Frontend/tests/"
-git add "El Frontend/src/api/actuators.ts"
-git add "El Frontend/src/api/errors.ts"
-git add "El Frontend/Dockerfile"
-git add "El Frontend/.dockerignore"
-git add "El Frontend/Docs/UI/02-Individual-Views-Summary.md"
-git commit -m "feat(frontend): add Vitest, Playwright, unit and e2e tests"
-```
-
----
-
-## Commit 7: ci: add frontend, backend-e2e, playwright, security workflows; update existing
-
-**Was:** Neue Workflows: frontend-tests, backend-e2e-tests, playwright-tests, security-scan. pr-checks: verbesserte .env-Erkennung (.env.example, .env.ci erlaubt). esp32-tests, server-tests, wokwi-tests aktualisiert.
-
-**Dateien:**
-- `.github/workflows/frontend-tests.yml` – NEU
-- `.github/workflows/backend-e2e-tests.yml` – NEU
-- `.github/workflows/playwright-tests.yml` – NEU
-- `.github/workflows/security-scan.yml` – NEU
-- `.github/workflows/pr-checks.yml`
-- `.github/workflows/esp32-tests.yml`
-- `.github/workflows/server-tests.yml`
-- `.github/workflows/wokwi-tests.yml`
-- `.env.example` – evtl. neue Variablen
-- `.env.ci` – NEU (CI-Config)
-
-**Befehle:**
-```bash
-git add ".github/workflows/"
 git add .env.example
-git add .env.ci
-git commit -m "ci: add frontend, backend-e2e, playwright, security workflows"
+git commit -m "chore(config): extend .env.example for Grafana, pgAdmin and Wokwi"
 ```
 
 ---
 
-## Commit 8: chore(docker): add monitoring stack, CI/E2E compose, log rotation
+## Commit 3: chore(build): extend Makefile with monitoring and log targets
 
-**Was:** Docker-Compose: Log-Rotation, Resource-Limits, Security-Opts. Grafana, Loki, Prometheus, pgAdmin, Promtail. docker-compose.ci.yml und docker-compose.e2e.yml für CI/E2E.
+**Was:** Makefile um Ziele für Monitoring und Log-Verzeichnisse erweitern.
 
 **Dateien:**
-- `docker-compose.yml`
-- `docker-compose.ci.yml` – NEU
-- `docker-compose.e2e.yml` – NEU
-- `docker/grafana/` – NEU
-- `docker/loki/` – NEU
-- `docker/prometheus/` – NEU
-- `docker/promtail/` – NEU
-- `docker/pgadmin/` – NEU
-- `docker/postgres/postgresql.conf`
+- `Makefile` – neue Targets (z. B. logs, monitoring)
 
 **Befehle:**
 ```bash
-git add docker-compose.yml
-git add docker-compose.ci.yml
-git add docker-compose.e2e.yml
-git add docker/
-git commit -m "chore(docker): add monitoring stack, CI/E2E compose, log rotation"
+git add Makefile
+git commit -m "chore(build): extend Makefile with monitoring and log targets"
 ```
 
 ---
 
-## Commit 9: feat(agents): add agent-manager, new skills, update routing and references
+## Commit 4: feat(server): add Prometheus custom metrics and simplify health endpoint
 
-**Was:** Agent-Manager für Flow-/Agent-Konsistenz. Neue Skills: agent-manager, collect-system-status, do, frontend-debug, git-commit, git-health, verify-plan. Technical Manager Integration. CLAUDE.md, Agents, Skills, Reference aktualisiert.
+**Was:** Prometheus-Metriken (Uptime, CPU, Memory, MQTT, ESP) im Server einführen, in main einbinden und Health-Endpoint verschlanken.
+
+**Dateien:**
+- `El Servador/god_kaiser_server/pyproject.toml` – Abhängigkeit (prometheus-client, psutil)
+- `El Servador/god_kaiser_server/src/core/metrics.py` – neu: Gauge-Definitionen und Update-Logik
+- `El Servador/god_kaiser_server/src/main.py` – Metriken-Initialisierung und periodische Updates
+- `El Servador/god_kaiser_server/src/api/v1/health.py` – Vereinfachung (Metriken ausgelagert)
+
+**Befehle:**
+```bash
+git add "El Servador/god_kaiser_server/pyproject.toml" "El Servador/god_kaiser_server/src/core/metrics.py" "El Servador/god_kaiser_server/src/main.py" "El Servador/god_kaiser_server/src/api/v1/health.py"
+git commit -m "feat(server): add Prometheus custom metrics and simplify health endpoint"
+```
+
+---
+
+## Commit 5: feat(frontend): add structured logger and migrate components and stores
+
+**Was:** Zentralen strukturierten Logger (logger.ts) einführen und in API, Composables, Stores, Views und System-Monitor-Komponenten nutzen (JSON für Pipeline, lesbar im Dev).
+
+**Dateien:**
+- `El Frontend/src/utils/logger.ts` – neu
+- `El Frontend/src/api/esp.ts` – Logger-Nutzung
+- `El Frontend/src/api/index.ts` – Logger-Nutzung
+- `El Frontend/src/components/charts/MultiSensorChart.vue`
+- `El Frontend/src/components/dashboard/UnassignedDropBar.vue`
+- `El Frontend/src/components/database/RecordDetailModal.vue`
+- `El Frontend/src/components/esp/AnalysisDropZone.vue`
+- `El Frontend/src/components/esp/ESPCard.vue`
+- `El Frontend/src/components/esp/ESPOrbitalLayout.vue`
+- `El Frontend/src/components/esp/ESPSettingsPopover.vue`
+- `El Frontend/src/components/esp/SensorSatellite.vue`
+- `El Frontend/src/components/esp/SensorValueCard.vue`
+- `El Frontend/src/components/system-monitor/CleanupPanel.vue`
+- `El Frontend/src/components/system-monitor/DatabaseTab.vue`
+- `El Frontend/src/components/system-monitor/EventDetailsPanel.vue`
+- `El Frontend/src/components/system-monitor/LogManagementPanel.vue`
+- `El Frontend/src/components/system-monitor/MqttTrafficTab.vue`
+- `El Frontend/src/components/system-monitor/ServerLogsTab.vue`
+- `El Frontend/src/components/system-monitor/UnifiedEventList.vue`
+- `El Frontend/src/components/zones/ZoneAssignmentPanel.vue`
+- `El Frontend/src/components/zones/ZoneGroup.vue`
+- `El Frontend/src/composables/useConfigResponse.ts`
+- `El Frontend/src/composables/useWebSocket.ts`
+- `El Frontend/src/composables/useZoneDragDrop.ts`
+- `El Frontend/src/main.ts`
+- `El Frontend/src/services/websocket.ts`
+- `El Frontend/src/stores/auth.ts`
+- `El Frontend/src/stores/dragState.ts`
+- `El Frontend/src/stores/esp.ts`
+- `El Frontend/src/stores/logic.ts`
+- `El Frontend/src/utils/index.ts`
+- `El Frontend/src/views/DashboardView.vue`
+- `El Frontend/src/views/LoadTestView.vue`
+- `El Frontend/src/views/MaintenanceView.vue`
+- `El Frontend/src/views/SystemMonitorView.vue`
+- `El Frontend/src/vite-env.d.ts`
+- `El Frontend/tsconfig.tsbuildinfo`
+
+**Befehle:**
+```bash
+git add "El Frontend/src/utils/logger.ts" "El Frontend/src/api/esp.ts" "El Frontend/src/api/index.ts" "El Frontend/src/components/charts/MultiSensorChart.vue" "El Frontend/src/components/dashboard/UnassignedDropBar.vue" "El Frontend/src/components/database/RecordDetailModal.vue" "El Frontend/src/components/esp/AnalysisDropZone.vue" "El Frontend/src/components/esp/ESPCard.vue" "El Frontend/src/components/esp/ESPOrbitalLayout.vue" "El Frontend/src/components/esp/ESPSettingsPopover.vue" "El Frontend/src/components/esp/SensorSatellite.vue" "El Frontend/src/components/esp/SensorValueCard.vue" "El Frontend/src/components/system-monitor/CleanupPanel.vue" "El Frontend/src/components/system-monitor/DatabaseTab.vue" "El Frontend/src/components/system-monitor/EventDetailsPanel.vue" "El Frontend/src/components/system-monitor/LogManagementPanel.vue" "El Frontend/src/components/system-monitor/MqttTrafficTab.vue" "El Frontend/src/components/system-monitor/ServerLogsTab.vue" "El Frontend/src/components/system-monitor/UnifiedEventList.vue" "El Frontend/src/components/zones/ZoneAssignmentPanel.vue" "El Frontend/src/components/zones/ZoneGroup.vue" "El Frontend/src/composables/useConfigResponse.ts" "El Frontend/src/composables/useWebSocket.ts" "El Frontend/src/composables/useZoneDragDrop.ts" "El Frontend/src/main.ts" "El Frontend/src/services/websocket.ts" "El Frontend/src/stores/auth.ts" "El Frontend/src/stores/dragState.ts" "El Frontend/src/stores/esp.ts" "El Frontend/src/stores/logic.ts" "El Frontend/src/utils/index.ts" "El Frontend/src/views/DashboardView.vue" "El Frontend/src/views/LoadTestView.vue" "El Frontend/src/views/MaintenanceView.vue" "El Frontend/src/views/SystemMonitorView.vue" "El Frontend/src/vite-env.d.ts" "El Frontend/tsconfig.tsbuildinfo"
+git commit -m "feat(frontend): add structured logger and migrate components and stores"
+```
+
+---
+
+## Commit 6: docs(tm): cleanup TM commands and inbox, add pending commands and archive
+
+**Was:** Alte TM-Pending- und Inbox-Reports entfernen, neue Pending-Commands (mosquitto-exporter, grafana-alerting, pgadmin, frontend-logging) und Completed/Inbox/Archive hinzufügen.
+
+**Dateien (Modified/Deleted):**
+- `.technical-manager/README.md`
+- `.technical-manager/TECHNICAL_MANAGER.md`
+- `.technical-manager/skills/infrastructure-status/SKILL.md`
+- Gelöscht: `.technical-manager/commands/pending/agent-manager-log-access-reference.md`
+- Gelöscht: `.technical-manager/commands/pending/system-control-docker-vollaudit-korrektur.md`
+- Gelöscht: `.technical-manager/commands/pending/system-control-grafana-config.md`
+- Gelöscht: `.technical-manager/commands/pending/system-control-promtail-healthcheck-filter.md`
+- Gelöscht: `.technical-manager/commands/pending/system-control-promtail-positions.md`
+- Gelöscht: alle 10 `.technical-manager/inbox/agent-reports/*-2026-02-09.md`
+
+**Dateien (Untracked):**
+- `.technical-manager/archive/` (ganzes Verzeichnis)
+- `.technical-manager/commands/completed/CONSOLIDATED_REPORT.md`
+- `.technical-manager/commands/pending/3-1_mosquitto-exporter-plan.md`
+- `.technical-manager/commands/pending/3-1_mosquitto-exporter.md`
+- `.technical-manager/commands/pending/3-2_grafana-alerting-plan.md`
+- `.technical-manager/commands/pending/3-2_grafana-alerting.md`
+- `.technical-manager/commands/pending/4-1_pgadmin-devtools.md`
+- `.technical-manager/commands/pending/4-1_pgadmin-plan.md`
+- `.technical-manager/commands/pending/4-2_frontend-logging-plan.md`
+- `.technical-manager/commands/pending/4-2_frontend-logging.md`
+- `.technical-manager/inbox/agent-reports/CONSOLIDATED_REPORT.md`
+- `.technical-manager/inbox/agent-reports/mosquitto-exporter-impl-plan.md`
+
+**Befehle:**
+```bash
+git add .technical-manager/README.md .technical-manager/TECHNICAL_MANAGER.md .technical-manager/skills/infrastructure-status/SKILL.md
+git rm .technical-manager/commands/pending/agent-manager-log-access-reference.md .technical-manager/commands/pending/system-control-docker-vollaudit-korrektur.md .technical-manager/commands/pending/system-control-grafana-config.md .technical-manager/commands/pending/system-control-promtail-healthcheck-filter.md .technical-manager/commands/pending/system-control-promtail-positions.md
+git rm .technical-manager/inbox/agent-reports/agent-manager-log-access-reference-2026-02-09.md .technical-manager/inbox/agent-reports/grafana-analysis-2026-02-09.md .technical-manager/inbox/agent-reports/loki-analysis-2026-02-09.md .technical-manager/inbox/agent-reports/pgadmin-analysis-2026-02-09.md .technical-manager/inbox/agent-reports/prometheus-analysis-2026-02-09.md .technical-manager/inbox/agent-reports/promtail-analysis-2026-02-09.md .technical-manager/inbox/agent-reports/server-dev-grafana-panels-2026-02-09.md .technical-manager/inbox/agent-reports/system-control-docker-vollaudit-korrektur-2026-02-09.md .technical-manager/inbox/agent-reports/system-control-grafana-config-2026-02-09.md .technical-manager/inbox/agent-reports/system-control-promtail-healthcheck-filter-2026-02-09.md .technical-manager/inbox/agent-reports/system-control-promtail-positions-2026-02-09.md
+git add .technical-manager/archive/ .technical-manager/commands/completed/CONSOLIDATED_REPORT.md .technical-manager/commands/pending/3-1_mosquitto-exporter-plan.md .technical-manager/commands/pending/3-1_mosquitto-exporter.md .technical-manager/commands/pending/3-2_grafana-alerting-plan.md .technical-manager/commands/pending/3-2_grafana-alerting.md .technical-manager/commands/pending/4-1_pgadmin-devtools.md .technical-manager/commands/pending/4-1_pgadmin-plan.md .technical-manager/commands/pending/4-2_frontend-logging-plan.md .technical-manager/commands/pending/4-2_frontend-logging.md .technical-manager/inbox/agent-reports/CONSOLIDATED_REPORT.md .technical-manager/inbox/agent-reports/mosquitto-exporter-impl-plan.md
+git commit -m "docs(tm): cleanup TM commands and inbox, add pending commands and archive"
+```
+
+---
+
+## Commit 7: docs(claude): update reference, skills and current reports
+
+**Was:** CLAUDE-Routing, Referenz-Docs (Docker, Testing), Skills (README, collect-reports) und aktuelle Reports (Frontend-Logging, Mosquitto, etc.) aktualisieren.
 
 **Dateien:**
 - `.claude/CLAUDE.md`
-- `.claude/agents/Readme.md`
-- `.claude/agents/esp32-debug.md`
-- `.claude/agents/frontend/frontend-debug-agent.md`
-- `.claude/agents/meta-analyst.md`
-- `.claude/agents/mqtt/mqtt-debug-agent.md`
-- `.claude/agents/server/server-debug-agent.md`
-- `.claude/agents/system-control.md`
-- `.claude/agents/agent-manager/` – NEU
+- `.claude/reference/infrastructure/DOCKER_REFERENCE.md`
+- `.claude/reference/testing/agent_profiles.md`
+- `.claude/reference/testing/flow_reference.md`
 - `.claude/skills/README.md`
-- `.claude/skills/DO/SKILL.md`
-- `.claude/skills/esp32-debug/SKILL.md`
-- `.claude/skills/esp32-development/SKILL.md`
-- `.claude/skills/meta-analyst/SKILL.md`
-- `.claude/skills/mqtt-debug/SKILL.md`
-- `.claude/skills/server-debug/SKILL.md`
-- `.claude/skills/system-control/SKILL.md`
-- `.claude/skills/agent-manager/` – NEU
-- `.claude/skills/collect-system-status.md/` – NEU (Hinweis: Ordner-name enthält .md)
-- `.claude/skills/do/` – NEU
-- `.claude/skills/frontend-debug/` – NEU
-- `.claude/skills/git-commit/` – NEU
-- `.claude/skills/git-health/` – NEU
-- `.claude/skills/verify-plan/` – NEU
-- `.claude/reference/debugging/CI_PIPELINE.md`
-- `.claude/reference/debugging/LOG_LOCATIONS.md`
-- `.claude/reference/patterns/ARCHITECTURE_DEPENDENCIES.md`
-- `.claude/reference/patterns/COMMUNICATION_FLOWS.md`
-- `.claude/reference/patterns/vs_claude_best_practice.md`
-- `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
-- `.claude/reference/testing/TEST_WORKFLOW.md`
-- `.claude/reference/testing/TEST_ENGINE_REFERENCE.md` – NEU
-- `.claude/reference/testing/agent_profiles.md` – NEU
-- `.claude/reference/testing/flow_reference.md` – NEU
-- `.claude/reference/infrastructure/` – NEU
-- `.claude/rules/docker-rules.md`
-- `.technical-manager/` – NEU
+- `.claude/skills/collect-reports/SKILL.md`
+- `.claude/reports/current/FRONTEND_LOGGING_ANALYSIS.md`
+- `.claude/reports/current/FRONTEND_COMPONENT_LOGGER_MIGRATION.md` (untracked)
+- `.claude/reports/current/FRONTEND_DEV_REPORT.md` (untracked)
+- `.claude/reports/current/FRONTEND_DEV_STORE_LOGGER_MIGRATION.md` (untracked)
+- `.claude/reports/current/FRONTEND_DEV_SYSTEM_MONITOR_LOGGER.md` (untracked)
+- `.claude/reports/current/FRONTEND_LOGGING_IMPL_PLAN.md` (untracked)
+- `.claude/reports/current/MOSQUITTO_EXPORTER_ANALYSIS.md` (untracked)
+- `.claude/reports/current/GIT_COMMIT_PLAN.md` (diese Datei, neu)
+- `.claude/reports/current/GIT_HEALTH_REPORT.md` (von git-health erstellt, neu)
 
 **Befehle:**
 ```bash
-git add .claude/
-git add .technical-manager/
-git commit -m "feat(agents): add agent-manager, new skills, update routing and references"
+git add .claude/CLAUDE.md .claude/reference/infrastructure/DOCKER_REFERENCE.md .claude/reference/testing/agent_profiles.md .claude/reference/testing/flow_reference.md .claude/skills/README.md .claude/skills/collect-reports/SKILL.md .claude/reports/current/FRONTEND_LOGGING_ANALYSIS.md .claude/reports/current/FRONTEND_COMPONENT_LOGGER_MIGRATION.md .claude/reports/current/FRONTEND_DEV_REPORT.md .claude/reports/current/FRONTEND_DEV_STORE_LOGGER_MIGRATION.md .claude/reports/current/FRONTEND_DEV_SYSTEM_MONITOR_LOGGER.md .claude/reports/current/FRONTEND_LOGGING_IMPL_PLAN.md .claude/reports/current/MOSQUITTO_EXPORTER_ANALYSIS.md .claude/reports/current/GIT_COMMIT_PLAN.md .claude/reports/current/GIT_HEALTH_REPORT.md
+git commit -m "docs(claude): update reference, skills and current reports"
 ```
-
----
-
-## Commit 10: docs: update firmware docs, archive reports, add Makefile and scripts
-
-**Was:** El Trabajante Docs aktualisiert (API_REFERENCE, Mqtt_Protocoll, Roadmap, System_Overview, sensor-reading-flow). LOG_INFRASTRUKTUR_ANALYSE nach archive verschoben. BUGBOT, Makefile, scripts (Wokwi, hardware validation → scripts/tests/).
-
-**Dateien:**
-- `El Trabajante/docs/API_REFERENCE.md`
-- `El Trabajante/docs/Mqtt_Protocoll.md`
-- `El Trabajante/docs/Roadmap.md`
-- `El Trabajante/docs/System_Overview.md`
-- `El Trabajante/docs/system-flows/02-sensor-reading-flow.md`
-- `.claude/reports/Technical Manager/PROJECT_OVERVIEW.md`
-- `.claude/reports/Technical Manager/TM SKILLS.md` – NEU
-- `.claude/reports/User_Reports/AutoOneFullStack.md`
-- `.claude/reports/current/LOG_INFRASTRUKTUR_ANALYSE.md` – gelöscht (→ archive)
-- `.claude/reports/archive/LOG_INFRASTRUKTUR_ANALYSE.md` – NEU (archiviert)
-- `BUGBOT.md`
-- `Makefile`
-- `scripts/debug/start_session.sh`
-- `scripts/run-wokwi.bat`
-- `scripts/run-wokwi-tests.py` – NEU
-- `scripts/tests/` – NEU (run_hardware_validation_tests.py, test_hardware_validation.ps1 verschoben)
-- `run_hardware_validation_tests.py` – gelöscht (→ scripts/tests/)
-- `test_hardware_validation.ps1` – gelöscht (→ scripts/tests/)
-- `register_user.json` – gelöscht
-- `docs/` – NEU (mqtt-injection-analysis.md, wokwi-self-hosted-evaluation.md)
-
-**Befehle:**
-```bash
-git add "El Trabajante/docs/"
-git add ".claude/reports/"
-git add BUGBOT.md
-git add Makefile
-git add scripts/
-git add docs/
-git rm run_hardware_validation_tests.py
-git rm test_hardware_validation.ps1
-git rm register_user.json
-git rm ".claude/reports/current/LOG_INFRASTRUKTUR_ANALYSE.md"
-git add ".claude/reports/archive/LOG_INFRASTRUKTUR_ANALYSE.md"
-git commit -m "docs: update firmware docs, archive reports, add Makefile and scripts"
-```
-
----
-
-## Optional: Session-Reports (aktuell) – committen oder ignorieren
-
-**Dateien in `.claude/reports/current/`:**
-- AUFTRAG_STATUS_CHECK.md, DOCKER.md, DOCKER_REPORT.md, DOCKER_VOLLAUDIT.md
-- ESP_STORE_TEST_ANALYSE.md, PLAN.md, SESSION_BRIEFING.md, SYSTEM_CONTROL_REPORT.md
-- TEST_ENGINE_AUDIT.md, TEST_VERIFICATION_TRUTH.md, TEST_ZAHLEN_VERIFIZIERT.md
-- WEBSOCKET_E2E_ANALYSE.md, WOKWI_INTEGRATION_AUDIT.md, Wokwi_Full_Integration.md, verifikation_phase3_wokwi.md
-
-**Empfehlung:** Session-Reports sind ephemeral. Normalerweise **nicht** committen. Wenn doch: separater Commit `docs(reports): add current session reports` – oder in `.gitignore` mit `!.gitkeep` belassen.
 
 ---
 
 ## Abschluss
-
-**Vor Commit 1:** `.gitignore` erweitern:
-```
-# Vitest coverage
-El Frontend/coverage/
-
-# Python cache (root scripts)
-scripts/__pycache__/
-
-# Debug / local
-debug_output.txt
-.claude/settings.local.json
-```
 
 **Nach allen Commits:**
 ```bash
@@ -349,21 +205,17 @@ git push origin feature/docs-cleanup
 
 **Zusammenfassung:**
 
-| # | Commit | Typ |
-|---|--------|-----|
-| 1 | chore(git): remove binary, extend gitignore | chore |
-| 2 | refactor(server): remove sensor_processing, add Prometheus | refactor |
-| 3 | refactor(firmware): server-centric, remove PiEnhanced/http_client | refactor |
-| 4 | test(server): update e2e, add actuator/websocket tests | test |
-| 5 | test(firmware): update Wokwi scenarios | test |
-| 6 | feat(frontend): add Vitest, Playwright, tests | feat |
-| 7 | ci: add workflows, update pr-checks | ci |
-| 8 | chore(docker): monitoring stack, CI/E2E compose | chore |
-| 9 | feat(agents): agent-manager, skills, routing | feat |
-| 10 | docs: firmware docs, archive, Makefile, scripts | docs |
+| # | Commit | Typ | Schwerpunkt |
+|---|--------|-----|-------------|
+| 1 | chore(docker): add monitoring stack config and Grafana alerting | chore | Docker/Monitoring |
+| 2 | chore(config): extend .env.example for Grafana, pgAdmin and Wokwi | chore | Config |
+| 3 | chore(build): extend Makefile with monitoring and log targets | chore | Build |
+| 4 | feat(server): add Prometheus custom metrics and simplify health endpoint | feat | Server |
+| 5 | feat(frontend): add structured logger and migrate components and stores | feat | Frontend |
+| 6 | docs(tm): cleanup TM commands and inbox, add pending commands and archive | docs | TM |
+| 7 | docs(claude): update reference, skills and current reports | docs | Claude |
 
 **Hinweise:**
-- `mosquitto-installer.exe` ist bereits gestaged – Commit 1 baut darauf auf.
-- Reihenfolge berücksichtigt Abhängigkeiten (z.B. .gitignore vor anderen Commits).
-- Session-Reports (reports/current/) optional – je nach Team-Workflow.
-- Skill-Ordner `collect-system-status.md` hat ungewöhnlichen Namen (`.md` im Pfad) – evtl. später zu `collect-system-status` umbenennen.
+- Commit 6: `git rm` für bereits gelöschte Dateien ausführen, danach neue/geänderte TM-Dateien mit `git add`. Unter Windows Pfade in Anführungszeichen setzen, falls Leerzeichen vorkommen.
+- Commit 5: Viele Dateien; bei Bedarf in einem Schritt mit `git add "El Frontend/"` (ohne Anführungszeichen-Anzahl reduzieren), dann prüfen ob nur die gewünschten Änderungen gestaged sind.
+- Reihenfolge einhalten: Infrastruktur (1–3) → Code (4–5) → Dokumentation (6–7).

@@ -1,143 +1,62 @@
-# Agent Management Report: Technical Manager Ordner Optimierung
+# Agent-Management Report
 
-**Datum:** 2026-02-09
-**Auftrag:** .technical-manager/ Ordner optimieren fuer harmonische TM-Agent-Zusammenarbeit
-**Status:** ABGESCHLOSSEN
-
----
-
-## 1. Ausgangslage (IST vor Optimierung)
-
-### Ordnerstruktur
-- `reports/current/` fehlte
-- `archive/` fehlte
-- Alle anderen Ordner vorhanden (commands/pending, commands/completed, inbox/agent-reports, inbox/system-logs)
-
-### TECHNICAL_MANAGER.md
-- Nur 12 Agents gelistet (agent-manager fehlte)
-- Keine Ops-Skills dokumentiert (/collect-reports, /updatedocs, /git-commit, /git-health, /verify-plan, /do, /test)
-- Keine operativen Szenarien (Session-Start, Trockentest, Hardware-Test, CI rot, Feature, Debugging, Strategische Planung)
-- Auftragsformat veraltet: `@agent - Edit Mode` + `**Task:**/**Output:**`
-- Fehlte: Auftragsphilosophie (TM sagt WAS/WARUM, Agents bestimmen WIE)
-- Keine Report-Flow-Dokumentation
-- Debug-Agents als "Read-Only" beschrieben (sie haben jetzt Bash + Eigenanalyse)
-
-### README.md
-- Keine Agent-Zaehlung
-- Keine Ops-Skills erwaehnt
-- Ordnerstruktur unvollstaendig (kein reports/current/, kein archive/)
-
-### config/mcp-access-rules.md
-- Fehlte: `.claude/reports/Testrunner/` als erlaubter Read-Only Pfad
-- Fehlte: GitHub CLI (gh) in erlaubten Bash-Commands
-- Fehlte: 5. Rationale-Punkt (Role confusion)
-
-### Skills (infrastructure-status, ci-quality-gates, strategic-planning)
-- Alle VS Code Command-Beispiele im alten Format (`@agent - Edit/Plan Mode` + `**Task:**`)
-- ci-quality-gates: Delegierte an `@frontend-dev` fuer Playwright statt `/test`
-- ci-quality-gates: "On Doubt" verwies auf `@server-dev` statt `@server-debug`
-- strategic-planning: Code-Detail-Anfragen im alten Format
-
-### Keine veralteten system-manager Referenzen gefunden (gut!)
+**Erstellt:** 2026-02-10
+**Modus:** Neuer Skill angelegt (auf Robin-Anfrage)
+**Auftrag:** Neuen Skill erstellen, der Kontext aus dem Chat versteht, betroffene Bereiche vollständig auf KI-Fehler untersucht; Report standardmäßig, Fix nur auf Anfrage. Alle gelieferten Fehlerkategorien erfassen und nach Projekt-Pattern/Referenzen ausrichten.
 
 ---
 
-## 2. Durchgefuehrte Aenderungen
+## 1. Zusammenfassung
 
-### A. Ordnerstruktur
-| Aenderung | Grund |
-|-----------|-------|
-| `reports/current/` erstellt | TM-eigene aktive Reports |
-| `archive/` erstellt | Archivierung alter Reports und Commands |
-
-### B. TECHNICAL_MANAGER.md (komplett neu geschrieben)
-| Sektion | Aenderung |
-|---------|-----------|
-| 1. TM Skills | Unveraendert (3 Skills mit 4-Phasen-Methodik) |
-| 2. VS Code Agent System | **NEU:** 4 Kategorien (System/Debug/Dev/Ops), alle 13 Agents + 7 Ops-Skills |
-| 2.2 Debug Agents | **NEU:** "have Bash access and perform autonomous cross-layer analysis" |
-| 2.3 Dev Agents | **NEU:** "analyze existing codebase FIRST (Mode A), then implement (Mode B)" |
-| 2.4 Ops Skills | **NEU:** Komplette Tabelle aller 7 Ops-Skills mit Triggern |
-| 3. Operational Scenarios | **NEU:** 7 Szenarien (Session-Start, Trockentest, Hardware, CI, Feature, Debug, Strategic) |
-| 4. How TM Formulates Commands | **NEU:** Context/Focus/Goal/Success-Criterion Format + 3 Beispiele |
-| 4.3 What TM Commands Do NOT Include | **NEU:** Explizit: keine Dateipfade, keine Funktionsnamen, keine Schritt-Anleitungen |
-| 5. Information Flow | **NEU:** Report-Flow-Tabelle mit allen Quellen und Zielen |
-| 6. Decision Matrix | Erweitert um /test, /verify-plan, /git-health |
-| 9. Key Rules | **NEU:** 7 Kernregeln inkl. "TM orchestrates, agents execute" |
-
-### C. README.md
-| Aenderung | Grund |
-|-----------|-------|
-| Agent-System-Uebersicht mit Zaehlung | TM sieht sofort: 13 Agents + 7 Ops Skills |
-| Ordnerstruktur aktualisiert | reports/current/ und archive/ hinzugefuegt |
-| "What TM Does NOT Do" erweitert | "Specify file paths or function names" hinzugefuegt |
-| Datums-Update | Updated: 2026-02-09 |
-
-### D. config/mcp-access-rules.md
-| Aenderung | Grund |
-|-----------|-------|
-| `.claude/reports/Testrunner/` hinzugefuegt | test-log-analyst Output ist TM-relevant |
-| GitHub CLI (gh) in erlaubte Bash-Commands | TM braucht gh fuer CI-Status |
-| 5. Rationale-Punkt hinzugefuegt | "Role confusion" Praevention |
-| archive/ in Workspace-Struktur | Neuer Ordner dokumentiert |
-
-### E. Skills
-| Skill | Aenderung |
-|-------|-----------|
-| infrastructure-status | VS Code Command-Beispiele im neuen Format (Context/Focus/Goal/Success). Integration-Beispiel fuer /test hinzugefuegt. |
-| ci-quality-gates | Playwright-Delegation: /test statt @frontend-dev. "On Doubt": @server-debug statt @server-dev + /verify-plan Hinweis. Alle Command-Beispiele im neuen Format. |
-| strategic-planning | Code-Detail-Anfragen im neuen Format + /verify-plan Hinweis. Integration-Beispiele im neuen Auftragsformat. |
+Neuer Skill **ki-audit** wurde erstellt und im Router registriert. Der Skill leitet den Prüfumfang aus dem vom User im Chat bereitgestellten Kontext ab (vs_claude_best_practice-konform), wendet den vollständigen KI-Fehler-Katalog (9 Kategorien inkl. aller Unterpunkte) an und nutzt die Projekt-Referenzen für faktenbasierte Prüfung. Standardverhalten: Analyse + Report; Korrekturen nur bei ausdrücklicher User-Anfrage. CLAUDE.md und skills/README.md wurden um den Eintrag für ki-audit ergänzt.
 
 ---
 
-## 3. Konsistenz-Pruefung (Final)
+## 2. Angelegter Skill / Dokument
 
-| Pruefung | Ergebnis |
-|----------|----------|
-| `system-manager` Referenzen | KEINE gefunden |
-| `Edit Mode` / `Plan Mode` Suffix | KEINE mehr vorhanden |
-| Alte `**Task:**/**Output:**` Format | KEINE mehr in TM-Dateien |
-| Agent-Zaehlung konsistent | 13 Agents ueberall |
-| Ops-Skills vollstaendig | Alle 7 dokumentiert |
-| Report-Pfade korrekt | .claude/reports/current/ und .technical-manager/inbox/ |
-| Ordnerstruktur vollstaendig | Alle SOLL-Ordner existieren |
+| Eigenschaft | Wert |
+|-------------|------|
+| Skill-Datei | `.claude/skills/ki-audit/SKILL.md` |
+| Report-Output | `.claude/reports/current/KI_AUDIT_REPORT.md` |
+| Trigger | ki-audit, KI-Fehler prüfen, Qualitätsaudit, Bereich auf KI-Fehler untersuchen, halluzinierte API, falsches Mapping |
+| Abgrenzung | Kein Runtime-Debug (server/esp32/mqtt/frontend-debug), keine Cross-Report-Analyse (meta-analyst), kein TM-Plan-Check (verify-plan) |
 
 ---
 
-## 4. Nicht geaendert (bewusst)
+## 3. Inhalt des Skills (Überblick)
 
-| Datei/Bereich | Grund |
-|---------------|-------|
-| `.claude/agents/` | Nicht im Scope (VS Code Territorium) |
-| `.claude/skills/` | Nicht im Scope (VS Code Territorium) |
-| TM-Skill Kernlogik | 4-Phasen-Methodik und Datenbeschaffung sind solide |
-| mcp-access-rules FORBIDDEN | .claude/reference/testing/ bleibt FORBIDDEN (TM braucht keine Agent-internen Workflows) |
+- **Kontexterkennung:** Umfang aus User-Aussage (Datei, Bereich, Modul) → passende Fehler-Kategorien anwenden.
+- **KI-Fehler-Katalog:** Strukturell (1.1–1.4), Logik/Semantik (2.1–2.4), Format/Encoding (3.1–3.3), Integration (4.1–4.4), Grafana (5.1–5.5), Docker (6.1–6.4), Python/FastAPI (7.1–7.3), ESP32 (8.1–8.3), Meta (9.1–9.5).
+- **Referenzen:** api/, errors/, patterns/, infrastructure/, debugging/, testing/ – explizit in Skill Section 7 aufgeführt.
+- **Regel:** Nur Report, außer User fordert explizit „fixen“ / „korrigieren“ / „anpassen“.
 
 ---
 
-## 5. Zusammenfassung
+## 4. Durchgeführte Änderungen
 
-Der `.technical-manager/` Ordner ist jetzt vollstaendig synchron mit dem aktuellen Agent-System:
+### .claude/skills/ki-audit/SKILL.md (neu)
+- **Inhalt:** Frontmatter (name, description mit MUST BE USED when / NOT FOR / Keywords), Kontexterkennung, vollständiger Fehler-Katalog, Arbeitsweise, Report-Format, Regeln, Trigger, Referenz-Tabelle, Abgrenzung.
+- **Grund:** Robin-Anfrage nach neuem Skill für KI-Fehler-Audit mit allen gelieferten Fehlertypen und Referenz-Anbindung.
 
-1. **Alle 13 Agents** korrekt dokumentiert mit aktuellen Modi und Faehigkeiten
-2. **Alle 7 Ops-Skills** erstmals im TM-Workspace referenziert
-3. **7 operative Szenarien** geben dem TM eine klare Orientierung fuer jede Situation
-4. **Neues Auftragsformat** (Context/Focus/Goal/Success) statt altem Task/Output Format
-5. **Auftragsphilosophie** explizit dokumentiert: TM sagt WAS/WARUM, Agents bestimmen WIE
-6. **Ordnerstruktur** komplett mit reports/current/ und archive/
-7. **Konsistenz** verifiziert: keine veralteten Referenzen mehr
+### .claude/CLAUDE.md
+- **Vorher:** Skills-Tabelle endete mit verify-plan.
+- **Nachher:** Eine Zeile ergänzt: „KI-Audit, Bereich auf KI-Fehler prüfen, Qualitätsaudit | `ki-audit`“.
+- **Grund:** Skill im Haupt-Router sichtbar machen.
+
+### .claude/skills/README.md
+- **Vorher:** Skill-Auswahl und Ordnerstruktur ohne ki-audit.
+- **Nachher:** ki-audit in Tabelle und in der Ordnerstruktur (ki-audit/SKILL.md) ergänzt.
+- **Grund:** Index und Struktur aktuell halten.
 
 ---
 
-## 6. Geaenderte Dateien
+## 5. Offene Punkte
 
-| Datei | Aktion |
-|-------|--------|
-| `.technical-manager/TECHNICAL_MANAGER.md` | Komplett neu geschrieben (v2.0) |
-| `.technical-manager/README.md` | Aktualisiert |
-| `.technical-manager/config/mcp-access-rules.md` | Aktualisiert |
-| `.technical-manager/skills/infrastructure-status/SKILL.md` | Command-Beispiele aktualisiert |
-| `.technical-manager/skills/ci-quality-gates/SKILL.md` | Delegationen + Commands aktualisiert |
-| `.technical-manager/skills/strategic-planning/SKILL.md` | Command-Beispiele aktualisiert |
-| `.technical-manager/reports/current/` | Ordner erstellt |
-| `.technical-manager/archive/` | Ordner erstellt |
+- Keine. Skill ist eigenständig aufrufbar; kein neuer Agent oder Flow-Eintrag nötig (Skill-only wie verify-plan, git-commit).
+
+---
+
+## 6. Empfehlungen
+
+- Optional: In `.claude/reference/testing/agent_profiles.md` einen Eintrag „Skill ki-audit“ in einer Skills-Sektion ergänzen, falls ihr Skills dort katalogisieren wollt.
+- Bei ersten Einsätzen: Kontext im Chat klar benennen (z. B. „Grafana-Dashboards“, „docker-compose“, „El Servador health.py“), damit der Prüfumfang eindeutig ist.
