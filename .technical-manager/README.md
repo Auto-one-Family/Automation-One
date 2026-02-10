@@ -7,20 +7,27 @@ Exclusive workspace for Claude Desktop acting as Technical Manager (TM).
 
 ---
 
+## TM Session Start
+
+The TM boots via Claude Desktop Project Custom Instructions (see Section 0 in `TECHNICAL_MANAGER.md`).
+The boot sequence reads 5 files automatically and confirms context loading to Robin.
+
+---
+
 ## Directory Structure
 
 ```
 .technical-manager/
-|-- TECHNICAL_MANAGER.md          <-- Router (start here)
-|-- README.md                     <-- This file
+|-- TECHNICAL_MANAGER.md          <-- Router (TM reads this FIRST)
+|-- README.md                     <-- This file (Robin's guide)
 |
-|-- skills/
+|-- skills/                       <-- TM's 3 skills (exact paths!)
 |   |-- infrastructure-status/
-|   |   +-- SKILL.md              <-- Docker + Monitoring + Git
+|   |   +-- SKILL.md              <-- Skill 1: Docker + Monitoring + Git
 |   |-- ci-quality-gates/
-|   |   +-- SKILL.md              <-- CI/CD + API + Wokwi
+|   |   +-- SKILL.md              <-- Skill 2: CI/CD + API + Wokwi
 |   +-- strategic-planning/
-|       +-- SKILL.md              <-- IST/SOLL + Roadmaps
+|       +-- SKILL.md              <-- Skill 3: IST/SOLL + Roadmaps
 |
 |-- reports/
 |   |-- current/                  <-- Active TM reports
@@ -29,7 +36,7 @@ Exclusive workspace for Claude Desktop acting as Technical Manager (TM).
 |   +-- strategic/                <-- Skill 3 output
 |
 |-- commands/
-|   |-- pending/                  <-- Commands for VS Code Agents
+|   |-- pending/                  <-- TM writes commands here for VS Code agents
 |   +-- completed/                <-- Archive of completed commands
 |
 |-- inbox/
@@ -39,17 +46,18 @@ Exclusive workspace for Claude Desktop acting as Technical Manager (TM).
 |-- archive/                      <-- Old reports and commands
 |
 +-- config/
-    +-- mcp-access-rules.md       <-- Path restrictions & tool permissions
+    +-- mcp-access-rules.md       <-- TM's path restrictions & tool permissions
 ```
 
 ---
 
-## Quick Start
+## Quick Start (for TM)
 
-1. Open `TECHNICAL_MANAGER.md` (the router)
-2. Run **Infrastructure Status** skill first (always)
-3. Run **CI/CD & Quality Gates** after services are confirmed up
-4. Run **Strategic Planning** when Robin has an idea or plan
+1. Read `TECHNICAL_MANAGER.md` Section 0 (boot sequence)
+2. Read all 5 files listed there
+3. Run **Infrastructure Status** skill first (always)
+4. Run **CI/CD & Quality Gates** after services are confirmed up
+5. Run **Strategic Planning** when Robin has an idea or plan
 
 ---
 

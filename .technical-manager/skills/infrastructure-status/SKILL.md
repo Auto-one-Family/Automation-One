@@ -15,7 +15,7 @@
 ### 1.1 Docker Stack
 
 ```bash
-# Container status (all 9 expected services)
+# Container status (8 expected services, pgAdmin optional)
 docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 # Resource usage
@@ -136,7 +136,7 @@ ls -lh logs/postgres/ 2>/dev/null | tail -5
 | Check A | Check B | Contradiction if |
 |---------|---------|-----------------|
 | `docker ps` says "running" | Health endpoint returns 503 | Container up, service down |
-| Compose defines 9 services | `docker ps` shows < 4 | Core services missing |
+| Compose defines 8 services (+ pgAdmin optional) | `docker ps` shows < 4 | Core services missing |
 | `docker stats` shows 0 Net I/O | Service should receive MQTT | Network problem |
 | Git says "ahead 0" | Recent commits are local | Remote not pushed |
 | Prometheus `up` = 1 | curl health returns 503 | Scrape OK but service degraded |
