@@ -15,6 +15,7 @@ Status: IMPLEMENTED
 """
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -320,6 +321,26 @@ async def lifespan(app: FastAPI):
         )
         _maintenance_service.start()  # Registriert alle Jobs
         logger.info("MaintenanceService initialized and started")
+
+        # Step 3.4.3: Register Prometheus metrics update job
+        # Updates custom Gauges (uptime, CPU, memory, MQTT, ESP counts) every 15s.
+        # Gauges are in the default prometheus_client registry and automatically
+        # exposed by the Instrumentator at /api/v1/health/metrics.
+        logger.info("Registering Prometheus metrics update job...")
+        from .core.metrics import set_server_start_time, update_all_metrics_async
+        set_server_start_time(time.time())
+
+        async def _metrics_update_job() -> None:
+            await update_all_metrics_async(get_session)
+
+        from .core.scheduler import JobCategory
+        _central_scheduler.add_interval_job(
+            job_id="monitor_prometheus_metrics",
+            func=_metrics_update_job,
+            seconds=15,
+            category=JobCategory.MONITOR,
+        )
+        logger.info("Prometheus metrics job registered (15s interval)")
 
         # Step 3.5: Recover running Mock-ESP simulations from database (Paket X)
         # After server restart, resume any simulations that were active before shutdown
@@ -640,6 +661,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
+)
+
+# ===== PROMETHEUS INSTRUMENTATOR =====
+# Must be after CORS middleware, before router includes.
+# Exposes HTTP request metrics (duration, count, size) + custom gauges
+# at /api/v1/health/metrics in Prometheus text format.
+from prometheus_fastapi_instrumentator import Instrumentator
+
+Instrumentator().instrument(app).expose(
+    app,
+    endpoint="/api/v1/health/metrics",
+    include_in_schema=False,
 )
 
 # ===== ROUTES =====
