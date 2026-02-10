@@ -2,6 +2,20 @@
 # ==========================================
 # Collects Docker container logs and ships them to Loki.
 # Uses Docker service discovery to automatically find containers.
+#
+# Pipeline Overview:
+#   1. docker: {}          - Parse Docker json-file log driver format
+#   2. el-servador match   - Health drop → Multiline → Regex parser → Labels
+#   3. el-frontend match   - JSON parser → Labels
+#
+# Label Strategy:
+#   - compose_service, container, stream, compose_project: from Docker SD (all services)
+#   - level:     extracted by parser (el-servador: regex, el-frontend: json)
+#   - logger:    extracted by regex (el-servador only, e.g. "src.mqtt.handlers.sensor_handler")
+#   - component: extracted by json  (el-frontend only, e.g. "ESPCard")
+#
+# NOT as labels (high cardinality):
+#   - request_id, function, line: remain in log text, queryable via |= filter
 
 server:
   http_listen_port: 9080
@@ -34,10 +48,69 @@ scrape_configs:
       - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
         target_label: 'compose_project'
     pipeline_stages:
+      # Stage 1: Parse Docker json-file log driver wrapper
+      # Docker wraps each log line in JSON: {"log":"...", "stream":"...", "time":"..."}
+      # This stage unwraps it to get the actual log content.
       - docker: {}
+
+      # Stage 2: el-servador - Health drop, multiline, and structured parsing
+      # Server outputs text-format logs to stdout (Docker captures these):
+      #   Structured: "2026-02-09 23:10:47 - src.module.name - INFO - [-] - message"
+      #   Uvicorn:    "INFO:     172.18.0.3:59152 - "GET /path HTTP/1.1" 200 OK"
       - match:
           selector: '{compose_service="el-servador"}'
           stages:
+            # 2a: Drop health-check and metrics endpoint access logs (high frequency noise)
+            # Prometheus scrapes /health/metrics every 15s, Docker healthcheck hits /health/live every 30s
+            # Two drop patterns needed because server logs requests in two formats:
+            #   1. Uvicorn access: 'INFO:     ... "GET /api/v1/health/metrics HTTP/1.1" 200'
+            #   2. Structured middleware: '... - Request completed: GET /api/v1/health/metrics status=200'
             - drop:
                 source: ""
                 expression: ".*GET /api/v1/health/.* HTTP/.*"
+            - drop:
+                source: ""
+                expression: ".*Request completed: GET /api/v1/health/.*"
+
+            # 2b: Multiline aggregation for Python tracebacks
+            # A new log entry starts with a timestamp (structured) or log level prefix (uvicorn).
+            # Lines NOT matching firstline (e.g. traceback frames, exception details)
+            # are appended to the previous entry, keeping tracebacks as single Loki entries.
+            # Example traceback that gets aggregated:
+            #   2026-02-09 12:00:00 - src.module - ERROR - [-] - Unhandled exception:
+            #   Traceback (most recent call last):
+            #     File "/app/src/module.py", line 42, in handle
+            #       result = await self.process(data)
+            #   ValueError: Invalid data
+            - multiline:
+                firstline: '^\d{4}-\d{2}-\d{2}|^(?:INFO|WARNING|ERROR|DEBUG|CRITICAL):'
+                max_wait_time: 3s
+                max_lines: 50
+
+            # 2c: Regex parser for structured server text-logs
+            # Extracts: level (INFO/WARNING/ERROR/DEBUG), logger (Python module path)
+            # Format: "YYYY-MM-DD HH:MM:SS - logger.name - LEVEL - [request_id] - message"
+            # Uvicorn access logs won't match this regex → no labels extracted (acceptable)
+            - regex:
+                expression: '^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\s-\s(?P<logger>\S+)\s-\s(?P<level>\w+)\s-\s\[(?P<request_id>[^\]]*)\]\s-\s(?P<message>.*)'
+
+            # 2d: Promote extracted fields to Loki labels for efficient querying
+            # Only level and logger become labels (low cardinality).
+            # request_id stays in log text (high cardinality) → query with |= "request-uuid"
+            - labels:
+                level:
+                logger:
+
+      # Stage 3: el-frontend - JSON parsing for Vue 3 dashboard logs
+      # Frontend outputs JSON-structured logs via custom logger utility.
+      # Extracts level (info/warn/error/debug) and component (Vue component name).
+      - match:
+          selector: '{compose_service="el-frontend"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  component: component
+            - labels:
+                level:
+                component:

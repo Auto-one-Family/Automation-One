@@ -4,7 +4,7 @@ COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
 COMPOSE_E2E := -f docker-compose.yml -f docker-compose.e2e.yml
 
-.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status
+.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status devtools-up devtools-down devtools-logs devtools-status
 
 help:
 	@echo "AutomationOne Docker Commands:"
@@ -49,6 +49,12 @@ help:
 	@echo "  make monitor-down   - Stop monitoring stack"
 	@echo "  make monitor-logs   - Follow monitoring logs"
 	@echo "  make monitor-status - Monitoring container status"
+	@echo ""
+	@echo "DevTools Stack:"
+	@echo "  make devtools-up     - Start devtools (pgAdmin)"
+	@echo "  make devtools-down   - Stop devtools stack"
+	@echo "  make devtools-logs   - Follow devtools logs"
+	@echo "  make devtools-status - DevTools container status"
 
 up:
 	$(COMPOSE) up -d
@@ -147,3 +153,18 @@ monitor-logs:
 
 monitor-status:
 	$(COMPOSE) --profile monitoring ps
+
+# ============================================
+# DevTools Stack (Profile: devtools)
+# ============================================
+devtools-up:
+	$(COMPOSE) --profile devtools up -d
+
+devtools-down:
+	$(COMPOSE) --profile devtools down
+
+devtools-logs:
+	$(COMPOSE) --profile devtools logs -f --tail=100
+
+devtools-status:
+	$(COMPOSE) --profile devtools ps

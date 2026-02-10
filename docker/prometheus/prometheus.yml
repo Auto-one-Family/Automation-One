@@ -11,6 +11,20 @@ scrape_configs:
           service: 'el-servador'
           environment: 'development'
 
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgres'
+          environment: 'development'
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+
+  - job_name: 'mqtt-broker'
+    static_configs:
+      - targets: ['mosquitto-exporter:9234']
+        labels:
+          service: 'mqtt-broker'
+          environment: 'development'
