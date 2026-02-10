@@ -9,6 +9,9 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { websocketService, type WebSocketMessage, type WebSocketFilters } from '@/services/websocket'
 import type { MessageType } from '@/types'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('useWebSocket')
 
 // =============================================================================
 // Types
@@ -84,7 +87,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         subscribe(activeFilters.value)
       }
     } catch (error) {
-      console.error('[useWebSocket] Connection error:', error)
+      logger.error('Connection error', error)
       connectionError.value = error instanceof Error ? error.message : 'Connection failed'
       isConnected.value = false
     } finally {

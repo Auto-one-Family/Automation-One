@@ -31,12 +31,15 @@ import {
   AlertCircle,
   ChevronDown,
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
 
 // Database Sub-Components
 import FilterPanel from '@/components/database/FilterPanel.vue'
 import DataTable from '@/components/database/DataTable.vue'
 import Pagination from '@/components/database/Pagination.vue'
 import RecordDetailModal from '@/components/database/RecordDetailModal.vue'
+
+const log = createLogger('DatabaseTab')
 
 // ============================================================================
 // Store
@@ -120,7 +123,7 @@ async function handleSelectTable(tableName: string): Promise<void> {
     await store.selectTable(tableName)
     showFilterPanel.value = false
   } catch (err) {
-    console.error('[DatabaseTab] Failed to select table:', err)
+    log.error(' Failed to select table:', err)
   }
 }
 
@@ -128,7 +131,7 @@ async function handleRefresh(): Promise<void> {
   try {
     await store.refreshData()
   } catch (err) {
-    console.error('[DatabaseTab] Failed to refresh:', err)
+    log.error(' Failed to refresh:', err)
   }
 }
 
@@ -140,7 +143,7 @@ async function handleSort(column: string): Promise<void> {
   try {
     await store.toggleSort(column)
   } catch (err) {
-    console.error('[DatabaseTab] Failed to sort:', err)
+    log.error(' Failed to sort:', err)
   }
 }
 
@@ -148,7 +151,7 @@ async function handleApplyFilters(filters: Record<string, unknown>): Promise<voi
   try {
     await store.setFilters(filters)
   } catch (err) {
-    console.error('[DatabaseTab] Failed to apply filters:', err)
+    log.error(' Failed to apply filters:', err)
   }
 }
 
@@ -156,7 +159,7 @@ async function handleClearFilters(): Promise<void> {
   try {
     await store.clearFilters()
   } catch (err) {
-    console.error('[DatabaseTab] Failed to clear filters:', err)
+    log.error(' Failed to clear filters:', err)
   }
 }
 
@@ -168,7 +171,7 @@ async function handlePageChange(page: number): Promise<void> {
   try {
     await store.setPage(page)
   } catch (err) {
-    console.error('[DatabaseTab] Failed to change page:', err)
+    log.error(' Failed to change page:', err)
   }
 }
 
@@ -176,7 +179,7 @@ async function handlePageSizeChange(size: number): Promise<void> {
   try {
     await store.setPageSize(size)
   } catch (err) {
-    console.error('[DatabaseTab] Failed to change page size:', err)
+    log.error(' Failed to change page size:', err)
   }
 }
 

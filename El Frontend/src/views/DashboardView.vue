@@ -19,6 +19,9 @@ import {
   Filter,
   GitBranch
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('Dashboard')
 
 // Components
 import ActionBar from '@/components/dashboard/ActionBar.vue'
@@ -90,12 +93,12 @@ watch(
       // Open settings popover for this device
       settingsDevice.value = device
       isSettingsOpen.value = true
-      console.info(`[Dashboard] Opened settings for ${openSettingsId} via query parameter`)
+      logger.info(`Opened settings for ${openSettingsId} via query parameter`)
 
       // Remove query parameter from URL to prevent re-opening on refresh
       router.replace({ path: '/', query: {} })
     } else {
-      console.warn(`[Dashboard] Device ${openSettingsId} not found for openSettings query`)
+      logger.warn(`Device ${openSettingsId} not found for openSettings query`)
       // Remove invalid query parameter
       router.replace({ path: '/', query: {} })
     }
@@ -159,12 +162,18 @@ function toggleStatusFilter(filter: StatusFilter) {
   activeStatusFilters.value = newFilters
 }
 
+/** Reset type and status filters (used when "No Results" is shown) */
+function resetFilters() {
+  filterType.value = 'all'
+  activeStatusFilters.value = new Set()
+}
+
 // Handle Mock ESP created
 function onMockEspCreated(espId: string) {
   // Refresh devices to show the new ESP
   espStore.fetchAll()
   // Show a toast or notification (could be enhanced later)
-  console.log(`Mock ESP erstellt: ${espId}`)
+  logger.info(`Mock ESP erstellt: ${espId}`)
 }
 
 // Filtered ESPs (using type filter + status pills)
@@ -247,15 +256,15 @@ async function handleHeartbeat(espId: string) {
   if (!espStore.isMock(espId)) {
     // Real ESPs send heartbeats automatically every 60 seconds
     // There's no server endpoint to request a heartbeat from real devices
-    console.info(`[Dashboard] Heartbeat request ignored for Real ESP ${espId} - they send automatically`)
+    logger.info(`Heartbeat request ignored for Real ESP ${espId} - they send automatically`)
     return
   }
 
   try {
     await espStore.triggerHeartbeat(espId)
-    console.info(`[Dashboard] Heartbeat triggered for Mock ESP ${espId}`)
+    logger.info(`Heartbeat triggered for Mock ESP ${espId}`)
   } catch (err) {
-    console.error(`[Dashboard] Failed to trigger heartbeat for ${espId}:`, err)
+    logger.error(`Failed to trigger heartbeat for ${espId}`, err)
   }
 }
 
@@ -274,9 +283,9 @@ async function handleDelete(espId: string) {
 
   try {
     await espStore.deleteDevice(espId)
-    console.info(`[Dashboard] Device ${espId} deleted successfully`)
+    logger.info(`Device ${espId} deleted successfully`)
   } catch (err) {
-    console.error(`[Dashboard] Failed to delete device ${espId}:`, err)
+    logger.error(`Failed to delete device ${espId}`, err)
   }
 }
 
@@ -286,13 +295,13 @@ async function handleDelete(espId: string) {
  */
 async function handleToggleSafeMode(espId: string) {
   if (!espStore.isMock(espId)) {
-    console.warn(`[Dashboard] Safe-mode toggle not available for Real ESP ${espId}`)
+    logger.warn(`Safe-mode toggle not available for Real ESP ${espId}`)
     return
   }
 
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   if (!device) {
-    console.warn(`[Dashboard] Device ${espId} not found`)
+    logger.warn(`Device ${espId} not found`)
     return
   }
 
@@ -305,9 +314,9 @@ async function handleToggleSafeMode(espId: string) {
 
   try {
     await espStore.setState(espId, newState as any, 'Manueller Wechsel über Dashboard')
-    console.info(`[Dashboard] Safe-mode toggled for ${espId}: ${currentState} → ${newState}`)
+    logger.info(`Safe-mode toggled for ${espId}: ${currentState} → ${newState}`)
   } catch (err) {
-    console.error(`[Dashboard] Failed to toggle safe-mode for ${espId}:`, err)
+    logger.error(`Failed to toggle safe-mode for ${espId}`, err)
   }
 }
 
@@ -317,7 +326,7 @@ async function handleToggleSafeMode(espId: string) {
  */
 function handleSettings(device: ESPDevice) {
   const deviceId = espStore.getDeviceId(device)
-  console.info(`[Dashboard] Settings requested for ${deviceId}`)
+  logger.info(`Settings requested for ${deviceId}`)
 
   // Open ESPSettingsPopover
   settingsDevice.value = device
@@ -341,7 +350,7 @@ function handleSettingsClose() {
  * Handle device deletion from popover
  */
 function handleDeviceDeleted(payload: { deviceId: string }) {
-  console.info(`[Dashboard] Device ${payload.deviceId} was deleted via popover`)
+  logger.info(`Device ${payload.deviceId} was deleted via popover`)
   // Device list will be updated automatically via store
   handleSettingsClose()
 }
@@ -350,7 +359,7 @@ function handleDeviceDeleted(payload: { deviceId: string }) {
  * Handle name update from ESPOrbitalLayout or ESPSettingsPopover (Phase 3)
  */
 function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
-  console.info(`[Dashboard] Device name updated: ${payload.deviceId} → "${payload.name || 'Unbenannt'}"`)
+  logger.info(`Device name updated: ${payload.deviceId} → "${payload.name || 'Unbenannt'}"`)
   // Store is already updated via updateDevice(), just log for debugging
 }
 
@@ -360,7 +369,7 @@ function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
  * This handler is for logging and potential future cross-component coordination
  */
 function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName: string }) {
-  console.info(`[Dashboard] Zone updated: ${payload.deviceId} → "${payload.zoneName}" (${payload.zoneId})`)
+  logger.info(`Zone updated: ${payload.deviceId} → "${payload.zoneName}" (${payload.zoneId})`)
   // ESP Store is updated via WebSocket event from server
   // Card will automatically move to correct ZoneGroup via reactive computed
 }
@@ -424,7 +433,7 @@ function handleOpenPendingDevices(event: MouseEvent) {
       <p style="color: var(--color-text-muted)" class="mb-4">
         Keine Geräte entsprechen den aktuellen Filtern.
       </p>
-      <button class="btn-secondary" @click="filterType = 'all'; activeStatusFilters = new Set()">
+      <button class="btn-secondary" @click="resetFilters">
         Filter zurücksetzen
       </button>
     </div>

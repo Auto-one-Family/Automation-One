@@ -42,6 +42,9 @@ import {
   X,
   Maximize2,
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ServerLogsTab')
 
 // ============================================================================
 // Props
@@ -174,7 +177,7 @@ async function loadLogFiles(): Promise<void> {
       selectedFile.value = currentFile.name
     }
   } catch (err) {
-    console.error('[ServerLogsTab] Failed to load log files:', err)
+    log.error(' Failed to load log files:', err)
   }
 }
 
@@ -307,23 +310,23 @@ function getSummary(log: LogEntry): LogSummary | null {
   return summary
 }
 
-async function copyMessage(log: LogEntry, index: number) {
+async function copyMessage(logEntry: LogEntry, index: number) {
   try {
-    await navigator.clipboard.writeText(log.message)
+    await navigator.clipboard.writeText(logEntry.message)
     copiedMessageId.value = index
     setTimeout(() => { copiedMessageId.value = null }, 2000)
   } catch (e) {
-    console.error('[ServerLogsTab] Failed to copy:', e)
+    log.error('Failed to copy', e)
   }
 }
 
-async function copyAsJson(log: LogEntry, index: number) {
+async function copyAsJson(logEntry: LogEntry, index: number) {
   try {
-    await navigator.clipboard.writeText(JSON.stringify(log, null, 2))
+    await navigator.clipboard.writeText(JSON.stringify(logEntry, null, 2))
     copiedJsonId.value = index
     setTimeout(() => { copiedJsonId.value = null }, 2000)
   } catch (e) {
-    console.error('[ServerLogsTab] Failed to copy:', e)
+    log.error('Failed to copy', e)
   }
 }
 

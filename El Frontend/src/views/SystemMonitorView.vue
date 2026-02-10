@@ -30,6 +30,9 @@ import type { EventOrGroup, GroupingOptions } from '@/types/event-grouping'
 import { groupEventsByTimeWindow } from '@/utils/eventGrouper'
 import type { WebSocketMessage } from '@/services/websocket'
 import { X, CheckCircle } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('SystemMonitor')
 
 // Sub-Components
 import MonitorTabs, { type TabId } from '@/components/system-monitor/MonitorTabs.vue'
@@ -387,7 +390,7 @@ function handleWebSocketMessage(message: WebSocketMessage) {
   // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
   // MAX_EVENTS ist nur noch als Safety-Limit
   if (unifiedEvents.value.length > MAX_EVENTS) {
-    console.warn(`[SystemMonitor] Event count exceeds MAX_EVENTS (${MAX_EVENTS}) after WebSocket message`)
+    logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}) after WebSocket message`)
     unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
   }
 }
@@ -406,7 +409,7 @@ async function handleEventsRestored(message: WebSocketMessage) {
     message: string
   }
 
-  console.log('[SystemMonitor] Events restored:', data)
+  logger.info('Events restored', data)
 
   // Show success toast
   showToast(`✅ ${data.message}`, 'success')
@@ -550,11 +553,7 @@ if (import.meta.env.DEV) {
   const unmappedTypes = ALL_EVENT_TYPES.filter(type => !mappedTypes.has(type))
 
   if (unmappedTypes.length > 0) {
-    console.warn(
-      '[SystemMonitor] Unmapped event types detected:',
-      unmappedTypes,
-      '\nThese events will bypass DataSource filtering!'
-    )
+    logger.warn('Unmapped event types detected - will bypass DataSource filtering', { unmappedTypes })
   }
 }
 
@@ -847,7 +846,7 @@ async function handleLoadMore(): Promise<void> {
 
   isLoadingMore.value = true
   try {
-    console.log(`[SystemMonitor] Load More: cursor=${paginationCursor.value ?? 'initial'}`)
+    logger.debug('Load More', { cursor: paginationCursor.value ?? 'initial' })
 
     // Build params with pagination cursor
     const params = buildServerFilterParams()
@@ -880,13 +879,13 @@ async function handleLoadMore(): Promise<void> {
 
     // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
     if (unifiedEvents.value.length > MAX_EVENTS) {
-      console.warn(`[SystemMonitor] Event count exceeds MAX_EVENTS (${MAX_EVENTS}). This should not happen in normal operation.`)
+      logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}). This should not happen in normal operation.`)
       unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
     }
 
-    console.log(`[SystemMonitor] Loaded ${newEvents.length} more events (total: ${unifiedEvents.value.length}, hasMore: ${hasMoreEvents.value})`)
+    logger.debug('Loaded more events', { newEvents: newEvents.length, total: unifiedEvents.value.length, hasMore: hasMoreEvents.value })
   } catch (error) {
-    console.error('[SystemMonitor] Failed to load more events:', error)
+    logger.error('Failed to load more events', error)
   } finally {
     isLoadingMore.value = false
   }
@@ -914,7 +913,7 @@ async function loadHistoricalEvents(): Promise<void> {
   try {
     // Load events from user-selected data sources (persisted via DataSourceSelector)
     // Client-side filtering in filteredEvents handles additional visibility filters
-    console.log('[DEBUG] loadHistoricalEvents called with selected sources:', selectedDataSources.value, 'hours:', eventLoadHours.value ?? 'ALL')
+    logger.debug('loadHistoricalEvents called', { sources: selectedDataSources.value, hours: eventLoadHours.value ?? 'ALL' })
 
     // WICHTIG: Sehr hoher limitPerSource um alle historischen Events zu laden
     // Virtual Scrolling in UnifiedEventList kickt ab 200 Events automatisch ein
@@ -925,19 +924,19 @@ async function loadHistoricalEvents(): Promise<void> {
     paginationCursor.value = response.pagination.oldest_timestamp
     totalAvailableEvents.value = response.pagination.total_available
 
-    console.log('[DEBUG] API response:', {
+    logger.debug('API response', {
       eventCount: response.events.length,
       totalLoaded: response.total_loaded,
       totalAvailable: response.total_available,
       sources: response.sources,
-      sourceCounts: response.source_counts,  // ← CRITICAL: Wie viele Events pro Quelle?
+      sourceCounts: response.source_counts,
       firstEvent: response.events[0],
       eventTypes: [...new Set(response.events.map(e => e.source))]
     })
 
     // ⭐ CRITICAL DEBUG: Zeige Sensor-Events explizit
     const sensorEvents = response.events.filter(e => e.source === 'sensor_data')
-    console.log('[DEBUG] Sensor Events in Response:', {
+    logger.debug('Sensor Events in Response', {
       count: sensorEvents.length,
       first5: sensorEvents.slice(0, 5).map(e => ({
         id: e.id,
@@ -950,7 +949,7 @@ async function loadHistoricalEvents(): Promise<void> {
     // Transform API events to frontend UnifiedEvent format
     const historicalEvents = response.events.map(transformAggregatedEventToUnified)
 
-    console.log('[DEBUG] After transform:', {
+    logger.debug('After transform', {
       count: historicalEvents.length,
       firstEvent: historicalEvents[0],
       eventTypes: [...new Set(historicalEvents.map(e => e.event_type))],
@@ -962,7 +961,7 @@ async function loadHistoricalEvents(): Promise<void> {
     const existingIds = new Set(unifiedEvents.value.map(e => e.id))
     const newEvents = historicalEvents.filter(e => !existingIds.has(e.id))
 
-    console.log('[DEBUG] After duplicate filter:', {
+    logger.debug('After duplicate filter', {
       before: historicalEvents.length,
       after: newEvents.length,
       duplicatesRemoved: historicalEvents.length - newEvents.length,
@@ -981,12 +980,12 @@ async function loadHistoricalEvents(): Promise<void> {
     // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
     // MAX_EVENTS ist nur noch als Safety-Limit für extreme Fälle gedacht
     if (unifiedEvents.value.length > MAX_EVENTS) {
-      console.warn(`[SystemMonitor] Event count exceeds MAX_EVENTS (${MAX_EVENTS}). This should not happen in normal operation.`)
+      logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}). This should not happen in normal operation.`)
       unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
     }
 
     // ⭐ CRITICAL DEBUG: Finale Filter-Statistiken
-    console.log('[DEBUG] Final unifiedEvents:', {
+    logger.debug('Final unifiedEvents', {
       totalInMemory: unifiedEvents.value.length,
       byDataSource: {
         audit_log: unifiedEvents.value.filter(e => e.dataSource === 'audit_log').length,
@@ -1004,10 +1003,10 @@ async function loadHistoricalEvents(): Promise<void> {
       filteredCount: filteredEvents.value.length
     })
 
-    console.log(`[SystemMonitor] Loaded ${newEvents.length} historical events from ${response.sources.length} source(s)`)
-    console.log(`[SystemMonitor] ⚠️ Zeige ${filteredEvents.value.length} von ${unifiedEvents.value.length} Events (${unifiedEvents.value.length - filteredEvents.value.length} durch Filter versteckt)`)
+    logger.info(`Loaded ${newEvents.length} historical events from ${response.sources.length} source(s)`)
+    logger.info(`Zeige ${filteredEvents.value.length} von ${unifiedEvents.value.length} Events (${unifiedEvents.value.length - filteredEvents.value.length} durch Filter versteckt)`)
   } catch (error) {
-    console.error('[SystemMonitor] Failed to load historical events:', error)
+    logger.error('Failed to load historical events', error)
   } finally {
     isLoading.value = false
   }
@@ -1097,7 +1096,7 @@ async function loadHealthData() {
     const response = await getFleetHealth()
     healthDevices.value = response.devices
   } catch (error) {
-    console.error('Failed to load health data:', error)
+    logger.error('Failed to load health data', error)
   } finally {
     isHealthLoading.value = false
   }
@@ -1201,7 +1200,7 @@ async function loadStatistics() {
   try {
     statistics.value = await auditApi.getStatistics(statisticsTimeRange.value)
   } catch (err) {
-    console.error('[SystemMonitor] Failed to load statistics:', err)
+    logger.error('Failed to load statistics', err)
   }
 }
 
@@ -1322,7 +1321,7 @@ watch(
     filterReloadTimeout = setTimeout(() => {
       // Only reload if we're on the events tab and not already loading
       if (activeTab.value === 'events' && !isLoading.value) {
-        console.log('[SystemMonitor] Server-side filters changed, reloading events')
+        logger.debug('Server-side filters changed, reloading events')
         loadHistoricalEvents()
       }
     }, 300)  // 300ms debounce

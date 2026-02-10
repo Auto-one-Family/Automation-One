@@ -17,6 +17,9 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('DragState')
 
 // =============================================================================
 // Constants
@@ -28,12 +31,6 @@ import { ref, computed } from 'vue'
  * Verhindert "hängende" UI-States bei fehlgeschlagenen Drag-Events.
  */
 const DRAG_TIMEOUT_MS = 30000 // 30 Sekunden
-
-/**
- * Debug-Modus aktivieren (für Entwicklung)
- * IMMER aktiv für Drag-Debug - später wieder auf import.meta.env.DEV setzen
- */
-const DEBUG = import.meta.env.VITE_LOG_LEVEL === 'debug'
 
 // =============================================================================
 // Types
@@ -158,7 +155,7 @@ export const useDragStateStore = defineStore('dragState', () => {
 
     safetyTimeoutId = setTimeout(() => {
       if (isAnyDragActive.value) {
-        console.warn('[DragState] Safety timeout triggered - resetting stuck drag state')
+        logger.warn('Safety timeout triggered - resetting stuck drag state')
         stats.value.timeoutCount++
         endDrag()
       }
@@ -175,19 +172,6 @@ export const useDragStateStore = defineStore('dragState', () => {
     }
   }
 
-  /**
-   * Debug-Logger - mit auffälligem Styling für einfaches Debugging
-   */
-  function log(message: string, data?: Record<string, unknown>): void {
-    if (DEBUG) {
-      const style = 'background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-      if (data) {
-        console.log(`%c[DragState]%c ${message}`, style, 'color: #a78bfa;', data)
-      } else {
-        console.log(`%c[DragState]%c ${message}`, style, 'color: #a78bfa;')
-      }
-    }
-  }
 
   // ============================================
   // Actions
@@ -197,11 +181,11 @@ export const useDragStateStore = defineStore('dragState', () => {
    * Startet einen Sensor-Typ-Drag aus der Sidebar
    */
   function startSensorTypeDrag(payload: SensorTypeDragPayload): void {
-    log('Starting sensor type drag', { sensorType: payload.sensorType })
+    logger.debug('Starting sensor type drag', { sensorType: payload.sensorType })
 
     // Reset vorheriger State (Sicherheit)
     if (isAnyDragActive.value) {
-      log('Warning: Starting new drag while previous drag active - resetting')
+      logger.debug('Warning: Starting new drag while previous drag active - resetting')
       endDrag()
     }
 
@@ -217,11 +201,11 @@ export const useDragStateStore = defineStore('dragState', () => {
    * Startet einen ESP-Card-Drag (VueDraggable zwischen Zonen)
    */
   function startEspCardDrag(): void {
-    log('Starting ESP card drag')
+    logger.debug('Starting ESP card drag')
 
     // Reset vorheriger State (Sicherheit)
     if (isAnyDragActive.value) {
-      log('Warning: Starting new drag while previous drag active - resetting')
+      logger.debug('Warning: Starting new drag while previous drag active - resetting')
       endDrag()
     }
 
@@ -236,7 +220,7 @@ export const useDragStateStore = defineStore('dragState', () => {
    * Beendet einen ESP-Card-Drag
    */
   function endEspCardDrag(): void {
-    log('Ending ESP card drag')
+    logger.debug('Ending ESP card drag')
     isDraggingEspCard.value = false
 
     // Berechne Drag-Dauer für Statistiken
@@ -253,11 +237,11 @@ export const useDragStateStore = defineStore('dragState', () => {
    * Startet einen Sensor-Satellite-Drag für Chart-Analyse
    */
   function startSensorDrag(payload: SensorDragPayload): void {
-    log('Starting sensor drag', { espId: payload.espId, gpio: payload.gpio })
+    logger.debug('Starting sensor drag', { espId: payload.espId, gpio: payload.gpio })
 
     // Reset vorheriger State (Sicherheit)
     if (isAnyDragActive.value) {
-      log('Warning: Starting new drag while previous drag active - resetting')
+      logger.debug('Warning: Starting new drag while previous drag active - resetting')
       endDrag()
     }
 
@@ -274,11 +258,11 @@ export const useDragStateStore = defineStore('dragState', () => {
    * Startet einen Actuator-Typ-Drag aus der ActuatorSidebar (Phase 7)
    */
   function startActuatorTypeDrag(payload: ActuatorTypeDragPayload): void {
-    log('Starting actuator type drag', { actuatorType: payload.actuatorType })
+    logger.debug('Starting actuator type drag', { actuatorType: payload.actuatorType })
 
     // Reset vorheriger State (Sicherheit)
     if (isAnyDragActive.value) {
-      log('Warning: Starting new drag while previous drag active - resetting')
+      logger.debug('Warning: Starting new drag while previous drag active - resetting')
       endDrag()
     }
 
@@ -296,7 +280,7 @@ export const useDragStateStore = defineStore('dragState', () => {
    */
   function endDrag(): void {
     // Log current state BEFORE reset
-    log('endDrag() called', {
+    logger.debug('endDrag() called', {
       wasDraggingSensorType: isDraggingSensorType.value,
       wasDraggingSensor: isDraggingSensor.value,
       wasDraggingEspCard: isDraggingEspCard.value,
@@ -309,7 +293,7 @@ export const useDragStateStore = defineStore('dragState', () => {
     // Berechne Drag-Dauer für Statistiken
     if (dragStartTime.value) {
       stats.value.lastDragDuration = Date.now() - dragStartTime.value
-      log('Drag duration', { duration: `${stats.value.lastDragDuration}ms` })
+      logger.debug('Drag duration', { duration: `${stats.value.lastDragDuration}ms` })
     }
 
     // State zurücksetzen
@@ -325,14 +309,14 @@ export const useDragStateStore = defineStore('dragState', () => {
     stats.value.endCount++
 
     clearSafetyTimeout()
-    log('State reset complete', { stats: stats.value })
+    logger.debug('State reset complete', { stats: stats.value })
   }
 
   /**
    * Forciert einen Reset (für manuelle Intervention)
    */
   function forceReset(): void {
-    log('Force reset triggered')
+    logger.debug('Force reset triggered')
     endDrag()
   }
 
@@ -363,7 +347,7 @@ export const useDragStateStore = defineStore('dragState', () => {
     // Nur für native HTML5 Drags reagieren, NICHT für SortableJS/VueDraggable
     // isDraggingEspCard wird von VueDraggable verwaltet (@choose/@end Events)
     if (isDraggingEspCard.value) {
-      log('Global dragend ignored - ESP card drag is managed by VueDraggable', {
+      logger.debug('Global dragend ignored - ESP card drag is managed by VueDraggable', {
         target: (event.target as HTMLElement)?.tagName,
       })
       return
@@ -371,7 +355,7 @@ export const useDragStateStore = defineStore('dragState', () => {
 
     // Nur bei nativen Drags (Sensor-Typ aus Sidebar, Sensor-Satellite für Chart, Actuator-Typ aus Sidebar)
     if (isDraggingSensorType.value || isDraggingSensor.value || isDraggingActuatorType.value) {
-      log('Global dragend caught for native drag - ensuring state cleanup', {
+      logger.debug('Global dragend caught for native drag - ensuring state cleanup', {
         target: (event.target as HTMLElement)?.tagName,
         isDraggingSensorType: isDraggingSensorType.value,
         isDraggingSensor: isDraggingSensor.value,
@@ -380,7 +364,7 @@ export const useDragStateStore = defineStore('dragState', () => {
       // Kleine Verzögerung um Component-Handler Zeit zu geben
       setTimeout(() => {
         if (isDraggingSensorType.value || isDraggingSensor.value || isDraggingActuatorType.value) {
-          log('State still active after global dragend - forcing cleanup')
+          logger.debug('State still active after global dragend - forcing cleanup')
           endDrag()
         }
       }, 100)
@@ -393,7 +377,7 @@ export const useDragStateStore = defineStore('dragState', () => {
    */
   function handleKeyDown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && isAnyDragActive.value) {
-      log('Escape pressed - canceling drag')
+      logger.debug('Escape pressed - canceling drag')
       endDrag()
     }
   }
@@ -408,7 +392,7 @@ export const useDragStateStore = defineStore('dragState', () => {
     window.addEventListener('dragend', handleGlobalDragEnd, { capture: true })
     window.addEventListener('keydown', handleKeyDown)
     listenersRegistered = true
-    log('Global event listeners registered')
+    logger.debug('Global event listeners registered')
   }
 
   /**
@@ -422,7 +406,7 @@ export const useDragStateStore = defineStore('dragState', () => {
     window.removeEventListener('keydown', handleKeyDown)
     listenersRegistered = false
     clearSafetyTimeout()
-    log('Global event listeners cleaned up')
+    logger.debug('Global event listeners cleaned up')
   }
 
   // Auto-register listeners on store creation

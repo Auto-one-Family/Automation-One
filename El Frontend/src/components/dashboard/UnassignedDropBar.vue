@@ -24,6 +24,9 @@ import Badge from '@/components/common/Badge.vue'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useEspStore } from '@/stores/esp'
 import { espApi, type ESPDevice } from '@/api/esp'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('UnassignedDropBar')
 
 const espStore = useEspStore()
 const { handleRemoveFromZone, isProcessing, processingDeviceId } = useZoneDragDrop()
@@ -100,19 +103,19 @@ async function handleDragAdd(event: any) {
   // VueDraggable provides the added element directly in event.added
   const device = event?.added?.element as ESPDevice | undefined
   if (!device) {
-    console.warn('[UnassignedDropBar] handleDragAdd: No device in event.added.element')
+    log.warn('handleDragAdd: No device in event.added.element')
     return
   }
 
   const deviceId = getDeviceId(device)
   if (!deviceId) {
-    console.warn('[UnassignedDropBar] handleDragAdd: Device has no ID')
+    log.warn('handleDragAdd: Device has no ID')
     return
   }
 
   // Only unassign if device has a zone (was dragged FROM a zone)
   if (device.zone_id) {
-    console.debug(`[UnassignedDropBar] Unassigning device ${deviceId} from zone ${device.zone_id}`)
+    log.debug('Unassigning device from zone', { deviceId, zoneId: device.zone_id })
     await handleRemoveFromZone(device)
     // NOTE: handleRemoveFromZone() already calls espStore.fetchAll() internally
   }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { X, Copy, Check, ExternalLink } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('RecordDetail')
 
 const props = defineProps<{
   tableName: string
@@ -42,7 +44,7 @@ async function copyJson(): Promise<void> {
       copied.value = false
     }, 2000)
   } catch (err) {
-    console.error('Failed to copy:', err)
+    log.error('Failed to copy', err)
   }
 }
 

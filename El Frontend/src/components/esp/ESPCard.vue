@@ -75,6 +75,9 @@ import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { espApi, type ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ESPCard')
 
 interface Props {
   /** The ESP device data */
@@ -143,7 +146,7 @@ async function saveName() {
   const newName = editedName.value.trim() || null
   const deviceId = espId.value
 
-  console.log('[ESPCard] saveName called:', {
+  log.debug('saveName called', {
     deviceId,
     currentName: props.esp.name,
     newName,
@@ -152,7 +155,7 @@ async function saveName() {
 
   // No change? Just close
   if (newName === (props.esp.name || null)) {
-    console.log('[ESPCard] No change detected, cancelling')
+    log.debug('No change detected, cancelling')
     cancelEditName()
     return
   }
@@ -161,9 +164,9 @@ async function saveName() {
   saveError.value = ''
 
   try {
-    console.log('[ESPCard] Calling espStore.updateDevice with:', { name: newName || undefined })
+    log.debug('Calling espStore.updateDevice', { name: newName || undefined })
     const result = await espStore.updateDevice(deviceId, { name: newName || undefined })
-    console.log('[ESPCard] updateDevice returned:', result)
+    log.debug('updateDevice returned', result)
     isEditingName.value = false
     emit('nameUpdated', deviceId, newName)
   } catch (err: unknown) {

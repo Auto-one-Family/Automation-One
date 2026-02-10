@@ -34,6 +34,9 @@ import 'chartjs-adapter-date-fns'
 import { sensorsApi } from '@/api/sensors'
 import { websocketService } from '@/services/websocket'
 import type { ChartSensor, SensorReading } from '@/types'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('MultiSensorChart')
 
 // Register Chart.js components
 ChartJS.register(
@@ -136,17 +139,6 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 /** Retry-Timer */
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-// =============================================================================
-// Debug Logger
-// =============================================================================
-function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #14b8a6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  if (data) {
-    console.log(`%c[MultiSensorChart]%c ${message}`, style, 'color: #5eead4;', data)
-  } else {
-    console.log(`%c[MultiSensorChart]%c ${message}`, style, 'color: #5eead4;')
-  }
-}
 
 // =============================================================================
 // Computed
@@ -230,7 +222,7 @@ const computedYRange = computed(() => {
 
   // Fallback wenn keine Daten
   if (minVal === Infinity || maxVal === -Infinity) {
-    log('computedYRange: no valid data', { valueCount })
+    log.debug('computedYRange: no valid data', { valueCount })
     return { min: undefined, max: undefined }
   }
 
@@ -243,7 +235,7 @@ const computedYRange = computed(() => {
     max: Math.ceil((maxVal + padding) * 10) / 10,  // Auf 0.1 aufrunden
   }
 
-  log('computedYRange calculated', {
+  log.debug('computedYRange calculated', {
     rawMin: minVal,
     rawMax: maxVal,
     range,
@@ -369,7 +361,7 @@ const chartOptions = computed(() => {
  * Verwendet Retry-Logik bei Fehlern.
  */
 async function fetchData(retryAttempt = 0): Promise<void> {
-  log('fetchData called', {
+  log.debug('fetchData called', {
     sensorCount: props.sensors.length,
     sensors: props.sensors.map(s => s.id),
     timeRange: props.timeRange,
@@ -377,7 +369,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
   })
 
   if (props.sensors.length === 0) {
-    log('No sensors - skipping fetch')
+    log.debug('No sensors - skipping fetch')
     sensorData.value = new Map()
     return
   }
@@ -391,7 +383,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
   const now = new Date()
   const startTime = new Date(now.getTime() - timeRangeMs.value)
 
-  log('Fetching data', {
+  log.debug('Fetching data', {
     startTime: startTime.toISOString(),
     endTime: now.toISOString(),
   })
@@ -399,7 +391,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
   try {
     const promises = props.sensors.map(async (sensor) => {
       try {
-        log(`Querying API for sensor ${sensor.id}`, {
+        log.debug(`Querying API for sensor ${sensor.id}`, {
           esp_id: sensor.espId,
           gpio: sensor.gpio,
         })
@@ -410,14 +402,14 @@ async function fetchData(retryAttempt = 0): Promise<void> {
           end_time: now.toISOString(),
           limit: MAX_DATA_POINTS,
         })
-        log(`API response for ${sensor.id}`, {
+        log.debug(`API response for ${sensor.id}`, {
           readingsCount: response.readings?.length ?? 0,
           response,
         })
         return { id: sensor.id, readings: response.readings, error: null }
       } catch (err) {
         // Einzelner Sensor-Fehler wird nicht als kritischer Fehler behandelt
-        log(`API ERROR for ${sensor.id}`, { error: err })
+        log.debug(`API ERROR for ${sensor.id}`, { error: err })
         return { id: sensor.id, readings: [], error: err }
       }
     })
@@ -436,7 +428,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
 
     sensorData.value = newData
 
-    log('fetchData complete', {
+    log.debug('fetchData complete', {
       successCount,
       totalSensors: props.sensors.length,
       enableLiveUpdates: props.enableLiveUpdates,
@@ -445,13 +437,13 @@ async function fetchData(retryAttempt = 0): Promise<void> {
     // Kein Error wenn mindestens ein Sensor Daten hat oder Live-Updates aktiv sind
     if (successCount === 0 && !props.enableLiveUpdates) {
       // Keine historischen Daten - kein Error, nur Info
-      log('⚠️ No historical data available - waiting for live updates')
+      log.debug('⚠️ No historical data available - waiting for live updates')
     }
 
     error.value = null
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Fehler beim Laden der Daten'
-    log('fetchData FAILED', { error: err, errorMessage })
+    log.debug('fetchData FAILED', { error: err, errorMessage })
 
     // Retry-Logik
     if (retryAttempt < RETRY_CONFIG.maxAttempts) {
@@ -459,7 +451,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
         RETRY_CONFIG.baseDelay * Math.pow(2, retryAttempt),
         RETRY_CONFIG.maxDelay
       )
-      log(`Retry ${retryAttempt + 1}/${RETRY_CONFIG.maxAttempts} in ${delay}ms`)
+      log.debug(`Retry ${retryAttempt + 1}/${RETRY_CONFIG.maxAttempts} in ${delay}ms`)
 
       error.value = {
         message: `${errorMessage} (Retry ${retryAttempt + 1}/${RETRY_CONFIG.maxAttempts}...)`,
@@ -495,13 +487,13 @@ function retry(): void {
  * Richtet WebSocket-Subscriptions für Live-Updates ein.
  */
 function setupWebSocketSubscriptions(): void {
-  log('setupWebSocketSubscriptions', {
+  log.debug('setupWebSocketSubscriptions', {
     enableLiveUpdates: props.enableLiveUpdates,
     sensorCount: props.sensors.length,
   })
 
   if (!props.enableLiveUpdates || props.sensors.length === 0) {
-    log('WebSocket subscriptions skipped')
+    log.debug('WebSocket subscriptions skipped')
     return
   }
 
@@ -520,7 +512,7 @@ function setupWebSocketSubscriptions(): void {
       }
     )
     wsSubscriptionIds.value.push(subscriptionId)
-    log(`WebSocket subscription created`, {
+    log.debug(`WebSocket subscription created`, {
       sensorId: sensor.id,
       espId: sensor.espId,
       gpio: sensor.gpio,
@@ -528,7 +520,7 @@ function setupWebSocketSubscriptions(): void {
     })
   }
 
-  log(`✅ ${wsSubscriptionIds.value.length} WebSocket subscriptions aktiv`)
+  log.debug(`✅ ${wsSubscriptionIds.value.length} WebSocket subscriptions aktiv`)
 }
 
 /**
@@ -543,7 +535,7 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
     const now = Date.now()
     const lastLog = (handleSensorDataMessage as any)._lastFilterLog || 0
     if (now - lastLog > 5000) {
-      log(`WebSocket data filtered (GPIO mismatch)`, {
+      log.debug(`WebSocket data filtered (GPIO mismatch)`, {
         expectedGpio: sensor.gpio,
         receivedGpio: data.gpio,
         sensorId: sensor.id,
@@ -553,7 +545,7 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
     return
   }
 
-  log(`📡 WebSocket data received for ${sensor.id}`, { data, value: data.value ?? data.raw_value })
+  log.debug(`📡 WebSocket data received for ${sensor.id}`, { data, value: data.value ?? data.raw_value })
 
   // Erstelle SensorReading aus WebSocket-Daten
   const reading: SensorReading = {
@@ -575,7 +567,7 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
   newLiveData.set(sensor.id, updatedLive)
   liveDataPoints.value = newLiveData
 
-  log(`Live data updated for ${sensor.id}`, { totalPoints: updatedLive.length })
+  log.debug(`Live data updated for ${sensor.id}`, { totalPoints: updatedLive.length })
 }
 
 /**
@@ -610,7 +602,7 @@ const sensorIdsString = computed(() => props.sensors.map(s => s.id).sort().join(
 watch(
   sensorIdsString,
   (newIds, oldIds) => {
-    log('sensorIdsString changed', { newIds, oldIds })
+    log.debug('sensorIdsString changed', { newIds, oldIds })
     clearLiveData()
     fetchData()
     setupWebSocketSubscriptions()

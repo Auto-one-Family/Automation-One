@@ -55,6 +55,9 @@ import {
   Loader2,
   Check,
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('EventDetails')
 
 // ============================================================================
 // Props & Emits
@@ -423,7 +426,7 @@ async function copyCorrelationId() {
       copiedCorrelationId.value = false
     }, 2000)
   } catch (err) {
-    console.error('Failed to copy:', err)
+    log.error('Failed to copy', err)
   }
 }
 

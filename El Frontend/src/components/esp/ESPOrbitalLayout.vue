@@ -54,6 +54,9 @@ import {
 } from '@/utils/actuatorDefaults'
 import { getRecommendedGpios } from '@/utils/gpioConfig'
 import type { MockActuatorConfig } from '@/types'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('ESPOrbitalLayout')
 
 interface Props {
   /** The ESP device data */
@@ -254,7 +257,7 @@ async function handleOneWireScan() {
   try {
     await espStore.scanOneWireBus(espId.value, oneWireScanPin.value)
   } catch (err) {
-    console.error('[ESPOrbitalLayout] OneWire scan failed:', err)
+    logger.error('OneWire scan failed', err)
   }
 }
 
@@ -346,9 +349,9 @@ async function addMultipleOneWireSensors() {
       
       await espStore.addSensor(espId.value, config)
       successCount++
-      
+
     } catch (err) {
-      console.error(`[ESPOrbitalLayout] Failed to add OneWire sensor ${romCode}:`, err)
+      logger.error(`Failed to add OneWire sensor ${romCode}`, err)
       failCount++
     }
   }
@@ -409,7 +412,7 @@ function resetNewSensor() {
 function onSensorGpioValidation(valid: boolean, message: string | null): void {
   sensorGpioValid.value = valid
   if (!valid && message) {
-    console.debug('[ESPOrbitalLayout] GPIO validation:', message)
+    logger.debug('GPIO validation', { message })
   }
 }
 
@@ -489,7 +492,7 @@ function resetNewActuator() {
 function onActuatorGpioValidation(valid: boolean, message: string | null): void {
   actuatorGpioValid.value = valid
   if (!valid && message) {
-    console.debug('[ESPOrbitalLayout] Actuator GPIO validation:', message)
+    logger.debug('Actuator GPIO validation', { message })
   }
 }
 
@@ -500,7 +503,7 @@ function onActuatorAuxGpioValidation(valid: boolean, message: string | null): vo
   // aux_gpio=255 means "not used", which is always valid
   actuatorAuxGpioValid.value = valid || newActuator.value.aux_gpio === 255
   if (!valid && message && newActuator.value.aux_gpio !== 255) {
-    console.debug('[ESPOrbitalLayout] Actuator aux GPIO validation:', message)
+    logger.debug('Actuator aux GPIO validation', { message })
   }
 }
 
@@ -636,16 +639,10 @@ function getSensorLabel(sensorType: string): string {
 }
 
 // =============================================================================
-// Debug Logger
+// Debug Logger (replaced with structured logger)
 // =============================================================================
 function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #3b82f6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  const label = `ESPLayout:${espId.value}`
-  if (data) {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #60a5fa;', data)
-  } else {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #60a5fa;')
-  }
+  logger.debug(message, data)
 }
 
 // =============================================================================
@@ -868,7 +865,7 @@ async function addSensor() {
       espStore.fetchGpioStatus(espId.value)
     ])
   } catch (error: any) {
-    console.error('[ESPOrbitalLayout] Failed to add sensor:', error)
+    logger.error('Failed to add sensor', error)
 
     // Handle GPIO conflict (HTTP 409) - Phase 5
     if (error?.response?.status === 409) {
@@ -899,7 +896,7 @@ async function addSensor() {
 function openEditSensorModal(gpio: number) {
   const sensor = sensors.value.find(s => s.gpio === gpio)
   if (!sensor) {
-    console.error('[ESPOrbitalLayout] Sensor not found:', gpio)
+    logger.error('Sensor not found', { gpio })
     return
   }
 
@@ -1004,7 +1001,7 @@ async function saveEditSensor() {
       schedule_config: scheduleConfig,
     })
 
-    console.log(`[ESPOrbitalLayout] Sensor GPIO ${gpio} aktualisiert`)
+    logger.info(`Sensor GPIO ${gpio} aktualisiert`)
 
     // Success Toast (Phase 5)
     toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) aktualisiert`)
@@ -1015,7 +1012,7 @@ async function saveEditSensor() {
     // Refresh ESP data
     await espStore.fetchAll()
   } catch (err: any) {
-    console.error('[ESPOrbitalLayout] Failed to update sensor:', err)
+    logger.error('Failed to update sensor', err)
     editError.value = err.message || 'Fehler beim Speichern der Sensor-Konfiguration'
   } finally {
     isEditSaving.value = false
@@ -1047,7 +1044,7 @@ async function triggerMeasureNow() {
   try {
     const result = await sensorsApi.triggerMeasurement(espId.value, editingSensor.value.gpio)
     measureSuccess.value = `Messung angefordert (ID: ${result.request_id.slice(0, 8)}...)`
-    console.log('[ESPOrbitalLayout] Measurement triggered:', result)
+    logger.info('Measurement triggered', result)
 
     // Auto-clear success message after 5 seconds
     setTimeout(() => {
@@ -1059,7 +1056,7 @@ async function triggerMeasureNow() {
       await espStore.fetchAll()
     }, 2000)
   } catch (err: any) {
-    console.error('[ESPOrbitalLayout] Failed to trigger measurement:', err)
+    logger.error('Failed to trigger measurement', err)
     editError.value = err.message || 'Fehler bei der Messungsanforderung'
   } finally {
     isMeasuring.value = false
@@ -1090,7 +1087,7 @@ async function removeSensor() {
 
   try {
     await espStore.removeSensor(espId.value, gpio)
-    console.log(`[ESPOrbitalLayout] Sensor GPIO ${gpio} entfernt`)
+    logger.info(`Sensor GPIO ${gpio} entfernt`)
     toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) entfernt`)
 
     // Close modal
@@ -1100,7 +1097,7 @@ async function removeSensor() {
     // Refresh ESP data
     await espStore.fetchAll()
   } catch (err: any) {
-    console.error('[ESPOrbitalLayout] Failed to remove sensor:', err)
+    logger.error('Failed to remove sensor', err)
     editError.value = err.message || 'Fehler beim Entfernen des Sensors'
   } finally {
     isEditSaving.value = false

@@ -22,6 +22,9 @@ import {
 import { getQualityInfo, getGpioDescription } from '@/utils/labels'
 import { formatRelativeTime, formatNumber, formatSensorStatus, getModeLabel } from '@/utils/formatters'
 import type { SensorOperatingMode } from '@/types'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('SensorValueCard')
 
 interface Sensor {
   gpio: number
@@ -82,10 +85,10 @@ async function handleTriggerMeasurement() {
 
     toast.success(`Messung gestartet für GPIO ${props.sensor.gpio}`)
 
-    console.log('Measurement triggered:', result)
+    log.info('Measurement triggered', result)
 
   } catch (err: unknown) {
-    console.error('Measurement trigger failed:', err)
+    log.error('Measurement trigger failed', err)
 
     const errorMessage = (err as { response?: { data?: { detail?: string } } })
       .response?.data?.detail || 'Messung konnte nicht gestartet werden'

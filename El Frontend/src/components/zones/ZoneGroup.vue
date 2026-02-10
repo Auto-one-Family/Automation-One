@@ -21,6 +21,9 @@ import {
 import ESPCard from '@/components/esp/ESPCard.vue'
 import { type ESPDevice } from '@/api/esp'
 import { useDragStateStore } from '@/stores/dragState'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ZoneGroup')
 
 interface Props {
   /** Zone ID (technical, lowercase) */
@@ -79,7 +82,7 @@ function saveCollapsedState(zoneId: string, collapsed: boolean): void {
     stored[zoneId] = collapsed
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
   } catch (e) {
-    console.warn('Failed to save zone collapsed state:', e)
+    log.warn('Failed to save zone collapsed state', e)
   }
 }
 
@@ -141,16 +144,6 @@ const containerClasses = computed(() => {
   return classes
 })
 
-// Debug logger with consistent styling
-function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #ec4899; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  const label = `ZoneGroup:${props.zoneId}`
-  if (data) {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;', data)
-  } else {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;')
-  }
-}
 
 // Methods
 function toggleExpanded() {
@@ -166,7 +159,7 @@ function toggleExpanded() {
 // This is more reliable than @add/@remove events which have SortableJS format
 
 function handleDragChange(event: any) {
-  log('VueDraggable @change', {
+  log.debug('VueDraggable @change', {
     hasAdded: !!event.added,
     hasMoved: !!event.moved,
     hasRemoved: !!event.removed,
@@ -178,7 +171,7 @@ function handleDragChange(event: any) {
 
   // Handle moved event - reorder within zone (falls hier getriggert)
   if (event.moved) {
-    log('Device MOVED within zone', { oldIndex: event.moved.oldIndex, newIndex: event.moved.newIndex })
+    log.debug('Device MOVED within zone', { oldIndex: event.moved.oldIndex, newIndex: event.moved.newIndex })
     emit('devices-reordered', localDevices.value)
   }
 }
@@ -191,7 +184,7 @@ function handleDragAdd(event: any) {
   // - event.oldIndex, event.newIndex: Positionen
 
   const deviceId = event?.item?.dataset?.deviceId
-  log('VueDraggable @add 📥', {
+  log.debug('VueDraggable @add 📥', {
     deviceId,
     oldIndex: event?.oldIndex,
     newIndex: event?.newIndex,
@@ -200,7 +193,7 @@ function handleDragAdd(event: any) {
   })
 
   if (!deviceId) {
-    log('ERROR: No deviceId found in item dataset')
+    log.debug('ERROR: No deviceId found in item dataset')
     return
   }
 
@@ -210,13 +203,13 @@ function handleDragAdd(event: any) {
   )
 
   if (!device) {
-    log('ERROR: Device not found in localDevices', { deviceId, localDevices: localDevices.value.map(d => d.device_id || d.esp_id) })
+    log.debug('ERROR: Device not found in localDevices', { deviceId, localDevices: localDevices.value.map(d => d.device_id || d.esp_id) })
     return
   }
 
   const fromZoneId = device.zone_id || null
 
-  log('Device ADDED to zone ✅', {
+  log.debug('Device ADDED to zone ✅', {
     deviceId,
     fromZoneId,
     toZoneId: props.zoneId,
@@ -232,12 +225,12 @@ function handleDragAdd(event: any) {
 }
 
 function handleDragUpdate(_event: any) {
-  log('VueDraggable @update (legacy)', { event: _event })
+  log.debug('VueDraggable @update (legacy)', { event: _event })
   // Kept for compatibility but @change handles this better
 }
 
 function handleDragStart(event: any) {
-  log('VueDraggable @start 🚀', {
+  log.debug('VueDraggable @start 🚀', {
     item: event?.item?.dataset,
     itemClass: event?.item?.className?.slice?.(0, 80),
     from: event?.from?.className?.slice?.(0, 50),
@@ -257,7 +250,7 @@ function handleDragStart(event: any) {
 }
 
 function handleDragEnd(event: any) {
-  log('VueDraggable @end 🏁', {
+  log.debug('VueDraggable @end 🏁', {
     item: event?.item?.dataset,
     itemClass: event?.item?.className?.slice?.(0, 80),
     to: event?.to?.className?.slice?.(0, 50),
@@ -278,7 +271,7 @@ function handleDragEnd(event: any) {
 
 // VueDraggable @choose event - fired when item is selected (before drag starts)
 function handleDragChoose(event: any) {
-  log('VueDraggable @choose 👆 (item selected)', {
+  log.debug('VueDraggable @choose 👆 (item selected)', {
     item: event?.item?.dataset,
     itemClass: event?.item?.className?.slice?.(0, 80),
     oldIndex: event?.oldIndex,
@@ -295,7 +288,7 @@ function handleDragChoose(event: any) {
 
 // VueDraggable @unchoose event - fired when item is deselected
 function handleDragUnchoose(event: any) {
-  log('VueDraggable @unchoose 👋 (item deselected)', {
+  log.debug('VueDraggable @unchoose 👋 (item deselected)', {
     item: event?.item?.dataset,
     dragStarted: dragStarted.value,
   })
@@ -303,7 +296,7 @@ function handleDragUnchoose(event: any) {
   // Wenn @start nie gefeuert hat, wurde der Drag abgebrochen (z.B. kurzer Klick)
   // In diesem Fall müssen wir den State hier beenden
   if (!dragStarted.value) {
-    log('Drag was aborted (no @start), cleaning up state')
+    log.debug('Drag was aborted (no @start), cleaning up state')
     dragStore.endEspCardDrag()
   }
   // Sonst: @end wird den State beenden
@@ -328,14 +321,14 @@ function handleNativeDragStart(event: DragEvent) {
 
   if (isSatelliteDrag) {
     // Satellite-Drag für Chart - durchlassen
-    log('Native dragstart from satellite - allowing for chart drag', {
+    log.debug('Native dragstart from satellite - allowing for chart drag', {
       satelliteType: (target.closest('[data-satellite-type]') as HTMLElement)?.dataset?.satelliteType,
     })
     return
   }
 
   // Alle anderen native Drags blockieren - VueDraggable handhabt ESP-Card-Drag via Mouse Events
-  log('Native dragstart BLOCKED - VueDraggable uses mouse events (force-fallback)', {
+  log.debug('Native dragstart BLOCKED - VueDraggable uses mouse events (force-fallback)', {
     target: target.tagName,
     targetClass: target.className?.toString()?.slice(0, 50),
   })
@@ -348,7 +341,7 @@ function handleContainerDragEnter(event: DragEvent) {
   event.preventDefault()
   dragOverCount.value++
   isDragOver.value = true
-  log('Container dragenter', { dragOverCount: dragOverCount.value })
+  log.debug('Container dragenter', { dragOverCount: dragOverCount.value })
 }
 
 function handleContainerDragLeave(event: DragEvent) {
@@ -358,11 +351,11 @@ function handleContainerDragLeave(event: DragEvent) {
     dragOverCount.value = 0
     isDragOver.value = false
   }
-  log('Container dragleave', { dragOverCount: dragOverCount.value })
+  log.debug('Container dragleave', { dragOverCount: dragOverCount.value })
 }
 
 function handleContainerDrop(event: DragEvent) {
-  log('Container drop', { types: event.dataTransfer?.types })
+  log.debug('Container drop', { types: event.dataTransfer?.types })
   event.preventDefault()
   dragOverCount.value = 0
   isDragOver.value = false

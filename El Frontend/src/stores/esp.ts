@@ -14,10 +14,11 @@ import { actuatorsApi } from '@/api/actuators'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
-import type { 
-  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, 
-  ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, 
-  StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, 
+import { createLogger } from '@/utils/logger'
+import type {
+  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType,
+  ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason,
+  StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse,
   GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem, MultiValueEntry,
   PendingESPDevice, ESPApprovalRequest, ESPApprovalResponse,
   DeviceDiscoveredEvent, DeviceApprovedEvent, DeviceRejectedEvent
@@ -83,6 +84,9 @@ function getOfflineReason(source: StatusSource, reason?: string): OfflineReason 
 }
 
 export const useEspStore = defineStore('esp', () => {
+  // Logger
+  const logger = createLogger('ESPStore')
+
   // State
   const devices = ref<ESPDevice[]>([])
   const selectedDeviceId = ref<string | null>(null)
@@ -201,8 +205,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   // Fallback: Check if espId looks like UUID (contains dashes and 36 chars)
   if (espId.includes('-') && espId.length === 36) {
-    console.warn(
-      `[ESP Store] Received UUID "${espId}" instead of device_id. ` +
+    logger.warn(`Received UUID "${espId}" instead of device_id. ` +
       `Server should send device_id! Trying fallback lookup...`
     )
 
@@ -210,7 +213,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     index = devices.value.findIndex(d => d.id === espId)
 
     if (index !== -1) {
-      console.info(`[ESP Store] Fallback lookup successful: ${espId} → ${getDeviceId(devices.value[index])}`)
+      logger.info(`Fallback lookup successful: ${espId} → ${getDeviceId(devices.value[index])}`)
       return { index, device: devices.value[index] }
     }
   }
@@ -357,7 +360,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       gpioStatusMap.value.set(espId, status)
       return status
     } catch (err) {
-      console.error(`[ESP Store] Failed to fetch GPIO status for ${espId}:`, err)
+      logger.error(`Failed to fetch GPIO status for ${espId}:`, err)
       return null
     } finally {
       gpioStatusLoading.value.set(espId, false)
@@ -625,9 +628,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       const fetchedDevices = await espApi.listDevices(params)
 
       // DEBUG: Log fetched devices with name field
-      console.log('[ESP Store] fetchAll: Fetched devices:')
+      logger.info('fetchAll: Fetched devices:')
       fetchedDevices.forEach((d) => {
-        console.log(`  - ${d.device_id || d.esp_id}: name="${d.name}"`)
+        logger.info(`  - ${d.device_id || d.esp_id}: name="${d.name}"`)
       })
 
       // Deduplicate by device ID (safety net for API-level deduplication failures)
@@ -640,11 +643,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           seen.add(id)
           dedupedDevices.push(device)
         } else if (id) {
-          console.warn(`[ESP Store] Duplicate device filtered: ${id}`)
+          logger.warn(`Duplicate device filtered: ${id}`)
         }
       }
 
-      console.log('[ESP Store] fetchAll: Setting devices.value with', dedupedDevices.length, 'devices')
+      logger.info('Loaded devices', { count: dedupedDevices.length })
       devices.value = dedupedDevices
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch ESP devices')
@@ -695,10 +698,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     try {
       const devices = await espApi.getPendingDevices()
       pendingDevices.value = devices
-      console.debug(`[ESP Store] Fetched ${devices.length} pending devices`)
+      logger.debug(`Fetched ${devices.length} pending devices`)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch pending devices')
-      console.error('[ESP Store] Failed to fetch pending devices:', err)
+      logger.error(`Failed to fetch pending devices:`, err)
     } finally {
       isPendingLoading.value = false
     }
@@ -782,7 +785,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       if (existingIndex !== -1) {
         // Replace existing with new data
         devices.value[existingIndex] = device
-        console.debug(`[ESP Store] Device ${deviceId} already exists, updated`)
+        logger.debug(`Device ${deviceId} already exists, updated`)
       } else {
         devices.value.push(device)
       }
@@ -800,12 +803,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     isLoading.value = true
     error.value = null
 
-    console.log('[ESP Store] updateDevice called:', { deviceId, update })
+    logger.info('updateDevice called:', { deviceId, update })
 
     try {
       // First, persist the update to the database
       const dbDevice = await espApi.updateDevice(deviceId, update)
-      console.log('[ESP Store] espApi.updateDevice returned:', {
+      logger.info('espApi.updateDevice returned:', {
         deviceId: dbDevice.device_id,
         name: dbDevice.name,
       })
@@ -814,7 +817,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       // The DB only returns partial data, but espApi.getDevice() merges both sources
       let device: ESPDevice
       if (isMock(deviceId)) {
-        console.log('[ESP Store] Mock ESP detected, re-fetching complete data from server')
+        logger.info('Mock ESP detected, re-fetching complete data from server')
         device = await espApi.getDevice(deviceId)
       } else {
         device = dbDevice
@@ -826,7 +829,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       )
       if (index !== -1) {
         devices.value[index] = device
-        console.log('[ESP Store] Device updated in list:', device.name)
+        logger.info('Device updated in list:', device.name)
       }
 
       return device
@@ -849,7 +852,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   ): void {
     const index = devices.value.findIndex(d => getDeviceId(d) === deviceId)
     if (index === -1) {
-      console.warn(`[ESP Store] updateDeviceZone: device not found: ${deviceId}`)
+      logger.warn(`updateDeviceZone: device not found: ${deviceId}`)
       return
     }
 
@@ -861,7 +864,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       zone_name: zoneData.zone_name ?? device.zone_name,
       master_zone_id: zoneData.master_zone_id ?? device.master_zone_id,
     }
-    console.info(`[ESP Store] Zone updated (optimistic): ${deviceId} → ${zoneData.zone_id}`)
+    logger.info(`Zone updated (optimistic): ${deviceId} → ${zoneData.zone_id}`)
   }
 
   async function deleteDevice(deviceId: string): Promise<void> {
@@ -875,7 +878,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
       // If 404, device is already gone - still remove from local list
       if (axiosError.response?.status === 404) {
-        console.warn(`[ESP Store] Device ${deviceId} not found on server, removing from local list`)
+        logger.warn(`Device ${deviceId} not found on server, removing from local list`)
       } else {
         error.value = extractErrorMessage(err, `Fehler beim Löschen von ${deviceId}`)
         throw err
@@ -1329,7 +1332,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const espId = data.esp_id || data.device_id
 
     // DEBUG: Log when WebSocket event arrives
-    console.log('[ESP Store] handleEspHealth received:', {
+    logger.info('handleEspHealth received:', {
       esp_id: espId,
       status: data.status,
       timestamp: data.timestamp,
@@ -1344,9 +1347,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     // BUG X FIX: Unknown device came online - refresh device list for real-time updates
     if (!device && data.status === 'online') {
-      console.info(`[ESP Store] New device online: ${espId}, refreshing device list...`)
+      logger.info(`New device online: ${espId}, refreshing device list...`)
       fetchAll().catch(err => {
-        console.error('[ESP Store] Failed to refresh devices after new online device:', err)
+        logger.error(`Failed to refresh devices after new online device:`, err)
       })
       return
     }
@@ -1409,7 +1412,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         offlineInfo: data.status === 'offline' ? offlineInfo : undefined,
       }
 
-      console.debug(`[ESP Store] esp_health update for ${espId}:`, {
+      logger.debug(`esp_health update for ${espId}:`, {
         last_seen: newLastSeen,
         status: data.status ?? device.status,
         name: data.name ?? device.name,
@@ -1434,7 +1437,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const alertType = data.alert_type as string
 
     if (!espId) {
-      console.warn('[ESP Store] actuator_alert missing esp_id')
+      logger.warn('actuator_alert missing esp_id')
       return
     }
 
@@ -1467,7 +1470,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       }
     }
 
-    console.info(`[ESP Store] Actuator alert: ${espId} GPIO ${gpio ?? 'ALL'} - ${alertType}`)
+    logger.info(`Actuator alert: ${espId} GPIO ${gpio ?? 'ALL'} - ${alertType}`)
   }
 
   /**
@@ -1710,14 +1713,14 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         `${deviceName}: ${data.message}`,
         { duration: 4000 }
       )
-      console.info(`[ESP Store] Config success: ${data.esp_id} - ${data.config_type} (${data.count})`)
+      logger.info(`Config success: ${data.esp_id} - ${data.config_type} (${data.count})`)
     } else if (data.status === 'partial_success') {
       // Phase 4: Partial success - some items OK, some failed
       toast.warning(
         `${deviceName}: ${data.count} konfiguriert, ${data.failed_count || 0} fehlgeschlagen`,
         { duration: 6000 }
       )
-      console.warn(`[ESP Store] Config partial_success: ${data.esp_id} - ${data.count} OK, ${data.failed_count} failed`)
+      logger.warn(`Config partial_success: ${data.esp_id} - ${data.count} OK, ${data.failed_count} failed`)
 
       // Show detail toasts for individual failures (max 3)
       if (data.failures && data.failures.length > 0) {
@@ -1732,9 +1735,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         // Log additional failures to console
         if (data.failures.length > MAX_DETAIL_TOASTS) {
           const remaining = data.failures.slice(MAX_DETAIL_TOASTS)
-          console.warn(`[ESP Store] ${remaining.length} additional failures (not shown in toast):`)
+          logger.warn(`${remaining.length} additional failures (not shown in toast):`)
           remaining.forEach((failure: ConfigFailure) => {
-            console.warn(`  - GPIO ${failure.gpio} (${failure.type}): ${failure.error} - ${failure.detail || 'No details'}`)
+            logger.warn(`  - GPIO ${failure.gpio} (${failure.type}): ${failure.error} - ${failure.detail || 'No details'}`)
           })
         }
       }
@@ -1744,7 +1747,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         `${deviceName}: ${data.error_code || 'CONFIG_ERROR'} - ${data.message}`,
         { duration: 6000 }
       )
-      console.error(`[ESP Store] Config error: ${data.esp_id} - ${data.error_code}`)
+      logger.error(`Config error: ${data.esp_id} - ${data.error_code}`)
 
       // Phase 4: Show detail toasts for failures (max 3)
       if (data.failures && data.failures.length > 0) {
@@ -1759,9 +1762,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         // Log additional failures to console
         if (data.failures.length > MAX_DETAIL_TOASTS) {
           const remaining = data.failures.slice(MAX_DETAIL_TOASTS)
-          console.error(`[ESP Store] ${remaining.length} additional failures:`)
+          logger.error(`${remaining.length} additional failures:`)
           remaining.forEach((failure: ConfigFailure) => {
-            console.error(`  - GPIO ${failure.gpio}: ${failure.error} - ${failure.detail || 'No details'}`)
+            logger.error(`  - GPIO ${failure.gpio}: ${failure.error} - ${failure.detail || 'No details'}`)
           })
         }
       } else if (data.failed_item) {
@@ -1797,13 +1800,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const espId = data.esp_id || data.device_id
 
     if (!espId) {
-      console.warn('[ESP Store] zone_assignment missing esp_id')
+      logger.warn('zone_assignment missing esp_id')
       return
     }
 
     const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
     if (deviceIndex === -1) {
-      console.debug(`[ESP Store] Zone assignment for unknown device: ${espId}`)
+      logger.debug(`Zone assignment for unknown device: ${espId}`)
       return
     }
 
@@ -1818,11 +1821,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         zone_name: data.zone_name || undefined,
         master_zone_id: data.master_zone_id || undefined,
       }
-      console.info(`[ESP Store] Zone confirmed: ${espId} → ${data.zone_id} (reactivity triggered)`)
+      logger.info(`Zone confirmed: ${espId} → ${data.zone_id} (reactivity triggered)`)
     } else if (data.status === 'error') {
-      console.error(`[ESP Store] Zone assignment error for ${espId}: ${data.message}`)
+      logger.error(`Zone assignment error for ${espId}: ${data.message}`)
     } else {
-      console.warn(`[ESP Store] Unknown zone_assignment status: ${data.status}`)
+      logger.warn(`Unknown zone_assignment status: ${data.status}`)
     }
   }
 
@@ -1839,11 +1842,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const toast = useToast()
 
     if (!data.device_id) {
-      console.warn('[ESP Store] device_discovered missing device_id')
+      logger.warn('device_discovered missing device_id')
       return
     }
 
-    console.info(`[ESP Store] New device discovered: ${data.device_id}`)
+    logger.info(`New device discovered: ${data.device_id}`)
 
     // Add to pending list if not already present
     const exists = pendingDevices.value.some(d => d.device_id === data.device_id)
@@ -1875,11 +1878,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const toast = useToast()
 
     if (!data.device_id) {
-      console.warn('[ESP Store] device_approved missing device_id')
+      logger.warn('device_approved missing device_id')
       return
     }
 
-    console.info(`[ESP Store] Device approved: ${data.device_id} by ${data.approved_by}`)
+    logger.info(`Device approved: ${data.device_id} by ${data.approved_by}`)
 
     // Remove from pending list
     pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
@@ -1900,11 +1903,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const toast = useToast()
 
     if (!data.device_id) {
-      console.warn('[ESP Store] device_rejected missing device_id')
+      logger.warn('device_rejected missing device_id')
       return
     }
 
-    console.info(`[ESP Store] Device rejected: ${data.device_id} - ${data.rejection_reason}`)
+    logger.info(`Device rejected: ${data.device_id} - ${data.rejection_reason}`)
 
     // Remove from pending list
     pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
@@ -1937,20 +1940,20 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const event = message.data as SensorHealthEvent
 
     if (!event.esp_id || event.gpio === undefined) {
-      console.warn('[ESP Store] sensor_health missing esp_id or gpio')
+      logger.warn('sensor_health missing esp_id or gpio')
       return
     }
 
     // Find the device (with UUID fallback for robustness)
     const result = findDeviceByEspIdDefensive(event.esp_id)
     if (!result) {
-      console.debug(`[ESP Store] sensor_health: Device not found: ${event.esp_id}`)
+      logger.debug(`sensor_health: Device not found: ${event.esp_id}`)
       return
     }
 
     const { device } = result
     if (!device.sensors) {
-      console.debug(`[ESP Store] sensor_health: Device ${event.esp_id} has no sensors`)
+      logger.debug(`sensor_health: Device ${event.esp_id} has no sensors`)
       return
     }
 
@@ -1965,8 +1968,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     }>
     const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
     if (sensorIndex === -1) {
-      console.debug(
-        `[ESP Store] sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`
+      logger.debug(`sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`
       )
       return
     }
@@ -1981,14 +1983,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     sensor.timeout_seconds = event.timeout_seconds
 
     if (event.is_stale) {
-      console.warn(
-        `[ESP Store] Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +
+      logger.warn(`Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +
         `(${event.sensor_type}) - ${event.stale_reason}, ` +
         `overdue by ${event.seconds_overdue}s`
       )
     } else {
-      console.debug(
-        `[ESP Store] Sensor health updated: ${event.esp_id} GPIO ${event.gpio} ` +
+      logger.debug(`Sensor health updated: ${event.esp_id} GPIO ${event.gpio} ` +
         `is_stale=${event.is_stale}`
       )
     }
@@ -2352,7 +2352,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function initWebSocket(): void {
     if (wsUnsubscribers.length > 0) {
-      console.debug('[ESP Store] WebSocket handlers already registered, skipping')
+      logger.debug('WebSocket handlers already registered, skipping')
       return
     }
 
@@ -2391,16 +2391,16 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     // This ensures the UI shows the current state from the server after connection is established
     wsUnsubscribers.push(
       websocketService.onConnect(() => {
-        console.log('[ESP Store] WebSocket connected, refreshing ESP data...')
+        logger.info('WebSocket connected, refreshing ESP data...')
         // Use fetchAll to get current state from server
         // This handles the case where heartbeats arrived before WebSocket was connected
         fetchAll().catch(err => {
-          console.error('[ESP Store] Failed to refresh ESP data after WebSocket connect:', err)
+          logger.error(`Failed to refresh ESP data after WebSocket connect:`, err)
         })
       })
     )
 
-    console.debug('[ESP Store] WebSocket handlers registered')
+    logger.debug('WebSocket handlers registered')
   }
 
   /**
@@ -2411,7 +2411,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     wsUnsubscribers.forEach(unsub => unsub())
     wsUnsubscribers.length = 0
     ws.disconnect()
-    console.debug('[ESP Store] WebSocket handlers unregistered')
+    logger.debug('WebSocket handlers unregistered')
   }
 
   // Auto-initialize WebSocket handlers on store creation

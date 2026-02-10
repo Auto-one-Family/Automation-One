@@ -25,6 +25,7 @@ import {
 } from '@/utils/sensorDefaults'
 import { formatNumber } from '@/utils/formatters'
 import { useDragStateStore } from '@/stores/dragState'
+import { createLogger } from '@/utils/logger'
 import type { QualityLevel, MultiValueEntry } from '@/types'
 
 interface Props {
@@ -78,6 +79,9 @@ const dragStore = useDragStateStore()
 
 // Local drag state for visual feedback
 const isDragging = ref(false)
+
+// Logger
+const log = createLogger('SensorSatellite')
 
 // Get sensor configuration
 const sensorConfig = computed(() => SENSOR_TYPE_CONFIG[props.sensorType] || {
@@ -233,23 +237,13 @@ function handleClick() {
   }
 }
 
-// Debug logger with consistent styling
-function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  const label = `SensorSatellite:${props.espId}:GPIO${props.gpio}`
-  if (data) {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #34d399;', data)
-  } else {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #34d399;')
-  }
-}
 
 // Drag handlers for Multi-Sensor Chart (Phase 4)
 function handleDragStart(event: DragEvent) {
-  log('dragstart fired', { draggable: props.draggable, hasDataTransfer: !!event.dataTransfer })
+  log.debug('dragstart fired', { draggable: props.draggable, hasDataTransfer: !!event.dataTransfer })
 
   if (!props.draggable || !event.dataTransfer) {
-    log('dragstart ABORTED - not draggable or no dataTransfer')
+    log.debug('dragstart ABORTED - not draggable or no dataTransfer')
     return
   }
 
@@ -257,7 +251,7 @@ function handleDragStart(event: DragEvent) {
   // Ohne stopPropagation() würde VueDraggable denken, eine ESP-Card wird gedraggt,
   // was den UI-State korrumpiert und dragend nie aufgerufen wird.
   event.stopPropagation()
-  log('stopPropagation() called')
+  log.debug('stopPropagation() called')
 
   isDragging.value = true
 
@@ -272,24 +266,24 @@ function handleDragStart(event: DragEvent) {
   }
   event.dataTransfer.setData('application/json', JSON.stringify(dragData))
   event.dataTransfer.effectAllowed = 'copy'
-  log('dataTransfer set', { dragData })
+  log.debug('dataTransfer set', { dragData })
 
   // Update global drag state for auto-opening chart
   dragStore.startSensorDrag(dragData)
-  log('dragStore.startSensorDrag() called')
+  log.debug('dragStore.startSensorDrag() called')
 }
 
 function handleDragEnd(event: DragEvent) {
-  log('dragend fired', { dropEffect: event.dataTransfer?.dropEffect })
+  log.debug('dragend fired', { dropEffect: event.dataTransfer?.dropEffect })
 
   // KRITISCH: Auch hier stopPropagation für konsistentes Verhalten
   event.stopPropagation()
-  log('stopPropagation() called')
+  log.debug('stopPropagation() called')
 
   isDragging.value = false
   // Clear global drag state
   dragStore.endDrag()
-  log('dragStore.endDrag() called - drag complete')
+  log.debug('dragStore.endDrag() called - drag complete')
 }
 </script>
 

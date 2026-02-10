@@ -11,8 +11,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { logicApi } from '@/api/logic'
 import { extractConnections } from '@/types/logic'
+import { createLogger } from '@/utils/logger'
 import type { LogicRule, LogicConnection } from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
+
+const logger = createLogger('LogicStore')
 
 /**
  * Logic Execution Event from WebSocket.
@@ -119,10 +122,10 @@ export const useLogicStore = defineStore('logic', () => {
     try {
       const response = await logicApi.getRules(params)
       rules.value = response.items || []
-      console.debug(`[Logic Store] Fetched ${rules.value.length} rules`)
+      logger.debug('Fetched rules', { count: rules.value.length })
     } catch (err) {
       error.value = extractErrorMessage(err, 'Fehler beim Laden der Logic Rules')
-      console.error('[Logic Store] fetchRules error:', err)
+      logger.error('fetchRules error', err)
     } finally {
       isLoading.value = false
     }
@@ -147,7 +150,7 @@ export const useLogicStore = defineStore('logic', () => {
       return rule
     } catch (err) {
       error.value = extractErrorMessage(err, `Fehler beim Laden der Regel ${ruleId}`)
-      console.error('[Logic Store] fetchRule error:', err)
+      logger.error('fetchRule error', err)
       return null
     } finally {
       isLoading.value = false
@@ -167,11 +170,11 @@ export const useLogicStore = defineStore('logic', () => {
       if (rule) {
         rule.enabled = response.enabled
       }
-      console.info(`[Logic Store] Rule ${ruleId} toggled: enabled=${response.enabled}`)
+      logger.info('Rule toggled', { ruleId, enabled: response.enabled })
       return response.enabled
     } catch (err) {
       error.value = extractErrorMessage(err, 'Fehler beim Umschalten der Regel')
-      console.error('[Logic Store] toggleRule error:', err)
+      logger.error('toggleRule error', err)
       throw err
     }
   }
@@ -184,13 +187,11 @@ export const useLogicStore = defineStore('logic', () => {
 
     try {
       const response = await logicApi.testRule(ruleId)
-      console.info(
-        `[Logic Store] Rule ${ruleId} test: conditions=${response.conditions_result}`
-      )
+      logger.info('Rule test completed', { ruleId, conditionsResult: response.conditions_result })
       return response.conditions_result
     } catch (err) {
       error.value = extractErrorMessage(err, 'Fehler beim Testen der Regel')
-      console.error('[Logic Store] testRule error:', err)
+      logger.error('testRule error', err)
       throw err
     }
   }
@@ -246,7 +247,7 @@ export const useLogicStore = defineStore('logic', () => {
     const event = message.data as unknown as LogicExecutionEvent
     if (!event.rule_id) return
 
-    console.debug(`[Logic Store] Logic execution: ${event.rule_name} (${event.success ? 'success' : 'failed'})`)
+    logger.debug('Logic execution', { ruleName: event.rule_name, success: event.success })
 
     // Add to recent executions (keep last 20)
     recentExecutions.value.unshift(event)
@@ -280,7 +281,7 @@ export const useLogicStore = defineStore('logic', () => {
       { types: ['logic_execution'] },
       handleLogicExecutionEvent
     )
-    console.debug('[Logic Store] Subscribed to WebSocket for logic_execution events')
+    logger.debug('Subscribed to WebSocket for logic_execution events')
   }
 
   /**
@@ -290,7 +291,7 @@ export const useLogicStore = defineStore('logic', () => {
     if (wsSubscriptionId) {
       websocketService.unsubscribe(wsSubscriptionId)
       wsSubscriptionId = null
-      console.debug('[Logic Store] Unsubscribed from WebSocket')
+      logger.debug('Unsubscribed from WebSocket')
     }
   }
 

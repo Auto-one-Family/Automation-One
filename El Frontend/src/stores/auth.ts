@@ -2,7 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
 import { websocketService } from '@/services/websocket'
+import { createLogger } from '@/utils/logger'
 import type { User, LoginRequest, SetupRequest } from '@/types'
+
+const logger = createLogger('AuthStore')
 
 const TOKEN_KEY = 'el_frontend_access_token'
 const REFRESH_TOKEN_KEY = 'el_frontend_refresh_token'
@@ -56,7 +59,7 @@ export const useAuthStore = defineStore('auth', () => {
         }
       }
     } catch (err) {
-      console.error('Failed to check auth status:', err)
+      logger.error('Failed to check auth status', err)
       error.value = 'Failed to check authentication status'
     } finally {
       isLoading.value = false
@@ -125,7 +128,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await authApi.logout(logoutAll)
     } catch (err) {
-      console.error('Logout API call failed:', err)
+      logger.error('Logout API call failed', err)
     } finally {
       // Cleanup WebSocket connection before clearing auth
       // This ensures proper resource cleanup and prevents memory leaks

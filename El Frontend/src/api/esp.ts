@@ -1,12 +1,15 @@
 /**
  * Unified ESP API Client
- * 
+ *
  * Supports both Mock ESPs (via /debug/mock-esp) and Real ESPs (via /v1/esp/devices).
  * Automatically routes API calls based on ESP ID detection.
  */
 
 import api from './index'
 import { debugApi } from './debug'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('ESP-API')
 import type { 
   MockESP, 
   MockESPCreate, 
@@ -197,25 +200,24 @@ export const espApi = {
     // Fetch both Mock and Real ESPs in parallel
     const [mockEsps, dbDevices] = await Promise.all([
       debugApi.listMockEsps().catch((err) => {
-        console.warn('[ESP API] Failed to fetch mock ESPs:', err)
+        logger.warn('Failed to fetch mock ESPs', err)
         return [] as MockESP[]
       }),
       api
         .get<ESPDeviceListResponse>('/esp/devices', { params })
         .catch((err) => {
-          console.warn('[ESP API] Failed to fetch DB devices:', err)
+          logger.warn('Failed to fetch DB devices', err)
           return { data: { success: true, data: [] } }
         })
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])
 
-    console.log(`[ESP API] listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
+    logger.info(`listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
 
     // DEBUG: Log raw mock ESP data from server to verify name field
     if (mockEsps.length > 0) {
-      console.log('[ESP API] listDevices: Raw Mock ESP data from debug API:')
-      mockEsps.forEach((mock) => {
-        console.log(`  - ${mock.esp_id}: name="${mock.name}", zone_id="${mock.zone_id}"`)
+      logger.debug('Raw Mock ESP data from debug API', {
+        mocks: mockEsps.map(m => ({ esp_id: m.esp_id, name: m.name, zone_id: m.zone_id }))
       })
     }
 
@@ -256,7 +258,7 @@ export const espApi = {
         const deviceId = device.device_id || device.esp_id || ''
         // If it's in the mock store, skip it (we already have richer data)
         if (mockEspIds.has(deviceId)) {
-          console.debug(`[ESP API] Filtering out DB device ${deviceId} (exists in mock store)`)
+          logger.debug(`Filtering out DB device ${deviceId} (exists in mock store)`)
           return false
         }
         return true
@@ -265,7 +267,7 @@ export const espApi = {
         const deviceId = device.device_id || device.esp_id || ''
         // Mark mock-pattern IDs that aren't in mock store as orphaned
         if (isMockEsp(deviceId)) {
-          console.debug(`[ESP API] Marking ${deviceId} as orphaned mock (not in mock store)`)
+          logger.debug(`Marking ${deviceId} as orphaned mock (not in mock store)`)
           return {
             ...device,
             metadata: { ...device.metadata, orphaned_mock: true },
@@ -275,7 +277,7 @@ export const espApi = {
       })
 
     const result = [...normalizedMockEsps, ...filteredDbDevices]
-    console.debug(`[ESP API] Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
+    logger.debug(`Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
 
     // Combine: Mock ESPs first (active), then real/orphaned
     return result
@@ -324,7 +326,7 @@ export const espApi = {
 
         // If 404: device might exist in DB only (orphaned mock)
         if (axiosError.response?.status === 404) {
-          console.warn(`[ESP API] Mock ESP ${normalizedId} not in debug store, trying database...`)
+          logger.warn(`Mock ESP ${normalizedId} not in debug store, trying database...`)
           const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
           // Mark as orphaned mock for UI indication
           return {
@@ -395,12 +397,12 @@ export const espApi = {
     // Both Mock and Real ESPs are in the database and can be updated via the normal API
     // Mock ESPs are registered in DB when created (debug.py lines 104-146)
     try {
-      console.log(`[ESP API] updateDevice: Sending PATCH to /esp/devices/${normalizedId}`, update)
+      logger.debug(`Sending PATCH to /esp/devices/${normalizedId}`, update)
       const response = await api.patch<ESPDevice>(
         `/esp/devices/${normalizedId}`,
         update
       )
-      console.log(`[ESP API] updateDevice: Server response:`, {
+      logger.debug('Server response', {
         status: response.status,
         name: response.data.name,
         device_id: response.data.device_id,
@@ -413,8 +415,8 @@ export const espApi = {
       // If 404 and it's a Mock ESP, it might only exist in the debug store
       // This can happen if the server was restarted (DB cleared) but UI still has cached data
       if (axiosError.response?.status === 404 && isMockEsp(normalizedId)) {
-        console.warn(
-          `[ESP API] Mock ESP ${normalizedId} not found in database. ` +
+        logger.warn(
+          `Mock ESP ${normalizedId} not found in database. ` +
           `It may need to be recreated. Fetching current state from debug store...`
         )
 
@@ -476,16 +478,16 @@ export const espApi = {
         // If 404: device exists in DB but not in mock store (orphaned)
         // Try to delete from database directly
         if (axiosError.response?.status === 404) {
-          console.warn(`[ESP API] Mock ESP ${normalizedId} not found in debug store, trying database deletion...`)
+          logger.warn(`Mock ESP ${normalizedId} not found in debug store, trying database deletion...`)
           try {
             await api.delete(`/esp/devices/${normalizedId}`)
-            console.info(`[ESP API] Successfully deleted orphaned mock ESP ${normalizedId} from database`)
+            logger.info(`Successfully deleted orphaned mock ESP ${normalizedId} from database`)
             return
           } catch (dbErr: unknown) {
             const dbAxiosError = dbErr as { response?: { status?: number } }
             // If also 404 in DB, device is already gone - consider success
             if (dbAxiosError.response?.status === 404) {
-              console.info(`[ESP API] Mock ESP ${normalizedId} already deleted from database`)
+              logger.info(`Mock ESP ${normalizedId} already deleted from database`)
               return
             }
             throw new Error(`Konnte verwaisten Mock ESP nicht löschen: ${normalizedId}. Das Gerät existiert möglicherweise nur noch im UI-Cache.`)
@@ -544,7 +546,7 @@ export const espApi = {
 
     if (isMockEsp(normalizedId)) {
       // Mock ESPs don't have restart endpoint - be honest about it
-      console.info(`[ESP API] Restart command not available for Mock ESP ${normalizedId}`)
+      logger.info(`Restart command not available for Mock ESP ${normalizedId}`)
       return {
         success: false, // Changed to false - command wasn't actually executed
         device_id: normalizedId,
@@ -575,7 +577,7 @@ export const espApi = {
 
     if (isMockEsp(normalizedId)) {
       // Mock ESPs don't have reset endpoint - be honest about it
-      console.info(`[ESP API] Factory reset command not available for Mock ESP ${normalizedId}`)
+      logger.info(`Factory reset command not available for Mock ESP ${normalizedId}`)
       return {
         success: false, // Changed to false - command wasn't actually executed
         device_id: normalizedId,
