@@ -9,7 +9,7 @@ allowed-tools: Read
 
 # AutomationOne Skills - Index
 
-> **Version:** 3.2 | **Aktualisiert:** 2026-02-09 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
+> **Version:** 3.3 | **Aktualisiert:** 2026-02-11 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
 
 ## Skill-Auswahl
 
@@ -65,6 +65,8 @@ allowed-tools: Read
 │   └── SKILL.md                # Server-Log Analyse
 ├── mqtt-debug/
 │   └── SKILL.md                # MQTT Traffic Analyse
+├── frontend-debug/
+│   └── SKILL.md                # Frontend Debug Analyse
 ├── db-inspector/
 │   └── SKILL.md                # Datenbank-Inspektion
 ├── system-control/
@@ -142,6 +144,7 @@ Auto-one/
 | Dokument | Pfad | Wann lesen? |
 |----------|------|-------------|
 | **Test-Workflow** | `.claude/reference/testing/TEST_WORKFLOW.md` | NUR wenn User Tests anfordert |
+| **Wokwi-Testing** | `.claude/reference/testing/WOKWI_TESTING.md` | Bei Wokwi-Simulation, ESP32-Tests, CI Wokwi-Szenarien |
 | **Log-System** | `.claude/reference/debugging/LOG_SYSTEM.md` | Bei Log-Analyse, Serial Capture |
 | **CI Pipeline** | `.claude/reference/debugging/CI_PIPELINE.md` | Bei CI-Failures, GitHub Actions |
 | **KI-Limitationen** | `.claude/reference/debugging/ACCESS_LIMITATIONS.md` | Bei Zugriffsproblemen |

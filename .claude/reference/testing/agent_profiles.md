@@ -1,8 +1,8 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.1 | **Stand:** 2026-02-08
+> **Version:** 1.2 | **Stand:** 2026-02-10
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
-> **Genutzt von:** agent-manager (primär), system-manager, Technical Manager
+> **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
 ---
 
@@ -85,21 +85,14 @@
 - **Referenzen:** STATUS.md, god_kaiser.log, ERROR_CODES.md, MQTT_TOPICS.md, server-development SKILL
 - **Andere Agenten:** esp32-debug, mqtt-debug, db-inspector, system-control
 
-## 1.12 system-manager
-- **Datei:** `.claude/agents/System Manager/system-manager.md`
-- **Rolle:** Session-Orchestrator. Erstellt SESSION_BRIEFING.md für den TM. Erklärt das System, erstellt keine Agent-Befehle.
-- **Skills:** Nicht explizit; Konzept ähnlich System Manager Skill
-- **Referenzen:** STATUS.md, SYSTEM_OPERATIONS_REFERENCE.md, COMMUNICATION_FLOWS.md, ERROR_CODES.md, MQTT_TOPICS.md, REST_ENDPOINTS.md, WEBSOCKET_EVENTS.md
-- **Andere Agenten:** Alle über Agent-Kompendium beschrieben
-
-## 1.13 system-control
+## 1.12 system-control (Briefing + Ops)
 - **Datei:** `.claude/agents/system-control.md`
-- **Rolle:** System-Steuerung. Server/MQTT starten/stoppen, API-Aufrufe, ESP32-Flash, Debug-Sessions.
+- **Rolle:** Briefing-Modus: Erstellt SESSION_BRIEFING.md für TM. Ops-Modus: Server/MQTT starten/stoppen, API-Aufrufe, ESP32-Flash, Debug-Sessions. Ersetzt den archivierten system-manager (seit 2026-02-08).
 - **Skills:** system-control
-- **Referenzen:** SYSTEM_OPERATIONS_REFERENCE.md, LOG_LOCATIONS.md, MQTT_TOPICS.md
+- **Referenzen:** SYSTEM_OPERATIONS_REFERENCE.md, LOG_LOCATIONS.md, MQTT_TOPICS.md, STATUS.md, alle Referenz-Docs (im Briefing-Modus)
 - **Andere Agenten:** esp32-debug, server-debug, mqtt-debug, db-inspector
 
-## 1.14 test-log-analyst
+## 1.13 test-log-analyst
 - **Datei:** `.claude/agents/testing/test-log-analyst.md`
 - **Rolle:** Analysiert Test-Outputs (pytest, Vitest, Playwright, Wokwi) lokal und in CI.
 - **Skills:** test-log-analyst
@@ -128,11 +121,11 @@
 | mqtt-development | MQTT-Implementierung (Server + ESP32) | mqtt-dev |
 | server-debug | Server-Log-Analyse, Handler, Error-Codes | server-debug |
 | server-development | Server-Entwicklung, FastAPI, Services | server-dev |
-| System Manager | Session-Briefing, Agent-Kompendium | system-manager |
-| system-control | System-Operationen, Docker, Make | system-control |
+| system-control | Session-Briefing (Briefing-Modus) + System-Operationen, Docker, Make (Ops-Modus) | system-control |
 | test-log-analyst | Test-Log-Analyse, pytest/Vitest/Playwright/Wokwi | test-log-analyst |
 | updatedocs | Docs nach Code-Änderungen aktualisieren | Robin (/updatedocs) |
 | verify-plan | TM-Pläne gegen Codebase prüfen | Robin (/verify-plan) |
+| ki-audit | Bereich auf KI-Fehler prüfen, Report/Fix | Robin (/ki-audit) |
 
 ---
 
@@ -151,12 +144,12 @@
 | infrastructure/DOCKER_AKTUELL.md | Docker-Status | — |
 | infrastructure/DOCKER_REFERENCE.md | Docker-Referenz | — |
 | patterns/ARCHITECTURE_DEPENDENCIES.md | Architektur-Abhängigkeiten | meta-analyst, server-dev |
-| patterns/COMMUNICATION_FLOWS.md | Datenflüsse | esp32-debug, mqtt-debug, mqtt-dev, server-dev, system-manager |
+| patterns/COMMUNICATION_FLOWS.md | Datenflüsse | esp32-debug, mqtt-debug, mqtt-dev, server-dev, system-control |
 | patterns/vs_claude_best_practice.md | Claude-Code Best Practices | agent-manager |
 | security/PRODUCTION_CHECKLIST.md | Produktions-Checkliste | mqtt-development |
 | testing/agent_profiles.md | Agent-Profile (SOLL) | agent-manager |
 | testing/flow_reference.md | Flow-Definitionen | agent-manager, test-log-analyst |
-| testing/SYSTEM_OPERATIONS_REFERENCE.md | Operationen, Befehle | db-inspector, system-control, system-manager |
+| testing/SYSTEM_OPERATIONS_REFERENCE.md | Operationen, Befehle | db-inspector, system-control |
 | testing/TEST_ENGINE_REFERENCE.md | Makefile, Test-Targets | test-log-analyst |
 | testing/TEST_WORKFLOW.md | Test-Workflow | test-log-analyst |
 
@@ -380,9 +373,9 @@ Strukturiere Antworten bei Operationen so:
 
 ---
 
-## 4.2 system-manager (Agent-Datei)
+## 4.2 system-manager (ARCHIVIERT seit 2026-02-08)
 
-Vollständiger Inhalt: System-Manager ist der Session-Orchestrator: Er erstellt SESSION_BRIEFING.md; erklärt System, Agents, Workflows; aktiviert keine Agents und formuliert keine Befehle. Er liest `logs/current/STATUS.md`, alle Referenzen und Agent-Definitionen, schreibt `.claude/reports/current/SESSION_BRIEFING.md`. (Volltext: 469 Zeilen, inkl. Template für SESSION_BRIEFING mit Agent-Kompendium und Workflow-Struktur.)
+Archiviert nach `.claude/archive/system_manager_archived_20260208/`. Funktionalität (Session-Briefing) wurde in system-control (Briefing-Modus) integriert.
 
 ---
 

@@ -32,8 +32,10 @@
 | `logs/server/` | el-servador | FastAPI Server JSON-Logs |
 | `logs/mqtt/` | mqtt-broker | Mosquitto Broker Logs |
 | `logs/postgres/` | postgres | PostgreSQL Query/Connection Logs |
-| `logs/esp32/` | - | ESP32 Serial Logs (manuell) |
+| `logs/esp32/` | - | ESP32 Serial Logs (manuell via PlatformIO) |
+| `logs/wokwi/` | - | Wokwi Serial/MQTT/Report Logs (via make wokwi-test-*) |
 | `logs/current/` | - | Session-Logs (via start_session.sh) |
+| Docker Container | esp32-serial-logger | ESP32 Serial via TCP-Bridge (stdout only, Profile: hardware) |
 
 ### Docker-Compose Konfiguration
 
@@ -167,6 +169,7 @@ gh run download <run-id>                                                       #
 | Wokwi | `--serial-log-file <path>` | Text | ✅ Native CLI Option |
 | ESP32 | `> serial.log 2>&1` (Umleitung) | Text | ⚠️ log2file unzuverlässig |
 | MQTT | `> mqtt.log` (Umleitung) | Text | ❌ Capture nötig |
+| Wokwi Logs | `logs/wokwi/{serial,mqtt,reports}/` | Text/JSON | ✅ Automatisch (Makefile) |
 | CI | `gh run view --log` | Text | ✅ `--log` Flag |
 
 ---
@@ -873,8 +876,8 @@ curl -s "http://localhost:3100/loki/api/v1/label/service/values"
 
 | Label | Beschreibung | Beispiel-Werte |
 |-------|-------------|----------------|
-| `service` | Docker Compose Service-Name | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres` |
-| `container` | Container-Name | `automationone-server`, `automationone-mqtt` |
+| `service` | Docker Compose Service-Name | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres`, `esp32-serial-logger` |
+| `container` | Container-Name | `automationone-server`, `automationone-mqtt`, `automationone-esp32-serial` |
 | `compose_service` | Identisch zu `service` | `el-servador` |
 | `compose_project` | Compose-Projekt | `auto-one` |
 | `stream` | Log-Stream | `stdout`, `stderr` |
@@ -901,9 +904,11 @@ curl -s http://localhost:9090/api/v1/targets
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-09
-**Version:** 3.1
+**Letzte Aktualisierung:** 2026-02-11
+**Version:** 3.3
 **Changelog:**
+- 3.3: Loki-Labels: esp32-serial-logger Service und automationone-esp32-serial Container in Beispiel-Werte ergaenzt
+- 3.2: Wokwi Log-Pfade (logs/wokwi/) in Quick-Reference und Docker-Log-Tabelle ergaenzt
 - 3.1: Monitoring-Stack Section (Loki-Queries, Labels, Grafana, Prometheus)
 - 3.0: Docker-basierte Log-Infrastruktur
   - Neue Log-Verzeichnisse: `logs/server/`, `logs/mqtt/`, `logs/postgres/`, `logs/esp32/`

@@ -1,8 +1,8 @@
 # AutomationOne — Flow-Referenz
 
-> **Version:** 1.0 | **Stand:** 2026-02-06
+> **Version:** 1.1 | **Stand:** 2026-02-10
 > **Zweck:** Definiert ALLE Arbeitsabläufe im AutomationOne Agent-System
-> **Genutzt von:** agent-manager (primär), system-manager, Technical Manager
+> **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 > **Erweiterung:** Neue Flows werden als neue FLOW-Sektion am Ende angehängt
 
 ---
@@ -37,8 +37,8 @@ SCHRITT 1: SESSION STARTEN
 ├── Danach: Robin schreibt in VS Code Claude: "Session gestartet" + Hardware-Info
 └── Nächster Schritt: → SCHRITT 2
 
-SCHRITT 2: SYSTEM-MANAGER ERSTELLT BRIEFING
-├── Wer: system-manager (Agent in VS Code)
+SCHRITT 2: SYSTEM-CONTROL ERSTELLT BRIEFING
+├── Wer: system-control (Agent in VS Code, Briefing-Modus)
 ├── Trigger: "Session gestartet" im Chat
 ├── Liest: logs/current/STATUS.md + alle Referenz-Dokumentation
 ├── Erzeugt: .claude/reports/current/SESSION_BRIEFING.md
@@ -49,13 +49,13 @@ SCHRITT 2: SYSTEM-MANAGER ERSTELLT BRIEFING
 │   ├── Agent-Kompendium (ALLE Agents mit Capabilities)
 │   ├── Referenz-Verzeichnis (alle verfügbaren Dokumente)
 │   └── Workflow-Struktur (wie Agents zusammenarbeiten)
-├── REGEL: system-manager erstellt KEINE Agent-Befehle
-├── REGEL: system-manager entscheidet NICHT welcher Agent läuft
+├── REGEL: system-control (Briefing) erstellt KEINE Agent-Befehle
+├── REGEL: system-control (Briefing) entscheidet NICHT welcher Agent läuft
 ├── Prinzip: Wissenstransfer, nicht Befehlsvorgabe
 └── Nächster Schritt: Robin kopiert SESSION_BRIEFING.md zum TM → SCHRITT 3
 
 SCHRITT 3: TM ANALYSIERT UND FORMULIERT BEFEHLE
-├── Wer: Technical Manager (claude.ai — NICHT in VS Code)
+├── Wer: Technical Manager (Claude Desktop — NICHT in VS Code)
 ├── Erhält: SESSION_BRIEFING.md von Robin
 ├── Aktion: Analysiert Status, formuliert Agent-Befehle
 │   a) ZUERST: system-control Befehl (der "Starter")
@@ -115,7 +115,7 @@ SCHRITT 6: REPORTS KONSOLIDIEREN
 └── Nächster Schritt: Robin kopiert CONSOLIDATED_REPORT.md zum TM → SCHRITT 7
 
 SCHRITT 7: TM BEAUFTRAGT META-ANALYSE
-├── Wer: Technical Manager (claude.ai)
+├── Wer: Technical Manager (Claude Desktop)
 ├── Erhält: CONSOLIDATED_REPORT.md von Robin
 ├── Formuliert: meta-analyst Befehl
 └── Nächster Schritt: Robin führt meta-analyst aus → SCHRITT 8
@@ -143,7 +143,7 @@ SCHRITT 8: META-ANALYST (LETZTE ANALYSE-INSTANZ)
 session.sh ──→ STATUS.md
                   │
                   ▼
-          system-manager ──→ SESSION_BRIEFING.md ──→ [zum TM]
+      system-control(B) ──→ SESSION_BRIEFING.md ──→ [zum TM]
                                                         │
                                                         ▼
                                                    TM formuliert
@@ -184,7 +184,7 @@ Der agent-manager prüft für F1:
 
 | Schritt | Agent | Muss haben | Muss lesen | Muss erzeugen |
 |---------|-------|------------|------------|---------------|
-| 2 | system-manager | Zugriff auf STATUS.md, alle Referenz-Docs | logs/current/STATUS.md | SESSION_BRIEFING.md |
+| 2 | system-control (Briefing) | Zugriff auf STATUS.md, alle Referenz-Docs | logs/current/STATUS.md | SESSION_BRIEFING.md |
 | 4 | system-control | Bash-Zugriff, Docker-Befehle | STATUS.md, TM-Auftrag | SC_REPORT.md mit Timestamps |
 | 5 | esp32-debug | Read-Only Tools | SC_REPORT.md, ESP32-Logs | ESP32_DEBUG_REPORT.md |
 | 5 | server-debug | Read-Only Tools | SC_REPORT.md, Server-Logs | SERVER_DEBUG_REPORT.md |
@@ -196,7 +196,7 @@ Der agent-manager prüft für F1:
 
 ```
 STATUS.md Informationen fließen so:
-STATUS.md → system-manager → SESSION_BRIEFING.md → TM
+STATUS.md → system-control (Briefing) → SESSION_BRIEFING.md → TM
 STATUS.md → system-control → SC_REPORT.md → Debug-Agents
 
 Debug-Agents müssen STATUS.md NICHT separat laden weil:
@@ -218,7 +218,7 @@ Der SC_REPORT enthält bereits: Container-Status, Ports, Netzwerk, etc.
 
 ```
 SCHRITT 1: TM IDENTIFIZIERT PROBLEME
-├── Wer: Technical Manager (claude.ai)
+├── Wer: Technical Manager (Claude Desktop)
 ├── Input: META_ANALYSIS.md aus Test-Flow
 ├── Aktion: Probleme priorisieren, Dev-Agent-Befehle formulieren
 ├── REGEL: Je ein Befehl pro Dev-Agent

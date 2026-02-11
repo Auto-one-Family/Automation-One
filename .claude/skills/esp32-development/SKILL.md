@@ -80,11 +80,19 @@ cd "El Trabajante" && pio run -e esp32_dev
 # Build XIAO ESP32-C3
 cd "El Trabajante" && pio run -e seeed_xiao_esp32c3
 
+# Build Wokwi Simulation (Multi-Device)
+cd "El Trabajante" && pio run -e wokwi_esp01  # ESP_00000001
+cd "El Trabajante" && pio run -e wokwi_esp02  # ESP_00000002
+cd "El Trabajante" && pio run -e wokwi_esp03  # ESP_00000003
+
 # Flash
 cd "El Trabajante" && pio run -e esp32_dev -t upload
 
 # Serial Monitor
 cd "El Trabajante" && pio device monitor
+
+# Native Unit Tests (22 Tests, laeuft auf Host-PC ohne Hardware)
+cd "El Trabajante" && pio test -e native -vvv
 ```
 
 ---
@@ -97,6 +105,7 @@ cd "El Trabajante" && pio device monitor
 1. GPIOManager.initializeAllPinsToSafeMode()  ← MUST BE FIRST!
 2. Logger.begin()
 3. StorageManager.begin()
+3.1 Logger: Restore log_level from NVS (system_config namespace)
 4. ConfigManager.begin() + loadAllConfigs()
 5. [Watchdog Configuration]
 6. [Provisioning Check - wenn Config fehlt]
@@ -235,6 +244,8 @@ std::unique_ptr<IActuatorDriver> createDriver(const String& type) {
 TopicBuilder::buildSensorDataTopic(gpio);      // .../sensor/{gpio}/data
 TopicBuilder::buildActuatorCommandTopic(gpio); // .../actuator/{gpio}/command
 TopicBuilder::buildSystemHeartbeatTopic();     // .../system/heartbeat
+TopicBuilder::buildZoneAssignTopic();          // .../zone/assign
+TopicBuilder::buildZoneAckTopic();             // .../zone/ack
 ```
 
 ### Standard Publish-Pattern

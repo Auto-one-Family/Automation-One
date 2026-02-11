@@ -347,10 +347,10 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/02-sensor/sensor_he
 ```
 
 **WICHTIG:**
-- Projektverzeichnis (`.`) muss als ERSTES Argument kommen
+- Projektverzeichnis (`.`) ist optional - wenn weggelassen, wird cwd genutzt (v0.19.1+)
 - Timeout wird via CLI gesetzt, NICHT im YAML
-- FALSCH: `wokwi-cli --scenario ... .`
-- RICHTIG: `wokwi-cli . --timeout 90000 --scenario ...`
+- `wokwi-cli run` existiert NICHT (v0.19.1) - `run` wird als Pfad interpretiert
+- Konvention: `wokwi-cli . --timeout 90000 --scenario ...` (Pfad explizit, wie in Makefile/CI)
 
 ### 3.6 Bekannte Limitationen
 
@@ -359,7 +359,7 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/02-sensor/sensor_he
 | **SHT31 nicht unterstützt** | I2C Sensor fehlt in Wokwi | DHT22 als Alternative, Server Tests |
 | **DS18B20 konstant 22.5°C** | Temp-basierte Logik nicht testbar | Server Mock Tests |
 | **LED Helligkeit nicht messbar** | PWM nicht verifizierbar | Serial Log Verification |
-| **90s max Timeout** | Lange Tests unmöglich | In mehrere Tests aufteilen |
+| **Timeout konfigurierbar** | CI nutzt 120-210s, 0=unbegrenzt | `--timeout 0` für Interactive |
 | **MQTT nicht direkt prüfbar** | Messages nur via Serial | Serial Confirmation |
 | **WiFi Drop nicht simulierbar** | Error Recovery begrenzt | Server Mock Tests |
 | **Button nur via MQTT** | Kein physischer Druck | MQTT Alternative |

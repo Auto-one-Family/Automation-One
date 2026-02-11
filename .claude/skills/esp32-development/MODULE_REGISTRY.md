@@ -17,6 +17,7 @@ description: Vollständige API-Referenz aller ESP32-Module. Laden bei Bedarf fü
 | GPIOManager | `drivers/gpio_manager.h` | ✅ | STEP 3 (FIRST!) |
 | Logger | `utils/logger.h` | ✅ | STEP 4 |
 | StorageManager | `services/config/storage_manager.h` | ✅ | STEP 5 |
+| Logger (NVS restore) | `utils/logger.h` | — | STEP 5.1 (log_level from NVS) |
 | ConfigManager | `services/config/config_manager.h` | ✅ | STEP 6 |
 | ProvisionManager | `services/provisioning/provision_manager.h` | ✅ | STEP 6.6 |
 | ErrorTracker | `error_handling/error_tracker.h` | ✅ | STEP 7 |
@@ -72,6 +73,21 @@ public:
 
 extern GPIOManager& gpioManager;
 ```
+
+### HAL Abstraction (GPIO)
+
+**Pfad:** `src/drivers/hal/`
+
+GPIOManager delegiert alle Hardware-Zugriffe an ein `IGPIOHal`-Interface. In Production wird `ESP32GPIOHal` (thin Arduino wrapper) verwendet, in Native Unit Tests `MockGPIOHal` (in-memory state).
+
+| Datei | Rolle |
+|-------|-------|
+| `hal/igpio_hal.h` | Pure virtual interface (`IGPIOHal`) |
+| `hal/esp32_gpio_hal.h` | Production: Low-Level GPIO via Arduino API, High-Level Ops = No-ops |
+
+**Pattern:** GPIOManager handles all pin tracking internally. ESP32GPIOHal only delegates `::pinMode()`, `::digitalWrite()`, `::digitalRead()` to Arduino API. Pin queries (read-only) delegate back to GPIOManager safely (no circular risk).
+
+**Native Test Mock:** `test/mocks/mock_gpio_hal.h` - Full in-memory GPIO state tracking.
 
 ---
 
@@ -363,6 +379,10 @@ public:
     // Config Topics
     static const char* buildConfigTopic();
     static const char* buildConfigResponseTopic();
+
+    // Zone Topics (WP3)
+    static const char* buildZoneAssignTopic();
+    static const char* buildZoneAckTopic();
 
     // Subzone Topics (Phase 9)
     static const char* buildSubzoneAssignTopic();

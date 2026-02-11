@@ -106,6 +106,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 | 20 | `subzone/ack` | ESP→Server | 1 | `buildSubzoneAckTopic()` | `MQTT_TOPIC_SUBZONE_ACK` |
 | 21 | `subzone/status` | ESP→Server | 1 | `buildSubzoneStatusTopic()` | `MQTT_TOPIC_SUBZONE_STATUS` |
 | 22 | `subzone/safe` | Server→ESP | 1 | `buildSubzoneSafeTopic()` | `MQTT_TOPIC_SUBZONE_SAFE` |
+| 23 | `zone/assign` | Server→ESP | 1 | `buildZoneAssignTopic()` | - |
+| 24 | `zone/ack` | ESP→Server | 1 | `buildZoneAckTopic()` | - |
 | B1 | `kaiser/broadcast/emergency` | Server→ALL | 2 | `buildBroadcastEmergencyTopic()` | - |
 
 ---
@@ -267,7 +269,7 @@ def build_your_new_topic(esp_id: str, gpio: int) -> str:
 ```python
 # lifespan() Funktion
 subscriber.register_handler(
-    "kaiser/god/esp/+/sensor/+/data",  # Pattern mit Wildcard
+    "kaiser/+/esp/+/sensor/+/data",  # Pattern mit Wildcard (multi-Kaiser support)
     sensor_handler.handle_sensor_data   # Handler-Funktion
 )
 ```
@@ -310,7 +312,7 @@ async def handle_your_event(topic: str, payload: dict) -> bool:
     try:
         # Extract esp_id from topic
         parts = topic.split("/")
-        esp_id = parts[3]  # kaiser/god/esp/{esp_id}/...
+        esp_id = parts[3]  # kaiser/{kaiser_id}/esp/{esp_id}/...
 
         # Process payload
         logger.info(f"Processing your_event from {esp_id}")

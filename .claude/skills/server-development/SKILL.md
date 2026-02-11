@@ -308,6 +308,10 @@ cd "El Servador"
 poetry install                                    # Dependencies
 poetry run pytest god_kaiser_server/tests/ -v     # Tests
 poetry run uvicorn god_kaiser_server.src.main:app --reload  # Server
+
+# Wokwi Test-Devices seeden (3 ESPs: ESP_00000001/02/03)
+cd "El Servador/god_kaiser_server"
+poetry run python scripts/seed_wokwi_esp.py
 ```
 
 ---

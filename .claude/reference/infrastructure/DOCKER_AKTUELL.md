@@ -527,7 +527,7 @@ make test-full       - Backend + Frontend tests
 make wokwi-build         - Build firmware
 make wokwi-test-boot     - Boot test
 make wokwi-test-quick    - Boot + heartbeat
-make wokwi-test-full     - 23 core CI scenarios (Makefile echo says 24, actual count 23)
+make wokwi-test-full     - 22 core scenarios (Makefile help says 23, echo says 22, actual count 22)
 make wokwi-test-runner   - Python runner (JSON report)
 make wokwi-list          - List scenarios
 make wokwi-test-category CAT=01-boot
@@ -580,7 +580,7 @@ El Servador/god_kaiser_server/tests/
 └── e2e/            # 6 test files (logic engine, sensor workflow, real server, WebSocket, actuator)
 ```
 
-**pytest markers:** unit, integration, esp32, e2e, hardware, performance, slow
+**pytest markers:** unit, integration, esp32, e2e, hardware, performance, slow, slow_e2e, logic, temperature, critical, daily_ops, irrigation, ventilation, night_mode, edge_case, gpio, onewire, pwm, safety, sensor, ds18b20, cross_esp, ph_sensor, relay, sht31
 
 ### Frontend Unit Test Structure:
 ```

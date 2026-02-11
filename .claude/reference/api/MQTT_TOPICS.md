@@ -7,9 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.1 | **Aktualisiert:** 2026-02-06
+> **Version:** 2.2 | **Aktualisiert:** 2026-02-10
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
+> **Änderungen:** Server-Subscriptions auf Multi-Kaiser-Wildcards (`kaiser/+/`) umgestellt
 
 ---
 
@@ -499,9 +500,11 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `resume_operation` | Schrittweise Reaktivierung |
 | `diagnostics` | Diagnostik-Report senden |
 | `reset_config` | Konfiguration zurücksetzen |
+| `get_config` | Aktuelle Config zurückgeben (Response auf system/command/response) |
+| `set_log_level` | Runtime Log-Level ändern. Params: `{"level":"DEBUG\|INFO\|WARNING\|ERROR\|CRITICAL"}`. Persisted to NVS (survives reboot). Response includes `"persisted":true`. |
 
 **Code-Referenzen:**
-- **ESP32:** `main.cpp` Zeile 720 (Subscription)
+- **ESP32:** `main.cpp` Zeile 720 (Subscription), Zeile 1121 (get_config), Zeile 1208 (set_log_level)
 - **Server:** `publisher.py:publish_system_command()` (Zeile 273)
 
 ---
@@ -551,13 +554,35 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "mqtt_connected": true,
   "sensor_count": 4,
   "actuator_count": 2,
-  "system_state": "OPERATIONAL"
+  "system_state": "OPERATIONAL",
+  "boot_reason": "POWERON",
+  "mqtt_cb_state": "CLOSED",
+  "mqtt_cb_failures": 0,
+  "wdt_mode": "PRODUCTION",
+  "wdt_timeouts_24h": 0,
+  "wdt_timeout_pending": false
 }
 ```
 
+**Required fields:** `heap_free` (int), `wifi_rssi` (int)
+**Optional fields:** All others (graceful degradation via `payload.get()`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `boot_reason` | string | ESP-IDF reset reason: UNKNOWN, POWERON, EXT, SW, PANIC, INT_WDT, TASK_WDT, WDT, DEEPSLEEP, BROWNOUT, SDIO |
+| `mqtt_cb_state` | string | MQTT Circuit Breaker state: CLOSED, OPEN, HALF_OPEN |
+| `mqtt_cb_failures` | int | Current failure count in circuit breaker |
+| `wdt_mode` | string | Watchdog mode: DISABLED, PROVISIONING, PRODUCTION, SAFE_MODE |
+| `wdt_timeouts_24h` | int | Watchdog timeout events in last 24 hours |
+| `wdt_timeout_pending` | bool | Whether a watchdog timeout flag is currently set |
+
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSystemDiagnosticsTopic()` (Zeile 152)
-- **Server:** `main.py` Zeile 274 (Handler Registration)
+- **ESP32:** `topic_builder.cpp:buildSystemDiagnosticsTopic()` (Zeile 180)
+- **ESP32:** `health_monitor.cpp:publishSnapshot()` (Zeile 264-267, QoS 0)
+- **ESP32:** `health_monitor.cpp:getSnapshotJSON()` (Payload-Serialisierung)
+- **Server:** `diagnostics_handler.py:handle_diagnostics()` (Handler)
+- **Server:** `main.py` (Handler Registration: `kaiser/+/esp/+/system/diagnostics`)
+- **Server:** `topics.py:parse_system_diagnostics_topic()` (Topic Parser)
 
 ---
 
@@ -805,7 +830,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `main.cpp` Zeile 726 (Subscription)
+- **ESP32:** `topic_builder.cpp:buildZoneAssignTopic()` (Zeile 229) + `main.cpp` Subscription
 - **Server:** `topics.py:build_zone_assign_topic()` (Zeile 142)
 
 ---
@@ -829,7 +854,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** Direkt in `main.cpp` gebaut (keine TopicBuilder-Funktion)
+- **ESP32:** `topic_builder.cpp:buildZoneAckTopic()` (Zeile 237)
 - **Server:** `main.py` Zeile 275 (Handler Registration)
 
 ---
@@ -991,21 +1016,23 @@ Der Server subscribed zu folgenden Topic-Patterns:
 
 | Pattern | Handler | Datei:Zeile |
 |---------|---------|-------------|
-| `kaiser/god/esp/+/sensor/+/data` | `handle_sensor_data` | `sensor_handler.py:77` |
-| `kaiser/god/esp/+/sensor/batch` | `handle_sensor_batch` | `sensor_handler.py:285` |
-| `kaiser/god/esp/+/actuator/+/status` | `handle_actuator_status` | `actuator_handler.py:45` |
-| `kaiser/god/esp/+/actuator/+/response` | `handle_actuator_response` | `main.py:239` |
-| `kaiser/god/esp/+/actuator/+/alert` | `handle_actuator_alert` | `main.py:244` |
-| `kaiser/god/esp/+/system/heartbeat` | `handle_heartbeat` | `heartbeat_handler.py:61` |
-| `kaiser/god/esp/+/config_response` | `handle_config_response` | `config_handler.py:52` |
-| `kaiser/god/esp/+/zone/ack` | `handle_zone_ack` | `main.py:275` |
-| `kaiser/god/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |
-| `kaiser/god/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
-| `kaiser/god/esp/+/system/error` | `handle_system_error` | `main.py:293` |
-| `kaiser/god/esp/+/status` | `handle_status` | `main.py:298` |
-| `kaiser/god/esp/+/safe_mode` | `handle_safe_mode` | `main.py:303` |
+| `kaiser/+/esp/+/sensor/+/data` | `handle_sensor_data` | `sensor_handler.py:77` |
+| `kaiser/+/esp/+/sensor/batch` | `handle_sensor_batch` | `sensor_handler.py:285` |
+| `kaiser/+/esp/+/actuator/+/status` | `handle_actuator_status` | `actuator_handler.py:45` |
+| `kaiser/+/esp/+/actuator/+/response` | `handle_actuator_response` | `main.py:239` |
+| `kaiser/+/esp/+/actuator/+/alert` | `handle_actuator_alert` | `main.py:244` |
+| `kaiser/+/esp/+/system/heartbeat` | `handle_heartbeat` | `heartbeat_handler.py:61` |
+| `kaiser/+/esp/+/config_response` | `handle_config_response` | `config_handler.py:52` |
+| `kaiser/+/esp/+/zone/ack` | `handle_zone_ack` | `main.py:275` |
+| `kaiser/+/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |
+| `kaiser/+/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
+| `kaiser/+/esp/+/system/error` | `handle_system_error` | `main.py:293` |
+| `kaiser/+/esp/+/status` | `handle_status` | `main.py:298` |
+| `kaiser/+/esp/+/safe_mode` | `handle_safe_mode` | `main.py:303` |
 
 **Handler-Registrierung:** `main.py:201-307`
+
+**Wildcard-Bedeutung:** `+` (Single-Level) matcht jeden Wert an dieser Position. `kaiser/+/` unterstützt Multi-Kaiser-Setup (aktuell: `kaiser/god/`, zukünftig: `kaiser/kaiser_01/`, etc.).
 
 ---
 

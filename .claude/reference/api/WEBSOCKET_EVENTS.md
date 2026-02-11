@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.0 | **Aktualisiert:** 2026-02-01
+> **Version:** 2.1 | **Aktualisiert:** 2026-02-10
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 26 verschiedene Event-Typen
+> **Event-Anzahl:** 28 verschiedene Event-Typen (esp_diagnostics hinzugefügt)
 
 ---
 
@@ -25,6 +25,7 @@ allowed-tools: Read
 | `device_rediscovered` | Server→Frontend | ESP wieder online | Bekanntes ESP kommt zurück |
 | `device_approved` | Server→Frontend | Admin-Aktion | Pending ESP genehmigt |
 | `device_rejected` | Server→Frontend | Admin-Aktion | Pending ESP abgelehnt |
+| `esp_diagnostics` | Server→Frontend | HealthMonitor (60s) | System-Diagnostics (Heap, CB, Watchdog) |
 
 ### Sensor Events
 
@@ -56,6 +57,7 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `zone_assignment` | Server→Frontend | Zone ACK | ESP bestätigt Zone-Zuweisung |
+| `subzone_assignment` | Server→Frontend | Subzone ACK | ESP bestätigt Subzone-Zuweisung/Entfernung |
 
 ### Logic/Automation Events
 
@@ -187,6 +189,39 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
         "safe": false
       }
     ]
+  }
+}
+```
+
+---
+
+### 3.1b esp_diagnostics
+
+ESP System-Diagnostics Snapshot. Wird alle 60s vom HealthMonitor gesendet.
+
+**Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics`
+
+**Code-Location:** [diagnostics_handler.py:151](El Servador/god_kaiser_server/src/mqtt/handlers/diagnostics_handler.py#L151)
+
+**Payload:**
+```json
+{
+  "type": "esp_diagnostics",
+  "timestamp": 1706787600,
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "heap_free": 150000,
+    "heap_min_free": 120000,
+    "heap_fragmentation": 15,
+    "uptime_seconds": 3600,
+    "error_count": 3,
+    "wifi_rssi": -65,
+    "system_state": "OPERATIONAL",
+    "boot_reason": "POWERON",
+    "mqtt_cb_state": "CLOSED",
+    "wdt_mode": "PRODUCTION",
+    "wdt_timeouts_24h": 0,
+    "timestamp": 1735818000
   }
 }
 ```
@@ -613,14 +648,55 @@ Zone Assignment ACK vom ESP.
   "timestamp": 1706787600,
   "data": {
     "esp_id": "ESP_12AB34CD",
+    "status": "zone_assigned",
     "zone_id": "greenhouse",
-    "zone_name": "Gewächshaus",
     "master_zone_id": "main_zone",
-    "success": true,
-    "timestamp": "2026-02-01T10:23:45Z"
+    "zone_name": "Gewächshaus",
+    "kaiser_id": "god",
+    "timestamp": 1706787600,
+    "message": ""
   }
 }
 ```
+
+**status Values:**
+- `zone_assigned`: Zone erfolgreich zugewiesen
+- `zone_removed`: Zone entfernt
+- `error`: Zuweisung fehlgeschlagen (message enthält Fehlergrund)
+
+---
+
+### 7.2 subzone_assignment
+
+Subzone Assignment ACK vom ESP.
+
+**Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/subzone/ack`
+
+**Code-Location:** [subzone_ack_handler.py:149](El Servador/god_kaiser_server/src/mqtt/handlers/subzone_ack_handler.py#L149)
+
+**Payload:**
+```json
+{
+  "type": "subzone_assignment",
+  "timestamp": 1706787600,
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "subzone_id": "zone_a",
+    "status": "subzone_assigned",
+    "timestamp": 1706787600,
+    "error_code": null,
+    "message": ""
+  }
+}
+```
+
+**status Values:**
+- `subzone_assigned`: Subzone erfolgreich zugewiesen
+- `subzone_removed`: Subzone entfernt
+- `error`: Zuweisung/Entfernung fehlgeschlagen
+
+**error_code:** Optional, nur bei status="error"
+**message:** Optional, nur bei status="error"
 
 ---
 

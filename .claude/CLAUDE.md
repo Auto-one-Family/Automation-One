@@ -8,6 +8,21 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 
 ---
 
+## Agent-Orchestrierung (UNVERÄNDERLICH)
+
+| Modus | Verhalten | Trigger |
+|-------|-----------|---------|
+| **Sequenziell** (Default) | Agents/Skills NACHEINANDER. Erst wenn Agent 1 komplett fertig → Agent 2 startet | Standard. Immer, außer User sagt "zusammen" |
+| **Parallel** | Agents/Skills GLEICHZEITIG starten (System-Default parallel) | User sagt explizit "zusammen" |
+
+**Regeln:**
+1. **NACHEINANDER ist Default.** Bei mehreren Agents/Skills in einer Nachricht: Task-Aufrufe EINZELN absenden, WARTEN bis komplett fertig, dann nächsten starten. KEINE parallelen Task-Aufrufe im selben Message-Block
+2. **OHNE PAUSE durcharbeiten.** NIEMALS "Soll ich fortfahren?", "Möchtest du dass ich weitermache?" oder ähnliche Unterbrechungen. Jeder Agent arbeitet seinen kompletten Task ab bis er fertig ist
+3. **"zusammen" = parallel.** NUR wenn User explizit "zusammen" schreibt: Mehrere Task-Aufrufe im selben Message-Block starten. Output-Pfade VOR Start festlegen. Selbständig analysieren ob alle Agents fertig sind. Ohne Pause durcharbeiten bis alle komplett
+4. **Plan Mode:** Parallel erlaubt, ohne Pause arbeiten
+
+---
+
 ## Skills (Entwicklung)
 
 | Trigger | Skill |
@@ -91,7 +106,11 @@ SKILL → DEV-AGENT → ANALYSE → PLAN → IMPLEMENTIEREN → VERIFIZIEREN
 
 ## TM-Workflow (Technical Manager Integration)
 
-Der Technical Manager (TM) ist eine externe Claude-Instanz in claude.ai – hat **KEINEN direkten Projektzugriff**. Der User ist die einzige Schnittstelle (Copy/Paste zwischen VS Code und claude.ai).
+Der Technical Manager (TM) ist eine Claude Desktop-Instanz – hat **KEINEN direkten Projektzugriff**. Der User ist die einzige Schnittstelle (Copy/Paste zwischen VS Code und Claude Desktop).
+
+**TM-Workspace:** `.technical-manager/` (Router: `TECHNICAL_MANAGER.md`, 3 Skills, Config, Archive)
+**TM-Skills:** infrastructure-status, ci-quality-gates, strategic-planning
+**Kommunikation:** TM schreibt nach `commands/pending/`, VS Code Reports nach `inbox/agent-reports/`
 
 ### Test-Flow (Analyse & Debugging)
 
@@ -99,7 +118,7 @@ Der Technical Manager (TM) ist eine externe Claude-Instanz in claude.ai – hat 
 1. User führt `scripts/debug/start_session.sh` aus → `logs/current/STATUS.md` wird generiert
 2. User schreibt "Session gestartet" + Hardware-Info → system-control (Briefing-Modus) aktiviert sich
 3. system-control liest STATUS.md, erstellt SESSION_BRIEFING.md
-4. User kopiert SESSION_BRIEFING.md zum Technical Manager (claude.ai, extern)
+4. User kopiert SESSION_BRIEFING.md zum Technical Manager (Claude Desktop, extern)
 5. TM analysiert Briefing, formuliert Agent-Befehle (einzeln pro Agent)
 6. User führt system-control ZUERST aus → generiert Log-Daten, Operations-Bericht
 7. User führt Debug-Agents EINZELN aus (esp32-debug, server-debug, mqtt-debug, frontend-debug) → jeder schreibt eigenen Report

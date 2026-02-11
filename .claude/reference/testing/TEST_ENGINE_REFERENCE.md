@@ -1,6 +1,6 @@
 # Test-Engine Reference - AutomationOne
 
-> **Version:** 1.0 | **Aktualisiert:** 2026-02-06
+> **Version:** 1.1 | **Aktualisiert:** 2026-02-11
 > **Zweck:** Vollständige Referenz der Test-Infrastruktur
 > **Themengebiet:** Testing, CI/CD, Agents
 
@@ -11,22 +11,22 @@
 ```
                     ┌─────────────────┐
                     │   E2E Tests     │  ← Browser (Playwright)
-                    │  (5 Szenarien)  │     Server E2E (pytest)
+                    │  (6 Dateien)    │     Server E2E (pytest)
                     └────────┬────────┘
                              │
                ┌─────────────┴─────────────┐
                │   Integration Tests       │  ← pytest + Docker
-               │   (40+ Dateien)           │     MQTT, DB, API
+               │   (44 Dateien)            │     MQTT, DB, API
                └─────────────┬─────────────┘
                              │
     ┌────────────────────────┴────────────────────────┐
     │              Unit Tests                         │
-    │  Backend: 25 Dateien | Frontend: 4 Dateien      │
+    │  Backend: 36 | Frontend: 4 | ESP32 Native: 22   │
     └────────────────────────┬────────────────────────┘
                              │
     ┌────────────────────────┴────────────────────────┐
     │           Firmware Simulation                    │
-    │      Wokwi: 163 Szenarien (138 in CI)           │
+    │      Wokwi: 163 Szenarien (42 in CI)             │
     └─────────────────────────────────────────────────┘
 ```
 
@@ -38,11 +38,11 @@
 
 ```
 El Servador/god_kaiser_server/tests/
-├── unit/           # 25 Dateien, ~200+ Tests
-├── integration/    # 40 Dateien, ~300+ Tests
-├── esp32/          # 30 Dateien, ~150+ Tests (Mock)
-├── e2e/            # 2 Dateien, ~45 Tests
-└── conftest.py     # Fixtures
+├── unit/           # 36 Dateien, 759 Tests (755 pass, 1 fail, 3 skip)
+├── integration/    # 44 Dateien, ~600+ Tests
+├── esp32/          # 19 Dateien, ~370+ Tests (Mock)
+├── e2e/            # 6 Dateien, ~60 Tests (--e2e flag required)
+└── conftest.py     # 4 conftest files (root + unit/db + esp32 + e2e)
 ```
 
 ### 1.2 Test-Kategorien
@@ -59,21 +59,25 @@ El Servador/god_kaiser_server/tests/
 ```bash
 # Unit Tests
 cd "El Servador/god_kaiser_server"
-poetry run pytest tests/unit/ -v
+.venv/Scripts/pytest.exe tests/unit/ -v
+# Alternative (wenn poetry→Python Mapping funktioniert): poetry run pytest tests/unit/ -v
 
 # Integration Tests (benötigt Docker)
 docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait postgres mqtt-broker
-poetry run pytest tests/integration/ -v
+.venv/Scripts/pytest.exe tests/integration/ -v
 
 # ESP32 Mock Tests
-poetry run pytest tests/esp32/ -v
+.venv/Scripts/pytest.exe tests/esp32/ -v
 
 # E2E Tests (benötigt laufenden Server)
 docker compose up -d
-poetry run pytest tests/e2e/ --e2e -v
+.venv/Scripts/pytest.exe tests/e2e/ --e2e -v
 
 # Alle Tests mit Coverage
-poetry run pytest --cov=src --cov-report=xml
+.venv/Scripts/pytest.exe --cov=src --cov-report=xml
+
+# Collection Check (0 errors = healthy)
+.venv/Scripts/pytest.exe --collect-only
 ```
 
 ### 1.4 Fixtures (conftest.py)
@@ -166,7 +170,7 @@ El Trabajante/tests/wokwi/scenarios/
 ├── 10-nvs/         # 40 Szenarien (5 skipped)
 └── gpio/           # 24 Szenarien
                     ────────────────
-                    163 Szenarien total (138 in CI)
+                    163 Szenarien total (42 in CI)
 ```
 
 ### 3.2 CI-Coverage
@@ -180,13 +184,14 @@ El Trabajante/tests/wokwi/scenarios/
 | 05-emergency | 3 | 3 | 100% |
 | 06-config | 2 | 2 | 100% |
 | 07-combined | 2 | 2 | 100% |
-| 08-i2c | 20 | 0 | 0% |
-| 08-onewire | 29 | 29 | 100% |
-| 09-hardware | 9 | 9 | 100% |
-| 09-pwm | 18 | 18 | 100% |
-| 10-nvs | 40 | 35 | 88% |
-| gpio | 24 | 24 | 100% |
-| **Gesamt** | **163** | **138** | **85%** |
+| 08-i2c | 20 | 5 | 25% |
+| 08-onewire | 29 | 0 | 0% |
+| 09-hardware | 9 | 0 | 0% |
+| 09-pwm | 18 | 3 | 17% |
+| 10-nvs | 40 | 5 | 13% |
+| gpio | 24 | 5 | 21% |
+| mqtt_connection (legacy) | 1 | 1 | 100% |
+| **Gesamt** | **163** | **42** | **26%** |
 
 ### 3.3 Befehle
 
@@ -235,6 +240,63 @@ steps:
       text: "MQTT connected"
       count: 1
 ```
+
+---
+
+## 3.5 ESP32 Native Unit Tests (PlatformIO)
+
+### 3.5.1 Struktur
+
+```
+El Trabajante/
+├── test/
+│   ├── test_infra/                      # Infrastruktur-Tests
+│   │   └── test_topic_builder.cpp       # 12 Tests: MQTT Topic-Generierung
+│   ├── test_managers/                   # Manager-Tests
+│   │   └── test_gpio_manager_mock.cpp   # 10 Tests: GPIOManager + MockGPIOHal
+│   ├── mocks/                           # Test-Mocks
+│   │   ├── Arduino.h                    # Arduino API Mock (String, Serial, GPIO)
+│   │   └── mock_gpio_hal.h             # MockGPIOHal (IGPIOHal Implementierung)
+│   └── helpers/                         # Test-Helpers
+│       └── gpio_manager_test_helper.h   # GPIOManager HAL-Injection
+├── scripts/
+│   └── set_native_toolchain.py          # MinGW PATH-Setup (PlatformIO pre-script)
+└── platformio.ini                       # [env:native] Konfiguration
+```
+
+### 3.5.2 Befehle
+
+```bash
+cd "El Trabajante"
+
+# Alle native Tests (22 Tests)
+pio test -e native
+
+# Verbose
+pio test -e native -vvv
+
+# Nur TopicBuilder
+pio test -e native -f test_infra
+
+# Nur GPIOManager
+pio test -e native -f test_managers
+```
+
+### 3.5.3 Architektur
+
+| Komponente | Beschreibung |
+|------------|-------------|
+| **Platform** | `native` (x86_64, MinGW-w64 auf Windows) |
+| **Framework** | Unity Test (C) |
+| **HAL Pattern** | IGPIOHal → MockGPIOHal (Test) / ESP32GPIOHal (Production) |
+| **Toolchain-Fix** | `scripts/set_native_toolchain.py` setzt MinGW-Pfad automatisch |
+| **Static Linking** | `-static` Flag verhindert DLL-Abhängigkeiten |
+
+### 3.5.4 Voraussetzungen
+
+- MinGW-w64 installiert (gcc/g++ >= 13)
+- PlatformIO CLI (`pio`)
+- Kein ESP32-Hardware nötig (läuft auf Host-PC)
 
 ---
 
@@ -424,6 +486,9 @@ cd "El Servador/god_kaiser_server" && poetry run pytest tests/unit/ -v
 # Frontend Unit Tests (schnell, keine Deps)
 cd "El Frontend" && npm run test:unit
 
+# ESP32 Native Unit Tests (22 Tests, keine Hardware)
+cd "El Trabajante" && pio test -e native -vvv
+
 # Wokwi Quick Test
 make wokwi-test-quick
 
@@ -459,8 +524,9 @@ poetry run pytest tests/integration/ -x -v
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-09
-**Version:** 1.2
+**Letzte Aktualisierung:** 2026-02-11
+**Version:** 1.3
 **Changelog:**
+- 1.3: ESP32 Native Unit Tests Sektion (3.5): 22 Tests (TopicBuilder + GPIOManager), Toolchain-Fix, HAL-Architektur
 - 1.2: E2E ghost targets removed (e2e-report, e2e-debug, e2e-codegen), CI targets replaced with monitoring targets, ci-up references updated
 - 1.1: Python Wokwi-Runner Retry-Optionen (--retries, --no-retry), JUnit XML Output

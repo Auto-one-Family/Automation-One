@@ -1,7 +1,7 @@
 # Docker-Infrastruktur Referenz - AutomationOne
 
-**Version:** 1.5
-**Datum:** 2026-02-10
+**Version:** 1.8
+**Datum:** 2026-02-11
 **Zweck:** Vollstaendige Referenz fuer Docker-Stack Architektur und Befehle
 
 ---
@@ -37,6 +37,7 @@
 | postgres-exporter | automationone-postgres-exporter | prometheuscommunity/postgres-exporter:v0.16.0 | 9187 | monitoring | wget /metrics |
 | mosquitto-exporter | automationone-mosquitto-exporter | sapcc/mosquitto-exporter:0.8.0 | 9234 | monitoring | wget /metrics |
 | pgadmin | automationone-pgadmin | dpage/pgadmin4:9.12 | 5050 | devtools | wget /misc/ping |
+| esp32-serial-logger | automationone-esp32-serial | Custom Build (Python 3.11-slim) | - (TCP 3333 via socat) | hardware | pgrep serial_logger.py |
 
 ### 1.2 Compose-Dateien
 
@@ -69,11 +70,11 @@
 
 **Bind-Mounts (Logs):**
 
-| Host-Pfad | Service | Container-Pfad |
-|-----------|---------|----------------|
-| `./logs/server/` | el-servador | `/app/logs` |
-| `./logs/mqtt/` | mqtt-broker | `/mosquitto/log` |
-| `./logs/postgres/` | postgres | `/var/log/postgresql` |
+| Host-Pfad | Service | Container-Pfad | Status |
+|-----------|---------|----------------|--------|
+| `./logs/server/` | el-servador | `/app/logs` | Aktiv |
+| `./logs/mqtt/` | mqtt-broker | `/mosquitto/log` | Deaktiviert (kommentiert seit v3.1, Mosquitto nutzt stdout-only) |
+| `./logs/postgres/` | postgres | `/var/log/postgresql` | Aktiv |
 
 ---
 
@@ -393,9 +394,11 @@ docker run --rm -v automationone-postgres-data:/data -v $(pwd):/backup alpine ta
 
 | Problem | Diagnose | Loesung |
 |---------|----------|---------|
-| API Error 500 | Docker Desktop crashed | Docker Desktop neu starten |
+| API Error 500 | Docker Desktop crashed | Docker Desktop neu starten (Quit + Restart) |
+| API Error 500 persistent | WSL2 instabil | `wsl --shutdown` dann Docker Desktop neu starten |
 | WSL2 Memory | Container fressen RAM | `.wslconfig` Memory-Limit |
 | Disk Full | Volume-Wachstum | `docker system prune -a` |
+| "Network still in use" | Monitoring-Stack auf gleichem Netzwerk | `docker compose --profile monitoring down` zuerst |
 
 ### 7.2 Container startet nicht
 
@@ -427,6 +430,40 @@ lsof -i :8000                # Linux/Mac
 docker network inspect automationone-net
 ```
 
+### 7.5 Port 1883 blockiert durch lokalen Mosquitto (Windows)
+
+**Symptom:** `docker ps` zeigt `1883/tcp` OHNE `0.0.0.0:1883->` (exposed but not published)
+
+**Ursache:** Lokaler Mosquitto Windows-Service belegt Port 1883 bevor Docker binden kann.
+
+**Diagnose:**
+```powershell
+# Port-Belegung pruefen
+netstat -ano | findstr ":1883"
+# Wenn PID nicht Docker ist → lokaler Mosquitto blockiert
+
+# Docker Port-Status pruefen
+docker ps --format "table {{.Names}}\t{{.Ports}}" | Select-String mqtt
+# Erwartet: 0.0.0.0:1883->1883/tcp (published)
+# Problem:  1883/tcp (nur exposed)
+```
+
+**Fix:**
+```powershell
+# 1. Lokalen Mosquitto stoppen (Admin-PowerShell)
+Stop-Service mosquitto
+# Oder: Stop-Process -Id <PID> -Force
+
+# 2. Docker MQTT-Broker neu starten
+docker compose restart mqtt-broker
+
+# 3. Verifizieren
+docker ps --format "table {{.Names}}\t{{.Ports}}" | Select-String mqtt
+# Muss zeigen: 0.0.0.0:1883->1883/tcp
+```
+
+**Wichtig fuer Wokwi:** Zusaetzlich Windows Firewall Inbound-Regel fuer Port 1883 noetig (siehe ACCESS_LIMITATIONS.md Section 10.5).
+
 ### 7.4 Volume-Probleme
 
 ```bash
@@ -452,6 +489,9 @@ docker volume rm automationone-postgres-data
 | 1.3 | 2026-02-09 | postgres-exporter Service hinzugefuegt (9 Services total: 4 Core + 5 Monitoring), Prometheus 3 Scrape-Jobs, Instrumentator + psutil Metriken dokumentiert |
 | 1.4 | 2026-02-09 | pgAdmin DevTools hinzugefuegt (10 Services: 4 Core + 5 Monitoring + 1 DevTools), Profile devtools, Makefile devtools-Targets, Section 2.5 DevTools |
 | 1.5 | 2026-02-10 | mosquitto-exporter hinzugefuegt (11 Services: 4 Core + 6 Monitoring + 1 DevTools), Service-Tabelle korrigiert |
+| 1.6 | 2026-02-11 | esp32-serial-logger hinzugefuegt (12 Services: 4 Core + 6 Monitoring + 1 DevTools + 1 Hardware), Profile: hardware, TCP-Bridge via socat |
+| 1.7 | 2026-02-11 | Bind-Mounts-Tabelle: `./logs/mqtt/` als deaktiviert markiert (Mosquitto stdout-only seit v3.1) |
+| 1.8 | 2026-02-11 | Section 7.5: Port-1883-Blockade durch lokalen Mosquitto, Docker Desktop 500/WSL-Troubleshooting ergaenzt |
 
 ---
 

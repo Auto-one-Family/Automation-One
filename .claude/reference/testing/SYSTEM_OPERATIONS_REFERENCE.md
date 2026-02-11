@@ -1,7 +1,11 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.1 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-09
+> **Version:** 2.5 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-11
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.5:** Admin-Credentials ergänzt, Wokwi-Seed lokal (nicht im Container), PowerShell Test-Befehle, Wokwi Windows-Voraussetzungen
+> **Änderungen 2.4:** Native Tests vollständig: 22 Tests (12 TopicBuilder + 10 GPIOManager), Toolchain-Fix (set_native_toolchain.py), korrigierte Pfade
+> **Änderungen 2.3:** Native Test-Commands (pio test -e native/esp32dev_test), wokwi-test-full Count korrigiert (22 Szenarien)
+> **Änderungen 2.2:** Wokwi-Testing Makefile-Targets (8 neue Targets für ESP32-Simulation)
 > **Änderungen 2.1:** Monitoring-Stack (Loki, Promtail, Prometheus, Grafana), Monitoring-Configs in Pfade
 > **Änderungen 2.0:** Docker-Flow als primärer Workflow, .env-Auslagerung, session.sh v4.0
 
@@ -13,6 +17,7 @@
 
 | Username | Password | Rolle | Verwendung |
 |----------|----------|-------|------------|
+| admin | Admin123# | Admin | Production-Login, Health-Endpoints |
 | Robin | Robin123! | Admin | Development & Testing |
 
 ### 0.2 Login (Bash)
@@ -129,9 +134,10 @@ docker stats --no-stream
 | `logs/server/` | Server JSON-Logs (Bind-Mount) |
 | `logs/mqtt/` | Mosquitto Broker-Logs (Bind-Mount) |
 | `logs/postgres/` | PostgreSQL Query-Logs (Bind-Mount) |
-| `logs/esp32/` | ESP32 Serial-Logs (manuell) |
+| `logs/esp32/` | ESP32 Serial-Logs (manuell via PlatformIO) |
 | `logs/current/` | Session-Logs (via start_session.sh) |
 | `logs/archive/` | Archivierte Session-Logs |
+| Docker: `esp32-serial-logger` | ESP32 Serial via TCP-Bridge (stdout only, Profile: hardware) |
 
 ### .env Konfiguration
 
@@ -1089,8 +1095,13 @@ pio run -e esp32_dev
 # Build (XIAO ESP32-C3)
 pio run -e seeed_xiao_esp32c3
 
-# Build (Wokwi Simulation)
+# Build (Wokwi Simulation - Single Device)
 pio run -e wokwi_simulation
+
+# Build (Wokwi Multi-Device - Individual)
+pio run -e wokwi_esp01  # ESP_00000001
+pio run -e wokwi_esp02  # ESP_00000002
+pio run -e wokwi_esp03  # ESP_00000003
 
 # Flash/Upload
 pio run -e esp32_dev -t upload
@@ -1120,20 +1131,140 @@ pio device monitor -b 115200 -e esp32_dev
 
 ### 5.3 Wokwi-Simulation
 
+#### Via Makefile (EMPFOHLEN)
+
+```bash
+# Build firmware für alle Wokwi ESPs (parallel, 3 devices)
+make wokwi-build
+
+# Build einzelnes ESP
+make wokwi-build-esp01  # ESP_00000001
+make wokwi-build-esp02  # ESP_00000002
+make wokwi-build-esp03  # ESP_00000003
+
+# Database seeden mit 3 Wokwi test devices (ESP_00000001/02/03, status="approved")
+make wokwi-seed
+# HINWEIS: make wokwi-seed nutzt docker exec, aber das Script ist NICHT im Container gemountet!
+# Lokaler Workaround (PowerShell):
+#   cd "El Servador\god_kaiser_server"
+#   .venv\Scripts\python.exe scripts\seed_wokwi_esp.py
+
+# Alle verfügbaren Szenarien auflisten (163 total)
+make wokwi-list
+
+# Schnelltest (3 Szenarien: boot_full, boot_safe_mode, sensor_heartbeat)
+make wokwi-test-quick
+
+# Alle CI-Szenarien lokal (22 Szenarien, ~30 Minuten)
+make wokwi-test-full
+
+# Einzelnes Szenario (default: ESP_00000001)
+make wokwi-test-scenario SCENARIO=tests/wokwi/scenarios/01-boot/boot_full.yaml
+
+# Gesamte Kategorie testen
+make wokwi-test-category CAT=01-boot
+make wokwi-test-category CAT=02-sensor
+
+# Interaktiver Modus (ohne Szenario, manuelles Testen)
+make wokwi-run        # Default: ESP_00000001
+make wokwi-run-esp01  # ESP_00000001
+make wokwi-run-esp02  # ESP_00000002
+make wokwi-run-esp03  # ESP_00000003
+```
+
+#### Via PlatformIO/wokwi-cli (Direkt)
+
 ```bash
 cd "El Trabajante"
 
-# Build für Wokwi
-pio run -e wokwi_simulation
+# Build für Wokwi (einzelne Devices)
+pio run -e wokwi_esp01  # ESP_00000001
+pio run -e wokwi_esp02  # ESP_00000002
+pio run -e wokwi_esp03  # ESP_00000003
 
-# Wokwi starten
-wokwi-cli run --timeout 60000
+# Wokwi starten (ESP_00000001)
+wokwi-cli . --timeout 0 --firmware .pio/build/wokwi_esp01/firmware.bin
 
-# Mit Test-Szenario
-wokwi-cli run --timeout 60000 --scenario tests/wokwi/boot_test.yaml
+# Mit Test-Szenario (ESP_00000001)
+wokwi-cli . --timeout 60000 --firmware .pio/build/wokwi_esp01/firmware.bin \
+  --scenario tests/wokwi/scenarios/01-boot/boot_full.yaml
+
+# Mit Serial-Log (ESP_00000002)
+wokwi-cli . --timeout 60000 --firmware .pio/build/wokwi_esp02/firmware.bin \
+  --scenario tests/wokwi/scenarios/01-boot/boot_full.yaml --serial-log-file esp02_output.log
 ```
 
-### 5.4 NVS-Operationen (Programmatisch)
+**Windows-Voraussetzungen für Wokwi Full Boot (MQTT Gateway):**
+1. Docker Stack mit mqtt-broker auf Host-Port 1883 (`0.0.0.0:1883->1883/tcp`)
+2. Kein lokaler Mosquitto Windows-Service (blockiert Port 1883)
+3. Windows Firewall: Inbound-Regel für Port 1883 TCP
+4. Wokwi DB Seed lokal: `.venv\Scripts\python.exe scripts\seed_wokwi_esp.py`
+
+**Vollständige Dokumentation:** `.claude/reference/testing/WOKWI_TESTING.md`
+
+### 5.4 Native Tests (PlatformIO)
+
+```bash
+cd "El Trabajante"
+
+# Alle nativen Tests ausfuehren (22 Tests: 12 TopicBuilder + 10 GPIOManager)
+pio test -e native
+
+# Verbose (empfohlen fuer Debugging)
+pio test -e native -vvv
+
+# Nur TopicBuilder-Tests
+pio test -e native -f test_infra
+
+# Nur GPIOManager-Tests
+pio test -e native -f test_managers
+
+# Hardware-Tests auf echtem ESP32
+pio test -e esp32dev_test -t upload
+```
+
+**Toolchain-Voraussetzung:** MinGW-w64 muss installiert sein (gcc/g++). Der Pfad wird automatisch via `scripts/set_native_toolchain.py` gesetzt (sucht in bekannten Installationspfaden). Static linking ist aktiviert, sodass keine MinGW-DLLs zur Laufzeit benoetigt werden.
+
+**Environments:**
+
+| Environment | Platform | Zweck |
+|-------------|----------|-------|
+| `native` | x86_64 | Unit Tests ohne Hardware (Unity Framework, 22 Tests) |
+| `esp32dev_test` | espressif32 | Hardware-Tests direkt auf ESP32 |
+
+**Aktive Native Tests (2 Suites, 22 Tests):**
+- `test/test_infra/test_topic_builder.cpp` (12 Tests: MQTT Topic-Generierung)
+- `test/test_managers/test_gpio_manager_mock.cpp` (10 Tests: GPIOManager mit MockGPIOHal)
+
+### 5.5 Lokale Tests (PowerShell)
+
+```powershell
+# Frontend (Vitest) - 1118 Tests
+cd "El Frontend"
+npx vitest run
+
+# Backend Unit (pytest) - 759+ Tests
+cd "El Servador\god_kaiser_server"
+.venv\Scripts\pytest.exe tests\unit\ -x -q
+
+# ESP32 Native (Unity) - 22 Tests
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" test -e native
+
+# Backend Integration (braucht Docker Stack)
+cd "El Servador\god_kaiser_server"
+.venv\Scripts\pytest.exe tests\integration\ -v --tb=short
+
+# Wokwi Build (PowerShell, ohne make)
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e wokwi_esp01
+
+# Wokwi Test (PowerShell)
+cd "El Trabajante"
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.yaml
+```
+
+**Hinweis:** `poetry run` kann auf Python 3.14 statt `.venv` (3.13) resolven. Workaround: `.venv\Scripts\` direkt nutzen.
+
+### 5.6 NVS-Operationen (Programmatisch)
 
 Die NVS-Operationen erfolgen über die Firmware oder Boot-Button:
 
@@ -1487,6 +1618,7 @@ curl -s "http://localhost:3100/loki/api/v1/label/service/values"
 | Server | `el-servador` | `automationone-server` |
 | MQTT Broker | `mqtt-broker` | `automationone-mqtt` |
 | PostgreSQL | `postgres` | `automationone-postgres` |
+| ESP32 Serial Logger | `esp32-serial-logger` | `automationone-esp32-serial` |
 
 ### 8.5 Prometheus-Metriken
 
@@ -1497,6 +1629,31 @@ curl -s http://localhost:8000/api/v1/health/metrics
 # Prometheus Targets pruefen
 curl -s http://localhost:9090/api/v1/targets | python -m json.tool
 ```
+
+### 8.6 Hardware-Profile (ESP32 Serial Logger)
+
+```bash
+# Hardware-Profile starten (ESP32 Serial Logger via TCP-Bridge)
+docker compose --profile hardware up -d
+
+# Hardware-Profile stoppen
+docker compose --profile hardware down
+
+# ESP32 Serial Logs
+docker logs automationone-esp32-serial --tail=100 -f
+```
+
+**Voraussetzung:** socat TCP-Bridge muss auf dem Host laufen (WSL2: `socat TCP-LISTEN:3333,fork,reuseaddr,bind=0.0.0.0 /dev/ttyUSB0,raw,echo=0,b115200,local`)
+
+**ENV-Variablen (.env):**
+
+| Variable | Default | Beschreibung |
+|----------|---------|--------------|
+| `ESP32_SERIAL_HOST` | `host.docker.internal` | TCP-Bridge Host |
+| `ESP32_SERIAL_PORT` | `3333` | TCP-Bridge Port |
+| `ESP32_DEVICE_ID` | `esp32-xiao-01` | Device-ID fuer Log-Labels |
+| `ESP32_LOG_FORMAT` | `structured` | Log-Format (structured/raw) |
+| `ESP32_RECONNECT_DELAY` | `5` | Reconnect-Delay in Sekunden |
 
 ---
 
@@ -1527,4 +1684,4 @@ curl -s http://localhost:9090/api/v1/targets | python -m json.tool
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-09 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-11 | AutomationOne Debug-Operations-Reference*

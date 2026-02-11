@@ -40,6 +40,7 @@ allowed-tools: Read, Write, Bash, Grep, Glob
 | **Status prüfen** | [Section 2](#monitoring) | `make status` → `make health` |
 | **MQTT beobachten** | [Section 2](#monitoring) | `make mqtt-sub` |
 | **Logs lesen** | [Section 2](#monitoring) | `make logs` / `make logs-server` |
+| **ESP32 Serial (Docker)** | [Section 2](#monitoring) | `docker logs automationone-esp32-serial` (Profile: hardware) |
 | **Health-Check** | [Section 4](#4-health-check-referenz) | `curl /v1/health/live` |
 | **Session starten** | [Section 5](#5-session-scripts-v40) | `./scripts/debug/start_session.sh` |
 | **Container-Shell** | [Section 2](#shell-zugriff) | `make shell-server` |
@@ -180,7 +181,7 @@ postgres + mqtt-broker (parallel starten)
       el-frontend
 ```
 
-### Monitoring-Stack (4 Container, Profile: monitoring)
+### Monitoring-Stack (6 Container, Profile: monitoring)
 
 | Service | Container-Name | Image | Ports |
 |---------|---------------|-------|-------|
@@ -188,9 +189,21 @@ postgres + mqtt-broker (parallel starten)
 | promtail | `automationone-promtail` | `grafana/promtail:3.4` | 9080 (intern) |
 | prometheus | `automationone-prometheus` | `prom/prometheus:v3.2.1` | 9090 |
 | grafana | `automationone-grafana` | `grafana/grafana:11.5.2` | 3000 |
+| postgres-exporter | `automationone-postgres-exporter` | `prometheuscommunity/postgres-exporter:v0.16.0` | 9187 |
+| mosquitto-exporter | `automationone-mosquitto-exporter` | `sapcc/mosquitto-exporter:0.8.0` | 9234 |
 
 **Start:** `make monitor-up` / **Stop:** `make monitor-down`
 **Zugang:** Grafana http://localhost:3000 (admin / GRAFANA_ADMIN_PASSWORD aus .env)
+
+### Wokwi-Seed (WICHTIG: lokal ausführen)
+
+```powershell
+# Script ist NICHT im Docker-Container gemountet (nur src/, alembic/, logs/)
+# FALSCH: docker exec -it automationone-server python scripts/seed_wokwi_esp.py
+# RICHTIG (PowerShell):
+cd "El Servador\god_kaiser_server"
+.venv\Scripts\python.exe scripts\seed_wokwi_esp.py
+```
 
 ### Volume-Mapping
 

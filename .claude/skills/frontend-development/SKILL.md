@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 7.0
-**Letzte Aktualisierung:** 2026-02-06
+**Version:** 7.1
+**Letzte Aktualisierung:** 2026-02-11
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~8.000+ Zeilen TypeScript/Vue)
 
@@ -60,6 +60,11 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 | vite | ^6.2.4 | Build Tool |
 | tailwindcss | ^3.4.17 | CSS Framework |
 | typescript | ~5.7.2 | Type Safety |
+| vitest | ^3.0.0 | Unit Test Framework |
+| @vue/test-utils | ^2.4.0 | Vue Component Testing |
+| jsdom | ^25.0.0 | DOM Environment fuer Tests |
+| msw | ^2.7.0 | HTTP Request Mocking (Mock Service Worker) |
+| @vitest/coverage-v8 | ^3.0.0 | Code Coverage |
 
 ### Build-Konfiguration
 
@@ -92,6 +97,11 @@ make dev          # Docker Dev mit hot-reload
 make build        # Production build
 make logs         # el-frontend Container Logs
 docker exec automationone-frontend npm run build  # Build im Container
+
+# Tests (lokal)
+npm test          # Vitest run (einmalig)
+npm run test:watch    # Vitest watch mode
+npm run test:coverage # Vitest mit v8 Coverage
 ```
 
 ---
@@ -153,6 +163,22 @@ El Frontend/src/
 ├── main.ts        # Bootstrap
 ├── App.vue        # Root Component
 └── style.css      # CSS Variablen (~800 Zeilen)
+
+El Frontend/tests/           # Test-Infrastruktur (Vitest + MSW)
+├── setup.ts                 # Global Setup: MSW, Pinia, jsdom Mocks
+├── mocks/
+│   ├── server.ts            # MSW setupServer
+│   ├── handlers.ts          # ~80 MSW Request Handlers
+│   └── websocket.ts         # MockWebSocketService
+└── unit/
+    ├── stores/
+    │   ├── auth.test.ts     # 37 Tests
+    │   └── esp.test.ts      # 40 Tests
+    ├── composables/
+    │   ├── useToast.test.ts     # 27 Tests
+    │   └── useWebSocket.test.ts # 55 Tests
+    └── utils/
+        └── formatters.test.ts   # 65 Tests
 ```
 
 ---
@@ -749,6 +775,7 @@ Mock ESP erstellen (POST /v1/debug/mock-esp)
 | Dark/Light Mode Toggle | CSS vorhanden, kein UI | Dark Theme ONLY |
 | PWA/Offline-First | Nicht implementiert | - |
 | i18n | Hardcoded German | Kein Mehrsprachigkeit |
+| Unit Tests | 5 Files, 250 Tests (Vitest + MSW) | Stores, Composables, Utils |
 | E2E Tests | Nicht vorhanden | - |
 | ESPOrbitalLayout | Name irrefuehrend | Ist 3-Spalten Grid, NICHT orbital |
 
@@ -847,8 +874,15 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 7.0
-**Letzte Aktualisierung:** 2026-02-06
+**Version:** 7.1
+**Letzte Aktualisierung:** 2026-02-11
+
+### Aenderungen in v7.1
+
+- Test-Stack hinzugefuegt: vitest, @vue/test-utils, jsdom, msw, @vitest/coverage-v8
+- Test-Scripts dokumentiert: npm test, test:watch, test:coverage
+- Test-Ordnerstruktur (tests/) in Section 2 ergaenzt
+- Unit Tests Status in Bekannte Luecken aktualisiert (5 Files, 250 Tests)
 
 ### Aenderungen in v7.0
 

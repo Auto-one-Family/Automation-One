@@ -12,7 +12,7 @@ context: inline
 # ESP32 Debug Skill
 
 > **Fokus:** Firmware-Fehler, Boot-Probleme, Hardware-Issues, Sensor/Actuator-Kommunikation
-> **Log-Quelle:** `logs/current/esp32_serial.log`
+> **Log-Quelle:** `logs/current/esp32_serial.log` (PlatformIO Monitor) OR `docker logs automationone-esp32-serial` (TCP-Bridge)
 > **Error-Codes:** 1000-4999 (ESP32-spezifisch)
 
 ---
@@ -32,7 +32,7 @@ context: inline
 
 ## 1. ESP32 Firmware-Architektur (Debug-relevante Module)
 
-98 Source-Dateien, Singleton-Pattern. Debug-Kernmodule:
+100 Source-Dateien (42 .cpp + 58 .h), Singleton-Pattern. Debug-Kernmodule:
 
 | Modul | Pfad | Funktion |
 |-------|------|----------|

@@ -197,6 +197,8 @@ Vor Implementierung prüfen:
 | Code ohne Fehlerbehandlung | Nicht produktionsreif |
 | Breaking Changes ohne Genehmigung | Rückwärtskompatibilität |
 | Große Refactorings ohne Plan | Risiko |
+| Agents parallel starten ohne "zusammen" | User erwartet sequenzielle Ausführung |
+| "Soll ich fortfahren?" mid-task fragen | Ohne Pause durcharbeiten bis Task beendet |
 
 ---
 

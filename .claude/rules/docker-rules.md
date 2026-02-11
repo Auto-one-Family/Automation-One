@@ -60,6 +60,7 @@ All service logs use bind-mounts for easy access:
 | Server | `./logs/server/` | `/app/logs` |
 | MQTT | `./logs/mqtt/` | `/mosquitto/log` |
 | PostgreSQL | `./logs/postgres/` | `/var/log/postgresql` |
+| ESP32 Serial Logger | N/A (stdout only) | N/A |
 
 **Config Files:**
 - PostgreSQL: `docker/postgres/postgresql.conf` (mounted read-only)
@@ -76,7 +77,7 @@ All service logs use bind-mounts for easy access:
 | Server | 8000 | 8000 | FastAPI |
 | PostgreSQL | 5432 | 5432 | Database |
 | MQTT | 1883 | 1883 | Mosquitto |
-| Frontend | 3000 | 3000 | Vite Dev |
+| Frontend | 5173 | 5173 | Vite Dev |
 
 ---
 
