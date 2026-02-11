@@ -263,6 +263,20 @@ void setup() {
   }
 
   // ============================================
+  // STEP 5.1: RESTORE LOG LEVEL FROM NVS
+  // ============================================
+  // Log-Level persists across reboots (set via MQTT set_log_level command)
+  if (storageManager.beginNamespace("system_config", true)) {
+    uint8_t saved_level = storageManager.getUInt8("log_level", LOG_INFO);
+    if (saved_level <= LOG_CRITICAL) {
+      logger.setLogLevel((LogLevel)saved_level);
+      // Use Serial.printf directly — LOG_INFO would be invisible if restored level > INFO
+      Serial.printf("[NVS] Log level restored from NVS: %s\n", Logger::getLogLevelString((LogLevel)saved_level));
+    }
+    storageManager.endNamespace();
+  }
+
+  // ============================================
   // STEP 6: CONFIG MANAGER (Load configurations)
   // ============================================
   configManager.begin();
@@ -690,7 +704,73 @@ void setup() {
 
   if (!mqttClient.connect(mqtt_config)) {
     LOG_ERROR("MQTT connection failed");
-    LOG_WARNING("System will continue but MQTT features unavailable");
+
+    // ═══════════════════════════════════════════════════
+    // MQTT FAILURE → PROVISIONING PORTAL RECOVERY
+    // ═══════════════════════════════════════════════════
+    // Same pattern as WiFi failure recovery (see STEP 10 above).
+    // If MQTT broker is unreachable, the server IP or MQTT port
+    // in the user's config is likely wrong. Re-open the portal
+    // so the user can correct the configuration.
+    LOG_CRITICAL("╔════════════════════════════════════════╗");
+    LOG_CRITICAL("║  MQTT CONNECTION FAILED                ║");
+    LOG_CRITICAL("║  Opening Provisioning Portal...        ║");
+    LOG_CRITICAL("╚════════════════════════════════════════╝");
+    LOG_CRITICAL("Server: " + mqtt_config.server + ":" + String(mqtt_config.port));
+    LOG_CRITICAL("Possible causes:");
+    LOG_CRITICAL("  1. Wrong MQTT port in configuration");
+    LOG_CRITICAL("  2. Server IP not reachable");
+    LOG_CRITICAL("  3. MQTT broker not running");
+
+    // Update system state
+    g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+    g_system_config.safe_mode_reason = "MQTT connection to '" + mqtt_config.server +
+                                       ":" + String(mqtt_config.port) + "' failed";
+    configManager.saveSystemConfig(g_system_config);
+
+    // Clear the faulty config so the user must re-enter it
+    configManager.resetWiFiConfig();
+    LOG_INFO("WiFi/MQTT configuration cleared from NVS");
+
+    // Initialize and start Provisioning Manager
+    if (!provisionManager.begin()) {
+      LOG_CRITICAL("ProvisionManager initialization failed!");
+      pinMode(LED_PIN, OUTPUT);
+      while (true) {
+        for (int i = 0; i < 6; i++) {  // 6x blink = MQTT failure code
+          digitalWrite(LED_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED_PIN, LOW);
+          delay(200);
+        }
+        delay(2000);
+      }
+    }
+
+    if (provisionManager.startAPMode()) {
+      LOG_INFO("╔════════════════════════════════════════╗");
+      LOG_INFO("║  PROVISIONING PORTAL ACTIVE            ║");
+      LOG_INFO("╚════════════════════════════════════════╝");
+      LOG_INFO("Connect to: AutoOne-" + g_system_config.esp_id);
+      LOG_INFO("Password: provision");
+      LOG_INFO("Open browser: http://192.168.4.1");
+      LOG_INFO("");
+      LOG_INFO("Correct your Server IP / MQTT Port in the form.");
+      LOG_INFO("setup() complete - loop() will handle provisioning");
+      return;  // Exit setup() early - loop() will handle provisioning
+    } else {
+      LOG_CRITICAL("Failed to start AP Mode after MQTT failure!");
+      pinMode(LED_PIN, OUTPUT);
+      while (true) {
+        for (int i = 0; i < 4; i++) {
+          digitalWrite(LED_PIN, HIGH);
+          delay(200);
+          digitalWrite(LED_PIN, LOW);
+          delay(200);
+        }
+        delay(2000);
+      }
+    }
   } else {
     LOG_INFO("MQTT connected successfully");
 
@@ -715,11 +795,8 @@ void setup() {
     actuator_command_wildcard.replace("/0/command", "/+/command");
     String esp_emergency_topic = TopicBuilder::buildActuatorEmergencyTopic();
 
-    // Phase 7: Zone assignment topic
-    String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
-    if (g_kaiser.kaiser_id.length() == 0) {
-      zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
-    }
+    // WP3: Use TopicBuilder for zone topics
+    String zone_assign_topic = TopicBuilder::buildZoneAssignTopic();
 
     mqttClient.subscribe(system_command_topic);
     mqttClient.subscribe(config_topic);
@@ -734,14 +811,10 @@ void setup() {
     mqttClient.subscribe(subzone_assign_topic);
     mqttClient.subscribe(subzone_remove_topic);
 
-    // ✅ Phase 2C: Sensor command topic (on-demand measurement)
+    // WP3: Build sensor command wildcard from TopicBuilder
     // Wildcard subscription for all sensor GPIOs: kaiser/{id}/esp/{esp_id}/sensor/+/command
-    String sensor_command_wildcard = "kaiser/" + g_kaiser.kaiser_id +
-                                     "/esp/" + g_system_config.esp_id +
-                                     "/sensor/+/command";
-    if (g_kaiser.kaiser_id.length() == 0) {
-      sensor_command_wildcard = "kaiser/god/esp/" + g_system_config.esp_id + "/sensor/+/command";
-    }
+    String sensor_command_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
+    sensor_command_wildcard.replace("/0/command", "/+/command");
     mqttClient.subscribe(sensor_command_wildcard);
 
     // Phase 2: Heartbeat-ACK topic (Server → ESP for approval status)
@@ -1143,6 +1216,68 @@ void setup() {
           mqttClient.publish(system_command_topic + "/response", response);
           LOG_INFO("Safe mode deactivated via command");
         }
+        // ============================================
+        // SET_LOG_LEVEL COMMAND (Phase 0: ser2net prep)
+        // ============================================
+        else if (command == "set_log_level") {
+          LOG_INFO("╔════════════════════════════════════════╗");
+          LOG_INFO("║  SET_LOG_LEVEL COMMAND RECEIVED       ║");
+          LOG_INFO("╚════════════════════════════════════════╝");
+
+          // Extract level from payload (two formats supported):
+          //   Flat:   {"command":"set_log_level","level":"DEBUG"}
+          //   Params: {"command":"set_log_level","params":{"level":"DEBUG"}}
+          String level;
+          if (doc.containsKey("level")) {
+            level = doc["level"].as<String>();
+          } else if (doc.containsKey("params") && doc["params"].containsKey("level")) {
+            level = doc["params"]["level"].as<String>();
+          }
+          level.toUpperCase();
+          LOG_INFO("Requested log level: " + level);
+
+          // Map string to LogLevel enum using Logger's static method
+          LogLevel new_level = Logger::getLogLevelFromString(level.c_str());
+
+          // Validate level (getLogLevelFromString returns LOG_INFO for invalid)
+          bool valid = (level.length() > 0 &&
+                       (level == "DEBUG" || level == "INFO" || level == "WARNING" ||
+                        level == "ERROR" || level == "CRITICAL"));
+
+          DynamicJsonDocument response_doc(256);
+          response_doc["command"] = "set_log_level";
+          response_doc["esp_id"] = g_system_config.esp_id;
+
+          if (valid) {
+            logger.setLogLevel(new_level);
+
+            // Persist to NVS for boot recovery
+            if (storageManager.beginNamespace("system_config", false)) {
+              storageManager.putUInt8("log_level", (uint8_t)new_level);
+              storageManager.endNamespace();
+            }
+
+            response_doc["success"] = true;
+            response_doc["level"] = level;
+            response_doc["message"] = "Log level changed to " + level;
+            response_doc["persisted"] = true;
+            response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+            LOG_INFO("✅ Log level changed to " + level + " (persisted to NVS)");
+          } else {
+            response_doc["success"] = false;
+            response_doc["error"] = "Invalid log level";
+            response_doc["message"] = "Valid levels: DEBUG, INFO, WARNING, ERROR, CRITICAL";
+            response_doc["requested_level"] = level;
+            response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+            LOG_ERROR("❌ Invalid log level: " + level);
+          }
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+        }
         // Unknown command
         else {
           LOG_WARNING("Unknown system command: '" + command + "'");
@@ -1163,10 +1298,8 @@ void setup() {
       }
 
       // Phase 7: Zone Assignment Handler
-      String zone_assign_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
-      if (g_kaiser.kaiser_id.length() == 0) {
-        zone_assign_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/zone/assign";
-      }
+      // WP3: Use TopicBuilder for zone assign topic
+      String zone_assign_topic = TopicBuilder::buildZoneAssignTopic();
 
       if (topic == zone_assign_topic) {
         LOG_INFO("╔════════════════════════════════════════╗");
@@ -1183,12 +1316,79 @@ void setup() {
           String zone_name = doc["zone_name"].as<String>();
           String kaiser_id = doc["kaiser_id"].as<String>();
 
-          // Validate critical fields
+          // WP1: Empty zone_id = Zone Removal
           if (zone_id.length() == 0) {
-            LOG_ERROR("Zone assignment failed: zone_id is empty");
+            LOG_INFO("╔════════════════════════════════════════╗");
+            LOG_INFO("║  ZONE REMOVAL DETECTED                ║");
+            LOG_INFO("╚════════════════════════════════════════╝");
+
+            // WP1: Cascade-remove ALL subzones first (avoid orphaned subzones)
+            SubzoneConfig subzone_configs[8];  // MAX_SUBZONES_PER_ESP = 8
+            uint8_t loaded_count = 0;
+            configManager.loadAllSubzoneConfigs(subzone_configs, 8, loaded_count);
+
+            for (uint8_t i = 0; i < loaded_count; i++) {
+              // Free GPIOs
+              for (uint8_t gpio : subzone_configs[i].assigned_gpios) {
+                gpioManager.removePinFromSubzone(gpio);
+              }
+              // Remove from NVS
+              configManager.removeSubzoneConfig(subzone_configs[i].subzone_id);
+              LOG_INFO("  Cascade-removed subzone: " + subzone_configs[i].subzone_id);
+            }
+
+            if (loaded_count > 0) {
+              LOG_INFO("✅ Cascade-removed " + String(loaded_count) + " subzone(s)");
+            }
+
+            // Clear zone configuration in NVS
+            if (configManager.updateZoneAssignment("", "", "", kaiser_id.length() > 0 ? kaiser_id : "god")) {
+              // Update global variables
+              g_kaiser.zone_id = "";
+              g_kaiser.master_zone_id = "";
+              g_kaiser.zone_name = "";
+              g_kaiser.zone_assigned = false;
+
+              // Send zone_removed acknowledgment
+              String ack_topic = TopicBuilder::buildZoneAckTopic();
+              DynamicJsonDocument ack_doc(256);
+              ack_doc["esp_id"] = g_system_config.esp_id;
+              ack_doc["status"] = "zone_removed";
+              ack_doc["zone_id"] = "";
+              ack_doc["master_zone_id"] = "";
+              ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+
+              String ack_payload;
+              size_t written = serializeJson(ack_doc, ack_payload);
+              if (written == 0 || ack_payload.length() == 0) {
+                LOG_ERROR("JSON serialization failed for Zone Removal ACK");
+                ack_payload = "{\"esp_id\":\"" + g_system_config.esp_id +
+                             "\",\"status\":\"error\",\"message\":\"serialization_failed\",\"ts\":0}";
+              }
+              mqttClient.publish(ack_topic, ack_payload);
+
+              LOG_INFO("✅ Zone removed successfully");
+
+              // Update system state
+              g_system_config.current_state = STATE_PENDING_APPROVAL;
+              configManager.saveSystemConfig(g_system_config);
+
+              // Send updated heartbeat
+              mqttClient.publishHeartbeat(true);
+            } else {
+              LOG_ERROR("❌ Failed to remove zone configuration");
+
+              // Send error acknowledgment
+              String ack_topic = TopicBuilder::buildZoneAckTopic();
+              String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
+                                     "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
+                                     ",\"message\":\"Failed to remove zone config\"}";
+              mqttClient.publish(ack_topic, error_response);
+            }
             return;
           }
 
+          // Zone Assignment (zone_id not empty)
           // Kaiser_id optional (if empty, use default "god")
           if (kaiser_id.length() == 0) {
             LOG_WARNING("Kaiser_id empty, using default 'god'");
@@ -1200,6 +1400,26 @@ void setup() {
           LOG_INFO("Zone Name: " + zone_name);
           LOG_INFO("Kaiser ID: " + kaiser_id);
 
+          // WP5: Validate zone configuration BEFORE updating
+          KaiserZone temp_kaiser;
+          temp_kaiser.zone_id = zone_id;
+          temp_kaiser.master_zone_id = master_zone_id;
+          temp_kaiser.zone_name = zone_name;
+          temp_kaiser.kaiser_id = kaiser_id;
+          temp_kaiser.zone_assigned = true;
+
+          if (!configManager.validateZoneConfig(temp_kaiser)) {
+            LOG_ERROR("❌ Zone configuration validation failed");
+
+            // Send error acknowledgment
+            String ack_topic = TopicBuilder::buildZoneAckTopic();
+            String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
+                                   "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
+                                   ",\"message\":\"Zone validation failed\"}";
+            mqttClient.publish(ack_topic, error_response);
+            return;
+          }
+
           // Update zone configuration
           if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaiser_id)) {
             // Update global variables
@@ -1207,10 +1427,58 @@ void setup() {
             g_kaiser.master_zone_id = master_zone_id;
             g_kaiser.zone_name = zone_name;
             g_kaiser.zone_assigned = true;
-            if (kaiser_id.length() > 0) {
+            if (kaiser_id.length() > 0 && kaiser_id != g_kaiser.kaiser_id) {
+              // WP3-Fix: Store old kaiser_id before updating
+              String old_kaiser_id = g_kaiser.kaiser_id;
+
+              // WP3-Fix: Unsubscribe from ALL old topics to prevent duplicate messages
+              // Build topics manually with old kaiser_id (TopicBuilder not updated yet)
+              String old_zone_assign = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/assign";
+              String old_sensor_cmd = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/sensor/+/command";
+              String old_subzone_assign = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/assign";
+              String old_subzone_remove = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/remove";
+              String old_actuator_cmd = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/actuator/+/command";
+              String old_heartbeat_ack = "kaiser/" + old_kaiser_id + "/system/heartbeat/ack";
+
+              mqttClient.unsubscribe(old_zone_assign);
+              mqttClient.unsubscribe(old_sensor_cmd);
+              mqttClient.unsubscribe(old_subzone_assign);
+              mqttClient.unsubscribe(old_subzone_remove);
+              mqttClient.unsubscribe(old_actuator_cmd);
+              mqttClient.unsubscribe(old_heartbeat_ack);
+
+              LOG_INFO("Unsubscribed from old kaiser_id topics: " + old_kaiser_id);
+
+              // Update global kaiser_id and TopicBuilder
               g_kaiser.kaiser_id = kaiser_id;
               // Update TopicBuilder with new kaiser_id
               TopicBuilder::setKaiserId(kaiser_id.c_str());
+
+              // WP3: Re-subscribe to topics after kaiser_id change
+              // Topics that depend on kaiser_id need to be re-subscribed
+              LOG_INFO("Kaiser ID changed - re-subscribing to topics...");
+
+              // Re-subscribe to zone topic
+              mqttClient.subscribe(TopicBuilder::buildZoneAssignTopic());
+
+              // Re-subscribe to sensor command wildcard
+              String sensor_cmd_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
+              sensor_cmd_wildcard.replace("/0/command", "/+/command");
+              mqttClient.subscribe(sensor_cmd_wildcard);
+
+              // Re-subscribe to subzone topics
+              mqttClient.subscribe(TopicBuilder::buildSubzoneAssignTopic());
+              mqttClient.subscribe(TopicBuilder::buildSubzoneRemoveTopic());
+
+              // Re-subscribe to actuator command wildcard
+              String actuator_cmd_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
+              actuator_cmd_wildcard.replace("/0/command", "/+/command");
+              mqttClient.subscribe(actuator_cmd_wildcard);
+
+              // Re-subscribe to heartbeat ack
+              mqttClient.subscribe(TopicBuilder::buildSystemHeartbeatAckTopic());
+
+              LOG_INFO("Topics re-subscribed with new kaiser_id: " + kaiser_id);
             }
 
             // Send acknowledgment
@@ -1399,6 +1667,9 @@ void setup() {
 
           // Remove from NVS
           configManager.removeSubzoneConfig(subzone_id);
+
+          // WP8: Send subzone_removed acknowledgment
+          sendSubzoneAck(subzone_id, "subzone_removed", "");
 
           LOG_INFO("✅ Subzone removed: " + subzone_id);
         }
@@ -1850,7 +2121,7 @@ void loop() {
   // === LOOP TRACING (Debug Blockade) ===
   static uint32_t loop_count = 0;
   loop_count++;
-  LOG_INFO("LOOP[" + String(loop_count) + "] START");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] START");
 
   // ─────────────────────────────────────────────────────
   // WATCHDOG FEED (Industrial-Grade)
@@ -1869,13 +2140,13 @@ void loop() {
       }
     }
   }
-  LOG_INFO("LOOP[" + String(loop_count) + "] WATCHDOG_FEED OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] WATCHDOG_FEED OK");
 
   // ─────────────────────────────────────────────────────
   // WATCHDOG TIMEOUT HANDLER
   // ─────────────────────────────────────────────────────
   handleWatchdogTimeout();
-  LOG_INFO("LOOP[" + String(loop_count) + "] WATCHDOG_TIMEOUT_HANDLER OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] WATCHDOG_TIMEOUT_HANDLER OK");
   // ═══════════════════════════════════════════════════
   // ✅ FIX #1: STATE_SAFE_MODE_PROVISIONING HANDLING
   // ═══════════════════════════════════════════════════
@@ -1949,36 +2220,76 @@ void loop() {
   }
 
   // Phase 2: Communication monitoring (with Circuit Breaker - Phase 6+)
-  LOG_INFO("LOOP[" + String(loop_count) + "] WIFI_START");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] WIFI_START");
   wifiManager.loop();      // Monitor WiFi connection (Circuit Breaker integrated)
-  LOG_INFO("LOOP[" + String(loop_count) + "] WIFI OK");
-  LOG_INFO("LOOP[" + String(loop_count) + "] MQTT_START");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] WIFI OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] MQTT_START");
   mqttClient.loop();       // Process MQTT messages + heartbeat (Circuit Breaker integrated)
-  LOG_INFO("LOOP[" + String(loop_count) + "] MQTT OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] MQTT OK");
+
+  // ═══════════════════════════════════════════════════
+  // MQTT PERSISTENT FAILURE DETECTION → PROVISIONING RECOVERY
+  // ═══════════════════════════════════════════════════
+  // If MQTT Circuit Breaker stays OPEN for 5 minutes continuously,
+  // the server/broker config is likely wrong. Trigger portal recovery.
+  // This covers the case where MQTT connected initially but then
+  // permanently lost the broker (e.g. server IP changed, broker down).
+  {
+    static const unsigned long MQTT_PERSISTENT_FAILURE_TIMEOUT_MS = 300000;  // 5 minutes
+    static unsigned long mqtt_failure_start = 0;
+
+    if (!mqttClient.isConnected() && mqttClient.getCircuitBreakerState() == CircuitState::OPEN) {
+      if (mqtt_failure_start == 0) {
+        mqtt_failure_start = millis();
+        LOG_WARNING("MQTT persistent failure timer started (5 min to recovery)");
+      } else if (millis() - mqtt_failure_start > MQTT_PERSISTENT_FAILURE_TIMEOUT_MS) {
+        LOG_CRITICAL("╔════════════════════════════════════════╗");
+        LOG_CRITICAL("║  MQTT PERSISTENT FAILURE (5 min)       ║");
+        LOG_CRITICAL("║  Triggering Provisioning Recovery...   ║");
+        LOG_CRITICAL("╚════════════════════════════════════════╝");
+
+        g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+        g_system_config.safe_mode_reason = "MQTT persistent failure (5 min Circuit Breaker OPEN)";
+        configManager.saveSystemConfig(g_system_config);
+
+        // Clear faulty config so user must re-enter
+        configManager.resetWiFiConfig();
+        LOG_INFO("Configuration cleared - rebooting to provisioning...");
+        delay(2000);
+        ESP.restart();
+      }
+    } else {
+      // MQTT is connected or Circuit Breaker recovered → reset timer
+      if (mqtt_failure_start != 0) {
+        LOG_INFO("MQTT recovered - persistent failure timer reset");
+        mqtt_failure_start = 0;
+      }
+    }
+  }
 
   // Phase 4: Sensor measurements
-  LOG_INFO("LOOP[" + String(loop_count) + "] SENSOR_START");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] SENSOR_START");
   sensorManager.performAllMeasurements();
-  LOG_INFO("LOOP[" + String(loop_count) + "] SENSOR OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] SENSOR OK");
 
   // Phase 5: Actuator maintenance
-  LOG_INFO("LOOP[" + String(loop_count) + "] ACTUATOR_START");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] ACTUATOR_START");
   actuatorManager.processActuatorLoops();
   static unsigned long last_actuator_status = 0;
   if (millis() - last_actuator_status > 30000) {
     actuatorManager.publishAllActuatorStatus();
     last_actuator_status = millis();
   }
-  LOG_INFO("LOOP[" + String(loop_count) + "] ACTUATOR OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] ACTUATOR OK");
 
   // ============================================
   // PHASE 7: HEALTH MONITORING (automatic via HealthMonitor)
   // ============================================
-  LOG_INFO("LOOP[" + String(loop_count) + "] HEALTH_START");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] HEALTH_START");
   healthMonitor.loop();  // Publishes automatically if needed
-  LOG_INFO("LOOP[" + String(loop_count) + "] HEALTH OK");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] HEALTH OK");
 
-  LOG_INFO("LOOP[" + String(loop_count) + "] END");
+  LOG_DEBUG("LOOP[" + String(loop_count) + "] END");
   delay(10);  // Small delay (gives CPU to scheduler)
 }
 
@@ -2089,6 +2400,9 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
     LOG_ERROR("Sensor field 'sensor_type' must be a string");
     SET_FAILURE_AND_RETURN(config.gpio, ERROR_CONFIG_INVALID, "TYPE_MISMATCH", "Field 'sensor_type' must be a string");
   }
+  // Normalize sensor_type to lowercase (Defense-in-Depth)
+  // Server may send "DS18B20" or "SHT31" - direct indexOf() checks need lowercase
+  config.sensor_type.toLowerCase();
 
   if (!sensor_obj.containsKey("sensor_name")) {
     LOG_ERROR("Sensor config missing required field 'sensor_name'");
@@ -2152,10 +2466,12 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
   if (!configManager.validateSensorConfig(config)) {
     LOG_ERROR("Sensor validation failed for GPIO " + String(config.gpio));
     // Check if it's a GPIO conflict using GPIOManager
+    // Bus-sharing owners (e.g. "bus/onewire/4") are NOT conflicts for compatible sensors
     String pin_owner = gpioManager.getPinOwner(config.gpio);
     String pin_component = gpioManager.getPinComponent(config.gpio);
     String detail;
-    if (pin_owner.length() > 0) {
+    if (pin_owner.length() > 0 && !pin_owner.startsWith("bus/")) {
+      // Exclusive conflict: Pin owned by non-bus component (sensor, actuator, system)
       detail = "GPIO " + String(config.gpio) + " reserved by " + pin_owner;
       if (pin_component.length() > 0) {
         detail += " (" + pin_component + ")";
@@ -2182,16 +2498,18 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
 
   if (!sensorManager.configureSensor(config)) {
     LOG_ERROR("Failed to configure sensor on GPIO " + String(config.gpio));
-    // Check for GPIO conflict
+    // Check for GPIO conflict (distinguish exclusive vs bus-sharing conflicts)
     String pin_owner = gpioManager.getPinOwner(config.gpio);
     String pin_component = gpioManager.getPinComponent(config.gpio);
-    if (pin_owner.length() > 0) {
+    if (pin_owner.length() > 0 && !pin_owner.startsWith("bus/")) {
+      // Exclusive conflict: Pin owned by non-bus component (sensor, actuator, system)
       String detail = "GPIO " + String(config.gpio) + " already used by " + pin_owner;
       if (pin_component.length() > 0) {
         detail += " (" + pin_component + ")";
       }
       SET_FAILURE_AND_RETURN(config.gpio, ERROR_GPIO_CONFLICT, "GPIO_CONFLICT", detail);
     } else {
+      // Either no owner or bus owner (bus-sharing scenario) - report actual config failure
       SET_FAILURE_AND_RETURN(config.gpio, ERROR_SENSOR_INIT_FAILED, "CONFIG_FAILED",
                              "Failed to configure sensor on GPIO " + String(config.gpio));
     }

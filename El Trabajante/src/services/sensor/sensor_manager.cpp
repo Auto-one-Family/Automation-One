@@ -315,8 +315,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
     // ONEWIRE SENSOR HANDLING (DS18B20, DS18S20, DS1822)
     // ============================================
     // OneWire sensors share a single bus pin - special GPIO handling required
-    bool is_onewire = (capability && !capability->is_i2c && 
-                       config.sensor_type.indexOf("ds18b20") >= 0);
+    // Defense-in-Depth: case-insensitive check (main entry points normalize,
+    // but direct indexOf needs protection against mixed-case sensor_type)
+    String lower_sensor_type = config.sensor_type;
+    lower_sensor_type.toLowerCase();
+    bool is_onewire = (capability && !capability->is_i2c &&
+                       lower_sensor_type.indexOf("ds18b20") >= 0);
     
     if (is_onewire) {
         LOG_DEBUG("SensorManager: OneWire sensor detected: " + config.sensor_type);
@@ -583,7 +587,10 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
             // For other I2C sensors, adjust buffer size as needed
             if (readRawI2C(gpio, device_addr, 0x00, buffer, 6)) {
                 // Extract raw value based on sensor type
-                if (config->sensor_type.indexOf("sht31") >= 0) {
+                // Defense-in-Depth: case-insensitive check
+                String lower_type_check = config->sensor_type;
+                lower_type_check.toLowerCase();
+                if (lower_type_check.indexOf("sht31") >= 0) {
                     // SHT31: First 2 bytes are temperature (for temp sensor)
                     // For humidity, bytes 3-4 would be used (handled separately)
                     raw_value = (uint32_t)(buffer[0] << 8 | buffer[1]);
@@ -994,20 +1001,23 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
 // Begründung: Minimiert MQTT-Traffic, Server-Control via measurement_interval Config.
 // Dokumentiert in: docs/ZZZ.md - "Server-Centric Pragmatic Deviations"
 void SensorManager::performAllMeasurements() {
-    LOG_INFO("SensorManager::performAllMeasurements() ENTER");
-
     if (!initialized_) {
-        LOG_INFO("SensorManager: Not initialized, returning");
         return;
     }
 
+    // No sensors configured - nothing to do
+    if (sensor_count_ == 0) {
+        return;
+    }
+
+    LOG_DEBUG("SensorManager::performAllMeasurements() ENTER, sensor_count=" + String(sensor_count_));
+
     unsigned long now = millis();
-    LOG_INFO("SensorManager: sensor_count=" + String(sensor_count_));
 
     // ✅ Phase 2C: Pro-Sensor Iteration with Mode-Check
     // (Removed global interval check - each sensor has its own interval)
     for (uint8_t i = 0; i < sensor_count_; i++) {
-        LOG_INFO("SensorManager: Processing sensor[" + String(i) + "] GPIO=" + String(sensors_[i].gpio) + " type=" + sensors_[i].sensor_type);
+        LOG_DEBUG("SensorManager: Processing sensor[" + String(i) + "] GPIO=" + String(sensors_[i].gpio) + " type=" + sensors_[i].sensor_type);
         // Check 1: Sensor must be active
         if (!sensors_[i].active) {
             continue;
@@ -1045,14 +1055,14 @@ void SensorManager::performAllMeasurements() {
         // ✅ Continuous Mode: Perform measurement
         // Check if this is a multi-value sensor
         const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
-        LOG_INFO("SensorManager: sensor[" + String(i) + "] is_multi_value=" + String(capability && capability->is_multi_value ? "YES" : "NO"));
+        LOG_DEBUG("SensorManager: sensor[" + String(i) + "] is_multi_value=" + String(capability && capability->is_multi_value ? "YES" : "NO"));
 
         if (capability && capability->is_multi_value) {
             // Multi-value sensor - create multiple readings
-            LOG_INFO("SensorManager: MULTI-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
+            LOG_DEBUG("SensorManager: MULTI-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading readings[4];  // Max 4 values per sensor
             uint8_t count = performMultiValueMeasurement(sensors_[i].gpio, readings, 4);
-            LOG_INFO("SensorManager: MULTI-VALUE measurement END count=" + String(count));
+            LOG_DEBUG("SensorManager: MULTI-VALUE measurement END count=" + String(count));
 
             // Readings are already published by performMultiValueMeasurement
             if (count == 0) {
@@ -1062,26 +1072,26 @@ void SensorManager::performAllMeasurements() {
             }
         } else {
             // Single-value sensor - standard measurement
-            LOG_INFO("SensorManager: SINGLE-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
+            LOG_DEBUG("SensorManager: SINGLE-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading reading;
             if (performMeasurement(sensors_[i].gpio, reading)) {
-                LOG_INFO("SensorManager: SINGLE-VALUE measurement OK, publishing");
+                LOG_DEBUG("SensorManager: SINGLE-VALUE measurement OK, publishing");
                 // Publish via MQTT
                 publishSensorReading(reading);
                 sensors_[i].last_reading = now;  // Update timestamp
             } else {
-                LOG_INFO("SensorManager: SINGLE-VALUE measurement FAILED");
+                LOG_DEBUG("SensorManager: SINGLE-VALUE measurement FAILED");
             }
         }
 
         // Feed watchdog between sensor measurements to prevent timeout
-        LOG_INFO("SensorManager: sensor[" + String(i) + "] DONE, yielding");
+        LOG_DEBUG("SensorManager: sensor[" + String(i) + "] DONE, yielding");
         yield();
     }
 
     // Update global timestamp for compatibility
     last_measurement_time_ = now;
-    LOG_INFO("SensorManager::performAllMeasurements() EXIT");
+    LOG_DEBUG("SensorManager::performAllMeasurements() EXIT");
 }
 
 // ============================================

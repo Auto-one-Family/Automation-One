@@ -95,7 +95,14 @@ HealthSnapshot HealthMonitor::getCurrentSnapshot() const {
     
     // System state
     snapshot.system_state = g_system_config.current_state;
-    
+
+    // Boot reason
+    snapshot.boot_reason = (uint8_t)esp_reset_reason();
+
+    // MQTT Circuit Breaker status
+    snapshot.mqtt_circuit_state = mqttClient.getCircuitBreakerState();
+    snapshot.mqtt_failure_count = mqttClient.getCircuitBreakerFailureCount();
+
     // ─────────────────────────────────────────────────────
     // WATCHDOG STATUS
     // ─────────────────────────────────────────────────────
@@ -235,6 +242,25 @@ String HealthMonitor::getSnapshotJSON() const {
         default: state_str = "UNKNOWN"; break;
     }
     json += "\"system_state\":\"" + state_str + "\"";
+
+    // Boot reason (ESP-IDF esp_reset_reason_t)
+    const char* boot_reasons[] = {"UNKNOWN","POWERON","EXT","SW","PANIC",
+                                   "INT_WDT","TASK_WDT","WDT","DEEPSLEEP","BROWNOUT","SDIO"};
+    uint8_t reason_idx = snapshot.boot_reason;
+    const char* reason_str = (reason_idx < 11) ? boot_reasons[reason_idx] : "UNKNOWN";
+    json += ",\"boot_reason\":\"" + String(reason_str) + "\"";
+
+    // MQTT Circuit Breaker status
+    const char* cb_states[] = {"CLOSED","OPEN","HALF_OPEN"};
+    json += ",\"mqtt_cb_state\":\"" + String(cb_states[(uint8_t)snapshot.mqtt_circuit_state]) + "\"";
+    json += ",\"mqtt_cb_failures\":" + String(snapshot.mqtt_failure_count);
+
+    // Watchdog status (data already captured in snapshot, now serialized)
+    const char* wdt_modes[] = {"DISABLED","PROVISIONING","PRODUCTION","SAFE_MODE"};
+    json += ",\"wdt_mode\":\"" + String(wdt_modes[(uint8_t)snapshot.watchdog_mode]) + "\"";
+    json += ",\"wdt_timeouts_24h\":" + String(snapshot.watchdog_timeouts_24h);
+    json += ",\"wdt_timeout_pending\":" + String(snapshot.watchdog_timeout_pending ? "true" : "false");
+
     json += "}";
     
     return json;

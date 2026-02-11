@@ -2,6 +2,12 @@
 #include "../utils/logger.h"
 #include <algorithm>
 
+// HAL Interface and Wrapper (Phase 2: Unit Testing)
+#include "hal/igpio_hal.h"
+#ifndef UNIT_TEST
+    #include "hal/esp32_gpio_hal.h"
+#endif
+
 // ============================================
 // CONDITIONAL HARDWARE CONFIGURATION INCLUDES
 // ============================================
@@ -12,6 +18,39 @@
 #else
     #include "../config/hardware/esp32_dev.h"
 #endif
+
+// ============================================
+// PRODUCTION HAL INSTANCE (Static)
+// ============================================
+#ifndef UNIT_TEST
+ESP32GPIOHal GPIOManager::production_gpio_hal_;
+#endif
+
+// ============================================
+// CONSTRUCTOR
+// ============================================
+GPIOManager::GPIOManager() {
+    #ifndef UNIT_TEST
+    // Production: HAL pointer points to static production instance
+    gpio_hal_ = &production_gpio_hal_;
+    #else
+    // Unit Test: HAL pointer is nullptr (will be injected via TestHelper)
+    gpio_hal_ = nullptr;
+    #endif
+}
+
+// ============================================
+// toGPIOMode CONVERSION
+// ============================================
+GPIOMode GPIOManager::toGPIOMode(uint8_t arduino_mode) {
+    switch (arduino_mode) {
+        case INPUT:          return GPIOMode::GPIO_INPUT;
+        case OUTPUT:         return GPIOMode::GPIO_OUTPUT;
+        case INPUT_PULLUP:   return GPIOMode::GPIO_INPUT_PULLUP;
+        case INPUT_PULLDOWN: return GPIOMode::GPIO_INPUT_PULLDOWN;
+        default:             return GPIOMode::GPIO_INPUT_PULLUP;  // Safe fallback
+    }
+}
 
 // ============================================
 // GLOBAL INSTANCE
@@ -30,28 +69,40 @@ GPIOManager& gpioManager = GPIOManager::getInstance();
 // - Sets all safe pins to INPUT_PULLUP (high-impedance safe state)
 
 void GPIOManager::initializeAllPinsToSafeMode() {
+    // Re-entrancy guard (safety net for circular HAL calls)
+    static bool initializing_ = false;
+    if (initializing_) return;
+    initializing_ = true;
+
     Serial.println("\n=== GPIO SAFE-MODE INITIALIZATION ===");
     Serial.printf("Board Type: %s\n", BOARD_TYPE);
-    
+
+    // Notify HAL (Mock uses this to set initialized flag)
+    if (gpio_hal_) {
+        gpio_hal_->initializeAllPinsToSafeMode();
+    }
+
     // Clear any existing pin information
     pins_.clear();
     pins_.reserve(HardwareConfig::SAFE_PIN_COUNT);
-    
+
     uint8_t warning_count = 0;  // Track failed verifications
-    
+
     // Initialize all safe GPIO pins to INPUT_PULLUP
     for (uint8_t i = 0; i < HardwareConfig::SAFE_PIN_COUNT; i++) {
         uint8_t pin = HardwareConfig::SAFE_GPIO_PINS[i];
-        
-        // Set hardware pin mode to INPUT_PULLUP (safe state)
-        pinMode(pin, INPUT_PULLUP);
-        
+
+        // Set hardware pin mode to INPUT_PULLUP (safe state) via HAL
+        if (gpio_hal_) {
+            gpio_hal_->pinMode(pin, GPIOMode::GPIO_INPUT_PULLUP);
+        }
+
         // Verify pin state
         if (!verifyPinState(pin, INPUT_PULLUP)) {
             LOG_WARNING("GPIO " + String(pin) + " may not be in safe state!");
             warning_count++;
         }
-        
+
         // Register pin in tracking system
         GPIOPinInfo info;
         info.pin = pin;
@@ -60,21 +111,23 @@ void GPIOManager::initializeAllPinsToSafeMode() {
         info.mode = INPUT_PULLUP;
         info.in_safe_mode = true;
         pins_.push_back(info);
-        
+
         LOG_DEBUG("GPIO " + String(pin) + ": Safe-Mode (INPUT_PULLUP)");
     }
-    
-    // Auto-reserve I2C pins for system use
+
+    // Auto-reserve I2C pins for system use (skip in unit tests)
+    #ifndef UNIT_TEST
     bool i2c_sda = requestPin(HardwareConfig::I2C_SDA_PIN, "system", "I2C_SDA");
     bool i2c_scl = requestPin(HardwareConfig::I2C_SCL_PIN, "system", "I2C_SCL");
-    
+
     if (i2c_sda && i2c_scl) {
-        LOG_INFO("I2C pins auto-reserved (SDA: GPIO " + String(HardwareConfig::I2C_SDA_PIN) + 
+        LOG_INFO("I2C pins auto-reserved (SDA: GPIO " + String(HardwareConfig::I2C_SDA_PIN) +
                  ", SCL: GPIO " + String(HardwareConfig::I2C_SCL_PIN) + ")");
     } else {
         LOG_WARNING("GPIOManager: I2C pin auto-reservation failed");
     }
-    
+    #endif
+
     // Log initialization summary
     if (warning_count > 0) {
         LOG_WARNING("GPIOManager: " + String(warning_count) + " pins failed safe-mode verification");
@@ -84,8 +137,10 @@ void GPIOManager::initializeAllPinsToSafeMode() {
     LOG_INFO("Board: " + String(BOARD_TYPE));
     LOG_INFO("Available Pins: " + String(HardwareConfig::SAFE_PIN_COUNT));
     LOG_INFO("Reserved Pins: " + String(HardwareConfig::RESERVED_PIN_COUNT));
-    
+
     LOG_INFO("GPIOManager: Safe-Mode initialization complete");
+
+    initializing_ = false;
 }
 
 // ============================================
@@ -95,21 +150,61 @@ void GPIOManager::initializeAllPinsToSafeMode() {
 // Implements comprehensive validation and conflict detection
 
 bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* component_name) {
-    // ✅ VALIDATION 1: Check if pin is reserved
+    // VALIDATION 1: Check if pin is reserved
     if (isReservedPin(gpio)) {
         LOG_ERROR("GPIOManager: Attempted to request reserved pin " + String(gpio));
         return false;
     }
-    
-    // ✅ VALIDATION 2: Check if pin is already in use
+
+    // VALIDATION 2: Check if pin is already in use
     for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio && pin_info.owner[0] != '\0') {
-            LOG_ERROR("GPIOManager: Pin " + String(gpio) + " conflict - already owned by " + String(pin_info.owner));
+            // ============================================
+            // BUS-SHARING CHECK: Allow compatible bus users
+            // ============================================
+            // Pins owned by a bus (owner starts with "bus/") can be shared
+            // by sensors/components that use the same bus type.
+            // Example: "bus/onewire/4" allows DS18B20 sensors to share GPIO 4
+            // Uses C-string operations for native test compatibility
+            const char* existing_owner = pin_info.owner;
+            const char* new_owner_str = owner;
+            const size_t BUS_PREFIX_LEN = 4;  // strlen("bus/")
+
+            if (strncmp(existing_owner, "bus/", BUS_PREFIX_LEN) == 0 &&
+                strncmp(new_owner_str, "bus/", BUS_PREFIX_LEN) == 0) {
+                // Both are bus owners - allow if same bus type
+                // Extract bus type: "bus/onewire/4" -> "onewire"
+                const char* existing_bus_start = existing_owner + BUS_PREFIX_LEN;
+                const char* new_bus_start = new_owner_str + BUS_PREFIX_LEN;
+
+                // Find end of bus type (next '/' or end of string)
+                const char* existing_bus_end = strchr(existing_bus_start, '/');
+                const char* new_bus_end = strchr(new_bus_start, '/');
+
+                size_t existing_bus_len = existing_bus_end ?
+                    (size_t)(existing_bus_end - existing_bus_start) : strlen(existing_bus_start);
+                size_t new_bus_len = new_bus_end ?
+                    (size_t)(new_bus_end - new_bus_start) : strlen(new_bus_start);
+
+                if (existing_bus_len == new_bus_len &&
+                    strncmp(existing_bus_start, new_bus_start, existing_bus_len) == 0) {
+                    LOG_INFO("GPIOManager: Pin " + String(gpio) + " bus-sharing allowed (" +
+                             String(existing_owner) + " + " + String(new_owner_str) + ")");
+                    return true;  // Same bus type - sharing OK
+                }
+            }
+
+            LOG_ERROR("GPIOManager: Pin " + String(gpio) + " conflict - already owned by " + String(existing_owner));
             return false;
         }
     }
-    
-    // ✅ ALLOCATION: Reserve the pin
+
+    // Notify HAL (Mock tracks reservations)
+    if (gpio_hal_) {
+        gpio_hal_->requestPin(gpio, String(owner), String(component_name));
+    }
+
+    // ALLOCATION: Reserve the pin in internal tracking
     for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio) {
             strncpy(pin_info.owner, owner, sizeof(pin_info.owner) - 1);
@@ -117,12 +212,12 @@ bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* compon
             strncpy(pin_info.component_name, component_name, sizeof(pin_info.component_name) - 1);
             pin_info.component_name[sizeof(pin_info.component_name) - 1] = '\0';
             pin_info.in_safe_mode = false;
-            
+
             LOG_INFO("GPIOManager: Pin " + String(gpio) + " allocated to " + String(component_name));
             return true;
         }
     }
-    
+
     // Pin not found in safe pins array
     LOG_ERROR("GPIOManager: Pin " + String(gpio) + " not in safe pins list");
     return false;
@@ -137,26 +232,28 @@ bool GPIOManager::releasePin(uint8_t gpio) {
     for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio) {
             LOG_INFO("Releasing GPIO " + String(gpio) + " (was: " + String(pin_info.owner) + "/" + String(pin_info.component_name) + ")");
-            
-            // Return hardware pin to safe state
-            pinMode(gpio, INPUT_PULLUP);
-            
+
+            // Return hardware pin to safe state via HAL
+            if (gpio_hal_) {
+                gpio_hal_->releasePin(gpio);
+            }
+
             // Verify safe mode
             if (!verifyPinState(gpio, INPUT_PULLUP)) {
                 LOG_WARNING("Pin " + String(gpio) + " may not be in safe state after release");
             }
-            
+
             // Update tracking information
             pin_info.owner[0] = '\0';
             pin_info.component_name[0] = '\0';
             pin_info.mode = INPUT_PULLUP;
             pin_info.in_safe_mode = true;
-            
+
             LOG_INFO("GPIOManager: Pin " + String(gpio) + " released to safe mode");
             return true;
         }
     }
-    
+
     LOG_WARNING("GPIO " + String(gpio) + " not found for release");
     return false;
 }
@@ -169,44 +266,53 @@ bool GPIOManager::releasePin(uint8_t gpio) {
 
 void GPIOManager::enableSafeModeForAllPins() {
     LOG_CRITICAL("GPIOManager: Emergency safe-mode activated");
-    
+
+    // Notify HAL (Mock clears all state)
+    if (gpio_hal_) {
+        gpio_hal_->enableSafeModeForAllPins();
+    }
+
     uint8_t warning_count = 0;
     uint8_t de_energized_count = 0;
-    
+
     for (auto& pin_info : pins_) {
         // Enhanced safety - De-energize outputs BEFORE mode change
         if (pin_info.mode == OUTPUT) {
-            digitalWrite(pin_info.pin, LOW);  // Turn off actuator
+            if (gpio_hal_) {
+                gpio_hal_->digitalWrite(pin_info.pin, false);
+            }
             de_energized_count++;
             delayMicroseconds(10);            // Allow hardware to settle
-            
+
             LOG_INFO("Emergency: GPIO " + String(pin_info.pin) + " de-energized before safe-mode");
         }
-        
-        // Now safe to change mode
-        pinMode(pin_info.pin, INPUT_PULLUP);
-        
+
+        // Now safe to change mode via HAL
+        if (gpio_hal_) {
+            gpio_hal_->pinMode(pin_info.pin, GPIOMode::GPIO_INPUT_PULLUP);
+        }
+
         // Verify emergency safe mode
         if (!verifyPinState(pin_info.pin, INPUT_PULLUP)) {
             LOG_WARNING("GPIO " + String(pin_info.pin) + " emergency safe-mode failed");
             warning_count++;
         }
-        
+
         // Update tracking
         pin_info.in_safe_mode = true;
         pin_info.owner[0] = '\0';
         pin_info.component_name[0] = '\0';
         pin_info.mode = INPUT_PULLUP;
     }
-    
+
     if (de_energized_count > 0) {
         LOG_INFO("Emergency: " + String(de_energized_count) + " outputs de-energized");
     }
-    
+
     if (warning_count > 0) {
         LOG_CRITICAL("Emergency safe-mode: " + String(warning_count) + " pins failed verification!");
     }
-    
+
     LOG_INFO("GPIOManager: All pins returned to safe mode");
 }
 
@@ -216,23 +322,25 @@ void GPIOManager::enableSafeModeForAllPins() {
 // Configure pin mode with validation
 
 bool GPIOManager::configurePinMode(uint8_t gpio, uint8_t mode) {
-    // ✅ VALIDATION 1: Pin reserved?
+    // VALIDATION 1: Pin reserved?
     if (isReservedPin(gpio)) {
         LOG_ERROR("GPIOManager: Attempted to configure reserved pin " + String(gpio));
         return false;
     }
-    
-    // ✅ VALIDATION 2: Input-Only Pin check (ESP32 WROOM specific)
+
+    // VALIDATION 2: Input-Only Pin check (ESP32 WROOM specific)
     #ifndef XIAO_ESP32C3
     if (isInputOnlyPin(gpio) && mode == OUTPUT) {
         LOG_ERROR("GPIOManager: Attempted OUTPUT mode on input-only pin " + String(gpio));
         return false;
     }
     #endif
-    
-    // ✅ CONFIGURE: Set pin mode
-    pinMode(gpio, mode);
-    
+
+    // CONFIGURE: Set pin mode via HAL
+    if (gpio_hal_) {
+        gpio_hal_->pinMode(gpio, toGPIOMode(mode));
+    }
+
     // Verify configuration (only for INPUT_PULLUP)
     if (mode == INPUT_PULLUP) {
         if (!verifyPinState(gpio, mode)) {
@@ -240,20 +348,20 @@ bool GPIOManager::configurePinMode(uint8_t gpio, uint8_t mode) {
             // Don't return false - best effort
         }
     }
-    
+
     // Update tracking information
     for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio) {
             pin_info.mode = mode;
             pin_info.in_safe_mode = false;
-            
-            String mode_str = (mode == INPUT) ? "INPUT" : 
+
+            String mode_str = (mode == INPUT) ? "INPUT" :
                              (mode == OUTPUT) ? "OUTPUT" : "INPUT_PULLUP";
             LOG_DEBUG("GPIOManager: Pin " + String(gpio) + " mode set to " + mode_str);
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -262,18 +370,25 @@ bool GPIOManager::configurePinMode(uint8_t gpio, uint8_t mode) {
 // ============================================
 
 bool GPIOManager::isPinAvailable(uint8_t gpio) const {
-    // Reserved pins are never available
+    #ifdef UNIT_TEST
+    // In tests: delegate to HAL mock for correct behavior
+    if (gpio_hal_) {
+        return gpio_hal_->isPinAvailable(gpio);
+    }
+    #endif
+
+    // Production: Reserved pins are never available
     if (isReservedPin(gpio)) {
         return false;
     }
-    
+
     // Check if pin is in safe pins list and not allocated
     for (const auto& pin_info : pins_) {
         if (pin_info.pin == gpio && pin_info.owner[0] == '\0') {
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -337,11 +452,11 @@ String GPIOManager::getPinComponent(uint8_t gpio) const {
 void GPIOManager::printPinStatus() const {
     LOG_INFO("=== GPIO PIN STATUS ===");
     LOG_INFO("Board: " + String(BOARD_TYPE));
-    LOG_INFO("Total Managed Pins: " + String(pins_.size()));
-    
+    LOG_INFO("Total Managed Pins: " + String((int)pins_.size()));
+
     for (const auto& pin_info : pins_) {
         String status = "GPIO " + String(pin_info.pin) + ": ";
-        
+
         if (pin_info.in_safe_mode) {
             status += "SAFE-MODE (available)";
         } else if (pin_info.owner[0] == '\0') {
@@ -349,10 +464,10 @@ void GPIOManager::printPinStatus() const {
         } else {
             status += "USED by " + String(pin_info.owner) + " (" + String(pin_info.component_name) + ")";
         }
-        
+
         LOG_INFO(status);
     }
-    
+
     LOG_INFO("=======================");
 }
 
@@ -394,7 +509,7 @@ std::vector<GPIOPinInfo> GPIOManager::getReservedPinsList() const {
         return std::vector<GPIOPinInfo>();
     }
 
-    LOG_DEBUG("GPIOManager: " + String(reserved.size()) + " reserved pins for heartbeat");
+    LOG_DEBUG("GPIOManager: " + String((int)reserved.size()) + " reserved pins for heartbeat");
     return reserved;
 }
 
@@ -421,11 +536,11 @@ uint8_t GPIOManager::getReservedPinCount() const {
 
 void GPIOManager::releaseI2CPins() {
     LOG_WARNING("GPIOManager: I2C pins released - I2C bus will not be available");
-    
+
     releasePin(HardwareConfig::I2C_SDA_PIN);
     releasePin(HardwareConfig::I2C_SCL_PIN);
-    
-    LOG_INFO("I2C pins released: SDA (GPIO " + String(HardwareConfig::I2C_SDA_PIN) + 
+
+    LOG_INFO("I2C pins released: SDA (GPIO " + String(HardwareConfig::I2C_SDA_PIN) +
              "), SCL (GPIO " + String(HardwareConfig::I2C_SCL_PIN) + ")");
     LOG_INFO("GPIOManager: I2C pins now available for general GPIO use");
 }
@@ -435,6 +550,14 @@ void GPIOManager::releaseI2CPins() {
 // ============================================
 
 bool GPIOManager::isReservedPin(uint8_t gpio) const {
+    #ifdef UNIT_TEST
+    // In tests: delegate to HAL mock for configurable reserved pins
+    if (gpio_hal_) {
+        return gpio_hal_->isPinReserved(gpio);
+    }
+    #endif
+
+    // Production: check HardwareConfig directly
     for (uint8_t i = 0; i < HardwareConfig::RESERVED_PIN_COUNT; i++) {
         if (HardwareConfig::RESERVED_GPIO_PINS[i] == gpio) {
             return true;
@@ -457,18 +580,21 @@ bool GPIOManager::isInputOnlyPin(uint8_t gpio) const {
 
 bool GPIOManager::verifyPinState(uint8_t pin, uint8_t expected_mode) {
     delay(1);  // Allow pin to stabilize (1ms is sufficient)
-    
+
     if (expected_mode == INPUT_PULLUP) {
         // For INPUT_PULLUP, pin should read HIGH (pulled up)
-        int state = digitalRead(pin);
-        if (state != HIGH) {
-            LOG_WARNING("Pin " + String(pin) + " verification failed - expected HIGH, got " + String(state));
+        bool state = false;
+        if (gpio_hal_) {
+            state = gpio_hal_->digitalRead(pin);
+        }
+        if (!state) {
+            LOG_WARNING("Pin " + String(pin) + " verification failed - expected HIGH, got LOW");
             return false;
         }
     }
     // For OUTPUT mode, we can't verify without external hardware
     // (reading pin value doesn't tell us if OUTPUT is working)
-    
+
     return true;  // Verification passed or not applicable
 }
 
@@ -519,7 +645,7 @@ bool GPIOManager::assignPinToSubzone(uint8_t gpio, const String& subzone_id) {
 
   // Assignment: Pin zu Subzone hinzufügen
   subzone_pin_map_[subzone_id].push_back(gpio);
-  
+
   // Update pin_info component_name für Tracking
   for (auto& pin_info : pins_) {
     if (pin_info.pin == gpio) {
@@ -541,12 +667,12 @@ bool GPIOManager::removePinFromSubzone(uint8_t gpio) {
     if (it != gpios.end()) {
       gpios.erase(it);
       LOG_INFO("GPIOManager: Pin " + String(gpio) + " removed from subzone: " + entry.first);
-      
+
       // Wenn Subzone leer ist, entferne sie aus Map
       if (gpios.empty()) {
         subzone_pin_map_.erase(entry.first);
       }
-      
+
       // Update pin_info
       for (auto& pin_info : pins_) {
         if (pin_info.pin == gpio) {
@@ -554,11 +680,11 @@ bool GPIOManager::removePinFromSubzone(uint8_t gpio) {
           break;
         }
       }
-      
+
       return true;
     }
   }
-  
+
   LOG_WARNING("GPIOManager: Pin " + String(gpio) + " not found in any subzone");
   return false;
 }
@@ -583,7 +709,7 @@ bool GPIOManager::isPinAssignedToSubzone(uint8_t gpio, const String& subzone_id)
     }
     return false;
   }
-  
+
   // Prüfe spezifische Subzone
   auto it = subzone_pin_map_.find(subzone_id);
   if (it != subzone_pin_map_.end()) {
@@ -601,7 +727,7 @@ bool GPIOManager::isSubzoneSafe(const String& subzone_id) const {
   if (pins.empty()) {
     return true;  // Leere Subzone ist "safe"
   }
-  
+
   for (uint8_t gpio : pins) {
     if (!isPinInSafeMode(gpio)) {
       return false;
@@ -616,20 +742,24 @@ bool GPIOManager::enableSafeModeForSubzone(const String& subzone_id) {
     LOG_WARNING("GPIOManager: Subzone " + subzone_id + " has no pins");
     return false;
   }
-  
+
   bool success = true;
   for (uint8_t gpio : pins) {
     // De-energize outputs BEFORE mode change
     for (auto& pin_info : pins_) {
       if (pin_info.pin == gpio && pin_info.mode == OUTPUT) {
-        digitalWrite(gpio, LOW);
+        if (gpio_hal_) {
+            gpio_hal_->digitalWrite(gpio, false);
+        }
         delayMicroseconds(10);
       }
     }
-    
-    // Set to safe mode
-    pinMode(gpio, INPUT_PULLUP);
-    
+
+    // Set to safe mode via HAL
+    if (gpio_hal_) {
+        gpio_hal_->pinMode(gpio, GPIOMode::GPIO_INPUT_PULLUP);
+    }
+
     // Update tracking
     for (auto& pin_info : pins_) {
       if (pin_info.pin == gpio) {
@@ -642,7 +772,7 @@ bool GPIOManager::enableSafeModeForSubzone(const String& subzone_id) {
       }
     }
   }
-  
+
   if (success) {
     LOG_INFO("GPIOManager: Safe-Mode activated for subzone: " + subzone_id);
   }
@@ -656,7 +786,7 @@ bool GPIOManager::disableSafeModeForSubzone(const String& subzone_id) {
   if (pins.empty()) {
     return false;
   }
-  
+
   for (uint8_t gpio : pins) {
     for (auto& pin_info : pins_) {
       if (pin_info.pin == gpio) {
@@ -664,7 +794,7 @@ bool GPIOManager::disableSafeModeForSubzone(const String& subzone_id) {
       }
     }
   }
-  
+
   LOG_INFO("GPIOManager: Safe-Mode disabled for subzone: " + subzone_id);
   return true;
 }

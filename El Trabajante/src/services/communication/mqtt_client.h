@@ -80,6 +80,7 @@ public:
     
     // Circuit Breaker Access (for Watchdog integration)
     CircuitState getCircuitBreakerState() const;
+    uint8_t getCircuitBreakerFailureCount() const;
 
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)

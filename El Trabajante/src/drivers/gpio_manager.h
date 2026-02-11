@@ -5,6 +5,9 @@
 #include <vector>
 #include <map>
 
+// Forward declaration of GPIOMode (defined in hal/igpio_hal.h)
+enum class GPIOMode : uint8_t;
+
 // ============================================
 // GPIO Manager - Hardware Safety System
 // ============================================
@@ -204,9 +207,14 @@ public:
 
 private:
     // ============================================
+    // FRIEND DECLARATION (Test Helper)
+    // ============================================
+    friend class GPIOManagerTestHelper;
+
+    // ============================================
     // PRIVATE CONSTRUCTOR (SINGLETON)
     // ============================================
-    GPIOManager() {}
+    GPIOManager();
     ~GPIOManager() {}
 
     // ============================================
@@ -219,6 +227,19 @@ private:
     std::map<String, std::vector<uint8_t>> subzone_pin_map_;
 
     // ============================================
+    // HAL ABSTRACTION (Phase 2: Unit Testing)
+    // ============================================
+    // HAL pointer for hardware abstraction
+    // - Production: Points to production_gpio_hal_ (ESP32GPIOHal)
+    // - Tests: Injected via GPIOManagerTestHelper (MockGPIOHal)
+    class IGPIOHal* gpio_hal_;
+
+    // Production HAL instance (only in non-test builds)
+    #ifndef UNIT_TEST
+    static class ESP32GPIOHal production_gpio_hal_;
+    #endif
+
+    // ============================================
     // HELPER METHODS
     // ============================================
     // Check if pin is in reserved pins array (board-specific)
@@ -226,9 +247,12 @@ private:
 
     // Check if pin is input-only (ESP32 WROOM specific)
     bool isInputOnlyPin(uint8_t gpio) const;
-    
+
     // Verify that a pin is in the expected state after pinMode()
     bool verifyPinState(uint8_t pin, uint8_t expected_mode);
+
+    // Convert Arduino uint8_t pin mode to GPIOMode enum
+    static GPIOMode toGPIOMode(uint8_t arduino_mode);
 };
 
 // ============================================

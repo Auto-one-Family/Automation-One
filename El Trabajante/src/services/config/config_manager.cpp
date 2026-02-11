@@ -354,22 +354,51 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
  * NOTE: Does NOT validate zone_id format (server-side responsibility)
  */
 bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
-  // Kaiser ID required
+  // 1. Kaiser ID required
   if (kaiser.kaiser_id.length() == 0) {
     LOG_WARNING("ConfigManager: Kaiser ID is empty");
     return false;
   }
 
-  // Kaiser ID length check (MQTT topic limit)
+  // 2. Kaiser ID length check (MQTT topic limit)
   if (kaiser.kaiser_id.length() > 63) {
     LOG_WARNING("ConfigManager: Kaiser ID too long (max 63 chars)");
     return false;
   }
 
-  // If zone assigned, zone_id must be set
+  // 3. If zone assigned, zone_id must be set
   if (kaiser.zone_assigned && kaiser.zone_id.length() == 0) {
     LOG_WARNING("ConfigManager: Zone assigned but zone_id is empty");
     return false;
+  }
+
+  // 4. Zone_id length check (if not empty)
+  if (kaiser.zone_id.length() > 0 && kaiser.zone_id.length() > 32) {
+    LOG_WARNING("ConfigManager: Zone ID too long (max 32 chars)");
+    return false;
+  }
+
+  // 5. Master_zone_id length check (if not empty)
+  if (kaiser.master_zone_id.length() > 0 && kaiser.master_zone_id.length() > 32) {
+    LOG_WARNING("ConfigManager: Master Zone ID too long (max 32 chars)");
+    return false;
+  }
+
+  // 6. Zone_name length check (if not empty)
+  if (kaiser.zone_name.length() > 0 && kaiser.zone_name.length() > 64) {
+    LOG_WARNING("ConfigManager: Zone Name too long (max 64 chars)");
+    return false;
+  }
+
+  // 7. Zone_id character whitelist (alphanumeric + underscore + hyphen)
+  if (kaiser.zone_id.length() > 0) {
+    for (size_t i = 0; i < kaiser.zone_id.length(); i++) {
+      char c = kaiser.zone_id.charAt(i);
+      if (!isalnum(c) && c != '_' && c != '-') {
+        LOG_WARNING("ConfigManager: Zone ID contains invalid character: " + String(c));
+        return false;
+      }
+    }
   }
 
   return true;
@@ -397,24 +426,34 @@ bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& ma
   LOG_INFO("  Zone Name: " + zone_name);
   LOG_INFO("  Kaiser ID: " + kaiser_id);
 
+  // WP1: Empty zone_id means zone removal
+  bool is_removal = (zone_id.length() == 0);
+
+  // Save current state for rollback (WP5)
+  KaiserZone previous_kaiser = kaiser_;
+  MasterZone previous_master = master_;
+
   // Update kaiser_ structure
   kaiser_.zone_id = zone_id;
   kaiser_.master_zone_id = master_zone_id;
   kaiser_.zone_name = zone_name;
-  kaiser_.zone_assigned = true;
+  kaiser_.zone_assigned = !is_removal;  // WP1: false if removal, true if assignment
 
   // Update kaiser_id if provided
   if (kaiser_id.length() > 0) {
     kaiser_.kaiser_id = kaiser_id;
   }
 
-  // Persist to NVS
+  // WP5: Persist to NVS FIRST, then update cache on success
   bool success = saveZoneConfig(kaiser_, master_);
 
   if (success) {
-    LOG_INFO("ConfigManager: Zone assignment updated successfully");
+    LOG_INFO("ConfigManager: Zone " + String(is_removal ? "removal" : "assignment") + " updated successfully");
   } else {
-    LOG_ERROR("ConfigManager: Failed to update zone assignment");
+    LOG_ERROR("ConfigManager: Failed to update zone " + String(is_removal ? "removal" : "assignment"));
+    // WP5: Rollback cache on NVS failure
+    kaiser_ = previous_kaiser;
+    master_ = previous_master;
   }
 
   return success;
@@ -1791,6 +1830,9 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     snprintf(new_key, sizeof(new_key), NVS_SEN_TYPE, i);
     snprintf(old_key, sizeof(old_key), NVS_SEN_TYPE_OLD, i);
     config.sensor_type = migrateReadString(new_key, old_key, "");
+    // Normalize sensor_type to lowercase (Defense-in-Depth)
+    // Ensures consistent casing regardless of what was stored in NVS
+    config.sensor_type.toLowerCase();
 
     // Sensor Name
     snprintf(new_key, sizeof(new_key), NVS_SEN_NAME, i);
