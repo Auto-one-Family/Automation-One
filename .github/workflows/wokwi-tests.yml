@@ -12,7 +12,7 @@
 # Prerequisites:
 # - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
 #
-# Test Categories (15 scenarios total):
+# Test Categories (42 scenarios total across 15 jobs):
 # - Boot Tests (passive): boot_full, boot_safe_mode
 # - Sensor Tests (passive): sensor_heartbeat, sensor_ds18b20_read
 # - MQTT Connection (passive, legacy): mqtt_connection
@@ -20,6 +20,13 @@
 # - Zone Tests (MQTT injection): zone_assignment, subzone_assignment
 # - Emergency Tests (MQTT injection): emergency_broadcast, emergency_esp_stop
 # - Config Tests (MQTT injection): config_sensor_add, config_actuator_add
+# - Sensor Flow Tests (E2E): sensor_ds18b20_full_flow, sensor_dht22_full_flow, sensor_analog_flow
+# - Actuator Flow Tests (E2E): actuator_binary_full_flow, actuator_pwm_full_flow, actuator_timeout_e2e
+# - Combined Flow Tests (E2E): combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel
+# - GPIO Core Tests: gpio_boot_first, gpio_boot_mode_verify, gpio_edge_max_pins, gpio_integration_actuator, gpio_integration_emergency
+# - I2C Core Tests: i2c_device_present, i2c_device_not_present, i2c_error_nack, i2c_scan_devices, i2c_double_init
+# - NVS Core Tests: nvs_init_success, nvs_key_exists, nvs_rst_factory, nvs_ns_isolation, nvs_del_key
+# - PWM Core Tests: pwm_duty_percent_50, pwm_frequency_change, pwm_resolution_verify
 #
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
 
@@ -1086,11 +1093,319 @@ jobs:
           retention-days: 7
 
   # ============================================
-  # JOB 12: Test Summary
+  # JOB 12: GPIO Core Tests (Phase 1: Critical)
+  # ============================================
+  gpio-core-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run GPIO Boot First Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/gpio/gpio_boot_first.yaml \
+            2>&1 | tee gpio_boot_first.log || true
+
+      - name: Run GPIO Boot Mode Verify Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/gpio/gpio_boot_mode_verify.yaml \
+            2>&1 | tee gpio_boot_mode_verify.log || true
+
+      - name: Run GPIO Edge Max Pins Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/gpio/gpio_edge_max_pins.yaml \
+            2>&1 | tee gpio_edge_max_pins.log || true
+
+      - name: Run GPIO Integration Actuator Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/gpio/gpio_integration_actuator.yaml \
+            2>&1 | tee gpio_integration_actuator.log || true
+
+      - name: Run GPIO Integration Emergency Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/gpio/gpio_integration_emergency.yaml \
+            2>&1 | tee gpio_integration_emergency.log || true
+
+      - name: Upload GPIO Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpio-test-logs
+          path: |
+            El Trabajante/gpio_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 13: I2C Core Tests (Phase 1: Critical)
+  # ============================================
+  i2c-core-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run I2C Device Present Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/08-i2c/i2c_device_present.yaml \
+            2>&1 | tee i2c_device_present.log || true
+
+      - name: Run I2C Device Not Present Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/08-i2c/i2c_device_not_present.yaml \
+            2>&1 | tee i2c_device_not_present.log || true
+
+      - name: Run I2C Error NACK Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/08-i2c/i2c_error_nack.yaml \
+            2>&1 | tee i2c_error_nack.log || true
+
+      - name: Run I2C Scan Devices Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/08-i2c/i2c_scan_devices.yaml \
+            2>&1 | tee i2c_scan_devices.log || true
+
+      - name: Run I2C Double Init Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/08-i2c/i2c_double_init.yaml \
+            2>&1 | tee i2c_double_init.log || true
+
+      - name: Upload I2C Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: i2c-test-logs
+          path: |
+            El Trabajante/i2c_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 14: NVS Core Tests (Phase 1: Critical)
+  # ============================================
+  nvs-core-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run NVS Init Success Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/10-nvs/nvs_init_success.yaml \
+            2>&1 | tee nvs_init_success.log || true
+
+      - name: Run NVS Key Exists Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/10-nvs/nvs_key_exists.yaml \
+            2>&1 | tee nvs_key_exists.log || true
+
+      - name: Run NVS Factory Reset Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/10-nvs/nvs_rst_factory.yaml \
+            2>&1 | tee nvs_rst_factory.log || true
+
+      - name: Run NVS Namespace Isolation Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/10-nvs/nvs_ns_isolation.yaml \
+            2>&1 | tee nvs_ns_isolation.log || true
+
+      - name: Run NVS Delete Key Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/10-nvs/nvs_del_key.yaml \
+            2>&1 | tee nvs_del_key.log || true
+
+      - name: Upload NVS Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvs-test-logs
+          path: |
+            El Trabajante/nvs_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 15: PWM Core Tests (Phase 1: Critical)
+  # ============================================
+  pwm-core-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run PWM Duty Percent 50 Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/09-pwm/pwm_duty_percent_50.yaml \
+            2>&1 | tee pwm_duty_percent_50.log || true
+
+      - name: Run PWM Frequency Change Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/09-pwm/pwm_frequency_change.yaml \
+            2>&1 | tee pwm_frequency_change.log || true
+
+      - name: Run PWM Resolution Verify Test
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . \
+            --timeout 90000 \
+            --scenario tests/wokwi/scenarios/09-pwm/pwm_resolution_verify.yaml \
+            2>&1 | tee pwm_resolution_verify.log || true
+
+      - name: Upload PWM Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwm-test-logs
+          path: |
+            El Trabajante/pwm_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 16: Test Summary
   # ============================================
   test-summary:
     runs-on: ubuntu-latest
-    needs: [boot-tests, sensor-tests, mqtt-connection-test, actuator-tests, zone-tests, emergency-tests, config-tests, sensor-flow-tests, actuator-flow-tests, combined-flow-tests]
+    needs: [boot-tests, sensor-tests, mqtt-connection-test, actuator-tests, zone-tests, emergency-tests, config-tests, sensor-flow-tests, actuator-flow-tests, combined-flow-tests, gpio-core-tests, i2c-core-tests, nvs-core-tests, pwm-core-tests]
     if: always()
 
     steps:
