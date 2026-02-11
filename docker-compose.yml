@@ -297,6 +297,34 @@ services:
         max-file: "3"
 
   # ============================================
+  # cAdvisor (Container Metrics) - Profile: monitoring
+  # ============================================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: automationone-cadvisor
+    profiles: ["monitoring"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - automationone-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ============================================
   # PostgreSQL Exporter (Prometheus Metrics) - Profile: monitoring
   # ============================================
   postgres-exporter:
@@ -386,6 +414,30 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+
+  # ============================================
+  # ESP32 Serial Logger (Hardware Bridge) - Profile: hardware
+  # ============================================
+  esp32-serial-logger:
+    build:
+      context: ./docker/esp32-serial-logger
+      dockerfile: Dockerfile
+    container_name: automationone-esp32-serial
+    profiles: ["hardware"]
+    environment:
+      SERIAL_HOST: ${ESP32_SERIAL_HOST:-host.docker.internal}
+      SERIAL_PORT: ${ESP32_SERIAL_PORT:-3333}
+      DEVICE_ID: ${ESP32_DEVICE_ID:-esp32-xiao-01}
+      LOG_FORMAT: ${ESP32_LOG_FORMAT:-structured}
+      RECONNECT_DELAY: ${ESP32_RECONNECT_DELAY:-5}
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks:
+      - automationone-net
+    restart: unless-stopped
 
 # ============================================
 # Volumes

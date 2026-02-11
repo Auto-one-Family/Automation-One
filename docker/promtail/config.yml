@@ -114,3 +114,51 @@ scrape_configs:
             - labels:
                 level:
                 component:
+
+      # Stage 4: esp32-serial-logger - Parse ESP32 serial output (JSON-structured)
+      # Logger outputs structured JSON from TCP-based serial bridge (ser2net/socat).
+      # Parses 4 ESP32 log formats: Custom Logger, Boot Banner, MQTT Debug JSON, ESP-IDF SDK.
+      # Extracts: level (info/warning/error/debug), device_id (esp32-xiao-01), component (mqtt/sensor/logger).
+      - match:
+          selector: '{compose_service="esp32-serial-logger"}'
+          stages:
+            # 4a: Parse JSON output from serial_logger.py
+            - json:
+                expressions:
+                  level: level
+                  device: device_id
+                  component: component
+                  format: format
+
+            # 4b: Promote extracted fields to Loki labels for efficient querying
+            # device, level, component become labels (low cardinality).
+            # format stays in log text (queryable via |= filter).
+            - labels:
+                level:
+                device:
+                component:
+
+      # Stage 5: Loki - Extract level and drop query-stats noise
+      # Grafana polls Loki every 10s with error-monitoring queries (|~ "error|...").
+      # Loki logs these API calls as level=info with the full query text embedded.
+      # Promtail sends them back to Loki, where embedded keywords "error|exception"
+      # match the error filter → self-referencing feedback loop (~380 false positives).
+      # Same noise-drop pattern as el-servador health-check drops (Stage 2a).
+      # Only info-level query-stats are dropped; error-level logs are preserved.
+      - match:
+          selector: '{compose_service="loki"}'
+          stages:
+            # 5a: Parse Loki logfmt to extract level for label-based querying
+            # Loki outputs logfmt: level=info ts=... caller=... msg=... query=...
+            - logfmt:
+                mapping:
+                  level:
+            - labels:
+                level:
+            # 5b: Drop info-level lines containing LogQL query parameters
+            # Pattern: level=info ... query="{...}" (query execution stats)
+            # These contain embedded LogQL strings like |~ "error" that self-reference.
+            # Error-level query logs (malformed queries etc.) are preserved.
+            - drop:
+                source: ""
+                expression: '.*level=info.*query="\{.*'

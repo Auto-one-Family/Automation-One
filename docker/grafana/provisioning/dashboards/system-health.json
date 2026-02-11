@@ -952,7 +952,7 @@
           "id": 24,
           "targets": [
             {
-              "expr": "sum(count_over_time({compose_project=\"auto-one\", compose_service=~\"$service\"} |~ \"(?i)(error|exception|critical)\" [$interval])) by (compose_service)",
+              "expr": "sum(count_over_time({compose_project=\"auto-one\", compose_service=~\"$service\"} |~ \"(?i)(error|exception|critical)\" != \"|~\" [$interval])) by (compose_service)",
               "legendFormat": "{{compose_service}}",
               "refId": "A"
             }
@@ -1054,7 +1054,7 @@
           "id": 26,
           "targets": [
             {
-              "expr": "{compose_project=\"auto-one\", compose_service=~\"$service\"} |~ \"(?i)(error|exception|fail|critical)\"",
+              "expr": "{compose_project=\"auto-one\", compose_service=~\"$service\"} |~ \"(?i)(error|exception|fail|critical)\" != \"|~\"",
               "refId": "A"
             }
           ],

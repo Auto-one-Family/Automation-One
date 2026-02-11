@@ -1,9 +1,9 @@
 # Grafana Alerting Provisioning - AutomationOne
-# Phase 1: UI-only Alerting (no webhook, no external service)
+# Phase 2: Expanded Alerting (UI-only, no webhook yet)
 #
 # Rules:
-# - 3 Critical: server-down, mqtt-disconnected, database-down
-# - 2 Warning: high-memory, esp-devices-offline
+# - 5 Critical: server-down, mqtt-disconnected, database-down, loki-down, promtail-down
+# - 3 Warning: high-memory, esp-devices-offline, high-error-rate
 #
 # Pipeline per rule: A (PromQL query) -> B (Reduce to last value) -> C (Threshold)
 # All datasource UIDs verified against datasources.yml (2026-02-09)
@@ -167,6 +167,104 @@ groups:
           severity: critical
           component: database
 
+      # Rule 6: Loki Down
+      # Fires when Prometheus cannot scrape Loki metrics endpoint
+      - uid: ao-loki-down
+        title: "Loki Down"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "up{job=\"loki\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Loki Log-Aggregation nicht erreichbar"
+          description: "Prometheus kann Loki :3100/metrics nicht scrapen seit >2m. Log-Ingestion gestoppt."
+        labels:
+          severity: critical
+          component: monitoring
+
+      # Rule 7: Promtail Down
+      # Fires when Prometheus cannot scrape Promtail metrics endpoint
+      - uid: ao-promtail-down
+        title: "Promtail Down"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "up{job=\"promtail\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Promtail Log-Shipping nicht erreichbar"
+          description: "Prometheus kann Promtail :9080/metrics nicht scrapen seit >2m. Container-Logs werden nicht nach Loki geschickt."
+        labels:
+          severity: critical
+          component: monitoring
+
   # ============================================
   # Warning Alerts (1m evaluation)
   # ============================================
@@ -275,3 +373,52 @@ groups:
         labels:
           severity: warning
           component: esp32
+
+      # Rule 8: High MQTT Error Rate
+      # Fires when MQTT receive/publish errors exceed 10 in the last 5 minutes
+      - uid: ao-high-mqtt-error-rate
+        title: "High MQTT Error Rate"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "increase(god_kaiser_mqtt_errors_total[5m])"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [10]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Erhoehte MQTT-Fehlerrate"
+          description: "Mehr als 10 MQTT-Fehler (receive/publish) in den letzten 5 Minuten. Pruefen: Broker-Verbindung, Payload-Validierung, Handler-Exceptions."
+        labels:
+          severity: warning
+          component: mqtt

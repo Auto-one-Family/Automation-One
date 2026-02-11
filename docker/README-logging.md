@@ -16,6 +16,7 @@ Promtail scrapes Docker container logs via the Docker socket and ships them to L
 | `logs/server/` | el-servador | JSON (RotatingFileHandler) | 10MB x 5 backups |
 | `logs/postgres/` | postgres | Text with timestamps | Daily + 50MB intra-day |
 | `logs/mqtt/` | mqtt-broker | Disabled (stdout-only since v3.1) | n/a |
+| `stdout-only` | esp32-serial-logger | JSON (structured ESP32 logs) | Docker json-file (5m x 3) |
 
 ### Why Bind-Mounts Exist
 
@@ -34,6 +35,7 @@ file logging (uncomment `log_dest file` in `docker/mosquitto/mosquitto.conf`).
 | SQL debugging, slow queries | Bind-mount `logs/postgres/postgresql-*.log` |
 | Quick last N lines check | `docker logs <container> --tail 100` |
 | MQTT broker events | `docker logs automationone-mqtt` |
+| ESP32 serial debugging (hardware) | Loki (Grafana Explore) or `docker logs automationone-esp32-serial` |
 
 ## Storage Impact
 
