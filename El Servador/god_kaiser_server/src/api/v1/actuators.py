@@ -103,6 +103,10 @@ def _model_to_schema_response(
         servo_min_pulse=servo_min_pulse,
         servo_max_pulse=servo_max_pulse,
         metadata=user_metadata or None,
+        # Config status from ESP32 verification (Phase 2: write-after-verification)
+        config_status=actuator.config_status,
+        config_error=actuator.config_error,
+        config_error_detail=actuator.config_error_detail,
         current_value=state.current_value if state else None,
         is_active=(state.state == "active") if state else False,
         last_command_at=state.last_command_timestamp if state else None,
@@ -311,6 +315,21 @@ async def create_or_update_actuator(
             detail=f"ESP device '{esp_id}' not found",
         )
 
+    # =========================================================================
+    # DEVICE STATUS GUARD - Only approved/online devices can be configured
+    # =========================================================================
+    if esp_device.status not in ("approved", "online"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "DEVICE_NOT_APPROVED",
+                "device_id": esp_id,
+                "current_status": esp_device.status,
+                "message": f"Device '{esp_id}' must be approved before configuration "
+                           f"(current status: {esp_device.status})",
+            },
+        )
+
     # Check if actuator exists
     existing = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
 
@@ -356,10 +375,18 @@ async def create_or_update_actuator(
         model_fields = _schema_to_model_fields(request, existing=existing)
         for field, value in model_fields.items():
             setattr(existing, field, value)
+        # =========================================================================
+        # WRITE-AFTER-VERIFICATION: Reset config_status to pending
+        # Status will be updated to "applied" or "failed" by config_handler
+        # when ESP32 responds via MQTT config_response
+        # =========================================================================
+        existing.config_status = "pending"
+        existing.config_error = None
+        existing.config_error_detail = None
         actuator = existing
-        logger.info(f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username}")
+        logger.info(f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
     else:
-        # Create new
+        # Create new (config_status defaults to "pending" in model)
         model_fields = _schema_to_model_fields(request)
         actuator = ActuatorConfig(
             esp_id=esp_device.id,
@@ -367,7 +394,7 @@ async def create_or_update_actuator(
             **model_fields,
         )
         await actuator_repo.create(actuator)
-        logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username}")
+        logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
     
     await db.commit()
     

@@ -392,7 +392,7 @@ async def register_device(
         firmware_version=request.firmware_version,
         hardware_type=request.hardware_type,
         capabilities=request.capabilities or {},
-        status="unknown",
+        status="pending_approval",
         device_metadata={},
     )
     

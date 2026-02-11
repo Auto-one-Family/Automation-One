@@ -40,6 +40,7 @@ from .mqtt.handlers import (
     actuator_response_handler,
     actuator_alert_handler,
     config_handler,
+    diagnostics_handler,
     discovery_handler,
     error_handler,
     heartbeat_handler,
@@ -200,65 +201,74 @@ async def lifespan(app: FastAPI):
         kaiser_id = settings.hierarchy.kaiser_id
         logger.info(f"Using KAISER_ID: {kaiser_id}")
 
-        # Register handlers for each topic pattern (dynamic kaiser_id)
+        # WP6: Register handlers with wildcard kaiser_id (+) for multi-Kaiser support
+        # Topic parsers already accept any kaiser_id via regex, subscriptions now match
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/sensor/+/data",
+            "kaiser/+/esp/+/sensor/+/data",
             sensor_handler.handle_sensor_data
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/status",
+            "kaiser/+/esp/+/actuator/+/status",
             actuator_handler.handle_actuator_status
         )
         # Phase 8: Actuator Response Handler (command confirmations)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/response",
+            "kaiser/+/esp/+/actuator/+/response",
             actuator_response_handler.handle_actuator_response
         )
         # Phase 8: Actuator Alert Handler (emergency/timeout alerts)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/alert",
+            "kaiser/+/esp/+/actuator/+/alert",
             actuator_alert_handler.handle_actuator_alert
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/system/heartbeat",
+            "kaiser/+/esp/+/system/heartbeat",
             heartbeat_handler.handle_heartbeat
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/discovery/esp32_nodes",
+            "kaiser/+/discovery/esp32_nodes",
             discovery_handler.handle_discovery
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/config_response",
+            "kaiser/+/esp/+/config_response",
             config_handler.handle_config_ack
         )
         # Phase 7: Zone ACK Handler (zone assignment confirmations)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/zone/ack",
+            "kaiser/+/esp/+/zone/ack",
             zone_ack_handler.handle_zone_ack
         )
         # Phase 9: Subzone ACK Handler (subzone assignment confirmations)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/subzone/ack",
+            "kaiser/+/esp/+/subzone/ack",
             subzone_ack_handler.handle_subzone_ack
         )
         # LWT Handler (Instant Offline Detection)
-        # Topic: kaiser/{kaiser_id}/esp/+/system/will
+        # Topic: kaiser/+/esp/+/system/will (WP6: wildcard kaiser_id)
         # ESP32 builds LWT topic from heartbeat: /system/heartbeat -> /system/will
         # QoS: 1 (broker publishes LWT with QoS from ESP32 config)
         # This provides INSTANT offline detection when ESP32 disconnects unexpectedly
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/system/will",
+            "kaiser/+/esp/+/system/will",
             lwt_handler.handle_lwt
         )
-        logger.info(f"LWT handler registered: kaiser/{kaiser_id}/esp/+/system/will")
+        logger.info("LWT handler registered: kaiser/+/esp/+/system/will")
         # Error Event Handler (DS18B20/OneWire errors, GPIO conflicts, etc.)
-        # Topic: kaiser/{kaiser_id}/esp/+/system/error
+        # Topic: kaiser/+/esp/+/system/error (WP6: wildcard kaiser_id)
         # ESP32 publishes hardware/config errors to this topic for server processing
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/system/error",
+            "kaiser/+/esp/+/system/error",
             error_handler.handle_error_event
         )
-        logger.info(f"Error handler registered: kaiser/{kaiser_id}/esp/+/system/error")
+        logger.info("Error handler registered: kaiser/+/esp/+/system/error")
+        # System Diagnostics Handler (HealthMonitor snapshots)
+        # Topic: kaiser/+/esp/+/system/diagnostics (WP6: wildcard kaiser_id)
+        # ESP32 HealthMonitor publishes diagnostics every 60s (heap, RSSI, uptime, state)
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/system/diagnostics",
+            diagnostics_handler.handle_diagnostics
+        )
+        logger.info("Diagnostics handler registered: kaiser/+/esp/+/system/diagnostics")
 
         logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 
@@ -295,15 +305,17 @@ async def lifespan(app: FastAPI):
                 logger.debug(f"Mock actuator command handler error: {e}")
                 return False
 
+        # WP6: Wildcard kaiser_id for Mock-ESP handlers
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/command",
+            "kaiser/+/esp/+/actuator/+/command",
             mock_actuator_command_handler
         )
         # Also handle emergency topics for mocks
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/emergency",
+            "kaiser/+/esp/+/actuator/emergency",
             mock_actuator_command_handler
         )
+        # Broadcast pattern remains fixed (not kaiser-specific)
         _subscriber_instance.register_handler(
             "kaiser/broadcast/emergency",
             mock_actuator_command_handler

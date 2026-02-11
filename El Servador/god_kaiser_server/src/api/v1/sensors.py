@@ -114,6 +114,10 @@ def _model_to_response(sensor: SensorConfig, esp_device_id: Optional[str] = None
         warning_min=warning_min,
         warning_max=warning_max,
         metadata=sensor.sensor_metadata,  # Model: sensor_metadata -> Schema: metadata
+        # Config status from ESP32 verification (Phase 2: write-after-verification)
+        config_status=sensor.config_status,
+        config_error=sensor.config_error,
+        config_error_detail=sensor.config_error_detail,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
@@ -342,6 +346,21 @@ async def create_or_update_sensor(
         )
 
     # =========================================================================
+    # DEVICE STATUS GUARD - Only approved/online devices can be configured
+    # =========================================================================
+    if esp_device.status not in ("approved", "online"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "DEVICE_NOT_APPROVED",
+                "device_id": esp_id,
+                "current_status": esp_device.status,
+                "message": f"Device '{esp_id}' must be approved before configuration "
+                           f"(current status: {esp_device.status})",
+            },
+        )
+
+    # =========================================================================
     # MULTI-VALUE SENSOR SUPPORT
     # =========================================================================
     # Check if sensor already exists (include sensor_type!)
@@ -442,17 +461,25 @@ async def create_or_update_sensor(
         existing.timeout_seconds = model_fields["timeout_seconds"]
         existing.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
         existing.schedule_config = model_fields["schedule_config"]
+        # =========================================================================
+        # WRITE-AFTER-VERIFICATION: Reset config_status to pending
+        # Status will be updated to "applied" or "failed" by config_handler
+        # when ESP32 responds via MQTT config_response
+        # =========================================================================
+        existing.config_status = "pending"
+        existing.config_error = None
+        existing.config_error_detail = None
         sensor = existing
-        logger.info(f"Sensor updated: {esp_id} GPIO {gpio} by {current_user.username}")
+        logger.info(f"Sensor updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
     else:
-        # Create new sensor
+        # Create new sensor (config_status defaults to "pending" in model)
         sensor = SensorConfig(
             esp_id=esp_device.id,
             gpio=gpio,
             **model_fields,
         )
         await sensor_repo.create(sensor)
-        logger.info(f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username}")
+        logger.info(f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
     
     await db.commit()
     await db.refresh(sensor)

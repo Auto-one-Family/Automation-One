@@ -31,6 +31,8 @@ Error Codes:
 
 from typing import Any, Dict, Optional
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from ...core.error_codes import (
     ConfigErrorCode,
     ValidationErrorCode,
@@ -134,11 +136,28 @@ class ZoneAckHandler:
                     # Clear pending assignment from metadata
                     if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
                         del device.device_metadata["pending_zone_assignment"]
+                        # SQLAlchemy doesn't detect in-place JSON dict mutations
+                        flag_modified(device, "device_metadata")
 
                     logger.info(
                         f"Zone assignment confirmed for {esp_id_str}: "
                         f"zone_id={zone_id}, master_zone_id={master_zone_id}"
                     )
+
+                elif status == "zone_removed":
+                    # WP1-Fix6: Handle zone removal confirmation
+                    device.zone_id = None
+                    device.master_zone_id = None
+                    device.zone_name = None
+                    # device.kaiser_id remains unchanged (by design, F24)
+
+                    # Clear pending assignment from metadata
+                    if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
+                        del device.device_metadata["pending_zone_assignment"]
+                        # SQLAlchemy doesn't detect in-place JSON dict mutations
+                        flag_modified(device, "device_metadata")
+
+                    logger.info(f"Zone removal confirmed for {esp_id_str}")
 
                 elif status == "error":
                     logger.error(
@@ -159,6 +178,8 @@ class ZoneAckHandler:
                     status=status,
                     zone_id=zone_id,
                     master_zone_id=master_zone_id,
+                    zone_name=device.zone_name,  # WP4: Add zone_name for frontend
+                    kaiser_id=device.kaiser_id,  # WP4: Add kaiser_id for frontend
                     timestamp=timestamp,
                     message=error_message,
                 )
@@ -208,9 +229,9 @@ class ZoneAckHandler:
                 "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
             }
 
-        # Validate status value
+        # Validate status value (WP1-Fix7: added "zone_removed")
         status = payload.get("status")
-        if status not in ("zone_assigned", "error"):
+        if status not in ("zone_assigned", "zone_removed", "error"):
             return {
                 "valid": False,
                 "error": f"Invalid status value: {status}",
@@ -234,6 +255,8 @@ class ZoneAckHandler:
         status: str,
         zone_id: str,
         master_zone_id: str,
+        zone_name: str,
+        kaiser_id: str,
         timestamp: int,
         message: str,
     ) -> None:
@@ -242,9 +265,11 @@ class ZoneAckHandler:
 
         Args:
             esp_id: ESP device ID
-            status: "zone_assigned" or "error"
+            status: "zone_assigned", "zone_removed", or "error"
             zone_id: Assigned zone ID
             master_zone_id: Assigned master zone ID
+            zone_name: Zone name (WP4: added for frontend display)
+            kaiser_id: Kaiser ID (WP4: added for frontend display)
             timestamp: ACK timestamp
             message: Error message (if any)
         """
@@ -256,6 +281,8 @@ class ZoneAckHandler:
                 "status": status,
                 "zone_id": zone_id,
                 "master_zone_id": master_zone_id,
+                "zone_name": zone_name,  # WP4: Added zone_name
+                "kaiser_id": kaiser_id,  # WP4: Added kaiser_id
                 "timestamp": timestamp,
             }
 

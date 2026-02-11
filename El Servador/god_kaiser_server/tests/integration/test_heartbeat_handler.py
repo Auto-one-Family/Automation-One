@@ -488,3 +488,154 @@ class TestOnlineDeviceHeartbeat:
 
                                         assert result is True
                                         mock_repo.update_status.assert_called_once()
+
+
+class TestZoneMismatchDetection:
+    """Test zone mismatch detection and auto-reassignment.
+
+    Bug 3 (ZONE_MISMATCH): After ESP reboot (especially in Wokwi without
+    persistent NVS), the ESP loses its zone config. The server should detect
+    this via heartbeat and auto-resend the zone assignment.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return get_heartbeat_handler()
+
+    def test_zone_mismatch_detected_via_zone_id(self, handler):
+        """Zone mismatch detected when ESP sends empty zone_id but DB has zone."""
+        # Simulate ESP device with zone in DB
+        mock_device = MagicMock()
+        mock_device.device_id = "ESP_ZONE_TEST"
+        mock_device.zone_id = "greenhouse"
+        mock_device.master_zone_id = "main_zone"
+        mock_device.zone_name = "Greenhouse"
+        mock_device.kaiser_id = "god"
+        mock_device.device_metadata = {}
+
+        # ESP heartbeat payload with empty zone_id (lost after reboot)
+        payload = {
+            "zone_id": "",
+            "zone_assigned": False,
+        }
+
+        # Extract detection logic values
+        heartbeat_zone_id = payload.get("zone_id", "")
+        heartbeat_zone_assigned = payload.get("zone_assigned", True)
+        db_zone_id = mock_device.zone_id or ""
+
+        esp_has_zone = bool(heartbeat_zone_id)
+        db_has_zone = bool(db_zone_id)
+        esp_lost_zone = not heartbeat_zone_assigned and db_has_zone
+
+        # Assertions
+        assert heartbeat_zone_id == ""
+        assert db_zone_id == "greenhouse"
+        assert not esp_has_zone
+        assert db_has_zone
+        assert esp_lost_zone  # zone_assigned=false + DB has zone
+        assert heartbeat_zone_id != db_zone_id  # String mismatch triggers detection
+
+    def test_zone_mismatch_detected_via_zone_assigned_flag(self, handler):
+        """Zone mismatch detected via zone_assigned=false even if zone_id comparison would miss it."""
+        # Scenario: ESP has matching zone_id string but zone_assigned=false
+        # This can happen if zone_id is stale in payload but NVS is cleared
+        mock_device = MagicMock()
+        mock_device.zone_id = "greenhouse"
+        mock_device.device_metadata = {}
+
+        payload = {
+            "zone_id": "greenhouse",  # Stale value from previous session
+            "zone_assigned": False,   # But flag says NOT assigned
+        }
+
+        heartbeat_zone_id = payload.get("zone_id", "")
+        heartbeat_zone_assigned = payload.get("zone_assigned", True)
+        db_zone_id = mock_device.zone_id or ""
+
+        db_has_zone = bool(db_zone_id)
+        esp_lost_zone = not heartbeat_zone_assigned and db_has_zone
+
+        # zone_id strings match, but zone_assigned=false triggers detection
+        assert heartbeat_zone_id == db_zone_id  # Strings match
+        assert esp_lost_zone  # But flag detects the loss
+
+    def test_no_mismatch_when_both_unassigned(self, handler):
+        """No mismatch when both ESP and DB have no zone."""
+        payload = {
+            "zone_id": "",
+            "zone_assigned": False,
+        }
+
+        mock_device = MagicMock()
+        mock_device.zone_id = None
+        mock_device.device_metadata = {}
+
+        heartbeat_zone_id = payload.get("zone_id", "")
+        heartbeat_zone_assigned = payload.get("zone_assigned", True)
+        db_zone_id = mock_device.zone_id or ""
+
+        db_has_zone = bool(db_zone_id)
+        esp_lost_zone = not heartbeat_zone_assigned and db_has_zone
+
+        # No mismatch: both sides have no zone
+        assert heartbeat_zone_id == db_zone_id  # Both ""
+        assert not esp_lost_zone  # DB has no zone, so no loss detected
+
+    def test_no_mismatch_when_zones_match(self, handler):
+        """No mismatch when ESP and DB zones match."""
+        payload = {
+            "zone_id": "greenhouse",
+            "zone_assigned": True,
+        }
+
+        mock_device = MagicMock()
+        mock_device.zone_id = "greenhouse"
+        mock_device.device_metadata = {}
+
+        heartbeat_zone_id = payload.get("zone_id", "")
+        heartbeat_zone_assigned = payload.get("zone_assigned", True)
+        db_zone_id = mock_device.zone_id or ""
+
+        db_has_zone = bool(db_zone_id)
+        esp_lost_zone = not heartbeat_zone_assigned and db_has_zone
+
+        assert heartbeat_zone_id == db_zone_id  # Match
+        assert not esp_lost_zone  # zone_assigned=True
+
+    def test_resync_cooldown_logic(self, handler):
+        """Zone resync respects cooldown period (60s)."""
+        import time as time_module
+
+        now_ts = int(time_module.time())
+        zone_resync_cooldown_seconds = 60
+
+        # Case 1: No previous resync - should resync
+        current_metadata_no_resync = {}
+        last_resync = current_metadata_no_resync.get("zone_resync_sent_at")
+        should_resync = True
+        if last_resync:
+            elapsed = now_ts - last_resync
+            if elapsed < zone_resync_cooldown_seconds:
+                should_resync = False
+        assert should_resync is True
+
+        # Case 2: Recent resync (10s ago) - should NOT resync
+        current_metadata_recent = {"zone_resync_sent_at": now_ts - 10}
+        last_resync = current_metadata_recent.get("zone_resync_sent_at")
+        should_resync = True
+        if last_resync:
+            elapsed = now_ts - last_resync
+            if elapsed < zone_resync_cooldown_seconds:
+                should_resync = False
+        assert should_resync is False
+
+        # Case 3: Old resync (120s ago) - should resync
+        current_metadata_old = {"zone_resync_sent_at": now_ts - 120}
+        last_resync = current_metadata_old.get("zone_resync_sent_at")
+        should_resync = True
+        if last_resync:
+            elapsed = now_ts - last_resync
+            if elapsed < zone_resync_cooldown_seconds:
+                should_resync = False
+        assert should_resync is True

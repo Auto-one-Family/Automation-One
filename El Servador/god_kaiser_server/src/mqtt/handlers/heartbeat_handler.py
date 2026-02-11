@@ -29,6 +29,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...core import constants
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
 from ...db.models.esp import ESPDevice
@@ -207,7 +208,23 @@ class HeartbeatHandler:
                 ts_value = payload["ts"] / 1000 if payload["ts"] > 1e10 else payload["ts"]
                 last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
                 await esp_repo.update_status(esp_id_str, "online", last_seen)
-                
+
+                # Step 5b: Clear stale retained LWT message from broker
+                # After ESP reconnects, the broker still holds the retained
+                # offline LWT message. Publishing empty payload with retain=True
+                # clears it, preventing new subscribers from receiving stale
+                # offline status.
+                try:
+                    from ..client import MQTTClient
+                    lwt_topic = TopicBuilder.build_lwt_topic(esp_id_str)
+                    mqtt_client = MQTTClient.get_instance()
+                    mqtt_client.publish(lwt_topic, "", qos=1, retain=True)
+                    logger.debug(f"Cleared retained LWT message for {esp_id_str}")
+                except Exception as lwt_clear_error:
+                    logger.warning(
+                        f"Failed to clear retained LWT for {esp_id_str}: {lwt_clear_error}"
+                    )
+
                 # Step 6: Update metadata with latest heartbeat info
                 await self._update_esp_metadata(esp_device, payload, session)
 
@@ -355,6 +372,7 @@ class HeartbeatHandler:
                 hardware_type="ESP32_WROOM",  # Default, can be updated later
                 status="pending_approval",  # Requires admin approval
                 discovered_at=datetime.now(timezone.utc),  # Audit field
+                kaiser_id=constants.get_kaiser_id(),  # WP2-Fix1: Default kaiser_id from config
                 capabilities={
                     "max_sensors": 20,  # Default for ESP32_WROOM
                     "max_actuators": 12,
@@ -614,7 +632,105 @@ class HeartbeatHandler:
                 current_metadata["master_zone_id"] = payload["master_zone_id"]
             if "zone_assigned" in payload:
                 current_metadata["zone_assigned"] = payload["zone_assigned"]
-            
+
+            # WP7: Zone Mismatch Detection & Auto-Reassignment
+            # Server is authoritative for zone assignment.
+            # Two detection signals:
+            #   1. zone_id string mismatch (ESP vs DB)
+            #   2. zone_assigned: false flag in heartbeat (ESP lost NVS after reboot)
+            heartbeat_zone_id = payload.get("zone_id", "")
+            heartbeat_zone_assigned = payload.get("zone_assigned", True)
+            db_zone_id = esp_device.zone_id or ""
+
+            # Normalize: ESP sends "" for unassigned, DB uses None
+            esp_has_zone = bool(heartbeat_zone_id)
+            db_has_zone = bool(db_zone_id)
+
+            # Detect zone loss: ESP explicitly reports zone_assigned=false
+            # while server has a zone in DB (common after Wokwi/ESP reboot
+            # where NVS is cleared)
+            esp_lost_zone = (
+                not heartbeat_zone_assigned
+                and db_has_zone
+            )
+
+            if heartbeat_zone_id != db_zone_id or esp_lost_zone:
+                if esp_has_zone and not db_has_zone:
+                    # ESP has zone from NVS, Server has None
+                    # This happens after: (1) Server restart, (2) failed zone removal
+                    logger.warning(
+                        f"ZONE_MISMATCH [{esp_device.device_id}]: "
+                        f"ESP reports zone_id='{heartbeat_zone_id}' but DB has zone_id=None. "
+                        f"ESP may have stale zone from NVS. Consider re-sending zone removal."
+                    )
+                elif (not esp_has_zone and db_has_zone) or esp_lost_zone:
+                    # Server has zone, ESP does not (or ESP explicitly reports zone_assigned=false)
+                    # This happens after: (1) ESP reboot without persistent NVS (Wokwi),
+                    # (2) ESP factory reset, (3) ESP NVS corruption
+                    mismatch_reason = (
+                        "zone_assigned=false" if esp_lost_zone
+                        else f"zone_id mismatch (ESP='{heartbeat_zone_id}', DB='{db_zone_id}')"
+                    )
+                    logger.warning(
+                        f"ZONE_MISMATCH [{esp_device.device_id}]: "
+                        f"ESP lost zone config ({mismatch_reason}). "
+                        f"DB has zone_id='{db_zone_id}'. Auto-reassigning zone."
+                    )
+
+                    # Auto-resend zone/assign with rate-limiting
+                    # Use 60s cooldown (not 300s) because zone loss after reboot
+                    # should be resolved quickly for zone-based logic to work
+                    zone_resync_cooldown_seconds = 60
+                    last_resync = current_metadata.get("zone_resync_sent_at")
+                    now_ts = int(time_module.time())
+                    should_resync = True
+
+                    if last_resync:
+                        elapsed = now_ts - last_resync
+                        if elapsed < zone_resync_cooldown_seconds:
+                            should_resync = False
+                            logger.debug(
+                                f"Zone resync for {esp_device.device_id} skipped "
+                                f"(cooldown: {zone_resync_cooldown_seconds - elapsed}s remaining)"
+                            )
+
+                    if should_resync:
+                        try:
+                            from ..client import MQTTClient
+                            resync_topic = TopicBuilder.build_zone_assign_topic(esp_device.device_id)
+                            resync_payload = {
+                                "zone_id": db_zone_id,
+                                "master_zone_id": esp_device.master_zone_id or "",
+                                "zone_name": esp_device.zone_name or "",
+                                "kaiser_id": esp_device.kaiser_id or constants.get_kaiser_id(),
+                                "timestamp": now_ts,
+                            }
+                            mqtt_client = MQTTClient.get_instance()
+                            mqtt_client.publish(
+                                resync_topic,
+                                json.dumps(resync_payload),
+                                qos=1,
+                            )
+                            current_metadata["zone_resync_sent_at"] = now_ts
+                            current_metadata["zone_resync_reason"] = mismatch_reason
+                            logger.info(
+                                f"Auto-reassigning zone '{db_zone_id}' to ESP {esp_device.device_id} "
+                                f"(zone lost after reboot). Topic: {resync_topic}"
+                            )
+                        except Exception as resync_error:
+                            logger.error(
+                                f"Failed to resend zone assignment to "
+                                f"{esp_device.device_id}: {resync_error}",
+                                exc_info=True,
+                            )
+                else:
+                    # Both have zone but different values
+                    logger.warning(
+                        f"ZONE_MISMATCH [{esp_device.device_id}]: "
+                        f"ESP reports zone_id='{heartbeat_zone_id}' but DB has zone_id='{db_zone_id}'. "
+                        f"Zone assignment may be inconsistent."
+                    )
+
             # Update health metrics
             current_metadata["last_heap_free"] = payload.get(
                 "heap_free", payload.get("free_heap")

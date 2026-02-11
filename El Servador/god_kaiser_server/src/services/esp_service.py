@@ -708,6 +708,9 @@ class ESPService:
         if not device:
             return False
 
+        # WP2-Fix4: Set kaiser_id in DB column (indexed, queryable)
+        device.kaiser_id = kaiser_id
+        # Also update metadata for backward compatibility
         metadata = device.device_metadata or {}
         metadata["kaiser_id"] = kaiser_id
         device.device_metadata = metadata
@@ -722,17 +725,15 @@ class ESPService:
         """
         Get all ESP devices assigned to a Kaiser node.
 
+        WP2-Fix5b: Use DB-Query via Repository instead of full-table-scan.
+
         Args:
             kaiser_id: Kaiser node ID
 
         Returns:
             List of ESPDevice
         """
-        all_devices = await self.esp_repo.get_all()
-        return [
-            d for d in all_devices
-            if d.device_metadata and d.device_metadata.get("kaiser_id") == kaiser_id
-        ]
+        return await self.esp_repo.get_by_kaiser(kaiser_id)
 
     # =========================================================================
     # Discovery/Approval Methods
@@ -834,6 +835,11 @@ class ESPService:
             device.zone_id = zone_id
         if zone_name:
             device.zone_name = zone_name
+
+        # WP2-Fix2: Set kaiser_id if not already set
+        if not device.kaiser_id:
+            from ..core import constants
+            device.kaiser_id = constants.get_kaiser_id()
 
         logger.info(f"Device approved: {device_id} by {approved_by}")
         return device

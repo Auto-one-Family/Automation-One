@@ -469,17 +469,24 @@ class E2EAPIClient:
     async def get_sensor_data(
         self,
         device_id: str,
-        gpio: int,
-        limit: int = 10
+        gpio: int = None,
+        limit: int = 10,
+        sensor_type: str = None,
     ) -> list:
-        """Get recent sensor data."""
+        """Get recent sensor data via GET /sensors/data query endpoint."""
+        params = {"esp_id": device_id, "limit": limit}
+        if gpio is not None:
+            params["gpio"] = gpio
+        if sensor_type is not None:
+            params["sensor_type"] = sensor_type
         async with self.session.get(
-            f"{self.config.api_base}/sensors/{device_id}/{gpio}/data",
-            params={"limit": limit},
+            f"{self.config.api_base}/sensors/data",
+            params=params,
             headers=self.headers
         ) as response:
             if response.status == 200:
-                return await response.json()
+                result = await response.json()
+                return result.get("readings", [])
             return []
 
     async def create_logic_rule(self, rule: dict) -> dict:
@@ -843,6 +850,112 @@ class E2EMQTTClient:
         """Subscribe to actuator commands for an ESP."""
         topic = f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/+/command"
         await self._client.subscribe(topic)
+
+
+# =============================================================================
+# WebSocket Helper for E2E Tests
+# =============================================================================
+class E2EWebSocketClient:
+    """
+    WebSocket client helper for E2E tests.
+
+    Connects to the server's WebSocket endpoint and captures real-time events.
+    Used to verify that MQTT/API triggers produce correct WebSocket broadcasts.
+    """
+
+    def __init__(self, config: E2EConfig):
+        self.config = config
+        self._ws = None
+        self._connected = False
+        self._messages: list = []
+
+    async def connect(self, token: str = None):
+        """Connect to WebSocket endpoint at /api/v1/ws/realtime/{client_id}."""
+        import uuid
+        client_id = f"e2e-test-{uuid.uuid4().hex[:8]}"
+        ws_base = self.config.server_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_base}/api/v1/ws/realtime/{client_id}"
+        if token:
+            ws_url += f"?token={token}"
+        try:
+            self._session = aiohttp.ClientSession()
+            self._ws = await self._session.ws_connect(ws_url)
+            self._connected = True
+        except Exception as e:
+            if hasattr(self, '_session'):
+                await self._session.close()
+            raise
+
+    async def disconnect(self):
+        """Disconnect from WebSocket."""
+        if self._ws:
+            await self._ws.close()
+        if hasattr(self, '_session') and self._session:
+            await self._session.close()
+        self._connected = False
+
+    async def subscribe(self, subscription: dict):
+        """Send subscription message to WebSocket.
+
+        Server expects: {"action": "subscribe", "filters": {"types": [...], ...}}
+        """
+        if self._ws and self._connected:
+            await self._ws.send_json({
+                "action": "subscribe",
+                "filters": subscription
+            })
+
+    async def wait_for_message(self, timeout: float = 10.0) -> Optional[dict]:
+        """Wait for a WebSocket message with timeout."""
+        if not self._ws or not self._connected:
+            return None
+        try:
+            msg = await asyncio.wait_for(self._ws.receive_json(), timeout=timeout)
+            self._messages.append(msg)
+            return msg
+        except asyncio.TimeoutError:
+            return None
+
+    async def wait_for_event(
+        self, event_type: str, timeout: float = 10.0, match_fn=None
+    ) -> Optional[dict]:
+        """Wait for a specific event type, optionally matching a filter function."""
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            msg = await self.wait_for_message(timeout=remaining)
+            if msg and msg.get("type") == event_type:
+                if match_fn is None or match_fn(msg):
+                    return msg
+        return None
+
+    def clear_messages(self):
+        """Clear captured messages."""
+        self._messages.clear()
+
+    @property
+    def messages(self) -> list:
+        """Get all captured messages."""
+        return list(self._messages)
+
+
+@pytest_asyncio.fixture
+async def ws_client(
+    e2e_config: E2EConfig,
+    api_client: E2EAPIClient,
+) -> AsyncGenerator[E2EWebSocketClient, None]:
+    """Create a WebSocket client for E2E tests."""
+    client = E2EWebSocketClient(e2e_config)
+    try:
+        token = api_client._auth_token if hasattr(api_client, '_auth_token') else None
+        await client.connect(token=token)
+        yield client
+    except Exception:
+        yield client  # Yield even on connect failure (tests will be skipped via --e2e)
+    finally:
+        await client.disconnect()
 
 
 @pytest_asyncio.fixture

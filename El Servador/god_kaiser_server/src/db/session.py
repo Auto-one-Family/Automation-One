@@ -7,9 +7,11 @@ Includes resilience patterns:
 - Resilient session context manager with retry and timeout
 """
 
+import time as _time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
+from sqlalchemy import event
 from sqlalchemy.exc import OperationalError, InterfaceError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -75,7 +77,27 @@ def get_engine() -> AsyncEngine:
                 f"max_overflow={settings.database.max_overflow}"
             )
 
+        # Attach query duration instrumentation to the underlying sync engine
+        _attach_query_duration_events(_engine.sync_engine)
+
     return _engine
+
+
+def _attach_query_duration_events(sync_engine) -> None:
+    """Attach SQLAlchemy event listeners for DB query duration metrics."""
+
+    @event.listens_for(sync_engine, "before_cursor_execute")
+    def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        conn.info.setdefault("query_start_time", []).append(_time.perf_counter())
+
+    @event.listens_for(sync_engine, "after_cursor_execute")
+    def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        total = _time.perf_counter() - conn.info["query_start_time"].pop(-1)
+        try:
+            from ..core.metrics import DB_QUERY_DURATION
+            DB_QUERY_DURATION.observe(total)
+        except Exception:
+            pass  # Metrics not available during early startup
 
 
 # =============================================================================

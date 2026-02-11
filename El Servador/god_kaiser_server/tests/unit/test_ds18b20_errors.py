@@ -153,7 +153,7 @@ class TestDS18B20QualityAssessment:
         (400, "good"),    # 25.0°C (RAW 400 × 0.0625)
         (0, "good"),      # 0.0°C
         (-160, "good"),   # -10.0°C (boundary)
-        (1360, "good"),   # +85.0°C (boundary) - NOTE: exactly at TEMP_TYPICAL_MAX
+        (1360, "suspect"),  # +85.0°C (power-on reset value → suspect, not good)
 
         # Outside typical but within absolute range → "fair"
         (-800, "fair"),   # -50.0°C

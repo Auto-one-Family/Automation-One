@@ -130,7 +130,7 @@ class TestPrometheusMetrics:
         assert response.headers["content-type"].startswith("text/plain")
         # Check for Prometheus format
         content = response.text
-        assert "god_kaiser_uptime_seconds" in content
+        assert "http_request_duration_seconds" in content
         assert "# HELP" in content
         assert "# TYPE" in content
 

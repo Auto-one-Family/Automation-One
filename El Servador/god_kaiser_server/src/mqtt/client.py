@@ -414,12 +414,17 @@ class MQTTClient:
                 # Record success for circuit breaker
                 if self._circuit_breaker:
                     self._circuit_breaker.record_success()
+                # Prometheus counter
+                from ..core.metrics import increment_mqtt_published
+                increment_mqtt_published()
                 return True
             else:
                 logger.error(f"Publish failed for topic {topic}: {result.rc}")
                 # Record failure for circuit breaker
                 if self._circuit_breaker:
                     self._circuit_breaker.record_failure()
+                from ..core.metrics import increment_mqtt_publish_error
+                increment_mqtt_publish_error()
                 return False
 
         except Exception as e:
@@ -427,6 +432,8 @@ class MQTTClient:
             # Record failure for circuit breaker
             if self._circuit_breaker:
                 self._circuit_breaker.record_failure()
+            from ..core.metrics import increment_mqtt_publish_error
+            increment_mqtt_publish_error()
             return False
 
     def set_on_message_callback(self, callback: Callable):
@@ -581,6 +588,10 @@ class MQTTClient:
 
             logger.debug(f"Message received on {topic}: {payload[:100]}...")
 
+            # Prometheus counter
+            from ..core.metrics import increment_mqtt_received
+            increment_mqtt_received()
+
             # Call global callback if registered
             if self.on_message_callback:
                 self.on_message_callback(topic, payload)
@@ -589,6 +600,8 @@ class MQTTClient:
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
+            from ..core.metrics import increment_mqtt_receive_error
+            increment_mqtt_receive_error()
 
     def _on_subscribe(self, client, userdata, mid, granted_qos):
         """Callback when subscription is confirmed."""

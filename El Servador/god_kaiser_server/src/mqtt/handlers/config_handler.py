@@ -168,8 +168,17 @@ class ConfigHandler:
                         f"Type={failed_item.get('sensor_type', failed_item.get('actuator_type', 'N/A'))}"
                     )
 
-            # Step 5: Phase 4 - Process failures and update DB
-            if failures and (status == "partial_success" or status == "error"):
+            # Step 5: Update DB config_status based on response
+            if status == "success":
+                # All items configured successfully → mark as "applied"
+                await self._mark_config_applied(esp_id, config_type)
+            elif status == "partial_success":
+                # Some succeeded, some failed → mark successes as applied, failures as failed
+                await self._mark_config_applied(esp_id, config_type)
+                if failures:
+                    await self._process_config_failures(esp_id, config_type, failures)
+            elif failures:
+                # Full failure with details → mark as failed
                 await self._process_config_failures(esp_id, config_type, failures)
 
             # Store in audit_log table for history tracking
@@ -260,6 +269,61 @@ class ConfigHandler:
         except Exception as e:
             logger.error(f"Error handling config ACK: {e}", exc_info=True)
             return False
+
+    async def _mark_config_applied(
+        self,
+        esp_id: str,
+        config_type: str,
+    ) -> None:
+        """
+        Mark all pending sensor/actuator configs as "applied" after successful ESP response.
+
+        Only updates items with config_status="pending" to avoid overwriting
+        items that were already marked as "failed" by a partial_success response.
+
+        Args:
+            esp_id: ESP device ID
+            config_type: Configuration type (sensor/actuator)
+        """
+        try:
+            async with resilient_session() as session:
+                esp_repo = ESPRepository(session)
+                esp = await esp_repo.get_by_device_id(esp_id)
+
+                if not esp:
+                    logger.error(f"ESP not found for config applied update: {esp_id}")
+                    return
+
+                updated_count = 0
+
+                if config_type in ("sensor", "system"):
+                    sensor_repo = SensorRepository(session)
+                    sensors = await sensor_repo.get_by_esp(esp.id)
+                    for sensor in sensors:
+                        if sensor.config_status == "pending":
+                            sensor.config_status = "applied"
+                            sensor.config_error = None
+                            sensor.config_error_detail = None
+                            updated_count += 1
+
+                if config_type in ("actuator", "system"):
+                    actuator_repo = ActuatorRepository(session)
+                    actuators = await actuator_repo.get_by_esp(esp.id)
+                    for actuator in actuators:
+                        if actuator.config_status == "pending":
+                            actuator.config_status = "applied"
+                            actuator.config_error = None
+                            actuator.config_error_detail = None
+                            updated_count += 1
+
+                if updated_count > 0:
+                    await session.commit()
+                    logger.info(
+                        f"Marked {updated_count} {config_type} config(s) as applied for {esp_id}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Failed to mark config as applied: {e}", exc_info=True)
 
     async def _process_config_failures(
         self,
