@@ -425,6 +425,7 @@ export type WebSocketEvent =
   | ActuatorCommandEvent
   | ActuatorCommandFailedEvent
   | ZoneAssignmentEvent
+  | SubzoneAssignmentEvent
   | LogicExecutionEvent
   | SystemEvent
   | SensorHealthEvent
@@ -583,7 +584,29 @@ export interface ZoneAssignmentEvent extends WebSocketEventBase {
     esp_id: string
     zone_id: string
     zone_name?: string
-    status: 'success' | 'failed'
+    master_zone_id?: string
+    kaiser_id?: string
+    status: 'zone_assigned' | 'zone_removed' | 'error'
+    timestamp: number
+    error_code?: string
+    message?: string
+  }
+}
+
+/**
+ * Subzone assignment event
+ * Sent when ESP acknowledges subzone assignment or removal
+ * WP4: Added to support subzone real-time UI updates
+ */
+export interface SubzoneAssignmentEvent extends WebSocketEventBase {
+  event: 'subzone_assignment'
+  severity: 'info'
+  source_type: 'esp32'
+  data: {
+    esp_id: string
+    subzone_id: string
+    status: 'subzone_assigned' | 'subzone_removed' | 'error'
+    timestamp: number
     error_code?: string
     message?: string
   }

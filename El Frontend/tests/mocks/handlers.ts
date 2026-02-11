@@ -465,23 +465,213 @@ const zoneHandlers = [
 ]
 
 // =============================================================================
-// Database Handlers
+// Logic Handlers
 // =============================================================================
 
+const mockLogicRule = {
+  id: 'rule-001',
+  name: 'Temperature Fan Control',
+  description: 'Turn on fan when temperature exceeds 25°C',
+  enabled: true,
+  conditions: [
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_TEST_001',
+      gpio: 4,
+      sensor_type: 'ds18b20',
+      operator: '>',
+      value: 25
+    }
+  ],
+  logic_operator: 'AND',
+  actions: [
+    {
+      type: 'actuator_command',
+      esp_id: 'ESP_TEST_002',
+      gpio: 16,
+      command: 'ON'
+    }
+  ],
+  priority: 1,
+  cooldown_seconds: 60,
+  max_executions_per_hour: 10,
+  last_triggered: null,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z'
+}
+
+const logicHandlers = [
+  // GET /logic/rules - Get all rules
+  http.get('/api/v1/logic/rules', () => {
+    return HttpResponse.json({
+      items: [mockLogicRule],
+      total: 1,
+      page: 1,
+      page_size: 50
+    })
+  }),
+
+  // GET /logic/rules/:id - Get single rule
+  http.get('/api/v1/logic/rules/:ruleId', ({ params }) => {
+    const { ruleId } = params
+
+    if (ruleId === 'rule-001') {
+      return HttpResponse.json(mockLogicRule)
+    }
+
+    return HttpResponse.json(
+      { detail: 'Rule not found' },
+      { status: 404 }
+    )
+  }),
+
+  // POST /logic/rules/:id/toggle - Toggle rule
+  http.post('/api/v1/logic/rules/:ruleId/toggle', ({ params }) => {
+    const { ruleId } = params
+
+    if (ruleId === 'rule-001') {
+      return HttpResponse.json({
+        success: true,
+        message: 'Rule toggled',
+        rule_id: ruleId,
+        enabled: !mockLogicRule.enabled
+      })
+    }
+
+    return HttpResponse.json(
+      { detail: 'Rule not found' },
+      { status: 404 }
+    )
+  }),
+
+  // POST /logic/rules/:id/test - Test rule
+  http.post('/api/v1/logic/rules/:ruleId/test', ({ params }) => {
+    const { ruleId } = params
+
+    if (ruleId === 'rule-001') {
+      return HttpResponse.json({
+        success: true,
+        message: 'Rule evaluation completed',
+        rule_id: ruleId,
+        conditions_result: true,
+        evaluation_details: [
+          { condition_index: 0, result: true, sensor_value: 26.5 }
+        ],
+        would_execute_actions: true
+      })
+    }
+
+    return HttpResponse.json(
+      { detail: 'Rule not found' },
+      { status: 404 }
+    )
+  })
+]
+
+// =============================================================================
+// Database Handlers (Debug DB Explorer)
+// =============================================================================
+
+/** Inline type for mock table schema */
+interface TableSchemaForMock {
+  table_name: string
+  columns: Array<{
+    name: string
+    type: string
+    nullable: boolean
+    primary_key: boolean
+    foreign_key?: string | null
+  }>
+  row_count: number
+  primary_key: string
+}
+
+const mockTableSchema: TableSchemaForMock = {
+  table_name: 'esp_devices',
+  columns: [
+    { name: 'id', type: 'uuid', nullable: false, primary_key: true },
+    { name: 'esp_id', type: 'string', nullable: false, primary_key: false },
+    { name: 'name', type: 'string', nullable: true, primary_key: false },
+    { name: 'status', type: 'string', nullable: false, primary_key: false },
+    { name: 'created_at', type: 'datetime', nullable: false, primary_key: false }
+  ],
+  row_count: 5,
+  primary_key: 'id'
+}
+
+const mockTableData = {
+  success: true,
+  table_name: 'esp_devices',
+  data: [
+    { id: 'uuid-1', esp_id: 'ESP_TEST_001', name: 'Test ESP', status: 'online', created_at: '2026-01-01T00:00:00Z' },
+    { id: 'uuid-2', esp_id: 'ESP_TEST_002', name: 'Second ESP', status: 'offline', created_at: '2026-01-02T00:00:00Z' }
+  ],
+  total_count: 2,
+  page: 1,
+  page_size: 50,
+  total_pages: 1
+}
+
 const databaseHandlers = [
-  // GET /database/tables - Get all tables
-  http.get('/api/v1/database/tables', () => {
-    return HttpResponse.json([
-      {
+  // GET /debug/db/tables - List all tables
+  http.get('/api/v1/debug/db/tables', () => {
+    return HttpResponse.json({
+      success: true,
+      tables: [mockTableSchema]
+    })
+  }),
+
+  // GET /debug/db/:table/schema - Get table schema
+  http.get('/api/v1/debug/db/:table/schema', ({ params }) => {
+    const { table } = params
+
+    if (table === 'esp_devices') {
+      return HttpResponse.json(mockTableSchema)
+    }
+
+    return HttpResponse.json(
+      { detail: `Table '${table}' not found` },
+      { status: 404 }
+    )
+  }),
+
+  // GET /debug/db/:table - Query table data
+  http.get('/api/v1/debug/db/:table', ({ params, request }) => {
+    const { table } = params
+    const url = new URL(request.url)
+    const page = Number(url.searchParams.get('page')) || 1
+    const pageSize = Number(url.searchParams.get('page_size')) || 50
+
+    if (table === 'esp_devices') {
+      return HttpResponse.json({
+        ...mockTableData,
+        page,
+        page_size: pageSize
+      })
+    }
+
+    return HttpResponse.json(
+      { detail: `Table '${table}' not found` },
+      { status: 404 }
+    )
+  }),
+
+  // GET /debug/db/:table/:recordId - Get single record
+  http.get('/api/v1/debug/db/:table/:recordId', ({ params }) => {
+    const { table, recordId } = params
+
+    if (table === 'esp_devices' && recordId === 'uuid-1') {
+      return HttpResponse.json({
+        success: true,
         table_name: 'esp_devices',
-        row_count: 5,
-        columns: [
-          { name: 'id', type: 'integer', nullable: false },
-          { name: 'esp_id', type: 'varchar', nullable: false },
-          { name: 'name', type: 'varchar', nullable: true }
-        ]
-      }
-    ])
+        record: mockTableData.data[0]
+      })
+    }
+
+    return HttpResponse.json(
+      { detail: 'Record not found' },
+      { status: 404 }
+    )
   })
 ]
 
@@ -778,6 +968,7 @@ export const handlers = [
   ...actuatorHandlers,
   ...oneWireHandlers,
   ...zoneHandlers,
+  ...logicHandlers,
   ...databaseHandlers,
   ...auditHandlers,
   ...debugHandlers
@@ -794,5 +985,8 @@ export {
   mockSensor,
   mockActuator,
   mockPendingDevice,
-  mockGpioStatus
+  mockGpioStatus,
+  mockLogicRule,
+  mockTableSchema,
+  mockTableData
 }

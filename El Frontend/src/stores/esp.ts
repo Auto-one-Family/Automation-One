@@ -118,7 +118,7 @@ export const useEspStore = defineStore('esp', () => {
     filters: {
       types: [
         'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert',
-        'config_response', 'zone_assignment', 'sensor_health',
+        'config_response', 'zone_assignment', 'subzone_assignment', 'sensor_health',
         'device_discovered', 'device_approved', 'device_rejected', 'device_rediscovered',
         'actuator_response', 'actuator_command', 'actuator_command_failed',
         'config_published', 'config_failed',
@@ -1785,11 +1785,15 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Handle zone_assignment WebSocket event
    * Updates device zone fields when ESP confirms zone assignment
    *
+   * WP4: DEFENSIVE implementation - only overwrite fields that are DEFINED in the event
+   *
    * Server payload (from zone_ack_handler.py):
    * {
    *   esp_id: string,
    *   status: "zone_assigned" | "error",
    *   zone_id: string,
+   *   zone_name?: string,       // ← server-dev WP4: NOW SENT
+   *   kaiser_id?: string,       // ← server-dev WP4: NOW SENT
    *   master_zone_id?: string,
    *   timestamp: number,
    *   message?: string
@@ -1815,17 +1819,99 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     if (data.status === 'zone_assigned') {
       // IMPORTANT: Replace entire device object to trigger Vue reactivity
       // Direct mutation (device.zone_id = ...) doesn't reliably trigger computed updates
+      //
+      // WP4 FIX: DEFENSIVE - only update fields that are DEFINED in the event
+      // This prevents undefined values from overwriting existing data
+      const updates: Partial<typeof device> = {}
+
+      if (data.zone_id !== undefined) updates.zone_id = data.zone_id
+      if (data.zone_name !== undefined) updates.zone_name = data.zone_name
+      if (data.master_zone_id !== undefined) updates.master_zone_id = data.master_zone_id
+      if (data.kaiser_id !== undefined) updates.kaiser_id = data.kaiser_id
+
       devices.value[deviceIndex] = {
         ...device,
-        zone_id: data.zone_id || undefined,
-        zone_name: data.zone_name || undefined,
-        master_zone_id: data.master_zone_id || undefined,
+        ...updates,
       }
-      logger.info(`Zone confirmed: ${espId} → ${data.zone_id} (reactivity triggered)`)
+      logger.info(`Zone confirmed: ${espId} → ${data.zone_id}${data.zone_name ? ` (${data.zone_name})` : ''} (reactivity triggered)`)
+    } else if (data.status === 'zone_removed') {
+      // WP4 FIX: Clear zone fields on zone removal (mirror subzone pattern)
+      // IMPORTANT: kaiser_id remains unchanged (WP2-F24)
+      devices.value[deviceIndex] = {
+        ...device,
+        zone_id: undefined,
+        zone_name: undefined,
+        master_zone_id: undefined,
+      }
+      logger.info(`Zone removed: ${espId}`)
     } else if (data.status === 'error') {
       logger.error(`Zone assignment error for ${espId}: ${data.message}`)
     } else {
       logger.warn(`Unknown zone_assignment status: ${data.status}`)
+    }
+  }
+
+  /**
+   * Handle subzone_assignment WebSocket event
+   * Updates device subzone fields when ESP confirms subzone assignment/removal
+   * WP4: Added to support real-time subzone UI updates
+   *
+   * Server payload (from subzone_ack_handler.py):
+   * {
+   *   esp_id: string,
+   *   subzone_id: string,
+   *   status: "subzone_assigned" | "subzone_removed" | "error",
+   *   timestamp: number,
+   *   error_code?: string,
+   *   message?: string
+   * }
+   */
+  function handleSubzoneAssignment(message: any): void {
+    const data = message.data
+    const espId = data.esp_id || data.device_id
+
+    if (!espId) {
+      logger.warn('subzone_assignment missing esp_id')
+      return
+    }
+
+    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
+    if (deviceIndex === -1) {
+      logger.debug(`Subzone assignment for unknown device: ${espId}`)
+      return
+    }
+
+    const device = devices.value[deviceIndex]
+
+    if (data.status === 'subzone_assigned') {
+      // Update subzone fields - DEFENSIVE: only update defined fields
+      const updates: Partial<typeof device> = {}
+
+      if (data.subzone_id !== undefined) updates.subzone_id = data.subzone_id
+      // Note: subzone_name is not yet sent by server (future enhancement)
+
+      devices.value[deviceIndex] = {
+        ...device,
+        ...updates,
+      }
+
+      logger.info(`Subzone confirmed: ${espId} → ${data.subzone_id} (reactivity triggered)`)
+      showSuccess(`Subzone zugewiesen: ${device.device_name || espId}`)
+    } else if (data.status === 'subzone_removed') {
+      // Remove subzone assignment
+      devices.value[deviceIndex] = {
+        ...device,
+        subzone_id: undefined,
+        subzone_name: undefined,
+      }
+
+      logger.info(`Subzone removed: ${espId}`)
+      showSuccess(`Subzone entfernt: ${device.device_name || espId}`)
+    } else if (data.status === 'error') {
+      logger.error(`Subzone assignment error for ${espId}: ${data.message}`)
+      showError(data.message || 'Subzone-Zuweisung fehlgeschlagen')
+    } else {
+      logger.warn(`Unknown subzone_assignment status: ${data.status}`)
     }
   }
 
@@ -2364,6 +2450,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('actuator_alert', handleActuatorAlert),
       ws.on('config_response', handleConfigResponse),
       ws.on('zone_assignment', handleZoneAssignment),
+      ws.on('subzone_assignment', handleSubzoneAssignment),  // WP4
       ws.on('sensor_health', handleSensorHealth),  // Phase 2E
       // Discovery/Approval Phase
       ws.on('device_discovered', handleDeviceDiscovered),

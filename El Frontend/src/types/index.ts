@@ -250,6 +250,10 @@ export interface MockSensor {
   last_reading_at?: string | null
   // Phase 2F: Schedule configuration
   schedule_config?: { type: string; expression: string } | null
+  // Config verification status from ESP32
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Phase 6: Multi-Value Sensor Fields
@@ -270,6 +274,10 @@ export interface MockActuator {
   pwm_value: number
   emergency_stopped: boolean
   last_command: string | null
+  // Config verification status from ESP32
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
 }
 
 export interface MockESP {
@@ -280,7 +288,7 @@ export interface MockESP {
   master_zone_id: string | null
   subzone_id: string | null
   system_state: MockSystemState
-  status: 'online' | 'offline'  // Connection status for consistent display
+  status: 'online' | 'offline' | 'pending_approval' | 'approved' | 'rejected'  // Device lifecycle status
   sensors: MockSensor[]
   actuators: MockActuator[]
   auto_heartbeat: boolean
@@ -614,6 +622,10 @@ export interface SensorConfigResponse {
   warning_min: number | null
   warning_max: number | null
   metadata: Record<string, unknown> | null
+  // Config status from ESP32 verification (Phase 2: write-after-verification)
+  config_status?: string | null
+  config_error?: string | null
+  config_error_detail?: string | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null
@@ -776,6 +788,10 @@ export interface ActuatorConfigResponse {
   servo_min_pulse: number | null
   servo_max_pulse: number | null
   metadata: Record<string, unknown> | null
+  // Config status from ESP32 verification (Phase 2: write-after-verification)
+  config_status?: string | null
+  config_error?: string | null
+  config_error_detail?: string | null
   current_value?: number | null
   is_active?: boolean
   last_command_at?: string | null
