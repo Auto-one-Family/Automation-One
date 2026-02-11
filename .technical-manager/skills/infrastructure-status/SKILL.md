@@ -15,7 +15,7 @@
 ### 1.1 Docker Stack
 
 ```bash
-# Container status (8 expected services, pgAdmin optional)
+# Container status (11 services: 4 core + 6 monitoring + 1 devtools)
 docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 # Resource usage
@@ -52,6 +52,8 @@ docker volume ls --filter name=automationone
 | Promtail | automationone-promtail | - | - | monitoring |
 | Prometheus | automationone-prometheus | 9090 | wget /-/healthy | monitoring |
 | Grafana | automationone-grafana | 3000 | wget /api/health | monitoring |
+| Postgres Exporter | automationone-postgres-exporter | (expose only) | pg_isready probe | monitoring |
+| Mosquitto Exporter | automationone-mosquitto-exporter | (expose only) | HTTP probe | monitoring |
 
 **Reference:** `.claude/reference/infrastructure/DOCKER_REFERENCE.md`
 
@@ -136,7 +138,7 @@ ls -lh logs/postgres/ 2>/dev/null | tail -5
 | Check A | Check B | Contradiction if |
 |---------|---------|-----------------|
 | `docker ps` says "running" | Health endpoint returns 503 | Container up, service down |
-| Compose defines 8 services (+ pgAdmin optional) | `docker ps` shows < 4 | Core services missing |
+| Compose defines 11 services (4 core + 6 monitoring + 1 devtools) | `docker ps` shows < 4 | Core services missing |
 | `docker stats` shows 0 Net I/O | Service should receive MQTT | Network problem |
 | Git says "ahead 0" | Recent commits are local | Remote not pushed |
 | Prometheus `up` = 1 | curl health returns 503 | Scrape OK but service degraded |

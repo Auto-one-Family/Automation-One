@@ -21,7 +21,7 @@ TM (Claude Desktop)                    VS Code Claude
 El Frontend (Vue 3) <--HTTP/WS--> El Servador (FastAPI) <--MQTT--> El Trabajante (ESP32)
 ```
 
-**Docker Stack:** 9 Services (4 Core + 1 DevTools + 4 Monitoring)
+**Docker Stack:** 11 Services (4 Core + 6 Monitoring + 1 DevTools)
 
 ---
 
@@ -128,8 +128,7 @@ Everything else       --> TM does it (docker, git, curl, monitoring APIs)
 
 | Agent | Role | When to delegate |
 |-------|------|------------------|
-| `@system-manager` | Session briefing | Session start |
-| `@system-control` | Start/stop, generate logs | Before debug agents |
+| `@system-control` | Session briefing + Start/stop, generate logs | Session start, before debug agents |
 | `@esp32-debug` | ESP32 serial-log analysis | Boot/GPIO/NVS issues |
 | `@server-debug` | Server JSON-log analysis | Error 5xxx, crashes |
 | `@mqtt-debug` | MQTT traffic analysis | Topic/payload issues |

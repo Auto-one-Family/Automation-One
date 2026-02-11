@@ -1,364 +1,381 @@
-# TM REPORT: Phase 1 Quick Wins - Analyse
+# Phase 2: Debug-Infrastruktur — Vollständiger Plan
 
-**Datum:** 2026-02-09
-**Session:** Monitoring Stack Fixes
-**Status:** 5/6 Aufträge abgeschlossen, 1 ausstehend
-
----
-
-## Executive Summary
-
-Phase 1 (Quick Wins) wurde zu **83% abgeschlossen** (5 von 6 Aufträgen). Alle implementierten Änderungen sind erfolgreich, aber **nicht live verifiziert** (Monitoring-Stack war nicht gestartet). Ein Auftrag (Grafana Dashboard Panels) fehlt komplett.
-
-### Status-Übersicht
-
-| Auftrag | Agent | Status | Verifikation |
-|---------|-------|--------|--------------|
-| 1. Grafana Dashboard Panels | server-dev | ❌ **FEHLT** | - |
-| 2. Grafana Dashboard Config | system-control | ✅ ERLEDIGT | Ausstehend (Stack) |
-| 3. Promtail Positions | system-control | ✅ IMPLEMENTIERT | Ausstehend (Stack) |
-| 4. Promtail Healthcheck Filter | system-control | ✅ IMPLEMENTIERT | Ausstehend (Stack) |
-| 5. LOG_ACCESS_REFERENCE | agent-manager | ✅ ERLEDIGT | Komplett |
-| 6. DOCKER_VOLLAUDIT | system-control | ✅ ERLEDIGT | Komplett |
-
-**Code-Änderungen:** 10 Dateien modifiziert, 0 Fehler
-**Dokumentation:** 2 Dateien korrigiert (LOG_ACCESS_REFERENCE, DOCKER_VOLLAUDIT)
+**Datum:** 2026-02-11 | **Basis:** KI-Audit gegen echte Codebase (2026-02-11)
+**Phase-Status:** ~55% abgeschlossen — Observability weitgehend fertig, ESP32-Debug und Tests offen
 
 ---
 
-## Detaillierte Findings
+## Was Phase 2 erreichen soll
 
-### ✅ AUFTRAG 2: Grafana Dashboard Config (ERFOLGREICH)
+Phase 1 hat den Monitoring-Stack gebaut: Loki, Promtail, Prometheus, Grafana — alles läuft, Logs fließen, Metriken werden gescrapt, Dashboard zeigt Panels. Das System ist **sichtbar**.
 
-**Agent:** system-control  
-**Dateien geändert:**
-- `docker/grafana/provisioning/dashboards/dashboards.yml` (disableDeletion: true)
-- `docker/grafana/provisioning/dashboards/system-health.json` (refresh: "10s")
-- `.env.example` (Security-Warnung für GRAFANA_ADMIN_PASSWORD)
+Phase 2 macht das System **debugbar**. Das bedeutet konkret:
 
-**Ergebnis:**
-- Dashboard löschgeschützt ✅
-- Auto-Refresh alle 10s konfiguriert ✅
-- Security-Warnung konsistent mit JWT_SECRET_KEY Pattern ✅
-- `.gitignore` bereits korrekt (`.env` gelistet) ✅
+- Du kannst ESP32-Probleme über drei Kanäle diagnostizieren (Simulation, MQTT-Live, Serial-Hardware)
+- Alerts erreichen dich aktiv, nicht nur wenn du zufällig Grafana offen hast
+- Gelöste Probleme werden zu strukturiertem Wissen statt zu vergessenem Terminal-Output
+- Tests laufen zuverlässig auf allen Layern, sodass jede Änderung abgesichert ist
 
-**Verifikation:** YAML/JSON-Syntax OK, Live-Test ausstehend (Stack nicht gestartet)
-
-**Offener Punkt:** Agent bemerkt dass Dashboard-Panels broken sind (`up{job="mqtt-broker"}` etc.), aber das war NICHT Teil dieses Auftrags. → **Das ist AUFTRAG 1 der fehlt!**
+Phase 2 ist in **vier Bereiche** gegliedert. Die Bereiche haben Abhängigkeiten untereinander — die Reihenfolge ist nicht beliebig.
 
 ---
 
-### ✅ AUFTRAG 3: Promtail Positions persistieren (ERFOLGREICH)
+## Bereich 1: ESP32 Debugging
 
-**Agent:** system-control  
-**Dateien geändert:**
-- `docker/promtail/config.yml` (filename: /promtail-positions/positions.yaml)
-- `docker-compose.yml` (Volume gemountet + Top-Level-Definition)
+**Ziel:** Drei unabhängige Kanäle um ESP32-Verhalten zu beobachten und Probleme zu diagnostizieren.
 
-**Implementierung:**
+### Kanal 1: Wokwi-Simulation
+
+**Aktueller Stand:** 163 Szenarien in 13 Kategorien existieren. CI-Workflow läuft mit 15 Jobs und deckt 42 Szenarien ab. Die Coverage ist ungleich verteilt:
+> [verify-plan Korrektur: 163, nicht 165. Verifiziert via Glob auf `El Trabajante/tests/wokwi/scenarios/`]
+
+| Kategorie | Szenarien | In CI | Coverage |
+|-----------|-----------|-------|----------|
+| 01-boot | 2 | 2 | 100% |
+| 02-sensor | 5 | 5 | 100% |
+| 03-actuator | 7 | 7 | 100% |
+| 04-zone | 2 | 2 | 100% |
+| 05-emergency | 3 | 3 | 100% |
+| 06-config | 2 | 2 | 100% |
+| 07-combined | 2 | 2 | 100% |
+| 08-i2c | 20 | 5 | 25% |
+| 08-onewire | 29 | 0 | **0%** |
+| 09-hardware | 9 | 0 | **0%** |
+| 09-pwm | 18 | 3 | 17% |
+| 10-nvs | 40 | 5 | 13% |
+| gpio (kein Prefix) | 24 | 5 | 21% |
+
+> **Hinweis:** Duplikat-Prefixe bei 08 und 09. 2 Root-Level YAML-Dateien existieren zusätzlich (`boot_test.yaml`, `mqtt_connection.yaml` — Legacy). Alle 3 PWM-CI-Tests referenzieren existierende Dateien (`pwm_duty_percent_50.yaml`, `pwm_frequency_change.yaml`, `pwm_resolution_verify.yaml`) — kein CI-Bug vorhanden.
+> [verify-plan Korrektur: CI verwendet korrekt `pwm_duty_percent_50.yaml`, nicht `pwm_duty_cycle.yaml`. Verifiziert in `.github/workflows/wokwi-tests.yml:1371`]
+
+Infrastrukturell existieren 3 Wokwi-Environments (wokwi_esp01/02/03) und Makefile-Targets dafür, aber CI nutzt ausschließlich ESP_00000001. Das Makefile `wokwi-test-full` Target listet 22 Szenarien (echo sagt 22, help sagt 23 — help-Bug), CI hat 42 (zusätzlich: 5 GPIO, 5 I2C, 5 NVS, 3 PWM, 1 mqtt_connection, 1 actuator_pwm).
+
+**Was noch fehlt:**
+
+- **CI-Expansion:** 08-onewire (29) und 09-hardware (9) haben 0% Coverage. GPIO, I2C, PWM, NVS haben 13-25%. Ziel: Mindestens die kritischsten Szenarien jeder Kategorie in CI bringen.
+- **Multi-Device-Testing:** Kein einziges Szenario testet mehrere ESP32s gleichzeitig. Die Infrastruktur (3 Envs) existiert, wird aber nicht genutzt.
+- **Makefile aktualisieren:** Szenario-Liste auf CI-Stand bringen (22 → 42).
+- ~~**CI-Bug fixen:** `pwm_duty_cycle.yaml` durch existierendes Szenario ersetzen.~~ [verify-plan: ENTFERNT — CI nutzt bereits korrekt `pwm_duty_percent_50.yaml`]
+
+### Kanal 2: MQTT Debug-Topic (Live-Debugging)
+
+**Aktueller Stand:** Teilweise vorhanden. `system/diagnostics` Topic ist bereits definiert:
+
+- **ESP32:** `topic_builder.cpp:180` → `buildSystemDiagnosticsTopic()` existiert
+- **Server:** `topics.py:846` → `build_system_diagnostics_topic()` existiert
+- **Server:** `diagnostics_handler.py` existiert und ist registriert in `main.py:264-271`
+- **Dokumentation:** `MQTT_TOPICS.md` Section 3.5 dokumentiert das Topic korrekt
+
+Der system/diagnostics Kanal ist also **infrastrukturell vorhanden**. Was fehlt, ist die Verifikation, dass der gesamte Flow end-to-end funktioniert (ESP32 sendet → Server empfängt → Daten werden verarbeitet/gespeichert).
+
+**Was zu prüfen/implementieren ist:**
+
+1. **End-to-End-Test:** Verifizieren dass die bestehende diagnostics_handler-Implementierung die Payloads korrekt verarbeitet. Dafür einen Wokwi-Szenario oder MQTT-CLI-Test durchführen.
+2. **Payload-Erweiterung prüfen:** Welche Daten schickt die ESP32-Firmware tatsächlich im diagnostics-Payload? Reicht das für Debug-Zwecke oder fehlen Felder (z.B. Boot-Reason, Circuit-Breaker-State)?
+3. **Grafana-Visualisierung:** Falls diagnostics-Daten im Server ankommen und in die DB geschrieben werden, fehlt ein Grafana-Panel dafür.
+
+> **Hinweis:** Neben `system/diagnostics` haben weitere in MQTT_TOPICS.md dokumentierte Topics keinen Server-Handler: `sensor/batch`, `system/response`, `status`, `safe_mode`, `sensor/+/response`. Für Kanal 2 nicht blockierend, aber der TM sollte diese Lücken kennen.
+
+### Kanal 3: Serial-Bridge (Hardware-Debugging)
+
+**Aktueller Stand:** Container vollständig vorbereitet, Firmware teilweise ready.
+
+Datenfluss:
+```
+ESP32 → USB → usbipd → WSL2 /dev/ttyUSB0 → socat TCP:3333 →
+Docker esp32-serial-logger (socket TCP) → stdout JSON →
+Promtail → Loki → Grafana
+```
+
+Der esp32-serial-logger Service existiert in docker-compose.yml (Profil: hardware). Promtail hat Pipeline-Stage 4 dafür (`config.yml:118-139`). Container-Dateien komplett: Dockerfile, serial_logger.py, requirements.txt, README.md, .dockerignore.
+
+> [verify-plan 2026-02-11] Datenfluss korrigiert: `serial_logger.py` nutzt `socket` (stdlib TCP), NICHT pyserial. `requirements.txt` listet `pyserial==3.5` — wird nicht importiert (Relikt vom USB-Direktzugriff-Design). Bei Task 1.6 entfernen.
+
+**Was bereits vorhanden ist:**
+
+- ✅ **MQTT Log-Level Control:** `set_log_level` Command in `main.cpp:1208-1250` — vollständig implementiert. Empfängt `{"command":"set_log_level","level":"DEBUG"}`, setzt `logger.setLogLevel()`, sendet JSON-Response. Funktioniert über `kaiser/{id}/esp/{id}/system/command` Topic.
+- ✅ **usbipd-Runbook:** `docker/esp32-serial-logger/README.md` enthält vollständige Dokumentation: Installation (winget), Bind, Attach, Auto-Attach, VID:PID für 3 Board-Typen, WSL2-Verifikation, socat TCP-Bridge, systemd Auto-Start, Multi-Device-Setup, Troubleshooting (DTR/RTS, USB-Disconnect).
+- ✅ **Promtail-Kompatibilität:** Jeder `ENABLE_AGENT_DEBUG_LOGS`-Block terminiert mit `\n` (Format: `[DEBUG]{...json...}\n`). `serial_logger.py:PATTERN_MQTT_DEBUG` parst dieses Format korrekt → `format: mqtt_debug_json`.
+
+**Was noch fehlt:**
+
+- **Serial.print()-Konsolidierung:** Die 13 `#ifdef ENABLE_AGENT_DEBUG_LOGS` Blöcke in `mqtt_client.cpp` nutzen je ~10 fragmentierte `Serial.print()`-Aufrufe pro Log-Zeile (statt einem `Serial.println()`). Promtail-seitig funktioniert das (TCP buffert), aber auf echter Hardware droht Interleaving wenn ISR/andere Tasks gleichzeitig auf Serial schreiben. Lösung: Jeden Block zu einem `snprintf()` + `Serial.println()` konsolidieren. Gleichzeitig `feature_flags.h:14` WARNING-Kommentar aktualisieren (sagt fälschlich "Not suitable for Promtail").
+- **NVS-Persistenz für Log-Level:** `set_log_level` MQTT-Command existiert (s.o.), aber Log-Level ist nur Runtime-volatile. Nach Reboot fällt es auf `LOG_INFO` zurück (`logger.cpp:17`). Lösung: Nach `logger.setLogLevel()` auch in NVS speichern, beim Boot aus NVS laden.
+- **Container testen:** esp32-serial-logger wurde noch nie gestartet. Image bauen, TCP-Connection gegen echten oder simulierten Stream testen (z.B. `socat` mit Echo-Input oder Wokwi-Serial-Output über TCP). `pyserial` aus requirements.txt entfernen (nicht benötigt).
+- ~~**usbipd-Runbook:**~~ [verify-plan: DONE — `docker/esp32-serial-logger/README.md` ist vollständig]
+
+### ESP32 Native Tests
+
+**Aktueller Stand:** 2 aktive Tests (test_topic_builder.cpp mit 12 Tests, test_gpio_manager_mock.cpp mit 10 Tests = 22 Native-Tests). PlatformIO [env:native] existiert. Mock-Infrastruktur vorhanden (test/mocks/, test/helpers/). GPIO-HAL existiert (igpio_hal.h + esp32_gpio_hal.h).
+
+**Was noch fehlt:**
+
+- **21 archivierte Tests:** Unter test/_archive/ liegen 21 .cpp Dateien — deaktiviert wegen vermuteter API-Änderungen. Müssen einzeln geprüft und nach test/ migriert werden.
+- **3 HAL-Interfaces:** II2CBus, IOneWireBus, IStorageManager fehlen. Ohne sie können weitere Hardware-abhängige Klassen nicht isoliert getestet werden.
+
+---
+
+## Bereich 2: Observability vervollständigen
+
+**Ziel:** Die letzten Lücken im Monitoring-Stack schließen.
+
+### Bereits erledigt (Phase 1 / bisherige Arbeit)
+
+Die folgenden Punkte sind **bereits implementiert** und brauchen keine weitere Arbeit:
+
+| Was | Status | Nachweis |
+|-----|--------|----------|
+| **cAdvisor** | Läuft | `docker-compose.yml` (Profil: monitoring), Port 8080, Prometheus scrape job `cadvisor` |
+| **Prometheus: Loki + Promtail** | Gescrapt | `prometheus.yml` Jobs `loki` (3100) und `promtail` (9080) |
+| **MQTT-Counter (Server-seitig)** | Implementiert | `metrics.py:51-61` — `MQTT_MESSAGES_TOTAL` (Counter, Labels: received/published) + `MQTT_ERRORS_TOTAL` |
+| **WebSocket-Connections** | Implementiert | `metrics.py:67-70` — `WEBSOCKET_CONNECTIONS_GAUGE`, updated via `update_websocket_metrics()` |
+| **DB-Query-Duration** | Implementiert | `metrics.py:76-80` — `DB_QUERY_DURATION` (Histogram, 10 Buckets) |
+| **ESP Heartbeat Gauges** | Implementiert | `metrics.py:105-123` — 4 aggregierte Gauges (avg_heap_free, min_heap_free, avg_wifi_rssi, avg_uptime). Kardinalitäts-Entscheidung: Aggregiert (keine per-ESP Labels) |
+| **Prometheus Scrape-Jobs** | 7 Jobs | el-servador, postgres, prometheus, mqtt-broker, cadvisor, loki, promtail |
+| **Alert Rules** | 8 Rules | 5 critical (server-down, mqtt-disconnected, database-down, loki-down, promtail-down) + 3 warning (high-memory, esp-offline, high-mqtt-error-rate) |
+
+**Aktuelle Metriken-Übersicht in `metrics.py`:** 12 Gauges + 2 Counters + 1 Histogram = 15 Custom Metrics, plus HTTP Auto-Metrics via prometheus-fastapi-instrumentator.
+
+### Was tatsächlich noch fehlt
+
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 2.1 | Dashboard: cAdvisor-Panels (CPU/RAM/I/O pro Container) | 2h | — |
+| 2.2 | Dashboard: HTTP-Latency Panel (RED-Methode vervollständigen) | 1h | — |
+| 2.3 | Dashboard: Panels für ESP Heartbeat Gauges (Heap/RSSI/Uptime Trend) | 1-2h | — |
+| 2.4 | LogQL Recording Rules definieren + Loki `ruler`-Section aktivieren | 3-4h | Label-Taxonomie (3.2) |
+| 2.5 | Alert: Webhook Contact Point → El Servador → Frontend Notification | 3-4h | — |
+| 2.6 | Alert: Weitere Rules (Disk Full, DB Connection Saturation) | 1-2h | — |
+
+> **Blocker für 2.4:** `loki-config.yml` hat keinen `ruler`-Abschnitt. Ohne aktivierten ruler-Component werden Recording Rules nicht evaluiert. Prerequisite: `ruler`-Section in loki-config.yml hinzufügen (alert_manager_url, storage, ring).
+
+> **Doku-Inkonsistenz:** `DOCKER_REFERENCE.md` Section 1.4 listet `./logs/mqtt/` als aktiven Bind-Mount, aber `docker-compose.yml:60-62` hat ihn kommentiert. Bei nächstem `/updatedocs` korrigieren.
+
+**Bereich 2 Gesamtaufwand: ~11-15h** (statt zuvor geschätzte 22-32h — Großteil bereits erledigt)
+
+---
+
+## Bereich 3: Debug-Wissensbasis
+
+**Ziel:** Gelöste Probleme werden zu strukturiertem Wissen. Das dient den Debug-Agents als Referenz, den Alert Rules als Grundlage, und langfristig als ML-Trainingsdaten.
+
+### PATTERNS.yaml
+
+**Aktueller Stand:** Schema entworfen, 16 initiale Patterns identifiziert (aus bisherigen Debugging-Sessions). Zielformat pro Eintrag:
+
 ```yaml
-# Named Volume erstellt: automationone-promtail-positions
-# Mount-Point: /promtail-positions
-# Config: /tmp/positions.yaml → /promtail-positions/positions.yaml
+- id: MQTT_RECONNECT_LOOP
+  symptoms:
+    - container: mqtt-broker
+      pattern: "socket error on client esp32_01, disconnecting"
+      frequency: ">3x in 60s"
+    - container: el-servador
+      pattern: "MQTT client esp32_01 went offline"
+  root_cause: "ESP32 WiFi-Interferenz bei schwachem Signal"
+  solution: "WiFi TX-Power anpassen oder Reconnect-Backoff erhöhen"
+  layers: [firmware, broker, backend]
+  severity: warning
+  correlation_window: "±10s"
 ```
 
-**Ergebnis:**
-- Named Volume konsistent mit anderen Monitoring-Volumes ✅
-- Kein explizites `name:` Property (konsistent mit loki-data, prometheus-data) ✅
-- Positions-Datei überleb Container-Restarts ✅
+**Was fehlt:** Die Datei existiert nicht. Keiner der 16 Patterns ist geschrieben. Vorgesehener Pfad: `.claude/reference/errors/PATTERNS.yaml`.
 
-**Verifikation:** YAML-Syntax OK (visuell), Docker-Tests ausstehend (Stack nicht gestartet)
+### Label-Taxonomie
 
-**Erwartete Effekte:**
-- KEINE Log-Duplikate nach Container-Restart
-- Loki-Datenbank bleibt sauber
-- ~46k Lines/h Log-Volume stabil (keine Spikes nach Restart)
+**Was fehlt:** Ein Dokument das definiert:
+- Pflicht-Labels pro Layer (Firmware / Backend / Frontend / Broker / DB)
+- Gültige Werte pro Label (z.B. level: DEBUG|INFO|WARNING|ERROR|CRITICAL)
+- Mapping ESP32-Level → Loki-Level
+- Labels die für späteres ML-Training gebraucht werden
+
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 3.1 | PATTERNS.yaml erstellen mit 16 initialen Patterns | 3-4h | — |
+| 3.2 | Label-Taxonomie Dokument erstellen | 2-3h | — |
+| 3.3 | PATTERNS.yaml in Agent-Referenzen einbinden | 1h | 3.1 |
+
+**Bereich 3 Gesamtaufwand: ~6-8h**
 
 ---
 
-### ✅ AUFTRAG 4: Promtail Healthcheck-Log-Filter (ERFOLGREICH)
+## Bereich 4: Test-Stabilisierung
 
-**Agent:** system-control  
-**Datei geändert:**
-- `docker/promtail/config.yml` (Pipeline: match + drop stage)
+**Ziel:** Alle drei Layer haben lauffähige, aussagekräftige Tests. Das ist die Absicherung für alles was in Bereich 1-3 implementiert wird.
 
-**Implementierung:**
-```yaml
-pipeline_stages:
-  - docker: {}
-  - match:
-      selector: '{compose_service="el-servador"}'
-      stages:
-        - drop:
-            source: ""
-            expression: ".*GET /api/v1/health/.* HTTP/.*"
+### Backend (pytest)
+
+**Aktueller Stand:** 105 Test-Dateien, 4 conftest-Dateien, 1791 Tests collected, 759 Unit-Tests bestehen. 25+ Marker registriert, --strict-markers aktiv. E2EWebSocketClient implementiert. MockESP32Client exzellent (1000+ Zeilen). Pydantic V2 Migration zu 97% abgeschlossen (nur 3 Legacy class Config übrig).
+
+**Verbleibende Lücken:**
+
+- **Neue Features ungetestet:** kaiser.py, ai.py, sequences.py und ihre Services (kaiser_service.py, ai_service.py, health_service.py) haben keine Tests.
+- **Bekannter Bug:** DS18B20 off-by-one — test_quality_mapping_raw_mode[1360-good] schlägt fehl (< statt <= im Processor).
+- **3 Pydantic Legacy-Stellen:** api_response.py (x2), sequence.py (x1) nutzen noch class Config statt model_config = ConfigDict.
+
+### Frontend (Vitest / Playwright)
+
+**Aktueller Stand:** Dependencies installiert (vitest ^3.0.0, msw ^2.7.0, @vitest/coverage-v8). 26 Test-Dateien (21 Unit + 5 E2E-Specs). Alle 5 Stores getestet. 2 Composables getestet. 14 Utility-Test-Dateien. MSW handlers.ts mit ~80% API-Coverage.
+
+**Verbleibende Lücken:**
+
+- **6 von 8 Composables ungetestet** (useModal, useSwipeNavigation, useGpioStatus, useQueryFilters, useZoneDragDrop, useConfigResponse)
+- **0 von 67 Components getestet** — keine einzige Komponente hat Unit-Tests
+- **0 Integration-Tests** — Store-API-Interaktion ungetestet
+- **Playwright nicht in CI** — 5 E2E-Specs existieren, CI-Workflow fehlt
+
+### ESP32 (PlatformIO)
+
+**Aktueller Stand:** 2 aktive Tests (22 Assertions), GPIO-HAL existiert, Mock-Infrastruktur vorhanden.
+
+**Verbleibende Lücken:**
+
+- **21 archivierte Tests migrieren** — einzeln prüfen, an aktuelle API anpassen, nach test/ verschieben
+- **3 HAL-Interfaces erstellen** — II2CBus, IOneWireBus, IStorageManager
+
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 4.1 | Backend: Tests für kaiser.py + kaiser_service.py | 2-3h | — |
+| 4.2 | Backend: Tests für ai.py + ai_service.py | 2-3h | — |
+| 4.3 | Backend: Tests für sequences.py API-Router (`test_sequence_executor.py` existiert bereits für SequenceActionExecutor) | 1-2h | — |
+| 4.4 | Backend: DS18B20 off-by-one Bug fixen | 15min | — |
+| 4.5 | Backend: 3 Pydantic V2 Legacy-Stellen migrieren | 30min | — |
+| 4.6 | Frontend: Composable-Tests (6 fehlende: useModal, useSwipeNavigation, useGpioStatus, useQueryFilters, useZoneDragDrop, useConfigResponse) | 4-8h | — |
+| 4.7 | Frontend: Component-Tests anfangen (kritische zuerst: ESPCard, ZoneGroup, PendingDevicesPanel) | 5-8h | — |
+| 4.8 | Frontend: Integration-Tests (Store-API via MSW) | 3-5h | 4.7 teilweise |
+| 4.9 | Frontend: Playwright CI-Workflow erstellen | 2h | — |
+| 4.10 | ESP32: 21 archivierte Tests migrieren | 6-10h | fortlaufend |
+| 4.11 | ESP32: 3 HAL-Interfaces erstellen | 8-12h | 4.10 teilweise |
+
+**Bereich 4 Gesamtaufwand: ~33-52h**
+
+---
+
+## Abhängigkeiten zwischen den Bereichen
+
+```
+Bereich 4 (Tests) ───────────────────────────────────────────┐
+  Absicherung für alles was in 1-3 implementiert wird         │
+                                                               │
+Bereich 1 (ESP32 Debug) ─────────────────────────────────────┤
+  Diagnostics E2E-Test braucht laufenden Server               │
+  Serial-Bridge braucht Firmware-Prüfung                      │
+  Wokwi-Expansion braucht stabile CI                          │
+                                                               │
+Bereich 2 (Observability) ───────────────────────────────────┤
+  LogQL Recording Rules brauchen Label-Taxonomie (→ B3)       │
+  Neue Alert Rules brauchen die Dashboard-Panels              │
+                                                               │
+Bereich 3 (Wissensbasis) ───────────────────────────────────┘
+  PATTERNS.yaml hat keine technische Abhängigkeit
+  Label-Taxonomie wird von LogQL Recording Rules gebraucht
 ```
 
-**Ergebnis:**
-- Service-spezifisches Filtering (nur el-servador) ✅
-- Regex matcht alle Health-Endpoints (/metrics, /live, /ready) ✅
-- Stage-Reihenfolge korrekt (docker → match → drop) ✅
+**Empfohlene Reihenfolge:**
 
-**Metriken (geschätzt):**
-- Eingesparte Logs: ~360/h (Prometheus 240 + Docker HC 120)
-- Pro Tag: ~8.640 Logs weniger
-- Log-Volume-Reduktion: ~0.8% (nicht 5.2% wie erwartet)
+1. **Zuerst Bereich 4** — Test-Stabilisierung. Ohne lauffähige Tests ist jede Änderung ein Risiko. Kritische Lücken zuerst: Backend neue Features, Frontend Components anfangen, ESP32 Archive migrieren.
 
-**Korrektur der TM-Schätzung:** TM hatte "~2.4k Lines/h (5.2%)" angenommen, Agent fand nur ~360/h. Die TM-Schätzung war zu hoch weil sie Docker-Healthcheck-Frequenz falsch berechnete.
+2. **Parallel Bereich 3** — PATTERNS.yaml und Label-Taxonomie haben keine Code-Abhängigkeiten. Das sind Dokumentationsaufgaben die sofort beginnen können.
 
-**Verifikation:** Config-Änderung committed, Live-Test ausstehend
+3. **Dann Bereich 1** — ESP32 Debug-Kanäle. Diagnostics E2E-Test zuerst (verifiziert bestehende Infrastruktur), dann Wokwi-CI-Expansion, dann Serial-Bridge.
+
+4. **Dann Bereich 2** — Die verbliebenen Observability-Lücken (Dashboards, Recording Rules, Webhook).
 
 ---
 
-### ✅ AUFTRAG 5: LOG_ACCESS_REFERENCE korrigieren (ERFOLGREICH)
+## Vollständige Aufgabenliste
 
-**Agent:** agent-manager  
-**Datei geändert:**
-- `.claude/reference/debugging/LOG_ACCESS_REFERENCE.md` (Zeile 45)
+### Bereich 1: ESP32 Debugging
 
-**Änderung:**
-```diff
-- Labels: service_name oder container mit Container-Namen
-+ Labels: service (Compose-Service: el-servador, ...) oder container (Container-Name: automationone-server, ...)
-+ Warnung: service_name existiert (Docker SD Auto-Label), ist aber ambig
-```
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 1.1 | Diagnostics E2E-Test: Verifizieren dass system/diagnostics end-to-end funktioniert | 2-3h | — |
+| 1.2 | Diagnostics Payload-Erweiterung prüfen (fehlen Boot-Reason, Circuit-Breaker-State?) | 1-2h | 1.1 |
+| 1.3 | Verwaiste Topics inventarisieren: sensor/batch, system/response, status, safe_mode, sensor/+/response | 1h | — |
+| 1.4 | Firmware: ENABLE_AGENT_DEBUG_LOGS Serial.print()-Fragmentierung zu println() konsolidieren + `feature_flags.h` WARNING korrigieren | 1h | — |
+| 1.5a | ~~Firmware: MQTT Log-Level Control~~ [verify-plan: DONE — `main.cpp:1208-1250` `set_log_level` existiert] | — | — |
+| 1.5b | Firmware: NVS-Persistenz für Log-Level (speichern nach setLogLevel, laden beim Boot) | 1h | — |
+| 1.6 | Serial-Bridge: esp32-serial-logger Container testen + `pyserial` aus requirements.txt entfernen (unused) | 2-3h | 1.4 |
+| ~~1.7~~ | ~~Serial-Bridge: usbipd-Runbook dokumentieren~~ [verify-plan: DONE — `docker/esp32-serial-logger/README.md` vollständig] | — | — |
+| ~~1.8~~ | ~~Wokwi: CI-Bug fixen~~ [verify-plan: ENTFERNT — CI nutzt bereits `pwm_duty_percent_50.yaml`] | — | — |
+| 1.9 | Wokwi: Makefile-Szenario-Liste aktualisieren (22 → 42) + Help-Echo-Bug fixen (sagt 23, sind 22) | 1h | — |
+| 1.10 | Wokwi: CI-Expansion — onewire (29) + hardware (9) Szenarien integrieren | 2-3h | — |
+| 1.11 | Wokwi: CI-Expansion — gpio/i2c/pwm/nvs Coverage erhöhen | 3-4h | — |
+| 1.12 | Wokwi: Multi-Device-Szenarien erstellen (ESP_00000002/03 in CI) | 4-6h | — |
+| 1.13 | ESP32: Archivierte Tests migrieren (21 Dateien) | 6-10h | fortlaufend |
+| 1.14 | ESP32: HAL-Interfaces (II2CBus, IOneWireBus, IStorageManager) | 8-12h | 1.13 teilweise |
 
-**Findings:**
-- Nur **1 Zeile** betroffen (nicht "60+ Queries" wie TM erwartete)
-- LOG_LOCATIONS.md war **bereits korrekt** (v3.1, Query-Beispiele nutzen `{service="..."}`)
-- Frontend hat **0 Loki-Queries** (TM-Annahme "60+ Queries" war falsch)
+**Bereich 1 Gesamtaufwand: ~30-44h** (korrigiert: 1.5a + 1.7 = DONE, spart ~3-4h)
+> [verify-plan 2026-02-11] Kanal-3-Aufwand reduziert von ~7-8h auf ~4-5h. MQTT-Log-Level und usbipd-Runbook existieren bereits.
 
-**Root Cause identifiziert:** TM SKILLS.md Zeile 181 sagt "Label ist `service_name` (NICHT `service`!)" → **Das ist die Quelle der Fehlinformation!**
+### Bereich 2: Observability (nur verbleibende Lücken)
 
-**Cross-References:** 6 Dateien mit `service_name` gefunden, nur 1 korrigiert (Rest sind Reports oder irrelevant)
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 2.1 | Dashboard: cAdvisor-Panels (CPU/RAM/I/O pro Container) | 2h | — |
+| 2.2 | Dashboard: HTTP-Latency Panel (RED vervollständigen) | 1h | — |
+| 2.3 | Dashboard: Panels für ESP Heartbeat Gauges (Heap/RSSI/Uptime) | 1-2h | — |
+| 2.4 | Loki `ruler`-Section aktivieren + LogQL Recording Rules | 3-4h | Label-Taxonomie (3.2) |
+| 2.5 | Alert: Webhook Contact Point → El Servador → Frontend Notification | 3-4h | — |
+| 2.6 | Alert: Weitere Rules (Disk Full, DB Connection Saturation) | 1-2h | — |
 
-**Empfehlung:** TM SKILLS.md muss korrigiert werden (separate Aktion).
+**Bereich 2 Gesamtaufwand: ~11-15h**
 
----
+### Bereich 3: Debug-Wissensbasis
 
-### ✅ AUFTRAG 6: DOCKER_VOLLAUDIT Phantom-Service (ERFOLGREICH)
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 3.1 | PATTERNS.yaml erstellen mit 16 initialen Patterns | 3-4h | — |
+| 3.2 | Label-Taxonomie Dokument erstellen | 2-3h | — |
+| 3.3 | PATTERNS.yaml in Agent-Referenzen einbinden | 1h | 3.1 |
 
-**Agent:** system-control  
-**Datei geändert:**
-- `.claude/reports/current/DOCKER_VOLLAUDIT.md` (v1.4 → v1.5)
+**Bereich 3 Gesamtaufwand: ~6-8h**
 
-**Umfang:** **28 Stellen** in 15+ Sections korrigiert
+### Bereich 4: Test-Stabilisierung
 
-**Korrekturen:**
-- Service-Count: 9 → 8 überall
-- pgAdmin-Zeilen entfernt aus: Service-Tabelle, Security, Netzwerk, Volumes, depends_on, Aktionsplan
-- Profile `devtools` entfernt (existiert nicht)
-- Alle Scores neu berechnet
+| # | Aufgabe | Aufwand | Abhängig von |
+|---|---------|---------|--------------|
+| 4.1 | Backend: Tests für kaiser.py + kaiser_service.py | 2-3h | — |
+| 4.2 | Backend: Tests für ai.py + ai_service.py | 2-3h | — |
+| 4.3 | Backend: Tests für sequences.py API-Router (`test_sequence_executor.py` existiert bereits) | 1-2h | — |
+| 4.4 | Backend: DS18B20 off-by-one Bug fixen | 15min | — |
+| 4.5 | Backend: 3 Pydantic V2 Legacy-Stellen migrieren | 30min | — |
+| 4.6 | Frontend: Composable-Tests (6 fehlende: useModal, useSwipeNavigation, useGpioStatus, useQueryFilters, useZoneDragDrop, useConfigResponse) | 4-8h | — |
+| 4.7 | Frontend: Component-Tests anfangen (ESPCard, ZoneGroup, PendingDevicesPanel) | 5-8h | — |
+| 4.8 | Frontend: Integration-Tests (Store-API via MSW) | 3-5h | 4.7 teilweise |
+| 4.9 | Frontend: Playwright CI-Workflow erstellen | 2h | — |
+| 4.10 | ESP32: 21 archivierte Tests migrieren | 6-10h | fortlaufend (= 1.13) |
+| 4.11 | ESP32: 3 HAL-Interfaces erstellen | 8-12h | fortlaufend (= 1.14) |
 
-**Überraschende Findings:**
-- **Healthchecks:** TM sagte "7/8 (87.5%) - el-frontend fehlt", Agent fand "8/8 (100%) - el-frontend HAT Healthcheck!"
-- el-frontend Healthcheck: `node fetch` auf `localhost:5173` (Zeile 148 docker-compose.yml)
-- promtail HAT Healthcheck: TCP:9080 (Zeile 200)
+> **Hinweis:** 4.10 und 4.11 sind identisch mit 1.13 und 1.14. Sie erscheinen in beiden Bereichen, weil sie sowohl dem ESP32-Debug-Kanal als auch der Test-Stabilisierung dienen. In der Gesamtrechnung nur einmal gezählt.
 
-**Scores Alt → Neu:**
-
-| Metrik | Alt (v1.4, 9 Services) | Neu (v1.5, 8 Services) |
-|--------|----------------------|----------------------|
-| Images gepinnt | 9/9 (100%) | 8/8 (100%) |
-| Non-root User | 2/9 (22%) | 2/8 (25%) |
-| Resource Limits | 9/9 (100%) | 8/8 (100%) |
-| **Healthchecks** | 8/9 (89%) | **8/8 (100%)** ✨ |
-| Restart-Policy | 9/9 (100%) | 8/8 (100%) |
-| Secrets | 9/9 (100%) | 8/8 (100%) |
-
-**Artefakte:** `docker/pgadmin/servers.json` bleibt (Vorbereitung für zukünftige Implementation)
-
----
-
-## ❌ FEHLENDER AUFTRAG: Grafana Dashboard Panels (AUFTRAG 1)
-
-**Status:** Kein Report vorhanden, vermutlich nicht ausgeführt
-
-**Was fehlt:**
-- Panel 2 (MQTT Broker): `up{job="mqtt-broker"}` → `god_kaiser_mqtt_connected`
-- Panel 3 (Database): `up{job="postgres"}` → Loki-Heartbeat `count_over_time({compose_service="postgres"} [1m]) > 0`
-- Panel 4 (Frontend): `up{job="el-frontend"}` → Loki-Heartbeat `count_over_time({compose_service="el-frontend"} [1m]) > 0`
-
-**Warum kritisch:** Dashboard zeigt aktuell "No data" für 3 von 6 Panels → Monitoring unvollständig
-
-**Agent-Hinweis:** system-control Report (Auftrag 2) erwähnt das Problem: "Prometheus scrape jobs unvollständig... Empfehlung: Eigener TM-Auftrag für Prometheus-Config-Erweiterung"
-
-**Aber:** Das war NICHT Teil von Auftrag 2, sondern Auftrag 1 sollte die Panels direkt reparieren!
+**Bereich 4 Gesamtaufwand: ~33-52h** (4.10 + 4.11 überlappen mit Bereich 1)
 
 ---
 
-## Cross-Agent-Findings
+## Phase 2 Gesamtaufwand
 
-### 1. Healthcheck-Vollständigkeit (Positiv)
-
-**TM-Annahme:** el-frontend und promtail fehlen Healthchecks  
-**Realität:** Beide HABEN Healthchecks!
-
-- el-frontend: `node fetch localhost:5173` (funktioniert, Vite Dev-Server)
-- promtail: TCP-Check auf Port 9080
-
-**Impact:** DOCKER_VOLLAUDIT Score steigt von 89% auf **100%** ✨
-
-### 2. Log-Volume-Reduktion (Niedriger als erwartet)
-
-**TM-Schätzung:** ~2.4k Healthcheck-Logs/h (-5.2%)  
-**Agent-Messung:** ~360 Healthcheck-Logs/h (-0.8%)
-
-**Ursache:** TM hatte Docker-Healthcheck-Frequenz falsch berechnet
-- TM: "alle 15s" → falsch
-- Docker-Config: alle 30s → korrekt
-- Prometheus: alle 15s → korrekt
-- Summe: 240 + 120 = 360/h (nicht 2.400/h)
-
-**Impact:** Filtering spart weniger als gedacht, aber trotzdem sinnvoll (besseres Signal-Rausch-Verhältnis)
-
-### 3. Frontend-Loki-Integration nicht vorhanden
-
-**TM-Annahme:** "60+ Frontend-Queries nutzen service_name"  
-**Realität:** Frontend hat 0 Loki-Queries, 0 Loki-Integration
-
-**Quelle der Fehlinformation:** TM SKILLS.md oder alte Planung
-
-### 4. Label-Inkonsistenz-Quelle gefunden
-
-**Root Cause:** `.claude/reports/Technical Manager/TM SKILLS.md` Zeile 181 sagt:  
-> "WICHTIG: Label ist `service_name` (NICHT `service`!)"
-
-**Das ist komplett falsch!** Promtail-Config nutzt `service`, nicht `service_name`.
-
-**Empfehlung:** TM SKILLS.md muss korrigiert werden (separater Task).
+| Bereich | Aufwand | Status |
+|---------|---------|--------|
+| 1 — ESP32 Debugging | 30-44h | ~15% (Kanal 3: MQTT-Log-Level + Runbook DONE, Container + NVS-Persistenz + Print-Konsolidierung offen) |
+| 2 — Observability | 11-15h | ~70% (Metriken + Scraping fertig, Dashboards + Rules offen) |
+| 3 — Wissensbasis | 6-8h | ~10% (Schema entworfen, nichts geschrieben) |
+| 4 — Test-Stabilisierung | 33-52h | ~40% (Backend funktioniert, Frontend + ESP32 Lücken) |
+| **Gesamt (bereinigt um Überlappung 1<>4)** | **~66-101h** | **~37-42%** |
 
 ---
 
-## Nächste Schritte
+## Erledigungskriterien — Wann ist Phase 2 fertig?
 
-### SOFORT (Kritisch)
+Phase 2 ist abgeschlossen wenn:
 
-1. **AUFTRAG 1 nachliefern:** Grafana Dashboard Panels reparieren
-   - Agent: server-dev (war ursprünglich zugewiesen)
-   - Dateien: `docker/grafana/provisioning/dashboards/system-health.json`
-   - Ziel: 3 broken Panels → funktional
-
-2. **Live-Verifikation:** Monitoring-Stack starten, alle Änderungen testen
-   ```bash
-   docker compose --profile monitoring down
-   docker compose --profile monitoring up -d
-   # Tests: Dashboard Auto-Refresh, Positions-Datei, Healthcheck-Filtering
-   ```
-
-### HOCH (Nach Live-Verifikation)
-
-3. **TM SKILLS.md korrigieren:**
-   - Zeile 181: `service_name` → `service`
-   - Quelle der Fehlinformation eliminieren
-
-4. **Commit-Strategie:**
-   - 3 separate Commits empfohlen:
-     - Commit 1: Grafana Config (disableDeletion + refresh)
-     - Commit 2: Promtail Optimierungen (Positions + Healthcheck-Filter)
-     - Commit 3: Dokumentation (LOG_ACCESS_REFERENCE + DOCKER_VOLLAUDIT)
-
-### MITTEL (Phase 2 Vorbereitung)
-
-5. **pgAdmin Implementation planen:**
-   - Service-Definition in docker-compose.yml
-   - Profile `devtools` erstellen
-   - Makefile-Targets hinzufügen
-   - Pre-Provisioning aktivieren (servers.json)
-
-6. **Prometheus Metrics erweitern:**
-   - HTTP-Metriken via prometheus-fastapi-instrumentator
-   - Custom-Metriken refactoren (prometheus_client Registry)
-   - postgres_exporter hinzufügen
-
----
-
-## Risiken & Offene Punkte
-
-### Risiko 1: Positions-Datei Restart-Test
-
-**Was:** Promtail-Positions-Persistierung nicht live getestet  
-**Risk:** Log-Duplikate könnten trotzdem auftreten bei falschem Mount  
-**Mitigation:** Restart-Test nach Stack-Start durchführen (5 Min)
-
-### Risiko 2: Healthcheck-Filter zu aggressiv
-
-**Was:** Regex `.*GET /api/v1/health/.* HTTP/.*` könnte False-Positives haben  
-**Risk:** Wichtige Logs könnten gefiltert werden  
-**Mitigation:** Loki-Query nach 5 Min prüfen: normale Logs noch vorhanden?
-
-### Risiko 3: Dashboard Panels bleiben broken
-
-**Was:** Auftrag 1 fehlt → Panels zeigen weiterhin "No data"  
-**Risk:** Monitoring-Dashboard ist unvollständig  
-**Mitigation:** Auftrag 1 nachholen (Priorität KRITISCH)
-
-### Offener Punkt: Gesamt-Score-Berechnung
-
-DOCKER_VOLLAUDIT v1.5 zeigt "81% Gesamt-Score". Mit Healthcheck-Verbesserung (89%→100%) sollte der Score steigen, aber die Berechnungsformel ist unklar im Dokument.
-
----
-
-## Lessons Learned
-
-### 1. TM-Schätzungen können falsch sein
-
-**Healthcheck-Logs:** TM schätzte 2.4k/h, real sind 360/h  
-**Frontend-Queries:** TM erwartete 60+, real sind 0  
-**Healthcheck-Implementierung:** TM dachte el-frontend fehlt, real vorhanden
-
-**Lesson:** Agents sollten IST-Zustand verifizieren, nicht TM-Annahmen blind folgen
-
-### 2. Reports vs Referenz-Dokumente
-
-**TM SKILLS.md** ist ein Report (`.claude/reports/`) aber wird wie Referenz behandelt.  
-**LOG_ACCESS_REFERENCE.md** ist Referenz (`.claude/reference/`) und muss aktuell bleiben.
-
-**Lesson:** Reports sollten nicht als Source-of-Truth für technische Fakten dienen.
-
-### 3. Live-Verifikation ist kritisch
-
-Alle Code-Änderungen sind committed, aber nicht getestet. Potenzielle Runtime-Fehler unentdeckt.
-
-**Lesson:** Monitoring-Stack sollte während Implementation laufen, nicht nur "ausstehend".
-
----
-
-## Erfolgskriterien (Nach AUFTRAG 1 + Live-Tests)
-
-| Kriterium | Ziel | Status |
-|-----------|------|--------|
-| Grafana Dashboard Panels funktional | 6/6 | **3/6** (3 broken) |
-| Grafana Auto-Refresh aktiv | 10s | Implementiert, nicht getestet |
-| Grafana Dashboard löschgeschützt | Ja | Implementiert, nicht getestet |
-| Promtail Positions persistent | Ja | Implementiert, nicht getestet |
-| Promtail Healthcheck-Logs gefiltert | -360/h | Implementiert, nicht getestet |
-| LOG_ACCESS_REFERENCE Labels korrekt | Ja | ✅ ERLEDIGT |
-| DOCKER_VOLLAUDIT Service-Count korrekt | 8 | ✅ ERLEDIGT |
-| DOCKER_VOLLAUDIT Healthcheck-Score | 100% | ✅ ERLEDIGT |
-
-**Gesamt-Completion:** 50% (3/6 Kriterien erfüllt, 3 implementiert aber nicht verifiziert)
-
----
-
-## TM-Empfehlung
-
-### JETZT:
-
-1. **AUFTRAG 1 nachholen** (server-dev: Grafana Dashboard Panels reparieren)
-2. **Monitoring-Stack starten** für Live-Verifikation
-3. **Restart-Test** für Promtail-Positions durchführen
-
-### DANN:
-
-4. **TM SKILLS.md** korrigieren (Label-Fehlinformation)
-5. **Commits** erstellen (3 separate)
-6. **Phase 2 Planung** starten (pgAdmin + Prometheus Metrics)
-
-**Phase 1 ist 83% komplett** (5/6 Aufträge). Mit AUFTRAG 1 + Live-Tests → 100%.
-
----
-
-**Erstellt:** 2026-02-09  
-**TM:** Claude Desktop  
-**Nächster Review:** Nach AUFTRAG 1 + Live-Verifikation
+1. **system/diagnostics** end-to-end verifiziert (ESP32 sendet → Server empfängt → Daten verarbeitet)
+2. **Serial-Bridge** getestet und mit Runbook dokumentiert ist
+3. **Wokwi CI** mindestens 60% der Szenarien abdeckt, inklusive mindestens 1 Multi-Device-Szenario
+4. **Grafana-Dashboards** für cAdvisor, HTTP-Latency und ESP-Heartbeat existieren
+5. **Alert Webhook** funktioniert (Grafana → El Servador → Frontend)
+6. **LogQL Recording Rules** aktiv (Loki ruler konfiguriert)
+7. **PATTERNS.yaml** existiert mit mindestens 16 Einträgen
+8. **Label-Taxonomie** definiert und dokumentiert
+9. **Backend-Tests** für kaiser/ai/sequences existieren
+10. **Frontend-Tests** für mindestens 10 Components existieren und Playwright in CI läuft
+11. **ESP32 Native-Tests** mindestens 10 der 21 archivierten Tests migriert

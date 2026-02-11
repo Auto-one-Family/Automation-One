@@ -1,4 +1,3 @@
-# Phase 2.2: postgres_exporter + Dashboard Panel-Fix
 
 **Datum:** 2026-02-09
 **Agent:** system-control

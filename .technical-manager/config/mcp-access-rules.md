@@ -45,7 +45,7 @@
 
 | Path | Note |
 |------|------|
-| `docker-compose.yml` | Base stack (9 services) |
+| `docker-compose.yml` | Base stack (11 services: 4 core + 6 monitoring + 1 devtools) |
 | `docker-compose.ci.yml` | CI overrides |
 | `docker-compose.e2e.yml` | E2E overrides |
 | `Makefile` | Available targets |

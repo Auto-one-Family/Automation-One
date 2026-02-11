@@ -88,11 +88,11 @@ The boot sequence reads 5 files automatically and confirms context loading to Ro
 | System | system-control, agent-manager | 2 |
 | Debug | esp32-debug, server-debug, mqtt-debug, frontend-debug, db-inspector, meta-analyst | 6 |
 | Dev | esp32-dev, server-dev, mqtt-dev, frontend-dev | 4 |
-| Ops Skills | /collect-reports, /updatedocs, /git-commit, /git-health, /verify-plan, /do, /test | 7 |
+| Ops Skills | /collect-reports, /updatedocs, /git-commit, /git-health, /verify-plan, /do, /test, /ki-audit | 8 |
 | **Total Agents** | | **13** |
 
 See `TECHNICAL_MANAGER.md` Section 2 for complete agent reference with roles, modes, and triggers.
 
 ---
 
-**Created:** 2026-02-07 | **Updated:** 2026-02-09 | **Skills:** 3 | **Access rules:** `config/mcp-access-rules.md`
+**Created:** 2026-02-07 | **Updated:** 2026-02-10 | **Skills:** 3 | **Access rules:** `config/mcp-access-rules.md`
