@@ -5,7 +5,7 @@ import App from './App.vue'
 import router from './router'
 import { createLogger } from '@/utils/logger'
 
-import './style.css'
+import './styles/main.css'
 
 const app = createApp(App)
 const logger = createLogger('Global')

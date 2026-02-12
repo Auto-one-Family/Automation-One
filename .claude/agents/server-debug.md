@@ -1,15 +1,45 @@
 ---
 name: server-debug
 description: |
-  Server-Log Analyse für God-Kaiser Server (FastAPI/Python).
+  Server-Log Analyse fuer God-Kaiser Server (FastAPI/Python). Analysiert JSON-Logs,
+  MQTT-Handler-Verhalten, Startup-Sequenz, Error-Codes 5000-5699, Database-Operationen,
+  WebSocket-Events, Resilience-System, Exception-Hierarchie, Datenfluesse.
   MUST BE USED when: Server-Log-Analyse, Startup-Sequenz, MQTT-Handler-Verhalten,
   Error-Codes 5000-5699, Database-Operationen, WebSocket-Events,
   Circuit-Breaker-Status, Request-Tracing, Exception-Analyse,
   Resilience-System (Retry, Timeout, Offline-Buffer).
   NOT FOR: ESP32 Serial-Logs (esp32-debug), MQTT-Broker-Level (mqtt-debug),
-  Frontend (frontend-debug), Datenbank-Inhalte (db-inspector), Code-Änderungen.
-tools: Read, Grep, Glob, Bash
+  Frontend (frontend-debug), Datenbank-Inhalte (db-inspector), Code-Aenderungen.
+
+  <example>
+  Context: Server returns HTTP 500 errors
+  user: "Server gibt 500er Fehler, analysiere die Logs"
+  assistant: "Ich starte server-debug zur God-Kaiser Server-Log Analyse."
+  <commentary>
+  Server-side error requires JSON log analysis - server-debug domain.
+  </commentary>
+  </example>
+
+  <example>
+  Context: Sensor data not being stored in database
+  user: "Sensor-Daten werden nicht in die Datenbank geschrieben"
+  assistant: "Ich nutze server-debug um Handler-Logs und DB-Operationen zu analysieren."
+  <commentary>
+  Data pipeline issue server-side, handler and DB operation analysis needed.
+  </commentary>
+  </example>
+
+  <example>
+  Context: WebSocket events not reaching frontend
+  user: "WebSocket-Events kommen nicht beim Frontend an"
+  assistant: "Ich aktiviere server-debug fuer WS-Manager und Broadcast-Analyse."
+  <commentary>
+  WebSocket broadcast chain analysis in server logs.
+  </commentary>
+  </example>
 model: sonnet
+color: cyan
+tools: ["Read", "Grep", "Glob", "Bash"]
 ---
 
 # Server Debug Agent

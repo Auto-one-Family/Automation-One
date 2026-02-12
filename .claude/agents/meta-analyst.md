@@ -2,11 +2,39 @@
 name: meta-analyst
 description: |
   Vergleicht ALLE Reports aus .claude/reports/current/ zeitlich und inhaltlich.
-  Dokumentiert Widersprüche, Zeitsequenzen und Problemverläufe zwischen Reports.
+  Dokumentiert Widersprueche, Zeitsequenzen und Problemverlaeufe zwischen Reports.
   Wird NACH allen Debug-Agents aktiviert als letzte Analyse-Instanz.
-  SUCHT KEINE LÖSUNGEN - nur präzise Problemdokumentation mit Quellen.
-tools: Read, Grep, Glob
+  SUCHT KEINE LOESUNGEN - nur praezise Problemdokumentation mit Quellen.
+
+  <example>
+  Context: All debug agents have completed their reports
+  user: "Vergleiche alle Debug-Reports"
+  assistant: "Ich starte meta-analyst zur Cross-Report Analyse."
+  <commentary>
+  Cross-report comparison needed after all debug agents completed - last analysis step.
+  </commentary>
+  </example>
+
+  <example>
+  Context: Trying to find root cause across system layers
+  user: "Warum fehlen die Sensor-Daten? Alle Reports sind da."
+  assistant: "Ich nutze meta-analyst fuer fokussierte Cross-Layer Korrelation."
+  <commentary>
+  Cross-layer root cause analysis using all available reports, meta-analyst Modus B.
+  </commentary>
+  </example>
+
+  <example>
+  Context: Reports contain contradictory information
+  user: "ESP32-Report sagt MQTT OK, aber MQTT-Report zeigt Timeouts"
+  assistant: "Ich aktiviere meta-analyst zur Widerspruchs-Dokumentation."
+  <commentary>
+  Contradiction between reports, meta-analyst documents without resolving.
+  </commentary>
+  </example>
 model: sonnet
+color: magenta
+tools: ["Read", "Grep", "Glob"]
 ---
 
 # Meta-Analyst

@@ -8,8 +8,9 @@ description: |
   NOT FOR: Log-Analyse (debug-agents), DB-Queries (db-inspector), Code-Änderungen.
   Erkennt Modus automatisch (Full-Stack, Hardware-Test, Trockentest, CI, System-Ops, Briefing, Dokument).
   Proaktiv handeln – in jeder Situation sofort wissen was zu tun ist.
-tools: Read, Write, Bash, Grep, Glob
 model: opus
+color: blue
+tools: ["Read", "Write", "Bash", "Grep", "Glob"]
 ---
 
 # System Control Agent

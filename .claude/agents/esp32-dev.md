@@ -8,8 +8,9 @@ description: |
   Driver implementieren, Manager erweitern, Config-Struktur.
   NOT FOR: Log-Analyse (esp32-debug), Server-Code (server-dev), MQTT-Protokoll-Ebene (mqtt-dev).
   Keywords: sensor, actuator, driver, gpio, nvs, config, pattern, implementieren, esp32, c++, platformio
-tools: Read, Grep, Glob, Bash, Write, Edit
-skills: esp32-development
+model: sonnet
+color: green
+tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
 ---
 
 # ESP32 Development Agent

@@ -9,8 +9,8 @@ description: |
   NOT FOR: Build-Error-Analyse (frontend-debug), Server-Code (server-dev), MQTT-Protokoll (mqtt-dev).
   Keywords: komponente, component, composable, store, pinia, api, view, websocket, type, vue, typescript, tailwind, chart, drag drop, implementieren, frontend
 model: sonnet
-tools: Read, Write, Edit, Bash, Grep, Glob
-skills: frontend-development
+color: green
+tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
 ---
 
 # Frontend Development Agent
@@ -169,7 +169,11 @@ Vue Components → Rendern reaktiv aus Store-State (KEINE direkte API-Calls)
 ```
 El Frontend/src/
 ├── api/           # 16 API-Module (auth, esp, sensors, actuators, ...)
-├── components/    # Vue Komponenten (12 Unterverzeichnisse)
+├── components/    # Vue Komponenten (13 Unterverzeichnisse, inkl. rules/)
+├── shared/        # Design System + Shared Stores (NEU)
+│   ├── design/    # primitives/ (9), layout/ (3), patterns/ (3)
+│   └── stores/    # 4 Shared Stores (auth, database, dragState, logic)
+├── styles/        # CSS Design Tokens (tokens, glass, animations, main, tailwind)
 ├── composables/   # 8 Composables (useWebSocket, useToast, useModal, ...)
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton

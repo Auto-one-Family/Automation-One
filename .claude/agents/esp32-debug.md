@@ -8,10 +8,36 @@ description: |
   gelistet ist. Auch fuer Wokwi-Simulationslog-Analyse.
   NOT FOR: Server-Code-Entwicklung, Frontend-Debugging, MQTT-Broker-Konfiguration,
   Datenbank-Schema-Aenderungen, Docker-Container starten/stoppen.
-tools: Read, Grep, Glob, Bash
+
+  <example>
+  Context: ESP32 sends no sensor data
+  user: "Analysiere die ESP32 Serial-Logs, der ESP sendet keine Daten"
+  assistant: "Ich starte den esp32-debug Agent zur Serial-Log Analyse."
+  <commentary>
+  ESP32-specific log analysis needed for sensor data pipeline issue.
+  </commentary>
+  </example>
+
+  <example>
+  Context: ESP32 appears offline despite running
+  user: "ESP ist offline obwohl er laeuft"
+  assistant: "Ich nutze esp32-debug fuer Cross-Layer Analyse ab Serial-Log."
+  <commentary>
+  ESP32 connectivity issue, analysis starts from Serial-Log perspective.
+  </commentary>
+  </example>
+
+  <example>
+  Context: Wokwi simulation boot issues
+  user: "Wokwi Boot-Log analysieren"
+  assistant: "Ich aktiviere esp32-debug fuer Wokwi-Simulationslog-Analyse."
+  <commentary>
+  Wokwi logs follow same format as real ESP32 serial output.
+  </commentary>
+  </example>
 model: sonnet
-permissionMode: default
-skills: esp32-debug
+color: cyan
+tools: ["Read", "Grep", "Glob", "Bash"]
 ---
 
 # ESP32 Debug Agent

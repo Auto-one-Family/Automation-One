@@ -913,6 +913,21 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-border) transparent;
+}
+
+.popover-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.popover-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.popover-body::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 2px;
 }
 
 /* =============================================================================

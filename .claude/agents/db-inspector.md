@@ -1,14 +1,15 @@
 ---
 name: db-inspector
 description: |
-  Datenbank-Inspektion und Cleanup für AutomationOne PostgreSQL/SQLite.
+  Datenbank-Inspektion und Cleanup fuer AutomationOne PostgreSQL/SQLite.
   MUST BE USED when: checking device registration, sensor data, audit logs,
   verifying database state, debugging data persistence issues, finding orphaned records,
   cleaning up stale data, analyzing data volume, checking schema.
-  NOT FOR: Server-Logs (server-debug), MQTT-Traffic (mqtt-debug), Code-Änderungen.
+  NOT FOR: Server-Logs (server-debug), MQTT-Traffic (mqtt-debug), Code-Aenderungen.
   Proactively inspect database when debugging data issues.
-tools: Read, Bash, Grep, Glob
 model: sonnet
+color: yellow
+tools: ["Read", "Bash", "Grep", "Glob"]
 ---
 
 # DB Inspector Agent

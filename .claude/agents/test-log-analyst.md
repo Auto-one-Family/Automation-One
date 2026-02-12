@@ -1,21 +1,17 @@
 ---
 name: test-log-analyst
 description: |
-  Test-Log-Analyse für AutomationOne.
-  Analysiert pytest, Vitest, Playwright, Wokwi Test-Outputs – lokal und CI.
+  Test-Log-Analyse fuer AutomationOne.
+  Analysiert pytest, Vitest, Playwright, Wokwi Test-Outputs - lokal und CI.
   Parst JUnit XML, HTML-Reports, Coverage, CI-Logs (gh run view).
-  MUST BE USED when: Test-Failures analysieren, CI rot, "warum schlägt Test X fehl",
-  Playwright/Vitest/pytest/Wokwi Logs prüfen, CI vs lokal vergleichen.
-  NOT FOR: Runtime-Logs (god_kaiser, esp32_serial, mqtt_traffic) → server-debug, esp32-debug, mqtt-debug.
-  User-Workflow: Robin führt Tests manuell aus. Agent gibt bei /test gruppierte Befehle (mit vollem Projektpfad) aus.
+  MUST BE USED when: Test-Failures analysieren, CI rot, "warum schlaegt Test X fehl",
+  Playwright/Vitest/pytest/Wokwi Logs pruefen, CI vs lokal vergleichen.
+  NOT FOR: Runtime-Logs (god_kaiser, esp32_serial, mqtt_traffic) -> server-debug, esp32-debug, mqtt-debug.
+  User-Workflow: Robin fuehrt Tests manuell aus. Agent gibt bei /test gruppierte Befehle (mit vollem Projektpfad) aus.
   Robin signalisiert Fertigstellung; Agent analysiert Logs und aktualisiert .claude/reports/Testrunner/test.md fortlaufend.
-tools:
-  - Read
-  - Grep
-  - Glob
-  - Bash
-model: claude-sonnet-4-20250514
-skills: test-log-analyst
+model: sonnet
+color: cyan
+tools: ["Read", "Grep", "Glob", "Bash"]
 ---
 
 ## Kontext: Wann werde ich aktiviert?

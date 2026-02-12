@@ -467,11 +467,14 @@ function isProcessing(deviceId: string): boolean {
   color: var(--color-text-primary);
 }
 
-/* Content */
+/* Content - min-height: 0 required for flex-based scrolling */
 .pending-panel__content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.75rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-border) transparent;
 }
 
 /* Loading State */

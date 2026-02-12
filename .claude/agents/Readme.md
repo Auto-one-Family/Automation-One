@@ -1,51 +1,51 @@
 # AutomationOne Agenten
 
-> **Version:** 4.0 | **Aktualisiert:** 2026-02-08
-> **Format:** Offizielles Claude Code Agent-Format
-> **Agenten gesamt:** 13
+> **Version:** 5.0 | **Aktualisiert:** 2026-02-11
+> **Format:** Offizielles Claude Code Plugin-Agent-Format
+> **Agenten gesamt:** 13 | **Struktur:** Flach (alle .md direkt im agents/)
 
 ---
 
-## Verfügbare Agenten
+## Verfuegbare Agenten
 
 ### Debug-Agenten (Log-Analyse)
 
-| Agent | Datei | Beschreibung | Tools |
-|-------|-------|--------------|-------|
-| **esp32-debug** | `esp32-debug.md` | ESP32 Serial-Log Analyse | Read, Grep, Glob |
-| **server-debug** | `server/server-debug-agent.md` | God-Kaiser Server-Log Analyse | Read, Grep, Glob |
-| **mqtt-debug** | `mqtt/mqtt-debug-agent.md` | MQTT Traffic Analyse | Read, Grep, Glob |
-| **frontend-debug** | `frontend/frontend-debug-agent.md` | Frontend Build/Runtime Analyse | Read, Grep, Glob |
-| **meta-analyst** | `meta-analyst.md` | Cross-Report-Analyse & Problemvergleich | Read, Grep, Glob |
+| Agent | Datei | Color | Beschreibung |
+|-------|-------|-------|--------------|
+| **esp32-debug** | `esp32-debug.md` | cyan | ESP32 Serial-Log Analyse, Cross-Layer Stack |
+| **server-debug** | `server-debug.md` | cyan | God-Kaiser Server JSON-Log Analyse |
+| **mqtt-debug** | `mqtt-debug.md` | cyan | MQTT Traffic Analyse, Broker-Health |
+| **frontend-debug** | `frontend-debug.md` | cyan | Vue 3 Source-Code + Docker-Log Analyse |
+| **meta-analyst** | `meta-analyst.md` | magenta | Cross-Report Korrelation, Widersprueche |
 
 ### System-Operators
 
-| Agent | Datei | Beschreibung | Tools |
-|-------|-------|--------------|-------|
-| **db-inspector** | `db-inspector.md` | Datenbank-Inspektion & Cleanup | Read, Bash, Grep, Glob |
-| **system-control** | `system-control.md` | System-Steuerung, Briefing, Session-Planning | Read, Write, Bash, Grep, Glob |
+| Agent | Datei | Color | Beschreibung |
+|-------|-------|-------|--------------|
+| **system-control** | `system-control.md` | blue | System-Steuerung, Briefing, 7 Modi |
+| **db-inspector** | `db-inspector.md` | yellow | Datenbank-Inspektion & Cleanup |
 
 ### Utility-Agenten
 
-| Agent | Datei | Beschreibung | Tools |
-|-------|-------|--------------|-------|
-| **agent-manager** | `agent-manager/agent-manager.md` | Agent-Qualität, IST-SOLL, 7-Prinzipien-Check | Read, Write, Edit, Grep, Glob |
-| **test-log-analyst** | `testing/test-log-analyst.md` | Test-Log-Analyse (pytest, Vitest, Playwright, Wokwi) | Read, Grep, Glob, Bash |
+| Agent | Datei | Color | Beschreibung |
+|-------|-------|-------|--------------|
+| **agent-manager** | `agent-manager.md` | yellow | Agent-Qualitaet, IST-SOLL, Konsistenz |
+| **test-log-analyst** | `test-log-analyst.md` | cyan | Test-Log-Analyse (pytest, Vitest, Playwright, Wokwi) |
 
 ### Dev-Agenten (Pattern-konforme Implementierung)
 
-| Agent | Datei | Beschreibung | Tools |
-|-------|-------|--------------|-------|
-| **esp32-dev** | `esp32/esp32-dev-agent.md` | ESP32 Firmware-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
-| **server-dev** | `server/server_dev_agent.md` | Server-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
-| **mqtt-dev** | `mqtt/mqtt_dev_agent.md` | MQTT-Protokoll-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
-| **frontend-dev** | `frontend/frontend_dev_agent.md` | Frontend-Entwicklung | Read, Write, Edit, Bash, Grep, Glob |
+| Agent | Datei | Color | Beschreibung |
+|-------|-------|-------|--------------|
+| **esp32-dev** | `esp32-dev.md` | green | ESP32 Firmware-Entwicklung |
+| **server-dev** | `server-dev.md` | green | Server-Entwicklung (FastAPI/Python) |
+| **mqtt-dev** | `mqtt-dev.md` | green | MQTT-Protokoll-Entwicklung |
+| **frontend-dev** | `frontend-dev.md` | green | Frontend-Entwicklung (Vue 3/TypeScript) |
 
 ---
 
-## Agent-Format
+## Agent-Format (Plugin-Standard)
 
-Alle Agenten verwenden das offizielle Claude Code Format mit YAML-Frontmatter:
+Alle Agenten verwenden das offizielle Claude Code Plugin-Format:
 
 ```yaml
 ---
@@ -53,77 +53,84 @@ name: agent-name
 description: |
   Beschreibung wann der Agent verwendet werden soll.
   MUST BE USED when: [Trigger-Situationen]
-tools: Read, Grep, Glob
+  NOT FOR: [Abgrenzung]
+
+  <example>
+  Context: [Situation]
+  user: "[User-Anfrage]"
+  assistant: "[Wie Claude reagieren soll]"
+  <commentary>
+  [Warum dieser Agent der richtige ist]
+  </commentary>
+  </example>
 model: sonnet
+color: cyan
+tools: ["Read", "Grep", "Glob", "Bash"]
 ---
 
 # Agent-Titel
 
-[Agent-Inhalt]
+[System Prompt - Agent-Verhalten und Arbeitsanweisungen]
 ```
+
+### Frontmatter-Felder
+
+| Feld | Required | Format | Optionen |
+|------|----------|--------|----------|
+| `name` | Ja | lowercase-hyphens, 3-50 Zeichen | z.B. `esp32-debug` |
+| `description` | Ja | Text + `<example>` Bloecke | Triggering-Bedingungen |
+| `model` | Ja | String | `sonnet`, `opus`, `haiku`, `inherit` |
+| `color` | Ja | String | `blue`, `cyan`, `green`, `yellow`, `magenta`, `red` |
+| `tools` | Nein | JSON Array | `["Read", "Grep", "Glob"]` |
+
+### Farb-Schema
+
+| Farbe | Kategorie | Agenten |
+|-------|-----------|---------|
+| **cyan** | Analyse & Debug | esp32-debug, server-debug, mqtt-debug, frontend-debug, test-log-analyst |
+| **magenta** | Cross-Layer Meta | meta-analyst |
+| **green** | Implementierung | esp32-dev, server-dev, mqtt-dev, frontend-dev |
+| **blue** | System Operations | system-control |
+| **yellow** | Validation & Utility | db-inspector, agent-manager |
 
 ---
 
 ## Aktivierung
 
-Die Agenten werden automatisch von Claude Code erkannt basierend auf ihrer `description`.
+### Automatisch (basierend auf `description` + `<example>` Bloecke)
 
-**Manuelle Aktivierung:**
+Agenten werden durch ihre Description und Example-Bloecke automatisch getriggert:
+- "ESP32 Boot-Problem" → esp32-debug
+- "MQTT Messages kommen nicht an" → mqtt-debug
+- "Dashboard zeigt keine Daten" → frontend-debug
+- "Vergleiche alle Reports" → meta-analyst
+- "Sensor hinzufuegen" → esp32-dev
+
+### Manuell
+
 ```
-Analysiere mit esp32-debug
+Analysiere mit esp32-debug die Serial-Logs
 ```
-
-**Automatische Aktivierung** (basierend auf Kontext):
-- "ESP32 boot failure" → esp32-debug
-- "MQTT messages not arriving" → mqtt-debug
-- "Database cleanup" → db-inspector
-
----
-
-## STATUS.md Injection
-
-Alle Debug-Agenten lesen `logs/current/STATUS.md` für Session-Kontext:
-- Aktueller Test-Modus (boot, config, sensor, actuator, e2e)
-- Erwartete Log-Patterns
-- Hardware-Konfiguration
-- Phasen-Status
-
-**Workflow:**
-
-1. Debug-Session starten: `./scripts/debug/start_session.sh [name] [--mode MODE]`
-2. `STATUS.md` wird automatisch generiert
-3. Agent liest STATUS.md für Kontext
-4. Agent schreibt Report nach `.claude/reports/current/`
-
-**Verfügbare Modi:**
-
-| Modus | Flag | Beschreibung |
-|-------|------|--------------|
-| BOOT | `--mode boot` | Boot-Sequenz (WiFi, MQTT, Heartbeat) - **default** |
-| CONFIG | `--mode config` | Konfigurationsfluss (Zone Assignment, Config Push) |
-| SENSOR | `--mode sensor` | Sensor-Datenfluss (Readings, Validation) |
-| ACTUATOR | `--mode actuator` | Aktor-Steuerung (Commands, Status) |
 
 ---
 
 ## Log-Quellen
 
-| Agent | Primärer Input | Log-Pfad |
-|-------|----------------|----------|
-| esp32-debug | Serial-Log, eigenständig | `logs/current/esp32_serial.log` |
-| server-debug | Server-Log, eigenständig | `logs/server/god_kaiser.log` |
-| mqtt-debug | MQTT-Traffic, eigenständig | `logs/mqtt/mqtt_traffic.log` |
-| frontend-debug | Source-Code, Container, eigenständig | `El Frontend/`, Docker-Logs |
-| db-inspector | PostgreSQL, eigenständig | Docker exec psql |
+| Agent | Primaerer Input | Log-Pfad |
+|-------|-----------------|----------|
+| esp32-debug | Serial-Log | `logs/current/esp32_serial.log` |
+| server-debug | Server JSON-Log | `logs/server/god_kaiser.log` |
+| mqtt-debug | MQTT-Traffic | `logs/mqtt/mqtt_traffic.log` |
+| frontend-debug | Source-Code + Docker | `El Frontend/`, Docker-Logs |
+| db-inspector | PostgreSQL | Docker exec psql |
 | meta-analyst | Alle Reports | `.claude/reports/current/` |
+| test-log-analyst | Test-Output | `logs/backend/`, `logs/frontend/`, `logs/wokwi/` |
 
 ---
 
 ## Report-Ausgabe
 
 Alle Agenten schreiben Reports nach: `.claude/reports/current/`
-
-Format: Standardisierte Namen (kein Modus-Suffix)
 
 | Agent | Report-Datei |
 |-------|-------------|
@@ -142,38 +149,21 @@ Format: Standardisierte Namen (kein Modus-Suffix)
 
 ```
 .claude/agents/
-├── Readme.md                        # Dieser Index
-├── esp32-debug.md                   # ESP32 Debug (flach)
-├── meta-analyst.md                  # Meta-Analyst (flach)
-├── db-inspector.md                  # DB Inspector (flach)
-├── system-control.md                # System Control, Briefing (flach)
-├── agent-manager/
-│   └── agent-manager.md            # Agent-Manager (Qualität)
-├── testing/
-│   └── test-log-analyst.md         # Test-Log-Analyst
-├── esp32/
-│   └── esp32-dev-agent.md          # ESP32 Dev
-├── server/
-│   ├── server-debug-agent.md       # Server Debug
-│   └── server_dev_agent.md         # Server Dev
-├── mqtt/
-│   ├── mqtt-debug-agent.md         # MQTT Debug
-│   └── mqtt_dev_agent.md           # MQTT Dev
-└── frontend/
-    ├── frontend-debug-agent.md     # Frontend Debug
-    └── frontend_dev_agent.md       # Frontend Dev
+├── Readme.md              # Dieser Index
+├── agent-manager.md       # Agent-Manager (yellow)
+├── db-inspector.md        # DB Inspector (yellow)
+├── esp32-debug.md         # ESP32 Debug (cyan)
+├── esp32-dev.md           # ESP32 Dev (green)
+├── frontend-debug.md      # Frontend Debug (cyan)
+├── frontend-dev.md        # Frontend Dev (green)
+├── meta-analyst.md        # Meta-Analyst (magenta)
+├── mqtt-debug.md          # MQTT Debug (cyan)
+├── mqtt-dev.md            # MQTT Dev (green)
+├── server-debug.md        # Server Debug (cyan)
+├── server-dev.md          # Server Dev (green)
+├── system-control.md      # System Control (blue)
+└── test-log-analyst.md    # Test-Log-Analyst (cyan)
 ```
-
----
-
-## Session-Briefing & Operations (konsolidiert)
-
-| Agent | Pfad | Modus |
-|-------|------|-------|
-| **system-control** | `system-control.md` | Briefing- oder Ops-Modus |
-
-**Funktion:** Erstellt SESSION_BRIEFING.md (Briefing-Modus) oder führt Operationen aus (Ops-Modus)
-**Skill:** `.claude/skills/system-control/SKILL.md`
 
 ---
 
@@ -185,3 +175,5 @@ Format: Standardisierte Namen (kein Modus-Suffix)
 | Log-Locations | `.claude/reference/debugging/LOG_LOCATIONS.md` |
 | MQTT-Topics | `.claude/reference/api/MQTT_TOPICS.md` |
 | Communication-Flows | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` |
+| REST-Endpoints | `.claude/reference/api/REST_ENDPOINTS.md` |
+| WebSocket-Events | `.claude/reference/api/WEBSOCKET_EVENTS.md` |

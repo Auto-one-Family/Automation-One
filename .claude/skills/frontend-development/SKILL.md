@@ -15,10 +15,10 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 7.1
+**Version:** 8.0
 **Letzte Aktualisierung:** 2026-02-11
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
-**Codebase:** `El Frontend/src/` (~8.000+ Zeilen TypeScript/Vue)
+**Codebase:** `El Frontend/src/` (~8.000+ Zeilen TypeScript/Vue, 97 .vue Komponenten)
 
 > **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
 > **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
@@ -119,7 +119,7 @@ El Frontend/src/
 │   ├── zones.ts       # Zone Assignment
 │   ├── logic.ts       # Automation Rules
 │   └── ...
-├── components/    # Vue Komponenten (12 Unterverzeichnisse)
+├── components/    # Vue Komponenten (13 Unterverzeichnisse)
 │   ├── common/        # Modal, Toast, Skeleton (13 Dateien)
 │   ├── layout/        # MainLayout, AppHeader, AppSidebar
 │   ├── dashboard/     # Dashboard subcomponents (9 Dateien)
@@ -128,7 +128,23 @@ El Frontend/src/
 │   ├── charts/        # MultiSensorChart
 │   ├── system-monitor/ # 18 Dateien
 │   ├── filters/       # UnifiedFilterBar
-│   └── modals/
+│   ├── modals/
+│   ├── rules/         # RuleConfigPanel, RuleFlowEditor, RuleNodePalette (3 Dateien)
+│   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
+│   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
+│   └── safety/        # EmergencyStopButton
+├── shared/        # Design System + Shared Stores (NEU)
+│   ├── design/
+│   │   ├── primitives/  # 9 Base-Komponenten (BaseBadge, BaseButton, BaseCard, etc.)
+│   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
+│   │   └── patterns/    # EmptyState, ErrorState, ToastContainer (3 Dateien)
+│   └── stores/          # 4 Shared Stores (auth, database, dragState, logic)
+├── styles/        # CSS Design Tokens (NEU)
+│   ├── tokens.css       # Design Token Definitionen
+│   ├── glass.css        # Glassmorphism Klassen
+│   ├── animations.css   # Animationen
+│   ├── main.css         # Hauptstyles
+│   └── tailwind.css     # Tailwind Konfiguration
 ├── composables/   # 8 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
@@ -141,7 +157,7 @@ El Frontend/src/
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
-├── stores/        # 5 Pinia Stores
+├── stores/        # 5 Pinia Stores (Original)
 │   ├── auth.ts
 │   ├── esp.ts         # ~2500 Zeilen
 │   ├── logic.ts
@@ -874,8 +890,17 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 7.1
+**Version:** 8.0
 **Letzte Aktualisierung:** 2026-02-11
+
+### Aenderungen in v8.0
+
+- Design System: `shared/design/` mit primitives/ (9), layout/ (3), patterns/ (3)
+- Shared Stores: `shared/stores/` (auth, database, dragState, logic)
+- Styles: `styles/` (tokens.css, glass.css, animations.css, main.css, tailwind.css)
+- Rules Components: `components/rules/` (RuleConfigPanel, RuleFlowEditor, RuleNodePalette)
+- Component Count: 67 → 97 .vue, Stores: 5 → 9 (5 original + 4 shared)
+- Ordnerstruktur (Section 2) vollstaendig aktualisiert
 
 ### Aenderungen in v7.1
 

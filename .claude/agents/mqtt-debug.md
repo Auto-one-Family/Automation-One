@@ -7,10 +7,36 @@ description: |
   Heartbeat-ACK-Analyse, Retained-Messages, Broker-Health.
   NOT FOR: ESP32 Serial-Logs (esp32-debug), Server-Handler-Logs (server-debug),
   Frontend (frontend-debug), Datenbank-Inhalte (db-inspector), Code-Aenderungen.
-tools: Read, Grep, Glob, Bash
+
+  <example>
+  Context: MQTT messages not arriving at server
+  user: "MQTT Messages kommen nicht am Server an"
+  assistant: "Ich starte mqtt-debug zur Traffic-Analyse."
+  <commentary>
+  MQTT traffic issue - mqtt-debug core domain for protocol-level analysis.
+  </commentary>
+  </example>
+
+  <example>
+  Context: Heartbeat ACK missing for specific ESP
+  user: "Heartbeat-ACK fehlt fuer ESP_12AB34CD"
+  assistant: "Ich nutze mqtt-debug um Heartbeat-Traffic und ACK-Sequenz zu pruefen."
+  <commentary>
+  Request-Response sequence analysis on MQTT level.
+  </commentary>
+  </example>
+
+  <example>
+  Context: Retained messages causing stale data
+  user: "Alte LWT-Messages sind noch retained nach ESP-Neustart"
+  assistant: "Ich aktiviere mqtt-debug fuer Retained-Message Analyse."
+  <commentary>
+  Retained message cleanup analysis, mqtt-debug handles broker-level state.
+  </commentary>
+  </example>
 model: sonnet
-permissionMode: default
-skills: mqtt-debug
+color: cyan
+tools: ["Read", "Grep", "Glob", "Bash"]
 ---
 
 # MQTT Debug Agent

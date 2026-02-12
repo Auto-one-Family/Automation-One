@@ -15,17 +15,17 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, markRaw } from 'vue'
-import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square, MapPin, MinusCircle } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
-import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime } from '@/utils/formatters'
 import SensorSatellite from './SensorSatellite.vue'
 import ActuatorSatellite from './ActuatorSatellite.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
 import GpioPicker from './GpioPicker.vue'
-import { Badge } from '@/shared/design'
+import Badge from '@/components/common/Badge.vue'
+import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
 import { espApi } from '@/api/esp'
@@ -34,10 +34,9 @@ import { getStateInfo } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
 import { useUiStore } from '@/shared/stores'
-import { useContextMenu } from '@/composables/useContextMenu'
 import { useToast } from '@/composables/useToast'
+import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables/useZoneDragDrop'
 import { useGpioStatus } from '@/composables/useGpioStatus'
-import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import {
   SENSOR_TYPE_CONFIG,
   getSensorUnit,
@@ -79,9 +78,8 @@ const props = withDefaults(defineProps<Props>(), {
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
 const uiStore = useUiStore()
-const contextMenu = useContextMenu()
 const toast = useToast()
-const { handleDeviceDrop, handleRemoveFromZone, groupDevicesByZone } = useZoneDragDrop()
+const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones, zoneIdToDisplayName } = useZoneDragDrop()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
@@ -96,6 +94,23 @@ const emit = defineEmits<{
   /** Name was updated via inline edit */
   'name-updated': [payload: { deviceId: string; name: string | null }]
 }>()
+
+// =============================================================================
+// Zone Assignment (Dropdown alternative to drag)
+// =============================================================================
+const availableZones = computed(() => getAvailableZones(espStore.devices))
+
+async function handleZoneChanged(deviceId: string, zoneId: string | null) {
+  if (zoneId === null) {
+    await handleRemoveFromZone(props.device)
+  } else {
+    await handleDeviceDrop({
+      device: props.device,
+      fromZoneId: props.device.zone_id || null,
+      toZoneId: zoneId,
+    })
+  }
+}
 
 // =============================================================================
 // Analysis Drop Zone State
@@ -1084,7 +1099,6 @@ async function removeSensor() {
   const gpio = editingSensor.value.gpio
   const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
 
-  // Confirmation dialog
   const confirmed = await uiStore.confirm({
     title: 'Sensor entfernen',
     message: `Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`,
@@ -1113,52 +1127,6 @@ async function removeSensor() {
   } finally {
     isEditSaving.value = false
   }
-}
-
-// =============================================================================
-// Context Menu (Right-click on ESP card)
-// =============================================================================
-function handleEspContextMenu(event: MouseEvent) {
-  const hasZone = !!(props.device as any)?.zone_id
-  contextMenu.open(event, [
-    {
-      id: 'settings',
-      label: 'Einstellungen',
-      icon: markRaw(Settings2),
-      action: () => emit('settings', props.device),
-    },
-    {
-      id: 'assign-zone',
-      label: 'Zone zuweisen',
-      icon: markRaw(MapPin),
-      action: () => emit('settings', props.device),
-    },
-    {
-      id: 'remove-zone',
-      label: 'Aus Zone entfernen',
-      icon: markRaw(MinusCircle),
-      disabled: !hasZone,
-      action: () => {
-        // Handled via settings sheet zone panel
-        emit('settings', props.device)
-      },
-    },
-    {
-      id: 'heartbeat',
-      label: 'Heartbeat senden',
-      icon: markRaw(Heart),
-      disabled: !isMock.value,
-      action: () => emit('heartbeat', props.device),
-    },
-    { id: 'sep-1', label: '', separator: true },
-    {
-      id: 'delete',
-      label: 'Gerät löschen',
-      icon: markRaw(Trash2),
-      variant: 'danger' as const,
-      action: () => emit('delete', props.device),
-    },
-  ])
 }
 
 // =============================================================================
@@ -1218,27 +1186,6 @@ const stateInfo = computed(() => {
 const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
-
-// Zone options for ZoneAssignmentDropdown (Phase 2.2)
-const zoneOptions = computed(() => {
-  const groups = groupDevicesByZone(espStore.devices)
-  return groups
-    .filter(g => g.zoneId !== '__unassigned__')
-    .map(g => ({ zoneId: g.zoneId, zoneName: g.zoneName }))
-})
-
-async function handleZoneChanged(deviceId: string, zoneId: string | null) {
-  if (zoneId === null) {
-    await handleRemoveFromZone(props.device)
-  } else {
-    const zoneName = zoneOptions.value.find(z => z.zoneId === zoneId)?.zoneName ?? zoneId
-    await handleDeviceDrop({
-      device: props.device,
-      fromZoneId: props.device.zone_id ?? null,
-      toZoneId: zoneId,
-    })
-  }
-}
 
 /**
  * Determine if sensors should use multi-row layout.
@@ -1561,16 +1508,17 @@ watch(
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
-    @contextmenu.prevent="handleEspContextMenu"
   >
-    <!-- Left Column: Sensors (only shown if sensors exist) -->
+    <!-- Left Column: Sensors -->
     <div
-      v-if="sensors.length > 0"
       class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors"
-      :class="{ 'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow }"
+      :class="{
+        'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow,
+        'esp-horizontal-layout__column--empty': sensors.length === 0
+      }"
     >
       <SensorSatellite
-        v-for="sensor in sensors"
+        v-for="(sensor, idx) in sensors"
         :key="`sensor-${sensor.gpio}`"
         :esp-id="espId"
         :gpio="sensor.gpio"
@@ -1585,8 +1533,14 @@ watch(
         :selected="selectedGpio === sensor.gpio && selectedType === 'sensor'"
         :show-connections="showConnections"
         class="esp-horizontal-layout__satellite"
+        :style="{ animationDelay: `${idx * 60}ms` }"
         @click="handleSensorClick(sensor.gpio)"
       />
+      <!-- Empty state when no sensors configured -->
+      <div v-if="sensors.length === 0" class="esp-horizontal-layout__empty-slot">
+        <Plus class="w-3 h-3" />
+        <span>Sensors</span>
+      </div>
     </div>
 
     <!-- Center Column: ESP Card -->
@@ -1695,6 +1649,13 @@ watch(
             </div>
           </div>
 
+          <!-- Zone Assignment Dropdown -->
+          <ZoneAssignmentDropdown
+            :device="device"
+            :zones="availableZones"
+            @zone-changed="handleZoneChanged"
+          />
+
           <!-- Heartbeat Row -->
           <button
             :class="[
@@ -1717,14 +1678,6 @@ watch(
             </span>
             <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin" />
           </button>
-
-          <!-- Zone Assignment Dropdown (Phase 2.2) -->
-          <ZoneAssignmentDropdown
-            :device="device"
-            :zones="zoneOptions"
-            data-no-drag
-            @zone-changed="handleZoneChanged"
-          />
         </div>
 
         <!--
@@ -1750,8 +1703,11 @@ watch(
       <ESPCard v-else :esp="device" />
     </div>
 
-    <!-- Right Column: Actuators (only shown if actuators exist) -->
-    <div v-if="actuators.length > 0" class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators">
+    <!-- Right Column: Actuators -->
+    <div
+      class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators"
+      :class="{ 'esp-horizontal-layout__column--empty': actuators.length === 0 }"
+    >
       <ActuatorSatellite
         v-for="actuator in actuators"
         :key="`actuator-${actuator.gpio}`"
@@ -1767,6 +1723,11 @@ watch(
         class="esp-horizontal-layout__satellite"
         @click="handleActuatorClick(actuator.gpio)"
       />
+      <!-- Empty state when no actuators configured -->
+      <div v-if="actuators.length === 0" class="esp-horizontal-layout__empty-slot">
+        <Plus class="w-3 h-3" />
+        <span>Aktoren</span>
+      </div>
     </div>
 
     <!-- Drop Indicator Overlay (Phase 2B: für alle ESPs) -->
@@ -2528,37 +2489,44 @@ watch(
 
 /* Sensors column: Default = single vertical column */
 .esp-horizontal-layout__column--sensors {
-  /* Vertical column by default (≤5 sensors) */
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  align-items: stretch; /* All same width */
-  width: 65px; /* Fixed width for single column */
+  align-items: stretch;
+  width: 120px;
+}
+
+/* Sensors column: Empty state - minimal footprint */
+.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--empty {
+  width: 56px;
 }
 
 /* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
 .esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
-  /* Switch to CSS Grid: 2 equal columns */
   display: grid;
-  grid-template-columns: repeat(2, 65px);
+  grid-template-columns: repeat(2, 120px);
   gap: 0.375rem;
-  width: auto; /* Override single-column width */
+  width: auto;
 }
 
-/* Actuators column: align items to the left (toward center card) */
+/* Actuators column */
 .esp-horizontal-layout__column--actuators {
-  align-items: flex-start;
+  align-items: stretch;
+  width: 120px;
 }
 
-/* Satellite cards in horizontal layout - compact styling */
+.esp-horizontal-layout__column--actuators.esp-horizontal-layout__column--empty {
+  width: 56px;
+}
+
+/* Satellite cards in horizontal layout - fill column width */
 .esp-horizontal-layout__satellite {
-  /* Override any absolute positioning from satellite components */
   position: relative !important;
   transform: none !important;
   left: auto !important;
   top: auto !important;
-  /* Fill parent column width */
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
 
@@ -2579,6 +2547,31 @@ watch(
   color: var(--color-text-muted);
   text-align: center;
   white-space: nowrap;
+}
+
+/* Empty sensor/actuator slot - ghost placeholder */
+.esp-horizontal-layout__empty-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.5rem;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: all 0.2s ease;
+  cursor: default;
+}
+
+.esp-horizontal-layout__empty-slot:hover {
+  border-color: rgba(96, 165, 250, 0.2);
+  color: rgba(255, 255, 255, 0.35);
+  background: rgba(96, 165, 250, 0.03);
 }
 
 /* =============================================================================

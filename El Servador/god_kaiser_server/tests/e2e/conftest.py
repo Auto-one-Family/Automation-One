@@ -227,9 +227,9 @@ def e2e_config(request) -> E2EConfig:
     return E2EConfig.from_pytest_config(request.config)
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def http_client() -> AsyncGenerator[aiohttp.ClientSession, None]:
-    """Create an HTTP client for E2E tests."""
+    """Create an HTTP client for E2E tests (function-scoped for event loop safety)."""
     async with aiohttp.ClientSession() as session:
         yield session
 
@@ -241,23 +241,37 @@ async def e2e_http_client() -> AsyncGenerator[aiohttp.ClientSession, None]:
         yield session
 
 
-@pytest_asyncio.fixture(scope="session")
-async def server_health_check(e2e_config: E2EConfig, http_client: aiohttp.ClientSession):
+# Module-level flag to avoid redundant health checks
+_server_health_verified = False
+
+
+@pytest_asyncio.fixture(scope="function")
+async def server_health_check(e2e_config: E2EConfig, e2e_http_client: aiohttp.ClientSession):
     """
     Verify server is running before E2E tests.
 
     Domain-Expert Note:
         In einem echten Gewächshaus-System muss der Server zuverlässig
         laufen bevor Tests beginnen. Diese Fixture stellt das sicher.
+
+    Uses function-scope to avoid event loop conflicts with pytest-asyncio.
+    Module-level flag prevents redundant checks after first verification.
     """
+    global _server_health_verified
+    if _server_health_verified:
+        return True
+
     health_url = f"{e2e_config.server_url}/health"
     max_retries = 5
     retry_delay = 2.0
 
     for attempt in range(max_retries):
         try:
-            async with http_client.get(health_url, timeout=5) as response:
+            async with e2e_http_client.get(
+                health_url, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
                 if response.status == 200:
+                    _server_health_verified = True
                     return True
         except (aiohttp.ClientError, asyncio.TimeoutError):
             if attempt < max_retries - 1:
@@ -332,7 +346,7 @@ class E2EAPIClient:
         # Login failed - try to create initial admin user via setup endpoint
         setup_payload = {
             "username": username,
-            "email": f"{username}@e2e-test.local",
+            "email": f"{username}@e2e-test.dev",
             "password": password,
             "full_name": "E2E Test Admin"
         }
@@ -388,18 +402,27 @@ class E2EAPIClient:
             headers["Authorization"] = f"Bearer {self._auth_token}"
         return headers
 
-    async def register_esp(self, device: ESPDeviceTestData, max_retries: int = 3) -> dict:
+    async def register_esp(
+        self, device: ESPDeviceTestData, max_retries: int = 3, auto_approve: bool = True
+    ) -> dict:
         """
-        Register an ESP device with retry logic.
+        Register an ESP device with retry logic and optional auto-approval.
 
         Uses exponential backoff to handle connection issues (ConnectionResetError)
         that can occur when registering multiple devices in rapid succession.
+        Auto-approves the device by default so it can be used immediately in E2E tests.
         """
+        # Generate unique MAC/IP per device to avoid unique constraint violations
+        id_hash = abs(hash(device.device_id)) % 0xFFFFFF
+        mac_bytes = [(id_hash >> (i * 4)) & 0xFF for i in range(6)]
+        unique_mac = ":".join(f"{b:02X}" for b in mac_bytes)
+        unique_ip = f"192.168.{(id_hash >> 8) & 0xFF}.{id_hash & 0xFF or 1}"
+
         payload = {
             "device_id": device.device_id,
             "name": device.name,
-            "ip_address": "192.168.1.100",  # Required field
-            "mac_address": "AA:BB:CC:DD:EE:FF",  # Required field
+            "ip_address": unique_ip,
+            "mac_address": unique_mac,
             "hardware_type": "ESP32_WROOM",
             "firmware_version": "1.0.0",
         }
@@ -412,7 +435,13 @@ class E2EAPIClient:
                     json=payload,
                     headers=self.headers
                 ) as response:
-                    return await response.json()
+                    result = await response.json()
+
+                # Auto-approve after successful registration
+                if auto_approve and result.get("device_id"):
+                    await self.approve_esp(device.device_id)
+
+                return result
             except (ConnectionResetError, aiohttp.ClientError) as e:
                 last_error = e
                 if attempt < max_retries - 1:
@@ -424,6 +453,15 @@ class E2EAPIClient:
 
         # Should not reach here, but just in case
         raise last_error or Exception("register_esp failed after retries")
+
+    async def approve_esp(self, device_id: str) -> dict:
+        """Approve a pending ESP device for normal operation."""
+        async with self.session.post(
+            f"{self.config.api_base}/esp/devices/{device_id}/approve",
+            json={},
+            headers=self.headers
+        ) as response:
+            return await response.json()
 
     async def get_esp_status(self, device_id: str) -> dict:
         """Get ESP device status."""
@@ -699,9 +737,9 @@ async def api_client(
 
     # Try multiple credential combinations
     credentials_to_try = [
+        ("admin", "Admin123#"),  # Seeded admin user
         ("Robin", "Robin123!"),  # Default admin
-        ("test", "test"),        # Test user
-        ("admin", "admin"),      # Common default
+        ("admin", "Admin1234"),  # Fallback
     ]
 
     auth_errors = []
@@ -846,6 +884,140 @@ class E2EMQTTClient:
         }
         await self._client.publish(topic, json.dumps(payload))
 
+    async def publish_actuator_response(
+        self,
+        esp_id: str,
+        gpio: int,
+        command: str,
+        value: float,
+        success: bool,
+        message: str,
+        correlation_id: str = None,
+        kaiser_id: str = "god"
+    ):
+        """
+        Publish actuator command response like a real ESP32 would.
+
+        Topic: kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response
+        Payload matches mock_esp32_client._publish_actuator_response()
+        """
+        import json
+        import time
+
+        if not self._connected or not self._client:
+            print(f"[E2E MQTT] ERROR: Not connected! Cannot publish actuator response for {esp_id}")
+            return
+
+        topic = f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/response"
+
+        payload = {
+            "ts": int(time.time()),
+            "esp_id": esp_id,
+            "gpio": gpio,
+            "command": command,
+            "value": value,
+            "command_id": correlation_id or f"cmd_{int(time.time())}",
+            "success": success,
+            "message": message
+        }
+
+        try:
+            await self._client.publish(topic, json.dumps(payload), qos=1)
+            print(f"[E2E MQTT] Published actuator response to {topic}: success={success}")
+        except Exception as e:
+            print(f"[E2E MQTT] ERROR publishing actuator response: {type(e).__name__}: {e}")
+            raise
+
+        await asyncio.sleep(0.1)
+
+    async def publish_actuator_alert(
+        self,
+        esp_id: str,
+        gpio: int,
+        alert_type: str,
+        message: str,
+        zone_id: str = None,
+        kaiser_id: str = "god"
+    ):
+        """
+        Publish actuator alert like a real ESP32 would.
+
+        Topic: kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert
+        Payload matches mock_esp32_client._publish_actuator_alert()
+
+        Alert types: emergency_stop, runtime_protection, safety_violation, hardware_error
+        """
+        import json
+        import time
+
+        if not self._connected or not self._client:
+            print(f"[E2E MQTT] ERROR: Not connected! Cannot publish actuator alert for {esp_id}")
+            return
+
+        topic = f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/alert"
+
+        severity = "critical" if alert_type == "emergency_stop" else "warning"
+
+        payload = {
+            "ts": int(time.time()),
+            "esp_id": esp_id,
+            "gpio": gpio,
+            "alert_type": alert_type,
+            "message": message,
+            "severity": severity
+        }
+
+        if zone_id:
+            payload["zone_id"] = zone_id
+
+        try:
+            await self._client.publish(topic, json.dumps(payload), qos=1)
+            print(f"[E2E MQTT] Published actuator alert to {topic}: type={alert_type}, severity={severity}")
+        except Exception as e:
+            print(f"[E2E MQTT] ERROR publishing actuator alert: {type(e).__name__}: {e}")
+            raise
+
+        await asyncio.sleep(0.1)
+
+    async def publish_emergency_broadcast(
+        self,
+        esp_id: str,
+        reason: str = "manual",
+        stopped_actuators: list = None,
+        kaiser_id: str = "god"
+    ):
+        """
+        Publish emergency stop broadcast like a real ESP32 would.
+
+        Topic: kaiser/broadcast/emergency
+        Used for system-wide emergency stop.
+        """
+        import json
+        import time
+
+        if not self._connected or not self._client:
+            print(f"[E2E MQTT] ERROR: Not connected! Cannot publish emergency broadcast")
+            return
+
+        topic = "kaiser/broadcast/emergency"
+
+        payload = {
+            "esp_id": esp_id,
+            "command_id": f"emg_{int(time.time())}",
+            "stopped_actuators": stopped_actuators or [],
+            "timestamp": int(time.time()),
+            "reason": reason
+        }
+
+        try:
+            await self._client.publish(topic, json.dumps(payload), qos=1)
+            print(f"[E2E MQTT] Published emergency broadcast: reason={reason}")
+        except Exception as e:
+            print(f"[E2E MQTT] ERROR publishing emergency broadcast: {type(e).__name__}: {e}")
+            raise
+
+        await asyncio.sleep(0.1)
+
     async def subscribe_to_commands(self, esp_id: str, kaiser_id: str = "god"):
         """Subscribe to actuator commands for an ESP."""
         topic = f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/+/command"
@@ -938,6 +1110,11 @@ class E2EWebSocketClient:
     @property
     def messages(self) -> list:
         """Get all captured messages."""
+        return list(self._messages)
+
+    @property
+    def received_messages(self) -> list:
+        """Alias for messages - used by some test files."""
         return list(self._messages)
 
 

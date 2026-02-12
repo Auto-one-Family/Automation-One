@@ -7,19 +7,24 @@
 
 import api from './index'
 import { debugApi } from './debug'
+import { sensorsApi } from './sensors'
 import { createLogger } from '@/utils/logger'
+import { getSensorUnit } from '@/utils/sensorDefaults'
 
 const logger = createLogger('ESP-API')
-import type { 
-  MockESP, 
-  MockESPCreate, 
-  OfflineInfo, 
+import type {
+  MockESP,
+  MockESPCreate,
+  MockSensor,
+  OfflineInfo,
   GpioStatusResponse,
   PendingESPDevice,
   PendingDevicesListResponse,
   ESPApprovalRequest,
   ESPApprovalResponse,
-  ESPRejectionRequest
+  ESPRejectionRequest,
+  SensorConfigResponse,
+  QualityLevel
 } from '@/types'
 
 // =============================================================================
@@ -57,6 +62,9 @@ export interface ESPDevice {
   zone_id?: string | null             // Technical zone ID (lowercase, no spaces)
   zone_name?: string | null           // Human-readable zone name (UI display)
   master_zone_id?: string | null      // Parent zone for hierarchical zones
+  kaiser_id?: string | null           // Kaiser ID for zone management
+  subzone_id?: string | null          // Subzone assignment ID
+  subzone_name?: string | null        // Human-readable subzone name
   is_zone_master?: boolean            // Whether this ESP is zone master
   ip_address?: string
   mac_address?: string
@@ -179,6 +187,79 @@ function normalizeEspId(device: ESPDevice | string): string {
 }
 
 // =============================================================================
+// Sensor Config → MockSensor Mapping
+// =============================================================================
+
+/**
+ * Map SensorConfigResponse (from /sensors API) to MockSensor format
+ * used by ESPOrbitalLayout and SensorSatellite components.
+ *
+ * This bridges the gap between DB sensor configs and the in-memory
+ * Mock ESP sensor format that the UI components expect.
+ */
+function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
+  return {
+    gpio: config.gpio,
+    sensor_type: config.sensor_type,
+    name: config.name || null,
+    raw_value: config.latest_value ?? 0,
+    unit: getSensorUnit(config.sensor_type),
+    quality: (config.latest_quality as QualityLevel) || 'good',
+    raw_mode: true,
+    last_read: config.latest_timestamp || null,
+    operating_mode: config.processing_mode as MockSensor['operating_mode'],
+    config_status: config.config_status as MockSensor['config_status'],
+    config_error: config.config_error || null,
+    config_error_detail: config.config_error_detail || null,
+  }
+}
+
+/**
+ * Fetch sensor configs for real (DB) devices and attach as sensors[].
+ *
+ * Without this enrichment, DB devices only have sensor_count (integer)
+ * but no sensors[] array, causing SensorSatellite cards to not render.
+ */
+async function enrichDbDevicesWithSensors(devices: ESPDevice[]): Promise<void> {
+  // Collect device IDs with sensors
+  const devicesWithSensors = devices.filter(d => (d.sensor_count ?? 0) > 0)
+
+  if (devicesWithSensors.length === 0) return
+
+  try {
+    // Fetch all sensor configs in one call (page_size large enough for typical setups)
+    const { data: allSensors } = await sensorsApi.list({ page_size: 500 })
+
+    // Group sensors by ESP device ID
+    const sensorsByEsp = new Map<string, MockSensor[]>()
+    for (const sensorConfig of allSensors) {
+      const espId = sensorConfig.esp_device_id || sensorConfig.esp_id
+      if (!espId) continue
+
+      if (!sensorsByEsp.has(espId)) {
+        sensorsByEsp.set(espId, [])
+      }
+      sensorsByEsp.get(espId)!.push(mapSensorConfigToMockSensor(sensorConfig))
+    }
+
+    // Attach sensors to devices
+    for (const device of devicesWithSensors) {
+      const deviceId = device.device_id || device.esp_id || ''
+      const sensors = sensorsByEsp.get(deviceId)
+      if (sensors && sensors.length > 0) {
+        device.sensors = sensors
+        device.sensor_count = sensors.length
+        logger.debug(`Enriched ${deviceId} with ${sensors.length} sensors`)
+      }
+    }
+
+    logger.info(`Enriched ${devicesWithSensors.length} DB devices with sensor data`)
+  } catch (err) {
+    logger.warn('Failed to enrich DB devices with sensors (non-critical)', err)
+  }
+}
+
+// =============================================================================
 // Unified ESP API
 // =============================================================================
 
@@ -276,6 +357,10 @@ export const espApi = {
         return device
       })
 
+    // Enrich DB devices with sensor configs (so SensorSatellite cards render)
+    // Mock ESPs already have sensors[] from debug store; DB devices only have sensor_count
+    await enrichDbDevicesWithSensors(filteredDbDevices)
+
     const result = [...normalizedMockEsps, ...filteredDbDevices]
     logger.debug(`Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
 
@@ -338,7 +423,14 @@ export const espApi = {
       }
     } else {
       const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
-      return response.data
+      const device = response.data
+
+      // Enrich real device with sensor configs (same as in listDevices)
+      if ((device.sensor_count ?? 0) > 0 && !device.sensors?.length) {
+        await enrichDbDevicesWithSensors([device])
+      }
+
+      return device
     }
   },
 

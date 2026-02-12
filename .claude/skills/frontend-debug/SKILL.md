@@ -2,8 +2,8 @@
 name: frontend-debug
 description: |
   Frontend Debug-Wissensdatenbank: Vue 3 Architektur, 26 WebSocket-Events,
-  API-Client mit Token-Refresh, 5 Pinia Stores, Auth-Flow, Build-Chain,
-  Error-Kategorien, Component-Hierarchie, Test-Infrastruktur.
+  API-Client mit Token-Refresh, 9 Pinia Stores (5 + 4 shared), Auth-Flow, Build-Chain,
+  Error-Kategorien, Component-Hierarchie, Design System (shared/design/), Test-Infrastruktur.
   Trigger-Keywords: frontend, vue, vite, typescript, websocket, store, pinia,
   component, build, ts2, axios, 401, token, tailwind, dashboard
 allowed-tools: Read, Grep, Glob, Bash
@@ -23,10 +23,11 @@ context: inline
 
 ```
 Entry: main.ts → App.vue → Router → Views (11 aktiv)
-State: 5 Pinia Stores (esp ~2500 Zeilen = Kern-Store)
+State: 9 Pinia Stores (5 original + 4 shared/stores/)
 API:   16 Module via Axios mit Interceptors
 WS:    Singleton Service → useWebSocket Composable → Store-Handler
-UI:    ~70 Components (layout/, common/, dashboard/, esp/, system-monitor/, ...)
+UI:    97 Components (layout/, common/, dashboard/, esp/, system-monitor/, rules/, shared/design/, ...)
+Design: shared/design/ (primitives/ 9, layout/ 3, patterns/ 3) + styles/ (5 CSS)
 Utils: 14 Dateien | Types: 5 Dateien | Composables: 8
 ```
 

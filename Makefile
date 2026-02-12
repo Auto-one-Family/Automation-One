@@ -4,7 +4,7 @@ COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
 COMPOSE_E2E := -f docker-compose.yml -f docker-compose.e2e.yml
 
-.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-scenario wokwi-test-category wokwi-run
+.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-scenario wokwi-test-category wokwi-run
 
 help:
 	@echo "AutomationOne Docker Commands:"
@@ -20,10 +20,13 @@ help:
 	@echo "  make clean         - Stop + remove all volumes (DESTRUCTIVE)"
 	@echo ""
 	@echo "E2E Testing:"
-	@echo "  make e2e-up        - Start E2E stack (Playwright)"
-	@echo "  make e2e-down      - Stop E2E stack"
-	@echo "  make e2e-test      - Run Playwright E2E tests"
-	@echo "  make e2e-test-ui   - Run Playwright with UI"
+	@echo "  make e2e-up              - Start E2E stack (Docker)"
+	@echo "  make e2e-down            - Stop E2E stack + remove volumes"
+	@echo "  make e2e-test            - Run Playwright E2E tests (frontend)"
+	@echo "  make e2e-test-ui         - Run Playwright with UI (frontend)"
+	@echo "  make e2e-test-backend    - Run backend E2E tests (pytest)"
+	@echo "  make e2e-test-backend-smoke - Run smoke tests only"
+	@echo "  make e2e-all             - Start stack + run backend E2E + stop"
 	@echo ""
 	@echo "Logs & Monitoring:"
 	@echo "  make logs          - Follow all logs"
@@ -90,13 +93,26 @@ e2e-up:
 	$(COMPOSE) $(COMPOSE_E2E) up -d --wait
 
 e2e-down:
-	$(COMPOSE) $(COMPOSE_E2E) down
+	$(COMPOSE) $(COMPOSE_E2E) down -v
 
 e2e-test:
 	cd "El Frontend" && npx playwright test
 
 e2e-test-ui:
 	cd "El Frontend" && npx playwright test --ui
+
+e2e-test-backend:
+	cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/e2e/ --e2e -v --timeout=120 --tb=short
+
+e2e-test-backend-smoke:
+	cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/e2e/test_e2e_smoke.py --e2e -v --timeout=30
+
+e2e-all:
+	$(MAKE) e2e-up
+	@echo "Waiting for services to be healthy..."
+	@sleep 5
+	$(MAKE) e2e-test-backend
+	$(MAKE) e2e-down
 
 logs:
 	$(COMPOSE) logs -f --tail=100

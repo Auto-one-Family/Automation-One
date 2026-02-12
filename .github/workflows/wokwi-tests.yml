@@ -25,7 +25,7 @@
 # - Combined Flow Tests (E2E): combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel
 # - GPIO Core Tests: gpio_boot_first, gpio_boot_mode_verify, gpio_edge_max_pins, gpio_integration_actuator, gpio_integration_emergency
 # - I2C Core Tests: i2c_device_present, i2c_device_not_present, i2c_error_nack, i2c_scan_devices, i2c_double_init
-# - NVS Core Tests: nvs_init_success, nvs_key_exists, nvs_rst_factory, nvs_ns_isolation, nvs_del_key
+# - NVS Core Tests: nvs_init_success, nvs_key_exists, nvs_del_factory, nvs_ns_isolation, nvs_del_key
 # - PWM Core Tests: pwm_duty_percent_50, pwm_frequency_change, pwm_resolution_verify
 #
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
@@ -1306,8 +1306,8 @@ jobs:
           cd "El Trabajante"
           timeout 120 wokwi-cli . \
             --timeout 90000 \
-            --scenario tests/wokwi/scenarios/10-nvs/nvs_rst_factory.yaml \
-            2>&1 | tee nvs_rst_factory.log || true
+            --scenario tests/wokwi/scenarios/10-nvs/nvs_del_factory.yaml \
+            2>&1 | tee nvs_del_factory.log || true
 
       - name: Run NVS Namespace Isolation Test
         env:

@@ -84,33 +84,66 @@ async function handleEmergencyStop() {
 </template>
 
 <style scoped>
+/* ═══════════════════════════════════════════════════════════════════════════
+   EMERGENCY STOP — The ONLY red element in the entire UI
+   Visually heavy, always visible, impossible to miss
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 .emergency-btn {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  gap: var(--space-1);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
   font-weight: 700;
-  letter-spacing: 0.025em;
-  color: rgb(248, 113, 113);
+  letter-spacing: var(--tracking-wide);
+  color: #fca5a5;
   background: linear-gradient(135deg,
     rgba(239, 68, 68, 0.2) 0%,
-    rgba(239, 68, 68, 0.1) 100%
+    rgba(185, 28, 28, 0.15) 100%
   );
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+  border: 1.5px solid rgba(239, 68, 68, 0.5);
+  box-shadow:
+    0 0 12px rgba(239, 68, 68, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle pulse glow when idle — draws eye */
+.emergency-btn::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(239, 68, 68, 0.15) 0%,
+    transparent 70%
+  );
+  animation: emergency-idle-glow 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes emergency-idle-glow {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
 }
 
 .emergency-btn:hover:not(:disabled) {
+  color: #fee2e2;
   background: linear-gradient(135deg,
     rgba(239, 68, 68, 0.35) 0%,
-    rgba(239, 68, 68, 0.2) 100%
+    rgba(185, 28, 28, 0.25) 100%
   );
-  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
-  border-color: rgba(239, 68, 68, 0.6);
+  box-shadow:
+    0 0 24px rgba(239, 68, 68, 0.35),
+    0 0 8px rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.7);
+  transform: scale(1.03);
 }
 
 .emergency-btn:disabled {
@@ -122,12 +155,7 @@ async function handleEmergencyStop() {
   animation: pulse-emergency 1s ease-in-out infinite;
 }
 
-@keyframes pulse-emergency {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-/* Confirmation Dialog */
+/* ── Confirmation Dialog ── */
 .emergency-overlay {
   position: fixed;
   inset: 0;
@@ -135,42 +163,47 @@ async function handleEmergencyStop() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: rgba(7, 7, 13, 0.85);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 
 .emergency-dialog {
-  background: var(--color-bg-secondary, #12121a);
+  background: var(--color-bg-secondary);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 1rem;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
   max-width: 360px;
   width: 90%;
   text-align: center;
-  box-shadow: 0 0 40px rgba(239, 68, 68, 0.15);
+  box-shadow:
+    0 0 60px rgba(239, 68, 68, 0.15),
+    var(--elevation-floating);
+  animation: scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .emergency-dialog__icon {
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--space-3);
 }
 
 .emergency-dialog__title {
-  font-size: 1.125rem;
+  font-size: var(--text-lg);
   font-weight: 700;
-  color: rgb(248, 113, 113);
-  margin-bottom: 0.5rem;
+  color: var(--color-error);
+  margin-bottom: var(--space-2);
+  letter-spacing: var(--tracking-wide);
 }
 
 .emergency-dialog__text {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary, #b0b0c0);
-  margin-bottom: 1.25rem;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-6);
+  line-height: var(--leading-normal);
 }
 
 .emergency-dialog__actions {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--space-3);
   justify-content: center;
 }
 </style>

@@ -25,3 +25,6 @@ export { default as Select } from './Select.vue'
 export { default as LoadingState } from './LoadingState.vue'
 export { default as ErrorState } from './ErrorState.vue'
 export { default as EmptyState } from './EmptyState.vue'
+
+// Grafana Integration
+export { default as GrafanaPanelEmbed } from './GrafanaPanelEmbed.vue'

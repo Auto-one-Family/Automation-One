@@ -1,42 +1,95 @@
 <script setup lang="ts">
 /**
- * LogicView
+ * LogicView (Rules Editor)
  *
- * Automation rules management view with:
- * - Rule template grid (empty state)
- * - RuleCard list in sidebar
- * - Rule detail/edit area
- * - Execution feedback via toast and visual flash
+ * Node-RED-inspired visual automation editor for AutomationOne.
+ * Replaces the original placeholder with a full-featured rule editor.
+ *
+ * Layout:
+ * ┌──────────────────────────────────────────────────────────────┐
+ * │ Toolbar: [Rule ▼] [New] [Save] [Test] [Toggle] [Delete]    │
+ * ├──────────┬───────────────────────────┬───────────────────────┤
+ * │ Node     │                           │ Config Panel          │
+ * │ Palette  │     Vue Flow Canvas       │ (when node selected)  │
+ * │          │                           │                       │
+ * ├──────────┴───────────────────────────┴───────────────────────┤
+ * │ Execution History (collapsible bottom panel)                 │
+ * └──────────────────────────────────────────────────────────────┘
+ *
+ * @see RuleFlowEditor.vue - Canvas with custom nodes
+ * @see RuleNodePalette.vue - Draggable node palette
+ * @see RuleConfigPanel.vue - Node configuration
  */
 
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { Plus, GitBranch } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import {
+  Plus,
+  Save,
+  Play,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  ChevronDown,
+  History,
+  Workflow,
+  Check,
+  X,
+  AlertCircle,
+  Maximize2,
+  Loader2,
+  ArrowLeft,
+} from 'lucide-vue-next'
 import { useLogicStore } from '@/stores/logic'
+import { useUiStore } from '@/shared/stores'
 import { useToast } from '@/composables/useToast'
+import { createLogger } from '@/utils/logger'
 import type { LogicRule } from '@/types/logic'
-import type { RuleTemplate } from '@/config/rule-templates'
-import { ruleTemplates } from '@/config/rule-templates'
-import RuleTemplateCard from '@/components/rules/RuleTemplateCard.vue'
-import RuleCard from '@/components/rules/RuleCard.vue'
+import type { Node } from '@vue-flow/core'
+import RuleFlowEditor from '@/components/rules/RuleFlowEditor.vue'
+import RuleNodePalette from '@/components/rules/RuleNodePalette.vue'
+import RuleConfigPanel from '@/components/rules/RuleConfigPanel.vue'
 
+const logger = createLogger('LogicView')
 const logicStore = useLogicStore()
+const uiStore = useUiStore()
 const toast = useToast()
 
-// State
-const selectedRuleId = ref<string | null>(null)
-const isCreatingNew = ref(false)
-const newRuleName = ref('')
+// ======================== STATE ========================
 
-// Computed
-const rules = computed(() => logicStore.rules)
-const hasRules = computed(() => rules.value.length > 0)
+const selectedRuleId = ref<string | null>(null)
+const selectedNode = ref<Node | null>(null)
+const isCreatingNew = ref(false)
+const isSaving = ref(false)
+const isTesting = ref(false)
+const showHistory = ref(false)
+const showRuleDropdown = ref(false)
+const hasUnsavedChanges = ref(false)
+
+// New rule form
+const newRuleName = ref('')
+const newRuleDescription = ref('')
+
+// Editor ref
+const editorRef = ref<InstanceType<typeof RuleFlowEditor> | null>(null)
+
+// ======================== COMPUTED ========================
 
 const selectedRule = computed<LogicRule | null>(() => {
   if (!selectedRuleId.value) return null
-  return rules.value.find(r => r.id === selectedRuleId.value) ?? null
+  return logicStore.getRuleById(selectedRuleId.value) || null
 })
 
-// Load rules on mount
+const ruleCount = computed(() => logicStore.rules.length)
+const enabledCount = computed(() => logicStore.enabledRules.length)
+
+const toolbarTitle = computed(() => {
+  if (isCreatingNew.value) return 'Neue Regel'
+  if (selectedRule.value) return selectedRule.value.name
+  return 'Regel auswählen'
+})
+
+// ======================== LIFECYCLE ========================
+
 onMounted(() => {
   logicStore.fetchRules()
   logicStore.subscribeToWebSocket()
@@ -46,445 +99,1089 @@ onUnmounted(() => {
   logicStore.unsubscribeFromWebSocket()
 })
 
-// Execution feedback via toast
-watch(
-  () => logicStore.recentExecutions.length,
-  (newLen, oldLen) => {
-    if (newLen > oldLen) {
-      const latest = logicStore.recentExecutions[0]
-      if (latest) {
-        const rule = rules.value.find(r => r.id === latest.rule_id)
-        const name = rule?.name ?? latest.rule_id
-        toast.success(`Regel "${name}" ausgeführt`)
-      }
-    }
-  }
-)
+// ======================== RULE MANAGEMENT ========================
 
-function handleSelectRule(ruleId: string): void {
+async function selectRule(ruleId: string) {
+  if (hasUnsavedChanges.value) {
+    const confirmed = await uiStore.confirm({
+      title: 'Ungespeicherte Änderungen',
+      message: 'Ungespeicherte Änderungen verwerfen?',
+      variant: 'warning',
+    })
+    if (!confirmed) return
+  }
   selectedRuleId.value = ruleId
+  selectedNode.value = null
   isCreatingNew.value = false
+  hasUnsavedChanges.value = false
+  showRuleDropdown.value = false
 }
 
-async function handleToggleRule(ruleId: string, enabled: boolean): Promise<void> {
-  try {
-    await logicStore.toggleRule(ruleId, enabled)
-    toast.success(enabled ? 'Regel aktiviert' : 'Regel deaktiviert')
-  } catch {
-    toast.error('Fehler beim Umschalten der Regel')
+async function startNewRule() {
+  if (hasUnsavedChanges.value) {
+    const confirmed = await uiStore.confirm({
+      title: 'Ungespeicherte Änderungen',
+      message: 'Ungespeicherte Änderungen verwerfen?',
+      variant: 'warning',
+    })
+    if (!confirmed) return
   }
-}
-
-async function handleDeleteRule(ruleId: string): Promise<void> {
-  try {
-    await logicStore.deleteRule(ruleId)
-    if (selectedRuleId.value === ruleId) {
-      selectedRuleId.value = null
-    }
-    toast.success('Regel gelöscht')
-  } catch {
-    toast.error('Fehler beim Löschen')
-  }
-}
-
-function handleUseTemplate(template: RuleTemplate): void {
-  isCreatingNew.value = true
-  newRuleName.value = template.rule.name
   selectedRuleId.value = null
-  // Template data is available for the editor component (Phase 0+1 integration)
-}
-
-function handleCreateNew(): void {
+  selectedNode.value = null
   isCreatingNew.value = true
+  hasUnsavedChanges.value = false
   newRuleName.value = ''
-  selectedRuleId.value = null
+  newRuleDescription.value = ''
+  showRuleDropdown.value = false
+  editorRef.value?.clearCanvas()
 }
 
-/** Get execution count for a rule in last 24h */
-function getExecutionCount(ruleId: string): number {
-  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
-  return logicStore.recentExecutions.filter(
-    e => e.rule_id === ruleId && new Date(e.timestamp).getTime() > oneDayAgo
-  ).length
+function cancelNewRule() {
+  isCreatingNew.value = false
+  newRuleName.value = ''
+  newRuleDescription.value = ''
+  hasUnsavedChanges.value = false
 }
+
+async function saveRule() {
+  if (!editorRef.value) return
+
+  const graphData = editorRef.value.graphToRuleData()
+
+  if (graphData.conditions.length === 0) {
+    toast.error('Mindestens eine Bedingung erforderlich')
+    return
+  }
+
+  if (graphData.actions.length === 0) {
+    toast.error('Mindestens eine Aktion erforderlich')
+    return
+  }
+
+  isSaving.value = true
+
+  try {
+    if (isCreatingNew.value) {
+      // Create new rule
+      if (!newRuleName.value.trim()) {
+        toast.error('Regelname erforderlich')
+        isSaving.value = false
+        return
+      }
+
+      const { logicApi } = await import('@/api/logic')
+      const created = await logicApi.createRule({
+        name: newRuleName.value.trim(),
+        description: newRuleDescription.value.trim() || undefined,
+        enabled: false,
+        conditions: graphData.conditions as unknown[],
+        logic_operator: graphData.logic_operator,
+        actions: graphData.actions as unknown[],
+      })
+
+      await logicStore.fetchRules()
+      selectedRuleId.value = created.id
+      isCreatingNew.value = false
+      hasUnsavedChanges.value = false
+      toast.success(`Regel "${created.name}" erstellt`)
+      logger.info('Rule created', { id: created.id, name: created.name })
+    } else if (selectedRule.value) {
+      // Update existing rule
+      const { logicApi } = await import('@/api/logic')
+      await logicApi.updateRule(selectedRule.value.id, {
+        conditions: graphData.conditions as unknown[],
+        logic_operator: graphData.logic_operator,
+        actions: graphData.actions as unknown[],
+      })
+
+      await logicStore.fetchRules()
+      hasUnsavedChanges.value = false
+      toast.success('Regel gespeichert')
+      logger.info('Rule updated', { id: selectedRule.value.id })
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Speichern fehlgeschlagen'
+    toast.error(msg)
+    logger.error('Save failed', err)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function testRule() {
+  if (!selectedRule.value) return
+
+  isTesting.value = true
+  try {
+    const result = await logicStore.testRule(selectedRule.value.id)
+    if (result) {
+      toast.success('Bedingungen erfüllt — Aktionen würden ausgeführt')
+    } else {
+      toast.info('Bedingungen NICHT erfüllt — keine Aktion')
+    }
+  } catch (err) {
+    toast.error('Test fehlgeschlagen')
+    logger.error('Test failed', err)
+  } finally {
+    isTesting.value = false
+  }
+}
+
+async function toggleRule() {
+  if (!selectedRule.value) return
+
+  try {
+    const newState = await logicStore.toggleRule(selectedRule.value.id)
+    toast.success(newState ? 'Regel aktiviert' : 'Regel deaktiviert')
+  } catch (err) {
+    toast.error('Toggle fehlgeschlagen')
+  }
+}
+
+async function deleteRule() {
+  if (!selectedRule.value) return
+
+  const confirmed = await uiStore.confirm({
+    title: 'Regel löschen',
+    message: `Regel "${selectedRule.value.name}" wirklich löschen?`,
+    variant: 'danger',
+    confirmText: 'Löschen',
+  })
+  if (!confirmed) return
+
+  try {
+    const { logicApi } = await import('@/api/logic')
+    await logicApi.deleteRule(selectedRule.value.id)
+    await logicStore.fetchRules()
+    selectedRuleId.value = null
+    selectedNode.value = null
+    hasUnsavedChanges.value = false
+    toast.success('Regel gelöscht')
+  } catch (err) {
+    toast.error('Löschen fehlgeschlagen')
+  }
+}
+
+// ======================== NODE EVENTS ========================
+
+function onNodeSelected(node: Node | null) {
+  selectedNode.value = node
+}
+
+function onNodeDataUpdate(nodeId: string, data: Record<string, unknown>) {
+  editorRef.value?.updateNodeData(nodeId, data)
+  hasUnsavedChanges.value = true
+}
+
+function onDeleteNode(nodeId: string) {
+  editorRef.value?.deleteNode(nodeId)
+  selectedNode.value = null
+  hasUnsavedChanges.value = true
+  toast.info('Knoten entfernt')
+}
+
+function onDuplicateNode(nodeId: string) {
+  editorRef.value?.duplicateNode(nodeId)
+  hasUnsavedChanges.value = true
+  toast.success('Knoten dupliziert')
+}
+
+function onGraphChanged() {
+  hasUnsavedChanges.value = true
+}
+
+// ======================== EXECUTION HISTORY ========================
+
+function formatTimestamp(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+// Close dropdown on outside click
+function onClickOutsideDropdown(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.rule-selector')) {
+    showRuleDropdown.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onClickOutsideDropdown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onClickOutsideDropdown)
+})
 </script>
 
 <template>
-  <div class="logic-view">
-    <!-- Empty State: Template Grid -->
-    <div v-if="!hasRules && !isCreatingNew" class="logic-view__empty">
-      <div class="logic-view__empty-header">
-        <GitBranch class="logic-view__empty-icon" />
-        <h2 class="logic-view__empty-title">Automatisierung</h2>
-        <p class="logic-view__empty-text">
-          Erstelle Regeln, um Aktoren basierend auf Sensorwerten und Zeitplänen zu steuern.
-          Wähle ein Template als Ausgangspunkt oder starte von vorne.
-        </p>
-        <button class="logic-view__create-btn" @click="handleCreateNew">
-          <Plus class="logic-view__create-icon" />
-          Leere Regel erstellen
+  <div class="rules-view">
+    <!-- ======================== TOOLBAR ======================== -->
+    <div class="rules-toolbar">
+      <div class="rules-toolbar__left">
+        <!-- Back to Dashboard -->
+        <RouterLink to="/" class="toolbar-back" title="Zurück zum Dashboard">
+          <ArrowLeft class="w-4 h-4" />
+        </RouterLink>
+
+        <!-- Rule Selector -->
+        <div class="rule-selector">
+          <button
+            class="rule-selector__trigger"
+            @click.stop="showRuleDropdown = !showRuleDropdown"
+          >
+            <Workflow class="rule-selector__icon" />
+            <span class="rule-selector__name">{{ toolbarTitle }}</span>
+            <span
+              v-if="hasUnsavedChanges"
+              class="rule-selector__unsaved"
+              title="Ungespeicherte Änderungen"
+            >*</span>
+            <ChevronDown
+              class="rule-selector__chevron"
+              :class="{ 'rule-selector__chevron--open': showRuleDropdown }"
+            />
+          </button>
+
+          <!-- Dropdown -->
+          <Transition name="dropdown">
+            <div v-if="showRuleDropdown" class="rule-selector__dropdown">
+              <div class="rule-selector__dropdown-header">
+                <span>{{ ruleCount }} Regeln ({{ enabledCount }} aktiv)</span>
+              </div>
+              <div class="rule-selector__dropdown-list">
+                <button
+                  v-for="rule in logicStore.rules"
+                  :key="rule.id"
+                  class="rule-selector__dropdown-item"
+                  :class="{ 'rule-selector__dropdown-item--active': selectedRuleId === rule.id }"
+                  @click="selectRule(rule.id)"
+                >
+                  <span
+                    class="rule-selector__dropdown-dot"
+                    :class="rule.enabled ? 'rule-selector__dropdown-dot--enabled' : 'rule-selector__dropdown-dot--disabled'"
+                  />
+                  <span class="rule-selector__dropdown-name">{{ rule.name }}</span>
+                  <span v-if="logicStore.isRuleActive(rule.id)" class="rule-selector__dropdown-flash">
+                    LIVE
+                  </span>
+                </button>
+                <div v-if="logicStore.rules.length === 0" class="rule-selector__dropdown-empty">
+                  Keine Regeln vorhanden
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
+        <!-- New Rule Input (when creating) -->
+        <div v-if="isCreatingNew" class="new-rule-inputs">
+          <input
+            v-model="newRuleName"
+            type="text"
+            class="new-rule-input"
+            placeholder="Regelname..."
+            autofocus
+          />
+          <input
+            v-model="newRuleDescription"
+            type="text"
+            class="new-rule-input new-rule-input--desc"
+            placeholder="Beschreibung (optional)"
+          />
+        </div>
+      </div>
+
+      <div class="rules-toolbar__right">
+        <!-- New Rule -->
+        <button
+          v-if="!isCreatingNew"
+          class="toolbar-btn toolbar-btn--accent"
+          title="Neue Regel"
+          @click="startNewRule"
+        >
+          <Plus class="w-4 h-4" />
+          <span class="toolbar-btn__label">Neu</span>
+        </button>
+
+        <!-- Cancel New -->
+        <button
+          v-if="isCreatingNew"
+          class="toolbar-btn"
+          title="Abbrechen"
+          @click="cancelNewRule"
+        >
+          <X class="w-4 h-4" />
+        </button>
+
+        <!-- Save -->
+        <button
+          class="toolbar-btn toolbar-btn--save"
+          :class="{ 'toolbar-btn--pulse': hasUnsavedChanges }"
+          :disabled="isSaving || (!isCreatingNew && !selectedRule)"
+          title="Speichern"
+          @click="saveRule"
+        >
+          <Loader2 v-if="isSaving" class="w-4 h-4 animate-spin" />
+          <Save v-else class="w-4 h-4" />
+          <span class="toolbar-btn__label">Speichern</span>
+        </button>
+
+        <!-- Divider -->
+        <div class="toolbar-divider" />
+
+        <!-- Test -->
+        <button
+          class="toolbar-btn"
+          :disabled="!selectedRule || isTesting"
+          title="Regel testen (ohne Ausführung)"
+          @click="testRule"
+        >
+          <Loader2 v-if="isTesting" class="w-4 h-4 animate-spin" />
+          <Play v-else class="w-4 h-4" />
+          <span class="toolbar-btn__label">Test</span>
+        </button>
+
+        <!-- Toggle -->
+        <button
+          class="toolbar-btn"
+          :class="{ 'toolbar-btn--enabled': selectedRule?.enabled }"
+          :disabled="!selectedRule"
+          :title="selectedRule?.enabled ? 'Deaktivieren' : 'Aktivieren'"
+          @click="toggleRule"
+        >
+          <ToggleRight v-if="selectedRule?.enabled" class="w-4 h-4" />
+          <ToggleLeft v-else class="w-4 h-4" />
+        </button>
+
+        <!-- Delete -->
+        <button
+          class="toolbar-btn toolbar-btn--danger"
+          :disabled="!selectedRule"
+          title="Regel löschen"
+          @click="deleteRule"
+        >
+          <Trash2 class="w-4 h-4" />
+        </button>
+
+        <!-- Divider -->
+        <div class="toolbar-divider" />
+
+        <!-- History toggle -->
+        <button
+          class="toolbar-btn"
+          :class="{ 'toolbar-btn--active': showHistory }"
+          title="Ausführungshistorie"
+          @click="showHistory = !showHistory"
+        >
+          <History class="w-4 h-4" />
+        </button>
+
+        <!-- Fit View -->
+        <button
+          class="toolbar-btn"
+          title="Ansicht anpassen"
+          @click="editorRef?.fitView()"
+        >
+          <Maximize2 class="w-4 h-4" />
         </button>
       </div>
-
-      <div class="logic-view__templates">
-        <RuleTemplateCard
-          v-for="tmpl in ruleTemplates"
-          :key="tmpl.id"
-          :template="tmpl"
-          @use-template="handleUseTemplate"
-        />
-      </div>
     </div>
 
-    <!-- Main Layout: Sidebar + Editor -->
-    <div v-else class="logic-view__main">
-      <!-- Left Sidebar: Rule List -->
-      <div class="logic-view__sidebar">
-        <div class="logic-view__sidebar-header">
-          <h3 class="logic-view__sidebar-title">Regeln</h3>
-          <button
-            class="logic-view__add-btn"
-            title="Neue Regel erstellen"
-            aria-label="Neue Regel erstellen"
-            @click="handleCreateNew"
-          >
-            <Plus class="logic-view__add-icon" />
+    <!-- ======================== MAIN CONTENT ======================== -->
+    <div class="rules-content">
+      <!-- Loading -->
+      <div v-if="logicStore.isLoading && logicStore.rules.length === 0" class="rules-loading">
+        <Loader2 class="w-8 h-8 animate-spin" style="color: var(--color-iridescent-2)" />
+        <span>Lade Regeln...</span>
+      </div>
+
+      <!-- No rule selected and not creating -->
+      <div
+        v-else-if="!selectedRule && !isCreatingNew"
+        class="rules-empty"
+      >
+        <div class="rules-empty__content">
+          <Workflow class="rules-empty__icon" />
+          <h2 class="rules-empty__title">Automatisierung</h2>
+          <p class="rules-empty__desc">
+            Erstelle visuelle Regeln, um Aktoren basierend auf
+            Sensordaten und Zeitplänen zu steuern.
+          </p>
+          <div class="rules-empty__actions">
+            <button class="btn-primary" @click="startNewRule">
+              <Plus class="w-4 h-4" />
+              Erste Regel erstellen
+            </button>
+          </div>
+
+          <!-- Existing rules quick list -->
+          <div v-if="logicStore.rules.length > 0" class="rules-empty__list">
+            <h3 class="rules-empty__list-title">Vorhandene Regeln</h3>
+            <button
+              v-for="rule in logicStore.rules"
+              :key="rule.id"
+              class="rules-empty__list-item"
+              @click="selectRule(rule.id)"
+            >
+              <span
+                class="rules-empty__list-dot"
+                :class="rule.enabled ? 'rules-empty__list-dot--on' : 'rules-empty__list-dot--off'"
+              />
+              <span>{{ rule.name }}</span>
+              <span class="rules-empty__list-meta">
+                {{ rule.conditions.length }} Bed. → {{ rule.actions.length }} Akt.
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Editor (rule selected or creating new) -->
+      <template v-else>
+        <!-- Node Palette -->
+        <RuleNodePalette />
+
+        <!-- Canvas -->
+        <RuleFlowEditor
+          ref="editorRef"
+          :rule="selectedRule"
+          @node-selected="onNodeSelected"
+          @graph-changed="onGraphChanged"
+        />
+
+        <!-- Config Panel -->
+        <RuleConfigPanel
+          :node="selectedNode"
+          @update:data="onNodeDataUpdate"
+          @close="selectedNode = null"
+          @delete-node="onDeleteNode"
+          @duplicate-node="onDuplicateNode"
+        />
+      </template>
+    </div>
+
+    <!-- ======================== EXECUTION HISTORY ======================== -->
+    <Transition name="history-slide">
+      <div v-if="showHistory" class="rules-history">
+        <div class="rules-history__header">
+          <span class="rules-history__title">
+            <History class="w-4 h-4" />
+            Letzte Ausführungen
+          </span>
+          <button class="rules-history__close" @click="showHistory = false">
+            <ChevronDown class="w-4 h-4" />
           </button>
         </div>
-
-        <div class="logic-view__rule-list">
-          <RuleCard
-            v-for="rule in rules"
-            :key="rule.id"
-            :rule="rule"
-            :is-selected="rule.id === selectedRuleId"
-            :is-active="logicStore.isRuleActive(rule.id)"
-            :execution-count="getExecutionCount(rule.id)"
-            @select="handleSelectRule"
-            @toggle="handleToggleRule"
-            @delete="handleDeleteRule"
-          />
-
-          <div v-if="rules.length === 0" class="logic-view__no-rules">
-            Keine Regeln vorhanden
+        <div class="rules-history__list">
+          <div
+            v-for="(exec, i) in logicStore.recentExecutions"
+            :key="i"
+            class="rules-history__item"
+            :class="{ 'rules-history__item--success': exec.success, 'rules-history__item--fail': !exec.success }"
+          >
+            <span class="rules-history__item-time">{{ formatTimestamp(exec.timestamp) }}</span>
+            <span class="rules-history__item-name">{{ exec.rule_name }}</span>
+            <span class="rules-history__item-status">
+              <Check v-if="exec.success" class="w-3 h-3" />
+              <AlertCircle v-else class="w-3 h-3" />
+            </span>
+            <span class="rules-history__item-detail">
+              {{ exec.trigger.sensor_type }} {{ exec.trigger.value }}
+              → {{ exec.action.command }}
+            </span>
+          </div>
+          <div v-if="logicStore.recentExecutions.length === 0" class="rules-history__empty">
+            Noch keine Ausführungen in dieser Session
           </div>
         </div>
       </div>
-
-      <!-- Right: Editor Area -->
-      <div class="logic-view__editor">
-        <div v-if="isCreatingNew" class="logic-view__editor-content">
-          <h3 class="logic-view__editor-title">
-            {{ newRuleName || 'Neue Regel' }}
-          </h3>
-          <p class="logic-view__editor-hint">
-            Der Flow-Editor wird von Phase 0+1 bereitgestellt.
-            Hier können Regeln mit dem visuellen Node-Editor erstellt werden.
-          </p>
-        </div>
-
-        <div v-else-if="selectedRule" class="logic-view__editor-content">
-          <h3 class="logic-view__editor-title">{{ selectedRule.name }}</h3>
-          <p v-if="selectedRule.description" class="logic-view__editor-description">
-            {{ selectedRule.description }}
-          </p>
-
-          <!-- Rule details -->
-          <div class="logic-view__rule-details">
-            <div class="logic-view__detail-section">
-              <h4 class="logic-view__detail-label">Bedingungen</h4>
-              <div
-                v-for="(cond, i) in selectedRule.conditions"
-                :key="i"
-                class="logic-view__detail-item"
-              >
-                <code>{{ cond.type }}: {{ JSON.stringify(cond).slice(0, 80) }}</code>
-              </div>
-            </div>
-
-            <div class="logic-view__detail-section">
-              <h4 class="logic-view__detail-label">Logik</h4>
-              <span class="logic-view__operator-badge">{{ selectedRule.logic_operator }}</span>
-            </div>
-
-            <div class="logic-view__detail-section">
-              <h4 class="logic-view__detail-label">Aktionen</h4>
-              <div
-                v-for="(action, i) in selectedRule.actions"
-                :key="i"
-                class="logic-view__detail-item"
-              >
-                <code>{{ action.type }}: {{ JSON.stringify(action).slice(0, 80) }}</code>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="logic-view__editor-empty">
-          <GitBranch class="logic-view__editor-empty-icon" />
-          <p>Wähle eine Regel aus der Liste oder erstelle eine neue.</p>
-        </div>
-      </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
-.logic-view {
-  height: 100%;
-  overflow: auto;
-}
-
-/* Empty State */
-.logic-view__empty {
+.rules-view {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  padding: var(--space-6);
-}
-
-.logic-view__empty-header {
-  text-align: center;
-  max-width: 500px;
-  margin: 0 auto;
-}
-
-.logic-view__empty-icon {
-  width: 48px;
-  height: 48px;
-  color: var(--color-text-muted);
-  margin: 0 auto var(--space-3);
-}
-
-.logic-view__empty-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0 0 var(--space-2);
-}
-
-.logic-view__empty-text {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  line-height: 1.5;
-  margin: 0 0 var(--space-4);
-}
-
-.logic-view__create-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-accent);
-  background: transparent;
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.logic-view__create-btn:hover {
-  color: white;
-  background: var(--color-accent);
-}
-
-.logic-view__create-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.logic-view__templates {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-4);
-}
-
-/* Main Layout */
-.logic-view__main {
-  display: grid;
-  grid-template-columns: 280px 1fr;
   height: 100%;
   overflow: hidden;
+  background: var(--color-bg-primary);
 }
 
-/* Sidebar */
-.logic-view__sidebar {
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--glass-border);
-  overflow: hidden;
-}
+/* ======================== TOOLBAR ======================== */
 
-.logic-view__sidebar-header {
+.rules-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3);
+  gap: 1rem;
+  padding: 0.625rem 1rem;
+  background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+  z-index: 20;
 }
 
-.logic-view__sidebar-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0;
+.rules-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
-.logic-view__add-btn {
+.rules-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Back to Dashboard */
+.toolbar-back {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  padding: 0;
-  border: 1px solid var(--glass-border);
-  background: transparent;
   border-radius: var(--radius-sm);
-  cursor: pointer;
+  color: var(--color-text-muted);
+  text-decoration: none;
   transition: all var(--transition-fast);
 }
 
-.logic-view__add-btn:hover {
-  border-color: var(--color-accent);
-  background: rgba(59, 130, 246, 0.1);
-}
-
-.logic-view__add-icon {
-  width: 14px;
-  height: 14px;
-  color: var(--color-text-secondary);
-}
-
-.logic-view__rule-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.logic-view__no-rules {
-  text-align: center;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  padding: var(--space-4);
-}
-
-/* Editor */
-.logic-view__editor {
-  overflow-y: auto;
-  padding: var(--space-4);
-}
-
-.logic-view__editor-content {
-  max-width: 800px;
-}
-
-.logic-view__editor-title {
-  font-size: 18px;
-  font-weight: 600;
+.toolbar-back:hover {
   color: var(--color-text-primary);
-  margin: 0 0 var(--space-2);
-}
-
-.logic-view__editor-description {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  margin: 0 0 var(--space-4);
-}
-
-.logic-view__editor-hint {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin: 0;
-  padding: var(--space-4);
   background: var(--color-bg-tertiary);
+}
+
+/* Rule Selector */
+.rule-selector {
+  position: relative;
+}
+
+.rule-selector__trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.75rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  border: 1px dashed var(--glass-border);
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 180px;
 }
 
-.logic-view__rule-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
+.rule-selector__trigger:hover {
+  border-color: var(--color-iridescent-2);
 }
 
-.logic-view__detail-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+.rule-selector__icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-iridescent-2);
+  flex-shrink: 0;
 }
 
-.logic-view__detail-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0;
-}
-
-.logic-view__detail-item code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  display: block;
+.rule-selector__name {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.rule-selector__unsaved {
+  color: var(--color-warning);
+  font-weight: 700;
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.rule-selector__chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.rule-selector__chevron--open {
+  transform: rotate(180deg);
+}
+
+/* Dropdown */
+.rule-selector__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 300px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.rule-selector__dropdown-header {
+  padding: 0.625rem 0.875rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.rule-selector__dropdown-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0.375rem;
+}
+
+.rule-selector__dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.rule-selector__dropdown-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.rule-selector__dropdown-item--active {
+  background: rgba(129, 140, 248, 0.1);
+  color: var(--color-iridescent-2);
+}
+
+.rule-selector__dropdown-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rule-selector__dropdown-dot--enabled {
+  background: var(--color-success);
+}
+
+.rule-selector__dropdown-dot--disabled {
+  background: var(--color-text-muted);
+}
+
+.rule-selector__dropdown-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rule-selector__dropdown-flash {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: rgba(52, 211, 153, 0.2);
+  color: var(--color-success);
+  animation: pulse-dot 2s infinite;
+  letter-spacing: 0.08em;
+}
+
+.rule-selector__dropdown-empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+/* New rule inputs */
+.new-rule-inputs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.new-rule-input {
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.8125rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+  width: 180px;
+}
+
+.new-rule-input--desc {
+  width: 240px;
+}
+
+.new-rule-input:focus {
+  border-color: var(--color-iridescent-2);
+}
+
+.new-rule-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Toolbar Buttons */
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
   white-space: nowrap;
 }
 
-.logic-view__operator-badge {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-accent);
-  padding: 2px 8px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: var(--radius-sm);
+.toolbar-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--glass-border-hover);
 }
 
-.logic-view__editor-empty {
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-btn__label {
+  display: none;
+}
+
+@media (min-width: 1200px) {
+  .toolbar-btn__label {
+    display: inline;
+  }
+}
+
+.toolbar-btn--accent {
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  border-color: transparent;
+  color: white;
+}
+
+.toolbar-btn--accent:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  border-color: transparent;
+  color: white;
+}
+
+.toolbar-btn--save {
+  border-color: var(--glass-border);
+}
+
+.toolbar-btn--pulse {
+  border-color: var(--color-iridescent-2);
+  animation: save-glow 2s ease-in-out infinite;
+}
+
+@keyframes save-glow {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 8px rgba(129, 140, 248, 0.3); }
+}
+
+.toolbar-btn--enabled {
+  color: var(--color-success);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.toolbar-btn--danger:hover:not(:disabled) {
+  color: var(--color-error);
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.toolbar-btn--active {
+  background: rgba(129, 140, 248, 0.1);
+  border-color: var(--color-iridescent-2);
+  color: var(--color-iridescent-2);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--glass-border);
+  margin: 0 4px;
+}
+
+/* ======================== MAIN CONTENT ======================== */
+
+.rules-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Loading state */
+.rules-loading {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  gap: var(--space-3);
+  gap: 1rem;
   color: var(--color-text-muted);
 }
 
-.logic-view__editor-empty-icon {
-  width: 32px;
-  height: 32px;
-  opacity: 0.5;
+/* Empty / Landing state */
+.rules-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.logic-view__editor-empty p {
-  font-size: 13px;
-  margin: 0;
+.rules-empty__content {
+  text-align: center;
+  max-width: 480px;
+  padding: 2rem;
 }
 
-@media (max-width: 768px) {
-  .logic-view__main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
+.rules-empty__icon {
+  width: 64px;
+  height: 64px;
+  color: var(--color-iridescent-2);
+  opacity: 0.3;
+  margin: 0 auto 1.5rem;
+}
 
-  .logic-view__sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--glass-border);
-    max-height: 200px;
-  }
+.rules-empty__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.rules-empty__desc {
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+
+.rules-empty__actions {
+  margin-bottom: 2rem;
+}
+
+.rules-empty__list {
+  text-align: left;
+  padding: 1rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.rules-empty__list-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.rules-empty__list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  text-align: left;
+}
+
+.rules-empty__list-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.rules-empty__list-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rules-empty__list-dot--on {
+  background: var(--color-success);
+}
+
+.rules-empty__list-dot--off {
+  background: var(--color-text-muted);
+}
+
+.rules-empty__list-meta {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+/* ======================== EXECUTION HISTORY ======================== */
+
+.rules-history {
+  flex-shrink: 0;
+  max-height: 200px;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--glass-border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.rules-history__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.rules-history__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.rules-history__close {
+  padding: 0.25rem;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.rules-history__close:hover {
+  color: var(--color-text-primary);
+}
+
+.rules-history__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0.5rem;
+}
+
+.rules-history__item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.rules-history__item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.rules-history__item-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  width: 60px;
+}
+
+.rules-history__item-name {
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.rules-history__item-status {
+  flex-shrink: 0;
+}
+
+.rules-history__item--success .rules-history__item-status {
+  color: var(--color-success);
+}
+
+.rules-history__item--fail .rules-history__item-status {
+  color: var(--color-error);
+}
+
+.rules-history__item-detail {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rules-history__empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+/* ======================== TRANSITIONS ======================== */
+
+.dropdown-enter-active,
+.dropdown-leave-active {
+  transition: all 0.15s ease;
+}
+
+.dropdown-enter-from,
+.dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.history-slide-enter-active,
+.history-slide-leave-active {
+  transition: all 0.2s ease;
+}
+
+.history-slide-enter-from,
+.history-slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.history-slide-enter-to,
+.history-slide-leave-from {
+  max-height: 200px;
+  opacity: 1;
 }
 </style>

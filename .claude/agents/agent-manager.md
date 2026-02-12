@@ -2,16 +2,15 @@
 name: agent-manager
 description: |
   Analysiert und korrigiert das AutomationOne Agent-System.
-  MUST BE USED when: Flow-Änderungen umgesetzt werden müssen,
-  Agent-Konfigurationen geprüft werden sollen, Inkonsistenzen zwischen
-  Flow-Definitionen und Agent-Implementierungen behoben werden müssen,
+  MUST BE USED when: Flow-Aenderungen umgesetzt werden muessen,
+  Agent-Konfigurationen geprueft werden sollen, Inkonsistenzen zwischen
+  Flow-Definitionen und Agent-Implementierungen behoben werden muessen,
   oder neue Agents in die bestehende Struktur integriert werden sollen.
   NOT FOR: Code-Entwicklung, Docker-Konfiguration, Debugging von Runtime-Problemen.
   Keywords: agent-check, flow-analyse, IST-SOLL, agent-update, workflow, konsistenz
-tools: Read, Write, Edit, Grep, Glob
 model: sonnet
-permissionMode: default
-skills: agent-manager
+color: yellow
+tools: ["Read", "Write", "Edit", "Grep", "Glob"]
 ---
 
 # Agent-Manager — Hüter der Agenten-Qualität

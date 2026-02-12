@@ -12,7 +12,7 @@
 | Metrik | IST | SOLL |
 |--------|-----|------|
 | Vue-Komponenten | 67 in `components/` + 11 Views | ~80+ in `modules/` + `shared/` |
-| Stores | 5 in `stores/` | 8+ in `shared/stores/` |
+| Stores | 5 in `stores/` + 10 in `shared/stores/` (4 renamed + 6 split) | 8+ in `shared/stores/` |
 | API-Module | 17 in `api/` | 11 in `shared/services/api/` |
 | Composables | 8+index in `composables/` | ~15 in `shared/` + `modules/*/composables/` |
 | Utils | 15+index in `utils/` (16 Dateien) | ~12 in `shared/utils/` |
@@ -20,12 +20,12 @@
 | Style-Dateien | 1 (`style.css`, 805 Zeilen) | 5 in `styles/` |
 | Ordnertiefe | 2 Ebenen (components/bereich/) | 3 Ebenen (modules/bereich/components/) |
 | Hex-Codes in .vue | 30 Dateien | 0 Dateien |
-| WS-Handler | 25 in esp.ts (Z.2439-2475) | verteilt auf 4-5 Stores |
+| WS-Handler | 25 in esp.ts → 20 delegiert, 5 inline | verteilt auf 7 Stores (DONE) |
 | WS-Event-Types | 26 im Filter (1 ohne Handler) | 26+ (logic_execution Handler NEU) |
 | Test-Dateien | 26 (5 Store + 2 Composable + 14 Utils + 5 E2E) | 30+ (Split-Tests + Primitives) |
 | Test-Zeilen (neu) | 3068 Z. (3 neue Store-Tests) | Aufteilen bei Store-Split |
 | Backend-Router | 17 (kein monitoring/) | +1 monitoring (fuer Grafana-Proxy) |
-| Groesste Datei | ESPOrbitalLayout.vue (3833 Z.) | max 1500 Zeilen |
+| Groesste Datei | ESPOrbitalLayout.vue (3833 Z.), esp.ts (1611 Z., war 2598) | max 1500 Zeilen |
 
 ---
 
@@ -92,48 +92,44 @@
 
 ## 2. STORES
 
-### 2.1 ESP Store Split (2598 Zeilen -> 4 Dateien)
+### 2.1 ESP Store Split (2598 Zeilen -> 7 Sub-Stores) — **IMPLEMENTIERT**
 
-| Section | IST Zeilen | Inhalt | SOLL Datei |
-|---------|-----------|--------|------------|
-| Imports + Helpers + State | 1-99 | extractErrorMessage, getOfflineDisplayText, getOfflineReason (1-85 ausserhalb, 86-99 Store-State) | `shared/stores/esp.store.ts` |
-| Pending State + WS Setup + Getters | 100-178 | pendingDevices, isPendingLoading (100-104), WS-Filter setup + wsUnsubscribers (106-133), Computed: selectedDevice, deviceCount, onlineDevices, offlineDevices, mockDevices, realDevices, devicesByZone, masterZoneDevices, pendingCount (135-178) | `shared/stores/esp.store.ts` |
-| isMock + findDevice | 179-230 | isMock (182), findDeviceByEspIdDefensive (198), getDeviceId (227) | `shared/stores/esp.store.ts` |
-| GPIO Status Getters | 231-337 | gpioStatusMap, getGpioPinStatuses | `shared/stores/sensor.store.ts` |
-| GPIO Status Actions | 338-432 | fetchGpioStatus, refreshGpioStatus | `shared/stores/sensor.store.ts` |
-| OneWire Scan | 433-685 | oneWireScanResults, startOneWireScan | `shared/stores/sensor.store.ts` |
-| Pending + Device CRUD + Sensors/Actuators | 686-1314 | fetchPendingDevices, approveDevice, rejectDevice, fetchAllDevices, createMockEsp, deleteDevice, addSensor, removeSensor, addActuator, removeActuator | `shared/stores/esp.store.ts` |
-| WebSocket Handlers (Core) | 1315-1917 | esp_health (1330), actuator_alert (1433), sensor_data (1485), actuator_status (1667), config_response (1702), zone_assignment (1802), subzone_assignment (1869) | `shared/stores/sensor.store.ts` + `actuator.store.ts` + `zone.store.ts` (via Dispatcher) |
-| Discovery/Approval + Sensor Health WS | 1918-2082 | device_discovered (1926), device_approved (1962), device_rejected (1987), sensor_health (2025) | `shared/stores/esp.store.ts` + `sensor.store.ts` |
-| Feedback + Notifications WS | 2083-2201 | actuator_response (2091), notification (2119), error_event (2134), system_event (2194) | `shared/stores/actuator.store.ts` + `esp.store.ts` (notification/error/system) |
-| Actuator Command Lifecycle | 2202-2240 | actuator_command (2210), actuator_command_failed (2226) | `shared/stores/actuator.store.ts` |
-| Config Publish + Rediscovery | 2241-2303 | config_published (2249), config_failed (2265), device_rediscovered (2287) | `shared/stores/esp.store.ts` |
-| Sequence Handlers | 2304-2362 | sequence_started (2311), sequence_step (2322), sequence_completed (2330), sequence_error (2346), sequence_cancelled (2356) | `shared/stores/actuator.store.ts` |
-| Actuator Commands | 2363-2427 | sendActuatorCommand, sendEmergencyStop | `shared/stores/actuator.store.ts` |
-| WebSocket Registration | 2428-2598 | initWebSocket (25 Handler registriert), cleanupWebSocket, onConnect auto-refresh, return statement | `shared/stores/esp.store.ts` (Dispatcher) |
+**Status:** Phase 6 ABGESCHLOSSEN. esp.ts von 2598 auf 1611 Zeilen reduziert (-987, -38%).
+**Pattern:** WS-Dispatcher in esp.ts, Handler-Logik in Sub-Stores via Dependency Injection (devices, getDeviceId, callbacks).
+**Keine Circular Dependencies:** Sub-Stores importieren NICHT useEspStore(). Stattdessen erhalten sie dependencies als Funktionsparameter.
+**Tests:** 1118/1118 Vitest gruen, 0 TypeScript-Fehler nach jedem Split-Schritt verifiziert.
 
-**SOLL Ergebnis:**
-- `shared/stores/esp.store.ts` (~900 Z.): Device-CRUD, Pending, WS-Dispatcher (25 Events), Config (config_response, config_published, config_failed), Discovery (device_discovered/approved/rejected/rediscovered), General (notification, error_event, system_event)
-- `shared/stores/sensor.store.ts` (~600 Z.): GPIO Getters+Actions, OneWire Scan, sensor_data, sensor_health WS
-- `shared/stores/actuator.store.ts` (~550 Z.): Commands (sendActuatorCommand, sendEmergencyStop), actuator_response, actuator_command, actuator_command_failed, actuator_status, actuator_alert, Sequences (5 Handler: started/step/completed/error/cancelled)
-- `shared/stores/zone.store.ts` (~250 Z.): zone_assignment, subzone_assignment WS
+| Sub-Store | Datei | Zeilen | WS-Events | Inhalt |
+|-----------|-------|--------|-----------|--------|
+| zone | `shared/stores/zone.store.ts` | ~165 | zone_assignment, subzone_assignment | Zone/Subzone-Zuweisungen, Device-Updates via setDevice Callback |
+| actuator | `shared/stores/actuator.store.ts` | ~265 | actuator_alert/status/response/command/command_failed, sequence_started/step/completed/error/cancelled | 10 Handler, Toast-Notifications, Device-Mutation |
+| sensor | `shared/stores/sensor.store.ts` | ~280 | sensor_data, sensor_health | Multi-Value-Sensor HYBRID LOGIC, Quality Mapping, Stale-Detection |
+| gpio | `shared/stores/gpio.store.ts` | ~310 | (kein WS, aber via esp_health) | GPIO Status State + Getters + Actions, OneWire Scan State + Actions |
+| notification | `shared/stores/notification.store.ts` | ~110 | notification, error_event, system_event | Toast-Notifications, Troubleshooting-Detail-Events |
+| config | `shared/stores/config.store.ts` | ~165 | config_response, config_published, config_failed | Config-Lifecycle Toasts, GPIO-Refresh nach Config-Change |
+| **esp (verbleibend)** | `stores/esp.ts` | **1611** | esp_health + device_discovered/approved/rejected/rediscovered (5 inline) | Device-CRUD, Pending, WS-Dispatcher, esp_health, Discovery, sendActuatorCommand, emergencyStop |
 
-> **ARCHITEKTUR-HINWEIS (verify-plan):** Alle WS-Handler in esp.ts teilen sich `devices.value` State. Beim Split muessen `sensor.store.ts` und `actuator.store.ts` per `useEspStore()` Cross-Store darauf zugreifen. Der WS-Dispatcher bleibt in `esp.store.ts` und delegiert Events an die Sub-Stores. Reihenfolge: ESP-Store MUSS vor Sensor/Actuator-Store initialisiert werden (Pinia Dependency).
+> **ARCHITEKTUR-HINWEIS:** Dependency Injection Pattern statt Cross-Store Import gewaehlt. Sub-Stores erhalten `devices`, `getDeviceId`, `setDevice` als Funktionsparameter. Vermeidet Circular Dependencies und macht Sub-Stores unit-testbar.
 >
-> **WS-FILTER-HINWEIS (frontend-debug):** Die WS-Filter-Liste (Z.119-128) registriert 26 Event-Types, aber nur 25 haben Handler. `logic_execution` hat KEINEN Handler in esp.ts - entweder absichtlich (wird anderswo verarbeitet) oder SOLL-Luecke fuer Rules-Modul.
+> **VERBLEIBENDE INLINE-HANDLER:** esp_health (komplex, nutzt fetchAll + updateGpioStatusFromHeartbeat), device_discovered/approved/rejected/rediscovered (Device-CRUD), sendActuatorCommand, emergencyStopAll bleiben in esp.ts da sie Device-State direkt mutieren.
 >
-> **MQTT-HINWEIS (mqtt-debug):** Alle 25 WS-Events sind Server-seitige Broadcasts aus MQTT-Handlern. Die Events spiegeln das MQTT-Topic-Schema wider: `kaiser/{esp_id}/heartbeat` → esp_health, `kaiser/{esp_id}/sensor/data` → sensor_data, etc. Beim Store-Split muss die Event→Topic-Zuordnung konsistent bleiben.
+> **WS-FILTER-HINWEIS:** 26 Event-Types registriert, 25 Handler implementiert. `logic_execution` hat KEINEN Handler — SOLL-Luecke fuer Rules-Modul (Phase 17).
 
 ### 2.2 Andere Stores
 
 | IST Datei | Zeilen | SOLL Datei | Aktion |
 |-----------|--------|------------|--------|
-| `stores/auth.ts` | 179 | `shared/stores/auth.store.ts` | **Rename+Move** |
-| `stores/logic.ts` | 347 | `shared/stores/logic.store.ts` | **Rename+Move** |
-| `stores/dragState.ts` | 447 | `shared/stores/dragState.store.ts` | **Rename+Move** |
-| `stores/database.ts` | 316 | `shared/stores/database.store.ts` | **Rename+Move** |
+| `stores/auth.ts` | 179 | `shared/stores/auth.store.ts` | **DONE** (Re-Export Shim) |
+| `stores/logic.ts` | 347 | `shared/stores/logic.store.ts` | **DONE** (Re-Export Shim) |
+| `stores/dragState.ts` | 447 | `shared/stores/dragState.store.ts` | **DONE** (Re-Export Shim) |
+| `stores/database.ts` | 316 | `shared/stores/database.store.ts` | **DONE** (Re-Export Shim) |
+| -- | -- | `shared/stores/zone.store.ts` | **DONE** (ESP Split) |
+| -- | -- | `shared/stores/actuator.store.ts` | **DONE** (ESP Split) |
+| -- | -- | `shared/stores/sensor.store.ts` | **DONE** (ESP Split) |
+| -- | -- | `shared/stores/gpio.store.ts` | **DONE** (ESP Split) |
+| -- | -- | `shared/stores/notification.store.ts` | **DONE** (ESP Split) |
+| -- | -- | `shared/stores/config.store.ts` | **DONE** (ESP Split) |
 | -- | -- | `shared/stores/ui.store.ts` | **NEU**: Sidebar, Active-Tab, Theme |
-| -- | -- | `shared/stores/notification.store.ts` | **NEU**: Toast-Queue, Unread-Count |
 | -- | -- | `shared/stores/system.store.ts` | **NEU**: System-Health, Server-Status |
 
 ---
@@ -437,13 +433,13 @@ Dateien mit direkten Hex-Codes statt CSS-Tokens (verifiziert per grep `#[0-9a-fA
 
 | Phase | Aufgabe | ~Dateien | Abhaengigkeit |
 |-------|---------|---------|-------------|
-| 1 | Styles aufteilen | 6 | Keine |
-| 2 | Primitives umbenennen + Re-Exports | 15 | Phase 1 |
-| 3 | Patterns erstellen/migrieren | 13 | Phase 2 |
-| 4 | Layout umbenennen | 5 | Phase 2 |
-| 5 | Router Guards extrahieren | 3 | Phase 4 |
-| 6 | ESP Store aufteilen | 8 | Unabhaengig |
-| 7 | Andere Stores umbenennen | 4 | Phase 6 |
+| 1 | ~~Styles aufteilen~~ | ~~6~~ | **DONE** (5 files in styles/) |
+| 2 | ~~Primitives umbenennen + Re-Exports~~ | ~~15~~ | **DONE** (9 Base* + 9 Re-Export Shims) |
+| 3 | ~~Patterns erstellen/migrieren~~ | ~~13~~ | **PARTIAL** (3/13 Patterns: EmptyState, ErrorState, ToastContainer) |
+| 4 | ~~Layout umbenennen~~ | ~~5~~ | **DONE** (3 Layout + 3 Re-Export Shims) |
+| 5 | Router Guards extrahieren | 3 | Phase 4 (klein, niedrige Prio) |
+| 6 | ~~ESP Store aufteilen~~ | ~~8~~ | **DONE** (7 Sub-Stores, 2598→1611 Z.) |
+| 7 | ~~Andere Stores umbenennen~~ | ~~4~~ | **DONE** (4 Re-Export Shims) |
 | 8 | API-Module konsolidieren | 17 | Unabhaengig |
 | 9 | Composables aufteilen | 10 | Phase 8 |
 | 10 | Types aufteilen | 6 | Unabhaengig |
@@ -464,7 +460,7 @@ Dateien mit direkten Hex-Codes statt CSS-Tokens (verifiziert per grep `#[0-9a-fA
 - [ ] Kein Hex-Farbcode direkt in Komponenten
 - [ ] Jede Glassmorphism-Variante existiert genau einmal
 - [ ] Jeder Modal/Popover nutzt BaseModal/BasePopover
-- [ ] ESP-Store <=900 Zeilen pro Datei (korrigiert von 800, da notification/error/system Handler verbleiben)
+- [x] ESP-Store aufgeteilt: 2598 → 1611 Z. (+ 6 Sub-Stores). Ziel <=900 Z. noch nicht erreicht; verbleibend: esp_health, Device-CRUD, Discovery, sendActuatorCommand
 - [ ] Jedes Modul hat Ordner unter `modules/`
 - [ ] Shared Patterns von mindestens 2 Modulen genutzt
 - [ ] Lazy-Loading fuer alle Module
