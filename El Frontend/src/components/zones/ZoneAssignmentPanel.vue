@@ -194,10 +194,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted } from 'vue'
 import { MapPin, Check, X, AlertCircle, CheckCircle, Radio, Loader2 } from 'lucide-vue-next'
-import Card from '@/components/common/Card.vue'
-import Input from '@/components/common/Input.vue'
-import Button from '@/components/common/Button.vue'
-import Badge from '@/components/common/Badge.vue'
+import { Card, Input, Button, Badge } from '@/shared/design'
 import { zonesApi } from '@/api/zones'
 import { useEspStore } from '@/stores/esp'
 import { createLogger } from '@/utils/logger'

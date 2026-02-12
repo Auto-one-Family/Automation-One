@@ -1,0 +1,893 @@
+<script setup lang="ts">
+/**
+ * RuleConfigPanel
+ *
+ * Right sidebar for configuring selected node properties.
+ * Dynamically renders form fields based on node type:
+ * - sensor: ESP, GPIO, sensor type, operator, value
+ * - time: start/end hour, days of week
+ * - logic: AND/OR toggle
+ * - actuator: ESP, GPIO, command, value, duration
+ * - notification: channel, target, message
+ * - delay: seconds
+ */
+
+import { computed, watch, ref } from 'vue'
+import {
+  X,
+  Thermometer,
+  Clock,
+  GitMerge,
+  Power,
+  Bell,
+  Timer,
+  Trash2,
+  Copy,
+} from 'lucide-vue-next'
+import { useEspStore } from '@/stores/esp'
+import type { Node } from '@vue-flow/core'
+import type { MockSensor, MockActuator } from '@/types'
+
+interface Props {
+  node: Node | null
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  'update:data': [nodeId: string, data: Record<string, unknown>]
+  close: []
+  'delete-node': [nodeId: string]
+  'duplicate-node': [nodeId: string]
+}>()
+
+const espStore = useEspStore()
+
+const nodeTypeLabels: Record<string, string> = {
+  sensor: 'Sensor-Bedingung',
+  time: 'Zeitfenster',
+  logic: 'Logik-Verknüpfung',
+  actuator: 'Aktor-Aktion',
+  notification: 'Benachrichtigung',
+  delay: 'Verzögerung',
+}
+
+const nodeTypeIcons: Record<string, typeof Thermometer> = {
+  sensor: Thermometer,
+  time: Clock,
+  logic: GitMerge,
+  actuator: Power,
+  notification: Bell,
+  delay: Timer,
+}
+
+const operatorOptions = [
+  { value: '>', label: 'größer als (>)' },
+  { value: '>=', label: 'größer gleich (≥)' },
+  { value: '<', label: 'kleiner als (<)' },
+  { value: '<=', label: 'kleiner gleich (≤)' },
+  { value: '==', label: 'gleich (=)' },
+  { value: '!=', label: 'ungleich (≠)' },
+  { value: 'between', label: 'zwischen (↔)' },
+]
+
+const sensorTypeOptions = [
+  { value: 'DS18B20', label: 'DS18B20 (Temperatur)' },
+  { value: 'SHT31', label: 'SHT31 (Temp + Feuchte)' },
+  { value: 'BME280', label: 'BME280 (Temp + Feuchte + Druck)' },
+  { value: 'pH', label: 'pH-Sensor' },
+  { value: 'EC', label: 'EC (Leitfähigkeit)' },
+  { value: 'moisture', label: 'Bodenfeuchte' },
+  { value: 'light', label: 'Lichtsensor' },
+  { value: 'co2', label: 'CO2-Sensor' },
+  { value: 'flow', label: 'Durchflusssensor' },
+  { value: 'level', label: 'Füllstandsensor' },
+]
+
+const commandOptions = [
+  { value: 'ON', label: 'Einschalten (ON)' },
+  { value: 'OFF', label: 'Ausschalten (OFF)' },
+  { value: 'PWM', label: 'PWM-Wert setzen' },
+  { value: 'TOGGLE', label: 'Umschalten (TOGGLE)' },
+]
+
+const channelOptions = [
+  { value: 'websocket', label: 'WebSocket (Dashboard)' },
+  { value: 'email', label: 'E-Mail' },
+  { value: 'webhook', label: 'Webhook' },
+]
+
+const dayLabels = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
+
+// Local editable copy of node data
+const localData = ref<Record<string, unknown>>({})
+
+// Sync when node changes
+watch(
+  () => props.node,
+  (newNode) => {
+    if (newNode) {
+      localData.value = { ...newNode.data }
+    }
+  },
+  { immediate: true, deep: true }
+)
+
+// Emit on changes
+function updateField(key: string, value: unknown) {
+  localData.value[key] = value
+  if (props.node) {
+    emit('update:data', props.node.id, { ...localData.value })
+  }
+}
+
+function toggleDay(day: number) {
+  const days = (localData.value.daysOfWeek as number[]) || []
+  const idx = days.indexOf(day)
+  const updated = idx >= 0 ? days.filter((d) => d !== day) : [...days, day].sort()
+  updateField('daysOfWeek', updated)
+}
+
+function isDayActive(day: number): boolean {
+  const days = (localData.value.daysOfWeek as number[]) || []
+  return days.includes(day)
+}
+
+const nodeType = computed(() => props.node?.type || '')
+const typeLabel = computed(() => nodeTypeLabels[nodeType.value] || 'Unbekannt')
+const typeIcon = computed(() => nodeTypeIcons[nodeType.value] || Thermometer)
+
+// Available ESP devices for selectors
+const espDevices = computed(() =>
+  espStore.devices.map((d) => ({
+    id: espStore.getDeviceId(d),
+    name: d.name || espStore.getDeviceId(d),
+  }))
+)
+
+// Device-aware: sensors on the currently selected ESP (sensor config)
+const availableSensors = computed(() => {
+  const espId = localData.value.espId as string
+  if (!espId) return []
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!device?.sensors) return []
+  return (device.sensors as MockSensor[]).map(s => ({
+    gpio: s.gpio,
+    sensorType: s.sensor_type,
+    name: s.name || `${s.sensor_type} (GPIO ${s.gpio})`,
+    label: s.name
+      ? `${s.name} – ${s.sensor_type} (GPIO ${s.gpio})`
+      : `${s.sensor_type} (GPIO ${s.gpio})`,
+  }))
+})
+
+// Device-aware: actuators on the currently selected ESP (actuator config)
+const availableActuators = computed(() => {
+  const espId = localData.value.espId as string
+  if (!espId) return []
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!device?.actuators) return []
+  return (device.actuators as MockActuator[]).map(a => ({
+    gpio: a.gpio,
+    actuatorType: a.actuator_type,
+    name: a.name || `${a.actuator_type} (GPIO ${a.gpio})`,
+    label: a.name
+      ? `${a.name} – ${a.actuator_type} (GPIO ${a.gpio})`
+      : `${a.actuator_type} (GPIO ${a.gpio})`,
+  }))
+})
+
+// Handle ESP change in sensor config → reset sensor-specific fields
+function handleSensorEspChange(espId: string) {
+  updateField('espId', espId)
+  updateField('gpio', undefined)
+  updateField('sensorType', '')
+}
+
+// Handle ESP change in actuator config → reset actuator-specific fields
+function handleActuatorEspChange(espId: string) {
+  updateField('espId', espId)
+  updateField('gpio', undefined)
+}
+
+// Select sensor from device-aware dropdown → auto-fill gpio + sensorType
+function selectSensor(value: string) {
+  if (!value) {
+    updateField('gpio', undefined)
+    updateField('sensorType', '')
+    return
+  }
+  const gpio = Number(value)
+  const sensor = availableSensors.value.find(s => s.gpio === gpio)
+  if (sensor) {
+    updateField('gpio', sensor.gpio)
+    updateField('sensorType', sensor.sensorType)
+  }
+}
+
+// Select actuator from device-aware dropdown → auto-fill gpio
+function selectActuator(value: string) {
+  if (!value) {
+    updateField('gpio', undefined)
+    return
+  }
+  const gpio = Number(value)
+  const actuator = availableActuators.value.find(a => a.gpio === gpio)
+  if (actuator) {
+    updateField('gpio', actuator.gpio)
+  }
+}
+</script>
+
+<template>
+  <Transition name="config-slide">
+    <div v-if="node" class="config-panel">
+      <!-- Header -->
+      <div class="config-panel__header">
+        <div class="config-panel__type">
+          <div class="config-panel__type-icon" :class="`config-panel__type-icon--${nodeType}`">
+            <component :is="typeIcon" class="w-4 h-4" />
+          </div>
+          <span class="config-panel__type-label">{{ typeLabel }}</span>
+        </div>
+        <button class="config-panel__close" @click="emit('close')">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="config-panel__body">
+        <!-- ======================== SENSOR CONFIG ======================== -->
+        <template v-if="nodeType === 'sensor'">
+          <div class="config-field">
+            <label class="config-label">ESP-Gerät</label>
+            <select
+              class="config-select"
+              :value="localData.espId"
+              @change="handleSensorEspChange(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">-- ESP wählen --</option>
+              <option v-for="esp in espDevices" :key="esp.id" :value="esp.id">
+                {{ esp.name }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Device-aware sensor selection -->
+          <template v-if="localData.espId && availableSensors.length > 0">
+            <div class="config-field">
+              <label class="config-label">Sensor</label>
+              <select
+                class="config-select"
+                :value="localData.gpio ?? ''"
+                @change="selectSensor(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">-- Sensor wählen --</option>
+                <option v-for="s in availableSensors" :key="s.gpio" :value="s.gpio">
+                  {{ s.label }}
+                </option>
+              </select>
+              <p v-if="localData.gpio != null && localData.sensorType" class="config-hint">
+                GPIO {{ localData.gpio }} · {{ localData.sensorType }}
+              </p>
+            </div>
+          </template>
+
+          <!-- Fallback: manual input when ESP has no sensor data -->
+          <template v-else-if="localData.espId">
+            <div class="config-field">
+              <p class="config-hint config-hint--warn">Keine Sensoren konfiguriert – manuelle Eingabe</p>
+            </div>
+            <div class="config-field">
+              <label class="config-label">GPIO Pin</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.gpio"
+                min="0"
+                max="39"
+                @input="updateField('gpio', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+            <div class="config-field">
+              <label class="config-label">Sensor-Typ</label>
+              <select
+                class="config-select"
+                :value="localData.sensorType"
+                @change="updateField('sensorType', ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="opt in sensorTypeOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+          </template>
+
+          <!-- No ESP selected hint -->
+          <div v-else class="config-field">
+            <p class="config-hint">Wähle zuerst ein ESP-Gerät aus.</p>
+          </div>
+
+          <div class="config-field">
+            <label class="config-label">Operator</label>
+            <select
+              class="config-select"
+              :value="localData.operator"
+              @change="updateField('operator', ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="opt in operatorOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="localData.operator === 'between'" class="config-field-row">
+            <div class="config-field config-field--half">
+              <label class="config-label">Min</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.min"
+                step="0.1"
+                @input="updateField('min', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+            <div class="config-field config-field--half">
+              <label class="config-label">Max</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.max"
+                step="0.1"
+                @input="updateField('max', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+          </div>
+
+          <div v-else class="config-field">
+            <label class="config-label">Schwellwert</label>
+            <input
+              type="number"
+              class="config-input"
+              :value="localData.value"
+              step="0.1"
+              @input="updateField('value', Number(($event.target as HTMLInputElement).value))"
+            />
+          </div>
+        </template>
+
+        <!-- ======================== TIME CONFIG ======================== -->
+        <template v-if="nodeType === 'time'">
+          <div class="config-field-row">
+            <div class="config-field config-field--half">
+              <label class="config-label">Von</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.startHour"
+                min="0"
+                max="23"
+                @input="updateField('startHour', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+            <div class="config-field config-field--half">
+              <label class="config-label">Bis</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.endHour"
+                min="0"
+                max="23"
+                @input="updateField('endHour', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+          </div>
+
+          <div class="config-field">
+            <label class="config-label">Wochentage</label>
+            <div class="config-days">
+              <button
+                v-for="(label, idx) in dayLabels"
+                :key="idx"
+                class="config-day"
+                :class="{ 'config-day--active': isDayActive(idx) }"
+                @click="toggleDay(idx)"
+              >
+                {{ label }}
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- ======================== LOGIC CONFIG ======================== -->
+        <template v-if="nodeType === 'logic'">
+          <div class="config-field">
+            <label class="config-label">Verknüpfung</label>
+            <div class="config-toggle-group">
+              <button
+                class="config-toggle-btn"
+                :class="{ 'config-toggle-btn--active': localData.operator === 'AND' }"
+                @click="updateField('operator', 'AND')"
+              >
+                UND
+              </button>
+              <button
+                class="config-toggle-btn"
+                :class="{ 'config-toggle-btn--active': localData.operator === 'OR' }"
+                @click="updateField('operator', 'OR')"
+              >
+                ODER
+              </button>
+            </div>
+            <p class="config-hint">
+              {{ localData.operator === 'AND'
+                ? 'Alle verbundenen Bedingungen müssen erfüllt sein.'
+                : 'Mindestens eine verbundene Bedingung muss erfüllt sein.'
+              }}
+            </p>
+          </div>
+        </template>
+
+        <!-- ======================== ACTUATOR CONFIG ======================== -->
+        <template v-if="nodeType === 'actuator'">
+          <div class="config-field">
+            <label class="config-label">ESP-Gerät</label>
+            <select
+              class="config-select"
+              :value="localData.espId"
+              @change="handleActuatorEspChange(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">-- ESP wählen --</option>
+              <option v-for="esp in espDevices" :key="esp.id" :value="esp.id">
+                {{ esp.name }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Device-aware actuator selection -->
+          <template v-if="localData.espId && availableActuators.length > 0">
+            <div class="config-field">
+              <label class="config-label">Aktor</label>
+              <select
+                class="config-select"
+                :value="localData.gpio ?? ''"
+                @change="selectActuator(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">-- Aktor wählen --</option>
+                <option v-for="a in availableActuators" :key="a.gpio" :value="a.gpio">
+                  {{ a.label }}
+                </option>
+              </select>
+              <p v-if="localData.gpio != null" class="config-hint">
+                GPIO {{ localData.gpio }} · {{ availableActuators.find(a => a.gpio === localData.gpio)?.actuatorType || '' }}
+              </p>
+            </div>
+          </template>
+
+          <!-- Fallback: manual GPIO input when ESP has no actuator data -->
+          <template v-else-if="localData.espId">
+            <div class="config-field">
+              <p class="config-hint config-hint--warn">Keine Aktoren konfiguriert – manuelle Eingabe</p>
+            </div>
+            <div class="config-field">
+              <label class="config-label">GPIO Pin</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.gpio"
+                min="0"
+                max="39"
+                @input="updateField('gpio', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+          </template>
+
+          <!-- No ESP selected hint -->
+          <div v-else class="config-field">
+            <p class="config-hint">Wähle zuerst ein ESP-Gerät aus.</p>
+          </div>
+
+          <div class="config-field">
+            <label class="config-label">Befehl</label>
+            <select
+              class="config-select"
+              :value="localData.command"
+              @change="updateField('command', ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="opt in commandOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="localData.command === 'PWM'" class="config-field">
+            <label class="config-label">PWM-Wert (0-100%)</label>
+            <input
+              type="range"
+              class="config-range"
+              :value="(localData.pwmValue as number) ?? 50"
+              min="0"
+              max="100"
+              @input="updateField('pwmValue', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="config-range-value">{{ (localData.pwmValue as number) ?? 50 }}%</span>
+          </div>
+
+          <div class="config-field">
+            <label class="config-label">Auto-Abschaltung (Sek.)</label>
+            <input
+              type="number"
+              class="config-input"
+              :value="localData.duration"
+              min="0"
+              placeholder="0 = Keine"
+              @input="updateField('duration', Number(($event.target as HTMLInputElement).value) || undefined)"
+            />
+            <p class="config-hint">
+              0 oder leer = dauerhaft aktiv
+            </p>
+          </div>
+        </template>
+
+        <!-- ======================== NOTIFICATION CONFIG ======================== -->
+        <template v-if="nodeType === 'notification'">
+          <div class="config-field">
+            <label class="config-label">Kanal</label>
+            <select
+              class="config-select"
+              :value="localData.channel"
+              @change="updateField('channel', ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="opt in channelOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <div class="config-field">
+            <label class="config-label">Ziel</label>
+            <input
+              type="text"
+              class="config-input"
+              :value="localData.target"
+              placeholder="z.B. admin@example.com"
+              @input="updateField('target', ($event.target as HTMLInputElement).value)"
+            />
+          </div>
+
+          <div class="config-field">
+            <label class="config-label">Nachricht</label>
+            <textarea
+              class="config-textarea"
+              :value="String(localData.messageTemplate ?? '')"
+              placeholder="Temperatur {value}°C überschritten!"
+              rows="3"
+              @input="updateField('messageTemplate', ($event.target as HTMLTextAreaElement).value)"
+            ></textarea>
+            <p class="config-hint">
+              Variablen: {value}, {sensor_type}, {esp_id}, {timestamp}
+            </p>
+          </div>
+        </template>
+
+        <!-- ======================== DELAY CONFIG ======================== -->
+        <template v-if="nodeType === 'delay'">
+          <div class="config-field">
+            <label class="config-label">Wartezeit (Sekunden)</label>
+            <input
+              type="number"
+              class="config-input"
+              :value="localData.seconds"
+              min="1"
+              max="86400"
+              @input="updateField('seconds', Number(($event.target as HTMLInputElement).value))"
+            />
+            <p class="config-hint">
+              {{ localData.seconds ? `= ${Math.floor((localData.seconds as number) / 60)} Min. ${(localData.seconds as number) % 60} Sek.` : '' }}
+            </p>
+          </div>
+        </template>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="config-panel__footer">
+        <button class="config-action config-action--duplicate" @click="emit('duplicate-node', node!.id)">
+          <Copy class="w-3.5 h-3.5" />
+          Duplizieren
+        </button>
+        <button class="config-action config-action--delete" @click="emit('delete-node', node!.id)">
+          <Trash2 class="w-3.5 h-3.5" />
+          Löschen
+        </button>
+      </div>
+    </div>
+  </Transition>
+</template>
+
+<style scoped>
+.config-panel {
+  width: 280px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border-left: 1px solid var(--glass-border);
+  overflow-y: auto;
+}
+
+.config-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.config-panel__type {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.config-panel__type-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+}
+
+.config-panel__type-icon--sensor {
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--color-iridescent-1);
+}
+
+.config-panel__type-icon--time {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--color-warning);
+}
+
+.config-panel__type-icon--logic {
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--color-iridescent-3);
+}
+
+.config-panel__type-icon--actuator {
+  background: rgba(192, 132, 252, 0.15);
+  color: var(--color-iridescent-4);
+}
+
+.config-panel__type-icon--notification {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--color-success);
+}
+
+.config-panel__type-icon--delay {
+  background: rgba(112, 112, 128, 0.15);
+  color: var(--color-text-muted);
+}
+
+.config-panel__type-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.config-panel__close {
+  padding: 0.25rem;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.config-panel__close:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.config-panel__body {
+  flex: 1;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.config-field--half {
+  flex: 1;
+}
+
+.config-field-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.config-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.config-input,
+.config-select,
+.config-textarea {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.config-input:focus,
+.config-select:focus,
+.config-textarea:focus {
+  border-color: var(--color-iridescent-2);
+}
+
+.config-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23707080' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  padding-right: 1.75rem;
+}
+
+.config-select option {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.config-textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.config-range {
+  width: 100%;
+  accent-color: var(--color-iridescent-2);
+}
+
+.config-range-value {
+  font-size: 0.75rem;
+  color: var(--color-iridescent-2);
+  font-weight: 600;
+  text-align: right;
+}
+
+.config-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.config-hint--warn {
+  color: var(--color-warning);
+  font-style: italic;
+}
+
+.config-toggle-group {
+  display: flex;
+  gap: 1px;
+  background: var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.config-toggle-btn {
+  flex: 1;
+  padding: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--color-bg-tertiary);
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.config-toggle-btn--active {
+  background: linear-gradient(135deg, var(--color-iridescent-2), var(--color-iridescent-3));
+  color: white;
+}
+
+.config-days {
+  display: flex;
+  gap: 4px;
+}
+
+.config-day {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.config-day:hover {
+  border-color: var(--color-iridescent-2);
+  color: var(--color-text-primary);
+}
+
+.config-day--active {
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  border-color: transparent;
+  color: white;
+}
+
+.config-panel__footer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+.config-action {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.config-action--duplicate {
+  color: var(--color-text-secondary);
+}
+
+.config-action--duplicate:hover {
+  border-color: var(--color-iridescent-2);
+  color: var(--color-iridescent-2);
+}
+
+.config-action--delete {
+  color: var(--color-text-muted);
+}
+
+.config-action--delete:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* Slide transition */
+.config-slide-enter-active,
+.config-slide-leave-active {
+  transition: all 0.2s ease;
+}
+
+.config-slide-enter-from,
+.config-slide-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+</style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Plus, Settings, AlertTriangle, Sparkles, Radio } from 'lucide-vue-next'
+import { Plus, Settings, AlertTriangle, Sparkles, Radio, BarChart3 } from 'lucide-vue-next'
 import StatusPill from './StatusPill.vue'
 
 type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
@@ -13,6 +13,7 @@ interface Props {
   safeModeCount: number
   pendingCount?: number
   activeFilters: Set<StatusFilter>
+  showWidgets?: boolean
   hasProblems?: boolean
   problemMessage?: string
   // Type filter props (consolidated from DashboardView)
@@ -26,6 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
   hasProblems: false,
   problemMessage: '',
   pendingCount: 0,
+  showWidgets: true,
   filterType: 'all',
   totalCount: 0,
   mockCount: 0,
@@ -35,6 +37,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   toggleFilter: [filter: StatusFilter]
   'update:filterType': [filter: TypeFilter]
+  toggleWidgets: []
   createMockEsp: []
   openSettings: []
   openPendingDevices: [event: MouseEvent]
@@ -161,6 +164,19 @@ const barClasses = computed(() => {
       >
         <Plus class="w-4 h-4" />
         <span class="action-bar__btn-text">Mock</span>
+      </button>
+
+      <!-- Widget Toggle -->
+      <button
+        :class="[
+          'action-bar__btn action-bar__btn--ghost',
+          showWidgets ? 'action-bar__btn--ghost-active' : ''
+        ]"
+        @click="emit('toggleWidgets')"
+        :title="showWidgets ? 'Widgets ausblenden' : 'Widgets einblenden'"
+        aria-label="Dashboard Widgets ein-/ausblenden"
+      >
+        <BarChart3 class="w-4 h-4" />
       </button>
 
       <!-- Tertiary: Settings -->
@@ -336,6 +352,10 @@ const barClasses = computed(() => {
 .action-bar__btn--ghost:hover {
   color: var(--color-text-secondary);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.action-bar__btn--ghost-active {
+  color: var(--color-accent);
 }
 
 /* ============================================

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/shared/stores'
 import { useRouter } from 'vue-router'
 import { Settings, User, LogOut, Server } from 'lucide-vue-next'
 
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 const router = useRouter()
 
 const apiUrl = ref(window.location.origin)
@@ -15,7 +17,12 @@ async function handleLogout() {
 }
 
 async function handleLogoutAll() {
-  if (confirm('This will log you out from all devices. Continue?')) {
+  const confirmed = await uiStore.confirm({
+    title: 'Alle Geräte abmelden',
+    message: 'Du wirst auf allen Geräten abgemeldet. Fortfahren?',
+    variant: 'warning',
+  })
+  if (confirmed) {
     await authStore.logout(true)
     router.push('/login')
   }

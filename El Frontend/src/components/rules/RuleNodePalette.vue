@@ -1,0 +1,474 @@
+<script setup lang="ts">
+/**
+ * RuleNodePalette
+ *
+ * Left sidebar for the rules editor with draggable node types.
+ * Grouped into: Conditions (sensors, time), Logic (AND/OR), Actions (actuator, notification, delay).
+ * Drag items onto the canvas to create nodes.
+ */
+
+import { ref } from 'vue'
+import {
+  Thermometer,
+  Clock,
+  GitMerge,
+  Power,
+  Bell,
+  Timer,
+  ChevronDown,
+  Search,
+  Droplets,
+  Gauge,
+  Sun,
+  Wind,
+  Waves,
+  Leaf,
+  Zap,
+} from 'lucide-vue-next'
+import type { Component } from 'vue'
+
+export interface PaletteItem {
+  type: string
+  label: string
+  description: string
+  icon: Component
+  category: 'condition' | 'logic' | 'action'
+  defaults?: Record<string, unknown>
+}
+
+const searchQuery = ref('')
+
+const categories = [
+  {
+    id: 'condition',
+    label: 'Bedingungen',
+    collapsed: ref(false),
+    items: [
+      {
+        type: 'sensor',
+        label: 'Sensor',
+        description: 'Sensor-Schwellwert Bedingung',
+        icon: Thermometer,
+        category: 'condition' as const,
+        defaults: { sensorType: 'DS18B20', operator: '>', value: 25 },
+      },
+      {
+        type: 'sensor',
+        label: 'Feuchtigkeit',
+        description: 'Luftfeuchtigkeit Bedingung',
+        icon: Droplets,
+        category: 'condition' as const,
+        defaults: { sensorType: 'SHT31', operator: '<', value: 40 },
+      },
+      {
+        type: 'sensor',
+        label: 'pH-Wert',
+        description: 'pH-Sensor Bedingung',
+        icon: Gauge,
+        category: 'condition' as const,
+        defaults: { sensorType: 'pH', operator: 'between', value: 6, min: 5.5, max: 7.0 },
+      },
+      {
+        type: 'sensor',
+        label: 'Licht',
+        description: 'Lichtsensor Bedingung',
+        icon: Sun,
+        category: 'condition' as const,
+        defaults: { sensorType: 'light', operator: '<', value: 500 },
+      },
+      {
+        type: 'sensor',
+        label: 'CO2',
+        description: 'CO2-Konzentration Bedingung',
+        icon: Wind,
+        category: 'condition' as const,
+        defaults: { sensorType: 'co2', operator: '>', value: 1000 },
+      },
+      {
+        type: 'sensor',
+        label: 'Bodenfeuchte',
+        description: 'Bodenfeuchtigkeit Bedingung',
+        icon: Waves,
+        category: 'condition' as const,
+        defaults: { sensorType: 'moisture', operator: '<', value: 30 },
+      },
+      {
+        type: 'sensor',
+        label: 'EC-Wert',
+        description: 'Leitfähigkeit Bedingung',
+        icon: Zap,
+        category: 'condition' as const,
+        defaults: { sensorType: 'EC', operator: 'between', value: 1.2, min: 0.8, max: 2.0 },
+      },
+      {
+        type: 'sensor',
+        label: 'Füllstand',
+        description: 'Tank-/Behälter-Füllstand',
+        icon: Leaf,
+        category: 'condition' as const,
+        defaults: { sensorType: 'level', operator: '<', value: 20 },
+      },
+      {
+        type: 'time',
+        label: 'Zeitfenster',
+        description: 'Tageszeitbasierte Bedingung',
+        icon: Clock,
+        category: 'condition' as const,
+        defaults: { startHour: 8, endHour: 18 },
+      },
+    ],
+  },
+  {
+    id: 'logic',
+    label: 'Logik',
+    collapsed: ref(false),
+    items: [
+      {
+        type: 'logic',
+        label: 'UND',
+        description: 'Alle Bedingungen müssen zutreffen',
+        icon: GitMerge,
+        category: 'logic' as const,
+        defaults: { operator: 'AND' },
+      },
+      {
+        type: 'logic',
+        label: 'ODER',
+        description: 'Mindestens eine Bedingung muss zutreffen',
+        icon: GitMerge,
+        category: 'logic' as const,
+        defaults: { operator: 'OR' },
+      },
+    ],
+  },
+  {
+    id: 'action',
+    label: 'Aktionen',
+    collapsed: ref(false),
+    items: [
+      {
+        type: 'actuator',
+        label: 'Aktor steuern',
+        description: 'Aktor ein-/ausschalten oder PWM setzen',
+        icon: Power,
+        category: 'action' as const,
+        defaults: { command: 'ON' },
+      },
+      {
+        type: 'notification',
+        label: 'Benachrichtigung',
+        description: 'Email, Webhook oder WebSocket Nachricht',
+        icon: Bell,
+        category: 'action' as const,
+        defaults: { channel: 'websocket', target: '', messageTemplate: '' },
+      },
+      {
+        type: 'delay',
+        label: 'Verzögerung',
+        description: 'Aktion nach Wartezeit ausführen',
+        icon: Timer,
+        category: 'action' as const,
+        defaults: { seconds: 60 },
+      },
+    ],
+  },
+]
+
+function onDragStart(event: DragEvent, item: PaletteItem) {
+  if (!event.dataTransfer) return
+  event.dataTransfer.setData(
+    'application/rulenode',
+    JSON.stringify({
+      type: item.type,
+      label: item.label,
+      defaults: item.defaults || {},
+    })
+  )
+  event.dataTransfer.effectAllowed = 'move'
+}
+
+function matchesSearch(item: PaletteItem): boolean {
+  if (!searchQuery.value) return true
+  const q = searchQuery.value.toLowerCase()
+  return (
+    item.label.toLowerCase().includes(q) ||
+    item.description.toLowerCase().includes(q) ||
+    item.type.toLowerCase().includes(q)
+  )
+}
+</script>
+
+<template>
+  <div class="palette">
+    <div class="palette__header">
+      <h3 class="palette__title">Bausteine</h3>
+    </div>
+
+    <!-- Search -->
+    <div class="palette__search">
+      <Search class="palette__search-icon" />
+      <input
+        v-model="searchQuery"
+        type="text"
+        placeholder="Suchen..."
+        class="palette__search-input"
+      />
+    </div>
+
+    <!-- Categories -->
+    <div class="palette__categories">
+      <div
+        v-for="category in categories"
+        :key="category.id"
+        class="palette__category"
+      >
+        <button
+          class="palette__category-header"
+          @click="category.collapsed.value = !category.collapsed.value"
+        >
+          <span class="palette__category-label">{{ category.label }}</span>
+          <ChevronDown
+            class="palette__category-chevron"
+            :class="{ 'palette__category-chevron--collapsed': category.collapsed.value }"
+          />
+        </button>
+
+        <Transition name="palette-collapse">
+          <div v-show="!category.collapsed.value" class="palette__items">
+            <template v-for="item in category.items" :key="item.label">
+              <div
+                v-if="matchesSearch(item)"
+                class="palette__item"
+                :class="`palette__item--${item.category}`"
+                draggable="true"
+                @dragstart="onDragStart($event, item)"
+              >
+                <div class="palette__item-icon">
+                  <component :is="item.icon" class="w-4 h-4" />
+                </div>
+                <div class="palette__item-text">
+                  <span class="palette__item-label">{{ item.label }}</span>
+                  <span class="palette__item-desc">{{ item.description }}</span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </Transition>
+      </div>
+    </div>
+
+    <!-- Hint -->
+    <div class="palette__hint">
+      Bausteine auf die Arbeitsfläche ziehen
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.palette {
+  width: 240px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--glass-border);
+  overflow-y: auto;
+}
+
+.palette__header {
+  padding: 1rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.palette__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.palette__search {
+  position: relative;
+  padding: 0.75rem;
+}
+
+.palette__search-icon {
+  position: absolute;
+  left: 1.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.palette__search-input {
+  width: 100%;
+  padding: 0.5rem 0.5rem 0.5rem 2rem;
+  font-size: 0.8125rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.palette__search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.palette__search-input:focus {
+  border-color: var(--color-iridescent-2);
+}
+
+.palette__categories {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0.5rem;
+}
+
+.palette__category {
+  margin-bottom: 0.25rem;
+}
+
+.palette__category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.palette__category-header:hover {
+  color: var(--color-text-secondary);
+}
+
+.palette__category-chevron {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--transition-base);
+}
+
+.palette__category-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.palette__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 0.5rem;
+}
+
+.palette__item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-md);
+  cursor: grab;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+  user-select: none;
+}
+
+.palette__item:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
+}
+
+.palette__item:active {
+  cursor: grabbing;
+  opacity: 0.7;
+  transform: scale(0.97);
+}
+
+.palette__item-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+/* Category-specific icon colors */
+.palette__item--condition .palette__item-icon {
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--color-iridescent-1);
+}
+
+.palette__item--logic .palette__item-icon {
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--color-iridescent-3);
+}
+
+.palette__item--action .palette__item-icon {
+  background: rgba(192, 132, 252, 0.15);
+  color: var(--color-iridescent-4);
+}
+
+.palette__item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.palette__item-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette__item-desc {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette__hint {
+  padding: 0.75rem 1rem;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  border-top: 1px solid var(--glass-border);
+}
+
+/* Collapse transition */
+.palette-collapse-enter-active,
+.palette-collapse-leave-active {
+  transition: all var(--transition-base);
+  overflow: hidden;
+}
+
+.palette-collapse-enter-from,
+.palette-collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+
+.palette-collapse-enter-to,
+.palette-collapse-leave-from {
+  opacity: 1;
+  max-height: 500px;
+}
+</style>

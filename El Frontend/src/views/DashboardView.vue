@@ -12,8 +12,9 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/stores/logic'
+import { useUiStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
-import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
+import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts } from '@/composables'
 import {
   Plus,
   Filter,
@@ -27,19 +28,23 @@ const logger = createLogger('Dashboard')
 import ActionBar from '@/components/dashboard/ActionBar.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
-import ESPSettingsPopover from '@/components/esp/ESPSettingsPopover.vue'
+import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ZoneGroup from '@/components/zones/ZoneGroup.vue'
 import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnectionOverlay.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
-import { LoadingState, EmptyState } from '@/components/common'
+import { EmptyState } from '@/shared/design/patterns'
+import { BaseSkeleton as LoadingState } from '@/shared/design/primitives'
+import { WidgetGrid, SystemHealthWidget, DeviceStatusWidget, SensorOverviewWidget } from '@/components/widgets'
 
 const router = useRouter()
 const route = useRoute()
 const espStore = useEspStore()
 const logicStore = useLogicStore()
-const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
+const uiStore = useUiStore()
+const { groupDevicesByZone, handleDeviceDrop, undo: zoneDragUndo, redo: zoneDragRedo } = useZoneDragDrop()
+const { register: registerShortcut, activateScope, deactivateScope } = useKeyboardShortcuts()
 
 // Filter state (type filter unchanged)
 const filterType = ref<'all' | 'mock' | 'real'>('all')
@@ -60,22 +65,62 @@ const isSettingsOpen = ref(false)
 // Cross-ESP connections toggle
 const showCrossEspConnections = ref(true)
 
+// Widget grid visibility (persisted in localStorage)
+const WIDGET_STORAGE_KEY = 'dashboard.showWidgets'
+const showWidgets = ref(localStorage.getItem(WIDGET_STORAGE_KEY) !== 'false')
+
+function toggleWidgets(): void {
+  showWidgets.value = !showWidgets.value
+  localStorage.setItem(WIDGET_STORAGE_KEY, String(showWidgets.value))
+}
+
+// ── Dashboard Keyboard Shortcuts ──
+const shortcutCleanups: Array<() => void> = []
+
 onMounted(() => {
   espStore.fetchAll()
-  espStore.fetchPendingDevices()  // Fetch pending devices for Discovery/Approval
+  espStore.fetchPendingDevices()
   logicStore.fetchRules()
-  // Subscribe to WebSocket for live logic execution updates
   logicStore.subscribeToWebSocket()
+
+  // Activate dashboard scope
+  activateScope('dashboard')
+
+  // Ctrl+Z → Undo zone assignment
+  shortcutCleanups.push(registerShortcut({
+    key: 'z',
+    ctrl: true,
+    handler: (e) => {
+      e.preventDefault()
+      zoneDragUndo()
+    },
+    description: 'Zone-Zuweisung rückgängig',
+    scope: 'dashboard',
+  }))
+
+  // Ctrl+Shift+Z → Redo zone assignment
+  shortcutCleanups.push(registerShortcut({
+    key: 'z',
+    ctrl: true,
+    shift: true,
+    handler: (e) => {
+      e.preventDefault()
+      zoneDragRedo()
+    },
+    description: 'Zone-Zuweisung wiederherstellen',
+    scope: 'dashboard',
+  }))
 })
 
 onUnmounted(() => {
-  // Unsubscribe from WebSocket when leaving dashboard
   logicStore.unsubscribeFromWebSocket()
+  deactivateScope('dashboard')
+  shortcutCleanups.forEach(fn => fn())
 })
 
 // =============================================================================
 // Query Parameter Support: ?openSettings=ESP_ID
-// Opens ESPSettingsPopover when navigating from /devices/:espId redirect
+// Opens ESPSettingsSheet when navigating from /devices/:espId redirect
 // =============================================================================
 watch(
   [() => route.query.openSettings, () => espStore.devices, () => espStore.isLoading],
@@ -276,10 +321,13 @@ async function handleDelete(espId: string) {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   const displayName = device?.name || espId
 
-  // Simple confirmation dialog - can be enhanced with a proper modal later
-  if (!confirm(`Möchtest du "${displayName}" wirklich löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden.`)) {
-    return
-  }
+  const confirmed = await uiStore.confirm({
+    title: 'Gerät löschen',
+    message: `Möchtest du "${displayName}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    variant: 'danger',
+    confirmText: 'Löschen',
+  })
+  if (!confirmed) return
 
   try {
     await espStore.deleteDevice(espId)
@@ -322,13 +370,13 @@ async function handleToggleSafeMode(espId: string) {
 
 /**
  * Handle settings request from ESPOrbitalLayout
- * Opens ESPSettingsPopover with the selected device
+ * Opens ESPSettingsSheet with the selected device
  */
 function handleSettings(device: ESPDevice) {
   const deviceId = espStore.getDeviceId(device)
   logger.info(`Settings requested for ${deviceId}`)
 
-  // Open ESPSettingsPopover
+  // Open ESPSettingsSheet
   settingsDevice.value = device
   isSettingsOpen.value = true
 }
@@ -356,7 +404,7 @@ function handleDeviceDeleted(payload: { deviceId: string }) {
 }
 
 /**
- * Handle name update from ESPOrbitalLayout or ESPSettingsPopover (Phase 3)
+ * Handle name update from ESPOrbitalLayout or ESPSettingsSheet (Phase 3)
  */
 function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
   logger.info(`Device name updated: ${payload.deviceId} → "${payload.name || 'Unbenannt'}"`)
@@ -364,7 +412,7 @@ function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
 }
 
 /**
- * Handle zone update from ESPSettingsPopover (Phase 4)
+ * Handle zone update from ESPSettingsSheet (Phase 4)
  * Zone assignment is already processed by ZoneAssignmentPanel → zonesApi → ESP Store
  * This handler is for logging and potential future cross-component coordination
  */
@@ -397,16 +445,25 @@ function handleOpenPendingDevices(event: MouseEvent) {
       :active-filters="activeStatusFilters"
       :has-problems="hasProblems"
       :problem-message="problemMessage"
+      :show-widgets="showWidgets"
       :filter-type="filterType"
       :total-count="counts.all"
       :mock-count="counts.mock"
       :real-count="counts.real"
       @toggle-filter="toggleStatusFilter"
       @update:filter-type="filterType = $event"
+      @toggle-widgets="toggleWidgets"
       @create-mock-esp="showCreateMockModal = true"
       @open-settings="() => {}"
       @open-pending-devices="handleOpenPendingDevices"
     />
+
+    <!-- Dashboard Widgets -->
+    <WidgetGrid :collapsed="!showWidgets">
+      <SystemHealthWidget />
+      <DeviceStatusWidget />
+      <SensorOverviewWidget />
+    </WidgetGrid>
 
     <!-- Loading -->
     <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
@@ -519,7 +576,7 @@ function handleOpenPendingDevices(event: MouseEvent) {
     />
 
     <!-- ESP Settings Popover (Phase 2, 3 & 4) -->
-    <ESPSettingsPopover
+    <ESPSettingsSheet
       v-if="settingsDevice"
       :device="settingsDevice"
       :is-open="isSettingsOpen"

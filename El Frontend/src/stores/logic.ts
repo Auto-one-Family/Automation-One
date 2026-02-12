@@ -10,10 +10,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { logicApi } from '@/api/logic'
+import type { LogicRuleCreate, LogicRuleUpdate } from '@/api/logic'
 import { extractConnections } from '@/types/logic'
-import { createLogger } from '@/utils/logger'
-import type { LogicRule, LogicConnection } from '@/types/logic'
+import type { LogicRule, LogicConnection, ExecutionHistoryResponse } from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
+import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('LogicStore')
 
@@ -197,6 +198,78 @@ export const useLogicStore = defineStore('logic', () => {
   }
 
   /**
+   * Create a new logic rule
+   */
+  async function createRule(data: LogicRuleCreate): Promise<LogicRule | null> {
+    error.value = null
+
+    try {
+      const rule = await logicApi.createRule(data)
+      rules.value.push(rule)
+      console.info(`[Logic Store] Rule created: ${rule.id}`)
+      return rule
+    } catch (err) {
+      error.value = extractErrorMessage(err, 'Fehler beim Erstellen der Regel')
+      console.error('[Logic Store] createRule error:', err)
+      return null
+    }
+  }
+
+  /**
+   * Update an existing logic rule
+   */
+  async function updateRule(ruleId: string, data: LogicRuleUpdate): Promise<LogicRule | null> {
+    error.value = null
+
+    try {
+      const updated = await logicApi.updateRule(ruleId, data)
+      const idx = rules.value.findIndex((r) => r.id === ruleId)
+      if (idx !== -1) {
+        rules.value[idx] = updated
+      }
+      console.info(`[Logic Store] Rule updated: ${ruleId}`)
+      return updated
+    } catch (err) {
+      error.value = extractErrorMessage(err, 'Fehler beim Aktualisieren der Regel')
+      console.error('[Logic Store] updateRule error:', err)
+      return null
+    }
+  }
+
+  /**
+   * Delete a logic rule
+   */
+  async function deleteRule(ruleId: string): Promise<boolean> {
+    error.value = null
+
+    try {
+      await logicApi.deleteRule(ruleId)
+      rules.value = rules.value.filter((r) => r.id !== ruleId)
+      console.info(`[Logic Store] Rule deleted: ${ruleId}`)
+      return true
+    } catch (err) {
+      error.value = extractErrorMessage(err, 'Fehler beim Loeschen der Regel')
+      console.error('[Logic Store] deleteRule error:', err)
+      return false
+    }
+  }
+
+  /**
+   * Fetch execution history from server
+   */
+  async function fetchExecutionHistory(params?: {
+    rule_id?: string
+    limit?: number
+  }): Promise<ExecutionHistoryResponse> {
+    try {
+      return await logicApi.getExecutionHistory(params)
+    } catch (err) {
+      console.error('[Logic Store] fetchExecutionHistory error:', err)
+      return { items: [], total: 0 }
+    }
+  }
+
+  /**
    * Get connections for a specific ESP (either as source or target)
    */
   function getConnectionsForEsp(espId: string): LogicConnection[] {
@@ -330,8 +403,12 @@ export const useLogicStore = defineStore('logic', () => {
     // Actions
     fetchRules,
     fetchRule,
+    createRule,
+    updateRule,
+    deleteRule,
     toggleRule,
     testRule,
+    fetchExecutionHistory,
     getConnectionsForEsp,
     getOutgoingConnections,
     getIncomingConnections,

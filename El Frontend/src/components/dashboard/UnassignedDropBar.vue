@@ -20,16 +20,21 @@ import {
   ExternalLink,
   Loader2
 } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useEspStore } from '@/stores/esp'
+import { useDragStateStore } from '@/stores/dragState'
 import { espApi, type ESPDevice } from '@/api/esp'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('UnassignedDropBar')
 
 const espStore = useEspStore()
+const dragStore = useDragStateStore()
 const { handleRemoveFromZone, isProcessing, processingDeviceId } = useZoneDragDrop()
+
+// Global drag awareness (Phase 2.1)
+const isGlobalDragActive = computed(() => dragStore.isDraggingEspCard)
 
 // State
 const isExpanded = ref(false)
@@ -133,6 +138,7 @@ function goToDevice() {
       'unassigned-bar',
       {
         'unassigned-bar--expanded': isExpanded,
+        'unassigned-bar--drag-active': isGlobalDragActive,
         'unassigned-bar--drag-over': isDragOver,
         'unassigned-bar--has-devices': deviceCount > 0
       }
@@ -145,6 +151,8 @@ function goToDevice() {
     <!-- Collapsed Header (Always Visible) -->
     <button
       class="unassigned-bar__header"
+      :aria-expanded="isExpanded"
+      aria-controls="unassigned-content"
       @click="toggleExpanded"
     >
       <div class="unassigned-bar__header-left">
@@ -172,7 +180,7 @@ function goToDevice() {
 
     <!-- Expanded Content -->
     <Transition name="slide">
-      <div v-if="isExpanded || isDragOver" class="unassigned-bar__content">
+      <div v-if="isExpanded || isDragOver" id="unassigned-content" class="unassigned-bar__content" role="region" aria-label="Nicht zugewiesene Geräte">
         <!-- VueDraggable for drop target -->
         <!-- Use @change instead of @add for consistent event format (like ZoneGroup.vue) -->
         <VueDraggable
@@ -180,7 +188,8 @@ function goToDevice() {
           class="unassigned-bar__grid"
           :class="{ 'unassigned-bar__grid--empty': deviceCount === 0 }"
           group="esp-devices"
-          :animation="200"
+          :animation="100"
+          :swap-threshold="0.65"
           ghost-class="unassigned-item--ghost"
           @change="handleDragAdd"
         >
@@ -243,11 +252,32 @@ function goToDevice() {
   border-top-color: var(--color-iridescent-1);
 }
 
+/* Global drag active: Expand height + show as drop target */
+.unassigned-bar--drag-active {
+  border-top-style: dashed;
+  border-top-color: rgba(251, 191, 36, 0.4);
+}
+
+.unassigned-bar--drag-active .unassigned-bar__header {
+  padding: 0.875rem 1rem;
+}
+
+.unassigned-bar--drag-active .unassigned-bar__content {
+  display: block;
+}
+
 /* Drag over state */
 .unassigned-bar--drag-over {
+  border-top-style: solid;
   border-top-color: var(--color-warning);
   background: rgba(251, 191, 36, 0.05);
   box-shadow: 0 -4px 24px rgba(251, 191, 36, 0.2);
+  animation: bar-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes bar-pulse {
+  0%, 100% { box-shadow: 0 -4px 24px rgba(251, 191, 36, 0.2); }
+  50% { box-shadow: 0 -8px 32px rgba(251, 191, 36, 0.35); }
 }
 
 /* Has devices indicator */

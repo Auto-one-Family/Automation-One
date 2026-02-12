@@ -35,7 +35,7 @@ import {
   Tag,
   Activity,
 } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
 import { espApi, type ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'

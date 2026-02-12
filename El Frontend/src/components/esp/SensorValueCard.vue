@@ -14,7 +14,7 @@ import { computed, ref } from 'vue'
 import { Gauge, Info, Edit, Trash2, AlertTriangle, Activity, Clock, Calendar, Pause, HelpCircle, Play } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useToast } from '@/composables/useToast'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import {
   SENSOR_TYPE_CONFIG,
   getSensorLabel,

@@ -70,7 +70,7 @@ import {
   Power,
   Activity,
 } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { espApi, type ESPDevice } from '@/api/esp'

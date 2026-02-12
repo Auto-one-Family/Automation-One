@@ -15,16 +15,17 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, markRaw } from 'vue'
+import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square, MapPin, MinusCircle } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
+import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime } from '@/utils/formatters'
 import SensorSatellite from './SensorSatellite.vue'
 import ActuatorSatellite from './ActuatorSatellite.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
 import GpioPicker from './GpioPicker.vue'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
 import { espApi } from '@/api/esp'
@@ -32,8 +33,11 @@ import { sensorsApi } from '@/api/sensors'
 import { getStateInfo } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
+import { useUiStore } from '@/shared/stores'
+import { useContextMenu } from '@/composables/useContextMenu'
 import { useToast } from '@/composables/useToast'
 import { useGpioStatus } from '@/composables/useGpioStatus'
+import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import {
   SENSOR_TYPE_CONFIG,
   getSensorUnit,
@@ -74,7 +78,10 @@ const props = withDefaults(defineProps<Props>(), {
 
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
+const uiStore = useUiStore()
+const contextMenu = useContextMenu()
 const toast = useToast()
+const { handleDeviceDrop, handleRemoveFromZone, groupDevicesByZone } = useZoneDragDrop()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
@@ -1078,9 +1085,13 @@ async function removeSensor() {
   const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
 
   // Confirmation dialog
-  if (!confirm(`Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`)) {
-    return
-  }
+  const confirmed = await uiStore.confirm({
+    title: 'Sensor entfernen',
+    message: `Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`,
+    variant: 'danger',
+    confirmText: 'Entfernen',
+  })
+  if (!confirmed) return
 
   isEditSaving.value = true
   editError.value = null
@@ -1102,6 +1113,52 @@ async function removeSensor() {
   } finally {
     isEditSaving.value = false
   }
+}
+
+// =============================================================================
+// Context Menu (Right-click on ESP card)
+// =============================================================================
+function handleEspContextMenu(event: MouseEvent) {
+  const hasZone = !!(props.device as any)?.zone_id
+  contextMenu.open(event, [
+    {
+      id: 'settings',
+      label: 'Einstellungen',
+      icon: markRaw(Settings2),
+      action: () => emit('settings', props.device),
+    },
+    {
+      id: 'assign-zone',
+      label: 'Zone zuweisen',
+      icon: markRaw(MapPin),
+      action: () => emit('settings', props.device),
+    },
+    {
+      id: 'remove-zone',
+      label: 'Aus Zone entfernen',
+      icon: markRaw(MinusCircle),
+      disabled: !hasZone,
+      action: () => {
+        // Handled via settings sheet zone panel
+        emit('settings', props.device)
+      },
+    },
+    {
+      id: 'heartbeat',
+      label: 'Heartbeat senden',
+      icon: markRaw(Heart),
+      disabled: !isMock.value,
+      action: () => emit('heartbeat', props.device),
+    },
+    { id: 'sep-1', label: '', separator: true },
+    {
+      id: 'delete',
+      label: 'Gerät löschen',
+      icon: markRaw(Trash2),
+      variant: 'danger' as const,
+      action: () => emit('delete', props.device),
+    },
+  ])
 }
 
 // =============================================================================
@@ -1161,6 +1218,27 @@ const stateInfo = computed(() => {
 const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
+
+// Zone options for ZoneAssignmentDropdown (Phase 2.2)
+const zoneOptions = computed(() => {
+  const groups = groupDevicesByZone(espStore.devices)
+  return groups
+    .filter(g => g.zoneId !== '__unassigned__')
+    .map(g => ({ zoneId: g.zoneId, zoneName: g.zoneName }))
+})
+
+async function handleZoneChanged(deviceId: string, zoneId: string | null) {
+  if (zoneId === null) {
+    await handleRemoveFromZone(props.device)
+  } else {
+    const zoneName = zoneOptions.value.find(z => z.zoneId === zoneId)?.zoneName ?? zoneId
+    await handleDeviceDrop({
+      device: props.device,
+      fromZoneId: props.device.zone_id ?? null,
+      toZoneId: zoneId,
+    })
+  }
+}
 
 /**
  * Determine if sensors should use multi-row layout.
@@ -1483,6 +1561,7 @@ watch(
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
+    @contextmenu.prevent="handleEspContextMenu"
   >
     <!-- Left Column: Sensors (only shown if sensors exist) -->
     <div
@@ -1638,6 +1717,14 @@ watch(
             </span>
             <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin" />
           </button>
+
+          <!-- Zone Assignment Dropdown (Phase 2.2) -->
+          <ZoneAssignmentDropdown
+            :device="device"
+            :zones="zoneOptions"
+            data-no-drag
+            @zone-changed="handleZoneChanged"
+          />
         </div>
 
         <!--

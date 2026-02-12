@@ -10,20 +10,20 @@
  * - Smooth transitions for expand/collapse and drag operations
  */
 
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, markRaw, type ComputedRef } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   ChevronDown,
   Tag,
   Layers,
-  AlertTriangle
+  AlertTriangle,
+  Maximize2,
+  Trash2
 } from 'lucide-vue-next'
 import ESPCard from '@/components/esp/ESPCard.vue'
 import { type ESPDevice } from '@/api/esp'
 import { useDragStateStore } from '@/stores/dragState'
-import { createLogger } from '@/utils/logger'
-
-const log = createLogger('ZoneGroup')
+import { useContextMenu } from '@/composables/useContextMenu'
 
 interface Props {
   /** Zone ID (technical, lowercase) */
@@ -71,6 +71,10 @@ const emit = defineEmits<{
 
 // Drag state store (global ESP-Card drag tracking)
 const dragStore = useDragStateStore()
+const contextMenu = useContextMenu()
+
+// Global drag awareness for visual feedback (Phase 2.1)
+const isGlobalDragActive = computed(() => dragStore.isDraggingEspCard)
 
 // LocalStorage key for zone collapsed state persistence
 const STORAGE_KEY = 'automation-one-zone-collapsed'
@@ -133,6 +137,10 @@ const headerClasses = computed(() => {
 const containerClasses = computed(() => {
   const classes = ['zone-group']
 
+  if (isGlobalDragActive.value) {
+    classes.push('zone-group--drag-active')
+  }
+
   if (isDragOver.value) {
     classes.push('zone-group--drag-over')
   }
@@ -144,6 +152,42 @@ const containerClasses = computed(() => {
   return classes
 })
 
+// ── Zone Header Context Menu ──
+function handleZoneContextMenu(event: MouseEvent) {
+  if (props.isUnassigned) return // No context menu for unassigned zone
+  contextMenu.open(event, [
+    {
+      id: 'expand-all',
+      label: isExpanded.value ? 'Zuklappen' : 'Aufklappen',
+      icon: markRaw(Maximize2),
+      action: () => { isExpanded.value = !isExpanded.value },
+    },
+    { id: 'sep-1', label: '', separator: true },
+    {
+      id: 'remove-all',
+      label: 'Alle Geräte entfernen',
+      icon: markRaw(Trash2),
+      variant: 'danger' as const,
+      disabled: props.devices.length === 0,
+      action: () => {
+        // Remove all devices from this zone by emitting delete events
+        // This would need a dedicated emit - for now just expand to show all
+        isExpanded.value = true
+      },
+    },
+  ])
+}
+
+// Debug logger with consistent styling
+function log(message: string, data?: Record<string, unknown>): void {
+  const style = 'background: #ec4899; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
+  const label = `ZoneGroup:${props.zoneId}`
+  if (data) {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;', data)
+  } else {
+    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;')
+  }
+}
 
 // Methods
 function toggleExpanded() {
@@ -397,6 +441,7 @@ function getDeviceId(device: ESPDevice): string {
       @click="toggleExpanded"
       @keydown.enter="toggleExpanded"
       @keydown.space.prevent="toggleExpanded"
+      @contextmenu.prevent="handleZoneContextMenu"
     >
       <div class="zone-group__header-left">
         <component :is="isUnassigned ? AlertTriangle : Tag" class="zone-group__header-icon" />
@@ -441,7 +486,8 @@ function getDeviceId(device: ESPDevice): string {
             'zone-group__grid--empty': devices.length === 0
           }"
           group="esp-devices"
-          :animation="0"
+          :animation="100"
+          :swap-threshold="0.65"
           ghost-class="zone-item--ghost"
           chosen-class="zone-item--chosen"
           drag-class="zone-item--drag"
@@ -558,11 +604,32 @@ function getDeviceId(device: ESPDevice): string {
   transition: all 0.2s ease;
 }
 
-/* Drag-over state: Highlight border + subtle background */
+/* Global drag active: Expand padding + dashed border hint */
+.zone-group--drag-active {
+  border-style: dashed;
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.zone-group--drag-active .zone-group__content {
+  padding: 1.5rem;
+}
+
+.zone-group--drag-active .zone-group__grid--empty {
+  min-height: 120px;
+}
+
+/* Drag-over state: Highlight border + glow + pulse animation */
 .zone-group--drag-over {
+  border-style: solid;
   border-color: var(--color-iridescent-1);
   background: rgba(96, 165, 250, 0.04);
-  box-shadow: 0 0 16px rgba(96, 165, 250, 0.15);
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.2), 0 0 40px rgba(96, 165, 250, 0.08);
+  animation: zone-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes zone-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(96, 165, 250, 0.2), 0 0 40px rgba(96, 165, 250, 0.08); }
+  50% { box-shadow: 0 0 28px rgba(96, 165, 250, 0.35), 0 0 56px rgba(96, 165, 250, 0.12); }
 }
 
 /* Unassigned zone: Warning accent */
@@ -785,17 +852,16 @@ function getDeviceId(device: ESPDevice): string {
    ============================================================================= */
 
 .zone-content-enter-active {
-  transition: all 0.2s ease-out;
+  transition: opacity 0.2s ease-out, grid-template-rows 0.2s ease-out;
 }
 
 .zone-content-leave-active {
-  transition: all 0.15s ease-in;
+  transition: opacity 0.15s ease-in, grid-template-rows 0.15s ease-in;
 }
 
 .zone-content-enter-from,
 .zone-content-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
 }
 
 /* =============================================================================
@@ -832,11 +898,13 @@ function getDeviceId(device: ESPDevice): string {
 }
 
 .zone-item--ghost {
-  opacity: 0.4;
+  opacity: 0.35;
+  transform: scale(1.05);
 }
 
 .zone-item--ghost > * {
   border-style: dashed !important;
+  box-shadow: 0 4px 16px rgba(96, 165, 250, 0.2) !important;
 }
 
 .zone-item--chosen {

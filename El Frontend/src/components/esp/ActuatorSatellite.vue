@@ -14,7 +14,7 @@
 
 import { computed, ref } from 'vue'
 import { Power, ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import { useDragStateStore } from '@/stores/dragState'
 
