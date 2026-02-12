@@ -26,6 +26,8 @@ Error Codes:
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from ...core.error_codes import (
     ConfigErrorCode,
     ValidationErrorCode,
@@ -142,6 +144,7 @@ class DiagnosticsHandler:
                     "received_at": datetime.now(timezone.utc).isoformat(),
                 }
                 esp_device.device_metadata = current_metadata
+                flag_modified(esp_device, "device_metadata")
 
                 await session.commit()
 

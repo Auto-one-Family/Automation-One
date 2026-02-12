@@ -271,14 +271,14 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
         // Attempt recovery
         if (attemptRecoveryIfNeeded(error)) {
             // Recovery successful - retry the read ONCE
-            LOG_INFO("I2C: Retrying read after recovery...");
+            LOG_DEBUG("I2C: Retrying read after recovery...");
 
             Wire.beginTransmission(device_address);
             Wire.write(register_address);
             error = Wire.endTransmission(false);
 
             if (error == 0) {
-                LOG_INFO("I2C: Retry successful after recovery");
+                LOG_DEBUG("I2C: Retry successful after recovery");
                 // Fall through to read data
             } else {
                 LOG_ERROR("I2C: Retry failed after recovery (error " + String(error) + ")");
@@ -302,9 +302,9 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
     }
     
     // Read data
-    LOG_INFO("I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
+    LOG_DEBUG("I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
     size_t received = Wire.requestFrom(device_address, (uint8_t)length);
-    LOG_INFO("I2C: requestFrom END received=" + String(received));
+    LOG_DEBUG("I2C: requestFrom END received=" + String(received));
 
     if (received != length) {
         LOG_ERROR("I2C read: Expected " + String(length) + " bytes, got " + String(received));
@@ -776,7 +776,7 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
         if (error == 4 || error == 5) {
             if (attemptRecoveryIfNeeded(error)) {
                 // Retry command after recovery
-                LOG_INFO("I2C: Retrying command after recovery...");
+                LOG_DEBUG("I2C: Retrying command after recovery...");
                 Wire.beginTransmission(i2c_address);
                 for (uint8_t i = 0; i < protocol->command_length; i++) {
                     Wire.write(protocol->command_bytes[i]);
@@ -812,13 +812,13 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
 
     // Step 3: Read data directly (no register address)
     size_t requested = protocol->expected_bytes;
-    LOG_INFO("I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(requested));
+    LOG_DEBUG("I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(requested));
     size_t received = Wire.requestFrom(i2c_address, (uint8_t)requested);
-    LOG_INFO("I2C CMD: requestFrom END received=" + String(received));
+    LOG_DEBUG("I2C CMD: requestFrom END received=" + String(received));
 
     // Timeout handling for slow sensors
     unsigned long start = millis();
-    LOG_INFO("I2C CMD: Waiting for Wire.available()...");
+    LOG_DEBUG("I2C CMD: Waiting for Wire.available()...");
     while (Wire.available() < (int)requested) {
         if (millis() - start > I2C_READ_TIMEOUT_MS) {
             LOG_ERROR("I2C: Read timeout for " + String(protocol->sensor_type));
@@ -829,7 +829,7 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
         yield();  // Feed watchdog
     }
 
-    LOG_INFO("I2C CMD: Wire.available() ready");
+    LOG_DEBUG("I2C CMD: Wire.available() ready");
 
     if (received != requested) {
         LOG_ERROR("I2C: Incomplete read from " + String(protocol->sensor_type) +
@@ -840,12 +840,12 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
     }
 
     // Read bytes into buffer
-    LOG_INFO("I2C CMD: Reading " + String(received) + " bytes from buffer...");
+    LOG_DEBUG("I2C CMD: Reading " + String(received) + " bytes from buffer...");
     for (size_t i = 0; i < received; i++) {
         buffer[i] = Wire.read();
     }
     bytes_read = received;
-    LOG_INFO("I2C CMD: Read complete, bytes_read=" + String(bytes_read));
+    LOG_DEBUG("I2C CMD: Read complete, bytes_read=" + String(bytes_read));
 
     return true;
 }

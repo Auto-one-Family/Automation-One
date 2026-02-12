@@ -21,6 +21,23 @@ import type { ESPDevice } from '@/api/esp'
 
 const logger = createLogger('ActuatorStore')
 
+/** Payload shape for actuator_status WebSocket events */
+interface ActuatorStatusPayload {
+  esp_id?: string
+  device_id?: string
+  gpio: number
+  actuator_type?: string
+  state?: string
+  value?: number
+  emergency?: string
+  timestamp?: number
+}
+
+/** Message wrapper for actuator_status events */
+interface ActuatorStatusMessage {
+  data: ActuatorStatusPayload
+}
+
 export const useActuatorStore = defineStore('actuator', () => {
 
   // =========================================================================
@@ -88,7 +105,7 @@ export const useActuatorStore = defineStore('actuator', () => {
    * Server: actuator_handler.py
    */
   function handleActuatorStatus(
-    message: any,
+    message: ActuatorStatusMessage,
     devices: ESPDevice[],
     getDeviceId: (d: ESPDevice) => string,
   ): void {
@@ -101,7 +118,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const device = devices.find(d => getDeviceId(d) === espId)
     if (!device?.actuators) return
 
-    const actuator = (device.actuators as any[]).find(a => a.gpio === gpio)
+    const actuator = (device.actuators as { gpio: number; state?: boolean; pwm_value?: number; emergency_stopped?: boolean; last_command?: string }[]).find(a => a.gpio === gpio)
     if (!actuator) return
 
     // Map server payload → frontend MockActuator

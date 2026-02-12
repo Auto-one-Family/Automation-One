@@ -19,6 +19,30 @@ import type { ESPDevice } from '@/api/esp'
 
 const logger = createLogger('ZoneStore')
 
+/** Payload shape for zone_assignment WebSocket events */
+interface ZoneAssignmentPayload {
+  esp_id?: string
+  device_id?: string
+  status: 'zone_assigned' | 'zone_removed' | 'error'
+  zone_id?: string | null
+  zone_name?: string | null
+  master_zone_id?: string | null
+  kaiser_id?: string | null
+  timestamp?: number
+  message?: string
+}
+
+/** Payload shape for subzone_assignment WebSocket events */
+interface SubzoneAssignmentPayload {
+  esp_id?: string
+  device_id?: string
+  subzone_id?: string
+  status: 'subzone_assigned' | 'subzone_removed' | 'error'
+  timestamp?: number
+  error_code?: string
+  message?: string
+}
+
 /**
  * Find device index in the devices array by esp_id.
  * Uses the same defensive pattern as esp.store.ts (findDeviceByEspIdDefensive).
@@ -54,12 +78,12 @@ export const useZoneStore = defineStore('zone', () => {
    * }
    */
   function handleZoneAssignment(
-    message: any,
+    message: { data: Record<string, unknown> },
     devices: ESPDevice[],
     getDeviceId: (d: ESPDevice) => string,
     setDevice: (index: number, device: ESPDevice) => void,
   ): void {
-    const data = message.data
+    const data = message.data as unknown as ZoneAssignmentPayload
     const espId = data.esp_id || data.device_id
 
     if (!espId) {
@@ -121,13 +145,13 @@ export const useZoneStore = defineStore('zone', () => {
    * }
    */
   function handleSubzoneAssignment(
-    message: any,
+    message: { data: Record<string, unknown> },
     devices: ESPDevice[],
     getDeviceId: (d: ESPDevice) => string,
     setDevice: (index: number, device: ESPDevice) => void,
   ): void {
     const toast = useToast()
-    const data = message.data
+    const data = message.data as unknown as SubzoneAssignmentPayload
     const espId = data.esp_id || data.device_id
 
     if (!espId) {

@@ -32,12 +32,12 @@ export const useConfigStore = defineStore('config', () => {
    * - Additional failures logged to console
    */
   function handleConfigResponse(
-    message: any,
+    message: { data: Record<string, unknown> },
     devices: ESPDevice[],
     getDeviceId: (d: ESPDevice) => string,
     refreshGpioStatus: (espId: string) => void,
   ): void {
-    const data = message.data as ConfigResponseExtended
+    const data = message.data as unknown as ConfigResponseExtended
     const toast = useToast()
 
     if (!data.esp_id) return

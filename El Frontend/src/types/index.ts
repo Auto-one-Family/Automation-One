@@ -91,9 +91,10 @@ export interface PendingDevicesListResponse {
 }
 
 /**
- * WebSocket event for device discovery.
+ * Payload for device_discovered WebSocket event (data field).
+ * For the full event wrapper, use DeviceDiscoveredEvent from websocket-events.ts.
  */
-export interface DeviceDiscoveredEvent {
+export interface DeviceDiscoveredPayload {
   device_id: string
   discovered_at: string
   ip_address?: string | null
@@ -105,9 +106,10 @@ export interface DeviceDiscoveredEvent {
 }
 
 /**
- * WebSocket event for device approval.
+ * Payload for device_approved WebSocket event (data field).
+ * For the full event wrapper, use DeviceApprovedEvent from websocket-events.ts.
  */
-export interface DeviceApprovedEvent {
+export interface DeviceApprovedPayload {
   device_id: string
   approved_by: string
   approved_at: string
@@ -115,9 +117,10 @@ export interface DeviceApprovedEvent {
 }
 
 /**
- * WebSocket event for device rejection.
+ * Payload for device_rejected WebSocket event (data field).
+ * For the full event wrapper, use DeviceRejectedEvent from websocket-events.ts.
  */
-export interface DeviceRejectedEvent {
+export interface DeviceRejectedPayload {
   device_id: string
   rejection_reason: string
   rejected_at: string
@@ -288,7 +291,7 @@ export interface MockESP {
   master_zone_id: string | null
   subzone_id: string | null
   system_state: MockSystemState
-  status: 'online' | 'offline' | 'pending_approval' | 'approved' | 'rejected'  // Device lifecycle status
+  status: 'online' | 'offline' | 'error' | 'unknown' | 'pending_approval' | 'approved' | 'rejected'  // Device lifecycle + connection status
   sensors: MockSensor[]
   actuators: MockActuator[]
   auto_heartbeat: boolean
@@ -623,7 +626,7 @@ export interface SensorConfigResponse {
   warning_max: number | null
   metadata: Record<string, unknown> | null
   // Config status from ESP32 verification (Phase 2: write-after-verification)
-  config_status?: string | null
+  config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
   config_error_detail?: string | null
   latest_value?: number | null
@@ -789,7 +792,7 @@ export interface ActuatorConfigResponse {
   servo_max_pulse: number | null
   metadata: Record<string, unknown> | null
   // Config status from ESP32 verification (Phase 2: write-after-verification)
-  config_status?: string | null
+  config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
   config_error_detail?: string | null
   current_value?: number | null

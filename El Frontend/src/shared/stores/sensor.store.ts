@@ -30,6 +30,28 @@ import type { MockSensor, MultiValueEntry, QualityLevel, SensorHealthEvent } fro
 
 const logger = createLogger('SensorStore')
 
+/** Payload shape for sensor_data WebSocket events */
+interface SensorDataPayload {
+  esp_id?: string
+  device_id?: string
+  gpio: number
+  sensor_type: string
+  value: number
+  unit: string
+  quality?: QualityLevel
+  timestamp?: number
+}
+
+/** Message wrapper for sensor_data events */
+interface SensorDataMessage {
+  data: SensorDataPayload
+}
+
+/** Message wrapper for sensor_health events */
+interface SensorHealthMessage {
+  data: SensorHealthEvent
+}
+
 // ============================================================================
 // Helper: Get worst quality from multi-values
 // ============================================================================
@@ -63,7 +85,7 @@ export const useSensorStore = defineStore('sensor', () => {
    * 3. Single-value sensors → Unchanged behavior
    */
   function handleSensorData(
-    message: any,
+    message: SensorDataMessage,
     devices: ESPDevice[],
     getDeviceId: (d: ESPDevice) => string,
   ): void {
@@ -105,7 +127,7 @@ export const useSensorStore = defineStore('sensor', () => {
   // ════════════════════════════════════════════════════════════════════════════
   function handleKnownMultiValueSensor(
     sensors: MockSensor[],
-    data: any,
+    data: SensorDataPayload,
     deviceType: string
   ): void {
     let sensor = sensors.find(s => s.gpio === data.gpio)
@@ -161,7 +183,7 @@ export const useSensorStore = defineStore('sensor', () => {
   // ════════════════════════════════════════════════════════════════════════════
   function handleDynamicMultiValueSensor(
     existingSensor: MockSensor,
-    data: any
+    data: SensorDataPayload
   ): void {
     if (!existingSensor.is_multi_value) {
       existingSensor.is_multi_value = true
@@ -195,7 +217,7 @@ export const useSensorStore = defineStore('sensor', () => {
   // ════════════════════════════════════════════════════════════════════════════
   // HANDLER 3: SINGLE-VALUE (unchanged behavior)
   // ════════════════════════════════════════════════════════════════════════════
-  function handleSingleValueSensorData(sensors: MockSensor[], data: any): void {
+  function handleSingleValueSensorData(sensors: MockSensor[], data: SensorDataPayload): void {
     const sensor = sensors.find(
       s => s.gpio === data.gpio && s.sensor_type === data.sensor_type
     )
@@ -220,7 +242,7 @@ export const useSensorStore = defineStore('sensor', () => {
    * Server: maintenance/jobs/sensor_health.py
    */
   function handleSensorHealth(
-    message: any,
+    message: SensorHealthMessage,
     findDeviceByEspId: (espId: string) => { device: ESPDevice; index: number } | null,
   ): void {
     const event = message.data as SensorHealthEvent

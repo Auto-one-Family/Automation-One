@@ -255,7 +255,7 @@ async function enrichDbDevicesWithSensors(devices: ESPDevice[]): Promise<void> {
 
     logger.info(`Enriched ${devicesWithSensors.length} DB devices with sensor data`)
   } catch (err) {
-    logger.warn('Failed to enrich DB devices with sensors (non-critical)', err)
+    logger.error('Failed to enrich DB devices with sensors - sensor cards may be empty until live data arrives', err)
   }
 }
 
@@ -281,14 +281,14 @@ export const espApi = {
     // Fetch both Mock and Real ESPs in parallel
     const [mockEsps, dbDevices] = await Promise.all([
       debugApi.listMockEsps().catch((err) => {
-        logger.warn('Failed to fetch mock ESPs', err)
+        logger.warn('Failed to fetch mock ESPs (non-critical)', err)
         return [] as MockESP[]
       }),
       api
         .get<ESPDeviceListResponse>('/esp/devices', { params })
         .catch((err) => {
-          logger.warn('Failed to fetch DB devices', err)
-          return { data: { success: true, data: [] } }
+          logger.error('Failed to fetch DB devices - dashboard may show incomplete data', err)
+          return { data: { success: false, data: [] } }
         })
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])

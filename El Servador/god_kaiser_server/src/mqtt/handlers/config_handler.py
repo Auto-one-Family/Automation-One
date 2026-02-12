@@ -203,8 +203,9 @@ class ConfigHandler:
                     await session.commit()
                     logger.debug(f"Config response stored in audit log: {esp_id}")
             except Exception as audit_error:
-                # Don't fail the handler if audit logging fails
-                logger.warning(f"Failed to store config response in audit log: {audit_error}")
+                # Don't fail the handler if audit logging fails, but log as error
+                # (audit trail loss is compliance-relevant in industrial environments)
+                logger.error(f"Failed to store config response in audit log: {audit_error}")
 
             # WebSocket Broadcast (Phase 4 extended) - Mit deutschen Übersetzungen
             try:

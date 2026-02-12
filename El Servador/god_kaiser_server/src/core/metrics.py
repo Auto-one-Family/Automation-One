@@ -211,8 +211,10 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
             ws_manager = await WebSocketManager.get_instance()
             if ws_manager:
                 update_websocket_metrics(ws_manager.connection_count)
-        except Exception:
-            pass  # WebSocket manager may not be initialized yet
+        except ImportError:
+            pass  # WebSocket module not yet importable during early startup
+        except Exception as e:
+            logger.debug(f"WebSocket metrics update skipped: {e}")
 
         # ESP counts + heartbeat aggregates (needs DB)
         from ..db.repositories import ESPRepository

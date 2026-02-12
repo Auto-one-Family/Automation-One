@@ -35,7 +35,6 @@ import {
   Waves,
   Leaf,
   Zap,
-  AlertCircle,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { LogicRule, SensorCondition, TimeCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
@@ -104,6 +103,34 @@ const sensorIcons: Record<string, Component> = {
   level: Leaf,
 }
 
+// Sensor unit mapping
+const sensorUnits: Record<string, string> = {
+  DS18B20: '°C',
+  SHT31: '%',
+  BME280: 'hPa',
+  pH: 'pH',
+  EC: 'mS',
+  moisture: '%',
+  light: 'lux',
+  co2: 'ppm',
+  flow: 'L/m',
+  level: '%',
+}
+
+// Sensor label mapping
+const sensorLabels: Record<string, string> = {
+  DS18B20: 'Temperatur',
+  SHT31: 'Luftfeuchte',
+  BME280: 'Luftdruck',
+  pH: 'pH-Wert',
+  EC: 'Leitfähigkeit',
+  moisture: 'Bodenfeuchte',
+  light: 'Licht',
+  co2: 'CO₂',
+  flow: 'Durchfluss',
+  level: 'Füllstand',
+}
+
 // Operator display mapping
 const operatorDisplay: Record<string, string> = {
   '>': '>',
@@ -121,6 +148,12 @@ const commandDisplay: Record<string, string> = {
   OFF: 'AUS',
   PWM: 'PWM',
   TOGGLE: '⇄',
+}
+
+// Format GPIO pin number
+function formatGpio(gpio: number | undefined): string {
+  if (gpio === undefined || gpio === null) return '—'
+  return `GPIO ${gpio}`
 }
 
 // ======================== DROP HANDLING ========================
@@ -552,13 +585,23 @@ defineExpose({
     <!-- Empty state hint -->
     <div v-if="nodes.length === 0" class="flow-editor__empty">
       <div class="flow-editor__empty-content">
-        <AlertCircle class="flow-editor__empty-icon" />
-        <p class="flow-editor__empty-title">Leere Arbeitsfläche</p>
+        <div class="flow-editor__empty-arrows">
+          <svg width="200" height="40" viewBox="0 0 200 40" fill="none">
+            <path d="M20 20 L90 20" stroke="rgba(96,165,250,0.2)" stroke-width="1.5" stroke-dasharray="4 4">
+              <animate attributeName="stroke-dashoffset" values="8;0" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <path d="M110 20 L180 20" stroke="rgba(192,132,252,0.2)" stroke-width="1.5" stroke-dasharray="4 4">
+              <animate attributeName="stroke-dashoffset" values="8;0" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <circle cx="100" cy="20" r="3" fill="rgba(167,139,250,0.3)" />
+          </svg>
+        </div>
+        <p class="flow-editor__empty-title">Arbeitsfläche bereit</p>
         <p class="flow-editor__empty-desc">
-          Ziehe Bausteine aus der linken Palette hierher, um deine Automatisierung zu erstellen.
+          Ziehe Bausteine aus der Palette hierher
         </p>
         <p class="flow-editor__empty-hint">
-          Bedingungen → Logik → Aktionen
+          Bedingungen &rarr; Logik &rarr; Aktionen
         </p>
       </div>
     </div>
@@ -580,29 +623,40 @@ defineExpose({
       <template #node-sensor="{ data, id }">
         <div
           class="rule-node rule-node--sensor"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId }"
         >
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
-            <component
-              :is="sensorIcons[data.sensorType] || Thermometer"
-              class="rule-node__icon"
-            />
-            <span class="rule-node__type">{{ data.sensorType }}</span>
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--sensor">
+              <component
+                :is="sensorIcons[data.sensorType] || Thermometer"
+                class="rule-node__icon"
+              />
+            </div>
+            <div class="rule-node__header-text">
+              <span class="rule-node__type">{{ sensorLabels[data.sensorType] || data.sensorType }}</span>
+              <span class="rule-node__chip">{{ data.sensorType }}</span>
+            </div>
           </div>
           <div class="rule-node__body">
-            <div v-if="data.espId" class="rule-node__detail">
-              <span class="rule-node__detail-label">ESP</span>
-              <span class="rule-node__detail-value">{{ getEspName(data.espId) }}</span>
-            </div>
             <div class="rule-node__condition">
               <template v-if="data.operator === 'between'">
-                {{ data.min }} {{ operatorDisplay.between }} {{ data.max }}
+                {{ data.min }}<span class="rule-node__unit">{{ sensorUnits[data.sensorType] || '' }}</span>
+                {{ operatorDisplay.between }}
+                {{ data.max }}<span class="rule-node__unit">{{ sensorUnits[data.sensorType] || '' }}</span>
               </template>
               <template v-else>
-                {{ operatorDisplay[data.operator] || data.operator }} {{ data.value }}
+                {{ operatorDisplay[data.operator] || data.operator }} {{ data.value }}<span class="rule-node__unit">{{ sensorUnits[data.sensorType] || '' }}</span>
               </template>
             </div>
+          </div>
+          <div class="rule-node__footer">
+            <template v-if="data.espId">
+              <span class="rule-node__meta-item">{{ getEspName(data.espId) }}</span>
+              <span class="rule-node__meta-sep" />
+              <span class="rule-node__meta-item">{{ formatGpio(data.gpio) }}</span>
+            </template>
+            <span v-else class="rule-node__unconfigured-hint">Nicht konfiguriert</span>
           </div>
         </div>
       </template>
@@ -615,16 +669,23 @@ defineExpose({
         >
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
-            <Clock class="rule-node__icon" />
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--time">
+              <Clock class="rule-node__icon" />
+            </div>
             <span class="rule-node__type">Zeitfenster</span>
           </div>
           <div class="rule-node__body">
             <div class="rule-node__condition">
               {{ padHour(data.startHour) }} – {{ padHour(data.endHour) }}
             </div>
-            <div v-if="data.daysOfWeek?.length" class="rule-node__days">
-              {{ data.daysOfWeek.map((d: number) => ['So','Mo','Di','Mi','Do','Fr','Sa'][d]).join(' ') }}
-            </div>
+          </div>
+          <div v-if="data.daysOfWeek?.length" class="rule-node__footer">
+            <span class="rule-node__days-inline">
+              {{ data.daysOfWeek.map((d: number) => ['So','Mo','Di','Mi','Do','Fr','Sa'][d]).join(' · ') }}
+            </span>
+          </div>
+          <div v-else class="rule-node__footer">
+            <span class="rule-node__meta-item">Täglich</span>
           </div>
         </div>
       </template>
@@ -638,7 +699,9 @@ defineExpose({
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__gate">
-            <GitMerge class="rule-node__gate-icon" />
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--logic">
+              <GitMerge class="rule-node__gate-icon" />
+            </div>
             <span class="rule-node__gate-label">{{ data.operator }}</span>
           </div>
         </div>
@@ -648,25 +711,32 @@ defineExpose({
       <template #node-actuator="{ data, id }">
         <div
           class="rule-node rule-node--actuator"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
-            <Power class="rule-node__icon" />
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--actuator">
+              <Power class="rule-node__icon" />
+            </div>
             <span class="rule-node__type">Aktor</span>
           </div>
           <div class="rule-node__body">
-            <div v-if="data.espId" class="rule-node__detail">
-              <span class="rule-node__detail-label">ESP</span>
-              <span class="rule-node__detail-value">{{ getEspName(data.espId) }}</span>
-            </div>
             <div class="rule-node__command" :class="`rule-node__command--${data.command?.toLowerCase()}`">
               {{ commandDisplay[data.command] || data.command }}
               <template v-if="data.command === 'PWM'"> {{ data.pwmValue ?? 0 }}%</template>
             </div>
             <div v-if="data.duration" class="rule-node__duration">
+              <Timer class="rule-node__duration-icon" />
               {{ data.duration }}s Auto-Off
             </div>
+          </div>
+          <div class="rule-node__footer">
+            <template v-if="data.espId">
+              <span class="rule-node__meta-item">{{ getEspName(data.espId) }}</span>
+              <span class="rule-node__meta-sep" />
+              <span class="rule-node__meta-item">{{ formatGpio(data.gpio) }}</span>
+            </template>
+            <span v-else class="rule-node__unconfigured-hint">Nicht konfiguriert</span>
           </div>
         </div>
       </template>
@@ -679,13 +749,21 @@ defineExpose({
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
-            <Bell class="rule-node__icon" />
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--notification">
+              <Bell class="rule-node__icon" />
+            </div>
             <span class="rule-node__type">{{ data.channel === 'email' ? 'E-Mail' : data.channel === 'webhook' ? 'Webhook' : 'Dashboard' }}</span>
           </div>
           <div class="rule-node__body">
             <div v-if="data.target" class="rule-node__detail">
               <span class="rule-node__detail-value rule-node__detail-value--truncate">{{ data.target }}</span>
             </div>
+            <div v-if="data.messageTemplate" class="rule-node__detail">
+              <span class="rule-node__detail-value rule-node__detail-value--truncate rule-node__detail-value--dim">{{ data.messageTemplate }}</span>
+            </div>
+          </div>
+          <div class="rule-node__footer">
+            <span class="rule-node__meta-item">{{ data.channel || 'websocket' }}</span>
           </div>
         </div>
       </template>
@@ -699,7 +777,9 @@ defineExpose({
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
-            <Timer class="rule-node__icon" />
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--delay">
+              <Timer class="rule-node__icon" />
+            </div>
             <span class="rule-node__type">Verzögerung</span>
           </div>
           <div class="rule-node__body">
@@ -764,119 +844,150 @@ function miniMapNodeColor(node: Node): string {
 .flow-editor__empty-content {
   text-align: center;
   max-width: 320px;
+  animation: canvas-empty-in 0.4s ease-out;
 }
 
-.flow-editor__empty-icon {
-  width: 48px;
-  height: 48px;
+@keyframes canvas-empty-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.flow-editor__empty-arrows {
+  margin-bottom: 1rem;
   color: var(--color-text-muted);
-  opacity: 0.4;
-  margin: 0 auto 1rem;
+  opacity: 0.5;
 }
 
 .flow-editor__empty-title {
-  font-size: 1rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-secondary);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.375rem;
 }
 
 .flow-editor__empty-desc {
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   line-height: 1.5;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.625rem;
 }
 
 .flow-editor__empty-hint {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--color-iridescent-2);
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 /* Drop overlay */
 .flow-editor__drop-overlay {
   position: absolute;
-  inset: 0;
+  inset: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(129, 140, 248, 0.05);
-  border: 2px dashed var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.04);
+  border: 2px dashed rgba(129, 140, 248, 0.3);
   border-radius: var(--radius-lg);
   z-index: 10;
   pointer-events: none;
 }
 
 .flow-editor__drop-text {
-  font-size: 1rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-iridescent-2);
-  padding: 0.75rem 1.5rem;
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-  border-radius: var(--radius-xl);
-  border: 1px solid rgba(129, 140, 248, 0.3);
+  padding: 0.625rem 1.25rem;
+  background: rgba(13, 13, 22, 0.8);
+  backdrop-filter: blur(12px);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(129, 140, 248, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 /* ======================== CUSTOM NODES ======================== */
 
 .rule-node {
-  min-width: 170px;
-  max-width: 220px;
-  background: rgba(18, 18, 26, 0.9);
-  backdrop-filter: blur(12px);
+  min-width: 190px;
+  max-width: 240px;
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), 0 0 1px rgba(255,255,255,0.05) inset;
+  transition: all 0.2s var(--ease-out);
   overflow: hidden;
+  position: relative;
+}
+
+.rule-node::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  opacity: 0.9;
 }
 
 .rule-node:hover {
   border-color: var(--glass-border-hover);
-  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 0 1px rgba(255,255,255,0.08) inset;
   transform: translateY(-1px);
+}
+
+/* Selected state */
+:deep(.vue-flow__node.selected) .rule-node {
+  border-color: var(--color-iridescent-2);
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.15), 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* Unconfigured state */
+.rule-node--unconfigured {
+  border-style: dashed;
+  border-color: rgba(129, 140, 248, 0.25);
 }
 
 /* Active flash (rule executing) */
 .rule-node--active {
-  animation: node-pulse 0.6s ease;
+  animation: node-execution-flash 0.8s ease;
 }
 
-@keyframes node-pulse {
-  0% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); }
-  50% { box-shadow: 0 0 30px rgba(96, 165, 250, 0.4); }
-  100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3); }
+@keyframes node-execution-flash {
+  0% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25); }
+  30% { box-shadow: 0 0 40px rgba(96, 165, 250, 0.5), 0 0 80px rgba(96, 165, 250, 0.2); }
+  100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25); }
 }
 
-/* Type-specific accent colors */
-.rule-node--sensor {
-  border-top: 3px solid var(--color-iridescent-1);
+/* Type-specific accent via ::before pseudo */
+.rule-node--sensor::before {
+  background: linear-gradient(90deg, var(--color-iridescent-1), rgba(96, 165, 250, 0.3));
 }
 
-.rule-node--time {
-  border-top: 3px solid var(--color-warning);
+.rule-node--time::before {
+  background: linear-gradient(90deg, var(--color-warning), rgba(251, 191, 36, 0.3));
+}
+
+.rule-node--logic::before {
+  background: linear-gradient(90deg, var(--color-iridescent-3), rgba(167, 139, 250, 0.3));
 }
 
 .rule-node--logic {
-  border-top: 3px solid var(--color-iridescent-3);
   min-width: auto;
   max-width: none;
 }
 
-.rule-node--actuator {
-  border-top: 3px solid var(--color-iridescent-4);
+.rule-node--actuator::before {
+  background: linear-gradient(90deg, var(--color-iridescent-4), rgba(192, 132, 252, 0.3));
 }
 
-.rule-node--notification {
-  border-top: 3px solid var(--color-success);
+.rule-node--notification::before {
+  background: linear-gradient(90deg, var(--color-success), rgba(52, 211, 153, 0.3));
 }
 
-.rule-node--delay {
-  border-top: 3px solid var(--color-text-muted);
+.rule-node--delay::before {
+  background: linear-gradient(90deg, var(--color-text-secondary), rgba(133, 133, 160, 0.3));
 }
 
 /* Node inner layout */
@@ -887,17 +998,59 @@ function miniMapNodeColor(node: Node): string {
   padding: 0.625rem 0.75rem 0.25rem;
 }
 
+.rule-node__header-text {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+/* Icon wrapper with background */
+.rule-node__icon-wrap {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.rule-node__icon-wrap--sensor {
+  background: rgba(96, 165, 250, 0.12);
+  color: var(--color-iridescent-1);
+}
+
+.rule-node__icon-wrap--time {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--color-warning);
+}
+
+.rule-node__icon-wrap--logic {
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--color-iridescent-3);
+}
+
+.rule-node__icon-wrap--actuator {
+  background: rgba(192, 132, 252, 0.12);
+  color: var(--color-iridescent-4);
+}
+
+.rule-node__icon-wrap--notification {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--color-success);
+}
+
+.rule-node__icon-wrap--delay {
+  background: rgba(133, 133, 160, 0.12);
+  color: var(--color-text-secondary);
+}
+
 .rule-node__icon {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
 }
-
-.rule-node--sensor .rule-node__icon { color: var(--color-iridescent-1); }
-.rule-node--time .rule-node__icon { color: var(--color-warning); }
-.rule-node--actuator .rule-node__icon { color: var(--color-iridescent-4); }
-.rule-node--notification .rule-node__icon { color: var(--color-success); }
-.rule-node--delay .rule-node__icon { color: var(--color-text-muted); }
 
 .rule-node__type {
   font-size: 0.6875rem;
@@ -905,10 +1058,26 @@ function miniMapNodeColor(node: Node): string {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sensor chip (e.g. "DS18B20") */
+.rule-node__chip {
+  font-size: 0.5625rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .rule-node__body {
-  padding: 0.25rem 0.75rem 0.625rem;
+  padding: 0.125rem 0.75rem 0.5rem;
 }
 
 .rule-node__detail {
@@ -919,15 +1088,20 @@ function miniMapNodeColor(node: Node): string {
 }
 
 .rule-node__detail-label {
-  font-size: 0.625rem;
-  font-weight: 500;
+  font-size: 0.5625rem;
+  font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 3px;
 }
 
 .rule-node__detail-value {
   font-size: 0.75rem;
   color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 .rule-node__detail-value--truncate {
@@ -937,18 +1111,67 @@ function miniMapNodeColor(node: Node): string {
   white-space: nowrap;
 }
 
+.rule-node__detail-value--dim {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: 0.6875rem;
+}
+
 .rule-node__condition {
-  font-size: 1.125rem;
+  font-size: 1.375rem;
   font-weight: 700;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 
-.rule-node__days {
-  font-size: 0.6875rem;
+.rule-node__unit {
+  font-size: 0.75rem;
+  font-weight: 500;
   color: var(--color-text-muted);
-  margin-top: 0.125rem;
-  letter-spacing: 0.05em;
+  margin-left: 1px;
+}
+
+/* Node footer with meta info */
+.rule-node__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.rule-node__meta-item {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.rule-node__meta-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+.rule-node__unconfigured-hint {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--color-warning);
+  font-style: italic;
+  letter-spacing: 0.01em;
+}
+
+.rule-node__days-inline {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.03em;
 }
 
 /* Logic gate node */
@@ -956,20 +1179,20 @@ function miniMapNodeColor(node: Node): string {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
+  padding: 0.625rem 1rem;
 }
 
 .rule-node__gate-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--color-iridescent-3);
 }
 
 .rule-node__gate-label {
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--color-iridescent-3);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
 }
 
 /* Actuator command badge */
@@ -981,92 +1204,141 @@ function miniMapNodeColor(node: Node): string {
   font-size: 0.8125rem;
   font-weight: 700;
   border-radius: var(--radius-sm);
-  margin-top: 0.125rem;
+  letter-spacing: 0.02em;
 }
 
 .rule-node__command--on {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgba(52, 211, 153, 0.12);
   color: var(--color-success);
+  border: 1px solid rgba(52, 211, 153, 0.15);
 }
 
 .rule-node__command--off {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgba(248, 113, 113, 0.12);
   color: var(--color-error);
+  border: 1px solid rgba(248, 113, 113, 0.15);
 }
 
 .rule-node__command--pwm {
-  background: rgba(96, 165, 250, 0.15);
+  background: rgba(96, 165, 250, 0.12);
   color: var(--color-iridescent-1);
+  border: 1px solid rgba(96, 165, 250, 0.15);
 }
 
 .rule-node__command--toggle {
-  background: rgba(251, 191, 36, 0.15);
+  background: rgba(251, 191, 36, 0.12);
   color: var(--color-warning);
+  border: 1px solid rgba(251, 191, 36, 0.15);
 }
 
 .rule-node__duration {
-  font-size: 0.625rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
   color: var(--color-text-muted);
-  margin-top: 0.25rem;
+  margin-top: 0.375rem;
+}
+
+.rule-node__duration-icon {
+  width: 11px;
+  height: 11px;
+  opacity: 0.6;
 }
 
 /* ======================== HANDLE STYLING ======================== */
 
 :deep(.vue-flow__handle) {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--color-bg-quaternary);
-  border: 2px solid var(--color-iridescent-2);
-  transition: all 0.15s ease;
+  background: var(--color-bg-primary);
+  border: 2.5px solid rgba(129, 140, 248, 0.6);
+  transition: all 0.15s var(--ease-out);
+  z-index: 5;
+}
+
+/* Source handles (output - right side) */
+:deep(.vue-flow__handle.vue-flow__handle-right) {
+  background: rgba(129, 140, 248, 0.2);
+  border-color: rgba(129, 140, 248, 0.7);
+}
+
+/* Target handles (input - left side) */
+:deep(.vue-flow__handle.vue-flow__handle-left) {
+  background: var(--color-bg-primary);
+  border-color: rgba(129, 140, 248, 0.5);
 }
 
 :deep(.vue-flow__handle:hover) {
   background: var(--color-iridescent-2);
-  box-shadow: 0 0 10px var(--color-iridescent-2);
-  transform: scale(1.4);
+  border-color: var(--color-iridescent-2);
+  box-shadow: 0 0 14px rgba(129, 140, 248, 0.6);
+  transform: scale(1.35);
 }
 
 :deep(.vue-flow__handle-connecting) {
   background: var(--color-iridescent-1);
-  box-shadow: 0 0 14px var(--color-iridescent-1);
+  border-color: var(--color-iridescent-1);
+  box-shadow: 0 0 18px rgba(96, 165, 250, 0.7);
+  transform: scale(1.4);
 }
 
 :deep(.vue-flow__handle-valid) {
   background: var(--color-success);
   border-color: var(--color-success);
-  box-shadow: 0 0 10px var(--color-success);
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.6);
+  transform: scale(1.4);
 }
 
 /* ======================== EDGE STYLING ======================== */
 
 :deep(.vue-flow__edge-path) {
-  stroke: var(--color-iridescent-2);
+  stroke: rgba(129, 140, 248, 0.5);
   stroke-width: 2;
 }
 
 :deep(.vue-flow__edge.animated .vue-flow__edge-path) {
   stroke-dasharray: 6 4;
-  animation: edge-flow 1.5s linear infinite;
+  animation: edge-flow 1.8s linear infinite;
 }
 
 :deep(.vue-flow__edge:hover .vue-flow__edge-path) {
   stroke: var(--color-iridescent-1);
-  stroke-width: 3;
-  filter: drop-shadow(0 0 4px var(--color-iridescent-1));
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.4));
 }
 
 :deep(.vue-flow__edge .vue-flow__edge-interaction) {
-  stroke-width: 20;
+  stroke-width: 24;
 }
 
 :deep(.vue-flow__arrowhead) {
-  fill: var(--color-iridescent-2);
+  fill: rgba(129, 140, 248, 0.6);
+}
+
+:deep(.vue-flow__edge:hover .vue-flow__arrowhead) {
+  fill: var(--color-iridescent-1);
 }
 
 @keyframes edge-flow {
   from { stroke-dashoffset: 10; }
   to { stroke-dashoffset: 0; }
+
+}
+
+/* Connection line while dragging */
+:deep(.vue-flow__connection-path) {
+  stroke: var(--color-iridescent-2);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+}
+
+/* Selection box */
+:deep(.vue-flow__selection) {
+  background: rgba(129, 140, 248, 0.06);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+  border-radius: var(--radius-sm);
 }
 
 /* ======================== VUE FLOW THEME OVERRIDES ======================== */
@@ -1079,20 +1351,17 @@ function miniMapNodeColor(node: Node): string {
   cursor: default;
 }
 
-:deep(.vue-flow__selection) {
-  background: rgba(129, 140, 248, 0.08);
-  border: 1px solid rgba(129, 140, 248, 0.3);
-}
-
 :deep(.vue-flow__minimap) {
-  background: var(--color-bg-secondary);
+  background: rgba(13, 13, 22, 0.85);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 :deep(.vue-flow__minimap-mask) {
-  fill: rgba(10, 10, 15, 0.7);
+  fill: rgba(7, 7, 13, 0.75);
 }
 
 :deep(.vue-flow__controls) {
@@ -1105,12 +1374,13 @@ function miniMapNodeColor(node: Node): string {
 }
 
 :deep(.vue-flow__controls-button) {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-secondary);
+  background: rgba(13, 13, 22, 0.85);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
@@ -1120,7 +1390,7 @@ function miniMapNodeColor(node: Node): string {
 
 :deep(.vue-flow__controls-button:hover) {
   background: var(--color-bg-tertiary);
-  border-color: var(--color-iridescent-2);
+  border-color: rgba(129, 140, 248, 0.3);
   color: var(--color-text-primary);
 }
 

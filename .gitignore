@@ -121,3 +121,15 @@ scripts/__pycache__/
 # ========== TEST ARTIFACTS ==========
 logs/wokwi/reports/*.xml
 logs/wokwi/reports/*.json
+
+# ========== ROOT SCREENSHOTS ==========
+/*.png
+
+# ========== COMPILED OBJECTS ==========
+El\ Trabajante/*.o
+
+# ========== LOCAL CONFIG & ARTIFACTS ==========
+.mcp.json
+.claude/*.local.md
+.claude/local-marketplace/
+docker/**/__pycache__/

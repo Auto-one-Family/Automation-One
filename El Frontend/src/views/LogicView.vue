@@ -3,11 +3,11 @@
  * LogicView (Rules Editor)
  *
  * Node-RED-inspired visual automation editor for AutomationOne.
- * Replaces the original placeholder with a full-featured rule editor.
+ * Full-featured rule editor with drag-and-drop node composition.
  *
  * Layout:
  * ┌──────────────────────────────────────────────────────────────┐
- * │ Toolbar: [Rule ▼] [New] [Save] [Test] [Toggle] [Delete]    │
+ * │ Toolbar: [← Back] [Rule ▼] [Name] [Desc] ... [Actions]     │
  * ├──────────┬───────────────────────────┬───────────────────────┤
  * │ Node     │                           │ Config Panel          │
  * │ Palette  │     Vue Flow Canvas       │ (when node selected)  │
@@ -26,8 +26,6 @@ import {
   Plus,
   Save,
   Play,
-  ToggleLeft,
-  ToggleRight,
   Trash2,
   ChevronDown,
   History,
@@ -38,6 +36,10 @@ import {
   Maximize2,
   Loader2,
   ArrowLeft,
+  Eye,
+  EyeOff,
+  Zap,
+  GitBranch,
 } from 'lucide-vue-next'
 import { useLogicStore } from '@/stores/logic'
 import { useUiStore } from '@/shared/stores'
@@ -450,11 +452,11 @@ onUnmounted(() => {
           class="toolbar-btn"
           :class="{ 'toolbar-btn--enabled': selectedRule?.enabled }"
           :disabled="!selectedRule"
-          :title="selectedRule?.enabled ? 'Deaktivieren' : 'Aktivieren'"
+          :title="selectedRule?.enabled ? 'Regel deaktivieren' : 'Regel aktivieren'"
           @click="toggleRule"
         >
-          <ToggleRight v-if="selectedRule?.enabled" class="w-4 h-4" />
-          <ToggleLeft v-else class="w-4 h-4" />
+          <Eye v-if="selectedRule?.enabled" class="w-4 h-4" />
+          <EyeOff v-else class="w-4 h-4" />
         </button>
 
         <!-- Delete -->
@@ -504,38 +506,84 @@ onUnmounted(() => {
         v-else-if="!selectedRule && !isCreatingNew"
         class="rules-empty"
       >
+        <!-- Animated background mesh -->
+        <div class="rules-empty__bg">
+          <div class="rules-empty__bg-grid" />
+          <div class="rules-empty__bg-glow" />
+        </div>
+
         <div class="rules-empty__content">
-          <Workflow class="rules-empty__icon" />
+          <!-- Animated flow illustration -->
+          <div class="rules-empty__illustration">
+            <div class="rules-empty__flow">
+              <div class="rules-empty__flow-node rules-empty__flow-node--sensor">
+                <Zap class="w-5 h-5" />
+              </div>
+              <div class="rules-empty__flow-line">
+                <svg width="80" height="2" viewBox="0 0 80 2">
+                  <line x1="0" y1="1" x2="80" y2="1" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3" class="rules-empty__flow-dash" />
+                </svg>
+              </div>
+              <div class="rules-empty__flow-node rules-empty__flow-node--logic">
+                <GitBranch class="w-5 h-5" />
+              </div>
+              <div class="rules-empty__flow-line">
+                <svg width="80" height="2" viewBox="0 0 80 2">
+                  <line x1="0" y1="1" x2="80" y2="1" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3" class="rules-empty__flow-dash" />
+                </svg>
+              </div>
+              <div class="rules-empty__flow-node rules-empty__flow-node--action">
+                <Workflow class="w-5 h-5" />
+              </div>
+            </div>
+            <div class="rules-empty__flow-labels">
+              <span>Bedingung</span>
+              <span>Logik</span>
+              <span>Aktion</span>
+            </div>
+          </div>
+
           <h2 class="rules-empty__title">Automatisierung</h2>
           <p class="rules-empty__desc">
-            Erstelle visuelle Regeln, um Aktoren basierend auf
-            Sensordaten und Zeitplänen zu steuern.
+            Erstelle visuelle Regeln, um Aktoren basierend auf Sensordaten und Zeitplänen zu steuern.
           </p>
+
           <div class="rules-empty__actions">
-            <button class="btn-primary" @click="startNewRule">
-              <Plus class="w-4 h-4" />
-              Erste Regel erstellen
+            <button class="rules-empty__cta" @click="startNewRule">
+              <Plus class="w-4.5 h-4.5" />
+              <span>Neue Regel erstellen</span>
             </button>
+            <p class="rules-empty__hint">
+              Bausteine auf die Arbeitsfläche ziehen und verbinden
+            </p>
           </div>
 
           <!-- Existing rules quick list -->
           <div v-if="logicStore.rules.length > 0" class="rules-empty__list">
-            <h3 class="rules-empty__list-title">Vorhandene Regeln</h3>
-            <button
-              v-for="rule in logicStore.rules"
-              :key="rule.id"
-              class="rules-empty__list-item"
-              @click="selectRule(rule.id)"
-            >
-              <span
-                class="rules-empty__list-dot"
-                :class="rule.enabled ? 'rules-empty__list-dot--on' : 'rules-empty__list-dot--off'"
-              />
-              <span>{{ rule.name }}</span>
-              <span class="rules-empty__list-meta">
-                {{ rule.conditions.length }} Bed. → {{ rule.actions.length }} Akt.
-              </span>
-            </button>
+            <h3 class="rules-empty__list-title">
+              <Workflow class="w-3.5 h-3.5" />
+              {{ logicStore.rules.length }} {{ logicStore.rules.length === 1 ? 'Regel' : 'Regeln' }} vorhanden
+            </h3>
+            <div class="rules-empty__list-items">
+              <button
+                v-for="rule in logicStore.rules"
+                :key="rule.id"
+                class="rules-empty__list-item"
+                @click="selectRule(rule.id)"
+              >
+                <span
+                  class="rules-empty__list-dot"
+                  :class="rule.enabled ? 'rules-empty__list-dot--on' : 'rules-empty__list-dot--off'"
+                />
+                <span class="rules-empty__list-name">{{ rule.name }}</span>
+                <span class="rules-empty__list-meta">
+                  {{ rule.conditions.length }} {{ rule.conditions.length === 1 ? 'Bedingung' : 'Bedingungen' }}
+                  <span class="rules-empty__list-arrow">&rarr;</span>
+                  {{ rule.actions.length }} {{ rule.actions.length === 1 ? 'Aktion' : 'Aktionen' }}
+                </span>
+                <span v-if="rule.enabled" class="rules-empty__list-badge">Aktiv</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -848,10 +896,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   padding: 0.4375rem 0.625rem;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   font-weight: 500;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -860,13 +908,16 @@ onUnmounted(() => {
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
-  border-color: var(--glass-border-hover);
+}
+
+.toolbar-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .toolbar-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
@@ -884,51 +935,68 @@ onUnmounted(() => {
   background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
   border-color: transparent;
   color: white;
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.2);
 }
 
 .toolbar-btn--accent:hover:not(:disabled) {
-  opacity: 0.9;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(96, 165, 250, 0.3);
   border-color: transparent;
   color: white;
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
 }
 
 .toolbar-btn--save {
+  background: var(--color-bg-tertiary);
   border-color: var(--glass-border);
+}
+
+.toolbar-btn--save:hover:not(:disabled) {
+  border-color: var(--glass-border-hover);
+  background: var(--color-bg-hover);
 }
 
 .toolbar-btn--pulse {
   border-color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.08);
   animation: save-glow 2s ease-in-out infinite;
 }
 
 @keyframes save-glow {
   0%, 100% { box-shadow: none; }
-  50% { box-shadow: 0 0 8px rgba(129, 140, 248, 0.3); }
+  50% { box-shadow: 0 0 12px rgba(129, 140, 248, 0.25); }
 }
 
 .toolbar-btn--enabled {
   color: var(--color-success);
-  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.toolbar-btn--enabled:hover:not(:disabled) {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--color-success);
 }
 
 .toolbar-btn--danger:hover:not(:disabled) {
   color: var(--color-error);
-  border-color: rgba(248, 113, 113, 0.3);
-  background: rgba(248, 113, 113, 0.1);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 .toolbar-btn--active {
   background: rgba(129, 140, 248, 0.1);
-  border-color: var(--color-iridescent-2);
+  color: var(--color-iridescent-2);
+}
+
+.toolbar-btn--active:hover:not(:disabled) {
+  background: rgba(129, 140, 248, 0.15);
   color: var(--color-iridescent-2);
 }
 
 .toolbar-divider {
   width: 1px;
-  height: 24px;
+  height: 20px;
   background: var(--glass-border);
-  margin: 0 4px;
+  margin: 0 2px;
 }
 
 /* ======================== MAIN CONTENT ======================== */
@@ -951,102 +1019,315 @@ onUnmounted(() => {
   color: var(--color-text-muted);
 }
 
-/* Empty / Landing state */
+/* ======================== EMPTY / LANDING STATE ======================== */
+
 .rules-empty {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Animated background */
+.rules-empty__bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rules-empty__bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.rules-empty__bg-glow {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  width: 600px;
+  height: 400px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(129, 140, 248, 0.06) 0%,
+    rgba(167, 139, 250, 0.03) 40%,
+    transparent 70%
+  );
+  animation: empty-glow-pulse 6s ease-in-out infinite;
+}
+
+@keyframes empty-glow-pulse {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
 }
 
 .rules-empty__content {
   text-align: center;
-  max-width: 480px;
+  max-width: 520px;
   padding: 2rem;
+  position: relative;
+  z-index: 1;
+  animation: empty-fade-in 0.5s ease-out;
 }
 
-.rules-empty__icon {
-  width: 64px;
-  height: 64px;
-  color: var(--color-iridescent-2);
-  opacity: 0.3;
-  margin: 0 auto 1.5rem;
+@keyframes empty-fade-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.rules-empty__title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  margin-bottom: 0.5rem;
-}
-
-.rules-empty__desc {
-  font-size: 0.9375rem;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-  margin-bottom: 1.5rem;
-}
-
-.rules-empty__actions {
+/* Flow illustration */
+.rules-empty__illustration {
   margin-bottom: 2rem;
 }
 
+.rules-empty__flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: 0.75rem;
+}
+
+.rules-empty__flow-node {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  border: 1.5px solid;
+  background: var(--color-bg-secondary);
+  transition: all 0.3s ease;
+}
+
+.rules-empty__flow-node--sensor {
+  color: var(--color-iridescent-1);
+  border-color: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.1);
+  animation: node-float 3s ease-in-out infinite;
+}
+
+.rules-empty__flow-node--logic {
+  color: var(--color-iridescent-3);
+  border-color: rgba(167, 139, 250, 0.3);
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.1);
+  animation: node-float 3s ease-in-out 0.3s infinite;
+}
+
+.rules-empty__flow-node--action {
+  color: var(--color-iridescent-4);
+  border-color: rgba(192, 132, 252, 0.3);
+  box-shadow: 0 0 20px rgba(192, 132, 252, 0.1);
+  animation: node-float 3s ease-in-out 0.6s infinite;
+}
+
+@keyframes node-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.rules-empty__flow-line {
+  width: 80px;
+  color: var(--color-text-muted);
+  opacity: 0.4;
+  display: flex;
+  align-items: center;
+}
+
+.rules-empty__flow-dash {
+  animation: dash-flow 1.5s linear infinite;
+}
+
+@keyframes dash-flow {
+  from { stroke-dashoffset: 14; }
+  to { stroke-dashoffset: 0; }
+}
+
+.rules-empty__flow-labels {
+  display: flex;
+  justify-content: center;
+  gap: 80px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+}
+
+.rules-empty__title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.625rem;
+  letter-spacing: -0.01em;
+}
+
+.rules-empty__desc {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-loose);
+  margin-bottom: 2rem;
+  max-width: 380px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* CTA area */
+.rules-empty__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 2.5rem;
+}
+
+/* CTA Button */
+.rules-empty__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 2rem;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, var(--color-iridescent-1) 0%, var(--color-iridescent-2) 50%, var(--color-iridescent-3) 100%);
+  background-size: 200% 100%;
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.3s var(--ease-out);
+  box-shadow:
+    0 4px 16px rgba(129, 140, 248, 0.3),
+    0 1px 0 rgba(255, 255, 255, 0.15) inset;
+  animation: cta-gradient-shift 4s ease-in-out infinite;
+}
+
+@keyframes cta-gradient-shift {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 100% center; }
+}
+
+.rules-empty__cta:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 8px 28px rgba(129, 140, 248, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+.rules-empty__cta:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 8px rgba(129, 140, 248, 0.2);
+}
+
+.rules-empty__hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+}
+
+/* Rules list */
 .rules-empty__list {
   text-align: left;
   padding: 1rem;
-  background: var(--color-bg-secondary);
+  background: rgba(13, 13, 22, 0.6);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+  max-width: 400px;
+  margin: 0 auto;
 }
 
 .rules-empty__list-title {
-  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--color-text-muted);
   margin-bottom: 0.5rem;
+  padding: 0 0.375rem;
+}
+
+.rules-empty__list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .rules-empty__list-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
   width: 100%;
-  padding: 0.5rem 0.625rem;
+  padding: 0.625rem 0.625rem;
   background: none;
-  border: none;
-  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   color: var(--color-text-primary);
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: all var(--transition-fast);
   text-align: left;
 }
 
 .rules-empty__list-item:hover {
   background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
 }
 
 .rules-empty__list-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .rules-empty__list-dot--on {
   background: var(--color-success);
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
 }
 
 .rules-empty__list-dot--off {
   background: var(--color-text-muted);
 }
 
+.rules-empty__list-name {
+  font-weight: 500;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .rules-empty__list-meta {
-  margin-left: auto;
   font-size: 0.6875rem;
   color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.rules-empty__list-arrow {
+  color: var(--color-iridescent-2);
+  margin: 0 0.125rem;
+}
+
+.rules-empty__list-badge {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--color-success);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 /* ======================== EXECUTION HISTORY ======================== */

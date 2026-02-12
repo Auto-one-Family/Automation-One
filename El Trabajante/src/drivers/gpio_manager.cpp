@@ -77,6 +77,11 @@ void GPIOManager::initializeAllPinsToSafeMode() {
     Serial.println("\n=== GPIO SAFE-MODE INITIALIZATION ===");
     Serial.printf("Board Type: %s\n", BOARD_TYPE);
 
+    // HAL availability check - in production always set, nullptr only in unit tests
+    if (!gpio_hal_) {
+        Serial.println("[CRITICAL] GPIOManager: HAL not initialized! Hardware operations will be skipped.");
+    }
+
     // Notify HAL (Mock uses this to set initialized flag)
     if (gpio_hal_) {
         gpio_hal_->initializeAllPinsToSafeMode();

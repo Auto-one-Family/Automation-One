@@ -21,7 +21,7 @@ import type {
   StatusSource, SensorConfigCreate, MockSensor,
   HeartbeatGpioItem,
   PendingESPDevice, ESPApprovalRequest, ESPApprovalResponse,
-  DeviceDiscoveredEvent, DeviceApprovedEvent, DeviceRejectedEvent
+  DeviceDiscoveredPayload, DeviceApprovedPayload, DeviceRejectedPayload
 } from '@/types'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
@@ -1088,25 +1088,25 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Sensor data handler - delegates to sensor.store.ts
    * Server: sensor_handler.py → WS: sensor_data
    */
-  function handleSensorData(message: any): void {
+  function handleSensorData(message: { data: Record<string, unknown> }): void {
     const sensorStore = useSensorStore()
-    sensorStore.handleSensorData(message, devices.value, getDeviceId)
+    sensorStore.handleSensorData(message as unknown as Parameters<typeof sensorStore.handleSensorData>[0], devices.value, getDeviceId)
   }
 
   /**
    * Actuator status handler - delegates to actuator.store.ts
    * Server: actuator_handler.py → WS: actuator_status
    */
-  function handleActuatorStatus(message: any): void {
+  function handleActuatorStatus(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
-    actStore.handleActuatorStatus(message, devices.value, getDeviceId)
+    actStore.handleActuatorStatus(message as unknown as Parameters<typeof actStore.handleActuatorStatus>[0], devices.value, getDeviceId)
   }
 
   /**
    * Config response handler - delegates to config.store.ts
    * Server: config_ack_handler.py → WS: config_response
    */
-  function handleConfigResponse(message: any): void {
+  function handleConfigResponse(message: { data: Record<string, unknown> }): void {
     const cfgStore = useConfigStore()
     cfgStore.handleConfigResponse(message, devices.value, getDeviceId, fetchGpioStatus)
   }
@@ -1166,7 +1166,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Adds new device to pending list and shows toast notification.
    */
   function handleDeviceDiscovered(message: any): void {
-    const data = message.data as DeviceDiscoveredEvent
+    const data = message.data as DeviceDiscoveredPayload
     const toast = useToast()
 
     if (!data.device_id) {
@@ -1202,7 +1202,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Removes device from pending list.
    */
   function handleDeviceApproved(message: any): void {
-    const data = message.data as DeviceApprovedEvent
+    const data = message.data as DeviceApprovedPayload
     const toast = useToast()
 
     if (!data.device_id) {
@@ -1227,7 +1227,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Removes device from pending list.
    */
   function handleDeviceRejected(message: any): void {
-    const data = message.data as DeviceRejectedEvent
+    const data = message.data as DeviceRejectedPayload
     const toast = useToast()
 
     if (!data.device_id) {
@@ -1248,9 +1248,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Sensor health handler - delegates to sensor.store.ts
    * Server: maintenance/jobs/sensor_health.py → WS: sensor_health
    */
-  function handleSensorHealth(message: any): void {
+  function handleSensorHealth(message: { data: Record<string, unknown> }): void {
     const sensorStore = useSensorStore()
-    sensorStore.handleSensorHealth(message, findDeviceByEspIdDefensive)
+    sensorStore.handleSensorHealth(message as unknown as Parameters<typeof sensorStore.handleSensorHealth>[0], findDeviceByEspIdDefensive)
   }
 
   // =============================================================================

@@ -96,8 +96,8 @@ def _attach_query_duration_events(sync_engine) -> None:
         try:
             from ..core.metrics import DB_QUERY_DURATION
             DB_QUERY_DURATION.observe(total)
-        except Exception:
-            pass  # Metrics not available during early startup
+        except ImportError:
+            pass  # Metrics module not yet importable during early startup
 
 
 # =============================================================================

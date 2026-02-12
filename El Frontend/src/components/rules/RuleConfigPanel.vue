@@ -606,13 +606,13 @@ function selectActuator(value: string) {
 
 <style scoped>
 .config-panel {
-  width: 280px;
-  min-width: 280px;
+  width: 288px;
+  min-width: 288px;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-secondary);
   border-left: 1px solid var(--glass-border);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .config-panel__header {
@@ -621,17 +621,18 @@ function selectActuator(value: string) {
   justify-content: space-between;
   padding: 0.875rem 1rem;
   border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
 }
 
 .config-panel__type {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
 }
 
 .config-panel__type-icon {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -639,43 +640,47 @@ function selectActuator(value: string) {
 }
 
 .config-panel__type-icon--sensor {
-  background: rgba(96, 165, 250, 0.15);
+  background: rgba(96, 165, 250, 0.1);
   color: var(--color-iridescent-1);
 }
 
 .config-panel__type-icon--time {
-  background: rgba(251, 191, 36, 0.15);
+  background: rgba(251, 191, 36, 0.1);
   color: var(--color-warning);
 }
 
 .config-panel__type-icon--logic {
-  background: rgba(167, 139, 250, 0.15);
+  background: rgba(167, 139, 250, 0.1);
   color: var(--color-iridescent-3);
 }
 
 .config-panel__type-icon--actuator {
-  background: rgba(192, 132, 252, 0.15);
+  background: rgba(192, 132, 252, 0.1);
   color: var(--color-iridescent-4);
 }
 
 .config-panel__type-icon--notification {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgba(52, 211, 153, 0.1);
   color: var(--color-success);
 }
 
 .config-panel__type-icon--delay {
-  background: rgba(112, 112, 128, 0.15);
-  color: var(--color-text-muted);
+  background: rgba(133, 133, 160, 0.1);
+  color: var(--color-text-secondary);
 }
 
 .config-panel__type-label {
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .config-panel__close {
-  padding: 0.25rem;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--color-text-muted);
@@ -694,7 +699,8 @@ function selectActuator(value: string) {
   padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 1rem;
+  overflow-y: auto;
 }
 
 .config-field {
@@ -713,9 +719,11 @@ function selectActuator(value: string) {
 }
 
 .config-label {
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.6875rem;
+  font-weight: 600;
   color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .config-input,
@@ -723,19 +731,25 @@ function selectActuator(value: string) {
 .config-textarea {
   width: 100%;
   padding: 0.5rem 0.625rem;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
   outline: none;
-  transition: border-color var(--transition-fast);
+  transition: all var(--transition-fast);
 }
 
 .config-input:focus,
 .config-select:focus,
 .config-textarea:focus {
-  border-color: var(--color-iridescent-2);
+  border-color: rgba(129, 140, 248, 0.4);
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.06);
+}
+
+.config-input::placeholder,
+.config-textarea::placeholder {
+  color: var(--color-text-muted);
 }
 
 .config-select {
@@ -744,6 +758,7 @@ function selectActuator(value: string) {
   background-repeat: no-repeat;
   background-position: right 0.5rem center;
   padding-right: 1.75rem;
+  cursor: pointer;
 }
 
 .config-select option {
@@ -753,24 +768,27 @@ function selectActuator(value: string) {
 
 .config-textarea {
   resize: vertical;
-  min-height: 60px;
+  min-height: 64px;
   font-family: inherit;
+  line-height: 1.5;
 }
 
 .config-range {
   width: 100%;
   accent-color: var(--color-iridescent-2);
+  cursor: pointer;
 }
 
 .config-range-value {
   font-size: 0.75rem;
   color: var(--color-iridescent-2);
-  font-weight: 600;
+  font-weight: 700;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .config-hint {
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
   color: var(--color-text-muted);
   line-height: 1.4;
 }
@@ -791,13 +809,18 @@ function selectActuator(value: string) {
 .config-toggle-btn {
   flex: 1;
   padding: 0.5rem;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   background: var(--color-bg-tertiary);
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
   transition: all var(--transition-fast);
+  letter-spacing: 0.04em;
+}
+
+.config-toggle-btn:hover:not(.config-toggle-btn--active) {
+  color: var(--color-text-secondary);
 }
 
 .config-toggle-btn--active {
@@ -816,18 +839,19 @@ function selectActuator(value: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: 0.625rem;
+  font-weight: 700;
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
   color: var(--color-text-muted);
   cursor: pointer;
   transition: all var(--transition-fast);
+  letter-spacing: 0.02em;
 }
 
-.config-day:hover {
-  border-color: var(--color-iridescent-2);
+.config-day:hover:not(.config-day--active) {
+  border-color: rgba(129, 140, 248, 0.3);
   color: var(--color-text-primary);
 }
 
@@ -835,13 +859,15 @@ function selectActuator(value: string) {
   background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
   border-color: transparent;
   color: white;
+  box-shadow: 0 2px 6px rgba(96, 165, 250, 0.2);
 }
 
 .config-panel__footer {
   display: flex;
   gap: 0.5rem;
-  padding: 0.875rem 1rem;
+  padding: 0.75rem 1rem;
   border-top: 1px solid var(--glass-border);
+  flex-shrink: 0;
 }
 
 .config-action {
@@ -850,12 +876,12 @@ function selectActuator(value: string) {
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  padding: 0.5rem;
-  font-size: 0.75rem;
+  padding: 0.4375rem;
+  font-size: 0.6875rem;
   font-weight: 500;
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
+  background: transparent;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
@@ -865,7 +891,7 @@ function selectActuator(value: string) {
 }
 
 .config-action--duplicate:hover {
-  border-color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.08);
   color: var(--color-iridescent-2);
 }
 
@@ -874,20 +900,26 @@ function selectActuator(value: string) {
 }
 
 .config-action--delete:hover {
-  border-color: var(--color-error);
   color: var(--color-error);
-  background: rgba(248, 113, 113, 0.1);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 /* Slide transition */
-.config-slide-enter-active,
-.config-slide-leave-active {
-  transition: all 0.2s ease;
+.config-slide-enter-active {
+  transition: all 0.2s var(--ease-out);
 }
 
-.config-slide-enter-from,
+.config-slide-leave-active {
+  transition: all 0.15s ease-in;
+}
+
+.config-slide-enter-from {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
 .config-slide-leave-to {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(8px);
 }
 </style>
