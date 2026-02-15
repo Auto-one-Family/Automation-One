@@ -12,7 +12,17 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "npx playwright test tests/e2e/scenarios/",
+    "test:css": "npx playwright test tests/e2e/css/ --project=chromium",
+    "test:css:all": "npx playwright test tests/e2e/css/",
+    "test:css:tokens": "npx playwright test tests/e2e/css/design-tokens.spec.ts --project=chromium",
+    "test:css:visual": "npx playwright test tests/e2e/css/visual-regression.spec.ts --project=chromium",
+    "test:css:a11y": "npx playwright test tests/e2e/css/accessibility.spec.ts tests/e2e/css/color-contrast.spec.ts --project=chromium",
+    "test:css:responsive": "npx playwright test tests/e2e/css/responsive-layout.spec.ts",
+    "test:css:update-snapshots": "npx playwright test tests/e2e/css/visual-regression.spec.ts --update-snapshots --project=chromium",
+    "test:playwright": "npx playwright test",
+    "test:playwright:ui": "npx playwright test --ui"
   },
   "dependencies": {
     "@vue-flow/background": "^1.3.2",
