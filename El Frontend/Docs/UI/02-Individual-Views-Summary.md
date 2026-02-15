@@ -755,9 +755,7 @@ Backend:
 - Industrielle Aktoren brauchen präzise Kontrolle
 - Beispiel: Pumpe auf 75% statt volle Leistung
 - Beispiel: Ventil 30% öffnen statt ganz auf
-- Beispiel: LED-Helligkeit dimmen
-
-**Status:** 🟥 **BLOCKIERT USER** - PWM-Kontrolle fehlt komplett!
+- Beispiel: LED-Helligkeit dimmen**Status:** 🟥 **BLOCKIERT USER** - PWM-Kontrolle fehlt komplett!
 
 ---
 
