@@ -49,9 +49,9 @@ export default defineConfig({
   // Limit parallel workers on CI (resource constraints)
   workers: process.env.CI ? 2 : undefined,
 
-  // Reporter configuration (CI + local: logs/frontend/playwright/)
+  // Reporter configuration
   reporter: [
-    ['html', { outputFolder: '../../logs/frontend/playwright/playwright-report', open: 'never' }],
+    ['html', { outputFolder: './playwright-report', open: 'never' }],
     ['list'],
     ...(process.env.CI ? [['github' as const]] : []),
   ],
@@ -102,8 +102,8 @@ export default defineConfig({
   // Snapshot path template — organized by project and test file
   snapshotPathTemplate: '{testDir}/__screenshots__/{projectName}/{testFilePath}/{arg}{ext}',
 
-  // Output directory for artifacts (CI + local: logs/frontend/playwright/)
-  outputDir: '../../logs/frontend/playwright/test-results',
+  // Output directory for artifacts
+  outputDir: './test-results',
 
   // ═══════════════════════════════════════════════════════════════════════
   // PROJECTS — Multi-browser + Multi-viewport
