@@ -1,291 +1,230 @@
-# Git Commit Plan
+# Git Commit & Branch-Konsolidierungsplan
 
-**Erstellt:** 2025-02-15  
-**Status:** ✅ **AUSGEFÜHRT** – Alle Branches erstellt, nichts gelöscht  
-
----
-
-## Branch-Übersicht (nach Ausführung)
-
-| Branch | Basis | Inhalt |
-|--------|-------|--------|
-| **backup/frontend-consolidation-full** | feature/frontend-consolidation | Vollständiger WIP-State (86 Dateien) – **nichts verloren** |
-| **fix/pending-panel** | feature/frontend-consolidation | PendingDevicesPanel Sichtbarkeits-Fix |
-| **feat/dashboard-consolidation** | fix/pending-panel | Dashboard Zoom, ZonePlate, TopBar, shared stores |
-| **feat/frontend-rules-views** | feat/dashboard-consolidation | Rules UI, Logic Store, Login/Setup/Logic Views |
-| **feat/frontend-esp-tokens** | feat/frontend-rules-views | ESP Store, Design Tokens, Animations, Package |
-| **feat/server-esp** | feature/frontend-consolidation | Server: ESP pending, Sensor Repo, Heartbeat |
-| **feat/firmware-mqtt** | feature/frontend-consolidation | Firmware: MQTT Client, Pi-Enhanced |
-| **chore/infra** | feature/frontend-consolidation | Docker, CI Workflows, .env, Makefile |
-| **test/e2e-esp-registration** | feature/frontend-consolidation | E2E Playwright ESP-Registrierung |
-| **docs/claude-reports** | feature/frontend-consolidation | .claude Reference, Skills, Reports, Scripts |
-
-**feature/frontend-consolidation** bleibt unverändert (origin).
+**Erstellt:** 2026-02-15 19:00 UTC
+**Branch:** feature/frontend-consolidation
+**Status:** BEREIT ZUR AUSFUEHRUNG
 
 ---
 
-## ⚠️ SICHERHEIT – Backup (erledigt)
+## Ausgangslage
 
-```bash
-# 1. Backup-Branch erstellen (alle Änderungen bleiben erhalten)
-git stash push -m "WIP frontend-consolidation" -u
-
-# Oder alternativ: Branch von aktuellem Stand
-git add -A
-git stash push -m "frontend-consolidation-full" -u
-
-# 2. Nach Verifizierung: Stash wieder anwenden
-git stash pop
-```
-
-**Kein Merge** – User wünscht explizit: "nicht unbedacht mergen". Merge erst nach Review und bewusster Entscheidung.
+| Metrik | Wert |
+|--------|------|
+| Aktueller Branch | `feature/frontend-consolidation` (synchron mit origin) |
+| Uncommitted Changes | 10 Dateien (unstaged) |
+| Feature-Branch ahead of master | 64 Commits |
+| Feature-Branch behind master | 1 Commit (PR#3 Merge-Commit `20c1592`) |
+| Lokale Branches gesamt | 15 |
+| Davon merged in Feature-Branch | 12 (sicher loeschbar) |
+| Davon NICHT merged | 2 (backup + phase2-wokwi-ci) |
+| Remote-Branches | 7 (3 davon Cleanup-Kandidaten) |
 
 ---
 
-## Commit 1: fix(frontend): PendingDevicesPanel visibility and positioning
+## Phase 1: Uncommitted Changes committen
 
-**Was:** Panel war unsichtbar weil anchor-el=null → updatePosition brach ab. Fallback-Positionierung (top-right), CSS-Fallback, Layout-Timing (requestAnimationFrame), robuste right-Positionierung.
+### Commit 1: feat(frontend): improve WebSocket lifecycle and ESP error handling
+
+**Was:** WebSocket-Service bekommt reaktive Status-Callbacks (statt Polling), der useWebSocket-Composable erkennt ob er in Component- oder Store-Kontext laeuft und waehlt die passende Strategie. ESP-API propagiert DB-Fehler korrekt und verschaerft Mock-Erkennung. Store nutzt inklusivere Offline-Logik.
 
 **Dateien:**
-- `El Frontend/src/components/esp/PendingDevicesPanel.vue` – Fallback-Position, double RAF, CSS top/right, Design-Updates
+- `El Frontend/src/services/websocket.ts` - onStatusChange() callback system, centralized setStatus(), better reconnect error handling
+- `El Frontend/src/composables/useWebSocket.ts` - component vs store context detection, callback-based status for stores
+- `El Frontend/src/api/esp.ts` - DB fetch error propagation, stricter mock detection (remove `includes('MOCK')`)
+- `El Frontend/src/stores/esp.ts` - inverted offline filter logic (more inclusive)
 
 **Befehle:**
 ```bash
-git add "El Frontend/src/components/esp/PendingDevicesPanel.vue"
-git commit -m "fix(frontend): PendingDevicesPanel visibility and positioning when triggered from TopBar"
+git add "El Frontend/src/services/websocket.ts" "El Frontend/src/composables/useWebSocket.ts" "El Frontend/src/api/esp.ts" "El Frontend/src/stores/esp.ts"
+git commit -m "feat(frontend): improve WebSocket lifecycle and ESP error handling
+
+- Add onStatusChange() callback system to WebSocket service (avoids polling)
+- Detect component vs store context in useWebSocket composable
+- Use callback-based status monitoring in store contexts (no setInterval leak)
+- Propagate DB fetch errors in ESP API when no mock fallback available
+- Tighten mock ESP detection (remove overly broad includes check)
+- Use inclusive offline filter logic in ESP store
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Commit 2: feat(frontend): dashboard consolidation, zoom navigation, shared stores
+### Commit 2: fix(server): thread-safe MQTT buffering and ESP registration hardening
 
-**Was:** DashboardView Drei-Stufen-Zoom, ZonePlate/ZoneDetailView/DeviceDetailView, useZoomNavigation, dashboard.store, TopBar-Integration, UnassignedDropBar, neue Komponenten.
+**Was:** MQTT-Client bekommt thread-safe asyncio-Scheduling fuer den Offline-Buffer (paho-mqtt Callback-Thread hat keinen Event-Loop). Discovery nutzt korrektes `device_metadata` Feld. Heartbeat-Handler bekommt Session-Rollback bei History-Fehler und entfernt Debug-Logs. Sensor-Handler bekommt Task-Done-Callbacks. ESP-Service setzt neue Geraete auf `pending_approval` statt direkt `online`.
 
 **Dateien:**
-- `El Frontend/src/views/DashboardView.vue`
-- `El Frontend/src/shared/design/layout/TopBar.vue`
-- `El Frontend/src/shared/stores/dashboard.store.ts` (untracked)
-- `El Frontend/src/composables/useZoomNavigation.ts` (untracked)
-- `El Frontend/src/components/dashboard/UnassignedDropBar.vue`
-- `El Frontend/src/components/dashboard/ZonePlate.vue` (untracked)
-- `El Frontend/src/components/dashboard/ZoneDetailView.vue` (untracked)
-- `El Frontend/src/components/dashboard/DeviceMiniCard.vue` (untracked)
-- `El Frontend/src/components/dashboard/ZoomBreadcrumb.vue` (untracked)
-- `El Frontend/src/components/zones/DeviceSummaryCard.vue` (untracked)
-- `El Frontend/src/components/zones/SubzoneArea.vue` (untracked)
-- `El Frontend/src/components/esp/DeviceDetailView.vue` (untracked)
-- `El Frontend/src/components/esp/DeviceHeaderBar.vue` (untracked)
-- `El Frontend/src/components/modals/RejectDeviceModal.vue` (untracked)
+- `El Servador/god_kaiser_server/src/mqtt/client.py` - _schedule_buffer_add() for thread-safe async, event loop capture
+- `El Servador/god_kaiser_server/src/mqtt/handlers/discovery_handler.py` - metadata -> device_metadata field fix
+- `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` - session rollback on history error, remove DEBUG timing logs, improve error logging
+- `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py` - task done callbacks for logic evaluation visibility
+- `El Servador/god_kaiser_server/src/services/esp_service.py` - pending_approval for new devices, persist status changes, log WebSocket errors
 
 **Befehle:**
 ```bash
-git add "El Frontend/src/views/DashboardView.vue" "El Frontend/src/shared/design/layout/TopBar.vue" "El Frontend/src/shared/stores/dashboard.store.ts" "El Frontend/src/composables/useZoomNavigation.ts" "El Frontend/src/composables/index.ts" "El Frontend/src/components/dashboard/UnassignedDropBar.vue" "El Frontend/src/components/dashboard/ZonePlate.vue" "El Frontend/src/components/dashboard/ZoneDetailView.vue" "El Frontend/src/components/dashboard/DeviceMiniCard.vue" "El Frontend/src/components/dashboard/ZoomBreadcrumb.vue" "El Frontend/src/components/zones/DeviceSummaryCard.vue" "El Frontend/src/components/zones/SubzoneArea.vue" "El Frontend/src/components/esp/DeviceDetailView.vue" "El Frontend/src/components/esp/DeviceHeaderBar.vue" "El Frontend/src/components/modals/RejectDeviceModal.vue"
-git commit -m "feat(frontend): dashboard consolidation with zoom navigation and shared stores"
+git add "El Servador/god_kaiser_server/src/mqtt/client.py" "El Servador/god_kaiser_server/src/mqtt/handlers/discovery_handler.py" "El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py" "El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py" "El Servador/god_kaiser_server/src/services/esp_service.py"
+git commit -m "fix(server): thread-safe MQTT buffering and ESP registration hardening
+
+- Add _schedule_buffer_add() for thread-safe async scheduling from paho threads
+- Capture event loop reference during connect() for cross-thread use
+- Fix metadata -> device_metadata field name in discovery handler
+- Add session rollback on heartbeat history insert failure
+- Remove DEBUG timing logs from heartbeat handler
+- Add task done callbacks for logic evaluation error visibility
+- New ESP devices start as pending_approval (not auto-online)
+- Preserve existing device status on re-registration
+- Persist offline status changes via session commit
+- Log WebSocket broadcast errors instead of silently swallowing
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Commit 3: feat(frontend): rules UI, logic store, views and auth flows
+### Commit 3: docs(reports): update git health report
 
-**Was:** RuleConfigPanel, RuleFlowEditor, RuleNodePalette, logic.store Erweiterungen, LogicView, LoginView, SetupView.
+**Was:** Git Health Report aktualisiert mit vollstaendiger Branch-Analyse, Repo-Groesse, Secrets-Audit und CI-Bewertung.
 
 **Dateien:**
-- `El Frontend/src/components/rules/RuleConfigPanel.vue`
-- `El Frontend/src/components/rules/RuleFlowEditor.vue`
-- `El Frontend/src/components/rules/RuleNodePalette.vue`
-- `El Frontend/src/shared/stores/logic.store.ts`
-- `El Frontend/src/views/LogicView.vue`
-- `El Frontend/src/views/LoginView.vue`
-- `El Frontend/src/views/SetupView.vue`
+- `.claude/reports/current/GIT_HEALTH_REPORT.md` - complete rewrite with branch hygiene, repo size analysis
 
 **Befehle:**
 ```bash
-git add "El Frontend/src/components/rules/RuleConfigPanel.vue" "El Frontend/src/components/rules/RuleFlowEditor.vue" "El Frontend/src/components/rules/RuleNodePalette.vue" "El Frontend/src/shared/stores/logic.store.ts" "El Frontend/src/shared/stores/index.ts" "El Frontend/src/views/LogicView.vue" "El Frontend/src/views/LoginView.vue" "El Frontend/src/views/SetupView.vue"
-git commit -m "feat(frontend): rules UI, logic store and auth view refinements"
+git add ".claude/reports/current/GIT_HEALTH_REPORT.md"
+git commit -m "docs(reports): update git health report with branch and repo analysis
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Commit 4: feat(frontend): esp store, design tokens, animations
+## Phase 2: Master synchronisieren
 
-**Was:** esp.store Erweiterungen, tokens.css, animations.css, tailwind.config.
+### Schritt 2.1: Master in Feature-Branch mergen
 
-**Dateien:**
-- `El Frontend/src/stores/esp.ts`
-- `El Frontend/src/types/index.ts`
-- `El Frontend/src/styles/tokens.css`
-- `El Frontend/src/styles/animations.css`
-- `El Frontend/tailwind.config.js`
+Master hat 1 Commit den Feature-Branch nicht hat (PR#3 Merge `20c1592`).
 
-**Befehle:**
 ```bash
-git add "El Frontend/src/stores/esp.ts" "El Frontend/src/types/index.ts" "El Frontend/src/styles/tokens.css" "El Frontend/src/styles/animations.css" "El Frontend/tailwind.config.js"
-git commit -m "feat(frontend): esp store, design tokens and animations"
+# Auf feature/frontend-consolidation bleiben
+git merge master -m "Merge master: sync PR#3 merge commit"
 ```
 
----
+**Erwartung:** Clean merge (keine Konflikte erwartet, da feature/frontend-consolidation bereits den Inhalt von feature/docs-cleanup enthaelt - es fehlt nur der Merge-Commit selbst).
 
-## Commit 5: feat(server): esp, sensors, heartbeat, pending devices
+### Schritt 2.2: Feature-Branch pushen
 
-**Was:** Server-API für pending devices, sensor repo, heartbeat handler, Schemas.
-
-**Dateien:**
-- `El Servador/god_kaiser_server/src/api/v1/esp.py`
-- `El Servador/god_kaiser_server/src/api/v1/sensors.py`
-- `El Servador/god_kaiser_server/src/db/repositories/sensor_repo.py`
-- `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`
-- `El Servador/god_kaiser_server/src/schemas/esp.py`
-- `El Servador/god_kaiser_server/src/schemas/sensor.py`
-- `El Servador/god_kaiser_server/src/services/maintenance/jobs/sensor_health.py`
-
-**Befehle:**
 ```bash
-git add "El Servador/god_kaiser_server/src/api/v1/esp.py" "El Servador/god_kaiser_server/src/api/v1/sensors.py" "El Servador/god_kaiser_server/src/db/repositories/sensor_repo.py" "El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py" "El Servador/god_kaiser_server/src/schemas/esp.py" "El Servador/god_kaiser_server/src/schemas/sensor.py" "El Servador/god_kaiser_server/src/services/maintenance/jobs/sensor_health.py"
-git commit -m "feat(server): esp pending devices, sensor repo and heartbeat handler"
-```
-
----
-
-## Commit 6: feat(firmware): mqtt client and pi-enhanced processor
-
-**Was:** mqtt_client.cpp, pi_enhanced_processor Änderungen.
-
-**Dateien:**
-- `El Trabajante/src/services/communication/mqtt_client.cpp`
-- `El Trabajante/src/services/sensor/pi_enhanced_processor.cpp`
-- `El Trabajante/src/services/sensor/pi_enhanced_processor.h`
-
-**Befehle:**
-```bash
-git add "El Trabajante/src/services/communication/mqtt_client.cpp" "El Trabajante/src/services/sensor/pi_enhanced_processor.cpp" "El Trabajante/src/services/sensor/pi_enhanced_processor.h"
-git commit -m "feat(firmware): mqtt client and pi-enhanced processor updates"
-```
-
----
-
-## Commit 7: chore(docker,ci,config): docker-compose, workflows, env, Makefile
-
-**Was:** docker-compose, GitHub workflows, .env.example, Makefile.
-
-**Dateien:**
-- `docker-compose.yml`
-- `.github/workflows/backend-e2e-tests.yml`
-- `.github/workflows/playwright-tests.yml`
-- `.env.example`
-- `Makefile`
-
-**Befehle:**
-```bash
-git add docker-compose.yml .github/workflows/backend-e2e-tests.yml .github/workflows/playwright-tests.yml .env.example Makefile
-git commit -m "chore(docker,ci): update compose, workflows and env"
-```
-
----
-
-## Commit 8: chore(frontend): package.json and tsconfig
-
-**Was:** package.json, package-lock.json, tsconfig.
-
-**Dateien:**
-- `El Frontend/package.json`
-- `El Frontend/package-lock.json`
-- `El Frontend/tsconfig.node.tsbuildinfo`
-- `El Frontend/tsconfig.tsbuildinfo`
-
-**Befehle:**
-```bash
-git add "El Frontend/package.json" "El Frontend/package-lock.json" "El Frontend/tsconfig.node.tsbuildinfo" "El Frontend/tsconfig.tsbuildinfo"
-git commit -m "chore(frontend): update package and tsconfig"
-```
-
----
-
-## Commit 9: test(frontend): e2e esp registration flow
-
-**Was:** Playwright-E2E für ESP-Registrierung.
-
-**Dateien:**
-- `El Frontend/tests/e2e/scenarios/esp-registration-flow.spec.ts`
-
-**Befehle:**
-```bash
-git add "El Frontend/tests/e2e/scenarios/esp-registration-flow.spec.ts"
-git commit -m "test(frontend): add e2e esp registration flow"
-```
-
----
-
-## Commit 10: docs(claude): reference, skills, agents, reports
-
-**Was:** Alle .claude Änderungen – Agents, Reference, Skills, Reports, Rules.
-
-**Dateien (modified):**
-- `.claude/agents/frontend-debug.md`
-- `.claude/reference/ROADMAP_KI_MONITORING.md`
-- `.claude/reference/api/WEBSOCKET_EVENTS.md`
-- `.claude/reference/debugging/LOG_ACCESS_REFERENCE.md`
-- `.claude/reference/debugging/LOG_LOCATIONS.md`
-- `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
-- `.claude/reference/testing/agent_profiles.md`
-- `.claude/rules/docker-rules.md`
-- `.claude/skills/frontend-debug/SKILL.md`
-- `.claude/skills/ki-audit/SKILL.md`
-- `.claude/reports/Testrunner/test.md`
-- `.claude/reports/current/CONSOLIDATED_REPORT.md`
-- `.claude/reports/current/DB_INSPECTOR_REPORT.md`
-- `.claude/reports/current/GIT_HEALTH_REPORT.md`
-- `.claude/reports/current/KI_AUDIT_REPORT.md`
-
-**Dateien (untracked):**
-- `.claude/reports/current/BACKEND_INSPECTION.md`
-- `.claude/reports/current/DEBUG_CONSOLIDATION_PLAN.md`
-- `.claude/reports/current/DEBUG_INFRA_AGENT_ASSESSMENT.md`
-- `.claude/reports/current/DEBUG_INFRA_PLAN.md`
-- `.claude/reports/current/ESP_REGISTRATION_FLOW_REPORT.md`
-- `.claude/reports/current/FRONTEND_INSPECTION.md`
-- `.claude/reports/current/SYSTEMATIC_DEBUG_ESP472204.md`
-- `.claude/reports/current/SYSTEMATIC_DEBUG_PENDING_PANEL.md`
-- `.claude/reports/current/auto-one_*.md`
-- `El Frontend/Docs/UI/02-Individual-Views-Summary.md`
-- `docs/plans/Debug.md`
-- `scripts/debug/`
-- `scripts/esp/`
-
-**Befehle:**
-```bash
-git add .claude/agents/frontend-debug.md .claude/reference/ .claude/rules/docker-rules.md .claude/skills/frontend-debug/SKILL.md .claude/skills/ki-audit/SKILL.md .claude/reports/ "El Frontend/Docs/UI/02-Individual-Views-Summary.md" docs/plans/Debug.md scripts/debug/ scripts/esp/
-git commit -m "docs(claude): update reference, skills, agents and reports"
-```
-
----
-
-## Abschluss
-
-**Nach allen Commits:**
-```bash
-git status
-git log --oneline -12
-# Optional: Push
 git push origin feature/frontend-consolidation
 ```
 
-**Zusammenfassung:**
+---
 
-| # | Commit | Typ |
-|---|--------|-----|
-| 1 | fix(frontend): PendingDevicesPanel visibility | fix |
-| 2 | feat(frontend): dashboard consolidation | feat |
-| 3 | feat(frontend): rules UI, logic store | feat |
-| 4 | feat(frontend): esp store, tokens | feat |
-| 5 | feat(server): esp, sensors, heartbeat | feat |
-| 6 | feat(firmware): mqtt, pi-enhanced | feat |
-| 7 | chore(docker,ci): compose, workflows | chore |
-| 8 | chore(frontend): package, tsconfig | chore |
-| 9 | test(frontend): e2e esp registration | test |
-| 10 | docs(claude): reference, skills, reports | docs |
+## Phase 3: Feature-Branch in Master mergen
 
-**Hinweise:**
-- **Commit 1** kann einzeln verifiziert werden: Panel nach Klick auf "1 Neue" sichtbar
-- **Kein Merge** bis User explizit entscheidet
-- Bei Konflikten: Stash sichern, Branch-Status prüfen
-- `logs/frontend/playwright/` ggf. in .gitignore statt committen
+### Schritt 3.1: Auf Master wechseln und Feature-Branch mergen
+
+```bash
+git checkout master
+git merge feature/frontend-consolidation -m "Merge feature/frontend-consolidation: ESP registration, WebSocket improvements, MQTT thread safety"
+```
+
+### Schritt 3.2: Master pushen
+
+```bash
+git push origin master
+```
+
+---
+
+## Phase 4: Branch-Cleanup (lokal)
+
+### 4a. Sicher loeschbar (bereits vollstaendig in feature/frontend-consolidation gemerged)
+
+Diese 12 Branches sind vollstaendig in feature/frontend-consolidation enthalten. Da feature/frontend-consolidation in master gemerged wird, sind sie auch in master enthalten.
+
+```bash
+git branch -d chore/infra
+git branch -d docs/claude-reports
+git branch -d feat/dashboard-consolidation
+git branch -d feat/firmware-mqtt
+git branch -d feat/frontend-esp-tokens
+git branch -d feat/frontend-rules-views
+git branch -d feat/server-esp
+git branch -d feature/dashboard-consolidation
+git branch -d feature/docs-cleanup
+git branch -d fix/pending-panel
+git branch -d test/e2e-esp-registration
+git branch -d feature/frontend-consolidation
+```
+
+### 4b. Pruefung noetig (NICHT in feature/frontend-consolidation gemerged)
+
+| Branch | Unique Commits | Empfehlung |
+|--------|----------------|------------|
+| `backup/frontend-consolidation-full` | 1 (`c6f026f` WIP backup) | LOESCHEN - war Sicherungskopie, Inhalt ist laengst in feature/frontend-consolidation |
+| `feature/phase2-wokwi-ci` | 2 (`5ebd1f6` WIP + `20c1592` PR#3) | LOESCHEN - alter WIP-Branch, 853 Dateien hinter aktuellem Stand, Inhalt superseded |
+
+```bash
+# Nur mit -D (force) da nicht gemerged - User muss bestaetigen!
+git branch -D backup/frontend-consolidation-full
+git branch -D feature/phase2-wokwi-ci
+```
+
+---
+
+## Phase 5: Remote-Branch-Cleanup
+
+### Alte Feature-Branches (bereits in master via PRs gemerged)
+
+```bash
+git push origin --delete feature/docs-cleanup
+git push origin --delete feature/dashboard-consolidation
+git push origin --delete feature/frontend-consolidation
+```
+
+### Verwaiste Branches (Cursor IDE / Claude generiert)
+
+```bash
+git push origin --delete cursor/playwright-css-testkonzept-7562
+git push origin --delete cursor/projekt-design-konsolidierung-161e
+git push origin --delete claude/review-agent-structure-ymhUi
+```
+
+### Remote-Tracking bereinigen
+
+```bash
+git remote prune origin
+git gc
+```
+
+---
+
+## Zusammenfassung
+
+| # | Aktion | Dateien/Branches | Typ |
+|---|--------|------------------|-----|
+| 1 | `feat(frontend): improve WebSocket lifecycle and ESP error handling` | 4 | feat |
+| 2 | `fix(server): thread-safe MQTT buffering and ESP registration hardening` | 5 | fix |
+| 3 | `docs(reports): update git health report` | 1 | docs |
+| 4 | Merge master -> feature/frontend-consolidation | sync | merge |
+| 5 | Push feature/frontend-consolidation | - | push |
+| 6 | Merge feature/frontend-consolidation -> master | 64+ Commits | merge |
+| 7 | Push master | - | push |
+| 8 | Loesche 14 lokale Branches | 14 | cleanup |
+| 9 | Loesche 6 remote Branches | 6 | cleanup |
+| 10 | git gc + prune | - | maintenance |
+
+### Endergebnis
+
+- **master:** Enthaelt ALLE Arbeit aus feature/frontend-consolidation (64+ Commits)
+- **Lokale Branches:** Nur `master`
+- **Remote Branches:** Nur `origin/master` + `origin/HEAD`
+- **Kein Datenverlust:** Alle Commits preserved, uncommitted changes committed
+
+### Hinweise
+
+- Phase 2 (merge master) sollte conflict-free sein
+- Phase 4b (force-delete) erfordert User-Bestaetigung
+- Phase 5 (remote delete) ist destruktiv und sollte erst NACH erfolgreichem master-push erfolgen
+- Falls CI auf master laeuft: Phase 3 evtl. besser via PR (GitHub UI)
