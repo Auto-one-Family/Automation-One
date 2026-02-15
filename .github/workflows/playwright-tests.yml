@@ -60,6 +60,9 @@ jobs:
             ${{ runner.os }}-docker-playwright-
             ${{ runner.os }}-docker-
 
+      - name: Create shared-infra network (if not exists)
+        run: docker network create shared-infra-net || true
+
       - name: Start E2E stack
         run: |
           docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --wait
