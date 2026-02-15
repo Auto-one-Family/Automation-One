@@ -102,15 +102,20 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
         // ═══════════════════════════════════════════════════
         // PHASE 2: HTTP-FALLBACK-MODE (Robustness)
         // ═══════════════════════════════════════════════════
-        // Server unavailable → use local fallback processing
-        LOG_INFO("Using local fallback processing - returning raw values");
-
-        processed_out.value = (float)data.raw_value;  // RAW value directly
-        processed_out.unit = "raw";                   // Mark as unprocessed
+        // Server unavailable → use local fallback with conversion
+        bool converted = applyLocalConversion(data.sensor_type, data.raw_value, processed_out);
         processed_out.quality = "fair";               // Medium quality (not calibrated)
         processed_out.timestamp = data.timestamp;
         processed_out.valid = true;
-        processed_out.error_message = "Local fallback - server unavailable (circuit breaker open)";
+
+        if (converted) {
+            LOG_INFO("Using local fallback processing - converted " + data.sensor_type + 
+                     " raw=" + String(data.raw_value) + " → " + String(processed_out.value) + " " + processed_out.unit);
+            processed_out.error_message = "Local fallback (converted) - server unavailable";
+        } else {
+            LOG_INFO("Using local fallback processing - returning raw values (unknown type: " + data.sensor_type + ")");
+            processed_out.error_message = "Local fallback (raw) - server unavailable, unknown sensor type";
+        }
 
         return true;  // Success with fallback data
     }
@@ -344,3 +349,60 @@ CircuitState PiEnhancedProcessor::getCircuitState() const {
     return circuit_breaker_.getState();
 }
 
+// ============================================
+// LOCAL FALLBACK CONVERSION (Circuit Breaker OPEN)
+// ============================================
+// Standard conversion formulas for known sensor types.
+// Used when server is unreachable to provide approximately
+// correct physical values instead of raw register data.
+bool PiEnhancedProcessor::applyLocalConversion(
+    const String& sensor_type, uint32_t raw_value,
+    ProcessedSensorData& processed_out) {
+    
+    // SHT31 Temperature: T(°C) = -45 + 175 × (raw / 65535)
+    if (sensor_type == "sht31_temp") {
+        processed_out.value = -45.0f + 175.0f * ((float)raw_value / 65535.0f);
+        processed_out.unit = "°C";
+        return true;
+    }
+    
+    // SHT31 Humidity: H(%) = 100 × (raw / 65535)
+    if (sensor_type == "sht31_humidity") {
+        processed_out.value = 100.0f * ((float)raw_value / 65535.0f);
+        processed_out.unit = "%";
+        return true;
+    }
+    
+    // DS18B20 Temperature: T(°C) = raw × 0.0625 (12-bit resolution)
+    if (sensor_type == "ds18b20") {
+        processed_out.value = (float)raw_value * 0.0625f;
+        processed_out.unit = "°C";
+        return true;
+    }
+    
+    // BMP280/BME280 Temperature: raw is centidegrees
+    if (sensor_type == "bmp280_temp" || sensor_type == "bme280_temp") {
+        processed_out.value = (float)raw_value / 100.0f;
+        processed_out.unit = "°C";
+        return true;
+    }
+    
+    // BMP280/BME280 Pressure: raw is centipascals
+    if (sensor_type == "bmp280_pressure" || sensor_type == "bme280_pressure") {
+        processed_out.value = (float)raw_value / 100.0f;
+        processed_out.unit = "hPa";
+        return true;
+    }
+    
+    // BME280 Humidity: raw is 1024ths of percent
+    if (sensor_type == "bme280_humidity") {
+        processed_out.value = (float)raw_value / 1024.0f;
+        processed_out.unit = "%";
+        return true;
+    }
+    
+    // Unknown sensor type → return raw value
+    processed_out.value = (float)raw_value;
+    processed_out.unit = "raw";
+    return false;
+}
