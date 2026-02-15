@@ -238,17 +238,23 @@ async def list_pending_devices(
         initial_heartbeat = metadata.get("initial_heartbeat", {})
 
         # Use last_seen for current activity, discovered_at for historical reference
-        # last_seen is updated on every heartbeat, discovered_at only on first discovery
+        # Prefer metadata last_* values (updated on every heartbeat) over initial_heartbeat
+        last_heap = metadata.get("last_heap_free")
+        last_rssi = metadata.get("last_wifi_rssi")
+        last_sensors = metadata.get("last_sensor_count")
+        last_actuators = metadata.get("last_actuator_count")
         pending_devices.append(PendingESPDevice(
             device_id=device.device_id,
             discovered_at=device.discovered_at or device.created_at,
             last_seen=device.last_seen,  # Current activity timestamp (for UI "vor X Zeit")
+            ip_address=device.ip_address,  # IP from heartbeat wifi_ip field
             zone_id=metadata.get("zone_id"),
-            heap_free=initial_heartbeat.get("heap_free", initial_heartbeat.get("free_heap")),
-            wifi_rssi=initial_heartbeat.get("wifi_rssi"),
-            sensor_count=initial_heartbeat.get("sensor_count", 0),
-            actuator_count=initial_heartbeat.get("actuator_count", 0),
+            heap_free=last_heap if last_heap is not None else initial_heartbeat.get("heap_free", initial_heartbeat.get("free_heap")),
+            wifi_rssi=last_rssi if last_rssi is not None else initial_heartbeat.get("wifi_rssi"),
+            sensor_count=last_sensors if last_sensors is not None else initial_heartbeat.get("sensor_count", 0),
+            actuator_count=last_actuators if last_actuators is not None else initial_heartbeat.get("actuator_count", 0),
             heartbeat_count=metadata.get("heartbeat_count", 0),
+            hardware_type=device.hardware_type,  # From auto-registration
         ))
 
     return PendingDevicesListResponse(

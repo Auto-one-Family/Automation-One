@@ -129,8 +129,8 @@ class HeartbeatHandler:
                         logger.debug(f"Discovery rate limited for {esp_id_str}: {status_msg}")
                         return True  # Don't log as error
                     
-                    # Broadcast discovery event
-                    await self._broadcast_device_discovered(esp_id_str, payload)
+                    # Broadcast discovery event (pass esp_device for hardware_type etc.)
+                    await self._broadcast_device_discovered(esp_id_str, payload, esp_device)
                     await session.commit()
 
                     # Phase 2: ACK with pending_approval status
@@ -373,6 +373,7 @@ class HeartbeatHandler:
                 status="pending_approval",  # Requires admin approval
                 discovered_at=datetime.now(timezone.utc),  # Audit field
                 kaiser_id=constants.get_kaiser_id(),  # WP2-Fix1: Default kaiser_id from config
+                ip_address=payload.get("wifi_ip"),  # IP from heartbeat (if ESP sends it)
                 capabilities={
                     "max_sensors": 20,  # Default for ESP32_WROOM
                     "max_actuators": 12,
@@ -513,6 +514,10 @@ class HeartbeatHandler:
         metadata["heartbeat_count"] = metadata.get("heartbeat_count", 0) + 1
         esp_device.device_metadata = metadata
         esp_device.last_seen = datetime.now(timezone.utc)
+        # Update IP from rediscovery heartbeat (ESP may have new IP after WiFi reconnect)
+        wifi_ip = payload.get("wifi_ip")
+        if wifi_ip:
+            esp_device.ip_address = wifi_ip
 
         logger.info(f"🔔 Device rediscovered: {esp_device.device_id} (pending_approval again)")
 
@@ -541,7 +546,7 @@ class HeartbeatHandler:
         payload: dict
     ) -> None:
         """
-        Update pending device heartbeat count.
+        Update pending device heartbeat count and IP address.
         
         Args:
             esp_device: ESP device model
@@ -550,13 +555,23 @@ class HeartbeatHandler:
         metadata = esp_device.device_metadata or {}
         metadata["heartbeat_count"] = metadata.get("heartbeat_count", 0) + 1
         metadata["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+        # Store latest metrics for REST /devices/pending (avoid stale initial_heartbeat)
+        metadata["last_heap_free"] = payload.get("heap_free", payload.get("free_heap"))
+        metadata["last_wifi_rssi"] = payload.get("wifi_rssi")
+        metadata["last_sensor_count"] = payload.get("sensor_count", 0)
+        metadata["last_actuator_count"] = payload.get("actuator_count", 0)
         esp_device.device_metadata = metadata
         esp_device.last_seen = datetime.now(timezone.utc)
+        # Update IP address if provided (ESP sends wifi_ip in heartbeat)
+        wifi_ip = payload.get("wifi_ip")
+        if wifi_ip:
+            esp_device.ip_address = wifi_ip
     
     async def _broadcast_device_discovered(
         self,
         esp_id: str,
-        payload: dict
+        payload: dict,
+        esp_device: Optional[ESPDevice] = None
     ) -> None:
         """
         Broadcast device_discovered WebSocket event.
@@ -564,19 +579,24 @@ class HeartbeatHandler:
         Args:
             esp_id: ESP device ID
             payload: Heartbeat payload
+            esp_device: Newly created ESPDevice model (for hardware_type etc.)
         """
         try:
             from ...websocket.manager import WebSocketManager
             ws_manager = await WebSocketManager.get_instance()
+            discovered_at = datetime.now(timezone.utc).isoformat()
             await ws_manager.broadcast("device_discovered", {
                 "esp_id": esp_id,
                 "device_id": esp_id,  # Frontend expects device_id
-                "discovered_at": datetime.now(timezone.utc).isoformat(),
+                "discovered_at": discovered_at,
+                "last_seen": discovered_at,  # Initially same as discovered_at
                 "zone_id": payload.get("zone_id"),
                 "heap_free": payload.get("heap_free", payload.get("free_heap")),
                 "wifi_rssi": payload.get("wifi_rssi"),
                 "sensor_count": payload.get("sensor_count", 0),
                 "actuator_count": payload.get("actuator_count", 0),
+                "hardware_type": (esp_device.hardware_type if esp_device else None) or "ESP32_WROOM",
+                "ip_address": payload.get("wifi_ip"),  # ESP sends wifi_ip if available
             })
             logger.info(f"📡 Broadcast device_discovered for {esp_id}")
         except Exception as e:
@@ -602,6 +622,7 @@ class HeartbeatHandler:
                 "device_id": esp_id,  # Frontend expects device_id
                 "rediscovered_at": datetime.now(timezone.utc).isoformat(),
                 "zone_id": payload.get("zone_id"),
+                "ip_address": payload.get("wifi_ip"),  # ESP sends wifi_ip in heartbeat
             })
             logger.info(f"📡 Broadcast device_rediscovered for {esp_id}")
         except Exception as e:
@@ -736,6 +757,10 @@ class HeartbeatHandler:
                 "heap_free", payload.get("free_heap")
             )
             current_metadata["last_wifi_rssi"] = payload.get("wifi_rssi")
+            # Update IP address if provided (ESP may get new IP via DHCP lease renewal)
+            wifi_ip = payload.get("wifi_ip")
+            if wifi_ip:
+                esp_device.ip_address = wifi_ip
             current_metadata["last_uptime"] = payload.get("uptime")
             current_metadata["last_sensor_count"] = payload.get(
                 "sensor_count", payload.get("active_sensors", 0)

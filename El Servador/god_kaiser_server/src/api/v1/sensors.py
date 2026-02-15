@@ -222,7 +222,10 @@ async def list_sensors(
 
     responses = []
     for sensor, esp_device_id in rows:
-        latest = await sensor_repo.get_latest_reading(sensor.esp_id, sensor.gpio)
+        # Pass sensor_type for correct multi-value sensor latest reading
+        latest = await sensor_repo.get_latest_reading(
+            sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
+        )
 
         response = _model_to_response(sensor, esp_device_id)
         response.latest_value = latest.processed_value if latest else None
@@ -258,6 +261,9 @@ async def get_sensor(
     gpio: int,
     db: DBSession,
     current_user: ActiveUser,
+    sensor_type: Annotated[Optional[str], Query(
+        description="Sensor type filter (required for multi-value sensors like SHT31)"
+    )] = None,
 ) -> SensorConfigResponse:
     """
     Get sensor configuration.
@@ -267,6 +273,8 @@ async def get_sensor(
         gpio: GPIO pin number
         db: Database session
         current_user: Authenticated user
+        sensor_type: Optional sensor type (e.g. 'sht31_temp'). Required for
+                     multi-value sensors that share a GPIO pin.
         
     Returns:
         Sensor configuration
@@ -281,14 +289,33 @@ async def get_sensor(
             detail=f"ESP device '{esp_id}' not found",
         )
     
-    sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+    # Multi-value sensor support: use sensor_type for precise lookup
+    if sensor_type:
+        sensor = await sensor_repo.get_by_esp_gpio_and_type(
+            esp_device.id, gpio, sensor_type
+        )
+    else:
+        # Fallback: get all sensors on this GPIO, return first
+        sensors = await sensor_repo.get_all_by_esp_and_gpio(esp_device.id, gpio)
+        if len(sensors) > 1:
+            logger.warning(
+                f"Multiple sensors on GPIO {gpio} for ESP '{esp_id}' "
+                f"(types: {[s.sensor_type for s in sensors]}). "
+                f"Use ?sensor_type= to select specific sensor."
+            )
+        sensor = sensors[0] if sensors else None
+    
     if not sensor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'",
+            detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'"
+                   + (f" with type '{sensor_type}'" if sensor_type else ""),
         )
     
-    latest = await sensor_repo.get_latest_reading(esp_device.id, gpio)
+    # Get latest reading filtered by sensor_type for correct multi-value data
+    latest = await sensor_repo.get_latest_reading(
+        esp_device.id, gpio, sensor_type=sensor.sensor_type
+    )
     
     # Convert model to response schema
     response = _model_to_response(sensor, esp_id)
@@ -1287,7 +1314,10 @@ async def list_onewire_sensors(
     # Convert to response format
     responses = []
     for sensor in onewire_sensors:
-        latest = await sensor_repo.get_latest_reading(sensor.esp_id, sensor.gpio)
+        # Pass sensor_type for correct multi-value sensor latest reading
+        latest = await sensor_repo.get_latest_reading(
+            sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
+        )
         response = _model_to_response(sensor, esp_id)
         response.latest_value = latest.processed_value if latest else None
         response.latest_quality = latest.quality if latest else None
