@@ -54,6 +54,10 @@ interface Props {
 
 const props = defineProps<Props>()
 
+const emit = defineEmits<{
+  click: [item: ComponentCardItem]
+}>()
+
 // ── Icon mapping ─────────────────────────────────────────────────────
 
 const sensorIcons: Record<string, Component> = {
@@ -130,6 +134,10 @@ const displayName = computed(() =>
       item.type === 'actuator' ? 'component-card--actuator' : 'component-card--sensor',
       { 'component-card--stale': item.isStale }
     ]"
+    role="button"
+    tabindex="0"
+    @click="emit('click', item)"
+    @keydown.enter="emit('click', item)"
   >
     <!-- Icon + Name -->
     <div class="component-card__header">
@@ -166,6 +174,7 @@ const displayName = computed(() =>
   min-width: 140px;
   max-width: 220px;
   transition: all 0.15s ease;
+  cursor: pointer;
 }
 
 .component-card:hover {

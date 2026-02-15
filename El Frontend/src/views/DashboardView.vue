@@ -58,6 +58,17 @@ function handleZonePlateClick(payload: { zoneId: string }) {
   zoomNav.zoomToZone(payload.zoneId)
 }
 
+/** Navigate from L2 component card click → open ESP settings */
+function handleComponentCardClick(item: ComponentCardItem) {
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === item.espId)
+  if (device) {
+    // Open settings sheet for the ESP that owns this sensor/actuator
+    settingsDevice.value = device
+    isSettingsOpen.value = true
+    logger.info(`Opened settings for ${item.espId} from component card (GPIO ${item.gpio})`)
+  }
+}
+
 // Filter state (type filter unchanged)
 const filterType = ref<'all' | 'mock' | 'real'>('all')
 
@@ -861,6 +872,7 @@ const unassignedCount = computed(() => {
                 v-for="item in group.items"
                 :key="`${item.espId}-${item.gpio}-${item.type}`"
                 :item="item"
+                @click="handleComponentCardClick"
               />
             </div>
           </section>
