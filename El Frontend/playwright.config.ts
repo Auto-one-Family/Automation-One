@@ -1,26 +1,38 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * Playwright E2E Test Configuration
+ * Playwright E2E + CSS Test Configuration
  *
- * Purpose: Browser-based E2E tests for AutomationOne Vue 3 Dashboard
+ * Purpose: Browser-based E2E tests AND comprehensive CSS/visual testing
+ *          for AutomationOne Vue 3 Dashboard
  * Architecture: Playwright on HOST, backend services in Docker
  *
  * Usage:
- *   make e2e-up                    # Start Docker services
- *   npx playwright test            # Run all E2E tests
- *   npx playwright test --ui       # Interactive UI mode
- *   npx playwright test --debug    # Debug mode
- *   make e2e-down                  # Stop Docker services
+ *   make e2e-up                                  # Start Docker services
+ *   npx playwright test                          # Run all tests
+ *   npx playwright test --project=chromium       # Chromium only (fast)
+ *   npx playwright test tests/e2e/css/           # CSS tests only
+ *   npx playwright test tests/e2e/scenarios/     # E2E scenario tests only
+ *   npx playwright test --ui                     # Interactive UI mode
+ *   npx playwright test --debug                  # Debug mode
+ *   npx playwright test --update-snapshots       # Update visual baselines
+ *   make e2e-down                                # Stop Docker services
  *
  * Auth Flow:
  *   globalSetup logs in once, saves token to .playwright/auth-state.json
  *   All tests reuse this auth state (storageState)
+ *
+ * CSS Test Architecture (5 layers):
+ *   1. Design Token Verification   — tokens.css values correct
+ *   2. CSS Property Assertions     — computed styles match spec
+ *   3. Responsive Layout Tests     — multi-viewport layout checks
+ *   4. Accessibility & Contrast    — axe-core + WCAG 2.1 AA
+ *   5. Visual Regression           — screenshot baselines
  */
 
 export default defineConfig({
-  // Test directory
-  testDir: './tests/e2e/scenarios',
+  // Test directories — both scenarios and CSS tests
+  testDir: './tests/e2e',
 
   // Test file pattern
   testMatch: '**/*.spec.ts',
@@ -37,9 +49,9 @@ export default defineConfig({
   // Limit parallel workers on CI (resource constraints)
   workers: process.env.CI ? 2 : undefined,
 
-  // Reporter configuration (CI + local: logs/frontend/playwright/)
+  // Reporter configuration
   reporter: [
-    ['html', { outputFolder: '../../logs/frontend/playwright/playwright-report', open: 'never' }],
+    ['html', { outputFolder: './playwright-report', open: 'never' }],
     ['list'],
     ...(process.env.CI ? [['github' as const]] : []),
   ],
@@ -65,7 +77,7 @@ export default defineConfig({
     // Video on first retry
     video: 'on-first-retry',
 
-    // Viewport size
+    // Viewport size (desktop default)
     viewport: { width: 1280, height: 720 },
 
     // Longer timeout for WebSocket-based tests
@@ -73,32 +85,65 @@ export default defineConfig({
     navigationTimeout: 30000,
   },
 
-  // Global test timeout (30s for WebSocket tests)
+  // Global test timeout
   timeout: 30000,
 
-  // Expect timeout
+  // Expect timeout + screenshot defaults
   expect: {
     timeout: 10000,
+    toHaveScreenshot: {
+      // Allow 1% pixel difference (font rendering varies)
+      maxDiffPixelRatio: 0.01,
+      // Disable animations for stable screenshots
+      animations: 'disabled',
+    },
   },
 
-  // Output directory for artifacts (CI + local: logs/frontend/playwright/)
-  outputDir: '../../logs/frontend/playwright/test-results',
+  // Snapshot path template — organized by project and test file
+  snapshotPathTemplate: '{testDir}/__screenshots__/{projectName}/{testFilePath}/{arg}{ext}',
 
-  // Projects: Chromium only for speed
+  // Output directory for artifacts
+  outputDir: './test-results',
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // PROJECTS — Multi-browser + Multi-viewport
+  // ═══════════════════════════════════════════════════════════════════════
   projects: [
+    // ── Desktop Browsers ──
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    // Firefox and WebKit can be enabled later if needed
-    // {
-    //   name: 'firefox',
-    //   use: { ...devices['Desktop Firefox'] },
-    // },
-    // {
-    //   name: 'webkit',
-    //   use: { ...devices['Desktop Safari'] },
-    // },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+
+    // ── Mobile Viewports ──
+    {
+      name: 'mobile-chrome',
+      use: {
+        ...devices['Pixel 7'],
+      },
+    },
+    {
+      name: 'mobile-safari',
+      use: {
+        ...devices['iPhone 14'],
+      },
+    },
+
+    // ── Tablet Viewport ──
+    {
+      name: 'tablet',
+      use: {
+        ...devices['iPad (gen 7)'],
+      },
+    },
   ],
 
   // Web server is managed externally via Docker
