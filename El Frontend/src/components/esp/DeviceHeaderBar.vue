@@ -2,15 +2,14 @@
 /**
  * DeviceHeaderBar Component
  *
- * Extracted from ESPOrbitalLayout: The compact header card for an ESP device.
+ * Compact header card for an ESP device using useDeviceActions composable.
  * Shows: Name (editable), Status, WiFi, Zone, Heartbeat, Settings button.
  *
  * Used in:
  * - ESPOrbitalLayout (compact mode center column)
- * - Future: DeviceDetailView (Level 3 device page)
+ * - Future: DeviceDetailView
  */
 
-import { ref, computed, nextTick } from 'vue'
 import {
   Heart,
   Settings2,
@@ -23,14 +22,10 @@ import Badge from '@/components/common/Badge.vue'
 import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
-import { useToast } from '@/composables/useToast'
+import { useDeviceActions } from '@/composables/useDeviceActions'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
-import { getStateInfo } from '@/utils/labels'
-import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
-import { formatRelativeTime } from '@/utils/formatters'
-import { createLogger } from '@/utils/logger'
-
-const logger = createLogger('DeviceHeaderBar')
+import { computed } from 'vue'
+// formatRelativeTime now handled by useDeviceActions
 
 interface Props {
   device: ESPDevice
@@ -45,121 +40,40 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
-const toast = useToast()
 const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones } = useZoneDragDrop()
 
-// ── Computed Device Properties ───────────────────────────────────────
+// ── useDeviceActions composable (replaces all inline logic) ──────────
+const actions = useDeviceActions(() => props.device)
 
-const espId = computed(() => espStore.getDeviceId(props.device))
-const isMock = computed(() => espStore.isMock(espId.value))
-const isOnline = computed(() => props.device.status === 'online' || props.device.connected === true)
-const systemState = computed(() => (props.device as any).system_state || 'UNKNOWN')
-const displayName = computed(() => props.device.name || null)
+// Re-export for template
+const {
+  espId, isMock, displayName, isOnline, systemState, stateInfo,
+  wifiInfo, wifiColorClass, wifiTooltip,
+  heartbeatLoading, isHeartbeatFresh, heartbeatTooltip,
+  isEditingName, editedName, isSavingName, saveError, nameInputRef,
+  startEditName, cancelEditName,
+} = actions
 
-const stateInfo = computed(() => {
-  if (isMock.value) {
-    return getStateInfo(systemState.value)
-  }
-  return getStateInfo(isOnline.value ? 'OPERATIONAL' : 'OFFLINE')
-})
-
-// WiFi
-const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(props.device.wifi_rssi))
-const wifiColorClass = computed(() => {
-  switch (wifiInfo.value.quality) {
-    case 'excellent': case 'good': return 'wifi--good'
-    case 'fair': return 'wifi--fair'
-    default: return 'wifi--poor'
-  }
-})
-const wifiTooltip = computed(() =>
-  props.device.wifi_rssi
-    ? `WiFi: ${props.device.wifi_rssi} dBm (${wifiInfo.value.label})`
-    : 'WiFi: Keine Daten'
-)
-
-// Heartbeat
-const heartbeatLoading = ref(false)
-const isHeartbeatFresh = computed(() => {
-  const lastSeen = props.device.last_heartbeat || props.device.last_seen
-  if (!lastSeen) return false
-  const diff = Date.now() - new Date(lastSeen).getTime()
-  return diff < 120_000 // 2 min
-})
-const heartbeatTooltip = computed(() => {
-  const ts = props.device.last_heartbeat || props.device.last_seen
-  if (!ts) return 'Kein Heartbeat empfangen'
-  if (isMock.value) return `Letzter Heartbeat: ${formatRelativeTime(ts)} (Klick = manuell senden)`
-  return `Letzter Heartbeat: ${formatRelativeTime(ts)}`
-})
+/** Override keydown to emit name-updated after save */
+function handleNameKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') handleSaveName()
+  if (e.key === 'Escape') cancelEditName()
+}
 
 // Zone
 const availableZones = computed(() => getAvailableZones(espStore.devices))
 
-// ── Name Editing ─────────────────────────────────────────────────────
-
-const isEditingName = ref(false)
-const editedName = ref('')
-const isSavingName = ref(false)
-const saveError = ref<string | null>(null)
-const nameInputRef = ref<HTMLInputElement | null>(null)
-
-function startEditName() {
-  editedName.value = displayName.value || ''
-  isEditingName.value = true
-  saveError.value = null
-  nextTick(() => {
-    nameInputRef.value?.focus()
-    nameInputRef.value?.select()
-  })
-}
-
-function cancelEditName() {
-  isEditingName.value = false
-  saveError.value = null
-}
-
-async function saveName() {
-  if (isSavingName.value) return
-  const trimmed = editedName.value.trim()
-  const newName = trimmed || null
-
-  // No change
-  if (newName === displayName.value) {
-    isEditingName.value = false
-    return
-  }
-
-  isSavingName.value = true
-  saveError.value = null
-
-  try {
-    await espStore.updateDevice(espId.value, { name: newName ?? undefined })
-    isEditingName.value = false
-    emit('name-updated', { deviceId: espId.value, name: newName })
-    toast.success(newName ? `Gerätename: "${newName}"` : 'Gerätename entfernt')
-  } catch (err) {
-    saveError.value = 'Speichern fehlgeschlagen'
-    logger.error('Failed to save name', err)
-  } finally {
-    isSavingName.value = false
-  }
-}
-
-function handleNameKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') saveName()
-  if (e.key === 'Escape') cancelEditName()
-}
-
 // ── Actions ──────────────────────────────────────────────────────────
 
 async function handleHeartbeatClick() {
-  if (!isMock.value || heartbeatLoading.value) return
-  heartbeatLoading.value = true
-  try {
-    emit('heartbeat', props.device)
-  } finally {
-    setTimeout(() => { heartbeatLoading.value = false }, 1000)
+  await actions.triggerHeartbeat()
+  emit('heartbeat', props.device)
+}
+
+async function handleSaveName() {
+  const result = await actions.saveName()
+  if (result) {
+    emit('name-updated', result)
   }
 }
 
@@ -197,7 +111,7 @@ async function handleZoneChanged(_deviceId: string, zoneId: string | null) {
               placeholder="Gerätename..."
               :disabled="isSavingName"
               @keydown="handleNameKeydown"
-              @blur="saveName"
+              @blur="handleSaveName"
               @click.stop
             />
             <div class="device-header-bar__name-actions">
@@ -205,7 +119,7 @@ async function handleZoneChanged(_deviceId: string, zoneId: string | null) {
                 <Loader2 class="w-3 h-3 animate-spin" />
               </button>
               <template v-else>
-                <button class="device-header-bar__name-btn device-header-bar__name-btn--save" title="Speichern" @mousedown.prevent="saveName">
+                <button class="device-header-bar__name-btn device-header-bar__name-btn--save" title="Speichern" @mousedown.prevent="handleSaveName">
                   <Check class="w-3 h-3" />
                 </button>
                 <button class="device-header-bar__name-btn device-header-bar__name-btn--cancel" title="Abbrechen" @mousedown.prevent="cancelEditName">
@@ -285,7 +199,7 @@ async function handleZoneChanged(_deviceId: string, zoneId: string | null) {
       >
         <Heart :class="['w-3 h-3', isHeartbeatFresh ? 'device-header-bar__heart-pulse' : '']" />
         <span class="device-header-bar__heartbeat-text">
-          {{ formatRelativeTime(device.last_heartbeat || device.last_seen || '') }}
+          {{ actions.heartbeatText.value }}
         </span>
         <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin" />
       </button>
