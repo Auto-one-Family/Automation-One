@@ -1,7 +1,17 @@
 <script setup lang="ts">
 /**
- * ESPSettingsPopover Component
+ * @deprecated Use ESPSettingsSheet.vue instead.
  *
+ * ESPSettingsPopover Component (DEPRECATED 2026-02-15)
+ *
+ * Replaced by ESPSettingsSheet which provides a slide-in panel with
+ * better UX, SensorConfigPanel, ActuatorConfigPanel, and auto-heartbeat.
+ * DashboardView now uses ESPSettingsSheet exclusively.
+ *
+ * This file is kept for reference and backward compatibility only.
+ * It is NOT imported by any active component.
+ *
+ * Original description:
  * A floating settings panel that appears over the ESP card in the dashboard.
  * Provides access to device settings, status info, and actions without
  * navigating away from the dashboard.
