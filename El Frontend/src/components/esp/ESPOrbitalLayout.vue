@@ -16,7 +16,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2 } from 'lucide-vue-next'
+import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime } from '@/utils/formatters'
@@ -24,6 +24,8 @@ import SensorColumn from './SensorColumn.vue'
 import ActuatorColumn from './ActuatorColumn.vue'
 import AddSensorModal from './AddSensorModal.vue'
 import AddActuatorModal from './AddActuatorModal.vue'
+import EditSensorModal from './EditSensorModal.vue'
+import type { EditableSensor } from './EditSensorModal.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
 // GpioPicker moved to AddSensorModal/AddActuatorModal
 import Badge from '@/components/common/Badge.vue'
@@ -31,17 +33,14 @@ import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, ChartSensor } from '@/types'
 import { espApi } from '@/api/esp'
-import { sensorsApi } from '@/api/sensors'
+// sensorsApi moved to AddSensorModal/EditSensorModal
 import { getStateInfo } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
-import { useUiStore } from '@/shared/stores'
-import { useToast } from '@/composables/useToast'
+// useUiStore and useToast moved to extracted modal components
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useGpioStatus } from '@/composables/useGpioStatus'
-import {
-  SENSOR_TYPE_CONFIG,
-} from '@/utils/sensorDefaults'
+// sensorDefaults moved to AddSensorModal/EditSensorModal
 // actuatorDefaults moved to AddActuatorModal.vue
 import { createLogger } from '@/utils/logger'
 
@@ -63,8 +62,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
-const uiStore = useUiStore()
-const toast = useToast()
+// uiStore and toast moved to extracted modal components
 const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones } = useZoneDragDrop()
 
 const emit = defineEmits<{
@@ -119,78 +117,30 @@ const showAddSensorModal = ref(false)
 const showAddActuatorModal = ref(false)
 
 // =============================================================================
-// EDIT SENSOR STATE (Phase 2F)
+// EDIT SENSOR STATE (Phase 2F) — delegated to EditSensorModal component
 // =============================================================================
 const showEditSensorModal = ref(false)
-const editingSensor = ref<{
-  gpio: number
-  sensor_type: string
-  name: string | null
-  operating_mode: string | null  // null = use type default
-  timeout_seconds: number | null // null = use type default
-  schedule_config: { type: string; expression: string } | null // Schedule configuration
-  // Type defaults for comparison
-  typeDefaultMode: string
-  typeDefaultTimeout: number
-} | null>(null)
+const editSensorGpio = ref<number | null>(null)
 
-// Cron Presets for easy selection
-const CRON_PRESETS = [
-  { label: 'Jede Stunde', value: '0 * * * *', description: 'Zur vollen Stunde' },
-  { label: 'Alle 6 Stunden', value: '0 */6 * * *', description: '00:00, 06:00, 12:00, 18:00' },
-  { label: 'Täglich um 8:00', value: '0 8 * * *', description: 'Einmal täglich' },
-  { label: 'Alle 15 Minuten', value: '*/15 * * * *', description: '00, 15, 30, 45' },
-  { label: 'Alle 30 Minuten', value: '*/30 * * * *', description: '00 und 30' },
-  { label: 'Wochentags 9:00', value: '0 9 * * 1-5', description: 'Mo-Fr um 9:00' },
-]
+/** Payload for EditSensorModal — computed from current device sensors */
+const editSensorPayload = computed<EditableSensor | null>(() => {
+  if (editSensorGpio.value === null) return null
+  const sensor = sensors.value.find(s => s.gpio === editSensorGpio.value)
+  if (!sensor) return null
+  return {
+    gpio: sensor.gpio,
+    sensor_type: sensor.sensor_type,
+    name: sensor.name || null,
+    operating_mode: sensor.operating_mode || null,
+    timeout_seconds: sensor.timeout_seconds ?? null,
+    schedule_config: sensor.schedule_config as { type: string; expression: string } | null,
+  }
+})
 
-// Loading & Error State for Edit Modal
-const isEditSaving = ref(false)
-const editError = ref<string | null>(null)
-const isMeasuring = ref(false)
-const measureSuccess = ref<string | null>(null)
+// Edit modal computed/state moved to EditSensorModal.vue
 
 // =============================================================================
-// EDIT MODAL COMPUTED (Phase 2F)
-// =============================================================================
-
-// Check if current value differs from type default
-const editHasModeOverride = computed(() => {
-  if (!editingSensor.value) return false
-  return editingSensor.value.operating_mode !== null
-})
-
-const editHasTimeoutOverride = computed(() => {
-  if (!editingSensor.value) return false
-  return editingSensor.value.timeout_seconds !== null
-})
-
-// Effective values (what will actually be used)
-const editEffectiveMode = computed(() => {
-  if (!editingSensor.value) return 'continuous'
-  return editingSensor.value.operating_mode ?? editingSensor.value.typeDefaultMode
-})
-
-const editEffectiveTimeout = computed(() => {
-  if (!editingSensor.value) return 180
-  return editingSensor.value.timeout_seconds ?? editingSensor.value.typeDefaultTimeout
-})
-
-// Check if on_demand is supported for this sensor type
-const editSupportsOnDemand = computed(() => {
-  if (!editingSensor.value) return false
-  const config = SENSOR_TYPE_CONFIG[editingSensor.value.sensor_type]
-  return config?.supportsOnDemand ?? false
-})
-
-// Get sensor label for display
-function getSensorLabel(sensorType: string): string {
-  const config = SENSOR_TYPE_CONFIG[sensorType]
-  return config?.label || sensorType
-}
-
-// =============================================================================
-// Debug Logger (replaced with structured logger)
+// Debug Logger
 // =============================================================================
 function log(message: string, data?: Record<string, unknown>): void {
   logger.debug(message, data)
@@ -331,218 +281,11 @@ function onDrop(event: DragEvent) {
  * Open edit modal for a sensor
  */
 function openEditSensorModal(gpio: number) {
-  const sensor = sensors.value.find(s => s.gpio === gpio)
-  if (!sensor) {
-    logger.error('Sensor not found', { gpio })
-    return
-  }
-
-  // Reset error/success states
-  editError.value = null
-  measureSuccess.value = null
-  isEditSaving.value = false
-  isMeasuring.value = false
-
-  // Get type defaults
-  const typeConfig = SENSOR_TYPE_CONFIG[sensor.sensor_type] || {}
-  const typeDefaultMode = typeConfig.recommendedMode || 'continuous'
-  const typeDefaultTimeout = typeConfig.recommendedTimeout ?? 180
-
-  // Initialize edit state
-  // null means "use type default"
-  // Parse existing schedule_config if present
-  const existingSchedule = sensor.schedule_config as { type?: string; expression?: string } | null
-  const scheduleConfig = existingSchedule?.expression
-    ? { type: 'cron', expression: existingSchedule.expression }
-    : null
-
-  editingSensor.value = {
-    gpio: sensor.gpio,
-    sensor_type: sensor.sensor_type,
-    name: sensor.name || null,
-    // If sensor has override different from default, use it; otherwise null (= use default)
-    operating_mode: sensor.operating_mode && sensor.operating_mode !== typeDefaultMode
-      ? sensor.operating_mode
-      : null,
-    timeout_seconds: sensor.timeout_seconds !== undefined && sensor.timeout_seconds !== typeDefaultTimeout
-      ? sensor.timeout_seconds
-      : null,
-    // Schedule configuration for scheduled mode
-    schedule_config: scheduleConfig,
-    // Store defaults for comparison
-    typeDefaultMode,
-    typeDefaultTimeout,
-  }
-
+  editSensorGpio.value = gpio
   showEditSensorModal.value = true
 }
 
-/**
- * Reset a field to type default
- */
-function resetToTypeDefault(field: 'operating_mode' | 'timeout_seconds') {
-  if (!editingSensor.value) return
 
-  if (field === 'operating_mode') {
-    editingSensor.value.operating_mode = null
-  } else if (field === 'timeout_seconds') {
-    editingSensor.value.timeout_seconds = null
-  }
-}
-
-/**
- * Set override value (when user changes from default)
- */
-function setOverrideValue(field: 'operating_mode' | 'timeout_seconds', value: string | number) {
-  if (!editingSensor.value) return
-
-  if (field === 'operating_mode') {
-    editingSensor.value.operating_mode = value as string
-  } else if (field === 'timeout_seconds') {
-    editingSensor.value.timeout_seconds = value as number
-  }
-}
-
-/**
- * Set cron expression from preset or custom input
- */
-function setCronExpression(expression: string) {
-  if (!editingSensor.value) return
-  editingSensor.value.schedule_config = expression
-    ? { type: 'cron', expression }
-    : null
-}
-
-/**
- * Save sensor configuration
- */
-async function saveEditSensor() {
-  if (!editingSensor.value) return
-
-  isEditSaving.value = true
-  editError.value = null
-
-  try {
-    // Prepare schedule_config for API
-    const scheduleConfig = editingSensor.value.operating_mode === 'scheduled' && editingSensor.value.schedule_config
-      ? editingSensor.value.schedule_config
-      : undefined
-
-    const gpio = editingSensor.value.gpio
-    const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
-
-    await espStore.updateSensorConfig(espId.value, gpio, {
-      name: editingSensor.value.name,
-      operating_mode: editingSensor.value.operating_mode,
-      timeout_seconds: editingSensor.value.timeout_seconds,
-      schedule_config: scheduleConfig,
-    })
-
-    logger.info(`Sensor GPIO ${gpio} aktualisiert`)
-
-    // Success Toast (Phase 5)
-    toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) aktualisiert`)
-
-    showEditSensorModal.value = false
-    editingSensor.value = null
-
-    // Refresh ESP data
-    await espStore.fetchAll()
-  } catch (err: any) {
-    logger.error('Failed to update sensor', err)
-    editError.value = err.message || 'Fehler beim Speichern der Sensor-Konfiguration'
-  } finally {
-    isEditSaving.value = false
-  }
-}
-
-/**
- * Cancel edit
- */
-function cancelEditSensor() {
-  showEditSensorModal.value = false
-  editingSensor.value = null
-  editError.value = null
-  measureSuccess.value = null
-  isEditSaving.value = false
-  isMeasuring.value = false
-}
-
-/**
- * Trigger immediate measurement for on-demand sensors
- */
-async function triggerMeasureNow() {
-  if (!editingSensor.value) return
-
-  isMeasuring.value = true
-  editError.value = null
-  measureSuccess.value = null
-
-  try {
-    const result = await sensorsApi.triggerMeasurement(espId.value, editingSensor.value.gpio)
-    measureSuccess.value = `Messung angefordert (ID: ${result.request_id.slice(0, 8)}...)`
-    logger.info('Measurement triggered', result)
-
-    // Auto-clear success message after 5 seconds
-    setTimeout(() => {
-      measureSuccess.value = null
-    }, 5000)
-
-    // Refresh to get new data after a short delay
-    setTimeout(async () => {
-      await espStore.fetchAll()
-    }, 2000)
-  } catch (err: any) {
-    logger.error('Failed to trigger measurement', err)
-    editError.value = err.message || 'Fehler bei der Messungsanforderung'
-  } finally {
-    isMeasuring.value = false
-  }
-}
-
-/**
- * Remove sensor from ESP (only for Mock ESPs)
- * Closes the edit modal and deletes the sensor via API
- */
-async function removeSensor() {
-  if (!editingSensor.value) return
-  if (!isMock.value) {
-    toast.error('Sensor löschen ist nur für Mock ESPs verfügbar')
-    return
-  }
-
-  const gpio = editingSensor.value.gpio
-  const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
-
-  const confirmed = await uiStore.confirm({
-    title: 'Sensor entfernen',
-    message: `Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`,
-    variant: 'danger',
-    confirmText: 'Entfernen',
-  })
-  if (!confirmed) return
-
-  isEditSaving.value = true
-  editError.value = null
-
-  try {
-    await espStore.removeSensor(espId.value, gpio)
-    logger.info(`Sensor GPIO ${gpio} entfernt`)
-    toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) entfernt`)
-
-    // Close modal
-    showEditSensorModal.value = false
-    editingSensor.value = null
-
-    // Refresh ESP data
-    await espStore.fetchAll()
-  } catch (err: any) {
-    logger.error('Failed to remove sensor', err)
-    editError.value = err.message || 'Fehler beim Entfernen des Sensors'
-  } finally {
-    isEditSaving.value = false
-  }
-}
 
 // =============================================================================
 // Refs
@@ -1135,245 +878,17 @@ watch(
 
   <!-- Old inline sensor/actuator modals removed (see AddSensorModal.vue, AddActuatorModal.vue) -->
 
-  <!-- =======================================================================
-       EDIT SENSOR MODAL (Phase 2F)
-       ======================================================================= -->
-  <Teleport to="body">
-    <div
-      v-if="showEditSensorModal && editingSensor"
-      class="modal-overlay"
-      @click.self="cancelEditSensor"
-    >
-      <div class="modal-content">
-        <!-- Modal Header -->
-        <div class="modal-header modal-header--edit">
-          <div>
-            <h3 class="modal-title">Sensor bearbeiten</h3>
-            <p class="modal-subtitle">
-              GPIO {{ editingSensor.gpio }} · {{ getSensorLabel(editingSensor.sensor_type) }}
-            </p>
-          </div>
-          <button class="modal-close" @click="cancelEditSensor">
-            <X :size="20" />
-          </button>
-        </div>
+  <!-- Edit Sensor Modal (extracted component) -->
+  <EditSensorModal
+    v-model="showEditSensorModal"
+    :esp-id="espId"
+    :sensor="editSensorPayload"
+    :is-mock="isMock"
+    @saved="() => espStore.fetchAll()"
+    @deleted="() => espStore.fetchAll()"
+  />
 
-        <!-- Modal Body -->
-        <div class="modal-body">
-          <!-- Name -->
-          <div class="form-group">
-            <label class="form-label">Name (optional)</label>
-            <input
-              v-model="editingSensor.name"
-              type="text"
-              class="form-input"
-              placeholder="z.B. Temperatur Gewächshaus 1"
-            />
-          </div>
-
-          <!-- Operating Mode -->
-          <div class="form-group">
-            <div class="form-label-row">
-              <label class="form-label">Betriebsmodus</label>
-              <button
-                v-if="editHasModeOverride"
-                class="btn-reset"
-                title="Auf Type-Default zurücksetzen"
-                @click="resetToTypeDefault('operating_mode')"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Type-Default
-              </button>
-            </div>
-
-            <select
-              :value="editEffectiveMode"
-              class="form-select"
-              @change="setOverrideValue('operating_mode', ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="continuous">Kontinuierlich</option>
-              <option value="on_demand" :disabled="!editSupportsOnDemand">
-                Auf Abruf {{ !editSupportsOnDemand ? '(nicht unterstützt)' : '' }}
-              </option>
-              <option value="scheduled">Geplant</option>
-              <option value="paused">Pausiert</option>
-            </select>
-
-            <!-- Type Default Info -->
-            <p :class="['form-hint', editHasModeOverride ? 'form-hint--warning' : '']">
-              <template v-if="editHasModeOverride">
-                ⚠️ Individuell angepasst (Type-Default: {{ editingSensor.typeDefaultMode }})
-              </template>
-              <template v-else>
-                Verwendet Type-Default: {{ editingSensor.typeDefaultMode }}
-              </template>
-            </p>
-          </div>
-
-          <!-- Timeout (nur bei continuous) -->
-          <div v-if="editEffectiveMode === 'continuous'" class="form-group">
-            <div class="form-label-row">
-              <label class="form-label">Timeout (Sekunden)</label>
-              <button
-                v-if="editHasTimeoutOverride"
-                class="btn-reset"
-                title="Auf Type-Default zurücksetzen"
-                @click="resetToTypeDefault('timeout_seconds')"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Type-Default
-              </button>
-            </div>
-
-            <input
-              :value="editEffectiveTimeout"
-              type="number"
-              min="0"
-              max="86400"
-              class="form-input"
-              placeholder="180"
-              @input="setOverrideValue('timeout_seconds', parseInt(($event.target as HTMLInputElement).value) || 0)"
-            />
-
-            <!-- Type Default Info -->
-            <p :class="['form-hint', editHasTimeoutOverride ? 'form-hint--warning' : '']">
-              <template v-if="editHasTimeoutOverride">
-                ⚠️ Individuell angepasst (Type-Default: {{ editingSensor.typeDefaultTimeout }}s)
-              </template>
-              <template v-else>
-                Verwendet Type-Default: {{ editingSensor.typeDefaultTimeout }}s
-              </template>
-            </p>
-
-            <p class="form-hint">
-              0 = Kein Timeout (Warnung deaktiviert)
-            </p>
-          </div>
-
-          <!-- Info für nicht-continuous Modi -->
-          <div v-if="editEffectiveMode !== 'continuous'" class="info-box">
-            <template v-if="editEffectiveMode === 'on_demand'">
-              <div class="info-box__content">
-                <p>ℹ️ <strong>Auf Abruf:</strong> Sensor misst nur bei manueller Anforderung. Kein automatisches Timeout.</p>
-                <button
-                  class="btn btn--accent btn--sm"
-                  :disabled="isMeasuring"
-                  @click="triggerMeasureNow"
-                >
-                  <Loader2 v-if="isMeasuring" class="animate-spin" :size="14" />
-                  <span v-else>📏</span>
-                  {{ isMeasuring ? 'Messe...' : 'Jetzt messen' }}
-                </button>
-              </div>
-            </template>
-            <template v-else-if="editEffectiveMode === 'paused'">
-              ℹ️ <strong>Pausiert:</strong> Sensor ist deaktiviert, GPIO bleibt reserviert.
-            </template>
-            <template v-else-if="editEffectiveMode === 'scheduled'">
-              <div class="schedule-config">
-                <p class="schedule-config__info">
-                  ℹ️ <strong>Geplant:</strong> Messung zu definierten Zeitpunkten (Server-gesteuert).
-                </p>
-
-                <!-- Cron Presets -->
-                <div class="schedule-config__presets">
-                  <label class="form-label">Zeitplan-Vorlagen:</label>
-                  <div class="preset-buttons">
-                    <button
-                      v-for="preset in CRON_PRESETS"
-                      :key="preset.value"
-                      class="preset-btn"
-                      :class="{ 'preset-btn--active': editingSensor?.schedule_config?.expression === preset.value }"
-                      :title="preset.description"
-                      @click="setCronExpression(preset.value)"
-                    >
-                      {{ preset.label }}
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Custom Cron Input -->
-                <div class="schedule-config__custom">
-                  <label class="form-label">Cron-Expression:</label>
-                  <input
-                    :value="editingSensor?.schedule_config?.expression || ''"
-                    type="text"
-                    class="form-input form-input--mono"
-                    placeholder="z.B. 0 */6 * * * (alle 6 Stunden)"
-                    @input="setCronExpression(($event.target as HTMLInputElement).value)"
-                  />
-                  <p class="form-hint">
-                    Format: Minute Stunde Tag Monat Wochentag
-                    <br />
-                    <code>*</code> = jeder, <code>*/n</code> = alle n, <code>1-5</code> = Bereich
-                  </p>
-                </div>
-
-                <!-- Current Schedule Display -->
-                <div v-if="editingSensor?.schedule_config?.expression" class="schedule-config__current">
-                  <span class="schedule-label">Aktuell:</span>
-                  <code class="schedule-value">{{ editingSensor.schedule_config.expression }}</code>
-                </div>
-              </div>
-            </template>
-          </div>
-
-          <!-- Error Message -->
-          <div v-if="editError" class="alert alert--error">
-            <span class="alert__icon">⚠️</span>
-            <span class="alert__text">{{ editError }}</span>
-            <button class="alert__close" @click="editError = null">×</button>
-          </div>
-
-          <!-- Success Message -->
-          <div v-if="measureSuccess" class="alert alert--success">
-            <span class="alert__icon">✅</span>
-            <span class="alert__text">{{ measureSuccess }}</span>
-          </div>
-        </div>
-
-        <!-- Modal Footer -->
-        <div class="modal-footer modal-footer--with-delete">
-          <!-- Delete Button (nur für Mock ESPs) -->
-          <button
-            v-if="isMock"
-            class="btn btn--danger btn--icon"
-            :disabled="isEditSaving"
-            title="Sensor entfernen"
-            @click="removeSensor"
-          >
-            <Trash2 :size="16" />
-            Entfernen
-          </button>
-
-          <!-- Spacer für rechte Ausrichtung der anderen Buttons -->
-          <div class="modal-footer__spacer" />
-
-          <button
-            class="btn btn--secondary"
-            :disabled="isEditSaving"
-            @click="cancelEditSensor"
-          >
-            Abbrechen
-          </button>
-          <button
-            class="btn btn--primary"
-            :disabled="isEditSaving"
-            @click="saveEditSensor"
-          >
-            <Loader2 v-if="isEditSaving" class="animate-spin" :size="16" />
-            {{ isEditSaving ? 'Speichere...' : 'Speichern' }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+  <!-- OLD INLINE EDIT MODAL REMOVED - replaced by EditSensorModal component -->
 </template>
 
 <style scoped>
