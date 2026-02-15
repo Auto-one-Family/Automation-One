@@ -20,14 +20,14 @@ import { X, Heart, Settings2, Loader2, Pencil, Check, Trash2, ScanLine, AlertCir
 import ESPCard from './ESPCard.vue'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime } from '@/utils/formatters'
-import SensorSatellite from './SensorSatellite.vue'
-import ActuatorSatellite from './ActuatorSatellite.vue'
+import SensorColumn from './SensorColumn.vue'
+import ActuatorColumn from './ActuatorColumn.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
 import GpioPicker from './GpioPicker.vue'
 import Badge from '@/components/common/Badge.vue'
 import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
-import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
+import type { MockSensor, MockActuator, ChartSensor, MockSensorConfig } from '@/types'
 import { espApi } from '@/api/esp'
 import { sensorsApi } from '@/api/sensors'
 import { getStateInfo } from '@/utils/labels'
@@ -1509,39 +1509,19 @@ watch(
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Left Column: Sensors -->
-    <div
+    <!-- Left Column: Sensors (uses extracted SensorColumn) -->
+    <SensorColumn
+      :esp-id="espId"
+      :sensors="sensors"
+      :selected-gpio="selectedGpio !== null && selectedType === 'sensor' ? selectedGpio : null"
+      :show-connections="showConnections"
       class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors"
       :class="{
         'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow,
         'esp-horizontal-layout__column--empty': sensors.length === 0
       }"
-    >
-      <SensorSatellite
-        v-for="(sensor, idx) in sensors"
-        :key="`sensor-${sensor.gpio}`"
-        :esp-id="espId"
-        :gpio="sensor.gpio"
-        :sensor-type="sensor.sensor_type"
-        :name="sensor.name"
-        :value="sensor.processed_value ?? sensor.raw_value"
-        :quality="sensor.quality as QualityLevel"
-        :unit="sensor.unit"
-        :device-type="sensor.device_type"
-        :multi-values="sensor.multi_values"
-        :is-multi-value="sensor.is_multi_value"
-        :selected="selectedGpio === sensor.gpio && selectedType === 'sensor'"
-        :show-connections="showConnections"
-        class="esp-horizontal-layout__satellite"
-        :style="{ animationDelay: `${idx * 60}ms` }"
-        @click="handleSensorClick(sensor.gpio)"
-      />
-      <!-- Empty state when no sensors configured -->
-      <div v-if="sensors.length === 0" class="esp-horizontal-layout__empty-slot">
-        <Plus class="w-3 h-3" />
-        <span>Sensors</span>
-      </div>
-    </div>
+      @sensor-click="handleSensorClick"
+    />
 
     <!-- Center Column: ESP Card -->
     <div ref="centerRef" class="esp-horizontal-layout__center">
@@ -1703,32 +1683,16 @@ watch(
       <ESPCard v-else :esp="device" />
     </div>
 
-    <!-- Right Column: Actuators -->
-    <div
+    <!-- Right Column: Actuators (uses extracted ActuatorColumn) -->
+    <ActuatorColumn
+      :esp-id="espId"
+      :actuators="actuators"
+      :selected-gpio="selectedGpio !== null && selectedType === 'actuator' ? selectedGpio : null"
+      :show-connections="showConnections"
       class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators"
       :class="{ 'esp-horizontal-layout__column--empty': actuators.length === 0 }"
-    >
-      <ActuatorSatellite
-        v-for="actuator in actuators"
-        :key="`actuator-${actuator.gpio}`"
-        :esp-id="espId"
-        :gpio="actuator.gpio"
-        :actuator-type="actuator.actuator_type"
-        :name="actuator.name"
-        :state="actuator.state"
-        :pwm-value="actuator.pwm_value"
-        :emergency-stopped="actuator.emergency_stopped"
-        :selected="selectedGpio === actuator.gpio && selectedType === 'actuator'"
-        :show-connections="showConnections"
-        class="esp-horizontal-layout__satellite"
-        @click="handleActuatorClick(actuator.gpio)"
-      />
-      <!-- Empty state when no actuators configured -->
-      <div v-if="actuators.length === 0" class="esp-horizontal-layout__empty-slot">
-        <Plus class="w-3 h-3" />
-        <span>Aktoren</span>
-      </div>
-    </div>
+      @actuator-click="handleActuatorClick"
+    />
 
     <!-- Drop Indicator Overlay (Phase 2B: für alle ESPs) -->
     <Transition name="fade">
