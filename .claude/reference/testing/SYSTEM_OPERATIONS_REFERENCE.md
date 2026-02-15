@@ -1,7 +1,10 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.5 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-11
+> **Version:** 2.8 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-13
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.8:** Frontend-Container-Logs als Quelle ergänzt (Loki/docker compose logs, §9 + Log-Verzeichnisse)
+> **Änderungen 2.7:** Playwright E2E-Pfade und -Befehle; Playwright MCP für Agenten (Browser-Inspection) in §9.1
+> **Änderungen 2.6:** Loki-Queries auf compose_service umgestellt (ROADMAP §1.1); MQTT-Logs ohne Bind-Mount dokumentiert
 > **Änderungen 2.5:** Admin-Credentials ergänzt, Wokwi-Seed lokal (nicht im Container), PowerShell Test-Befehle, Wokwi Windows-Voraussetzungen
 > **Änderungen 2.4:** Native Tests vollständig: 22 Tests (12 TopicBuilder + 10 GPIOManager), Toolchain-Fix (set_native_toolchain.py), korrigierte Pfade
 > **Änderungen 2.3:** Native Test-Commands (pio test -e native/esp32dev_test), wokwi-test-full Count korrigiert (22 Szenarien)
@@ -132,11 +135,12 @@ docker stats --no-stream
 | Verzeichnis | Inhalt |
 |-------------|--------|
 | `logs/server/` | Server JSON-Logs (Bind-Mount) |
-| `logs/mqtt/` | Mosquitto Broker-Logs (Bind-Mount) |
+| `logs/mqtt/` | Deaktiviert (Mosquitto stdout-only); Broker-Logs via Loki `compose_service=mqtt-broker` |
 | `logs/postgres/` | PostgreSQL Query-Logs (Bind-Mount) |
 | `logs/esp32/` | ESP32 Serial-Logs (manuell via PlatformIO) |
 | `logs/current/` | Session-Logs (via start_session.sh) |
 | `logs/archive/` | Archivierte Session-Logs |
+| (stdout only) el-frontend | Vue/Vite → Loki `compose_service=el-frontend`; `docker compose logs el-frontend` |
 | Docker: `esp32-serial-logger` | ESP32 Serial via TCP-Bridge (stdout only, Profile: hardware) |
 
 ### .env Konfiguration
@@ -568,7 +572,7 @@ curl http://localhost:8000/api/v1/health/metrics
 | Pfad | Inhalt | Rotation |
 |------|--------|----------|
 | `logs/server/god_kaiser.log` | Server JSON-Logs | 10 Backups × 10MB |
-| `logs/mqtt/mosquitto.log` | Mosquitto Broker-Log | 50MB/Tag |
+| `logs/mqtt/mosquitto.log` | – (Bind-Mount in docker-compose auskommentiert; MQTT-Logs: `docker compose logs mqtt-broker` oder Loki) | – |
 | `logs/postgres/postgresql.log` | PostgreSQL Queries | 50MB/Tag |
 
 #### Via Docker (EMPFOHLEN)
@@ -609,8 +613,8 @@ tail -f logs/server/god_kaiser.log | grep -v "heartbeat"
 # PostgreSQL Slow Queries (>100ms)
 grep "duration:" logs/postgres/postgresql.log
 
-# MQTT Broker-Logs
-tail -f logs/mqtt/mosquitto.log
+# MQTT Broker-Logs (Bind-Mount deaktiviert: docker compose logs -f mqtt-broker oder Loki compose_service=mqtt-broker)
+docker compose logs -f mqtt-broker
 ```
 
 #### PowerShell (Windows)
@@ -1598,22 +1602,22 @@ make monitor-status
 ### 8.3 Loki-Queries (Log-Suche)
 
 ```bash
-# Service-Logs via Loki API
+# Service-Logs via Loki API (Label compose_service, ROADMAP §1.1)
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={service="el-servador"}' \
+  --data-urlencode 'query={compose_service="el-servador"}' \
   --data-urlencode 'limit=50'
 
 # Verfuegbare Labels
 curl -s http://localhost:3100/loki/api/v1/labels
 
-# Verfuegbare Services
-curl -s "http://localhost:3100/loki/api/v1/label/service/values"
+# Verfuegbare Services (compose_service = Promtail-Target-Label)
+curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 ```
 
 ### 8.4 Loki-Labels
 
-| Service | Label `service=` | Container-Name |
-|---------|-----------------|----------------|
+| Service | Label `compose_service=` (ROADMAP §1.1) | Container-Name |
+|---------|----------------------------------------|----------------|
 | Frontend | `el-frontend` | `automationone-frontend` |
 | Server | `el-servador` | `automationone-server` |
 | MQTT Broker | `mqtt-broker` | `automationone-mqtt` |
@@ -1665,7 +1669,8 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **Server Config** | `El Servador/god_kaiser_server/src/core/config.py` |
 | **Environment** | `.env` (Projektroot) |
 | **Server Logs** | `logs/server/god_kaiser.log` (Docker Bind-Mount) |
-| **MQTT Logs** | `logs/mqtt/mosquitto.log` (Docker Bind-Mount) |
+| **MQTT Logs** | `docker compose logs mqtt-broker` oder Loki `compose_service=mqtt-broker` (kein Bind-Mount) |
+| **Frontend Logs** | Loki `compose_service=el-frontend` / `docker compose logs el-frontend` (stdout only, kein Bind-Mount) |
 | **PostgreSQL Logs** | `logs/postgres/postgresql.log` (Docker Bind-Mount) |
 | **ESP32 Logs** | `logs/esp32/` (manuell) |
 | **Session Logs** | `logs/current/` (via session.sh) |
@@ -1681,7 +1686,21 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **Prometheus Config** | `docker/prometheus/prometheus.yml` |
 | **Grafana Provisioning** | `docker/grafana/provisioning/` |
 | **Session Script** | `scripts/debug/start_session.sh` (v4.0) |
+| **Playwright E2E Config** | `El Frontend/playwright.config.ts` |
+| **Playwright E2E Report** | `logs/frontend/playwright/playwright-report/` |
+| **Playwright E2E test-results** | `logs/frontend/playwright/test-results/` |
+
+### 9.1 Playwright (E2E + MCP für Agenten)
+
+**E2E-Tests (Befehle):**
+- Stack: `make e2e-up` / `make e2e-down` (docker-compose.e2e.yml)
+- Tests: `npx playwright test` (aus `El Frontend/`) bzw. `make e2e-test`
+- Base URL: `http://localhost:5173`
+- Report nach Run: `logs/frontend/playwright/playwright-report/`
+
+**Playwright MCP (Browser-Zugang für Agenten):**  
+Wenn Cursor den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der Agent den Browser live inspizieren – DOM, Console, Network, Screenshots. Tools: `browser_navigate`, `browser_snapshot`, `browser_console_messages`, `browser_network_requests`. Frontend muss laufen (`http://localhost:5173`). Details: `docs/plans/Debug.md` Sektion „Playwright MCP“.
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-11 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-13 | AutomationOne Debug-Operations-Reference*

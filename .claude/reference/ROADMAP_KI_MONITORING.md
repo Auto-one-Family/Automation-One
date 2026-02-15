@@ -1,9 +1,9 @@
 # AutomationOne - KI & Monitoring Roadmap
 
-**Version:** 1.0
-**Datum:** 2026-02-10
-**Status:** Living Document (verify-plan geprueft)
-**Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings
+**Version:** 1.1
+**Datum:** 2026-02-13
+**Status:** Living Document (verify-plan Full-Stack 2026-02-13)
+**Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings; Full-Stack-Abgleich gegen echte Configs (docker-compose, Promtail, Prometheus, metrics.py, Alert Rules)
 
 ---
 
@@ -31,6 +31,10 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 |---------|-----------|------|-------|--------|
 | loki | automationone-loki | 3100 | grafana/loki:3.4 | DONE |
 | promtail | automationone-promtail | 9080 (intern) | grafana/promtail:3.4 | DONE |
+| cadvisor | automationone-cadvisor | 8080 | gcr.io/cadvisor/cadvisor:v0.49.1 | DONE |
+| postgres-exporter | automationone-postgres-exporter | 9187 (intern) | prometheuscommunity/postgres-exporter:v0.16.0 | DONE |
+| mosquitto-exporter | automationone-mosquitto-exporter | 9234 (intern) | sapcc/mosquitto-exporter:0.8.0 | DONE |
+| esp32-serial-logger | automationone-esp32-serial | - | Build: docker/esp32-serial-logger | DONE (Profile: hardware) |
 | prometheus | automationone-prometheus | 9090 | prom/prometheus:v3.2.1 | DONE |
 | grafana | automationone-grafana | 3000 | grafana/grafana:11.5.2 | DONE |
 
@@ -53,8 +57,10 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 - Multiline-Aggregation fuer Python Tracebacks
 - Structured regex parsing fuer el-servador Text-Logs
 - JSON parsing fuer el-frontend Logs
+- **ESP32 → Loki:** Stage 4 `{compose_service="esp32-serial-logger"}` – JSON-Parse (level, device_id, component), Labels fuer Abfragen. ESP-Serial-Output fliesst in Loki sobald `esp32-serial-logger` (Profile: hardware) laeuft und sich mit ser2net/socat auf dem Host verbindet.
+- **Loki-Selbst-Logs:** Stage 5 – Loki-Container-Logs werden mitgeholt, logfmt-Parser, Query-Stats-Drop (Noise-Reduktion).
 
-**Loki-Config (DONE):** 7-Tage-Retention, TSDB storage, schema v13
+**Loki-Config (DONE):** 7-Tage-Retention (168h), TSDB storage, schema v13 (`docker/loki/loki-config.yml`).
 
 ### 1.2 ESP32 Serial Output einfangen
 
@@ -82,11 +88,11 @@ El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die 
 
 **B) Serial-zu-Netzwerk-Bridge (fester Bestandteil des Stacks)**
 
-> **STATUS: TODO**
+> **STATUS: TEILWEISE DONE**
 
-Docker-Container `ser2net` liest `/dev/ttyUSB0` (oder mehrere Ports bei mehreren ESP32s) und sendet die Zeilen an Loki (via Promtail oder direkt via Loki Push API).
-
-**Voraussetzung:** WSL2 USB-Passthrough via `usbipd-win` muss konfiguriert sein.
+- **DONE:** Container `esp32-serial-logger` (Profile: `hardware`) in `docker-compose.yml`. Verbindet sich per TCP mit einem Serial-Bridge auf dem Host (`SERIAL_HOST`/`SERIAL_PORT`, Default: `host.docker.internal:3333`). Liest Zeilen, gibt strukturiertes JSON auf stdout aus. Promtail scraped den Container und sendet nach Loki (Pipeline Stage 4 in `docker/promtail/config.yml`). **ESP32-Logs landen also bereits in Loki**, wenn: (1) ser2net oder socat auf dem Host auf Port 3333 laeuft, (2) `make monitor-up` und Hardware-Profil gestartet werden (`docker compose --profile monitoring --profile hardware up -d`).
+- **Voraussetzung:** Auf dem Host muss eine Serial-Bridge laufen (z. B. ser2net oder `socat TCP-LISTEN:3333,reuseaddr,fork FILE:/dev/ttyUSB0,raw,echo=0`). WSL2: USB-Passthrough via `usbipd-win` fuer `/dev/ttyUSB0`.
+- **Hinweis:** Der Plan nannte zuerst "ser2net-Container"; im Stack heisst der Service `esp32-serial-logger` (Build: `docker/esp32-serial-logger`, Image nutzt ser2net/socat **auf dem Host**, nicht im Container).
 
 ### 1.3 Grafana "Kontrollraum" Dashboard
 
@@ -102,14 +108,14 @@ Docker-Container `ser2net` liest `/dev/ttyUSB0` (oder mehrere Ports bei mehreren
 
 **TODO:**
 - Log-Panel pro Layer (Backend, Frontend, Firmware, Broker, DB) - live, filterbar nach Severity
-- Container-Health-Status (CPU, RAM, Restart-Count) via cAdvisor -> Prometheus
+- Container-Health-Status (CPU, RAM, Restart-Count) im Dashboard: cAdvisor wird bereits von Prometheus gescraped; Grafana-Panels fuer Container-Metriken fehlen noch
 - Korrelations-View: alle Logs +/-5 Sekunden um einen Error herum (LogQL)
 
 ### 1.4 Prometheus-Metriken
 
 > **STATUS: TEILWEISE DONE**
 
-**DONE - Custom Gauges** (`El Servador/god_kaiser_server/src/core/metrics.py`):
+**DONE - Custom Gauges/Counters/Histogram** (`El Servador/god_kaiser_server/src/core/metrics.py`):
 
 | Metrik | Typ | Beschreibung |
 |--------|-----|-------------|
@@ -117,11 +123,19 @@ Docker-Container `ser2net` liest `/dev/ttyUSB0` (oder mehrere Ports bei mehreren
 | `god_kaiser_cpu_percent` | Gauge | CPU usage |
 | `god_kaiser_memory_percent` | Gauge | Memory usage |
 | `god_kaiser_mqtt_connected` | Gauge | MQTT status (1/0) |
+| `god_kaiser_mqtt_messages_total` | Counter | MQTT messages (labels: direction=received\|published) |
+| `god_kaiser_mqtt_errors_total` | Counter | MQTT Fehler (labels: direction=received\|published) |
+| `god_kaiser_websocket_connections` | Gauge | Aktive WS-Verbindungen (exakter Name in Code) |
+| `god_kaiser_db_query_duration_seconds` | Histogram | DB-Query-Dauer (app-seitig) |
 | `god_kaiser_esp_total` | Gauge | Total ESP devices |
 | `god_kaiser_esp_online` | Gauge | Online ESP devices |
 | `god_kaiser_esp_offline` | Gauge | Offline ESP devices |
+| `god_kaiser_esp_avg_heap_free_bytes` | Gauge | Ø freier Heap (online ESPs) |
+| `god_kaiser_esp_min_heap_free_bytes` | Gauge | Min freier Heap |
+| `god_kaiser_esp_avg_wifi_rssi_dbm` | Gauge | Ø WiFi RSSI |
+| `god_kaiser_esp_avg_uptime_seconds` | Gauge | Ø Uptime |
 
-**DONE - prometheus-fastapi-instrumentator v7.0.0:**
+**DONE - prometheus-fastapi-instrumentator:**
 - Automatische HTTP-Metriken (Request Count, Latency, Error-Rate pro Endpoint)
 - Endpoint: `/api/v1/health/metrics`
 
@@ -130,30 +144,21 @@ Docker-Container `ser2net` liest `/dev/ttyUSB0` (oder mehrere Ports bei mehreren
 - Mosquitto-Exporter (`mosquitto-exporter`, Port 9234)
 
 **DONE - Scrape-Config** (`docker/prometheus/prometheus.yml`):
-- Job `el-servador` -> `el-servador:8000/api/v1/health/metrics`
+- Job `el-servador` -> `el-servador:8000` (metrics_path: `/api/v1/health/metrics`)
 - Job `postgres` -> `postgres-exporter:9187`
 - Job `mqtt-broker` -> `mosquitto-exporter:9234`
 - Job `prometheus` -> `localhost:9090`
+- Job `cadvisor` -> `cadvisor:8080`
+- Job `loki` -> `loki:3100`
+- Job `promtail` -> `promtail:9080`
 
-**TODO - Zusaetzliche Custom Metriken:**
-
-| Metrik | Typ | Beschreibung |
-|--------|-----|-------------|
-| `god_kaiser_mqtt_messages_received_total` | Counter | Empfangene MQTT Messages |
-| `god_kaiser_mqtt_messages_published_total` | Counter | Gesendete MQTT Messages |
-| `god_kaiser_mqtt_errors_total` | Counter | MQTT Fehler |
-| `god_kaiser_websocket_connections_active` | Gauge | Aktive WS-Verbindungen |
-| `god_kaiser_db_query_duration_seconds` | Histogram | DB-Query-Dauer |
-
-**TODO - cAdvisor:**
-- Neuer Service in `docker-compose.yml` (Profile: monitoring)
-- Container-CPU, -RAM, -Restart-Count als Prometheus-Metriken
+**DONE - cAdvisor:** Service in `docker-compose.yml` (Profile: monitoring), Port 8080. Prometheus scraped `cadvisor:8080`. Container-CPU, -RAM, -Restart-Count als Prometheus-Metriken verfuegbar.
 
 ### Ergebnis Phase 1
 
-**DONE:** Loki, Promtail, Grafana, Prometheus laufen im Monitoring-Profil. Server exponiert Custom Gauges und HTTP-Metriken. PostgreSQL- und Mosquitto-Exporter aktiv. Basis-Dashboard vorhanden.
+**DONE:** Loki, Promtail, Grafana, Prometheus laufen im Monitoring-Profil. cAdvisor, postgres-exporter, mosquitto-exporter aktiv. Server exponiert Custom Gauges, Counter (MQTT messages/errors), WebSocket-Gauge, DB-Histogram und HTTP-Metriken. Prometheus scraped zusaetzlich Loki, Promtail, cAdvisor. ESP32-Serial-Output fluesst in Loki ueber Container `esp32-serial-logger` (Profile: hardware) + Promtail Pipeline. Basis-Dashboard vorhanden (`docker/grafana/provisioning/dashboards/system-health.json`).
 
-**TODO:** ser2net-Container, MQTT Debug-Topic, cAdvisor, zusaetzliche Metriken (MQTT-Counters, WS, DB-Query), Log-Panel-Dashboard, Korrelations-View.
+**TODO:** MQTT Debug-Topic (A); auf Host ser2net/socat fuer esp32-serial-logger (B bereits im Stack); Log-Panel-Dashboard, Korrelations-View.
 
 ---
 
@@ -167,22 +172,25 @@ Docker-Container `ser2net` liest `/dev/ttyUSB0` (oder mehrere Ports bei mehreren
 
 **DONE** (`docker/grafana/provisioning/alerting/alert-rules.yml`):
 
-5 Rules mit korrekter 3-Stage Pipeline (A: PromQL -> B: Reduce:last -> C: Threshold):
+7 Rules mit korrekter 3-Stage Pipeline (A: PromQL -> B: Reduce:last -> C: Threshold):
 
 | Rule | UID | Severity | Condition | For |
 |------|-----|----------|-----------|-----|
 | Server Down | ao-server-down | critical | up{job="el-servador"} < 1 | 1m |
 | MQTT Disconnected | ao-mqtt-disconnected | critical | god_kaiser_mqtt_connected < 1 | 1m |
 | Database Down | ao-database-down | critical | pg_up < 1 | 1m |
+| Loki Down | ao-loki-down | critical | up{job="loki"} < 1 | 2m |
+| Promtail Down | ao-promtail-down | critical | up{job="promtail"} < 1 | 2m |
 | High Memory | ao-high-memory | warning | god_kaiser_memory_percent > 85 | 5m |
-| ESP Offline | ao-esp-offline | warning | god_kaiser_esp_offline > 5 AND online > 0 | 3m |
+| ESP Offline | ao-esp-offline | warning | (esp_offline/esp_total) > 0.5 AND esp_online > 0 | 3m |
+| High MQTT Error Rate | ao-high-mqtt-error-rate | warning | increase(god_kaiser_mqtt_errors_total[5m]) > 10 | 2m |
 
 **TODO - Fehlende Alert Rules:**
 
 | Rule | Bedingung | Severity |
 |------|-----------|----------|
-| Frontend WebSocket Lost | WS-Connection-Count = 0 (wenn zuvor > 0) | warning |
-| Container Restart | Container restart_count > threshold | warning |
+| Frontend WebSocket Lost | god_kaiser_websocket_connections = 0 (wenn zuvor > 0) | warning |
+| Container Restart | Container restart_count > threshold (cAdvisor-Metriken) | warning |
 | MQTT Reconnect Loop | disconnect -> connect -> disconnect in < 60s | warning |
 
 **TODO - Alert Contact Point:**
@@ -248,10 +256,11 @@ Definiert Labels fuer spaeteres ML-Training. Bestehende Promtail-Labels als Basi
 
 | Label | Typ | Werte | Quelle |
 |-------|-----|-------|--------|
-| `compose_service` | auto | el-servador, mqtt-broker, etc. | Docker SD |
-| `level` | extracted | INFO, WARNING, ERROR, DEBUG, CRITICAL | Parser |
-| `logger` | extracted | src.mqtt.handlers.sensor_handler, etc. | Regex |
-| `component` | extracted | ESPCard, DashboardView, etc. | JSON |
+| `compose_service` | auto | el-servador, mqtt-broker, esp32-serial-logger, loki, etc. | Docker SD |
+| `level` | extracted | INFO, WARNING, ERROR, DEBUG, CRITICAL | Parser (el-servador regex, el-frontend/loki/esp32 JSON/logfmt) |
+| `logger` | extracted | src.mqtt.handlers.sensor_handler, etc. | Regex (el-servador) |
+| `component` | extracted | ESPCard, DashboardView; mqtt/sensor/logger (Firmware) | JSON (el-frontend, esp32-serial-logger) |
+| `device` | extracted | esp32-xiao-01, etc. | JSON (esp32-serial-logger, Feld device_id) |
 | `error_pattern` | manual | MQTT_RECONNECT_LOOP, etc. | Fehlermuster-Katalog |
 | `layer` | static | firmware, broker, backend, frontend, database | Promtail relabel |
 
@@ -487,11 +496,9 @@ Jetson laeuft 24/7 als intelligenter Debug-Assistent. Erkennt bekannte Fehler, w
 
 ### Phase 1b (TODO)
 
-- ser2net-Container in `docker-compose.yml`
-- cAdvisor-Container in `docker-compose.yml`
-- MQTT Debug-Topic Handler (`kaiser/god/esp/{esp_id}/system/debug`)
-- Zusaetzliche Custom Metriken in `metrics.py`
-- Log-Panel Dashboard + Korrelations-View
+- MQTT Debug-Topic Handler (`kaiser/god/esp/{esp_id}/system/debug`) in Firmware + El Servador
+- Log-Panel Dashboard + Korrelations-View in Grafana
+- (Bereits erledigt: cAdvisor, esp32-serial-logger, MQTT/WS/DB-Metriken in `metrics.py`; ser2net/socat auf Host bleibt Voraussetzung fuer ESP→Loki)
 
 ### Phase 2 (TODO)
 
@@ -540,3 +547,20 @@ Jetson laeuft 24/7 als intelligenter Debug-Assistent. Erkennt bekannte Fehler, w
 | 6 | `system-manager` Agent | `system-control` | system-manager wurde konsolidiert (Git: 64f5686) |
 | 7 | Debug-Agents schreiben Katalog | Read-Only Zugriff | Debug-Agents haben nur Read/Grep/Glob |
 | 8 | `ao/ml/{method}/results` | `kaiser/god/ml/{method}/results` | Konsistenz mit bestehendem Topic-Schema |
+
+---
+
+## verify-plan Full-Stack (2026-02-13) – echte Configs
+
+Abgleich gegen `docker-compose.yml`, `docker/promtail/config.yml`, `docker/prometheus/prometheus.yml`, `El Servador/.../core/metrics.py`, `docker/grafana/provisioning/alerting/alert-rules.yml`.
+
+| # | Im Plan / Doku | Im System | Aenderung im Dokument |
+|---|----------------|-----------|------------------------|
+| 9 | cAdvisor TODO | cAdvisor Service in docker-compose (Profile monitoring), Port 8080; Prometheus scraped cadvisor:8080 | Phase 1.4 + Ergebnis Phase 1: cAdvisor als DONE gefuehrt |
+| 10 | ser2net-Container | Service heisst `esp32-serial-logger` (Profile: hardware), verbindet zu Host (SERIAL_HOST:SERIAL_PORT), baut nicht ser2net im Container | 1.2 B) auf esp32-serial-logger umgestellt, Voraussetzung Host-Bridge erlaeutert |
+| 11 | ESP hat keine Loki-Anbindung | Promtail Stage 4 scraped `esp32-serial-logger`-Container, Labels level/device/component; ESP-Logs in Loki wenn Hardware-Profil + Host-Bridge | 1.1 Promtail-Pipeline + 1.2 B) ergaenzt (ESP→Loki) |
+| 12 | Nur 4 Prometheus-Jobs | 7 Jobs: el-servador, postgres, prometheus, mqtt-broker, cadvisor, loki, promtail | 1.4 Scrape-Config vollstaendig aufgelistet |
+| 13 | MQTT/WS/DB-Metriken TODO | metrics.py: god_kaiser_mqtt_messages_total, god_kaiser_mqtt_errors_total, god_kaiser_websocket_connections, god_kaiser_db_query_duration_seconds | 1.4 Custom-Metriken-Tabelle erweitert, TODO-Block entfernt |
+| 14 | Metrikname websocket_connections_active | Code: `god_kaiser_websocket_connections` | 1.4 exakter Name eingetragen |
+| 15 | 5 Alert Rules | 7 Rules: zusaetzlich ao-loki-down, ao-promtail-down, ao-high-mqtt-error-rate; ESP-Offline-Formel: 50% offline + esp_online>0 | 2.1 Tabelle auf 7 Rules erweitert, Bedingungen angepasst |
+| 16 | Grafana Dashboard-Pfad | `docker/grafana/provisioning/dashboards/system-health.json` + dashboards.yml | 1.3 bereits korrekt; Ergebnis Phase 1 Pfad explizit genannt |

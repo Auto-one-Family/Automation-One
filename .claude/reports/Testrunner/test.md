@@ -1,6 +1,7 @@
 # Test Baseline Report
 
 **Erstellt:** 2026-02-11
+**Aktualisiert:** 2026-02-13 (systematic-debugging ESP_472204)
 **Skill:** test-log-analyst
 **Zweck:** Erstmalige Baseline-Messung aller Test-Suites
 
@@ -92,3 +93,22 @@
 - Node.js, Vitest 3.2.4
 - PlatformIO Core 6.1.18 (native: kein gcc/g++)
 - Windows 11, Git Bash
+
+---
+
+## 2026-02-13: Systematic Debugging ESP_472204 („Nichts im Frontend“)
+
+**Kontext:** Echter ESP (ESP_472204) sendet laut Serial MQTT-Publishes; Frontend zeigt kein Device/Daten. Root Cause (Phase 1): ESP_472204 ist **nicht in der DB** – der Server verarbeitet keine MQTT-Nachrichten von diesem ESP (siehe `.claude/reports/current/DB_INSPECTOR_REPORT.md`, `SYSTEMATIC_DEBUG_ESP472204.md`).
+
+**Relevante Tests zur Pipeline-Verifikation („Device registriert → Sensor-Daten → API/Frontend“):**
+
+| Befehl (PowerShell, Projektroot) | Zweck |
+|----------------------------------|--------|
+| `cd "c:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one"` | Projektroot |
+| `make e2e-up` | E2E-Stack starten (falls noch nicht laeuft) |
+| `make e2e-test-backend-smoke` | Backend E2E Smoke (schnell) |
+| `make e2e-test-backend` | Backend E2E voll (inkl. test_sensor_workflow: MQTT → sensor_handler → DB → API) |
+
+**Erwartung:** Wenn E2E-Tests gruen sind, funktioniert die Pipeline **sobald** ein Device in der DB existiert und MQTT beim Server ankommt. Das bestaetigt: Problem liegt vor dem Server (MQTT von ESP_472204 erreicht Broker/Server nicht), nicht an Server/Frontend-Code.
+
+**Nach Testlauf:** Logs/Ergebnis hier eintragen oder `test.md` mit Ergebnis aktualisieren (Pass/Fail, evtl. `logs/backend/pytest.log`, `logs/server/e2e-running-results.xml`).

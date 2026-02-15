@@ -1,6 +1,6 @@
 # Log-Zugriff – Agent-Referenz
 
-> **Version:** 1.2 | **Stand:** 2026-02-08
+> **Version:** 1.4 | **Stand:** 2026-02-13
 > **Zweck:** Zentrale Referenz für Log-Dateien, Prioritäten und Erstellung
 > **Verknüpfung:** [LOG_LOCATIONS.md](LOG_LOCATIONS.md) für Pfade und Capture-Methoden
 
@@ -11,8 +11,8 @@
 | Agent | Primär | Erweitert (wenn vorhanden) | Fallback |
 |-------|--------|---------------------------|----------|
 | server-debug | `logs/current/god_kaiser.log` | `logs/current/server_loki_errors.log`, `logs/current/server_api_filtered.log` | `logs/server/god_kaiser.log` |
-| mqtt-debug | `logs/current/mqtt_traffic.log` | `logs/current/mqtt_broker_loki.log` | `logs/mqtt/mosquitto.log` |
-| frontend-debug | `logs/current/frontend_container.log` | `logs/current/frontend_loki.log` | - |
+| mqtt-debug | `logs/current/mqtt_traffic.log` | `logs/current/mqtt_broker_loki.log` | `docker compose logs mqtt-broker` / Loki (kein Bind-Mount) |
+| frontend-debug | `logs/current/frontend_container.log` | `logs/current/frontend_loki.log` | Loki `compose_service=el-frontend` / `docker compose logs el-frontend` |
 | esp32-debug | `logs/current/esp32_serial.log` | - | - |
 | test-log-analyst | `logs/backend/`, `logs/frontend/`, `logs/wokwi/reports/`, `logs/server/` (Test-Outputs) | CI: `gh run view --log`, Artifacts nach Download | - |
 

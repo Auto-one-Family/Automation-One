@@ -235,7 +235,7 @@ Neues unbekanntes ESP-Gerät entdeckt (Pending Device).
 **Trigger:** Heartbeat von unbekanntem ESP
 
 **Code-Locations:**
-- [heartbeat_handler.py:553](El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py#L553)
+- [heartbeat_handler.py:556](El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py#L556)
 - [debug.py:319](El Servador/god_kaiser_server/src/api/v1/debug.py#L319)
 
 **Payload:**
@@ -245,23 +245,46 @@ Neues unbekanntes ESP-Gerät entdeckt (Pending Device).
   "timestamp": 1706787600,
   "data": {
     "esp_id": "ESP_NEW_DEVICE",
+    "device_id": "ESP_NEW_DEVICE",
     "discovered_at": "2026-02-01T10:23:45Z",
+    "last_seen": "2026-02-01T10:23:45Z",
+    "zone_id": "zone_main",
+    "heap_free": 245760,
     "wifi_rssi": -55,
-    "firmware_version": "4.0.0",
-    "pending": true
+    "sensor_count": 3,
+    "actuator_count": 2,
+    "hardware_type": "ESP32_WROOM",
+    "ip_address": "192.168.1.100"
   }
 }
 ```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `esp_id` | string | ESP device ID |
+| `device_id` | string | Gleich wie esp_id (Frontend-Kompatibilität) |
+| `discovered_at` | ISO 8601 | Zeitpunkt der Erstentdeckung |
+| `last_seen` | ISO 8601 | Letzte Aktivität (initial = discovered_at) |
+| `zone_id` | string? | Zone aus Heartbeat |
+| `heap_free` | int? | Freier Heap in Bytes |
+| `wifi_rssi` | int? | WiFi-Signalstärke in dBm |
+| `sensor_count` | int | Anzahl aktiver Sensoren |
+| `actuator_count` | int | Anzahl aktiver Aktoren |
+| `hardware_type` | string | Hardware-Typ (z.B. ESP32_WROOM) |
+| `ip_address` | string? | IP-Adresse aus wifi_ip (falls ESP sie sendet) |
 
 ---
 
 ### 3.3 device_rediscovered
 
-Bekanntes ESP-Gerät kommt nach Offline-Phase zurück.
+Bekanntes ESP-Gerät kommt zurück (zwei Fälle):
 
-**Trigger:** Heartbeat von bekanntem, aber offline ESP
+1. **Rejected → Pending:** Abgelehntes Gerät sendet nach Cooldown wieder Heartbeat → wird erneut pending_approval
+2. **Offline → Online:** (falls Frontend bereits approved-Device in Liste hatte) Device kommt wieder online
 
-**Code-Location:** [heartbeat_handler.py:582](El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py#L582)
+**Trigger:** Heartbeat von bekanntem, zuvor rejected ESP (nach Cooldown) oder offline ESP
+
+**Code-Location:** [heartbeat_handler.py:614](El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py#L614)
 
 **Payload:**
 ```json
@@ -271,14 +294,20 @@ Bekanntes ESP-Gerät kommt nach Offline-Phase zurück.
   "data": {
     "esp_id": "ESP_12AB34CD",
     "device_id": "ESP_12AB34CD",
+    "rediscovered_at": "2026-02-01T10:23:45Z",
     "zone_id": "greenhouse",
-    "zone_name": "Gewächshaus",
-    "previous_status": "offline",
-    "heap_free": 98304,
-    "wifi_rssi": -45
+    "ip_address": "192.168.1.100"
   }
 }
 ```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `esp_id` | string | ESP device ID |
+| `device_id` | string | Gleich wie esp_id |
+| `rediscovered_at` | ISO 8601 | Zeitpunkt der Wiederentdeckung |
+| `zone_id` | string? | Zone aus Heartbeat |
+| `ip_address` | string? | IP aus wifi_ip (falls ESP sendet) |
 
 ---
 

@@ -47,7 +47,7 @@
 - **Datei:** `.claude/agents/frontend/frontend-debug-agent.md`
 - **Rolle:** Frontend-Analyse. Build-Errors (Vite/TypeScript), WebSocket, Pinia, API-Fehler.
 - **Skills:** frontend-debug (implizit)
-- **Referenzen:** SYSTEM_CONTROL_REPORT.md (Primär-Input), frontend_build.log, browser_console.log, WEBSOCKET_EVENTS.md, REST_ENDPOINTS.md, frontend-rules.md
+- **Referenzen:** SYSTEM_CONTROL_REPORT.md (Primär-Input), frontend_build.log, browser_console.log, WEBSOCKET_EVENTS.md, REST_ENDPOINTS.md, frontend-rules.md. **Browser-Inspection:** Playwright MCP (docs/plans/Debug.md „Playwright MCP“, SYSTEM_OPERATIONS_REFERENCE.md §9.1).
 - **Andere Agenten:** server-debug, mqtt-debug, esp32-debug, db-inspector, system-control
 
 ## 1.7 meta-analyst

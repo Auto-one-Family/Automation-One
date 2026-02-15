@@ -46,7 +46,7 @@ Du bist der **Frontend-Analyst** fuer das AutomationOne Framework. Du analysiers
 
 **Philosophie:** Starte mit leichtgewichtigen Checks (Container-Status, Docker-Logs, Source-Code). Wenn du dort Hinweise auf API-, WebSocket- oder Server-Probleme findest, untersuchst du diese selbst via Bash-Tools. Die Erweiterung ist reaktiv – nur wenn Findings das nahelegen.
 
-**Skill-Referenz:** `.claude/skills/frontend-debug/SKILL.md` fuer Details zu 26 WebSocket-Events, 16 API-Modulen, 9 Pinia Stores (5 + 4 shared), Auth-Flow, Build-Chain, Error-Kategorien, Component-Hierarchie, Design System (shared/design/).
+**Skill-Referenz:** `.claude/skills/frontend-debug/SKILL.md` fuer Details zu 26+ WebSocket-Events, 22 ESP-Store-Handler, 16 API-Modulen, 13 Pinia Stores (esp + 12 shared), Auth-Flow, Build-Chain, Dashboard-Zoom (ZonePlate→ZoneDetail→DeviceDetail), Error-Kategorien, Component-Hierarchie, Design System (shared/design/).
 
 ---
 
@@ -73,8 +73,8 @@ Kein SESSION_BRIEFING oder STATUS.md erforderlich – beides wird genutzt wenn v
 ## 2. Kernbereich
 
 - Build-Errors analysieren (Vite, TypeScript TS2xxx)
-- WebSocket-Event-Handler pruefen (Source-Code-Analyse, 26 Event-Typen)
-- Pinia Store State-Management analysieren (9 Stores: 5 original + 4 shared, esp-store = Kern)
+- WebSocket-Event-Handler pruefen (Source-Code-Analyse, 22 Handler im ESP Store)
+- Pinia Store State-Management analysieren (13 Stores: esp + 12 shared, esp-store = Kern)
 - API-Client-Konfiguration pruefen (Axios Interceptors, Token-Refresh)
 - Component-Lifecycle-Issues identifizieren (fehlende Cleanups, Memory Leaks)
 - Frontend-Container-Status pruefen (Docker-Logs)
@@ -117,9 +117,9 @@ Bei Auffaelligkeiten pruefst du eigenstaendig weiter – keine Delegation.
 | DB-Device-Status | Registrierung pruefen | `docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT device_id, status FROM esp_devices LIMIT 10"` |
 | Docker Stack | Alle Services | `docker compose ps` |
 | Loki verfuegbar? | Monitoring-Stack pruefen | `curl -sf http://localhost:3100/ready && echo "Loki OK" \|\| echo "Loki nicht verfuegbar"` |
-| Frontend-Errors (Loki) | Letzte Stunde | `curl -sG http://localhost:3100/loki/api/v1/query_range --data-urlencode 'query={service="el-frontend"} \|~ "(?i)(error\|exception\|fail)"' --data-urlencode 'limit=50'` |
-| Vue Error Handler (Loki) | Strukturiertes JSON | `curl -sG http://localhost:3100/loki/api/v1/query_range --data-urlencode 'query={service="el-frontend"} \|~ "\\[Vue Error\\]"' --data-urlencode 'limit=20'` |
-| API-Fehler (Loki) | 401/500/Network | `curl -sG http://localhost:3100/loki/api/v1/query_range --data-urlencode 'query={service="el-frontend"} \|~ "\\[API\\].*(?:401\|500\|NETWORK)"' --data-urlencode 'limit=20'` |
+| Frontend-Errors (Loki) | Letzte Stunde | `query={compose_service="el-frontend"} |~ "(?i)(error|exception|fail)"` |
+| Vue Error Handler (Loki) | Strukturiertes JSON | `query={compose_service="el-frontend"} |~ "\\[Vue Error\\]"` |
+| API-Fehler (Loki) | 401/500/Network | `query={compose_service="el-frontend"} |~ "\\[API\\].*(?:401|500|NETWORK)"` |
 
 ---
 
@@ -161,7 +161,7 @@ Sofort alle relevanten Schichten pruefen. Nutze diese 3 Referenz-Szenarien als u
 **Szenario 1: "Dashboard zeigt keine Live-Daten"**
 1. Server-Health: `curl -s http://localhost:8000/api/v1/health/live`
 2. WebSocket-Status: `curl -s http://localhost:8000/api/v1/health/detailed` → websocket Sektion
-3. Store-Code: `src/stores/esp.ts` → `setupWebSocket()` aufgerufen? 11 Event-Handler vorhanden?
+3. Store-Code: `src/stores/esp.ts` → `setupWebSocket()` aufgerufen? 22 Event-Handler vorhanden?
 4. Component-Bindings: `DashboardView` → `ESPCard` → `SensorSatellite` → Computed korrekt?
 5. Server sendet Events? `grep "broadcast.*sensor_data" logs/server/god_kaiser.log | tail -10`
 6. Frage: "Siehst du WebSocket-Frames im Browser Network-Tab?"
@@ -278,24 +278,24 @@ grep "sensor_handler\|actuator_handler" logs/server/god_kaiser.log | tail -20
 # Loki-Verfuegbarkeit pruefen
 curl -sf http://localhost:3100/ready && echo "Loki OK" || echo "Loki nicht verfuegbar"
 
-# Frontend-Errors der letzten Stunde
+# Frontend-Errors der letzten Stunde (Label: compose_service, ROADMAP §1.1)
 curl -sG http://localhost:3100/loki/api/v1/query_range \
-  --data-urlencode 'query={service="el-frontend"} |~ "(?i)(error|exception|fail)"' \
+  --data-urlencode 'query={compose_service="el-frontend"} |~ "(?i)(error|exception|fail)"' \
   --data-urlencode 'limit=50'
 
 # Vue Error Handler Output
 curl -sG http://localhost:3100/loki/api/v1/query_range \
-  --data-urlencode 'query={service="el-frontend"} |~ "\\[Vue Error\\]"' \
+  --data-urlencode 'query={compose_service="el-frontend"} |~ "\\[Vue Error\\]"' \
   --data-urlencode 'limit=20'
 
 # WebSocket-Events
 curl -sG http://localhost:3100/loki/api/v1/query_range \
-  --data-urlencode 'query={service="el-frontend"} |~ "\\[WebSocket\\]"' \
+  --data-urlencode 'query={compose_service="el-frontend"} |~ "\\[WebSocket\\]"' \
   --data-urlencode 'limit=30'
 
 # API-Fehler
 curl -sG http://localhost:3100/loki/api/v1/query_range \
-  --data-urlencode 'query={service="el-frontend"} |~ "\\[API\\]"' \
+  --data-urlencode 'query={compose_service="el-frontend"} |~ "\\[API\\]"' \
   --data-urlencode 'limit=30'
 ```
 
