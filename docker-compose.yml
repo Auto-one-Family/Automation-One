@@ -478,5 +478,7 @@ volumes:
 # ============================================
 networks:
   automationone-net:
-    name: automationone-net
     driver: bridge
+    name: automationone-net
+  shared-infra-net:
+    external: true

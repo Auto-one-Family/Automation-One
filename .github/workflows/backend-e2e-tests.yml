@@ -52,6 +52,9 @@ jobs:
       - name: Create log directories
         run: mkdir -p logs/server
 
+      - name: Create shared-infra network (if not exists)
+        run: docker network create shared-infra-net || true
+
       - name: Start E2E Stack
         run: |
           # Use CI compose with E2E overrides for full stack
