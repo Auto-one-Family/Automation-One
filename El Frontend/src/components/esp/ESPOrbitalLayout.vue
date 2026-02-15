@@ -15,11 +15,10 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
-import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
-import { formatRelativeTime } from '@/utils/formatters'
+// wifiStrength + formatRelativeTime now provided by useDeviceActions
 import SensorColumn from './SensorColumn.vue'
 import ActuatorColumn from './ActuatorColumn.vue'
 import AddSensorModal from './AddSensorModal.vue'
@@ -32,11 +31,11 @@ import Badge from '@/components/common/Badge.vue'
 import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, ChartSensor } from '@/types'
-import { espApi } from '@/api/esp'
-import { getStateInfo } from '@/utils/labels'
+// espApi + getStateInfo now provided by useDeviceActions
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
+import { useDeviceActions } from '@/composables/useDeviceActions'
 import { useGpioStatus } from '@/composables/useGpioStatus'
 import { createLogger } from '@/utils/logger'
 
@@ -301,39 +300,18 @@ const actuators = computed<MockActuator[]>(() => {
   return (props.device?.actuators as MockActuator[]) || []
 })
 
-const espId = computed(() => {
-  return props.device?.esp_id || props.device?.device_id || ''
-})
-
-const isMock = computed(() => {
-  return espApi.isMockEsp(espId.value)
-})
+// ── Device Actions (shared composable) ───────────────────────────────
+const actions = useDeviceActions(() => props.device)
+const {
+  espId, isMock, displayName, isOnline, systemState, stateInfo,
+  wifiInfo, wifiColorClass, wifiTooltip,
+  heartbeatLoading, isHeartbeatFresh, heartbeatTooltip, heartbeatText,
+  isEditingName, editedName, isSavingName, saveError, nameInputRef,
+  startEditName, cancelEditName, handleNameKeydown,
+} = actions
 
 // GPIO Status für dynamische GPIO-Auswahl (Phase 5)
-// GPIO status used by edit sensor modal
 useGpioStatus(espId)
-
-const isOnline = computed(() => {
-  return props.device?.status === 'online' || props.device?.connected === true
-})
-
-const systemState = computed(() => {
-  if (isMock.value && 'system_state' in props.device) {
-    return (props.device as any).system_state
-  }
-  return props.device?.status || 'unknown'
-})
-
-const stateInfo = computed(() => {
-  if (isMock.value) {
-    return getStateInfo(systemState.value)
-  }
-  const status = props.device?.status || 'unknown'
-  if (status === 'online') return { label: 'Online', variant: 'success' }
-  if (status === 'offline') return { label: 'Offline', variant: 'gray' }
-  if (status === 'error') return { label: 'Error', variant: 'danger' }
-  return { label: 'Unknown', variant: 'gray' }
-})
 
 const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
@@ -348,205 +326,23 @@ const sensorsUseMultiRow = computed(() => {
   return sensors.value.length > 5
 })
 
-/**
- * Connection quality based on WiFi RSSI
- * @deprecated - Use wifiInfo.quality instead (provides more detailed levels)
- */
-// const connectionQuality = computed(() => {
-//   if (!isOnline.value) return 'poor'
-//   const rssi = props.device?.wifi_rssi
-//   if (rssi === undefined || rssi === null) return 'fair'
-//   if (rssi > -60) return 'good'
-//   if (rssi >= -75) return 'fair'
-//   return 'poor'
-// })
-//
-// const connectionTooltip = computed(() => {
-//   if (!isOnline.value) return 'Keine Verbindung'
-//   switch (connectionQuality.value) {
-//     case 'good': return 'Verbindung: Stabil'
-//     case 'fair': return 'Verbindung: Schwach'
-//     case 'poor': return 'Verbindung: Kritisch'
-//     default: return 'Verbindung: Unbekannt'
-//   }
-// })
+// WiFi, Heartbeat, Name Editing — all provided by useDeviceActions above
 
-// =============================================================================
-// WiFi Signal Strength (Phase 1)
-// =============================================================================
-
-/** WiFi strength info from RSSI value */
-const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(props.device?.wifi_rssi))
-
-/** WiFi color class based on signal quality */
-const wifiColorClass = computed(() => {
-  switch (wifiInfo.value.quality) {
-    case 'excellent':
-    case 'good':
-      return 'text-emerald-400'
-    case 'fair':
-      return 'text-yellow-400'
-    case 'poor':
-      return 'text-orange-400'
-    case 'none':
-      return 'text-red-400'
-    default:
-      return 'text-slate-500'
-  }
-})
-
-/** WiFi tooltip with technical dBm value for experts */
-const wifiTooltip = computed(() => {
-  if (props.device?.wifi_rssi === undefined || props.device?.wifi_rssi === null) {
-    return 'WiFi-Signalstärke: Keine Daten verfügbar'
-  }
-  const simNote = isMock.value ? ' (simuliert)' : ''
-  return `WiFi: ${props.device.wifi_rssi} dBm${simNote}`
-})
-
-// =============================================================================
-// Heartbeat Indicator (Phase 1)
-// =============================================================================
-
-/** Loading state for heartbeat button */
-const heartbeatLoading = ref(false)
-
-/**
- * Check if heartbeat is "fresh" (< 30 seconds ago)
- * Used for pulse animation on heartbeat icon
- */
-const isHeartbeatFresh = computed(() => {
-  const timestamp = props.device?.last_heartbeat || props.device?.last_seen
-  if (!timestamp) return false
-
-  const now = Date.now()
-  const then = new Date(timestamp).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-
-  return diffSec >= 0 && diffSec < 30
-})
-
-/**
- * Heartbeat tooltip based on device type
- */
-const heartbeatTooltip = computed(() => {
-  const timestamp = props.device?.last_heartbeat || props.device?.last_seen
-  const relativeTime = timestamp ? formatRelativeTime(timestamp) : 'Nie'
-
-  if (isMock.value) {
-    return `Letzter Heartbeat: ${relativeTime}\nKlicken zum manuellen Senden`
-  }
-  return `Letzter Heartbeat: ${relativeTime}\n(Real ESPs senden automatisch)`
-})
-
-/**
- * Heartbeat click handler
- * - Mock ESP: Emits heartbeat event
- * - Real ESP: Shows info tooltip (no action)
- */
+/** Heartbeat click: trigger + emit */
 async function handleHeartbeatClick() {
-  if (!isMock.value) {
-    // Real ESPs can't trigger heartbeat manually - tooltip explains this
-    return
-  }
-
-  heartbeatLoading.value = true
+  await actions.triggerHeartbeat()
   emit('heartbeat', props.device)
-
-  // Reset loading after a short delay (actual response comes via WebSocket)
-  setTimeout(() => {
-    heartbeatLoading.value = false
-  }, 1500)
 }
 
-/**
- * Settings click handler - opens settings popover
- */
+/** Settings click → emit to parent */
 function handleSettingsClick() {
   emit('settings', props.device)
 }
 
-// =============================================================================
-// Name Editing (Phase 3)
-// =============================================================================
-
-const isEditingName = ref(false)
-const editedName = ref('')
-const isSavingName = ref(false)
-const saveError = ref('')
-const nameInputRef = ref<HTMLInputElement | null>(null)
-
-/** Display name or fallback */
-const displayName = computed(() => props.device?.name || null)
-
-/**
- * Start inline editing of the device name
- */
-function startEditName() {
-  editedName.value = props.device?.name || ''
-  isEditingName.value = true
-  saveError.value = ''
-  // Focus the input after DOM update
-  nextTick(() => {
-    nameInputRef.value?.focus()
-    nameInputRef.value?.select()
-  })
-}
-
-/**
- * Cancel name editing, reset to original value
- */
-function cancelEditName() {
-  isEditingName.value = false
-  editedName.value = ''
-  saveError.value = ''
-}
-
-/**
- * Save the new name via API
- */
+/** Save name + emit */
 async function saveName() {
-  if (isSavingName.value) return
-
-  const newName = editedName.value.trim() || null
-  const deviceId = espId.value
-
-  // No change? Just close
-  if (newName === (props.device?.name || null)) {
-    cancelEditName()
-    return
-  }
-
-  isSavingName.value = true
-  saveError.value = ''
-
-  try {
-    await espStore.updateDevice(deviceId, { name: newName || undefined })
-    isEditingName.value = false
-    emit('name-updated', { deviceId, name: newName })
-  } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    saveError.value = axiosError.response?.data?.detail || 'Fehler beim Speichern'
-    // Keep edit mode open on error
-    setTimeout(() => {
-      saveError.value = ''
-    }, 3000)
-  } finally {
-    isSavingName.value = false
-  }
-}
-
-/**
- * Handle keyboard events in name input
- */
-function handleNameKeydown(event: KeyboardEvent) {
-  if (event.key === 'Enter') {
-    event.preventDefault()
-    saveName()
-  } else if (event.key === 'Escape') {
-    event.preventDefault()
-    cancelEditName()
-  }
+  const result = await actions.saveName()
+  if (result) emit('name-updated', result)
 }
 
 // =============================================================================
@@ -806,7 +602,7 @@ watch(
               ]"
             />
             <span class="esp-info-compact__heartbeat-text">
-              {{ formatRelativeTime(device.last_heartbeat || device.last_seen || '') }}
+              {{ heartbeatText }}
             </span>
             <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin" />
           </button>
