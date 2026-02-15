@@ -1,7 +1,7 @@
 # CSS-Testkonzept — Playwright
 
-> **288 Tests** über **14 Testdateien** · 5 Schichten · 6 Browser-Profile  
-> **Validiert:** 288/288 passing (Chromium ✓ Firefox ✓)
+> **297 Tests** über **15 Testdateien** · 5 Schichten · 6 Browser-Profile  
+> **Validiert:** 297/297 passing (Chromium ✓ Firefox ✓ WebKit ✓)
 
 ## Architektur
 
@@ -47,6 +47,7 @@ npm run test:css:update-snapshots
 |-------|---------|-------|-------------|
 | `design-tokens.spec.ts` | 1 | 31 | Alle CSS-Variablen aus tokens.css verifizieren |
 | `token-consistency.spec.ts` | 1 | 38 | Tailwind ↔ CSS Token Synchronisation |
+| `animations.spec.ts` | 2 | 9 | Keyframe-Existenz, Transitions, prefers-reduced-motion |
 | `buttons.spec.ts` | 2 | 13 | Button-Varianten, Größen, Zustände |
 | `badges.spec.ts` | 2 | 13 | Badge-Varianten, Farben, Rundung |
 | `cards.spec.ts` | 2 | 12 | Card, Glass-Card, Sektionen |
