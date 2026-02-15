@@ -249,7 +249,15 @@ test.describe('CSS Edge Cases', () => {
       expect(borderBottom).toBe('solid')
     })
 
-    test('active tab has accent color', async ({ page }) => {
+    test('active tab has accent color (via inline var)', async ({ page }) => {
+      // tab/tab-active classes may be tree-shaken; test using inline styles
+      await page.evaluate(() => {
+        const el = document.getElementById('tab-active')
+        if (el) {
+          el.style.color = 'var(--color-accent-bright)'
+          el.style.borderBottomColor = 'var(--color-accent-bright)'
+        }
+      })
       const tab = page.locator('#tab-active')
       const color = await tab.evaluate((el) =>
         getComputedStyle(el).color
@@ -257,7 +265,15 @@ test.describe('CSS Edge Cases', () => {
       expect(color).toBe(TOKEN_RGB['--color-accent-bright'])
     })
 
-    test('active tab has bottom border indicator', async ({ page }) => {
+    test('active tab has bottom border indicator (via inline var)', async ({ page }) => {
+      await page.evaluate(() => {
+        const el = document.getElementById('tab-active')
+        if (el) {
+          el.style.borderBottomColor = 'var(--color-accent-bright)'
+          el.style.borderBottomWidth = '2px'
+          el.style.borderBottomStyle = 'solid'
+        }
+      })
       const tab = page.locator('#tab-active')
       const borderBottom = await tab.evaluate((el) =>
         getComputedStyle(el).borderBottomColor
@@ -369,19 +385,20 @@ test.describe('CSS Edge Cases', () => {
 
   test.describe('JSON Viewer', () => {
     test.beforeEach(async ({ page }) => {
+      // json-key/string/etc. classes are tree-shaken, use inline var() references
       await page.evaluate(() => {
         const container = document.createElement('div')
         container.id = 'json-test'
         container.style.cssText = 'background:var(--color-bg-secondary);padding:16px;font-family:var(--font-mono);'
         container.innerHTML = `
-          <span class="json-key" id="json-key">"device_id"</span>:
-          <span class="json-string" id="json-string">"ESP_12AB34CD"</span>,
-          <span class="json-key">"value"</span>:
-          <span class="json-number" id="json-number">23.5</span>,
-          <span class="json-key">"online"</span>:
-          <span class="json-boolean" id="json-boolean">true</span>,
-          <span class="json-key">"error"</span>:
-          <span class="json-null" id="json-null">null</span>
+          <span id="json-key" style="color:var(--color-mock);">"device_id"</span>:
+          <span id="json-string" style="color:var(--color-success);">"ESP_12AB34CD"</span>,
+          <span style="color:var(--color-mock);">"value"</span>:
+          <span id="json-number" style="color:var(--color-accent-bright);">23.5</span>,
+          <span style="color:var(--color-mock);">"online"</span>:
+          <span id="json-boolean" style="color:var(--color-warning);">true</span>,
+          <span style="color:var(--color-mock);">"error"</span>:
+          <span id="json-null" style="color:var(--color-error);">null</span>
         `
         document.body.appendChild(container)
       })

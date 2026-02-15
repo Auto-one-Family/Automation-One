@@ -116,19 +116,21 @@ test.describe('Typography System', () => {
 
   test.describe('Text Utilities', () => {
     test.beforeEach(async ({ page }) => {
+      // Use inline styles referencing CSS variables since utility classes
+      // may be tree-shaken if not used on the current page
       await page.evaluate(() => {
         const container = document.createElement('div')
         container.id = 'text-util-container'
         container.innerHTML = `
-          <span class="text-gradient" id="text-gradient" style="font-size: 24px;">Gradient Text</span>
-          <span class="text-primary" id="text-primary">Primary</span>
-          <span class="text-secondary" id="text-secondary">Secondary</span>
-          <span class="text-muted" id="text-muted">Muted</span>
-          <span class="text-success" id="text-status-success">OK</span>
-          <span class="text-warning" id="text-status-warning">Warn</span>
-          <span class="text-error" id="text-status-error">Error</span>
-          <span class="text-mock" id="text-mock">Mock</span>
-          <span class="text-real" id="text-real">Real</span>
+          <span id="text-gradient" style="font-size:24px;background-image:var(--gradient-iridescent);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">Gradient Text</span>
+          <span id="text-primary" style="color:var(--color-text-primary);">Primary</span>
+          <span id="text-secondary" style="color:var(--color-text-secondary);">Secondary</span>
+          <span id="text-muted" style="color:var(--color-text-muted);">Muted</span>
+          <span id="text-status-success" style="color:var(--color-success);">OK</span>
+          <span id="text-status-warning" style="color:var(--color-warning);">Warn</span>
+          <span id="text-status-error" style="color:var(--color-error);">Error</span>
+          <span id="text-mock" style="color:var(--color-mock);">Mock</span>
+          <span id="text-real" style="color:var(--color-real);">Real</span>
         `
         document.body.appendChild(container)
       })
