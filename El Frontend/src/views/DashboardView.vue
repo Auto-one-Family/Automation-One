@@ -193,9 +193,14 @@ function onMockEspCreated(espId: string) {
   logger.info(`Mock ESP erstellt: ${espId}`)
 }
 
-// Filtered ESPs (using type filter + status pills)
+// Filtered ESPs (using type filter + status pills + zone filter from Level 3 navigation)
 const filteredEsps = computed(() => {
   let esps = espStore.devices
+
+  // Filter by zone (from Level 3 → Level 1 navigation)
+  if (zoomNav.selectedZoneId.value) {
+    esps = esps.filter(e => e.zone_id === zoomNav.selectedZoneId.value)
+  }
 
   // Filter by type (unchanged)
   if (filterType.value === 'mock') {
@@ -680,6 +685,16 @@ const unassignedCount = computed(() => {
       v-show="zoomNav.currentLevel.value === 1 && espStore.devices.length > 0"
       :class="zoomNav.level1Class.value"
     >
+      <!-- Zone Filter Banner (when navigated from Level 3) -->
+      <div v-if="zoomNav.selectedZoneId.value" class="zone-filter-banner">
+        <span class="zone-filter-banner__text">
+          Gefiltert nach Zone: <strong>{{ zoomNav.selectedZoneId.value }}</strong>
+        </span>
+        <button class="zone-filter-banner__clear" @click="zoomNav.selectedZoneId.value = null">
+          Alle Zonen anzeigen ×
+        </button>
+      </div>
+
       <!-- No Results (with filters) -->
       <div
         v-if="filteredEsps.length === 0"
@@ -1148,6 +1163,40 @@ const unassignedCount = computed(() => {
   border: 1px solid rgba(248, 113, 113, 0.2);
   border-radius: var(--radius-md);
   color: var(--color-error);
+}
+
+/* ── Zone Filter Banner (Level 3 → Level 1 navigation) ── */
+.zone-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: var(--radius-md, 0.625rem);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.zone-filter-banner__text strong {
+  color: var(--color-text-primary);
+}
+
+.zone-filter-banner__clear {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-iridescent-2, #60a5fa);
+  background: transparent;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.zone-filter-banner__clear:hover {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.3);
 }
 
 /* ── Zone Groups Container ── */
