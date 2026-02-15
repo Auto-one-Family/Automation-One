@@ -48,6 +48,16 @@
     "commitMessageTemplate": "<type>: <subject>\n\n<body>",
     "requireTests": true
   },
+  "autoops": {
+    "serverUrl": "http://localhost:8000",
+    "defaultCredentials": {
+      "username": "admin",
+      "password": "admin"
+    },
+    "plugins": "El Servador/god_kaiser_server/src/autoops/plugins/",
+    "reports": "El Servador/god_kaiser_server/src/autoops/reports/",
+    "documentation": ".claude/CLAUDE_AUTOOPS.md"
+  },
   "workflows": {
     "preCommit": [
       "/full-test"
