@@ -701,6 +701,7 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
     payload += "\"sensor_count\":" + String(sensorManager.getActiveSensorCount()) + ",";
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
+    payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
     // ============================================
     // GPIO STATUS (Phase 1)

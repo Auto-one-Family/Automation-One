@@ -115,6 +115,15 @@ private:
     
     // Parse JSON response
     bool parseResponse(const String& json_response, ProcessedSensorData& processed_out);
+    
+    // ============================================
+    // LOCAL FALLBACK CONVERSION (Circuit Breaker OPEN)
+    // ============================================
+    // Apply local conversion formulas for known sensor types
+    // when server is unavailable. Returns true if conversion was applied,
+    // false if sensor type is unknown (raw value used as-is).
+    bool applyLocalConversion(const String& sensor_type, uint32_t raw_value,
+                              ProcessedSensorData& processed_out);
 };
 
 // ============================================
