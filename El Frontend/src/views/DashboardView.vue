@@ -427,9 +427,10 @@ function formatTimeAgo(timestamp: number): string {
 // =============================================================================
 
 /** Grouping mode for Level 2 */
-type ComponentGrouping = 'zone' | 'type' | 'all'
+type ComponentGrouping = 'zone' | 'subzone' | 'type' | 'all'
 const componentGrouping = ref<ComponentGrouping>('zone')
 const componentFilter = ref<'all' | 'sensors' | 'actuators'>('all')
+const componentSearch = ref('')
 
 /** Flatten all sensors and actuators from all devices into ComponentCardItems */
 const allComponents = computed<ComponentCardItem[]>(() => {
@@ -485,11 +486,33 @@ const allComponents = computed<ComponentCardItem[]>(() => {
   return items
 })
 
-/** Filtered components based on type filter */
+/** Filtered components based on type filter + search */
 const filteredComponents = computed(() => {
-  if (componentFilter.value === 'sensors') return allComponents.value.filter(c => c.type === 'sensor')
-  if (componentFilter.value === 'actuators') return allComponents.value.filter(c => c.type === 'actuator')
-  return allComponents.value
+  let items = allComponents.value
+
+  // Type filter
+  if (componentFilter.value === 'sensors') items = items.filter(c => c.type === 'sensor')
+  else if (componentFilter.value === 'actuators') items = items.filter(c => c.type === 'actuator')
+
+  // Search filter
+  const q = componentSearch.value.trim().toLowerCase()
+  if (q) {
+    items = items.filter(c => {
+      const searchFields = [
+        c.name,
+        c.sensorType,
+        c.actuatorType,
+        c.espName,
+        c.espId,
+        c.zoneName,
+        c.subzoneName,
+        `GPIO ${c.gpio}`,
+      ].filter(Boolean).join(' ').toLowerCase()
+      return searchFields.includes(q)
+    })
+  }
+
+  return items
 })
 
 /** Grouped components for display */
@@ -500,24 +523,35 @@ const groupedComponents = computed<{ label: string; items: ComponentCardItem[] }
     return [{ label: 'Alle Komponenten', items }]
   }
 
-  if (componentGrouping.value === 'zone') {
+  if (componentGrouping.value === 'zone' || componentGrouping.value === 'subzone') {
+    const useSubzone = componentGrouping.value === 'subzone'
     const groups = new Map<string, ComponentCardItem[]>()
     const unassigned: ComponentCardItem[] = []
 
     for (const item of items) {
-      if (item.zoneId && item.zoneName) {
-        if (!groups.has(item.zoneId)) groups.set(item.zoneId, [])
-        groups.get(item.zoneId)!.push(item)
+      const groupKey = useSubzone
+        ? (item.subzoneId || item.zoneId || null)
+        : (item.zoneId || null)
+      const groupLabel = useSubzone
+        ? (item.subzoneName || item.zoneName || null)
+        : (item.zoneName || null)
+
+      if (groupKey && groupLabel) {
+        if (!groups.has(groupKey)) groups.set(groupKey, [])
+        groups.get(groupKey)!.push(item)
       } else {
         unassigned.push(item)
       }
     }
 
     const result = Array.from(groups.entries())
-      .map(([, groupItems]) => ({
-        label: groupItems[0].zoneName || 'Unbekannt',
-        items: groupItems,
-      }))
+      .map(([, groupItems]) => {
+        const first = groupItems[0]
+        const label = useSubzone
+          ? (first.subzoneName || first.zoneName || 'Unbekannt')
+          : (first.zoneName || 'Unbekannt')
+        return { label, items: groupItems }
+      })
       .sort((a, b) => a.label.localeCompare(b.label))
 
     if (unassigned.length > 0) {
@@ -741,9 +775,21 @@ const unassignedCount = computed(() => {
             <span class="components-view__stat">{{ componentStats.actuators }} Aktoren</span>
             <span class="components-view__stat-sep">·</span>
             <span class="components-view__stat">{{ componentStats.zones }} Zonen</span>
+            <span v-if="componentSearch" class="components-view__stat-sep">·</span>
+            <span v-if="componentSearch" class="components-view__stat">
+              {{ filteredComponents.length }} Treffer
+            </span>
           </div>
 
           <div class="components-view__controls">
+            <!-- Search -->
+            <input
+              v-model="componentSearch"
+              type="text"
+              class="components-view__search"
+              placeholder="Suche (Name, Typ, ESP, Zone...)"
+            />
+
             <!-- Type Filter -->
             <div class="components-view__filter-group">
               <button
@@ -764,8 +810,9 @@ const unassignedCount = computed(() => {
             <div class="components-view__filter-group">
               <button
                 v-for="opt in [
-                  { value: 'zone', label: 'Nach Zone' },
-                  { value: 'type', label: 'Nach Typ' },
+                  { value: 'zone', label: 'Zone' },
+                  { value: 'subzone', label: 'Subzone' },
+                  { value: 'type', label: 'Typ' },
                   { value: 'all', label: 'Alle' },
                 ] as const"
                 :key="opt.value"
@@ -1231,6 +1278,26 @@ const unassignedCount = computed(() => {
   display: flex;
   gap: var(--space-3, 0.75rem);
   flex-wrap: wrap;
+}
+
+.components-view__search {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+  outline: none;
+  min-width: 200px;
+  transition: border-color 0.15s ease;
+}
+
+.components-view__search::placeholder {
+  color: var(--color-text-muted);
+}
+
+.components-view__search:focus {
+  border-color: var(--color-iridescent-1, #a78bfa);
 }
 
 .components-view__filter-group {
