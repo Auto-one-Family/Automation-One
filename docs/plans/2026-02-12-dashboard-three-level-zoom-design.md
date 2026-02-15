@@ -1,10 +1,35 @@
 # Dashboard Three-Level Zoom Design
 
 > **Date:** 2026-02-12
-> **Status:** Implementation-Ready
+> **Status:** PARTIALLY IMPLEMENTED (2026-02-15)
 > **Scope:** Frontend — El Frontend Dashboard Redesign
 > **Reviewed:** 2026-02-12 — gegen echte Codebase verifiziert, Architecture Dependencies ergänzt
-> **Last Update:** 2026-02-12 — Aesthetic Direction, Performance, Mobile, Accessibility, präzise Implementierungsanweisungen
+> **Last Update:** 2026-02-15 — Implementation status update, revised level order
+>
+> ## ⚠️ IMPLEMENTATION NOTE (2026-02-15)
+>
+> The 3-level architecture was **implemented with a REVISED level order** based on user feedback:
+>
+> | Level | Original Design | **Implemented** |
+> |-------|----------------|-----------------|
+> | **L1 (default)** | Zone Overview | **ESP-Orbital-View**: ESPs with sensors/actuators, drag & drop |
+> | **L2** | Zone Detail | **Komponentenübersicht**: ALL sensors + actuators WITHOUT ESPs |
+> | **L3** | Device Detail | **Zonen-Navigator**: Zone/subzone overview with aggregated stats |
+>
+> ### Implemented Files
+> - `src/composables/useZoomNavigation.ts` — Level state, CSS transitions, URL sync, keyboard (Escape)
+> - `src/components/dashboard/LevelNavigation.vue` — Tab bar: ESPs | Komponenten | Zonen
+> - `src/components/dashboard/ComponentCard.vue` — Sensor/actuator card (Level 2)
+> - `src/components/dashboard/ZonePlate.vue` — Zone overview card with subzones (Level 3)
+> - `src/components/esp/DeviceHeaderBar.vue` — Extracted from ESPOrbitalLayout
+> - `src/views/DashboardView.vue` — Refactored with v-show-based 3-level containers
+>
+> ### NOT yet implemented from this doc
+> - DeviceMiniCard (Level 1 uses existing ESPOrbitalLayout instead)
+> - DeviceSummaryCard (Level 2 uses ComponentCard instead)
+> - SubzoneArea (integrated into ZonePlate as inline subzone groups)
+> - DeviceDetailView (Level 3 uses ZonePlate overview, not device detail)
+> - Full ESPOrbitalLayout decomposition (SensorColumn, ActuatorColumn)
 
 ---
 
