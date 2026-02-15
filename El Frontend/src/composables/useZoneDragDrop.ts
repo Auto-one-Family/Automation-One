@@ -29,6 +29,9 @@ import { zonesApi } from '@/api/zones'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from './useToast'
 import type { ESPDevice } from '@/api/esp'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('ZoneDragDrop')
 
 interface ZoneDropEvent {
   device: ESPDevice
@@ -228,11 +231,11 @@ export function useZoneDragDrop() {
         timestamp: Date.now()
       })
 
-      console.debug(`[ZoneDragDrop] Assigned ${deviceId} → ${toZoneId}`)
+      logger.debug(`Assigned ${deviceId} → ${toZoneId}`)
       return true
 
     } catch (error) {
-      console.error(`[ZoneDragDrop] Failed to assign ${deviceId} to ${toZoneId}:`, error)
+      logger.error(`Failed to assign ${deviceId} to ${toZoneId}`, error)
 
       // Refresh store to ensure consistent state
       await espStore.fetchAll()
@@ -307,11 +310,11 @@ export function useZoneDragDrop() {
         timestamp: Date.now()
       })
 
-      console.log(`[useZoneDragDrop] Successfully removed ${deviceId} from zone`)
+      logger.info(`Successfully removed ${deviceId} from zone`)
       return true
 
     } catch (error) {
-      console.error('[useZoneDragDrop] Failed to remove zone:', error)
+      logger.error('Failed to remove zone', error)
 
       // Refresh store to ensure consistent state
       await espStore.fetchAll()
@@ -382,11 +385,11 @@ export function useZoneDragDrop() {
       const targetZone = entry.fromZoneName || 'Nicht zugewiesen'
       toast.success(`Rückgängig: "${entry.deviceName}" → "${targetZone}"`)
 
-      console.debug(`[ZoneDragDrop] Undo: ${entry.deviceId} → ${entry.fromZoneId || 'unassigned'}`)
+      logger.debug(`Undo: ${entry.deviceId} → ${entry.fromZoneId || 'unassigned'}`)
       return true
 
     } catch (error) {
-      console.error('[ZoneDragDrop] Undo failed:', error)
+      logger.error('Undo failed', error)
 
       // Put entry back on undo stack
       undoStack.value.push(entry)
@@ -449,11 +452,11 @@ export function useZoneDragDrop() {
       const targetZone = entry.toZoneName || 'Nicht zugewiesen'
       toast.success(`Wiederherstellen: "${entry.deviceName}" → "${targetZone}"`)
 
-      console.debug(`[ZoneDragDrop] Redo: ${entry.deviceId} → ${entry.toZoneId || 'unassigned'}`)
+      logger.debug(`Redo: ${entry.deviceId} → ${entry.toZoneId || 'unassigned'}`)
       return true
 
     } catch (error) {
-      console.error('[ZoneDragDrop] Redo failed:', error)
+      logger.error('Redo failed', error)
 
       // Put entry back on redo stack
       redoStack.value.push(entry)

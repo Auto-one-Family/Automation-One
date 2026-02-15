@@ -28,3 +28,13 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Playwright
+.playwright/
+/test-results/
+/playwright-report/
+/blob-report/
+
+# Playwright screenshots are tracked in git for visual regression
+# but test artifacts (traces, videos) are not
+# Note: tests/e2e/__screenshots__/ IS tracked for baselines
+

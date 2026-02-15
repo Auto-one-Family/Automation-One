@@ -209,7 +209,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             issued_by=issued_by,
             success=success,
             error_message=error_message,
-            timestamp=timestamp or datetime.utcnow(),
+            timestamp=timestamp or datetime.now(timezone.utc),
             command_metadata=metadata,
             data_source=data_source,
         )
@@ -283,7 +283,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         Returns:
             Number of deleted records
         """
-        cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
         stmt = delete(ActuatorHistory).where(
             ActuatorHistory.data_source == DataSource.TEST.value,
             ActuatorHistory.timestamp < cutoff,

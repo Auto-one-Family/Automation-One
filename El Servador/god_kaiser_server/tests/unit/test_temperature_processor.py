@@ -424,3 +424,106 @@ class TestSHT31TemperatureProcessor:
         # 20°C + 0.5°C = 20.5°C → 68.9°F
         assert result.value == 68.9
         assert result.unit == "°F"
+
+    # =========================================================================
+    # SHT31 RAW MODE TESTS (Pi-Enhanced Mode - 16-bit Integer)
+    # Formula: temp_celsius = -45 + (175 * raw_value / 65535.0)
+    # =========================================================================
+
+    def test_raw_mode_sht31_conversion_formula(self, processor):
+        """Test Sensirion Datasheet Formula: -45 + (175 * raw / 65535)."""
+        params = {"raw_mode": True}
+        # raw=27445 → -45 + (175 * 27445 / 65535) = 28.27°C
+        result = processor.process(raw_value=27445, params=params)
+
+        assert result.value == pytest.approx(28.3, abs=0.1)
+        assert result.quality == "good"
+        assert result.metadata["raw_mode"] is True
+        assert result.metadata["original_raw_value"] == 27445
+
+    def test_raw_mode_sht31_zero(self, processor):
+        """Test RAW=0 → -45°C (below sensor minimum of -40°C)."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=0, params=params)
+
+        # -45°C is below SHT31 sensor range (-40°C to 125°C) → error
+        # Value is returned as 0.0 with error quality
+        assert result.quality == "error"
+        assert "out of sensor range" in result.metadata.get("error", "")
+
+    def test_raw_mode_sht31_typical_room_temp(self, processor):
+        """Test RAW value for typical room temperature (22°C)."""
+        params = {"raw_mode": True}
+        # Solving: 22 = -45 + (175 * raw / 65535)
+        # raw = (22 + 45) * 65535 / 175 = 25089
+        result = processor.process(raw_value=25089, params=params)
+
+        assert result.value == pytest.approx(22.0, abs=0.2)
+        assert result.quality == "good"
+
+    def test_raw_mode_sht31_max_typical(self, processor):
+        """Test RAW value at max typical range (65°C)."""
+        params = {"raw_mode": True}
+        # Solving: 65 = -45 + (175 * raw / 65535)
+        # raw = (65 + 45) * 65535 / 175 = 41203
+        result = processor.process(raw_value=41203, params=params)
+
+        assert result.value == pytest.approx(65.0, abs=0.2)
+        # 65°C is at edge of typical range (0-65°C) - "good" is correct
+        # But SHT31TemperatureProcessor uses TEMP_TYPICAL_MAX = 65.0
+        # Since 65.0 <= 65.0, it should be "good"
+        assert result.quality in ["good", "fair"]  # At edge, depends on rounding
+
+    def test_raw_mode_sht31_above_spec(self, processor):
+        """Test RAW=65535 → 130°C (above 125°C spec max)."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=65535, params=params)
+
+        # 130°C > 125°C (max spec) → should be error
+        assert result.quality == "error"
+        assert "out of sensor range" in result.metadata.get("error", "")
+
+    def test_raw_mode_sht31_out_of_range_negative(self, processor):
+        """Test negative RAW value rejected."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=-100, params=params)
+
+        assert result.quality == "error"
+        assert "out of range" in result.metadata.get("error", "")
+
+    def test_raw_mode_sht31_out_of_range_high(self, processor):
+        """Test RAW value > 65535 rejected."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=70000, params=params)
+
+        assert result.quality == "error"
+        assert "out of range" in result.metadata.get("error", "")
+
+    def test_raw_mode_sht31_with_calibration(self, processor):
+        """Test SHT31 RAW mode with calibration offset."""
+        params = {"raw_mode": True}
+        calibration = {"offset": 0.5}
+        # raw=27445 → 28.27°C + 0.5°C = 28.77°C
+        result = processor.process(raw_value=27445, params=params, calibration=calibration)
+
+        assert result.value == pytest.approx(28.8, abs=0.1)
+        assert result.metadata["calibrated"] is True
+
+    def test_raw_mode_sht31_with_fahrenheit(self, processor):
+        """Test SHT31 RAW mode with Fahrenheit conversion."""
+        params = {"raw_mode": True, "unit": "fahrenheit"}
+        # raw=27445 → 28.27°C → 82.9°F
+        result = processor.process(raw_value=27445, params=params)
+
+        assert result.value == pytest.approx(82.9, abs=0.2)
+        assert result.unit == "°F"
+
+    def test_raw_mode_sht31_metadata_conversion_formula(self, processor):
+        """Test metadata includes conversion formula for SHT31."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=27445, params=params)
+
+        assert result.metadata["raw_mode"] is True
+        assert result.metadata["original_raw_value"] == 27445
+        assert result.metadata["conversion_formula"] is not None
+        assert "27445" in result.metadata["conversion_formula"]

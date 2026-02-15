@@ -1,0 +1,490 @@
+/**
+ * Sensor Defaults Utility Unit Tests
+ *
+ * Tests for sensor type configuration, units, validation, and multi-value device helpers.
+ */
+
+import { describe, it, expect } from 'vitest'
+import {
+  SENSOR_TYPE_CONFIG,
+  SENSOR_CATEGORIES,
+  getSensorUnit,
+  getSensorDefault,
+  getSensorConfig,
+  getSensorLabel,
+  isValidSensorValue,
+  getSensorTypeOptions,
+  formatSensorValueWithUnit,
+  MULTI_VALUE_DEVICES,
+  isMultiValueSensorType,
+  getDeviceTypeFromSensorType,
+  getSensorTypesForDevice,
+  inferInterfaceType,
+  getDefaultI2CAddress
+} from '@/utils/sensorDefaults'
+
+// =============================================================================
+// SENSOR_TYPE_CONFIG
+// =============================================================================
+
+describe('SENSOR_TYPE_CONFIG', () => {
+  it('has DS18B20 with unit °C', () => {
+    expect(SENSOR_TYPE_CONFIG['DS18B20']?.unit).toBe('°C')
+  })
+
+  it('has pH with unit pH (NOT °C - critical bug fix)', () => {
+    expect(SENSOR_TYPE_CONFIG['pH']?.unit).toBe('pH')
+    expect(SENSOR_TYPE_CONFIG['pH']?.unit).not.toBe('°C')
+  })
+
+  it('has valid min/max values for DS18B20', () => {
+    const config = SENSOR_TYPE_CONFIG['DS18B20']
+    expect(config?.min).toBe(-55)
+    expect(config?.max).toBe(125)
+  })
+
+  it('has valid min/max values for pH', () => {
+    const config = SENSOR_TYPE_CONFIG['pH']
+    expect(config?.min).toBe(0)
+    expect(config?.max).toBe(14)
+  })
+
+  it('has category for each sensor type', () => {
+    expect(SENSOR_TYPE_CONFIG['DS18B20']?.category).toBe('temperature')
+    expect(SENSOR_TYPE_CONFIG['pH']?.category).toBe('water')
+    expect(SENSOR_TYPE_CONFIG['sht31_humidity']?.category).toBe('air')
+  })
+})
+
+// =============================================================================
+// SENSOR_CATEGORIES
+// =============================================================================
+
+describe('SENSOR_CATEGORIES', () => {
+  it('has 6 categories', () => {
+    expect(Object.keys(SENSOR_CATEGORIES)).toHaveLength(6)
+  })
+
+  it('each category has name, icon, and order', () => {
+    for (const category of Object.values(SENSOR_CATEGORIES)) {
+      expect(category).toHaveProperty('name')
+      expect(category).toHaveProperty('icon')
+      expect(category).toHaveProperty('order')
+      expect(typeof category.name).toBe('string')
+      expect(typeof category.icon).toBe('string')
+      expect(typeof category.order).toBe('number')
+    }
+  })
+
+  it('has temperature category', () => {
+    expect(SENSOR_CATEGORIES['temperature']?.name).toBe('Temperatur')
+  })
+
+  it('has water category', () => {
+    expect(SENSOR_CATEGORIES['water']?.name).toBe('Wasser')
+  })
+})
+
+// =============================================================================
+// getSensorUnit
+// =============================================================================
+
+describe('getSensorUnit', () => {
+  it('returns °C for DS18B20', () => {
+    expect(getSensorUnit('DS18B20')).toBe('°C')
+  })
+
+  it('returns pH for pH sensor', () => {
+    expect(getSensorUnit('pH')).toBe('pH')
+  })
+
+  it('returns raw for unknown type', () => {
+    expect(getSensorUnit('unknown')).toBe('raw')
+  })
+
+  it('returns µS/cm for EC sensor', () => {
+    expect(getSensorUnit('EC')).toBe('µS/cm')
+  })
+
+  it('returns % RH for humidity', () => {
+    expect(getSensorUnit('sht31_humidity')).toBe('% RH')
+  })
+})
+
+// =============================================================================
+// getSensorDefault
+// =============================================================================
+
+describe('getSensorDefault', () => {
+  it('returns 20.0 for DS18B20', () => {
+    expect(getSensorDefault('DS18B20')).toBe(20.0)
+  })
+
+  it('returns 7.0 for pH', () => {
+    expect(getSensorDefault('pH')).toBe(7.0)
+  })
+
+  it('returns 0 for unknown type', () => {
+    expect(getSensorDefault('unknown')).toBe(0)
+  })
+
+  it('returns 1200 for EC sensor', () => {
+    expect(getSensorDefault('EC')).toBe(1200)
+  })
+
+  it('returns 50.0 for humidity', () => {
+    expect(getSensorDefault('sht31_humidity')).toBe(50.0)
+  })
+})
+
+// =============================================================================
+// getSensorConfig
+// =============================================================================
+
+describe('getSensorConfig', () => {
+  it('returns full config object for DS18B20', () => {
+    const config = getSensorConfig('DS18B20')
+    expect(config).toBeDefined()
+    expect(config?.label).toBe('Temperatur (DS18B20)')
+    expect(config?.unit).toBe('°C')
+    expect(config?.min).toBe(-55)
+    expect(config?.max).toBe(125)
+    expect(config?.decimals).toBe(1)
+    expect(config?.icon).toBe('Thermometer')
+    expect(config?.defaultValue).toBe(20.0)
+    expect(config?.category).toBe('temperature')
+  })
+
+  it('returns undefined for unknown type', () => {
+    expect(getSensorConfig('unknown')).toBeUndefined()
+  })
+
+  it('returns config for lowercase variant', () => {
+    const config = getSensorConfig('ds18b20')
+    expect(config).toBeDefined()
+    expect(config?.unit).toBe('°C')
+  })
+})
+
+// =============================================================================
+// getSensorLabel
+// =============================================================================
+
+describe('getSensorLabel', () => {
+  it('returns label for DS18B20', () => {
+    expect(getSensorLabel('DS18B20')).toBe('Temperatur (DS18B20)')
+  })
+
+  it('returns label for pH', () => {
+    expect(getSensorLabel('pH')).toBe('pH-Wert')
+  })
+
+  it('returns original type for unknown', () => {
+    expect(getSensorLabel('unknown')).toBe('unknown')
+  })
+
+  it('returns label for multi-value sensor', () => {
+    expect(getSensorLabel('sht31_temp')).toBe('Temperatur (SHT31)')
+  })
+})
+
+// =============================================================================
+// isValidSensorValue
+// =============================================================================
+
+describe('isValidSensorValue', () => {
+  it('returns true for valid DS18B20 value', () => {
+    expect(isValidSensorValue('DS18B20', 25)).toBe(true)
+    expect(isValidSensorValue('DS18B20', -55)).toBe(true)
+    expect(isValidSensorValue('DS18B20', 125)).toBe(true)
+  })
+
+  it('returns false for out-of-range DS18B20 value', () => {
+    expect(isValidSensorValue('DS18B20', 200)).toBe(false)
+    expect(isValidSensorValue('DS18B20', -100)).toBe(false)
+  })
+
+  it('returns true for valid pH value', () => {
+    expect(isValidSensorValue('pH', 7.0)).toBe(true)
+    expect(isValidSensorValue('pH', 0)).toBe(true)
+    expect(isValidSensorValue('pH', 14)).toBe(true)
+  })
+
+  it('returns false for out-of-range pH value', () => {
+    expect(isValidSensorValue('pH', 15)).toBe(false)
+    expect(isValidSensorValue('pH', -1)).toBe(false)
+  })
+
+  it('returns true for unknown type (always valid)', () => {
+    expect(isValidSensorValue('unknown', 999)).toBe(true)
+    expect(isValidSensorValue('unknown', -999)).toBe(true)
+  })
+
+  it('returns true for edge case values', () => {
+    expect(isValidSensorValue('EC', 0)).toBe(true)
+    expect(isValidSensorValue('EC', 5000)).toBe(true)
+  })
+})
+
+// =============================================================================
+// getSensorTypeOptions
+// =============================================================================
+
+describe('getSensorTypeOptions', () => {
+  it('returns array of options', () => {
+    const options = getSensorTypeOptions()
+    expect(Array.isArray(options)).toBe(true)
+    expect(options.length).toBeGreaterThan(0)
+  })
+
+  it('each option has value and label', () => {
+    const options = getSensorTypeOptions()
+    for (const option of options) {
+      expect(option).toHaveProperty('value')
+      expect(option).toHaveProperty('label')
+      expect(typeof option.value).toBe('string')
+      expect(typeof option.label).toBe('string')
+    }
+  })
+
+  it('contains DS18B20 option', () => {
+    const options = getSensorTypeOptions()
+    const ds18b20 = options.find(opt => opt.value === 'DS18B20')
+    expect(ds18b20).toBeDefined()
+    expect(ds18b20?.label).toBe('Temperatur (DS18B20)')
+  })
+
+  it('contains pH option', () => {
+    const options = getSensorTypeOptions()
+    const pH = options.find(opt => opt.value === 'pH')
+    expect(pH).toBeDefined()
+    expect(pH?.label).toBe('pH-Wert')
+  })
+})
+
+// =============================================================================
+// formatSensorValueWithUnit
+// =============================================================================
+
+describe('formatSensorValueWithUnit', () => {
+  it('formats DS18B20 value with unit', () => {
+    expect(formatSensorValueWithUnit(23.5, 'DS18B20')).toBe('23.5 °C')
+  })
+
+  it('formats pH value with unit', () => {
+    expect(formatSensorValueWithUnit(7.0, 'pH')).toBe('7.00 pH')
+  })
+
+  it('returns dash for null value', () => {
+    expect(formatSensorValueWithUnit(null, 'DS18B20')).toBe('-')
+  })
+
+  it('returns dash for undefined value', () => {
+    expect(formatSensorValueWithUnit(undefined as any, 'DS18B20')).toBe('-')
+  })
+
+  it('formats humidity value', () => {
+    expect(formatSensorValueWithUnit(65.5, 'sht31_humidity')).toBe('65.5 % RH')
+  })
+
+  it('formats EC value', () => {
+    expect(formatSensorValueWithUnit(1200, 'EC')).toBe('1200 µS/cm')
+  })
+
+  it('formats unknown type without config', () => {
+    const result = formatSensorValueWithUnit(42, 'unknown')
+    expect(result).toBe('42')
+  })
+})
+
+// =============================================================================
+// MULTI_VALUE_DEVICES
+// =============================================================================
+
+describe('MULTI_VALUE_DEVICES', () => {
+  it('has sht31 with 2 sensor types', () => {
+    expect(MULTI_VALUE_DEVICES['sht31']).toBeDefined()
+    expect(MULTI_VALUE_DEVICES['sht31'].sensorTypes).toHaveLength(2)
+    expect(MULTI_VALUE_DEVICES['sht31'].sensorTypes).toContain('sht31_temp')
+    expect(MULTI_VALUE_DEVICES['sht31'].sensorTypes).toContain('sht31_humidity')
+  })
+
+  it('has bme280 with BME280 in sensorTypes', () => {
+    expect(MULTI_VALUE_DEVICES['bme280']).toBeDefined()
+    expect(MULTI_VALUE_DEVICES['bme280'].sensorTypes).toContain('BME280')
+  })
+
+  it('each device has required properties', () => {
+    for (const [key, device] of Object.entries(MULTI_VALUE_DEVICES)) {
+      expect(device.deviceType).toBe(key)
+      expect(device.label).toBeDefined()
+      expect(Array.isArray(device.sensorTypes)).toBe(true)
+      expect(Array.isArray(device.values)).toBe(true)
+      expect(device.icon).toBeDefined()
+      expect(device.interface).toBeDefined()
+    }
+  })
+})
+
+// =============================================================================
+// isMultiValueSensorType
+// =============================================================================
+
+describe('isMultiValueSensorType', () => {
+  it('returns true for sht31_temp', () => {
+    expect(isMultiValueSensorType('sht31_temp')).toBe(true)
+  })
+
+  it('returns true for SHT31 (base type)', () => {
+    expect(isMultiValueSensorType('SHT31')).toBe(true)
+  })
+
+  it('returns true for BME280', () => {
+    expect(isMultiValueSensorType('BME280')).toBe(true)
+  })
+
+  it('returns false for ds18b20 (single-value)', () => {
+    expect(isMultiValueSensorType('ds18b20')).toBe(false)
+  })
+
+  it('returns false for unknown type', () => {
+    expect(isMultiValueSensorType('unknown')).toBe(false)
+  })
+
+  it('returns true for bme280_humidity', () => {
+    expect(isMultiValueSensorType('bme280_humidity')).toBe(true)
+  })
+})
+
+// =============================================================================
+// getDeviceTypeFromSensorType
+// =============================================================================
+
+describe('getDeviceTypeFromSensorType', () => {
+  it('returns sht31 for sht31_temp', () => {
+    expect(getDeviceTypeFromSensorType('sht31_temp')).toBe('sht31')
+  })
+
+  it('returns sht31 for SHT31 (uppercase base type)', () => {
+    expect(getDeviceTypeFromSensorType('SHT31')).toBe('sht31')
+  })
+
+  it('returns bme280 for BME280', () => {
+    expect(getDeviceTypeFromSensorType('BME280')).toBe('bme280')
+  })
+
+  it('returns null for ds18b20 (single-value)', () => {
+    expect(getDeviceTypeFromSensorType('ds18b20')).toBeNull()
+  })
+
+  it('returns null for unknown type', () => {
+    expect(getDeviceTypeFromSensorType('unknown')).toBeNull()
+  })
+
+  it('returns sht31 for sht31_humidity', () => {
+    expect(getDeviceTypeFromSensorType('sht31_humidity')).toBe('sht31')
+  })
+
+  it('returns bme280 for bme280_pressure', () => {
+    expect(getDeviceTypeFromSensorType('bme280_pressure')).toBe('bme280')
+  })
+})
+
+// =============================================================================
+// getSensorTypesForDevice
+// =============================================================================
+
+describe('getSensorTypesForDevice', () => {
+  it('returns sensor types for sht31', () => {
+    const types = getSensorTypesForDevice('sht31')
+    expect(types).toHaveLength(2)
+    expect(types).toContain('sht31_temp')
+    expect(types).toContain('sht31_humidity')
+  })
+
+  it('returns empty array for unknown device', () => {
+    expect(getSensorTypesForDevice('unknown')).toEqual([])
+  })
+
+  it('returns sensor types for bme280', () => {
+    const types = getSensorTypesForDevice('bme280')
+    expect(types.length).toBeGreaterThan(0)
+    expect(types).toContain('BME280')
+  })
+
+  it('returns sensor types for bmp280', () => {
+    const types = getSensorTypesForDevice('bmp280')
+    expect(types).toHaveLength(2)
+    expect(types).toContain('bmp280_pressure')
+    expect(types).toContain('bmp280_temp')
+  })
+})
+
+// =============================================================================
+// inferInterfaceType
+// =============================================================================
+
+describe('inferInterfaceType', () => {
+  it('returns ONEWIRE for ds18b20', () => {
+    expect(inferInterfaceType('ds18b20')).toBe('ONEWIRE')
+  })
+
+  it('returns I2C for sht31_temp', () => {
+    expect(inferInterfaceType('sht31_temp')).toBe('I2C')
+  })
+
+  it('returns I2C for bme280', () => {
+    expect(inferInterfaceType('bme280')).toBe('I2C')
+  })
+
+  it('returns ANALOG for pH', () => {
+    expect(inferInterfaceType('pH')).toBe('ANALOG')
+  })
+
+  it('returns ANALOG for unknown type (default)', () => {
+    expect(inferInterfaceType('unknown')).toBe('ANALOG')
+  })
+
+  it('is case-insensitive', () => {
+    expect(inferInterfaceType('DS18B20')).toBe('ONEWIRE')
+    expect(inferInterfaceType('SHT31')).toBe('I2C')
+  })
+
+  it('returns I2C for bh1750', () => {
+    expect(inferInterfaceType('bh1750')).toBe('I2C')
+  })
+
+  it('returns I2C for veml7700', () => {
+    expect(inferInterfaceType('veml7700')).toBe('I2C')
+  })
+})
+
+// =============================================================================
+// getDefaultI2CAddress
+// =============================================================================
+
+describe('getDefaultI2CAddress', () => {
+  it('returns 0x44 (68 decimal) for sht31_temp', () => {
+    expect(getDefaultI2CAddress('sht31_temp')).toBe(0x44)
+  })
+
+  it('returns 0x76 for bme280', () => {
+    expect(getDefaultI2CAddress('bme280_pressure')).toBe(0x76)
+  })
+
+  it('returns null for ds18b20 (not I2C)', () => {
+    expect(getDefaultI2CAddress('ds18b20')).toBeNull()
+  })
+
+  it('returns null for unknown type', () => {
+    expect(getDefaultI2CAddress('unknown')).toBeNull()
+  })
+
+  it('returns null for analog sensor', () => {
+    expect(getDefaultI2CAddress('pH')).toBeNull()
+  })
+
+  it('returns 0x76 for bmp280', () => {
+    expect(getDefaultI2CAddress('bmp280_temp')).toBe(0x76)
+  })
+})

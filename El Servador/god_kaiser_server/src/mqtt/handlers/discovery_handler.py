@@ -104,35 +104,43 @@ class DiscoveryHandler:
                     existing_esp.mac_address = payload.get("mac_address")
                     existing_esp.firmware_version = payload.get("firmware_version")
                     existing_esp.last_seen = datetime.now(timezone.utc)
-                    existing_esp.status = "online"
+                    # Only update status to online if device is already approved
+                    # Devices in pending_approval or rejected stay in their current state
+                    if existing_esp.status in ("approved", "online"):
+                        existing_esp.status = "online"
 
                     await session.commit()
 
-                    logger.info(f"Updated existing ESP: {esp_id_str}")
+                    logger.info(f"Updated existing ESP: {esp_id_str} (status: {existing_esp.status})")
                     return True
 
-                # Step 4: Auto-register new ESP
+                # Step 4: Auto-register new ESP with pending_approval status
+                # Requires admin approval before device becomes fully operational
+                now = datetime.now(timezone.utc)
                 new_esp = ESPDevice(
                     device_id=esp_id_str,
                     hardware_type=payload["hardware_type"],
                     ip_address=payload.get("ip_address"),
                     mac_address=payload.get("mac_address"),
                     firmware_version=payload.get("firmware_version"),
-                    status="online",
+                    status="pending_approval",
                     capabilities=payload.get("capabilities", {}),
-                    metadata={
-                        "discovered_at": datetime.now(timezone.utc).isoformat(),
-                        "auto_registered": True,  # Flag for manual review
+                    device_metadata={
+                        "discovered_at": now.isoformat(),
+                        "auto_registered": True,
+                        "discovery_source": "legacy_discovery_topic",
                     },
-                    last_seen=datetime.now(timezone.utc),
+                    last_seen=now,
+                    discovered_at=now,
                 )
 
                 session.add(new_esp)
                 await session.commit()
 
                 logger.info(
-                    f"✅ Auto-registered new ESP: {esp_id_str} "
-                    f"(Type: {payload['hardware_type']}, IP: {payload.get('ip_address', 'N/A')})"
+                    f"🔔 New ESP discovered (legacy): {esp_id_str} "
+                    f"(Type: {payload['hardware_type']}, IP: {payload.get('ip_address', 'N/A')}, "
+                    f"status: pending_approval)"
                 )
 
                 return True

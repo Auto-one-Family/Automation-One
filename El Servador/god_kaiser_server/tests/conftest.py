@@ -62,6 +62,26 @@ from src.db.repositories.user_repo import UserRepository
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
+# =============================================================================
+# Pytest Markers for Test Categorization (Phase 2 Core Services)
+# =============================================================================
+def pytest_configure(config):
+    """Register custom markers for test categorization."""
+    config.addinivalue_line("markers", "critical: Safety-critical tests (must never fail)")
+    config.addinivalue_line("markers", "sensor: SensorManager tests")
+    config.addinivalue_line("markers", "actuator: ActuatorManager tests")
+    config.addinivalue_line("markers", "safety: SafetyController tests")
+    config.addinivalue_line("markers", "edge_case: Edge case tests")
+    config.addinivalue_line("markers", "ds18b20: DS18B20 specific tests")
+    config.addinivalue_line("markers", "onewire: OneWire tests")
+    config.addinivalue_line("markers", "flow_a: Sensor data flow tests (ESP→Server→DB)")
+    config.addinivalue_line("markers", "flow_b: Actuator command flow tests (Server→ESP)")
+    config.addinivalue_line("markers", "flow_c: Emergency stop flow tests")
+    config.addinivalue_line("markers", "pwm: PWM actuator tests")
+    config.addinivalue_line("markers", "gpio: GPIO conflict tests")
+    config.addinivalue_line("markers", "hardware: Tests requiring real hardware (skipped in CI)")
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create event loop for async tests."""

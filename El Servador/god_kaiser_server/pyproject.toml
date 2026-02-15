@@ -17,6 +17,7 @@ python-multipart = "^0.0.6"
 sqlalchemy = "^2.0.25"
 alembic = "^1.13.1"
 psycopg2-binary = "^2.9.9"  # PostgreSQL sync driver
+asyncpg = "^0.29.0"  # PostgreSQL async driver for create_async_engine
 
 # Pydantic
 pydantic = {extras = ["email"], version = "^2.5.3"}
@@ -44,6 +45,8 @@ websockets = "^12.0"
 
 # Monitoring & Logging
 prometheus-client = "^0.19.0"
+prometheus-fastapi-instrumentator = "^7.0.0"
+psutil = "^5.9.0"
 apscheduler = "^3.11.2"
 requests = "^2.32.5"
 
@@ -121,7 +124,8 @@ disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --strict-markers --cov=src --cov-report=term-missing --cov-report=html"
+addopts = "-ra -q --strict-markers"
+# Coverage separat: poetry run pytest --cov=src --cov-report=term-missing --cov-report=html
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -135,6 +139,25 @@ markers = [
     "hardware: Tests requiring real ESP32 hardware (deselect with '-m \"not hardware\"')",
     "performance: Performance benchmarking tests",
     "slow: Slow-running tests (can be skipped with '-m \"not slow\"')",
+    "slow_e2e: Slow end-to-end tests",
+    "logic: Logic engine integration tests",
+    "temperature: Temperature-related tests",
+    "critical: Safety-critical tests (must always pass)",
+    "daily_ops: Daily operation routine tests",
+    "irrigation: Irrigation system tests",
+    "ventilation: Ventilation system tests",
+    "night_mode: Night operation mode tests",
+    "edge_case: Edge case scenario tests",
+    "gpio: GPIO-related tests",
+    "onewire: OneWire bus tests",
+    "pwm: PWM actuator tests",
+    "safety: Safety system tests",
+    "sensor: Sensor-related tests",
+    "ds18b20: DS18B20 temperature sensor tests",
+    "cross_esp: Cross-ESP communication tests",
+    "ph_sensor: pH sensor tests",
+    "relay: Relay actuator tests",
+    "sht31: SHT31 humidity/temperature sensor tests",
 ]
 
 [tool.coverage.run]

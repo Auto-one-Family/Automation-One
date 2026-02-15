@@ -1,5 +1,26 @@
 #include "topic_builder.h"
-#include "logger.h"
+
+// ============================================
+// NATIVE TEST COMPATIBILITY (Phase 1)
+// ============================================
+// Logger depends on Arduino.h which is not available in native tests.
+// These guards disable logging in native tests (error paths are not tested in Phase 1).
+//
+// TO REMOVE: Delete this entire comment block and the guards below when:
+//   - Phase 2 HAL-Mocks are implemented, OR
+//   - Logger is refactored to be hardware-independent
+//
+// Search for: "NATIVE_TEST_GUARD" to find all related code
+//
+#ifndef NATIVE_TEST
+    #include "logger.h"
+    #define LOG_ERROR(msg) Logger::getInstance().error(msg)
+#else
+    // Native test mode: Logging disabled
+    #define LOG_ERROR(msg) ((void)0)
+#endif
+// END NATIVE_TEST_GUARD
+// ============================================
 
 // ============================================
 // STATIC MEMBER INITIALIZATION
@@ -29,18 +50,25 @@ void TopicBuilder::setKaiserId(const char* kaiser_id) {
 const char* TopicBuilder::validateTopicBuffer(int snprintf_result) {
   // ✅ Check 1: Encoding error (snprintf returned negative)
   if (snprintf_result < 0) {
+    // NATIVE_TEST_GUARD: LOG_ERROR macro is no-op in native tests
     LOG_ERROR("TopicBuilder: snprintf encoding error!");
     return "";
   }
-  
+
   // ✅ Check 2: Buffer overflow (truncation occurred)
   if (snprintf_result >= (int)sizeof(topic_buffer_)) {
-    LOG_ERROR("TopicBuilder: Topic truncated! Required: " + 
-              String(snprintf_result) + " bytes, buffer: " + 
-              String(sizeof(topic_buffer_)) + " bytes");
+    // NATIVE_TEST_GUARD: LOG_ERROR macro is no-op in native tests
+    #ifndef NATIVE_TEST
+        LOG_ERROR("TopicBuilder: Topic truncated! Required: " +
+                  String(snprintf_result) + " bytes, buffer: " +
+                  String(sizeof(topic_buffer_)) + " bytes");
+    #else
+        // Native test: String concatenation not available, skip detailed error
+        LOG_ERROR("TopicBuilder: Topic truncated!");
+    #endif
     return "";
   }
-  
+
   // ✅ Success: Return buffer pointer
   return topic_buffer_;
 }
@@ -57,6 +85,7 @@ const char* TopicBuilder::buildSensorDataTopic(uint8_t gpio) {
   return validateTopicBuffer(written);
 }
 
+// ORPHANED - No server handler. See Mqtt_Protocoll.md inventory.
 // Pattern 2: kaiser/god/esp/{esp_id}/sensor/batch
 const char* TopicBuilder::buildSensorBatchTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
@@ -115,6 +144,7 @@ const char* TopicBuilder::buildActuatorAlertTopic(uint8_t gpio) {
   return validateTopicBuffer(written);
 }
 
+// ORPHANED - Redundant to actuator/{gpio}/alert. See Mqtt_Protocoll.md inventory.
 // Phase 5: kaiser/god/esp/{esp_id}/actuator/emergency
 const char* TopicBuilder::buildActuatorEmergencyTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
@@ -180,6 +210,7 @@ const char* TopicBuilder::buildConfigResponseTopic() {
   return validateTopicBuffer(written);
 }
 
+// ORPHANED (GHOST) - Server->ESP but ESP never subscribes. See Mqtt_Protocoll.md inventory.
 // Pattern 8: kaiser/broadcast/emergency
 const char* TopicBuilder::buildBroadcastEmergencyTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_), 
@@ -210,6 +241,7 @@ const char* TopicBuilder::buildSubzoneAckTopic() {
   return validateTopicBuffer(written);
 }
 
+// ORPHANED - No server handler. See Mqtt_Protocoll.md inventory.
 const char* TopicBuilder::buildSubzoneStatusTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
                          "kaiser/%s/esp/%s/subzone/status",
@@ -220,6 +252,22 @@ const char* TopicBuilder::buildSubzoneStatusTopic() {
 const char* TopicBuilder::buildSubzoneSafeTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
                          "kaiser/%s/esp/%s/subzone/safe",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// WP3: Zone Management Topics
+
+const char* TopicBuilder::buildZoneAssignTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/zone/assign",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+const char* TopicBuilder::buildZoneAckTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/zone/ack",
                          kaiser_id_, esp_id_);
   return validateTopicBuffer(written);
 }

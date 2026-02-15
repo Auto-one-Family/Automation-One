@@ -10,6 +10,9 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useWebSocket } from '@/composables/useWebSocket'
 import type { ConfigResponse } from '@/types'
 import type { WebSocketMessage } from '@/services/websocket'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('ConfigResponse')
 
 // =============================================================================
 // COMPOSABLE
@@ -55,7 +58,7 @@ export function useConfigResponse() {
         }
       }
     } catch (error) {
-      console.error('[ConfigResponse] Failed to parse message:', error)
+      logger.error('Failed to parse message', error)
     }
   }
 

@@ -29,6 +29,9 @@ import {
   Filter,
   X
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('MqttTrafficTab')
 
 // ============================================================================
 // Types
@@ -196,7 +199,7 @@ function handleWebSocketMessage(message: WebSocketMessage) {
       messages.value = messages.value.slice(0, MAX_MESSAGES)
     }
   } catch (e) {
-    console.error('[MqttTrafficTab] Failed to process message:', e)
+    log.error(' Failed to process message:', e)
   }
 }
 
@@ -273,7 +276,7 @@ async function copyPayload(msg: MqttMessage) {
       copiedId.value = null
     }, 2000)
   } catch (e) {
-    console.error('[MqttTrafficTab] Failed to copy:', e)
+    log.error(' Failed to copy:', e)
   }
 }
 

@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "../models/system_types.h"
 #include "../models/watchdog_types.h"
+#include "../error_handling/circuit_breaker.h"
 
 // ============================================
 // HEALTH SNAPSHOT STRUCTURE
@@ -21,7 +22,14 @@ struct HealthSnapshot {
     uint8_t sensor_count;
     uint8_t actuator_count;
     SystemState system_state;
-    
+
+    // Boot reason (ESP-IDF esp_reset_reason_t mapped to uint8_t)
+    uint8_t boot_reason;
+
+    // MQTT Circuit Breaker status
+    CircuitState mqtt_circuit_state;
+    uint8_t mqtt_failure_count;
+
     // ─────────────────────────────────────────────────────
     // WATCHDOG STATUS (Industrial-Grade)
     // ─────────────────────────────────────────────────────

@@ -46,6 +46,9 @@ import {
   type BackupRetentionConfig,
 } from '@/api/audit'
 import { useAuthStore } from '@/stores/auth'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('CleanupPanel')
 
 import CleanupPreview from './CleanupPreview.vue'
 import AutoCleanupStatusBanner from './AutoCleanupStatusBanner.vue'
@@ -212,7 +215,7 @@ async function loadAutoCleanupStatus() {
   try {
     autoCleanupStatus.value = await auditApi.getRetentionStatus()
   } catch (err) {
-    console.error('[CleanupPanel] Failed to load auto-cleanup status:', err)
+    logger.error(' Failed to load auto-cleanup status:', err)
   } finally {
     isLoadingAutoCleanupStatus.value = false
   }
@@ -229,7 +232,7 @@ async function loadStatistics() {
   try {
     statistics.value = await auditApi.getStatistics()
   } catch (err) {
-    console.error('[CleanupPanel] Failed to load statistics:', err)
+    logger.error(' Failed to load statistics:', err)
   } finally {
     isLoadingStats.value = false
   }
@@ -241,7 +244,7 @@ async function loadBackups() {
     const response = await auditApi.listBackups(true)
     backups.value = response.backups
   } catch (err) {
-    console.error('[CleanupPanel] Failed to load backups:', err)
+    logger.error(' Failed to load backups:', err)
   } finally {
     isLoadingBackups.value = false
   }
@@ -260,7 +263,7 @@ async function loadRetentionConfig() {
       preserve_emergency_stops: retentionConfig.value.preserve_emergency_stops,
     }
   } catch (err) {
-    console.error('[CleanupPanel] Failed to load retention config:', err)
+    logger.error(' Failed to load retention config:', err)
   } finally {
     isLoadingRetention.value = false
   }
@@ -274,7 +277,7 @@ async function loadBackupRetentionConfig() {
     backupRetentionConfig.value = await auditApi.getBackupRetentionConfig()
     selectedBackupRetention.value = backupRetentionConfig.value.retention_days
   } catch (err) {
-    console.error('[CleanupPanel] Failed to load backup retention config:', err)
+    logger.error(' Failed to load backup retention config:', err)
   } finally {
     isLoadingBackupRetention.value = false
   }
@@ -290,7 +293,7 @@ async function saveBackupRetentionConfig() {
     })
     await loadBackupRetentionConfig()
   } catch (err) {
-    console.error('[CleanupPanel] Failed to save backup retention config:', err)
+    logger.error(' Failed to save backup retention config:', err)
   } finally {
     isSavingBackupRetention.value = false
   }
@@ -321,7 +324,7 @@ async function handleCleanupClick() {
       showCleanupDialog.value = true
     }
   } catch (err) {
-    console.error('[CleanupPanel] Cleanup preview failed:', err)
+    logger.error(' Cleanup preview failed:', err)
   } finally {
     isRunningCleanup.value = false
   }
@@ -344,7 +347,7 @@ async function confirmAndRunCleanup() {
       emit('cleanup-success', result)
     }
   } catch (err) {
-    console.error('[CleanupPanel] Cleanup failed:', err)
+    logger.error(' Cleanup failed:', err)
   } finally {
     isDeleting.value = false
   }
@@ -365,7 +368,7 @@ async function loadAllPreviewEvents() {
     })
     cleanupPreview.value = result
   } catch (err) {
-    console.error('[CleanupPanel] Failed to load all preview events:', err)
+    logger.error(' Failed to load all preview events:', err)
   } finally {
     isRunningCleanup.value = false
   }
@@ -382,7 +385,7 @@ async function restoreBackup(backupId: string) {
     await loadBackups()
     emit('restore-success', result)
   } catch (err) {
-    console.error('[CleanupPanel] Restore failed:', err)
+    logger.error(' Restore failed:', err)
   } finally {
     isRestoringBackup.value = null
   }
@@ -394,7 +397,7 @@ async function deleteBackup(backupId: string) {
     await auditApi.deleteBackup(backupId)
     await loadBackups()
   } catch (err) {
-    console.error('[CleanupPanel] Delete backup failed:', err)
+    logger.error(' Delete backup failed:', err)
   } finally {
     isDeletingBackup.value = null
   }
@@ -414,7 +417,7 @@ async function saveRetentionConfig() {
       loadStatistics(),
     ])
   } catch (err) {
-    console.error('[CleanupPanel] Failed to save retention config:', err)
+    logger.error(' Failed to save retention config:', err)
   } finally {
     isSavingRetention.value = false
   }

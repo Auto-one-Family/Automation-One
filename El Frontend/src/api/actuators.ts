@@ -52,7 +52,7 @@ export const actuatorsApi = {
     config: ActuatorConfigCreate
   ): Promise<ActuatorConfigResponse> {
     const response = await api.post<ActuatorConfigResponse>(
-      `/v1/actuators/${espId}/${gpio}`,
+      `/actuators/${espId}/${gpio}`,
       {
         ...config,
         esp_id: espId,
@@ -66,7 +66,7 @@ export const actuatorsApi = {
    * Delete actuator configuration
    */
   async delete(espId: string, gpio: number): Promise<void> {
-    await api.delete(`/v1/actuators/${espId}/${gpio}`)
+    await api.delete(`/actuators/${espId}/${gpio}`)
   },
 
   /**
@@ -74,7 +74,7 @@ export const actuatorsApi = {
    */
   async get(espId: string, gpio: number): Promise<ActuatorConfigResponse> {
     const response = await api.get<ActuatorConfigResponse>(
-      `/v1/actuators/${espId}/${gpio}`
+      `/actuators/${espId}/${gpio}`
     )
     return response.data
   },
@@ -95,7 +95,7 @@ export const actuatorsApi = {
       page: number
       page_size: number
       total_pages: number
-    }>('/v1/actuators', { params })
+    }>('/actuators', { params })
     return {
       data: response.data.data,
       total: response.data.total,
@@ -111,7 +111,7 @@ export const actuatorsApi = {
     command: ActuatorCommandRequest
   ): Promise<ActuatorCommandResponse> {
     const response = await api.post<ActuatorCommandResponse>(
-      `/v1/actuators/${espId}/${gpio}/command`,
+      `/actuators/${espId}/${gpio}/command`,
       command
     )
     return response.data
@@ -122,7 +122,7 @@ export const actuatorsApi = {
    */
   async emergencyStop(request: EmergencyStopRequest): Promise<EmergencyStopResponse> {
     const response = await api.post<EmergencyStopResponse>(
-      '/v1/actuators/emergency_stop',
+      '/actuators/emergency_stop',
       request
     )
     return response.data

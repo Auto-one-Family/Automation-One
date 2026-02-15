@@ -1,0 +1,33 @@
+# AutomationOne - Test Environment
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#
+# Strategy: Override postgres with a dummy container that's instantly healthy
+# This satisfies the depends_on from base config without running real PostgreSQL
+
+services:
+  postgres:
+    # Override to minimal dummy - satisfies depends_on without real DB
+    image: busybox:latest
+    command: ["sh", "-c", "echo 'Dummy postgres for test env' && sleep infinity"]
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 1s
+      timeout: 1s
+      retries: 1
+      start_period: 0s
+    restart: "no"
+
+  mqtt-broker:
+    restart: "no"
+
+  el-servador:
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./test_db.sqlite
+      ENVIRONMENT: test
+      LOG_LEVEL: WARNING
+    restart: "no"
+
+  el-frontend:
+    profiles:
+      - frontend
+    restart: "no"

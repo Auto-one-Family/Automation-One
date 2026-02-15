@@ -149,14 +149,31 @@ class SensorDataHandler:
                     # Step 5: Extract sensor_type FIRST (needed for multi-value lookup)
                     sensor_type = payload.get("sensor_type", "unknown")
 
-                    # Step 5.5: Extract onewire_address (for OneWire 4-way lookup)
+                    # Step 5.5: Extract interface-specific addresses for 4-way lookup
                     # DS18B20 sensors send ROM code to distinguish multiple sensors on same GPIO
                     onewire_address = payload.get("onewire_address")
+                    # I2C sensors send address to distinguish multiple sensors at different addresses
+                    i2c_address = payload.get("i2c_address")
 
-                    # Step 6: Lookup sensor config (Multi-Value Support + OneWire Support)
+                    # Step 6: Lookup sensor config (Multi-Value Support + OneWire/I2C Support)
                     sensor_config = None
 
-                    if onewire_address:
+                    if i2c_address is not None and i2c_address != 0:
+                        # I2C Sensor: 4-way lookup (esp_id, gpio, sensor_type, i2c_address)
+                        # Multiple I2C sensors can exist at different addresses on same bus
+                        logger.debug(
+                            f"I2C sensor detected: gpio={gpio}, addr=0x{i2c_address:02X}"
+                        )
+                        sensor_config = await sensor_repo.get_by_esp_gpio_type_and_i2c(
+                            esp_device.id, gpio, sensor_type, i2c_address
+                        )
+                        if not sensor_config:
+                            logger.warning(
+                                f"I2C sensor config not found: esp_id={esp_id_str}, "
+                                f"gpio={gpio}, type={sensor_type}, addr=0x{i2c_address:02X}. "
+                                f"Saving data without config."
+                            )
+                    elif onewire_address:
                         # OneWire Sensor: 4-way lookup (esp_id, gpio, sensor_type, onewire_address)
                         # Multiple DS18B20 sensors can share same GPIO (bus pin)
                         logger.debug(
@@ -173,7 +190,7 @@ class SensorDataHandler:
                             )
                     else:
                         # Standard Sensor: 3-way lookup (esp_id, gpio, sensor_type)
-                        # e.g., SHT31 on GPIO 21: sht31_temp + sht31_humidity
+                        # e.g., Analog sensors (pH, EC) or single I2C without address in payload
                         sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
                             esp_device.id, gpio, sensor_type
                         )
@@ -248,13 +265,13 @@ class SensorDataHandler:
                     data_source = self._detect_data_source(esp_device, payload)
 
                     # Step 9: Save data to database
-                    # Convert ESP32 timestamp (millis since boot) to UTC datetime
-                    # Same pattern as heartbeat_handler: auto-detect millis vs seconds
+                    # Convert ESP32 timestamp (millis since boot) to naive UTC datetime
+                    # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
                     esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
                     esp32_timestamp = datetime.fromtimestamp(
                         esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
                         tz=timezone.utc
-                    )
+                    ).replace(tzinfo=None)
 
                     sensor_data = await sensor_repo.save_data(
                         esp_id=esp_device.id,
@@ -328,8 +345,22 @@ class SensorDataHandler:
                             except Exception as e:
                                 logger.error(f"Error in logic evaluation: {e}", exc_info=True)
 
-                        # Create non-blocking task
-                        asyncio.create_task(trigger_logic_evaluation())
+                        # Create non-blocking task with done callback for visibility
+                        task = asyncio.create_task(trigger_logic_evaluation())
+
+                        def _on_logic_task_done(t: asyncio.Task) -> None:
+                            if t.cancelled():
+                                logger.warning(
+                                    f"Logic evaluation task cancelled for {esp_id_str} GPIO {gpio}"
+                                )
+                            elif t.exception():
+                                logger.error(
+                                    f"Logic evaluation task failed for {esp_id_str} GPIO {gpio}: "
+                                    f"{t.exception()}",
+                                    exc_info=t.exception(),
+                                )
+
+                        task.add_done_callback(_on_logic_task_done)
                     except Exception as e:
                         logger.warning(f"Failed to trigger logic evaluation: {e}")
 
@@ -478,6 +509,23 @@ class SensorDataHandler:
                     f"ESP reported error_code={error_code} for sensor: "
                     f"esp_id={payload.get('esp_id')}, gpio={payload.get('gpio')}"
                 )
+
+        # Validate i2c_address field (optional, for I2C sensor identification)
+        i2c_address = payload.get("i2c_address")
+        if i2c_address is not None:
+            if not isinstance(i2c_address, int):
+                return {
+                    "valid": False,
+                    "error": "Field 'i2c_address' must be integer",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+            # I2C 7-bit address range: 0x00-0x7F (0-127)
+            if i2c_address < 0 or i2c_address > 127:
+                return {
+                    "valid": False,
+                    "error": f"Field 'i2c_address' must be 0-127, got {i2c_address}",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
 
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
 

@@ -21,6 +21,9 @@ import {
 import ESPCard from '@/components/esp/ESPCard.vue'
 import { type ESPDevice } from '@/api/esp'
 import { useDragStateStore } from '@/stores/dragState'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ZoneGroup')
 
 interface Props {
   /** Zone ID (technical, lowercase) */
@@ -79,7 +82,7 @@ function saveCollapsedState(zoneId: string, collapsed: boolean): void {
     stored[zoneId] = collapsed
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
   } catch (e) {
-    console.warn('Failed to save zone collapsed state:', e)
+    log.warn('Failed to save zone collapsed state', e)
   }
 }
 
@@ -130,6 +133,10 @@ const headerClasses = computed(() => {
 const containerClasses = computed(() => {
   const classes = ['zone-group']
 
+  if (dragStore.isAnyDragActive) {
+    classes.push('zone-group--drag-active')
+  }
+
   if (isDragOver.value) {
     classes.push('zone-group--drag-over')
   }
@@ -141,16 +148,6 @@ const containerClasses = computed(() => {
   return classes
 })
 
-// Debug logger with consistent styling
-function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #ec4899; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  const label = `ZoneGroup:${props.zoneId}`
-  if (data) {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;', data)
-  } else {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #f472b6;')
-  }
-}
 
 // Methods
 function toggleExpanded() {
@@ -166,7 +163,7 @@ function toggleExpanded() {
 // This is more reliable than @add/@remove events which have SortableJS format
 
 function handleDragChange(event: any) {
-  log('VueDraggable @change', {
+  log.debug('VueDraggable @change', {
     hasAdded: !!event.added,
     hasMoved: !!event.moved,
     hasRemoved: !!event.removed,
@@ -178,7 +175,7 @@ function handleDragChange(event: any) {
 
   // Handle moved event - reorder within zone (falls hier getriggert)
   if (event.moved) {
-    log('Device MOVED within zone', { oldIndex: event.moved.oldIndex, newIndex: event.moved.newIndex })
+    log.debug('Device MOVED within zone', { oldIndex: event.moved.oldIndex, newIndex: event.moved.newIndex })
     emit('devices-reordered', localDevices.value)
   }
 }
@@ -191,7 +188,7 @@ function handleDragAdd(event: any) {
   // - event.oldIndex, event.newIndex: Positionen
 
   const deviceId = event?.item?.dataset?.deviceId
-  log('VueDraggable @add 📥', {
+  log.debug('VueDraggable @add 📥', {
     deviceId,
     oldIndex: event?.oldIndex,
     newIndex: event?.newIndex,
@@ -200,7 +197,7 @@ function handleDragAdd(event: any) {
   })
 
   if (!deviceId) {
-    log('ERROR: No deviceId found in item dataset')
+    log.debug('ERROR: No deviceId found in item dataset')
     return
   }
 
@@ -210,13 +207,13 @@ function handleDragAdd(event: any) {
   )
 
   if (!device) {
-    log('ERROR: Device not found in localDevices', { deviceId, localDevices: localDevices.value.map(d => d.device_id || d.esp_id) })
+    log.debug('ERROR: Device not found in localDevices', { deviceId, localDevices: localDevices.value.map(d => d.device_id || d.esp_id) })
     return
   }
 
   const fromZoneId = device.zone_id || null
 
-  log('Device ADDED to zone ✅', {
+  log.debug('Device ADDED to zone ✅', {
     deviceId,
     fromZoneId,
     toZoneId: props.zoneId,
@@ -232,12 +229,12 @@ function handleDragAdd(event: any) {
 }
 
 function handleDragUpdate(_event: any) {
-  log('VueDraggable @update (legacy)', { event: _event })
+  log.debug('VueDraggable @update (legacy)', { event: _event })
   // Kept for compatibility but @change handles this better
 }
 
 function handleDragStart(event: any) {
-  log('VueDraggable @start 🚀', {
+  log.debug('VueDraggable @start 🚀', {
     item: event?.item?.dataset,
     itemClass: event?.item?.className?.slice?.(0, 80),
     from: event?.from?.className?.slice?.(0, 50),
@@ -257,7 +254,7 @@ function handleDragStart(event: any) {
 }
 
 function handleDragEnd(event: any) {
-  log('VueDraggable @end 🏁', {
+  log.debug('VueDraggable @end 🏁', {
     item: event?.item?.dataset,
     itemClass: event?.item?.className?.slice?.(0, 80),
     to: event?.to?.className?.slice?.(0, 50),
@@ -278,7 +275,7 @@ function handleDragEnd(event: any) {
 
 // VueDraggable @choose event - fired when item is selected (before drag starts)
 function handleDragChoose(event: any) {
-  log('VueDraggable @choose 👆 (item selected)', {
+  log.debug('VueDraggable @choose 👆 (item selected)', {
     item: event?.item?.dataset,
     itemClass: event?.item?.className?.slice?.(0, 80),
     oldIndex: event?.oldIndex,
@@ -295,7 +292,7 @@ function handleDragChoose(event: any) {
 
 // VueDraggable @unchoose event - fired when item is deselected
 function handleDragUnchoose(event: any) {
-  log('VueDraggable @unchoose 👋 (item deselected)', {
+  log.debug('VueDraggable @unchoose 👋 (item deselected)', {
     item: event?.item?.dataset,
     dragStarted: dragStarted.value,
   })
@@ -303,7 +300,7 @@ function handleDragUnchoose(event: any) {
   // Wenn @start nie gefeuert hat, wurde der Drag abgebrochen (z.B. kurzer Klick)
   // In diesem Fall müssen wir den State hier beenden
   if (!dragStarted.value) {
-    log('Drag was aborted (no @start), cleaning up state')
+    log.debug('Drag was aborted (no @start), cleaning up state')
     dragStore.endEspCardDrag()
   }
   // Sonst: @end wird den State beenden
@@ -328,14 +325,14 @@ function handleNativeDragStart(event: DragEvent) {
 
   if (isSatelliteDrag) {
     // Satellite-Drag für Chart - durchlassen
-    log('Native dragstart from satellite - allowing for chart drag', {
+    log.debug('Native dragstart from satellite - allowing for chart drag', {
       satelliteType: (target.closest('[data-satellite-type]') as HTMLElement)?.dataset?.satelliteType,
     })
     return
   }
 
   // Alle anderen native Drags blockieren - VueDraggable handhabt ESP-Card-Drag via Mouse Events
-  log('Native dragstart BLOCKED - VueDraggable uses mouse events (force-fallback)', {
+  log.debug('Native dragstart BLOCKED - VueDraggable uses mouse events (force-fallback)', {
     target: target.tagName,
     targetClass: target.className?.toString()?.slice(0, 50),
   })
@@ -348,7 +345,7 @@ function handleContainerDragEnter(event: DragEvent) {
   event.preventDefault()
   dragOverCount.value++
   isDragOver.value = true
-  log('Container dragenter', { dragOverCount: dragOverCount.value })
+  log.debug('Container dragenter', { dragOverCount: dragOverCount.value })
 }
 
 function handleContainerDragLeave(event: DragEvent) {
@@ -358,11 +355,11 @@ function handleContainerDragLeave(event: DragEvent) {
     dragOverCount.value = 0
     isDragOver.value = false
   }
-  log('Container dragleave', { dragOverCount: dragOverCount.value })
+  log.debug('Container dragleave', { dragOverCount: dragOverCount.value })
 }
 
 function handleContainerDrop(event: DragEvent) {
-  log('Container drop', { types: event.dataTransfer?.types })
+  log.debug('Container drop', { types: event.dataTransfer?.types })
   event.preventDefault()
   dragOverCount.value = 0
   isDragOver.value = false
@@ -458,6 +455,7 @@ function getDeviceId(device: ESPDevice): string {
           :force-fallback="true"
           :fallback-on-body="true"
           fallback-class="zone-item--fallback"
+          :swap-threshold="0.65"
           :delay="0"
           :touch-start-threshold="5"
           @add="handleDragAdd"
@@ -549,27 +547,46 @@ function getDeviceId(device: ESPDevice): string {
 </template>
 
 <style scoped>
-/* =============================================================================
-   Zone Group - Minimal Section Header Design
-   Industry-Benchmark: Home Assistant Mushroom Cards, Grafana IoT
-   ============================================================================= */
+/* ═══════════════════════════════════════════════════════════════════════════
+   ZONE GROUP — Environment Container
+   Token-aligned, glass-morphism, drag-drop aware
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Base: Full container with glass-morphism background */
 .zone-group {
   position: relative;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
-  overflow: hidden;
-  margin-bottom: 1rem;
-  transition: all 0.2s ease;
+  border-radius: var(--radius-md);
+  overflow: visible;
+  transition: all var(--transition-base);
 }
 
-/* Drag-over state: Highlight border + subtle background */
+/* Any drag active: Expand padding to enlarge drop target */
+.zone-group--drag-active {
+  transition: padding var(--transition-base), border-color var(--transition-base),
+              background var(--transition-base), box-shadow var(--transition-base);
+}
+
+.zone-group--drag-active .zone-group__content {
+  padding-bottom: calc(var(--space-4) + 16px);
+}
+
+/* Drag-over state: Highlight border + pulse + glow */
 .zone-group--drag-over {
   border-color: var(--color-iridescent-1);
   background: rgba(96, 165, 250, 0.04);
-  box-shadow: 0 0 16px rgba(96, 165, 250, 0.15);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(59, 130, 246, 0.25);
+  }
 }
 
 /* Unassigned zone: Warning accent */
@@ -585,12 +602,12 @@ function getDeviceId(device: ESPDevice): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1rem;
+  padding: var(--space-3) var(--space-4);
   background: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--glass-border);
   cursor: pointer;
   user-select: none;
-  transition: background 0.15s ease;
+  transition: background var(--transition-fast);
 }
 
 .zone-group__header:hover {
@@ -614,14 +631,14 @@ function getDeviceId(device: ESPDevice): string {
 .zone-group__header-left {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 /* Right side: Stats + Chevron */
 .zone-group__header-right {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 /* Icon */
@@ -634,15 +651,15 @@ function getDeviceId(device: ESPDevice): string {
 
 /* Zone name text */
 .zone-group__header-text {
-  font-size: 0.9375rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 /* Stats (X ESPs • Y Online) */
 .zone-group__header-stats {
-  font-size: 0.8125rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
   color: var(--color-text-muted);
 }
 
@@ -671,11 +688,11 @@ function getDeviceId(device: ESPDevice): string {
 
 /* Chevron */
 .zone-group__chevron {
-  width: 1rem;
-  height: 1rem;
+  width: 16px;
+  height: 16px;
   color: var(--color-text-muted);
   opacity: 0.6;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -692,27 +709,26 @@ function getDeviceId(device: ESPDevice): string {
    ============================================================================= */
 
 .zone-group__content {
-  padding: 1rem;
-  overflow: visible;  /* Erlaubt Overlays */
+  padding: var(--space-4);
+  overflow: visible;
 }
 
 .zone-group__grid {
-  /* FLEXBOX statt GRID: Items behalten ihre natürliche Größe */
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: var(--space-4);
   align-items: flex-start;
-  overflow: visible;  /* Erlaubt Overlays von Child-Elementen */
+  overflow: visible;
 }
 
-/* Compact mode for dashboard - gleiche Flex-Basis */
+/* Compact mode for dashboard */
 .zone-group__grid--compact {
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 @media (min-width: 1440px) {
   .zone-group__grid--compact {
-    gap: 1rem;
+    gap: var(--space-4);
   }
 }
 
@@ -721,7 +737,7 @@ function getDeviceId(device: ESPDevice): string {
   .zone-group__grid,
   .zone-group__grid--compact {
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-3);
   }
 
   .zone-group__item {
@@ -734,6 +750,12 @@ function getDeviceId(device: ESPDevice): string {
   min-height: 100px;
   display: flex;
   align-items: stretch;
+  transition: min-height var(--transition-base);
+}
+
+/* Enlarge empty grid when any drag is active */
+.zone-group--drag-active .zone-group__grid--empty {
+  min-height: 140px;
 }
 
 /* =============================================================================
@@ -745,11 +767,11 @@ function getDeviceId(device: ESPDevice): string {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem 1.5rem;
+  padding: var(--space-8) var(--space-6);
   text-align: center;
   background: var(--glass-bg);
   border: 1px dashed var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
 }
 
 /* Drop target styling - spans full width inside VueDraggable */
@@ -757,7 +779,7 @@ function getDeviceId(device: ESPDevice): string {
   flex: 1;
   width: 100%;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--transition-base);
 }
 
 /* Highlight on drag-over */
@@ -767,23 +789,23 @@ function getDeviceId(device: ESPDevice): string {
 }
 
 .zone-group__empty-icon {
-  width: 2rem;
-  height: 2rem;
+  width: 32px;
+  height: 32px;
   color: var(--color-text-muted);
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--space-3);
   opacity: 0.4;
 }
 
 .zone-group__empty-text {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   margin: 0;
 }
 
 .zone-group__empty-hint {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
-  margin: 0.375rem 0 0 0;
+  margin: var(--space-1) 0 0 0;
   opacity: 0.7;
 }
 
@@ -792,11 +814,11 @@ function getDeviceId(device: ESPDevice): string {
    ============================================================================= */
 
 .zone-content-enter-active {
-  transition: all 0.2s ease-out;
+  transition: all var(--duration-base) var(--ease-out);
 }
 
 .zone-content-leave-active {
-  transition: all 0.15s ease-in;
+  transition: all var(--duration-fast) var(--ease-in-out);
 }
 
 .zone-content-enter-from,
@@ -840,10 +862,12 @@ function getDeviceId(device: ESPDevice): string {
 
 .zone-item--ghost {
   opacity: 0.4;
+  transform: scale(1.05);
 }
 
 .zone-item--ghost > * {
   border-style: dashed !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
 }
 
 .zone-item--chosen {

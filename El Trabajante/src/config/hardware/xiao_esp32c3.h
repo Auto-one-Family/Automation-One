@@ -90,4 +90,3 @@ constexpr uint16_t ADC_MAX_VALUE = 4095;
 } // namespace HardwareConfig
 
 #endif // CONFIG_HARDWARE_XIAO_ESP32C3_H
-

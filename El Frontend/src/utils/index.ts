@@ -31,6 +31,10 @@ export * from './zoneColors'
 // Actuator defaults
 export * from './actuatorDefaults'
 
+// Logger utility
+export { createLogger } from './logger'
+export type { Logger } from './logger'
+
 // NOTE: gpioConfig is NOT exported here due to naming conflict
 // (getCategoryLabel exists in both gpioConfig and errorCodeTranslator)
 // Import directly: import { ... } from '@/utils/gpioConfig'

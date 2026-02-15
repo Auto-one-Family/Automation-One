@@ -327,6 +327,19 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     warning_min: Optional[float] = Field(None)
     warning_max: Optional[float] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # Config status from ESP32 verification
+    config_status: Optional[str] = Field(
+        None,
+        description="Config status: pending, applied, failed",
+    )
+    config_error: Optional[str] = Field(
+        None,
+        description="Error code if config_status=failed",
+    )
+    config_error_detail: Optional[str] = Field(
+        None,
+        description="Error detail if config_status=failed",
+    )
     # Latest reading (optional)
     latest_value: Optional[float] = Field(
         None,
@@ -391,6 +404,11 @@ class SensorReading(BaseModel):
         "good",
         description="Data quality (excellent, good, fair, poor, bad, stale)",
     )
+    sensor_type: Optional[str] = Field(
+        None,
+        description="Sensor type (e.g. 'sht31_temp', 'sht31_humidity', 'ds18b20'). "
+                    "Allows frontend to distinguish readings from multi-value sensors.",
+    )
     
     @field_validator("quality")
     @classmethod
@@ -409,7 +427,8 @@ class SensorReading(BaseModel):
                 "raw_value": 2150,
                 "processed_value": 6.8,
                 "unit": "pH",
-                "quality": "good"
+                "quality": "good",
+                "sensor_type": "ph"
             }
         }
     )

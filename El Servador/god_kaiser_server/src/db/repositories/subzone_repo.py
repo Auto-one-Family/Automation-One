@@ -309,6 +309,28 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
         await self.session.flush()
         return count
 
+    async def delete_all_by_zone(self, zone_id: str) -> int:
+        """
+        Delete all subzones for a zone.
+
+        This is used during zone removal to cascade-delete subzones
+        and maintain consistency with ESP32 behavior.
+
+        Args:
+            zone_id: Parent zone identifier
+
+        Returns:
+            Number of subzones deleted
+        """
+        subzones = await self.get_by_zone(zone_id)
+        count = len(subzones)
+
+        for subzone in subzones:
+            await self.session.delete(subzone)
+
+        await self.session.flush()
+        return count
+
     # =========================================================================
     # Count Methods
     # =========================================================================

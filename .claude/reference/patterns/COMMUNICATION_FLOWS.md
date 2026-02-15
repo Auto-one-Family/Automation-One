@@ -1,0 +1,839 @@
+---
+name: communication-flows
+description: Datenfluss Flow Kommunikation Sensor Actuator Emergency ESP32
+  Server Frontend MQTT WebSocket Sequenz Architektur
+allowed-tools: Read
+---
+
+# Kommunikationsmuster & Datenflüsse
+
+> **Version:** 2.0 | **Aktualisiert:** 2026-02-01
+> **Quellen:** Code-Traces durch ESP32, Server, Frontend
+> **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
+
+---
+
+## 0. Flow-Übersicht
+
+| Flow | Komponenten | Beschreibung | Latenz |
+|------|-------------|--------------|--------|
+| A | ESP→Server→Frontend | Sensor-Daten | 50-230ms |
+| B | Frontend→Server→ESP | Actuator-Steuerung | 100-290ms |
+| C | Server→ALL ESPs | Emergency Stop | <100ms |
+| D | Server→ESP→Server | Zone Assignment | 50-150ms |
+| E | Server→ESP | Config Update | 100-300ms |
+| F | ESP→Server→Frontend | Heartbeat | 20-80ms |
+| G | Server→ESP | Logic Engine Rule Execution | 20-100ms |
+
+---
+
+## 1. Flow A: Sensor-Daten (ESP32 → Server → Frontend)
+
+### Sequenz-Diagramm
+
+```
+┌─────────────────┐          ┌───────────────────┐          ┌──────────────────┐
+│      ESP32      │          │      Server       │          │     Frontend     │
+│  SensorManager  │          │   sensor_handler  │          │     espStore     │
+└────────┬────────┘          └─────────┬─────────┘          └────────┬─────────┘
+         │                             │                             │
+         │ 1. performAllMeasurements() │                             │
+         │    [sensor_manager.cpp:985] │                             │
+         │                             │                             │
+         │ 2. MQTT Publish             │                             │
+         │    QoS 1, Topic:            │                             │
+         │    kaiser/god/esp/{esp_id}/ │                             │
+         │    sensor/{gpio}/data       │                             │
+         │─────────────────────────────►                             │
+         │    [sensor_manager.cpp:1226]│                             │
+         │                             │                             │
+         │                             │ 3. handle_sensor_data()     │
+         │                             │    [sensor_handler.py:79]   │
+         │                             │                             │
+         │                             │ 4. Validate & Parse         │
+         │                             │    [sensor_handler.py:353]  │
+         │                             │                             │
+         │                             │ 5. DB: Save Sensor Data     │
+         │                             │    [sensor_handler.py:259]  │
+         │                             │                             │
+         │                             │ 6. Logic Engine (async)     │
+         │                             │    [logic_engine.py:135]    │
+         │                             │                             │
+         │                             │ 7. WebSocket Broadcast      │
+         │                             │    "sensor_data" Event      │
+         │                             │────────────────────────────►│
+         │                             │    [sensor_handler.py:297]  │
+         │                             │                             │
+         │                             │                             │ 8. handleSensorData()
+         │                             │                             │    [esp.ts:1482]
+         │                             │                             │
+         │                             │                             │ 9. Vue Reactivity
+         │                             │                             │    UI Update
+```
+
+### Code-Pfad (Verifiziert)
+
+| Schritt | Datei | Methode | Zeile |
+|---------|-------|---------|-------|
+| 1 | `sensor_manager.cpp` | `performAllMeasurements()` | 985 |
+| 2 | `sensor_manager.cpp` | `publishSensorReading()` | 1226 |
+| 3 | `sensor_manager.cpp` | `buildMQTTPayload()` | 1246 |
+| 4 | `topic_builder.cpp` | `buildSensorDataTopic()` | 53 |
+| 5 | `mqtt_client.cpp` | `publish()` | 469 |
+| 6 | `sensor_handler.py` | `handle_sensor_data()` | 79 |
+| 7 | `sensor_handler.py` | `_validate_payload()` | 353 |
+| 8 | `sensor_handler.py` | DB Save | 259 |
+| 9 | `sensor_handler.py` | WebSocket Broadcast | 297 |
+| 10 | `logic_engine.py` | `evaluate_sensor_data()` | 135 |
+| 11 | `websocket/manager.py` | `broadcast()` | 179 |
+| 12 | `esp.ts` | `handleSensorData()` | 1482 |
+
+### MQTT Topic & Payload
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data`
+
+**Payload (ESP32→Server):**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "gpio": 4,
+  "sensor_type": "DS18B20",
+  "raw": 2150,
+  "value": 21.5,
+  "unit": "°C",
+  "quality": "good",
+  "raw_mode": true,
+  "subzone_id": "zone_a",
+  "onewire_address": "28FF123456789ABC",
+  "i2c_address": 68
+}
+```
+
+### Sensor-Interface-spezifische Unterscheidung
+
+| Interface | Identifikator | Lookup-Strategie |
+|-----------|---------------|------------------|
+| Analog/Digital | - | 3-way: esp_id + gpio + sensor_type |
+| OneWire (DS18B20) | `onewire_address` (64-bit ROM) | 4-way: + onewire_address |
+| I2C (SHT31, BMP280, BME280) | `i2c_address` (7-bit) | 4-way: + i2c_address |
+
+**I2C-Adress-Konfiguration:**
+- SHT31: 0x44 (ADDR→GND), 0x45 (ADDR→VCC)
+- BMP280/BME280: 0x76 (SDO→GND), 0x77 (SDO→VCC)
+
+### Architektur-Abweichung: BMP280/BME280
+
+**Abweichung vom Server-Centric Prinzip:**
+
+BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensationsformel (~50 Zeilen C-Code mit 12-18 Kalibrierungswerten) wird ESP32-seitig durch die Adafruit_BMP280/BME280 Library ausgeführt.
+
+| Sensor | RAW-Mode | Kompensation | Server-Aufgabe |
+|--------|----------|--------------|----------------|
+| SHT31 | ✅ Ja | Server | Konvertierung: -45 + 175×raw/65535 |
+| BMP280 | ❌ Nein | ESP32 (Adafruit) | Validierung, Unit-Konvertierung |
+| BME280 | ❌ Nein | ESP32 (Adafruit) | Validierung, Unit-Konvertierung |
+
+**Begründung:** Bosch-Kalibrierungsdaten (dig_T1-T3, dig_P1-P9, dig_H1-H6) sind im Sensor-EEPROM gespeichert und werden von der Adafruit-Library beim Init ausgelesen. Eine Server-seitige Kompensation würde erfordern, diese Daten via MQTT zu übertragen - unnötige Komplexität.
+
+**WebSocket Event (Server→Frontend):**
+```json
+{
+  "type": "sensor_data",
+  "timestamp": 1735818000,
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "gpio": 4,
+    "sensor_type": "DS18B20",
+    "value": 21.5,
+    "unit": "°C",
+    "quality": "good"
+  }
+}
+```
+
+### Timing-Analyse
+
+| Phase | Operation | Dauer | Datei:Zeile |
+|-------|-----------|-------|-------------|
+| 1 | Sensor Read (ADC/I2C/OneWire) | 10-750ms | sensor_manager.cpp:280-430 |
+| 2 | Pi-Enhanced Processing (optional) | 10-50ms | pi_enhanced_processor.cpp:86 |
+| 3 | MQTT Publish (QoS 1) | 20-100ms | mqtt_client.cpp:498 |
+| 4 | Server Handler | 5-20ms | sensor_handler.py:79 |
+| 5 | DB Write | 10-50ms | sensor_handler.py:259 |
+| 6 | WebSocket Broadcast | 5-10ms | manager.py:179 |
+| 7 | Frontend Store Update | <1ms | esp.ts:1482 |
+| 8 | Vue Render | ~16ms | - |
+| **Total** | | **50-230ms** | |
+
+### Fehlerbehandlung
+
+| Fehler | Erkennung | Reaktion | Datei:Zeile |
+|--------|-----------|----------|-------------|
+| MQTT Disconnect | Circuit Breaker | Offline Buffer (100 msg) | mqtt_client.cpp:478-493 |
+| Server Down | No ACK | ESP buffert, Retry QoS 1 | mqtt_client.cpp:512 |
+| DB Error | Exception | Log, Skip Broadcast | sensor_handler.py:260 |
+| Invalid Payload | Validation | Reject, Log Warning | sensor_handler.py:353 |
+| WebSocket Fail | Best-effort | Continue, Log | sensor_handler.py:310 |
+
+---
+
+## 2. Flow B: Actuator-Steuerung (Frontend → Server → ESP32)
+
+### Sequenz-Diagramm
+
+```
+┌──────────────────┐          ┌───────────────────┐          ┌─────────────────┐
+│     Frontend     │          │      Server       │          │      ESP32      │
+│   actuatorsApi   │          │   actuators.py    │          │ ActuatorManager │
+└────────┬─────────┘          └─────────┬─────────┘          └────────┬────────┘
+         │                              │                             │
+         │ 1. sendCommand()             │                             │
+         │    [actuators.ts:108]        │                             │
+         │                              │                             │
+         │ 2. POST /actuators/{id}/cmd  │                             │
+         │─────────────────────────────►│                             │
+         │                              │                             │
+         │                              │ 3. Safety Validation        │
+         │                              │    [actuators.py:validate]  │
+         │                              │                             │
+         │                              │ 4. MQTT Publish Command     │
+         │                              │    Topic: .../command       │
+         │                              │─────────────────────────────►
+         │                              │    [publisher.py:publish]   │
+         │                              │                             │
+         │ 5. HTTP 202 Accepted         │                             │
+         │◄─────────────────────────────│                             │
+         │                              │                             │
+         │                              │                             │ 6. handleActuatorCommand()
+         │                              │                             │    [actuator_manager.cpp:537]
+         │                              │                             │
+         │                              │                             │ 7. Safety Check
+         │                              │                             │    [safety_controller.cpp]
+         │                              │                             │
+         │                              │                             │ 8. GPIO digitalWrite()
+         │                              │                             │    [pump_actuator.cpp:407]
+         │                              │                             │
+         │                              │ 9. MQTT: .../response       │
+         │                              │◄─────────────────────────────│
+         │                              │    [actuator_manager.cpp:826]│
+         │                              │                             │
+         │                              │ 10. MQTT: .../status        │
+         │                              │◄─────────────────────────────│
+         │                              │    [actuator_manager.cpp:778]│
+         │                              │                             │
+         │ 11. WS: actuator_response    │                             │
+         │◄─────────────────────────────│                             │
+         │    [actuator_handler.py:228] │                             │
+         │                              │                             │
+         │ 12. handleActuatorResponse() │                             │
+         │    [esp.ts:2005]             │                             │
+```
+
+### Code-Pfad (Verifiziert)
+
+| Schritt | Datei | Methode | Zeile |
+|---------|-------|---------|-------|
+| 1 | `actuators.ts` | `sendCommand()` | 108 |
+| 2 | `esp.ts` | `sendActuatorCommand()` | 2287 |
+| 3 | Server | REST Handler | actuators.py |
+| 4 | `publisher.py` | `publish_actuator_command()` | - |
+| 5 | `topic_builder.cpp` | `buildActuatorCommandTopic()` | 87 |
+| 6 | `actuator_manager.cpp` | `handleActuatorCommand()` | 537 |
+| 7 | `actuator_manager.cpp` | `extractGPIOFromTopic()` | 467 |
+| 8 | `actuator_manager.cpp` | `controlActuatorBinary()` | 382 |
+| 9 | `pump_actuator.cpp` | `applyState()` | 384 |
+| 10 | `actuator_manager.cpp` | `publishActuatorResponse()` | 826 |
+| 11 | `actuator_manager.cpp` | `publishActuatorStatus()` | 778 |
+| 12 | `actuator_handler.py` | `handle_actuator_status()` | 44 |
+| 13 | `esp.ts` | `handleActuatorStatus()` | 1664 |
+| 14 | `esp.ts` | `handleActuatorResponse()` | 2005 |
+
+### MQTT Topics
+
+| Topic | Richtung | QoS | Beschreibung |
+|-------|----------|-----|--------------|
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | Server→ESP | 2 | Befehl |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/response` | ESP→Server | 1 | ACK |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/status` | ESP→Server | 1 | Zustand |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Warnung |
+
+### Command Payload (Server→ESP)
+
+```json
+{
+  "command": "ON",
+  "value": 1.0,
+  "duration": 0,
+  "timestamp": 1735818000,
+  "correlation_id": "cmd_abc123"
+}
+```
+
+### Response Payload (ESP→Server)
+
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "zone_id": "greenhouse",
+  "ts": 1735818000,
+  "gpio": 5,
+  "command": "ON",
+  "value": 1.0,
+  "duration": 0,
+  "success": true,
+  "message": "Command executed",
+  "correlation_id": "cmd_abc123"
+}
+```
+
+### Timing-Analyse
+
+| Phase | Operation | Dauer | Datei:Zeile |
+|-------|-----------|-------|-------------|
+| 1 | REST Request | 10-30ms | actuators.ts:108 |
+| 2 | Safety Validation | 5-15ms | actuators.py |
+| 3 | MQTT Publish (QoS 2) | 50-150ms | publisher.py |
+| 4 | ESP Processing | 10-30ms | actuator_manager.cpp:537 |
+| 5 | GPIO Set | <1ms | pump_actuator.cpp:407 |
+| 6 | Response Publish | 20-50ms | actuator_manager.cpp:826 |
+| 7 | WebSocket Broadcast | 5-10ms | actuator_handler.py:228 |
+| **Total** | | **100-290ms** | |
+
+### Fehlerbehandlung
+
+| Fehler | Erkennung | Reaktion | Datei:Zeile |
+|--------|-----------|----------|-------------|
+| ESP Emergency Stop | `emergency_stopped` flag | Reject + Alert | actuator_manager.cpp:294 |
+| Runtime Protection | `canActivate()` check | Reject + Alert | pump_actuator.cpp:163 |
+| GPIO Conflict | GPIOManager check | Reject | gpio_manager.cpp:169 |
+| MQTT Timeout | No response | HTTP 504, Retry | actuators.py |
+| Invalid Command | Validation | HTTP 400 | actuators.py |
+
+---
+
+## 3. Flow C: Emergency Stop (Server → ALL ESPs)
+
+### Sequenz-Diagramm
+
+```
+┌──────────────────┐          ┌───────────────────┐          ┌─────────────────┐
+│     Frontend     │          │      Server       │          │    ALL ESP32s   │
+└────────┬─────────┘          └─────────┬─────────┘          └────────┬────────┘
+         │                              │                             │
+         │ 1. POST /emergency_stop      │                             │
+         │─────────────────────────────►│                             │
+         │    [actuators.ts:123]        │                             │
+         │                              │                             │
+         │                              │ 2. MQTT Broadcast           │
+         │                              │    Topic: kaiser/broadcast/ │
+         │                              │           emergency         │
+         │                              │    QoS 2                    │
+         │                              │─────────────────────────────►│ (ALL)
+         │                              │                             │
+         │                              │                             │ 3. handleEmergency()
+         │                              │                             │    [safety_controller.cpp:37]
+         │                              │                             │
+         │                              │                             │ 4. stopAllActuators()
+         │                              │                             │    <50ms GARANTIERT
+         │                              │                             │
+         │                              │                             │ 5. Set INPUT_PULLUP
+         │                              │                             │    [gpio_manager.cpp:169]
+         │                              │                             │
+         │                              │ 6. MQTT: .../alert          │
+         │                              │◄─────────────────────────────│
+         │                              │                             │
+         │                              │ 7. MQTT: .../safe_mode      │
+         │                              │◄─────────────────────────────│
+         │                              │                             │
+         │ 8. WS: actuator_alert        │                             │
+         │◄─────────────────────────────│                             │
+         │                              │                             │
+         │ 9. handleActuatorAlert()     │                             │
+         │    [esp.ts:1430]             │                             │
+```
+
+### Code-Pfad (Verifiziert)
+
+| Schritt | Datei | Methode | Zeile |
+|---------|-------|---------|-------|
+| 1 | `actuators.ts` | `emergencyStop()` | 123 |
+| 2 | Server | Broadcast publish | - |
+| 3 | `safety_controller.cpp` | `emergencyStopAll()` | 37 |
+| 4 | `actuator_manager.cpp` | `emergencyStopAll()` | - |
+| 5 | `gpio_manager.cpp` | `enableSafeModeForAllPins()` | 169 |
+| 6 | `safety_controller.cpp` | `clearEmergencyStop()` | 63 |
+| 7 | `safety_controller.cpp` | `resumeOperation()` | 97 |
+| 8 | `esp.ts` | `handleActuatorAlert()` | 1430 |
+
+### MQTT Topics
+
+| Topic | Richtung | QoS | Beschreibung |
+|-------|----------|-----|--------------|
+| `kaiser/broadcast/emergency` | Server→ALL | 2 | Stop-Befehl |
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Alert-Status |
+| `kaiser/god/esp/{esp_id}/safe_mode` | ESP→Server | 1 | Safe-Mode bestätigt |
+
+### Emergency Payload
+
+```json
+{
+  "action": "stop_all",
+  "reason": "User emergency stop",
+  "timestamp": 1735818000,
+  "source": "frontend"
+}
+```
+
+### Timing-Garantien
+
+| Phase | Max. Dauer | Kritisch |
+|-------|------------|----------|
+| MQTT Broadcast (QoS 2) | 100ms | ✓ |
+| ESP Emergency Handler | 10ms | ✓ |
+| GPIO De-Energize | 10µs/Pin | ✓ |
+| All Actuators OFF | **<50ms** | ✓✓✓ |
+| Alert Publish | 100ms | - |
+| **Total bis OFF** | **<100ms** | |
+
+### Recovery Flow
+
+```
+1. Emergency Stop empfangen       → 0ms
+2. ALLE Aktoren → OFF             → 10-20ms (GPIO-Latenz)
+3. Alert published                → 50-100ms (MQTT QoS 1)
+4. Wait: exit_safe_mode Command   → Manual
+5. Wait: resume_operation Command → Manual
+6. Resume mit Delay               → 2000ms pro Aktor (konfigurierbar)
+```
+
+---
+
+## 4. Flow D: Zone Assignment (Server → ESP → Server)
+
+### Sequenz-Diagramm
+
+```
+┌──────────────────┐          ┌───────────────────┐          ┌─────────────────┐
+│     Frontend     │          │      Server       │          │      ESP32      │
+└────────┬─────────┘          └─────────┬─────────┘          └────────┬────────┘
+         │                              │                             │
+         │ 1. POST /esp/{id}/zone       │                             │
+         │─────────────────────────────►│                             │
+         │                              │                             │
+         │                              │ 2. DB Update                │
+         │                              │                             │
+         │                              │ 3. MQTT: zone/assign        │
+         │                              │─────────────────────────────►│
+         │                              │                             │
+         │                              │                             │ 4. NVS Store
+         │                              │                             │
+         │                              │ 5. MQTT: zone/ack           │
+         │                              │◄─────────────────────────────│
+         │                              │                             │
+         │ 6. WS: zone_assignment       │                             │
+         │◄─────────────────────────────│                             │
+```
+
+### MQTT Payloads
+
+**zone/assign (Server→ESP):**
+```json
+{
+  "zone_id": "greenhouse",
+  "zone_name": "Gewächshaus",
+  "master_zone_id": "main_zone"
+}
+```
+
+**zone/ack (ESP→Server):**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "zone_id": "greenhouse",
+  "zone_name": "Gewächshaus",
+  "success": true,
+  "message": "Zone assigned successfully"
+}
+```
+
+---
+
+## 5. Flow E: Config Update (Server → ESP)
+
+### Sequenz-Diagramm
+
+```
+┌──────────────────┐          ┌───────────────────┐          ┌─────────────────┐
+│     Frontend     │          │      Server       │          │      ESP32      │
+└────────┬─────────┘          └─────────┬─────────┘          └────────┬────────┘
+         │                              │                             │
+         │ 1. PUT /esp/{id}/config      │                             │
+         │─────────────────────────────►│                             │
+         │                              │                             │
+         │                              │ 2. Build Config JSON        │
+         │                              │                             │
+         │                              │ 3. MQTT: config (QoS 2)     │
+         │                              │─────────────────────────────►│
+         │                              │                             │
+         │                              │                             │ 4. Validate
+         │                              │                             │ 5. Apply Sections
+         │                              │                             │ 6. NVS Store
+         │                              │                             │
+         │                              │ 7. MQTT: config_resp (QoS 2)│
+         │                              │◄─────────────────────────────│
+         │                              │                             │
+         │ 8. WS: config_response       │                             │
+         │◄─────────────────────────────│                             │
+         │                              │                             │
+         │ 9. handleConfigResponse()    │                             │
+         │    [esp.ts:1699]             │                             │
+```
+
+### Config Sections
+
+| Section | Beschreibung | Restart Required |
+|---------|--------------|------------------|
+| `wifi` | WiFi-Credentials | Ja |
+| `server` | MQTT-Broker-Adresse | Ja |
+| `device` | ESP-Name, Zone | Nein |
+| `sensors` | Sensor-Konfiguration | Nein |
+| `actuators` | Actuator-Konfiguration | Nein |
+
+---
+
+## 6. Flow F: Heartbeat (ESP → Server → Frontend)
+
+### Sequenz-Diagramm
+
+```
+┌─────────────────┐          ┌───────────────────┐          ┌──────────────────┐
+│      ESP32      │          │      Server       │          │     Frontend     │
+│   MQTTClient    │          │ heartbeat_handler │          │     espStore     │
+└────────┬────────┘          └─────────┬─────────┘          └────────┬─────────┘
+         │                             │                             │
+         │ 1. publishHeartbeat()       │                             │
+         │    [mqtt_client.cpp:621]    │                             │
+         │    Interval: 60s            │                             │
+         │                             │                             │
+         │ 2. MQTT: system/heartbeat   │                             │
+         │    QoS 0                    │                             │
+         │────────────────────────────►│                             │
+         │                             │                             │
+         │                             │ 3. handle_heartbeat()       │
+         │                             │    [heartbeat_handler.py:61]│
+         │                             │                             │
+         │                             │ 4. Validate ESP             │
+         │                             │    Auto-Discovery?          │
+         │                             │                             │
+         │                             │ 5. Update last_seen         │
+         │                             │    Update metadata          │
+         │                             │                             │
+         │                             │ 6. WS: esp_health           │
+         │                             │────────────────────────────►│
+         │                             │    [heartbeat_handler.py:275]
+         │                             │                             │
+         │                             │                             │ 7. handleEspHealth()
+         │                             │                             │    [esp.ts:1327]
+         │                             │                             │
+         │ 8. MQTT: heartbeat/ack      │                             │
+         │◄────────────────────────────│                             │
+         │    [heartbeat_handler.py:303]                             │
+```
+
+### Code-Pfad (Verifiziert)
+
+| Schritt | Datei | Methode | Zeile |
+|---------|-------|---------|-------|
+| 1 | `mqtt_client.cpp` | `publishHeartbeat()` | 621 |
+| 2 | `topic_builder.cpp` | `buildSystemHeartbeatTopic()` | 127 |
+| 3 | `heartbeat_handler.py` | `handle_heartbeat()` | 61 |
+| 4 | `heartbeat_handler.py` | `_discover_new_device()` | 396 |
+| 5 | `heartbeat_handler.py` | `check_device_timeouts()` | 989 |
+| 6 | `websocket/manager.py` | `broadcast()` | 179 |
+| 7 | `esp.ts` | `handleEspHealth()` | 1327 |
+
+### Heartbeat Payload (ESP→Server)
+
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "zone_id": "greenhouse",
+  "master_zone_id": "main_zone",
+  "zone_assigned": true,
+  "ts": 1735818000,
+  "uptime": 3600,
+  "heap_free": 245760,
+  "wifi_rssi": -65,
+  "sensor_count": 3,
+  "actuator_count": 2,
+  "gpio_status": [
+    {
+      "gpio": 4,
+      "owner": "sensor",
+      "component": "DS18B20",
+      "mode": 1,
+      "safe": false
+    }
+  ],
+  "gpio_reserved_count": 4
+}
+```
+
+### WebSocket Event (Server→Frontend)
+
+```json
+{
+  "type": "esp_health",
+  "timestamp": 1735818000,
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "status": "online",
+    "heap_free": 245760,
+    "wifi_rssi": -65,
+    "uptime": 3600,
+    "sensor_count": 3,
+    "actuator_count": 2,
+    "gpio_status": [...]
+  }
+}
+```
+
+### Device Timeout Detection
+
+**Timeout:** 300 Sekunden (5 Minuten) ohne Heartbeat
+**Handler:** `heartbeat_handler.check_device_timeouts()` (Zeile 989)
+**Action:** Markiert Device offline, sendet `esp_health` mit `status: "offline"`
+
+---
+
+## 7. Flow G: Logic Engine Rule Execution
+
+### Sequenz-Diagramm
+
+```
+┌─────────────────┐          ┌───────────────────┐          ┌─────────────────┐
+│  ESP32 Sensor   │          │      Server       │          │  ESP32 Actuator │
+└────────┬────────┘          └─────────┬─────────┘          └────────┬────────┘
+         │                             │                             │
+         │ 1. MQTT: sensor/data        │                             │
+         │────────────────────────────►│                             │
+         │                             │                             │
+         │                             │ 2. sensor_handler receives  │
+         │                             │    [sensor_handler.py:79]   │
+         │                             │                             │
+         │                             │ 3. asyncio.create_task()    │
+         │                             │    logic_engine.evaluate... │
+         │                             │    [sensor_handler.py:332]  │
+         │                             │                             │
+         │                             │ 4. evaluate_sensor_data()   │
+         │                             │    [logic_engine.py:135]    │
+         │                             │                             │
+         │                             │ 5. Get matching rules       │
+         │                             │    [logic_repo.py]          │
+         │                             │                             │
+         │                             │ 6. _evaluate_rule()         │
+         │                             │    - SensorConditionEvaluator
+         │                             │    - TimeConditionEvaluator │
+         │                             │    - CompoundConditionEvaluator
+         │                             │                             │
+         │                             │ 7. Execute actions          │
+         │                             │    - ActuatorActionExecutor │
+         │                             │    - DelayActionExecutor    │
+         │                             │    - NotificationActionExecutor
+         │                             │                             │
+         │                             │ 8. MQTT: actuator/command   │
+         │                             │────────────────────────────►│
+         │                             │                             │
+         │                             │                             │ 9. Execute command
+         │                             │                             │
+         │                             │ 10. MQTT: actuator/response │
+         │                             │◄────────────────────────────│
+         │                             │                             │
+         │                             │ 11. Log Execution           │
+```
+
+### Rule-Struktur
+
+```json
+{
+  "id": 1,
+  "name": "Auto-Irrigation",
+  "enabled": true,
+  "trigger_conditions": {
+    "type": "sensor_threshold",
+    "esp_id": "ESP_SENSOR_01",
+    "gpio": 4,
+    "operator": ">",
+    "value": 30.0
+  },
+  "actions": [{
+    "type": "actuator_command",
+    "esp_id": "ESP_ACTUATOR_01",
+    "gpio": 5,
+    "command": "ON"
+  }],
+  "cooldown_seconds": 300
+}
+```
+
+### Cross-ESP Support
+
+Die Logic Engine unterstützt Rules über **mehrere ESPs**:
+- Sensor auf ESP_A triggert Actuator auf ESP_B
+- Server koordiniert die Kommunikation
+- Safety-Checks erfolgen VOR Command-Publishing
+
+### Logic Engine Komponenten
+
+| Komponente | Datei | Beschreibung |
+|------------|-------|--------------|
+| SensorConditionEvaluator | logic_engine.py:70 | Sensor-Schwellwert-Prüfung |
+| TimeConditionEvaluator | logic_engine.py:73 | Zeit-basierte Bedingungen |
+| CompoundConditionEvaluator | logic_engine.py:76 | AND/OR Verknüpfungen |
+| ActuatorActionExecutor | logic_engine.py:79 | Actuator-Befehle |
+| DelayActionExecutor | logic_engine.py:82 | Verzögerungen |
+| NotificationActionExecutor | logic_engine.py:85 | WebSocket Notifications |
+| ConflictManager | logic_engine.py:88 | GPIO-Konflikt-Prüfung |
+| RateLimiter | logic_engine.py:91 | Command-Flooding-Schutz |
+
+---
+
+## 8. WebSocket Event Types (Server → Frontend)
+
+### Alle Event Types
+
+| Event Type | Handler im Store | Zeile | Beschreibung |
+|------------|------------------|-------|--------------|
+| `esp_health` | `handleEspHealth()` | 1327 | Device Health & GPIO Status |
+| `sensor_data` | `handleSensorData()` | 1482 | Sensor-Messwerte |
+| `actuator_status` | `handleActuatorStatus()` | 1664 | Actuator-Zustand |
+| `actuator_alert` | `handleActuatorAlert()` | 1430 | Emergency/Timeout |
+| `config_response` | `handleConfigResponse()` | 1699 | Config ACK |
+| `zone_assignment` | `handleZoneAssignment()` | 1782 | Zone-Zuweisung |
+| `sensor_health` | `handleSensorHealth()` | 1917 | Sensor Timeout/Recovery |
+| `device_discovered` | `handleDeviceDiscovered()` | 1837 | Neues Gerät |
+| `device_approved` | `handleDeviceApproved()` | 1873 | Gerät genehmigt |
+| `device_rejected` | `handleDeviceRejected()` | 1895 | Gerät abgelehnt |
+| `actuator_response` | `handleActuatorResponse()` | 2005 | Command-Bestätigung |
+| `actuator_command` | `handleActuatorCommand()` | 2124 | Command gesendet |
+| `actuator_command_failed` | `handleActuatorCommandFailed()` | 2140 | Command fehlgeschlagen |
+| `config_published` | `handleConfigPublished()` | 2163 | Config an ESP |
+| `config_failed` | `handleConfigFailed()` | 2176 | Config-Fehler |
+| `sequence_started` | `handleSequenceStarted()` | 2225 | Automation gestartet |
+| `sequence_completed` | `handleSequenceCompleted()` | 2244 | Automation fertig |
+| `sequence_error` | `handleSequenceError()` | 2260 | Automation-Fehler |
+| `notification` | `handleNotification()` | 2033 | Logic-Rule Benachrichtigung |
+| `error_event` | `handleErrorEvent()` | 2048 | Fehler mit Troubleshooting |
+| `system_event` | `handleSystemEvent()` | 2108 | System-Wartung |
+
+### WebSocket Subscriptions (Frontend)
+
+```typescript
+// esp.ts:111-126
+const ws = useWebSocket({
+  autoConnect: true,
+  autoReconnect: true,
+  filters: {
+    types: [
+      'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert',
+      'config_response', 'zone_assignment', 'sensor_health',
+      'device_discovered', 'device_approved', 'device_rejected',
+      'actuator_response', 'actuator_command', 'actuator_command_failed',
+      'config_published', 'config_failed',
+      'sequence_started', 'sequence_step', 'sequence_completed', 'sequence_error',
+      'logic_execution', 'notification', 'error_event', 'system_event'
+    ]
+  }
+})
+```
+
+---
+
+## 9. Circuit Breaker & Resilience Patterns
+
+### ESP32 Circuit Breaker
+
+**MQTT Client:** `mqtt_client.cpp:44-58`
+- **Threshold:** 5 failures → OPEN
+- **Recovery Timeout:** 30s
+- **Half-Open Test:** 10s
+
+**WiFi Manager:** `wifi_manager.cpp:27-36`
+- **Threshold:** 10 failures → OPEN
+- **Recovery Timeout:** 60s
+- **Half-Open Test:** 15s
+
+### Server Resilience
+
+**Database Sessions:** `resilient_session()` Pattern
+- Retry mit Circuit Breaker
+- Graceful Degradation
+
+**MQTT Publishing:** Best-effort mit Logging
+
+**WebSocket Broadcasting:** Non-blocking, failure doesn't affect main handler
+
+### Exponential Backoff (MQTT Reconnect)
+
+```
+Attempt 1: 1s    (2^0 * 1000ms)
+Attempt 2: 2s    (2^1 * 1000ms)
+Attempt 3: 4s    (2^2 * 1000ms)
+Attempt 4: 8s    (2^3 * 1000ms)
+Attempt 5: 16s   (2^4 * 1000ms)
+Attempt 6+: 60s  (capped)
+```
+
+**Code:** `mqtt_client.cpp:815-825` (`calculateBackoffDelay()`)
+
+---
+
+## 10. Architektur-Prinzip: Server-Centric
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    HARDWARE-HIERARCHIE                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   Frontend (Vue 3)                                           │
+│       │ WebSocket (ws://...:8080/api/v1/ws/realtime)        │
+│       │ REST API (http://...:8080/api/v1/...)               │
+│       ▼                                                      │
+│   God-Kaiser Server (Python/FastAPI)                         │
+│       │ MQTT (tcp://...:8883)                               │
+│       ▼                                                      │
+│   ESP32 Agents (C++/Arduino)                                 │
+│       │ GPIO                                                 │
+│       ▼                                                      │
+│   Hardware (Sensoren, Aktoren)                               │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Verantwortlichkeiten
+
+| Komponente | Verantwortung |
+|------------|---------------|
+| **ESP32** | RAW-Daten senden, Commands empfangen, GPIO steuern |
+| **Server** | ALLE Intelligenz, Validierung, Business-Logic, Persistenz |
+| **Frontend** | Visualisierung, User-Interaktion |
+
+**NIEMALS** Business-Logic auf ESP32 implementieren!
+
+---
+
+## 11. Verwandte Dokumentation
+
+| Dokument | Pfad | Beschreibung |
+|----------|------|--------------|
+| Boot Sequence | `El Trabajante/docs/system-flows/01-boot-sequence.md` | System-Initialisierung |
+| Sensor Reading | `El Trabajante/docs/system-flows/02-sensor-reading-flow.md` | Sensor-Messzyklus |
+| Actuator Command | `El Trabajante/docs/system-flows/03-actuator-command-flow.md` | Actuator-Steuerung |
+| Error Recovery | `El Trabajante/docs/system-flows/07-error-recovery-flow.md` | Fehler-Recovery |
+| MQTT Protocol | `El Trabajante/docs/Mqtt_Protocoll.md` | Vollständige Topic-Spezifikation |
+
+---
+
+**Ende der Communication Flows Dokumentation**

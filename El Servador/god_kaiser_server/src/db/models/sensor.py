@@ -221,9 +221,10 @@ class SensorConfig(Base, TimestampMixin):
     # MULTI-VALUE SUPPORT: Erlaubt mehrere sensor_types pro GPIO
     # z.B. SHT31 auf GPIO 21: sht31_temp + sht31_humidity
     # ONEWIRE SUPPORT: Erlaubt mehrere DS18B20 auf demselben GPIO (Bus-Sharing)
-    # onewire_address ist nullable → NULL != NULL in UNIQUE (PostgreSQL + SQLite)
+    # I2C SUPPORT: Erlaubt mehrere I2C-Sensoren auf verschiedenen Adressen
+    # onewire_address und i2c_address sind nullable → NULL != NULL in UNIQUE (PostgreSQL + SQLite)
     __table_args__ = (
-        UniqueConstraint("esp_id", "gpio", "sensor_type", "onewire_address", name="unique_esp_gpio_sensor_type_onewire"),
+        UniqueConstraint("esp_id", "gpio", "sensor_type", "onewire_address", "i2c_address", name="unique_esp_gpio_sensor_interface"),
         Index("idx_sensor_type_enabled", "sensor_type", "enabled"),
     )
 

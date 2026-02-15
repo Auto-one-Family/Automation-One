@@ -81,12 +81,16 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         matching_rules = []
         for rule in all_rules:
             trigger = rule.trigger_conditions
-            
+
             # Handle single condition or multiple conditions
             conditions = []
-            if isinstance(trigger, dict):
+            if isinstance(trigger, list):
+                # List format (from API): conditions stored as array
+                conditions = trigger
+            elif isinstance(trigger, dict):
                 # Check if it's a single condition or a compound condition
-                if trigger.get("type") == "sensor_threshold":
+                # Support both "sensor" (schema) and "sensor_threshold" (legacy) types
+                if trigger.get("type") in ("sensor_threshold", "sensor"):
                     conditions = [trigger]
                 elif trigger.get("logic") in ("AND", "OR"):
                     # Compound condition with multiple sub-conditions
@@ -94,10 +98,11 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
                 else:
                     # Single condition without type field (legacy format)
                     conditions = [trigger]
-            
+
             # Check each condition for sensor match
+            # Support both "sensor" (schema) and "sensor_threshold" (legacy) types
             for condition in conditions:
-                if condition.get("type") == "sensor_threshold":
+                if condition.get("type") in ("sensor_threshold", "sensor"):
                     if (
                         condition.get("esp_id") == esp_id
                         and condition.get("gpio") == gpio

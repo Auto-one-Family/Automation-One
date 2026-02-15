@@ -1,0 +1,449 @@
+<script setup lang="ts">
+/**
+ * DeviceSummaryCard Component (~240x140px)
+ *
+ * Level 2 (Zone Detail): Medium device card showing:
+ * - Name, status dot, mock/real badge
+ * - Top-2 live sensor values (fallback to count)
+ * - Health-bar at bottom edge
+ * - Quick-action buttons (heartbeat mock-only, settings)
+ * - Value-flash animation on sensor data change
+ */
+
+import { computed, ref, watch } from 'vue'
+import type { ESPDevice } from '@/api/esp'
+import { useEspStore } from '@/stores/esp'
+import { formatRelativeTime } from '@/utils/formatters'
+import {
+  Heart,
+  Settings2,
+} from 'lucide-vue-next'
+
+interface Props {
+  device: ESPDevice
+  isMock: boolean
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  (e: 'click', payload: { deviceId: string; originRect: DOMRect }): void
+  (e: 'heartbeat', deviceId: string): void
+  (e: 'settings', device: ESPDevice): void
+}>()
+
+const espStore = useEspStore()
+const cardRef = ref<HTMLElement | null>(null)
+
+/** Value-flash trigger: toggled when sensor data changes */
+const valueFlashing = ref(false)
+
+const deviceId = computed(() => espStore.getDeviceId(props.device))
+const displayName = computed(() => props.device.name || deviceId.value)
+
+/** Status dot color */
+const statusColor = computed(() => {
+  if (props.device.status === 'online' || props.device.connected === true) {
+    return 'var(--color-success)'
+  }
+  if (props.device.status === 'error') {
+    return 'var(--color-error)'
+  }
+  if (props.isMock && (props.device as any).system_state === 'SAFE_MODE') {
+    return 'var(--color-warning)'
+  }
+  return 'var(--color-text-muted)'
+})
+
+/** Border color */
+const borderColor = computed(() =>
+  props.isMock ? 'var(--color-mock)' : 'var(--color-real)'
+)
+
+/** Badge */
+const badgeText = computed(() => props.isMock ? 'MOCK' : 'REAL')
+const badgeClass = computed(() => props.isMock ? 'badge--mock' : 'badge--real')
+
+/** Top-2 live sensor values */
+interface LiveSensor {
+  value: string
+  unit: string
+}
+
+const liveSensors = computed((): LiveSensor[] => {
+  const sensors = props.device.sensors as any[] | undefined
+  if (!sensors || sensors.length === 0) return []
+
+  const result: LiveSensor[] = []
+  for (const sensor of sensors) {
+    if (result.length >= 2) break
+    if (sensor.raw_value != null) {
+      result.push({
+        value: String(sensor.raw_value),
+        unit: sensor.unit || '',
+      })
+    }
+  }
+  return result
+})
+
+/** Fallback counts when no sensor data */
+const sensorCount = computed(() => {
+  const sensors = props.device.sensors as any[] | undefined
+  return sensors?.length ?? props.device.sensor_count ?? 0
+})
+
+const actuatorCount = computed(() => {
+  const actuators = props.device.actuators as any[] | undefined
+  return actuators?.length ?? props.device.actuator_count ?? 0
+})
+
+/** Last heartbeat */
+const lastSeen = computed(() => {
+  const ts = props.device.last_seen || props.device.last_heartbeat
+  if (!ts) return 'Nie'
+  return formatRelativeTime(ts)
+})
+
+/** Health percentage (0-100) for health-bar.
+ *  Heuristic: online=100, safe_mode=60, error=20, offline=40 */
+const healthPercent = computed(() => {
+  if (props.device.status === 'online' || props.device.connected === true) return 100
+  if (props.isMock) {
+    const state = (props.device as any).system_state
+    if (state === 'SAFE_MODE') return 60
+    if (state === 'ERROR') return 20
+  }
+  if (props.device.status === 'error') return 20
+  return 40
+})
+
+/** Health-bar gradient color */
+const healthColor = computed(() => {
+  if (healthPercent.value >= 80) return 'var(--color-success)'
+  if (healthPercent.value >= 50) return 'var(--color-warning)'
+  return 'var(--color-error)'
+})
+
+/** Watch sensor data for value-flash animation */
+watch(
+  () => {
+    const sensors = props.device.sensors as any[] | undefined
+    if (!sensors) return ''
+    return sensors.map(s => s.raw_value).join(',')
+  },
+  (newVal, oldVal) => {
+    if (oldVal && newVal !== oldVal) {
+      valueFlashing.value = true
+      setTimeout(() => { valueFlashing.value = false }, 600)
+    }
+  }
+)
+
+function handleClick(event: Event) {
+  if ((event.target as HTMLElement).closest('.device-summary-card__actions')) return
+  const rect = cardRef.value?.getBoundingClientRect()
+  if (rect) {
+    emit('click', { deviceId: deviceId.value, originRect: rect })
+  }
+}
+
+function handleHeartbeat(event: MouseEvent) {
+  event.stopPropagation()
+  emit('heartbeat', deviceId.value)
+}
+
+function handleSettings(event: MouseEvent) {
+  event.stopPropagation()
+  emit('settings', props.device)
+}
+</script>
+
+<template>
+  <div
+    ref="cardRef"
+    class="device-summary-card"
+    :class="{ 'device-summary-card--flashing': valueFlashing }"
+    :style="{ borderLeftColor: borderColor }"
+    :data-device-id="deviceId"
+    role="button"
+    :aria-label="`${displayName}, Status: ${device.status || 'unbekannt'}`"
+    tabindex="0"
+    @click="handleClick"
+    @keydown.enter="handleClick"
+  >
+    <!-- Header: status dot + name + badge -->
+    <div class="device-summary-card__header esp-drag-handle">
+      <span
+        class="device-summary-card__status-dot"
+        :style="{ backgroundColor: statusColor }"
+      />
+      <span class="device-summary-card__name">{{ displayName }}</span>
+      <span class="device-summary-card__badge" :class="badgeClass">{{ badgeText }}</span>
+    </div>
+
+    <!-- Live sensor values OR fallback counts -->
+    <div v-if="liveSensors.length > 0" class="device-summary-card__live-data">
+      <div
+        v-for="(sensor, idx) in liveSensors"
+        :key="idx"
+        class="device-summary-card__live-value"
+      >
+        <span class="device-summary-card__live-number">{{ sensor.value }}</span>
+        <span class="device-summary-card__live-unit">{{ sensor.unit }}</span>
+      </div>
+      <div class="device-summary-card__live-meta">
+        {{ lastSeen }}
+      </div>
+    </div>
+
+    <div v-else class="device-summary-card__meta">
+      <span>{{ sensorCount }} Sensor{{ sensorCount !== 1 ? 'en' : '' }}</span>
+      <span class="device-summary-card__meta-sep">·</span>
+      <span>{{ actuatorCount }} Aktor{{ actuatorCount !== 1 ? 'en' : '' }}</span>
+      <span class="device-summary-card__meta-sep">·</span>
+      <span>{{ lastSeen }}</span>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="device-summary-card__actions">
+      <button
+        v-if="isMock"
+        class="device-summary-card__action-btn"
+        title="Heartbeat auslösen"
+        @click="handleHeartbeat"
+      >
+        <Heart class="w-3 h-3" />
+      </button>
+      <button
+        class="device-summary-card__action-btn"
+        title="Einstellungen"
+        @click="handleSettings"
+      >
+        <Settings2 class="w-3 h-3" />
+      </button>
+    </div>
+
+    <!-- Health bar at bottom edge -->
+    <div class="device-summary-card__health-bar">
+      <div
+        class="device-summary-card__health-fill"
+        :style="{
+          width: healthPercent + '%',
+          backgroundColor: healthColor,
+        }"
+      />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.device-summary-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + 3px); /* room for health-bar */
+  border-left: 3px solid var(--color-mock);
+  cursor: pointer;
+  transition:
+    transform var(--transition-base),
+    box-shadow var(--transition-base),
+    border-color var(--transition-base),
+    border-left-width var(--transition-fast),
+    backdrop-filter var(--transition-base);
+  position: relative;
+  overflow: hidden;
+  min-width: 200px;
+}
+
+/* Noise overlay */
+.device-summary-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+.device-summary-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--elevation-floating);
+  border-color: var(--glass-border-hover);
+  border-left-width: 4px;
+  backdrop-filter: blur(16px);
+}
+
+/* Action buttons reveal on hover */
+.device-summary-card__actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--glass-border);
+  opacity: 0.5;
+  transition: opacity var(--transition-base);
+}
+
+.device-summary-card:hover .device-summary-card__actions {
+  opacity: 1;
+}
+
+/* Value-flash animation */
+.device-summary-card--flashing .device-summary-card__live-data {
+  animation: value-flash 0.6s ease-out;
+}
+
+.device-summary-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Tactile press */
+.device-summary-card:active {
+  transform: scale(0.98);
+  transition-duration: 60ms;
+}
+
+/* Header */
+.device-summary-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.device-summary-card__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  transition: box-shadow var(--transition-fast);
+}
+
+.device-summary-card:hover .device-summary-card__status-dot {
+  box-shadow: 0 0 10px currentColor;
+}
+
+.device-summary-card__name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-summary-card__badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.badge--mock {
+  color: var(--color-mock);
+  background: rgba(167, 139, 250, 0.12);
+}
+
+.badge--real {
+  color: var(--color-real);
+  background: rgba(34, 211, 238, 0.12);
+}
+
+/* ── Live sensor data display ── */
+.device-summary-card__live-data {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  border-radius: var(--radius-sm);
+  padding: 2px 0;
+}
+
+.device-summary-card__live-value {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.device-summary-card__live-number {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: var(--leading-tight);
+}
+
+.device-summary-card__live-unit {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin-left: 1px;
+}
+
+.device-summary-card__live-meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+/* ── Fallback meta (counts) ── */
+.device-summary-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.device-summary-card__meta-sep {
+  color: var(--color-text-muted);
+}
+
+/* ── Action buttons ── */
+.device-summary-card__action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.device-summary-card__action-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--glass-border-hover);
+  background: var(--glass-bg-light);
+}
+
+/* ── Health bar (bottom edge) ── */
+.device-summary-card__health-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.device-summary-card__health-fill {
+  height: 100%;
+  transition: width var(--transition-slow), background-color var(--transition-slow);
+  border-radius: 0 2px 0 0;
+}
+</style>

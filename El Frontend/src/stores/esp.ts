@@ -9,22 +9,27 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } from '@/api/esp'
 import { debugApi } from '@/api/debug'
-import { sensorsApi, oneWireApi, type OneWireDevice, type OneWireScanResponse } from '@/api/sensors'
+import { sensorsApi } from '@/api/sensors'
 import { actuatorsApi } from '@/api/actuators'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
-import type { 
-  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType, 
-  ConfigResponseExtended, ConfigFailure, MockESPCreate, OfflineInfo, OfflineReason, 
-  StatusSource, SensorConfigCreate, SensorHealthEvent, MockSensor, GpioStatusResponse, 
-  GpioUsageItem, GpioPinStatus, GpioOwner, HeartbeatGpioItem, MultiValueEntry,
+import { createLogger } from '@/utils/logger'
+import type {
+  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType,
+  MockESPCreate, OfflineInfo, OfflineReason,
+  StatusSource, SensorConfigCreate, MockSensor,
+  HeartbeatGpioItem,
   PendingESPDevice, ESPApprovalRequest, ESPApprovalResponse,
-  DeviceDiscoveredEvent, DeviceApprovedEvent, DeviceRejectedEvent
+  DeviceDiscoveredPayload, DeviceApprovedPayload, DeviceRejectedPayload
 } from '@/types'
+import { useZoneStore } from '@/shared/stores/zone.store'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
+import { useSensorStore } from '@/shared/stores/sensor.store'
+import { useGpioStore } from '@/shared/stores/gpio.store'
+import { useNotificationStore } from '@/shared/stores/notification.store'
+import { useConfigStore } from '@/shared/stores/config.store'
 import {
-  getDeviceTypeFromSensorType,
-  getMultiValueDeviceConfigBySensorType,
   inferInterfaceType,
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
@@ -83,21 +88,30 @@ function getOfflineReason(source: StatusSource, reason?: string): OfflineReason 
 }
 
 export const useEspStore = defineStore('esp', () => {
+  // Logger
+  const logger = createLogger('ESPStore')
+
   // State
   const devices = ref<ESPDevice[]>([])
   const selectedDeviceId = ref<string | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
-  // GPIO Status State (Phase 3)
-  const gpioStatusMap = ref<Map<string, GpioStatusResponse>>(new Map())
-  const gpioStatusLoading = ref<Map<string, boolean>>(new Map())
+  // GPIO Status State → delegated to gpio.store.ts
+  // Expose via computed for backward compatibility
+  const gpioStore = useGpioStore()
+  const gpioStatusMap = computed(() => gpioStore.gpioStatusMap)
+  const gpioStatusLoading = computed(() => gpioStore.gpioStatusLoading)
 
   // =========================================================================
   // Pending Devices State (Discovery/Approval Phase)
   // =========================================================================
   const pendingDevices = ref<PendingESPDevice[]>([])
   const isPendingLoading = ref(false)
+
+  // Track locally-initiated approvals to avoid duplicate fetchAll from WS echo
+  const _recentlyApprovedByClient = ref<string | null>(null)
+  const _recentlyApprovedAt = ref<number>(0)
 
   // WebSocket integration
   // Note: Server broadcasts these types from MQTT handlers:
@@ -114,7 +128,7 @@ export const useEspStore = defineStore('esp', () => {
     filters: {
       types: [
         'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert',
-        'config_response', 'zone_assignment', 'sensor_health',
+        'config_response', 'zone_assignment', 'subzone_assignment', 'sensor_health',
         'device_discovered', 'device_approved', 'device_rejected', 'device_rediscovered',
         'actuator_response', 'actuator_command', 'actuator_command_failed',
         'config_published', 'config_failed',
@@ -145,7 +159,7 @@ export const useEspStore = defineStore('esp', () => {
 
   const offlineDevices = computed(() =>
     devices.value.filter(device => 
-      device.status === 'offline' || device.connected === false
+      !(device.status === 'online' || device.connected === true)
     )
   )
 
@@ -201,8 +215,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   // Fallback: Check if espId looks like UUID (contains dashes and 36 chars)
   if (espId.includes('-') && espId.length === 36) {
-    console.warn(
-      `[ESP Store] Received UUID "${espId}" instead of device_id. ` +
+    logger.warn(`Received UUID "${espId}" instead of device_id. ` +
       `Server should send device_id! Trying fallback lookup...`
     )
 
@@ -210,7 +223,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     index = devices.value.findIndex(d => d.id === espId)
 
     if (index !== -1) {
-      console.info(`[ESP Store] Fallback lookup successful: ${espId} → ${getDeviceId(devices.value[index])}`)
+      logger.info(`Fallback lookup successful: ${espId} → ${getDeviceId(devices.value[index])}`)
       return { index, device: devices.value[index] }
     }
   }
@@ -226,389 +239,32 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   // =========================================================================
-  // GPIO Status Getters (Phase 3)
+  // GPIO Status - delegated to gpio.store.ts
   // =========================================================================
 
-  /**
-   * Get GPIO status for a specific ESP.
-   */
-  function getGpioStatusForEsp(espId: string): GpioStatusResponse | null {
-    return gpioStatusMap.value.get(espId) ?? null
-  }
-
-  /**
-   * Get available GPIOs for a specific ESP.
-   */
-  function getAvailableGpios(espId: string): number[] {
-    return gpioStatusMap.value.get(espId)?.available ?? []
-  }
-
-  /**
-   * Get reserved GPIOs for a specific ESP.
-   */
-  function getReservedGpios(espId: string): GpioUsageItem[] {
-    return gpioStatusMap.value.get(espId)?.reserved ?? []
-  }
-
-  /**
-   * Check if a GPIO is available for a specific ESP.
-   */
-  function isGpioAvailableForEsp(espId: string, gpio: number): boolean {
-    const status = gpioStatusMap.value.get(espId)
-    if (!status) return false  // Unknown = not available (safe default)
-    return status.available.includes(gpio)
-  }
-
-  /**
-   * Get human-readable name for system pins.
-   */
-  function getSystemPinName(gpio: number): string {
-    const names: Record<number, string> = {
-      0: 'Boot',
-      1: 'UART TX',
-      2: 'Boot',
-      3: 'UART RX',
-      6: 'Flash CLK',
-      7: 'Flash D0',
-      8: 'Flash D1',
-      9: 'Flash D2',
-      10: 'Flash D3',
-      11: 'Flash CMD',
-      21: 'I2C SDA',
-      22: 'I2C SCL'
-    }
-    return names[gpio] ?? `System ${gpio}`
-  }
-
-  /**
-   * Get enriched pin status list for UI.
-   * Combines all GPIO info into displayable format.
-   */
-  function getAllPinStatuses(espId: string): GpioPinStatus[] {
-    const status = gpioStatusMap.value.get(espId)
-    if (!status) return []
-
-    const allPins: GpioPinStatus[] = []
-
-    // Available pins
-    for (const gpio of status.available) {
-      allPins.push({
-        gpio,
-        available: true,
-        owner: null,
-        component: null,
-        name: null,
-        statusClass: 'available',
-        tooltip: `GPIO ${gpio} - Verfügbar`
-      })
-    }
-
-    // Reserved pins
-    for (const item of status.reserved) {
-      allPins.push({
-        gpio: item.gpio,
-        available: false,
-        owner: item.owner,
-        component: item.component,
-        name: item.name,
-        statusClass: item.owner as 'sensor' | 'actuator' | 'system',
-        tooltip: `GPIO ${item.gpio} - ${item.owner}: ${item.name || item.component}`
-      })
-    }
-
-    // System pins
-    for (const gpio of status.system) {
-      allPins.push({
-        gpio,
-        available: false,
-        owner: 'system',
-        component: getSystemPinName(gpio),
-        name: null,
-        statusClass: 'system',
-        tooltip: `GPIO ${gpio} - System (${getSystemPinName(gpio)})`
-      })
-    }
-
-    return allPins.sort((a, b) => a.gpio - b.gpio)
-  }
+  const getGpioStatusForEsp = gpioStore.getGpioStatusForEsp
+  const getAvailableGpios = gpioStore.getAvailableGpios
+  const getReservedGpios = gpioStore.getReservedGpios
+  const isGpioAvailableForEsp = gpioStore.isGpioAvailableForEsp
+  const getSystemPinName = gpioStore.getSystemPinName
+  const getAllPinStatuses = gpioStore.getAllPinStatuses
+  const fetchGpioStatus = gpioStore.fetchGpioStatus
+  const clearGpioStatus = gpioStore.clearGpioStatus
+  const updateGpioStatusFromHeartbeat = gpioStore.updateGpioStatusFromHeartbeat
 
   // =========================================================================
-  // GPIO Status Actions (Phase 3)
+  // OneWire Scan - delegated to gpio.store.ts
   // =========================================================================
 
-  /**
-   * Fetch GPIO status for an ESP device.
-   *
-   * Called when:
-   * - ESP detail view is opened
-   * - Add sensor/actuator modal is opened
-   * - After successful sensor/actuator creation
-   */
-  async function fetchGpioStatus(espId: string): Promise<GpioStatusResponse | null> {
-    // Prevent duplicate fetches
-    if (gpioStatusLoading.value.get(espId)) {
-      return gpioStatusMap.value.get(espId) ?? null
-    }
-
-    gpioStatusLoading.value.set(espId, true)
-
-    try {
-      const status = await espApi.getGpioStatus(espId)
-      gpioStatusMap.value.set(espId, status)
-      return status
-    } catch (err) {
-      console.error(`[ESP Store] Failed to fetch GPIO status for ${espId}:`, err)
-      return null
-    } finally {
-      gpioStatusLoading.value.set(espId, false)
-    }
-  }
-
-  /**
-   * Clear GPIO status for an ESP (e.g., when device goes offline).
-   */
-  function clearGpioStatus(espId: string): void {
-    gpioStatusMap.value.delete(espId)
-  }
-
-  /**
-   * Update GPIO status from WebSocket esp_health event.
-   *
-   * Partial update: Only updates if gpio_status is present in event.
-   * If no full status exists yet, triggers a full fetch.
-   */
-  function updateGpioStatusFromHeartbeat(
-    espId: string,
-    gpioStatus: HeartbeatGpioItem[]
-  ): void {
-    const current = gpioStatusMap.value.get(espId)
-    if (!current) {
-      // No full status yet, trigger full fetch
-      fetchGpioStatus(espId)
-      return
-    }
-
-    // Update reserved list from ESP-reported data
-    // Note: This is a partial update, full status comes from API
-    const espReported: GpioUsageItem[] = gpioStatus
-      .filter(item => !item.safe)  // Only non-safe-mode pins
-      .map(item => ({
-        gpio: item.gpio,
-        owner: item.owner as GpioOwner,
-        component: item.component,
-        name: null,
-        id: null,
-        source: 'esp_reported' as const
-      }))
-
-    // Merge: Keep DB-sourced items, add/update ESP-reported
-    const dbItems = current.reserved.filter(r => r.source === 'database' || r.source === 'static')
-    const mergedReserved = [...dbItems]
-
-    for (const espItem of espReported) {
-      const existingIndex = mergedReserved.findIndex(r => r.gpio === espItem.gpio)
-      if (existingIndex === -1) {
-        mergedReserved.push(espItem)
-      }
-      // Don't overwrite DB/static items with ESP items (DB is more detailed)
-    }
-
-    // Update available list
-    const reservedGpios = new Set(mergedReserved.map(r => r.gpio))
-    const systemGpios = new Set(current.system)
-    const available = Array.from({ length: 40 }, (_, i) => i)
-      .filter(gpio => !reservedGpios.has(gpio) && !systemGpios.has(gpio))
-
-    gpioStatusMap.value.set(espId, {
-      ...current,
-      available,
-      reserved: mergedReserved,
-      last_esp_report: new Date().toISOString()
-    })
-  }
-
-  // =========================================================================
-  // OneWire Scan State & Actions (Phase 6 - DS18B20 Support)
-  // =========================================================================
-
-  /**
-   * OneWire scan state for each ESP device.
-   * Tracks scanning status, results, and user selections.
-   */
-  interface OneWireScanState {
-    isScanning: boolean
-    scanResults: OneWireDevice[]
-    selectedRomCodes: string[]
-    scanError: string | null
-    lastScanTimestamp: number | null
-    lastScanPin: number | null
-  }
-
-  // OneWire scan states per ESP
-  const oneWireScanStates = ref<Record<string, OneWireScanState>>({})
-
-  /**
-   * Get or initialize OneWire scan state for an ESP.
-   * 
-   * @param espId - ESP device ID
-   * @returns OneWire scan state (creates if not exists)
-   */
-  function getOneWireScanState(espId: string): OneWireScanState {
-    if (!oneWireScanStates.value[espId]) {
-      oneWireScanStates.value[espId] = {
-        isScanning: false,
-        scanResults: [],
-        selectedRomCodes: [],
-        scanError: null,
-        lastScanTimestamp: null,
-        lastScanPin: null
-      }
-    }
-    return oneWireScanStates.value[espId]
-  }
-
-  /**
-   * Scan OneWire bus for devices.
-   * 
-   * Sends MQTT command to ESP, waits for scan result (10s timeout).
-   * Updates scan state with results or error.
-   * 
-   * @param espId - ESP device ID
-   * @param pin - GPIO pin for OneWire bus (default: 4)
-   */
-  async function scanOneWireBus(espId: string, pin: number = 4): Promise<OneWireScanResponse> {
-    const state = getOneWireScanState(espId)
-    state.isScanning = true
-    state.scanError = null
-    state.scanResults = []
-    state.selectedRomCodes = []
-    
-    const toast = useToast()
-    
-    try {
-      const response = await oneWireApi.scanBus(espId, pin)
-      
-      state.scanResults = response.devices
-      state.lastScanTimestamp = Date.now()
-      state.lastScanPin = pin
-      
-      if (response.found_count === 0) {
-        toast.warning(`Keine OneWire-Geräte auf GPIO ${pin} gefunden`, {
-          duration: 6000
-        })
-      } else {
-        toast.success(
-          `${response.found_count} OneWire-Gerät(e) auf GPIO ${pin} gefunden`,
-          { duration: 5000 }
-        )
-      }
-      
-      return response
-      
-    } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string }; status?: number } }
-      
-      // Extract error message based on status code
-      let errorMsg = 'Scan fehlgeschlagen'
-      
-      if (axiosError.response?.status === 404) {
-        errorMsg = 'ESP-Gerät nicht gefunden'
-      } else if (axiosError.response?.status === 503) {
-        errorMsg = 'ESP-Gerät ist offline'
-      } else if (axiosError.response?.status === 504) {
-        errorMsg = `ESP antwortet nicht (Timeout). Ist OneWire-Bus auf GPIO ${pin} konfiguriert?`
-      } else if (axiosError.response?.data?.detail) {
-        errorMsg = axiosError.response.data.detail
-      }
-      
-      state.scanError = errorMsg
-      
-      toast.error(`OneWire-Scan fehlgeschlagen: ${errorMsg}`, {
-        duration: 8000
-      })
-      
-      throw err
-    } finally {
-      state.isScanning = false
-    }
-  }
-
-  /**
-   * Clear OneWire scan results and state.
-   * 
-   * Called when modal closes or user wants to reset.
-   * 
-   * @param espId - ESP device ID
-   */
-  function clearOneWireScan(espId: string): void {
-    const state = getOneWireScanState(espId)
-    state.scanResults = []
-    state.selectedRomCodes = []
-    state.scanError = null
-    // Keep lastScanTimestamp and lastScanPin for reference
-  }
-
-  /**
-   * Toggle ROM code selection for multi-select.
-   * 
-   * @param espId - ESP device ID
-   * @param romCode - ROM code to toggle
-   */
-  function toggleRomSelection(espId: string, romCode: string): void {
-    const state = getOneWireScanState(espId)
-    const index = state.selectedRomCodes.indexOf(romCode)
-    
-    if (index > -1) {
-      state.selectedRomCodes.splice(index, 1)
-    } else {
-      state.selectedRomCodes.push(romCode)
-    }
-  }
-
-  /**
-   * Select all discovered devices.
-   * 
-   * @param espId - ESP device ID
-   */
-  function selectAllOneWireDevices(espId: string): void {
-    const state = getOneWireScanState(espId)
-    state.selectedRomCodes = state.scanResults.map(d => d.rom_code)
-  }
-
-  /**
-   * Deselect all devices.
-   *
-   * @param espId - ESP device ID
-   */
-  function deselectAllOneWireDevices(espId: string): void {
-    const state = getOneWireScanState(espId)
-    state.selectedRomCodes = []
-  }
-
-  /**
-   * Select specific ROM codes (replaces current selection).
-   * 
-   * OneWire Multi-Device Support: Used to select only NEW (non-configured) devices.
-   * 
-   * @param espId - ESP device ID
-   * @param romCodes - Array of ROM codes to select
-   */
-  function selectSpecificRomCodes(espId: string, romCodes: string[]): void {
-    const state = getOneWireScanState(espId)
-    state.selectedRomCodes = [...romCodes]
-  }
-
-  /**
-   * Check if a ROM code is currently selected.
-   * 
-   * @param espId - ESP device ID
-   * @param romCode - ROM code to check
-   * @returns true if selected
-   */
-  function isRomCodeSelected(espId: string, romCode: string): boolean {
-    const state = getOneWireScanState(espId)
-    return state.selectedRomCodes.includes(romCode)
-  }
+  const oneWireScanStates = computed(() => gpioStore.oneWireScanStates)
+  const getOneWireScanState = gpioStore.getOneWireScanState
+  const scanOneWireBus = gpioStore.scanOneWireBus
+  const clearOneWireScan = gpioStore.clearOneWireScan
+  const toggleRomSelection = gpioStore.toggleRomSelection
+  const selectAllOneWireDevices = gpioStore.selectAllOneWireDevices
+  const deselectAllOneWireDevices = gpioStore.deselectAllOneWireDevices
+  const selectSpecificRomCodes = gpioStore.selectSpecificRomCodes
+  const isRomCodeSelected = gpioStore.isRomCodeSelected
 
   // Actions
   async function fetchAll(params?: {
@@ -625,9 +281,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       const fetchedDevices = await espApi.listDevices(params)
 
       // DEBUG: Log fetched devices with name field
-      console.log('[ESP Store] fetchAll: Fetched devices:')
+      logger.info('fetchAll: Fetched devices:')
       fetchedDevices.forEach((d) => {
-        console.log(`  - ${d.device_id || d.esp_id}: name="${d.name}"`)
+        logger.info(`  - ${d.device_id || d.esp_id}: name="${d.name}"`)
       })
 
       // Deduplicate by device ID (safety net for API-level deduplication failures)
@@ -640,11 +296,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           seen.add(id)
           dedupedDevices.push(device)
         } else if (id) {
-          console.warn(`[ESP Store] Duplicate device filtered: ${id}`)
+          logger.warn(`Duplicate device filtered: ${id}`)
         }
       }
 
-      console.log('[ESP Store] fetchAll: Setting devices.value with', dedupedDevices.length, 'devices')
+      logger.info('Loaded devices', { count: dedupedDevices.length })
       devices.value = dedupedDevices
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch ESP devices')
@@ -695,10 +351,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     try {
       const devices = await espApi.getPendingDevices()
       pendingDevices.value = devices
-      console.debug(`[ESP Store] Fetched ${devices.length} pending devices`)
+      logger.debug(`Fetched ${devices.length} pending devices`)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch pending devices')
-      console.error('[ESP Store] Failed to fetch pending devices:', err)
+      logger.error(`Failed to fetch pending devices:`, err)
     } finally {
       isPendingLoading.value = false
     }
@@ -723,6 +379,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       
       // Remove from pending list
       pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== deviceId)
+      
+      // Track this approval so the WS echo handler skips its fetchAll
+      _recentlyApprovedByClient.value = deviceId
+      _recentlyApprovedAt.value = Date.now()
       
       // Toast notification
       toast.success(`Gerät ${deviceId} wurde genehmigt`, { duration: 4000 })
@@ -782,7 +442,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       if (existingIndex !== -1) {
         // Replace existing with new data
         devices.value[existingIndex] = device
-        console.debug(`[ESP Store] Device ${deviceId} already exists, updated`)
+        logger.debug(`Device ${deviceId} already exists, updated`)
       } else {
         devices.value.push(device)
       }
@@ -800,12 +460,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     isLoading.value = true
     error.value = null
 
-    console.log('[ESP Store] updateDevice called:', { deviceId, update })
+    logger.info('updateDevice called:', { deviceId, update })
 
     try {
       // First, persist the update to the database
       const dbDevice = await espApi.updateDevice(deviceId, update)
-      console.log('[ESP Store] espApi.updateDevice returned:', {
+      logger.info('espApi.updateDevice returned:', {
         deviceId: dbDevice.device_id,
         name: dbDevice.name,
       })
@@ -814,7 +474,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       // The DB only returns partial data, but espApi.getDevice() merges both sources
       let device: ESPDevice
       if (isMock(deviceId)) {
-        console.log('[ESP Store] Mock ESP detected, re-fetching complete data from server')
+        logger.info('Mock ESP detected, re-fetching complete data from server')
         device = await espApi.getDevice(deviceId)
       } else {
         device = dbDevice
@@ -826,7 +486,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       )
       if (index !== -1) {
         devices.value[index] = device
-        console.log('[ESP Store] Device updated in list:', device.name)
+        logger.info('Device updated in list:', device.name)
       }
 
       return device
@@ -849,7 +509,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   ): void {
     const index = devices.value.findIndex(d => getDeviceId(d) === deviceId)
     if (index === -1) {
-      console.warn(`[ESP Store] updateDeviceZone: device not found: ${deviceId}`)
+      logger.warn(`updateDeviceZone: device not found: ${deviceId}`)
       return
     }
 
@@ -861,7 +521,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       zone_name: zoneData.zone_name ?? device.zone_name,
       master_zone_id: zoneData.master_zone_id ?? device.master_zone_id,
     }
-    console.info(`[ESP Store] Zone updated (optimistic): ${deviceId} → ${zoneData.zone_id}`)
+    logger.info(`Zone updated (optimistic): ${deviceId} → ${zoneData.zone_id}`)
   }
 
   async function deleteDevice(deviceId: string): Promise<void> {
@@ -875,7 +535,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
       // If 404, device is already gone - still remove from local list
       if (axiosError.response?.status === 404) {
-        console.warn(`[ESP Store] Device ${deviceId} not found on server, removing from local list`)
+        logger.warn(`Device ${deviceId} not found on server, removing from local list`)
       } else {
         error.value = extractErrorMessage(err, `Fehler beim Löschen von ${deviceId}`)
         throw err
@@ -1329,7 +989,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const espId = data.esp_id || data.device_id
 
     // DEBUG: Log when WebSocket event arrives
-    console.log('[ESP Store] handleEspHealth received:', {
+    logger.info('handleEspHealth received:', {
       esp_id: espId,
       status: data.status,
       timestamp: data.timestamp,
@@ -1344,9 +1004,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     // BUG X FIX: Unknown device came online - refresh device list for real-time updates
     if (!device && data.status === 'online') {
-      console.info(`[ESP Store] New device online: ${espId}, refreshing device list...`)
+      logger.info(`New device online: ${espId}, refreshing device list...`)
       fetchAll().catch(err => {
-        console.error('[ESP Store] Failed to refresh devices after new online device:', err)
+        logger.error(`Failed to refresh devices after new online device:`, err)
       })
       return
     }
@@ -1409,7 +1069,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         offlineInfo: data.status === 'offline' ? offlineInfo : undefined,
       }
 
-      console.debug(`[ESP Store] esp_health update for ${espId}:`, {
+      logger.debug(`esp_health update for ${espId}:`, {
         last_seen: newLastSeen,
         status: data.status ?? device.status,
         name: data.name ?? device.name,
@@ -1424,406 +1084,85 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   /**
-   * Handle actuator_alert WebSocket event
-   * Updates actuator emergency state on alerts
+   * Actuator alert handler - delegates to actuator.store.ts
+   * Server: actuator_alert_handler.py → WS: actuator_alert
    */
   function handleActuatorAlert(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string || data.device_id as string
-    const gpio = data.gpio as number | undefined
-    const alertType = data.alert_type as string
-
-    if (!espId) {
-      console.warn('[ESP Store] actuator_alert missing esp_id')
-      return
-    }
-
-    const isEmergencyAlert = alertType === 'emergency_stop' || alertType === 'runtime_protection' || alertType === 'safety_violation'
-
-    // "ALL" means all devices affected (system-wide emergency)
-    const targetDevices = espId === 'ALL'
-      ? devices.value
-      : devices.value.filter(d => getDeviceId(d) === espId)
-
-    for (const device of targetDevices) {
-      if (!device?.actuators) continue
-      const actuators = device.actuators as { gpio: number; emergency_stopped?: boolean; state?: boolean }[]
-
-      if (gpio === undefined) {
-        // No gpio = all actuators on device affected
-        if (isEmergencyAlert) {
-          for (const act of actuators) {
-            act.emergency_stopped = true
-            act.state = false
-          }
-        }
-      } else {
-        const actuator = actuators.find(a => a.gpio === gpio)
-        if (!actuator) continue
-        if (isEmergencyAlert) {
-          actuator.emergency_stopped = true
-          actuator.state = false
-        }
-      }
-    }
-
-    console.info(`[ESP Store] Actuator alert: ${espId} GPIO ${gpio ?? 'ALL'} - ${alertType}`)
+    const actStore = useActuatorStore()
+    actStore.handleActuatorAlert(message, devices.value, getDeviceId)
   }
 
   /**
-   * Handle sensor_data WebSocket event
-   * Updates sensor value in corresponding device for live updates
-   *
-   * Phase 6: HYBRID LOGIC
-   * 1. Known multi-value sensors → Group by GPIO using registry
-   * 2. Unknown multi-value → Dynamic detection when multiple types on same GPIO
-   * 3. Single-value sensors → Unchanged behavior
+   * Sensor data handler - delegates to sensor.store.ts
+   * Server: sensor_handler.py → WS: sensor_data
    */
-  function handleSensorData(message: any): void {
-    const data = message.data
-    const espId = data.esp_id || data.device_id
-    const gpio = data.gpio
-    const sensorType = data.sensor_type
-
-    if (!espId || gpio === undefined) return
-
-    const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (!device?.sensors) return
-
-    const sensors = device.sensors as MockSensor[]
-
-    // HYBRID LOGIC:
-    // 1. Check if this is a KNOWN multi-value sensor type (Registry)
-    const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
-
-    if (knownDeviceType) {
-      // KNOWN MULTI-VALUE: Use registry metadata
-      handleKnownMultiValueSensor(sensors, data, knownDeviceType)
-      return
-    }
-
-    // 2. Check if there's already a sensor on this GPIO with different type
-    const existingSensor = sensors.find(s => s.gpio === gpio)
-
-    if (existingSensor && existingSensor.sensor_type !== sensorType && !existingSensor.is_multi_value) {
-      // DYNAMIC DETECTION: Multiple types on same GPIO = multi-value!
-      handleDynamicMultiValueSensor(existingSensor, data)
-      return
-    }
-
-    // 3. Single-value sensor (or first value of unknown multi-value)
-    handleSingleValueSensorData(sensors, data)
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 1: KNOWN MULTI-VALUE (Registry-based)
-  // ════════════════════════════════════════════════════════════════════════════
-  function handleKnownMultiValueSensor(
-    sensors: MockSensor[],
-    data: any,
-    deviceType: string
-  ): void {
-    // Find existing sensor by GPIO (not by sensor_type!)
-    let sensor = sensors.find(s => s.gpio === data.gpio)
-
-    const deviceConfig = getMultiValueDeviceConfigBySensorType(data.sensor_type)
-
-    if (!sensor) {
-      // Create new multi-value sensor with registry metadata
-      sensor = {
-        gpio: data.gpio,
-        sensor_type: data.sensor_type,
-        name: deviceConfig?.label ?? data.sensor_type,
-        raw_value: data.value,
-        unit: data.unit,
-        quality: data.quality ?? 'good',
-        raw_mode: true,
-        last_read: new Date().toISOString(),
-        // Multi-value fields
-        device_type: deviceType,
-        is_multi_value: true,
-        multi_values: {}
-      }
-      sensors.push(sensor)
-    }
-
-    // Ensure multi_values object exists
-    if (!sensor.multi_values) {
-      sensor.multi_values = {}
-      sensor.is_multi_value = true
-      sensor.device_type = deviceType
-    }
-
-    // Update the specific value
-    sensor.multi_values[data.sensor_type] = {
-      value: data.value,
-      unit: data.unit,
-      quality: data.quality ?? 'good',
-      timestamp: Date.now(),
-      sensorType: data.sensor_type
-    }
-
-    // Update primary value (first in config order)
-    if (deviceConfig) {
-      const primaryType = deviceConfig.values[0]?.sensorType
-      if (sensor.multi_values[primaryType]) {
-        sensor.raw_value = sensor.multi_values[primaryType].value
-        sensor.unit = sensor.multi_values[primaryType].unit
-      }
-    }
-
-    // Update worst quality
-    sensor.quality = getWorstQuality(Object.values(sensor.multi_values))
-    sensor.last_read = data.timestamp
-      ? new Date(data.timestamp * 1000).toISOString()
-      : new Date().toISOString()
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 2: DYNAMIC MULTI-VALUE (Auto-detected)
-  // ════════════════════════════════════════════════════════════════════════════
-  function handleDynamicMultiValueSensor(
-    existingSensor: MockSensor,
-    data: any
-  ): void {
-    // Convert existing single-value sensor to multi-value
-    if (!existingSensor.is_multi_value) {
-      existingSensor.is_multi_value = true
-      existingSensor.device_type = null  // Unknown device
-      existingSensor.multi_values = {
-        // Add existing value
-        [existingSensor.sensor_type]: {
-          value: existingSensor.raw_value,
-          unit: existingSensor.unit,
-          quality: existingSensor.quality,
-          timestamp: Date.now(),
-          sensorType: existingSensor.sensor_type
-        }
-      }
-      // Update name to indicate multi-value
-      existingSensor.name = `Multi-Sensor GPIO ${existingSensor.gpio}`
-    }
-
-    // Add new value
-    existingSensor.multi_values![data.sensor_type] = {
-      value: data.value,
-      unit: data.unit,
-      quality: data.quality ?? 'good',
-      timestamp: Date.now(),
-      sensorType: data.sensor_type
-    }
-
-    // Update worst quality
-    existingSensor.quality = getWorstQuality(Object.values(existingSensor.multi_values!))
-    existingSensor.last_read = data.timestamp
-      ? new Date(data.timestamp * 1000).toISOString()
-      : new Date().toISOString()
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // HANDLER 3: SINGLE-VALUE (unchanged behavior)
-  // ════════════════════════════════════════════════════════════════════════════
-  function handleSingleValueSensorData(sensors: MockSensor[], data: any): void {
-    const sensor = sensors.find(
-      s => s.gpio === data.gpio && s.sensor_type === data.sensor_type
-    )
-
-    if (sensor) {
-      // Update existing
-      if (data.value !== undefined) sensor.raw_value = data.value
-      if (data.quality) sensor.quality = data.quality
-      if (data.unit) sensor.unit = data.unit
-      sensor.last_read = data.timestamp
-        ? new Date(data.timestamp * 1000).toISOString()
-        : new Date().toISOString()
-    }
-    // Note: We don't create new sensors here via WebSocket - they must be added via API
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // HELPER: Get worst quality from multi-values
-  // ════════════════════════════════════════════════════════════════════════════
-  function getWorstQuality(values: MultiValueEntry[]): QualityLevel {
-    const qualityOrder: QualityLevel[] = ['excellent', 'good', 'fair', 'poor', 'bad', 'stale', 'error']
-
-    let worstIndex = 0
-    for (const value of values) {
-      const index = qualityOrder.indexOf(value.quality)
-      if (index > worstIndex) {
-        worstIndex = index
-      }
-    }
-
-    return qualityOrder[worstIndex]
+  function handleSensorData(message: { data: Record<string, unknown> }): void {
+    const sensorStore = useSensorStore()
+    sensorStore.handleSensorData(message as unknown as Parameters<typeof sensorStore.handleSensorData>[0], devices.value, getDeviceId)
   }
 
   /**
-   * Handle actuator_status WebSocket event
-   * Updates actuator state in corresponding device for live updates
+   * Actuator status handler - delegates to actuator.store.ts
+   * Server: actuator_handler.py → WS: actuator_status
    */
-  function handleActuatorStatus(message: any): void {
-    const data = message.data
-    const espId = data.esp_id || data.device_id
-    const gpio = data.gpio
-
-    if (!espId || gpio === undefined) return
-
-    const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (!device?.actuators) return
-
-    const actuator = (device.actuators as any[]).find(a => a.gpio === gpio)
-    if (!actuator) return
-
-    // Map server payload → frontend MockActuator
-    // Server: state="on"|"off"|"pwm" → Frontend: state=boolean
-    if (data.state !== undefined) {
-      actuator.state = data.state === 'on' || data.state === 'pwm'
-    }
-    if (data.value !== undefined) actuator.pwm_value = data.value
-    if (data.emergency !== undefined) {
-      actuator.emergency_stopped = data.emergency !== 'normal'
-    }
-    actuator.last_command = data.timestamp
-      ? new Date(data.timestamp * 1000).toISOString()
-      : new Date().toISOString()
+  function handleActuatorStatus(message: { data: Record<string, unknown> }): void {
+    const actStore = useActuatorStore()
+    actStore.handleActuatorStatus(message as unknown as Parameters<typeof actStore.handleActuatorStatus>[0], devices.value, getDeviceId)
   }
 
   /**
-   * Handle config_response WebSocket event
-   * Shows toast notification when ESP confirms config changes
-   *
-   * Phase 4: Extended to handle partial_success and failures array
-   * - Max 3 detail toasts for individual failures
-   * - Additional failures logged to console
+   * Config response handler - delegates to config.store.ts
+   * Server: config_ack_handler.py → WS: config_response
    */
-  function handleConfigResponse(message: any): void {
-    const data = message.data as ConfigResponseExtended
-    const toast = useToast()
-
-    if (!data.esp_id) return
-
-    const deviceName = devices.value.find(d => getDeviceId(d) === data.esp_id)?.name || data.esp_id
-    const MAX_DETAIL_TOASTS = 3
-
-    if (data.status === 'success') {
-      toast.success(
-        `${deviceName}: ${data.message}`,
-        { duration: 4000 }
-      )
-      console.info(`[ESP Store] Config success: ${data.esp_id} - ${data.config_type} (${data.count})`)
-    } else if (data.status === 'partial_success') {
-      // Phase 4: Partial success - some items OK, some failed
-      toast.warning(
-        `${deviceName}: ${data.count} konfiguriert, ${data.failed_count || 0} fehlgeschlagen`,
-        { duration: 6000 }
-      )
-      console.warn(`[ESP Store] Config partial_success: ${data.esp_id} - ${data.count} OK, ${data.failed_count} failed`)
-
-      // Show detail toasts for individual failures (max 3)
-      if (data.failures && data.failures.length > 0) {
-        const toShow = data.failures.slice(0, MAX_DETAIL_TOASTS)
-        toShow.forEach((failure: ConfigFailure) => {
-          toast.error(
-            `GPIO ${failure.gpio} (${failure.type}): ${failure.error}${failure.detail ? ` - ${failure.detail}` : ''}`,
-            { duration: 8000 }
-          )
-        })
-
-        // Log additional failures to console
-        if (data.failures.length > MAX_DETAIL_TOASTS) {
-          const remaining = data.failures.slice(MAX_DETAIL_TOASTS)
-          console.warn(`[ESP Store] ${remaining.length} additional failures (not shown in toast):`)
-          remaining.forEach((failure: ConfigFailure) => {
-            console.warn(`  - GPIO ${failure.gpio} (${failure.type}): ${failure.error} - ${failure.detail || 'No details'}`)
-          })
-        }
-      }
-    } else {
-      // Full error - all items failed
-      toast.error(
-        `${deviceName}: ${data.error_code || 'CONFIG_ERROR'} - ${data.message}`,
-        { duration: 6000 }
-      )
-      console.error(`[ESP Store] Config error: ${data.esp_id} - ${data.error_code}`)
-
-      // Phase 4: Show detail toasts for failures (max 3)
-      if (data.failures && data.failures.length > 0) {
-        const toShow = data.failures.slice(0, MAX_DETAIL_TOASTS)
-        toShow.forEach((failure: ConfigFailure) => {
-          toast.error(
-            `GPIO ${failure.gpio}: ${failure.detail || failure.error}`,
-            { duration: 8000 }
-          )
-        })
-
-        // Log additional failures to console
-        if (data.failures.length > MAX_DETAIL_TOASTS) {
-          const remaining = data.failures.slice(MAX_DETAIL_TOASTS)
-          console.error(`[ESP Store] ${remaining.length} additional failures:`)
-          remaining.forEach((failure: ConfigFailure) => {
-            console.error(`  - GPIO ${failure.gpio}: ${failure.error} - ${failure.detail || 'No details'}`)
-          })
-        }
-      } else if (data.failed_item) {
-        // Legacy: Single failed_item (backward compatibility)
-        const item = data.failed_item
-        toast.error(
-          `GPIO ${item.gpio || 'N/A'}: ${item.sensor_type || item.actuator_type || 'Unknown'}`,
-          { duration: 8000 }
-        )
-      }
-    }
-
-    // Refresh GPIO status after config change
-    fetchGpioStatus(data.esp_id)
+  function handleConfigResponse(message: { data: Record<string, unknown> }): void {
+    const cfgStore = useConfigStore()
+    cfgStore.handleConfigResponse(message, devices.value, getDeviceId, fetchGpioStatus)
   }
 
   /**
    * Handle zone_assignment WebSocket event
    * Updates device zone fields when ESP confirms zone assignment
    *
+   * WP4: DEFENSIVE implementation - only overwrite fields that are DEFINED in the event
+   *
    * Server payload (from zone_ack_handler.py):
    * {
    *   esp_id: string,
    *   status: "zone_assigned" | "error",
    *   zone_id: string,
+   *   zone_name?: string,       // ← server-dev WP4: NOW SENT
+   *   kaiser_id?: string,       // ← server-dev WP4: NOW SENT
    *   master_zone_id?: string,
    *   timestamp: number,
    *   message?: string
    * }
    */
+  /**
+   * Zone assignment handler - delegates to zone.store.ts
+   * Server: zone_ack_handler.py → WS: zone_assignment
+   */
   function handleZoneAssignment(message: any): void {
-    const data = message.data
-    const espId = data.esp_id || data.device_id
+    const zoneStore = useZoneStore()
+    zoneStore.handleZoneAssignment(
+      message,
+      devices.value,
+      getDeviceId,
+      (idx, dev) => { devices.value[idx] = dev },
+    )
+  }
 
-    if (!espId) {
-      console.warn('[ESP Store] zone_assignment missing esp_id')
-      return
-    }
-
-    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
-    if (deviceIndex === -1) {
-      console.debug(`[ESP Store] Zone assignment for unknown device: ${espId}`)
-      return
-    }
-
-    const device = devices.value[deviceIndex]
-
-    if (data.status === 'zone_assigned') {
-      // IMPORTANT: Replace entire device object to trigger Vue reactivity
-      // Direct mutation (device.zone_id = ...) doesn't reliably trigger computed updates
-      devices.value[deviceIndex] = {
-        ...device,
-        zone_id: data.zone_id || undefined,
-        zone_name: data.zone_name || undefined,
-        master_zone_id: data.master_zone_id || undefined,
-      }
-      console.info(`[ESP Store] Zone confirmed: ${espId} → ${data.zone_id} (reactivity triggered)`)
-    } else if (data.status === 'error') {
-      console.error(`[ESP Store] Zone assignment error for ${espId}: ${data.message}`)
-    } else {
-      console.warn(`[ESP Store] Unknown zone_assignment status: ${data.status}`)
-    }
+  /**
+   * Subzone assignment handler - delegates to zone.store.ts
+   * Server: subzone_ack_handler.py → WS: subzone_assignment
+   */
+  function handleSubzoneAssignment(message: any): void {
+    const zoneStore = useZoneStore()
+    zoneStore.handleSubzoneAssignment(
+      message,
+      devices.value,
+      getDeviceId,
+      (idx, dev) => { devices.value[idx] = dev },
+    )
   }
 
   // ===========================================================================
@@ -1835,15 +1174,15 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Adds new device to pending list and shows toast notification.
    */
   function handleDeviceDiscovered(message: any): void {
-    const data = message.data as DeviceDiscoveredEvent
+    const data = message.data as DeviceDiscoveredPayload
     const toast = useToast()
 
     if (!data.device_id) {
-      console.warn('[ESP Store] device_discovered missing device_id')
+      logger.warn('device_discovered missing device_id')
       return
     }
 
-    console.info(`[ESP Store] New device discovered: ${data.device_id}`)
+    logger.info(`New device discovered: ${data.device_id}`)
 
     // Add to pending list if not already present
     const exists = pendingDevices.value.some(d => d.device_id === data.device_id)
@@ -1851,11 +1190,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       const newPending: PendingESPDevice = {
         device_id: data.device_id,
         discovered_at: data.discovered_at || new Date().toISOString(),
+        last_seen: data.last_seen ?? data.discovered_at ?? new Date().toISOString(),
         ip_address: data.ip_address,
         heap_free: data.heap_free,
         wifi_rssi: data.wifi_rssi,
-        sensor_count: data.sensor_count || 0,
-        actuator_count: data.actuator_count || 0,
+        sensor_count: data.sensor_count ?? 0,
+        actuator_count: data.actuator_count ?? 0,
         heartbeat_count: 1,
         hardware_type: data.hardware_type,
       }
@@ -1871,24 +1211,33 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Removes device from pending list.
    */
   function handleDeviceApproved(message: any): void {
-    const data = message.data as DeviceApprovedEvent
+    const data = message.data as DeviceApprovedPayload
     const toast = useToast()
 
     if (!data.device_id) {
-      console.warn('[ESP Store] device_approved missing device_id')
+      logger.warn('device_approved missing device_id')
       return
     }
 
-    console.info(`[ESP Store] Device approved: ${data.device_id} by ${data.approved_by}`)
+    logger.info(`Device approved: ${data.device_id} by ${data.approved_by}`)
 
     // Remove from pending list
     pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
 
-    // Toast notification (only if not triggered by this client)
-    toast.success(`Gerät ${data.device_id} wurde genehmigt`, { duration: 4000 })
+    // Check if this approval was initiated by this client (avoids duplicate fetchAll)
+    const isOwnApproval =
+      _recentlyApprovedByClient.value === data.device_id &&
+      (Date.now() - _recentlyApprovedAt.value) < 5000
 
-    // Refresh device list
-    fetchAll()
+    if (isOwnApproval) {
+      // Own client already triggered fetchAll in approveDevice() - skip duplicate
+      _recentlyApprovedByClient.value = null
+      logger.debug(`Skipping fetchAll for own approval of ${data.device_id}`)
+    } else {
+      // Another client approved - show toast and refresh
+      toast.success(`Gerät ${data.device_id} wurde genehmigt`, { duration: 4000 })
+      fetchAll()
+    }
   }
 
   /**
@@ -1896,15 +1245,15 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Removes device from pending list.
    */
   function handleDeviceRejected(message: any): void {
-    const data = message.data as DeviceRejectedEvent
+    const data = message.data as DeviceRejectedPayload
     const toast = useToast()
 
     if (!data.device_id) {
-      console.warn('[ESP Store] device_rejected missing device_id')
+      logger.warn('device_rejected missing device_id')
       return
     }
 
-    console.info(`[ESP Store] Device rejected: ${data.device_id} - ${data.rejection_reason}`)
+    logger.info(`Device rejected: ${data.device_id} - ${data.rejection_reason}`)
 
     // Remove from pending list
     pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
@@ -1914,84 +1263,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   /**
-   * Handle sensor_health WebSocket event (Phase 2E).
-   * Updates sensor stale status based on timeout violations.
-   *
-   * Server payload (from maintenance/jobs/sensor_health.py):
-   * {
-   *   esp_id: string,
-   *   gpio: number,
-   *   sensor_type: string,
-   *   sensor_name: string | null,
-   *   is_stale: boolean,
-   *   stale_reason: 'timeout_exceeded' | 'no_data' | 'sensor_error',
-   *   last_reading_at: string | null,
-   *   timeout_seconds: number,
-   *   seconds_overdue: number,
-   *   operating_mode: string,
-   *   config_source: string,
-   *   timestamp: number
-   * }
+   * Sensor health handler - delegates to sensor.store.ts
+   * Server: maintenance/jobs/sensor_health.py → WS: sensor_health
    */
-  function handleSensorHealth(message: any): void {
-    const event = message.data as SensorHealthEvent
-
-    if (!event.esp_id || event.gpio === undefined) {
-      console.warn('[ESP Store] sensor_health missing esp_id or gpio')
-      return
-    }
-
-    // Find the device (with UUID fallback for robustness)
-    const result = findDeviceByEspIdDefensive(event.esp_id)
-    if (!result) {
-      console.debug(`[ESP Store] sensor_health: Device not found: ${event.esp_id}`)
-      return
-    }
-
-    const { device } = result
-    if (!device.sensors) {
-      console.debug(`[ESP Store] sensor_health: Device ${event.esp_id} has no sensors`)
-      return
-    }
-
-    // Find the sensor
-    const sensors = device.sensors as Array<{
-      gpio: number
-      is_stale?: boolean
-      stale_reason?: string
-      last_reading_at?: string | null
-      operating_mode?: string
-      timeout_seconds?: number
-    }>
-    const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
-    if (sensorIndex === -1) {
-      console.debug(
-        `[ESP Store] sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`
-      )
-      return
-    }
-
-    // Update sensor health status
-    // Note: We update the sensor in-place since sensors is already reactive
-    const sensor = sensors[sensorIndex]
-    sensor.is_stale = event.is_stale
-    sensor.stale_reason = event.stale_reason
-    sensor.last_reading_at = event.last_reading_at
-    sensor.operating_mode = event.operating_mode
-    sensor.timeout_seconds = event.timeout_seconds
-
-    if (event.is_stale) {
-      console.warn(
-        `[ESP Store] Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +
-        `(${event.sensor_type}) - ${event.stale_reason}, ` +
-        `overdue by ${event.seconds_overdue}s`
-      )
-    } else {
-      console.debug(
-        `[ESP Store] Sensor health updated: ${event.esp_id} GPIO ${event.gpio} ` +
-        `is_stale=${event.is_stale}`
-      )
-    }
+  function handleSensorHealth(message: { data: Record<string, unknown> }): void {
+    const sensorStore = useSensorStore()
+    sensorStore.handleSensorHealth(message as unknown as Parameters<typeof sensorStore.handleSensorHealth>[0], findDeviceByEspIdDefensive)
   }
 
   // =============================================================================
@@ -1999,157 +1276,50 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   // =============================================================================
 
   /**
-   * Handle actuator_response WebSocket event
-   * Shows toast when ESP confirms command execution
+   * Actuator response handler - delegates to actuator.store.ts
+   * Server: actuator_handler.py → WS: actuator_response
    */
   function handleActuatorResponse(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string || data.device_id as string
-    const gpio = data.gpio as number
-    const success = data.success as boolean
-    const command = data.command as string
-    const errorCode = data.error_code as number | undefined
-    const msg = data.message as string | undefined
-
-    if (!espId) return
-
-    const toast = useToast()
-    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
-
-    if (success) {
-      toast.success(`${deviceName} GPIO ${gpio}: ${command} bestätigt`)
-    } else {
-      toast.error(
-        `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen${errorCode ? ` (${errorCode})` : ''}${msg ? ` – ${msg}` : ''}`,
-        { persistent: true }
-      )
-    }
+    const actStore = useActuatorStore()
+    actStore.handleActuatorResponse(message, devices.value, getDeviceId)
   }
 
   /**
-   * Handle notification WebSocket event
-   * Shows toast from server notifications (logic rules, system)
+   * Notification handler - delegates to notification.store.ts
+   * Server: logic engine, system → WS: notification
    */
   function handleNotification(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const title = data.title as string || 'Benachrichtigung'
-    const msg = data.message as string || ''
-    const priority = data.priority as string || 'normal'
-
-    const toast = useToast()
-    const toastType = priority === 'high' ? 'warning' : 'info'
-    toast.show({ message: `${title}: ${msg}`, type: toastType, persistent: priority === 'high' })
+    useNotificationStore().handleNotification(message)
   }
 
   /**
-   * Handle error_event WebSocket event
-   * Shows toast with troubleshooting info
+   * Error event handler - delegates to notification.store.ts
+   * Server: error tracker → WS: error_event
    */
   function handleErrorEvent(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string || data.source_id as string
-    const severity = data.severity as string || 'error'
-    const title = data.title as string | undefined
-    const msg = data.message as string || 'Unbekannter Fehler'
-    const errorCode = data.error_code as number | undefined
-    const userActionRequired = data.user_action_required as boolean | undefined
-    const troubleshooting = data.troubleshooting as string[] | undefined
-
-    const toast = useToast()
-    const deviceName = espId
-      ? (devices.value.find(d => getDeviceId(d) === espId)?.name || espId)
-      : 'System'
-
-    // Use title (short) if available, otherwise fall back to message
-    const displayTitle = title || msg
-    const displayMsg = userActionRequired
-      ? `${deviceName}: ${displayTitle} — Handlungsbedarf`
-      : `${deviceName}: ${displayTitle}${errorCode ? ` (${errorCode})` : ''}`
-
-    // Build action for troubleshooting details if available
-    const actions: Array<{ label: string; onClick: () => void; variant?: 'primary' | 'secondary' }> = []
-    if (troubleshooting && troubleshooting.length > 0) {
-      actions.push({
-        label: 'Details',
-        variant: 'secondary',
-        onClick: () => {
-          // Emit a custom event so the SystemMonitor can show the ErrorDetailsModal
-          window.dispatchEvent(new CustomEvent('show-error-details', {
-            detail: {
-              error_code: errorCode,
-              title: title || `Fehler ${errorCode}`,
-              description: msg,
-              severity,
-              troubleshooting,
-              user_action_required: userActionRequired ?? false,
-              esp_id: espId,
-              esp_name: deviceName,
-              docs_link: data.docs_link as string | null | undefined,
-              context: data.context as Record<string, unknown> | undefined,
-              timestamp: data.timestamp as string | undefined,
-            },
-          }))
-        },
-      })
-    }
-
-    toast.show({
-      message: displayMsg,
-      type: severity === 'critical' ? 'error' : severity === 'warning' ? 'warning' : 'error',
-      persistent: severity === 'critical' || severity === 'error',
-      actions: actions.length > 0 ? actions : undefined,
-    })
+    useNotificationStore().handleErrorEvent(message, devices.value, getDeviceId)
   }
 
   /**
-   * Handle system_event WebSocket event
-   * Shows info toast for system events
+   * System event handler - delegates to notification.store.ts
+   * Server: system events → WS: system_event
    */
   function handleSystemEvent(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const msg = data.message as string || 'System-Ereignis'
-
-    const toast = useToast()
-    toast.info(msg)
+    useNotificationStore().handleSystemEvent(message)
   }
 
   // =============================================================================
-  // Phase 2: Actuator Command Lifecycle Handlers
+  // Phase 2: Actuator Command Lifecycle Handlers - delegates to actuator.store.ts
   // =============================================================================
 
-  /**
-   * Handle actuator_command WebSocket event
-   * Notifies that a command was sent to an ESP (not yet confirmed)
-   */
   function handleActuatorCommand(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string
-    const gpio = data.gpio as number
-    const command = data.command as string
-    if (!espId) return
-
-    const toast = useToast()
-    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
-    toast.info(`${deviceName} GPIO ${gpio}: ${command} gesendet`)
+    const actStore = useActuatorStore()
+    actStore.handleActuatorCommand(message, devices.value, getDeviceId)
   }
 
-  /**
-   * Handle actuator_command_failed WebSocket event
-   * Notifies that a command could NOT be sent to ESP (MQTT/safety failure)
-   */
   function handleActuatorCommandFailed(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string
-    const gpio = data.gpio as number
-    const error = data.error as string || 'Unbekannter Fehler'
-    if (!espId) return
-
-    const toast = useToast()
-    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
-    toast.error(
-      `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen – ${error}`,
-      { persistent: true }
-    )
+    const actStore = useActuatorStore()
+    actStore.handleActuatorCommandFailed(message, devices.value, getDeviceId)
   }
 
   // =============================================================================
@@ -2157,37 +1327,19 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   // =============================================================================
 
   /**
-   * Handle config_published WebSocket event
-   * Notifies that config was sent to ESP via MQTT
+   * Config published handler - delegates to config.store.ts
+   * Server: config_publisher → WS: config_published
    */
   function handleConfigPublished(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string
-    if (!espId) return
-
-    const toast = useToast()
-    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
-    const keys = data.config_keys as string[] | undefined
-    const detail = keys?.length ? ` (${keys.join(', ')})` : ''
-    toast.info(`Konfiguration für ${deviceName} gesendet${detail}`)
+    useConfigStore().handleConfigPublished(message, devices.value, getDeviceId)
   }
 
   /**
-   * Handle config_failed WebSocket event
-   * Notifies that config publishing failed
+   * Config failed handler - delegates to config.store.ts
+   * Server: config_publisher → WS: config_failed
    */
   function handleConfigFailed(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const espId = data.esp_id as string
-    const error = data.error as string || 'Unbekannter Fehler'
-    if (!espId) return
-
-    const toast = useToast()
-    const deviceName = devices.value.find(d => getDeviceId(d) === espId)?.name || espId
-    toast.error(
-      `Konfiguration für ${deviceName} fehlgeschlagen: ${error}`,
-      { persistent: true }
-    )
+    useConfigStore().handleConfigFailed(message, devices.value, getDeviceId)
   }
 
   // =============================================================================
@@ -2195,83 +1347,63 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   // =============================================================================
 
   /**
-   * Handle device_rediscovered WebSocket event
-   * Known device came back online after disconnect
+   * Handle device_rediscovered WebSocket event.
+   * Two cases:
+   * 1) Approved device that went offline came back → update devices list
+   * 2) Rejected device sends heartbeat again (cooldown expired) → now pending again, refresh pending list
    */
   function handleDeviceRediscovered(message: { data: Record<string, unknown> }): void {
     const data = message.data
-    const espId = data.esp_id as string || data.device_id as string
+    const espId = (data.esp_id as string) || (data.device_id as string)
     if (!espId) return
 
-    // Update device status to online
-    const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (device) {
-      device.status = 'online'
-      device.last_seen = new Date().toISOString()
+    const toast = useToast()
+
+    // Case 1: Device in approved list (was offline, came back)
+    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
+    if (deviceIndex !== -1) {
+      const device = devices.value[deviceIndex]
+      devices.value[deviceIndex] = {
+        ...device,
+        status: 'online',
+        last_seen: new Date().toISOString(),
+        offlineInfo: undefined,
+        ip_address: (data.ip_address as string) ?? device.ip_address,
+      }
+      const deviceName = device.name || espId
+      toast.info(`${deviceName} ist wieder online`)
+      return
     }
 
-    const toast = useToast()
-    const deviceName = device?.name || espId
-    toast.info(`${deviceName} ist wieder online`)
+    // Case 2: Rejected device rediscovered → now pending_approval again
+    fetchPendingDevices().catch(err => {
+      logger.error(`Failed to refresh pending after device_rediscovered:`, err)
+    })
+    toast.info(`${espId} ist wieder zur Genehmigung verfügbar`)
   }
 
   // =============================================================================
-  // Phase 2: Sequence Handlers (Automation)
+  // Sequence Handlers - delegates to actuator.store.ts
   // =============================================================================
 
-  /**
-   * Handle sequence_started WebSocket event
-   */
   function handleSequenceStarted(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const name = data.rule_name as string || data.description as string || `Sequenz ${data.sequence_id}`
-    const toast = useToast()
-    toast.info(`Sequenz gestartet: ${name}`)
+    useActuatorStore().handleSequenceStarted(message)
   }
 
-  /**
-   * Handle sequence_step WebSocket event
-   * No toast - progress updates are too frequent
-   */
-  function handleSequenceStep(_message: { data: Record<string, unknown> }): void {
-    // No toast - would flood the UI
-    // Could be used for progress tracking in future UI components
+  function handleSequenceStep(message: { data: Record<string, unknown> }): void {
+    useActuatorStore().handleSequenceStep(message)
   }
 
-  /**
-   * Handle sequence_completed WebSocket event
-   */
   function handleSequenceCompleted(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const success = data.success as boolean
-    const toast = useToast()
-
-    if (success) {
-      toast.success('Sequenz erfolgreich abgeschlossen')
-    } else {
-      const error = data.error as string || 'Unbekannter Fehler'
-      toast.error(`Sequenz fehlgeschlagen: ${error}`, { persistent: true })
-    }
+    useActuatorStore().handleSequenceCompleted(message)
   }
 
-  /**
-   * Handle sequence_error WebSocket event
-   */
   function handleSequenceError(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const msg = data.message as string || 'Unbekannter Sequenz-Fehler'
-    const toast = useToast()
-    toast.error(`Sequenz-Fehler: ${msg}`, { persistent: true })
+    useActuatorStore().handleSequenceError(message)
   }
 
-  /**
-   * Handle sequence_cancelled WebSocket event
-   */
   function handleSequenceCancelled(message: { data: Record<string, unknown> }): void {
-    const data = message.data
-    const reason = data.reason as string
-    const toast = useToast()
-    toast.warning(reason ? `Sequenz abgebrochen: ${reason}` : 'Sequenz abgebrochen')
+    useActuatorStore().handleSequenceCancelled(message)
   }
 
   // =============================================================================
@@ -2352,7 +1484,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function initWebSocket(): void {
     if (wsUnsubscribers.length > 0) {
-      console.debug('[ESP Store] WebSocket handlers already registered, skipping')
+      logger.debug('WebSocket handlers already registered, skipping')
       return
     }
 
@@ -2364,6 +1496,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('actuator_alert', handleActuatorAlert),
       ws.on('config_response', handleConfigResponse),
       ws.on('zone_assignment', handleZoneAssignment),
+      ws.on('subzone_assignment', handleSubzoneAssignment),  // WP4
       ws.on('sensor_health', handleSensorHealth),  // Phase 2E
       // Discovery/Approval Phase
       ws.on('device_discovered', handleDeviceDiscovered),
@@ -2391,16 +1524,16 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     // This ensures the UI shows the current state from the server after connection is established
     wsUnsubscribers.push(
       websocketService.onConnect(() => {
-        console.log('[ESP Store] WebSocket connected, refreshing ESP data...')
+        logger.info('WebSocket connected, refreshing ESP data...')
         // Use fetchAll to get current state from server
         // This handles the case where heartbeats arrived before WebSocket was connected
         fetchAll().catch(err => {
-          console.error('[ESP Store] Failed to refresh ESP data after WebSocket connect:', err)
+          logger.error(`Failed to refresh ESP data after WebSocket connect:`, err)
         })
       })
     )
 
-    console.debug('[ESP Store] WebSocket handlers registered')
+    logger.debug('WebSocket handlers registered')
   }
 
   /**
@@ -2411,7 +1544,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     wsUnsubscribers.forEach(unsub => unsub())
     wsUnsubscribers.length = 0
     ws.disconnect()
-    console.debug('[ESP Store] WebSocket handlers unregistered')
+    logger.debug('WebSocket handlers unregistered')
   }
 
   // Auto-initialize WebSocket handlers on store creation

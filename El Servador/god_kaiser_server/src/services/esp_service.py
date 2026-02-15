@@ -182,7 +182,7 @@ class ESPService:
         existing = await self.esp_repo.get_by_device_id(device_id)
 
         if existing:
-            # Update existing device
+            # Update existing device - preserve current status
             existing.ip_address = ip_address
             existing.mac_address = mac_address
             existing.firmware_version = firmware_version
@@ -196,13 +196,13 @@ class ESPService:
             existing.is_zone_master = is_zone_master
             if capabilities:
                 existing.capabilities = capabilities
-            existing.status = "online"
             existing.last_seen = datetime.now(timezone.utc)
 
             logger.info(f"ESP device updated: {device_id}")
             return existing
         else:
-            # Create new device
+            # Create new device with pending_approval status
+            # Requires admin approval before device becomes fully operational
             device = ESPDevice(
                 device_id=device_id,
                 ip_address=ip_address,
@@ -214,13 +214,13 @@ class ESPService:
                 zone_name=zone_name,
                 is_zone_master=is_zone_master,
                 capabilities=capabilities or {},
-                status="online",
+                status="pending_approval",
                 last_seen=datetime.now(timezone.utc),
-                metadata={},
+                device_metadata={},
             )
             created = await self.esp_repo.create(device)
 
-            logger.info(f"ESP device registered: {device_id}")
+            logger.info(f"ESP device registered (pending approval): {device_id}")
             return created
 
     async def unregister_device(
@@ -345,6 +345,10 @@ class ESPService:
                     newly_offline.append(device.device_id)
                     logger.warning(f"ESP device went offline: {device.device_id}")
                 offline.append(device.device_id)
+
+        # Persist any status changes to the database
+        if self.esp_repo.session.dirty:
+            await self.esp_repo.session.commit()
 
         return {
             "online": online,
@@ -487,8 +491,8 @@ class ESPService:
                     "config_keys": list(config.keys()),
                     "correlation_id": correlation_id,
                 })
-            except Exception:
-                pass  # WebSocket broadcast is best-effort
+            except Exception as e:
+                logger.warning(f"WebSocket broadcast config_published failed for {device_id}: {e}")
         else:
             result["message"] = f"Failed to publish config to {device_id}"
             result["error_code"] = ConfigErrorCode.CONFIG_PUBLISH_FAILED
@@ -525,8 +529,8 @@ class ESPService:
                     "error": "MQTT publish failed",
                     "correlation_id": correlation_id,
                 })
-            except Exception:
-                pass  # WebSocket broadcast is best-effort
+            except Exception as e:
+                logger.warning(f"WebSocket broadcast config_failed failed for {device_id}: {e}")
 
         return result
 
@@ -708,6 +712,9 @@ class ESPService:
         if not device:
             return False
 
+        # WP2-Fix4: Set kaiser_id in DB column (indexed, queryable)
+        device.kaiser_id = kaiser_id
+        # Also update metadata for backward compatibility
         metadata = device.device_metadata or {}
         metadata["kaiser_id"] = kaiser_id
         device.device_metadata = metadata
@@ -722,17 +729,15 @@ class ESPService:
         """
         Get all ESP devices assigned to a Kaiser node.
 
+        WP2-Fix5b: Use DB-Query via Repository instead of full-table-scan.
+
         Args:
             kaiser_id: Kaiser node ID
 
         Returns:
             List of ESPDevice
         """
-        all_devices = await self.esp_repo.get_all()
-        return [
-            d for d in all_devices
-            if d.device_metadata and d.device_metadata.get("kaiser_id") == kaiser_id
-        ]
+        return await self.esp_repo.get_by_kaiser(kaiser_id)
 
     # =========================================================================
     # Discovery/Approval Methods
@@ -834,6 +839,11 @@ class ESPService:
             device.zone_id = zone_id
         if zone_name:
             device.zone_name = zone_name
+
+        # WP2-Fix2: Set kaiser_id if not already set
+        if not device.kaiser_id:
+            from ..core import constants
+            device.kaiser_id = constants.get_kaiser_id()
 
         logger.info(f"Device approved: {device_id} by {approved_by}")
         return device

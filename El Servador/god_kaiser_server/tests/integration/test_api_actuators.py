@@ -228,7 +228,11 @@ class TestSendCommand:
             )
         
         assert response.status_code == 400
-        assert "disabled" in response.json()["detail"].lower()
+        detail = response.json()["detail"]
+        if isinstance(detail, dict):
+            assert "disabled" in detail.get("message", "").lower()
+        else:
+            assert "disabled" in str(detail).lower()
 
 
 class TestEmergencyStop:

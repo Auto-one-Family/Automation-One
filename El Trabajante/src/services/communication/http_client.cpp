@@ -231,16 +231,20 @@ HTTPResponse HTTPClient::sendRequest(const char* method, const char* host, uint1
                                      const char* content_type, int timeout_ms) {
     HTTPResponse response;
     
-    // Connect to server
-    if (!wifi_client_.connect(host, port)) {
-        strncpy(response.error_message, "Connection failed", sizeof(response.error_message) - 1);
-        errorTracker.trackError(ERROR_HTTP_REQUEST_FAILED, ERROR_SEVERITY_ERROR, 
-                               "HTTP connection failed");
+    // Set read timeout BEFORE connect (used by connect() internally on ESP32)
+    wifi_client_.setTimeout(timeout_ms);
+
+    // Connect to server WITH TIMEOUT (ESP32 WiFiClient supports connect(host, port, timeout_ms))
+    // This prevents indefinite blocking when server is unreachable
+    yield();  // Feed watchdog before potentially blocking operation
+    if (!wifi_client_.connect(host, port, timeout_ms)) {
+        snprintf(response.error_message, sizeof(response.error_message) - 1,
+                "Connection failed (timeout %dms)", timeout_ms);
+        errorTracker.trackError(ERROR_HTTP_REQUEST_FAILED, ERROR_SEVERITY_ERROR,
+                               "HTTP connection failed/timeout");
         return response;
     }
-    
-    // Set timeout
-    wifi_client_.setTimeout(timeout_ms);
+    yield();  // Feed watchdog after connect
     
     // Build request
     String request;
@@ -290,6 +294,7 @@ HTTPResponse HTTPClient::sendRequest(const char* method, const char* host, uint1
             response_ok = readResponse(response, timeout_ms);
             break;
         }
+        yield();  // Feed watchdog while waiting for response
         delay(10);
     }
     
@@ -326,6 +331,7 @@ bool HTTPClient::readResponse(HTTPResponse& response, int timeout_ms) {
     // Read response line by line
     while (millis() - start_time < (unsigned long)timeout_ms) {
         if (!wifi_client_.available()) {
+            yield();  // Feed watchdog while waiting for more data
             delay(10);
             continue;
         }

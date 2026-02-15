@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include "i2c_sensor_protocol.h"
 
 // ============================================
 // I2C Bus Manager - Hardware Abstraction Layer
@@ -85,6 +86,40 @@ public:
                   const uint8_t* data, size_t length);
 
     // ============================================
+    // PROTOCOL-AWARE SENSOR READING (Phase 4)
+    // ============================================
+    // Read raw sensor data using protocol registry
+    // Automatically selects correct communication pattern based on sensor type
+    //
+    // sensor_type: Device type identifier (e.g., "sht31", "bmp280")
+    //              MUST match SensorCapability.device_type
+    // i2c_address: Device address (0 = use protocol default)
+    // buffer: Output buffer for raw data
+    // buffer_size: Maximum buffer capacity
+    // bytes_read: Output - actual bytes read
+    //
+    // Returns: true on success, false on error
+    //          Error codes tracked via ErrorTracker
+    //
+    // Example:
+    //   uint8_t buffer[8];
+    //   size_t bytes_read;
+    //   if (i2cBusManager.readSensorRaw("sht31", 0x44, buffer, 8, bytes_read)) {
+    //     // buffer contains: [temp_msb, temp_lsb, temp_crc, hum_msb, hum_lsb, hum_crc]
+    //   }
+    bool readSensorRaw(const String& sensor_type, uint8_t i2c_address,
+                       uint8_t* buffer, size_t buffer_size, size_t& bytes_read);
+
+    // Check if sensor type has registered protocol
+    bool isSensorTypeSupported(const String& sensor_type) const;
+
+    // Get list of supported I2C sensor types (for server discovery)
+    // types: Array to store supported sensor type names
+    // max_count: Maximum number of entries to return
+    // count: Output - actual number of entries
+    void getSupportedI2CSensorTypes(String types[], uint8_t max_count, uint8_t& count) const;
+
+    // ============================================
     // STATUS QUERIES
     // ============================================
     // Check if I2C bus is initialized
@@ -124,6 +159,43 @@ private:
     uint8_t sda_pin_;       // SDA pin (from HardwareConfig)
     uint8_t scl_pin_;       // SCL pin (from HardwareConfig)
     uint32_t frequency_;    // Bus frequency in Hz (typically 100kHz)
+
+    // ============================================
+    // INTERNAL PROTOCOL EXECUTION
+    // ============================================
+    // Execute command-based protocol (SHT31 style)
+    // 1. Write command bytes
+    // 2. Wait for conversion
+    // 3. Read data directly (no register)
+    bool executeCommandBasedProtocol(const I2CSensorProtocol* protocol,
+                                     uint8_t i2c_address,
+                                     uint8_t* buffer,
+                                     size_t buffer_size,
+                                     size_t& bytes_read);
+
+    // Execute register-based protocol (BMP280 style)
+    // 1. Write register address
+    // 2. Read data bytes
+    bool executeRegisterBasedProtocol(const I2CSensorProtocol* protocol,
+                                      uint8_t i2c_address,
+                                      uint8_t* buffer,
+                                      size_t buffer_size,
+                                      size_t& bytes_read);
+
+    // Validate all CRCs in buffer according to protocol
+    bool validateInterleavedCRC(const I2CSensorProtocol* protocol,
+                                const uint8_t* buffer,
+                                size_t buffer_len);
+
+    // Validate CRC8 with configurable polynomial
+    // polynomial: CRC polynomial (0x31 for Sensirion)
+    // init_value: Initial CRC value (0xFF for Sensirion)
+    bool validateCRC8(const uint8_t* data, size_t data_len,
+                      uint8_t expected_crc, uint8_t polynomial, uint8_t init_value);
+
+    // Calculate CRC8 (table-based for 0x31, bit-by-bit for others)
+    uint8_t calculateCRC8(const uint8_t* data, size_t len,
+                          uint8_t polynomial, uint8_t init_value);
 };
 
 // ============================================
@@ -132,4 +204,3 @@ private:
 extern I2CBusManager& i2cBusManager;
 
 #endif // DRIVERS_I2C_BUS_H
-

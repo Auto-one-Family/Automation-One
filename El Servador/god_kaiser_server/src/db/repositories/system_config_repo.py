@@ -4,7 +4,7 @@ System Configuration Repository
 Provides database operations for system-wide configuration settings.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -197,7 +197,7 @@ class SystemConfigRepository:
         # Update last_configured timestamp
         await self.set_config(
             "mqtt_auth_last_configured",
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             config_type="mqtt",
             description="Last MQTT auth configuration timestamp",
             is_secret=False,

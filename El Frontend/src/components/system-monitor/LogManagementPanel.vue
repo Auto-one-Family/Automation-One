@@ -25,6 +25,9 @@ import {
   Clock,
   AlertTriangle,
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('LogManagement')
 
 const emit = defineEmits<{
   close: []
@@ -93,7 +96,7 @@ async function loadStatistics() {
     fileCount.value = stats.file_count
   } catch (err) {
     error.value = 'Statistiken konnten nicht geladen werden'
-    console.error('[LogManagement] Failed to load statistics:', err)
+    log.error(' Failed to load statistics:', err)
   } finally {
     isLoading.value = false
   }
@@ -129,7 +132,7 @@ async function handleDeleteClick() {
     showConfirm.value = true
   } catch (err) {
     error.value = 'Vorschau fehlgeschlagen'
-    console.error('[LogManagement] Dry-run failed:', err)
+    log.error(' Dry-run failed:', err)
   }
 }
 
@@ -154,7 +157,7 @@ async function confirmDelete() {
     await loadStatistics()
   } catch (err) {
     error.value = 'Bereinigung fehlgeschlagen'
-    console.error('[LogManagement] Cleanup failed:', err)
+    log.error(' Cleanup failed:', err)
   } finally {
     isDeleting.value = false
   }

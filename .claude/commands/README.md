@@ -6,10 +6,28 @@ Dieses Verzeichnis enthält alle Slash Commands für Claude Code, organisiert na
 
 ```
 commands/
+├── autoops/        # AutoOps Autonomous Agent Commands (NEU)
 ├── esp32/          # ESP32 Firmware Commands
 ├── server/         # God-Kaiser Server Commands
 └── integration/    # System-übergreifende Commands
 ```
+
+## 🤖 AutoOps Commands (`autoops/`) - NEU
+
+Autonomer Agent für ESP-Konfiguration, Debug & Fix. Plugin-basiert und selbst-dokumentierend.
+
+| Command | Datei | Beschreibung |
+|---------|-------|--------------|
+| `/autoops-run` | [run.md](autoops/run.md) | **Vollautonome ESP-Konfiguration** mit Sensor/Aktuator-Setup |
+| `/autoops-debug` | [debug.md](autoops/debug.md) | System-Diagnose, Auto-Fix und Dokumentation |
+| `/autoops-status` | [status.md](autoops/status.md) | Plugin-Übersicht und letzte Reports |
+
+**Dokumentation:**
+- AutoOps Framework: [.claude/CLAUDE_AUTOOPS.md](../CLAUDE_AUTOOPS.md)
+- Plugin-System: `El Servador/god_kaiser_server/src/autoops/`
+- API Client: `autoops/core/api_client.py`
+
+---
 
 ## 📁 ESP32 Commands (`esp32/`)
 
@@ -62,6 +80,9 @@ System-übergreifende Commands für End-to-End-Tests und Validierung.
 ### Slash Command ausführen
 
 ```bash
+/autoops-run        # Autonome ESP-Konfiguration (NEU)
+/autoops-debug      # System-Diagnose & Auto-Fix (NEU)
+/autoops-status     # AutoOps Plugin-Status (NEU)
 /esp-build          # Build ESP32 Firmware
 /esp-test           # ESP32 Tests (Server-orchestriert)
 /server-test        # Server Python Tests
@@ -141,11 +162,12 @@ Commands werden automatisch erkannt, wenn sie in `.claude/commands/` liegen.
 
 ### Weitere Ressourcen
 
+- **AutoOps Framework:** [.claude/CLAUDE_AUTOOPS.md](../CLAUDE_AUTOOPS.md) - Autonomer Agent
 - **Architektur:** [.claude/ARCHITECTURE_DEPENDENCIES.md](../ARCHITECTURE_DEPENDENCIES.md)
 - **Workflow Patterns:** [.claude/WORKFLOW_PATTERNS.md](../WORKFLOW_PATTERNS.md)
 - **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
 
 ---
 
-**Letzte Aktualisierung:** 2025-01
-**Version:** 2.0 (Reorganisiert nach System-Komponenten)
+**Letzte Aktualisierung:** 2026-02-15
+**Version:** 3.0 (AutoOps Agent-System hinzugefügt)

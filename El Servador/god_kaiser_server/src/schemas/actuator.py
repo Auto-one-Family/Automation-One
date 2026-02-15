@@ -235,6 +235,19 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     servo_min_pulse: Optional[int] = Field(None)
     servo_max_pulse: Optional[int] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # Config status from ESP32 verification
+    config_status: Optional[str] = Field(
+        None,
+        description="Config status: pending, applied, failed",
+    )
+    config_error: Optional[str] = Field(
+        None,
+        description="Error code if config_status=failed",
+    )
+    config_error_detail: Optional[str] = Field(
+        None,
+        description="Error detail if config_status=failed",
+    )
     # Current state
     current_value: Optional[float] = Field(
         None,

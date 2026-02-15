@@ -43,7 +43,7 @@ import {
 /**
  * Mapping von Event-Types zu Lucide Icons.
  *
- * Gemappte Event-Types (33):
+ * Gemappte Event-Types (32):
  * - Sensor: sensor_data, sensor_health
  * - Actuator: actuator_status, actuator_response, actuator_alert, actuator_command, actuator_command_failed
  * - ESP: esp_health

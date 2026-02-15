@@ -382,6 +382,10 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
 bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
   RegisteredActuator* actuator = findActuator(gpio);
   if (!actuator || !actuator->driver) {
+    LOG_ERROR("controlActuatorBinary: actuator not found on GPIO " + String(gpio));
+    errorTracker.trackError(ERROR_ACTUATOR_NOT_FOUND,
+                            ERROR_SEVERITY_ERROR,
+                            "Actuator missing (binary control)");
     return false;
   }
 
@@ -549,26 +553,56 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   command.timestamp = millis();
   command.correlation_id = extractJSONString(payload, "correlation_id");
 
-  bool success = false;
-  if (command.command.equalsIgnoreCase("ON")) {
-    success = controlActuatorBinary(gpio, true);
-  } else if (command.command.equalsIgnoreCase("OFF")) {
-    success = controlActuatorBinary(gpio, false);
-  } else if (command.command.equalsIgnoreCase("PWM")) {
-    success = controlActuator(gpio, command.value);
-  } else if (command.command.equalsIgnoreCase("TOGGLE")) {
-    RegisteredActuator* actuator = findActuator(gpio);
-    if (actuator) {
-      success = controlActuatorBinary(gpio, !actuator->config.current_state);
-    }
-  } else {
-    LOG_ERROR("Unknown actuator command: " + command.command);
+  // BUG-008 Fix: Check if actuator exists before processing command
+  RegisteredActuator* actuator = findActuator(gpio);
+  if (!actuator || !actuator->driver) {
+    LOG_ERROR("╔════════════════════════════════════════╗");
+    LOG_ERROR("║  ACTUATOR COMMAND FAILED               ║");
+    LOG_ERROR("╚════════════════════════════════════════╝");
+    LOG_ERROR("No actuator configured on GPIO " + String(gpio));
+    LOG_ERROR("Hint: Send config first via kaiser/{id}/esp/{esp_id}/config");
+
+    String errorMessage = "Actuator not configured on GPIO " + String(gpio) +
+                          ". Configure via API first.";
+    publishActuatorResponse(command, false, errorMessage);
+    errorTracker.trackError(ERROR_ACTUATOR_NOT_FOUND,
+                            ERROR_SEVERITY_ERROR,
+                            "Command received for unconfigured actuator");
+    return false;
   }
 
-  publishActuatorResponse(command,
-                          success,
-                          success ? "Command executed" : "Command failed");
+  // Check emergency stop state
+  if (actuator->emergency_stopped) {
+    LOG_WARNING("Actuator GPIO " + String(gpio) + " is emergency stopped");
+    publishActuatorResponse(command, false,
+                            "Actuator in emergency stop state. Clear emergency first.");
+    return false;
+  }
+
+  bool success = false;
+  String resultMessage = "Command executed";
+
+  if (command.command.equalsIgnoreCase("ON")) {
+    success = controlActuatorBinary(gpio, true);
+    if (!success) resultMessage = "Failed to turn actuator ON";
+  } else if (command.command.equalsIgnoreCase("OFF")) {
+    success = controlActuatorBinary(gpio, false);
+    if (!success) resultMessage = "Failed to turn actuator OFF";
+  } else if (command.command.equalsIgnoreCase("PWM")) {
+    success = controlActuator(gpio, command.value);
+    if (!success) resultMessage = "Failed to set PWM value";
+  } else if (command.command.equalsIgnoreCase("TOGGLE")) {
+    success = controlActuatorBinary(gpio, !actuator->config.current_state);
+    if (!success) resultMessage = "Failed to toggle actuator";
+  } else {
+    LOG_ERROR("Unknown actuator command: " + command.command);
+    resultMessage = "Unknown command: " + command.command;
+  }
+
+  publishActuatorResponse(command, success, resultMessage);
   if (success) {
+    LOG_INFO("Actuator command executed: GPIO " + String(gpio) +
+             " " + command.command + " = " + String(command.value));
     publishActuatorStatus(gpio);
   }
 

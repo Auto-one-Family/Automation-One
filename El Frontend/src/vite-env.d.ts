@@ -8,6 +8,7 @@ declare module '*.vue' {
 
 interface ImportMetaEnv {
   readonly VITE_API_URL: string
+  readonly VITE_LOG_LEVEL: 'error' | 'warn' | 'info' | 'debug'
 }
 
 interface ImportMeta {

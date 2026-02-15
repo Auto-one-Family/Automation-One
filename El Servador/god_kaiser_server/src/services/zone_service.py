@@ -31,10 +31,13 @@ Mock ESP Integration:
 import time
 from typing import Any, Dict, Optional
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from ..core import constants
 from ..core.logging_config import get_logger
 from ..db.models.esp import ESPDevice
 from ..db.repositories import ESPRepository
+from ..db.repositories.subzone_repo import SubzoneRepository
 from ..mqtt.publisher import Publisher
 from ..schemas.zone import ZoneAssignResponse, ZoneRemoveResponse
 
@@ -71,8 +74,8 @@ class ZoneService:
         """
         self.esp_repo = esp_repo
         self.publisher = publisher or Publisher()
-        # Get kaiser_id from constants (default: "god")
-        self.kaiser_id = getattr(constants, "KAISER_ID", "god")
+        # WP2-Fix3: Get kaiser_id from config (default: "god")
+        self.kaiser_id = constants.get_kaiser_id()
 
     # =========================================================================
     # Zone Assignment
@@ -142,6 +145,8 @@ class ZoneService:
             "zone_name": zone_name,
             "sent_at": int(time.time()),
         }
+        # SQLAlchemy doesn't detect in-place JSON dict mutations
+        flag_modified(device, "device_metadata")
 
         # 5. Publish via MQTT (QoS 1 - At least once)
         mqtt_sent = self._publish_zone_assignment(topic, payload)
@@ -215,6 +220,10 @@ class ZoneService:
         # NOTE: We update DB regardless of MQTT status because:
         # - Mock ESPs don't have MQTT connections
         # - Real ESPs will confirm via zone/ack topic
+
+        # Store old zone_id before clearing (needed for cascade-delete)
+        old_zone_id = device.zone_id
+
         device.zone_id = None
         device.master_zone_id = None
         device.zone_name = None
@@ -222,6 +231,19 @@ class ZoneService:
         # Clear pending assignment from metadata
         if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
             del device.device_metadata["pending_zone_assignment"]
+            # SQLAlchemy doesn't detect in-place JSON dict mutations
+            flag_modified(device, "device_metadata")
+
+        # 4a. Cascade-delete subzones to maintain consistency with ESP32 behavior
+        # ESP32 removes all subzones from NVS during zone removal - server must match
+        if old_zone_id:
+            subzone_repo = SubzoneRepository(self.esp_repo.session)
+            deleted_count = await subzone_repo.delete_all_by_zone(old_zone_id)
+            if deleted_count > 0:
+                logger.info(
+                    f"Cascade-deleted {deleted_count} subzone(s) for zone {old_zone_id} "
+                    f"(device {device_id})"
+                )
 
         # 5. Publish via MQTT
         mqtt_sent = self._publish_zone_assignment(topic, payload)
@@ -290,6 +312,8 @@ class ZoneService:
             # Clear pending assignment
             if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
                 del device.device_metadata["pending_zone_assignment"]
+                # SQLAlchemy doesn't detect in-place JSON dict mutations
+                flag_modified(device, "device_metadata")
 
             logger.info(
                 f"Zone assignment confirmed for {device_id}: "

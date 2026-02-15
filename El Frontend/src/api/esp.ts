@@ -1,22 +1,30 @@
 /**
  * Unified ESP API Client
- * 
+ *
  * Supports both Mock ESPs (via /debug/mock-esp) and Real ESPs (via /v1/esp/devices).
  * Automatically routes API calls based on ESP ID detection.
  */
 
 import api from './index'
 import { debugApi } from './debug'
-import type { 
-  MockESP, 
-  MockESPCreate, 
-  OfflineInfo, 
+import { sensorsApi } from './sensors'
+import { createLogger } from '@/utils/logger'
+import { getSensorUnit } from '@/utils/sensorDefaults'
+
+const logger = createLogger('ESP-API')
+import type {
+  MockESP,
+  MockESPCreate,
+  MockSensor,
+  OfflineInfo,
   GpioStatusResponse,
   PendingESPDevice,
   PendingDevicesListResponse,
   ESPApprovalRequest,
   ESPApprovalResponse,
-  ESPRejectionRequest
+  ESPRejectionRequest,
+  SensorConfigResponse,
+  QualityLevel
 } from '@/types'
 
 // =============================================================================
@@ -54,6 +62,9 @@ export interface ESPDevice {
   zone_id?: string | null             // Technical zone ID (lowercase, no spaces)
   zone_name?: string | null           // Human-readable zone name (UI display)
   master_zone_id?: string | null      // Parent zone for hierarchical zones
+  kaiser_id?: string | null           // Kaiser ID for zone management
+  subzone_id?: string | null          // Subzone assignment ID
+  subzone_name?: string | null        // Human-readable subzone name
   is_zone_master?: boolean            // Whether this ESP is zone master
   ip_address?: string
   mac_address?: string
@@ -160,8 +171,7 @@ export interface ESPConfigResponse {
 function isMockEsp(espId: string): boolean {
   return (
     espId.startsWith('ESP_MOCK_') ||
-    espId.startsWith('MOCK_') ||
-    espId.includes('MOCK')
+    espId.startsWith('MOCK_')
   )
 }
 
@@ -173,6 +183,79 @@ function normalizeEspId(device: ESPDevice | string): string {
     return device
   }
   return device.device_id || device.esp_id || ''
+}
+
+// =============================================================================
+// Sensor Config → MockSensor Mapping
+// =============================================================================
+
+/**
+ * Map SensorConfigResponse (from /sensors API) to MockSensor format
+ * used by ESPOrbitalLayout and SensorSatellite components.
+ *
+ * This bridges the gap between DB sensor configs and the in-memory
+ * Mock ESP sensor format that the UI components expect.
+ */
+function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
+  return {
+    gpio: config.gpio,
+    sensor_type: config.sensor_type,
+    name: config.name || null,
+    raw_value: config.latest_value ?? 0,
+    unit: getSensorUnit(config.sensor_type),
+    quality: (config.latest_quality as QualityLevel) || 'good',
+    raw_mode: true,
+    last_read: config.latest_timestamp || null,
+    operating_mode: config.processing_mode as MockSensor['operating_mode'],
+    config_status: config.config_status as MockSensor['config_status'],
+    config_error: config.config_error || null,
+    config_error_detail: config.config_error_detail || null,
+  }
+}
+
+/**
+ * Fetch sensor configs for real (DB) devices and attach as sensors[].
+ *
+ * Without this enrichment, DB devices only have sensor_count (integer)
+ * but no sensors[] array, causing SensorSatellite cards to not render.
+ */
+async function enrichDbDevicesWithSensors(devices: ESPDevice[]): Promise<void> {
+  // Collect device IDs with sensors
+  const devicesWithSensors = devices.filter(d => (d.sensor_count ?? 0) > 0)
+
+  if (devicesWithSensors.length === 0) return
+
+  try {
+    // Fetch all sensor configs in one call (page_size large enough for typical setups)
+    const { data: allSensors } = await sensorsApi.list({ page_size: 500 })
+
+    // Group sensors by ESP device ID
+    const sensorsByEsp = new Map<string, MockSensor[]>()
+    for (const sensorConfig of allSensors) {
+      const espId = sensorConfig.esp_device_id || sensorConfig.esp_id
+      if (!espId) continue
+
+      if (!sensorsByEsp.has(espId)) {
+        sensorsByEsp.set(espId, [])
+      }
+      sensorsByEsp.get(espId)!.push(mapSensorConfigToMockSensor(sensorConfig))
+    }
+
+    // Attach sensors to devices
+    for (const device of devicesWithSensors) {
+      const deviceId = device.device_id || device.esp_id || ''
+      const sensors = sensorsByEsp.get(deviceId)
+      if (sensors && sensors.length > 0) {
+        device.sensors = sensors
+        device.sensor_count = sensors.length
+        logger.debug(`Enriched ${deviceId} with ${sensors.length} sensors`)
+      }
+    }
+
+    logger.info(`Enriched ${devicesWithSensors.length} DB devices with sensor data`)
+  } catch (err) {
+    logger.error('Failed to enrich DB devices with sensors - sensor cards may be empty until live data arrives', err)
+  }
 }
 
 // =============================================================================
@@ -195,27 +278,35 @@ export const espApi = {
     page_size?: number
   }): Promise<ESPDevice[]> {
     // Fetch both Mock and Real ESPs in parallel
+    // Mock ESP fetch is non-critical (graceful fallback to empty)
+    // DB device fetch failure is propagated to caller for proper error handling
+    let dbFetchError: Error | null = null
     const [mockEsps, dbDevices] = await Promise.all([
       debugApi.listMockEsps().catch((err) => {
-        console.warn('[ESP API] Failed to fetch mock ESPs:', err)
+        logger.warn('Failed to fetch mock ESPs (non-critical)', err)
         return [] as MockESP[]
       }),
       api
         .get<ESPDeviceListResponse>('/esp/devices', { params })
         .catch((err) => {
-          console.warn('[ESP API] Failed to fetch DB devices:', err)
-          return { data: { success: true, data: [] } }
+          logger.error('Failed to fetch DB devices - dashboard may show incomplete data', err)
+          dbFetchError = err instanceof Error ? err : new Error(String(err))
+          return { data: { success: false, data: [] } }
         })
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])
 
-    console.log(`[ESP API] listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
+    // If DB fetch failed and no mock ESPs available, propagate the error
+    if (dbFetchError && mockEsps.length === 0) {
+      throw dbFetchError
+    }
+
+    logger.info(`listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
 
     // DEBUG: Log raw mock ESP data from server to verify name field
     if (mockEsps.length > 0) {
-      console.log('[ESP API] listDevices: Raw Mock ESP data from debug API:')
-      mockEsps.forEach((mock) => {
-        console.log(`  - ${mock.esp_id}: name="${mock.name}", zone_id="${mock.zone_id}"`)
+      logger.debug('Raw Mock ESP data from debug API', {
+        mocks: mockEsps.map(m => ({ esp_id: m.esp_id, name: m.name, zone_id: m.zone_id }))
       })
     }
 
@@ -256,7 +347,7 @@ export const espApi = {
         const deviceId = device.device_id || device.esp_id || ''
         // If it's in the mock store, skip it (we already have richer data)
         if (mockEspIds.has(deviceId)) {
-          console.debug(`[ESP API] Filtering out DB device ${deviceId} (exists in mock store)`)
+          logger.debug(`Filtering out DB device ${deviceId} (exists in mock store)`)
           return false
         }
         return true
@@ -265,7 +356,7 @@ export const espApi = {
         const deviceId = device.device_id || device.esp_id || ''
         // Mark mock-pattern IDs that aren't in mock store as orphaned
         if (isMockEsp(deviceId)) {
-          console.debug(`[ESP API] Marking ${deviceId} as orphaned mock (not in mock store)`)
+          logger.debug(`Marking ${deviceId} as orphaned mock (not in mock store)`)
           return {
             ...device,
             metadata: { ...device.metadata, orphaned_mock: true },
@@ -274,8 +365,12 @@ export const espApi = {
         return device
       })
 
+    // Enrich DB devices with sensor configs (so SensorSatellite cards render)
+    // Mock ESPs already have sensors[] from debug store; DB devices only have sensor_count
+    await enrichDbDevicesWithSensors(filteredDbDevices)
+
     const result = [...normalizedMockEsps, ...filteredDbDevices]
-    console.debug(`[ESP API] Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
+    logger.debug(`Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
 
     // Combine: Mock ESPs first (active), then real/orphaned
     return result
@@ -324,7 +419,7 @@ export const espApi = {
 
         // If 404: device might exist in DB only (orphaned mock)
         if (axiosError.response?.status === 404) {
-          console.warn(`[ESP API] Mock ESP ${normalizedId} not in debug store, trying database...`)
+          logger.warn(`Mock ESP ${normalizedId} not in debug store, trying database...`)
           const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
           // Mark as orphaned mock for UI indication
           return {
@@ -336,7 +431,14 @@ export const espApi = {
       }
     } else {
       const response = await api.get<ESPDevice>(`/esp/devices/${normalizedId}`)
-      return response.data
+      const device = response.data
+
+      // Enrich real device with sensor configs (same as in listDevices)
+      if ((device.sensor_count ?? 0) > 0 && !device.sensors?.length) {
+        await enrichDbDevicesWithSensors([device])
+      }
+
+      return device
     }
   },
 
@@ -395,12 +497,12 @@ export const espApi = {
     // Both Mock and Real ESPs are in the database and can be updated via the normal API
     // Mock ESPs are registered in DB when created (debug.py lines 104-146)
     try {
-      console.log(`[ESP API] updateDevice: Sending PATCH to /esp/devices/${normalizedId}`, update)
+      logger.debug(`Sending PATCH to /esp/devices/${normalizedId}`, update)
       const response = await api.patch<ESPDevice>(
         `/esp/devices/${normalizedId}`,
         update
       )
-      console.log(`[ESP API] updateDevice: Server response:`, {
+      logger.debug('Server response', {
         status: response.status,
         name: response.data.name,
         device_id: response.data.device_id,
@@ -413,8 +515,8 @@ export const espApi = {
       // If 404 and it's a Mock ESP, it might only exist in the debug store
       // This can happen if the server was restarted (DB cleared) but UI still has cached data
       if (axiosError.response?.status === 404 && isMockEsp(normalizedId)) {
-        console.warn(
-          `[ESP API] Mock ESP ${normalizedId} not found in database. ` +
+        logger.warn(
+          `Mock ESP ${normalizedId} not found in database. ` +
           `It may need to be recreated. Fetching current state from debug store...`
         )
 
@@ -476,16 +578,16 @@ export const espApi = {
         // If 404: device exists in DB but not in mock store (orphaned)
         // Try to delete from database directly
         if (axiosError.response?.status === 404) {
-          console.warn(`[ESP API] Mock ESP ${normalizedId} not found in debug store, trying database deletion...`)
+          logger.warn(`Mock ESP ${normalizedId} not found in debug store, trying database deletion...`)
           try {
             await api.delete(`/esp/devices/${normalizedId}`)
-            console.info(`[ESP API] Successfully deleted orphaned mock ESP ${normalizedId} from database`)
+            logger.info(`Successfully deleted orphaned mock ESP ${normalizedId} from database`)
             return
           } catch (dbErr: unknown) {
             const dbAxiosError = dbErr as { response?: { status?: number } }
             // If also 404 in DB, device is already gone - consider success
             if (dbAxiosError.response?.status === 404) {
-              console.info(`[ESP API] Mock ESP ${normalizedId} already deleted from database`)
+              logger.info(`Mock ESP ${normalizedId} already deleted from database`)
               return
             }
             throw new Error(`Konnte verwaisten Mock ESP nicht löschen: ${normalizedId}. Das Gerät existiert möglicherweise nur noch im UI-Cache.`)
@@ -544,7 +646,7 @@ export const espApi = {
 
     if (isMockEsp(normalizedId)) {
       // Mock ESPs don't have restart endpoint - be honest about it
-      console.info(`[ESP API] Restart command not available for Mock ESP ${normalizedId}`)
+      logger.info(`Restart command not available for Mock ESP ${normalizedId}`)
       return {
         success: false, // Changed to false - command wasn't actually executed
         device_id: normalizedId,
@@ -575,7 +677,7 @@ export const espApi = {
 
     if (isMockEsp(normalizedId)) {
       // Mock ESPs don't have reset endpoint - be honest about it
-      console.info(`[ESP API] Factory reset command not available for Mock ESP ${normalizedId}`)
+      logger.info(`Factory reset command not available for Mock ESP ${normalizedId}`)
       return {
         success: false, // Changed to false - command wasn't actually executed
         device_id: normalizedId,
@@ -592,35 +694,22 @@ export const espApi = {
     }
   },
 
-  /**
-   * Update ESP configuration via MQTT
-   *
-   * Note: Mock ESPs don't support MQTT config updates. Use the debug API
-   * for Mock ESP state changes.
-   */
-  async updateConfig(
-    espId: string,
-    config: Record<string, unknown>
-  ): Promise<ESPConfigResponse> {
-    const normalizedId = normalizeEspId(espId)
-
-    if (isMockEsp(normalizedId)) {
-      // Mock ESPs don't support config updates via MQTT
-      console.info(`[ESP API] Config updates via MQTT not available for Mock ESP ${normalizedId}`)
-      return {
-        success: false, // Changed to false - config wasn't actually sent
-        device_id: normalizedId,
-        config_sent: false,
-        config_acknowledged: false,
-      }
-    } else {
-      const response = await api.post<ESPConfigResponse>(
-        `/esp/devices/${normalizedId}/config`,
-        config
-      )
-      return response.data
-    }
-  },
+  // ===========================================================================
+  // ESP32 Config-Push Architektur
+  // ===========================================================================
+  //
+  // Config-Push zu ESP32-Geräten erfolgt AUTOMATISCH durch das Backend nach
+  // Sensor/Actuator CRUD-Operationen. Das Frontend muss keinen separaten
+  // Config-Push triggern.
+  //
+  // Ablauf:
+  //   1. Frontend ruft sensorsApi.create() oder actuatorsApi.create() auf
+  //   2. Backend speichert in DB und triggert automatisch Config-Push
+  //   3. ESP32 erhält Config via MQTT
+  //
+  // Für manuelle Konfiguration einzelner Sensoren/Aktoren die entsprechenden
+  // CRUD-Methoden in sensorsApi und actuatorsApi verwenden.
+  // ===========================================================================
 
   /**
    * Get GPIO status for an ESP device.

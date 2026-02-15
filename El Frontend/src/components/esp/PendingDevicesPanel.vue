@@ -18,6 +18,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { X, Check, Ban, Wifi, Clock, MapPin, Info, Loader2, Radio } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { getWifiStrength } from '@/utils/wifiStrength'
+import RejectDeviceModal from '@/components/modals/RejectDeviceModal.vue'
 import type { PendingESPDevice } from '@/types'
 
 interface Props {
@@ -45,11 +46,17 @@ const activeTab = ref<TabType>('pending')
 const approvingDevices = ref<Set<string>>(new Set())
 const rejectingDevices = ref<Set<string>>(new Set())
 
+// Reject modal state
+const rejectModalOpen = ref(false)
+const rejectTargetDevice = ref<PendingESPDevice | null>(null)
+
 // Fetch pending devices when panel opens
 watch(() => props.isOpen, (open) => {
   if (open) {
     espStore.fetchPendingDevices()
     nextTick(updatePosition)
+    // Re-run after layout (offsetWidth can be 0 on first paint)
+    requestAnimationFrame(() => requestAnimationFrame(updatePosition))
   }
 })
 
@@ -70,32 +77,48 @@ onUnmounted(() => {
 // Watch for anchor changes
 watch(() => props.anchorEl, () => nextTick(updatePosition))
 
-// Position panel relative to anchor element
+// Position panel relative to anchor element, or use fallback when anchor is null
 function updatePosition() {
-  if (!props.anchorEl || !panelRef.value || !props.isOpen) return
+  if (!panelRef.value || !props.isOpen) return
 
-  const anchor = props.anchorEl.getBoundingClientRect()
   const panel = panelRef.value
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
 
-  // Position below the button, right-aligned
-  let top = anchor.bottom + 8
-  let left = anchor.right - panel.offsetWidth
+  if (props.anchorEl) {
+    // Position below the button, right-aligned
+    const anchor = props.anchorEl.getBoundingClientRect()
+    let top = anchor.bottom + 8
+    let left = anchor.right - panel.offsetWidth
 
-  // Viewport boundary checks
-  if (left < 16) left = 16
-  if (left + panel.offsetWidth > viewportWidth - 16) {
-    left = viewportWidth - panel.offsetWidth - 16
+    // Viewport boundary checks
+    if (left < 16) left = 16
+    if (left + panel.offsetWidth > viewportWidth - 16) {
+      left = viewportWidth - panel.offsetWidth - 16
+    }
+
+    // If not enough space below, position above
+    if (top + panel.offsetHeight > viewportHeight - 16) {
+      top = anchor.top - panel.offsetHeight - 8
+    }
+
+    panel.style.right = 'auto'
+    panel.style.top = `${top}px`
+    panel.style.left = `${left}px`
+  } else {
+    // Fallback when no anchor (e.g. triggered from TopBar): top-right below header
+    const HEADER_OFFSET = 72
+    const panelH = panel.offsetHeight || 320
+    let top = HEADER_OFFSET + 8
+
+    if (top + panelH > viewportHeight - 16) {
+      top = Math.max(16, viewportHeight - panelH - 16)
+    }
+
+    panel.style.left = 'auto'
+    panel.style.right = '16px'
+    panel.style.top = `${top}px`
   }
-
-  // If not enough space below, position above
-  if (top + panel.offsetHeight > viewportHeight - 16) {
-    top = anchor.top - panel.offsetHeight - 8
-  }
-
-  panel.style.top = `${top}px`
-  panel.style.left = `${left}px`
 }
 
 // Computed
@@ -155,18 +178,29 @@ async function handleApprove(device: PendingESPDevice) {
   }
 }
 
-async function handleReject(device: PendingESPDevice) {
+function handleReject(device: PendingESPDevice) {
   if (rejectingDevices.value.has(device.device_id)) return
 
-  // Simple prompt for rejection reason
-  const reason = prompt('Grund für die Ablehnung (optional):') || 'Manuell abgelehnt'
+  // Open reject modal instead of window.prompt() for UX consistency
+  rejectTargetDevice.value = device
+  rejectModalOpen.value = true
+}
+
+async function confirmReject(reason: string) {
+  const device = rejectTargetDevice.value
+  if (!device) return
 
   rejectingDevices.value.add(device.device_id)
   try {
     await espStore.rejectDevice(device.device_id, reason)
   } finally {
     rejectingDevices.value.delete(device.device_id)
+    rejectTargetDevice.value = null
   }
+}
+
+function cancelReject() {
+  rejectTargetDevice.value = null
 }
 
 function handleClose() {
@@ -182,11 +216,11 @@ function isProcessing(deviceId: string): boolean {
 
 <template>
   <Teleport to="body">
-    <!-- Backdrop -->
+    <!-- Backdrop: glass overlay for mission-control atmosphere -->
     <Transition name="fade">
       <div
         v-if="isOpen"
-        class="fixed inset-0 z-40"
+        class="pending-backdrop"
         @click="handleClose"
       />
     </Transition>
@@ -232,16 +266,16 @@ function isProcessing(deviceId: string): boolean {
         <div v-if="activeTab === 'pending'" class="pending-panel__content">
           <!-- Loading State -->
           <div v-if="isLoading" class="pending-panel__loading">
-            <Loader2 class="w-6 h-6 animate-spin text-blue-400" />
-            <span>Lade Geräte...</span>
+            <Loader2 class="pending-panel__loading-icon" />
+            <span>Suche nach Geräten...</span>
           </div>
 
           <!-- Empty State -->
           <div v-else-if="isEmpty" class="pending-panel__empty">
-            <Radio class="w-8 h-8 text-gray-500 mb-2" />
-            <p class="text-gray-400 text-sm text-center">
-              Keine neuen Geräte.<br>
-              ESP32 verbinden sich automatisch.
+            <Radio class="pending-panel__empty-icon" />
+            <p class="pending-panel__empty-text">
+              Keine neuen Geräte.
+              <br><span class="pending-panel__empty-hint">ESP32 verbinden sich automatisch.</span>
             </p>
             <button
               class="pending-panel__info-link"
@@ -254,10 +288,14 @@ function isProcessing(deviceId: string): boolean {
           <!-- Device List -->
           <div v-else class="pending-panel__list">
             <div
-              v-for="device in pendingDevices"
+              v-for="(device, index) in pendingDevices"
               :key="device.device_id"
               class="pending-device"
-              :class="{ 'pending-device--processing': isProcessing(device.device_id) }"
+              :class="{
+                'pending-device--processing': isProcessing(device.device_id),
+                'pending-device--fresh': getTimeAgo(device.last_seen || device.discovered_at) === 'gerade eben'
+              }"
+              :style="{ '--stagger-index': index }"
             >
               <!-- Device Info -->
               <div class="pending-device__info">
@@ -320,7 +358,7 @@ function isProcessing(deviceId: string): boolean {
         <div v-if="activeTab === 'info'" class="pending-panel__content">
           <div class="pending-panel__info">
             <h4 class="pending-panel__info-title">
-              <Wifi class="w-5 h-5 text-emerald-400" />
+              <Wifi class="pending-panel__info-icon" />
               ESP32 verbinden
             </h4>
 
@@ -367,26 +405,62 @@ function isProcessing(deviceId: string): boolean {
         </div>
       </div>
     </Transition>
+
+    <!-- Reject Device Modal -->
+    <RejectDeviceModal
+      v-model:open="rejectModalOpen"
+      :device-id="rejectTargetDevice?.device_id ?? ''"
+      @confirm="confirmReject"
+      @cancel="cancelReject"
+    />
   </Teleport>
 </template>
 
 <style scoped>
-/* Panel Container - positioned via JS */
+/* Backdrop: glass overlay — mission-control depth */
+.pending-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop);
+  background: rgba(7, 7, 13, 0.72);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* Panel Container - positioned via JS, CSS fallback wenn anchor=null */
 .pending-panel {
   position: fixed;
-  z-index: 50;
+  z-index: var(--z-popover);
+  top: 80px;
+  right: 16px;
+  left: auto;
   width: 100%;
   max-width: 400px;
   max-height: calc(100vh - 100px);
-  background-color: var(--color-bg-secondary);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-lg);
   box-shadow:
-    0 20px 25px -5px rgba(0, 0, 0, 0.3),
-    0 8px 10px -6px rgba(0, 0, 0, 0.2);
+    0 20px 25px -5px rgba(0, 0, 0, 0.4),
+    0 8px 10px -6px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.03);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Iridescent accent — top edge, matches "✨ 1 Neue" button */
+.pending-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--gradient-iridescent);
+  opacity: 0.85;
+  z-index: 1;
 }
 
 /* Header with Tabs */
@@ -394,44 +468,47 @@ function isProcessing(deviceId: string): boolean {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.625rem 0.75rem;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--glass-border);
   background-color: var(--color-bg-tertiary);
+  position: relative;
+  z-index: 2;
 }
 
 /* Tab System */
 .pending-panel__tabs {
   display: flex;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 0.5rem;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-md);
 }
 
 .pending-panel__tab {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  font-size: 0.8125rem;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
   font-weight: 500;
+  font-family: var(--font-body);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .pending-panel__tab:hover {
   color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .pending-panel__tab.active {
   color: var(--color-text-primary);
-  background: rgba(96, 165, 250, 0.15);
+  background: rgba(96, 165, 250, 0.12);
 }
 
 .pending-panel__badge {
@@ -467,11 +544,14 @@ function isProcessing(deviceId: string): boolean {
   color: var(--color-text-primary);
 }
 
-/* Content */
+/* Content - min-height: 0 required for flex-based scrolling */
 .pending-panel__content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.75rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-border) transparent;
 }
 
 /* Loading State */
@@ -480,9 +560,20 @@ function isProcessing(deviceId: string): boolean {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
-  padding: 2rem;
+  gap: var(--space-3);
+  padding: var(--space-8);
   color: var(--color-text-muted);
+}
+
+.pending-panel__loading-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-iridescent-2);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Empty State */
@@ -491,53 +582,96 @@ function isProcessing(deviceId: string): boolean {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem 1rem;
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.pending-panel__empty-icon {
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.pending-panel__empty-text {
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-loose);
+  margin: 0;
+}
+
+.pending-panel__empty-hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
 }
 
 .pending-panel__info-link {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.8125rem;
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
   font-weight: 500;
+  font-family: var(--font-body);
   color: var(--color-iridescent-2);
-  background: rgba(96, 165, 250, 0.1);
+  background: rgba(96, 165, 250, 0.08);
   border: 1px solid rgba(96, 165, 250, 0.2);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
 .pending-panel__info-link:hover {
-  background: rgba(96, 165, 250, 0.15);
-  border-color: rgba(96, 165, 250, 0.3);
+  background: rgba(96, 165, 250, 0.14);
+  border-color: rgba(96, 165, 250, 0.35);
 }
 
 /* Device List */
 .pending-panel__list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
-/* Device Card */
+/* Device Card — staggered entrance */
 .pending-device {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
-  padding: 0.75rem;
+  gap: var(--space-2);
+  padding: var(--space-3);
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
-  transition: all 0.2s;
+  border-radius: var(--radius-md);
+  border-left-width: 3px;
+  border-left-color: transparent;
+  transition: border-color var(--transition-base), transform var(--transition-fast);
+  animation: pending-device-enter 0.35s var(--ease-out) calc(var(--stagger-index, 0) * 0.04s) both;
 }
 
 .pending-device:hover {
-  border-color: rgba(96, 165, 250, 0.3);
+  border-color: var(--glass-border-hover);
+  border-left-color: rgba(96, 165, 250, 0.4);
+}
+
+.pending-device--fresh {
+  border-left-color: var(--color-iridescent-2);
+  box-shadow: inset 0 0 12px rgba(96, 165, 250, 0.04);
 }
 
 .pending-device--processing {
   opacity: 0.7;
   pointer-events: none;
+}
+
+@keyframes pending-device-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .pending-device__info {
@@ -547,17 +681,18 @@ function isProcessing(deviceId: string): boolean {
 }
 
 .pending-device__name {
-  font-size: 0.875rem;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-mono);
 }
 
 .pending-device__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.625rem;
-  font-size: 0.75rem;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-body);
   color: var(--color-text-muted);
 }
 
@@ -578,14 +713,15 @@ function isProcessing(deviceId: string): boolean {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.375rem;
-  padding: 0.4375rem 0.625rem;
-  font-size: 0.75rem;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
+  font-size: var(--text-xs);
   font-weight: 500;
-  border-radius: 0.375rem;
+  font-family: var(--font-body);
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
 .pending-device__btn:disabled {
@@ -617,39 +753,47 @@ function isProcessing(deviceId: string): boolean {
 
 /* Info Content */
 .pending-panel__info {
-  padding: 0.5rem 0.25rem;
+  padding: var(--space-2) var(--space-1);
 }
 
 .pending-panel__info-title {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.625rem;
-  font-size: 0.9375rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-lg);
   font-weight: 600;
+  font-family: var(--font-body);
   color: var(--color-text-primary);
 }
 
+.pending-panel__info-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--color-success);
+}
+
 .pending-panel__info-text {
-  margin-bottom: 0.875rem;
-  font-size: 0.8125rem;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-base);
+  font-family: var(--font-body);
   color: var(--color-text-secondary);
-  line-height: 1.5;
+  line-height: var(--leading-loose);
 }
 
 .pending-panel__steps {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .pending-panel__step {
   display: flex;
-  gap: 0.625rem;
-  padding: 0.625rem;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 0.375rem;
-  border-left: 2px solid var(--color-iridescent-2);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-iridescent-2);
 }
 
 .pending-panel__step-number {
@@ -673,38 +817,41 @@ function isProcessing(deviceId: string): boolean {
 }
 
 .pending-panel__step-content strong {
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   font-weight: 600;
+  font-family: var(--font-body);
   color: var(--color-text-primary);
 }
 
 .pending-panel__step-content span {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
+  font-family: var(--font-body);
   color: var(--color-text-secondary);
 }
 
 .pending-panel__info-note {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.875rem;
-  padding: 0.5rem 0.625rem;
-  font-size: 0.75rem;
-  color: var(--color-text-tertiary);
-  background: rgba(96, 165, 250, 0.1);
-  border-radius: 0.375rem;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-body);
+  color: var(--color-text-muted);
+  background: rgba(96, 165, 250, 0.08);
+  border-radius: var(--radius-sm);
 }
 
 .pending-panel__info-note code {
   color: var(--color-iridescent-2);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
 }
 
-/* Transitions */
+/* Transitions — match design system */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.15s ease;
+  transition: opacity var(--duration-base) var(--ease-out);
 }
 
 .fade-enter-from,
@@ -714,13 +861,14 @@ function isProcessing(deviceId: string): boolean {
 
 .slide-down-enter-active,
 .slide-down-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-spring);
 }
 
 .slide-down-enter-from,
 .slide-down-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
+  transform: translateY(-12px) scale(0.98);
 }
 
 /* Mobile adjustments */

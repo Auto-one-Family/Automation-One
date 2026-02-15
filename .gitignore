@@ -19,8 +19,21 @@ nul
 *.swo
 *.swn
 *.log
-logs/
 npm-debug.log*
+
+# ========== DEBUG LOGS ==========
+# Log-Inhalte ignorieren, aber Struktur behalten
+logs/current/*
+!logs/current/.gitkeep
+logs/archive/*
+!logs/archive/.gitkeep
+logs/postgres/*
+!logs/postgres/.gitkeep
+logs/mqtt/*
+!logs/mqtt/.gitkeep
+logs/server/*.log*
+!logs/server/.gitkeep
+!logs/README.md
 yarn-debug.log*
 *.tmp
 *.temp
@@ -85,3 +98,38 @@ docs/.vuepress/.temp
 # Backup files
 El Servador/god_kaiser_server/backups/
 **/backups/
+
+# ========== DOCKER ==========
+docker-compose.override.yml
+
+# Backups
+backups/*.sql.gz
+backups/*.sql
+
+# ========== BUILD ARTIFACTS ==========
+debug_output.txt
+El\ Frontend/coverage/
+El\ Frontend/.playwright/
+El\ Frontend/vite.config.d.ts
+
+# ========== PYTHON CACHE ==========
+scripts/__pycache__/
+
+# ========== LOCAL SETTINGS ==========
+.claude/settings.local.json
+
+# ========== TEST ARTIFACTS ==========
+logs/wokwi/reports/*.xml
+logs/wokwi/reports/*.json
+
+# ========== ROOT SCREENSHOTS ==========
+/*.png
+
+# ========== COMPILED OBJECTS ==========
+El\ Trabajante/*.o
+
+# ========== LOCAL CONFIG & ARTIFACTS ==========
+.mcp.json
+.claude/*.local.md
+.claude/local-marketplace/
+docker/**/__pycache__/

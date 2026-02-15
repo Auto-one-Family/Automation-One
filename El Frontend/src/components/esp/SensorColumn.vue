@@ -1,0 +1,144 @@
+<script setup lang="ts">
+/**
+ * SensorColumn Component
+ *
+ * Extracted from ESPOrbitalLayout: Renders the left column of sensor satellites.
+ * Handles sensor selection and multi-row layout for >5 sensors.
+ *
+ * Used in:
+ * - ESPOrbitalLayout (left column)
+ * - Future: DeviceDetailView standalone sensor panel
+ */
+
+import { computed } from 'vue'
+import { Plus } from 'lucide-vue-next'
+import SensorSatellite from './SensorSatellite.vue'
+import type { QualityLevel } from '@/types'
+
+/** Sensor data shape from device.sensors array */
+export interface SensorItem {
+  gpio: number
+  sensor_type: string
+  name: string | null
+  raw_value: number | null
+  processed_value?: number | null
+  unit: string
+  quality: string
+  device_type?: string | null
+  multi_values?: Record<string, any> | null
+  is_multi_value?: boolean
+}
+
+interface Props {
+  espId: string
+  sensors: SensorItem[]
+  selectedGpio?: number | null
+  showConnections?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  selectedGpio: null,
+  showConnections: true,
+})
+
+const emit = defineEmits<{
+  'sensor-click': [gpio: number]
+}>()
+
+/** Use multi-row layout when >5 sensors */
+const useMultiRow = computed(() => props.sensors.length > 5)
+</script>
+
+<template>
+  <div
+    :class="[
+      'sensor-column',
+      {
+        'sensor-column--multi-row': useMultiRow,
+        'sensor-column--empty': sensors.length === 0,
+      }
+    ]"
+  >
+    <SensorSatellite
+      v-for="(sensor, idx) in sensors"
+      :key="`sensor-${sensor.gpio}`"
+      :esp-id="espId"
+      :gpio="sensor.gpio"
+      :sensor-type="sensor.sensor_type"
+      :name="sensor.name"
+      :value="sensor.processed_value ?? sensor.raw_value ?? 0"
+      :quality="(sensor.quality as QualityLevel)"
+      :unit="sensor.unit"
+      :device-type="sensor.device_type"
+      :multi-values="sensor.multi_values"
+      :is-multi-value="sensor.is_multi_value"
+      :selected="selectedGpio === sensor.gpio"
+      :show-connections="showConnections"
+      class="sensor-column__satellite"
+      :style="{ animationDelay: `${idx * 60}ms` }"
+      @click="emit('sensor-click', sensor.gpio)"
+    />
+
+    <!-- Empty state -->
+    <div v-if="sensors.length === 0" class="sensor-column__empty-slot">
+      <Plus class="w-3 h-3" />
+      <span>Sensors</span>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.sensor-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  align-items: stretch;
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.sensor-column--empty {
+  width: 56px;
+}
+
+/* Multi-column mode (>5 sensors) = 2 columns side by side */
+.sensor-column--multi-row {
+  display: grid;
+  grid-template-columns: repeat(2, 120px);
+  gap: 0.375rem;
+  width: auto;
+}
+
+.sensor-column__satellite {
+  position: relative !important;
+  transform: none !important;
+  width: 100%;
+  animation: satellite-appear 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes satellite-appear {
+  from { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.sensor-column__empty-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.5rem;
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.375rem;
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 0.5625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-height: 56px;
+}
+
+.sensor-column__empty-slot:hover {
+  border-color: rgba(96, 165, 250, 0.2);
+  color: rgba(255, 255, 255, 0.35);
+}
+</style>

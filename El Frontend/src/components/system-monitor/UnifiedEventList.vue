@@ -47,6 +47,9 @@ import {
   RotateCcw,
   ChevronRight,
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('UnifiedEventList')
 
 // ============================================================================
 // Props & Emits
@@ -392,7 +395,7 @@ async function measureContainerHeight(retryCount = 0): Promise<void> {
           // Nach allen Retries immer noch 0 - verwende Viewport-Höhe als Fallback
           // Das ist besser als der hardcodierte 600px Fallback
           containerHeight.value = window.innerHeight * 0.6 // ~60% der Viewport-Höhe
-          console.warn('[UnifiedEventList] Container height could not be measured, using viewport fallback')
+          log.warn('Container height could not be measured, using viewport fallback')
           resolve()
         }
       } else {

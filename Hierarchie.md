@@ -2,7 +2,7 @@
 
 > **Zweck:** Präzise Systemdokumentation für Entwickler - zeigt aktuelle Implementierung, Vision und Code-Locations  
 > **Orientierung:** Basierend auf tatsächlichem Code in `El Trabajante/`, `El Servador/` und `El Frontend/`  
-> **Referenz:** `.claude/CLAUDE.md` (ESP32), `.claude/CLAUDE_SERVER.md` (Server), `.claude/CLAUDE_FRONTEND.md` (Frontend)
+> **Referenz:** `.claude/skills/esp32/CLAUDE_Esp32.md` (ESP32), `.claude/skills/server/CLAUDE_SERVER.md` (Server), `.claude/skills/Frontend/CLAUDE_FRONTEND.md` (Frontend)
 
 ---
 
@@ -27,7 +27,7 @@
 │ El Frontend (Vue 3 + TypeScript + Vite + Pinia + Tailwind)               │
 │ Status: ✅ Production-Ready                                              │
 │ Code: El Frontend/src/                                                    │
-│ Doku: .claude/CLAUDE_FRONTEND.md                                          │
+│ Doku: .claude/skills/Frontend/CLAUDE_FRONTEND.md                          │
 │ Rolle: Web UI – Dashboard, Sensoren/Aktoren, System Monitor,              │
 │        Zone-Management, Pending Devices, Real-time WebSocket              │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -37,7 +37,7 @@
 │ Status: ✅ Production-Ready                                              │
 │ Fungiert auch als Kaiser (kaiser_id="god")                               │
 │ Code: El Servador/god_kaiser_server/                                      │
-│ Doku: .claude/CLAUDE_SERVER.md                                            │
+│ Doku: .claude/skills/server/CLAUDE_SERVER.md                              │
 │ Rolle: Control Hub, MQTT Broker, Logic Engine, Maintenance,              │
 │        SimulationScheduler, Audit/Retention, REST API v1                 │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -46,7 +46,7 @@
 │ ESP32-Agenten (C++ Firmware)                                             │
 │ Status: ✅ Production-Ready                                              │
 │ Code: El Trabajante/                                                      │
-│ Doku: .claude/CLAUDE.md                                                   │
+│ Doku: .claude/skills/esp32/CLAUDE_Esp32.md                                │
 │ Rolle: Sensor-Auslesung, Aktor-Steuerung, Provisioning,                  │
 │        Config-Response, Watchdog, Wokwi-Simulation                        │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -69,7 +69,7 @@ Detaillierte Beschreibung der geplanten Architektur (God, Kaiser-Nodes, KI-Plugi
 
 ### 2.0 El Frontend – Implementierte Komponenten
 
-**Status:** ✅ Production-Ready | **Code:** `El Frontend/src/` | **Doku:** `.claude/CLAUDE_FRONTEND.md`
+**Status:** ✅ Production-Ready | **Code:** `El Frontend/src/` | **Doku:** `.claude/skills/Frontend/CLAUDE_FRONTEND.md`
 
 El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP REST + WebSocket). Keine Direktverbindung zu ESP32.
 
@@ -203,7 +203,7 @@ El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP RES
 
 #### ✅ Vollständig Production-Ready
 - **Code-Location:** `El Trabajante/src/`
-- **Dokumentation:** `.claude/CLAUDE.md`
+- **Dokumentation:** `.claude/skills/esp32/CLAUDE_Esp32.md`
 - **Status:** ~13.300 Zeilen Code, 60+ Module, Production-Ready
 - **Kern-Module:**
   - SensorManager: RAW-Daten-Auslesung, Pi-Enhanced-Request
@@ -395,14 +395,14 @@ El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP RES
 
 ### 3.4 Frontend - User-Interface
 
-**Aktueller Stand (2026-01-27):** El Frontend ist **Production-Ready**. Es existiert eine einheitliche Web-App (Vue 3 + TypeScript + Vite + Pinia + Tailwind) mit System Monitor (4 Tabs), Pending Devices, Zone-Management, WebSocket Real-time usw. – siehe Section 2.0 und `.claude/CLAUDE_FRONTEND.md`. Die nachstehend aufgeführten „Production Frontend“-Funktionen sind **weiterhin geplant** und werden nicht entfernt.
+**Aktueller Stand (2026-01-27):** El Frontend ist **Production-Ready**. Es existiert eine einheitliche Web-App (Vue 3 + TypeScript + Vite + Pinia + Tailwind) mit System Monitor (4 Tabs), Pending Devices, Zone-Management, WebSocket Real-time usw. – siehe Section 2.0 und `.claude/skills/Frontend/CLAUDE_FRONTEND.md`. Die nachstehend aufgeführten „Production Frontend“-Funktionen sind **weiterhin geplant** und werden nicht entfernt.
 
 #### Bereits implementiert (El Frontend, Production-Ready)
 - **System Monitor:** Ereignisse | Logs | Datenbank | MQTT (eine View, 4 Tabs)
 - **Mock-ESP & Real-ESP:** Unified API, ESP-Management, Zone Drag & Drop
 - **Pending Devices:** Discovery/Approval, GPIO-Status
 - **User Management, Load Test, System Config,** WebSocket-Client, JWT, Pinia
-- **Code-Location:** `El Frontend/src/` | **Doku:** `.claude/CLAUDE_FRONTEND.md`
+- **Code-Location:** `El Frontend/src/` | **Doku:** `.claude/skills/Frontend/CLAUDE_FRONTEND.md`
 
 #### Production Frontend – Zusätzliche Funktionen (📋 Geplant, unverändert beibehalten)
 **Konzept:** Erweiterungen für vollständiges User-Interface für alle System-Funktionen.
@@ -486,15 +486,15 @@ El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP RES
 | **System-Types** | `src/models/system_types.h` | ✅ | KaiserZone, MasterZone, SubZone |
 | **TopicBuilder** | `src/utils/topic_builder.cpp` | ✅ | MQTT-Topic-Generierung |
 
-**Vollständige ESP32-Dokumentation:** `.claude/CLAUDE.md`
+**Vollständige ESP32-Dokumentation:** `.claude/skills/esp32/CLAUDE_Esp32.md`
 
 ### 5.3 Dokumentation - Wichtige Dateien
 
 | Dokument | Datei | Zweck |
 |----------|-------|-------|
-| **ESP32-Doku** | `.claude/CLAUDE.md` | Vollständige ESP32-Referenz |
-| **Server-Doku** | `.claude/CLAUDE_SERVER.md` | Vollständige Server-Referenz |
-| **Frontend-Doku** | `.claude/CLAUDE_FRONTEND.md` | Vollständige Frontend-Referenz (Vue 3, System Monitor, Pending Devices) |
+| **ESP32-Doku** | `.claude/skills/esp32/CLAUDE_Esp32.md` | Vollständige ESP32-Referenz |
+| **Server-Doku** | `.claude/skills/server/CLAUDE_SERVER.md` | Vollständige Server-Referenz |
+| **Frontend-Doku** | `.claude/skills/Frontend/CLAUDE_FRONTEND.md` | Vollständige Frontend-Referenz (Vue 3, System Monitor, Pending Devices) |
 | **MQTT-Protokoll** | `El Trabajante/docs/Mqtt_Protocoll.md` | MQTT-Spezifikation |
 | **API-Referenz** | `El Trabajante/docs/API_REFERENCE.md` | ESP32-API-Referenz |
 
@@ -545,7 +545,7 @@ El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP RES
 1. Neue Processor-Klasse in `El Servador/god_kaiser_server/src/sensors/sensor_libraries/active/`
 2. Erbt von `BaseSensorProcessor` (`src/sensors/base_processor.py`)
 3. Wird automatisch von `LibraryLoader` entdeckt
-4. Code-Location: `.claude/CLAUDE_SERVER.md` → Section 3.1
+4. Code-Location: `.claude/skills/server/CLAUDE_SERVER.md` → Section 3.1
 
 **KI-Plugin hinzufügen (Geplant):**
 1. Neue Plugin-Klasse in `El Servador/god_kaiser_server/src/ai/plugins/`
@@ -583,7 +583,7 @@ El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP RES
 - Sensor/Actuator-Management, Sensor-Registry (Multi-Value), Config-Response-Builder
 - MQTT-Kommunikation, Provisioning-System, Watchdog-System
 - Safety-Controller, GPIO Safe-Mode, Wokwi-Simulation
-- Doku: `.claude/CLAUDE.md`
+- Doku: `.claude/skills/esp32/CLAUDE_Esp32.md`
 
 **El Servador (God-Kaiser Server):**
 - FastAPI + PostgreSQL, MQTT-Handler für alle Topics
@@ -591,14 +591,14 @@ El Frontend kommuniziert **ausschließlich** mit dem God-Kaiser Server (HTTP RES
 - AuditRetentionService, AuditBackupService, Central Scheduler
 - REST API v1 (14 Router inkl. audit, debug, sequences, sensor_type_defaults)
 - WebSocket Real-time, Resilience (Circuit Breaker, Retry)
-- Doku: `.claude/CLAUDE_SERVER.md`
+- Doku: `.claude/skills/server/CLAUDE_SERVER.md`
 
 **El Frontend (Web UI):**
 - Vue 3 + TypeScript + Pinia + Tailwind
 - System Monitor (4 Tabs: Ereignisse | Logs | Datenbank | MQTT)
 - ESP-Management mit Drag & Drop, Pending Devices (Discovery/Approval)
 - Real-time WebSocket Updates, Zone-Management, GPIO-Status
-- Doku: `.claude/CLAUDE_FRONTEND.md`
+- Doku: `.claude/skills/Frontend/CLAUDE_FRONTEND.md`
 
 ### 📋 Geplant (Zukunft – unverändert beibehalten):
 - **Layer 1: God** – KI/Analytics Layer (Optional, Modular)

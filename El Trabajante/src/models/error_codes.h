@@ -32,6 +32,11 @@
 #define ERROR_I2C_BUS_RECOVERY_FAILED     1017  // Recovery attempt failed
 #define ERROR_I2C_BUS_RECOVERED           1018  // Recovery successful
 
+// I2C Protocol-Layer Errors (1007-1009, 1019)
+#define ERROR_I2C_TIMEOUT                 1007  // I2C operation timed out
+#define ERROR_I2C_CRC_FAILED              1009  // CRC validation failed
+#define ERROR_I2C_PROTOCOL_UNSUPPORTED    1019  // Sensor type not in protocol registry
+
 #define ERROR_ONEWIRE_INIT_FAILED   1020
 #define ERROR_ONEWIRE_NO_DEVICES    1021
 #define ERROR_ONEWIRE_READ_FAILED   1022
@@ -249,6 +254,9 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_I2C_BUS_RECOVERY_STARTED: return "I2C bus recovery initiated";
     case ERROR_I2C_BUS_RECOVERY_FAILED: return "I2C bus recovery failed after max attempts";
     case ERROR_I2C_BUS_RECOVERED: return "I2C bus recovered successfully";
+    case ERROR_I2C_TIMEOUT: return "I2C operation timed out (sensor not responding)";
+    case ERROR_I2C_CRC_FAILED: return "I2C sensor data CRC validation failed";
+    case ERROR_I2C_PROTOCOL_UNSUPPORTED: return "I2C sensor type has no registered communication protocol";
 
     case ERROR_ONEWIRE_INIT_FAILED: return "Failed to initialize OneWire bus";
     case ERROR_ONEWIRE_NO_DEVICES: return "No OneWire devices found on bus";
@@ -386,5 +394,3 @@ inline const char* getErrorCodeRange(uint16_t error_code) {
 }
 
 #endif
-
-

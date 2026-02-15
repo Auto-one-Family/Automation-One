@@ -171,6 +171,25 @@ class TopicBuilder:
         )
 
     @staticmethod
+    def build_lwt_topic(esp_id: str) -> str:
+        """
+        Build LWT (Last-Will-Testament) topic for clearing retained messages.
+
+        Used by server to publish empty retained message after ESP reconnect,
+        clearing stale offline LWT messages from the broker.
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/will
+        """
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_LWT,
+            esp_id=esp_id
+        )
+
+    @staticmethod
     def build_pi_enhanced_response_topic(esp_id: str, gpio: int) -> str:
         """
         Build Pi-Enhanced response topic.
@@ -593,6 +612,39 @@ class TopicBuilder:
         return None
 
     @staticmethod
+    def parse_system_diagnostics_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse system diagnostics topic.
+
+        Expected topic: kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics
+
+        ESP32 HealthMonitor publishes diagnostics snapshots (heap, RSSI,
+        uptime, error count, system state) every 60s to this topic.
+
+        Args:
+            topic: MQTT topic string
+
+        Returns:
+            {
+                "kaiser_id": str,
+                "esp_id": str,
+                "type": "system_diagnostics"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/system/diagnostics
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/system/diagnostics$"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "system_diagnostics",
+            }
+        return None
+
+    @staticmethod
     def parse_pi_enhanced_request_topic(topic: str) -> Optional[Dict[str, any]]:
         """
         Parse Pi-Enhanced request topic.
@@ -959,8 +1011,8 @@ class TopicBuilder:
         """
         if hardware_type == constants.HARDWARE_TYPE_ESP32_WROOM:
             return gpio in constants.GPIO_RANGE_ESP32_WROOM and gpio not in constants.GPIO_RESERVED_ESP32_WROOM
-        elif hardware_type == constants.HARDWARE_TYPE_XIAO_ESP32_C3:
-            return gpio in constants.GPIO_RANGE_XIAO_ESP32_C3 and gpio not in constants.GPIO_RESERVED_XIAO_ESP32_C3
+        elif hardware_type == constants.HARDWARE_TYPE_XIAO_ESP32C3:
+            return gpio in constants.GPIO_RANGE_XIAO_ESP32C3 and gpio not in constants.GPIO_RESERVED_XIAO_ESP32C3
         else:
             logger.error(f"Unknown hardware type: {hardware_type}")
             return False

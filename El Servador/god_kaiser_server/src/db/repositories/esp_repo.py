@@ -70,6 +70,22 @@ class ESPRepository(BaseRepository[ESPDevice]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_by_kaiser(self, kaiser_id: str) -> list[ESPDevice]:
+        """
+        Get all ESP devices assigned to a Kaiser node.
+
+        WP2-Fix5a: DB-Query via indexed kaiser_id column instead of metadata filter.
+
+        Args:
+            kaiser_id: Kaiser node identifier
+
+        Returns:
+            List of ESPDevice instances
+        """
+        stmt = select(ESPDevice).where(ESPDevice.kaiser_id == kaiser_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_zone_masters(self, zone_id: Optional[str] = None) -> list[ESPDevice]:
         """
         Get zone master devices.

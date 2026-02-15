@@ -91,11 +91,14 @@ export interface PendingDevicesListResponse {
 }
 
 /**
- * WebSocket event for device discovery.
+ * Payload for device_discovered WebSocket event (data field).
+ * For the full event wrapper, use DeviceDiscoveredEvent from websocket-events.ts.
  */
-export interface DeviceDiscoveredEvent {
+export interface DeviceDiscoveredPayload {
   device_id: string
   discovered_at: string
+  /** Last activity timestamp (initial = discovered_at) */
+  last_seen?: string | null
   ip_address?: string | null
   heap_free?: number | null
   wifi_rssi?: number | null
@@ -105,9 +108,10 @@ export interface DeviceDiscoveredEvent {
 }
 
 /**
- * WebSocket event for device approval.
+ * Payload for device_approved WebSocket event (data field).
+ * For the full event wrapper, use DeviceApprovedEvent from websocket-events.ts.
  */
-export interface DeviceApprovedEvent {
+export interface DeviceApprovedPayload {
   device_id: string
   approved_by: string
   approved_at: string
@@ -115,9 +119,10 @@ export interface DeviceApprovedEvent {
 }
 
 /**
- * WebSocket event for device rejection.
+ * Payload for device_rejected WebSocket event (data field).
+ * For the full event wrapper, use DeviceRejectedEvent from websocket-events.ts.
  */
-export interface DeviceRejectedEvent {
+export interface DeviceRejectedPayload {
   device_id: string
   rejection_reason: string
   rejected_at: string
@@ -250,6 +255,10 @@ export interface MockSensor {
   last_reading_at?: string | null
   // Phase 2F: Schedule configuration
   schedule_config?: { type: string; expression: string } | null
+  // Config verification status from ESP32
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Phase 6: Multi-Value Sensor Fields
@@ -270,6 +279,10 @@ export interface MockActuator {
   pwm_value: number
   emergency_stopped: boolean
   last_command: string | null
+  // Config verification status from ESP32
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
 }
 
 export interface MockESP {
@@ -280,7 +293,7 @@ export interface MockESP {
   master_zone_id: string | null
   subzone_id: string | null
   system_state: MockSystemState
-  status: 'online' | 'offline'  // Connection status for consistent display
+  status: 'online' | 'offline' | 'error' | 'unknown' | 'pending_approval' | 'approved' | 'rejected'  // Device lifecycle + connection status
   sensors: MockSensor[]
   actuators: MockActuator[]
   auto_heartbeat: boolean
@@ -614,6 +627,10 @@ export interface SensorConfigResponse {
   warning_min: number | null
   warning_max: number | null
   metadata: Record<string, unknown> | null
+  // Config status from ESP32 verification (Phase 2: write-after-verification)
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null
@@ -776,6 +793,10 @@ export interface ActuatorConfigResponse {
   servo_min_pulse: number | null
   servo_max_pulse: number | null
   metadata: Record<string, unknown> | null
+  // Config status from ESP32 verification (Phase 2: write-after-verification)
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
   current_value?: number | null
   is_active?: boolean
   last_command_at?: string | null

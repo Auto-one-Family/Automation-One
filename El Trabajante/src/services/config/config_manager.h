@@ -143,7 +143,17 @@ private:
   bool wifi_config_loaded_;
   bool zone_config_loaded_;
   bool system_config_loaded_;
-  
+
+  // ============================================
+  // SUBZONE COUNT CACHE (BUG-005 FIX)
+  // ============================================
+  // Cached subzone count to avoid NVS access on every heartbeat (60s).
+  // The ESP32 Preferences library logs ERROR when opening a non-existent
+  // namespace in read-only mode, even though it's expected behavior for
+  // new devices without subzones. Caching eliminates this repeated error.
+  mutable uint8_t subzone_count_cache_;
+  mutable bool subzone_count_initialized_;
+
   // Helper Methods
   void generateESPIdIfMissing();
   

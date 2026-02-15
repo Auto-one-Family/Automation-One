@@ -2,6 +2,7 @@
 Actuator Management API Endpoints
 
 Phase: 5 (Week 9-10) - API Layer
+Updated: 2026-01-30 - Fixed ActuatorState attribute access (current_value, last_command_timestamp)
 Priority: 🔴 CRITICAL
 Status: IMPLEMENTED
 
@@ -102,9 +103,13 @@ def _model_to_schema_response(
         servo_min_pulse=servo_min_pulse,
         servo_max_pulse=servo_max_pulse,
         metadata=user_metadata or None,
-        current_value=state.value if state else None,
-        is_active=state.is_active if state else False,
-        last_command_at=state.last_command_at if state else None,
+        # Config status from ESP32 verification (Phase 2: write-after-verification)
+        config_status=actuator.config_status,
+        config_error=actuator.config_error,
+        config_error_detail=actuator.config_error_detail,
+        current_value=state.current_value if state else None,
+        is_active=(state.state == "active") if state else False,
+        last_command_at=state.last_command_timestamp if state else None,
         created_at=actuator.created_at,
         updated_at=actuator.updated_at,
     )
@@ -310,6 +315,21 @@ async def create_or_update_actuator(
             detail=f"ESP device '{esp_id}' not found",
         )
 
+    # =========================================================================
+    # DEVICE STATUS GUARD - Only approved/online devices can be configured
+    # =========================================================================
+    if esp_device.status not in ("approved", "online"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "DEVICE_NOT_APPROVED",
+                "device_id": esp_id,
+                "current_status": esp_device.status,
+                "message": f"Device '{esp_id}' must be approved before configuration "
+                           f"(current status: {esp_device.status})",
+            },
+        )
+
     # Check if actuator exists
     existing = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
 
@@ -355,10 +375,18 @@ async def create_or_update_actuator(
         model_fields = _schema_to_model_fields(request, existing=existing)
         for field, value in model_fields.items():
             setattr(existing, field, value)
+        # =========================================================================
+        # WRITE-AFTER-VERIFICATION: Reset config_status to pending
+        # Status will be updated to "applied" or "failed" by config_handler
+        # when ESP32 responds via MQTT config_response
+        # =========================================================================
+        existing.config_status = "pending"
+        existing.config_error = None
+        existing.config_error_detail = None
         actuator = existing
-        logger.info(f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username}")
+        logger.info(f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
     else:
-        # Create new
+        # Create new (config_status defaults to "pending" in model)
         model_fields = _schema_to_model_fields(request)
         actuator = ActuatorConfig(
             esp_id=esp_device.id,
@@ -366,7 +394,7 @@ async def create_or_update_actuator(
             **model_fields,
         )
         await actuator_repo.create(actuator)
-        logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username}")
+        logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
     
     await db.commit()
     
@@ -431,27 +459,45 @@ async def send_command(
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
+        # BUG-006 Fix: Detailed error message with hint
+        logger.warning(f"Actuator command failed: ESP '{esp_id}' not found in database")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
+            detail={
+                "error": "ESP_NOT_FOUND",
+                "message": f"ESP device '{esp_id}' not found",
+                "hint": "ESP must send heartbeat to register. Check if ESP is online and connected to MQTT.",
+            },
         )
-    
+
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
+        # BUG-006 Fix: Detailed error message with hint
+        logger.warning(
+            f"Actuator command failed: No actuator on GPIO {gpio} for ESP '{esp_id}'"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
+            detail={
+                "error": "ACTUATOR_NOT_FOUND",
+                "message": f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
+                "hint": f"Create actuator first via PUT /api/v1/actuators/{esp_id}/{gpio}",
+            },
         )
-    
+
     if not actuator.enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Actuator is disabled",
+            detail={
+                "error": "ACTUATOR_DISABLED",
+                "message": "Actuator is disabled",
+                "hint": "Enable actuator via PUT request with enabled=true",
+            },
         )
-    
+
     # Send command via service (includes safety validation)
     success = await actuator_service.send_command(
         esp_id=esp_id,
@@ -541,14 +587,15 @@ async def get_status(
     state = await actuator_repo.get_state(esp_device.id, gpio)
     
     # Build state response
+    # NOTE: ActuatorState model uses: current_value, state (str), last_command_timestamp
     state_response = ActuatorState(
         gpio=gpio,
         mode=actuator.actuator_type,
-        value=state.value if state else 0.0,
-        is_active=state.is_active if state else False,
+        value=state.current_value if state else 0.0,
+        is_active=(state.state == "active") if state else False,
         last_command=state.last_command if state else None,
-        last_command_at=state.last_command_at if state else None,
-        runtime_seconds=None,  # Would calculate from last_command_at
+        last_command_at=state.last_command_timestamp if state else None,
+        runtime_seconds=None,  # Would calculate from last_command_timestamp
     )
     
     # Optionally include config

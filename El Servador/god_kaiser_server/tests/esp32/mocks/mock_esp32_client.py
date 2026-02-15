@@ -1675,3 +1675,585 @@ class MockESP32Client:
         """Get list of subscribed topics."""
         return self.subscribed_topics.copy()
 
+    # =========================================================================
+    # Hardware Simulation Methods (Phase 3: Logic Engine Integration Tests)
+    # =========================================================================
+
+    def add_ph_sensor(
+        self,
+        gpio: int,
+        initial_ph: float = 7.0,
+        calibrated: bool = False,
+        drift_rate: float = 0.0  # pH/hour
+    ) -> None:
+        """
+        Add pH sensor with calibration state and drift simulation.
+
+        Hardware Context:
+        - pH Electrode (Haoshi H-101) + Interface Board (PH-4502C)
+        - ADC1 pins required (GPIO32-39) due to WiFi coexistence
+        - Value range: 0-14 pH, accuracy ±0.05
+        - Drift: typical ≤0.02 pH/24h when calibrated
+
+        Args:
+            gpio: ADC1 pin (32-39 recommended for WiFi compatibility)
+            initial_ph: Starting pH value (default 7.0 = neutral)
+            calibrated: Whether sensor has been calibrated
+            drift_rate: Simulated drift per hour (0.0 = no drift)
+
+        Usage:
+            mock.add_ph_sensor(gpio=34, initial_ph=6.5, calibrated=True)
+            # Later: simulate drift
+            mock.simulate_ph_drift(gpio=34, hours=24)
+        """
+        # Validate ADC1 pin (required for WiFi coexistence)
+        adc1_pins = [32, 33, 34, 35, 36, 39]
+        if gpio not in adc1_pins:
+            logger.warning(f"GPIO {gpio} is not an ADC1 pin. pH sensors should use GPIO 32-39 for WiFi compatibility.")
+
+        self.sensors[gpio] = SensorState(
+            gpio=gpio,
+            sensor_type="pH",
+            raw_value=initial_ph,
+            name=f"pH_Sensor_{gpio}",
+            unit="pH",
+            quality="good" if calibrated else "fair",
+            calibration={
+                "calibrated": calibrated,
+                "drift_rate": drift_rate,
+                "drift_start": time.time(),
+                "initial_ph": initial_ph,
+                # Two-point calibration data (pH 4.0 and pH 7.0)
+                "cal_point_4": 3.0 if calibrated else None,  # Voltage at pH 4.0
+                "cal_point_7": 2.5 if calibrated else None,  # Voltage at pH 7.0
+            },
+            raw_mode=True  # Server processes pH conversion
+        )
+
+    def get_ph_with_drift(self, gpio: int) -> float:
+        """
+        Get current pH value including simulated drift.
+
+        Args:
+            gpio: pH sensor GPIO pin
+
+        Returns:
+            Current pH value with drift applied
+        """
+        sensor = self.sensors.get(gpio)
+        if not sensor or sensor.sensor_type != "pH":
+            return -1.0  # Error value
+
+        calibration = sensor.calibration or {}
+        drift_rate = calibration.get("drift_rate", 0.0)
+        drift_start = calibration.get("drift_start", time.time())
+        initial_ph = calibration.get("initial_ph", sensor.raw_value)
+
+        if drift_rate == 0.0:
+            return sensor.raw_value
+
+        # Calculate drift
+        hours_elapsed = (time.time() - drift_start) / 3600.0
+        drift = drift_rate * hours_elapsed
+        current_ph = initial_ph + drift
+
+        # Clamp to valid pH range (values outside indicate fault)
+        return current_ph
+
+    def add_ds18b20_multi(
+        self,
+        gpio: int,
+        count: int = 3,
+        initial_temps: Optional[List[float]] = None,
+        rom_addresses: Optional[List[str]] = None
+    ) -> None:
+        """
+        Add multiple DS18B20 sensors on same OneWire bus.
+
+        Hardware Context:
+        - OneWire protocol: multiple sensors share one GPIO
+        - Each sensor has unique 64-bit ROM address
+        - Special values: -127°C (fault/CRC error), +85°C (power-on reset)
+        - Conversion time: 750ms for 12-bit resolution
+        - 4.7kΩ pull-up resistor required
+
+        Args:
+            gpio: OneWire data pin (GPIO4, 16, 17 recommended)
+            count: Number of sensors on bus
+            initial_temps: Starting temperatures (default: [22.0, 22.5, 23.0, ...])
+            rom_addresses: Unique ROM addresses (default: auto-generated)
+
+        Usage:
+            mock.add_ds18b20_multi(
+                gpio=4,
+                count=3,
+                initial_temps=[22.5, 23.0, 22.8],
+                rom_addresses=["28-000000000001", "28-000000000002", "28-000000000003"]
+            )
+        """
+        # Initialize DS18B20 bus storage if not exists
+        if not hasattr(self, '_ds18b20_buses'):
+            self._ds18b20_buses: Dict[int, Dict[str, SensorState]] = {}
+
+        # Generate default temperatures if not provided
+        if initial_temps is None:
+            initial_temps = [22.0 + i * 0.5 for i in range(count)]
+
+        # Generate default ROM addresses if not provided
+        if rom_addresses is None:
+            rom_addresses = [f"28-{i:012X}" for i in range(1, count + 1)]
+
+        # Validate count matches
+        if len(initial_temps) != count:
+            initial_temps = (initial_temps + [22.0] * count)[:count]
+        if len(rom_addresses) != count:
+            rom_addresses = [f"28-{i:012X}" for i in range(1, count + 1)]
+
+        # Create bus entry
+        self._ds18b20_buses[gpio] = {}
+
+        # Create sensor entry for each DS18B20
+        for i, (temp, rom) in enumerate(zip(initial_temps, rom_addresses)):
+            sensor_state = SensorState(
+                gpio=gpio,
+                sensor_type="DS18B20",
+                raw_value=temp,
+                name=f"DS18B20_{gpio}_{rom[-4:]}",
+                unit="°C",
+                quality="good",
+                calibration={
+                    "rom_address": rom,
+                    "bus_index": i,
+                    "resolution": 12,  # 12-bit = 0.0625°C resolution
+                    "conversion_time_ms": 750,
+                },
+                raw_mode=False  # DS18B20 provides calibrated temperature
+            )
+            self._ds18b20_buses[gpio][rom] = sensor_state
+
+        # Also add primary sensor to self.sensors (for backward compatibility)
+        # Uses first sensor on bus
+        if rom_addresses:
+            first_rom = rom_addresses[0]
+            self.sensors[gpio] = self._ds18b20_buses[gpio][first_rom]
+
+    def get_ds18b20_by_rom(self, gpio: int, rom_address: str) -> Optional[SensorState]:
+        """
+        Get specific DS18B20 sensor by ROM address.
+
+        Args:
+            gpio: OneWire bus GPIO pin
+            rom_address: 64-bit ROM address (e.g., "28-000000000001")
+
+        Returns:
+            SensorState for specific sensor, or None if not found
+        """
+        if not hasattr(self, '_ds18b20_buses'):
+            return None
+        bus = self._ds18b20_buses.get(gpio, {})
+        return bus.get(rom_address)
+
+    def set_ds18b20_value(
+        self,
+        gpio: int,
+        rom_address: str,
+        temperature: float,
+        quality: str = "good"
+    ) -> bool:
+        """
+        Set temperature value for specific DS18B20 sensor.
+
+        Args:
+            gpio: OneWire bus GPIO pin
+            rom_address: 64-bit ROM address
+            temperature: New temperature value
+            quality: Sensor quality level
+
+        Returns:
+            True if sensor was updated, False if not found
+        """
+        sensor = self.get_ds18b20_by_rom(gpio, rom_address)
+        if sensor is None:
+            return False
+
+        sensor.raw_value = temperature
+        sensor.quality = quality
+        sensor.last_read = time.time()
+        return True
+
+    def get_ds18b20_average(self, gpio: int) -> Optional[float]:
+        """
+        Get average temperature from all DS18B20 sensors on bus.
+
+        Args:
+            gpio: OneWire bus GPIO pin
+
+        Returns:
+            Average temperature, or None if no sensors
+        """
+        if not hasattr(self, '_ds18b20_buses'):
+            return None
+
+        bus = self._ds18b20_buses.get(gpio, {})
+        if not bus:
+            return None
+
+        # Filter out fault values (-127°C)
+        valid_temps = [s.raw_value for s in bus.values()
+                       if s.raw_value > -100 and s.quality != "bad"]
+
+        if not valid_temps:
+            return None
+
+        return sum(valid_temps) / len(valid_temps)
+
+    def set_relay_state(
+        self,
+        gpio: int,
+        state: bool,
+        trigger_type: str = "active_low"
+    ) -> None:
+        """
+        Set relay state accounting for trigger type.
+
+        Hardware Context:
+        - Active-LOW relays (common): LOW=ON, HIGH=OFF
+        - Active-HIGH relays: HIGH=ON, LOW=OFF
+        - Safe GPIO pins: 16, 17 (no boot glitches)
+        - Strapping pins to avoid: 0, 2, 12, 15
+
+        Args:
+            gpio: Relay control pin
+            state: Desired relay state (True=ON, False=OFF)
+            trigger_type: "active_low" or "active_high"
+
+        Usage:
+            # Active-LOW relay (common type)
+            mock.set_relay_state(gpio=16, state=True, trigger_type="active_low")
+            # This sets GPIO LOW to turn relay ON
+        """
+        # Calculate actual GPIO level based on trigger type
+        if trigger_type == "active_low":
+            gpio_level = not state  # LOW = ON, HIGH = OFF
+        else:  # active_high
+            gpio_level = state  # HIGH = ON, LOW = OFF
+
+        # Warn about strapping pins
+        strapping_pins = [0, 2, 12, 15]
+        if gpio in strapping_pins:
+            logger.warning(
+                f"GPIO {gpio} is a strapping pin. Relays may 'rattle' during boot. "
+                f"Recommended: GPIO 16 or 17."
+            )
+
+        # Update or create actuator state
+        if gpio in self.actuators:
+            actuator = self.actuators[gpio]
+            actuator.state = state
+            actuator.target_value = 1.0 if state else 0.0
+            actuator.timestamp = time.time()
+            # Always update trigger type and GPIO level
+            actuator._trigger_type = trigger_type
+            actuator._gpio_level = gpio_level
+        else:
+            self.actuators[gpio] = ActuatorState(
+                gpio=gpio,
+                actuator_type="relay",
+                state=state,
+                pwm_value=0.0,
+                target_value=1.0 if state else 0.0,
+                name=f"Relay_{gpio}",
+            )
+            self.actuators[gpio]._trigger_type = trigger_type
+            self.actuators[gpio]._gpio_level = gpio_level
+
+    def get_relay_gpio_level(self, gpio: int) -> Optional[bool]:
+        """
+        Get actual GPIO level for relay (accounts for trigger type).
+
+        Args:
+            gpio: Relay GPIO pin
+
+        Returns:
+            Actual GPIO level (True=HIGH, False=LOW), or None if not found
+        """
+        actuator = self.actuators.get(gpio)
+        if actuator is None:
+            return None
+        return getattr(actuator, '_gpio_level', actuator.state)
+
+    def set_pwm_duty(
+        self,
+        gpio: int,
+        duty_cycle: int,
+        frequency: int = 25000
+    ) -> None:
+        """
+        Set PWM duty cycle for actuator.
+
+        Hardware Context:
+        - ESP32 LEDC: 16 independent channels
+        - Fans: 1-25kHz, 8-bit resolution (0-255)
+        - Servos: 50Hz, 1-2ms pulse width
+        - Recommended pins: GPIO25, 26, 27 (have DAC capability)
+
+        Args:
+            gpio: PWM output pin
+            duty_cycle: 0-255 (8-bit)
+            frequency: PWM frequency in Hz (default 25kHz for fans)
+
+        Usage:
+            # Fan at 50% speed
+            mock.set_pwm_duty(gpio=25, duty_cycle=128, frequency=25000)
+
+            # Servo at 90° (center position)
+            mock.set_pwm_duty(gpio=26, duty_cycle=191, frequency=50)  # ~1.5ms pulse
+        """
+        # Clamp duty cycle to valid range
+        duty_cycle = max(0, min(255, duty_cycle))
+
+        # Convert to 0.0-1.0 range for internal storage
+        pwm_value = duty_cycle / 255.0
+
+        if gpio in self.actuators:
+            actuator = self.actuators[gpio]
+            actuator.pwm_value = pwm_value
+            actuator.target_value = pwm_value
+            actuator.state = duty_cycle > 0
+            actuator.timestamp = time.time()
+            # Store frequency
+            if not hasattr(actuator, '_pwm_frequency'):
+                actuator._pwm_frequency = frequency
+            else:
+                actuator._pwm_frequency = frequency
+        else:
+            # Determine actuator type based on frequency
+            if frequency <= 100:
+                actuator_type = "servo"
+            else:
+                actuator_type = "pwm_motor"
+
+            self.actuators[gpio] = ActuatorState(
+                gpio=gpio,
+                actuator_type=actuator_type,
+                state=duty_cycle > 0,
+                pwm_value=pwm_value,
+                target_value=pwm_value,
+                name=f"PWM_{gpio}",
+            )
+            self.actuators[gpio]._pwm_frequency = frequency
+
+    def get_pwm_duty(self, gpio: int) -> Optional[int]:
+        """
+        Get current PWM duty cycle (0-255).
+
+        Args:
+            gpio: PWM GPIO pin
+
+        Returns:
+            Duty cycle as 0-255, or None if not configured
+        """
+        actuator = self.actuators.get(gpio)
+        if actuator is None:
+            return None
+        return int(actuator.pwm_value * 255)
+
+    def get_pwm_frequency(self, gpio: int) -> Optional[int]:
+        """
+        Get PWM frequency for actuator.
+
+        Args:
+            gpio: PWM GPIO pin
+
+        Returns:
+            Frequency in Hz, or None if not configured
+        """
+        actuator = self.actuators.get(gpio)
+        if actuator is None:
+            return None
+        return getattr(actuator, '_pwm_frequency', 25000)
+
+    def simulate_boot_sequence(self) -> Dict[str, Any]:
+        """
+        Simulate ESP32 boot sequence with strapping pin behavior.
+
+        Hardware Context:
+        - Strapping pins (GPIO 0, 2, 12, 15) may toggle during boot
+        - Safe pins (GPIO 16, 17) remain stable
+        - Boot sequence: BOOT → WIFI_SETUP → WIFI_CONNECTED → MQTT_CONNECTING → MQTT_CONNECTED
+
+        Returns:
+            Boot sequence result with pin behavior
+
+        Usage:
+            result = mock.simulate_boot_sequence()
+            assert result["safe_pins_unchanged"] == [16, 17]
+        """
+        strapping_pins = [0, 2, 12, 15]
+        safe_pins = [16, 17]
+
+        # Track pre-boot state of actuators on safe pins
+        safe_pin_states_before = {}
+        for gpio in safe_pins:
+            if gpio in self.actuators:
+                safe_pin_states_before[gpio] = self.actuators[gpio].state
+
+        # Record strapping pins that have relays
+        strapping_with_relays = [gpio for gpio in strapping_pins if gpio in self.actuators]
+
+        # Simulate boot state transitions
+        boot_states = [
+            SystemState.BOOT,
+            SystemState.WIFI_SETUP,
+            SystemState.WIFI_CONNECTED,
+            SystemState.MQTT_CONNECTING,
+            SystemState.MQTT_CONNECTED,
+        ]
+
+        # Add zone states if zone configured
+        if self.zone:
+            boot_states.append(SystemState.ZONE_CONFIGURED)
+        if self.sensors:
+            boot_states.append(SystemState.SENSORS_CONFIGURED)
+        boot_states.append(SystemState.OPERATIONAL)
+
+        # Transition through states
+        for state in boot_states:
+            self._transition_state(state)
+
+        # Verify safe pins unchanged
+        safe_pins_verified = []
+        for gpio in safe_pins:
+            if gpio in safe_pin_states_before:
+                current_state = self.actuators[gpio].state
+                if current_state == safe_pin_states_before[gpio]:
+                    safe_pins_verified.append(gpio)
+
+        return {
+            "strapping_pins_toggled": strapping_with_relays,
+            "safe_pins_unchanged": safe_pins_verified if safe_pin_states_before else safe_pins,
+            "final_state": self.system_state,
+            "boot_states": [s.name for s in boot_states],
+            "boot_time_ms": int((time.time() - self.boot_time) * 1000)
+        }
+
+    def simulate_sensor_fault(
+        self,
+        gpio: int,
+        fault_type: str
+    ) -> None:
+        """
+        Simulate sensor fault conditions.
+
+        Hardware Context:
+        - DS18B20: -127°C (disconnect/CRC), +85°C (power-on reset)
+        - pH: ADC=0 or ADC=4095 (open/short circuit)
+        - SHT31: I2C NACK, invalid checksum
+        - Analog: ADC=0 or ADC=4095 (wire fault)
+
+        Args:
+            gpio: Sensor GPIO pin
+            fault_type:
+                - "disconnect": Sensor disconnected/wire break
+                - "power_on_reset": DS18B20 factory reset value (+85°C)
+                - "crc_error": CRC checksum failure
+                - "i2c_nack": I2C device not responding
+                - "short_circuit": Shorted sensor wires
+                - "open_circuit": Open circuit (no sensor)
+
+        Usage:
+            mock.simulate_sensor_fault(gpio=4, fault_type="disconnect")
+            # DS18B20 now reports -127°C
+        """
+        sensor = self.sensors.get(gpio)
+        if sensor is None:
+            logger.warning(f"No sensor on GPIO {gpio} to simulate fault")
+            return
+
+        sensor_type = sensor.sensor_type
+
+        # Apply fault based on sensor type
+        if sensor_type == "DS18B20":
+            if fault_type == "disconnect":
+                sensor.raw_value = -127.0  # DS18B20 fault indicator
+                sensor.quality = "bad"
+            elif fault_type == "power_on_reset":
+                sensor.raw_value = 85.0  # DS18B20 power-on default
+                sensor.quality = "stale"
+            elif fault_type == "crc_error":
+                sensor.raw_value = -127.0
+                sensor.quality = "bad"
+            else:
+                sensor.quality = "bad"
+
+        elif sensor_type == "pH":
+            if fault_type in ["disconnect", "open_circuit"]:
+                sensor.raw_value = -1.0  # Outside valid 0-14 range
+                sensor.quality = "bad"
+            elif fault_type == "short_circuit":
+                sensor.raw_value = 15.0  # Outside valid 0-14 range
+                sensor.quality = "bad"
+            else:
+                sensor.quality = "bad"
+
+        elif sensor_type == "SHT31":
+            if fault_type == "i2c_nack":
+                sensor.raw_value = 0.0
+                sensor.quality = "bad"
+                if sensor.secondary_values:
+                    sensor.secondary_values = {"humidity": 0.0}
+            elif fault_type == "disconnect":
+                sensor.raw_value = 0.0
+                sensor.quality = "bad"
+            else:
+                sensor.quality = "bad"
+
+        elif sensor_type in ["analog", "ADC"]:
+            if fault_type == "open_circuit":
+                sensor.raw_value = 4095.0  # Max ADC value (floating input)
+                sensor.quality = "bad"
+            elif fault_type == "short_circuit":
+                sensor.raw_value = 0.0  # Min ADC value (shorted to ground)
+                sensor.quality = "bad"
+            else:
+                sensor.quality = "bad"
+
+        else:
+            # Generic fault
+            sensor.quality = "bad"
+
+        sensor.last_read = time.time()
+
+        # Also update DS18B20 bus if applicable
+        if hasattr(self, '_ds18b20_buses') and gpio in self._ds18b20_buses:
+            for rom, bus_sensor in self._ds18b20_buses[gpio].items():
+                bus_sensor.raw_value = sensor.raw_value
+                bus_sensor.quality = sensor.quality
+                bus_sensor.last_read = time.time()
+
+    def clear_sensor_fault(self, gpio: int) -> None:
+        """
+        Clear sensor fault and restore normal operation.
+
+        Args:
+            gpio: Sensor GPIO pin
+        """
+        sensor = self.sensors.get(gpio)
+        if sensor is None:
+            return
+
+        # Restore to default good values based on sensor type
+        if sensor.sensor_type == "DS18B20":
+            sensor.raw_value = 22.0  # Room temperature
+        elif sensor.sensor_type == "pH":
+            sensor.raw_value = 7.0  # Neutral pH
+        elif sensor.sensor_type == "SHT31":
+            sensor.raw_value = 22.0  # Room temperature
+            if sensor.secondary_values:
+                sensor.secondary_values = {"humidity": 50.0}
+        elif sensor.sensor_type in ["analog", "ADC"]:
+            sensor.raw_value = 2048.0  # Mid-range ADC
+
+        sensor.quality = "good"
+        sensor.last_read = time.time()
+

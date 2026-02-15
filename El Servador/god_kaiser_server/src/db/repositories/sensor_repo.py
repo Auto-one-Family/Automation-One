@@ -249,6 +249,11 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Created SensorData instance
         """
+        # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
+        ts = timestamp or datetime.now(timezone.utc)
+        if ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
+
         sensor_data = SensorData(
             esp_id=esp_id,
             gpio=gpio,
@@ -258,7 +263,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             unit=unit,
             processing_mode=processing_mode,
             quality=quality,
-            timestamp=timestamp or datetime.utcnow(),
+            timestamp=ts,
             sensor_metadata=metadata,  # Model field is sensor_metadata
             data_source=data_source,
         )
@@ -268,7 +273,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
         return sensor_data
 
     async def get_latest_data(
-        self, esp_id: uuid.UUID, gpio: int, limit: int = 1
+        self, esp_id: uuid.UUID, gpio: int,
+        sensor_type: Optional[str] = None, limit: int = 1
     ) -> list[SensorData]:
         """
         Get latest sensor data.
@@ -276,14 +282,20 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Args:
             esp_id: ESP device UUID
             gpio: GPIO pin number
+            sensor_type: Optional sensor type filter (required for multi-value
+                         sensors like SHT31 where temp and humidity share a GPIO)
             limit: Number of latest records
 
         Returns:
             List of latest SensorData instances
         """
+        filters = [SensorData.esp_id == esp_id, SensorData.gpio == gpio]
+        if sensor_type:
+            filters.append(SensorData.sensor_type == sensor_type)
+
         stmt = (
             select(SensorData)
-            .where(SensorData.esp_id == esp_id, SensorData.gpio == gpio)
+            .where(*filters)
             .order_by(SensorData.timestamp.desc())
             .limit(limit)
         )
@@ -291,7 +303,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
         return list(result.scalars().all())
 
     async def get_latest_reading(
-        self, esp_id: uuid.UUID, gpio: int
+        self, esp_id: uuid.UUID, gpio: int,
+        sensor_type: Optional[str] = None
     ) -> Optional[SensorData]:
         """
         Get latest sensor reading (single item).
@@ -299,11 +312,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Args:
             esp_id: ESP device UUID
             gpio: GPIO pin number
+            sensor_type: Optional sensor type filter (required for multi-value
+                         sensors like SHT31 where temp and humidity share a GPIO)
 
         Returns:
             Latest SensorData instance or None
         """
-        data = await self.get_latest_data(esp_id, gpio, limit=1)
+        data = await self.get_latest_data(esp_id, gpio, sensor_type=sensor_type, limit=1)
         return data[0] if data else None
 
     async def get_latest_readings_batch(
@@ -318,6 +333,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
         N individual queries.
 
         Uses index: idx_esp_gpio_timestamp (esp_id, gpio, timestamp)
+
+        NOTE: For multi-value sensors (e.g. SHT31 with temp + humidity on same
+        GPIO), use get_latest_readings_batch_by_config() instead, which includes
+        sensor_type in the key to avoid collisions.
 
         Args:
             sensor_keys: List of (esp_id, gpio) tuples identifying sensors
@@ -366,6 +385,72 @@ class SensorRepository(BaseRepository[SensorConfig]):
 
         # Build lookup dict: (esp_id, gpio) → SensorData
         return {(d.esp_id, d.gpio): d for d in data_list}
+
+    async def get_latest_readings_batch_by_config(
+        self,
+        sensor_keys: list[tuple[uuid.UUID, int, str]],
+    ) -> dict[tuple[uuid.UUID, int, str], SensorData]:
+        """
+        Get latest reading for multiple sensors including sensor_type in key.
+
+        This variant correctly handles multi-value sensors (e.g. SHT31 with
+        sht31_temp + sht31_humidity on the same GPIO) by grouping on
+        (esp_id, gpio, sensor_type) instead of just (esp_id, gpio).
+
+        Args:
+            sensor_keys: List of (esp_id, gpio, sensor_type) tuples
+
+        Returns:
+            Dict mapping (esp_id, gpio, sensor_type) to latest SensorData.
+            Sensors without any readings are not included in the result.
+
+        Example:
+            >>> keys = [(uuid1, 21, 'sht31_temp'), (uuid1, 21, 'sht31_humidity')]
+            >>> readings = await repo.get_latest_readings_batch_by_config(keys)
+            >>> latest_temp = readings.get((uuid1, 21, 'sht31_temp'))
+            >>> latest_hum = readings.get((uuid1, 21, 'sht31_humidity'))
+        """
+        if not sensor_keys:
+            return {}
+
+        # Subquery: Get MAX(timestamp) per (esp_id, gpio, sensor_type)
+        max_timestamp_subq = (
+            select(
+                SensorData.esp_id,
+                SensorData.gpio,
+                SensorData.sensor_type,
+                func.max(SensorData.timestamp).label("max_ts"),
+            )
+            .where(
+                tuple_(
+                    SensorData.esp_id, SensorData.gpio, SensorData.sensor_type
+                ).in_(sensor_keys)
+            )
+            .group_by(SensorData.esp_id, SensorData.gpio, SensorData.sensor_type)
+            .subquery()
+        )
+
+        # Main query: Join with subquery to get full SensorData rows
+        stmt = (
+            select(SensorData)
+            .join(
+                max_timestamp_subq,
+                and_(
+                    SensorData.esp_id == max_timestamp_subq.c.esp_id,
+                    SensorData.gpio == max_timestamp_subq.c.gpio,
+                    SensorData.sensor_type == max_timestamp_subq.c.sensor_type,
+                    SensorData.timestamp == max_timestamp_subq.c.max_ts,
+                ),
+            )
+        )
+
+        result = await self.session.execute(stmt)
+        data_list = result.scalars().all()
+
+        # Build lookup dict: (esp_id, gpio, sensor_type) → SensorData
+        return {
+            (d.esp_id, d.gpio, d.sensor_type): d for d in data_list
+        }
 
     async def query_data(
         self,
@@ -649,7 +734,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Number of deleted records
         """
-        cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
         stmt = delete(SensorData).where(
             SensorData.data_source == DataSource.TEST.value,
             SensorData.timestamp < cutoff,
@@ -765,6 +850,50 @@ class SensorRepository(BaseRepository[SensorConfig]):
             SensorConfig.gpio == gpio,
             SensorConfig.sensor_type == sensor_type,
             SensorConfig.onewire_address == onewire_address
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_esp_gpio_type_and_i2c(
+        self,
+        esp_id: uuid.UUID,
+        gpio: int,
+        sensor_type: str,
+        i2c_address: int
+    ) -> Optional[SensorConfig]:
+        """
+        Get sensor by ESP ID, GPIO, sensor_type, AND I2C address (4-way lookup).
+
+        **Use-Case:** Multiple I2C sensors of same type at different addresses.
+        For example: 2x SHT31 sensors at 0x44 and 0x45 on same I2C bus.
+
+        This is the most specific lookup for I2C sensors, ensuring
+        we match the exact device when multiple same-type sensors exist.
+
+        Args:
+            esp_id: ESP device UUID
+            gpio: GPIO pin number (I2C bus SDA pin, e.g., 21)
+            sensor_type: Sensor type (e.g., 'sht31_temp', 'sht31_humidity')
+            i2c_address: I2C device address (7-bit, 0-127)
+
+        Returns:
+            SensorConfig if found, None otherwise
+
+        Example:
+            # ESP has 2x SHT31 sensors at 0x44 and 0x45
+            # Lookup specific sensor by I2C address
+            sensor = await repo.get_by_esp_gpio_type_and_i2c(
+                esp_id=uuid,
+                gpio=21,
+                sensor_type='sht31_temp',
+                i2c_address=0x44
+            )
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.gpio == gpio,
+            SensorConfig.sensor_type == sensor_type,
+            SensorConfig.i2c_address == i2c_address
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

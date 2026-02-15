@@ -47,16 +47,35 @@ class ConfigConflictError(Exception):
 
 class ConfigPayloadBuilder:
     """
-    Builds ESP32-compatible configuration payloads.
-    
+    Baut Config-Payloads für ESP32-Geräte.
+
+    VERWENDUNG:
+        Wird automatisch von Sensor/Actuator APIs aufgerufen nach CRUD-Operationen.
+
+    ARCHITEKTUR:
+        1. Sensor/Actuator CRUD API führt DB-Operation durch
+        2. build_combined_config() lädt alle Sensoren/Aktoren eines ESP aus DB
+        3. Für jeden Sensor/Actuator wird apply_sensor/actuator_mapping() aufgerufen
+        4. Mappings kommen aus core/config_mapping.py (DEFAULT_SENSOR_MAPPINGS)
+        5. Ergebnis wird an esp_service.send_config() übergeben
+        6. MQTT Publisher sendet an: kaiser/{kaiser_id}/esp/{esp_id}/config
+
+    FELD-KONFIGURATION:
+        Welche Felder zum ESP32 gesendet werden, wird in
+        core/config_mapping.py definiert (DEFAULT_SENSOR_MAPPINGS).
+
+    HINWEIS:
+        Ein manueller Config-Push-Endpoint existiert NICHT.
+        Configs werden automatisch nach CRUD-Operationen gesendet.
+
     Converts database models to ESP32 payload format with configurable field mapping
     and zone information extraction.
-    
+
     Field mappings can be customized via:
     1. Constructor parameter (custom_mapping_engine)
     2. SystemConfig entries (config_mapping.sensor, config_mapping.actuator)
     3. Default mappings in config_mapping.py
-    
+
     Usage:
         # Default mappings
         builder = ConfigPayloadBuilder()

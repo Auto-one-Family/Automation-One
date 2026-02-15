@@ -73,6 +73,9 @@ class TextFormatter(logging.Formatter):
         Returns:
             str: Formatted log message
         """
+        # Ensure request_id exists to avoid formatting errors
+        if not hasattr(record, "request_id"):
+            record.request_id = "-"
         return super().format(record)
 
 
