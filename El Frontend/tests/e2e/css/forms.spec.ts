@@ -65,6 +65,8 @@ test.describe('Form Styles', () => {
   })
 
   test('input has placeholder text defined', async ({ page }) => {
+    // Wait for Vue to mount the form inputs
+    await page.waitForSelector('input[type="text"], input#username', { timeout: 5000 })
     const placeholder = await page.evaluate(() => {
       const input = document.querySelector('input[type="text"], input#username') as HTMLInputElement
       return input?.placeholder || ''
