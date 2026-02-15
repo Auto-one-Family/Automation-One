@@ -171,8 +171,7 @@ export interface ESPConfigResponse {
 function isMockEsp(espId: string): boolean {
   return (
     espId.startsWith('ESP_MOCK_') ||
-    espId.startsWith('MOCK_') ||
-    espId.includes('MOCK')
+    espId.startsWith('MOCK_')
   )
 }
 
@@ -279,6 +278,9 @@ export const espApi = {
     page_size?: number
   }): Promise<ESPDevice[]> {
     // Fetch both Mock and Real ESPs in parallel
+    // Mock ESP fetch is non-critical (graceful fallback to empty)
+    // DB device fetch failure is propagated to caller for proper error handling
+    let dbFetchError: Error | null = null
     const [mockEsps, dbDevices] = await Promise.all([
       debugApi.listMockEsps().catch((err) => {
         logger.warn('Failed to fetch mock ESPs (non-critical)', err)
@@ -288,10 +290,16 @@ export const espApi = {
         .get<ESPDeviceListResponse>('/esp/devices', { params })
         .catch((err) => {
           logger.error('Failed to fetch DB devices - dashboard may show incomplete data', err)
+          dbFetchError = err instanceof Error ? err : new Error(String(err))
           return { data: { success: false, data: [] } }
         })
         .then((res) => (res.data?.data || []) as ESPDevice[]),
     ])
+
+    // If DB fetch failed and no mock ESPs available, propagate the error
+    if (dbFetchError && mockEsps.length === 0) {
+      throw dbFetchError
+    }
 
     logger.info(`listDevices: ${mockEsps.length} mocks, ${dbDevices.length} DB devices`)
 

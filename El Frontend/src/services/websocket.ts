@@ -69,6 +69,9 @@ class WebSocketService {
   // NEW: Connection success callbacks for notifying stores to refresh data
   private onConnectCallbacks: Set<() => void> = new Set()
 
+  // Status change callbacks for reactive status monitoring (avoids polling)
+  private statusChangeCallbacks: Set<(status: WebSocketStatus) => void> = new Set()
+
   private constructor() {
     // Generate client ID (UUID-like)
     this.clientId = this.generateClientId()
@@ -161,7 +164,7 @@ class WebSocketService {
       return
     }
 
-    this.status = 'connecting'
+    this.setStatus('connecting')
     this.reconnectAttempts = 0
 
     return new Promise((resolve, reject) => {
@@ -173,7 +176,7 @@ class WebSocketService {
 
         this.ws.onopen = () => {
           logger.info('Connected')
-          this.status = 'connected'
+          this.setStatus('connected')
           this.reconnectAttempts = 0
           this.rateLimitWarning = false
 
@@ -197,18 +200,25 @@ class WebSocketService {
 
         this.ws.onclose = (event) => {
           logger.info('Disconnected', { code: event.code, reason: event.reason })
-          this.status = 'disconnected'
+          this.setStatus('disconnected')
           this.ws = null
 
           // Attempt reconnect if not a normal closure
           if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.scheduleReconnect()
+          } else if (event.code !== 1000) {
+            // Max reconnect attempts exhausted - signal error for UI
+            logger.error(
+              `WebSocket reconnection failed after ${this.maxReconnectAttempts} attempts. ` +
+              `Connection permanently lost. Reload the page to reconnect.`
+            )
+            this.setStatus('error')
           }
         }
 
         this.ws.onerror = (event) => {
           logger.error('WebSocket error', event)
-          this.status = 'error'
+          this.setStatus('error')
           reject(new Error('WebSocket connection failed'))
         }
 
@@ -217,7 +227,7 @@ class WebSocketService {
         }
       } catch (error) {
         logger.error('Connection error', error)
-        this.status = 'error'
+        this.setStatus('error')
         reject(error)
       }
     })
@@ -243,7 +253,7 @@ class WebSocketService {
     // Clear pending subscriptions
     this.pendingSubscriptions = []
 
-    this.status = 'disconnected'
+    this.setStatus('disconnected')
     this.reconnectAttempts = 0
   }
 
@@ -274,11 +284,11 @@ class WebSocketService {
       const tokenValid = await this.refreshTokenIfNeeded()
       if (!tokenValid) {
         logger.error('Cannot reconnect - token refresh failed')
-        this.status = 'error'
+        this.setStatus('error')
         return
       }
 
-      this.connect()
+      this.connect().catch(e => logger.error('Reconnect failed', e))
     }, delay)
   }
 
@@ -318,11 +328,11 @@ class WebSocketService {
         const tokenValid = await this.refreshTokenIfNeeded()
         if (!tokenValid) {
           logger.error('Cannot reconnect - token refresh failed')
-          this.status = 'error'
+          this.setStatus('error')
           return
         }
 
-        this.connect()
+        this.connect().catch(e => logger.error('Visibility reconnect failed', e))
       }
     }
 
@@ -620,6 +630,37 @@ class WebSocketService {
         logger.error('Error in connect callback', error)
       }
     })
+  }
+
+  /**
+   * Register a callback for connection status changes.
+   * Called whenever the WebSocket status changes (connected, disconnected, error, connecting).
+   * Useful for composables/stores to track connection state without polling.
+   *
+   * @param callback Function called with new status
+   * @returns Unsubscribe function
+   */
+  onStatusChange(callback: (status: WebSocketStatus) => void): () => void {
+    this.statusChangeCallbacks.add(callback)
+    return () => {
+      this.statusChangeCallbacks.delete(callback)
+    }
+  }
+
+  /**
+   * Update status and notify all status change listeners.
+   */
+  private setStatus(newStatus: WebSocketStatus): void {
+    if (this.status !== newStatus) {
+      this.status = newStatus
+      this.statusChangeCallbacks.forEach(callback => {
+        try {
+          callback(newStatus)
+        } catch (error) {
+          logger.error('Error in status change callback', error)
+        }
+      })
+    }
   }
 }
 

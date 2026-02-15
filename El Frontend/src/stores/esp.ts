@@ -159,7 +159,7 @@ export const useEspStore = defineStore('esp', () => {
 
   const offlineDevices = computed(() =>
     devices.value.filter(device => 
-      device.status === 'offline' || device.connected === false
+      !(device.status === 'online' || device.connected === true)
     )
   )
 

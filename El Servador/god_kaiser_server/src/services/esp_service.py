@@ -182,7 +182,7 @@ class ESPService:
         existing = await self.esp_repo.get_by_device_id(device_id)
 
         if existing:
-            # Update existing device
+            # Update existing device - preserve current status
             existing.ip_address = ip_address
             existing.mac_address = mac_address
             existing.firmware_version = firmware_version
@@ -196,13 +196,13 @@ class ESPService:
             existing.is_zone_master = is_zone_master
             if capabilities:
                 existing.capabilities = capabilities
-            existing.status = "online"
             existing.last_seen = datetime.now(timezone.utc)
 
             logger.info(f"ESP device updated: {device_id}")
             return existing
         else:
-            # Create new device
+            # Create new device with pending_approval status
+            # Requires admin approval before device becomes fully operational
             device = ESPDevice(
                 device_id=device_id,
                 ip_address=ip_address,
@@ -214,13 +214,13 @@ class ESPService:
                 zone_name=zone_name,
                 is_zone_master=is_zone_master,
                 capabilities=capabilities or {},
-                status="online",
+                status="pending_approval",
                 last_seen=datetime.now(timezone.utc),
-                metadata={},
+                device_metadata={},
             )
             created = await self.esp_repo.create(device)
 
-            logger.info(f"ESP device registered: {device_id}")
+            logger.info(f"ESP device registered (pending approval): {device_id}")
             return created
 
     async def unregister_device(
@@ -345,6 +345,10 @@ class ESPService:
                     newly_offline.append(device.device_id)
                     logger.warning(f"ESP device went offline: {device.device_id}")
                 offline.append(device.device_id)
+
+        # Persist any status changes to the database
+        if self.esp_repo.session.dirty:
+            await self.esp_repo.session.commit()
 
         return {
             "online": online,
@@ -487,8 +491,8 @@ class ESPService:
                     "config_keys": list(config.keys()),
                     "correlation_id": correlation_id,
                 })
-            except Exception:
-                pass  # WebSocket broadcast is best-effort
+            except Exception as e:
+                logger.warning(f"WebSocket broadcast config_published failed for {device_id}: {e}")
         else:
             result["message"] = f"Failed to publish config to {device_id}"
             result["error_code"] = ConfigErrorCode.CONFIG_PUBLISH_FAILED
@@ -525,8 +529,8 @@ class ESPService:
                     "error": "MQTT publish failed",
                     "correlation_id": correlation_id,
                 })
-            except Exception:
-                pass  # WebSocket broadcast is best-effort
+            except Exception as e:
+                logger.warning(f"WebSocket broadcast config_failed failed for {device_id}: {e}")
 
         return result
 

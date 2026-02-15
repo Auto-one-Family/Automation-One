@@ -125,7 +125,7 @@ class DiscoveryHandler:
                     firmware_version=payload.get("firmware_version"),
                     status="pending_approval",
                     capabilities=payload.get("capabilities", {}),
-                    metadata={
+                    device_metadata={
                         "discovered_at": now.isoformat(),
                         "auto_registered": True,
                         "discovery_source": "legacy_discovery_topic",

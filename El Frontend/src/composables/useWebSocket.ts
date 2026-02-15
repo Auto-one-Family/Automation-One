@@ -6,7 +6,7 @@
  * Provides subscription system consistent with backend.
  */
 
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, getCurrentInstance } from 'vue'
 import { websocketService, type WebSocketMessage, type WebSocketFilters } from '@/services/websocket'
 import type { MessageType } from '@/types'
 import { createLogger } from '@/utils/logger'
@@ -201,11 +201,17 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   // Lifecycle & Status Monitoring
   // =============================================================================
 
-  // Status check interval - works in both component and non-component contexts
+  // Detect whether we're in a Vue component context (has lifecycle) or store context (no lifecycle)
+  const hasComponentContext = !!getCurrentInstance()
+
+  // Status check interval - only used in component contexts
   let statusInterval: ReturnType<typeof setInterval> | null = null
 
+  // Status change unsubscriber - used in store contexts
+  let unsubscribeStatusChange: (() => void) | null = null
+
   /**
-   * Start status monitoring
+   * Start status monitoring via polling (component context only)
    */
   function startStatusMonitor(): void {
     if (statusInterval) return // Already running
@@ -221,12 +227,30 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   }
 
   /**
-   * Stop status monitoring
+   * Start status monitoring via callback (store context - no polling)
+   */
+  function startStatusCallback(): void {
+    if (unsubscribeStatusChange) return // Already registered
+
+    unsubscribeStatusChange = websocketService.onStatusChange((status) => {
+      const connected = status === 'connected'
+      if (connected !== isConnected.value) {
+        isConnected.value = connected
+      }
+    })
+  }
+
+  /**
+   * Stop status monitoring (both polling and callback)
    */
   function stopStatusMonitor(): void {
     if (statusInterval) {
       clearInterval(statusInterval)
       statusInterval = null
+    }
+    if (unsubscribeStatusChange) {
+      unsubscribeStatusChange()
+      unsubscribeStatusChange = null
     }
   }
 
@@ -244,25 +268,28 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   // Auto-connect immediately if enabled (works in both component and store contexts)
   if (autoConnect) {
     connect()
-    startStatusMonitor()
+    // Use callback-based monitoring in store context (no setInterval leak),
+    // polling in component context (cleaned up by onUnmounted)
+    if (hasComponentContext) {
+      startStatusMonitor()
+    } else {
+      startStatusCallback()
+    }
   }
 
   // Vue component lifecycle hooks (only work when used in Vue components)
-  // These provide automatic cleanup when used in components
-  onMounted(() => {
-    // Start status monitor if not already started
-    if (!statusInterval) {
-      startStatusMonitor()
-    }
-  })
+  if (hasComponentContext) {
+    onMounted(() => {
+      // Start status monitor if not already started
+      if (!statusInterval) {
+        startStatusMonitor()
+      }
+    })
 
-  onUnmounted(() => {
-    cleanup()
-    if (autoReconnect) {
-      // Note: We don't disconnect the singleton service, just cleanup this composable
-      // The service should stay connected for other consumers
-    }
-  })
+    onUnmounted(() => {
+      cleanup()
+    })
+  }
 
   // =============================================================================
   // Return

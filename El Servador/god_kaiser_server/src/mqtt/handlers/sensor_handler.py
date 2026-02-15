@@ -345,8 +345,22 @@ class SensorDataHandler:
                             except Exception as e:
                                 logger.error(f"Error in logic evaluation: {e}", exc_info=True)
 
-                        # Create non-blocking task
-                        asyncio.create_task(trigger_logic_evaluation())
+                        # Create non-blocking task with done callback for visibility
+                        task = asyncio.create_task(trigger_logic_evaluation())
+
+                        def _on_logic_task_done(t: asyncio.Task) -> None:
+                            if t.cancelled():
+                                logger.warning(
+                                    f"Logic evaluation task cancelled for {esp_id_str} GPIO {gpio}"
+                                )
+                            elif t.exception():
+                                logger.error(
+                                    f"Logic evaluation task failed for {esp_id_str} GPIO {gpio}: "
+                                    f"{t.exception()}",
+                                    exc_info=t.exception(),
+                                )
+
+                        task.add_done_callback(_on_logic_task_done)
                     except Exception as e:
                         logger.warning(f"Failed to trigger logic evaluation: {e}")
 

@@ -250,7 +250,8 @@ class HeartbeatHandler:
                     await session.commit()
                 except Exception as hb_log_error:
                     logger.warning(f"Failed to log heartbeat history for {esp_id_str}: {hb_log_error}")
-                    # Non-critical - don't fail the heartbeat handler
+                    # Rollback partial history insert to keep session clean for subsequent ops
+                    await session.rollback()
 
                 source_indicator = f"[{device_source.upper()}]" if device_source != DataSource.PRODUCTION.value else ""
 
@@ -258,14 +259,6 @@ class HeartbeatHandler:
                     f"Heartbeat processed{source_indicator}: esp_id={esp_id_str}, "
                     f"uptime={payload.get('uptime')}s, "
                     f"heap_free={payload.get('heap_free', payload.get('free_heap'))} bytes"
-                )
-
-                # DEBUG: Log timing for first heartbeat investigation
-                import time
-                ws_broadcast_start = time.time()
-                logger.info(
-                    f"DEBUG: About to broadcast esp_health for {esp_id_str} "
-                    f"(device status in DB: online, last_seen: {last_seen})"
                 )
 
                 # WebSocket Broadcast
@@ -303,12 +296,6 @@ class HeartbeatHandler:
                         "gpio_status": payload.get("gpio_status", []),
                         "gpio_reserved_count": payload.get("gpio_reserved_count", 0)
                     })
-                    # DEBUG: Log after WebSocket broadcast
-                    ws_broadcast_end = time.time()
-                    logger.info(
-                        f"DEBUG: WebSocket broadcast completed for {esp_id_str} "
-                        f"in {(ws_broadcast_end - ws_broadcast_start)*1000:.2f}ms"
-                    )
                 except Exception as e:
                     logger.warning(f"Failed to broadcast ESP health via WebSocket: {e}")
 
@@ -796,7 +783,10 @@ class HeartbeatHandler:
             esp_device.device_metadata = current_metadata
             
         except Exception as e:
-            logger.warning(f"Failed to update ESP metadata: {e}")
+            logger.error(
+                f"Failed to update ESP metadata for {esp_device.device_id}: {e}",
+                exc_info=True
+            )
 
     def _validate_payload(self, payload: dict) -> dict:
         """

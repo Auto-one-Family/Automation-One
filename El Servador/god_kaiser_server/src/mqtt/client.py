@@ -135,6 +135,10 @@ class MQTTClient:
         self._offline_buffer = None
         self._init_offline_buffer()
 
+        # Event loop reference for thread-safe async scheduling
+        # Captured during connect() which runs from the main async context
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+
         self._initialized = True
         logger.info("MQTTClient singleton initialized (with resilience patterns)")
     
@@ -206,6 +210,16 @@ class MQTTClient:
         Returns:
             True if connection successful, False otherwise
         """
+        # Capture the event loop for thread-safe async scheduling in publish()
+        try:
+            self._event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                self._event_loop = asyncio.get_event_loop()
+            except RuntimeError:
+                self._event_loop = None
+                logger.warning("No event loop available - offline buffering may not work from background threads")
+
         # Use settings if not provided
         broker = broker or self.settings.mqtt.broker_host
         port = port or self.settings.mqtt.broker_port
@@ -359,6 +373,40 @@ class MQTTClient:
             logger.error(f"Subscribe exception for topic {topic}: {e}", exc_info=True)
             return False
 
+    def _schedule_buffer_add(
+        self,
+        topic: str,
+        payload: str,
+        qos: int = 1,
+        retain: bool = False,
+    ) -> None:
+        """
+        Thread-safe scheduling of offline buffer add.
+
+        publish() can be called from paho-mqtt's network thread where there
+        is no running asyncio event loop. Using asyncio.create_task() from
+        that thread would raise RuntimeError or silently fail.
+        Instead, use run_coroutine_threadsafe() with the captured event loop.
+        """
+        if not self._offline_buffer:
+            return
+
+        try:
+            # Try current thread's running loop first (works when called from async context)
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._offline_buffer.add(topic, payload, qos, retain))
+        except RuntimeError:
+            # No running loop in this thread (paho callback thread) - use stored loop
+            if self._event_loop and not self._event_loop.is_closed():
+                asyncio.run_coroutine_threadsafe(
+                    self._offline_buffer.add(topic, payload, qos, retain),
+                    self._event_loop,
+                )
+            else:
+                logger.warning(
+                    f"Cannot buffer message for {topic}: no event loop available"
+                )
+
     def publish(
         self,
         topic: str,
@@ -387,11 +435,8 @@ class MQTTClient:
                 f"[resilience] MQTT publish blocked by Circuit Breaker: {topic}"
             )
             # Buffer the message for later
-            if self._offline_buffer:
-                asyncio.create_task(
-                    self._offline_buffer.add(topic, payload, qos, retain)
-                )
-                logger.debug(f"[resilience] Message buffered: {topic}")
+            self._schedule_buffer_add(topic, payload, qos, retain)
+            logger.debug(f"[resilience] Message buffered: {topic}")
             return False
         
         if not self.client or not self.connected:
@@ -400,10 +445,7 @@ class MQTTClient:
             if self._circuit_breaker:
                 self._circuit_breaker.record_failure()
             # Buffer the message
-            if self._offline_buffer:
-                asyncio.create_task(
-                    self._offline_buffer.add(topic, payload, qos, retain)
-                )
+            self._schedule_buffer_add(topic, payload, qos, retain)
             return False
 
         try:
@@ -491,9 +533,18 @@ class MQTTClient:
                 except Exception as e:
                     logger.error(f"Failed to re-subscribe after reconnect: {e}", exc_info=True)
             
-            # Flush offline buffer on reconnect
+            # Flush offline buffer on reconnect (thread-safe)
             if self._offline_buffer and not self._offline_buffer.is_empty:
-                asyncio.create_task(self._flush_offline_buffer())
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._flush_offline_buffer())
+                except RuntimeError:
+                    if self._event_loop and not self._event_loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(
+                            self._flush_offline_buffer(), self._event_loop
+                        )
+                    else:
+                        logger.warning("Cannot flush offline buffer: no event loop available")
         else:
             self.connected = False
             error_messages = {
