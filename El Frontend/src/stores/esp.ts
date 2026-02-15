@@ -109,6 +109,10 @@ export const useEspStore = defineStore('esp', () => {
   const pendingDevices = ref<PendingESPDevice[]>([])
   const isPendingLoading = ref(false)
 
+  // Track locally-initiated approvals to avoid duplicate fetchAll from WS echo
+  const _recentlyApprovedByClient = ref<string | null>(null)
+  const _recentlyApprovedAt = ref<number>(0)
+
   // WebSocket integration
   // Note: Server broadcasts these types from MQTT handlers:
   // - esp_health (heartbeat_handler.py)
@@ -375,6 +379,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       
       // Remove from pending list
       pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== deviceId)
+      
+      // Track this approval so the WS echo handler skips its fetchAll
+      _recentlyApprovedByClient.value = deviceId
+      _recentlyApprovedAt.value = Date.now()
       
       // Toast notification
       toast.success(`Gerät ${deviceId} wurde genehmigt`, { duration: 4000 })
@@ -1182,11 +1190,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       const newPending: PendingESPDevice = {
         device_id: data.device_id,
         discovered_at: data.discovered_at || new Date().toISOString(),
+        last_seen: data.last_seen ?? data.discovered_at ?? new Date().toISOString(),
         ip_address: data.ip_address,
         heap_free: data.heap_free,
         wifi_rssi: data.wifi_rssi,
-        sensor_count: data.sensor_count || 0,
-        actuator_count: data.actuator_count || 0,
+        sensor_count: data.sensor_count ?? 0,
+        actuator_count: data.actuator_count ?? 0,
         heartbeat_count: 1,
         hardware_type: data.hardware_type,
       }
@@ -1215,11 +1224,20 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     // Remove from pending list
     pendingDevices.value = pendingDevices.value.filter(d => d.device_id !== data.device_id)
 
-    // Toast notification (only if not triggered by this client)
-    toast.success(`Gerät ${data.device_id} wurde genehmigt`, { duration: 4000 })
+    // Check if this approval was initiated by this client (avoids duplicate fetchAll)
+    const isOwnApproval =
+      _recentlyApprovedByClient.value === data.device_id &&
+      (Date.now() - _recentlyApprovedAt.value) < 5000
 
-    // Refresh device list
-    fetchAll()
+    if (isOwnApproval) {
+      // Own client already triggered fetchAll in approveDevice() - skip duplicate
+      _recentlyApprovedByClient.value = null
+      logger.debug(`Skipping fetchAll for own approval of ${data.device_id}`)
+    } else {
+      // Another client approved - show toast and refresh
+      toast.success(`Gerät ${data.device_id} wurde genehmigt`, { duration: 4000 })
+      fetchAll()
+    }
   }
 
   /**
@@ -1329,24 +1347,39 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   // =============================================================================
 
   /**
-   * Handle device_rediscovered WebSocket event
-   * Known device came back online after disconnect
+   * Handle device_rediscovered WebSocket event.
+   * Two cases:
+   * 1) Approved device that went offline came back → update devices list
+   * 2) Rejected device sends heartbeat again (cooldown expired) → now pending again, refresh pending list
    */
   function handleDeviceRediscovered(message: { data: Record<string, unknown> }): void {
     const data = message.data
-    const espId = data.esp_id as string || data.device_id as string
+    const espId = (data.esp_id as string) || (data.device_id as string)
     if (!espId) return
 
-    // Update device status to online
-    const device = devices.value.find(d => getDeviceId(d) === espId)
-    if (device) {
-      device.status = 'online'
-      device.last_seen = new Date().toISOString()
+    const toast = useToast()
+
+    // Case 1: Device in approved list (was offline, came back)
+    const deviceIndex = devices.value.findIndex(d => getDeviceId(d) === espId)
+    if (deviceIndex !== -1) {
+      const device = devices.value[deviceIndex]
+      devices.value[deviceIndex] = {
+        ...device,
+        status: 'online',
+        last_seen: new Date().toISOString(),
+        offlineInfo: undefined,
+        ip_address: (data.ip_address as string) ?? device.ip_address,
+      }
+      const deviceName = device.name || espId
+      toast.info(`${deviceName} ist wieder online`)
+      return
     }
 
-    const toast = useToast()
-    const deviceName = device?.name || espId
-    toast.info(`${deviceName} ist wieder online`)
+    // Case 2: Rejected device rediscovered → now pending_approval again
+    fetchPendingDevices().catch(err => {
+      logger.error(`Failed to refresh pending after device_rediscovered:`, err)
+    })
+    toast.info(`${espId} ist wieder zur Genehmigung verfügbar`)
   }
 
   // =============================================================================

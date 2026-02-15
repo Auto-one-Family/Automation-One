@@ -97,6 +97,8 @@ export interface PendingDevicesListResponse {
 export interface DeviceDiscoveredPayload {
   device_id: string
   discovered_at: string
+  /** Last activity timestamp (initial = discovered_at) */
+  last_seen?: string | null
   ip_address?: string | null
   heap_free?: number | null
   wifi_rssi?: number | null

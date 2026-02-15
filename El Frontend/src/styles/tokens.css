@@ -14,6 +14,11 @@
   --color-bg-quaternary: #1d1d2a;   /* overlay — hover states, dropdowns */
   --color-bg-hover:      #1d1d2a;   /* alias for hover (= quaternary) */
 
+  /* Zoom depth: each level feels physically closer */
+  --color-bg-level-1:    #07070d;   /* Zone Overview — deepest void */
+  --color-bg-level-2:    #0a0a14;   /* Zone Detail — slightly warmer */
+  --color-bg-level-3:    #0e0e1a;   /* Device Detail — noticeably raised */
+
   /* ═══════════════════════════════════════════════════════════════════════════
      TEXT HIERARCHY — 3 stops, high contrast on dark
      ═══════════════════════════════════════════════════════════════════════════ */
@@ -174,5 +179,5 @@
      SIDEBAR DIMENSIONS
      ═══════════════════════════════════════════════════════════════════════════ */
   --sidebar-width: 15rem;  /* 240px */
-  --header-height: 3.5rem; /* 56px — slightly more compact */
+  --header-height: 3rem;   /* 48px — consolidated command strip */
 }
