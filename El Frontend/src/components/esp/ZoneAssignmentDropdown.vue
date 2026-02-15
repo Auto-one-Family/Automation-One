@@ -7,8 +7,8 @@
  * Uses existing useZoneDragDrop composable for API calls + undo/redo.
  */
 
-import { ref, computed } from 'vue'
-import { MapPin, X } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { MapPin } from 'lucide-vue-next'
 import type { ESPDevice } from '@/api/esp'
 
 interface ZoneOption {
@@ -33,8 +33,6 @@ const emit = defineEmits<{
   /** Emitted when zone selection changes */
   (e: 'zone-changed', deviceId: string, zoneId: string | null): void
 }>()
-
-const isOpen = ref(false)
 
 const currentZoneName = computed(() => {
   if (!props.device.zone_id) return 'Nicht zugewiesen'

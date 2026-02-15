@@ -98,10 +98,10 @@ function handleSensorMessage(msg: WebSocketMessage): void {
 }
 
 onMounted(() => {
-  subscriptionId = websocketService.subscribe({
-    filters: { types: ['sensor_data'] },
-    callback: handleSensorMessage,
-  })
+  subscriptionId = websocketService.subscribe(
+    { types: ['sensor_data'] },
+    handleSensorMessage,
+  )
 })
 
 onUnmounted(() => {

@@ -10,7 +10,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useWebSocket } from '@/composables/useWebSocket'
-import { LogOut, User, ChevronDown, Menu } from 'lucide-vue-next'
+import { LogOut, ChevronDown, Menu } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 
 // Emit for sidebar toggle
@@ -24,7 +24,7 @@ const authStore = useAuthStore()
 const showUserMenu = ref(false)
 
 // WebSocket Connection Status
-const { isConnected, connectionStatus } = useWebSocket({ autoConnect: true })
+const { connectionStatus } = useWebSocket({ autoConnect: true })
 
 // Computed: connection dot class
 const connectionDotClass = computed(() => {

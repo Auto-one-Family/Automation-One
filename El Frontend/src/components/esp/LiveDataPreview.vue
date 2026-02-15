@@ -62,10 +62,10 @@ function handleMessage(msg: WebSocketMessage): void {
 }
 
 onMounted(() => {
-  subscriptionId = websocketService.subscribe({
-    filters: { types: ['sensor_data'], esp_ids: [props.espId] },
-    callback: handleMessage,
-  })
+  subscriptionId = websocketService.subscribe(
+    { types: ['sensor_data'], esp_ids: [props.espId] },
+    handleMessage,
+  )
 })
 
 onUnmounted(() => {

@@ -13,7 +13,7 @@
  * - Danger zone (delete device with two-step confirmation)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
 import {
   X,
   Heart,

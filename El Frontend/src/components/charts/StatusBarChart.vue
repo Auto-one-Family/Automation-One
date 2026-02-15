@@ -82,37 +82,22 @@ const chartOptions = computed(() => ({
     },
   },
   scales: {
-    x: {
-      display: !props.horizontal,
-      grid: { display: false },
-      ticks: {
-        color: '#484860',
-        font: { family: 'JetBrains Mono', size: 10 },
-      },
-      border: { display: false },
-    },
-    y: {
-      display: props.horizontal,
-      grid: { display: false },
-      ticks: {
-        color: '#484860',
-        font: { family: 'JetBrains Mono', size: 10 },
-      },
-      border: { display: false },
-    },
-    ...(props.horizontal ? {
-      x: {
-        display: false,
-        grid: { display: false },
-        border: { display: false },
-      },
-    } : {
-      y: {
-        display: false,
-        grid: { display: false },
-        border: { display: false },
-      },
-    }),
+    x: props.horizontal
+      ? { display: false, grid: { display: false }, border: { display: false } }
+      : {
+          display: true,
+          grid: { display: false },
+          ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 } },
+          border: { display: false },
+        },
+    y: props.horizontal
+      ? {
+          display: true,
+          grid: { display: false },
+          ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 } },
+          border: { display: false },
+        }
+      : { display: false, grid: { display: false }, border: { display: false } },
   },
 }))
 </script>

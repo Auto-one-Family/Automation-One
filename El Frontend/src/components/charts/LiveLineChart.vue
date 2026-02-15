@@ -6,7 +6,7 @@
  * Design-token-consistent dark theme, responsive, with live update support.
  */
 
-import { ref, computed, watch, onUnmounted, shallowRef } from 'vue'
+import { computed, watch, shallowRef } from 'vue'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,

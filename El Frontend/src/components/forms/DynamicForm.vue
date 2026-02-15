@@ -7,7 +7,6 @@
  * and provides v-model binding for form data.
  */
 
-import { computed } from 'vue'
 import type { FormSchema, FormFieldSchema } from '@/types/form-schema'
 import FormGroup from './FormGroup.vue'
 import FormField from './FormField.vue'

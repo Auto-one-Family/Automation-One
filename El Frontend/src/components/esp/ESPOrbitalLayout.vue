@@ -35,7 +35,7 @@ import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
 import { useUiStore } from '@/shared/stores'
 import { useToast } from '@/composables/useToast'
-import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables/useZoneDragDrop'
+import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useGpioStatus } from '@/composables/useGpioStatus'
 import {
   SENSOR_TYPE_CONFIG,
@@ -79,7 +79,7 @@ const espStore = useEspStore()
 const dragStore = useDragStateStore()
 const uiStore = useUiStore()
 const toast = useToast()
-const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones, zoneIdToDisplayName } = useZoneDragDrop()
+const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones } = useZoneDragDrop()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
@@ -100,7 +100,7 @@ const emit = defineEmits<{
 // =============================================================================
 const availableZones = computed(() => getAvailableZones(espStore.devices))
 
-async function handleZoneChanged(deviceId: string, zoneId: string | null) {
+async function handleZoneChanged(_deviceId: string, zoneId: string | null) {
   if (zoneId === null) {
     await handleRemoveFromZone(props.device)
   } else {

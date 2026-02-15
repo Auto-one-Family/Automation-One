@@ -57,7 +57,7 @@ function handleSelect(): void {
 }
 
 function handleItemClick(index: number): void {
-  palette.selectedIndex = index
+  palette.selectedIndex.value = index
   handleSelect()
 }
 
@@ -72,7 +72,7 @@ function scrollToSelected(): void {
 
 // Reset selection when query changes
 watch(() => palette.query.value, () => {
-  palette.selectedIndex = 0
+  palette.selectedIndex.value = 0
 })
 </script>
 
@@ -117,17 +117,17 @@ watch(() => palette.query.value, () => {
                 {{ palette.categoryLabels[category] || category }}
               </div>
               <button
-                v-for="(item, idx) in items"
+                v-for="item in items"
                 :key="item.id"
-                :data-selected="palette.filteredCommands.value.indexOf(item) === palette.selectedIndex"
+                :data-selected="palette.filteredCommands.value.indexOf(item) === palette.selectedIndex.value"
                 :class="[
                   'palette__item',
-                  { 'palette__item--selected': palette.filteredCommands.value.indexOf(item) === palette.selectedIndex }
+                  { 'palette__item--selected': palette.filteredCommands.value.indexOf(item) === palette.selectedIndex.value }
                 ]"
                 role="option"
-                :aria-selected="palette.filteredCommands.value.indexOf(item) === palette.selectedIndex"
+                :aria-selected="palette.filteredCommands.value.indexOf(item) === palette.selectedIndex.value"
                 @click="handleItemClick(palette.filteredCommands.value.indexOf(item))"
-                @mouseenter="palette.selectedIndex = palette.filteredCommands.value.indexOf(item)"
+                @mouseenter="palette.selectedIndex.value = palette.filteredCommands.value.indexOf(item)"
               >
                 <component
                   :is="item.icon"
@@ -136,7 +136,7 @@ watch(() => palette.query.value, () => {
                 />
                 <span class="palette__item-label">{{ item.label }}</span>
                 <CornerDownLeft
-                  v-if="palette.filteredCommands.value.indexOf(item) === palette.selectedIndex"
+                  v-if="palette.filteredCommands.value.indexOf(item) === palette.selectedIndex.value"
                   class="palette__item-enter"
                 />
               </button>
