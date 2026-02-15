@@ -1,11 +1,13 @@
 <script setup lang="ts">
 /**
- * DashboardView
+ * DashboardView — Three-Level Zoom Dashboard
  *
- * Main dashboard with:
- * - ActionBar for quick status overview and actions
- * - Zone-grouped ESP overview with drag & drop
- * - ESPOrbitalLayout for visual device display (within zones)
+ * Level 1: ESP-Orbital-View — ESPs with sensors/actuators grouped by zone (default)
+ * Level 2: Komponentenübersicht — All sensors + actuators without ESPs
+ * Level 3: Zonen-Navigator — Zone/subzone overview with aggregated stats
+ *
+ * Navigation via LevelNavigation tabs, keyboard (Escape), or inter-level clicks.
+ * All three levels exist simultaneously (v-show) to preserve state and scroll position.
  */
 
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
@@ -15,6 +17,7 @@ import { useLogicStore } from '@/stores/logic'
 import { useUiStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
+import { useZoomNavigation } from '@/composables/useZoomNavigation'
 import { Plus, Filter, GitBranch, Workflow } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
 
@@ -22,6 +25,7 @@ const logger = createLogger('Dashboard')
 
 // Components
 import ActionBar from '@/components/dashboard/ActionBar.vue'
+import LevelNavigation from '@/components/dashboard/LevelNavigation.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
@@ -30,6 +34,9 @@ import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnection
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
+import ComponentCard from '@/components/dashboard/ComponentCard.vue'
+import type { ComponentCardItem } from '@/components/dashboard/ComponentCard.vue'
+import ZonePlate from '@/components/dashboard/ZonePlate.vue'
 import { LoadingState, EmptyState } from '@/components/common'
 
 const router = useRouter()
@@ -38,6 +45,18 @@ const espStore = useEspStore()
 const logicStore = useLogicStore()
 const uiStore = useUiStore()
 const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
+
+// ── Three-Level Zoom Navigation ──────────────────────────────────────
+const zoomNav = useZoomNavigation()
+
+function handleLevelChange(level: 1 | 2 | 3 | undefined) {
+  if (level) zoomNav.zoomToLevel(level)
+}
+
+/** Navigate from L3 zone click → L1 filtered by zone */
+function handleZonePlateClick(payload: { zoneId: string }) {
+  zoomNav.zoomToZone(payload.zoneId)
+}
 
 // Filter state (type filter unchanged)
 const filterType = ref<'all' | 'mock' | 'real'>('all')
@@ -402,30 +421,182 @@ function formatTimeAgo(timestamp: number): string {
   if (seconds < 86400) return `vor ${Math.floor(seconds / 3600)} Std.`
   return `vor ${Math.floor(seconds / 86400)} Tagen`
 }
+
+// =============================================================================
+// Level 2: Komponentenübersicht — All Sensors + Actuators
+// =============================================================================
+
+/** Grouping mode for Level 2 */
+type ComponentGrouping = 'zone' | 'type' | 'all'
+const componentGrouping = ref<ComponentGrouping>('zone')
+const componentFilter = ref<'all' | 'sensors' | 'actuators'>('all')
+
+/** Flatten all sensors and actuators from all devices into ComponentCardItems */
+const allComponents = computed<ComponentCardItem[]>(() => {
+  const items: ComponentCardItem[] = []
+
+  for (const device of espStore.devices) {
+    const deviceId = espStore.getDeviceId(device)
+    const espName = device.name || deviceId
+
+    // Sensors
+    const sensors = (device.sensors as any[]) || []
+    for (const sensor of sensors) {
+      items.push({
+        type: 'sensor',
+        gpio: sensor.gpio,
+        sensorType: sensor.sensor_type,
+        name: sensor.name,
+        value: sensor.raw_value ?? null,
+        unit: sensor.unit || '',
+        quality: sensor.quality || 'good',
+        espId: deviceId,
+        espName,
+        zoneName: device.zone_name || null,
+        zoneId: device.zone_id || null,
+        subzoneName: (device as any).subzone_name || null,
+        subzoneId: (device as any).subzone_id || null,
+        isStale: sensor.is_stale || false,
+      })
+    }
+
+    // Actuators
+    const actuators = (device.actuators as any[]) || []
+    for (const act of actuators) {
+      items.push({
+        type: 'actuator',
+        gpio: act.gpio,
+        actuatorType: act.actuator_type,
+        name: act.name,
+        value: act.pwm_value ?? null,
+        unit: '',
+        state: act.state || false,
+        emergencyStopped: act.emergency_stopped || false,
+        espId: deviceId,
+        espName,
+        zoneName: device.zone_name || null,
+        zoneId: device.zone_id || null,
+        subzoneName: (device as any).subzone_name || null,
+        subzoneId: (device as any).subzone_id || null,
+      })
+    }
+  }
+
+  return items
+})
+
+/** Filtered components based on type filter */
+const filteredComponents = computed(() => {
+  if (componentFilter.value === 'sensors') return allComponents.value.filter(c => c.type === 'sensor')
+  if (componentFilter.value === 'actuators') return allComponents.value.filter(c => c.type === 'actuator')
+  return allComponents.value
+})
+
+/** Grouped components for display */
+const groupedComponents = computed<{ label: string; items: ComponentCardItem[] }[]>(() => {
+  const items = filteredComponents.value
+
+  if (componentGrouping.value === 'all') {
+    return [{ label: 'Alle Komponenten', items }]
+  }
+
+  if (componentGrouping.value === 'zone') {
+    const groups = new Map<string, ComponentCardItem[]>()
+    const unassigned: ComponentCardItem[] = []
+
+    for (const item of items) {
+      if (item.zoneId && item.zoneName) {
+        if (!groups.has(item.zoneId)) groups.set(item.zoneId, [])
+        groups.get(item.zoneId)!.push(item)
+      } else {
+        unassigned.push(item)
+      }
+    }
+
+    const result = Array.from(groups.entries())
+      .map(([, groupItems]) => ({
+        label: groupItems[0].zoneName || 'Unbekannt',
+        items: groupItems,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+
+    if (unassigned.length > 0) {
+      result.push({ label: 'Nicht zugewiesen', items: unassigned })
+    }
+
+    return result
+  }
+
+  // Group by type
+  const groups = new Map<string, ComponentCardItem[]>()
+  for (const item of items) {
+    const typeKey = item.sensorType || item.actuatorType || 'unknown'
+    if (!groups.has(typeKey)) groups.set(typeKey, [])
+    groups.get(typeKey)!.push(item)
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, groupItems]) => ({ label: key, items: groupItems }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+/** Stats for Level 2 header */
+const componentStats = computed(() => ({
+  sensors: allComponents.value.filter(c => c.type === 'sensor').length,
+  actuators: allComponents.value.filter(c => c.type === 'actuator').length,
+  zones: new Set(allComponents.value.map(c => c.zoneId).filter(Boolean)).size,
+}))
+
+// =============================================================================
+// Level 3: Zonen-Navigator — Zone/Subzone Overview
+// =============================================================================
+
+/** All zone groups for Level 3 (including unassigned) */
+const allZoneGroups = computed(() => {
+  const groups = groupDevicesByZone(espStore.devices)
+  return groups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
+})
+
+/** Unassigned device count for Level 3 */
+const unassignedCount = computed(() => {
+  return espStore.devices.filter(d => !d.zone_id).length
+})
 </script>
 
 <template>
   <div class="dashboard-view">
-    <!-- Action Bar (replaces StatCards and Status Filters) -->
-    <!-- Type Filter is now consolidated into ActionBar (Robin UX feedback) -->
-    <ActionBar
-      :online-count="onlineCount"
-      :offline-count="offlineCount"
-      :warning-count="warningCount"
-      :safe-mode-count="safeModeCount"
-      :pending-count="pendingCount"
-      :active-filters="activeStatusFilters"
-      :has-problems="hasProblems"
-      :problem-message="problemMessage"
-      :filter-type="filterType"
-      :total-count="counts.all"
-      :mock-count="counts.mock"
-      :real-count="counts.real"
-      @toggle-filter="toggleStatusFilter"
-      @update:filter-type="filterType = $event"
-      @create-mock-esp="showCreateMockModal = true"
-      @open-pending-devices="handleOpenPendingDevices"
-    />
+    <!-- ═══════════════════════════════════════════════════════════════════
+         GLOBAL HEADER: ActionBar + Level Navigation
+         Visible across all zoom levels
+         ═══════════════════════════════════════════════════════════════════ -->
+
+    <div class="dashboard-header">
+      <ActionBar
+        :online-count="onlineCount"
+        :offline-count="offlineCount"
+        :warning-count="warningCount"
+        :safe-mode-count="safeModeCount"
+        :pending-count="pendingCount"
+        :active-filters="activeStatusFilters"
+        :has-problems="hasProblems"
+        :problem-message="problemMessage"
+        :filter-type="filterType"
+        :total-count="counts.all"
+        :mock-count="counts.mock"
+        :real-count="counts.real"
+        @toggle-filter="toggleStatusFilter"
+        @update:filter-type="filterType = $event"
+        @create-mock-esp="showCreateMockModal = true"
+        @open-pending-devices="handleOpenPendingDevices"
+      />
+
+      <!-- Level Navigation Tabs -->
+      <LevelNavigation
+        :current-level="zoomNav.currentLevel.value"
+        :is-transitioning="zoomNav.isTransitioning.value"
+        @update:current-level="handleLevelChange"
+      />
+    </div>
 
     <!-- Rules Activity Ribbon -->
     <div v-if="logicStore.ruleCount > 0 || logicStore.recentExecutions.length > 0" class="rules-ribbon">
@@ -457,9 +628,9 @@ function formatTimeAgo(timestamp: number): string {
     <!-- Loading -->
     <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
 
-    <!-- Empty State -->
+    <!-- Empty State (only on Level 1) -->
     <EmptyState
-      v-else-if="espStore.devices.length === 0"
+      v-else-if="espStore.devices.length === 0 && zoomNav.currentLevel.value === 1"
       :icon="Plus"
       title="Keine ESP-Geräte"
       description="Erstellen Sie Ihr erstes Mock-ESP32-Gerät, um mit dem Testen zu beginnen."
@@ -467,104 +638,226 @@ function formatTimeAgo(timestamp: number): string {
       @action="showCreateMockModal = true"
     />
 
-    <!-- No Results (with filters) -->
+    <!-- ═══════════════════════════════════════════════════════════════════
+         LEVEL 1: ESP-Orbital-View (default)
+         ESPs with sensors/actuators grouped by zone, drag & drop
+         ═══════════════════════════════════════════════════════════════════ -->
     <div
-      v-else-if="filteredEsps.length === 0"
-      class="card p-8 text-center"
+      v-show="zoomNav.currentLevel.value === 1 && espStore.devices.length > 0"
+      :class="zoomNav.level1Class.value"
     >
-      <Filter class="w-12 h-12 mx-auto mb-4" style="color: var(--color-text-muted)" />
-      <h3 class="font-semibold mb-2" style="color: var(--color-text-secondary)">
-        Keine Ergebnisse
-      </h3>
-      <p style="color: var(--color-text-muted)" class="mb-4">
-        Keine Geräte entsprechen den aktuellen Filtern.
-      </p>
-      <button class="btn-secondary" @click="resetFilters">
-        Filter zurücksetzen
-      </button>
-    </div>
+      <!-- No Results (with filters) -->
+      <div
+        v-if="filteredEsps.length === 0"
+        class="card p-8 text-center"
+      >
+        <Filter class="w-12 h-12 mx-auto mb-4" style="color: var(--color-text-muted)" />
+        <h3 class="font-semibold mb-2" style="color: var(--color-text-secondary)">
+          Keine Ergebnisse
+        </h3>
+        <p style="color: var(--color-text-muted)" class="mb-4">
+          Keine Geräte entsprechen den aktuellen Filtern.
+        </p>
+        <button class="btn-secondary" @click="resetFilters">
+          Filter zurücksetzen
+        </button>
+      </div>
 
-    <!-- Zone-Grouped ESP Grid with Cross-ESP Overlay and Sensor Sidebar -->
-    <div v-else class="dashboard-main-layout">
-      <!-- Main Content Area -->
-      <div class="zone-groups-wrapper">
-        <!-- Cross-ESP Connection Overlay (renders on top of all ESPs) -->
-        <CrossEspConnectionOverlay
-          :show="showCrossEspConnections"
-          :show-labels="true"
-        />
+      <!-- Zone-Grouped ESP Grid with Cross-ESP Overlay and Sensor Sidebar -->
+      <div v-else class="dashboard-main-layout">
+        <div class="zone-groups-wrapper">
+          <CrossEspConnectionOverlay
+            :show="showCrossEspConnections"
+            :show-labels="true"
+          />
 
-        <div class="zone-groups-container">
-          <!-- Empty State when all devices are unassigned -->
-          <div v-if="zoneGroups.length === 0" class="no-zones-hint">
-            <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
-            <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
+          <div class="zone-groups-container">
+            <div v-if="zoneGroups.length === 0" class="no-zones-hint">
+              <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
+              <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
+            </div>
+
+            <ZoneGroup
+              v-for="group in zoneGroups"
+              :key="group.zoneId"
+              :zone-id="group.zoneId"
+              :zone-name="group.zoneName"
+              :devices="group.devices"
+              :is-unassigned="false"
+              :compact-mode="true"
+              :enable-drag-drop="true"
+              :default-expanded="true"
+              @device-dropped="onDeviceDropped"
+              @heartbeat="handleHeartbeat"
+              @delete="handleDelete"
+              @toggle-safe-mode="handleToggleSafeMode"
+            >
+              <template #device="{ device }">
+                <ESPOrbitalLayout
+                  :device="device"
+                  :show-connections="false"
+                  :compact-mode="true"
+                  @heartbeat="(d) => handleHeartbeat(espStore.getDeviceId(d))"
+                  @delete="(d) => handleDelete(espStore.getDeviceId(d))"
+                  @settings="handleSettings"
+                  @name-updated="handleNameUpdated"
+                />
+              </template>
+            </ZoneGroup>
           </div>
 
-          <ZoneGroup
-            v-for="group in zoneGroups"
+          <button
+            v-if="logicStore.crossEspConnections.length > 0"
+            class="cross-esp-toggle"
+            :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
+            @click="showCrossEspConnections = !showCrossEspConnections"
+            :title="showCrossEspConnections ? 'Verbindungen ausblenden' : 'Verbindungen einblenden'"
+          >
+            <GitBranch class="w-4 h-4" />
+            <span>{{ logicStore.crossEspConnections.length }} Cross-ESP</span>
+          </button>
+        </div>
+
+        <ComponentSidebar />
+      </div>
+
+      <UnassignedDropBar />
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         LEVEL 2: Komponentenübersicht
+         All sensors + actuators without ESPs, filterable by zone/type
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div
+      v-show="zoomNav.currentLevel.value === 2"
+      :class="zoomNav.level2Class.value"
+    >
+      <div class="components-view">
+        <!-- Header with stats and filters -->
+        <div class="components-view__header">
+          <div class="components-view__stats">
+            <span class="components-view__stat">{{ componentStats.sensors }} Sensoren</span>
+            <span class="components-view__stat-sep">·</span>
+            <span class="components-view__stat">{{ componentStats.actuators }} Aktoren</span>
+            <span class="components-view__stat-sep">·</span>
+            <span class="components-view__stat">{{ componentStats.zones }} Zonen</span>
+          </div>
+
+          <div class="components-view__controls">
+            <!-- Type Filter -->
+            <div class="components-view__filter-group">
+              <button
+                v-for="opt in [
+                  { value: 'all', label: 'Alle' },
+                  { value: 'sensors', label: 'Sensoren' },
+                  { value: 'actuators', label: 'Aktoren' },
+                ] as const"
+                :key="opt.value"
+                :class="['components-view__filter-btn', { active: componentFilter === opt.value }]"
+                @click="componentFilter = opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+
+            <!-- Grouping -->
+            <div class="components-view__filter-group">
+              <button
+                v-for="opt in [
+                  { value: 'zone', label: 'Nach Zone' },
+                  { value: 'type', label: 'Nach Typ' },
+                  { value: 'all', label: 'Alle' },
+                ] as const"
+                :key="opt.value"
+                :class="['components-view__filter-btn', { active: componentGrouping === opt.value }]"
+                @click="componentGrouping = opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Component Groups -->
+        <div v-if="filteredComponents.length === 0" class="components-view__empty">
+          <p>Keine Komponenten vorhanden.</p>
+          <p class="text-sm">Füge Sensoren oder Aktoren zu deinen ESPs hinzu.</p>
+        </div>
+
+        <div v-else class="components-view__groups">
+          <section
+            v-for="group in groupedComponents"
+            :key="group.label"
+            class="components-view__group"
+          >
+            <h3 class="components-view__group-label">
+              {{ group.label }}
+              <span class="components-view__group-count">{{ group.items.length }}</span>
+            </h3>
+            <div class="components-view__grid">
+              <ComponentCard
+                v-for="item in group.items"
+                :key="`${item.espId}-${item.gpio}-${item.type}`"
+                :item="item"
+              />
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         LEVEL 3: Zonen-Navigator
+         Zone/subzone overview with aggregated stats
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div
+      v-show="zoomNav.currentLevel.value === 3"
+      :class="zoomNav.level3Class.value"
+    >
+      <div class="zones-view">
+        <div class="zones-view__header">
+          <h2 class="zones-view__title">Zonen-Übersicht</h2>
+          <span class="zones-view__subtitle">
+            {{ allZoneGroups.length }} Zone{{ allZoneGroups.length !== 1 ? 'n' : '' }}
+            <template v-if="unassignedCount > 0">
+              · {{ unassignedCount }} nicht zugewiesen
+            </template>
+          </span>
+        </div>
+
+        <div v-if="allZoneGroups.length === 0" class="zones-view__empty">
+          <p>Keine Zonen vorhanden.</p>
+          <p class="text-sm">Weise auf Ebene 1 Geräte einer Zone zu (Drag & Drop).</p>
+        </div>
+
+        <div v-else class="zones-view__grid">
+          <ZonePlate
+            v-for="group in allZoneGroups"
             :key="group.zoneId"
             :zone-id="group.zoneId"
             :zone-name="group.zoneName"
             :devices="group.devices"
-            :is-unassigned="false"
-            :compact-mode="true"
-            :enable-drag-drop="true"
-            :default-expanded="true"
-            @device-dropped="onDeviceDropped"
-            @heartbeat="handleHeartbeat"
-            @delete="handleDelete"
-            @toggle-safe-mode="handleToggleSafeMode"
-          >
-            <!-- Use ESPOrbitalLayout for Dashboard (compact view with sensors/actuators) -->
-            <template #device="{ device }">
-              <ESPOrbitalLayout
-                :device="device"
-                :show-connections="false"
-                :compact-mode="true"
-                @heartbeat="(d) => handleHeartbeat(espStore.getDeviceId(d))"
-                @delete="(d) => handleDelete(espStore.getDeviceId(d))"
-                @settings="handleSettings"
-                @name-updated="handleNameUpdated"
-              />
-            </template>
-          </ZoneGroup>
+            @click="handleZonePlateClick"
+          />
         </div>
-
-        <!-- Cross-ESP Toggle (if connections exist) -->
-        <button
-          v-if="logicStore.crossEspConnections.length > 0"
-          class="cross-esp-toggle"
-          :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
-          @click="showCrossEspConnections = !showCrossEspConnections"
-          :title="showCrossEspConnections ? 'Verbindungen ausblenden' : 'Verbindungen einblenden'"
-        >
-          <GitBranch class="w-4 h-4" />
-          <span>{{ logicStore.crossEspConnections.length }} Cross-ESP</span>
-        </button>
       </div>
-
-      <!-- Komponenten-Sidebar (rechte Seite) -->
-      <ComponentSidebar />
     </div>
 
-    <!-- Fixed Bottom Bar for Unassigned Devices -->
-    <UnassignedDropBar />
+    <!-- ═══════════════════════════════════════════════════════════════════
+         MODALS & OVERLAYS (global, above all levels)
+         ═══════════════════════════════════════════════════════════════════ -->
 
-    <!-- Create Mock ESP Modal -->
     <CreateMockEspModal
       v-model="showCreateMockModal"
       @created="onMockEspCreated"
     />
 
-    <!-- Pending Devices Panel (Discovery/Approval) -->
     <PendingDevicesPanel
       v-model:is-open="showPendingDevices"
       :anchor-el="pendingButtonAnchor"
       @close="showPendingDevices = false"
     />
 
-    <!-- ESP Settings Sheet (Slide-in from right) -->
     <ESPSettingsSheet
       v-if="settingsDevice"
       :device="settingsDevice"
@@ -576,23 +869,91 @@ function formatTimeAgo(timestamp: number): string {
       @name-updated="handleNameUpdated"
       @zone-updated="handleZoneUpdated"
     />
-
   </div>
 </template>
 
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════════════════
-   DASHBOARD VIEW — Mission Control Main View
-   Staggered entrance, token-aligned spacing
+   DASHBOARD VIEW — Three-Level Zoom Dashboard
+   Level 1: ESP-Orbital | Level 2: Components | Level 3: Zones
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .dashboard-view {
-  /* Let shell__content handle scrolling — no nested scroll context */
   min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding-bottom: 120px; /* Account for fixed UnassignedDropBar */
+  padding-bottom: 120px;
+}
+
+/* ── Dashboard Header: ActionBar + Level Navigation ── */
+.dashboard-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── Zoom Level Containers ── */
+.zoom-level {
+  display: none;
+}
+
+.zoom-level--active {
+  display: block;
+}
+
+.zoom-level--exiting {
+  display: block;
+  pointer-events: none;
+}
+
+.zoom-level--entering {
+  display: block;
+}
+
+/* Zoom animations */
+.animate-zoom-in-exit {
+  animation: zoom-in-exit 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-zoom-in-enter {
+  animation: zoom-in-enter 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-zoom-out-exit {
+  animation: zoom-out-exit 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-zoom-out-enter {
+  animation: zoom-out-enter 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes zoom-in-exit {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+
+@keyframes zoom-in-enter {
+  0%   { opacity: 0; transform: scale(0.94); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes zoom-out-exit {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.94); }
+}
+
+@keyframes zoom-out-enter {
+  0%   { opacity: 0; transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zoom-level--exiting,
+  .zoom-level--entering {
+    animation: none !important;
+    transition: opacity 0.1s ease;
+  }
 }
 
 /* ── Staggered Page Entrance ── */
@@ -824,7 +1185,7 @@ function formatTimeAgo(timestamp: number): string {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: var(--z-modal-backdrop);
+  z-index: var(--z-modal-backdrop, 40);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -832,5 +1193,184 @@ function formatTimeAgo(timestamp: number): string {
   background-color: rgba(7, 7, 13, 0.85);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEVEL 2: Komponentenübersicht
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.components-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 1rem);
+}
+
+.components-view__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3, 0.75rem);
+}
+
+.components-view__stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.components-view__stat-sep {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+.components-view__controls {
+  display: flex;
+  gap: var(--space-3, 0.75rem);
+  flex-wrap: wrap;
+}
+
+.components-view__filter-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+}
+
+.components-view__filter-btn {
+  padding: 0.3125rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.components-view__filter-btn:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.components-view__filter-btn.active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.components-view__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8, 2rem);
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--glass-bg);
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.5rem;
+}
+
+.components-view__groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6, 1.5rem);
+}
+
+.components-view__group-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  margin: 0 0 var(--space-3, 0.75rem) 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.components-view__group-count {
+  font-size: 0.6875rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-muted);
+  padding: 0.125rem 0.375rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 9999px;
+}
+
+.components-view__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3, 0.75rem);
+}
+
+@media (max-width: 640px) {
+  .components-view__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .components-view__grid {
+    flex-direction: column;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEVEL 3: Zonen-Navigator
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.zones-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 1rem);
+}
+
+.zones-view__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3, 0.75rem);
+}
+
+.zones-view__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.zones-view__subtitle {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.zones-view__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8, 2rem);
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--glass-bg);
+  border: 1px dashed var(--glass-border);
+  border-radius: 0.5rem;
+}
+
+.zones-view__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4, 1rem);
+}
+
+@media (max-width: 640px) {
+  .zones-view__grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
