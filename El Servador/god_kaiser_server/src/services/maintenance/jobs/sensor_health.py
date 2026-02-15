@@ -229,13 +229,14 @@ async def check_sensor_timeouts(
 
         # Collect sensor keys that need timeout checking
         # (only continuous mode with timeout > 0 and warning enabled)
+        # Key includes sensor_type for multi-value sensors (e.g. SHT31 temp+humidity)
         sensor_effective_configs: Dict[Any, Dict[str, Any]] = {}  # Cache für später
 
         for sensor in sensors:
             effective = compute_effective_config_from_cached(
                 type_defaults_map, sensor
             )
-            sensor_key = (sensor.esp_id, sensor.gpio)
+            sensor_key = (sensor.esp_id, sensor.gpio, sensor.sensor_type)
             sensor_effective_configs[sensor_key] = effective
 
             # Skip non-continuous modes
@@ -263,11 +264,12 @@ async def check_sensor_timeouts(
 
         if sensors_to_check:
             sensor_keys = [
-                (s.esp_id, s.gpio) for s in sensors_to_check
+                (s.esp_id, s.gpio, s.sensor_type) for s in sensors_to_check
             ]
 
             # Query 3: Batch-fetch all latest readings in ONE query
-            latest_readings_map = await sensor_repo.get_latest_readings_batch(
+            # Uses sensor_type in key for correct multi-value sensor handling
+            latest_readings_map = await sensor_repo.get_latest_readings_batch_by_config(
                 sensor_keys
             )
 
@@ -283,7 +285,7 @@ async def check_sensor_timeouts(
         now = datetime.now(timezone.utc)
 
         for sensor in sensors_to_check:
-            sensor_key = (sensor.esp_id, sensor.gpio)
+            sensor_key = (sensor.esp_id, sensor.gpio, sensor.sensor_type)
             effective = sensor_effective_configs[sensor_key]
             timeout_seconds = effective["timeout_seconds"]
 

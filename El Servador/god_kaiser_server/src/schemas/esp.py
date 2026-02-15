@@ -1167,6 +1167,14 @@ class PendingESPDevice(BaseModel):
         0,
         description="Number of heartbeats received while pending",
     )
+    ip_address: Optional[str] = Field(
+        None,
+        description="IP address from heartbeat (wifi_ip field)",
+    )
+    hardware_type: Optional[str] = Field(
+        None,
+        description="Hardware type (e.g., ESP32_WROOM)",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

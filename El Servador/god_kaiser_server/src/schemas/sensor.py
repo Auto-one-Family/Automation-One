@@ -404,6 +404,11 @@ class SensorReading(BaseModel):
         "good",
         description="Data quality (excellent, good, fair, poor, bad, stale)",
     )
+    sensor_type: Optional[str] = Field(
+        None,
+        description="Sensor type (e.g. 'sht31_temp', 'sht31_humidity', 'ds18b20'). "
+                    "Allows frontend to distinguish readings from multi-value sensors.",
+    )
     
     @field_validator("quality")
     @classmethod
@@ -422,7 +427,8 @@ class SensorReading(BaseModel):
                 "raw_value": 2150,
                 "processed_value": 6.8,
                 "unit": "pH",
-                "quality": "good"
+                "quality": "good",
+                "sensor_type": "ph"
             }
         }
     )
