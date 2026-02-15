@@ -1,6 +1,6 @@
 # Log-System - AutomationOne
 
-> **Version:** 3.0 | **Aktualisiert:** 2026-02-06
+> **Version:** 3.7 | **Aktualisiert:** 2026-02-13
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
 
@@ -30,11 +30,12 @@
 | Verzeichnis | Container | Beschreibung |
 |-------------|-----------|--------------|
 | `logs/server/` | el-servador | FastAPI Server JSON-Logs |
-| `logs/mqtt/` | mqtt-broker | Mosquitto Broker Logs |
+| `logs/mqtt/` | mqtt-broker | Deaktiviert (Mosquitto stdout-only seit v3.1); Broker-Logs via Loki `compose_service=mqtt-broker` |
 | `logs/postgres/` | postgres | PostgreSQL Query/Connection Logs |
 | `logs/esp32/` | - | ESP32 Serial Logs (manuell via PlatformIO) |
 | `logs/wokwi/` | - | Wokwi Serial/MQTT/Report Logs (via make wokwi-test-*) |
 | `logs/current/` | - | Session-Logs (via start_session.sh) |
+| (kein Bind-Mount) | el-frontend | Vue/Vite stdout → Loki `compose_service=el-frontend` (JSON, level/component); `docker compose logs el-frontend` |
 | Docker Container | esp32-serial-logger | ESP32 Serial via TCP-Bridge (stdout only, Profile: hardware) |
 
 ### Docker-Compose Konfiguration
@@ -50,10 +51,8 @@ el-servador:
       max-size: "10m"
       max-file: "3"
 
-# MQTT-Logs (Bind-Mount statt Named Volume)
-mqtt-broker:
-  volumes:
-    - ./logs/mqtt:/mosquitto/log
+# MQTT-Logs (in docker-compose auskommentiert: Mosquitto stdout-only)
+# mqtt-broker: kein Bind-Mount; Logs via Promtail → Loki (compose_service=mqtt-broker)
 
 # PostgreSQL-Logs
 postgres:
@@ -170,6 +169,7 @@ gh run download <run-id>                                                       #
 | ESP32 | `> serial.log 2>&1` (Umleitung) | Text | ⚠️ log2file unzuverlässig |
 | MQTT | `> mqtt.log` (Umleitung) | Text | ❌ Capture nötig |
 | Wokwi Logs | `logs/wokwi/{serial,mqtt,reports}/` | Text/JSON | ✅ Automatisch (Makefile) |
+| Playwright E2E | `logs/frontend/playwright/playwright-report/`, `logs/frontend/playwright/test-results/` | HTML/JSON | ✅ Config `playwright.config.ts` |
 | CI | `gh run view --log` | Text | ✅ `--log` Flag |
 
 ---
@@ -187,6 +187,8 @@ gh run download <run-id>                                                       #
 | **Wokwi** | `--serial-log-file` | ✅ | ✅ | ✅ **Native CLI Option** |
 | **ESP32 Serial** | `> file 2>&1` | ✅ | ❌ | ⚠️ log2file unzuverlässig |
 | **MQTT Traffic** | `> mqtt.log` | ✅ | ❌ | ❌ Umleitung nötig |
+| **Frontend (Container)** | Loki `compose_service=el-frontend` / `docker compose logs el-frontend` | ✅ | ✅ (Loki 7d) | ❌ (stdout only) |
+| **Playwright E2E** | `logs/frontend/playwright/` (Report + test-results) | ❌ | ✅ | ✅ `playwright.config.ts` |
 | **GitHub Actions** | CI Logs | ❌ | ✅ | ✅ `--log` Flag |
 
 ### 1.2 Zugriffsmethoden für KI
@@ -198,6 +200,7 @@ gh run download <run-id>                                                       #
 | Wokwi | ⚠️ Bedingt | Token nötig, dann Bash |
 | ESP32 Serial | ❌ | User muss Output teilen |
 | MQTT | ⚠️ Bedingt | `mosquitto_sub` muss installiert sein |
+| Frontend (Container) | ✅ Direkt (wenn Monitoring) | Loki API `compose_service=el-frontend`; sonst `docker compose logs el-frontend` |
 | GitHub Actions | ✅ Direkt | `gh` CLI |
 
 ---
@@ -838,6 +841,18 @@ mosquitto_sub -h localhost -t "kaiser/#" -v | ts '[%Y-%m-%d %H:%M:%S]' | tee mqt
 
 ## 12. Monitoring-Stack (Loki / Grafana / Prometheus)
 
+### 12.0 Erreichbarkeit aller Ebenen – KI-Optimalität
+
+| Ebene | Erreichbar | Live | In Loki (wenn `make monitor-up`) | KI-optimal (Labels/Struktur) | Hinweis |
+|-------|-------------|------|-----------------------------------|-------------------------------|---------|
+| **Server** (el-servador) | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=el-servador` + level, logger | Ja (Regex-Parser, level/logger) | Zusätzlich Datei: `logs/server/god_kaiser.log` |
+| **Frontend** (el-frontend) | Ja | Ja (docker logs / Loki) | Ja, `compose_service=el-frontend` + level, component | Ja (JSON-Parser) | Nur stdout, kein Bind-Mount |
+| **MQTT-Broker** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=mqtt-broker` | Teilweise (kein level-Extract) | Broker-Events; **MQTT-Payload** (kaiser/#) nicht in Loki, nur live z. B. `mosquitto_sub` / session.sh |
+| **PostgreSQL** | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=postgres` | Teilweise (Container-stdout; Hauptlog in `logs/postgres/`) | DB-Log primär in `logs/postgres/postgresql.log` |
+| **ESP32 Serial** | Bedingt | Ja, wenn Pfad aktiv | Ja, wenn Profile `hardware` + Host-Bridge (ser2net/socat); `compose_service=esp32-serial-logger` + level, device_id, component | Ja (JSON-Parser) | Ohne Hardware-Bridge nur manuell: `logs/current/esp32_serial.log` |
+
+**Zusammenfassung:** Alle Container-Logs sind erreichbar und bei laufendem Monitoring in Loki durchsuchbar (LogQL, Zeitfenster, Labels). Live-Zugriff immer über `docker compose logs -f <service>`. KI-optimal: Server, Frontend und (wenn aktiv) ESP32 haben strukturierte Labels; MQTT-Payload-Stream (Nachrichteninhalt) ist nicht in Loki. Einstieg Gesamtzustand: `debug-status.ps1`.
+
 ### 12.1 Voraussetzung
 
 Monitoring-Stack muss gestartet sein: `make monitor-up`
@@ -845,40 +860,50 @@ Monitoring-Stack muss gestartet sein: `make monitor-up`
 ### 12.2 Loki-Queries (Zentrales Log-System)
 
 ```bash
-# Alle Server-Logs (letzte Stunde)
+# Alle Server-Logs (letzte Stunde) – Label compose_service (ROADMAP §1.1)
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={service="el-servador"}' \
+  --data-urlencode 'query={compose_service="el-servador"}' \
   --data-urlencode 'limit=100'
 
 # Nur Errors
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={service="el-servador"} |= "ERROR"' \
+  --data-urlencode 'query={compose_service="el-servador"} |= "ERROR"' \
   --data-urlencode 'limit=50'
 
 # MQTT-Broker Logs
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={service="mqtt-broker"}' \
+  --data-urlencode 'query={compose_service="mqtt-broker"}' \
   --data-urlencode 'limit=50'
 
-# Frontend-Logs
+# Frontend-Logs (Vue/Vite stdout, Promtail Stage 3: JSON level/component)
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={service="el-frontend"}' \
+  --data-urlencode 'query={compose_service="el-frontend"}' \
+  --data-urlencode 'limit=50'
+
+# PostgreSQL-Container-Logs (stdout/stderr; Hauptlog siehe logs/postgres/)
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={compose_service="postgres"}' \
+  --data-urlencode 'limit=30'
+
+# ESP32 Serial (nur wenn Profile hardware + Host-Bridge aktiv)
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={compose_service="esp32-serial-logger"}' \
   --data-urlencode 'limit=50'
 
 # Verfuegbare Labels
 curl -s http://localhost:3100/loki/api/v1/labels
 
-# Services auflisten
-curl -s "http://localhost:3100/loki/api/v1/label/service/values"
+# Services auflisten (compose_service = Promtail-Target-Label)
+curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 ```
 
 ### 12.3 Loki-Labels
 
 | Label | Beschreibung | Beispiel-Werte |
 |-------|-------------|----------------|
-| `service` | Docker Compose Service-Name | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres`, `esp32-serial-logger` |
+| `compose_service` | Docker Compose Service-Name (Primär für Queries, ROADMAP §1.1) | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres`, `esp32-serial-logger` |
 | `container` | Container-Name | `automationone-server`, `automationone-mqtt`, `automationone-esp32-serial` |
-| `compose_service` | Identisch zu `service` | `el-servador` |
+| `service` | Wie compose_service (Promtail setzt beide) | `el-servador` |
 | `compose_project` | Compose-Projekt | `auto-one` |
 | `stream` | Log-Stream | `stdout`, `stderr` |
 
@@ -904,9 +929,13 @@ curl -s http://localhost:9090/api/v1/targets
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-11
-**Version:** 3.3
+**Letzte Aktualisierung:** 2026-02-13
+**Version:** 3.7
 **Changelog:**
+- 3.7: §12.0 Erreichbarkeit aller Ebenen (Tabelle KI-Optimalität); Loki-Beispiele für postgres + esp32-serial-logger
+- 3.6: Frontend-Container-Logs als Log-Quelle ergänzt (stdout → Loki, kein Bind-Mount; Tabelle Log-Verzeichnisse, 1.1, 1.2, 12.2)
+- 3.5: Playwright E2E-Log-Pfade in Quick-Reference und Übersicht ergänzt (logs/frontend/playwright/)
+- 3.4: Loki-Queries auf compose_service umgestellt (ROADMAP §1.1); MQTT Bind-Mount als deaktiviert dokumentiert (stdout-only); Label-Tabelle compose_service als primär
 - 3.3: Loki-Labels: esp32-serial-logger Service und automationone-esp32-serial Container in Beispiel-Werte ergaenzt
 - 3.2: Wokwi Log-Pfade (logs/wokwi/) in Quick-Reference und Docker-Log-Tabelle ergaenzt
 - 3.1: Monitoring-Stack Section (Loki-Queries, Labels, Grafana, Prometheus)

@@ -1,9 +1,10 @@
 ---
 name: frontend-debug
 description: |
-  Frontend Debug-Wissensdatenbank: Vue 3 Architektur, 26 WebSocket-Events,
-  API-Client mit Token-Refresh, 9 Pinia Stores (5 + 4 shared), Auth-Flow, Build-Chain,
-  Error-Kategorien, Component-Hierarchie, Design System (shared/design/), Test-Infrastruktur.
+  Frontend Debug-Wissensdatenbank: Vue 3 Architektur, 26+ WebSocket-Events,
+  API-Client mit Token-Refresh, 13 Pinia Stores (esp + 12 shared), Auth-Flow, Build-Chain,
+  Error-Kategorien, Component-Hierarchie, Design System (shared/design/), Test-Infrastruktur,
+  Dashboard-Zoom (ZonePlate→ZoneDetail→DeviceDetail), useZoomNavigation.
   Trigger-Keywords: frontend, vue, vite, typescript, websocket, store, pinia,
   component, build, ts2, axios, 401, token, tailwind, dashboard
 allowed-tools: Read, Grep, Glob, Bash
@@ -23,12 +24,12 @@ context: inline
 
 ```
 Entry: main.ts → App.vue → Router → Views (11 aktiv)
-State: 9 Pinia Stores (5 original + 4 shared/stores/)
+State: 13 Pinia Stores (esp + 12 shared/stores/)
 API:   16 Module via Axios mit Interceptors
-WS:    Singleton Service → useWebSocket Composable → Store-Handler
-UI:    97 Components (layout/, common/, dashboard/, esp/, system-monitor/, rules/, shared/design/, ...)
-Design: shared/design/ (primitives/ 9, layout/ 3, patterns/ 3) + styles/ (5 CSS)
-Utils: 14 Dateien | Types: 5 Dateien | Composables: 8
+WS:    Singleton Service → useWebSocket Composable → Store-Handler (22 Handler im ESP Store)
+UI:    ~128 Components (layout/, common/, dashboard/, esp/, zones/, system-monitor/, rules/, shared/design/, ...)
+Design: shared/design/ (primitives/ 9, layout/ 3, patterns/ 5) + styles/ (5 CSS)
+Utils: 14 Dateien | Types: 5 Dateien | Composables: 12
 ```
 
 ### Entry Point (`El Frontend/src/main.ts`)
@@ -65,22 +66,22 @@ console.error('[Vue Error]', {
 
 ## 2. WebSocket-Integration
 
-### 26 Event-Typen (MessageType)
+### 26+ Event-Typen (MessageType)
 
-Definiert in `src/types/index.ts`:
+Definiert in `src/types/index.ts`. Server broadcastet zusaetzlich: `subzone_assignment`, `esp_diagnostics`, `events_restored` (siehe WEBSOCKET_EVENTS.md).
 
 | Gruppe | Events |
 |--------|--------|
 | **Core** | `sensor_data`, `actuator_status`, `actuator_response`, `actuator_alert` |
 | **Health** | `esp_health`, `sensor_health` |
-| **Config** | `config_response`, `zone_assignment` |
+| **Config** | `config_response`, `zone_assignment`, `subzone_assignment` (Server) |
 | **Discovery** | `device_discovered`, `device_approved`, `device_rejected`, `device_rediscovered` |
 | **Actuator Lifecycle** | `actuator_command`, `actuator_command_failed` |
 | **Config Lifecycle** | `config_published`, `config_failed` |
 | **Sequence** | `sequence_started`, `sequence_step`, `sequence_completed`, `sequence_error`, `sequence_cancelled` |
 | **System** | `logic_execution`, `system_event`, `notification`, `error_event` |
 
-### ESP Store Event-Handler (11 aktiv)
+### ESP Store Event-Handler (22 aktiv)
 
 | Event | Store Action |
 |-------|-------------|
@@ -91,10 +92,20 @@ Definiert in `src/types/index.ts`:
 | `actuator_alert` | Emergency-Stop, Timeout-Alert |
 | `config_response` | Config-ACK Verarbeitung |
 | `zone_assignment` | Zone-Zuweisung bestaetigt |
+| `subzone_assignment` | Subzone ACK (WP4) |
 | `device_discovered` | Neues Pending Device |
 | `device_approved` | Pending → Active |
 | `device_rejected` | Pending entfernt |
+| `device_rediscovered` | Rejected/Offline → Pending |
 | `sensor_health` | Sensor Timeout/Recovery |
+| `actuator_command` | Command-Publish-Bestaetigung |
+| `actuator_command_failed` | Command-Fehler |
+| `config_published` | Config-Publish-Bestaetigung |
+| `config_failed` | Config-Publish-Fehler |
+| `notification` | Rule-Notification |
+| `error_event` | ESP-Fehler |
+| `system_event` | Maintenance-Events |
+| `sequence_started`, `sequence_step`, `sequence_completed`, `sequence_error`, `sequence_cancelled` | Sequence-Lifecycle |
 
 ### Connection Flow
 
@@ -165,22 +176,30 @@ API Error → Axios Response Interceptor
 
 ---
 
-## 4. Pinia Stores (5)
+## 4. Pinia Stores (13)
 
-| Store | ID | Pfad | Zeilen | Kernverantwortung |
-|-------|----|------|--------|-------------------|
-| **esp** | `'esp'` | `src/stores/esp.ts` | ~2500 | ESP-Devices, Sensoren, Aktoren, Zones, WebSocket, Pending Devices |
-| **auth** | `'auth'` | `src/stores/auth.ts` | 177 | Login, Token, User, Refresh, Setup |
-| **logic** | `'logic'` | `src/stores/logic.ts` | - | Cross-ESP Automation Rules, Connections |
-| **database** | `'database'` | `src/stores/database.ts` | - | DB Explorer State, Table/Schema/Data |
-| **dragState** | `'dragState'` | `src/stores/dragState.ts` | - | Drag&Drop State, Safety-Timeout (30s) |
+| Store | Pfad | Kernverantwortung |
+|-------|------|-------------------|
+| **esp** | `src/stores/esp.ts` | ESP-Devices, Sensoren, Aktoren, Zones, WebSocket, Pending Devices (22 Event-Handler) |
+| **auth** | `src/shared/stores/auth.store.ts` | Login, Token, User, Refresh, Setup |
+| **logic** | `src/shared/stores/logic.store.ts` | Cross-ESP Automation Rules, Connections |
+| **database** | `src/shared/stores/database.store.ts` | DB Explorer State, Table/Schema/Data |
+| **dragState** | `src/shared/stores/dragState.store.ts` | Drag&Drop State, Safety-Timeout (30s) |
+| **zone** | `src/shared/stores/zone.store.ts` | Zone-Management |
+| **actuator** | `src/shared/stores/actuator.store.ts` | Actuator-State |
+| **sensor** | `src/shared/stores/sensor.store.ts` | Sensor-State |
+| **gpio** | `src/shared/stores/gpio.store.ts` | GPIO-Status, OneWire-Scan |
+| **notification** | `src/shared/stores/notification.store.ts` | Benachrichtigungen |
+| **config** | `src/shared/stores/config.store.ts` | System-Config |
+| **ui** | `src/shared/stores/ui.store.ts` | UI-State, Confirm, Context-Menu |
+| **dashboard** | `src/shared/stores/dashboard.store.ts` | Dashboard-Filter, Zoom, TopBar-Actions |
 
 ### ESP Store (Detail)
 
 - **State:** `esps`, `pendingDevices`, `selectedEsp`, `loading`, `error`, `offlineInfoMap`
 - **WebSocket:** `setupWebSocket()`, `cleanupWebSocket()`, auto-connect via useWebSocket
 - **API:** Nutzt `espApi`, `sensorsApi`, `actuatorsApi`, `debugApi`
-- **11 Event-Handler:** siehe Sektion 2
+- **22 Event-Handler:** siehe Sektion 2
 
 ---
 
@@ -262,12 +281,12 @@ Include: src/**/*.ts, src/**/*.tsx, src/**/*.vue
 | Quelle | Zugriff | Format |
 |--------|---------|--------|
 | Docker stdout/stderr | `docker compose logs el-frontend` | Text (Vite + console.*) |
-| **Loki** (Monitoring-Profil) | `curl` Loki API, Label `service="el-frontend"` | JSON, 7 Tage Retention |
+| **Loki** (Monitoring-Profil) | `curl` Loki API, Label `compose_service="el-frontend"` (ROADMAP §1.1) | JSON, 7 Tage Retention |
 | **Grafana** (Monitoring-Profil) | `http://localhost:3000` (Panel 5: Log Volume, Panel 6: Errors) | Dashboard |
 | Browser Console | Nur Browser DevTools (Blind Spot) | DOM-Events, User-Interaktionen |
 | `logs/current/frontend_container.log` | Nach `scripts/debug/start_session.sh` | Ephemer, Snapshot |
 
-Loki-Labels: `service="el-frontend"`, `container="automationone-frontend"`, `stream="stdout"/"stderr"`
+Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend"`, `stream="stdout"/"stderr"` (Promtail: `reference/ROADMAP_KI_MONITORING.md` §1.1)
 
 ---
 
@@ -299,7 +318,7 @@ Loki-Labels: `service="el-frontend"`, `container="automationone-frontend"`, `str
 | Symptom | Ursache | Debug-Pfad |
 |---------|---------|------------|
 | Close Code 1006 | Abnormal Closure | Server-Status + Reconnect-Logik |
-| Events fehlen | Handler fehlt | ESP Store 11 Handler pruefen |
+| Events fehlen | Handler fehlt | ESP Store 22 Handler pruefen |
 | Reconnect-Loop | Token expired | Auth-Flow + refreshTokenIfNeeded |
 | Rate Limit | >10 msg/s | Client-seitig, Service pruefen |
 
@@ -318,17 +337,18 @@ Loki-Labels: `service="el-frontend"`, `container="automationone-frontend"`, `str
 
 ## 9. Component-Hierarchie
 
-### Dashboard-Kette
+### Dashboard-Kette (Drei-Stufen-Zoom)
 
 ```
-DashboardView → espStore → ESPCard (per ESP)
-  ├→ ESPOrbitalLayout
-  ├→ SensorSatellite (per Sensor)
-  ├→ ActuatorSatellite (per Actuator)
-  └→ ESPSettingsPopover
-+ ZoneGroup (Gruppierung)
-+ PendingDevicesPanel
-+ Sidebars (Sensor, Actuator, Component)
+DashboardView (useZoomNavigation, useDashboardStore)
+  Level 1: ZonePlate (pro Zone) → Klick zoomt in Zone
+  Level 2: ZoneDetailView → DeviceSummaryCard (pro ESP) → Klick zoomt in Device
+  Level 3: DeviceDetailView → ESPOrbitalLayout (SensorSatellite, ActuatorSatellite)
++ ZoomBreadcrumb (TopBar)
++ UnassignedDropBar (Drag&Drop unzugewiesene Devices)
++ PendingDevicesPanel (device_discovered → Approve/Reject)
++ DeviceMiniCard, DeviceHeaderBar
++ ComponentSidebar, Sensor/Actuator Sidebars
 ```
 
 ### SystemMonitor-Kette
@@ -374,26 +394,39 @@ MainLayout → AppHeader + AppSidebar + <RouterView />
 | Aspekt | Wert |
 |--------|------|
 | Config | `El Frontend/vitest.config.ts` |
+| Script | `npm run test` / `npm run test:unit` |
 | Environment | jsdom |
 | Include | `tests/**/*.test.ts` |
 | Coverage | `logs/frontend/vitest/coverage/` |
 | Timeout | 10000ms |
 
-**5 Unit Tests:** formatters, auth store, useToast, useWebSocket, esp store
+**Unit Tests:** formatters, auth store, useToast, useWebSocket, esp store
 
 ### Playwright (E2E)
 
 | Aspekt | Wert |
 |--------|------|
 | Config | `El Frontend/playwright.config.ts` |
+| Script | `npx playwright test` |
 | Browser | Chromium |
 | Base URL | `http://localhost:5173` |
 | Auth | Global Setup mit storageState |
 | Report | `logs/frontend/playwright/playwright-report/` |
+| Test-Dir | `tests/e2e/scenarios/` |
 
-**5 E2E Szenarien:** auth, sensor-live, actuator, emergency, device-discovery
+**6 E2E Szenarien:** auth, sensor-live, actuator, emergency, device-discovery, esp-registration-flow
 
-**ACHTUNG:** Vitest und Playwright sind NICHT in package.json – eigene Config-Dateien.
+**Vitest/Playwright:** In package.json (test, test:unit, test:coverage) und devDependencies.
+
+### Playwright MCP (für Agenten)
+
+Wenn der Editor (Cursor) den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der Agent den Browser **live** inspizieren und den Frontend-Blind-Spot vermeiden:
+- `browser_navigate` → `http://localhost:5173`
+- `browser_snapshot` → DOM-Zustand
+- `browser_console_messages` → Vue/JS-Fehler
+- `browser_network_requests` → fehlgeschlagene API-Calls, WebSocket-Status
+
+Voraussetzung: Frontend läuft (z. B. `docker compose up el-frontend` oder Dev-Server). Details: `docs/plans/Debug.md` Sektion „Playwright MCP“. Siehe auch `reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` §9.1.
 
 ---
 
@@ -409,8 +442,8 @@ grep -rn "onMounted\|watch(" "El Frontend/src/components/" --include="*.vue" -l 
 # WebSocket-Subscriptions ohne Cleanup
 grep -rn "subscribe\|\.on(" "El Frontend/src/" --include="*.ts" --include="*.vue" | grep -v "test"
 
-# Store Event-Handler
-grep -rn "subscribe\|on(" "El Frontend/src/stores/" --include="*.ts" | head -20
+# Store Event-Handler (esp Store + shared)
+grep -rn "subscribe\|\.on(" "El Frontend/src/stores/" "El Frontend/src/shared/stores/" --include="*.ts" | head -30
 
 # Import-Konsistenz (relative statt @/)
 grep -rn "from '\.\.\/" "El Frontend/src/" --include="*.ts" --include="*.vue" | grep -v "node_modules"
@@ -437,8 +470,9 @@ grep -rn ": any" "El Frontend/src" --include="*.ts" --include="*.vue"
 
 | Wann | Datei | Zweck |
 |------|-------|-------|
-| Bei WebSocket-Fragen | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Event-Schema |
+| Bei WebSocket-Fragen | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Event-Schema (28 Server-Events) |
 | Bei API-Fragen | `.claude/reference/api/REST_ENDPOINTS.md` | Endpoint-Uebersicht |
 | Bei Flows | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Datenfluesse |
 | Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Server-Errors (5xxx) |
 | Bei Type-Fragen | `El Frontend/src/types/` | Type-Definitionen |
+| Bei Zoom-Navigation | `El Frontend/src/composables/useZoomNavigation.ts` | Drei-Stufen-Dashboard-Zoom |

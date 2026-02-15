@@ -53,12 +53,12 @@ Every new service MUST have:
 
 ## Log Bind-Mounts
 
-All service logs use bind-mounts for easy access:
+Server, PostgreSQL und Session-Logs nutzen Bind-Mounts; MQTT-Broker nur stdout (kein Bind-Mount):
 
 | Service | Host Path | Container Path |
 |---------|-----------|----------------|
 | Server | `./logs/server/` | `/app/logs` |
-| MQTT | `./logs/mqtt/` | `/mosquitto/log` |
+| MQTT | – (stdout only, Bind-Mount in docker-compose auskommentiert) | – |
 | PostgreSQL | `./logs/postgres/` | `/var/log/postgresql` |
 | ESP32 Serial Logger | N/A (stdout only) | N/A |
 

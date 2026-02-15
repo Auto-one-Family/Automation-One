@@ -669,9 +669,7 @@ Backend:
   - services/esp_service.py      # Real-ESP-Logik
   - schemas/debug.py             # Request/Response Schemas
   - mqtt/publisher.py            # MQTT-Nachrichtenpublizierung
-```
-
-#### MqttLogView
+```#### MqttLogView
 ```
 Frontend:
   - src/views/MqttLogView.vue
@@ -894,9 +892,7 @@ kaiser/god/esp/{esp_id}/system/state          # State-Changes
 ### 8.5 Datenbank-Modelle
 
 ```
-Pfad: El Servador/god_kaiser_server/src/db/models/
-
-├── user.py           # User, Roles
+Pfad: El Servador/god_kaiser_server/src/db/models/├── user.py           # User, Roles
 ├── esp_device.py     # ESP-Geräte (echte)
 ├── sensor.py         # Sensor-Definitionen
 ├── actuator.py       # Aktor-Definitionen
