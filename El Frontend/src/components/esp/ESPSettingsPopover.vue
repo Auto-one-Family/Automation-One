@@ -35,12 +35,15 @@ import {
   Tag,
   Activity,
 } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
 import { espApi, type ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime, formatUptimeShort, formatHeapSize } from '@/utils/formatters'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ESPSettings')
 
 interface Props {
   /** The ESP device data */
@@ -201,7 +204,7 @@ async function handleHeartbeat() {
     await espStore.triggerHeartbeat(espId.value)
     emit('heartbeat-triggered', { deviceId: espId.value })
   } catch (err) {
-    console.error('[ESPSettingsPopover] Failed to trigger heartbeat:', err)
+    log.error('Failed to trigger heartbeat', err)
   } finally {
     // Short delay so user sees the loading state
     setTimeout(() => {
@@ -222,7 +225,7 @@ async function handleDelete() {
     emit('deleted', { deviceId: espId.value })
     close()
   } catch (err) {
-    console.error('[ESPSettingsPopover] Failed to delete device:', err)
+    log.error('Failed to delete device', err)
   } finally {
     deleteLoading.value = false
   }
@@ -348,7 +351,7 @@ async function handleAutoHeartbeatToggle() {
     )
     autoHeartbeatEnabled.value = newEnabled
   } catch (err) {
-    console.error('[ESPSettingsPopover] Failed to toggle auto-heartbeat:', err)
+    log.error('Failed to toggle auto-heartbeat', err)
     // Revert on error
     autoHeartbeatEnabled.value = !newEnabled
   } finally {
@@ -371,7 +374,7 @@ async function handleIntervalChange() {
   try {
     await espStore.setAutoHeartbeat(espId.value, true, interval)
   } catch (err) {
-    console.error('[ESPSettingsPopover] Failed to update interval:', err)
+    log.error('Failed to update interval', err)
   } finally {
     autoHeartbeatLoading.value = false
   }
@@ -910,6 +913,21 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-border) transparent;
+}
+
+.popover-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.popover-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.popover-body::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 2px;
 }
 
 /* =============================================================================

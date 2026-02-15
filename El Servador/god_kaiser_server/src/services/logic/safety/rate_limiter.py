@@ -10,7 +10,7 @@ PATTERN: Token Bucket Algorithmus für Global/ESP-Level, DB-Query für Rule-Leve
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 import logging
 
@@ -53,7 +53,7 @@ class TokenBucket:
         self.rate = rate
         self.capacity = capacity
         self.tokens = capacity
-        self.last_update = datetime.utcnow()
+        self.last_update = datetime.now(timezone.utc)
         self._lock = asyncio.Lock()
 
     async def try_consume(self, tokens: float = 1.0) -> Tuple[bool, float]:
@@ -64,7 +64,7 @@ class TokenBucket:
             Tuple of (success, wait_time_if_failed)
         """
         async with self._lock:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             elapsed = (now - self.last_update).total_seconds()
 
             # Tokens nachfüllen

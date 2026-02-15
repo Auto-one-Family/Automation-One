@@ -200,6 +200,9 @@
 import { ref, onMounted } from 'vue'
 import { debugApi, type MaintenanceStatusResponse, type MaintenanceConfigResponse } from '@/api/debug'
 import LoadingState from '@/components/common/LoadingState.vue'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('Maintenance')
 
 const loading = ref(true)
 const status = ref<MaintenanceStatusResponse | null>(null)
@@ -216,7 +219,7 @@ async function loadData() {
     status.value = statusData
     config.value = configData
   } catch (error) {
-    console.error('Failed to load maintenance data:', error)
+    logger.error('Failed to load maintenance data', error)
   } finally {
     loading.value = false
   }
@@ -226,11 +229,11 @@ async function triggerJob(jobId: string) {
   triggering.value = jobId
   try {
     const result = await debugApi.triggerMaintenanceJob(jobId)
-    console.log('Job triggered:', result)
+    logger.info('Job triggered', result)
     // Reload status nach Trigger
     await loadData()
   } catch (error) {
-    console.error('Failed to trigger job:', error)
+    logger.error('Failed to trigger job', error)
   } finally {
     triggering.value = null
   }

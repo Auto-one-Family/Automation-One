@@ -5,6 +5,9 @@ import {
   Zap, Plus, Play, Square, RefreshCw, AlertCircle, Check, X,
   Server, Thermometer, Power, MessageSquare, Clock
 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('LoadTest')
 
 // State
 const metrics = ref<MetricsResponse | null>(null)
@@ -31,7 +34,7 @@ async function loadMetrics(): Promise<void> {
   try {
     metrics.value = await loadTestApi.getMetrics()
   } catch (err) {
-    console.error('Failed to load metrics:', err)
+    logger.error('Failed to load metrics', err)
   }
 }
 

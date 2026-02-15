@@ -5,6 +5,7 @@
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
+#include "../../models/sensor_registry.h"  // For I2C sensor detection
 #include <WiFi.h>
 
 // ============================================
@@ -23,7 +24,9 @@ ConfigManager& ConfigManager::getInstance() {
 ConfigManager::ConfigManager()
   : wifi_config_loaded_(false),
     zone_config_loaded_(false),
-    system_config_loaded_(false) {
+    system_config_loaded_(false),
+    subzone_count_cache_(0),
+    subzone_count_initialized_(false) {
 }
 
 // ============================================
@@ -351,22 +354,51 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
  * NOTE: Does NOT validate zone_id format (server-side responsibility)
  */
 bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
-  // Kaiser ID required
+  // 1. Kaiser ID required
   if (kaiser.kaiser_id.length() == 0) {
     LOG_WARNING("ConfigManager: Kaiser ID is empty");
     return false;
   }
 
-  // Kaiser ID length check (MQTT topic limit)
+  // 2. Kaiser ID length check (MQTT topic limit)
   if (kaiser.kaiser_id.length() > 63) {
     LOG_WARNING("ConfigManager: Kaiser ID too long (max 63 chars)");
     return false;
   }
 
-  // If zone assigned, zone_id must be set
+  // 3. If zone assigned, zone_id must be set
   if (kaiser.zone_assigned && kaiser.zone_id.length() == 0) {
     LOG_WARNING("ConfigManager: Zone assigned but zone_id is empty");
     return false;
+  }
+
+  // 4. Zone_id length check (if not empty)
+  if (kaiser.zone_id.length() > 0 && kaiser.zone_id.length() > 32) {
+    LOG_WARNING("ConfigManager: Zone ID too long (max 32 chars)");
+    return false;
+  }
+
+  // 5. Master_zone_id length check (if not empty)
+  if (kaiser.master_zone_id.length() > 0 && kaiser.master_zone_id.length() > 32) {
+    LOG_WARNING("ConfigManager: Master Zone ID too long (max 32 chars)");
+    return false;
+  }
+
+  // 6. Zone_name length check (if not empty)
+  if (kaiser.zone_name.length() > 0 && kaiser.zone_name.length() > 64) {
+    LOG_WARNING("ConfigManager: Zone Name too long (max 64 chars)");
+    return false;
+  }
+
+  // 7. Zone_id character whitelist (alphanumeric + underscore + hyphen)
+  if (kaiser.zone_id.length() > 0) {
+    for (size_t i = 0; i < kaiser.zone_id.length(); i++) {
+      char c = kaiser.zone_id.charAt(i);
+      if (!isalnum(c) && c != '_' && c != '-') {
+        LOG_WARNING("ConfigManager: Zone ID contains invalid character: " + String(c));
+        return false;
+      }
+    }
   }
 
   return true;
@@ -394,24 +426,34 @@ bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& ma
   LOG_INFO("  Zone Name: " + zone_name);
   LOG_INFO("  Kaiser ID: " + kaiser_id);
 
+  // WP1: Empty zone_id means zone removal
+  bool is_removal = (zone_id.length() == 0);
+
+  // Save current state for rollback (WP5)
+  KaiserZone previous_kaiser = kaiser_;
+  MasterZone previous_master = master_;
+
   // Update kaiser_ structure
   kaiser_.zone_id = zone_id;
   kaiser_.master_zone_id = master_zone_id;
   kaiser_.zone_name = zone_name;
-  kaiser_.zone_assigned = true;
+  kaiser_.zone_assigned = !is_removal;  // WP1: false if removal, true if assignment
 
   // Update kaiser_id if provided
   if (kaiser_id.length() > 0) {
     kaiser_.kaiser_id = kaiser_id;
   }
 
-  // Persist to NVS
+  // WP5: Persist to NVS FIRST, then update cache on success
   bool success = saveZoneConfig(kaiser_, master_);
 
   if (success) {
-    LOG_INFO("ConfigManager: Zone assignment updated successfully");
+    LOG_INFO("ConfigManager: Zone " + String(is_removal ? "removal" : "assignment") + " updated successfully");
   } else {
-    LOG_ERROR("ConfigManager: Failed to update zone assignment");
+    LOG_ERROR("ConfigManager: Failed to update zone " + String(is_removal ? "removal" : "assignment"));
+    // WP5: Rollback cache on NVS failure
+    kaiser_ = previous_kaiser;
+    master_ = previous_master;
   }
 
   return success;
@@ -684,6 +726,9 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   storageManager.endNamespace();
 
   if (success) {
+    // BUG-005 FIX: Update cache after saving subzone
+    subzone_count_cache_ = count;
+    subzone_count_initialized_ = true;
     LOG_INFO("ConfigManager: Subzone config saved successfully (index " + String(index) + ")");
   } else {
     LOG_ERROR("ConfigManager: Failed to save subzone config");
@@ -966,6 +1011,10 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
   }
 
   storageManager.endNamespace();
+
+  // BUG-005 FIX: Invalidate cache after removing subzone (force re-read on next access)
+  subzone_count_initialized_ = false;
+
   LOG_INFO("ConfigManager: Subzone " + subzone_id + " removed");
   return true;
 }
@@ -1003,18 +1052,33 @@ bool ConfigManager::validateSubzoneConfig(const SubzoneConfig& config) const {
 
 uint8_t ConfigManager::getSubzoneCount() const {
   // ============================================
-  // PHASE 1E-C: Use cached count or index map
+  // BUG-005 FIX: Use cached count to avoid NVS access every heartbeat
   // ============================================
+  // The ESP32 Preferences library logs an ERROR when opening a non-existent
+  // namespace in read-only mode (expected for new devices without subzones).
+  // By caching the count, we only access NVS once instead of every 60 seconds.
 
+  // Return cached value if already initialized
+  if (subzone_count_initialized_) {
+    return subzone_count_cache_;
+  }
+
+  // First-time access: Query NVS and cache the result
+  // Note: If namespace doesn't exist, beginNamespace returns false (expected for new devices)
   if (!storageManager.beginNamespace("subzone_config", true)) {
+    // Namespace doesn't exist = 0 subzones (expected for new device)
+    subzone_count_cache_ = 0;
+    subzone_count_initialized_ = true;
     return 0;
   }
 
-  // Try new indexed pattern first (uses cached count)
+  // Try new indexed pattern first (uses NVS cached count)
   uint8_t count = storageManager.getUInt8(NVS_SZ_COUNT, 0);
 
   if (count > 0) {
     storageManager.endNamespace();
+    subzone_count_cache_ = count;
+    subzone_count_initialized_ = true;
     return count;
   }
 
@@ -1026,6 +1090,8 @@ uint8_t ConfigManager::getSubzoneCount() const {
       if (index_map[i] == ',') count++;
     }
     storageManager.endNamespace();
+    subzone_count_cache_ = count;
+    subzone_count_initialized_ = true;
     return count;
   }
 
@@ -1034,6 +1100,8 @@ uint8_t ConfigManager::getSubzoneCount() const {
   storageManager.endNamespace();
 
   if (subzone_ids_str.length() == 0) {
+    subzone_count_cache_ = 0;
+    subzone_count_initialized_ = true;
     return 0;
   }
 
@@ -1044,6 +1112,8 @@ uint8_t ConfigManager::getSubzoneCount() const {
     }
   }
 
+  subzone_count_cache_ = count;
+  subzone_count_initialized_ = true;
   return count;
 }
 
@@ -1760,6 +1830,9 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     snprintf(new_key, sizeof(new_key), NVS_SEN_TYPE, i);
     snprintf(old_key, sizeof(old_key), NVS_SEN_TYPE_OLD, i);
     config.sensor_type = migrateReadString(new_key, old_key, "");
+    // Normalize sensor_type to lowercase (Defense-in-Depth)
+    // Ensures consistent casing regardless of what was stored in NVS
+    config.sensor_type.toLowerCase();
 
     // Sensor Name
     snprintf(new_key, sizeof(new_key), NVS_SEN_NAME, i);
@@ -1951,15 +2024,26 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
 }
 
 bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
-  // GPIO must be valid (not 255)
-  if (config.gpio == 255) {
-    LOG_WARNING("ConfigManager: Invalid GPIO (255)");
+  // Sensor type must not be empty (check first - needed for I2C lookup)
+  if (config.sensor_type.length() == 0) {
+    LOG_WARNING("ConfigManager: Sensor type is empty");
     return false;
   }
 
-  // Sensor type must not be empty
-  if (config.sensor_type.length() == 0) {
-    LOG_WARNING("ConfigManager: Sensor type is empty");
+  // Check if it's an I2C sensor using SensorCapability Registry
+  const SensorCapability* capability = findSensorCapability(config.sensor_type);
+  bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
+
+  // For I2C sensors: Skip GPIO validation (they use shared I2C bus GPIO 21/22)
+  if (is_i2c_sensor) {
+    LOG_INFO("ConfigManager: I2C sensor '" + config.sensor_type +
+             "' - GPIO validation skipped (uses I2C bus)");
+    return true;
+  }
+
+  // For non-I2C sensors: Standard GPIO validation
+  if (config.gpio == 255) {
+    LOG_WARNING("ConfigManager: Invalid GPIO (255)");
     return false;
   }
 

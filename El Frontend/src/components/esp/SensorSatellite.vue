@@ -25,6 +25,7 @@ import {
 } from '@/utils/sensorDefaults'
 import { formatNumber } from '@/utils/formatters'
 import { useDragStateStore } from '@/stores/dragState'
+import { createLogger } from '@/utils/logger'
 import type { QualityLevel, MultiValueEntry } from '@/types'
 
 interface Props {
@@ -78,6 +79,9 @@ const dragStore = useDragStateStore()
 
 // Local drag state for visual feedback
 const isDragging = ref(false)
+
+// Logger
+const log = createLogger('SensorSatellite')
 
 // Get sensor configuration
 const sensorConfig = computed(() => SENSOR_TYPE_CONFIG[props.sensorType] || {
@@ -233,23 +237,13 @@ function handleClick() {
   }
 }
 
-// Debug logger with consistent styling
-function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  const label = `SensorSatellite:${props.espId}:GPIO${props.gpio}`
-  if (data) {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #34d399;', data)
-  } else {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #34d399;')
-  }
-}
 
 // Drag handlers for Multi-Sensor Chart (Phase 4)
 function handleDragStart(event: DragEvent) {
-  log('dragstart fired', { draggable: props.draggable, hasDataTransfer: !!event.dataTransfer })
+  log.debug('dragstart fired', { draggable: props.draggable, hasDataTransfer: !!event.dataTransfer })
 
   if (!props.draggable || !event.dataTransfer) {
-    log('dragstart ABORTED - not draggable or no dataTransfer')
+    log.debug('dragstart ABORTED - not draggable or no dataTransfer')
     return
   }
 
@@ -257,7 +251,7 @@ function handleDragStart(event: DragEvent) {
   // Ohne stopPropagation() würde VueDraggable denken, eine ESP-Card wird gedraggt,
   // was den UI-State korrumpiert und dragend nie aufgerufen wird.
   event.stopPropagation()
-  log('stopPropagation() called')
+  log.debug('stopPropagation() called')
 
   isDragging.value = true
 
@@ -272,24 +266,24 @@ function handleDragStart(event: DragEvent) {
   }
   event.dataTransfer.setData('application/json', JSON.stringify(dragData))
   event.dataTransfer.effectAllowed = 'copy'
-  log('dataTransfer set', { dragData })
+  log.debug('dataTransfer set', { dragData })
 
   // Update global drag state for auto-opening chart
   dragStore.startSensorDrag(dragData)
-  log('dragStore.startSensorDrag() called')
+  log.debug('dragStore.startSensorDrag() called')
 }
 
 function handleDragEnd(event: DragEvent) {
-  log('dragend fired', { dropEffect: event.dataTransfer?.dropEffect })
+  log.debug('dragend fired', { dropEffect: event.dataTransfer?.dropEffect })
 
   // KRITISCH: Auch hier stopPropagation für konsistentes Verhalten
   event.stopPropagation()
-  log('stopPropagation() called')
+  log.debug('stopPropagation() called')
 
   isDragging.value = false
   // Clear global drag state
   dragStore.endDrag()
-  log('dragStore.endDrag() called - drag complete')
+  log.debug('dragStore.endDrag() called - drag complete')
 }
 </script>
 
@@ -356,92 +350,90 @@ function handleDragEnd(event: DragEvent) {
 
 <style scoped>
 /* =============================================================================
-   SensorSatellite - Premium Industrial Design (Phase 7+)
-   Modern glassmorphism with subtle animations and premium feel
+   SensorSatellite - Precision Instrument Panel
+   Industrial IoT aesthetic with bold data readouts and clear hierarchy
    ============================================================================= */
 
 .sensor-satellite {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
-  padding: 0.625rem 0.75rem;
-  background: linear-gradient(
-    135deg,
-    rgba(24, 26, 32, 0.95) 0%,
-    rgba(30, 33, 42, 0.9) 100%
-  );
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.75rem;
+  gap: 0.25rem;
+  padding: 0.5rem 0.625rem;
+  background: #141720;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid rgba(96, 165, 250, 0.4);
+  border-radius: 0.5rem;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 72px;
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.2),
-    0 4px 12px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   overflow: hidden;
+  animation: satellite-enter 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
-/* Subtle inner glow */
-.sensor-satellite::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    ellipse at 50% 0%,
-    rgba(56, 189, 248, 0.04) 0%,
-    transparent 60%
-  );
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s ease;
+@keyframes satellite-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
-.sensor-satellite:hover::before {
-  opacity: 1;
+/* Quality-colored left accent border */
+.sensor-satellite:has(.sensor-satellite__quality--excellent) {
+  border-left-color: #10b981;
 }
-
-/* Single-value: compact card */
-.sensor-satellite--values-1 {
-  max-width: 96px;
+.sensor-satellite:has(.sensor-satellite__quality--good) {
+  border-left-color: #22c55e;
+}
+.sensor-satellite:has(.sensor-satellite__quality--fair) {
+  border-left-color: #eab308;
+}
+.sensor-satellite:has(.sensor-satellite__quality--poor) {
+  border-left-color: #f97316;
+}
+.sensor-satellite:has(.sensor-satellite__quality--bad),
+.sensor-satellite:has(.sensor-satellite__quality--error) {
+  border-left-color: #ef4444;
+}
+.sensor-satellite:has(.sensor-satellite__quality--stale) {
+  border-left-color: #4b5563;
 }
 
 /* Multi-value: wider cards */
 .sensor-satellite--values-2 {
   min-width: 140px;
-  max-width: 180px;
+  max-width: 220px;
 }
 
 .sensor-satellite--values-3 {
   min-width: 180px;
-  max-width: 220px;
+  max-width: 260px;
 }
 
-/* Hover state - elevated feel (ohne transform um Layout-Springen zu vermeiden) */
+/* Hover - clean elevation with subtle scale */
 .sensor-satellite:hover {
-  border-color: rgba(56, 189, 248, 0.3);
-  background: linear-gradient(
-    135deg,
-    rgba(28, 31, 40, 0.98) 0%,
-    rgba(35, 38, 48, 0.95) 100%
-  );
+  border-color: var(--glass-border-hover);
+  background: #181c28;
+  transform: scale(1.02);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.3),
-    0 16px 48px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(56, 189, 248, 0.15),
-    0 0 32px rgba(56, 189, 248, 0.08);
+    0 4px 12px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(96, 165, 250, 0.08);
 }
 
-/* Selected state - highlighted border */
+/* Selected state */
 .sensor-satellite--selected {
-  border-color: rgba(34, 211, 238, 0.5);
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.04);
   box-shadow:
-    0 0 0 2px rgba(34, 211, 238, 0.15),
-    0 4px 16px rgba(34, 211, 238, 0.1);
+    0 0 0 1px rgba(34, 211, 238, 0.2),
+    0 2px 8px rgba(34, 211, 238, 0.1);
 }
 
 /* Draggable states */
@@ -454,121 +446,109 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite--dragging {
-  opacity: 0.85;
-  transform: scale(0.98) rotate(1deg);
+  opacity: 0.8;
+  transform: scale(0.97);
   box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.5),
-    0 0 24px rgba(34, 211, 238, 0.25);
-  border-color: rgba(34, 211, 238, 0.6);
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(34, 211, 238, 0.2);
 }
 
 /* =============================================================================
-   Header Section - Refined Typography
+   Header - Compact, informative
    ============================================================================= */
 
 .sensor-satellite__header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 1.625rem;
+  gap: 0.375rem;
+  min-height: 1.25rem;
 }
 
 .sensor-satellite__icon {
-  width: 1.625rem;
-  height: 1.625rem;
+  width: 1.25rem;
+  height: 1.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
+  border-radius: 0.25rem;
   flex-shrink: 0;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-}
-
-.sensor-satellite:hover .sensor-satellite__icon {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease;
 }
 
 .sensor-satellite__icon--success {
-  background: linear-gradient(135deg, rgba(52, 211, 153, 0.2) 0%, rgba(16, 185, 129, 0.25) 100%);
+  background: rgba(52, 211, 153, 0.15);
   color: #34d399;
-  box-shadow: 0 2px 8px rgba(52, 211, 153, 0.2);
 }
 
 .sensor-satellite__icon--warning {
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.2) 0%, rgba(245, 158, 11, 0.25) 100%);
+  background: rgba(251, 191, 36, 0.15);
   color: #fbbf24;
-  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
 }
 
 .sensor-satellite__icon--danger {
-  background: linear-gradient(135deg, rgba(248, 113, 113, 0.2) 0%, rgba(239, 68, 68, 0.25) 100%);
+  background: rgba(248, 113, 113, 0.15);
   color: #f87171;
-  box-shadow: 0 2px 8px rgba(248, 113, 113, 0.2);
 }
 
 .sensor-satellite__icon--gray {
-  background: linear-gradient(135deg, rgba(107, 114, 128, 0.15) 0%, rgba(75, 85, 99, 0.2) 100%);
+  background: rgba(107, 114, 128, 0.12);
   color: #9ca3af;
 }
 
 .sensor-satellite__label {
-  font-size: 0.6875rem;
+  font-size: 10px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
   min-width: 0;
-  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .sensor-satellite__gpio-badge {
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 0.5625rem;
+  font-family: var(--font-mono);
+  font-size: 8px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 0.1875rem 0.375rem;
-  border-radius: 0.3125rem;
+  color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.0625rem 0.1875rem;
+  border-radius: 0.125rem;
   flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 /* =============================================================================
-   Values Section - Premium Typography
+   Values - Bold instrument readout
    ============================================================================= */
 
 .sensor-satellite__values {
   display: grid;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
+  gap: 0.375rem;
+  padding: 0.125rem 0;
 }
 
-/* Single value: centered, prominent */
 .sensor-satellite__values--count-1 {
   grid-template-columns: 1fr;
   text-align: center;
 }
 
-/* Two values: balanced columns */
 .sensor-satellite__values--count-2 {
   grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
-/* Three values: compact grid */
 .sensor-satellite__values--count-3 {
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 0.5rem;
+  gap: 0.375rem;
 }
 
 .sensor-satellite__value-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.1875rem;
+  gap: 0.125rem;
   position: relative;
 }
 
@@ -577,155 +557,142 @@ function handleDragEnd(event: DragEvent) {
 .sensor-satellite--values-3 .sensor-satellite__value-cell:not(:last-child)::after {
   content: '';
   position: absolute;
-  right: -0.375rem;
-  top: 15%;
-  height: 70%;
+  right: -0.25rem;
+  top: 10%;
+  height: 80%;
   width: 1px;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    transparent 100%
-  );
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .sensor-satellite__value {
   display: flex;
   align-items: baseline;
   justify-content: center;
-  gap: 0.1875rem;
+  gap: 0.125rem;
 }
 
 .sensor-satellite__value-number {
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
-  color: #ffffff;
+  color: #f0f4ff;
   line-height: 1;
-  letter-spacing: -0.03em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  letter-spacing: -0.04em;
 }
 
-/* Single value: larger, prominent display */
+/* Single value: large instrument readout */
 .sensor-satellite--values-1 .sensor-satellite__value-number {
-  font-size: 1.125rem;
+  font-size: 1.375rem;
 }
 
 /* Multi-value: balanced sizing */
 .sensor-satellite--values-2 .sensor-satellite__value-number {
-  font-size: 0.9375rem;
+  font-size: 1rem;
 }
 
 .sensor-satellite--values-3 .sensor-satellite__value-number {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .sensor-satellite__value-unit {
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.35);
   letter-spacing: 0.02em;
 }
 
-/* Multi-value: slightly smaller unit */
 .sensor-satellite--values-2 .sensor-satellite__value-unit,
 .sensor-satellite--values-3 .sensor-satellite__value-unit {
-  font-size: 0.5625rem;
+  font-size: 0.5rem;
 }
 
 .sensor-satellite__value-label {
-  font-size: 0.5625rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.3);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 /* =============================================================================
-   Quality Indicator - Refined Status Display
+   Quality Indicator - LED-style status bar
    ============================================================================= */
 
 .sensor-satellite__quality {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.3125rem;
+  gap: 0.25rem;
   padding-top: 0.25rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
   margin-top: 0.125rem;
 }
 
 .sensor-satellite__quality-dot {
-  width: 0.4375rem;
-  height: 0.4375rem;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 0 6px currentColor;
   transition: all 0.3s ease;
 }
 
-.sensor-satellite:hover .sensor-satellite__quality-dot {
-  box-shadow: 0 0 10px currentColor;
-}
-
 .sensor-satellite__quality-text {
-  font-size: 0.5625rem;
+  font-size: 0.5rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.45);
-  text-transform: capitalize;
-  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-/* Quality colors with glow effect */
+/* Quality colors - LED glow */
 .sensor-satellite__quality--excellent .sensor-satellite__quality-dot {
   background-color: #10b981;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  animation: led-breathe 3s ease-in-out infinite;
+}
+
+@keyframes led-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
+  50% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 10px rgba(16, 185, 129, 0.8); }
 }
 
 .sensor-satellite__quality--good .sensor-satellite__quality-dot {
   background-color: #22c55e;
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
 }
 
 .sensor-satellite__quality--fair .sensor-satellite__quality-dot {
   background-color: #eab308;
-  box-shadow: 0 0 8px rgba(234, 179, 8, 0.4);
+  box-shadow: 0 0 6px rgba(234, 179, 8, 0.5);
 }
 
 .sensor-satellite__quality--poor .sensor-satellite__quality-dot {
   background-color: #f97316;
-  box-shadow: 0 0 8px rgba(249, 115, 22, 0.4);
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.5);
 }
 
 .sensor-satellite__quality--bad .sensor-satellite__quality-dot {
   background-color: #ef4444;
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
 }
 
 .sensor-satellite__quality--stale .sensor-satellite__quality-dot {
-  background-color: #6b7280;
-  box-shadow: 0 0 6px rgba(107, 114, 128, 0.3);
+  background-color: #4b5563;
+  box-shadow: 0 0 4px rgba(75, 85, 99, 0.3);
 }
 
 .sensor-satellite__quality--error .sensor-satellite__quality-dot {
   background-color: #dc2626;
-  box-shadow: 0 0 12px rgba(220, 38, 38, 0.6);
-  animation: pulse-error 1.5s ease-in-out infinite;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.7);
+  animation: led-blink 1.2s ease-in-out infinite;
 }
 
-@keyframes pulse-error {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.1);
-  }
+@keyframes led-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 /* =============================================================================
@@ -736,16 +703,17 @@ function handleDragEnd(event: DragEvent) {
   position: absolute;
   top: 0.25rem;
   right: 0.25rem;
-  width: 0.375rem;
-  height: 0.375rem;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background-color: var(--color-success, #34d399);
-  animation: pulse-dot 2s infinite;
+  background-color: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
+  animation: conn-pulse 2s infinite;
 }
 
-@keyframes pulse-dot {
+@keyframes conn-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 </style>
 

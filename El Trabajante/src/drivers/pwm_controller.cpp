@@ -383,7 +383,6 @@ String PWMController::getChannelStatus() const {
     if (attached_count == 0) {
         status += "    (None)\n";
     }
-    
+
     return status;
 }
-

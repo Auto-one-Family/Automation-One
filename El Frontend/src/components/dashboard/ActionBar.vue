@@ -1,6 +1,18 @@
 <script setup lang="ts">
+/**
+ * ActionBar Component
+ *
+ * Consolidated dashboard control bar with three clear sections:
+ * LEFT:   Status filter pills (Online | Offline | Warning | SafeMode)
+ * CENTER: Type filter segmented control (All / Mock / Real)
+ * RIGHT:  Action buttons (Pending devices, +Mock)
+ *
+ * Design: Industrial precision instrument aesthetic.
+ * No Tailwind utility classes - pure BEM with CSS custom properties.
+ */
+
 import { computed } from 'vue'
-import { Plus, Settings, AlertTriangle, Sparkles, Radio } from 'lucide-vue-next'
+import { Plus, Sparkles, Radio, AlertTriangle } from 'lucide-vue-next'
 import StatusPill from './StatusPill.vue'
 
 type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
@@ -15,7 +27,6 @@ interface Props {
   activeFilters: Set<StatusFilter>
   hasProblems?: boolean
   problemMessage?: string
-  // Type filter props (consolidated from DashboardView)
   filterType?: TypeFilter
   totalCount?: number
   mockCount?: number
@@ -36,219 +47,330 @@ const emit = defineEmits<{
   toggleFilter: [filter: StatusFilter]
   'update:filterType': [filter: TypeFilter]
   createMockEsp: []
-  openSettings: []
   openPendingDevices: [event: MouseEvent]
 }>()
 
-// Has pending devices to show special button
 const hasPendingDevices = computed(() => props.pendingCount > 0)
-
 const isFilterActive = (filter: StatusFilter) => props.activeFilters.has(filter)
-
-const barClasses = computed(() => {
-  const base = 'flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 rounded-xl border transition-colors duration-300'
-
-  if (props.hasProblems && props.warningCount > 0) {
-    return `${base} bg-red-950/30 border-red-500/30`
-  }
-
-  return `${base} bg-gray-800/50 border-gray-700/50`
-})
 </script>
 
 <template>
-  <div :class="barClasses">
-    <!-- Warning Banner (when problems exist) -->
+  <div
+    :class="[
+      'action-bar',
+      {
+        'action-bar--alert': hasProblems && warningCount > 0
+      }
+    ]"
+  >
+    <!-- Problem Indicator Strip (subtle top accent) -->
     <div
       v-if="hasProblems && problemMessage"
-      class="w-full flex items-center gap-2 text-amber-400 text-sm pb-2 border-b border-amber-500/20 sm:hidden"
+      class="action-bar__alert-strip"
     >
-      <AlertTriangle class="w-4 h-4 flex-shrink-0" />
-      <span>{{ problemMessage }}</span>
+      <AlertTriangle class="action-bar__alert-icon" />
+      <span class="action-bar__alert-text">{{ problemMessage }}</span>
     </div>
 
-    <!-- Left Side: Status Pills + Type Filter -->
-    <div class="flex items-center gap-2 flex-wrap">
-      <!-- Status Filter Pills -->
-      <StatusPill
-        type="online"
-        :count="onlineCount"
-        label="Online"
-        :active="isFilterActive('online')"
-        @click="emit('toggleFilter', 'online')"
-      />
-      <StatusPill
-        type="offline"
-        :count="offlineCount"
-        label="Offline"
-        :active="isFilterActive('offline')"
-        @click="emit('toggleFilter', 'offline')"
-      />
-      <StatusPill
-        v-if="warningCount > 0"
-        type="warning"
-        :count="warningCount"
-        label="Fehler"
-        :active="isFilterActive('warning')"
-        @click="emit('toggleFilter', 'warning')"
-      />
-      <StatusPill
-        v-if="safeModeCount > 0"
-        type="safemode"
-        :count="safeModeCount"
-        label="Safe Mode"
-        :active="isFilterActive('safemode')"
-        @click="emit('toggleFilter', 'safemode')"
-      />
-
-      <!-- Divider -->
-      <div class="type-filter-divider" />
-
-      <!-- Type Filter Buttons (consolidated from separate row) -->
-      <div class="type-filter-group">
-        <button
-          :class="['type-filter-btn', filterType === 'all' ? 'type-filter-btn--active' : '']"
-          @click="emit('update:filterType', 'all')"
-        >
-          Alle ({{ totalCount }})
-        </button>
-        <button
-          :class="['type-filter-btn', filterType === 'mock' ? 'type-filter-btn--active type-filter-btn--mock' : '']"
-          @click="emit('update:filterType', 'mock')"
-        >
-          Mock ({{ mockCount }})
-        </button>
-        <button
-          :class="['type-filter-btn', filterType === 'real' ? 'type-filter-btn--active type-filter-btn--real' : '']"
-          @click="emit('update:filterType', 'real')"
-        >
-          Real ({{ realCount }})
-        </button>
+    <!-- Main Bar Content -->
+    <div class="action-bar__content">
+      <!-- LEFT: Status Filter Pills -->
+      <div class="action-bar__filters">
+        <StatusPill
+          type="online"
+          :count="onlineCount"
+          label="Online"
+          :active="isFilterActive('online')"
+          @click="emit('toggleFilter', 'online')"
+        />
+        <StatusPill
+          type="offline"
+          :count="offlineCount"
+          label="Offline"
+          :active="isFilterActive('offline')"
+          @click="emit('toggleFilter', 'offline')"
+        />
+        <StatusPill
+          v-if="warningCount > 0"
+          type="warning"
+          :count="warningCount"
+          label="Fehler"
+          :active="isFilterActive('warning')"
+          @click="emit('toggleFilter', 'warning')"
+        />
+        <StatusPill
+          v-if="safeModeCount > 0"
+          type="safemode"
+          :count="safeModeCount"
+          label="Safe Mode"
+          :active="isFilterActive('safemode')"
+          @click="emit('toggleFilter', 'safemode')"
+        />
       </div>
 
-      <!-- Problem indicator on desktop -->
-      <div
-        v-if="hasProblems && problemMessage"
-        class="hidden sm:flex items-center gap-2 text-amber-400 text-sm ml-2 pl-3 border-l border-gray-700"
-      >
-        <AlertTriangle class="w-4 h-4 flex-shrink-0" />
-        <span class="max-w-xs truncate">{{ problemMessage }}</span>
+      <!-- CENTER: Type Filter Segmented Control -->
+      <div class="action-bar__type-filter">
+        <div class="type-segment">
+          <button
+            :class="['type-segment__btn', { 'type-segment__btn--active': filterType === 'all' }]"
+            @click="emit('update:filterType', 'all')"
+          >
+            Alle
+            <span class="type-segment__count">{{ totalCount }}</span>
+          </button>
+          <button
+            :class="[
+              'type-segment__btn',
+              'type-segment__btn--mock',
+              { 'type-segment__btn--active': filterType === 'mock' }
+            ]"
+            @click="emit('update:filterType', 'mock')"
+          >
+            Mock
+            <span class="type-segment__count">{{ mockCount }}</span>
+          </button>
+          <button
+            :class="[
+              'type-segment__btn',
+              'type-segment__btn--real',
+              { 'type-segment__btn--active': filterType === 'real' }
+            ]"
+            @click="emit('update:filterType', 'real')"
+          >
+            Real
+            <span class="type-segment__count">{{ realCount }}</span>
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- Right Side: Quick Actions -->
-    <div class="action-bar__buttons">
-      <!-- Primary: Pending/Devices Button -->
-      <button
-        :class="[
-          'action-bar__btn',
-          hasPendingDevices ? 'action-bar__btn--iridescent' : 'action-bar__btn--default'
-        ]"
-        @click="(e) => emit('openPendingDevices', e)"
-        :title="hasPendingDevices ? 'Neue Geräte warten auf Genehmigung' : 'Geräte verwalten'"
-      >
-        <component :is="hasPendingDevices ? Sparkles : Radio" class="w-4 h-4" />
-        <span class="action-bar__btn-text">
-          {{ hasPendingDevices ? `${pendingCount} Neue` : 'Geräte' }}
-        </span>
-      </button>
+      <!-- RIGHT: Action Buttons -->
+      <div class="action-bar__actions">
+        <!-- Pending Devices Button -->
+        <button
+          :class="[
+            'action-btn',
+            hasPendingDevices ? 'action-btn--pending' : 'action-btn--default'
+          ]"
+          :title="hasPendingDevices ? 'Neue Geräte warten auf Genehmigung' : 'Geräte verwalten'"
+          @click="(e) => emit('openPendingDevices', e)"
+        >
+          <component
+            :is="hasPendingDevices ? Sparkles : Radio"
+            class="action-btn__icon"
+          />
+          <span class="action-btn__label">
+            {{ hasPendingDevices ? `${pendingCount} Neue` : 'Geräte' }}
+          </span>
+        </button>
 
-      <!-- Secondary: Create Mock ESP -->
-      <button
-        class="action-bar__btn action-bar__btn--secondary"
-        @click="emit('createMockEsp')"
-        title="Test-ESP erstellen"
-      >
-        <Plus class="w-4 h-4" />
-        <span class="action-bar__btn-text">Mock</span>
-      </button>
-
-      <!-- Tertiary: Settings -->
-      <button
-        class="action-bar__btn action-bar__btn--ghost"
-        @click="emit('openSettings')"
-        title="Einstellungen"
-      >
-        <Settings class="w-4 h-4" />
-      </button>
+        <!-- Create Mock ESP -->
+        <button
+          class="action-btn action-btn--create"
+          title="Test-ESP erstellen"
+          @click="emit('createMockEsp')"
+        >
+          <Plus class="action-btn__icon" />
+          <span class="action-btn__label">Mock</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Button Container */
-.action-bar__buttons {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+/* ═══════════════════════════════════════════════════════════════════════════
+   ACTION BAR — Industrial Control Strip
+   Token-aligned spacing, consistent elevation
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.action-bar {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--transition-base);
 }
 
-/* Base Button */
-.action-bar__btn {
-  display: inline-flex;
+.action-bar--alert {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+/* ── Alert Strip ── */
+.action-bar__alert-strip {
+  display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.875rem;
-  font-size: 0.875rem;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+  background: rgba(245, 158, 11, 0.06);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.12);
+  font-size: var(--text-sm);
+  color: var(--color-warning);
+}
+
+.action-bar__alert-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.action-bar__alert-text {
   font-weight: 500;
-  border-radius: 0.5rem;
-  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Main Content Row ── */
+.action-bar__content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* ── Left: Status Filters ── */
+.action-bar__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* ── Center: Type Filter ── */
+.action-bar__type-filter {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.type-segment {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-primary);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+}
+
+.type-segment__btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 5px 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--transition-fast);
   white-space: nowrap;
 }
 
-.action-bar__btn-text {
+.type-segment__btn:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.type-segment__btn--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.type-segment__btn--mock.type-segment__btn--active {
+  color: var(--color-mock);
+}
+
+.type-segment__btn--real.type-segment__btn--active {
+  color: var(--color-real);
+}
+
+.type-segment__count {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+.type-segment__btn--active .type-segment__count {
+  opacity: 1;
+}
+
+/* ── Right: Action Buttons ── */
+.action-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* ── Action Button Base ── */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.action-btn__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.action-btn__label {
   display: none;
 }
 
-@media (min-width: 640px) {
-  .action-bar__btn-text {
+@media (min-width: 768px) {
+  .action-btn__label {
     display: inline;
   }
 }
 
-/* Default State */
-.action-bar__btn--default {
+/* ── Default State (Devices Button) ── */
+.action-btn--default {
   color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--glass-border);
 }
 
-.action-bar__btn--default:hover {
+.action-btn--default:hover {
   color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--glass-border-hover);
 }
 
-/* Iridescent State (Pending Devices Active) */
-.action-bar__btn--iridescent {
+/* ── Pending State (Pulsing Iridescent) ── */
+.action-btn--pending {
   position: relative;
   color: white;
   background: linear-gradient(
     135deg,
-    rgba(96, 165, 250, 0.2) 0%,
-    rgba(129, 140, 248, 0.2) 50%,
-    rgba(167, 139, 250, 0.2) 100%
+    rgba(96, 165, 250, 0.15) 0%,
+    rgba(129, 140, 248, 0.15) 50%,
+    rgba(167, 139, 250, 0.15) 100%
   );
   border-color: transparent;
   overflow: hidden;
-  animation: iridescent-pulse 2.5s ease-in-out infinite;
+  animation: iridescent-pulse 3s ease-in-out infinite;
 }
 
-.action-bar__btn--iridescent::before {
+.action-btn--pending::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(
-    135deg,
-    var(--color-iridescent-1) 0%,
-    var(--color-iridescent-2) 33%,
-    var(--color-iridescent-3) 66%,
-    var(--color-iridescent-4) 100%
-  );
+  background: var(--gradient-iridescent);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -258,8 +380,7 @@ const barClasses = computed(() => {
   pointer-events: none;
 }
 
-/* Shimmer overlay */
-.action-bar__btn--iridescent::after {
+.action-btn--pending::after {
   content: '';
   position: absolute;
   top: 0;
@@ -269,136 +390,61 @@ const barClasses = computed(() => {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.06),
     transparent
   );
   animation: shimmer 3s ease-in-out infinite;
   pointer-events: none;
 }
 
-.action-bar__btn--iridescent:hover {
+.action-btn--pending:hover {
   transform: translateY(-1px);
   box-shadow:
-    0 4px 12px rgba(96, 165, 250, 0.3),
-    0 0 20px rgba(129, 140, 248, 0.2);
+    0 4px 12px rgba(96, 165, 250, 0.2),
+    0 0 16px rgba(129, 140, 248, 0.1);
 }
 
-@keyframes iridescent-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 8px rgba(96, 165, 250, 0.2),
-      0 0 16px rgba(129, 140, 248, 0.1);
-  }
-  50% {
-    box-shadow:
-      0 0 12px rgba(96, 165, 250, 0.4),
-      0 0 24px rgba(129, 140, 248, 0.2);
-  }
+/* ── Create Mock Button ── */
+.action-btn--create {
+  color: var(--color-success);
+  background: rgba(52, 211, 153, 0.06);
+  border-color: rgba(52, 211, 153, 0.15);
 }
 
-@keyframes iridescent-shift {
-  0%, 100% {
-    filter: hue-rotate(0deg);
-  }
-  50% {
-    filter: hue-rotate(30deg);
-  }
+.action-btn--create:hover {
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.3);
 }
 
-@keyframes shimmer {
-  0% {
-    left: -100%;
-  }
-  50%, 100% {
-    left: 200%;
-  }
-}
-
-/* Secondary (Mock ESP) */
-.action-bar__btn--secondary {
-  color: var(--color-emerald-400, #34d399);
-  background: rgba(16, 185, 129, 0.1);
-  border-color: rgba(16, 185, 129, 0.2);
-}
-
-.action-bar__btn--secondary:hover {
-  background: rgba(16, 185, 129, 0.2);
-  border-color: rgba(16, 185, 129, 0.3);
-}
-
-/* Ghost (Settings) */
-.action-bar__btn--ghost {
-  padding: 0.5rem;
-  color: var(--color-text-tertiary);
-  background: transparent;
-}
-
-.action-bar__btn--ghost:hover {
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-/* ============================================
-   Type Filter (consolidated from DashboardView)
-   ============================================ */
-
-/* Divider between Status Pills and Type Filter */
-.type-filter-divider {
-  width: 1px;
-  height: 24px;
-  background: var(--color-border, rgba(255, 255, 255, 0.1));
-  margin: 0 0.25rem;
-}
-
-/* Type Filter Button Group */
-.type-filter-group {
-  display: flex;
-  gap: 0.25rem;
-  background-color: var(--color-bg-tertiary, rgba(30, 30, 40, 0.5));
-  padding: 0.25rem;
-  border-radius: 0.5rem;
-}
-
-/* Type Filter Button */
-.type-filter-btn {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border-radius: 0.375rem;
-  color: var(--color-text-muted, #9ca3af);
-  transition: all 0.2s;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.type-filter-btn:hover {
-  color: var(--color-text-primary, #f3f4f6);
-}
-
-.type-filter-btn--active {
-  background-color: var(--color-bg-secondary, rgba(55, 55, 70, 0.8));
-  color: var(--color-text-primary, #f3f4f6);
-}
-
-.type-filter-btn--mock.type-filter-btn--active {
-  color: var(--color-mock, #a78bfa);
-}
-
-.type-filter-btn--real.type-filter-btn--active {
-  color: var(--color-real, #60a5fa);
-}
-
-/* Responsive: Hide divider on very small screens */
-@media (max-width: 480px) {
-  .type-filter-divider {
-    display: none;
+/* ── Responsive: Stack on small screens ── */
+@media (max-width: 640px) {
+  .action-bar__content {
+    flex-wrap: wrap;
+    gap: var(--space-2);
   }
 
-  .type-filter-group {
-    margin-top: 0.5rem;
+  .action-bar__filters {
+    order: 1;
+    flex: 1;
+  }
+
+  .action-bar__actions {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .action-bar__type-filter {
+    order: 3;
     width: 100%;
+    margin-left: 0;
+  }
+
+  .type-segment {
+    width: 100%;
+  }
+
+  .type-segment__btn {
+    flex: 1;
     justify-content: center;
   }
 }

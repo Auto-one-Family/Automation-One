@@ -1,5 +1,8 @@
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('API')
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
@@ -20,6 +23,7 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
 
+    logger.debug(`${config.method?.toUpperCase()} ${config.url}`)
     return config
   },
   (error: AxiosError) => {
@@ -29,7 +33,10 @@ api.interceptors.request.use(
 
 // Response interceptor - handle token refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    logger.debug(`${response.config.method?.toUpperCase()} ${response.config.url} → ${response.status}`)
+    return response
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
     const authStore = useAuthStore()
@@ -66,6 +73,7 @@ api.interceptors.response.use(
       }
     }
 
+    logger.error(`${error.config?.method?.toUpperCase()} ${error.config?.url} → ${error.response?.status || 'NETWORK_ERROR'}`, { message: error.message })
     return Promise.reject(error)
   }
 )

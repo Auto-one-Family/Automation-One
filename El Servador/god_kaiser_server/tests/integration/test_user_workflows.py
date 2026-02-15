@@ -133,6 +133,14 @@ class TestDeviceOnboardingWorkflow:
             )
             assert reg_response.status_code in [200, 201]
 
+            # Step 1b: Approve device (required before sensor/actuator config)
+            approve_response = await client.post(
+                "/api/v1/esp/devices/ESP_0B0A0D01/approve",
+                json={},
+                headers=auth_headers,
+            )
+            assert approve_response.status_code == 200
+
             # Step 2: Add sensor
             sensor_response = await client.post(
                 "/api/v1/sensors/ESP_0B0A0D01/34",

@@ -49,6 +49,31 @@ static const SensorCapability BMP280_TEMP_CAP = {
     .is_i2c = true,
 };
 
+// BME280 Sensor (I2C, Multi-Value: Pressure + Temperature + Humidity)
+static const SensorCapability BME280_PRESSURE_CAP = {
+    .server_sensor_type = "bme280_pressure",
+    .device_type = "bme280",
+    .i2c_address = 0x76,  // Default BME280 address (0x77 if SDO to VCC)
+    .is_multi_value = true,
+    .is_i2c = true,
+};
+
+static const SensorCapability BME280_TEMP_CAP = {
+    .server_sensor_type = "bme280_temp",
+    .device_type = "bme280",
+    .i2c_address = 0x76,
+    .is_multi_value = true,
+    .is_i2c = true,
+};
+
+static const SensorCapability BME280_HUMIDITY_CAP = {
+    .server_sensor_type = "bme280_humidity",
+    .device_type = "bme280",
+    .i2c_address = 0x76,
+    .is_multi_value = true,
+    .is_i2c = true,
+};
+
 // pH Sensor (Analog ADC, Single-Value)
 static const SensorCapability PH_SENSOR_CAP = {
     .server_sensor_type = "ph",
@@ -101,7 +126,15 @@ static const SensorTypeMapping SENSOR_TYPE_MAP[] = {
     {"temperature_bmp280", &BMP280_TEMP_CAP},
     {"bmp280_pressure", &BMP280_PRESSURE_CAP},  // Already normalized
     {"bmp280_temp", &BMP280_TEMP_CAP},  // Already normalized
-    
+
+    // BME280 variants
+    {"pressure_bme280", &BME280_PRESSURE_CAP},
+    {"temperature_bme280", &BME280_TEMP_CAP},
+    {"humidity_bme280", &BME280_HUMIDITY_CAP},
+    {"bme280_pressure", &BME280_PRESSURE_CAP},  // Already normalized
+    {"bme280_temp", &BME280_TEMP_CAP},  // Already normalized
+    {"bme280_humidity", &BME280_HUMIDITY_CAP},  // Already normalized
+
     // pH sensor
     {"ph_sensor", &PH_SENSOR_CAP},
     {"ph", &PH_SENSOR_CAP},  // Already normalized
@@ -134,6 +167,11 @@ static const MultiValueDevice MULTI_VALUE_DEVICES[] = {
         .device_type = "bmp280",
         .value_types = {"bmp280_pressure", "bmp280_temp", nullptr, nullptr},
         .value_count = 2,
+    },
+    {
+        .device_type = "bme280",
+        .value_types = {"bme280_pressure", "bme280_temp", "bme280_humidity", nullptr},
+        .value_count = 3,
     },
     // End marker
     {nullptr, {nullptr, nullptr, nullptr, nullptr}, 0}

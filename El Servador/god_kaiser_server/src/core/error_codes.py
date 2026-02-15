@@ -42,13 +42,18 @@ class ESP32HardwareError(IntEnum):
     GPIO_INVALID_MODE = 1004
     GPIO_READ_FAILED = 1005
     GPIO_WRITE_FAILED = 1006
-    
+
+    # I2C Extended Error Codes (Phase 4 - Protocol Abstraction)
+    I2C_TIMEOUT = 1007
+    I2C_CRC_FAILED = 1009
+
     I2C_INIT_FAILED = 1010
     I2C_DEVICE_NOT_FOUND = 1011
     I2C_READ_FAILED = 1012
     I2C_WRITE_FAILED = 1013
     I2C_BUS_ERROR = 1014
-    
+    I2C_PROTOCOL_UNSUPPORTED = 1019
+
     ONEWIRE_INIT_FAILED = 1020
     ONEWIRE_NO_DEVICES = 1021
     ONEWIRE_READ_FAILED = 1022
@@ -316,13 +321,18 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     1004: "Invalid GPIO pin mode specified",
     1005: "Failed to read GPIO pin value",
     1006: "Failed to write GPIO pin value",
-    
+
+    # I2C Extended Error Codes (Phase 4 - Protocol Abstraction)
+    1007: "I2C operation timed out - sensor not responding",
+    1009: "I2C sensor data CRC validation failed - data corrupted",
+
     1010: "Failed to initialize I2C bus",
     1011: "I2C device not found on bus",
     1012: "Failed to read from I2C device",
     1013: "Failed to write to I2C device",
     1014: "I2C bus error (SDA/SCL stuck or timeout)",
-    
+    1019: "I2C sensor type has no registered communication protocol",
+
     1020: "Failed to initialize OneWire bus",
     1021: "No OneWire devices found on bus",
     1022: "Failed to read from OneWire device",
@@ -671,4 +681,3 @@ def get_esp32_config_error_codes() -> List[Dict]:
         {"code": code, "description": desc}
         for code, desc in ESP32_CONFIG_ERROR_DESCRIPTIONS.items()
     ]
-

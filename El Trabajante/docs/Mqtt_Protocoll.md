@@ -1728,8 +1728,8 @@ mosquitto_pub -h localhost \
   "sensors": [                         // Optional
     {
       "gpio": 4,
-      "type": "DS18B20",
-      "name": "Boden Temp",
+      "sensor_type": "DS18B20",
+      "sensor_name": "Boden Temp",
       "subzone_id": "zone_a",
       "active": true,
       "raw_mode": true,
@@ -1897,9 +1897,9 @@ mosquitto_pub -h localhost \
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
 
-**QoS:** 1 (at least once)  
-**Handler:** `src/main.cpp:612-687` (Zone Assignment Handler)  
-**TopicBuilder:** Manuell gebaut (nicht via TopicBuilder, da kaiser_id dynamisch)
+**QoS:** 1 (at least once)
+**Handler:** `src/main.cpp:1243-1399` (Zone Assignment Handler mit WP1 Zone-Removal + WP5 Validation)
+**TopicBuilder:** `topic_builder.cpp:buildZoneAssignTopic()` und `buildZoneAckTopic()` (Zeile 229, 237)
 
 **Kaiser-ID Bedeutung:**
 - `kaiser_id` identifiziert den **übergeordneten Pi** (God-Kaiser Server oder Kaiser-Node)
@@ -2026,12 +2026,14 @@ kaiser/god/zone/greenhouse/esp/ESP_12AB34CD/subzone/north_section/sensor/4/data
 **God-Kaiser muss zu BEIDEN Topic-Patterns subscriben:**
 
 ```python
-# Standard-Topics (zone_mode: "normal")
-mqtt_client.subscribe("kaiser/god/esp/+/sensor/+/data")
+# Standard-Topics (multi-Kaiser support via wildcard)
+mqtt_client.subscribe("kaiser/+/esp/+/sensor/+/data")
 
 # Hierarchische Topics (zone_mode: "master")
-mqtt_client.subscribe("kaiser/god/zone/+/esp/+/subzone/+/sensor/+/data")
+mqtt_client.subscribe("kaiser/+/zone/+/esp/+/subzone/+/sensor/+/data")
 ```
+
+**Wildcard-Bedeutung:** `kaiser/+/` matcht `kaiser/god/` (aktuell) und zukünftige Kaiser-Nodes (`kaiser/kaiser_01/`, etc.).
 
 ---
 
@@ -2236,7 +2238,7 @@ def on_message_local(client, userdata, msg):
 
 local_client.on_message = on_message_local
 local_client.connect("localhost", 1883)
-local_client.subscribe("kaiser/god/esp/+/#")
+local_client.subscribe("kaiser/+/esp/+/#")
 
 remote_client.connect("192.168.0.100", 1883)
 
@@ -2538,8 +2540,8 @@ retry_count++;
   "total_parts": 3,                    // Anzahl Parts
   "part_data": {                       // Teil-Config
     "sensors": [
-      {"gpio": 4, "type": "DS18B20"},
-      {"gpio": 5, "type": "pH"}
+      {"gpio": 4, "sensor_type": "DS18B20", "sensor_name": "Boden Temp"},
+      {"gpio": 5, "sensor_type": "pH", "sensor_name": "pH Sensor"}
     ]
   }
 }
@@ -3824,3 +3826,20 @@ def test_actuator_control(mock_esp32):
 **Praktikabilität:** ~95% (Produktionsreif!)
 
 **FAZIT:** Dokument ist **produktionsreif** und bereit für Implementierung! ✅
+
+---
+
+## Orphaned Topics Inventory (PHASE_2 Audit 2026-02-11)
+
+The following topics have builder functions or parsers but NO active handler processing them.
+**Do NOT remove code** - pending TM decision. Marked with `// ORPHANED` in source.
+
+| Topic Pattern | ESP32 Builder | Server Parser/Handler | Status | Recommendation |
+|---------------|---------------|----------------------|--------|----------------|
+| `sensor/batch` | `buildSensorBatchTopic()` | `build_sensor_batch_topic()` | ORPHANED | Remove after batch-sensor feature decision |
+| `system/response` | - | `parse_system_response_topic()` | ORPHANED | Remove parser (no ESP32 publisher) |
+| `actuator/emergency` | `buildActuatorEmergencyTopic()` | - | ORPHANED | Redundant to `actuator/{gpio}/alert` |
+| `subzone/status` | `buildSubzoneStatusTopic()` | - | ORPHANED | Remove builder |
+| `sensor/{gpio}/response` | `buildSensorResponseTopic()` | - | **KEEP** | Phase 2C feature (server->ESP sensor response) |
+| `broadcast/emergency` | `buildBroadcastEmergencyTopic()` | - | GHOST | Server->ESP, but ESP never subscribes |
+| `discovery/esp32_nodes` | DEPRECATED | `discovery_handler.py` | LEGACY | Remove when discovery deprecation final |

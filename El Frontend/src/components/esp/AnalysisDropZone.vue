@@ -19,6 +19,9 @@ import { ref, computed } from 'vue'
 import { X, ChartLine, Plus, Settings } from 'lucide-vue-next'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
 import type { ChartSensor } from '@/types'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('AnalysisDropZone')
 
 interface Props {
   /** Title for the drop zone */
@@ -76,15 +79,6 @@ const timeRangeOptions = [
 const hasReachedMax = computed(() => selectedSensors.value.length >= props.maxSensors)
 const isEmpty = computed(() => selectedSensors.value.length === 0)
 
-// Debug logger with consistent styling
-function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #f59e0b; color: black; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  if (data) {
-    console.log(`%c[AnalysisDropZone]%c ${message}`, style, 'color: #fbbf24;', data)
-  } else {
-    console.log(`%c[AnalysisDropZone]%c ${message}`, style, 'color: #fbbf24;')
-  }
-}
 
 // Safely get className as string (handles SVG elements where className is SVGAnimatedString)
 function getClassName(element: Element | null): string {
@@ -111,7 +105,7 @@ function handleDragEnter(event: DragEvent) {
   event.preventDefault()
 
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  log('dragenter', {
+  log.debug('dragenter', {
     hasReachedMax: hasReachedMax.value,
     targetTag: (event.target as Element)?.tagName,
     targetClass: getClassName(event.target as Element),
@@ -122,7 +116,7 @@ function handleDragEnter(event: DragEvent) {
 
   if (!hasReachedMax.value) {
     isDragOver.value = true
-    log('isDragOver = true ✓')
+    log.debug('isDragOver = true ✓')
   }
 }
 
@@ -132,7 +126,7 @@ function handleDragOver(event: DragEvent) {
   event.preventDefault()
 
   if (hasReachedMax.value) {
-    log('dragover - BLOCKED (max reached)')
+    log.debug('dragover - BLOCKED (max reached)')
     event.dataTransfer!.dropEffect = 'none'
     return
   }
@@ -143,7 +137,7 @@ function handleDragOver(event: DragEvent) {
   // Nur alle 500ms loggen um Console nicht zu fluten
   const now = Date.now()
   if (!handleDragOver._lastLog || now - handleDragOver._lastLog > 500) {
-    log('dragover ✓', {
+    log.debug('dragover ✓', {
       dropEffect: event.dataTransfer!.dropEffect,
       clientXY: { x: event.clientX, y: event.clientY }
     })
@@ -161,7 +155,7 @@ function handleDragLeave(event: DragEvent) {
   const target = event.currentTarget as HTMLElement
   const related = event.relatedTarget as HTMLElement | null
 
-  log('dragleave RAW', {
+  log.debug('dragleave RAW', {
     targetTag: (event.target as Element)?.tagName,
     relatedTargetTag: related?.tagName,
     relatedTargetClass: getClassName(related),
@@ -170,9 +164,9 @@ function handleDragLeave(event: DragEvent) {
 
   if (!related || !target.contains(related)) {
     isDragOver.value = false
-    log('dragleave - isDragOver = false (left element)')
+    log.debug('dragleave - isDragOver = false (left element)')
   } else {
-    log('dragleave - IGNORED (moved to child element)')
+    log.debug('dragleave - IGNORED (moved to child element)')
   }
 }
 
@@ -181,7 +175,7 @@ function handleDrop(event: DragEvent) {
   event.stopPropagation()
   event.preventDefault()
 
-  log('DROP EVENT FIRED! 🎯', {
+  log.debug('DROP EVENT FIRED! 🎯', {
     hasData: !!event.dataTransfer?.getData('application/json'),
     types: event.dataTransfer?.types,
     clientXY: { x: event.clientX, y: event.clientY }
@@ -190,19 +184,19 @@ function handleDrop(event: DragEvent) {
   isDragOver.value = false
 
   if (hasReachedMax.value) {
-    log('DROP REJECTED - max sensors reached')
+    log.debug('DROP REJECTED - max sensors reached')
     return
   }
 
   const data = event.dataTransfer?.getData('application/json')
   if (!data) {
-    log('DROP REJECTED - no JSON data in dataTransfer')
+    log.debug('DROP REJECTED - no JSON data in dataTransfer')
     return
   }
 
   try {
     const dragData = JSON.parse(data)
-    log('Parsed drag data', dragData)
+    log.debug('Parsed drag data', dragData)
 
     // ISSUE-002 fix: Vollständige Validierung der drag data
     // Prüfe alle erforderlichen Felder bevor sie verwendet werden
@@ -212,7 +206,7 @@ function handleDrop(event: DragEvent) {
       typeof dragData.gpio !== 'number' || isNaN(dragData.gpio) ||
       typeof dragData.sensorType !== 'string' || !dragData.sensorType
     ) {
-      log('DROP REJECTED - invalid drag data', {
+      log.debug('DROP REJECTED - invalid drag data', {
         type: dragData.type,
         espId: dragData.espId,
         gpio: dragData.gpio,
@@ -224,7 +218,7 @@ function handleDrop(event: DragEvent) {
     // Check if sensor already exists
     const sensorId = `${dragData.espId}_${dragData.gpio}`
     if (selectedSensors.value.some((s) => s.id === sensorId)) {
-      log('DROP REJECTED - sensor already in chart', { sensorId })
+      log.debug('DROP REJECTED - sensor already in chart', { sensorId })
       return
     }
 
@@ -240,9 +234,9 @@ function handleDrop(event: DragEvent) {
     }
     selectedSensors.value.push(newSensor)
     emit('sensorAdded', newSensor)
-    log('✅ SENSOR ADDED TO CHART', { newSensor, totalSensors: selectedSensors.value.length })
+    log.debug('✅ SENSOR ADDED TO CHART', { newSensor, totalSensors: selectedSensors.value.length })
   } catch (error) {
-    log('DROP ERROR - failed to parse', { error })
+    log.debug('DROP ERROR - failed to parse', { error })
   }
 }
 

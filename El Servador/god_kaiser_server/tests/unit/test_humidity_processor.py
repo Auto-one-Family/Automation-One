@@ -29,7 +29,7 @@ class TestSHT31HumidityProcessor:
         assert result.value == 65.5
         assert result.unit == "%RH"
         assert result.quality == "good"
-        assert result.metadata["raw_value"] == 65.5
+        assert result.metadata["raw_humidity"] == 65.5
         assert result.metadata["calibrated"] is False
 
     def test_process_with_offset_calibration(self, processor):
@@ -234,3 +234,113 @@ class TestSHT31HumidityProcessor:
         # 75.5 - 1.0 = 74.5, rounded to 0 decimal places = 74 (banker's rounding)
         assert result.value == 74
         assert result.metadata["calibrated"] is True
+
+    # =========================================================================
+    # SHT31 RAW MODE TESTS (Pi-Enhanced Mode - 16-bit Integer)
+    # Formula: humidity_rh = 100 * raw_value / 65535.0
+    # =========================================================================
+
+    def test_raw_mode_humidity_conversion_formula(self, processor):
+        """Test Sensirion Datasheet Formula: 100 * raw / 65535."""
+        params = {"raw_mode": True}
+        # raw=32768 → 100 * 32768 / 65535 = 50.0%
+        result = processor.process(raw_value=32768, params=params)
+
+        assert result.value == pytest.approx(50.0, abs=0.1)
+        assert result.quality == "good"
+        assert result.metadata["raw_mode"] is True
+        assert result.metadata["original_raw_value"] == 32768
+
+    def test_raw_mode_humidity_zero(self, processor):
+        """Test RAW=0 → 0% RH."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=0, params=params)
+
+        assert result.value == 0.0
+        # 0% is very low → poor quality
+        assert result.quality == "poor"
+
+    def test_raw_mode_humidity_max(self, processor):
+        """Test RAW=65535 → 100% RH."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=65535, params=params)
+
+        assert result.value == 100.0
+        # 100% is very high → poor quality (condensation)
+        assert result.quality == "poor"
+
+    def test_raw_mode_humidity_60_percent(self, processor):
+        """Test RAW=39321 → ~60% RH."""
+        params = {"raw_mode": True}
+        # 100 * 39321 / 65535 = 60.0%
+        result = processor.process(raw_value=39321, params=params)
+
+        assert result.value == pytest.approx(60.0, abs=0.1)
+        assert result.quality == "good"
+
+    def test_raw_mode_humidity_typical_greenhouse(self, processor):
+        """Test RAW value for typical greenhouse humidity (75%)."""
+        params = {"raw_mode": True}
+        # Solving: 75 = 100 * raw / 65535
+        # raw = 75 * 65535 / 100 = 49151
+        result = processor.process(raw_value=49151, params=params)
+
+        assert result.value == pytest.approx(75.0, abs=0.1)
+        assert result.quality == "good"
+
+    def test_raw_mode_humidity_out_of_range_negative(self, processor):
+        """Test negative RAW value rejected."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=-100, params=params)
+
+        assert result.quality == "error"
+        assert "out of range" in result.metadata.get("error", "")
+
+    def test_raw_mode_humidity_out_of_range_high(self, processor):
+        """Test RAW value > 65535 rejected."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=70000, params=params)
+
+        assert result.quality == "error"
+        assert "out of range" in result.metadata.get("error", "")
+
+    def test_raw_mode_humidity_with_calibration(self, processor):
+        """Test SHT31 Humidity RAW mode with calibration offset."""
+        params = {"raw_mode": True}
+        calibration = {"offset": -2.0}
+        # raw=32768 → 50.0% - 2.0% = 48.0%
+        result = processor.process(raw_value=32768, params=params, calibration=calibration)
+
+        assert result.value == pytest.approx(48.0, abs=0.1)
+        assert result.metadata["calibrated"] is True
+
+    def test_raw_mode_humidity_clamping_after_calibration(self, processor):
+        """Test humidity clamping to 0-100% after calibration in RAW mode."""
+        params = {"raw_mode": True}
+        calibration = {"offset": 10.0}
+        # raw=62259 → 95% + 10% = 105% → clamped to 100%
+        # 95 = 100 * raw / 65535 → raw = 62259
+        result = processor.process(raw_value=62259, params=params, calibration=calibration)
+
+        assert result.value == 100.0  # Clamped
+
+    def test_raw_mode_humidity_metadata_conversion_formula(self, processor):
+        """Test metadata includes conversion formula for SHT31 humidity."""
+        params = {"raw_mode": True}
+        result = processor.process(raw_value=32768, params=params)
+
+        assert result.metadata["raw_mode"] is True
+        assert result.metadata["original_raw_value"] == 32768
+        assert result.metadata["conversion_formula"] is not None
+        assert "32768" in result.metadata["conversion_formula"]
+
+    def test_raw_mode_humidity_condensation_warning(self, processor):
+        """Test condensation warning triggers in RAW mode for high humidity."""
+        params = {"raw_mode": True}
+        # raw=64225 → ~98% RH (above 95% condensation threshold)
+        # 98 = 100 * raw / 65535 → raw = 64225
+        result = processor.process(raw_value=64225, params=params)
+
+        assert result.value == pytest.approx(98.0, abs=0.2)
+        assert result.metadata.get("warnings") is not None
+        assert any("condensation" in w.lower() for w in result.metadata["warnings"])

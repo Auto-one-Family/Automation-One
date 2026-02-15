@@ -6,6 +6,8 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import ToastContainer from '@/components/common/ToastContainer.vue'
 import ErrorDetailsModal from '@/components/error/ErrorDetailsModal.vue'
 import type { ErrorDetailsData } from '@/components/error/ErrorDetailsModal.vue'
+import ConfirmDialog from '@/shared/design/patterns/ConfirmDialog.vue'
+import ContextMenu from '@/shared/design/patterns/ContextMenu.vue'
 
 const authStore = useAuthStore()
 const espStore = useEspStore()
@@ -34,6 +36,8 @@ onUnmounted(() => {
 <template>
   <RouterView />
   <ToastContainer />
+  <ConfirmDialog />
+  <ContextMenu />
   <ErrorDetailsModal
     :error="errorModalData"
     :open="errorModalOpen"

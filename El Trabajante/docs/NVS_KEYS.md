@@ -139,6 +139,7 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 | `current_state` | uint8_t | `0` (STATE_BOOT) | 0-11 | State Machine Current State |
 | `safe_mode_reason` | String | `""` (empty) | Max 128 chars | Reason for Safe-Mode Entry |
 | `boot_count` | uint16_t | `0` | 0-65535 | Number of Reboots |
+| `log_level` | uint8_t | `1` (LOG_INFO) | 0-4 | Persisted log level (0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR, 4=CRITICAL) |
 
 #### Sensor Configuration (Namespace: `sensor_config`)
 
@@ -280,6 +281,8 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 
   - `boot_count` (uint16_t) - Anzahl der Boots (für Diagnostik)
 
+  - `log_level` (uint8_t) - Persistiertes Log-Level (0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR, 4=CRITICAL). Gesetzt via MQTT `set_log_level` Command, geladen bei Boot (STEP 5.1)
+
   - `last_error` (String) - Letzte Fehlermeldung
 
 ## Zone Configuration - Subzonen Details
@@ -313,7 +316,7 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 **Total Keys (Worst-Case):**
 - WiFi: 7 Keys
 - Zone: 6 Keys
-- System: 5 Keys
+- System: 6 Keys
 - Sensors: 1 + (8 × 20) = 161 Keys (bei 20 Sensoren, **+2 Keys Phase 2C: mode, interval**)
 - Actuators: 1 + (10 × 20) = 201 Keys (bei 20 Aktoren)
 - **TOTAL: ~380 Keys** (bei voller Auslastung)

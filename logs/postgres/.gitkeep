@@ -1,0 +1,2 @@
+# PostgreSQL logs directory
+# Logs are mounted from Docker container

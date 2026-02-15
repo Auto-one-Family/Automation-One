@@ -68,12 +68,19 @@ bool TimeManager::begin() {
     LOG_INFO("  Primary:   " + String(ntp_server_primary_));
     LOG_INFO("  Secondary: " + String(ntp_server_secondary_));
     LOG_INFO("  Tertiary:  " + String(ntp_server_tertiary_));
-    
+
+    // CRITICAL: Set timezone to UTC BEFORE configTime
+    // This ensures mktime() interprets tm structs as UTC, not local timezone.
+    // Without this, mktime() uses the host system's timezone (e.g., CET on Windows/Wokwi),
+    // causing a 1-hour offset between ESP32 timestamps and server time.
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
     // Configure NTP (ESP32 IDF function)
     // Parameters: GMT offset (seconds), Daylight offset (seconds), NTP servers
-    configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET, 
-               ntp_server_primary_, 
-               ntp_server_secondary_, 
+    configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
+               ntp_server_primary_,
+               ntp_server_secondary_,
                ntp_server_tertiary_);
     
     initialized_ = true;

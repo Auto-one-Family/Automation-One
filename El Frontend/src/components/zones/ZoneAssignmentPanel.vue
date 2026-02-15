@@ -194,12 +194,12 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted } from 'vue'
 import { MapPin, Check, X, AlertCircle, CheckCircle, Radio, Loader2 } from 'lucide-vue-next'
-import Card from '@/components/common/Card.vue'
-import Input from '@/components/common/Input.vue'
-import Button from '@/components/common/Button.vue'
-import Badge from '@/components/common/Badge.vue'
+import { Card, Input, Button, Badge } from '@/shared/design'
 import { zonesApi } from '@/api/zones'
 import { useEspStore } from '@/stores/esp'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ZoneAssignment')
 
 const espStore = useEspStore()
 
@@ -280,7 +280,7 @@ watch([() => props.currentZoneName, () => props.currentZoneId], ([newName, newId
 watch(() => props.currentZoneId, (newZoneId) => {
   if (assignmentState.value === 'pending_ack' && newZoneId === generatedZoneId.value) {
     // ESP confirmed zone assignment via WebSocket!
-    console.log('[ZoneAssignmentPanel] Zone confirmed via WebSocket:', newZoneId)
+    log.debug('Zone confirmed via WebSocket', newZoneId)
 
     // Clear the timeout
     if (ackTimeoutId.value) {
@@ -335,10 +335,10 @@ async function saveZone() {
       request.master_zone_id = props.currentMasterZoneId
     }
 
-    console.log('[ZoneAssignmentPanel] Sending request:', request)
+    log.debug('Sending request', request)
     const response = await zonesApi.assignZone(props.espId, request)
 
-    console.log('[ZoneAssignmentPanel] API response:', response)
+    log.debug('API response', response)
 
     if (response.success) {
       // OPTIMISTIC UPDATE: Update ESP Store immediately for instant UI feedback
@@ -403,7 +403,7 @@ async function saveZone() {
       }, 5000)
     }
   } catch (error: unknown) {
-    console.error('[ZoneAssignmentPanel] API error:', error)
+    log.error('API error', error)
     const axiosError = error as { response?: { data?: { detail?: string } } }
     const message = axiosError.response?.data?.detail
       || (error instanceof Error ? error.message : 'Unbekannter Fehler')
@@ -430,7 +430,7 @@ async function removeZone() {
     // Call the Zone API to remove assignment
     const response = await zonesApi.removeZone(props.espId)
 
-    console.log('[ZoneAssignmentPanel] Remove response:', response)
+    log.debug('Remove response', response)
 
     if (response.success) {
       // OPTIMISTIC UPDATE: Update ESP Store immediately for instant UI feedback
@@ -471,7 +471,7 @@ async function removeZone() {
       }, 5000)
     }
   } catch (error: unknown) {
-    console.error('[ZoneAssignmentPanel] Remove error:', error)
+    log.error('Remove error', error)
     const axiosError = error as { response?: { data?: { detail?: string } } }
     const message = axiosError.response?.data?.detail
       || (error instanceof Error ? error.message : 'Unbekannter Fehler')

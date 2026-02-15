@@ -76,7 +76,15 @@ String ConfigResponseBuilder::buildJsonPayload(const ConfigResponsePayload& payl
   }
 
   String json;
-  serializeJson(doc, json);
+  size_t written = serializeJson(doc, json);
+  if (written == 0 || json.length() == 0) {
+    LOG_ERROR("JSON serialization failed in buildJsonPayload (type=" +
+              String(configTypeToString(payload.type)) + ")");
+    // Return minimal valid JSON with required type field
+    return String("{\"status\":\"error\",\"type\":\"") +
+           configTypeToString(payload.type) +
+           "\",\"message\":\"serialization_failed\"}";
+  }
   return json;
 }
 
@@ -179,7 +187,15 @@ String ConfigResponseBuilder::buildJsonPayloadWithFailures(
   }
 
   String json;
-  serializeJson(doc, json);
+  size_t written = serializeJson(doc, json);
+  if (written == 0 || json.length() == 0) {
+    LOG_ERROR("JSON serialization failed in buildJsonPayloadWithFailures (type=" +
+              String(configTypeToString(type)) + ", failures=" + String(failures.size()) + ")");
+    // Return minimal valid JSON with required type field
+    return String("{\"status\":\"error\",\"type\":\"") +
+           configTypeToString(type) +
+           "\",\"message\":\"serialization_failed\"}";
+  }
   return json;
 }
 

@@ -741,9 +741,7 @@ Backend:
 ### Was der User sieht:
 - Alle Aktoren aus allen ESPs in tabellarischer Übersicht
 - Live-Status via WebSocket (actuator_status Events)
-- Emergency-Stop Status pro Aktor
-
-### User kann einstellen:
+- Emergency-Stop Status pro Aktor### User kann einstellen:
 ✅ **VOLLSTÄNDIG:**
 - Aktor ein-/ausschalten (ON/OFF Toggle)
 - Emergency-Stop Status sehen
@@ -849,9 +847,7 @@ Basierend auf Hierarchie.md **FEHLT** die Unterscheidung zwischen echten ESPs un
 1. **SensorsView & ActuatorsView migrieren** zu `useEspStore`
 2. **ESP-Typ-Badges implementieren** (🟢 REAL, 🔵 MOCK)
 3. **Unified API-Endpoints** für beide ESP-Typen
-4. **PWM-Kontrolle erweitern** auf echte ESPs
-
-### 📈 **Business Impact**
+4. **PWM-Kontrolle erweitern** auf echte ESPs### 📈 **Business Impact**
 
 **Ohne Behebung:** User können echte ESPs nicht in Aggregations-Views sehen
 **Mit Behebung:** Vollständige ESP-Übersicht, konsistente UX

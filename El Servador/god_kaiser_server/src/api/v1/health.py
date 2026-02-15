@@ -9,7 +9,7 @@ Provides:
 - GET / - Basic health check
 - GET /detailed - Comprehensive health
 - GET /esp - ESP health summary
-- GET /metrics - Prometheus metrics
+- GET /metrics - Prometheus metrics (served by prometheus-fastapi-instrumentator)
 - GET /live - Liveness probe
 - GET /ready - Readiness probe
 
@@ -17,11 +17,10 @@ References:
 - .claude/PI_SERVER_REFACTORING.md (Lines 191-195)
 """
 
-import platform
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter
 from sqlalchemy import and_, desc, select
 
 from ...core.config import get_settings
@@ -35,7 +34,6 @@ from ...schemas import (
     ESPHealthItem,
     HealthResponse,
     LivenessResponse,
-    MetricsResponse,
     MQTTHealth,
     ReadinessResponse,
     SystemResourceHealth,
@@ -147,30 +145,19 @@ async def detailed_health(
         total_messages_sent=0,  # Would track
     )
     
-    # System resources (simplified)
-    try:
-        import psutil
-        cpu_percent = psutil.cpu_percent()
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
-        system_health = SystemResourceHealth(
-            cpu_percent=cpu_percent,
-            memory_percent=memory.percent,
-            memory_used_mb=memory.used / (1024 * 1024),
-            memory_total_mb=memory.total / (1024 * 1024),
-            disk_percent=disk.percent,
-            disk_free_gb=disk.free / (1024 * 1024 * 1024),
-        )
-    except ImportError:
-        # psutil not available
-        system_health = SystemResourceHealth(
-            cpu_percent=0,
-            memory_percent=0,
-            memory_used_mb=0,
-            memory_total_mb=0,
-            disk_percent=0,
-            disk_free_gb=0,
-        )
+    # System resources
+    import psutil
+    cpu_percent = psutil.cpu_percent()
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+    system_health = SystemResourceHealth(
+        cpu_percent=cpu_percent,
+        memory_percent=memory.percent,
+        memory_used_mb=memory.used / (1024 * 1024),
+        memory_total_mb=memory.total / (1024 * 1024),
+        disk_percent=disk.percent,
+        disk_free_gb=disk.free / (1024 * 1024 * 1024),
+    )
     
     # Determine overall status
     status = "healthy"
@@ -344,86 +331,6 @@ async def esp_health_summary(
 
 
 # =============================================================================
-# Prometheus Metrics
-# =============================================================================
-
-
-@router.get(
-    "/metrics",
-    response_class=Response,
-    summary="Prometheus metrics",
-    description="Export metrics in Prometheus format.",
-)
-async def prometheus_metrics(
-    db: DBSession,
-) -> Response:
-    """
-    Export Prometheus metrics.
-    
-    Returns metrics in Prometheus text format.
-    """
-    mqtt_client = MQTTClient.get_instance()
-    esp_repo = ESPRepository(db)
-    
-    uptime_seconds = int(time.time() - _server_start_time)
-    
-    # Get ESP counts
-    devices = await esp_repo.get_all()
-    online_count = sum(1 for d in devices if d.status == "online")
-    offline_count = sum(1 for d in devices if d.status == "offline")
-    
-    # Build metrics
-    metrics_lines = [
-        "# HELP god_kaiser_uptime_seconds Server uptime in seconds",
-        "# TYPE god_kaiser_uptime_seconds gauge",
-        f"god_kaiser_uptime_seconds {uptime_seconds}",
-        "",
-        "# HELP god_kaiser_mqtt_connected MQTT broker connection status",
-        "# TYPE god_kaiser_mqtt_connected gauge",
-        f"god_kaiser_mqtt_connected {1 if mqtt_client.is_connected() else 0}",
-        "",
-        "# HELP god_kaiser_esp_total Total registered ESP devices",
-        "# TYPE god_kaiser_esp_total gauge",
-        f"god_kaiser_esp_total {len(devices)}",
-        "",
-        "# HELP god_kaiser_esp_online Online ESP devices",
-        "# TYPE god_kaiser_esp_online gauge",
-        f"god_kaiser_esp_online {online_count}",
-        "",
-        "# HELP god_kaiser_esp_offline Offline ESP devices",
-        "# TYPE god_kaiser_esp_offline gauge",
-        f"god_kaiser_esp_offline {offline_count}",
-        "",
-    ]
-    
-    # System metrics (if available)
-    try:
-        import psutil
-        cpu_percent = psutil.cpu_percent()
-        memory = psutil.virtual_memory()
-        
-        metrics_lines.extend([
-            "# HELP god_kaiser_cpu_percent CPU usage percentage",
-            "# TYPE god_kaiser_cpu_percent gauge",
-            f"god_kaiser_cpu_percent {cpu_percent}",
-            "",
-            "# HELP god_kaiser_memory_percent Memory usage percentage",
-            "# TYPE god_kaiser_memory_percent gauge",
-            f"god_kaiser_memory_percent {memory.percent}",
-            "",
-        ])
-    except ImportError:
-        pass
-    
-    metrics_text = "\n".join(metrics_lines)
-    
-    return Response(
-        content=metrics_text,
-        media_type="text/plain; version=0.0.4",
-    )
-
-
-# =============================================================================
 # Kubernetes Probes
 # =============================================================================
 
@@ -468,13 +375,10 @@ async def readiness_probe(
         "mqtt": mqtt_client.is_connected(),
     }
     
-    # Check disk space (simplified)
-    try:
-        import psutil
-        disk = psutil.disk_usage("/")
-        checks["disk_space"] = disk.percent < 95
-    except ImportError:
-        checks["disk_space"] = True
+    # Check disk space
+    import psutil
+    disk = psutil.disk_usage("/")
+    checks["disk_space"] = disk.percent < 95
     
     # Ready if all critical checks pass
     ready = checks["database"] and checks["mqtt"]

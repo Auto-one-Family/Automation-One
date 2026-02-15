@@ -4,6 +4,50 @@ Configuration Field Mapping System
 Defines field mappings between Server DB models and ESP32 payload format.
 Designed for industrial systems with full configurability.
 
+=============================================================================
+ESP32 Config-Mapping System
+=============================================================================
+
+Dieses Modul definiert wie Sensor/Actuator-Daten aus der Datenbank
+in ESP32-kompatible Config-Payloads transformiert werden.
+
+ARCHITEKTUR:
+
+  DB Model (SensorConfig/ActuatorConfig)
+      ↓
+  ConfigPayloadBuilder.build_combined_config() [services/config_builder.py]
+      ↓
+  ConfigMappingEngine.apply_sensor_mapping() / apply_actuator_mapping()
+      ↓
+  DEFAULT_SENSOR_MAPPINGS / DEFAULT_ACTUATOR_MAPPINGS (dieses Modul)
+      ↓
+  ESP32-Payload Dict
+      ↓
+  MQTT Topic: kaiser/{kaiser_id}/esp/{esp_id}/config
+
+MAPPING-STRUKTUR:
+
+  Jedes Mapping hat folgende Felder:
+  - source: Pfad zum Feld im DB-Model (z.B. "gpio" oder "sensor_metadata.subzone_id")
+  - target: Feldname im ESP32-Payload
+  - field_type: "string", "int", "bool", "float"
+  - required: True/False (ob Feld Pflicht ist)
+  - default: Default-Wert wenn source leer
+  - transform: Optional - Name einer Transform-Funktion aus TRANSFORMS Dict
+
+ERWEITERUNG:
+
+  Um neue Felder zum ESP32 zu senden, hier ein Mapping hinzufügen.
+  Für neue Transform-Funktionen das TRANSFORMS Dict erweitern.
+
+HINWEIS:
+
+  Ein manueller Config-Push-Endpoint existiert NICHT.
+  Configs werden automatisch nach Sensor/Actuator CRUD-Operationen gesendet.
+  Siehe: api/v1/sensors.py und api/v1/actuators.py
+
+=============================================================================
+
 Features:
 - Default mappings for sensors and actuators
 - Dynamic mapping override via SystemConfig
@@ -27,6 +71,74 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from ..core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+# =============================================================================
+# ACTUATOR TYPE MAPPING: Server DB → ESP32
+# =============================================================================
+# The Server stores normalized types (e.g. "digital" for all binary actuators).
+# The ESP32 expects specific types ("relay", "pump", "valve", "pwm").
+#
+# This mapping converts Server types back to ESP32-compatible types.
+
+# ESP32-compatible Actuator Types (from El Trabajante/src/models/actuator_types.h)
+ESP32_ACTUATOR_TYPES = frozenset({"pump", "valve", "pwm", "relay"})
+
+# Reverse-Mapping: Server-Type → ESP32-Type
+SERVER_TO_ESP32_ACTUATOR_TYPE = {
+    "digital": "relay",    # Server "digital" → ESP32 "relay"
+    "binary": "relay",     # Alternative name for binary actuators
+    "switch": "relay",     # Alternative name for switch actuators
+    # Types that remain unchanged:
+    "relay": "relay",
+    "pump": "pump",
+    "valve": "valve",
+    "pwm": "pwm",
+}
+
+
+def map_actuator_type_for_esp32(server_type: str) -> str:
+    """
+    Convert a Server actuator type to an ESP32-compatible type.
+
+    Args:
+        server_type: Actuator type from Server database (e.g. "digital")
+
+    Returns:
+        ESP32-compatible type (e.g. "relay")
+
+    Raises:
+        ValueError: If the type cannot be mapped
+
+    Example:
+        >>> map_actuator_type_for_esp32("digital")
+        "relay"
+        >>> map_actuator_type_for_esp32("pwm")
+        "pwm"
+    """
+    if not server_type:
+        raise ValueError("actuator_type must not be empty")
+
+    server_type_lower = server_type.lower().strip()
+
+    # Check after strip for whitespace-only input
+    if not server_type_lower:
+        raise ValueError("actuator_type must not be empty")
+
+    # Directly ESP32-compatible?
+    if server_type_lower in ESP32_ACTUATOR_TYPES:
+        return server_type_lower
+
+    # Apply mapping
+    esp32_type = SERVER_TO_ESP32_ACTUATOR_TYPE.get(server_type_lower)
+
+    if esp32_type is None:
+        raise ValueError(
+            f"Unknown actuator_type '{server_type}'. "
+            f"Allowed: {', '.join(sorted(SERVER_TO_ESP32_ACTUATOR_TYPE.keys()))}"
+        )
+
+    return esp32_type
 
 
 class FieldType(str, Enum):
@@ -129,6 +241,38 @@ DEFAULT_SENSOR_MAPPINGS: List[Dict[str, Any]] = [
         "default": 30,
         "transform": "ms_to_seconds",
     },
+    # =============================================================
+    # Interface-specific fields (OneWire, I2C, SPI)
+    #
+    # Diese Felder werden für Bus-basierte Sensoren benötigt:
+    # - interface_type: ANALOG, DIGITAL, I2C, ONEWIRE, SPI
+    # - onewire_address: 16-char hex ROM-Code für DS18B20 etc.
+    # - i2c_address: 7-bit I2C Adresse (0x00-0x7F)
+    #
+    # Hinzugefügt: 2026-02-03 (BUG-ONEWIRE-CONFIG-001)
+    # =============================================================
+    {
+        "source": "interface_type",
+        "target": "interface_type",
+        "field_type": "string",
+        "required": False,
+        "default": "ANALOG",
+    },
+    {
+        "source": "onewire_address",
+        "target": "onewire_address",
+        "field_type": "string",
+        "required": False,
+        "default": "",
+        "transform": "strip_auto_prefix",
+    },
+    {
+        "source": "i2c_address",
+        "target": "i2c_address",
+        "field_type": "int",
+        "required": False,
+        "default": 0,
+    },
 ]
 
 
@@ -145,6 +289,9 @@ DEFAULT_ACTUATOR_MAPPINGS: List[Dict[str, Any]] = [
         "target": "actuator_type",
         "field_type": "string",
         "required": True,
+        # BUG-FIX: Transform "digital" → "relay" for ESP32 compatibility
+        # Server normalizes relay/pump/valve to "digital" but ESP32 needs "relay"
+        "transform": "actuator_type_to_esp32",
     },
     {
         "source": "actuator_name",
@@ -234,6 +381,14 @@ class ConfigMappingEngine:
         "invert_bool": lambda x: not bool(x) if x is not None else True,
         # Phase 2C: Convert milliseconds to seconds for ESP32 measurement interval
         "ms_to_seconds": lambda x: (int(x) // 1000) if x else 30,
+        # BUG-FIX: Convert Server actuator types to ESP32-compatible types
+        # Server stores "digital" but ESP32 expects "relay"
+        # See: El Trabajante/src/models/actuator_types.h (ActuatorTypeTokens)
+        "actuator_type_to_esp32": map_actuator_type_for_esp32,
+        # BUG-ONEWIRE-CONFIG-001: Strip AUTO_ prefix from OneWire addresses
+        # ESP32 expects pure 16 hex char ROM-Code (e.g., "28FF641E8D3C0C79")
+        # DB may store "AUTO_28FF641E8D3C0C79" for auto-discovered sensors
+        "strip_auto_prefix": lambda x: x[5:] if x and isinstance(x, str) and x.startswith("AUTO_") else (x or ""),
     }
     
     def __init__(

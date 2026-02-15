@@ -160,4 +160,3 @@ private:
 extern PWMController& pwmController;
 
 #endif // DRIVERS_PWM_CONTROLLER_H
-

@@ -24,12 +24,14 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
     SHT31 I2C Humidity Sensor Processor.
 
     The SHT31 is a digital temperature and humidity sensor using I2C communication.
-    ESP32-side processing (Adafruit_SHT31 library) already converts raw sensor
-    data to relative humidity percentage, so this processor focuses on:
-    - Validation of humidity range (0-100% RH)
-    - Optional calibration offset
-    - Quality assessment based on value range
-    - Detection of condensation conditions
+
+    Supports TWO modes:
+    1. RAW Mode (Pi-Enhanced): ESP sends 16-bit unsigned integer, server converts
+       - raw_value = 32768 → 100 * 32768 / 65535 = 50.0% RH
+       - Set params["raw_mode"] = True
+    2. Pre-Converted Mode: ESP sends humidity in % RH (legacy)
+       - raw_value = 50.0 → 50.0% RH (direct)
+       - Set params["raw_mode"] = False (default for backward compatibility)
 
     Sensor Specifications:
     - Humidity Range: 0-100% RH (Relative Humidity)
@@ -39,12 +41,16 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
     - Response Time: 8 seconds (tau 63%)
     - Temperature Sensor: Same chip (see SHT31TemperatureProcessor)
 
+    RAW Value Conversion (Sensirion Datasheet):
+    - Formula: humidity_rh = 100 * raw_value / 65535.0
+    - RAW Range: 0 - 65535 (16-bit unsigned)
+    - Example: raw=32768 → 100 * 32768 / 65535 = 50.0% RH
+
     ESP32 Setup:
-    - Library: Adafruit_SHT31
     - I2C: GPIO21 (SDA), GPIO22 (SCL)
     - Address: 0x44 (default) or 0x45 (if ADR pin connected to VIN)
-    - Multiple sensors: Use different I2C addresses
-    - Heater: Built-in heater for condensation removal (controlled via library)
+    - Command: 0x24, 0x00 (Single Shot, High Repeatability)
+    - Data bytes 3-4 contain humidity (bytes 0-1 contain temperature)
 
     Important Notes:
     - Humidity readings are temperature-dependent
@@ -73,6 +79,10 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
     CONDENSATION_THRESHOLD = 95.0  # % RH (likely condensation)
     LOW_THRESHOLD = 5.0  # % RH (suspiciously low, possible sensor issue)
 
+    # RAW Mode Conversion (Pi-Enhanced)
+    RAW_CONVERSION_SCALE = 100.0
+    RAW_MAX_VALUE = 65535.0
+
     def get_sensor_type(self) -> str:
         """Return sensor type identifier."""
         return "sht31_humidity"
@@ -86,11 +96,22 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
         """
         Process SHT31 humidity reading.
 
+        Supports TWO modes:
+        1. RAW Mode (Pi-Enhanced): ESP sends 16-bit unsigned integer, server converts
+           - raw_value = 32768 → 100 * 32768 / 65535 = 50.0% RH
+           - Set params["raw_mode"] = True
+        2. Pre-Converted Mode: ESP sends humidity in % RH
+           - raw_value = 50.0 → 50.0% RH (direct)
+           - Set params["raw_mode"] = False (default for backward compatibility)
+
         Args:
-            raw_value: Relative Humidity % (0-100) from Adafruit_SHT31 library
+            raw_value: Humidity value
+                - If raw_mode=True: 16-bit unsigned integer (0-65535)
+                - If raw_mode=False: Humidity in % RH (pre-converted)
             calibration: Optional calibration data
                 - "offset": float - Humidity offset correction (% RH)
             params: Optional processing parameters
+                - "raw_mode": bool - Whether value is RAW 16-bit (default: False)
                 - "decimal_places": int - Decimal places for rounding (default: 1)
                 - "condensation_warning": bool - Warn if humidity >95% (default: True)
 
@@ -98,29 +119,56 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
             ProcessingResult with humidity value, unit "%RH", quality assessment
 
         Example:
-            # Basic usage
+            # RAW Mode (Pi-Enhanced) - ESP sends 16-bit integer
+            result = processor.process(
+                raw_value=32768,  # 16-bit RAW
+                params={"raw_mode": True}
+            )
+            # result.value = 50.0 (converted), result.unit = "%RH"
+
+            # Pre-Converted Mode (backward compatible)
             result = processor.process(raw_value=65.5)
             # result.value = 65.5, result.unit = "%RH", result.quality = "good"
-
-            # With calibration offset
-            result = processor.process(
-                raw_value=65.5,
-                calibration={"offset": -2.0}
-            )
-            # result.value = 63.5
-
-            # High humidity (condensation warning)
-            result = processor.process(raw_value=96.5)
-            # result.quality = "fair", metadata contains condensation warning
         """
-        # Step 1: Validate raw value
+        # Step 0: Check for RAW mode (Pi-Enhanced)
+        raw_mode = params.get("raw_mode", False) if params else False
+        original_raw_value = raw_value  # Keep original for metadata
+
+        if raw_mode:
+            # ==================================================================
+            # RAW MODE CONVERSION (Sensirion Datasheet)
+            # Formula: humidity_rh = 100 * raw_value / 65535.0
+            # ==================================================================
+            raw_int = int(raw_value)
+
+            # Validate RAW value range (0-65535)
+            if raw_int < 0 or raw_int > 65535:
+                return ProcessingResult(
+                    value=0.0,
+                    unit="%RH",
+                    quality="error",
+                    metadata={
+                        "error": f"SHT31 RAW humidity value {raw_int} out of range (0-65535)",
+                        "raw_mode": raw_mode,
+                        "original_raw_value": original_raw_value,
+                    },
+                )
+
+            # Convert RAW to % RH
+            raw_value = self.RAW_CONVERSION_SCALE * float(raw_int) / self.RAW_MAX_VALUE
+
+        # Step 1: Validate converted value (now in % RH)
         validation = self.validate(raw_value)
         if not validation.valid:
             return ProcessingResult(
                 value=0.0,
                 unit="%RH",
                 quality="error",
-                metadata={"error": validation.error},
+                metadata={
+                    "error": validation.error,
+                    "raw_mode": raw_mode,
+                    "original_raw_value": original_raw_value if raw_mode else None,
+                },
             )
 
         # Step 2: Apply calibration offset (if provided)
@@ -148,10 +196,16 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
         if params and "condensation_warning" in params:
             condensation_warning_enabled = params["condensation_warning"]
 
-        metadata_dict = {
-            "raw_value": raw_value,
+        metadata_dict: Dict[str, Any] = {
+            "raw_humidity": raw_value,
             "calibrated": calibrated,
             "warnings": validation.warnings,
+            # RAW mode metadata (Pi-Enhanced)
+            "raw_mode": raw_mode,
+            "original_raw_value": original_raw_value if raw_mode else None,
+            "conversion_formula": (
+                f"100 * {int(original_raw_value)} / 65535" if raw_mode else None
+            ),
         }
 
         if condensation_warning_enabled and humidity > self.CONDENSATION_THRESHOLD:

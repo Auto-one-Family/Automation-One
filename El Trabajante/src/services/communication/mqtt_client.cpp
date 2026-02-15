@@ -5,6 +5,7 @@
 #include "../../services/actuator/actuator_manager.h"
 #include "../../utils/time_manager.h"
 #include "../../drivers/gpio_manager.h"  // Phase 1: GPIO Status
+#include "../../config/feature_flags.h"
 #include <WiFi.h>
 
 // ============================================
@@ -43,7 +44,7 @@ MQTTClient& MQTTClient::getInstance() {
 // ============================================
 // CONSTRUCTOR / DESTRUCTOR
 // ============================================
-MQTTClient::MQTTClient() 
+MQTTClient::MQTTClient()
     : mqtt_(wifi_client_),
       offline_buffer_count_(0),
       last_reconnect_attempt_(0),
@@ -52,7 +53,9 @@ MQTTClient::MQTTClient()
       initialized_(false),
       anonymous_mode_(true),
       last_heartbeat_(0),
-      circuit_breaker_("MQTT", 5, 30000, 10000) {
+      circuit_breaker_("MQTT", 5, 30000, 10000),
+      registration_confirmed_(false),
+      registration_start_ms_(0) {
   // Circuit Breaker configured:
   // - 5 failures → OPEN
   // - 30s recovery timeout
@@ -83,19 +86,19 @@ bool MQTTClient::begin() {
 // CONNECTION MANAGEMENT
 // ============================================
 bool MQTTClient::connect(const MQTTConfig& config) {
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_entry\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:84\",\"message\":\"MQTT connect() called\",\"data\":{\"server\":\"");
-    Serial.print(config.server);
-    Serial.print("\",\"port\":");
-    Serial.print(config.port);
-    Serial.print(",\"client_id\":\"");
-    Serial.print(config.client_id);
-    Serial.print("\",\"username_len\":");
-    Serial.print(config.username.length());
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    { char dbg[384];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_connect_entry\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:84\",\"message\":\"MQTT connect() called\""
+        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"client_id\":\"%s\",\"username_len\":%u}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+        millis(), config.server.c_str(), config.port, config.client_id.c_str(),
+        (unsigned int)config.username.length());
+      Serial.println(dbg); }
     // #endregion
+    #endif
     
     if (!initialized_) {
         LOG_ERROR("MQTTClient not initialized");
@@ -106,11 +109,17 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     
     // Validate config
     if (config.server.length() == 0) {
+        #ifdef ENABLE_AGENT_DEBUG_LOGS
         // #region agent log
-        Serial.print("[DEBUG]{\"id\":\"mqtt_connect_empty_server\",\"timestamp\":");
-        Serial.print(millis());
-        Serial.print(",\"location\":\"mqtt_client.cpp:93\",\"message\":\"MQTT server address is empty\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        { char dbg[256];
+          snprintf(dbg, sizeof(dbg),
+            "[DEBUG]{\"id\":\"mqtt_connect_empty_server\",\"timestamp\":%lu"
+            ",\"location\":\"mqtt_client.cpp:93\",\"message\":\"MQTT server address is empty\""
+            ",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+            millis());
+          Serial.println(dbg); }
         // #endregion
+        #endif
         LOG_ERROR("MQTT server address is empty");
         errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
                                            "MQTT server address is empty");
@@ -132,42 +141,39 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Set server
     mqtt_.setServer(config.server.c_str(), config.port);
     mqtt_.setKeepAlive(config.keepalive);
-    
+
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_before_broker\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:115\",\"message\":\"About to call connectToBroker()\",\"data\":{\"server_set\":\"");
-    Serial.print(config.server);
-    Serial.print("\",\"port_set\":");
-    Serial.print(config.port);
-    Serial.print(",\"wifi_status\":");
-    Serial.print(WiFi.status());
-    Serial.print(",\"wifi_connected\":");
-    Serial.print(WiFi.isConnected() ? "true" : "false");
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}\n");
+    { char dbg[384];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_connect_before_broker\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:115\",\"message\":\"About to call connectToBroker()\""
+        ",\"data\":{\"server_set\":\"%s\",\"port_set\":%d,\"wifi_status\":%d,\"wifi_connected\":%s}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}",
+        millis(), config.server.c_str(), config.port, WiFi.status(),
+        WiFi.isConnected() ? "true" : "false");
+      Serial.println(dbg); }
     // #endregion
+    #endif
     
     return connectToBroker();
 }
 
 bool MQTTClient::connectToBroker() {
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_broker_entry\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:119\",\"message\":\"connectToBroker() called\",\"data\":{\"server\":\"");
-    Serial.print(current_config_.server);
-    Serial.print("\",\"port\":");
-    Serial.print(current_config_.port);
-    Serial.print(",\"mqtt_state\":");
-    Serial.print(mqtt_.state());
-    Serial.print(",\"wifi_status\":");
-    Serial.print(WiFi.status());
-    Serial.print(",\"wifi_ssid\":\"");
-    Serial.print(WiFi.SSID());
-    Serial.print("\",\"wifi_ip\":\"");
-    Serial.print(WiFi.localIP().toString());
-    Serial.print("\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}\n");
+    { char dbg[512];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_connect_broker_entry\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:119\",\"message\":\"connectToBroker() called\""
+        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"mqtt_state\":%d"
+        ",\"wifi_status\":%d,\"wifi_ssid\":\"%s\",\"wifi_ip\":\"%s\"}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}",
+        millis(), current_config_.server.c_str(), current_config_.port, mqtt_.state(),
+        WiFi.status(), WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+      Serial.println(dbg); }
     // #endregion
+    #endif
     
     LOG_INFO("Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
 
@@ -190,17 +196,19 @@ bool MQTTClient::connectToBroker() {
 
     // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
     // Try configured port first (likely 8883 for TLS)
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_connect_before_attempt\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:141\",\"message\":\"About to attempt MQTT connection\",\"data\":{\"server\":\"");
-    Serial.print(current_config_.server);
-    Serial.print("\",\"port\":");
-    Serial.print(current_config_.port);
-    Serial.print(",\"hostname_length\":");
-    Serial.print(current_config_.server.length());
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    { char dbg[384];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_connect_before_attempt\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:141\",\"message\":\"About to attempt MQTT connection\""
+        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"hostname_length\":%u}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+        millis(), current_config_.server.c_str(), current_config_.port,
+        (unsigned int)current_config_.server.length());
+      Serial.println(dbg); }
     // #endregion
+    #endif
     bool connected = attemptMQTTConnection(last_will_topic, last_will_message);
 
     // If connection failed and port is 8883 (TLS), try fallback to 1883 (plain MQTT)
@@ -225,17 +233,18 @@ bool MQTTClient::connectToBroker() {
     }
 
     if (connected) {
+        #ifdef ENABLE_AGENT_DEBUG_LOGS
         // #region agent log
-        Serial.print("[DEBUG]{\"id\":\"mqtt_connect_success\",\"timestamp\":");
-        Serial.print(millis());
-        Serial.print(",\"location\":\"mqtt_client.cpp:164\",\"message\":\"MQTT connection successful\",\"data\":{\"server\":\"");
-        Serial.print(current_config_.server);
-        Serial.print("\",\"port\":");
-        Serial.print(current_config_.port);
-        Serial.print(",\"mqtt_state\":");
-        Serial.print(mqtt_.state());
-        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        { char dbg[384];
+          snprintf(dbg, sizeof(dbg),
+            "[DEBUG]{\"id\":\"mqtt_connect_success\",\"timestamp\":%lu"
+            ",\"location\":\"mqtt_client.cpp:164\",\"message\":\"MQTT connection successful\""
+            ",\"data\":{\"server\":\"%s\",\"port\":%d,\"mqtt_state\":%d}"
+            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+            millis(), current_config_.server.c_str(), current_config_.port, mqtt_.state());
+          Serial.println(dbg); }
         // #endregion
+        #endif
         LOG_INFO("MQTT connected!");
         reconnect_attempts_ = 0;
         reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
@@ -243,26 +252,32 @@ bool MQTTClient::connectToBroker() {
         // Reset Circuit Breaker on successful connection (Phase 6+)
         circuit_breaker_.recordSuccess();
 
+        // ============================================
+        // REGISTRATION GATE RESET (Bug #1 Fix)
+        // ============================================
+        registration_confirmed_ = false;
+        registration_start_ms_ = millis();
+        LOG_INFO("Registration gate closed - awaiting heartbeat ACK");
+
         // Process offline buffer
         processOfflineBuffer();
 
         return true;
     } else {
+        #ifdef ENABLE_AGENT_DEBUG_LOGS
         // #region agent log
-        Serial.print("[DEBUG]{\"id\":\"mqtt_connect_failed\",\"timestamp\":");
-        Serial.print(millis());
-        Serial.print(",\"location\":\"mqtt_client.cpp:177\",\"message\":\"MQTT connection failed\",\"data\":{\"server\":\"");
-        Serial.print(current_config_.server);
-        Serial.print("\",\"port\":");
-        Serial.print(current_config_.port);
-        Serial.print(",\"mqtt_state\":");
-        Serial.print(mqtt_.state());
-        Serial.print(",\"server_length\":");
-        Serial.print(current_config_.server.length());
-        Serial.print(",\"wifi_status\":");
-        Serial.print(WiFi.status());
-        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        { char dbg[384];
+          snprintf(dbg, sizeof(dbg),
+            "[DEBUG]{\"id\":\"mqtt_connect_failed\",\"timestamp\":%lu"
+            ",\"location\":\"mqtt_client.cpp:177\",\"message\":\"MQTT connection failed\""
+            ",\"data\":{\"server\":\"%s\",\"port\":%d,\"mqtt_state\":%d"
+            ",\"server_length\":%u,\"wifi_status\":%d}"
+            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+            millis(), current_config_.server.c_str(), current_config_.port, mqtt_.state(),
+            (unsigned int)current_config_.server.length(), WiFi.status());
+          Serial.println(dbg); }
         // #endregion
+        #endif
         LOG_ERROR("MQTT connection failed, rc=" + String(mqtt_.state()));
         errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
                                            ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
@@ -272,34 +287,37 @@ bool MQTTClient::connectToBroker() {
 
 // ✅ FIX #2: Helper function for connection attempts
 bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const String& last_will_message) {
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_entry\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:185\",\"message\":\"attemptMQTTConnection() called\",\"data\":{\"server\":\"");
-    Serial.print(current_config_.server);
-    Serial.print("\",\"port\":");
-    Serial.print(current_config_.port);
-    Serial.print(",\"anonymous_mode\":");
-    Serial.print(anonymous_mode_ ? "true" : "false");
-    Serial.print(",\"client_id\":\"");
-    Serial.print(current_config_.client_id);
-    Serial.print("\",\"mqtt_state_before\":");
-    Serial.print(mqtt_.state());
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    { char dbg[512];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_attempt_entry\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:185\",\"message\":\"attemptMQTTConnection() called\""
+        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"anonymous_mode\":%s"
+        ",\"client_id\":\"%s\",\"mqtt_state_before\":%d}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+        millis(), current_config_.server.c_str(), current_config_.port,
+        anonymous_mode_ ? "true" : "false",
+        current_config_.client_id.c_str(), mqtt_.state());
+      Serial.println(dbg); }
     // #endregion
+    #endif
     
     bool result = false;
     if (anonymous_mode_) {
         // Anonymous connection with Last-Will
+        #ifdef ENABLE_AGENT_DEBUG_LOGS
         // #region agent log
-        Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_anonymous\",\"timestamp\":");
-        Serial.print(millis());
-        Serial.print(",\"location\":\"mqtt_client.cpp:188\",\"message\":\"Calling mqtt_.connect() anonymous\",\"data\":{\"server\":\"");
-        Serial.print(current_config_.server);
-        Serial.print("\",\"port\":");
-        Serial.print(current_config_.port);
-        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        { char dbg[256];
+          snprintf(dbg, sizeof(dbg),
+            "[DEBUG]{\"id\":\"mqtt_attempt_anonymous\",\"timestamp\":%lu"
+            ",\"location\":\"mqtt_client.cpp:188\",\"message\":\"Calling mqtt_.connect() anonymous\""
+            ",\"data\":{\"server\":\"%s\",\"port\":%d}"
+            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+            millis(), current_config_.server.c_str(), current_config_.port);
+          Serial.println(dbg); }
         // #endregion
+        #endif
         result = mqtt_.connect(
             current_config_.client_id.c_str(),
             last_will_topic.c_str(),
@@ -309,15 +327,18 @@ bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const Stri
         );
     } else {
         // Authenticated connection with Last-Will
+        #ifdef ENABLE_AGENT_DEBUG_LOGS
         // #region agent log
-        Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_authenticated\",\"timestamp\":");
-        Serial.print(millis());
-        Serial.print(",\"location\":\"mqtt_client.cpp:197\",\"message\":\"Calling mqtt_.connect() authenticated\",\"data\":{\"server\":\"");
-        Serial.print(current_config_.server);
-        Serial.print("\",\"port\":");
-        Serial.print(current_config_.port);
-        Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+        { char dbg[256];
+          snprintf(dbg, sizeof(dbg),
+            "[DEBUG]{\"id\":\"mqtt_attempt_authenticated\",\"timestamp\":%lu"
+            ",\"location\":\"mqtt_client.cpp:197\",\"message\":\"Calling mqtt_.connect() authenticated\""
+            ",\"data\":{\"server\":\"%s\",\"port\":%d}"
+            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+            millis(), current_config_.server.c_str(), current_config_.port);
+          Serial.println(dbg); }
         // #endregion
+        #endif
         result = mqtt_.connect(
             current_config_.client_id.c_str(),
             current_config_.username.c_str(),
@@ -328,20 +349,20 @@ bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const Stri
             last_will_message.c_str()
         );
     }
-    
+
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_attempt_result\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:207\",\"message\":\"MQTT connect() returned\",\"data\":{\"result\":");
-    Serial.print(result ? "true" : "false");
-    Serial.print(",\"mqtt_state_after\":");
-    Serial.print(mqtt_.state());
-    Serial.print(",\"server\":\"");
-    Serial.print(current_config_.server);
-    Serial.print("\",\"port\":");
-    Serial.print(current_config_.port);
-    Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}\n");
+    { char dbg[384];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_attempt_result\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:207\",\"message\":\"MQTT connect() returned\""
+        ",\"data\":{\"result\":%s,\"mqtt_state_after\":%d,\"server\":\"%s\",\"port\":%d}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
+        millis(), result ? "true" : "false", mqtt_.state(),
+        current_config_.server.c_str(), current_config_.port);
+      Serial.println(dbg); }
     // #endregion
+    #endif
     
     return result;
 }
@@ -374,13 +395,18 @@ void MQTTClient::reconnect() {
         unsigned long now = millis();
         if (now - last_circuit_breaker_log > 1000) {
             last_circuit_breaker_log = now;
+            #ifdef ENABLE_AGENT_DEBUG_LOGS
             // #region agent log
-            Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_circuit_breaker\",\"timestamp\":");
-            Serial.print(now);
-            Serial.print(",\"location\":\"mqtt_client.cpp:383\",\"message\":\"Reconnect blocked by Circuit Breaker\",\"data\":{\"circuit_open\":true,\"failure_count\":");
-            Serial.print(circuit_breaker_.getFailureCount());
-            Serial.print("},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+            { char dbg[384];
+              snprintf(dbg, sizeof(dbg),
+                "[DEBUG]{\"id\":\"mqtt_reconnect_circuit_breaker\",\"timestamp\":%lu"
+                ",\"location\":\"mqtt_client.cpp:383\",\"message\":\"Reconnect blocked by Circuit Breaker\""
+                ",\"data\":{\"circuit_open\":true,\"failure_count\":%u}"
+                ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}",
+                now, (unsigned int)circuit_breaker_.getFailureCount());
+              Serial.println(dbg); }
             // #endregion
+            #endif
             LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
         }
         return;  // Skip reconnect attempt
@@ -399,21 +425,21 @@ void MQTTClient::reconnect() {
              String(reconnect_attempts_) + ")");
 
     // Debug log only when reconnect is actually attempted (after all checks)
+    #ifdef ENABLE_AGENT_DEBUG_LOGS
     // #region agent log
-    Serial.print("[DEBUG]{\"id\":\"mqtt_reconnect_attempt\",\"timestamp\":");
-    Serial.print(millis());
-    Serial.print(",\"location\":\"mqtt_client.cpp:407\",\"message\":\"About to call connectToBroker() for reconnect\",\"data\":{\"attempt\":");
-    Serial.print(reconnect_attempts_);
-    Serial.print(",\"server\":\"");
-    Serial.print(current_config_.server);
-    Serial.print("\",\"port\":");
-    Serial.print(current_config_.port);
-    Serial.print(",\"server_length\":");
-    Serial.print(current_config_.server.length());
-    Serial.print(",\"circuit_breaker_state\":\"");
-    Serial.print(circuit_breaker_.isOpen() ? "OPEN" : (circuit_breaker_.isClosed() ? "CLOSED" : "HALF_OPEN"));
-    Serial.print("\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}\n");
+    { char dbg[512];
+      snprintf(dbg, sizeof(dbg),
+        "[DEBUG]{\"id\":\"mqtt_reconnect_attempt\",\"timestamp\":%lu"
+        ",\"location\":\"mqtt_client.cpp:407\",\"message\":\"About to call connectToBroker() for reconnect\""
+        ",\"data\":{\"attempt\":%u,\"server\":\"%s\",\"port\":%d"
+        ",\"server_length\":%u,\"circuit_breaker_state\":\"%s\"}"
+        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}",
+        millis(), (unsigned int)reconnect_attempts_, current_config_.server.c_str(),
+        current_config_.port, (unsigned int)current_config_.server.length(),
+        circuit_breaker_.isOpen() ? "OPEN" : (circuit_breaker_.isClosed() ? "CLOSED" : "HALF_OPEN"));
+      Serial.println(dbg); }
     // #endregion
+    #endif
 
     if (!connectToBroker()) {
         // ❌ RECONNECT FAILED
@@ -480,6 +506,35 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         LOG_DEBUG("  Topic: " + topic);
         LOG_DEBUG("  Circuit State: OPEN (waiting for recovery)");
         // Don't add to offline buffer when circuit is open - it will retry on recovery
+        return false;
+    }
+
+    // ============================================
+    // REGISTRATION GATE CHECK (Bug #1 Fix)
+    // ============================================
+    // Heartbeat Topics sind IMMER erlaubt (für initiale Registration)
+    bool is_heartbeat = topic.indexOf("/system/heartbeat") != -1 &&
+                        topic.indexOf("/heartbeat/ack") == -1;
+
+    if (!registration_confirmed_ && !is_heartbeat) {
+        // Check timeout: Nach 10s Gate automatisch öffnen (Fallback)
+        if (registration_start_ms_ > 0 &&
+            (millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
+            LOG_WARNING("Registration timeout - opening gate (fallback)");
+            registration_confirmed_ = true;
+        } else {
+            LOG_DEBUG("Publish blocked (awaiting registration): " + topic);
+            return false;
+        }
+    }
+
+    // ============================================
+    // EMPTY PAYLOAD GUARD (Bug #2 Fix)
+    // ============================================
+    if (payload.length() == 0) {
+        LOG_ERROR("Empty payload blocked for topic: " + topic);
+        errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID,
+                                           ("Empty payload for: " + topic).c_str());
         return false;
     }
 
@@ -683,6 +738,23 @@ void MQTTClient::publishHeartbeat(bool force) {
 }
 
 // ============================================
+// REGISTRATION GATE (Bug #1 Fix)
+// ============================================
+bool MQTTClient::isRegistrationConfirmed() const {
+    return registration_confirmed_;
+}
+
+void MQTTClient::confirmRegistration() {
+    if (!registration_confirmed_) {
+        registration_confirmed_ = true;
+        LOG_INFO("╔════════════════════════════════════════╗");
+        LOG_INFO("║  REGISTRATION CONFIRMED BY SERVER     ║");
+        LOG_INFO("╚════════════════════════════════════════╝");
+        LOG_INFO("Gate opened - publishes now allowed");
+    }
+}
+
+// ============================================
 // MONITORING
 // ============================================
 void MQTTClient::loop() {
@@ -707,14 +779,21 @@ void MQTTClient::loop() {
 
 void MQTTClient::handleDisconnection() {
     static bool disconnection_logged = false;
-    
+
+    // ============================================
+    // REGISTRATION GATE RESET (Bug #1 Fix)
+    // ============================================
+    registration_confirmed_ = false;
+    registration_start_ms_ = 0;
+    LOG_DEBUG("Registration gate closed due to disconnect");
+
     if (!disconnection_logged) {
         LOG_WARNING("MQTT disconnected");
-        errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT, 
+        errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT,
                                            "MQTT connection lost");
         disconnection_logged = true;
     }
-    
+
     reconnect();
     
     if (isConnected()) {
@@ -792,6 +871,12 @@ void MQTTClient::processOfflineBuffer() {
 }
 
 bool MQTTClient::addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos) {
+    // Bug #2 Fix: Don't buffer empty payloads
+    if (payload.length() == 0) {
+        LOG_WARNING("Empty payload rejected from offline buffer: " + topic);
+        return false;
+    }
+
     if (offline_buffer_count_ >= MAX_OFFLINE_MESSAGES) {
         LOG_ERROR("Offline buffer full, dropping message");
         errorTracker.logCommunicationError(ERROR_MQTT_BUFFER_FULL, 
@@ -870,6 +955,10 @@ uint16_t MQTTClient::getOfflineMessageCount() const {
 
 CircuitState MQTTClient::getCircuitBreakerState() const {
     return circuit_breaker_.getState();
+}
+
+uint8_t MQTTClient::getCircuitBreakerFailureCount() const {
+    return circuit_breaker_.getFailureCount();
 }
 
 // ============================================

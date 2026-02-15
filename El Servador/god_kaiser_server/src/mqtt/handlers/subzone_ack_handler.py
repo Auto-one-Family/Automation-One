@@ -131,23 +131,23 @@ class SubzoneAckHandler:
         Args:
             ack_payload: Validated ACK payload
         """
-        message = {
-            "type": "subzone_assignment",
-            "device_id": ack_payload.esp_id,
-            "data": {
-                "subzone_id": ack_payload.subzone_id,
-                "status": ack_payload.status,
-                "timestamp": ack_payload.timestamp,
-            },
+        # WP9-F23: Unified WebSocket broadcast API (matches zone_ack_handler pattern)
+        event_data = {
+            "esp_id": ack_payload.esp_id,
+            "subzone_id": ack_payload.subzone_id,
+            "status": ack_payload.status,
+            "timestamp": ack_payload.timestamp,
         }
 
         # Add error info if present
         if ack_payload.error_code is not None:
-            message["data"]["error_code"] = ack_payload.error_code
-            message["data"]["message"] = ack_payload.message
+            event_data["error_code"] = ack_payload.error_code
+            event_data["message"] = ack_payload.message
 
-        await self.ws_manager.broadcast_thread_safe(message)
-        logger.debug(f"Broadcasted subzone update for {ack_payload.esp_id}")
+        # Use broadcast() instead of broadcast_thread_safe() for consistency
+        ws_manager = await WebSocketManager.get_instance()
+        await ws_manager.broadcast("subzone_assignment", event_data)
+        logger.debug(f"Broadcasted subzone_assignment event for {ack_payload.esp_id}")
 
 
 # =============================================================================

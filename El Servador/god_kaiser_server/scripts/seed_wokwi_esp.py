@@ -24,7 +24,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from datetime import timezone
+from datetime import datetime, timezone
 
 from src.core.logging_config import get_logger
 from src.db.models.esp import ESPDevice
@@ -33,96 +33,149 @@ from src.db.session import get_session
 
 logger = get_logger(__name__)
 
-WOKWI_ESP_ID = "ESP_00000001"
+# Wokwi ESP IDs - matches platformio.ini environments (wokwi_esp01, wokwi_esp02, wokwi_esp03)
+WOKWI_ESP_IDS = [
+    "ESP_00000001",
+    "ESP_00000002",
+    "ESP_00000003",
+]
 
 
-async def seed_wokwi_esp() -> bool:
+def create_wokwi_esp_device(device_id: str, index: int) -> ESPDevice:
     """
-    Create Wokwi simulation ESP device if it doesn't exist.
+    Create a Wokwi ESP device object with consistent configuration.
+
+    Args:
+        device_id: ESP device ID (e.g., "ESP_00000001")
+        index: Device index (1-based, for display purposes)
 
     Returns:
-        True if created, False if already exists
+        ESPDevice object ready to be added to session
     """
+    return ESPDevice(
+        device_id=device_id,
+        name=f"Wokwi Simulation ESP #{index}",
+        hardware_type="ESP32_WROOM",
+        status="approved",  # Pre-approved (Wokwi is controlled environment)
+        discovered_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(timezone.utc),
+        approved_by="seed_script",
+        zone_id=None,
+        zone_name=None,
+        master_zone_id=None,
+        is_zone_master=False,
+        kaiser_id="god",
+        capabilities={
+            "max_sensors": 20,
+            "max_actuators": 12,
+            "features": ["heartbeat", "sensors", "actuators", "wokwi_simulation"],
+            "wokwi": True,
+        },
+        device_metadata={
+            "source": "wokwi_simulation",
+            "created_by": "seed_wokwi_esp",
+            "description": f"Pre-registered Wokwi ESP #{index} for firmware simulation testing",
+            "simulation_config": {
+                "sensors": {},
+                "actuators": {},
+                "auto_heartbeat": False,
+            },
+            "device_index": index,
+        },
+    )
+
+
+async def seed_wokwi_esp() -> dict[str, int]:
+    """
+    Create Wokwi simulation ESP devices if they don't exist.
+
+    Returns:
+        Dictionary with counts: {"created": N, "existing": M, "failed": K}
+    """
+    results = {"created": 0, "existing": 0, "failed": 0}
+
     async for session in get_session():
         try:
             esp_repo = ESPRepository(session)
 
-            # Check if Wokwi ESP already exists
-            existing_esp = await esp_repo.get_by_device_id(WOKWI_ESP_ID)
-            if existing_esp:
-                logger.info(f"[OK] Wokwi ESP '{WOKWI_ESP_ID}' already exists (status: {existing_esp.status})")
-                return False
+            for index, esp_id in enumerate(WOKWI_ESP_IDS, start=1):
+                try:
+                    # Check if ESP already exists
+                    existing_esp = await esp_repo.get_by_device_id(esp_id)
+                    if existing_esp:
+                        logger.info(f"[OK] Wokwi ESP '{esp_id}' already exists (status: {existing_esp.status})")
+                        results["existing"] += 1
+                        continue
 
-            # Create Wokwi ESP device
-            wokwi_esp = ESPDevice(
-                device_id=WOKWI_ESP_ID,
-                name="Wokwi Simulation ESP",
-                hardware_type="ESP32_WROOM",
-                status="offline",
-                zone_id=None,
-                zone_name=None,
-                master_zone_id=None,
-                is_zone_master=False,
-                kaiser_id="god",
-                capabilities={
-                    "max_sensors": 20,
-                    "max_actuators": 12,
-                    "features": ["heartbeat", "sensors", "actuators", "wokwi_simulation"],
-                    "wokwi": True,
-                },
-                device_metadata={
-                    "source": "wokwi_simulation",
-                    "created_by": "seed_wokwi_esp",
-                    "description": "Pre-registered Wokwi ESP for firmware simulation testing",
-                    "simulation_config": {
-                        "sensors": {},
-                        "actuators": {},
-                        "auto_heartbeat": False,
-                    },
-                },
-            )
+                    # Create new Wokwi ESP device
+                    wokwi_esp = create_wokwi_esp_device(esp_id, index)
+                    session.add(wokwi_esp)
+                    await session.commit()
 
-            session.add(wokwi_esp)
-            await session.commit()
+                    logger.info(f"[OK] Created Wokwi ESP '{esp_id}'")
+                    results["created"] += 1
 
-            logger.info(f"[OK] Created Wokwi ESP '{WOKWI_ESP_ID}'")
-            return True
+                except Exception as e:
+                    logger.error(f"Failed to create Wokwi ESP '{esp_id}': {e}", exc_info=True)
+                    await session.rollback()
+                    results["failed"] += 1
+                    # Continue with next device
 
         except Exception as e:
-            logger.error(f"Failed to create Wokwi ESP: {e}", exc_info=True)
-            await session.rollback()
+            logger.error(f"Failed to seed Wokwi ESPs: {e}", exc_info=True)
             raise
         finally:
             break
 
-    return False
+    return results
 
 
 async def main() -> None:
     """Main entry point."""
     print("=" * 60)
-    print("Wokwi ESP Seed Script")
+    print("Wokwi ESP Seed Script (Multi-Device)")
     print("=" * 60)
+    print()
+    print(f"Creating {len(WOKWI_ESP_IDS)} Wokwi ESP devices:")
+    for i, esp_id in enumerate(WOKWI_ESP_IDS, start=1):
+        print(f"  {i}. {esp_id}")
+    print()
 
     try:
-        created = await seed_wokwi_esp()
+        results = await seed_wokwi_esp()
 
         print()
-        if created:
-            print(f"[OK] Wokwi ESP '{WOKWI_ESP_ID}' created successfully!")
-            print()
+        print("Results:")
+        print(f"  ✅ Created: {results['created']}")
+        print(f"  ℹ️  Already exist: {results['existing']}")
+        if results['failed'] > 0:
+            print(f"  ❌ Failed: {results['failed']}")
+        print()
+
+        if results['created'] > 0:
             print("Next steps:")
             print("  1. Mosquitto MQTT broker prüfen (läuft als Windows Service)")
             print("  2. God-Kaiser Server starten (poetry run uvicorn ...)")
             print("  3. Frontend starten (npm run dev)")
-            print("  4. USER: Firmware bauen: cd 'El Trabajante' && pio run -e wokwi_simulation")
-            print("  5. USER: Wokwi starten: VS Code Extension oder wokwi-cli . --timeout 0")
             print()
-            print("Der ESP erscheint im Frontend sobald Wokwi verbindet.")
+            print("  4. USER: Firmware bauen (choose one):")
+            print("     - pio run -e wokwi_esp01  # ESP_00000001")
+            print("     - pio run -e wokwi_esp02  # ESP_00000002")
+            print("     - pio run -e wokwi_esp03  # ESP_00000003")
+            print()
+            print("  5. USER: Wokwi starten:")
+            print("     - VS Code Extension: Select environment in PlatformIO panel")
+            print("     - CLI: wokwi-cli . --timeout 0 --firmware .pio/build/wokwi_esp01/firmware.bin")
+            print()
+            print("Die ESPs erscheinen im Frontend sobald Wokwi verbindet.")
         else:
-            print("[OK] Wokwi ESP already exists - no action needed")
+            print("[OK] All Wokwi ESPs already exist - no action needed")
 
+        print()
         print("=" * 60)
+
+        if results['failed'] > 0:
+            sys.exit(1)
 
     except Exception as e:
         print(f"\n[ERROR] {e}")

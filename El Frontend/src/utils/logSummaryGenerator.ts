@@ -151,7 +151,7 @@ const SUMMARY_PATTERNS: SummaryPattern[] = [
     }),
   },
   {
-    pattern: /Heartbeat.*?(\w+).*?online|connected/i,
+    pattern: /Heartbeat.*?(\w+).*?(?:online|connected)/i,
     summary: (match) => ({
       icon: '\u{1F493}',
       title: 'Heartbeat empfangen',

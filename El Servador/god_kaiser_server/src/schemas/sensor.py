@@ -327,6 +327,19 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     warning_min: Optional[float] = Field(None)
     warning_max: Optional[float] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # Config status from ESP32 verification
+    config_status: Optional[str] = Field(
+        None,
+        description="Config status: pending, applied, failed",
+    )
+    config_error: Optional[str] = Field(
+        None,
+        description="Error code if config_status=failed",
+    )
+    config_error_detail: Optional[str] = Field(
+        None,
+        description="Error detail if config_status=failed",
+    )
     # Latest reading (optional)
     latest_value: Optional[float] = Field(
         None,

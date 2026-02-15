@@ -143,10 +143,10 @@ class ESPDevice(Base, TimestampMixin):
     )
 
     last_seen: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         index=True,
-        doc="Last heartbeat timestamp",
+        doc="Last heartbeat timestamp (UTC)",
     )
 
     health_status: Mapped[Optional[str]] = mapped_column(
@@ -157,15 +157,15 @@ class ESPDevice(Base, TimestampMixin):
 
     # Discovery/Approval Audit Fields
     discovered_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
-        doc="Timestamp when device was first discovered via heartbeat",
+        doc="Timestamp when device was first discovered via heartbeat (UTC)",
     )
 
     approved_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
-        doc="Timestamp when device was approved by admin",
+        doc="Timestamp when device was approved by admin (UTC)",
     )
 
     approved_by: Mapped[Optional[str]] = mapped_column(
@@ -181,9 +181,9 @@ class ESPDevice(Base, TimestampMixin):
     )
 
     last_rejection_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
-        doc="Timestamp of last rejection (for cooldown calculation)",
+        doc="Timestamp of last rejection (for cooldown calculation, UTC)",
     )
 
     # Metadata

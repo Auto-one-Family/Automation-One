@@ -25,6 +25,7 @@ import ActuatorSatellite from './ActuatorSatellite.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
 import GpioPicker from './GpioPicker.vue'
 import Badge from '@/components/common/Badge.vue'
+import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, QualityLevel, ChartSensor, MockSensorConfig } from '@/types'
 import { espApi } from '@/api/esp'
@@ -32,7 +33,9 @@ import { sensorsApi } from '@/api/sensors'
 import { getStateInfo } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/stores/dragState'
+import { useUiStore } from '@/shared/stores'
 import { useToast } from '@/composables/useToast'
+import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables/useZoneDragDrop'
 import { useGpioStatus } from '@/composables/useGpioStatus'
 import {
   SENSOR_TYPE_CONFIG,
@@ -54,6 +57,9 @@ import {
 } from '@/utils/actuatorDefaults'
 import { getRecommendedGpios } from '@/utils/gpioConfig'
 import type { MockActuatorConfig } from '@/types'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('ESPOrbitalLayout')
 
 interface Props {
   /** The ESP device data */
@@ -71,7 +77,9 @@ const props = withDefaults(defineProps<Props>(), {
 
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
+const uiStore = useUiStore()
 const toast = useToast()
+const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones, zoneIdToDisplayName } = useZoneDragDrop()
 
 const emit = defineEmits<{
   sensorClick: [gpio: number]
@@ -86,6 +94,23 @@ const emit = defineEmits<{
   /** Name was updated via inline edit */
   'name-updated': [payload: { deviceId: string; name: string | null }]
 }>()
+
+// =============================================================================
+// Zone Assignment (Dropdown alternative to drag)
+// =============================================================================
+const availableZones = computed(() => getAvailableZones(espStore.devices))
+
+async function handleZoneChanged(deviceId: string, zoneId: string | null) {
+  if (zoneId === null) {
+    await handleRemoveFromZone(props.device)
+  } else {
+    await handleDeviceDrop({
+      device: props.device,
+      fromZoneId: props.device.zone_id || null,
+      toZoneId: zoneId,
+    })
+  }
+}
 
 // =============================================================================
 // Analysis Drop Zone State
@@ -254,7 +279,7 @@ async function handleOneWireScan() {
   try {
     await espStore.scanOneWireBus(espId.value, oneWireScanPin.value)
   } catch (err) {
-    console.error('[ESPOrbitalLayout] OneWire scan failed:', err)
+    logger.error('OneWire scan failed', err)
   }
 }
 
@@ -346,9 +371,9 @@ async function addMultipleOneWireSensors() {
       
       await espStore.addSensor(espId.value, config)
       successCount++
-      
+
     } catch (err) {
-      console.error(`[ESPOrbitalLayout] Failed to add OneWire sensor ${romCode}:`, err)
+      logger.error(`Failed to add OneWire sensor ${romCode}`, err)
       failCount++
     }
   }
@@ -409,7 +434,7 @@ function resetNewSensor() {
 function onSensorGpioValidation(valid: boolean, message: string | null): void {
   sensorGpioValid.value = valid
   if (!valid && message) {
-    console.debug('[ESPOrbitalLayout] GPIO validation:', message)
+    logger.debug('GPIO validation', { message })
   }
 }
 
@@ -489,7 +514,7 @@ function resetNewActuator() {
 function onActuatorGpioValidation(valid: boolean, message: string | null): void {
   actuatorGpioValid.value = valid
   if (!valid && message) {
-    console.debug('[ESPOrbitalLayout] Actuator GPIO validation:', message)
+    logger.debug('Actuator GPIO validation', { message })
   }
 }
 
@@ -500,7 +525,7 @@ function onActuatorAuxGpioValidation(valid: boolean, message: string | null): vo
   // aux_gpio=255 means "not used", which is always valid
   actuatorAuxGpioValid.value = valid || newActuator.value.aux_gpio === 255
   if (!valid && message && newActuator.value.aux_gpio !== 255) {
-    console.debug('[ESPOrbitalLayout] Actuator aux GPIO validation:', message)
+    logger.debug('Actuator aux GPIO validation', { message })
   }
 }
 
@@ -636,16 +661,10 @@ function getSensorLabel(sensorType: string): string {
 }
 
 // =============================================================================
-// Debug Logger
+// Debug Logger (replaced with structured logger)
 // =============================================================================
 function log(message: string, data?: Record<string, unknown>): void {
-  const style = 'background: #3b82f6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;'
-  const label = `ESPLayout:${espId.value}`
-  if (data) {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #60a5fa;', data)
-  } else {
-    console.log(`%c[${label}]%c ${message}`, style, 'color: #60a5fa;')
-  }
+  logger.debug(message, data)
 }
 
 // =============================================================================
@@ -868,7 +887,7 @@ async function addSensor() {
       espStore.fetchGpioStatus(espId.value)
     ])
   } catch (error: any) {
-    console.error('[ESPOrbitalLayout] Failed to add sensor:', error)
+    logger.error('Failed to add sensor', error)
 
     // Handle GPIO conflict (HTTP 409) - Phase 5
     if (error?.response?.status === 409) {
@@ -899,7 +918,7 @@ async function addSensor() {
 function openEditSensorModal(gpio: number) {
   const sensor = sensors.value.find(s => s.gpio === gpio)
   if (!sensor) {
-    console.error('[ESPOrbitalLayout] Sensor not found:', gpio)
+    logger.error('Sensor not found', { gpio })
     return
   }
 
@@ -1004,7 +1023,7 @@ async function saveEditSensor() {
       schedule_config: scheduleConfig,
     })
 
-    console.log(`[ESPOrbitalLayout] Sensor GPIO ${gpio} aktualisiert`)
+    logger.info(`Sensor GPIO ${gpio} aktualisiert`)
 
     // Success Toast (Phase 5)
     toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) aktualisiert`)
@@ -1015,7 +1034,7 @@ async function saveEditSensor() {
     // Refresh ESP data
     await espStore.fetchAll()
   } catch (err: any) {
-    console.error('[ESPOrbitalLayout] Failed to update sensor:', err)
+    logger.error('Failed to update sensor', err)
     editError.value = err.message || 'Fehler beim Speichern der Sensor-Konfiguration'
   } finally {
     isEditSaving.value = false
@@ -1047,7 +1066,7 @@ async function triggerMeasureNow() {
   try {
     const result = await sensorsApi.triggerMeasurement(espId.value, editingSensor.value.gpio)
     measureSuccess.value = `Messung angefordert (ID: ${result.request_id.slice(0, 8)}...)`
-    console.log('[ESPOrbitalLayout] Measurement triggered:', result)
+    logger.info('Measurement triggered', result)
 
     // Auto-clear success message after 5 seconds
     setTimeout(() => {
@@ -1059,7 +1078,7 @@ async function triggerMeasureNow() {
       await espStore.fetchAll()
     }, 2000)
   } catch (err: any) {
-    console.error('[ESPOrbitalLayout] Failed to trigger measurement:', err)
+    logger.error('Failed to trigger measurement', err)
     editError.value = err.message || 'Fehler bei der Messungsanforderung'
   } finally {
     isMeasuring.value = false
@@ -1080,17 +1099,20 @@ async function removeSensor() {
   const gpio = editingSensor.value.gpio
   const sensorLabel = getSensorLabel(editingSensor.value.sensor_type)
 
-  // Confirmation dialog
-  if (!confirm(`Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`)) {
-    return
-  }
+  const confirmed = await uiStore.confirm({
+    title: 'Sensor entfernen',
+    message: `Sensor "${sensorLabel}" an GPIO ${gpio} wirklich entfernen?`,
+    variant: 'danger',
+    confirmText: 'Entfernen',
+  })
+  if (!confirmed) return
 
   isEditSaving.value = true
   editError.value = null
 
   try {
     await espStore.removeSensor(espId.value, gpio)
-    console.log(`[ESPOrbitalLayout] Sensor GPIO ${gpio} entfernt`)
+    logger.info(`Sensor GPIO ${gpio} entfernt`)
     toast.success(`Sensor "${sensorLabel}" (GPIO ${gpio}) entfernt`)
 
     // Close modal
@@ -1100,7 +1122,7 @@ async function removeSensor() {
     // Refresh ESP data
     await espStore.fetchAll()
   } catch (err: any) {
-    console.error('[ESPOrbitalLayout] Failed to remove sensor:', err)
+    logger.error('Failed to remove sensor', err)
     editError.value = err.message || 'Fehler beim Entfernen des Sensors'
   } finally {
     isEditSaving.value = false
@@ -1487,14 +1509,16 @@ watch(
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Left Column: Sensors (only shown if sensors exist) -->
+    <!-- Left Column: Sensors -->
     <div
-      v-if="sensors.length > 0"
       class="esp-horizontal-layout__column esp-horizontal-layout__column--sensors"
-      :class="{ 'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow }"
+      :class="{
+        'esp-horizontal-layout__column--multi-row': sensorsUseMultiRow,
+        'esp-horizontal-layout__column--empty': sensors.length === 0
+      }"
     >
       <SensorSatellite
-        v-for="sensor in sensors"
+        v-for="(sensor, idx) in sensors"
         :key="`sensor-${sensor.gpio}`"
         :esp-id="espId"
         :gpio="sensor.gpio"
@@ -1509,8 +1533,14 @@ watch(
         :selected="selectedGpio === sensor.gpio && selectedType === 'sensor'"
         :show-connections="showConnections"
         class="esp-horizontal-layout__satellite"
+        :style="{ animationDelay: `${idx * 60}ms` }"
         @click="handleSensorClick(sensor.gpio)"
       />
+      <!-- Empty state when no sensors configured -->
+      <div v-if="sensors.length === 0" class="esp-horizontal-layout__empty-slot">
+        <Plus class="w-3 h-3" />
+        <span>Sensors</span>
+      </div>
     </div>
 
     <!-- Center Column: ESP Card -->
@@ -1619,6 +1649,13 @@ watch(
             </div>
           </div>
 
+          <!-- Zone Assignment Dropdown -->
+          <ZoneAssignmentDropdown
+            :device="device"
+            :zones="availableZones"
+            @zone-changed="handleZoneChanged"
+          />
+
           <!-- Heartbeat Row -->
           <button
             :class="[
@@ -1666,8 +1703,11 @@ watch(
       <ESPCard v-else :esp="device" />
     </div>
 
-    <!-- Right Column: Actuators (only shown if actuators exist) -->
-    <div v-if="actuators.length > 0" class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators">
+    <!-- Right Column: Actuators -->
+    <div
+      class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators"
+      :class="{ 'esp-horizontal-layout__column--empty': actuators.length === 0 }"
+    >
       <ActuatorSatellite
         v-for="actuator in actuators"
         :key="`actuator-${actuator.gpio}`"
@@ -1683,6 +1723,11 @@ watch(
         class="esp-horizontal-layout__satellite"
         @click="handleActuatorClick(actuator.gpio)"
       />
+      <!-- Empty state when no actuators configured -->
+      <div v-if="actuators.length === 0" class="esp-horizontal-layout__empty-slot">
+        <Plus class="w-3 h-3" />
+        <span>Aktoren</span>
+      </div>
     </div>
 
     <!-- Drop Indicator Overlay (Phase 2B: für alle ESPs) -->
@@ -2444,37 +2489,44 @@ watch(
 
 /* Sensors column: Default = single vertical column */
 .esp-horizontal-layout__column--sensors {
-  /* Vertical column by default (≤5 sensors) */
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  align-items: stretch; /* All same width */
-  width: 65px; /* Fixed width for single column */
+  align-items: stretch;
+  width: 120px;
+}
+
+/* Sensors column: Empty state - minimal footprint */
+.esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--empty {
+  width: 56px;
 }
 
 /* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
 .esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
-  /* Switch to CSS Grid: 2 equal columns */
   display: grid;
-  grid-template-columns: repeat(2, 65px);
+  grid-template-columns: repeat(2, 120px);
   gap: 0.375rem;
-  width: auto; /* Override single-column width */
+  width: auto;
 }
 
-/* Actuators column: align items to the left (toward center card) */
+/* Actuators column */
 .esp-horizontal-layout__column--actuators {
-  align-items: flex-start;
+  align-items: stretch;
+  width: 120px;
 }
 
-/* Satellite cards in horizontal layout - compact styling */
+.esp-horizontal-layout__column--actuators.esp-horizontal-layout__column--empty {
+  width: 56px;
+}
+
+/* Satellite cards in horizontal layout - fill column width */
 .esp-horizontal-layout__satellite {
-  /* Override any absolute positioning from satellite components */
   position: relative !important;
   transform: none !important;
   left: auto !important;
   top: auto !important;
-  /* Fill parent column width */
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
 
@@ -2495,6 +2547,31 @@ watch(
   color: var(--color-text-muted);
   text-align: center;
   white-space: nowrap;
+}
+
+/* Empty sensor/actuator slot - ghost placeholder */
+.esp-horizontal-layout__empty-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.5rem;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: all 0.2s ease;
+  cursor: default;
+}
+
+.esp-horizontal-layout__empty-slot:hover {
+  border-color: rgba(96, 165, 250, 0.2);
+  color: rgba(255, 255, 255, 0.35);
+  background: rgba(96, 165, 250, 0.03);
 }
 
 /* =============================================================================

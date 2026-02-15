@@ -37,7 +37,14 @@ struct SensorConfig {
   // Format: 16 Hex chars (e.g. "28FF641E8D3C0C79")
   // Empty for non-OneWire sensors (pH, EC, ADC-based, etc.)
   String onewire_address = "";
-  
+
+  // ============================================
+  // I2C SUPPORT (SHT31, BMP280, etc.)
+  // ============================================
+  // I2C address for device identification (7-bit address, 0x00-0x7F)
+  // 0 for non-I2C sensors (OneWire, Analog, Digital)
+  uint8_t i2c_address = 0;
+
   // ❌ NICHT NÖTIG in Server-Centric Architektur:
   // - float last_value (Server verarbeitet)
   // - void* library_handle (keine lokalen Libraries)
@@ -77,6 +84,14 @@ struct SensorReading {
   // which DS18B20 on a shared bus sent this reading
   // Format: 16 Hex chars (e.g. "28FF641E8D3C0C79")
   String onewire_address = "";
+
+  // ============================================
+  // I2C SUPPORT (for MQTT payload identification)
+  // ============================================
+  // Copied from SensorConfig - Server uses this to identify
+  // which I2C sensor at a specific address sent this reading
+  // 0 for non-I2C sensors
+  uint8_t i2c_address = 0;
 };
 
 #endif

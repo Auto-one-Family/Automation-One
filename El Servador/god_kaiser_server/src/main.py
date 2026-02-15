@@ -15,6 +15,7 @@ Status: IMPLEMENTED
 """
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -39,6 +40,7 @@ from .mqtt.handlers import (
     actuator_response_handler,
     actuator_alert_handler,
     config_handler,
+    diagnostics_handler,
     discovery_handler,
     error_handler,
     heartbeat_handler,
@@ -199,65 +201,74 @@ async def lifespan(app: FastAPI):
         kaiser_id = settings.hierarchy.kaiser_id
         logger.info(f"Using KAISER_ID: {kaiser_id}")
 
-        # Register handlers for each topic pattern (dynamic kaiser_id)
+        # WP6: Register handlers with wildcard kaiser_id (+) for multi-Kaiser support
+        # Topic parsers already accept any kaiser_id via regex, subscriptions now match
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/sensor/+/data",
+            "kaiser/+/esp/+/sensor/+/data",
             sensor_handler.handle_sensor_data
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/status",
+            "kaiser/+/esp/+/actuator/+/status",
             actuator_handler.handle_actuator_status
         )
         # Phase 8: Actuator Response Handler (command confirmations)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/response",
+            "kaiser/+/esp/+/actuator/+/response",
             actuator_response_handler.handle_actuator_response
         )
         # Phase 8: Actuator Alert Handler (emergency/timeout alerts)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/alert",
+            "kaiser/+/esp/+/actuator/+/alert",
             actuator_alert_handler.handle_actuator_alert
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/system/heartbeat",
+            "kaiser/+/esp/+/system/heartbeat",
             heartbeat_handler.handle_heartbeat
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/discovery/esp32_nodes",
+            "kaiser/+/discovery/esp32_nodes",
             discovery_handler.handle_discovery
         )
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/config_response",
+            "kaiser/+/esp/+/config_response",
             config_handler.handle_config_ack
         )
         # Phase 7: Zone ACK Handler (zone assignment confirmations)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/zone/ack",
+            "kaiser/+/esp/+/zone/ack",
             zone_ack_handler.handle_zone_ack
         )
         # Phase 9: Subzone ACK Handler (subzone assignment confirmations)
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/subzone/ack",
+            "kaiser/+/esp/+/subzone/ack",
             subzone_ack_handler.handle_subzone_ack
         )
         # LWT Handler (Instant Offline Detection)
-        # Topic: kaiser/{kaiser_id}/esp/+/system/will
+        # Topic: kaiser/+/esp/+/system/will (WP6: wildcard kaiser_id)
         # ESP32 builds LWT topic from heartbeat: /system/heartbeat -> /system/will
         # QoS: 1 (broker publishes LWT with QoS from ESP32 config)
         # This provides INSTANT offline detection when ESP32 disconnects unexpectedly
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/system/will",
+            "kaiser/+/esp/+/system/will",
             lwt_handler.handle_lwt
         )
-        logger.info(f"LWT handler registered: kaiser/{kaiser_id}/esp/+/system/will")
+        logger.info("LWT handler registered: kaiser/+/esp/+/system/will")
         # Error Event Handler (DS18B20/OneWire errors, GPIO conflicts, etc.)
-        # Topic: kaiser/{kaiser_id}/esp/+/system/error
+        # Topic: kaiser/+/esp/+/system/error (WP6: wildcard kaiser_id)
         # ESP32 publishes hardware/config errors to this topic for server processing
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/system/error",
+            "kaiser/+/esp/+/system/error",
             error_handler.handle_error_event
         )
-        logger.info(f"Error handler registered: kaiser/{kaiser_id}/esp/+/system/error")
+        logger.info("Error handler registered: kaiser/+/esp/+/system/error")
+        # System Diagnostics Handler (HealthMonitor snapshots)
+        # Topic: kaiser/+/esp/+/system/diagnostics (WP6: wildcard kaiser_id)
+        # ESP32 HealthMonitor publishes diagnostics every 60s (heap, RSSI, uptime, state)
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/system/diagnostics",
+            diagnostics_handler.handle_diagnostics
+        )
+        logger.info("Diagnostics handler registered: kaiser/+/esp/+/system/diagnostics")
 
         logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 
@@ -294,15 +305,17 @@ async def lifespan(app: FastAPI):
                 logger.debug(f"Mock actuator command handler error: {e}")
                 return False
 
+        # WP6: Wildcard kaiser_id for Mock-ESP handlers
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/+/command",
+            "kaiser/+/esp/+/actuator/+/command",
             mock_actuator_command_handler
         )
         # Also handle emergency topics for mocks
         _subscriber_instance.register_handler(
-            f"kaiser/{kaiser_id}/esp/+/actuator/emergency",
+            "kaiser/+/esp/+/actuator/emergency",
             mock_actuator_command_handler
         )
+        # Broadcast pattern remains fixed (not kaiser-specific)
         _subscriber_instance.register_handler(
             "kaiser/broadcast/emergency",
             mock_actuator_command_handler
@@ -320,6 +333,26 @@ async def lifespan(app: FastAPI):
         )
         _maintenance_service.start()  # Registriert alle Jobs
         logger.info("MaintenanceService initialized and started")
+
+        # Step 3.4.3: Register Prometheus metrics update job
+        # Updates custom Gauges (uptime, CPU, memory, MQTT, ESP counts) every 15s.
+        # Gauges are in the default prometheus_client registry and automatically
+        # exposed by the Instrumentator at /api/v1/health/metrics.
+        logger.info("Registering Prometheus metrics update job...")
+        from .core.metrics import set_server_start_time, update_all_metrics_async
+        set_server_start_time(time.time())
+
+        async def _metrics_update_job() -> None:
+            await update_all_metrics_async(get_session)
+
+        from .core.scheduler import JobCategory
+        _central_scheduler.add_interval_job(
+            job_id="monitor_prometheus_metrics",
+            func=_metrics_update_job,
+            seconds=15,
+            category=JobCategory.MONITOR,
+        )
+        logger.info("Prometheus metrics job registered (15s interval)")
 
         # Step 3.5: Recover running Mock-ESP simulations from database (Paket X)
         # After server restart, resume any simulations that were active before shutdown
@@ -642,6 +675,18 @@ app.add_middleware(
     expose_headers=["X-Request-ID"],
 )
 
+# ===== PROMETHEUS INSTRUMENTATOR =====
+# Must be after CORS middleware, before router includes.
+# Exposes HTTP request metrics (duration, count, size) + custom gauges
+# at /api/v1/health/metrics in Prometheus text format.
+from prometheus_fastapi_instrumentator import Instrumentator
+
+Instrumentator().instrument(app).expose(
+    app,
+    endpoint="/api/v1/health/metrics",
+    include_in_schema=False,
+)
+
 # ===== ROUTES =====
 
 # Root endpoint
@@ -657,6 +702,17 @@ async def root():
         "environment": settings.environment,
         "docs": "/docs",
         "api_prefix": "/api/v1",
+    }
+
+
+# Health endpoint (standard path for E2E tests and monitoring)
+@app.get("/health", tags=["health"])
+async def health():
+    """Simple health check endpoint for monitoring and E2E tests."""
+    mqtt_client = MQTTClient.get_instance()
+    return {
+        "status": "healthy" if mqtt_client.is_connected() else "degraded",
+        "mqtt_connected": mqtt_client.is_connected(),
     }
 
 
@@ -696,3 +752,4 @@ if __name__ == "__main__":
         reload=settings.environment == "development",
         log_level=settings.log_level.lower(),
     )
+# Reload trigger Fr, 30. Jan 2026 04:31:31
