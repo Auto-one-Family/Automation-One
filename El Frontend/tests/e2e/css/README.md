@@ -1,7 +1,7 @@
 # CSS-Testkonzept — Playwright
 
-> **252 Tests** über **13 Testdateien** · 5 Schichten · 6 Browser-Profile  
-> **Validiert:** 249/250 passing (1 transient/flaky)
+> **288 Tests** über **14 Testdateien** · 5 Schichten · 6 Browser-Profile  
+> **Validiert:** 288/288 passing (Chromium ✓ Firefox ✓)
 
 ## Architektur
 
@@ -46,6 +46,7 @@ npm run test:css:update-snapshots
 | Datei | Schicht | Tests | Beschreibung |
 |-------|---------|-------|-------------|
 | `design-tokens.spec.ts` | 1 | 31 | Alle CSS-Variablen aus tokens.css verifizieren |
+| `token-consistency.spec.ts` | 1 | 38 | Tailwind ↔ CSS Token Synchronisation |
 | `buttons.spec.ts` | 2 | 13 | Button-Varianten, Größen, Zustände |
 | `badges.spec.ts` | 2 | 13 | Badge-Varianten, Farben, Rundung |
 | `cards.spec.ts` | 2 | 12 | Card, Glass-Card, Sektionen |
@@ -56,7 +57,7 @@ npm run test:css:update-snapshots
 | `responsive-layout.spec.ts` | 3 | 18 | Sidebar, Grid, Breakpoints |
 | `accessibility.spec.ts` | 4 | 11 | axe-core WCAG 2.1 AA Scanning |
 | `color-contrast.spec.ts` | 4 | 22 | Manuelle Kontrast-Berechnung |
-| `visual-regression.spec.ts` | 5 | 17 | Screenshot-Baselines |
+| `visual-regression.spec.ts` | 5 | 17 | Screenshot-Baselines (Chromium + Firefox) |
 | `edge-cases.spec.ts` | 7 | 26 | Overflow, Z-Index, Tabellen, Tabs |
 
 ## Konfiguration
