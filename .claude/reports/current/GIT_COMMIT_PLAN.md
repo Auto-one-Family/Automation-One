@@ -1,13 +1,30 @@
 # Git Commit Plan
 
 **Erstellt:** 2025-02-15  
-**Branch:** feature/frontend-consolidation  
-**Ungepushte Commits:** 0 (Branch up to date mit origin)  
-**Änderungen gesamt:** 49 modified, 20+ untracked  
+**Status:** ✅ **AUSGEFÜHRT** – Alle Branches erstellt, nichts gelöscht  
 
 ---
 
-## ⚠️ SICHERHEIT ZUERST – Empfehlung vor jedem Commit
+## Branch-Übersicht (nach Ausführung)
+
+| Branch | Basis | Inhalt |
+|--------|-------|--------|
+| **backup/frontend-consolidation-full** | feature/frontend-consolidation | Vollständiger WIP-State (86 Dateien) – **nichts verloren** |
+| **fix/pending-panel** | feature/frontend-consolidation | PendingDevicesPanel Sichtbarkeits-Fix |
+| **feat/dashboard-consolidation** | fix/pending-panel | Dashboard Zoom, ZonePlate, TopBar, shared stores |
+| **feat/frontend-rules-views** | feat/dashboard-consolidation | Rules UI, Logic Store, Login/Setup/Logic Views |
+| **feat/frontend-esp-tokens** | feat/frontend-rules-views | ESP Store, Design Tokens, Animations, Package |
+| **feat/server-esp** | feature/frontend-consolidation | Server: ESP pending, Sensor Repo, Heartbeat |
+| **feat/firmware-mqtt** | feature/frontend-consolidation | Firmware: MQTT Client, Pi-Enhanced |
+| **chore/infra** | feature/frontend-consolidation | Docker, CI Workflows, .env, Makefile |
+| **test/e2e-esp-registration** | feature/frontend-consolidation | E2E Playwright ESP-Registrierung |
+| **docs/claude-reports** | feature/frontend-consolidation | .claude Reference, Skills, Reports, Scripts |
+
+**feature/frontend-consolidation** bleibt unverändert (origin).
+
+---
+
+## ⚠️ SICHERHEIT – Backup (erledigt)
 
 ```bash
 # 1. Backup-Branch erstellen (alle Änderungen bleiben erhalten)
