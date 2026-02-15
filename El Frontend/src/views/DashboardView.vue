@@ -2,109 +2,133 @@
 /**
  * DashboardView
  *
- * Main dashboard with:
- * - ActionBar for quick status overview and actions
- * - Zone-grouped ESP overview with drag & drop
- * - ESPOrbitalLayout for visual device display (within zones)
+ * Main dashboard with three-level zoom navigation:
+ * Level 1: Zone Overview (ZonePlates)
+ * Level 2: Zone Detail (DeviceSummaryCards)
+ * Level 3: Device Detail (ESPOrbitalLayout)
+ *
+ * All three levels exist in DOM simultaneously (v-show),
+ * connected by CSS zoom transitions via useZoomNavigation.
+ *
+ * Header controls (filters, breadcrumb, actions) are delegated
+ * to the TopBar via the dashboard store.
  */
 
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/stores/logic'
-import { useUiStore } from '@/shared/stores'
+import { useUiStore, useDashboardStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
-import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
+import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
+import { useZoomNavigation } from '@/composables/useZoomNavigation'
 import { Plus, Filter, GitBranch, Workflow } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('Dashboard')
 
 // Components
-import ActionBar from '@/components/dashboard/ActionBar.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
-import ESPOrbitalLayout from '@/components/esp/ESPOrbitalLayout.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
-import ZoneGroup from '@/components/zones/ZoneGroup.vue'
-import CrossEspConnectionOverlay from '@/components/dashboard/CrossEspConnectionOverlay.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import { LoadingState, EmptyState } from '@/components/common'
+
+// Zoom components
+import ZonePlate from '@/components/dashboard/ZonePlate.vue'
+import ZoneDetailView from '@/components/zones/ZoneDetailView.vue'
+import DeviceDetailView from '@/components/esp/DeviceDetailView.vue'
 
 const router = useRouter()
 const route = useRoute()
 const espStore = useEspStore()
 const logicStore = useLogicStore()
 const uiStore = useUiStore()
+const dashStore = useDashboardStore()
 const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
+const zoomNav = useZoomNavigation()
+const { register } = useKeyboardShortcuts()
 
-// Filter state (type filter unchanged)
-const filterType = ref<'all' | 'mock' | 'real'>('all')
+// Swipe navigation for mobile zoom-back
+const zoomContainerRef = ref<HTMLElement | null>(null)
+useSwipeNavigation(zoomContainerRef, {
+  onSwipeRight: () => {
+    if (zoomNav.currentLevel.value > 1 && !zoomNav.isTransitioning.value) {
+      zoomNav.zoomOut()
+    }
+  },
+})
 
-// Status filter using Set for multi-select pills
-type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
-const activeStatusFilters = ref<Set<StatusFilter>>(new Set())
-
-// Modal states
-const showCreateMockModal = ref(false)
-const showPendingDevices = ref(false)
+// Modal states (triggered by TopBar via dashboard store)
 const pendingButtonAnchor = ref<HTMLElement | null>(null)
 
-// Settings popover state (Phase 2)
+// Settings popover state
 const settingsDevice = ref<ESPDevice | null>(null)
 const isSettingsOpen = ref(false)
 
 // Cross-ESP connections toggle
 const showCrossEspConnections = ref(true)
 
+// =============================================================================
+// Dashboard Store: Activate/Deactivate
+// =============================================================================
 onMounted(() => {
+  dashStore.activate()
   espStore.fetchAll()
-  espStore.fetchPendingDevices()  // Fetch pending devices for Discovery/Approval
+  espStore.fetchPendingDevices()
   logicStore.fetchRules()
-  // Subscribe to WebSocket for live logic execution updates
   logicStore.subscribeToWebSocket()
 })
 
 onUnmounted(() => {
-  // Unsubscribe from WebSocket when leaving dashboard
+  dashStore.deactivate()
   logicStore.unsubscribeFromWebSocket()
+})
+
+// Keyboard: Escape to zoom out
+const unregisterEscape = register({
+  key: 'Escape',
+  handler: () => {
+    if (zoomNav.currentLevel.value > 1 && !zoomNav.isTransitioning.value) {
+      zoomNav.zoomOut()
+    }
+  },
+  description: 'Zoom zurück zur Übersicht',
+  scope: 'global',
+})
+
+onUnmounted(() => {
+  unregisterEscape()
 })
 
 // =============================================================================
 // Query Parameter Support: ?openSettings=ESP_ID
-// Opens ESPSettingsSheet when navigating from /devices/:espId redirect
 // =============================================================================
 watch(
   [() => route.query.openSettings, () => espStore.devices, () => espStore.isLoading],
   ([openSettingsId, devices, isLoading]) => {
-    // Wait for devices to be loaded
     if (isLoading || !devices.length) return
-
-    // Check if we have an openSettings query parameter
     if (!openSettingsId || typeof openSettingsId !== 'string') return
 
-    // Find the device by ID
     const device = devices.find(d => espStore.getDeviceId(d) === openSettingsId)
-
     if (device) {
-      // Open settings popover for this device
       settingsDevice.value = device
       isSettingsOpen.value = true
       logger.info(`Opened settings for ${openSettingsId} via query parameter`)
-
-      // Remove query parameter from URL to prevent re-opening on refresh
-      router.replace({ path: '/', query: {} })
     } else {
       logger.warn(`Device ${openSettingsId} not found for openSettings query`)
-      // Remove invalid query parameter
-      router.replace({ path: '/', query: {} })
     }
+
+    const { openSettings: _, ...remainingQuery } = route.query
+    router.replace({ query: remainingQuery })
   },
   { immediate: true }
 )
 
-// Status counts for ActionBar pills
+// =============================================================================
+// Status counts → Dashboard Store
+// =============================================================================
 const onlineCount = computed(() => espStore.onlineDevices.length)
 const offlineCount = computed(() => espStore.offlineDevices.length)
 const pendingCount = computed(() => espStore.pendingCount)
@@ -131,69 +155,48 @@ const safeModeCount = computed(() =>
   }).length
 )
 
-// Problem message for ActionBar warning banner
-const problemMessage = computed(() => {
-  if (warningCount.value > 0) {
-    return `${warningCount.value} Gerät(e) mit Fehlern`
-  }
-  if (safeModeCount.value > 0) {
-    return `${safeModeCount.value} Gerät(e) im Safe-Mode`
-  }
-  if (offlineCount.value > 0 && onlineCount.value > 0) {
-    return `${offlineCount.value} Gerät(e) offline`
-  }
-  return ''
-})
+const counts = computed(() => ({
+  all: espStore.devices.length,
+  mock: espStore.mockDevices.length,
+  real: espStore.realDevices.length,
+}))
 
-const hasProblems = computed(() =>
-  warningCount.value > 0 || safeModeCount.value > 0
+// Sync counts to dashboard store
+watch(
+  [onlineCount, offlineCount, warningCount, safeModeCount],
+  ([on, off, warn, safe]) => {
+    dashStore.statusCounts = { online: on, offline: off, warning: warn, safeMode: safe }
+  },
+  { immediate: true }
 )
 
-// Toggle status filter
-function toggleStatusFilter(filter: StatusFilter) {
-  const newFilters = new Set(activeStatusFilters.value)
-  if (newFilters.has(filter)) {
-    newFilters.delete(filter)
-  } else {
-    newFilters.add(filter)
-  }
-  activeStatusFilters.value = newFilters
-}
+watch(counts, (c) => {
+  dashStore.deviceCounts = { all: c.all, mock: c.mock, real: c.real }
+}, { immediate: true })
 
-/** Reset type and status filters (used when "No Results" is shown) */
-function resetFilters() {
-  filterType.value = 'all'
-  activeStatusFilters.value = new Set()
-}
+watch(pendingCount, (c) => {
+  dashStore.pendingCount = c
+}, { immediate: true })
 
-// Handle Mock ESP created
-function onMockEspCreated(espId: string) {
-  // Refresh devices to show the new ESP
-  espStore.fetchAll()
-  // Show a toast or notification (could be enhanced later)
-  logger.info(`Mock ESP erstellt: ${espId}`)
-}
-
-// Filtered ESPs (using type filter + status pills)
+// =============================================================================
+// Filtered ESPs & Zone Grouping (reads filters from dashboard store)
+// =============================================================================
 const filteredEsps = computed(() => {
   let esps = espStore.devices
 
-  // Filter by type (unchanged)
-  if (filterType.value === 'mock') {
+  if (dashStore.filterType === 'mock') {
     esps = esps.filter(e => espStore.isMock(espStore.getDeviceId(e)))
-  } else if (filterType.value === 'real') {
+  } else if (dashStore.filterType === 'real') {
     esps = esps.filter(e => !espStore.isMock(espStore.getDeviceId(e)))
   }
 
-  // Filter by status pills (Set-based, empty = show all)
-  const filters = activeStatusFilters.value
+  const filters = dashStore.activeStatusFilters
   if (filters.size > 0) {
     esps = esps.filter(device => {
       const deviceId = espStore.getDeviceId(device)
       const isMock = espStore.isMock(deviceId)
       const mockDevice = device as any
 
-      // Check each active filter
       if (filters.has('online')) {
         if (device.status === 'online' || device.connected === true) return true
       }
@@ -216,23 +219,79 @@ const filteredEsps = computed(() => {
   return esps
 })
 
-// Counts for filter badges (type filter)
-const counts = computed(() => ({
-  all: espStore.devices.length,
-  mock: espStore.mockDevices.length,
-  real: espStore.realDevices.length,
-}))
-
-// Group filtered ESPs by zone (excluding unassigned - shown in bottom bar)
+// Zone groups for Level 1
 const zoneGroups = computed(() => {
   const allGroups = groupDevicesByZone(filteredEsps.value)
-  // Filter out unassigned group - it's shown in UnassignedDropBar
   return allGroups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
 })
 
-// Handle zone drop event
-// NOTE: handleDeviceDrop() already calls espStore.fetchAll() internally,
-// so we don't need to call it again here (BUG-001 fix)
+// =============================================================================
+// Zoom-specific computed properties
+// =============================================================================
+
+/** Devices in the currently selected zone (Level 2) */
+const zoneDevices = computed(() => {
+  if (!zoomNav.selectedZoneId.value) return []
+  return filteredEsps.value.filter(d => d.zone_id === zoomNav.selectedZoneId.value)
+})
+
+/** Currently selected device (Level 3) */
+const selectedDevice = computed(() => {
+  if (!zoomNav.selectedDeviceId.value) return null
+  return espStore.devices.find(d =>
+    espStore.getDeviceId(d) === zoomNav.selectedDeviceId.value
+  ) ?? null
+})
+
+/** Zone name for the selected zone */
+const selectedZoneName = computed(() => {
+  if (!zoomNav.selectedZoneId.value) return ''
+  const first = zoneDevices.value[0]
+  return first?.zone_name || zoomNav.selectedZoneId.value
+})
+
+/** Device display name for breadcrumb */
+const selectedDeviceName = computed(() => {
+  if (!selectedDevice.value) return ''
+  return selectedDevice.value.name || espStore.getDeviceId(selectedDevice.value)
+})
+
+// =============================================================================
+// Breadcrumb → Dashboard Store
+// =============================================================================
+watch(
+  [() => zoomNav.currentLevel.value, selectedZoneName, selectedDeviceName],
+  ([level, zone, device]) => {
+    dashStore.breadcrumb = {
+      level: level as 1 | 2 | 3,
+      zoneName: zone,
+      deviceName: device,
+    }
+  },
+  { immediate: true }
+)
+
+// Watch navigation requests from TopBar breadcrumb
+watch(() => dashStore.navRequestCount, () => {
+  const target = dashStore.navTarget
+  if (target < zoomNav.currentLevel.value && !zoomNav.isTransitioning.value) {
+    zoomNav.zoomToLevel(target)
+  }
+})
+
+// =============================================================================
+// Event Handlers
+// =============================================================================
+
+function resetFilters() {
+  dashStore.resetFilters()
+}
+
+function onMockEspCreated(espId: string) {
+  espStore.fetchAll()
+  logger.info(`Mock ESP erstellt: ${espId}`)
+}
+
 async function onDeviceDropped(payload: {
   device: any
   fromZoneId: string | null
@@ -241,23 +300,11 @@ async function onDeviceDropped(payload: {
   await handleDeviceDrop(payload)
 }
 
-// =============================================================================
-// Phase 0: Event Handlers from ZoneGroup
-// These handlers were missing - ZoneGroup emits them but DashboardView wasn't handling them
-// =============================================================================
-
-/**
- * Handle heartbeat request from ZoneGroup/ESPCard
- * Only works for Mock ESPs - Real ESPs send heartbeats automatically
- */
 async function handleHeartbeat(espId: string) {
   if (!espStore.isMock(espId)) {
-    // Real ESPs send heartbeats automatically every 60 seconds
-    // There's no server endpoint to request a heartbeat from real devices
     logger.info(`Heartbeat request ignored for Real ESP ${espId} - they send automatically`)
     return
   }
-
   try {
     await espStore.triggerHeartbeat(espId)
     logger.info(`Heartbeat triggered for Mock ESP ${espId}`)
@@ -266,10 +313,6 @@ async function handleHeartbeat(espId: string) {
   }
 }
 
-/**
- * Handle delete request from ZoneGroup/ESPCard
- * Works for both Mock and Real ESPs with confirmation dialog
- */
 async function handleDelete(espId: string) {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   const displayName = device?.name || espId
@@ -290,56 +333,15 @@ async function handleDelete(espId: string) {
   }
 }
 
-/**
- * Handle safe-mode toggle from ZoneGroup/ESPCard
- * Only works for Mock ESPs - toggles between OPERATIONAL and SAFE_MODE
- */
-async function handleToggleSafeMode(espId: string) {
-  if (!espStore.isMock(espId)) {
-    logger.warn(`Safe-mode toggle not available for Real ESP ${espId}`)
-    return
-  }
-
-  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
-  if (!device) {
-    logger.warn(`Device ${espId} not found`)
-    return
-  }
-
-  // Type assertion for Mock ESP device with system_state
-  const mockDevice = device as { system_state?: string }
-  const currentState = mockDevice.system_state
-
-  // Toggle between SAFE_MODE and OPERATIONAL
-  const newState = currentState === 'SAFE_MODE' ? 'OPERATIONAL' : 'SAFE_MODE'
-
-  try {
-    await espStore.setState(espId, newState as any, 'Manueller Wechsel über Dashboard')
-    logger.info(`Safe-mode toggled for ${espId}: ${currentState} → ${newState}`)
-  } catch (err) {
-    logger.error(`Failed to toggle safe-mode for ${espId}`, err)
-  }
-}
-
-/**
- * Handle settings request from ESPOrbitalLayout
- * Opens ESPSettingsSheet with the selected device
- */
 function handleSettings(device: ESPDevice) {
   const deviceId = espStore.getDeviceId(device)
   logger.info(`Settings requested for ${deviceId}`)
-
-  // Open ESPSettingsSheet
   settingsDevice.value = device
   isSettingsOpen.value = true
 }
 
-/**
- * Handle popover close
- */
 function handleSettingsClose() {
   isSettingsOpen.value = false
-  // Keep settingsDevice for a moment to allow closing animation
   setTimeout(() => {
     if (!isSettingsOpen.value) {
       settingsDevice.value = null
@@ -347,54 +349,40 @@ function handleSettingsClose() {
   }, 200)
 }
 
-/**
- * Handle device deletion from popover
- */
 function handleDeviceDeleted(payload: { deviceId: string }) {
   logger.info(`Device ${payload.deviceId} was deleted via popover`)
-  // Device list will be updated automatically via store
   handleSettingsClose()
 }
 
-/**
- * Handle name update from ESPOrbitalLayout or ESPSettingsSheet (Phase 3)
- */
 function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
   logger.info(`Device name updated: ${payload.deviceId} → "${payload.name || 'Unbenannt'}"`)
-  // Store is already updated via updateDevice(), just log for debugging
 }
 
-/**
- * Handle zone update from ESPSettingsSheet (Phase 4)
- * Zone assignment is already processed by ZoneAssignmentPanel → zonesApi → ESP Store
- * This handler is for logging and potential future cross-component coordination
- */
 function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName: string }) {
   logger.info(`Zone updated: ${payload.deviceId} → "${payload.zoneName}" (${payload.zoneId})`)
-  // ESP Store is updated via WebSocket event from server
-  // Card will automatically move to correct ZoneGroup via reactive computed
 }
 
-/**
- * Handle opening pending devices panel
- * Captures the button element for anchor-based positioning
- */
-function handleOpenPendingDevices(event: MouseEvent) {
-  pendingButtonAnchor.value = event.currentTarget as HTMLElement
-  showPendingDevices.value = true
+// =============================================================================
+// Zoom Navigation Handlers
+// =============================================================================
+
+function onZonePlateClick(payload: { zoneId: string; originRect: DOMRect }) {
+  zoomNav.zoomToZone(payload.zoneId, payload.originRect)
+}
+
+function onDeviceCardClick(payload: { deviceId: string; originRect: DOMRect }) {
+  zoomNav.zoomToDevice(payload.deviceId, payload.originRect)
 }
 
 // =============================================================================
 // Rules Activity Ribbon
 // =============================================================================
 
-/** Latest rule execution for display */
 const latestExecution = computed(() => {
   if (logicStore.recentExecutions.length === 0) return null
   return logicStore.recentExecutions[0]
 })
 
-/** Format Unix timestamp (seconds) to relative German time string */
 function formatTimeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp * 1000) / 1000)
   if (seconds < 60) return 'gerade eben'
@@ -405,32 +393,11 @@ function formatTimeAgo(timestamp: number): string {
 </script>
 
 <template>
-  <div class="dashboard-view">
-    <!-- Action Bar (replaces StatCards and Status Filters) -->
-    <!-- Type Filter is now consolidated into ActionBar (Robin UX feedback) -->
-    <ActionBar
-      :online-count="onlineCount"
-      :offline-count="offlineCount"
-      :warning-count="warningCount"
-      :safe-mode-count="safeModeCount"
-      :pending-count="pendingCount"
-      :active-filters="activeStatusFilters"
-      :has-problems="hasProblems"
-      :problem-message="problemMessage"
-      :filter-type="filterType"
-      :total-count="counts.all"
-      :mock-count="counts.mock"
-      :real-count="counts.real"
-      @toggle-filter="toggleStatusFilter"
-      @update:filter-type="filterType = $event"
-      @create-mock-esp="showCreateMockModal = true"
-      @open-pending-devices="handleOpenPendingDevices"
-    />
-
-    <!-- Rules Activity Ribbon -->
+  <div :class="['dashboard-view', 'dashboard-view--level-' + zoomNav.currentLevel.value]">
+    <!-- Rules Activity Ribbon (compact, visible on all levels) -->
     <div v-if="logicStore.ruleCount > 0 || logicStore.recentExecutions.length > 0" class="rules-ribbon">
       <div class="rules-ribbon__status">
-        <Workflow class="w-4 h-4" />
+        <Workflow class="rules-ribbon__icon" />
         <span>{{ logicStore.enabledCount }} / {{ logicStore.ruleCount }} Regeln aktiv</span>
         <span v-if="logicStore.activeExecutions.size > 0" class="rules-ribbon__pulse" />
       </div>
@@ -464,7 +431,7 @@ function formatTimeAgo(timestamp: number): string {
       title="Keine ESP-Geräte"
       description="Erstellen Sie Ihr erstes Mock-ESP32-Gerät, um mit dem Testen zu beginnen."
       action-text="Gerät erstellen"
-      @action="showCreateMockModal = true"
+      @action="dashStore.showCreateMock = true"
     />
 
     <!-- No Results (with filters) -->
@@ -484,84 +451,108 @@ function formatTimeAgo(timestamp: number): string {
       </button>
     </div>
 
-    <!-- Zone-Grouped ESP Grid with Cross-ESP Overlay and Sensor Sidebar -->
-    <div v-else class="dashboard-main-layout">
-      <!-- Main Content Area -->
-      <div class="zone-groups-wrapper">
-        <!-- Cross-ESP Connection Overlay (renders on top of all ESPs) -->
-        <CrossEspConnectionOverlay
-          :show="showCrossEspConnections"
-          :show-labels="true"
-        />
+    <!-- ═══════════════════════════════════════════════════════════════════
+         THREE-LEVEL ZOOM DASHBOARD
+         All levels exist simultaneously, controlled by v-show + CSS classes
+         ═══════════════════════════════════════════════════════════════════ -->
+    <template v-else>
+      <div class="dashboard-main-layout">
+        <div ref="zoomContainerRef" class="zoom-container">
 
-        <div class="zone-groups-container">
-          <!-- Empty State when all devices are unassigned -->
-          <div v-if="zoneGroups.length === 0" class="no-zones-hint">
-            <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
-            <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
+          <!-- ═══ LEVEL 1: Zone Overview ═══════════════════════════════ -->
+          <div
+            v-show="zoomNav.currentLevel.value === 1 || zoomNav.isTransitioning.value"
+            :class="zoomNav.level1Class.value"
+          >
+            <!-- Zone Plates Grid -->
+            <div class="zone-plates-grid">
+              <div v-if="zoneGroups.length === 0" class="no-zones-hint">
+                <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
+                <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
+              </div>
+
+              <ZonePlate
+                v-for="group in zoneGroups"
+                :key="group.zoneId"
+                :zone-id="group.zoneId"
+                :zone-name="group.zoneName"
+                :devices="group.devices"
+                @click="onZonePlateClick"
+                @device-click="onDeviceCardClick"
+                @device-dropped="onDeviceDropped"
+              />
+            </div>
+
+            <!-- Cross-ESP Toggle -->
+            <button
+              v-if="logicStore.crossEspConnections.length > 0"
+              class="cross-esp-toggle"
+              :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
+              @click="showCrossEspConnections = !showCrossEspConnections"
+              :title="showCrossEspConnections ? 'Verbindungen ausblenden' : 'Verbindungen einblenden'"
+            >
+              <GitBranch class="w-4 h-4" />
+              <span>{{ logicStore.crossEspConnections.length }} Cross-ESP</span>
+            </button>
           </div>
 
-          <ZoneGroup
-            v-for="group in zoneGroups"
-            :key="group.zoneId"
-            :zone-id="group.zoneId"
-            :zone-name="group.zoneName"
-            :devices="group.devices"
-            :is-unassigned="false"
-            :compact-mode="true"
-            :enable-drag-drop="true"
-            :default-expanded="true"
-            @device-dropped="onDeviceDropped"
-            @heartbeat="handleHeartbeat"
-            @delete="handleDelete"
-            @toggle-safe-mode="handleToggleSafeMode"
+          <!-- ═══ LEVEL 2: Zone Detail ═════════════════════════════════ -->
+          <div
+            v-show="zoomNav.currentLevel.value === 2 || zoomNav.isTransitioning.value"
+            :class="zoomNav.level2Class.value"
           >
-            <!-- Use ESPOrbitalLayout for Dashboard (compact view with sensors/actuators) -->
-            <template #device="{ device }">
-              <ESPOrbitalLayout
-                :device="device"
-                :show-connections="false"
-                :compact-mode="true"
-                @heartbeat="(d) => handleHeartbeat(espStore.getDeviceId(d))"
-                @delete="(d) => handleDelete(espStore.getDeviceId(d))"
-                @settings="handleSettings"
-                @name-updated="handleNameUpdated"
-              />
-            </template>
-          </ZoneGroup>
+            <ZoneDetailView
+              v-if="zoomNav.selectedZoneId.value"
+              :zone-id="zoomNav.selectedZoneId.value"
+              :zone-name="selectedZoneName"
+              :devices="zoneDevices"
+              @device-click="onDeviceCardClick"
+              @back="zoomNav.zoomOut()"
+              @heartbeat="handleHeartbeat"
+              @delete="handleDelete"
+              @settings="handleSettings"
+            />
+          </div>
+
+          <!-- ═══ LEVEL 3: Device Detail ═══════════════════════════════ -->
+          <div
+            v-show="zoomNav.currentLevel.value === 3 || zoomNav.isTransitioning.value"
+            :class="zoomNav.level3Class.value"
+          >
+            <DeviceDetailView
+              v-if="selectedDevice"
+              :device="selectedDevice"
+              :zone-id="zoomNav.selectedZoneId.value || ''"
+              :zone-name="selectedZoneName"
+              @back="zoomNav.zoomOut()"
+              @settings="handleSettings"
+              @delete="handleDelete"
+              @heartbeat="handleHeartbeat"
+              @name-updated="handleNameUpdated"
+            />
+          </div>
+
         </div>
 
-        <!-- Cross-ESP Toggle (if connections exist) -->
-        <button
-          v-if="logicStore.crossEspConnections.length > 0"
-          class="cross-esp-toggle"
-          :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
-          @click="showCrossEspConnections = !showCrossEspConnections"
-          :title="showCrossEspConnections ? 'Verbindungen ausblenden' : 'Verbindungen einblenden'"
-        >
-          <GitBranch class="w-4 h-4" />
-          <span>{{ logicStore.crossEspConnections.length }} Cross-ESP</span>
-        </button>
+        <!-- Component Sidebar (visible only on Level 3) -->
+        <ComponentSidebar v-show="zoomNav.currentLevel.value === 3" />
       </div>
-
-      <!-- Komponenten-Sidebar (rechte Seite) -->
-      <ComponentSidebar />
-    </div>
+    </template>
 
     <!-- Fixed Bottom Bar for Unassigned Devices -->
     <UnassignedDropBar />
 
-    <!-- Create Mock ESP Modal -->
+    <!-- Create Mock ESP Modal (triggered by TopBar via store) -->
     <CreateMockEspModal
-      v-model="showCreateMockModal"
+      v-model="dashStore.showCreateMock"
       @created="onMockEspCreated"
     />
 
-    <!-- Pending Devices Panel (Discovery/Approval) -->
+    <!-- Pending Devices Panel (triggered by TopBar via store) -->
     <PendingDevicesPanel
-      v-model:is-open="showPendingDevices"
-      :anchor-el="pendingButtonAnchor"
-      @close="showPendingDevices = false"
+      v-model:is-open="dashStore.showPendingPanel"
+      :anchor-el="null"
+      @close="dashStore.showPendingPanel = false"
     />
 
     <!-- ESP Settings Sheet (Slide-in from right) -->
@@ -576,23 +567,67 @@ function formatTimeAgo(timestamp: number): string {
       @name-updated="handleNameUpdated"
       @zone-updated="handleZoneUpdated"
     />
-
   </div>
 </template>
 
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════════════════
-   DASHBOARD VIEW — Mission Control Main View
-   Staggered entrance, token-aligned spacing
+   DASHBOARD VIEW — Three-Level Zoom Mission Control
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .dashboard-view {
-  /* Let shell__content handle scrolling — no nested scroll context */
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding-bottom: 120px; /* Account for fixed UnassignedDropBar */
+  gap: var(--space-3);
+  padding-bottom: 120px;
+  position: relative;
+  background-color: var(--color-bg-level-1);
+  transition: background-color var(--transition-slow);
+}
+
+/* Level-aware background color */
+.dashboard-view--level-2 {
+  background-color: var(--color-bg-level-2);
+}
+
+.dashboard-view--level-3 {
+  background-color: var(--color-bg-level-3);
+}
+
+/* Ambient glow pseudo-element per level */
+.dashboard-view::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 300px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity var(--transition-slow), background var(--transition-slow);
+}
+
+/* Level 2: subtle blue radial glow */
+.dashboard-view--level-2::before {
+  opacity: 1;
+  background: radial-gradient(
+    ellipse 80% 200px at 50% 0%,
+    rgba(96, 165, 250, 0.04) 0%,
+    transparent 70%
+  );
+}
+
+/* Level 3: stronger violet radial glow */
+.dashboard-view--level-3::before {
+  opacity: 1;
+  background: radial-gradient(
+    ellipse 80% 250px at 50% 0%,
+    rgba(167, 139, 250, 0.06) 0%,
+    rgba(96, 165, 250, 0.02) 40%,
+    transparent 70%
+  );
 }
 
 /* ── Staggered Page Entrance ── */
@@ -604,24 +639,16 @@ function formatTimeAgo(timestamp: number): string {
   animation: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.10s both;
 }
 
-.dashboard-view > :nth-child(3) {
-  animation: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
-}
-
-.dashboard-view > :nth-child(4) {
-  animation: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.20s both;
-}
-
-/* ── Rules Activity Ribbon ── */
+/* ── Rules Activity Ribbon (compact: ~32px) ── */
 .rules-ribbon {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 
 .rules-ribbon__status {
@@ -633,9 +660,15 @@ function formatTimeAgo(timestamp: number): string {
   white-space: nowrap;
 }
 
+.rules-ribbon__icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .rules-ribbon__pulse {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: var(--radius-full);
   background: var(--color-iridescent-1);
   animation: rules-pulse 1.5s ease-in-out infinite;
@@ -643,7 +676,7 @@ function formatTimeAgo(timestamp: number): string {
 
 .rules-ribbon__divider {
   width: 1px;
-  height: 20px;
+  height: 16px;
   background: var(--glass-border);
   flex-shrink: 0;
 }
@@ -653,7 +686,6 @@ function formatTimeAgo(timestamp: number): string {
   align-items: center;
   gap: var(--space-1);
   color: var(--color-text-muted);
-  font-size: var(--text-xs);
   min-width: 0;
   overflow: hidden;
 }
@@ -689,7 +721,7 @@ function formatTimeAgo(timestamp: number): string {
   margin-left: auto;
   color: var(--color-accent-bright);
   font-weight: 500;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   text-decoration: none;
   transition: color var(--transition-fast);
   white-space: nowrap;
@@ -716,24 +748,32 @@ function formatTimeAgo(timestamp: number): string {
   }
 }
 
-/* ── Emergency Alert ── */
-.emergency-alert {
+/* ── Dashboard Main Layout ── */
+.dashboard-main-layout {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  background-color: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.2);
-  border-radius: var(--radius-md);
-  color: var(--color-error);
+  gap: 0;
+  min-height: 400px;
 }
 
-/* ── Zone Groups Container ── */
-.zone-groups-container {
+.zoom-container {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Zone Plates Grid (Level 1) ── */
+.zone-plates-grid {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   overflow: visible;
+}
+
+@media (min-width: 1600px) {
+  .zone-plates-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
+    gap: var(--space-6);
+  }
 }
 
 .no-zones-hint {
@@ -760,24 +800,91 @@ function formatTimeAgo(timestamp: number): string {
   margin-top: var(--space-2);
 }
 
-@media (min-width: 1600px) {
-  .zone-groups-container {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 450px), 1fr));
-    gap: var(--space-6);
+/* ── Zoom Level CSS ── */
+.zoom-level {
+  display: none;
+}
+
+.zoom-level--active {
+  display: block;
+  will-change: auto;
+}
+
+.zoom-level--exiting {
+  display: block;
+  pointer-events: none;
+  will-change: transform, opacity, filter;
+}
+
+.zoom-level--entering {
+  display: block;
+  will-change: transform, opacity, filter;
+}
+
+/* ── Zoom-In exit: shrink + blur into depth ── */
+.animate-zoom-in-exit {
+  animation: zoom-in-exit 250ms var(--ease-out) forwards;
+}
+
+@keyframes zoom-in-exit {
+  0% { opacity: 1; transform: scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: scale(0.92); filter: blur(4px); }
+}
+
+/* ── Zoom-In enter: scale-up with spring overshoot ── */
+.animate-zoom-in-enter {
+  animation: zoom-in-enter 300ms var(--ease-spring) forwards;
+}
+
+@keyframes zoom-in-enter {
+  0% { opacity: 0; transform: scale(1.06); filter: blur(4px); }
+  100% { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+
+/* ── Zoom-Out exit: enlarge + blur ── */
+.animate-zoom-out-exit {
+  animation: zoom-out-exit 250ms var(--ease-out) forwards;
+}
+
+@keyframes zoom-out-exit {
+  0% { opacity: 1; transform: scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: scale(1.08); filter: blur(4px); }
+}
+
+/* ── Zoom-Out enter: shrink-in with spring ── */
+.animate-zoom-out-enter {
+  animation: zoom-out-enter 300ms var(--ease-spring) forwards;
+}
+
+@keyframes zoom-out-enter {
+  0% { opacity: 0; transform: scale(0.94); filter: blur(4px); }
+  100% { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+
+/* Reduced motion: instant transition */
+@media (prefers-reduced-motion: reduce) {
+  .zoom-level--exiting,
+  .zoom-level--entering {
+    animation: none !important;
+    opacity: 1;
+    filter: none !important;
   }
 }
 
-/* ── Dashboard Main Layout ── */
-.dashboard-main-layout {
-  display: flex;
-  gap: 0;
-  min-height: 400px;
-}
+/* ── Mobile Responsive Overrides ── */
+@media (max-width: 640px) {
+  .dashboard-view {
+    padding-bottom: 80px;
+  }
 
-.zone-groups-wrapper {
-  position: relative;
-  flex: 1;
-  min-width: 0;
+  .zone-plates-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .dashboard-main-layout {
+    flex-direction: column;
+  }
 }
 
 /* ── Cross-ESP Toggle ── */
@@ -820,17 +927,15 @@ function formatTimeAgo(timestamp: number): string {
   box-shadow: 0 6px 20px rgba(96, 165, 250, 0.4);
 }
 
-/* ── Modal Overlay ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal-backdrop);
+/* ── Emergency Alert ── */
+.emergency-alert {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  gap: var(--space-3);
   padding: var(--space-4);
-  background-color: rgba(7, 7, 13, 0.85);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
+  background-color: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--color-error);
 }
 </style>

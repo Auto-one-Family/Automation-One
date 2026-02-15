@@ -199,6 +199,7 @@ async function handleDragAdd(event: any) {
             v-for="device in localDevices"
             :key="getDeviceId(device)"
             class="unassigned-card"
+            :data-device-id="getDeviceId(device)"
           >
             <!-- Status Dot -->
             <span :class="['unassigned-card__status', getStatusClass(device)]" />
