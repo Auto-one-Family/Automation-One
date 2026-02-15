@@ -51,23 +51,16 @@ test.describe('Button Styles', () => {
       expect(parseFloat(radius)).toBeGreaterThanOrEqual(0) // any valid radius
     })
 
-    test('disabled submit button changes visual state', async ({ page }) => {
+    test('disabled submit button is actually disabled', async ({ page }) => {
       const btn = page.locator('button[type="submit"]')
 
-      // Empty form → button should be disabled
+      // Empty form → button should be disabled (LoginView: :disabled="!isValid || authStore.isLoading")
       const isDisabled = await btn.isDisabled()
-      if (isDisabled) {
-        // btn-primary:disabled has opacity or visual change
-        const opacity = parseFloat(await btn.evaluate((el) =>
-          getComputedStyle(el).opacity
-        ))
-        const cursor = await btn.evaluate((el) =>
-          getComputedStyle(el).cursor
-        )
-        // Either opacity is reduced OR cursor is not-allowed
-        const hasDisabledState = opacity < 1 || cursor === 'not-allowed'
-        expect(hasDisabledState).toBe(true)
-      }
+      expect(isDisabled).toBe(true)
+
+      // Verify the disabled HTML attribute is set
+      const disabledAttr = await btn.getAttribute('disabled')
+      expect(disabledAttr).not.toBeNull()
     })
   })
 
