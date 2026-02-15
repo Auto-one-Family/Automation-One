@@ -11,6 +11,9 @@ export { default as ESPOrbitalLayout } from './ESPOrbitalLayout.vue'
 export { default as SensorSatellite } from './SensorSatellite.vue'
 export { default as ActuatorSatellite } from './ActuatorSatellite.vue'
 export { default as ConnectionLines } from './ConnectionLines.vue'
+export { default as DeviceHeaderBar } from './DeviceHeaderBar.vue'
+export { default as SensorColumn } from './SensorColumn.vue'
+export { default as ActuatorColumn } from './ActuatorColumn.vue'
 
 
 
