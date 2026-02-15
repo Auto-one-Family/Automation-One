@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { logicApi } from '@/api/logic'
+import type { LogicRuleCreate, LogicRuleUpdate } from '@/api/logic'
 import { extractConnections } from '@/types/logic'
 import { createLogger } from '@/utils/logger'
 import type { LogicRule, LogicConnection } from '@/types/logic'
@@ -197,6 +198,62 @@ export const useLogicStore = defineStore('logic', () => {
   }
 
   /**
+   * Create a new rule and add it to the store
+   */
+  async function createRule(data: LogicRuleCreate): Promise<LogicRule> {
+    error.value = null
+
+    try {
+      const created = await logicApi.createRule(data)
+      rules.value.push(created)
+      logger.info('Rule created', { id: created.id, name: created.name })
+      return created
+    } catch (err) {
+      error.value = extractErrorMessage(err, 'Fehler beim Erstellen der Regel')
+      logger.error('createRule error', err)
+      throw err
+    }
+  }
+
+  /**
+   * Update an existing rule and sync the store
+   */
+  async function updateRule(ruleId: string, data: LogicRuleUpdate): Promise<LogicRule> {
+    error.value = null
+
+    try {
+      const updated = await logicApi.updateRule(ruleId, data)
+      const index = rules.value.findIndex((r) => r.id === ruleId)
+      if (index !== -1) {
+        rules.value[index] = updated
+      }
+      logger.info('Rule updated', { id: ruleId })
+      return updated
+    } catch (err) {
+      error.value = extractErrorMessage(err, 'Fehler beim Aktualisieren der Regel')
+      logger.error('updateRule error', err)
+      throw err
+    }
+  }
+
+  /**
+   * Delete a rule and remove it from the store
+   */
+  async function deleteRule(ruleId: string): Promise<void> {
+    error.value = null
+
+    try {
+      await logicApi.deleteRule(ruleId)
+      rules.value = rules.value.filter((r) => r.id !== ruleId)
+      logger.info('Rule deleted', { id: ruleId })
+    } catch (err) {
+      error.value = extractErrorMessage(err, 'Fehler beim Löschen der Regel')
+      logger.error('deleteRule error', err)
+      throw err
+    }
+  }
+
+  /**
    * Get connections for a specific ESP (either as source or target)
    */
   function getConnectionsForEsp(espId: string): LogicConnection[] {
@@ -330,6 +387,9 @@ export const useLogicStore = defineStore('logic', () => {
     // Actions
     fetchRules,
     fetchRule,
+    createRule,
+    updateRule,
+    deleteRule,
     toggleRule,
     testRule,
     getConnectionsForEsp,

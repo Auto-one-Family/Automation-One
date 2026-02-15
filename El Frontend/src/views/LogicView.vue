@@ -164,15 +164,13 @@ async function saveRule() {
 
   try {
     if (isCreatingNew.value) {
-      // Create new rule
       if (!newRuleName.value.trim()) {
         toast.error('Regelname erforderlich')
         isSaving.value = false
         return
       }
 
-      const { logicApi } = await import('@/api/logic')
-      const created = await logicApi.createRule({
+      const created = await logicStore.createRule({
         name: newRuleName.value.trim(),
         description: newRuleDescription.value.trim() || undefined,
         enabled: false,
@@ -181,22 +179,18 @@ async function saveRule() {
         actions: graphData.actions as unknown[],
       })
 
-      await logicStore.fetchRules()
       selectedRuleId.value = created.id
       isCreatingNew.value = false
       hasUnsavedChanges.value = false
       toast.success(`Regel "${created.name}" erstellt`)
       logger.info('Rule created', { id: created.id, name: created.name })
     } else if (selectedRule.value) {
-      // Update existing rule
-      const { logicApi } = await import('@/api/logic')
-      await logicApi.updateRule(selectedRule.value.id, {
+      await logicStore.updateRule(selectedRule.value.id, {
         conditions: graphData.conditions as unknown[],
         logic_operator: graphData.logic_operator,
         actions: graphData.actions as unknown[],
       })
 
-      await logicStore.fetchRules()
       hasUnsavedChanges.value = false
       toast.success('Regel gespeichert')
       logger.info('Rule updated', { id: selectedRule.value.id })
@@ -252,9 +246,7 @@ async function deleteRule() {
   if (!confirmed) return
 
   try {
-    const { logicApi } = await import('@/api/logic')
-    await logicApi.deleteRule(selectedRule.value.id)
-    await logicStore.fetchRules()
+    await logicStore.deleteRule(selectedRule.value.id)
     selectedRuleId.value = null
     selectedNode.value = null
     hasUnsavedChanges.value = false
@@ -333,6 +325,8 @@ onUnmounted(() => {
         <div class="rule-selector">
           <button
             class="rule-selector__trigger"
+            :aria-expanded="showRuleDropdown"
+            aria-haspopup="listbox"
             @click.stop="showRuleDropdown = !showRuleDropdown"
           >
             <Workflow class="rule-selector__icon" />
@@ -403,6 +397,7 @@ onUnmounted(() => {
           v-if="!isCreatingNew"
           class="toolbar-btn toolbar-btn--accent"
           title="Neue Regel"
+          aria-label="Neue Regel erstellen"
           @click="startNewRule"
         >
           <Plus class="w-4 h-4" />
@@ -414,6 +409,7 @@ onUnmounted(() => {
           v-if="isCreatingNew"
           class="toolbar-btn"
           title="Abbrechen"
+          aria-label="Neue Regel abbrechen"
           @click="cancelNewRule"
         >
           <X class="w-4 h-4" />
@@ -425,6 +421,7 @@ onUnmounted(() => {
           :class="{ 'toolbar-btn--pulse': hasUnsavedChanges }"
           :disabled="isSaving || (!isCreatingNew && !selectedRule)"
           title="Speichern"
+          aria-label="Regel speichern"
           @click="saveRule"
         >
           <Loader2 v-if="isSaving" class="w-4 h-4 animate-spin" />
@@ -433,13 +430,14 @@ onUnmounted(() => {
         </button>
 
         <!-- Divider -->
-        <div class="toolbar-divider" />
+        <div class="toolbar-divider" aria-hidden="true" />
 
         <!-- Test -->
         <button
           class="toolbar-btn"
           :disabled="!selectedRule || isTesting"
           title="Regel testen (ohne Ausführung)"
+          aria-label="Regel testen"
           @click="testRule"
         >
           <Loader2 v-if="isTesting" class="w-4 h-4 animate-spin" />
@@ -453,6 +451,8 @@ onUnmounted(() => {
           :class="{ 'toolbar-btn--enabled': selectedRule?.enabled }"
           :disabled="!selectedRule"
           :title="selectedRule?.enabled ? 'Regel deaktivieren' : 'Regel aktivieren'"
+          :aria-label="selectedRule?.enabled ? 'Regel deaktivieren' : 'Regel aktivieren'"
+          :aria-pressed="selectedRule?.enabled ?? false"
           @click="toggleRule"
         >
           <Eye v-if="selectedRule?.enabled" class="w-4 h-4" />
@@ -464,19 +464,22 @@ onUnmounted(() => {
           class="toolbar-btn toolbar-btn--danger"
           :disabled="!selectedRule"
           title="Regel löschen"
+          aria-label="Regel löschen"
           @click="deleteRule"
         >
           <Trash2 class="w-4 h-4" />
         </button>
 
         <!-- Divider -->
-        <div class="toolbar-divider" />
+        <div class="toolbar-divider" aria-hidden="true" />
 
         <!-- History toggle -->
         <button
           class="toolbar-btn"
           :class="{ 'toolbar-btn--active': showHistory }"
           title="Ausführungshistorie"
+          aria-label="Ausführungshistorie anzeigen"
+          :aria-pressed="showHistory"
           @click="showHistory = !showHistory"
         >
           <History class="w-4 h-4" />
@@ -486,6 +489,7 @@ onUnmounted(() => {
         <button
           class="toolbar-btn"
           title="Ansicht anpassen"
+          aria-label="Ansicht anpassen"
           @click="editorRef?.fitView()"
         >
           <Maximize2 class="w-4 h-4" />
@@ -615,35 +619,37 @@ onUnmounted(() => {
     <!-- ======================== EXECUTION HISTORY ======================== -->
     <Transition name="history-slide">
       <div v-if="showHistory" class="rules-history">
-        <div class="rules-history__header">
-          <span class="rules-history__title">
-            <History class="w-4 h-4" />
-            Letzte Ausführungen
-          </span>
-          <button class="rules-history__close" @click="showHistory = false">
-            <ChevronDown class="w-4 h-4" />
-          </button>
-        </div>
-        <div class="rules-history__list">
-          <div
-            v-for="(exec, i) in logicStore.recentExecutions"
-            :key="i"
-            class="rules-history__item"
-            :class="{ 'rules-history__item--success': exec.success, 'rules-history__item--fail': !exec.success }"
-          >
-            <span class="rules-history__item-time">{{ formatTimestamp(exec.timestamp) }}</span>
-            <span class="rules-history__item-name">{{ exec.rule_name }}</span>
-            <span class="rules-history__item-status">
-              <Check v-if="exec.success" class="w-3 h-3" />
-              <AlertCircle v-else class="w-3 h-3" />
+        <div class="rules-history__inner">
+          <div class="rules-history__header">
+            <span class="rules-history__title">
+              <History class="w-4 h-4" />
+              Letzte Ausführungen
             </span>
-            <span class="rules-history__item-detail">
-              {{ exec.trigger.sensor_type }} {{ exec.trigger.value }}
-              → {{ exec.action.command }}
-            </span>
+            <button class="rules-history__close" @click="showHistory = false" aria-label="Historie schließen">
+              <ChevronDown class="w-4 h-4" />
+            </button>
           </div>
-          <div v-if="logicStore.recentExecutions.length === 0" class="rules-history__empty">
-            Noch keine Ausführungen in dieser Session
+          <div class="rules-history__list">
+            <div
+              v-for="(exec, i) in logicStore.recentExecutions"
+              :key="i"
+              class="rules-history__item"
+              :class="{ 'rules-history__item--success': exec.success, 'rules-history__item--fail': !exec.success }"
+            >
+              <span class="rules-history__item-time">{{ formatTimestamp(exec.timestamp) }}</span>
+              <span class="rules-history__item-name">{{ exec.rule_name }}</span>
+              <span class="rules-history__item-status">
+                <Check v-if="exec.success" class="w-3 h-3" />
+                <AlertCircle v-else class="w-3 h-3" />
+              </span>
+              <span class="rules-history__item-detail">
+                {{ exec.trigger.sensor_type }} {{ exec.trigger.value }}
+                → {{ exec.action.command }}
+              </span>
+            </div>
+            <div v-if="logicStore.recentExecutions.length === 0" class="rules-history__empty">
+              Noch keine Ausführungen in dieser Session
+            </div>
           </div>
         </div>
       </div>
@@ -729,6 +735,11 @@ onUnmounted(() => {
 
 .rule-selector__trigger:hover {
   border-color: var(--color-iridescent-2);
+}
+
+.rule-selector__trigger:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 1px;
 }
 
 .rule-selector__icon {
@@ -914,6 +925,11 @@ onUnmounted(() => {
 
 .toolbar-btn:active:not(:disabled) {
   transform: scale(0.96);
+}
+
+.toolbar-btn:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 1px;
 }
 
 .toolbar-btn:disabled {
@@ -1333,13 +1349,19 @@ onUnmounted(() => {
 /* ======================== EXECUTION HISTORY ======================== */
 
 .rules-history {
+  display: grid;
+  grid-template-rows: 1fr;
   flex-shrink: 0;
-  max-height: 200px;
-  background: var(--color-bg-secondary);
   border-top: 1px solid var(--glass-border);
-  overflow: hidden;
+}
+
+.rules-history__inner {
   display: flex;
   flex-direction: column;
+  max-height: 200px;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
 }
 
 .rules-history__header {
@@ -1440,29 +1462,90 @@ onUnmounted(() => {
 
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all 0.15s ease;
+  transition: opacity var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+  will-change: opacity, transform;
 }
 
 .dropdown-enter-from,
 .dropdown-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-4px) scale(0.98);
 }
 
 .history-slide-enter-active,
 .history-slide-leave-active {
-  transition: all 0.2s ease;
+  transition: grid-template-rows var(--duration-base) var(--ease-out),
+              opacity var(--duration-base) var(--ease-out);
+  display: grid;
+  grid-template-rows: 1fr;
 }
 
 .history-slide-enter-from,
 .history-slide-leave-to {
-  max-height: 0;
+  grid-template-rows: 0fr;
   opacity: 0;
 }
 
-.history-slide-enter-to,
-.history-slide-leave-from {
-  max-height: 200px;
-  opacity: 1;
+.history-slide-enter-active > *,
+.history-slide-leave-active > * {
+  overflow: hidden;
+}
+
+/* ======================== REDUCED MOTION ======================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .rules-empty__flow-node {
+    animation: none;
+  }
+
+  .rules-empty__flow-dash {
+    animation: none;
+  }
+
+  .rules-empty__bg-glow {
+    animation: none;
+  }
+
+  .rules-empty__cta {
+    animation: none;
+    background-size: 100% 100%;
+  }
+
+  .rules-empty__content {
+    animation: none;
+  }
+
+  .toolbar-btn--pulse {
+    animation: none;
+    border-color: var(--color-iridescent-2);
+  }
+
+  .rule-selector__dropdown-flash {
+    animation: none;
+  }
+
+  .toolbar-btn:active:not(:disabled) {
+    transform: none;
+  }
+
+  .toolbar-btn--accent:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .rules-empty__cta:hover {
+    transform: none;
+  }
+
+  .rules-empty__cta:active {
+    transform: none;
+  }
+
+  .dropdown-enter-active,
+  .dropdown-leave-active,
+  .history-slide-enter-active,
+  .history-slide-leave-active {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

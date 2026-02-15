@@ -904,6 +904,26 @@ function selectActuator(value: string) {
   background: rgba(248, 113, 113, 0.08);
 }
 
+.config-action:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 1px;
+}
+
+.config-toggle-btn:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: -1px;
+}
+
+.config-day:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 1px;
+}
+
+.config-panel__close:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 1px;
+}
+
 /* Slide transition */
 .config-slide-enter-active {
   transition: all 0.2s var(--ease-out);
@@ -921,5 +941,18 @@ function selectActuator(value: string) {
 .config-slide-leave-to {
   opacity: 0;
   transform: translateX(8px);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .config-slide-enter-active,
+  .config-slide-leave-active {
+    transition-duration: 0.01ms;
+  }
+
+  .config-slide-enter-from,
+  .config-slide-leave-to {
+    transform: none;
+  }
 }
 </style>

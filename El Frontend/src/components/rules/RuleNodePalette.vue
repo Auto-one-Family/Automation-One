@@ -371,6 +371,7 @@ function matchesSearch(item: PaletteItem): boolean {
   flex-direction: column;
   gap: 1px;
   padding-bottom: 0.5rem;
+  min-height: 0;
 }
 
 .palette__item {
@@ -477,22 +478,55 @@ function matchesSearch(item: PaletteItem): boolean {
   line-height: 1.4;
 }
 
-/* Collapse transition */
+/* Collapse transition using grid-template-rows for smooth animation */
 .palette-collapse-enter-active,
 .palette-collapse-leave-active {
-  transition: all var(--transition-base);
-  overflow: hidden;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--duration-base) var(--ease-out),
+              opacity var(--duration-base) var(--ease-out);
 }
 
 .palette-collapse-enter-from,
 .palette-collapse-leave-to {
+  grid-template-rows: 0fr;
   opacity: 0;
-  max-height: 0;
 }
 
-.palette-collapse-enter-to,
-.palette-collapse-leave-from {
-  opacity: 1;
-  max-height: 500px;
+.palette-collapse-enter-active > *,
+.palette-collapse-leave-active > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Focus-visible for palette items */
+.palette__item:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: -1px;
+}
+
+.palette__category-header:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 1px;
+}
+
+.palette__search-input:focus-visible {
+  outline: none;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .palette__item:active {
+    transform: none;
+  }
+
+  .palette__item:hover .palette__item-icon {
+    transform: none;
+  }
+
+  .palette-collapse-enter-active,
+  .palette-collapse-leave-active {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

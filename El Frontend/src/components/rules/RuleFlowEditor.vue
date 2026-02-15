@@ -89,46 +89,37 @@ const flowWrapper = ref<HTMLElement | null>(null)
 const isDragOver = ref(false)
 let nodeIdCounter = 0
 
-// Sensor icon mapping
-const sensorIcons: Record<string, Component> = {
-  DS18B20: Thermometer,
-  SHT31: Droplets,
-  BME280: Droplets,
-  pH: Gauge,
-  EC: Zap,
-  moisture: Waves,
-  light: Sun,
-  co2: Wind,
-  flow: Waves,
-  level: Leaf,
+// Consolidated sensor configuration: icon, unit, and label per sensor type
+interface SensorMeta {
+  icon: Component
+  unit: string
+  label: string
 }
 
-// Sensor unit mapping
-const sensorUnits: Record<string, string> = {
-  DS18B20: '°C',
-  SHT31: '%',
-  BME280: 'hPa',
-  pH: 'pH',
-  EC: 'mS',
-  moisture: '%',
-  light: 'lux',
-  co2: 'ppm',
-  flow: 'L/m',
-  level: '%',
+const SENSOR_CONFIG: Record<string, SensorMeta> = {
+  DS18B20:  { icon: Thermometer, unit: '°C',  label: 'Temperatur' },
+  SHT31:   { icon: Droplets,    unit: '%',   label: 'Luftfeuchte' },
+  BME280:  { icon: Droplets,    unit: 'hPa', label: 'Luftdruck' },
+  pH:      { icon: Gauge,       unit: 'pH',  label: 'pH-Wert' },
+  EC:      { icon: Zap,         unit: 'mS',  label: 'Leitfähigkeit' },
+  moisture:{ icon: Waves,       unit: '%',   label: 'Bodenfeuchte' },
+  light:   { icon: Sun,         unit: 'lux', label: 'Licht' },
+  co2:     { icon: Wind,        unit: 'ppm', label: 'CO₂' },
+  flow:    { icon: Waves,       unit: 'L/m', label: 'Durchfluss' },
+  level:   { icon: Leaf,        unit: '%',   label: 'Füllstand' },
 }
 
-// Sensor label mapping
-const sensorLabels: Record<string, string> = {
-  DS18B20: 'Temperatur',
-  SHT31: 'Luftfeuchte',
-  BME280: 'Luftdruck',
-  pH: 'pH-Wert',
-  EC: 'Leitfähigkeit',
-  moisture: 'Bodenfeuchte',
-  light: 'Licht',
-  co2: 'CO₂',
-  flow: 'Durchfluss',
-  level: 'Füllstand',
+// Helper accessors for template readability
+function sensorIcon(type: string): Component {
+  return SENSOR_CONFIG[type]?.icon ?? Thermometer
+}
+
+function sensorUnit(type: string): string {
+  return SENSOR_CONFIG[type]?.unit ?? ''
+}
+
+function sensorLabel(type: string): string {
+  return SENSOR_CONFIG[type]?.label ?? type
 }
 
 // Operator display mapping
@@ -148,6 +139,13 @@ const commandDisplay: Record<string, string> = {
   OFF: 'AUS',
   PWM: 'PWM',
   TOGGLE: '⇄',
+}
+
+// Notification channel display mapping
+const channelDisplay: Record<string, string> = {
+  email: 'E-Mail',
+  webhook: 'Webhook',
+  websocket: 'Dashboard',
 }
 
 // Format GPIO pin number
@@ -563,6 +561,22 @@ function padHour(h: number): string {
   return String(h).padStart(2, '0') + ':00'
 }
 
+// MiniMap node color by type
+const MINIMAP_NODE_COLORS: Record<string, string> = {
+  sensor: '#60a5fa',
+  time: '#fbbf24',
+  logic: '#a78bfa',
+  actuator: '#c084fc',
+  notification: '#34d399',
+  delay: '#707080',
+}
+
+const DEFAULT_MINIMAP_COLOR = '#707080'
+
+function miniMapNodeColor(node: Node): string {
+  return MINIMAP_NODE_COLORS[node.type || ''] || DEFAULT_MINIMAP_COLOR
+}
+
 defineExpose({
   graphToRuleData,
   updateNodeData,
@@ -629,24 +643,24 @@ defineExpose({
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--sensor">
               <component
-                :is="sensorIcons[data.sensorType] || Thermometer"
+                :is="sensorIcon(data.sensorType)"
                 class="rule-node__icon"
               />
             </div>
             <div class="rule-node__header-text">
-              <span class="rule-node__type">{{ sensorLabels[data.sensorType] || data.sensorType }}</span>
+              <span class="rule-node__type">{{ sensorLabel(data.sensorType) }}</span>
               <span class="rule-node__chip">{{ data.sensorType }}</span>
             </div>
           </div>
           <div class="rule-node__body">
             <div class="rule-node__condition">
               <template v-if="data.operator === 'between'">
-                {{ data.min }}<span class="rule-node__unit">{{ sensorUnits[data.sensorType] || '' }}</span>
+                {{ data.min }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
                 {{ operatorDisplay.between }}
-                {{ data.max }}<span class="rule-node__unit">{{ sensorUnits[data.sensorType] || '' }}</span>
+                {{ data.max }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
               </template>
               <template v-else>
-                {{ operatorDisplay[data.operator] || data.operator }} {{ data.value }}<span class="rule-node__unit">{{ sensorUnits[data.sensorType] || '' }}</span>
+                {{ operatorDisplay[data.operator] || data.operator }} {{ data.value }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
               </template>
             </div>
           </div>
@@ -752,7 +766,7 @@ defineExpose({
             <div class="rule-node__icon-wrap rule-node__icon-wrap--notification">
               <Bell class="rule-node__icon" />
             </div>
-            <span class="rule-node__type">{{ data.channel === 'email' ? 'E-Mail' : data.channel === 'webhook' ? 'Webhook' : 'Dashboard' }}</span>
+            <span class="rule-node__type">{{ channelDisplay[data.channel] || 'Dashboard' }}</span>
           </div>
           <div class="rule-node__body">
             <div v-if="data.target" class="rule-node__detail">
@@ -801,21 +815,6 @@ defineExpose({
     </VueFlow>
   </div>
 </template>
-
-<script lang="ts">
-// MiniMap color function (must be in Options API or script block)
-function miniMapNodeColor(node: Node): string {
-  const colors: Record<string, string> = {
-    sensor: '#60a5fa',
-    time: '#fbbf24',
-    logic: '#a78bfa',
-    actuator: '#c084fc',
-    notification: '#34d399',
-    delay: '#707080',
-  }
-  return colors[node.type || ''] || '#707080'
-}
-</script>
 
 <style scoped>
 .flow-editor {
@@ -1409,5 +1408,35 @@ function miniMapNodeColor(node: Node): string {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ======================== REDUCED MOTION ======================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .rule-node:hover {
+    transform: none;
+  }
+
+  .rule-node--active {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-iridescent-1);
+  }
+
+  :deep(.vue-flow__edge.animated .vue-flow__edge-path) {
+    animation: none;
+  }
+
+  :deep(.vue-flow__handle:hover) {
+    transform: none;
+  }
+
+  :deep(.vue-flow__handle-connecting),
+  :deep(.vue-flow__handle-valid) {
+    transform: none;
+  }
+
+  .flow-editor__empty-content {
+    animation: none;
+  }
 }
 </style>
