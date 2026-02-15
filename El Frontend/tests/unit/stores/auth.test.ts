@@ -5,12 +5,19 @@
  * token handling, and role-based access control.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
 import { mockUser, mockTokens } from '../../mocks/handlers'
+
+// =============================================================================
+// MSW Server Lifecycle
+// =============================================================================
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
+afterAll(() => server.close())
+afterEach(() => server.resetHandlers())
 
 // =============================================================================
 // MOCK WEBSOCKET SERVICE

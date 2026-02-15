@@ -39,12 +39,18 @@ vi.mock('@/utils/logger', () => ({
 }))
 
 // Import after mocks are set up
+import { beforeAll, afterAll, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useLogicStore } from '@/stores/logic'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
 import { mockLogicRule } from '../../mocks/handlers'
 import { websocketService } from '@/services/websocket'
+
+// MSW Server Lifecycle
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
+afterAll(() => server.close())
+afterEach(() => server.resetHandlers())
 
 // =============================================================================
 // INITIAL STATE

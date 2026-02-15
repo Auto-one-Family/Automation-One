@@ -33,7 +33,7 @@ export * from './actuatorDefaults'
 
 // Logger utility
 export { createLogger } from './logger'
-export type { Logger, LogLevel, LogEntry } from './logger'
+export type { Logger } from './logger'
 
 // NOTE: gpioConfig is NOT exported here due to naming conflict
 // (getCategoryLabel exists in both gpioConfig and errorCodeTranslator)

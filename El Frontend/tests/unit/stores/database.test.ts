@@ -5,12 +5,17 @@
  * pagination, sorting, filtering, and record loading.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useDatabaseStore } from '@/stores/database'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
 import { mockTableSchema, mockTableData } from '../../mocks/handlers'
+
+// MSW Server Lifecycle
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
+afterAll(() => server.close())
+afterEach(() => server.resetHandlers())
 
 // =============================================================================
 // INITIAL STATE

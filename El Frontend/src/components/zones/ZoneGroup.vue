@@ -558,7 +558,7 @@ function getDeviceId(device: ESPDevice): string {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  overflow: visible;
   transition: all var(--transition-base);
 }
 

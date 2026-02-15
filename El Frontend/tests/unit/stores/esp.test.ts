@@ -5,7 +5,7 @@
  * Mock ESP operations, and pending device approval workflow.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
@@ -16,6 +16,11 @@ import {
   mockPendingDevice,
   mockGpioStatus
 } from '../../mocks/handlers'
+
+// MSW Server Lifecycle
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
+afterAll(() => server.close())
+afterEach(() => server.resetHandlers())
 
 // =============================================================================
 // MOCK WEBSOCKET SERVICE (must be before import)
