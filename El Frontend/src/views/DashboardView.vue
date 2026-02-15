@@ -886,6 +886,20 @@ const unassignedCount = computed(() => {
             :devices="group.devices"
             @click="handleZonePlateClick"
           />
+
+          <!-- Unassigned devices summary -->
+          <div v-if="unassignedCount > 0" class="zones-view__unassigned">
+            <div class="zones-view__unassigned-header">
+              <span class="zones-view__unassigned-icon">⚠</span>
+              <span class="zones-view__unassigned-label">Nicht zugewiesen</span>
+            </div>
+            <span class="zones-view__unassigned-count">
+              {{ unassignedCount }} Gerät{{ unassignedCount !== 1 ? 'e' : '' }}
+            </span>
+            <p class="zones-view__unassigned-hint">
+              Wechsle zu Ebene 1 um Geräte per Drag & Drop zuzuweisen
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -1433,6 +1447,46 @@ const unassignedCount = computed(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-4, 1rem);
+}
+
+/* Unassigned devices card in zones view */
+.zones-view__unassigned {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: rgba(251, 191, 36, 0.04);
+  border: 1px dashed rgba(251, 191, 36, 0.25);
+  border-radius: 1rem;
+}
+
+.zones-view__unassigned-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.zones-view__unassigned-icon {
+  font-size: 0.875rem;
+}
+
+.zones-view__unassigned-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-warning, #fbbf24);
+}
+
+.zones-view__unassigned-count {
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-primary);
+}
+
+.zones-view__unassigned-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  margin: 0;
 }
 
 @media (max-width: 640px) {

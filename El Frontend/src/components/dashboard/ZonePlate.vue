@@ -139,6 +139,22 @@ function handleClick() {
       </span>
     </div>
 
+    <!-- Device Mini-Previews (status dots) -->
+    <div class="zone-plate__devices">
+      <div
+        v-for="device in devices.slice(0, 12)"
+        :key="espStore.getDeviceId(device)"
+        :class="[
+          'zone-plate__device-dot',
+          device.status === 'online' || device.connected ? 'zone-plate__device-dot--online' : 'zone-plate__device-dot--offline'
+        ]"
+        :title="device.name || espStore.getDeviceId(device)"
+      />
+      <span v-if="devices.length > 12" class="zone-plate__device-more">
+        +{{ devices.length - 12 }}
+      </span>
+    </div>
+
     <!-- Subzone Areas -->
     <div v-if="subzoneGroups.length > 0" class="zone-plate__subzones">
       <div
@@ -275,6 +291,42 @@ function handleClick() {
 .zone-plate__chip-icon {
   width: 0.625rem;
   height: 0.625rem;
+}
+
+/* Device Mini-Previews */
+.zone-plate__devices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.zone-plate__device-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.zone-plate__device-dot:hover {
+  transform: scale(1.5);
+}
+
+.zone-plate__device-dot--online {
+  background: var(--color-success, #34d399);
+  box-shadow: 0 0 4px rgba(52, 211, 153, 0.4);
+}
+
+.zone-plate__device-dot--offline {
+  background: var(--color-text-muted, #484860);
+  opacity: 0.5;
+}
+
+.zone-plate__device-more {
+  font-size: 0.5625rem;
+  color: var(--color-text-muted);
+  padding: 0 0.25rem;
 }
 
 /* Subzone Areas */
