@@ -21,7 +21,7 @@
 import { defineAsyncComponent } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import ESPOrbitalLayout from './ESPOrbitalLayout.vue'
 import DeviceHeaderBar from './DeviceHeaderBar.vue'
 

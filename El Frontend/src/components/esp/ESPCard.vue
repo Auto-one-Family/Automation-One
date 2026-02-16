@@ -789,7 +789,7 @@ const offlineTimeAbsolute = computed(() => {
         </div>
         <!-- WiFi Unknown state -->
         <div v-else class="esp-card__stat esp-card__wifi" title="WiFi-Signalstärke: Keine Daten verfügbar">
-          <Wifi class="w-4 h-4 text-slate-500" style="opacity: 0.4" />
+          <Wifi class="w-4 h-4 text-slate-500 opacity-40" />
           <span class="text-slate-500">Unbekannt</span>
         </div>
       </div>

@@ -307,7 +307,7 @@ function formatErrorTime(isoString: string): string {
 }
 
 .health-summary--expanded {
-  z-index: 50;
+  z-index: var(--z-modal);
 }
 
 .health-summary--has-problems {
@@ -533,7 +533,7 @@ function formatErrorTime(isoString: string): string {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0);
-  z-index: 40;
+  z-index: var(--z-modal-backdrop);
   transition: background 0.2s ease;
 }
 

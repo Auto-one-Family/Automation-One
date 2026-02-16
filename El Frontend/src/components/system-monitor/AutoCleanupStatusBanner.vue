@@ -385,20 +385,6 @@ function formatNumber(num: number): string {
   box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
 }
 
-/* Animations */
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Icon sizing */
 .w-4 {
   width: 1rem;

@@ -13,7 +13,7 @@
 import { ref, computed, watch } from 'vue'
 import { X, Loader2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square, Check } from 'lucide-vue-next'
 import GpioPicker from './GpioPicker.vue'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import {

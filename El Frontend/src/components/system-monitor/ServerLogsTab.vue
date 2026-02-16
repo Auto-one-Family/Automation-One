@@ -985,10 +985,6 @@ watch(selectedFile, () => {
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 .logs-empty__icon {
   width: 3rem;
   height: 3rem;

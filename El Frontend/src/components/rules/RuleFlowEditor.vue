@@ -38,7 +38,7 @@ import {
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { LogicRule, SensorCondition, TimeCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { useEspStore } from '@/stores/esp'
 
 // Vue Flow CSS

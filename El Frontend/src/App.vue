@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
 import { onMounted, onUnmounted, ref } from 'vue'
-import ToastContainer from '@/components/common/ToastContainer.vue'
+import ToastContainer from '@/shared/design/patterns/ToastContainer.vue'
 import ErrorDetailsModal from '@/components/error/ErrorDetailsModal.vue'
 import type { ErrorDetailsData } from '@/components/error/ErrorDetailsModal.vue'
 import ConfirmDialog from '@/shared/design/patterns/ConfirmDialog.vue'

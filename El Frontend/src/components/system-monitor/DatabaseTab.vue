@@ -16,7 +16,7 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
-import { useDatabaseStore } from '@/stores/database'
+import { useDatabaseStore } from '@/shared/stores/database.store'
 import {
   getColumnLabel,
   formatCellValue,
@@ -574,10 +574,6 @@ onMounted(async () => {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-bottom: 0.5rem;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 /* =============================================================================

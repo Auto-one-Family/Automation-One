@@ -51,6 +51,12 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 
+/* === Spin (loading spinners) === */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* === Scale In (modals, popovers) === */
 @keyframes scale-in {
   0% { opacity: 0; transform: scale(0.95); }

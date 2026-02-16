@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { useUiStore } from '@/shared/stores'
 import { useRouter } from 'vue-router'
 import { Settings, User, LogOut, Server } from 'lucide-vue-next'

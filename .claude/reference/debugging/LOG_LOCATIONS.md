@@ -1,6 +1,6 @@
 # Log-System - AutomationOne
 
-> **Version:** 3.7 | **Aktualisiert:** 2026-02-13
+> **Version:** 3.8 | **Aktualisiert:** 2026-02-15
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
 
@@ -126,10 +126,12 @@ tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"           # Live
 grep -i error "El Servador/god_kaiser_server/logs/god_kaiser.log"     # Errors suchen
 
 # ============================================
-# TESTS
+# TESTS (poetry run oder .venv direkt)
 # ============================================
 cd "El Servador/god_kaiser_server" && poetry run pytest tests/ -v --no-cov    # Alle Tests
 cd "El Servador/god_kaiser_server" && poetry run pytest tests/ -v --lf        # Nur fehlgeschlagene
+# Falls poetry auf falsches Python resolved → .venv direkt:
+cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/ -v --no-cov
 
 # ============================================
 # WOKWI
@@ -138,11 +140,12 @@ cd "El Trabajante" && wokwi-cli . --timeout 90000 --serial-log-file wokwi.log   
 cd "El Trabajante" && wokwi-cli . --timeout 90000 2>&1 | tee wokwi.log          # Pipe Alternative        # Mit Capture
 
 # ============================================
-# ESP32 SERIAL
+# ESP32 SERIAL (PowerShell/PlatformIO Terminal empfohlen - Git Bash kann COM-Port nicht öffnen)
 # ============================================
 cd "El Trabajante" && pio device monitor                                       # Live
 cd "El Trabajante" && pio device monitor > serial.log 2>&1                     # Direkte Umleitung (EMPFOHLEN)
-cd "El Trabajante" && pio device monitor | tee serial.log                      # Mit tee (Git Bash)
+cd "El Trabajante" && pio device monitor | tee serial.log                      # Mit tee
+# Hinweis: pio ist in Git Bash nicht im PATH → ~/.platformio/penv/Scripts/pio.exe
 
 # ============================================
 # MQTT
@@ -332,6 +335,10 @@ poetry run pytest tests/unit/test_xyz.py -xvs --tb=long  # Einzelner Test
 
 # CI-Format
 poetry run pytest tests/unit/ -v --junitxml=junit-unit.xml
+
+# Falls poetry auf Python 3.14 statt .venv (3.13) resolved → .venv direkt:
+.venv/Scripts/pytest.exe tests/ -v --no-cov
+.venv/Scripts/pytest.exe tests/unit/ -xvs --tb=long
 ```
 
 ### 3.4 Coverage Report öffnen
@@ -462,10 +469,11 @@ monitor_speed = 115200
 ### 5.2 Port identifizieren
 
 ```bash
-# PlatformIO
+# PlatformIO (Git Bash: vollständiger Pfad nötig)
 cd "El Trabajante" && pio device list
+# Git Bash: ~/.platformio/penv/Scripts/pio.exe device list
 
-# Windows PowerShell
+# Windows PowerShell (NICHT aus Git Bash aufrufen - $_ Escaping-Probleme)
 Get-WmiObject Win32_SerialPort | Select-Object Caption, DeviceID
 ```
 

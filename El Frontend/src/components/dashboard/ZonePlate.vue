@@ -22,6 +22,7 @@ import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
 import DeviceMiniCard from './DeviceMiniCard.vue'
 
+
 interface Props {
   zoneId: string
   zoneName: string
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   (e: 'click', payload: { zoneId: string; originRect: DOMRect }): void
   (e: 'device-dropped', payload: { device: ESPDevice; fromZoneId: string | null; toZoneId: string }): void
   (e: 'device-click', payload: { deviceId: string; originRect: DOMRect }): void
+  (e: 'settings', device: ESPDevice): void
 }>()
 
 const espStore = useEspStore()
@@ -174,6 +176,10 @@ function handleDeviceClick(payload: { deviceId: string; originRect: DOMRect }) {
   emit('device-click', payload)
 }
 
+function handleDeviceSettings(device: ESPDevice) {
+  emit('settings', device)
+}
+
 // ── Drag & Drop ──────────────────────────────────────────────────────────
 function isMock(device: ESPDevice): boolean {
   return espStore.isMock(espStore.getDeviceId(device))
@@ -274,6 +280,7 @@ function handleDragEnd() {
             :device="device"
             :is-mock="isMock(device)"
             @click="handleDeviceClick"
+            @settings="handleDeviceSettings"
           />
         </div>
       </template>

@@ -42,7 +42,7 @@ import {
   ACTUATOR_TYPE_CONFIG,
   type ActuatorTypeConfig,
 } from '@/utils/actuatorDefaults'
-import { useDragStateStore } from '@/stores/dragState'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
 
 const dragStore = useDragStateStore()
 

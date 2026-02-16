@@ -15,6 +15,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useScrollLock } from '@/composables/useScrollLock'
 import { X, Check, Ban, Wifi, Clock, MapPin, Info, Loader2, Radio } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { getWifiStrength } from '@/utils/wifiStrength'
@@ -50,28 +51,45 @@ const rejectingDevices = ref<Set<string>>(new Set())
 const rejectModalOpen = ref(false)
 const rejectTargetDevice = ref<PendingESPDevice | null>(null)
 
+// Reference-counted scroll lock
+const scrollLock = useScrollLock()
+
+// Escape key handler
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && props.isOpen) {
+    handleClose()
+  }
+}
+
 // Fetch pending devices when panel opens
 watch(() => props.isOpen, (open) => {
   if (open) {
+    scrollLock.lock()
     espStore.fetchPendingDevices()
     nextTick(updatePosition)
     // Re-run after layout (offsetWidth can be 0 on first paint)
     requestAnimationFrame(() => requestAnimationFrame(updatePosition))
+  } else {
+    scrollLock.unlock()
   }
 })
 
 onMounted(() => {
   if (props.isOpen) {
+    scrollLock.lock()
     espStore.fetchPendingDevices()
     nextTick(updatePosition)
   }
   window.addEventListener('resize', updatePosition)
   window.addEventListener('scroll', updatePosition, true)
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', updatePosition)
   window.removeEventListener('scroll', updatePosition, true)
+  window.removeEventListener('keydown', handleKeydown)
+  scrollLock.unlock()
 })
 
 // Watch for anchor changes
@@ -422,9 +440,9 @@ function isProcessing(deviceId: string): boolean {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal-backdrop);
-  background: rgba(7, 7, 13, 0.72);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: var(--backdrop-color);
+  -webkit-backdrop-filter: blur(var(--backdrop-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 /* Panel Container - positioned via JS, CSS fallback wenn anchor=null */
@@ -570,10 +588,6 @@ function isProcessing(deviceId: string): boolean {
   height: 1.5rem;
   color: var(--color-iridescent-2);
   animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 /* Empty State */

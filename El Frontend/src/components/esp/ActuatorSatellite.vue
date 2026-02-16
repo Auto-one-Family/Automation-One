@@ -16,7 +16,7 @@ import { computed, ref } from 'vue'
 import { Power, ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog } from 'lucide-vue-next'
 import { Badge } from '@/shared/design'
 import { getActuatorTypeInfo } from '@/utils/labels'
-import { useDragStateStore } from '@/stores/dragState'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
 
 interface Props {
   /** ESP ID this actuator belongs to */

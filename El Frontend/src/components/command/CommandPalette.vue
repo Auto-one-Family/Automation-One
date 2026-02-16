@@ -7,7 +7,8 @@
  * Supports keyboard navigation: ArrowUp/Down, Enter, Escape.
  */
 
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { useScrollLock } from '@/composables/useScrollLock'
 import { Search, CornerDownLeft } from 'lucide-vue-next'
 import { useUiStore } from '@/shared/stores'
 import { useCommandPalette } from '@/composables/useCommandPalette'
@@ -16,14 +17,22 @@ const uiStore = useUiStore()
 const palette = useCommandPalette()
 const inputRef = ref<HTMLInputElement | null>(null)
 const listRef = ref<HTMLDivElement | null>(null)
+const scrollLock = useScrollLock()
 
 // Auto-focus input and reset query when palette opens
 watch(() => uiStore.commandPaletteOpen, async (open) => {
   if (open) {
+    scrollLock.lock()
     palette.resetQuery()
     await nextTick()
     inputRef.value?.focus()
+  } else {
+    scrollLock.unlock()
   }
+})
+
+onUnmounted(() => {
+  scrollLock.unlock()
 })
 
 function handleKeydown(e: KeyboardEvent): void {
@@ -165,13 +174,14 @@ watch(() => palette.query.value, () => {
 .palette-overlay {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: var(--z-tooltip);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 20vh;
-  background: rgba(7, 7, 13, 0.6);
-  backdrop-filter: blur(4px);
+  background: var(--backdrop-color-light);
+  -webkit-backdrop-filter: blur(var(--backdrop-blur-light));
+  backdrop-filter: blur(var(--backdrop-blur-light));
 }
 
 .palette {

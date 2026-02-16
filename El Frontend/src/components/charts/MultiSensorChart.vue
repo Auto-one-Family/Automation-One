@@ -890,9 +890,4 @@ onUnmounted(() => {
   height: 1rem;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 </style>

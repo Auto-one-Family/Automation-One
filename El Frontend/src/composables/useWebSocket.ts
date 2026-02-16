@@ -33,7 +33,7 @@ export interface UseWebSocketOptions {
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const {
     autoConnect = true,
-    autoReconnect = true,
+    autoReconnect: _autoReconnect = true,
     filters,
   } = options
 

@@ -14,7 +14,7 @@
 
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { LogIn, Eye, EyeOff, AlertCircle, Cpu } from 'lucide-vue-next'
 
@@ -570,11 +570,6 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
   width: 20px;
   height: 20px;
   animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .login-form__spinner-track {

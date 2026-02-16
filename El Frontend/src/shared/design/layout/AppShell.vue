@@ -112,7 +112,7 @@ onUnmounted(() => {
   background: rgba(7, 7, 13, 0.6);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
-  z-index: 30;
+  z-index: var(--z-fixed);
 }
 
 @media (min-width: 768px) {

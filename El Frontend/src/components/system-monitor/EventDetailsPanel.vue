@@ -834,7 +834,7 @@ onUnmounted(() => {
   left: 16rem;
   right: 0;
   max-height: 65vh;
-  z-index: 50;
+  z-index: var(--z-modal);
   overflow-y: auto;
   transition: transform 0.15s ease-out;
 
@@ -1546,7 +1546,7 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   left: 16rem; /* Offset for sidebar */
-  z-index: 49; /* Below panel (z-index: 50) */
+  z-index: var(--z-modal-backdrop);
   background: transparent;
   opacity: 0;
   transition: opacity 0.2s ease, background-color 0.2s ease;
@@ -1729,12 +1729,4 @@ onUnmounted(() => {
   color: var(--color-text-primary, #f0f0f5);
 }
 
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 </style>

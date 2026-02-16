@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
 import { mockUser, mockTokens } from '../../mocks/handlers'

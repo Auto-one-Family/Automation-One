@@ -21,7 +21,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useWebSocket } from '@/composables/useWebSocket'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
 import { detectCategory } from '@/utils/errorCodeTranslator'
 import { auditApi, type AuditStatistics, type StatisticsTimeRange, type DataSource, type UnifiedEventFromAPI } from '@/api/audit'
@@ -1795,7 +1795,7 @@ watch(activeTab, (newTab) => {
   top: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 100;
+  z-index: var(--z-sticky);
   padding: var(--space-sm) var(--space-md);
   background: rgba(0, 0, 0, 0.95);
   border: 1px solid var(--glass-border);
@@ -2335,15 +2335,6 @@ watch(activeTab, (newTab) => {
   display: none;
 }
 
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 /* ============================================================================
    Toast Notification - Success/Error/Info
    ============================================================================ */
@@ -2352,7 +2343,7 @@ watch(activeTab, (newTab) => {
   bottom: var(--space-xl);
   left: 50%;
   transform: translateX(-50%);
-  z-index: var(--z-toast, 9999);
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: var(--space-md);

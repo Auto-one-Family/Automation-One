@@ -57,20 +57,24 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('1/2')
   })
 
-  it('shows sensor count', () => {
+  it('shows sensor count per device', () => {
     const w = mountPlate()
-    expect(w.text()).toContain('3 Sensoren')
+    // ZonePlate delegates per-device rendering to DeviceMiniCard
+    // ESP 1 has 1 sensor, ESP 2 has 2 sensors
+    expect(w.text()).toContain('1 Sensoren')
+    expect(w.text()).toContain('2 Sensoren')
   })
 
-  it('shows actuator count', () => {
+  it('shows actuator indicator per device', () => {
     const w = mountPlate()
-    expect(w.text()).toContain('1 Aktoren')
+    // ESP 1 has 1 actuator, shown as compact "1S·1A" in DeviceMiniCard
+    expect(w.text()).toContain('1A')
   })
 
-  it('renders device status dots', () => {
+  it('renders device wrappers for each device', () => {
     const w = mountPlate()
-    const dots = w.findAll('.zone-plate__device-dot')
-    expect(dots).toHaveLength(2)
+    const wrappers = w.findAll('.zone-plate__device-wrapper')
+    expect(wrappers).toHaveLength(2)
   })
 
   it('renders subzone label', () => {
@@ -78,11 +82,13 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('Bewässerung')
   })
 
-  it('emits click with zoneId', async () => {
+  it('emits click with zoneId and originRect', async () => {
     const w = mountPlate()
     await w.find('.zone-plate').trigger('click')
     expect(w.emitted('click')).toBeTruthy()
-    expect(w.emitted('click')![0]).toEqual([{ zoneId: 'zone_1' }])
+    const payload = w.emitted('click')![0][0] as { zoneId: string; originRect: DOMRect }
+    expect(payload.zoneId).toBe('zone_1')
+    expect(payload.originRect).toBeDefined()
   })
 
   it('has healthy class when all online', () => {

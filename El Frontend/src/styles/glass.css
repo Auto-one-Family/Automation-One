@@ -14,9 +14,9 @@
 
   /* Glass Modal Overlay */
   .glass-overlay {
-    background: rgba(7, 7, 13, 0.85);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    background: var(--backdrop-color);
+    -webkit-backdrop-filter: blur(var(--backdrop-blur));
+    backdrop-filter: blur(var(--backdrop-blur));
   }
 
   /* Iridescent Border — for active/premium elements */

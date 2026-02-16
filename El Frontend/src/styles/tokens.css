@@ -24,7 +24,7 @@
      ═══════════════════════════════════════════════════════════════════════════ */
   --color-text-primary:   #eaeaf2;  /* headlines, primary values, white-ish */
   --color-text-secondary: #8585a0;  /* labels, descriptions, body text */
-  --color-text-muted:     #484860;  /* timestamps, hints, disabled text */
+  --color-text-muted:     #484860;  /* timestamps, hints, disabled — 4.1:1 on primary, use on tertiary+ bg only */
 
   /* ═══════════════════════════════════════════════════════════════════════════
      ACCENT — 1 color, 3 intensities
@@ -137,6 +137,10 @@
   --transition-base: var(--duration-base) var(--ease-out);
   --transition-slow: var(--duration-slow) var(--ease-out);
 
+  /* Overlay / sheet specific */
+  --transition-overlay: var(--duration-base) var(--ease-out);
+  --transition-sheet:   var(--duration-slow) var(--ease-out);
+
   /* ═══════════════════════════════════════════════════════════════════════════
      Z-INDEX SCALE
      ═══════════════════════════════════════════════════════════════════════════ */
@@ -144,10 +148,22 @@
   --z-dropdown:       10;
   --z-sticky:         20;
   --z-fixed:          30;
+  --z-tray:           35;  /* bottom tray (UnassignedDropBar) — below modals */
   --z-modal-backdrop: 40;
   --z-modal:          50;
   --z-popover:        60;
   --z-tooltip:        70;
+  --z-drag-overlay:   72;  /* drag feedback — ephemeral, above tooltip */
+  --z-toast:          73;  /* toasts — above modals, below safety */
+  --z-safety:         75;  /* EmergencyStop — highest interactive priority */
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     BACKDROP / OVERLAY
+     ═══════════════════════════════════════════════════════════════════════════ */
+  --backdrop-color:       rgba(7, 7, 13, 0.85);
+  --backdrop-color-light: rgba(7, 7, 13, 0.60);
+  --backdrop-blur:        8px;
+  --backdrop-blur-light:  4px;
 
   /* ═══════════════════════════════════════════════════════════════════════════
      TYPOGRAPHY

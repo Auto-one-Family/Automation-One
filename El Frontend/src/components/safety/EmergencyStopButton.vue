@@ -159,7 +159,7 @@ async function handleEmergencyStop() {
 .emergency-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--z-safety);
   display: flex;
   align-items: center;
   justify-content: center;

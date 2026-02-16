@@ -71,7 +71,7 @@ function isObject(value: unknown): boolean {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+  <div class="fixed inset-0 flex items-center justify-center p-4" style="z-index: var(--z-modal); background: var(--backdrop-color); backdrop-filter: blur(var(--backdrop-blur)); -webkit-backdrop-filter: blur(var(--backdrop-blur))">
     <div class="card w-full max-w-3xl max-h-[90vh] flex flex-col">
       <!-- Header -->
       <div class="flex items-center justify-between p-4 border-b border-dark-700">

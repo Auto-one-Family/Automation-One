@@ -41,7 +41,7 @@ vi.mock('@/utils/logger', () => ({
 // Import after mocks are set up
 import { beforeAll, afterAll, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
 import { mockLogicRule } from '../../mocks/handlers'

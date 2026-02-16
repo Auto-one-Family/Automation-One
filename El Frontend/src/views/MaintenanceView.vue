@@ -4,7 +4,7 @@
     <div class="status-section">
       <h2>Service Status</h2>
       <div v-if="loading" class="loading">
-        <LoadingState message="Lade Maintenance-Status..." />
+        <BaseSkeleton text="Lade Maintenance-Status..." />
       </div>
 
       <div v-else-if="status" class="status-grid">
@@ -199,7 +199,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { debugApi, type MaintenanceStatusResponse, type MaintenanceConfigResponse } from '@/api/debug'
-import LoadingState from '@/components/common/LoadingState.vue'
+import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('Maintenance')

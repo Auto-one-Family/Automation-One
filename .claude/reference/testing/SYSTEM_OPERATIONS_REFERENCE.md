@@ -1,7 +1,8 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.8 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-13
+> **Version:** 2.9 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-15
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.9:** Health-Response korrigiert (Code-Abgleich), Provisioning Portal für Real-Hardware (§6.1), `tasklist` → Docker-Alternative, sqlite3 → PostgreSQL in §6.2/6.3, PlatformIO Git-Bash-Hinweis, Auth-Header ergänzt
 > **Änderungen 2.8:** Frontend-Container-Logs als Quelle ergänzt (Loki/docker compose logs, §9 + Log-Verzeichnisse)
 > **Änderungen 2.7:** Playwright E2E-Pfade und -Befehle; Playwright MCP für Agenten (Browser-Inspection) in §9.1
 > **Änderungen 2.6:** Loki-Queries auf compose_service umgestellt (ROADMAP §1.1); MQTT-Logs ohne Bind-Mount dokumentiert
@@ -508,8 +509,10 @@ kill -SIGTERM <PID>
 
 # PID finden
 ps aux | grep uvicorn
-# Windows:
-tasklist | findstr uvicorn
+# Windows (PowerShell):
+Get-Process | Where-Object { $_.ProcessName -like '*uvicorn*' }
+# Windows (Docker):
+docker compose ps el-servador
 ```
 
 ---
@@ -543,14 +546,21 @@ curl http://localhost:8000/api/v1/health/metrics
 #### Erwartete Responses
 
 ```json
-// /health
+// GET / (Root - Service Info)
 {
-  "success": true,
-  "status": "healthy",
+  "service": "God-Kaiser Server",
   "version": "2.0.0",
-  "environment": "development",
+  "status": "online",
   "mqtt_connected": true,
-  "uptime_seconds": 3600
+  "environment": "development",
+  "docs": "/docs",
+  "api_prefix": "/api/v1"
+}
+
+// GET /health (Simple Health Check)
+{
+  "status": "healthy",       // "healthy" oder "degraded"
+  "mqtt_connected": true
 }
 
 // /api/v1/health/detailed
@@ -1087,6 +1097,8 @@ mosquitto_pub -h localhost -t "kaiser/broadcast/emergency" -r -n
 
 ## 5. ESP32-Hardware
 
+**Hinweis:** `pio` ist in Git Bash nicht im PATH. Vollständiger Pfad: `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Upload/Monitor-Befehle erfordern COM-Port-Zugriff → PowerShell oder PlatformIO Terminal nutzen (Git Bash kann COM-Ports nicht öffnen).
+
 ### 5.1 Flash-Operationen
 
 ```bash
@@ -1284,40 +1296,55 @@ Die NVS-Operationen erfolgen über die Firmware oder Boot-Button:
 
 ### 6.1 Neues ESP komplett registrieren
 
+#### Reale Hardware (Provisioning Portal)
+
 ```bash
-# 1. ESP flashen
+# 1. ESP flashen (PowerShell oder PlatformIO Terminal empfohlen, Git Bash kann COM-Port nicht öffnen)
 cd "El Trabajante"
 pio run -e esp32_dev -t upload
 
-# 2. Monitor öffnen (in neuem Terminal)
+# 2. ESP startet im AP-Modus (Provisioning Portal)
+#    - SSID: "AutoOne-ESP_XXXXXXXX" (Chip-ID)
+#    - Passwort: "provision"
+#    - Portal-URL: http://192.168.4.1
+#    → WiFi-SSID, WiFi-Password, MQTT-Broker-IP konfigurieren
+#    → Nach Speichern: ESP rebootet und verbindet sich via WiFi+MQTT
+
+# 3. Monitor öffnen (PowerShell oder PlatformIO Terminal)
 pio device monitor -b 115200
 
-# 3. Warten auf Heartbeat (ESP sendet automatisch)
+# 4. Warten auf Heartbeat (ESP sendet automatisch nach WiFi+MQTT Verbindung)
 mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
 
-# 4. ESP sollte als "pending" erscheinen
-curl http://localhost:8000/api/v1/esp/devices/pending
+# 5. ESP sollte als "pending" erscheinen (Auth erforderlich)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/esp/devices/pending
 
-# 5. ESP genehmigen
+# 6. ESP genehmigen
 curl -X POST http://localhost:8000/api/v1/esp/devices/ESP_XXXXX/approve \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"approved_by": "admin"}'
 
-# 6. Zone zuweisen
+# 7. Zone zuweisen
 curl -X POST http://localhost:8000/api/v1/zone/devices/ESP_XXXXX/assign \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"zone_id": "greenhouse_1", "zone_name": "Gewächshaus 1"}'
 
-# 7. Sensoren konfigurieren
+# 8. Sensoren konfigurieren
 curl -X POST http://localhost:8000/api/v1/sensors/ESP_XXXXX/4 \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"sensor_type": "DS18B20", "name": "Temperatur", "enabled": true}'
 
-# 8. Aktoren konfigurieren
+# 9. Aktoren konfigurieren
 curl -X POST http://localhost:8000/api/v1/actuators/ESP_XXXXX/5 \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"actuator_type": "pump", "name": "Pumpe", "enabled": true}'
 ```
+
+**Hinweis:** `$TOKEN` muss vorher via Login geholt werden (siehe §0.2). Upload/Monitor-Befehle funktionieren NICHT aus Git Bash (COM-Port-Zugriff fehlt) - PowerShell oder PlatformIO Terminal nutzen.
 
 ---
 
@@ -1330,11 +1357,12 @@ curl -X POST http://localhost:8000/api/v1/actuators/ESP_XXXXX/5/command \
   -d '{"command": "OFF"}'
 
 # 2. ESP über API löschen (löscht auch Configs)
-curl -X DELETE http://localhost:8000/api/v1/esp/devices/ESP_XXXXX
+curl -X DELETE http://localhost:8000/api/v1/esp/devices/ESP_XXXXX \
+  -H "Authorization: Bearer $TOKEN"
 
-# 3. Alte Daten bereinigen (optional)
-sqlite3 "El Servador/god_kaiser_server/god_kaiser_dev.db" \
-  "DELETE FROM sensor_data WHERE esp_id NOT IN (SELECT id FROM esp_devices);"
+# 3. Alte Daten bereinigen (optional, PostgreSQL)
+docker exec -i postgres psql -U god_kaiser -d god_kaiser_db \
+  -c "DELETE FROM sensor_data WHERE esp_id NOT IN (SELECT id FROM esp_devices);"
 
 # 4. Retained MQTT Messages löschen
 mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_XXXXX/system/heartbeat" -r -n
@@ -1351,18 +1379,21 @@ mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_XXXXX/status" -r -n
 # 1. Server stoppen
 # Ctrl+C im Server-Terminal
 
-# 2. Datenbank löschen
-rm "El Servador/god_kaiser_server/god_kaiser_dev.db"
+# 2. Datenbank zurücksetzen (PostgreSQL via Docker)
+docker exec -i postgres psql -U god_kaiser -d god_kaiser_db \
+  -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+# Oder: Cleanup-Script nutzen (behält User-Accounts):
+cd "El Servador/god_kaiser_server"
+.venv/Scripts/python.exe ../../scripts/cleanup_for_real_esp.py
 
 # 3. Logs löschen (optional)
-rm -rf "El Servador/god_kaiser_server/logs/"*
+rm -rf logs/server/* logs/postgres/*
 
 # 4. Mosquitto Retained Messages löschen (alle)
 mosquitto_pub -h localhost -t "kaiser/#" -r -n
 
-# 5. Server neu starten (erstellt neue DB)
-cd "El Servador/god_kaiser_server"
-poetry run uvicorn src.main:app --reload
+# 5. Server neu starten (Docker)
+docker compose restart el-servador
 
 # 6. ESP32s: Factory Reset (Boot-Button 10s)
 # Oder: Flash erase

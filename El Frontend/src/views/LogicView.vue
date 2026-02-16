@@ -41,7 +41,7 @@ import {
   Zap,
   GitBranch,
 } from 'lucide-vue-next'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { useUiStore } from '@/shared/stores'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
@@ -677,7 +677,7 @@ onUnmounted(() => {
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
-  z-index: 20;
+  z-index: var(--z-sticky);
 }
 
 .rules-toolbar__left {
@@ -786,7 +786,7 @@ onUnmounted(() => {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-  z-index: 50;
+  z-index: var(--z-sticky);
   overflow: hidden;
 }
 

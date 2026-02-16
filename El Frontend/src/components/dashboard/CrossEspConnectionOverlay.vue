@@ -15,7 +15,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import type { LogicConnection } from '@/types/logic'
 
 interface Props {
@@ -393,7 +393,7 @@ watch(
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 50;
+  z-index: var(--z-modal);
   overflow: visible;
 }
 

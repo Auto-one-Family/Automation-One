@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -21,7 +21,7 @@ const router = createRouter({
     // Protected routes (require auth)
     {
       path: '/',
-      component: () => import('@/components/layout/MainLayout.vue'),
+      component: () => import('@/shared/design/layout/AppShell.vue'),
       meta: { requiresAuth: true },
       children: [
         {

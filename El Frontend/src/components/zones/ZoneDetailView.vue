@@ -15,7 +15,7 @@
 import { computed } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { ArrowLeft } from 'lucide-vue-next'
 import SubzoneArea from './SubzoneArea.vue'
 import DeviceSummaryCard from './DeviceSummaryCard.vue'

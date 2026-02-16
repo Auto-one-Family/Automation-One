@@ -16,6 +16,7 @@
  */
 
 import { ref, nextTick, onUnmounted, computed, watch } from 'vue'
+import { useScrollLock } from '@/composables/useScrollLock'
 import {
   X,
   AlertTriangle,
@@ -58,6 +59,7 @@ const showTechnicalDetails = ref(false)
 const backdropRef = ref<HTMLElement | null>(null)
 const modalRef = ref<HTMLElement | null>(null)
 let previouslyFocused: HTMLElement | null = null
+const scrollLock = useScrollLock()
 
 const severityLevel = computed((): ErrorSeverity => {
   const s = props.error?.severity
@@ -123,6 +125,7 @@ function handleBackdropClick(e: MouseEvent) {
 watch(() => props.open, (isOpen) => {
   showTechnicalDetails.value = false
   if (isOpen) {
+    scrollLock.lock()
     previouslyFocused = document.activeElement as HTMLElement | null
     document.addEventListener('keydown', handleKeydown)
     nextTick(() => {
@@ -130,6 +133,7 @@ watch(() => props.open, (isOpen) => {
       closeBtn?.focus()
     })
   } else {
+    scrollLock.unlock()
     document.removeEventListener('keydown', handleKeydown)
     previouslyFocused?.focus()
     previouslyFocused = null
@@ -138,6 +142,7 @@ watch(() => props.open, (isOpen) => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
+  scrollLock.unlock()
 })
 </script>
 
@@ -249,12 +254,13 @@ onUnmounted(() => {
 .error-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--z-tooltip);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: var(--backdrop-color-light);
+  -webkit-backdrop-filter: blur(var(--backdrop-blur-light));
+  backdrop-filter: blur(var(--backdrop-blur-light));
 }
 
 .error-modal {

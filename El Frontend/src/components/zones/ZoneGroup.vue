@@ -20,7 +20,7 @@ import {
 } from 'lucide-vue-next'
 import ESPCard from '@/components/esp/ESPCard.vue'
 import { type ESPDevice } from '@/api/esp'
-import { useDragStateStore } from '@/stores/dragState'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ZoneGroup')
@@ -880,7 +880,7 @@ function getDeviceId(device: ESPDevice): string {
 
 .zone-item--drag {
   transform: scale(1.03);
-  z-index: 9999;  /* Höher als alles andere während des Ziehens */
+  z-index: var(--z-drag-overlay);  /* Token: höher als alles andere während des Ziehens */
   pointer-events: none;  /* Verhindert Selbst-Drop */
 }
 
@@ -898,7 +898,7 @@ function getDeviceId(device: ESPDevice): string {
  */
 :global(.zone-item--fallback) {
   transform: scale(1.02);
-  z-index: 9999;
+  z-index: var(--z-drag-overlay);
   pointer-events: none;
   opacity: 0.85;
   will-change: transform;

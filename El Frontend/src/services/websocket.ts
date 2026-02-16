@@ -8,7 +8,7 @@
  * Rate Limiting: 10 messages per second
  */
 
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import type { MessageType } from '@/types'
 import { createLogger } from '@/utils/logger'
 

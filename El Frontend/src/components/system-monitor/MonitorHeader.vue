@@ -411,7 +411,7 @@ const espTooltip = computed(() => {
   top: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 100;
+  z-index: var(--z-sticky);
   padding: var(--space-sm) var(--space-md);
   background: rgba(0, 0, 0, 0.95);
   border: 1px solid var(--glass-border);
@@ -648,15 +648,6 @@ const espTooltip = computed(() => {
 
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 /* Icon sizes */

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useDatabaseStore } from '@/stores/database'
+import { useDatabaseStore } from '@/shared/stores/database.store'
 import { server } from '../../mocks/server'
 import { http, HttpResponse } from 'msw'
 import { mockTableSchema, mockTableData } from '../../mocks/handlers'

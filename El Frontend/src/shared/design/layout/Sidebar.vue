@@ -7,7 +7,7 @@
  */
 
 import { useRoute } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import {
   X,
   LayoutDashboard,
@@ -210,7 +210,7 @@ function handleNavClick() {
   border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
-  z-index: 40;
+  z-index: var(--z-fixed);
   transition: transform 0.3s var(--ease-out);
 }
 
