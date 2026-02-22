@@ -84,6 +84,7 @@ jobs:
           path: |
             El Frontend/junit-results.xml
             logs/frontend/vitest/coverage/
+          retention-days: 7
 
   build:
     name: Build Check
