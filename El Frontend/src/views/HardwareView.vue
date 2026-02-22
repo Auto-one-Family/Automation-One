@@ -25,6 +25,12 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('HardwareView')
 
+// SlideOver + Config Panels
+import SlideOver from '@/shared/design/primitives/SlideOver.vue'
+import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
+import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
+import ESPConfigPanel from '@/components/esp/ESPConfigPanel.vue'
+
 // Components
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
@@ -71,6 +77,14 @@ useSwipeNavigation(zoomContainerRef, {
 const settingsDevice = ref<ESPDevice | null>(null)
 const isSettingsOpen = ref(false)
 const showCrossEspConnections = ref(true)
+
+// SlideOver states for config panels
+const showSensorConfig = ref(false)
+const showActuatorConfig = ref(false)
+const showEspConfig = ref(false)
+const configSensorData = ref<{ espId: string; gpio: number; sensorType: string; unit: string } | null>(null)
+const configActuatorData = ref<{ espId: string; gpio: number; actuatorType: string } | null>(null)
+const configEspDevice = ref<ESPDevice | null>(null)
 
 // =============================================================================
 // Lifecycle
@@ -448,6 +462,50 @@ function formatTimeAgo(timestamp: number): string {
       @name-updated="handleNameUpdated"
       @zone-updated="handleZoneUpdated"
     />
+
+    <!-- Sensor Config SlideOver -->
+    <SlideOver
+      :open="showSensorConfig"
+      :title="configSensorData?.sensorType || 'Sensor'"
+      width="lg"
+      @close="showSensorConfig = false"
+    >
+      <SensorConfigPanel
+        v-if="configSensorData"
+        :esp-id="configSensorData.espId"
+        :gpio="configSensorData.gpio"
+        :sensor-type="configSensorData.sensorType"
+        :unit="configSensorData.unit"
+      />
+    </SlideOver>
+
+    <!-- Actuator Config SlideOver -->
+    <SlideOver
+      :open="showActuatorConfig"
+      :title="configActuatorData?.actuatorType || 'Aktor'"
+      width="lg"
+      @close="showActuatorConfig = false"
+    >
+      <ActuatorConfigPanel
+        v-if="configActuatorData"
+        :esp-id="configActuatorData.espId"
+        :gpio="configActuatorData.gpio"
+        :actuator-type="configActuatorData.actuatorType"
+      />
+    </SlideOver>
+
+    <!-- ESP Config SlideOver -->
+    <SlideOver
+      :open="showEspConfig"
+      :title="configEspDevice?.name || 'ESP'"
+      width="lg"
+      @close="showEspConfig = false"
+    >
+      <ESPConfigPanel
+        v-if="configEspDevice"
+        :device="configEspDevice"
+      />
+    </SlideOver>
   </div>
 </template>
 
