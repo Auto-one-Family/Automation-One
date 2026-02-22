@@ -66,12 +66,14 @@ jobs:
           # BuildKit for faster cached builds
           DOCKER_BUILDKIT: 1
           COMPOSE_DOCKER_CLI_BUILD: 1
-          # CI-specific environment (merged from .env.ci and compose files)
+          # Shell env vars for docker-compose.yml base config variable substitution.
+          # NOTE: docker-compose.e2e.yml overrides postgres password and JWT to
+          # e2e_test_password / e2e_test_secret_key_not_for_production respectively.
+          # These values here suppress "variable is not set" warnings from the base config.
           POSTGRES_USER: god_kaiser
-          POSTGRES_PASSWORD: ci_password
+          POSTGRES_PASSWORD: e2e_test_password
           POSTGRES_DB: god_kaiser_db
-          # JWT secret to suppress docker-compose warning from base config
-          JWT_SECRET_KEY: ci_test_secret_key_not_for_production
+          JWT_SECRET_KEY: e2e_test_secret_key_not_for_production
 
       - name: Wait for healthy services
         run: |
