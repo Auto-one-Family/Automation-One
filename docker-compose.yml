@@ -371,12 +371,9 @@ services:
     depends_on:
       mqtt-broker:
         condition: service_healthy
+    # Image is a scratch Go binary - no shell, wget, or curl available
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9234/metrics || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      test: ["NONE"]
     networks:
       - automationone-net
     restart: unless-stopped

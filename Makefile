@@ -65,7 +65,7 @@ help:
 	@echo "  make wokwi-seed          - Seed database with 3 Wokwi test devices"
 	@echo "  make wokwi-list          - List all available test scenarios"
 	@echo "  make wokwi-test-quick    - Run quick tests (boot + heartbeat)"
-	@echo "  make wokwi-test-full     - Run all CI scenarios (23 tests)"
+	@echo "  make wokwi-test-full     - Run all CI scenarios (22 tests)"
 	@echo "  make wokwi-test-scenario SCENARIO=path - Run specific scenario"
 	@echo "  make wokwi-test-category CAT=01-boot   - Run category tests"
 	@echo "  make wokwi-run           - Start Wokwi interactively (ESP_00000001)"
