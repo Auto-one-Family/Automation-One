@@ -1,6 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 3.8 | **Aktualisiert:** 2026-02-15
+> **Version:** 3.9 | **Aktualisiert:** 2026-02-22
+> **Änderungen 3.9:** Error-Injection Wokwi-Logs (11-error-injection/), Verweis auf WOKWI_ERROR_MAPPING.md
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
 
@@ -172,6 +173,7 @@ gh run download <run-id>                                                       #
 | ESP32 | `> serial.log 2>&1` (Umleitung) | Text | ⚠️ log2file unzuverlässig |
 | MQTT | `> mqtt.log` (Umleitung) | Text | ❌ Capture nötig |
 | Wokwi Logs | `logs/wokwi/{serial,mqtt,reports}/` | Text/JSON | ✅ Automatisch (Makefile) |
+| Wokwi Error-Injection | `logs/wokwi/error-injection/error_*.log` | Text | ✅ CI (background pattern + mosquitto_pub) |
 | Playwright E2E | `logs/frontend/playwright/playwright-report/`, `logs/frontend/playwright/test-results/` | HTML/JSON | ✅ Config `playwright.config.ts` |
 | CI | `gh run view --log` | Text | ✅ `--log` Flag |
 
@@ -940,6 +942,7 @@ curl -s http://localhost:9090/api/v1/targets
 **Letzte Aktualisierung:** 2026-02-13
 **Version:** 3.7
 **Changelog:**
+- 3.9: Error-Injection Wokwi-Logs (`11-error-injection/`), Verweis auf `WOKWI_ERROR_MAPPING.md`
 - 3.7: §12.0 Erreichbarkeit aller Ebenen (Tabelle KI-Optimalität); Loki-Beispiele für postgres + esp32-serial-logger
 - 3.6: Frontend-Container-Logs als Log-Quelle ergänzt (stdout → Loki, kein Bind-Mount; Tabelle Log-Verzeichnisse, 1.1, 1.2, 12.2)
 - 3.5: Playwright E2E-Log-Pfade in Quick-Reference und Übersicht ergänzt (logs/frontend/playwright/)

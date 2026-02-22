@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.1 | **Aktualisiert:** 2026-02-02
+> **Version:** 2.2 | **Aktualisiert:** 2026-02-22
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -63,7 +63,7 @@ allowed-tools: Read
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
 | `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken |
 | `/sensors/types` | GET | JWT | Alle Sensor-Typen |
-| `/sensors/{sensor_id}/calibrate` | POST | JWT | Sensor kalibrieren |
+| `/sensors/calibrate` | POST | JWT/API-Key | Sensor kalibrieren (body: esp_id, gpio, sensor_type, calibration_points) |
 | `/sensors/{sensor_id}/process` | POST | JWT | Sensor-Wert verarbeiten |
 | `/sensors/onewire/scan` | POST | JWT | OneWire-Bus scannen |
 | `/sensors/{sensor_id}/trigger` | POST | JWT | Messung triggern |
