@@ -18,50 +18,60 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }))
 afterAll(() => server.close())
 afterEach(() => server.resetHandlers())
 
-// Capture WebSocket event handlers
-const wsHandlers: Record<string, Function[]> = {}
-
+// Mock WebSocket service
 vi.mock('@/services/websocket', () => ({
   websocketService: {
     disconnect: vi.fn(),
     connect: vi.fn(),
     isConnected: vi.fn(() => true),
-    on: vi.fn((event: string, handler: Function) => {
-      if (!wsHandlers[event]) wsHandlers[event] = []
-      wsHandlers[event].push(handler)
-      return vi.fn() // unsubscribe function
-    }),
-    onConnect: vi.fn(() => vi.fn())
+    on: vi.fn(() => vi.fn()),
+    onConnect: vi.fn(() => vi.fn()),
+    onStatusChange: vi.fn(() => vi.fn())
   }
 }))
 
-// Helper to simulate WebSocket message
-function simulateWsMessage(event: string, data: unknown) {
-  const handlers = wsHandlers[event] || []
-  handlers.forEach(h => h(data))
-}
+vi.mock('@/composables/useWebSocket', () => ({
+  useWebSocket: vi.fn(() => ({
+    on: vi.fn(() => vi.fn()),
+    disconnect: vi.fn(),
+    connect: vi.fn(),
+    status: 'connected'
+  }))
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: vi.fn(() => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+    dismiss: vi.fn(),
+    dismissAll: vi.fn()
+  }))
+}))
+
+// Import stores after mocks
+import { useEspStore } from '@/stores/esp'
 
 describe('WebSocket → Store Data Flow Integration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    // Clear accumulated handlers
-    Object.keys(wsHandlers).forEach(key => delete wsHandlers[key])
+    vi.clearAllMocks()
   })
 
   it('ESP store processes device list from mock API', async () => {
-    const { useESPStore } = await import('@/stores/esp')
-    const store = useESPStore()
+    const store = useEspStore()
 
     // Fetch devices via API (intercepted by MSW)
-    await store.fetchESPDevices()
+    await store.fetchAll()
 
     // Verify devices were loaded from mock API
-    expect(store.espDevices.length).toBeGreaterThanOrEqual(0)
+    expect(store.devices.length).toBeGreaterThanOrEqual(0)
   })
 
-  it('store handles concurrent updates without data loss', async () => {
-    const { useESPStore } = await import('@/stores/esp')
-    const store = useESPStore()
+  it('store handles concurrent updates without data loss', () => {
+    const store = useEspStore()
 
     // Simulate rapid updates
     const devices = Array.from({ length: 5 }, (_, i) => ({
@@ -78,9 +88,9 @@ describe('WebSocket → Store Data Flow Integration', () => {
     }))
 
     // Patch all at once (simulating batch update)
-    store.$patch({ espDevices: devices })
+    store.$patch({ devices: devices })
 
-    expect(store.espDevices).toHaveLength(5)
-    expect(store.espDevices[4].name).toBe('Rapid ESP 4')
+    expect(store.devices).toHaveLength(5)
+    expect(store.devices[4].name).toBe('Rapid ESP 4')
   })
 })

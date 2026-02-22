@@ -26,13 +26,40 @@ vi.mock('@/services/websocket', () => ({
     connect: vi.fn(),
     isConnected: vi.fn(() => false),
     on: vi.fn(() => vi.fn()),
-    onConnect: vi.fn(() => vi.fn())
+    onConnect: vi.fn(() => vi.fn()),
+    onStatusChange: vi.fn(() => vi.fn())
   }
 }))
+
+vi.mock('@/composables/useWebSocket', () => ({
+  useWebSocket: vi.fn(() => ({
+    on: vi.fn(() => vi.fn()),
+    disconnect: vi.fn(),
+    connect: vi.fn(),
+    status: 'disconnected'
+  }))
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: vi.fn(() => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+    dismiss: vi.fn(),
+    dismissAll: vi.fn()
+  }))
+}))
+
+// Import stores after mocks
+import { useEspStore } from '@/stores/esp'
+import { useAuthStore } from '@/stores/auth'
 
 describe('Error Handling Integration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.clearAllMocks()
   })
 
   it('ESP store handles 500 server error on device fetch', async () => {
@@ -46,18 +73,17 @@ describe('Error Handling Integration', () => {
       })
     )
 
-    const { useESPStore } = await import('@/stores/esp')
-    const store = useESPStore()
+    const store = useEspStore()
 
     // Attempt to fetch devices — should handle error gracefully
     try {
-      await store.fetchESPDevices()
+      await store.fetchAll()
     } catch (e) {
       // May throw — that's OK
     }
 
     // Store should not contain corrupt data
-    expect(Array.isArray(store.espDevices)).toBe(true)
+    expect(Array.isArray(store.devices)).toBe(true)
   })
 
   it('ESP store handles network timeout gracefully', async () => {
@@ -68,26 +94,24 @@ describe('Error Handling Integration', () => {
       })
     )
 
-    const { useESPStore } = await import('@/stores/esp')
-    const store = useESPStore()
+    const store = useEspStore()
 
     try {
-      await store.fetchESPDevices()
+      await store.fetchAll()
     } catch (e) {
       // Expected to fail
     }
 
     // Store should remain in a valid state
-    expect(Array.isArray(store.espDevices)).toBe(true)
+    expect(Array.isArray(store.devices)).toBe(true)
   })
 
-  it('auth store handles expired token on API call', async () => {
-    const { useAuthStore } = await import('@/stores/auth')
-    const store = useAuthStore()
+  it('auth store handles expired token scenario', async () => {
+    const authStore = useAuthStore()
 
     // Simulate having an expired token
-    store.$patch({
-      token: 'expired-token',
+    authStore.$patch({
+      accessToken: 'expired-token',
       user: {
         id: 1,
         username: 'testuser',
@@ -98,7 +122,7 @@ describe('Error Handling Integration', () => {
       }
     })
 
-    expect(store.isAuthenticated).toBe(true)
+    expect(authStore.isAuthenticated).toBe(true)
 
     // Override to return 401 for any authenticated request
     server.use(
@@ -110,18 +134,15 @@ describe('Error Handling Integration', () => {
       })
     )
 
-    // The token is technically "valid" in store but the server rejects it
-    // This tests that the error is handled, not swallowed
-    const { useESPStore } = await import('@/stores/esp')
-    const espStore = useESPStore()
+    const espStore = useEspStore()
 
     try {
-      await espStore.fetchESPDevices()
+      await espStore.fetchAll()
     } catch (e) {
       // Expected
     }
 
     // ESP data should not be corrupted
-    expect(Array.isArray(espStore.espDevices)).toBe(true)
+    expect(Array.isArray(espStore.devices)).toBe(true)
   })
 })

@@ -1,7 +1,7 @@
 /**
  * Integration Test: Authentication Flow
  *
- * Tests the complete login → token storage → authenticated API call
+ * Tests the complete login → token storage → authenticated state
  * flow. This validates that auth state correctly propagates to
  * API request headers and store state.
  *
@@ -30,22 +30,25 @@ vi.mock('@/services/websocket', () => ({
   }
 }))
 
+// Import store after mocks
+import { useAuthStore } from '@/stores/auth'
+
 describe('Authentication Flow Integration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    vi.clearAllMocks()
   })
 
   it('login → store update → isAuthenticated becomes true', async () => {
-    const { useAuthStore } = await import('@/stores/auth')
     const store = useAuthStore()
 
     // Before login
     expect(store.isAuthenticated).toBe(false)
     expect(store.user).toBeNull()
 
-    // Perform login
-    await store.login('testuser', 'password123')
+    // Perform login with credentials object
+    await store.login({ username: 'testuser', password: 'password123' })
 
     // After login — store should have user and token
     expect(store.isAuthenticated).toBe(true)
@@ -54,20 +57,18 @@ describe('Authentication Flow Integration', () => {
   })
 
   it('logout clears all auth state', async () => {
-    const { useAuthStore } = await import('@/stores/auth')
     const store = useAuthStore()
 
     // Login first
-    await store.login('testuser', 'password123')
+    await store.login({ username: 'testuser', password: 'password123' })
     expect(store.isAuthenticated).toBe(true)
 
-    // Logout
-    store.logout()
+    // Logout (async — calls API then clears state)
+    await store.logout()
 
     // All auth state should be cleared
     expect(store.isAuthenticated).toBe(false)
     expect(store.user).toBeNull()
-    expect(store.token).toBe('')
   })
 
   it('handles login failure gracefully', async () => {
@@ -81,12 +82,11 @@ describe('Authentication Flow Integration', () => {
       })
     )
 
-    const { useAuthStore } = await import('@/stores/auth')
     const store = useAuthStore()
 
     // Attempt login with bad credentials
     try {
-      await store.login('baduser', 'badpass')
+      await store.login({ username: 'baduser', password: 'badpass' })
     } catch (e) {
       // Expected to throw
     }

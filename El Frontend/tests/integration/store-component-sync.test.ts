@@ -25,25 +25,51 @@ vi.mock('@/services/websocket', () => ({
     connect: vi.fn(),
     isConnected: vi.fn(() => false),
     on: vi.fn(() => vi.fn()),
-    onConnect: vi.fn(() => vi.fn())
+    onConnect: vi.fn(() => vi.fn()),
+    onStatusChange: vi.fn(() => vi.fn())
   }
 }))
+
+vi.mock('@/composables/useWebSocket', () => ({
+  useWebSocket: vi.fn(() => ({
+    on: vi.fn(() => vi.fn()),
+    disconnect: vi.fn(),
+    connect: vi.fn(),
+    status: 'connected'
+  }))
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: vi.fn(() => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+    dismiss: vi.fn(),
+    dismissAll: vi.fn()
+  }))
+}))
+
+// Import stores after mocks
+import { useEspStore } from '@/stores/esp'
+import { useAuthStore } from '@/stores/auth'
 
 describe('Store → Component Sync Integration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.clearAllMocks()
   })
 
-  it('ESP store device update reflects in computed getters', async () => {
-    const { useESPStore } = await import('@/stores/esp')
-    const store = useESPStore()
+  it('ESP store device update reflects in computed getters', () => {
+    const store = useEspStore()
 
     // Initially no devices
-    expect(store.espDevices).toHaveLength(0)
+    expect(store.devices).toHaveLength(0)
 
-    // Simulate WebSocket device update (direct store mutation)
+    // Simulate device update (direct store mutation)
     store.$patch({
-      espDevices: [{
+      devices: [{
         esp_id: 'ESP_INT_001',
         device_id: 'ESP_INT_001',
         name: 'Integration Test ESP',
@@ -58,21 +84,21 @@ describe('Store → Component Sync Integration', () => {
     })
 
     // Verify store state updated
-    expect(store.espDevices).toHaveLength(1)
-    expect(store.espDevices[0].name).toBe('Integration Test ESP')
-    expect(store.espDevices[0].status).toBe('online')
+    expect(store.devices).toHaveLength(1)
+    expect(store.devices[0].name).toBe('Integration Test ESP')
+    expect(store.devices[0].status).toBe('online')
   })
 
-  it('auth store login state propagates correctly', async () => {
-    const { useAuthStore } = await import('@/stores/auth')
+  it('auth store login state propagates correctly', () => {
     const store = useAuthStore()
 
     // Initially not authenticated
     expect(store.isAuthenticated).toBe(false)
 
     // Simulate successful login (direct state update)
+    // isAuthenticated requires both accessToken AND user
     store.$patch({
-      token: 'test-token-integration',
+      accessToken: 'test-token-integration',
       user: {
         id: 1,
         username: 'integration_test',
