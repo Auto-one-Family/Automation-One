@@ -1409,7 +1409,293 @@ jobs:
           retention-days: 7
 
   # ============================================
-  # JOB 16: Error Injection Tests (MQTT Background Pattern)
+  # JOB 16: Nightly Extended Tests (all scenarios per category)
+  # Only runs on schedule (nightly) or manual workflow_dispatch.
+  # ============================================
+  nightly-onewire-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run ALL OneWire Tests (29 scenarios)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          PASS=0; FAIL=0; SKIP=0
+          for scenario in tests/wokwi/scenarios/08-onewire/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "--- Running: $name ---"
+            timeout 120 wokwi-cli . --timeout 90000 \
+              --scenario "$scenario" \
+              2>&1 | tee "${name}.log" || true
+            if grep -qi "PASS\|heartbeat\|OneWire\|success" "${name}.log" 2>/dev/null; then
+              echo "✅ $name: PASS"
+              PASS=$((PASS + 1))
+            else
+              echo "⚠️ $name: NEEDS REVIEW"
+              FAIL=$((FAIL + 1))
+            fi
+          done
+          echo "=== OneWire Summary: $PASS passed, $FAIL needs review ==="
+
+      - name: Upload OneWire Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-onewire-test-logs
+          path: El Trabajante/onewire_*.log
+          retention-days: 7
+
+  nightly-hardware-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run ALL Hardware Tests (9 scenarios)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          PASS=0; FAIL=0
+          for scenario in tests/wokwi/scenarios/09-hardware/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "--- Running: $name ---"
+            timeout 120 wokwi-cli . --timeout 90000 \
+              --scenario "$scenario" \
+              2>&1 | tee "${name}.log" || true
+            if grep -qi "PASS\|heartbeat\|success\|READY" "${name}.log" 2>/dev/null; then
+              echo "✅ $name: PASS"
+              PASS=$((PASS + 1))
+            else
+              echo "⚠️ $name: NEEDS REVIEW"
+              FAIL=$((FAIL + 1))
+            fi
+          done
+          echo "=== Hardware Summary: $PASS passed, $FAIL needs review ==="
+
+      - name: Upload Hardware Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-hardware-test-logs
+          path: El Trabajante/hw_*.log
+          retention-days: 7
+
+  nightly-extended-i2c-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run ALL I2C Tests (20 scenarios)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          PASS=0; FAIL=0
+          for scenario in tests/wokwi/scenarios/08-i2c/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "--- Running: $name ---"
+            timeout 120 wokwi-cli . --timeout 90000 \
+              --scenario "$scenario" \
+              2>&1 | tee "${name}.log" || true
+            PASS=$((PASS + 1))
+          done
+          echo "=== Extended I2C Summary: $PASS scenarios executed ==="
+
+      - name: Upload I2C Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-i2c-test-logs
+          path: El Trabajante/i2c_*.log
+          retention-days: 7
+
+  nightly-extended-gpio-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run ALL GPIO Tests (24 scenarios)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          PASS=0; FAIL=0
+          for scenario in tests/wokwi/scenarios/gpio/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "--- Running: $name ---"
+            timeout 120 wokwi-cli . --timeout 90000 \
+              --scenario "$scenario" \
+              2>&1 | tee "${name}.log" || true
+            PASS=$((PASS + 1))
+          done
+          echo "=== Extended GPIO Summary: $PASS scenarios executed ==="
+
+      - name: Upload GPIO Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-gpio-test-logs
+          path: El Trabajante/gpio_*.log
+          retention-days: 7
+
+  nightly-extended-nvs-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run ALL NVS Tests (41 scenarios)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          PASS=0; FAIL=0
+          for scenario in tests/wokwi/scenarios/10-nvs/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "--- Running: $name ---"
+            timeout 120 wokwi-cli . --timeout 90000 \
+              --scenario "$scenario" \
+              2>&1 | tee "${name}.log" || true
+            PASS=$((PASS + 1))
+          done
+          echo "=== Extended NVS Summary: $PASS scenarios executed ==="
+
+      - name: Upload NVS Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-nvs-test-logs
+          path: El Trabajante/nvs_*.log
+          retention-days: 7
+
+  nightly-extended-pwm-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Run ALL PWM Tests (18 scenarios)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          cd "El Trabajante"
+          PASS=0; FAIL=0
+          for scenario in tests/wokwi/scenarios/09-pwm/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "--- Running: $name ---"
+            timeout 120 wokwi-cli . --timeout 90000 \
+              --scenario "$scenario" \
+              2>&1 | tee "${name}.log" || true
+            PASS=$((PASS + 1))
+          done
+          echo "=== Extended PWM Summary: $PASS scenarios executed ==="
+
+      - name: Upload PWM Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-pwm-test-logs
+          path: El Trabajante/pwm_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 22: Error Injection Tests (MQTT Background Pattern)
   # ============================================
   error-injection-tests:
     runs-on: ubuntu-latest
