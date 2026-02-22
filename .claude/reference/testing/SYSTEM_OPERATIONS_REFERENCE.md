@@ -1,7 +1,8 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.9 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-15
+> **Version:** 2.10 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-21
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.10:** Serena MCP-Server Pfade in §9, .mcp.json Pfad ergänzt
 > **Änderungen 2.9:** Health-Response korrigiert (Code-Abgleich), Provisioning Portal für Real-Hardware (§6.1), `tasklist` → Docker-Alternative, sqlite3 → PostgreSQL in §6.2/6.3, PlatformIO Git-Bash-Hinweis, Auth-Header ergänzt
 > **Änderungen 2.8:** Frontend-Container-Logs als Quelle ergänzt (Loki/docker compose logs, §9 + Log-Verzeichnisse)
 > **Änderungen 2.7:** Playwright E2E-Pfade und -Befehle; Playwright MCP für Agenten (Browser-Inspection) in §9.1
@@ -1720,6 +1721,8 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **Playwright E2E Config** | `El Frontend/playwright.config.ts` |
 | **Playwright E2E Report** | `logs/frontend/playwright/playwright-report/` |
 | **Playwright E2E test-results** | `logs/frontend/playwright/test-results/` |
+| **MCP Server Config** | `.mcp.json` (Projektroot, git-committed) |
+| **Serena LSP Config** | `.serena/project.yml` (gitignored, lokale LSP-Config für Python/TypeScript/C++) |
 
 ### 9.1 Playwright (E2E + MCP für Agenten)
 
@@ -1734,4 +1737,4 @@ Wenn Cursor den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-13 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-21 | AutomationOne Debug-Operations-Reference*

@@ -207,11 +207,12 @@ El Trabajante/tests/wokwi/scenarios/
 ├── 09-hardware/      (9)   - Hardware detection, board types
 ├── 09-pwm/           (18)  - PWM control scenarios
 ├── 10-nvs/           (40)  - NVS storage scenarios
+├── 11-error-injection/ (10) - Error injection (MQTT via CI background pattern)
 └── gpio/             (24)  - GPIO allocation, conflicts
 ```
 
-**Total:** 163 scenarios
-**In CI:** 23 scenarios (categories 01-07 only)
+**Total:** 173 scenarios
+**In CI:** 52 scenarios (categories 01-07 + gpio/i2c/nvs/pwm core + error-injection)
 
 ### Scenario YAML Structure
 
@@ -246,8 +247,9 @@ steps:
 | `"WiFi connected successfully"` | `wifi_manager.cpp` | WiFi connected |
 | `"MQTT connected successfully"` | `mqtt_client.cpp` | MQTT connected |
 | `"REGISTRATION CONFIRMED"` | `mqtt_client.cpp:750` | Gate opened |
-| `"heartbeat"` | `mqtt_client.cpp:697` | Heartbeat sent |
-| `"Published"` | `mqtt_client.cpp` | Sensor data sent |
+| `"heartbeat"` | `main.cpp:787` | Initial heartbeat (LOG_INFO, boot only) |
+| `"ConfigResponse published"` | `config_response.cpp:45` | Config processed (sensor/actuator) |
+| `"Published"` | `mqtt_client.cpp:558` | MQTT publish (LOG_DEBUG, invisible at default level) |
 
 **Validation:** All `wait-serial` strings must match actual firmware output. Mismatches cause test timeouts.
 
@@ -259,30 +261,39 @@ steps:
 
 **Structure:**
 - 1 Build Job (shared firmware artifact)
-- 12 Test Jobs (parallel)
+- 16 Test Jobs (parallel)
 - 1 Summary Job
 
 **Test Jobs:**
 1. `boot-tests` (2 scenarios)
 2. `sensor-tests` (5 scenarios)
-3. `actuator-tests` (7 scenarios)
-4. `zone-tests` (2 scenarios)
-5. `emergency-tests` (3 scenarios)
-6. `config-tests` (2 scenarios)
-7. `combined-tests` (2 scenarios)
-8. ... (additional jobs)
+3. `mqtt-connection-test` (1 scenario, legacy)
+4. `actuator-tests` (7 scenarios)
+5. `zone-tests` (2 scenarios)
+6. `emergency-tests` (3 scenarios)
+7. `config-tests` (2 scenarios)
+8. `sensor-flow-tests` (3 scenarios)
+9. `actuator-flow-tests` (3 scenarios)
+10. `combined-flow-tests` (3 scenarios)
+11. `gpio-core-tests` (5 scenarios)
+12. `i2c-core-tests` (5 scenarios)
+13. `nvs-core-tests` (5 scenarios)
+14. `pwm-core-tests` (3 scenarios)
+15. `error-injection-tests` (10 scenarios, background pattern with `mosquitto_pub`)
+16. `test-summary`
 
-**Total CI Runtime:** ~15-20 minutes (parallel execution)
+**Total CI Runtime:** ~20-25 minutes (parallel execution)
 
-**Coverage Gap:** 140 scenarios NOT in CI
-- 08-i2c/ (20)
+**Error-Injection Pattern (Job 15):**
+Error-injection scenarios use a background pattern: `wokwi-cli` runs in background, then `mosquitto_pub` injects MQTT messages externally. YAML files contain only `wait-serial` + `delay` steps. See `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` for details.
+
+**Coverage Gap:** 121 scenarios NOT in CI
 - 08-onewire/ (29)
 - 09-hardware/ (9)
-- 09-pwm/ (18)
-- 10-nvs/ (40)
-- gpio/ (24)
-
-**Recommendation:** Increase coverage to 80%+ (130+ scenarios) in future sprint.
+- 09-pwm/ (15 remaining)
+- 10-nvs/ (35 remaining)
+- gpio/ (19 remaining)
+- 08-i2c/ (15 remaining)
 
 ---
 
@@ -624,6 +635,7 @@ npx wokwi-cli . --timeout 90000 --scenario <scenario>
 - **ESP32 Development:** `.technical-manager/inbox/agent-reports/wokwi-esp32-development-2026-02-11.md`
 - **TM Integration Plan:** `.technical-manager/commands/pending/wokwi-integration-improvement.md`
 - **System Operations:** `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
+- **Error-Injection Mapping:** `.claude/reference/testing/WOKWI_ERROR_MAPPING.md`
 - **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
 
 ### External Resources

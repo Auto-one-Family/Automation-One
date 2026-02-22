@@ -43,7 +43,7 @@
     "server": {
       "framework": "pytest",
       "location": "El Servador/god_kaiser_server/tests/",
-      "command": "cd \"El Servador/god_kaiser_server\" && poetry run pytest -v --tb=short --no-cov"
+      "command": "cd \"El Servador/god_kaiser_server\" && .venv/Scripts/pytest.exe -v --tb=short --no-cov"
     },
     "wokwi": {
       "framework": "wokwi-cli",
@@ -62,7 +62,7 @@
       "command": "cd \"El Trabajante\" && pio run -e"
     },
     "server": {
-      "command": "cd \"El Servador/god_kaiser_server\" && poetry install"
+      "command": "cd \"El Servador/god_kaiser_server\" && .venv/Scripts/pip.exe install -e ."
     },
     "frontend": {
       "command": "cd \"El Frontend\" && npm install && npm run build"
@@ -70,7 +70,7 @@
   },
   "run": {
     "server": {
-      "command": "cd \"El Servador/god_kaiser_server\" && poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000"
+      "command": "cd \"El Servador/god_kaiser_server\" && .venv/Scripts/python.exe -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000"
     },
     "frontend": {
       "command": "cd \"El Frontend\" && npm run dev"
@@ -100,7 +100,7 @@
     "serverUrl": "http://localhost:8000",
     "defaultCredentials": {
       "username": "admin",
-      "password": "admin"
+      "password": "Admin123#"
     },
     "plugins": "El Servador/god_kaiser_server/src/autoops/plugins/",
     "reports": "El Servador/god_kaiser_server/src/autoops/reports/",
