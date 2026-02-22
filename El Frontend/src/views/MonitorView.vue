@@ -12,12 +12,15 @@
  * threshold monitoring, manual actuator control.
  */
 
-import { computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { ArrowLeft, Thermometer, Droplets, Zap, Activity, AlertTriangle } from 'lucide-vue-next'
 import type { MockSensor, MockActuator } from '@/types'
+import SlideOver from '@/shared/design/primitives/SlideOver.vue'
+import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
+import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -26,6 +29,19 @@ const { groupDevicesByZone } = useZoneDragDrop()
 
 const selectedZoneId = computed(() => (route.params.zoneId as string) || null)
 const isZoneDetail = computed(() => !!selectedZoneId.value)
+
+// SlideOver state
+const showSensorPanel = ref(false)
+const showActuatorPanel = ref(false)
+const selectedSensor = ref<SensorItem | null>(null)
+const selectedActuator = ref<ActuatorItem | null>(null)
+
+// Fetch data on mount
+onMounted(() => {
+  if (espStore.devices.length === 0) {
+    espStore.fetchAll()
+  }
+})
 
 // =============================================================================
 // Level 1: Zone KPI Aggregation
@@ -197,6 +213,27 @@ async function toggleActuator(item: ActuatorItem) {
   }
 }
 
+// Open config panels
+function openSensorConfig(sensor: SensorItem) {
+  selectedSensor.value = sensor
+  showSensorPanel.value = true
+}
+
+function openActuatorConfig(actuator: ActuatorItem) {
+  selectedActuator.value = actuator
+  showActuatorPanel.value = true
+}
+
+function closeSensorPanel() {
+  showSensorPanel.value = false
+  setTimeout(() => { selectedSensor.value = null }, 300)
+}
+
+function closeActuatorPanel() {
+  showActuatorPanel.value = false
+  setTimeout(() => { selectedActuator.value = null }, 300)
+}
+
 // Helpers
 function formatValue(value: number, decimals = 1): string {
   return value.toFixed(decimals)
@@ -278,6 +315,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
             v-for="sensor in zoneSensors"
             :key="`${sensor.espId}-${sensor.gpio}`"
             :class="['monitor-sensor-card', `monitor-sensor-card--${qualityToStatus(sensor.quality)}`]"
+            @click="openSensorConfig(sensor)"
           >
             <div class="monitor-sensor-card__header">
               <span class="monitor-sensor-card__name">{{ sensor.name }}</span>
@@ -303,6 +341,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
             v-for="actuator in zoneActuators"
             :key="`${actuator.espId}-${actuator.gpio}`"
             :class="['monitor-actuator-card', actuator.state ? 'monitor-actuator-card--on' : 'monitor-actuator-card--off']"
+            @click="openActuatorConfig(actuator)"
           >
             <div class="monitor-actuator-card__header">
               <span class="monitor-actuator-card__name">{{ actuator.name }}</span>
@@ -331,6 +370,37 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
         <p>Keine Sensoren oder Aktoren in dieser Zone.</p>
       </div>
     </template>
+
+    <!-- Sensor Config SlideOver -->
+    <SlideOver
+      :open="showSensorPanel"
+      :title="selectedSensor?.name || 'Sensor'"
+      width="lg"
+      @close="closeSensorPanel"
+    >
+      <SensorConfigPanel
+        v-if="selectedSensor"
+        :esp-id="selectedSensor.espId"
+        :gpio="selectedSensor.gpio"
+        :sensor-type="selectedSensor.sensorType"
+        :unit="selectedSensor.unit"
+      />
+    </SlideOver>
+
+    <!-- Actuator Config SlideOver -->
+    <SlideOver
+      :open="showActuatorPanel"
+      :title="selectedActuator?.name || 'Aktor'"
+      width="lg"
+      @close="closeActuatorPanel"
+    >
+      <ActuatorConfigPanel
+        v-if="selectedActuator"
+        :esp-id="selectedActuator.espId"
+        :gpio="selectedActuator.gpio"
+        :actuator-type="selectedActuator.actuatorType"
+      />
+    </SlideOver>
   </div>
 </template>
 
@@ -499,6 +569,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
   border-left: 3px solid var(--color-status-good);
   border-radius: var(--radius-md);
   padding: var(--space-3);
+  cursor: pointer;
   transition: all var(--transition-fast);
 }
 
@@ -578,6 +649,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
   border-left: 3px solid var(--color-status-offline);
   border-radius: var(--radius-md);
   padding: var(--space-3);
+  cursor: pointer;
   transition: all var(--transition-fast);
 }
 
