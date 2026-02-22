@@ -1,0 +1,48 @@
+---
+description: Vue 3 TypeScript Frontend Review Rules (El Frontend)
+globs: ["El Frontend/**/*.vue", "El Frontend/**/*.ts", "El Frontend/**/*.tsx"]
+alwaysApply: true
+---
+
+# El Frontend — Frontend Review Rules
+
+## Vue 3 Composition API
+- `<script setup lang="ts">` in allen neuen Komponenten — kein Options API
+- Props typisieren mit `defineProps<Props>()` und TypeScript-Interface
+- Emits typisieren mit `defineEmits<Emits>()`
+- `vue-tsc --noEmit` muss fehlerfrei sein
+
+## State Management
+- Pinia Stores fuer geteilten State (`src/stores/`, `src/shared/stores/`)
+- Kein lokaler reaktiver State fuer Daten die komponentenuebergreifend gebraucht werden
+
+## WebSocket & Cleanup
+- WebSocket-Events MUESSEN in `onUnmounted()` aufgeraeumt werden — Memory Leaks!
+- Event-Listener und Subscriptions in `onUnmounted()` entfernen
+
+## API-Aufrufe
+- Gehoeren in `src/api/` Clients (18 Module: esp, sensors, actuators, zones, auth, etc.)
+- NICHT direkt in Komponenten — immer ueber API-Client-Layer
+
+## Design-System (Pflicht)
+- Primitives aus `src/shared/design/primitives/`: BaseButton, BaseCard, BaseModal, BaseToggle, BaseInput, BaseSelect, BaseBadge, BaseSkeleton, BaseSpinner
+- Layout aus `src/shared/design/layout/`: AppShell, Sidebar, TopBar
+- Patterns: ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer
+- Neue Komponenten in `src/components/{bereich}/` ablegen
+
+## Styling
+- Tailwind CSS — keine inline-Styles oder separaten CSS-Dateien
+- Dark Theme ONLY — keine Light-Mode Styles
+- Design Tokens aus `src/styles/tokens.css` verwenden: `var(--color-*)`, `var(--space-*)`, `var(--radius-*)`
+- Farben NIEMALS als hex hardcoden
+
+## Icons & Imports
+- Icons ausschliesslich aus `lucide-vue-next` — KEIN neues Icon-Paket
+- Imports mit `@/` Alias — keine relativen `../../` Pfade
+
+## Safety-UI
+- Emergency-Stop-Button muss IMMER sichtbar sein (kein Verstecken hinter Modals)
+- Aktor-Schaltungen brauchen ConfirmDialog — nie direkt bei Klick ausfuehren
+
+## Accessibility
+- Alle interaktiven Elemente brauchen `aria-label` oder sichtbaren Text

@@ -133,3 +133,4 @@ El\ Trabajante/*.o
 .claude/*.local.md
 .claude/local-marketplace/
 docker/**/__pycache__/
+.serena/

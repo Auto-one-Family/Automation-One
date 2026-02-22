@@ -1,0 +1,49 @@
+---
+description: Python/FastAPI Backend Review Rules for El Servador
+globs: ["El Servador/**/*.py", "tests/**/*.py"]
+alwaysApply: true
+---
+
+# El Servador — Backend Review Rules
+
+## Async & I/O
+- Endpoints MUESSEN `async def` verwenden fuer I/O-Operationen (DB, MQTT, HTTP)
+- DB-Sessions via `async with get_session() as session` — kein manuelles close
+- Kein `time.sleep()` in async Code — `asyncio.sleep()` verwenden
+
+## MQTT-Handler (`src/mqtt/handlers/`)
+- MUESSEN von `base_handler.py` erben
+- MUESSEN ALLE Exceptions fangen und als Error-Event loggen
+- Duerfen nie still fehlschlagen — jeder Fehler muss geloggt werden
+- Brauchen Tests fuer: valide Message, invalide Message, fehlende Felder
+
+## Pydantic v2
+- `model_config = ConfigDict(from_attributes=True)` statt deprecated `class Config`
+- `model_validate()` statt deprecated `from_orm()`
+- Schemas fuer ALLE Request/Response-Bodies — kein `dict` als Return-Type
+
+## Sensor-Libraries
+- MUESSEN `process()` und `calibrate()` als Interface-Methoden implementieren
+- Sensor-Werte ausserhalb Plausibilitaetsgrenzen: `quality: "error"` setzen
+
+## Error-Codes
+- Server-Bereich 5000-5699 einhalten (CONFIG 5000-5099, MQTT 5100-5199, VALIDATION 5200-5299, DATABASE 5300-5399, SERVICE 5400-5499)
+- Neue Codes in `.claude/reference/errors/ERROR_CODES.md` dokumentieren
+
+## Safety-Critical
+- Aenderungen an `safety_service.py`, `logic_engine.py`, `actuator_service.py` sind safety-relevant
+- Aktor-Befehle MUESSEN durch Safety-Check laufen
+- Circuit-Breaker darf nicht umgangen werden
+
+## Security
+- Kein String-Formatting/f-Strings fuer SQL-Queries — parametrisiert verwenden
+- Alle Endpoints ausser Health-Checks brauchen JWT-Auth
+- Keine hardcoded Secrets
+
+## Deprecation
+- `datetime.utcnow()` -> `datetime.now(UTC)`
+- `psutil` Import mit `try/except ImportError` schuetzen
+
+## Testing
+- Jeder neue Endpoint braucht mindestens einen Unit-Test in `tests/unit/` oder `tests/integration/`
+- pytest-Fixtures muessen aufgeraeumt werden (kein DB-State-Leak)

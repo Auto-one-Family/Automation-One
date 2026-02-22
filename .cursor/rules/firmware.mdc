@@ -1,0 +1,46 @@
+---
+description: ESP32 C++ Firmware Review Rules — Safety-Critical (El Trabajante)
+globs: ["El Trabajante/**/*.cpp", "El Trabajante/**/*.h", "El Trabajante/**/*.ino"]
+alwaysApply: true
+---
+
+# El Trabajante — Firmware Review Rules (Safety-Critical)
+
+## Blocking & Timing
+- KEIN `delay()` in der Haupt-Loop — blockiert MQTT-Client und Watchdog
+- Watchdog-Timer darf NIE deaktiviert werden (nur Feed erlaubt)
+- Non-blocking Patterns verwenden (`millis()`-basiert oder FreeRTOS Tasks)
+
+## Memory Safety
+- KEIN Arduino `String` — NUR `const char*` oder `std::string` (Heap-Fragmentierung!)
+- Buffer-Groessen als Konstanten definieren (keine Magic Numbers)
+- JSON-Parsing mit `JsonDocument` mit definierter Kapazitaet (ArduinoJson)
+- Heap-Allokationen in ISRs sind verboten
+- Task-Stack-Groessen explizit definieren (nicht FreeRTOS Default)
+
+## Hardware-Abstraktion
+- Alle GPIO-Pins ueber GPIOManager (`drivers/gpio_manager.h`) registrieren — kein direktes `pinMode`/`digitalWrite`
+- Hardware-Zugriff NUR ueber HAL-Interface (`drivers/hal/igpio_hal.h`) fuer Testbarkeit
+- Mock-Implementation unter `test/mocks/mock_gpio_hal.h` bei Tests verwenden
+
+## MQTT
+- Topics ueber TopicBuilder (`utils/topic_builder.h`) konstruieren — kein manueller String-Bau
+- Topic-Schema: `kaiser/{id}/esp/{id}/...` einhalten
+- QoS-Level: 0=Heartbeat, 1=Sensordaten, 2=Aktor-Befehle
+
+## Sensor & Aktor
+- Sensor-Daten immer `raw_mode: true` senden (Server kalibriert)
+- Aktor-Befehle MUESSEN durch SafetyController (`services/actuator/safety_controller.h`) laufen
+- Aenderungen am SafetyController sind IMMER safety-critical
+
+## NVS & Config
+- NVS-Zugriffe MUESSEN Fehlerbehandlung haben (Flash kann voll/korrupt sein)
+- WiFi-Reconnect mit Exponential Backoff
+
+## Error-Codes
+- Firmware-Bereich 1000-4999 einhalten (HARDWARE 1000-1999, SERVICE 2000-2999, COMMUNICATION 3000-3999, APPLICATION 4000-4999)
+- Neue Codes in `models/error_codes.h` UND `.claude/reference/errors/ERROR_CODES.md` dokumentieren
+
+## Architektur
+- ESP32 = dumme Agenten — KEINE Logik auf Firmware, nur Datensammlung und Aktor-Ausfuehrung
+- Server-Zentrisch: Alle Entscheidungen trifft El Servador
