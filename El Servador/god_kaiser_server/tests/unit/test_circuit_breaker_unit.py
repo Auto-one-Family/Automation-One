@@ -12,7 +12,6 @@ import time
 from src.core.resilience import (
     CircuitBreaker,
     CircuitState,
-    CircuitBreakerOpenError,
 )
 
 

@@ -19,7 +19,7 @@ Safety Constraints:
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from src.services.safety_service import SafetyService, SafetyCheckResult
+from src.services.safety_service import SafetyService
 
 
 class TestPWMValueRangeValidation:
@@ -48,10 +48,10 @@ class TestPWMValueRangeValidation:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "Value -0.1 should be rejected (below 0.0)"
-        assert "out of range" in result.error.lower(), \
-            f"Error should mention 'out of range', got: {result.error}"
+        assert result.valid is False, "Value -0.1 should be rejected (below 0.0)"
+        assert (
+            "out of range" in result.error.lower()
+        ), f"Error should mention 'out of range', got: {result.error}"
 
     @pytest.mark.critical
     @pytest.mark.pwm
@@ -76,10 +76,10 @@ class TestPWMValueRangeValidation:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "Value 1.1 should be rejected (above 1.0)"
-        assert "out of range" in result.error.lower(), \
-            f"Error should mention 'out of range', got: {result.error}"
+        assert result.valid is False, "Value 1.1 should be rejected (above 1.0)"
+        assert (
+            "out of range" in result.error.lower()
+        ), f"Error should mention 'out of range', got: {result.error}"
 
     @pytest.mark.critical
     @pytest.mark.pwm
@@ -104,23 +104,26 @@ class TestPWMValueRangeValidation:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "Value 255.0 should be rejected (not using 0.0-1.0 scale)"
-        assert "0.0-1.0" in result.error or "0-255" in result.error, \
-            f"Error should mention correct scale, got: {result.error}"
+        assert result.valid is False, "Value 255.0 should be rejected (not using 0.0-1.0 scale)"
+        assert (
+            "0.0-1.0" in result.error or "0-255" in result.error
+        ), f"Error should mention correct scale, got: {result.error}"
 
     @pytest.mark.pwm
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("valid_value", [
-        0.0,   # Minimum (OFF)
-        0.001, # Just above minimum
-        0.25,  # 25% - fractional
-        0.33,  # 33% - fractional
-        0.5,   # Middle (50%)
-        0.75,  # 75% - fractional
-        0.999, # Just below maximum
-        1.0,   # Maximum (FULL ON)
-    ])
+    @pytest.mark.parametrize(
+        "valid_value",
+        [
+            0.0,  # Minimum (OFF)
+            0.001,  # Just above minimum
+            0.25,  # 25% - fractional
+            0.33,  # 33% - fractional
+            0.5,  # Middle (50%)
+            0.75,  # 75% - fractional
+            0.999,  # Just below maximum
+            1.0,  # Maximum (FULL ON)
+        ],
+    )
     async def test_pwm_valid_values_accepted(self, valid_value):
         """Valid PWM values (0.0-1.0) pass initial validation."""
         # ARRANGE
@@ -136,7 +139,9 @@ class TestPWMValueRangeValidation:
         )
         mock_actuator_repo.get_by_esp_and_gpio = AsyncMock(return_value=mock_actuator_config)
         mock_actuator_repo.get_state = AsyncMock(return_value=None)  # No existing state
-        mock_actuator_repo.get_by_esp = AsyncMock(return_value=[mock_actuator_config])  # For conflict check
+        mock_actuator_repo.get_by_esp = AsyncMock(
+            return_value=[mock_actuator_config]
+        )  # For conflict check
 
         service = SafetyService(
             actuator_repo=mock_actuator_repo,
@@ -152,8 +157,9 @@ class TestPWMValueRangeValidation:
         )
 
         # ASSERT
-        assert result.valid is True, \
-            f"Value {valid_value} should be accepted (within 0.0-1.0), got error: {result.error}"
+        assert (
+            result.valid is True
+        ), f"Value {valid_value} should be accepted (within 0.0-1.0), got error: {result.error}"
 
 
 class TestEmergencyStopBlocksCommands:
@@ -186,10 +192,10 @@ class TestEmergencyStopBlocksCommands:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "PWM command should be rejected during emergency stop"
-        assert "emergency" in result.error.lower(), \
-            f"Error should mention emergency stop, got: {result.error}"
+        assert result.valid is False, "PWM command should be rejected during emergency stop"
+        assert (
+            "emergency" in result.error.lower()
+        ), f"Error should mention emergency stop, got: {result.error}"
 
     @pytest.mark.critical
     @pytest.mark.pwm
@@ -224,12 +230,11 @@ class TestEmergencyStopBlocksCommands:
         )
 
         # ASSERT
-        assert result1.valid is False, \
-            "ESP_001 command should be blocked by global E-Stop"
-        assert result2.valid is False, \
-            "ESP_002 command should be blocked by global E-Stop"
-        assert "global" in result1.error.lower() or "emergency" in result1.error.lower(), \
-            f"Error should mention emergency, got: {result1.error}"
+        assert result1.valid is False, "ESP_001 command should be blocked by global E-Stop"
+        assert result2.valid is False, "ESP_002 command should be blocked by global E-Stop"
+        assert (
+            "global" in result1.error.lower() or "emergency" in result1.error.lower()
+        ), f"Error should mention emergency, got: {result1.error}"
 
 
 class TestActuatorSpecificLimits:
@@ -268,10 +273,10 @@ class TestActuatorSpecificLimits:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "Value 0.1 should be rejected (below actuator min 0.2)"
-        assert "out of" in result.error.lower() or "range" in result.error.lower(), \
-            f"Error should mention range violation, got: {result.error}"
+        assert result.valid is False, "Value 0.1 should be rejected (below actuator min 0.2)"
+        assert (
+            "out of" in result.error.lower() or "range" in result.error.lower()
+        ), f"Error should mention range violation, got: {result.error}"
 
     @pytest.mark.pwm
     @pytest.mark.asyncio
@@ -306,10 +311,10 @@ class TestActuatorSpecificLimits:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "Command to disabled actuator should be rejected"
-        assert "disabled" in result.error.lower(), \
-            f"Error should mention actuator is disabled, got: {result.error}"
+        assert result.valid is False, "Command to disabled actuator should be rejected"
+        assert (
+            "disabled" in result.error.lower()
+        ), f"Error should mention actuator is disabled, got: {result.error}"
 
 
 class TestEmergencyStopRelease:
@@ -361,10 +366,10 @@ class TestEmergencyStopRelease:
             command="PWM",
             value=0.5,
         )
-        assert result_blocked.valid is False, \
-            "Command should be blocked during E-Stop"
-        assert "emergency" in result_blocked.error.lower(), \
-            f"Error should mention emergency, got: {result_blocked.error}"
+        assert result_blocked.valid is False, "Command should be blocked during E-Stop"
+        assert (
+            "emergency" in result_blocked.error.lower()
+        ), f"Error should mention emergency, got: {result_blocked.error}"
 
         # 3. Release E-Stop
         await service.clear_emergency_stop()
@@ -376,8 +381,9 @@ class TestEmergencyStopRelease:
             command="PWM",
             value=0.5,
         )
-        assert result_allowed.valid is True, \
-            f"Command should be accepted after E-Stop cleared, got error: {result_allowed.error}"
+        assert (
+            result_allowed.valid is True
+        ), f"Command should be accepted after E-Stop cleared, got error: {result_allowed.error}"
 
 
 class TestPWMEdgeCases:
@@ -410,10 +416,10 @@ class TestPWMEdgeCases:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            f"Value {invalid_value} should be rejected (above 1.0)"
-        assert "range" in result.error.lower() or "out of" in result.error.lower(), \
-            f"Error should mention range violation, got: {result.error}"
+        assert result.valid is False, f"Value {invalid_value} should be rejected (above 1.0)"
+        assert (
+            "range" in result.error.lower() or "out of" in result.error.lower()
+        ), f"Error should mention range violation, got: {result.error}"
 
     @pytest.mark.pwm
     @pytest.mark.asyncio
@@ -440,7 +446,7 @@ class TestPWMEdgeCases:
         )
 
         # ASSERT
-        assert result.valid is False, \
-            "Value -0.001 should be rejected (below 0.0)"
-        assert "range" in result.error.lower() or "out of" in result.error.lower(), \
-            f"Error should mention range violation, got: {result.error}"
+        assert result.valid is False, "Value -0.001 should be rejected (below 0.0)"
+        assert (
+            "range" in result.error.lower() or "out of" in result.error.lower()
+        ), f"Error should mention range violation, got: {result.error}"

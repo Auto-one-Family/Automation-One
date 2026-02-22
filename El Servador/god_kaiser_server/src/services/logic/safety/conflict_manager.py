@@ -6,6 +6,7 @@ Erkennt und löst Konflikte wenn mehrere Rules den gleichen Actuator steuern wol
 INTEGRATION: Via Dependency Injection in LogicEngine
 PATTERN: Kein Singleton - wird als Dependency injiziert
 """
+
 import asyncio
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -18,16 +19,18 @@ logger = logging.getLogger(__name__)
 
 class ConflictResolution(Enum):
     """Wie ein Konflikt aufgelöst wird."""
+
     HIGHER_PRIORITY_WINS = "higher_priority_wins"
     FIRST_WINS = "first_wins"
     SAFETY_WINS = "safety_wins"  # Sicherheits-relevante Commands haben Vorrang
-    BLOCKED = "blocked"          # Actuator ist temporär blockiert
+    BLOCKED = "blocked"  # Actuator ist temporär blockiert
 
 
 @dataclass
 class ConflictInfo:
     """Information über einen erkannten Konflikt."""
-    actuator_key: str           # "esp_id:gpio"
+
+    actuator_key: str  # "esp_id:gpio"
     competing_rules: List[str]  # Rule-IDs die konkurrieren
     winner_rule_id: str
     resolution: ConflictResolution
@@ -38,6 +41,7 @@ class ConflictInfo:
 @dataclass
 class ActuatorLock:
     """Lock für einen Actuator."""
+
     rule_id: str
     priority: int
     command: str
@@ -97,7 +101,7 @@ class ConflictManager:
         priority: int,
         command: str,
         is_safety_critical: bool = False,
-        lock_ttl_seconds: Optional[int] = None
+        lock_ttl_seconds: Optional[int] = None,
     ) -> Tuple[bool, Optional[ConflictInfo]]:
         """
         Versucht einen Actuator für eine Rule zu reservieren.
@@ -137,7 +141,7 @@ class ConflictManager:
                     command=command,
                     acquired_at=now,
                     expires_at=now + timedelta(seconds=ttl),
-                    is_safety_critical=is_safety_critical
+                    is_safety_critical=is_safety_critical,
                 )
                 logger.debug(f"Actuator {actuator_key} acquired by rule {rule_id}")
                 return True, None
@@ -161,10 +165,13 @@ class ConflictManager:
                     priority=effective_priority,
                     command=command,
                     acquired_at=now,
-                    expires_at=now + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
-                    is_safety_critical=True
+                    expires_at=now
+                    + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
+                    is_safety_critical=True,
                 )
-                logger.warning(f"Safety override on {actuator_key}: {rule_id} > {existing_lock.rule_id}")
+                logger.warning(
+                    f"Safety override on {actuator_key}: {rule_id} > {existing_lock.rule_id}"
+                )
 
             # Höhere Priorität gewinnt
             elif effective_priority < existing_lock.priority:
@@ -175,8 +182,9 @@ class ConflictManager:
                     priority=effective_priority,
                     command=command,
                     acquired_at=now,
-                    expires_at=now + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
-                    is_safety_critical=is_safety_critical
+                    expires_at=now
+                    + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
+                    is_safety_critical=is_safety_critical,
                 )
                 logger.warning(
                     f"Priority override on {actuator_key}: {rule_id} (prio {priority}) > "
@@ -198,7 +206,7 @@ class ConflictManager:
                 winner_rule_id=winner,
                 resolution=resolution,
                 blocked_until=existing_lock.expires_at if winner != rule_id else None,
-                message=f"Conflict on {actuator_key}: {resolution.value}"
+                message=f"Conflict on {actuator_key}: {resolution.value}",
             )
 
             self._conflict_history.append(conflict)
@@ -235,7 +243,8 @@ class ConflictManager:
         """Returns alle aktuell gelockten Actuatoren."""
         now = datetime.now(timezone.utc)
         return {
-            key: lock for key, lock in self._locks.items()
+            key: lock
+            for key, lock in self._locks.items()
             if lock.expires_at is None or lock.expires_at > now
         }
 
@@ -243,13 +252,12 @@ class ConflictManager:
         """Returns Statistiken für Monitoring."""
         now = datetime.now(timezone.utc)
         active_locks = sum(
-            1 for lock in self._locks.values()
-            if lock.expires_at is None or lock.expires_at > now
+            1 for lock in self._locks.values() if lock.expires_at is None or lock.expires_at > now
         )
 
         return {
             "active_locks": active_locks,
             "total_locks": len(self._locks),
             "total_conflicts": len(self._conflict_history),
-            "recent_conflicts": len(self._conflict_history[-10:])
+            "recent_conflicts": len(self._conflict_history[-10:]),
         }

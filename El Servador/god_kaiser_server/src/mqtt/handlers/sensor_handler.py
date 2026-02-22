@@ -33,12 +33,10 @@ from ...core.logging_config import get_logger
 from ...utils.sensor_formatters import format_sensor_message
 from ...core.resilience import (
     ServiceUnavailableError,
-    with_timeout_fallback,
-    Timeouts,
 )
 from ...db.models.enums import DataSource
 from ...db.repositories import ESPRepository, SensorRepository
-from ...db.session import get_session, resilient_session
+from ...db.session import resilient_session
 from ..publisher import Publisher
 from ..topics import TopicBuilder
 
@@ -56,7 +54,7 @@ class SensorDataHandler:
     4. Check Pi-Enhanced mode
     5. Save data to database (with resilience)
     6. Trigger Pi-Enhanced processing if needed
-    
+
     Resilience:
     - Uses resilient_session() for database operations (circuit breaker)
     - Timeout protection for overall handler operation
@@ -71,7 +69,7 @@ class SensorDataHandler:
             publisher: Publisher instance for Pi-Enhanced responses
         """
         self.publisher = publisher or Publisher()
-        
+
         # Load resilience settings
         settings = get_settings()
         self._handler_timeout = settings.resilience.timeout_sensor_processing
@@ -123,7 +121,9 @@ class SensorDataHandler:
             # Step 2: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
-                error_code = validation_result.get("error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD)
+                error_code = validation_result.get(
+                    "error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD
+                )
                 logger.error(
                     f"[{error_code}] Invalid sensor data payload from {esp_id_str}: "
                     f"{validation_result['error']}"
@@ -161,9 +161,7 @@ class SensorDataHandler:
                     if i2c_address is not None and i2c_address != 0:
                         # I2C Sensor: 4-way lookup (esp_id, gpio, sensor_type, i2c_address)
                         # Multiple I2C sensors can exist at different addresses on same bus
-                        logger.debug(
-                            f"I2C sensor detected: gpio={gpio}, addr=0x{i2c_address:02X}"
-                        )
+                        logger.debug(f"I2C sensor detected: gpio={gpio}, addr=0x{i2c_address:02X}")
                         sensor_config = await sensor_repo.get_by_esp_gpio_type_and_i2c(
                             esp_device.id, gpio, sensor_type, i2c_address
                         )
@@ -176,9 +174,7 @@ class SensorDataHandler:
                     elif onewire_address:
                         # OneWire Sensor: 4-way lookup (esp_id, gpio, sensor_type, onewire_address)
                         # Multiple DS18B20 sensors can share same GPIO (bus pin)
-                        logger.debug(
-                            f"OneWire sensor detected: gpio={gpio}, rom={onewire_address}"
-                        )
+                        logger.debug(f"OneWire sensor detected: gpio={gpio}, rom={onewire_address}")
                         sensor_config = await sensor_repo.get_by_esp_gpio_type_and_onewire(
                             esp_device.id, gpio, sensor_type, onewire_address
                         )
@@ -269,8 +265,12 @@ class SensorDataHandler:
                     # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
                     esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
                     esp32_timestamp = datetime.fromtimestamp(
-                        esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
-                        tz=timezone.utc
+                        (
+                            esp32_timestamp_raw / 1000
+                            if esp32_timestamp_raw > 1e10
+                            else esp32_timestamp_raw
+                        ),
+                        tz=timezone.utc,
                     ).replace(tzinfo=None)
 
                     sensor_data = await sensor_repo.save_data(
@@ -300,10 +300,13 @@ class SensorDataHandler:
                     # WebSocket Broadcast (best-effort, outside transaction)
                     try:
                         from ...websocket.manager import WebSocketManager
+
                         ws_manager = await WebSocketManager.get_instance()
 
                         # Einheitliche Message generieren (Server-Centric)
-                        display_value = processed_value if processed_value is not None else raw_value
+                        display_value = (
+                            processed_value if processed_value is not None else raw_value
+                        )
                         message = format_sensor_message(
                             sensor_type=sensor_type,
                             gpio=gpio,
@@ -311,18 +314,21 @@ class SensorDataHandler:
                             unit=unit,
                         )
 
-                        await ws_manager.broadcast("sensor_data", {
-                            "esp_id": esp_id_str,
-                            "message": message,  # Menschenverstandliche Message
-                            "severity": "info",
-                            "device_id": esp_id_str,
-                            "gpio": gpio,
-                            "sensor_type": sensor_type,
-                            "value": display_value,
-                            "unit": unit,
-                            "quality": quality,
-                            "timestamp": esp32_timestamp_raw,
-                        })
+                        await ws_manager.broadcast(
+                            "sensor_data",
+                            {
+                                "esp_id": esp_id_str,
+                                "message": message,  # Menschenverstandliche Message
+                                "severity": "info",
+                                "device_id": esp_id_str,
+                                "gpio": gpio,
+                                "sensor_type": sensor_type,
+                                "value": display_value,
+                                "unit": unit,
+                                "quality": quality,
+                                "timestamp": esp32_timestamp_raw,
+                            },
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")
 
@@ -338,10 +344,12 @@ class SensorDataHandler:
                                         esp_id=esp_id_str,
                                         gpio=gpio,
                                         sensor_type=sensor_type,
-                                        value=processed_value or raw_value
+                                        value=processed_value or raw_value,
                                     )
                                 else:
-                                    logger.debug("Logic Engine not yet initialized, skipping evaluation")
+                                    logger.debug(
+                                        "Logic Engine not yet initialized, skipping evaluation"
+                                    )
                             except Exception as e:
                                 logger.error(f"Error in logic evaluation: {e}", exc_info=True)
 
@@ -566,7 +574,9 @@ class SensorDataHandler:
             try:
                 result = DataSource(source_value).value
                 detection_reason = f"payload._source='{source_value}'"
-                logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                logger.debug(
+                    f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})"
+                )
                 return result
             except ValueError:
                 logger.warning(f"Unknown data source: {source_value}, defaulting to production")
@@ -584,22 +594,24 @@ class SensorDataHandler:
             if esp_device.capabilities.get("mock"):
                 detection_reason = "esp_device.capabilities.mock=True"
                 result = DataSource.MOCK.value
-                logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                logger.debug(
+                    f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})"
+                )
                 return result
 
         # Priority 5-7: ESP ID prefix detection
         if esp_id.startswith("MOCK_"):
-            detection_reason = f"esp_id prefix 'MOCK_'"
+            detection_reason = "esp_id prefix 'MOCK_'"
             result = DataSource.MOCK.value
             logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
             return result
         if esp_id.startswith("TEST_"):
-            detection_reason = f"esp_id prefix 'TEST_'"
+            detection_reason = "esp_id prefix 'TEST_'"
             result = DataSource.TEST.value
             logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
             return result
         if esp_id.startswith("SIM_"):
-            detection_reason = f"esp_id prefix 'SIM_'"
+            detection_reason = "esp_id prefix 'SIM_'"
             result = DataSource.SIMULATION.value
             logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
             return result
@@ -680,11 +692,11 @@ class SensorDataHandler:
             processing_params = {}
             if sensor_config and sensor_config.sensor_metadata:
                 processing_params = sensor_config.sensor_metadata.get("processing_params") or {}
-            
+
             # Always pass raw_mode to processor (Pi-Enhanced mode indicator)
             # For DS18B20: raw_mode=True means ESP sent 12-bit integer (400 = 25°C)
             processing_params["raw_mode"] = raw_mode
-            
+
             result = processor.process(
                 raw_value=raw_value,
                 calibration=sensor_config.calibration_data if sensor_config else None,
@@ -706,8 +718,7 @@ class SensorDataHandler:
 
         except Exception as e:
             logger.error(
-                f"Pi-Enhanced processing failed: sensor_type={sensor_type}, "
-                f"error={e}",
+                f"Pi-Enhanced processing failed: sensor_type={sensor_type}, " f"error={e}",
                 exc_info=True,
             )
             return None

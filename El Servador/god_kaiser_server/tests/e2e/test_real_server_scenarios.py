@@ -20,8 +20,6 @@ Fokus: Verhalten wie ein Gewächshaus-Betreiber es erwartet
 """
 
 import asyncio
-import time
-from typing import Optional
 
 import pytest
 
@@ -30,7 +28,6 @@ from tests.e2e.conftest import (
     E2EConfig,
     E2EMQTTClient,
     GreenhouseTestFactory,
-    ESPDeviceTestData,
 )
 
 
@@ -72,15 +69,12 @@ class TestDeviceDiscoveryToOnline:
 
         # WHEN: Gerät wird über API registriert
         result = await api_client.register_esp(device)
-        assert "id" in result or "device_id" in result, \
-            "Gerät-Registrierung sollte erfolgreich sein"
+        assert (
+            "id" in result or "device_id" in result
+        ), "Gerät-Registrierung sollte erfolgreich sein"
 
         # AND: ESP sendet seinen ersten Heartbeat
-        await mqtt_client.publish_heartbeat(
-            esp_id=device.device_id,
-            heap_free=98304,
-            uptime=60
-        )
+        await mqtt_client.publish_heartbeat(esp_id=device.device_id, heap_free=98304, uptime=60)
 
         # Wait for server to process heartbeat
         await asyncio.sleep(2.0)
@@ -116,8 +110,9 @@ class TestDeviceDiscoveryToOnline:
         # THEN: Gerät erscheint in der Liste
         all_devices = await api_client.get_all_esp_devices()
         device_ids = [d.get("device_id") for d in all_devices]
-        assert device.device_id in device_ids, \
-            f"Gerät {device.device_id} sollte in Geräteliste erscheinen"
+        assert (
+            device.device_id in device_ids
+        ), f"Gerät {device.device_id} sollte in Geräteliste erscheinen"
 
 
 # =============================================================================
@@ -166,10 +161,7 @@ class TestSensorDataToFrontend:
         gpio = 4  # DS18B20 Sensor
 
         await mqtt_client.publish_sensor_data(
-            esp_id=device.device_id,
-            gpio=gpio,
-            value=test_temperature,
-            raw_mode=True
+            esp_id=device.device_id, gpio=gpio, value=test_temperature, raw_mode=True
         )
 
         # Wait for processing
@@ -178,8 +170,7 @@ class TestSensorDataToFrontend:
         # THEN: Daten sollten über API abrufbar sein
         sensor_data = await api_client.get_sensor_data(device.device_id, gpio)
         # Note: API response format may vary
-        assert sensor_data is not None, \
-            "Sensordaten sollten abrufbar sein"
+        assert sensor_data is not None, "Sensordaten sollten abrufbar sein"
 
     async def test_multiple_sensor_readings(
         self,
@@ -205,22 +196,14 @@ class TestSensorDataToFrontend:
         # WHEN: Mehrere Readings werden gesendet
         temperatures = [21.0, 21.5, 22.0, 22.5, 23.0]
         for temp in temperatures:
-            await mqtt_client.publish_sensor_data(
-                esp_id=device.device_id,
-                gpio=4,
-                value=temp
-            )
+            await mqtt_client.publish_sensor_data(esp_id=device.device_id, gpio=4, value=temp)
             await asyncio.sleep(0.5)
 
         # Wait for all to process
         await asyncio.sleep(2.0)
 
         # THEN: Alle Readings sollten gespeichert sein
-        sensor_data = await api_client.get_sensor_data(
-            device.device_id,
-            gpio=4,
-            limit=10
-        )
+        sensor_data = await api_client.get_sensor_data(device.device_id, gpio=4, limit=10)
         # Verify data was received (exact format depends on API)
         assert sensor_data is not None
 
@@ -282,7 +265,7 @@ class TestRuleTriggerCrossESP:
             "action_esp_id": climate_esp.device_id,
             "action_actuator_gpio": 27,  # Fan
             "action_value": 1.0,
-            "enabled": True
+            "enabled": True,
         }
 
         try:
@@ -293,9 +276,7 @@ class TestRuleTriggerCrossESP:
 
         # WHEN: Temperature exceeds threshold
         await mqtt_client.publish_sensor_data(
-            esp_id=temp_esp.device_id,
-            gpio=4,
-            value=30.0  # Above 28°C threshold
+            esp_id=temp_esp.device_id, gpio=4, value=30.0  # Above 28°C threshold
         )
 
         # Wait for rule evaluation
@@ -395,21 +376,13 @@ class TestNetworkPartitionRecovery:
         # Simulate ESP sending buffered readings after reconnect
         buffered_readings = [20.0, 20.5, 21.0, 21.5, 22.0]
         for temp in buffered_readings:
-            await mqtt_client.publish_sensor_data(
-                esp_id=device.device_id,
-                gpio=4,
-                value=temp
-            )
+            await mqtt_client.publish_sensor_data(esp_id=device.device_id, gpio=4, value=temp)
             await asyncio.sleep(0.1)  # Small delay between buffered messages
 
         await asyncio.sleep(3.0)
 
         # THEN: All buffered data should be stored
-        sensor_data = await api_client.get_sensor_data(
-            device.device_id,
-            gpio=4,
-            limit=10
-        )
+        sensor_data = await api_client.get_sensor_data(device.device_id, gpio=4, limit=10)
         assert sensor_data is not None
 
 
@@ -465,11 +438,7 @@ class TestServerRestartStateRecovery:
         await asyncio.sleep(2.0)
 
         # WHEN: Geräte senden Daten (simuliert laufenden Betrieb)
-        await mqtt_client.publish_sensor_data(
-            esp_id=devices[0].device_id,
-            gpio=4,
-            value=24.5
-        )
+        await mqtt_client.publish_sensor_data(esp_id=devices[0].device_id, gpio=4, value=24.5)
         await asyncio.sleep(1.0)
 
         # THEN: Alle Geräte sollten in der DB sein und abrufbar
@@ -477,8 +446,9 @@ class TestServerRestartStateRecovery:
         registered_ids = [d.get("device_id") for d in all_devices]
 
         for device in devices:
-            assert device.device_id in registered_ids, \
-                f"Gerät {device.device_id} sollte persistiert sein"
+            assert (
+                device.device_id in registered_ids
+            ), f"Gerät {device.device_id} sollte persistiert sein"
 
     async def test_sensor_history_persists(
         self,
@@ -503,26 +473,17 @@ class TestServerRestartStateRecovery:
 
         # Create some history
         for i in range(5):
-            await mqtt_client.publish_sensor_data(
-                esp_id=device.device_id,
-                gpio=4,
-                value=20.0 + i
-            )
+            await mqtt_client.publish_sensor_data(esp_id=device.device_id, gpio=4, value=20.0 + i)
             await asyncio.sleep(0.5)
 
         await asyncio.sleep(2.0)
 
         # WHEN: "Nach Neustart" - Daten abrufen
         # (In echtem Test würde hier Server neu starten)
-        sensor_data = await api_client.get_sensor_data(
-            device.device_id,
-            gpio=4,
-            limit=10
-        )
+        sensor_data = await api_client.get_sensor_data(device.device_id, gpio=4, limit=10)
 
         # THEN: History sollte vorhanden sein
-        assert sensor_data is not None, \
-            "Sensor-History sollte nach 'Neustart' erhalten sein"
+        assert sensor_data is not None, "Sensor-History sollte nach 'Neustart' erhalten sein"
 
 
 # =============================================================================
@@ -570,10 +531,7 @@ class TestWebSocketRealTimeUpdates:
         received_messages = []
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(
-                    e2e_config.ws_url,
-                    timeout=5.0
-                ) as ws:
+                async with session.ws_connect(e2e_config.ws_url, timeout=5.0) as ws:
                     # Start listening task
                     async def listen():
                         async for msg in ws:
@@ -586,9 +544,7 @@ class TestWebSocketRealTimeUpdates:
 
                     # WHEN: ESP sendet Sensordaten
                     await mqtt_client.publish_sensor_data(
-                        esp_id=device.device_id,
-                        gpio=4,
-                        value=25.5
+                        esp_id=device.device_id, gpio=4, value=25.5
                     )
 
                     # Wait for message or timeout
@@ -633,12 +589,11 @@ class TestSystemHealthCheck:
             Monitoring-Systeme (Grafana, etc.) brauchen Health-Endpoints
             um Gewächshaus-Server zu überwachen.
         """
-        async with e2e_http_client.get(
-            f"{e2e_config.server_url}/health"
-        ) as response:
+        async with e2e_http_client.get(f"{e2e_config.server_url}/health") as response:
             assert response.status == 200, "Health-Endpoint sollte erreichbar sein"
 
             # Check response format
             data = await response.json()
-            assert "status" in data or "healthy" in str(data).lower(), \
-                "Health-Response sollte Status enthalten"
+            assert (
+                "status" in data or "healthy" in str(data).lower()
+            ), "Health-Response sollte Status enthalten"

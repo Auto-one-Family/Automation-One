@@ -12,10 +12,8 @@ These tests validate the server-side mock behavior and the
 MQTT client's offline buffer integration.
 """
 
-import pytest
 from tests.esp32.mocks.mock_esp32_client import (
     MockESP32Client,
-    BrokerMode,
     SystemState,
 )
 
@@ -83,9 +81,7 @@ class TestMockESPDisconnectBehavior:
         esp.configure_actuator(gpio=25, actuator_type="pwm")
 
         # Set actuator active
-        esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 0.75, "mode": "pwm"
-        })
+        esp.handle_command("actuator_set", {"gpio": 25, "value": 0.75, "mode": "pwm"})
         assert esp.get_actuator_state(25).pwm_value == 0.75
 
         # Disconnect then emergency stop

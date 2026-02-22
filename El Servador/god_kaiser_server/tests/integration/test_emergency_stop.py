@@ -12,14 +12,13 @@ CRITICAL CORRECTIONS from analysis:
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from tests.esp32.mocks.mock_esp32_client import (
     MockESP32Client,
-    BrokerMode,
     SystemState,
 )
-from src.services.safety_service import SafetyService, SafetyCheckResult, EmergencyState
+from src.services.safety_service import SafetyService, EmergencyState
 
 
 # =========================================================================
@@ -73,9 +72,7 @@ class TestESPEmergencyStopActivation:
         esp = esp_with_actuators
         esp.handle_command("emergency_stop", {"reason": "test"})
 
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 1.0, "mode": "pwm"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 1.0, "mode": "pwm"})
 
         assert result["status"] == "error"
         assert "emergency" in result["error"].lower()
@@ -148,9 +145,7 @@ class TestESPEmergencyRecovery:
         assert esp.get_actuator_state(26).emergency_stopped is True
 
         # Commands still blocked
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 0.5, "mode": "pwm"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 0.5, "mode": "pwm"})
         assert result["status"] == "error"
 
     def test_clear_emergency_removes_flags(self, stopped_esp):
@@ -188,9 +183,7 @@ class TestESPEmergencyRecovery:
 
         esp.handle_command("clear_emergency", {})
 
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 0.75, "mode": "pwm"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 0.75, "mode": "pwm"})
         assert result["status"] == "ok"
         assert esp.get_actuator_state(25).pwm_value == 0.75
 
@@ -218,9 +211,7 @@ class TestESPSafeModeEmergency:
         esp.configure_actuator(gpio=25, actuator_type="relay")
         esp.enter_safe_mode("test")
 
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 1, "mode": "digital"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 1, "mode": "digital"})
         assert result["status"] == "error"
         assert "SAFE_MODE" in result["error"]
 

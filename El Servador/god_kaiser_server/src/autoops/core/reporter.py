@@ -54,32 +54,36 @@ class AutoOpsReporter:
         filepath = self.reports_dir / filename
 
         lines = [
-            f"# AutoOps Session Report",
-            f"",
+            "# AutoOps Session Report",
+            "",
             f"**Session ID:** {session_id}",
             f"**Generated:** {datetime.now(timezone.utc).isoformat()}",
             f"**Status:** {'ALL PASSED' if all(r.success for _, r in plugin_results) else 'ISSUES FOUND'}",
-            f"",
-            f"---",
-            f"",
+            "",
+            "---",
+            "",
         ]
 
         # Session summary
-        lines.extend([
-            "## Session Summary",
-            "",
-            f"| Metric | Value |",
-            f"|--------|-------|",
-        ])
+        lines.extend(
+            [
+                "## Session Summary",
+                "",
+                "| Metric | Value |",
+                "|--------|-------|",
+            ]
+        )
         for key, value in context_summary.items():
             lines.append(f"| {key} | {value} |")
         lines.append("")
 
         # Plugin results
-        lines.extend([
-            "## Plugin Results",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Plugin Results",
+                "",
+            ]
+        )
 
         total_success = 0
         total_failed = 0
@@ -91,12 +95,14 @@ class AutoOpsReporter:
             else:
                 total_failed += 1
 
-            lines.extend([
-                f"### {icon} {plugin_name}: {status}",
-                f"",
-                f"**Summary:** {result.summary}",
-                f"",
-            ])
+            lines.extend(
+                [
+                    f"### {icon} {plugin_name}: {status}",
+                    "",
+                    f"**Summary:** {result.summary}",
+                    "",
+                ]
+            )
 
             if result.actions:
                 lines.append(f"**Actions ({len(result.actions)}):**")
@@ -104,10 +110,13 @@ class AutoOpsReporter:
                 lines.append("| # | Action | Target | Result | API |")
                 lines.append("|---|--------|--------|--------|-----|")
                 for i, action in enumerate(result.actions, 1):
-                    api = f"`{action.api_method} {action.api_endpoint}`" if action.api_endpoint else "-"
+                    api = (
+                        f"`{action.api_method} {action.api_endpoint}`"
+                        if action.api_endpoint
+                        else "-"
+                    )
                     lines.append(
-                        f"| {i} | {action.action} | {action.target} | "
-                        f"{action.result} | {api} |"
+                        f"| {i} | {action.action} | {action.target} | " f"{action.result} | {api} |"
                     )
                 lines.append("")
 
@@ -132,14 +141,16 @@ class AutoOpsReporter:
 
         # Overall API log
         if api_actions:
-            lines.extend([
-                "## Complete API Action Log",
-                "",
-                f"Total API calls: {len(api_actions)}",
-                "",
-                "| # | Time | Method | Endpoint | Status | Action |",
-                "|---|------|--------|----------|--------|--------|",
-            ])
+            lines.extend(
+                [
+                    "## Complete API Action Log",
+                    "",
+                    f"Total API calls: {len(api_actions)}",
+                    "",
+                    "| # | Time | Method | Endpoint | Status | Action |",
+                    "|---|------|--------|----------|--------|--------|",
+                ]
+            )
             for i, action in enumerate(api_actions, 1):
                 method = action.api_method or "-"
                 endpoint = action.api_endpoint or "-"
@@ -151,19 +162,21 @@ class AutoOpsReporter:
             lines.append("")
 
         # Final summary
-        lines.extend([
-            "---",
-            "",
-            "## Final Summary",
-            "",
-            f"- **Plugins executed:** {len(plugin_results)}",
-            f"- **Passed:** {total_success}",
-            f"- **Failed:** {total_failed}",
-            f"- **Total API calls:** {len(api_actions)}",
-            f"- **Errors:** {sum(len(r.errors) for _, r in plugin_results)}",
-            f"- **Warnings:** {sum(len(r.warnings) for _, r in plugin_results)}",
-            "",
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                "## Final Summary",
+                "",
+                f"- **Plugins executed:** {len(plugin_results)}",
+                f"- **Passed:** {total_success}",
+                f"- **Failed:** {total_failed}",
+                f"- **Total API calls:** {len(api_actions)}",
+                f"- **Errors:** {sum(len(r.errors) for _, r in plugin_results)}",
+                f"- **Warnings:** {sum(len(r.warnings) for _, r in plugin_results)}",
+                "",
+            ]
+        )
 
         content = "\n".join(lines)
         filepath.write_text(content, encoding="utf-8")

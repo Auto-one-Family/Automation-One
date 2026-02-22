@@ -27,7 +27,9 @@ class APIResponse(BaseModel, Generic[T]):
     success: bool = Field(..., description="Whether the operation was successful")
     data: Optional[T] = Field(None, description="Response data (if any)")
     message: Optional[str] = Field(None, description="Optional human-readable message")
-    errors: Optional[List[str]] = Field(None, description="List of error messages (if success=false)")
+    errors: Optional[List[str]] = Field(
+        None, description="List of error messages (if success=false)"
+    )
 
     class Config:
         json_schema_extra = {
@@ -77,13 +79,3 @@ class PaginatedResponse(BaseModel, Generic[T]):
                 "has_more": True,
             }
         }
-
-
-
-
-
-
-
-
-
-

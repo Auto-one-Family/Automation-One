@@ -14,10 +14,8 @@ Usage:
 
 import pytest
 import pytest_asyncio
-import time
 from typing import Dict, Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import AsyncMock
 
 # MockESP32Client imports
 import sys
@@ -30,10 +28,6 @@ if str(project_root) not in sys.path:
 
 from tests.esp32.mocks.mock_esp32_client import (
     MockESP32Client,
-    BrokerMode,
-    SystemState,
-    ActuatorState,
-    SensorState,
 )
 
 # Logic Engine imports
@@ -200,7 +194,7 @@ def mock_esp32_ds18b20_multi():
         gpio=4,
         count=3,
         initial_temps=[22.5, 23.0, 22.8],
-        rom_addresses=["28-000000000001", "28-000000000002", "28-000000000003"]
+        rom_addresses=["28-000000000001", "28-000000000002", "28-000000000003"],
     )
     mock.configure_actuator(gpio=25, actuator_type="fan", name="Ventilation Fan")
     mock.clear_published_messages()
@@ -223,13 +217,10 @@ def mock_esp32_ds18b20_dual_bus():
         gpio=4,
         count=3,
         initial_temps=[22.5, 23.0, 22.8],
-        rom_addresses=["28-000000000001", "28-000000000002", "28-000000000003"]
+        rom_addresses=["28-000000000001", "28-000000000002", "28-000000000003"],
     )
     mock.add_ds18b20_multi(
-        gpio=16,
-        count=1,
-        initial_temps=[18.0],
-        rom_addresses=["28-OUTDOOR00001"]
+        gpio=16, count=1, initial_temps=[18.0], rom_addresses=["28-OUTDOOR00001"]
     )
     mock.clear_published_messages()
     yield mock
@@ -257,7 +248,7 @@ def mock_esp32_sht31():
         primary_value=23.5,
         secondary_values={"humidity": 65.0},
         name="SHT31_0x44",
-        quality="good"
+        quality="good",
     )
     # Add second SHT31 at address 0x45
     mock.set_multi_value_sensor(
@@ -266,7 +257,7 @@ def mock_esp32_sht31():
         primary_value=24.0,
         secondary_values={"humidity": 60.0},
         name="SHT31_0x45",
-        quality="good"
+        quality="good",
     )
     mock.configure_actuator(gpio=26, actuator_type="fan", name="Zone Ventilation")
     mock.clear_published_messages()
@@ -285,7 +276,7 @@ def mock_esp32_sht31_high_humidity():
         primary_value=25.0,
         secondary_values={"humidity": 98.5},  # >95% triggers heater
         name="SHT31_Humid",
-        quality="good"
+        quality="good",
     )
     mock.clear_published_messages()
     yield mock
@@ -309,16 +300,9 @@ def mock_esp32_relay_interlock():
     mock = MockESP32Client(esp_id="ESP_IRRIGATION", kaiser_id="god")
     mock.configure_zone("irrigation", "main-greenhouse", "zone-a")
     mock.configure_actuator(
-        gpio=16,
-        actuator_type="pump",
-        name="Main Pump",
-        safety_timeout_ms=300000
+        gpio=16, actuator_type="pump", name="Main Pump", safety_timeout_ms=300000
     )
-    mock.configure_actuator(
-        gpio=17,
-        actuator_type="valve",
-        name="Main Valve"
-    )
+    mock.configure_actuator(gpio=17, actuator_type="valve", name="Main Valve")
     # Set both as active-low relays
     mock.set_relay_state(gpio=16, state=False, trigger_type="active_low")
     mock.set_relay_state(gpio=17, state=False, trigger_type="active_low")
@@ -362,18 +346,14 @@ def mock_esp32_pwm_fan():
     mock = MockESP32Client(esp_id="ESP_FAN_CTRL", kaiser_id="god")
     mock.configure_zone("greenhouse", "main-greenhouse", "ventilation")
     mock.set_sensor_value(
-        gpio=4,
-        raw_value=22.0,
-        sensor_type="DS18B20",
-        name="Control Temp",
-        unit="°C"
+        gpio=4, raw_value=22.0, sensor_type="DS18B20", name="Control Temp", unit="°C"
     )
     mock.configure_actuator(
         gpio=25,
         actuator_type="pwm_motor",
         name="Ventilation Fan",
         min_value=0.2,  # Minimum 20% to prevent stall
-        max_value=1.0
+        max_value=1.0,
     )
     mock.set_pwm_duty(gpio=25, duty_cycle=0, frequency=25000)
     mock.clear_published_messages()
@@ -393,11 +373,7 @@ def mock_esp32_servo_valve():
     mock = MockESP32Client(esp_id="ESP_SERVO_VALVE", kaiser_id="god")
     mock.configure_zone("irrigation", "main-greenhouse", "zone-a")
     mock.configure_actuator(
-        gpio=26,
-        actuator_type="servo",
-        name="Proportional Valve",
-        min_value=0.0,
-        max_value=1.0
+        gpio=26, actuator_type="servo", name="Proportional Valve", min_value=0.0, max_value=1.0
     )
     mock.set_pwm_duty(gpio=26, duty_cycle=0, frequency=50)  # Servo at 50Hz
     mock.clear_published_messages()
@@ -425,18 +401,13 @@ def cross_esp_logic_setup():
     """
     sensor_esp = MockESP32Client(esp_id="ESP_SENSORS", kaiser_id="god")
     sensor_esp.configure_zone("sensors", "main-greenhouse", "monitoring")
-    sensor_esp.set_sensor_value(
-        gpio=4,
-        raw_value=22.0,
-        sensor_type="DS18B20",
-        name="Air Temp"
-    )
+    sensor_esp.set_sensor_value(gpio=4, raw_value=22.0, sensor_type="DS18B20", name="Air Temp")
     sensor_esp.set_multi_value_sensor(
         gpio=21,
         sensor_type="SHT31",
         primary_value=23.5,
         secondary_values={"humidity": 65.0},
-        name="Temp/Humidity"
+        name="Temp/Humidity",
     )
     sensor_esp.add_ph_sensor(gpio=34, initial_ph=6.5, calibrated=True)
 
@@ -445,11 +416,7 @@ def cross_esp_logic_setup():
     actuator_esp.configure_actuator(gpio=5, actuator_type="pump", name="Irrigation Pump")
     actuator_esp.configure_actuator(gpio=6, actuator_type="valve", name="Irrigation Valve")
     actuator_esp.configure_actuator(
-        gpio=25,
-        actuator_type="pwm_motor",
-        name="Ventilation",
-        min_value=0.0,
-        max_value=1.0
+        gpio=25, actuator_type="pwm_motor", name="Ventilation", min_value=0.0, max_value=1.0
     )
 
     sensor_esp.clear_published_messages()
@@ -476,8 +443,11 @@ def multi_zone_esp_setup():
     za_sens.configure_zone("zone-a", "greenhouse-complex", "sensors-a")
     za_sens.set_sensor_value(gpio=4, raw_value=24.0, sensor_type="DS18B20", name="Zone A Temp")
     za_sens.set_multi_value_sensor(
-        gpio=21, sensor_type="SHT31", primary_value=24.0,
-        secondary_values={"humidity": 70.0}, name="Zone A Humidity"
+        gpio=21,
+        sensor_type="SHT31",
+        primary_value=24.0,
+        secondary_values={"humidity": 70.0},
+        name="Zone A Humidity",
     )
 
     # Zone A - Actuators
@@ -491,8 +461,11 @@ def multi_zone_esp_setup():
     zb_sens.configure_zone("zone-b", "greenhouse-complex", "sensors-b")
     zb_sens.set_sensor_value(gpio=4, raw_value=22.0, sensor_type="DS18B20", name="Zone B Temp")
     zb_sens.set_multi_value_sensor(
-        gpio=21, sensor_type="SHT31", primary_value=22.0,
-        secondary_values={"humidity": 55.0}, name="Zone B Humidity"
+        gpio=21,
+        sensor_type="SHT31",
+        primary_value=22.0,
+        secondary_values={"humidity": 55.0},
+        name="Zone B Humidity",
     )
 
     # Zone B - Actuators
@@ -542,7 +515,7 @@ def mock_esp32_complete_greenhouse():
         gpio=4,
         count=2,
         initial_temps=[22.0, 21.5],
-        rom_addresses=["28-SOIL00000001", "28-SOIL00000002"]
+        rom_addresses=["28-SOIL00000001", "28-SOIL00000002"],
     )
 
     # Air temperature + humidity
@@ -551,7 +524,7 @@ def mock_esp32_complete_greenhouse():
         sensor_type="SHT31",
         primary_value=23.0,
         secondary_values={"humidity": 65.0},
-        name="Air Conditions"
+        name="Air Conditions",
     )
 
     # pH sensor
@@ -559,19 +532,12 @@ def mock_esp32_complete_greenhouse():
 
     # Soil moisture (analog)
     mock.set_sensor_value(
-        gpio=35,
-        raw_value=2048.0,
-        sensor_type="analog",
-        name="Soil Moisture",
-        unit="raw"
+        gpio=35, raw_value=2048.0, sensor_type="analog", name="Soil Moisture", unit="raw"
     )
 
     # Irrigation
     mock.configure_actuator(
-        gpio=5,
-        actuator_type="pump",
-        name="Irrigation Pump",
-        safety_timeout_ms=300000
+        gpio=5, actuator_type="pump", name="Irrigation Pump", safety_timeout_ms=300000
     )
     mock.configure_actuator(gpio=6, actuator_type="valve", name="Irrigation Valve")
 
@@ -581,17 +547,9 @@ def mock_esp32_complete_greenhouse():
 
     # PWM controlled
     mock.configure_actuator(
-        gpio=25,
-        actuator_type="pwm_motor",
-        name="Ventilation Fan",
-        min_value=0.2,
-        max_value=1.0
+        gpio=25, actuator_type="pwm_motor", name="Ventilation Fan", min_value=0.2, max_value=1.0
     )
-    mock.configure_actuator(
-        gpio=26,
-        actuator_type="servo",
-        name="Flow Control Valve"
-    )
+    mock.configure_actuator(gpio=26, actuator_type="servo", name="Flow Control Valve")
 
     mock.clear_published_messages()
     yield mock
@@ -602,11 +560,7 @@ def mock_esp32_complete_greenhouse():
 # Helper Functions for Test Data Generation
 # =============================================================================
 def create_sensor_condition(
-    esp_id: str,
-    gpio: int,
-    operator: str,
-    value: float,
-    sensor_type: str = "DS18B20"
+    esp_id: str, gpio: int, operator: str, value: float, sensor_type: str = "DS18B20"
 ) -> Dict[str, Any]:
     """Create a sensor condition dict for Logic Rules."""
     return {
@@ -620,11 +574,7 @@ def create_sensor_condition(
 
 
 def create_actuator_action(
-    esp_id: str,
-    gpio: int,
-    command: str = "ON",
-    value: float = 1.0,
-    duration: int = 0
+    esp_id: str, gpio: int, command: str = "ON", value: float = 1.0, duration: int = 0
 ) -> Dict[str, Any]:
     """Create an actuator action dict for Logic Rules."""
     return {
@@ -644,7 +594,7 @@ def create_hysteresis_condition(
     deactivate_below: Optional[float] = None,
     activate_below: Optional[float] = None,
     deactivate_above: Optional[float] = None,
-    sensor_type: str = "DS18B20"
+    sensor_type: str = "DS18B20",
 ) -> Dict[str, Any]:
     """
     Create a hysteresis condition dict for Logic Rules.
@@ -670,9 +620,7 @@ def create_hysteresis_condition(
 
 
 def create_sequence_action(
-    steps: list,
-    abort_on_failure: bool = True,
-    description: str = ""
+    steps: list, abort_on_failure: bool = True, description: str = ""
 ) -> Dict[str, Any]:
     """Create a sequence action dict for Logic Rules."""
     return {
@@ -683,11 +631,7 @@ def create_sequence_action(
     }
 
 
-def create_notification_action(
-    channel: str,
-    target: str,
-    message_template: str
-) -> Dict[str, Any]:
+def create_notification_action(channel: str, target: str, message_template: str) -> Dict[str, Any]:
     """Create a notification action dict for Logic Rules."""
     return {
         "type": "notification",

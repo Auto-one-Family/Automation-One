@@ -74,6 +74,20 @@ types-pytz = "^2024.1"
 [tool.poetry.scripts]
 server = "src.main:main"
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# E402: Module-level imports not at top — intentional in main.py (middleware setup),
+#   conftest.py (sys.path manipulation), and service files (lazy imports).
+# F821: Undefined names — false positives for SQLAlchemy string-based forward references
+#   (e.g., Mapped["ESPDevice"]) and AutoOps abstract method signatures.
+ignore = ["E402", "F821"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/*" = ["F401", "E402"]
+
 [tool.black]
 line-length = 100
 target-version = ['py311']

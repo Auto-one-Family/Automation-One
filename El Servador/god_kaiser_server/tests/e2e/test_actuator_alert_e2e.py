@@ -34,8 +34,6 @@ Dependencies:
 """
 
 import asyncio
-import time
-from typing import Optional
 
 import pytest
 
@@ -100,20 +98,13 @@ class TestActuatorAlertE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Alert E2E Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Alert E2E Test")
             result = await api_client.register_esp(esp)
-            assert "device_id" in result or "id" in result, \
-                f"ESP registration failed: {result}"
+            assert "device_id" in result or "id" in result, f"ESP registration failed: {result}"
 
             # Create actuator configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="pump",
-                name="Test Pump Alert"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="pump", name="Test Pump Alert"
             )
 
             # Send heartbeat to mark online
@@ -126,7 +117,7 @@ class TestActuatorAlertE2E:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 alert_type="emergency_stop",
-                message="High temperature detected - emergency stop activated"
+                message="High temperature detected - emergency stop activated",
             )
 
             # Wait for server to process alert
@@ -142,10 +133,7 @@ class TestActuatorAlertE2E:
                 current_value = state.get("current_value") or state.get("value", 1.0)
                 current_state = state.get("state")
                 # Either value is 0 or state is "off"
-                is_off = (
-                    current_value == 0.0 or
-                    current_state in ("off", "OFF", False, None)
-                )
+                is_off = current_value == 0.0 or current_state in ("off", "OFF", False, None)
                 if not is_off:
                     print(f"  Warning: Actuator may not be OFF - state: {state}")
             else:
@@ -176,18 +164,12 @@ class TestActuatorAlertE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Runtime Protection Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Runtime Protection Test")
             await api_client.register_esp(esp)
 
             # Create pump configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="pump",
-                name="Long-Running Pump"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="pump", name="Long-Running Pump"
             )
 
             # Send heartbeat
@@ -200,7 +182,7 @@ class TestActuatorAlertE2E:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 alert_type="runtime_protection",
-                message="Pump exceeded maximum runtime (1800s) - auto-stopped"
+                message="Pump exceeded maximum runtime (1800s) - auto-stopped",
             )
 
             await asyncio.sleep(2.0)
@@ -235,18 +217,12 @@ class TestActuatorAlertE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Safety Violation Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Safety Violation Test")
             await api_client.register_esp(esp)
 
             # Create valve configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="valve",
-                name="Safety Test Valve"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="valve", name="Safety Test Valve"
             )
 
             # Send heartbeat
@@ -259,7 +235,7 @@ class TestActuatorAlertE2E:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 alert_type="safety_violation",
-                message="Pressure exceeds safe limit (5 bar) - valve closed"
+                message="Pressure exceeds safe limit (5 bar) - valve closed",
             )
 
             await asyncio.sleep(2.0)
@@ -295,18 +271,12 @@ class TestActuatorAlertE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Hardware Error Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Hardware Error Test")
             await api_client.register_esp(esp)
 
             # Create fan configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="fan",
-                name="Faulty Fan"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="fan", name="Faulty Fan"
             )
 
             # Send heartbeat
@@ -319,7 +289,7 @@ class TestActuatorAlertE2E:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 alert_type="hardware_error",
-                message="PWM driver fault - unable to set frequency"
+                message="PWM driver fault - unable to set frequency",
             )
 
             await asyncio.sleep(2.0)
@@ -351,10 +321,7 @@ class TestActuatorAlertE2E:
 
         try:
             # Register ESP with multiple actuators
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="System-Wide Alert Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="System-Wide Alert Test")
             await api_client.register_esp(esp)
 
             # Create multiple actuators
@@ -365,10 +332,7 @@ class TestActuatorAlertE2E:
             ]
             for act in actuators:
                 await api_client.create_actuator_config(
-                    esp_id=esp_id,
-                    gpio=act["gpio"],
-                    actuator_type=act["type"],
-                    name=act["name"]
+                    esp_id=esp_id, gpio=act["gpio"], actuator_type=act["type"], name=act["name"]
                 )
 
             # Send heartbeat
@@ -381,7 +345,7 @@ class TestActuatorAlertE2E:
                 esp_id=esp_id,
                 gpio=system_wide_gpio,
                 alert_type="emergency_stop",
-                message="System-wide emergency stop - all actuators stopped"
+                message="System-wide emergency stop - all actuators stopped",
             )
 
             await asyncio.sleep(2.0)
@@ -390,7 +354,9 @@ class TestActuatorAlertE2E:
             # All actuators should be stopped
             for act in actuators:
                 state = await api_client.get_actuator_state(esp_id, act["gpio"])
-                status = "stopped" if not state or state.get("state") in ("off", None) else "unknown"
+                status = (
+                    "stopped" if not state or state.get("state") in ("off", None) else "unknown"
+                )
                 print(f"  {act['name']} (GPIO {act['gpio']}): {status}")
 
             print(f"✓ System-wide alert test passed for {esp_id}")
@@ -434,19 +400,12 @@ class TestActuatorAlertWithZone:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Zone Alert Test",
-                zone_id=zone_id
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Zone Alert Test", zone_id=zone_id)
             await api_client.register_esp(esp)
 
             # Create actuator
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="pump",
-                name="Zone A Pump"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="pump", name="Zone A Pump"
             )
 
             # Send heartbeat
@@ -460,7 +419,7 @@ class TestActuatorAlertWithZone:
                 gpio=actuator_gpio,
                 alert_type="runtime_protection",
                 message="Pump runtime exceeded in Zone A",
-                zone_id=zone_id
+                zone_id=zone_id,
             )
 
             await asyncio.sleep(2.0)
@@ -515,10 +474,7 @@ class TestActuatorAlertSequence:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Alert Sequence Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Alert Sequence Test")
             await api_client.register_esp(esp)
 
             # Create actuator
@@ -526,7 +482,7 @@ class TestActuatorAlertSequence:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 actuator_type="heater",
-                name="Sequence Test Heater"
+                name="Sequence Test Heater",
             )
 
             # Send heartbeat
@@ -540,7 +496,7 @@ class TestActuatorAlertSequence:
                     esp_id=esp_id,
                     gpio=actuator_gpio,
                     alert_type=alert["type"],
-                    message=alert["msg"]
+                    message=alert["msg"],
                 )
                 print(f"  Sent alert: {alert['type']}")
                 await asyncio.sleep(0.5)

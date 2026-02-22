@@ -6,6 +6,7 @@ Tests für Sequenz-Actions, Validierung, Execution und Error-Handling.
 Phase: 3 - Sequence Action Executor
 Status: IMPLEMENTED
 """
+
 import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
@@ -35,7 +36,9 @@ def mock_actuator_executor():
     """Mock Actuator Executor."""
     executor = Mock()
     executor.supports = Mock(side_effect=lambda t: t in ["actuator_command", "actuator"])
-    executor.execute = AsyncMock(return_value=ActionResult(success=True, message="Actuator executed"))
+    executor.execute = AsyncMock(
+        return_value=ActionResult(success=True, message="Actuator executed")
+    )
     return executor
 
 
@@ -399,6 +402,7 @@ class TestStepResult:
         """Test: StepResult.complete() setzt alle Felder."""
         # Setze started_at explizit in der Vergangenheit, um duration_ms > 0 zu garantieren
         from datetime import timedelta
+
         started = datetime.now(timezone.utc) - timedelta(milliseconds=50)
         result = StepResult(
             step_index=0,

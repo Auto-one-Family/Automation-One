@@ -24,10 +24,10 @@ def hash_password(password: str) -> str:
         str: Hashed password
     """
     # Encode password to bytes, hash with bcrypt, return as string
-    password_bytes = password.encode('utf-8')
+    password_bytes = password.encode("utf-8")
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password_bytes, salt)
-    return hashed.decode('utf-8')
+    return hashed.decode("utf-8")
 
 
 # Alias for backwards compatibility
@@ -45,8 +45,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         bool: True if password matches, False otherwise
     """
-    password_bytes = plain_password.encode('utf-8')
-    hashed_bytes = hashed_password.encode('utf-8')
+    password_bytes = plain_password.encode("utf-8")
+    hashed_bytes = hashed_password.encode("utf-8")
     return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
@@ -160,9 +160,7 @@ def verify_token(token: str, expected_type: str = "access") -> Dict[str, Any]:
 
         token_type = payload.get("type")
         if token_type != expected_type:
-            raise ValueError(
-                f"Invalid token type. Expected '{expected_type}', got '{token_type}'"
-            )
+            raise ValueError(f"Invalid token type. Expected '{expected_type}', got '{token_type}'")
 
         return payload
 

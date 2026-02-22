@@ -12,12 +12,9 @@ Firmware reference: El Trabajante/src/services/communication/mqtt_client.cpp
 These tests verify the Last-Will configuration and payload format.
 """
 
-import json
 import time
 
 import pytest
-
-from .mocks.mock_esp32_client import MockESP32Client
 
 
 class LastWillSimulator:

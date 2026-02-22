@@ -158,22 +158,26 @@ class DiagnosticsHandler:
                 # Step 6: WebSocket Broadcast
                 try:
                     from ...websocket.manager import WebSocketManager
+
                     ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast("esp_diagnostics", {
-                        "esp_id": esp_id_str,
-                        "heap_free": payload.get("heap_free"),
-                        "heap_min_free": payload.get("heap_min_free"),
-                        "heap_fragmentation": payload.get("heap_fragmentation"),
-                        "uptime_seconds": payload.get("uptime_seconds"),
-                        "error_count": payload.get("error_count", 0),
-                        "wifi_rssi": payload.get("wifi_rssi"),
-                        "system_state": payload.get("system_state"),
-                        "boot_reason": payload.get("boot_reason"),
-                        "mqtt_cb_state": payload.get("mqtt_cb_state"),
-                        "wdt_mode": payload.get("wdt_mode"),
-                        "wdt_timeouts_24h": payload.get("wdt_timeouts_24h"),
-                        "timestamp": payload.get("ts"),
-                    })
+                    await ws_manager.broadcast(
+                        "esp_diagnostics",
+                        {
+                            "esp_id": esp_id_str,
+                            "heap_free": payload.get("heap_free"),
+                            "heap_min_free": payload.get("heap_min_free"),
+                            "heap_fragmentation": payload.get("heap_fragmentation"),
+                            "uptime_seconds": payload.get("uptime_seconds"),
+                            "error_count": payload.get("error_count", 0),
+                            "wifi_rssi": payload.get("wifi_rssi"),
+                            "system_state": payload.get("system_state"),
+                            "boot_reason": payload.get("boot_reason"),
+                            "mqtt_cb_state": payload.get("mqtt_cb_state"),
+                            "wdt_mode": payload.get("wdt_mode"),
+                            "wdt_timeouts_24h": payload.get("wdt_timeouts_24h"),
+                            "timestamp": payload.get("ts"),
+                        },
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to broadcast diagnostics via WebSocket: {e}")
 

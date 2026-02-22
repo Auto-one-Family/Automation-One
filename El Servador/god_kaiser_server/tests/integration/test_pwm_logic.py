@@ -16,25 +16,10 @@ Dependencies:
 """
 
 import pytest
-import pytest_asyncio
-import uuid
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import fixtures
-from tests.integration.conftest_logic import (
-    mock_esp32_pwm_fan,
-    mock_esp32_servo_valve,
-    cross_esp_logic_setup,
-    logic_engine,
-    mock_actuator_service,
-    mock_logic_repo,
-    mock_websocket_manager,
-    create_sensor_condition,
-    create_actuator_action,
-)
 
-from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
+from tests.esp32.mocks.mock_esp32_client import MockESP32Client
 
 
 pytestmark = [pytest.mark.logic, pytest.mark.pwm]
@@ -44,9 +29,7 @@ class TestFanProportionalControl:
     """Tests for PWM fan proportional temperature control."""
 
     @pytest.mark.asyncio
-    async def test_fan_proportional_temperature(
-        self, mock_esp32_pwm_fan, logic_engine
-    ):
+    async def test_fan_proportional_temperature(self, mock_esp32_pwm_fan, logic_engine):
         """
         SZENARIO: Fan-Geschwindigkeit steigt proportional mit Temperatur
 
@@ -70,9 +53,9 @@ class TestFanProportionalControl:
 
         # Define temperature-to-PWM mapping
         temp_pwm_map = [
-            (24.0, 0.30, 77),    # 30% PWM
-            (26.0, 0.60, 153),   # 60% PWM
-            (28.0, 1.00, 255),   # 100% PWM
+            (24.0, 0.30, 77),  # 30% PWM
+            (26.0, 0.60, 153),  # 60% PWM
+            (28.0, 1.00, 255),  # 100% PWM
         ]
 
         # === TEST EACH TEMPERATURE LEVEL ===
@@ -143,8 +126,8 @@ class TestServoProportionalControl:
         # Flow demand → Servo position mapping
         # 0% → 0° (closed), 50% → 90°, 100% → 180° (fully open)
         demand_angle_map = [
-            (0, 0),      # 0% demand → 0°
-            (50, 90),    # 50% demand → 90°
+            (0, 0),  # 0% demand → 0°
+            (50, 90),  # 50% demand → 90°
             (100, 180),  # 100% demand → 180°
         ]
 

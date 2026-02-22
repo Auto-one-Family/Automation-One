@@ -6,7 +6,6 @@ Integration-Tests für Circuit Breaker, Retry und Timeout in realistischen Szena
 
 import asyncio
 import pytest
-from sqlalchemy.exc import OperationalError
 
 from src.core.resilience import (
     CircuitBreaker,
@@ -64,7 +63,7 @@ class TestDatabaseResilience:
 
         # Should reject request
         with pytest.raises(ServiceUnavailableError) as exc_info:
-            async with resilient_session() as session:
+            async with resilient_session():
                 pass
 
         assert exc_info.value.service_name == "database"
@@ -139,7 +138,7 @@ class TestMQTTResilience:
         breaker.force_open()
 
         # Try to publish (should buffer)
-        result = mqtt_client.publish("test/topic", '{"test": 1}', qos=1)
+        mqtt_client.publish("test/topic", '{"test": 1}', qos=1)
 
         # Publish should fail/return False (buffered)
         # Depending on implementation, might return False or True (buffered)
@@ -212,16 +211,14 @@ class TestEndToEndResilience:
         db_breaker.reset()
 
         # Simulate workflow
-        workflow_success = False
 
         try:
-            async with resilient_session() as session:
+            async with resilient_session():
                 # Simulate DB operation
                 await asyncio.sleep(0.01)
-                workflow_success = True
         except Exception:
             # Test environment might not have DB
-            workflow_success = False
+            pass
 
         # Circuit breaker should track success/failure
         metrics = db_breaker.get_metrics()

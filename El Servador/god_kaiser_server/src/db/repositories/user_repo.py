@@ -52,9 +52,7 @@ class UserRepository(BaseRepository[User]):
         await self.session.refresh(user)
         return user
 
-    async def authenticate(
-        self, username: str, password: str
-    ) -> Optional[User]:
+    async def authenticate(self, username: str, password: str) -> Optional[User]:
         """Authenticate user by username and password."""
         user = await self.get_by_username(username)
         if not user:
@@ -75,7 +73,7 @@ class UserRepository(BaseRepository[User]):
 
     async def get_active_users(self) -> list[User]:
         """Get all active users."""
-        stmt = select(User).where(User.is_active == True)
+        stmt = select(User).where(User.is_active is True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

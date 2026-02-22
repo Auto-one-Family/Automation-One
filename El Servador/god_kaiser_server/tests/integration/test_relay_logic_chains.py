@@ -16,24 +16,11 @@ Dependencies:
 """
 
 import pytest
-import pytest_asyncio
-import uuid
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import fixtures
 from tests.integration.conftest_logic import (
-    mock_esp32_relay_interlock,
-    mock_esp32_relay_strapping,
-    cross_esp_logic_setup,
-    logic_engine,
-    mock_actuator_service,
-    mock_logic_repo,
-    mock_websocket_manager,
-    create_sensor_condition,
     create_actuator_action,
     create_sequence_action,
-    create_notification_action,
 )
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
@@ -46,9 +33,7 @@ class TestPumpValveInterlock:
     """Tests for pump/valve interlock sequences."""
 
     @pytest.mark.asyncio
-    async def test_pump_valve_interlock_sequence(
-        self, mock_esp32_relay_interlock, logic_engine
-    ):
+    async def test_pump_valve_interlock_sequence(self, mock_esp32_relay_interlock, logic_engine):
         """
         SZENARIO: Pumpe darf erst nach Ventil starten
 
@@ -66,21 +51,26 @@ class TestPumpValveInterlock:
         - Action: sequence([valve_on, delay(2s), pump_on])
         """
         # === SETUP ===
-        mock = mock_esp32_relay_interlock
 
         # Create sequence action
         sequence_action = create_sequence_action(
             steps=[
-                {"name": "Open Valve", "action": create_actuator_action(
-                    esp_id="ESP_IRRIGATION", gpio=17, command="ON"
-                )},
+                {
+                    "name": "Open Valve",
+                    "action": create_actuator_action(
+                        esp_id="ESP_IRRIGATION", gpio=17, command="ON"
+                    ),
+                },
                 {"delay_seconds": 2},
-                {"name": "Start Pump", "action": create_actuator_action(
-                    esp_id="ESP_IRRIGATION", gpio=16, command="ON"
-                )},
+                {
+                    "name": "Start Pump",
+                    "action": create_actuator_action(
+                        esp_id="ESP_IRRIGATION", gpio=16, command="ON"
+                    ),
+                },
             ],
             abort_on_failure=True,
-            description="Pump-Valve Interlock Sequence"
+            description="Pump-Valve Interlock Sequence",
         )
 
         # === VERIFY ===
@@ -89,9 +79,7 @@ class TestPumpValveInterlock:
         assert sequence_action["abort_on_failure"] is True
 
     @pytest.mark.asyncio
-    async def test_pump_stops_on_valve_close(
-        self, mock_esp32_relay_interlock, logic_engine
-    ):
+    async def test_pump_stops_on_valve_close(self, mock_esp32_relay_interlock, logic_engine):
         """
         SZENARIO: Pumpe muss sofort stoppen wenn Ventil schließt
 
@@ -151,16 +139,22 @@ class TestPumpValveInterlock:
         # === SETUP ===
         sequence_action = create_sequence_action(
             steps=[
-                {"name": "Open Valve", "action": create_actuator_action(
-                    esp_id="ESP_IRRIGATION", gpio=17, command="ON"
-                )},
+                {
+                    "name": "Open Valve",
+                    "action": create_actuator_action(
+                        esp_id="ESP_IRRIGATION", gpio=17, command="ON"
+                    ),
+                },
                 {"delay_seconds": 2},
-                {"name": "Start Pump", "action": create_actuator_action(
-                    esp_id="ESP_IRRIGATION", gpio=16, command="ON"
-                )},
+                {
+                    "name": "Start Pump",
+                    "action": create_actuator_action(
+                        esp_id="ESP_IRRIGATION", gpio=16, command="ON"
+                    ),
+                },
             ],
             abort_on_failure=True,
-            description="Test Abort on Failure"
+            description="Test Abort on Failure",
         )
 
         # === VERIFY ===
@@ -331,7 +325,7 @@ class TestEmergencyStop:
         mock = mock_esp32_relay_interlock
 
         # Trigger emergency stop
-        response = mock.handle_command("emergency_stop", {})
+        mock.handle_command("emergency_stop", {})
 
         # === VERIFY ===
         messages = mock.get_messages_by_topic_pattern("broadcast/emergency")
@@ -371,9 +365,7 @@ class TestCrossESPRelayChain:
     """Tests for cross-ESP relay sequences."""
 
     @pytest.mark.asyncio
-    async def test_cross_esp_relay_chain(
-        self, cross_esp_logic_setup, logic_engine
-    ):
+    async def test_cross_esp_relay_chain(self, cross_esp_logic_setup, logic_engine):
         """
         SZENARIO: Cross-ESP Relay Chain (Valve ESP_A → Pump ESP_B)
 
@@ -396,21 +388,23 @@ class TestCrossESPRelayChain:
           ])
         """
         # === SETUP ===
-        actuator_esp = cross_esp_logic_setup["actuator_esp"]
+        cross_esp_logic_setup["actuator_esp"]
 
         # Create cross-ESP sequence
         sequence_action = create_sequence_action(
             steps=[
-                {"name": "Open Valve", "action": create_actuator_action(
-                    esp_id="ESP_ACTUATORS", gpio=6, command="ON"
-                )},
+                {
+                    "name": "Open Valve",
+                    "action": create_actuator_action(esp_id="ESP_ACTUATORS", gpio=6, command="ON"),
+                },
                 {"delay_seconds": 2},
-                {"name": "Start Pump", "action": create_actuator_action(
-                    esp_id="ESP_ACTUATORS", gpio=5, command="ON"
-                )},
+                {
+                    "name": "Start Pump",
+                    "action": create_actuator_action(esp_id="ESP_ACTUATORS", gpio=5, command="ON"),
+                },
             ],
             abort_on_failure=True,
-            description="Cross-ESP Irrigation Sequence"
+            description="Cross-ESP Irrigation Sequence",
         )
 
         # === VERIFY ===

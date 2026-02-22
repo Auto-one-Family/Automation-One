@@ -5,7 +5,6 @@ Business logic for actuator control, safety checks, command validation.
 """
 
 import uuid
-from typing import Optional
 
 from ..core.logging_config import get_logger
 from ..db.repositories import ActuatorRepository, ESPRepository
@@ -20,7 +19,7 @@ logger = get_logger(__name__)
 class ActuatorService:
     """
     Actuator Business Logic Service.
-    
+
     Handles actuator command execution with safety validation.
     """
 
@@ -32,7 +31,7 @@ class ActuatorService:
     ):
         """
         Initialize Actuator Service.
-        
+
         Args:
             actuator_repo: ActuatorRepository instance
             safety_service: SafetyService instance
@@ -53,13 +52,13 @@ class ActuatorService:
     ) -> bool:
         """
         Send actuator command with safety validation.
-        
+
         Flow:
         1. Validate command via SafetyService
         2. Lookup actuator config
         3. Publish MQTT command
         4. Log command to history
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
@@ -67,7 +66,7 @@ class ActuatorService:
             value: Command value (0.0-1.0 for PWM, 1.0 for ON, 0.0 for OFF)
             duration: Duration in seconds (0 = unlimited)
             issued_by: Who issued the command (e.g., "logic_engine", "user:123", "system")
-            
+
         Returns:
             True if command was sent successfully, False otherwise
         """
@@ -82,13 +81,13 @@ class ActuatorService:
                 command=command,
                 value=value,
             )
-            
+
             if not safety_result.valid:
                 logger.error(
                     f"Actuator command rejected by safety check: esp_id={esp_id}, "
                     f"gpio={gpio}, command={command}, error={safety_result.error}"
                 )
-                
+
                 # Log failed command attempt
                 async for session in get_session():
                     esp_repo = ESPRepository(session)
@@ -123,44 +122,44 @@ class ActuatorService:
                 # WebSocket broadcast: command failed
                 try:
                     from ..websocket.manager import WebSocketManager
+
                     ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast("actuator_command_failed", {
-                        "esp_id": esp_id,
-                        "gpio": gpio,
-                        "command": command,
-                        "error": safety_result.error,
-                        "issued_by": issued_by,
-                        "correlation_id": correlation_id,
-                    })
+                    await ws_manager.broadcast(
+                        "actuator_command_failed",
+                        {
+                            "esp_id": esp_id,
+                            "gpio": gpio,
+                            "command": command,
+                            "error": safety_result.error,
+                            "issued_by": issued_by,
+                            "correlation_id": correlation_id,
+                        },
+                    )
                 except Exception:
                     pass  # WebSocket broadcast is best-effort
 
                 return False
-            
+
             # Log warnings if any
             if safety_result.warnings:
                 for warning in safety_result.warnings:
                     logger.warning(
                         f"Actuator command warning: esp_id={esp_id}, gpio={gpio}, {warning}"
                     )
-            
+
             # Step 2: Get actuator config for logging
             async for session in get_session():
                 esp_repo = ESPRepository(session)
                 actuator_repo = ActuatorRepository(session)
-                
+
                 esp_device = await esp_repo.get_by_device_id(esp_id)
                 if not esp_device:
                     logger.error(f"ESP device not found: {esp_id}")
                     return False
-                
-                actuator_config = await actuator_repo.get_by_esp_and_gpio(
-                    esp_device.id, gpio
-                )
-                actuator_type = (
-                    actuator_config.actuator_type if actuator_config else "unknown"
-                )
-                
+
+                actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+                actuator_type = actuator_config.actuator_type if actuator_config else "unknown"
+
                 # Step 3: Publish MQTT command
                 # CRITICAL: value must be 0.0-1.0 (ESP32 converts internally to 0-255)
                 success = self.publisher.publish_actuator_command(
@@ -172,12 +171,12 @@ class ActuatorService:
                     retry=True,
                     correlation_id=correlation_id,
                 )
-                
+
                 if not success:
                     logger.error(
                         f"Failed to publish actuator command: esp_id={esp_id}, gpio={gpio}"
                     )
-                    
+
                     # Log failed command
                     await actuator_repo.log_command(
                         esp_id=esp_device.id,
@@ -206,16 +205,20 @@ class ActuatorService:
                     # WebSocket broadcast: MQTT publish failed
                     try:
                         from ..websocket.manager import WebSocketManager
+
                         ws_manager = await WebSocketManager.get_instance()
-                        await ws_manager.broadcast("actuator_command_failed", {
-                            "esp_id": esp_id,
-                            "gpio": gpio,
-                            "command": command,
-                            "value": value,
-                            "error": "MQTT publish failed",
-                            "issued_by": issued_by,
-                            "correlation_id": correlation_id,
-                        })
+                        await ws_manager.broadcast(
+                            "actuator_command_failed",
+                            {
+                                "esp_id": esp_id,
+                                "gpio": gpio,
+                                "command": command,
+                                "value": value,
+                                "error": "MQTT publish failed",
+                                "issued_by": issued_by,
+                                "correlation_id": correlation_id,
+                            },
+                        )
                     except Exception:
                         pass  # WebSocket broadcast is best-effort
 
@@ -251,15 +254,19 @@ class ActuatorService:
                 # WebSocket broadcast: command sent
                 try:
                     from ..websocket.manager import WebSocketManager
+
                     ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast("actuator_command", {
-                        "esp_id": esp_id,
-                        "gpio": gpio,
-                        "command": command,
-                        "value": value,
-                        "issued_by": issued_by,
-                        "correlation_id": correlation_id,
-                    })
+                    await ws_manager.broadcast(
+                        "actuator_command",
+                        {
+                            "esp_id": esp_id,
+                            "gpio": gpio,
+                            "command": command,
+                            "value": value,
+                            "issued_by": issued_by,
+                            "correlation_id": correlation_id,
+                        },
+                    )
                 except Exception:
                     pass  # WebSocket broadcast is best-effort
 
@@ -268,9 +275,9 @@ class ActuatorService:
                     f"command={command}, value={value}, duration={duration}, "
                     f"issued_by={issued_by}"
                 )
-                
+
                 return True
-        
+
         except Exception as e:
             logger.error(
                 f"Error sending actuator command: {e}",

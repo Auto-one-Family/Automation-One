@@ -27,14 +27,10 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from ...core.logging_config import get_logger
-from ...db.models.logic import CrossESPLogic, LogicExecutionHistory
 from ...db.repositories import LogicRepository
 from ...services.logic_service import LogicService
 from ...schemas import (
-    ActionResult,
-    ConditionResult,
     ExecutionHistoryEntry,
-    ExecutionHistoryPaginatedResponse,
     ExecutionHistoryResponse,
     LogicRuleCreate,
     LogicRuleListResponse,
@@ -73,60 +69,62 @@ async def list_rules(
 ) -> LogicRuleListResponse:
     """
     List all logic rules.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
         enabled: Optional enabled filter
         page: Page number
         page_size: Items per page
-        
+
     Returns:
         Paginated list of rules
     """
     logic_repo = LogicRepository(db)
-    
+
     # Get all rules
     rules = await logic_repo.get_all()
-    
+
     # Apply filter
     if enabled is not None:
         rules = [r for r in rules if r.enabled == enabled]
-    
+
     # Sort by priority (highest first)
     rules.sort(key=lambda r: r.priority, reverse=True)
-    
+
     # Pagination
     total_items = len(rules)
     start_idx = (page - 1) * page_size
     end_idx = start_idx + page_size
     paginated = rules[start_idx:end_idx]
-    
+
     # Build responses
     responses = []
     for rule in paginated:
         # Get execution count
         exec_count = await logic_repo.get_execution_count(rule.id)
         last_exec = await logic_repo.get_last_execution(rule.id)
-        
-        responses.append(LogicRuleResponse(
-            id=rule.id,
-            name=rule.name,
-            description=rule.description,
-            conditions=rule.conditions,
-            actions=rule.actions,
-            logic_operator=rule.logic_operator,
-            enabled=rule.enabled,
-            priority=rule.priority,
-            cooldown_seconds=rule.cooldown_seconds,
-            max_executions_per_hour=rule.max_executions_per_hour,
-            last_triggered=rule.last_triggered,
-            execution_count=exec_count,
-            last_execution_success=last_exec.success if last_exec else None,
-            created_at=rule.created_at,
-            updated_at=rule.updated_at,
-        ))
-    
+
+        responses.append(
+            LogicRuleResponse(
+                id=rule.id,
+                name=rule.name,
+                description=rule.description,
+                conditions=rule.conditions,
+                actions=rule.actions,
+                logic_operator=rule.logic_operator,
+                enabled=rule.enabled,
+                priority=rule.priority,
+                cooldown_seconds=rule.cooldown_seconds,
+                max_executions_per_hour=rule.max_executions_per_hour,
+                last_triggered=rule.last_triggered,
+                execution_count=exec_count,
+                last_execution_success=last_exec.success if last_exec else None,
+                created_at=rule.created_at,
+                updated_at=rule.updated_at,
+            )
+        )
+
     return LogicRuleListResponse(
         success=True,
         data=responses,
@@ -156,27 +154,27 @@ async def get_rule(
 ) -> LogicRuleResponse:
     """
     Get logic rule by ID.
-    
+
     Args:
         rule_id: Rule ID
         db: Database session
         current_user: Authenticated user
-        
+
     Returns:
         Rule details
     """
     logic_repo = LogicRepository(db)
-    
+
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Logic rule {rule_id} not found",
         )
-    
+
     exec_count = await logic_repo.get_execution_count(rule.id)
     last_exec = await logic_repo.get_last_execution(rule.id)
-    
+
     return LogicRuleResponse(
         id=rule.id,
         name=rule.name,
@@ -215,18 +213,18 @@ async def create_rule(
 ) -> LogicRuleResponse:
     """
     Create a new logic rule.
-    
+
     Args:
         request: Rule data
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Created rule
     """
     logic_repo = LogicRepository(db)
     logic_service = LogicService(logic_repo)
-    
+
     # Create rule using LogicService (with validation)
     try:
         created = await logic_service.create_rule(request)
@@ -235,12 +233,14 @@ async def create_rule(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    
-    logger.info(f"Logic rule created: '{created.name}' (ID: {created.id}) by {current_user.username}")
-    
+
+    logger.info(
+        f"Logic rule created: '{created.name}' (ID: {created.id}) by {current_user.username}"
+    )
+
     exec_count = await logic_repo.get_execution_count(created.id)
     last_exec = await logic_repo.get_last_execution(created.id)
-    
+
     return LogicRuleResponse(
         id=created.id,
         name=created.name,
@@ -283,19 +283,19 @@ async def update_rule(
 ) -> LogicRuleResponse:
     """
     Update logic rule.
-    
+
     Args:
         rule_id: Rule ID
         request: Update data
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Updated rule
     """
     logic_repo = LogicRepository(db)
     logic_service = LogicService(logic_repo)
-    
+
     # Update rule using LogicService (with validation)
     try:
         rule = await logic_service.update_rule(rule_id, request)
@@ -304,18 +304,18 @@ async def update_rule(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    
+
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Logic rule {rule_id} not found",
         )
-    
+
     exec_count = await logic_repo.get_execution_count(rule.id)
     last_exec = await logic_repo.get_last_execution(rule.id)
-    
+
     logger.info(f"Logic rule updated: '{rule.name}' (ID: {rule.id}) by {current_user.username}")
-    
+
     return LogicRuleResponse(
         id=rule.id,
         name=rule.name,
@@ -357,30 +357,30 @@ async def delete_rule(
 ) -> LogicRuleResponse:
     """
     Delete logic rule.
-    
+
     Args:
         rule_id: Rule ID
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Deleted rule
     """
     logic_repo = LogicRepository(db)
-    
+
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Logic rule {rule_id} not found",
         )
-    
+
     # Delete rule
     await logic_repo.delete(rule_id)
     await db.commit()
-    
+
     logger.info(f"Logic rule deleted: '{rule.name}' (ID: {rule.id}) by {current_user.username}")
-    
+
     return LogicRuleResponse(
         id=rule.id,
         name=rule.name,
@@ -423,37 +423,37 @@ async def toggle_rule(
 ) -> RuleToggleResponse:
     """
     Toggle rule enabled state.
-    
+
     Args:
         rule_id: Rule ID
         request: Toggle request
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Toggle response
     """
     logic_repo = LogicRepository(db)
-    
+
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Logic rule {rule_id} not found",
         )
-    
+
     previous_state = rule.enabled
     rule.enabled = request.enabled
-    
+
     await db.flush()
     await db.commit()
-    
+
     action = "enabled" if request.enabled else "disabled"
     logger.info(
         f"Logic rule {action}: '{rule.name}' (ID: {rule.id}) by {current_user.username}"
         + (f" - Reason: {request.reason}" if request.reason else "")
     )
-    
+
     return RuleToggleResponse(
         success=True,
         message=f"Rule '{rule.name}' {action}",
@@ -487,34 +487,34 @@ async def test_rule(
 ) -> RuleTestResponse:
     """
     Test/simulate rule execution.
-    
+
     Args:
         rule_id: Rule ID
         request: Test parameters
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Test results
     """
     logic_repo = LogicRepository(db)
     logic_service = LogicService(logic_repo)
-    
+
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Logic rule {rule_id} not found",
         )
-    
+
     # Test rule using LogicService
     test_result = await logic_service.test_rule(rule, request)
-    
+
     logger.info(
         f"Logic rule tested: '{rule.name}' (ID: {rule.id}) by {current_user.username} - "
         f"Would trigger: {test_result.would_trigger}, Dry run: {request.dry_run}"
     )
-    
+
     return test_result
 
 
@@ -540,7 +540,7 @@ async def get_execution_history(
 ) -> ExecutionHistoryResponse:
     """
     Get rule execution history.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
@@ -549,18 +549,18 @@ async def get_execution_history(
         start_time: Start of time range
         end_time: End of time range
         limit: Max results
-        
+
     Returns:
         Execution history
     """
     logic_repo = LogicRepository(db)
-    
+
     # Default time range
     if not start_time:
         start_time = datetime.now(timezone.utc) - timedelta(days=7)
     if not end_time:
         end_time = datetime.now(timezone.utc)
-    
+
     # Get history
     history = await logic_repo.get_execution_history(
         rule_id=rule_id,
@@ -569,36 +569,38 @@ async def get_execution_history(
         end_time=end_time,
         limit=limit,
     )
-    
+
     # Convert to response
     entries = []
     success_count = 0
     for entry in history:
         rule = await logic_repo.get_by_id(entry.logic_rule_id)
         rule_name = rule.rule_name if rule else "Unknown"
-        
+
         # Extract trigger reason from trigger_data
         trigger_reason = "Unknown trigger"
         if entry.trigger_data:
             trigger_reason = str(entry.trigger_data.get("reason", entry.trigger_data))
-        
-        entries.append(ExecutionHistoryEntry(
-            id=entry.id,
-            rule_id=entry.logic_rule_id,
-            rule_name=rule_name,
-            triggered_at=entry.timestamp,
-            trigger_reason=trigger_reason,
-            actions_executed=entry.actions_executed or [],
-            success=entry.success,
-            error_message=entry.error_message,
-            execution_time_ms=entry.execution_time_ms,
-        ))
-        
+
+        entries.append(
+            ExecutionHistoryEntry(
+                id=entry.id,
+                rule_id=entry.logic_rule_id,
+                rule_name=rule_name,
+                triggered_at=entry.timestamp,
+                trigger_reason=trigger_reason,
+                actions_executed=entry.actions_executed or [],
+                success=entry.success,
+                error_message=entry.error_message,
+                execution_time_ms=entry.execution_time_ms,
+            )
+        )
+
         if entry.success:
             success_count += 1
-    
+
     success_rate = success_count / len(entries) if entries else None
-    
+
     return ExecutionHistoryResponse(
         success=True,
         entries=entries,

@@ -227,9 +227,7 @@ class PHSensorProcessor(BaseSensorProcessor):
         """
         return (adc_value / self.ADC_MAX) * self.ADC_VOLTAGE_RANGE
 
-    def _voltage_to_ph_calibrated(
-        self, voltage: float, slope: float, offset: float
-    ) -> float:
+    def _voltage_to_ph_calibrated(self, voltage: float, slope: float, offset: float) -> float:
         """
         Convert voltage to pH using calibration.
 

@@ -19,27 +19,14 @@ Dependencies:
 """
 
 import pytest
-import pytest_asyncio
-import uuid
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import fixtures
 from tests.integration.conftest_logic import (
-    mock_esp32_ph,
-    mock_esp32_ph_uncalibrated,
-    logic_engine,
-    mock_actuator_service,
-    mock_logic_repo,
-    mock_websocket_manager,
-    cross_esp_logic_setup,
-    create_sensor_condition,
-    create_actuator_action,
     create_hysteresis_condition,
-    create_notification_action,
 )
 
-from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
+from tests.esp32.mocks.mock_esp32_client import MockESP32Client
 
 
 pytestmark = [pytest.mark.logic, pytest.mark.ph_sensor]
@@ -77,10 +64,7 @@ class TestPHSensorBasicLogic:
         # === TRIGGER ===
         # Evaluate sensor data via Logic Engine
         await logic_engine.evaluate_sensor_data(
-            esp_id="ESP_PH_SENSOR",
-            gpio=34,
-            sensor_type="pH",
-            value=5.2
+            esp_id="ESP_PH_SENSOR", gpio=34, sensor_type="pH", value=5.2
         )
 
         # === VERIFY ===
@@ -120,10 +104,7 @@ class TestPHSensorBasicLogic:
 
         # === TRIGGER ===
         await logic_engine.evaluate_sensor_data(
-            esp_id="ESP_PH_SENSOR",
-            gpio=34,
-            sensor_type="pH",
-            value=7.5
+            esp_id="ESP_PH_SENSOR", gpio=34, sensor_type="pH", value=7.5
         )
 
         # === VERIFY ===
@@ -250,7 +231,7 @@ class TestPHSensorHysteresis:
             gpio=34,
             activate_below=5.3,  # Turn ON base pump when pH < 5.3
             deactivate_above=5.8,  # Turn OFF when pH > 5.8
-            sensor_type="pH"
+            sensor_type="pH",
         )
 
         # === TEST SEQUENCE ===
@@ -333,7 +314,7 @@ class TestPHSensorCalibration:
         assert drift_rate > 0  # Drift is configured
 
         # Calculate expected drift after 24 hours
-        expected_drift_24h = drift_rate * 24
+        drift_rate * 24
         # With drift_rate=0.02, 24h drift = 0.48 pH
 
         # Get pH with drift (simulated time)
@@ -373,10 +354,7 @@ class TestPHSensorCrossESP:
 
         # === TRIGGER ===
         await logic_engine.evaluate_sensor_data(
-            esp_id="ESP_SENSORS",
-            gpio=34,
-            sensor_type="pH",
-            value=5.2
+            esp_id="ESP_SENSORS", gpio=34, sensor_type="pH", value=5.2
         )
 
         # === VERIFY ===

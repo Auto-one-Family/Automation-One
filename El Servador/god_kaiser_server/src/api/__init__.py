@@ -7,4 +7,3 @@ Provides REST API endpoints for:
 - Actuator control
 - System configuration
 """
-

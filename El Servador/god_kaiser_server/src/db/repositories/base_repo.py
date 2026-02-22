@@ -6,7 +6,6 @@ import uuid
 from typing import Any, Generic, Optional, Type, TypeVar
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..base import Base

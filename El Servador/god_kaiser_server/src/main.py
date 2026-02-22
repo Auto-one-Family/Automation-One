@@ -32,7 +32,7 @@ from .core.exception_handlers import (
 from .core.exceptions import GodKaiserException
 from .core.logging_config import get_logger, setup_logging
 from .core.resilience import ResilienceRegistry, get_health_status
-from .db.repositories import ActuatorRepository, ESPRepository, LogicRepository
+from .db.repositories import ActuatorRepository, LogicRepository
 from .db.session import dispose_engine, get_engine, get_session, init_db, init_db_circuit_breaker
 from .mqtt.client import MQTTClient
 from .mqtt.handlers import (
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     try:
         # Step 0: Security Validation
         logger.info("Validating security configuration...")
-        
+
         # Check JWT secret key
         if settings.security.jwt_secret_key == "change-this-secret-key-in-production":
             if settings.environment == "production":
@@ -117,7 +117,7 @@ async def lifespan(app: FastAPI):
                     "SECURITY: Using default JWT secret key (OK for development only). "
                     "Change JWT_SECRET_KEY in production!"
                 )
-        
+
         # Check MQTT TLS if auth is enabled
         # Note: We can't check if auth is enabled yet (DB not initialized), but we can warn
         if not settings.mqtt.use_tls:
@@ -125,20 +125,21 @@ async def lifespan(app: FastAPI):
                 "MQTT TLS is disabled. MQTT authentication credentials will be sent in plain text. "
                 "Enable MQTT_USE_TLS for secure credential distribution."
             )
-        
+
         logger.info("Security validation complete")
-        
+
         # Step 0.5: Initialize Resilience Patterns
         logger.info("Initializing resilience patterns...")
-        
+
         # Initialize registry (singleton)
         resilience_registry = ResilienceRegistry.get_instance()
-        
+
         # Database circuit breaker will be initialized in init_db_circuit_breaker()
         # MQTT circuit breaker is initialized in MQTTClient.__init__()
-        
+
         # Initialize external API circuit breaker (optional)
         from .core.resilience import CircuitBreaker
+
         external_api_breaker = CircuitBreaker(
             name="external_api",
             failure_threshold=settings.resilience.circuit_breaker_api_failure_threshold,
@@ -146,12 +147,12 @@ async def lifespan(app: FastAPI):
             half_open_timeout=float(settings.resilience.circuit_breaker_api_half_open_timeout),
         )
         resilience_registry.register_circuit_breaker("external_api", external_api_breaker)
-        
+
         logger.info(
-            f"[resilience] Resilience patterns initialized: "
-            f"registry ready, external_api breaker registered"
+            "[resilience] Resilience patterns initialized: "
+            "registry ready, external_api breaker registered"
         )
-        
+
         # Step 1: Initialize database
         if settings.database.auto_init:
             logger.info("Initializing database...")
@@ -161,7 +162,7 @@ async def lifespan(app: FastAPI):
             logger.info("Skipping database init (auto_init=False)")
             # Ensure engine is created even if not auto-initializing
             get_engine()
-        
+
         # Initialize database circuit breaker after DB is ready
         init_db_circuit_breaker()
         logger.info("[resilience] Database circuit breaker initialized")
@@ -204,69 +205,55 @@ async def lifespan(app: FastAPI):
         # WP6: Register handlers with wildcard kaiser_id (+) for multi-Kaiser support
         # Topic parsers already accept any kaiser_id via regex, subscriptions now match
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/sensor/+/data",
-            sensor_handler.handle_sensor_data
+            "kaiser/+/esp/+/sensor/+/data", sensor_handler.handle_sensor_data
         )
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/actuator/+/status",
-            actuator_handler.handle_actuator_status
+            "kaiser/+/esp/+/actuator/+/status", actuator_handler.handle_actuator_status
         )
         # Phase 8: Actuator Response Handler (command confirmations)
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/actuator/+/response",
-            actuator_response_handler.handle_actuator_response
+            "kaiser/+/esp/+/actuator/+/response", actuator_response_handler.handle_actuator_response
         )
         # Phase 8: Actuator Alert Handler (emergency/timeout alerts)
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/actuator/+/alert",
-            actuator_alert_handler.handle_actuator_alert
+            "kaiser/+/esp/+/actuator/+/alert", actuator_alert_handler.handle_actuator_alert
         )
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/system/heartbeat",
-            heartbeat_handler.handle_heartbeat
+            "kaiser/+/esp/+/system/heartbeat", heartbeat_handler.handle_heartbeat
         )
         _subscriber_instance.register_handler(
-            "kaiser/+/discovery/esp32_nodes",
-            discovery_handler.handle_discovery
+            "kaiser/+/discovery/esp32_nodes", discovery_handler.handle_discovery
         )
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/config_response",
-            config_handler.handle_config_ack
+            "kaiser/+/esp/+/config_response", config_handler.handle_config_ack
         )
         # Phase 7: Zone ACK Handler (zone assignment confirmations)
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/zone/ack",
-            zone_ack_handler.handle_zone_ack
+            "kaiser/+/esp/+/zone/ack", zone_ack_handler.handle_zone_ack
         )
         # Phase 9: Subzone ACK Handler (subzone assignment confirmations)
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/subzone/ack",
-            subzone_ack_handler.handle_subzone_ack
+            "kaiser/+/esp/+/subzone/ack", subzone_ack_handler.handle_subzone_ack
         )
         # LWT Handler (Instant Offline Detection)
         # Topic: kaiser/+/esp/+/system/will (WP6: wildcard kaiser_id)
         # ESP32 builds LWT topic from heartbeat: /system/heartbeat -> /system/will
         # QoS: 1 (broker publishes LWT with QoS from ESP32 config)
         # This provides INSTANT offline detection when ESP32 disconnects unexpectedly
-        _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/system/will",
-            lwt_handler.handle_lwt
-        )
+        _subscriber_instance.register_handler("kaiser/+/esp/+/system/will", lwt_handler.handle_lwt)
         logger.info("LWT handler registered: kaiser/+/esp/+/system/will")
         # Error Event Handler (DS18B20/OneWire errors, GPIO conflicts, etc.)
         # Topic: kaiser/+/esp/+/system/error (WP6: wildcard kaiser_id)
         # ESP32 publishes hardware/config errors to this topic for server processing
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/system/error",
-            error_handler.handle_error_event
+            "kaiser/+/esp/+/system/error", error_handler.handle_error_event
         )
         logger.info("Error handler registered: kaiser/+/esp/+/system/error")
         # System Diagnostics Handler (HealthMonitor snapshots)
         # Topic: kaiser/+/esp/+/system/diagnostics (WP6: wildcard kaiser_id)
         # ESP32 HealthMonitor publishes diagnostics every 60s (heap, RSSI, uptime, state)
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/system/diagnostics",
-            diagnostics_handler.handle_diagnostics
+            "kaiser/+/esp/+/system/diagnostics", diagnostics_handler.handle_diagnostics
         )
         logger.info("Diagnostics handler registered: kaiser/+/esp/+/system/diagnostics")
 
@@ -275,6 +262,7 @@ async def lifespan(app: FastAPI):
         # Step 3.4: Initialize Central Scheduler
         logger.info("Initializing Central Scheduler...")
         from .core.scheduler import init_central_scheduler
+
         _central_scheduler = init_central_scheduler()
         logger.info("Central Scheduler started")
 
@@ -282,9 +270,11 @@ async def lifespan(app: FastAPI):
         logger.info("Initializing SimulationScheduler...")
         from .services.simulation import init_simulation_scheduler
         import json
+
         def mqtt_publish_for_simulation(topic: str, payload: dict, qos: int = 1):
             if mqtt_client and mqtt_client.is_connected():
                 mqtt_client.publish(topic, json.dumps(payload), qos=qos)
+
         _simulation_scheduler = init_simulation_scheduler(mqtt_publish_for_simulation)
         logger.info("SimulationScheduler initialized")
 
@@ -294,6 +284,7 @@ async def lifespan(app: FastAPI):
             """Route actuator commands to Mock-ESP handler if target is an active mock."""
             try:
                 from .services.simulation import get_simulation_scheduler
+
                 sim_scheduler = get_simulation_scheduler()
                 # Convert payload back to JSON string for handler
                 payload_str = json.dumps(payload)
@@ -307,29 +298,27 @@ async def lifespan(app: FastAPI):
 
         # WP6: Wildcard kaiser_id for Mock-ESP handlers
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/actuator/+/command",
-            mock_actuator_command_handler
+            "kaiser/+/esp/+/actuator/+/command", mock_actuator_command_handler
         )
         # Also handle emergency topics for mocks
         _subscriber_instance.register_handler(
-            "kaiser/+/esp/+/actuator/emergency",
-            mock_actuator_command_handler
+            "kaiser/+/esp/+/actuator/emergency", mock_actuator_command_handler
         )
         # Broadcast pattern remains fixed (not kaiser-specific)
         _subscriber_instance.register_handler(
-            "kaiser/broadcast/emergency",
-            mock_actuator_command_handler
+            "kaiser/broadcast/emergency", mock_actuator_command_handler
         )
         logger.info("Registered Mock-ESP actuator command handlers (Paket G)")
 
         # Step 3.4.2: Initialize MaintenanceService
         logger.info("Initializing MaintenanceService...")
         from .services.maintenance import init_maintenance_service
+
         _maintenance_service = init_maintenance_service(
             scheduler=_central_scheduler,
             session_factory=get_session,
             mqtt_client=mqtt_client,
-            settings=settings
+            settings=settings,
         )
         _maintenance_service.start()  # Registriert alle Jobs
         logger.info("MaintenanceService initialized and started")
@@ -340,12 +329,14 @@ async def lifespan(app: FastAPI):
         # exposed by the Instrumentator at /api/v1/health/metrics.
         logger.info("Registering Prometheus metrics update job...")
         from .core.metrics import set_server_start_time, update_all_metrics_async
+
         set_server_start_time(time.time())
 
         async def _metrics_update_job() -> None:
             await update_all_metrics_async(get_session)
 
         from .core.scheduler import JobCategory
+
         _central_scheduler.add_interval_job(
             job_id="monitor_prometheus_metrics",
             func=_metrics_update_job,
@@ -361,7 +352,9 @@ async def lifespan(app: FastAPI):
             async for session in get_session():
                 recovered_count = await _simulation_scheduler.recover_mocks(session)
                 if recovered_count > 0:
-                    logger.info(f"Mock-ESP recovery complete: {recovered_count} simulations restored")
+                    logger.info(
+                        f"Mock-ESP recovery complete: {recovered_count} simulations restored"
+                    )
                 else:
                     logger.info("No active Mock-ESP simulations to recover")
                 break  # Exit after first session
@@ -411,9 +404,7 @@ async def lifespan(app: FastAPI):
                 )
 
                 recovered_count = await sensor_scheduler_service.recover_all_jobs(session)
-                logger.info(
-                    f"Sensor schedule recovery complete: {recovered_count} jobs"
-                )
+                logger.info(f"Sensor schedule recovery complete: {recovered_count} jobs")
                 break  # Exit after first session
         except Exception as e:
             # Non-fatal: Scheduled sensors won't auto-trigger, but manual trigger still works
@@ -425,7 +416,9 @@ async def lifespan(app: FastAPI):
             _subscriber_instance.subscribe_all()
             logger.info("MQTT subscriptions complete")
         else:
-            logger.info("Skipping initial subscription (not connected) - will subscribe on reconnect")
+            logger.info(
+                "Skipping initial subscription (not connected) - will subscribe on reconnect"
+            )
 
         # Step 5: Initialize WebSocket Manager
         logger.info("Initializing WebSocket Manager...")
@@ -441,25 +434,32 @@ async def lifespan(app: FastAPI):
             actuator_repo = ActuatorRepository(session)
             esp_repo = ESPRepository(session)
             logic_repo = LogicRepository(session)
-            
+
             # Initialize Safety Service
             safety_service = SafetyService(actuator_repo, esp_repo)
-            
+
             # Initialize Publisher
             publisher = Publisher()
-            
+
             # Initialize Actuator Service
             actuator_service = ActuatorService(actuator_repo, safety_service, publisher)
-            
+
             # Initialize Logic Engine with modular evaluators and executors
             global _logic_engine, _logic_scheduler
-            
+
             # Setup condition evaluators
             sensor_evaluator = SensorConditionEvaluator()
             time_evaluator = TimeConditionEvaluator()
             hysteresis_evaluator = HysteresisConditionEvaluator()
-            compound_evaluator = CompoundConditionEvaluator([sensor_evaluator, time_evaluator, hysteresis_evaluator])
-            condition_evaluators = [sensor_evaluator, time_evaluator, hysteresis_evaluator, compound_evaluator]
+            compound_evaluator = CompoundConditionEvaluator(
+                [sensor_evaluator, time_evaluator, hysteresis_evaluator]
+            )
+            condition_evaluators = [
+                sensor_evaluator,
+                time_evaluator,
+                hysteresis_evaluator,
+                compound_evaluator,
+            ]
 
             # Setup action executors
             actuator_executor = ActuatorActionExecutor(actuator_service)
@@ -499,18 +499,19 @@ async def lifespan(app: FastAPI):
                 rate_limiter=rate_limiter,
             )
             await _logic_engine.start()
-            
+
             # Initialize Logic Scheduler
             _logic_scheduler = LogicScheduler(
                 _logic_engine,
                 interval_seconds=settings.performance.logic_scheduler_interval_seconds,
             )
             await _logic_scheduler.start()
-            
+
             # Set global instance for handlers
             from .services.logic_engine import set_logic_engine
+
             set_logic_engine(_logic_engine)
-            
+
             logger.info("Services initialized successfully")
             break  # Exit after first session
 
@@ -522,13 +523,15 @@ async def lifespan(app: FastAPI):
             f"(closed={resilience_status['summary']['closed']}, "
             f"open={resilience_status['summary']['open']})"
         )
-        
+
         logger.info("=" * 60)
         logger.info("God-Kaiser Server Started Successfully")
         logger.info(f"Environment: {settings.environment}")
         logger.info(f"Log Level: {settings.log_level}")
         logger.info(f"MQTT Broker: {settings.mqtt.broker_host}:{settings.mqtt.broker_port}")
-        logger.info("API Endpoints: /api/v1/auth, /api/v1/esp, /api/v1/sensors, /api/v1/actuators, /api/v1/logic, /api/v1/health")
+        logger.info(
+            "API Endpoints: /api/v1/auth, /api/v1/esp, /api/v1/sensors, /api/v1/actuators, /api/v1/logic, /api/v1/health"
+        )
         logger.info("Resilience: Circuit Breakers (mqtt, database, external_api) + Retry + Timeout")
         logger.info("=" * 60)
 
@@ -549,7 +552,7 @@ async def lifespan(app: FastAPI):
             logger.info("Stopping Logic Scheduler...")
             await _logic_scheduler.stop()
             logger.info("Logic Scheduler stopped")
-        
+
         # Step 2: Stop Logic Engine
         if _logic_engine:
             logger.info("Stopping Logic Engine...")
@@ -566,6 +569,7 @@ async def lifespan(app: FastAPI):
         logger.info("Stopping MaintenanceService...")
         try:
             from .services.maintenance import get_maintenance_service
+
             maintenance_service = get_maintenance_service()
             maintenance_service.stop()  # Entfernt Maintenance-Jobs
             logger.info("  MaintenanceService stopped")
@@ -587,8 +591,11 @@ async def lifespan(app: FastAPI):
         logger.info("Stopping Central Scheduler...")
         try:
             from .core.scheduler import shutdown_central_scheduler
+
             scheduler_stats = await shutdown_central_scheduler()
-            logger.info(f"  Central Scheduler: {scheduler_stats.get('jobs_removed', 0)} jobs removed")
+            logger.info(
+                f"  Central Scheduler: {scheduler_stats.get('jobs_removed', 0)} jobs removed"
+            )
         except Exception as e:
             logger.warning(f"  Central Scheduler shutdown warning: {e}")
 
@@ -597,13 +604,13 @@ async def lifespan(app: FastAPI):
             logger.info("Shutting down WebSocket Manager...")
             await _websocket_manager.shutdown()
             logger.info("WebSocket Manager shutdown complete")
-        
+
         # Step 4: Shutdown MQTT subscriber (thread pool)
         if _subscriber_instance:
             logger.info("Shutting down MQTT subscriber thread pool...")
             _subscriber_instance.shutdown(wait=True, timeout=30.0)
             logger.info("MQTT subscriber shutdown complete")
-        
+
         # Step 5: Disconnect MQTT client (always stop loop, even if not connected)
         logger.info("Disconnecting MQTT client...")
         mqtt_client = MQTTClient.get_instance()
@@ -663,6 +670,7 @@ app = FastAPI(
 
 # Request-ID middleware (must be added before CORS so it wraps the full request)
 from .middleware.request_id import RequestIdMiddleware
+
 app.add_middleware(RequestIdMiddleware)
 
 # CORS middleware
@@ -688,6 +696,7 @@ Instrumentator().instrument(app).expose(
 )
 
 # ===== ROUTES =====
+
 
 # Root endpoint
 @app.get("/", tags=["root"])

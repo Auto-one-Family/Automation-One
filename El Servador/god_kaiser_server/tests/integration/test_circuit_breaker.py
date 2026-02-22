@@ -14,16 +14,11 @@ metrics, and integration with the ResilienceRegistry.
 import time
 import asyncio
 import pytest
-from unittest.mock import patch
 
 from src.core.resilience import (
     CircuitBreaker,
     CircuitState,
-    CircuitBreakerConfig,
     ResilienceRegistry,
-    CircuitBreakerOpenError,
-    ServiceUnavailableError,
-    circuit_breaker_decorator,
 )
 
 
@@ -332,10 +327,7 @@ class TestCircuitBreakerIndependence:
 
     def test_all_can_be_open_simultaneously(self):
         """All breakers can be OPEN at the same time."""
-        breakers = [
-            CircuitBreaker(f"sim_{i}", failure_threshold=2)
-            for i in range(3)
-        ]
+        breakers = [CircuitBreaker(f"sim_{i}", failure_threshold=2) for i in range(3)]
 
         for cb in breakers:
             cb.record_failure()

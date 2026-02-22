@@ -173,9 +173,7 @@ class TestDS18B20Processor:
         """Test processing with both calibration and unit conversion."""
         calibration = {"offset": 1.0}
         params = {"unit": "fahrenheit"}
-        result = processor.process(
-            raw_value=20.0, calibration=calibration, params=params
-        )
+        result = processor.process(raw_value=20.0, calibration=calibration, params=params)
 
         # 20°C + 1°C = 21°C → Fahrenheit = 69.8°F
         assert result.value == 69.8
@@ -190,7 +188,7 @@ class TestDS18B20Processor:
         # 400 * 0.0625 = 25.0°C
         params = {"raw_mode": True}
         result = processor.process(raw_value=400, params=params)
-        
+
         assert result.value == 25.0
         assert result.quality == "good"
         assert result.metadata["raw_mode"] is True
@@ -202,7 +200,7 @@ class TestDS18B20Processor:
         # -880 * 0.0625 = -55.0°C (spec minimum)
         params = {"raw_mode": True}
         result = processor.process(raw_value=-880, params=params)
-        
+
         assert result.value == -55.0
         assert result.quality == "fair"  # At spec limit
         assert result.metadata["raw_mode"] is True
@@ -212,7 +210,7 @@ class TestDS18B20Processor:
         # 2000 * 0.0625 = 125.0°C (spec maximum)
         params = {"raw_mode": True}
         result = processor.process(raw_value=2000, params=params)
-        
+
         assert result.value == 125.0
         assert result.quality == "fair"  # At spec limit
         assert result.metadata["raw_mode"] is True
@@ -221,7 +219,7 @@ class TestDS18B20Processor:
         """Test RAW mode with zero (0°C)."""
         params = {"raw_mode": True}
         result = processor.process(raw_value=0, params=params)
-        
+
         assert result.value == 0.0
         assert result.quality == "good"
 
@@ -230,7 +228,7 @@ class TestDS18B20Processor:
         # 400 * 0.0625 = 25.0°C → 77.0°F
         params = {"raw_mode": True, "unit": "fahrenheit"}
         result = processor.process(raw_value=400, params=params)
-        
+
         assert result.value == 77.0
         assert result.unit == "°F"
         assert result.metadata["raw_mode"] is True
@@ -241,7 +239,7 @@ class TestDS18B20Processor:
         params = {"raw_mode": True}
         calibration = {"offset": 0.5}
         result = processor.process(raw_value=400, params=params, calibration=calibration)
-        
+
         assert result.value == 25.5
         assert result.metadata["calibrated"] is True
         assert result.metadata["raw_mode"] is True
@@ -251,7 +249,7 @@ class TestDS18B20Processor:
         # Value is already in Celsius
         params = {"raw_mode": False}
         result = processor.process(raw_value=25.0, params=params)
-        
+
         assert result.value == 25.0
         assert result.metadata["raw_mode"] is False
         assert result.metadata["original_raw_value"] is None
@@ -260,7 +258,7 @@ class TestDS18B20Processor:
         """Test that raw_mode defaults to False for backward compatibility."""
         # No params = raw_mode defaults to False
         result = processor.process(raw_value=25.0)
-        
+
         assert result.value == 25.0
         assert result.metadata["raw_mode"] is False
 
@@ -269,7 +267,7 @@ class TestDS18B20Processor:
         # 2100 * 0.0625 = 131.25°C (above 125°C spec)
         params = {"raw_mode": True}
         result = processor.process(raw_value=2100, params=params)
-        
+
         # Should fail validation (out of sensor range)
         assert result.quality == "error"
 
@@ -278,7 +276,7 @@ class TestDS18B20Processor:
         # -1000 * 0.0625 = -62.5°C (below -55°C spec)
         params = {"raw_mode": True}
         result = processor.process(raw_value=-1000, params=params)
-        
+
         # Should fail validation (out of sensor range)
         assert result.quality == "error"
 
@@ -287,7 +285,7 @@ class TestDS18B20Processor:
         # 320 * 0.0625 = 20.0°C (typical greenhouse)
         params = {"raw_mode": True}
         result = processor.process(raw_value=320, params=params)
-        
+
         assert result.value == 20.0
         assert result.quality == "good"
 
@@ -296,7 +294,7 @@ class TestDS18B20Processor:
         # 401 * 0.0625 = 25.0625°C → rounded to 1 decimal = 25.1°C
         params = {"raw_mode": True, "decimal_places": 1}
         result = processor.process(raw_value=401, params=params)
-        
+
         assert result.value == 25.1
 
 
@@ -417,9 +415,7 @@ class TestSHT31TemperatureProcessor:
         """Test processing with calibration and Fahrenheit conversion."""
         calibration = {"offset": 0.5}
         params = {"unit": "fahrenheit", "decimal_places": 1}
-        result = processor.process(
-            raw_value=20.0, calibration=calibration, params=params
-        )
+        result = processor.process(raw_value=20.0, calibration=calibration, params=params)
 
         # 20°C + 0.5°C = 20.5°C → 68.9°F
         assert result.value == 68.9

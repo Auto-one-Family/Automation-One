@@ -3,11 +3,9 @@ Unit Tests: ESPRepository
 Tests for ESP device-specific queries
 """
 
-import uuid
 from datetime import datetime
 
 import pytest
-import pytest_asyncio
 
 from src.db.repositories.esp_repo import ESPRepository
 
@@ -47,7 +45,7 @@ class TestESPRepositoryGetByZone:
     async def test_get_by_zone_success(self, esp_repo: ESPRepository):
         """Test retrieval by zone_id."""
         # Create devices in different zones
-        device1 = await esp_repo.create(
+        await esp_repo.create(
             device_id="ESP_ZONE1_001",
             name="Zone 1 Device 1",
             ip_address="192.168.1.100",
@@ -59,7 +57,7 @@ class TestESPRepositoryGetByZone:
             zone_name="Zone 1",
         )
 
-        device2 = await esp_repo.create(
+        await esp_repo.create(
             device_id="ESP_ZONE1_002",
             name="Zone 1 Device 2",
             ip_address="192.168.1.101",
@@ -285,7 +283,7 @@ class TestESPRepositoryUpdateStatus:
 
     async def test_update_status_success(self, esp_repo: ESPRepository):
         """Test successful status update."""
-        device = await esp_repo.create(
+        await esp_repo.create(
             device_id="ESP_STATUS_TEST",
             name="Status Test Device",
             ip_address="192.168.1.100",
@@ -303,7 +301,7 @@ class TestESPRepositoryUpdateStatus:
 
     async def test_update_status_with_timestamp(self, esp_repo: ESPRepository):
         """Test status update with custom timestamp."""
-        device = await esp_repo.create(
+        await esp_repo.create(
             device_id="ESP_TIMESTAMP_TEST",
             name="Timestamp Test Device",
             ip_address="192.168.1.100",
@@ -333,7 +331,7 @@ class TestESPRepositoryUpdateCapabilities:
 
     async def test_update_capabilities_success(self, esp_repo: ESPRepository):
         """Test successful capabilities update."""
-        device = await esp_repo.create(
+        await esp_repo.create(
             device_id="ESP_CAPS_TEST",
             name="Capabilities Test Device",
             ip_address="192.168.1.100",
@@ -362,7 +360,7 @@ class TestESPRepositoryAssignZone:
 
     async def test_assign_zone_success(self, esp_repo: ESPRepository):
         """Test successful zone assignment."""
-        device = await esp_repo.create(
+        await esp_repo.create(
             device_id="ESP_ZONE_ASSIGN",
             name="Zone Assign Test",
             ip_address="192.168.1.100",
@@ -385,4 +383,3 @@ class TestESPRepositoryAssignZone:
         """Test zone assignment with non-existent device."""
         result = await esp_repo.assign_zone("ESP_NONEXISTENT", "zone_1", "Zone 1")
         assert result is None
-

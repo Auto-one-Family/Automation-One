@@ -18,8 +18,7 @@ Priority: CRITICAL
 Status: IMPLEMENTED
 """
 
-from typing import Any, Dict, List, Optional
-import uuid
+from typing import Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +26,6 @@ from ..core.config_mapping import ConfigMappingEngine, get_mapping_engine
 from ..core.logging_config import get_logger
 from ..db.models.actuator import ActuatorConfig
 from ..db.models.sensor import SensorConfig
-from ..db.models.esp import ESPDevice
 from ..db.repositories import ESPRepository, SensorRepository, ActuatorRepository
 
 logger = get_logger(__name__)
@@ -42,6 +40,7 @@ class ConfigConflictError(Exception):
 
     Phase: 2 (GPIO Validation)
     """
+
     pass
 
 
@@ -80,12 +79,12 @@ class ConfigPayloadBuilder:
         # Default mappings
         builder = ConfigPayloadBuilder()
         config = await builder.build_combined_config(esp_id, db)
-        
+
         # Custom mappings
         engine = ConfigMappingEngine(sensor_mappings=[...])
         builder = ConfigPayloadBuilder(mapping_engine=engine)
     """
-    
+
     def __init__(
         self,
         sensor_repo: Optional[SensorRepository] = None,
@@ -95,7 +94,7 @@ class ConfigPayloadBuilder:
     ):
         """
         Initialize ConfigPayloadBuilder.
-        
+
         Args:
             sensor_repo: Sensor repository (optional, created if not provided)
             actuator_repo: Actuator repository (optional, created if not provided)
@@ -106,11 +105,11 @@ class ConfigPayloadBuilder:
         self.actuator_repo = actuator_repo
         self.esp_repo = esp_repo
         self.mapping_engine = mapping_engine or get_mapping_engine()
-    
+
     def build_sensor_payload(self, sensor: SensorConfig) -> Dict[str, Any]:
         """
         Convert SensorConfig model to ESP32 payload format.
-        
+
         Uses configurable field mappings from ConfigMappingEngine.
         Default mappings:
         - sensor_name → sensor_name (direct)
@@ -120,19 +119,19 @@ class ConfigPayloadBuilder:
         - sample_interval_ms → sample_interval_ms (direct)
         - sensor_metadata.subzone_id → subzone_id (extracted from metadata)
         - raw_mode → always true (ESP32 expects this field)
-        
+
         Args:
             sensor: SensorConfig model instance
-            
+
         Returns:
             Dictionary with ESP32-compatible sensor payload
         """
         return self.mapping_engine.apply_sensor_mapping(sensor)
-    
+
     def build_actuator_payload(self, actuator: ActuatorConfig) -> Dict[str, Any]:
         """
         Convert ActuatorConfig model to ESP32 payload format.
-        
+
         Uses configurable field mappings from ConfigMappingEngine.
         Default mappings:
         - actuator_name → actuator_name (direct)
@@ -145,15 +144,15 @@ class ConfigPayloadBuilder:
         - actuator_metadata.inverted_logic → inverted_logic (default: false)
         - actuator_metadata.default_state → default_state (default: false)
         - actuator_metadata.default_pwm → default_pwm (default: 0)
-        
+
         Args:
             actuator: ActuatorConfig model instance
-            
+
         Returns:
             Dictionary with ESP32-compatible actuator payload
         """
         return self.mapping_engine.apply_actuator_mapping(actuator)
-    
+
     async def build_combined_config(
         self,
         esp_device_id: str,
@@ -161,17 +160,17 @@ class ConfigPayloadBuilder:
     ) -> Dict[str, Any]:
         """
         Build combined sensor/actuator configuration payload for ESP32.
-        
+
         Loads all active sensors and actuators for the ESP device and builds
         a combined payload in ESP32-compatible format.
-        
+
         Args:
             esp_device_id: ESP device ID (e.g., "ESP_12AB34CD")
             db: Database session
-            
+
         Returns:
             Dictionary with "sensors" and "actuators" arrays in ESP32 format
-            
+
         Raises:
             ValueError: If ESP device not found
         """
@@ -182,16 +181,16 @@ class ConfigPayloadBuilder:
             self.sensor_repo = SensorRepository(db)
         if not self.actuator_repo:
             self.actuator_repo = ActuatorRepository(db)
-        
+
         # Get ESP device
         esp_device = await self.esp_repo.get_by_device_id(esp_device_id)
         if not esp_device:
             raise ValueError(f"ESP device '{esp_device_id}' not found")
-        
+
         # Load all sensors and actuators for this ESP
         sensors = await self.sensor_repo.get_by_esp(esp_device.id)
         actuators = await self.actuator_repo.get_by_esp(esp_device.id)
-        
+
         # Filter only enabled sensors/actuators (ESP32 only processes active ones)
         active_sensors = [s for s in sensors if s.enabled]
         active_actuators = [a for a in actuators if a.enabled]
@@ -228,22 +227,21 @@ class ConfigPayloadBuilder:
         # Build payload arrays
         sensor_payloads = [self.build_sensor_payload(s) for s in active_sensors]
         actuator_payloads = [self.build_actuator_payload(a) for a in active_actuators]
-        
+
         # Build combined config
         config = {
             "sensors": sensor_payloads,
             "actuators": actuator_payloads,
         }
-        
+
         # Log zone information for better traceability
         zone_info = f"zone={esp_device.zone_id or 'none'}"
         if esp_device.zone_name:
             zone_info += f" ({esp_device.zone_name})"
-        
+
         logger.info(
             f"Built config payload for {esp_device_id}: "
             f"{len(sensor_payloads)} sensors, {len(actuator_payloads)} actuators, {zone_info}"
         )
-        
-        return config
 
+        return config

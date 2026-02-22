@@ -168,9 +168,7 @@ async def remove_zone(
         await db.commit()
 
         if result.mqtt_sent:
-            logger.info(
-                f"Zone removal for {esp_id} by {current_user.username} (MQTT sent)"
-            )
+            logger.info(f"Zone removal for {esp_id} by {current_user.username} (MQTT sent)")
         else:
             # Log warning but don't fail - DB was updated, MQTT can be retried
             # This is expected for Mock ESPs or offline devices

@@ -11,7 +11,7 @@ from typing import Dict
 class BaseConditionEvaluator(ABC):
     """
     Abstract base class for condition evaluators.
-    
+
     Each condition type (sensor, time, etc.) has its own evaluator
     that implements this interface.
     """
@@ -20,11 +20,11 @@ class BaseConditionEvaluator(ABC):
     async def evaluate(self, condition: Dict, context: Dict) -> bool:
         """
         Evaluate a condition.
-        
+
         Args:
             condition: Condition dictionary
             context: Evaluation context (sensor data, current time, etc.)
-            
+
         Returns:
             True if condition is met, False otherwise
         """
@@ -34,35 +34,11 @@ class BaseConditionEvaluator(ABC):
     def supports(self, condition_type: str) -> bool:
         """
         Check if this evaluator supports the given condition type.
-        
+
         Args:
             condition_type: Condition type string (e.g., "sensor_threshold", "time_window")
-            
+
         Returns:
             True if this evaluator supports the type, False otherwise
         """
         pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

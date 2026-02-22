@@ -202,12 +202,14 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
 
         # MQTT status
         from ..mqtt.client import MQTTClient
+
         mqtt_client = MQTTClient.get_instance()
         update_mqtt_metrics(mqtt_client.is_connected())
 
         # WebSocket connections
         try:
             from ..websocket.manager import WebSocketManager
+
             ws_manager = await WebSocketManager.get_instance()
             if ws_manager:
                 update_websocket_metrics(ws_manager.connection_count)
@@ -218,6 +220,7 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
 
         # ESP counts + heartbeat aggregates (needs DB)
         from ..db.repositories import ESPRepository
+
         async for session in get_session_func():
             esp_repo = ESPRepository(session)
             devices = await esp_repo.get_all()

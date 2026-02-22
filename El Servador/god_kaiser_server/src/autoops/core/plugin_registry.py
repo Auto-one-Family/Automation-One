@@ -58,10 +58,7 @@ class PluginRegistry:
 
     def get_by_capability(self, capability: PluginCapability) -> list[AutoOpsPlugin]:
         """Get all plugins that have a specific capability."""
-        return [
-            p for p in self._plugins.values()
-            if capability in p.capabilities
-        ]
+        return [p for p in self._plugins.values() if capability in p.capabilities]
 
     def discover_plugins(self) -> int:
         """

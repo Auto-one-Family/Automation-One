@@ -28,7 +28,6 @@ Error Codes:
 - Uses ConfigErrorCode for ESP device lookup errors
 """
 
-from datetime import datetime, timezone
 from typing import Optional
 
 from ...core.esp32_error_mapping import get_error_info
@@ -211,19 +210,13 @@ class ErrorEventHandler:
                                 "user_action_required": (
                                     error_info["user_action_required"] if error_info else False
                                 ),
-                                "recoverable": (
-                                    error_info["recoverable"] if error_info else True
-                                ),
-                                "docs_link": (
-                                    error_info.get("docs_link") if error_info else None
-                                ),
+                                "recoverable": (error_info["recoverable"] if error_info else True),
+                                "docs_link": (error_info.get("docs_link") if error_info else None),
                                 "context": payload.get("context", {}),
                                 "timestamp": payload.get("timestamp"),
                             },
                         )
-                        logger.debug(
-                            f"WebSocket broadcast completed for error_event: {esp_id_str}"
-                        )
+                        logger.debug(f"WebSocket broadcast completed for error_event: {esp_id_str}")
                     except Exception as e:
                         logger.warning(f"Failed to broadcast error event via WebSocket: {e}")
 

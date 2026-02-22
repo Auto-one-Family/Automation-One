@@ -22,12 +22,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.core.error_codes import ConfigErrorCode, ValidationErrorCode
 from src.mqtt.handlers.diagnostics_handler import (
     DiagnosticsHandler,
     get_diagnostics_handler,
 )
-from src.mqtt.topics import TopicBuilder
 
 
 # =============================================================================
@@ -62,6 +60,7 @@ MINIMAL_PAYLOAD = {
 # =============================================================================
 # Helper: Mock resilient_session context manager
 # =============================================================================
+
 
 def create_mock_session_and_repo(esp_device=None):
     """
@@ -183,9 +182,7 @@ class TestDiagnosticsHandler:
         handler = DiagnosticsHandler()
 
         with session_patcher, repo_patcher, ws_patcher:
-            result = await handler.handle_diagnostics(
-                VALID_TOPIC, MINIMAL_PAYLOAD.copy()
-            )
+            result = await handler.handle_diagnostics(VALID_TOPIC, MINIMAL_PAYLOAD.copy())
 
         assert result is True
         mock_session.commit.assert_awaited_once()
@@ -239,9 +236,7 @@ class TestDiagnosticsHandler:
         handler = DiagnosticsHandler()
 
         with session_patcher, repo_patcher, ws_patcher:
-            result = await handler.handle_diagnostics(
-                VALID_TOPIC, FULL_PAYLOAD.copy()
-            )
+            result = await handler.handle_diagnostics(VALID_TOPIC, FULL_PAYLOAD.copy())
 
         assert result is False
         mock_esp_repo.get_by_device_id.assert_awaited_once_with("ESP_TEST_001")

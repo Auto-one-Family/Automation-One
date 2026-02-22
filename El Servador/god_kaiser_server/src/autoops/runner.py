@@ -114,11 +114,13 @@ def parse_sensors(sensor_str: str) -> list[SensorSpec]:
                 specs.append(SensorSpec(**SENSOR_PRESETS["SHT31_HUMIDITY"]))
         else:
             # Unknown sensor - create generic
-            specs.append(SensorSpec(
-                sensor_type=name.lower(),
-                name=f"{name} Sensor",
-                raw_value=0.0,
-            ))
+            specs.append(
+                SensorSpec(
+                    sensor_type=name.lower(),
+                    name=f"{name} Sensor",
+                    raw_value=0.0,
+                )
+            )
 
     return specs
 
@@ -135,10 +137,12 @@ def parse_actuators(actuator_str: str) -> list[ActuatorSpec]:
         if preset:
             specs.append(ActuatorSpec(**preset))
         else:
-            specs.append(ActuatorSpec(
-                actuator_type=name.lower(),
-                name=f"{name} Actuator",
-            ))
+            specs.append(
+                ActuatorSpec(
+                    actuator_type=name.lower(),
+                    name=f"{name} Actuator",
+                )
+            )
 
     return specs
 
@@ -256,29 +260,29 @@ def main():
         description="AutoOps - Autonomous Operations Agent for AutomationOne"
     )
     parser.add_argument(
-        "--mode", choices=["full", "health", "configure", "debug"],
-        default="full", help="Operation mode"
+        "--mode",
+        choices=["full", "health", "configure", "debug"],
+        default="full",
+        help="Operation mode",
     )
-    parser.add_argument(
-        "--server", default="http://localhost:8000",
-        help="God-Kaiser server URL"
-    )
+    parser.add_argument("--server", default="http://localhost:8000", help="God-Kaiser server URL")
     parser.add_argument("--username", default="admin", help="Auth username")
     parser.add_argument("--password", default="admin", help="Auth password")
     parser.add_argument(
-        "--sensors", default="",
-        help="Comma-separated sensor types (DS18B20,SHT31,PH,EC,MOISTURE,CO2,LIGHT)"
+        "--sensors",
+        default="",
+        help="Comma-separated sensor types (DS18B20,SHT31,PH,EC,MOISTURE,CO2,LIGHT)",
     )
     parser.add_argument(
-        "--actuators", default="",
-        help="Comma-separated actuator types (RELAY,PUMP,VALVE,FAN,PWM)"
+        "--actuators", default="", help="Comma-separated actuator types (RELAY,PUMP,VALVE,FAN,PWM)"
     )
     parser.add_argument("--zone", default=None, help="Zone name")
     parser.add_argument("--esp-name", default="AutoOps ESP", help="ESP device name")
     parser.add_argument(
-        "--hardware", default="ESP32_WROOM",
+        "--hardware",
+        default="ESP32_WROOM",
         choices=["ESP32_WROOM", "XIAO_ESP32_C3"],
-        help="Hardware type"
+        help="Hardware type",
     )
     parser.add_argument("--dry-run", action="store_true", help="Plan only, no execution")
     parser.add_argument("--quiet", action="store_true", help="Minimal output")
@@ -286,26 +290,25 @@ def main():
 
     args = parser.parse_args()
 
-    result = asyncio.run(run_autoops(
-        mode=args.mode,
-        server_url=args.server,
-        username=args.username,
-        password=args.password,
-        sensors_str=args.sensors,
-        actuators_str=args.actuators,
-        zone=args.zone,
-        esp_name=args.esp_name,
-        hardware=args.hardware,
-        dry_run=args.dry_run,
-        verbose=not args.quiet,
-    ))
+    result = asyncio.run(
+        run_autoops(
+            mode=args.mode,
+            server_url=args.server,
+            username=args.username,
+            password=args.password,
+            sensors_str=args.sensors,
+            actuators_str=args.actuators,
+            zone=args.zone,
+            esp_name=args.esp_name,
+            hardware=args.hardware,
+            dry_run=args.dry_run,
+            verbose=not args.quiet,
+        )
+    )
 
     if args.json:
         # Clean result for JSON output (remove non-serializable items)
-        clean = {
-            k: v for k, v in result.items()
-            if k != "summary"  # summary is already printed
-        }
+        clean = {k: v for k, v in result.items() if k != "summary"}  # summary is already printed
         print(json.dumps(clean, indent=2, default=str))
 
     sys.exit(0 if result.get("all_passed", False) else 1)

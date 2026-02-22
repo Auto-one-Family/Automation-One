@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 class UserRole(str, Enum):
     """User role enumeration."""
+
     ADMIN = "admin"
     OPERATOR = "operator"
     VIEWER = "viewer"
@@ -20,31 +21,17 @@ class UserRole(str, Enum):
 
 class UserBase(BaseModel):
     """Base user schema with common fields."""
-    username: str = Field(
-        ..., 
-        min_length=3, 
-        max_length=50,
-        description="Unique username"
-    )
+
+    username: str = Field(..., min_length=3, max_length=50, description="Unique username")
     email: EmailStr = Field(..., description="User email address")
-    full_name: Optional[str] = Field(
-        default=None, 
-        max_length=100,
-        description="User's full name"
-    )
+    full_name: Optional[str] = Field(default=None, max_length=100, description="User's full name")
 
 
 class UserCreate(UserBase):
     """Schema for creating a new user."""
-    password: str = Field(
-        ..., 
-        min_length=8,
-        description="User password (minimum 8 characters)"
-    )
-    role: UserRole = Field(
-        default=UserRole.VIEWER,
-        description="User role"
-    )
+
+    password: str = Field(..., min_length=8, description="User password (minimum 8 characters)")
+    role: UserRole = Field(default=UserRole.VIEWER, description="User role")
 
     @field_validator("password")
     @classmethod
@@ -67,7 +54,7 @@ class UserCreate(UserBase):
                 "email": "user@example.com",
                 "password": "SecurePass123",
                 "full_name": "New User",
-                "role": "viewer"
+                "role": "viewer",
             }
         }
     )
@@ -75,23 +62,20 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     """Schema for updating a user (partial update)."""
+
     email: Optional[EmailStr] = Field(default=None, description="New email address")
     full_name: Optional[str] = Field(default=None, max_length=100, description="New full name")
     role: Optional[UserRole] = Field(default=None, description="New role")
     is_active: Optional[bool] = Field(default=None, description="Account active status")
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "email": "newemail@example.com",
-                "role": "operator"
-            }
-        }
+        json_schema_extra={"example": {"email": "newemail@example.com", "role": "operator"}}
     )
 
 
 class UserResponse(BaseModel):
     """Schema for user response (public data only)."""
+
     id: int
     username: str
     email: str
@@ -112,14 +96,15 @@ class UserResponse(BaseModel):
                 "role": "admin",
                 "is_active": True,
                 "created_at": "2025-01-01T00:00:00",
-                "updated_at": "2025-01-01T00:00:00"
+                "updated_at": "2025-01-01T00:00:00",
             }
-        }
+        },
     )
 
 
 class UserListResponse(BaseModel):
     """Response for listing users."""
+
     success: bool = True
     users: List[UserResponse]
     total: int
@@ -127,11 +112,8 @@ class UserListResponse(BaseModel):
 
 class PasswordReset(BaseModel):
     """Schema for admin password reset."""
-    new_password: str = Field(
-        ..., 
-        min_length=8,
-        description="New password (minimum 8 characters)"
-    )
+
+    new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
 
     @field_validator("new_password")
     @classmethod
@@ -144,12 +126,9 @@ class PasswordReset(BaseModel):
 
 class PasswordChange(BaseModel):
     """Schema for changing own password."""
+
     current_password: str = Field(..., description="Current password for verification")
-    new_password: str = Field(
-        ..., 
-        min_length=8,
-        description="New password (minimum 8 characters)"
-    )
+    new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
 
     @field_validator("new_password")
     @classmethod
@@ -161,36 +140,13 @@ class PasswordChange(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "current_password": "OldPassword123",
-                "new_password": "NewSecure456"
-            }
+            "example": {"current_password": "OldPassword123", "new_password": "NewSecure456"}
         }
     )
 
 
 class MessageResponse(BaseModel):
     """Simple message response."""
+
     success: bool = True
     message: str
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

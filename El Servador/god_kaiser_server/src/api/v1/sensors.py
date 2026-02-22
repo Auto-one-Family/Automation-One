@@ -29,17 +29,14 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.logging_config import get_logger
-from ...db.models.sensor import SensorConfig, SensorData
+from ...db.models.sensor import SensorConfig
 from ...db.models.enums import DataSource
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...schemas import (
-    OneWireDevice,
     OneWireScanResponse,
     SensorConfigCreate,
     SensorConfigListResponse,
     SensorConfigResponse,
-    SensorConfigUpdate,
-    SensorDataQuery,
     SensorDataResponse,
     SensorReading,
     SensorStats,
@@ -49,7 +46,15 @@ from ...schemas import (
 from ...schemas.common import PaginationMeta
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
-from ..deps import ActiveUser, DBSession, OperatorUser, get_config_builder, get_esp_service, get_mqtt_publisher, get_sensor_service, get_sensor_scheduler_service
+from ..deps import (
+    ActiveUser,
+    DBSession,
+    OperatorUser,
+    get_config_builder,
+    get_esp_service,
+    get_sensor_service,
+    get_sensor_scheduler_service,
+)
 from ...services.sensor_scheduler_service import SensorSchedulerService
 from ...services.sensor_service import SensorService
 from ...services.gpio_validation_service import GpioValidationService
@@ -64,10 +69,12 @@ router = APIRouter(prefix="/v1/sensors", tags=["sensors"])
 # =============================================================================
 
 
-def _model_to_response(sensor: SensorConfig, esp_device_id: Optional[str] = None) -> SensorConfigResponse:
+def _model_to_response(
+    sensor: SensorConfig, esp_device_id: Optional[str] = None
+) -> SensorConfigResponse:
     """
     Convert SensorConfig model to SensorConfigResponse schema.
-    
+
     Handles field name mapping between model and schema:
     - sensor_name (model) -> name (schema)
     - sample_interval_ms (model) -> interval_ms (schema)
@@ -83,13 +90,17 @@ def _model_to_response(sensor: SensorConfig, esp_device_id: Optional[str] = None
     threshold_max = thresholds.get("max")
     warning_min = thresholds.get("warning_min")
     warning_max = thresholds.get("warning_max")
-    
+
     # Convert pi_enhanced boolean to processing_mode string
     processing_mode = "pi_enhanced" if sensor.pi_enhanced else "raw"
 
     # Get interface_type from model or infer from sensor_type (fallback for legacy data)
-    interface_type = sensor.interface_type if sensor.interface_type else _infer_interface_type(sensor.sensor_type)
-    
+    interface_type = (
+        sensor.interface_type
+        if sensor.interface_type
+        else _infer_interface_type(sensor.sensor_type)
+    )
+
     return SensorConfigResponse(
         id=sensor.id,
         esp_id=sensor.esp_id,
@@ -197,7 +208,7 @@ async def list_sensors(
 ) -> SensorConfigListResponse:
     """
     List sensor configurations.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
@@ -206,7 +217,7 @@ async def list_sensors(
         enabled: Optional enabled filter
         page: Page number
         page_size: Items per page
-        
+
     Returns:
         Paginated list of sensor configs
     """
@@ -233,7 +244,7 @@ async def list_sensors(
         response.latest_timestamp = latest.timestamp if latest else None
 
         responses.append(response)
-    
+
     return SensorConfigListResponse(
         success=True,
         data=responses,
@@ -261,13 +272,14 @@ async def get_sensor(
     gpio: int,
     db: DBSession,
     current_user: ActiveUser,
-    sensor_type: Annotated[Optional[str], Query(
-        description="Sensor type filter (required for multi-value sensors like SHT31)"
-    )] = None,
+    sensor_type: Annotated[
+        Optional[str],
+        Query(description="Sensor type filter (required for multi-value sensors like SHT31)"),
+    ] = None,
 ) -> SensorConfigResponse:
     """
     Get sensor configuration.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
@@ -275,25 +287,23 @@ async def get_sensor(
         current_user: Authenticated user
         sensor_type: Optional sensor type (e.g. 'sht31_temp'). Required for
                      multi-value sensors that share a GPIO pin.
-        
+
     Returns:
         Sensor configuration
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Multi-value sensor support: use sensor_type for precise lookup
     if sensor_type:
-        sensor = await sensor_repo.get_by_esp_gpio_and_type(
-            esp_device.id, gpio, sensor_type
-        )
+        sensor = await sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
     else:
         # Fallback: get all sensors on this GPIO, return first
         sensors = await sensor_repo.get_all_by_esp_and_gpio(esp_device.id, gpio)
@@ -304,25 +314,25 @@ async def get_sensor(
                 f"Use ?sensor_type= to select specific sensor."
             )
         sensor = sensors[0] if sensors else None
-    
+
     if not sensor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'"
-                   + (f" with type '{sensor_type}'" if sensor_type else ""),
+            + (f" with type '{sensor_type}'" if sensor_type else ""),
         )
-    
+
     # Get latest reading filtered by sensor_type for correct multi-value data
     latest = await sensor_repo.get_latest_reading(
         esp_device.id, gpio, sensor_type=sensor.sensor_type
     )
-    
+
     # Convert model to response schema
     response = _model_to_response(sensor, esp_id)
     response.latest_value = latest.processed_value if latest else None
     response.latest_quality = latest.quality if latest else None
     response.latest_timestamp = latest.timestamp if latest else None
-    
+
     return response
 
 
@@ -350,14 +360,14 @@ async def create_or_update_sensor(
 ) -> SensorConfigResponse:
     """
     Create or update sensor configuration.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         request: Sensor configuration
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Created/updated sensor config
     """
@@ -383,7 +393,7 @@ async def create_or_update_sensor(
                 "device_id": esp_id,
                 "current_status": esp_device.status,
                 "message": f"Device '{esp_id}' must be approved before configuration "
-                           f"(current status: {esp_device.status})",
+                f"(current status: {esp_device.status})",
             },
         )
 
@@ -392,9 +402,7 @@ async def create_or_update_sensor(
     # =========================================================================
     # Check if sensor already exists (include sensor_type!)
     existing = await sensor_repo.get_by_esp_gpio_and_type(
-        esp_device.id,
-        gpio,
-        request.sensor_type  # ← CRITICAL: Include sensor_type!
+        esp_device.id, gpio, request.sensor_type  # ← CRITICAL: Include sensor_type!
     )
 
     # Infer interface_type if not provided
@@ -410,7 +418,7 @@ async def create_or_update_sensor(
             sensor_repo,
             esp_device.id,
             request.i2c_address,
-            exclude_sensor_id=existing.id if existing else None
+            exclude_sensor_id=existing.id if existing else None,
         )
         # I2C sensors can share GPIO (bus pins 21/22)
         # No GPIO validation needed
@@ -420,17 +428,14 @@ async def create_or_update_sensor(
             sensor_repo,
             esp_device.id,
             request.onewire_address,
-            exclude_sensor_id=existing.id if existing else None
+            exclude_sensor_id=existing.id if existing else None,
         )
         # OneWire sensors can share GPIO (bus pin)
         # No GPIO validation needed
     else:  # ANALOG or DIGITAL
         # Analog/Digital: Check GPIO conflict (exclusive)
         gpio_validator = GpioValidationService(
-            session=db,
-            sensor_repo=sensor_repo,
-            actuator_repo=actuator_repo,
-            esp_repo=esp_repo
+            session=db, sensor_repo=sensor_repo, actuator_repo=actuator_repo, esp_repo=esp_repo
         )
 
         validation_result = await gpio_validator.validate_gpio_available(
@@ -438,7 +443,7 @@ async def create_or_update_sensor(
             gpio=gpio,
             exclude_sensor_id=existing.id if existing else None,
             purpose="sensor",
-            interface_type=interface_type
+            interface_type=interface_type,
         )
 
         if not validation_result.available:
@@ -453,9 +458,13 @@ async def create_or_update_sensor(
                     "gpio": gpio,
                     "conflict_type": validation_result.conflict_type.value,
                     "conflict_component": validation_result.conflict_component,
-                    "conflict_id": str(validation_result.conflict_id) if validation_result.conflict_id else None,
-                    "message": validation_result.message
-                }
+                    "conflict_id": (
+                        str(validation_result.conflict_id)
+                        if validation_result.conflict_id
+                        else None
+                    ),
+                    "message": validation_result.message,
+                },
             )
     # =========================================================================
 
@@ -465,7 +474,7 @@ async def create_or_update_sensor(
     # Override onewire_address if it was auto-generated during validation
     if interface_type == "ONEWIRE" and validated_onewire_address:
         model_fields["onewire_address"] = validated_onewire_address
-    
+
     if existing:
         # Update existing sensor
         existing.sensor_type = model_fields["sensor_type"]
@@ -497,7 +506,9 @@ async def create_or_update_sensor(
         existing.config_error = None
         existing.config_error_detail = None
         sensor = existing
-        logger.info(f"Sensor updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
+        logger.info(
+            f"Sensor updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
+        )
     else:
         # Create new sensor (config_status defaults to "pending" in model)
         sensor = SensorConfig(
@@ -506,8 +517,10 @@ async def create_or_update_sensor(
             **model_fields,
         )
         await sensor_repo.create(sensor)
-        logger.info(f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
-    
+        logger.info(
+            f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
+        )
+
     await db.commit()
     await db.refresh(sensor)
 
@@ -579,33 +592,33 @@ async def delete_sensor(
 ) -> SensorConfigResponse:
     """
     Delete sensor configuration.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Deleted sensor config
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not sensor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'",
         )
-    
+
     # Delete sensor
     await sensor_repo.delete(sensor.id)
     await db.commit()
@@ -627,10 +640,10 @@ async def delete_sensor(
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
-        
+
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
-        
+
         if config_sent:
             logger.info(f"Config published to ESP {esp_id} after sensor delete")
         else:
@@ -638,7 +651,7 @@ async def delete_sensor(
     except Exception as e:
         # Log error but don't fail the request (DB delete was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
-    
+
     # Convert model to response schema
     return _model_to_response(sensor, esp_id)
 
@@ -667,7 +680,7 @@ async def query_sensor_data(
 ) -> SensorDataResponse:
     """
     Query sensor data.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
@@ -678,19 +691,19 @@ async def query_sensor_data(
         end_time: End of time range
         quality: Filter by quality
         limit: Max results
-        
+
     Returns:
         Sensor data readings
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
-    
+
     # Default time range to last 24 hours
     if not start_time:
         start_time = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_time:
         end_time = datetime.now(timezone.utc)
-    
+
     # Get ESP device ID if specified
     esp_db_id = None
     if esp_id:
@@ -701,7 +714,7 @@ async def query_sensor_data(
                 detail=f"ESP device '{esp_id}' not found",
             )
         esp_db_id = esp_device.id
-    
+
     # Query data
     readings = await sensor_repo.query_data(
         esp_id=esp_db_id,
@@ -712,7 +725,7 @@ async def query_sensor_data(
         quality=quality,
         limit=limit,
     )
-    
+
     # Convert to response format
     reading_responses = [
         SensorReading(
@@ -724,7 +737,7 @@ async def query_sensor_data(
         )
         for r in readings
     ]
-    
+
     return SensorDataResponse(
         success=True,
         esp_id=esp_id,
@@ -868,7 +881,7 @@ async def get_sensor_stats(
 ) -> SensorStatsResponse:
     """
     Get sensor statistics.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
@@ -876,33 +889,33 @@ async def get_sensor_stats(
         current_user: Authenticated user
         start_time: Start of time range
         end_time: End of time range
-        
+
     Returns:
         Statistical summary
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not sensor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'",
         )
-    
+
     # Default time range
     if not start_time:
         start_time = datetime.now(timezone.utc) - timedelta(hours=24)
     if not end_time:
         end_time = datetime.now(timezone.utc)
-    
+
     # Get statistics
     stats = await sensor_repo.get_stats(
         esp_id=esp_device.id,
@@ -910,7 +923,7 @@ async def get_sensor_stats(
         start_time=start_time,
         end_time=end_time,
     )
-    
+
     return SensorStatsResponse(
         success=True,
         esp_id=esp_id,
@@ -1019,41 +1032,40 @@ async def scan_onewire_bus(
 ) -> OneWireScanResponse:
     """
     Scan OneWire bus for connected devices.
-    
+
     Sends MQTT command to ESP32 and waits for scan result.
     Returns list of discovered devices with ROM codes and types.
-    
+
     **Pattern:** MQTT Command-Response with async timeout
     **Referenz:** ESP32 main.cpp:692-790 (onewire/scan command)
-    
+
     Args:
         esp_id: ESP device ID (e.g., "ESP_12AB34CD")
         pin: GPIO pin for OneWire bus (default: 4)
-    
+
     Returns:
         OneWireScanResponse with list of found devices
     """
     import asyncio
     import time
-    
+
     from ...mqtt.publisher import Publisher
     from ...mqtt.client import MQTTClient
     from ...schemas.sensor import OneWireDevice, OneWireScanResponse
-    
+
     start_time = time.time()
-    
+
     logger.info(f"OneWire scan requested: esp_id={esp_id}, pin={pin}")
-    
+
     # Step 1: Lookup ESP device
     esp_repo = ESPRepository(db)
     esp_device = await esp_repo.get_by_device_id(esp_id)
-    
+
     if not esp_device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device not found: {esp_id}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"ESP device not found: {esp_id}"
         )
-    
+
     # =========================================================================
     # MOCK-ESP DETECTION: Return fake devices without MQTT
     # =========================================================================
@@ -1062,48 +1074,48 @@ async def scan_onewire_bus(
     # =========================================================================
     if esp_id.startswith("MOCK_"):
         scan_duration_ms = int((time.time() - start_time) * 1000)
-        
+
         # =====================================================================
         # OneWire Multi-Device Support: Query existing sensors for enrichment
         # =====================================================================
         sensor_repo = SensorRepository(db)
         existing_sensors = await sensor_repo.get_all_by_esp_and_gpio(esp_device.id, pin)
-        
+
         # Filter to only OneWire sensors (ds18b20) and build ROM -> name mapping
         existing_rom_map: dict[str, str] = {}
         for sensor in existing_sensors:
             if sensor.interface_type == "ONEWIRE" and sensor.onewire_address:
                 existing_rom_map[sensor.onewire_address] = sensor.sensor_name or "Unbenannt"
-        
+
         # Generate fake OneWire devices for testing
         fake_rom_codes = [
             "28FF641E8D3C0C79",
             "28FF123456789ABC",
             "28FF987654321DEF",  # Third device for testing multi-add
         ]
-        
+
         fake_devices = []
         new_count = 0
         for rom_code in fake_rom_codes:
             already_configured = rom_code in existing_rom_map
             if not already_configured:
                 new_count += 1
-            
+
             fake_devices.append(
                 OneWireDevice(
                     rom_code=rom_code,
                     device_type="ds18b20",
                     pin=pin,
                     already_configured=already_configured,
-                    sensor_name=existing_rom_map.get(rom_code)
+                    sensor_name=existing_rom_map.get(rom_code),
                 )
             )
-        
+
         logger.info(
             f"Mock OneWire scan: {esp_id}, GPIO {pin} - "
             f"returning {len(fake_devices)} fake devices ({new_count} new)"
         )
-        
+
         return OneWireScanResponse(
             success=True,
             message=f"Mock scan: Found {len(fake_devices)} DS18B20 devices ({new_count} new)",
@@ -1112,84 +1124,74 @@ async def scan_onewire_bus(
             new_count=new_count,
             pin=pin,
             esp_id=esp_id,
-            scan_duration_ms=scan_duration_ms
+            scan_duration_ms=scan_duration_ms,
         )
     # =========================================================================
-    
+
     if esp_device.status != "online":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"ESP device is {esp_device.status}, must be online for OneWire scan"
+            detail=f"ESP device is {esp_device.status}, must be online for OneWire scan",
         )
-    
+
     # Step 2: Prepare MQTT command
     publisher = Publisher()
-    
+
     # Command topic: kaiser/god/esp/{esp_id}/system/command
     # Payload: {"command": "onewire/scan", "pin": 4}
-    command_payload = {
-        "command": "onewire/scan",
-        "pin": pin
-    }
-    
+
     # Response topic: kaiser/god/esp/{esp_id}/onewire/scan_result
     response_topic = f"kaiser/god/esp/{esp_id}/onewire/scan_result"
-    
+
     # Step 3: Setup response listener with asyncio.Future
     # IMPORTANT: Capture event loop in async context BEFORE callback registration
     # asyncio.get_event_loop() is deprecated; use get_running_loop() in async context
     loop = asyncio.get_running_loop()
     response_future: asyncio.Future = loop.create_future()
-    
+
     def on_scan_result(client, userdata, message):
         """Callback for scan result message (runs in paho-mqtt thread)."""
         import json
+
         try:
-            payload = json.loads(message.payload.decode('utf-8'))
+            payload = json.loads(message.payload.decode("utf-8"))
             if not response_future.done():
                 # Thread-safe: Use captured loop reference
-                loop.call_soon_threadsafe(
-                    response_future.set_result, payload
-                )
+                loop.call_soon_threadsafe(response_future.set_result, payload)
         except Exception as e:
             logger.error(f"Failed to parse OneWire scan result: {e}")
             if not response_future.done():
-                loop.call_soon_threadsafe(
-                    response_future.set_exception, e
-                )
-    
+                loop.call_soon_threadsafe(response_future.set_exception, e)
+
     # Get MQTT client and register callback
     mqtt_client = MQTTClient.get_instance()
-    
+
     # Check if MQTT client is connected
     if not mqtt_client.is_connected() or mqtt_client.client is None:
-        logger.error(f"OneWire scan failed: MQTT client not connected")
+        logger.error("OneWire scan failed: MQTT client not connected")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MQTT broker not connected. Cannot send scan command to ESP."
+            detail="MQTT broker not connected. Cannot send scan command to ESP.",
         )
-    
+
     # Subscribe to response topic
     mqtt_client.client.subscribe(response_topic, qos=1)
     mqtt_client.client.message_callback_add(response_topic, on_scan_result)
-    
+
     try:
         # Step 4: Publish command
         success = publisher.publish_system_command(
-            esp_id=esp_id,
-            command="onewire/scan",
-            params={"pin": pin},
-            retry=True
+            esp_id=esp_id, command="onewire/scan", params={"pin": pin}, retry=True
         )
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to send OneWire scan command to ESP. Check MQTT connection."
+                detail="Failed to send OneWire scan command to ESP. Check MQTT connection.",
             )
-        
+
         logger.debug(f"OneWire scan command sent to {esp_id}, waiting for response...")
-        
+
         # Step 5: Wait for response with timeout (10 seconds)
         try:
             result = await asyncio.wait_for(response_future, timeout=10.0)
@@ -1198,27 +1200,27 @@ async def scan_onewire_bus(
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail=f"ESP {esp_id} did not respond to OneWire scan command within 10 seconds. "
-                       f"Ensure ESP is online and OneWire bus is configured on GPIO {pin}."
+                f"Ensure ESP is online and OneWire bus is configured on GPIO {pin}.",
             )
-        
+
         # Step 6: Parse response and build device list with enrichment
         # =====================================================================
         # OneWire Multi-Device Support: Query existing sensors for enrichment
         # =====================================================================
         sensor_repo = SensorRepository(db)
         existing_sensors = await sensor_repo.get_all_by_esp_and_gpio(esp_device.id, pin)
-        
+
         # Filter to only OneWire sensors and build ROM -> name mapping
         existing_rom_map: dict[str, str] = {}
         for sensor in existing_sensors:
             if sensor.interface_type == "ONEWIRE" and sensor.onewire_address:
                 existing_rom_map[sensor.onewire_address] = sensor.sensor_name or "Unbenannt"
-        
+
         logger.debug(
             f"OneWire enrichment: Found {len(existing_rom_map)} already configured "
             f"sensors on ESP {esp_id}, GPIO {pin}"
         )
-        
+
         # Parse and enrich scan results
         devices = []
         new_count = 0
@@ -1226,29 +1228,29 @@ async def scan_onewire_bus(
             try:
                 rom_code = device_data.get("rom_code", "")
                 already_configured = rom_code in existing_rom_map
-                
+
                 if not already_configured:
                     new_count += 1
-                
+
                 device = OneWireDevice(
                     rom_code=rom_code,
                     device_type=device_data.get("device_type", "unknown"),
                     pin=device_data.get("pin", pin),
                     already_configured=already_configured,
-                    sensor_name=existing_rom_map.get(rom_code)
+                    sensor_name=existing_rom_map.get(rom_code),
                 )
                 devices.append(device)
             except Exception as e:
                 logger.warning(f"Failed to parse OneWire device: {e}")
-        
+
         found_count = len(devices)
         scan_duration_ms = int((time.time() - start_time) * 1000)
-        
+
         logger.info(
             f"OneWire scan complete: {found_count} device(s) found on ESP {esp_id}, "
             f"GPIO {pin} ({new_count} new) in {scan_duration_ms}ms"
         )
-        
+
         return OneWireScanResponse(
             success=True,
             message=f"Found {found_count} OneWire device(s) on GPIO {pin} ({new_count} new)",
@@ -1257,9 +1259,9 @@ async def scan_onewire_bus(
             new_count=new_count,
             pin=pin,
             esp_id=esp_id,
-            scan_duration_ms=scan_duration_ms
+            scan_duration_ms=scan_duration_ms,
         )
-        
+
     finally:
         # Step 7: Cleanup - unregister callback and unsubscribe
         try:
@@ -1284,33 +1286,33 @@ async def list_onewire_sensors(
 ) -> SensorConfigListResponse:
     """
     List all OneWire sensors configured on an ESP device.
-    
+
     Optionally filter by GPIO pin to see all sensors on a specific OneWire bus.
-    
+
     Args:
         esp_id: ESP device ID
         pin: Optional GPIO pin filter
-    
+
     Returns:
         List of configured OneWire sensors
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Get all OneWire sensors for this ESP
     onewire_sensors = await sensor_repo.get_all_by_interface(esp_device.id, "ONEWIRE")
-    
+
     # Filter by pin if specified
     if pin is not None:
         onewire_sensors = [s for s in onewire_sensors if s.gpio == pin]
-    
+
     # Convert to response format
     responses = []
     for sensor in onewire_sensors:
@@ -1323,7 +1325,7 @@ async def list_onewire_sensors(
         response.latest_quality = latest.quality if latest else None
         response.latest_timestamp = latest.timestamp if latest else None
         responses.append(response)
-    
+
     return SensorConfigListResponse(
         success=True,
         data=responses,
@@ -1365,7 +1367,7 @@ async def _validate_i2c_config(
     sensor_repo: SensorRepository,
     esp_id: uuid.UUID,
     i2c_address: Optional[int],
-    exclude_sensor_id: Optional[uuid.UUID] = None
+    exclude_sensor_id: Optional[uuid.UUID] = None,
 ):
     """
     Validate I2C configuration.
@@ -1388,12 +1390,12 @@ async def _validate_i2c_config(
         HTTPException: If validation fails
     """
     logger = get_logger(__name__)
-    
+
     # Check 1: Address is required
     if not i2c_address:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="i2c_address is required for I2C sensors"
+            detail="i2c_address is required for I2C sensors",
         )
 
     # Check 1.5: Negative addresses (Ergänzung 1)
@@ -1403,10 +1405,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=rejection_reason
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
 
     # Check 2: Validate 7-bit range (0x00-0x7F)
     if i2c_address > 0x7F:
@@ -1418,10 +1417,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=rejection_reason
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
 
     # Check 3: Reserved address ranges
     # 0x00-0x07: General call, START byte, reserved
@@ -1434,10 +1430,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=rejection_reason
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
 
     # 0x78-0x7F: 10-bit addressing reserved
     if 0x78 <= i2c_address <= 0x7F:
@@ -1449,15 +1442,10 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=rejection_reason
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
 
     # Check 4: Address already used (conflict check)
-    existing_with_address = await sensor_repo.get_by_i2c_address(
-        esp_id, i2c_address
-    )
+    existing_with_address = await sensor_repo.get_by_i2c_address(esp_id, i2c_address)
 
     if existing_with_address and existing_with_address.id != exclude_sensor_id:
         rejection_reason = f"Address 0x{i2c_address:02X} already in use"
@@ -1466,8 +1454,7 @@ async def _validate_i2c_config(
             f"(reason: {rejection_reason})"
         )
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"I2C_ADDRESS_CONFLICT: {rejection_reason}"
+            status_code=status.HTTP_409_CONFLICT, detail=f"I2C_ADDRESS_CONFLICT: {rejection_reason}"
         )
 
 
@@ -1475,7 +1462,7 @@ async def _validate_onewire_config(
     sensor_repo: SensorRepository,
     esp_id: uuid.UUID,
     onewire_address: Optional[str],
-    exclude_sensor_id: Optional[uuid.UUID] = None
+    exclude_sensor_id: Optional[uuid.UUID] = None,
 ) -> Optional[str]:
     """
     Validate OneWire configuration.
@@ -1508,19 +1495,18 @@ async def _validate_onewire_config(
     # Format: AUTO_<random_hex> to distinguish from real ROM addresses
     if not onewire_address:
         import secrets
+
         onewire_address = f"AUTO_{secrets.token_hex(8).upper()}"
         logger.info(f"Generated placeholder OneWire address: {onewire_address}")
         return onewire_address
 
     # Check if address already used (only if a real address was provided)
-    existing_with_address = await sensor_repo.get_by_onewire_address(
-        esp_id, onewire_address
-    )
+    existing_with_address = await sensor_repo.get_by_onewire_address(esp_id, onewire_address)
 
     if existing_with_address and existing_with_address.id != exclude_sensor_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"ONEWIRE_ADDRESS_CONFLICT: Address {onewire_address} already in use"
+            detail=f"ONEWIRE_ADDRESS_CONFLICT: Address {onewire_address} already in use",
         )
 
     return onewire_address

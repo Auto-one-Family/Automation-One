@@ -21,10 +21,10 @@ Usage:
     result = await agent.run_with_answers(answers={...})
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from .api_client import APIError, GodKaiserClient
-from .base_plugin import AutoOpsPlugin, PluginCapability, PluginResult
+from .base_plugin import PluginCapability, PluginResult
 from .context import AutoOpsContext, ESPSpec
 from .plugin_registry import PluginRegistry
 from .reporter import AutoOpsReporter
@@ -116,11 +116,16 @@ class AutoOpsAgent:
             # Get all devices
             devices_response = await self.client.list_devices()
             devices = devices_response.get("devices", devices_response.get("data", []))
-            if isinstance(devices_response, dict) and "devices" not in devices_response and "data" not in devices_response:
+            if (
+                isinstance(devices_response, dict)
+                and "devices" not in devices_response
+                and "data" not in devices_response
+            ):
                 devices = devices_response.get("items", [])
             snapshot.esp_devices = devices if isinstance(devices, list) else []
             snapshot.online_devices = sum(
-                1 for d in snapshot.esp_devices
+                1
+                for d in snapshot.esp_devices
                 if isinstance(d, dict) and d.get("status") == "online"
             )
             snapshot.offline_devices = len(snapshot.esp_devices) - snapshot.online_devices
@@ -155,6 +160,7 @@ class AutoOpsAgent:
             self.context.log_error(f"System scan failed: {e.detail}")
 
         from datetime import datetime, timezone
+
         snapshot.timestamp = datetime.now(timezone.utc).isoformat()
         self.context.system_snapshot = snapshot
 
@@ -179,8 +185,14 @@ class AutoOpsAgent:
                 "question": "Welche Sensoren soll der ESP haben?",
                 "header": "Sensoren",
                 "options": [
-                    {"label": "DS18B20 (Temperatur)", "description": "OneWire Temperatursensor, wasserdicht"},
-                    {"label": "SHT31 (Temp+Humidity)", "description": "I2C Temperatur- und Feuchtigkeitssensor"},
+                    {
+                        "label": "DS18B20 (Temperatur)",
+                        "description": "OneWire Temperatursensor, wasserdicht",
+                    },
+                    {
+                        "label": "SHT31 (Temp+Humidity)",
+                        "description": "I2C Temperatur- und Feuchtigkeitssensor",
+                    },
                     {"label": "PH Sensor", "description": "Analoger pH-Wert-Sensor"},
                     {"label": "EC Sensor", "description": "Analoger EC/Leitfähigkeitssensor"},
                 ],
@@ -190,8 +202,14 @@ class AutoOpsAgent:
                 "question": "Welche Aktoren soll der ESP haben?",
                 "header": "Aktoren",
                 "options": [
-                    {"label": "Relay (Pumpe)", "description": "Digitales Relay für Pumpensteuerung"},
-                    {"label": "Relay (Ventil)", "description": "Digitales Relay für Ventilsteuerung"},
+                    {
+                        "label": "Relay (Pumpe)",
+                        "description": "Digitales Relay für Pumpensteuerung",
+                    },
+                    {
+                        "label": "Relay (Ventil)",
+                        "description": "Digitales Relay für Ventilsteuerung",
+                    },
                     {"label": "PWM Fan", "description": "PWM-gesteuerter Lüfter"},
                     {"label": "Keine", "description": "Keine Aktoren konfigurieren"},
                 ],
@@ -225,24 +243,41 @@ class AutoOpsAgent:
         # Sensor type mapping with defaults
         sensor_map = {
             "DS18B20": SensorSpec(
-                sensor_type="temperature", name="Temperature Sensor",
-                interface_type="ONEWIRE", raw_value=22.0, unit="°C",
+                sensor_type="temperature",
+                name="Temperature Sensor",
+                interface_type="ONEWIRE",
+                raw_value=22.0,
+                unit="°C",
             ),
             "SHT31": SensorSpec(
-                sensor_type="temperature", name="SHT31 Temperature",
-                interface_type="I2C", i2c_address=0x44, raw_value=22.0, unit="°C",
+                sensor_type="temperature",
+                name="SHT31 Temperature",
+                interface_type="I2C",
+                i2c_address=0x44,
+                raw_value=22.0,
+                unit="°C",
             ),
             "SHT31_humidity": SensorSpec(
-                sensor_type="humidity", name="SHT31 Humidity",
-                interface_type="I2C", i2c_address=0x44, raw_value=55.0, unit="%",
+                sensor_type="humidity",
+                name="SHT31 Humidity",
+                interface_type="I2C",
+                i2c_address=0x44,
+                raw_value=55.0,
+                unit="%",
             ),
             "PH": SensorSpec(
-                sensor_type="ph", name="pH Sensor",
-                interface_type="ANALOG", raw_value=6.5, unit="pH",
+                sensor_type="ph",
+                name="pH Sensor",
+                interface_type="ANALOG",
+                raw_value=6.5,
+                unit="pH",
             ),
             "EC": SensorSpec(
-                sensor_type="ec", name="EC Sensor",
-                interface_type="ANALOG", raw_value=1.2, unit="mS/cm",
+                sensor_type="ec",
+                name="EC Sensor",
+                interface_type="ANALOG",
+                raw_value=1.2,
+                unit="mS/cm",
             ),
         }
 
@@ -290,7 +325,13 @@ class AutoOpsAgent:
         zone = answers.get("zone", "")
         if isinstance(zone, str) and zone and "keine" not in zone.lower():
             # Auto-generate zone_id from zone_name
-            zone_id = zone.lower().replace(" ", "_").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
+            zone_id = (
+                zone.lower()
+                .replace(" ", "_")
+                .replace("ä", "ae")
+                .replace("ö", "oe")
+                .replace("ü", "ue")
+            )
             spec.zone_name = zone
         else:
             zone_id = None
@@ -363,19 +404,17 @@ class AutoOpsAgent:
         # Determine which plugins to run
         if plugins:
             plugins_to_run = [
-                self.registry.get(name)
-                for name in plugins
-                if self.registry.get(name)
+                self.registry.get(name) for name in plugins if self.registry.get(name)
             ]
         else:
             # Run all plugins in capability order
             order = [
-                PluginCapability.VALIDATE,    # First: check system health
-                PluginCapability.CONFIGURE,    # Then: configure devices
-                PluginCapability.DIAGNOSE,     # Then: diagnose issues
-                PluginCapability.FIX,          # Then: fix issues
-                PluginCapability.MONITOR,      # Then: verify
-                PluginCapability.DOCUMENT,     # Finally: document
+                PluginCapability.VALIDATE,  # First: check system health
+                PluginCapability.CONFIGURE,  # Then: configure devices
+                PluginCapability.DIAGNOSE,  # Then: diagnose issues
+                PluginCapability.FIX,  # Then: fix issues
+                PluginCapability.MONITOR,  # Then: verify
+                PluginCapability.DOCUMENT,  # Finally: document
             ]
             seen = set()
             plugins_to_run = []
@@ -392,12 +431,8 @@ class AutoOpsAgent:
             result = await self.run_plugin(plugin.name)
 
             # Stop on critical failure
-            if not result.success and any(
-                a.severity.value == "critical" for a in result.actions
-            ):
-                self.context.log_error(
-                    f"Critical failure in {plugin.name}, stopping execution"
-                )
+            if not result.success and any(a.severity.value == "critical" for a in result.actions):
+                self.context.log_error(f"Critical failure in {plugin.name}, stopping execution")
                 break
 
         # Generate report

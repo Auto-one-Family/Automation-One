@@ -16,15 +16,12 @@ fail, and the dashboard shows blank/broken values. Each of these must
 be handled gracefully.
 """
 
-import math
 import pytest
-from unittest.mock import MagicMock
 
 from src.sensors.sensor_libraries.active.temperature import DS18B20Processor
 from src.sensors.sensor_libraries.active.ph_sensor import PHSensorProcessor
 from src.sensors.sensor_libraries.active.ec_sensor import ECSensorProcessor
 from src.sensors.sensor_libraries.active.humidity import SHT31HumidityProcessor
-from src.sensors.sensor_libraries.active.moisture import MoistureSensorProcessor
 
 # =============================================================================
 # DS18B20 Temperature Sensor Edge Cases
@@ -165,7 +162,7 @@ class TestCalibrationEdgeCases:
         ]
         # Should handle gracefully — not crash with ZeroDivisionError
         try:
-            result = processor.calibrate(points, method="linear")
+            processor.calibrate(points, method="linear")
             # If it returns, that's fine
         except (ValueError, ZeroDivisionError):
             # Also acceptable — explicit error is better than silent failure

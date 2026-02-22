@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
 # =============================================================================
 # STALE REASON CODES
 # =============================================================================
@@ -212,15 +213,13 @@ async def check_sensor_timeouts(
         }
 
         logger.debug(
-            f"Loaded {len(type_defaults_map)} type defaults for "
-            f"{len(sensors)} sensors"
+            f"Loaded {len(type_defaults_map)} type defaults for " f"{len(sensors)} sensors"
         )
 
         # FIX: Build device_id cache for WebSocket broadcasts
         # CRITICAL: Frontend expects device_id (e.g., "ESP_00000001"), NOT UUID!
         device_id_cache = await build_device_id_cache(
-            [sensor.esp_id for sensor in sensors],
-            esp_repo
+            [sensor.esp_id for sensor in sensors], esp_repo
         )
 
         # =====================================================================
@@ -233,9 +232,7 @@ async def check_sensor_timeouts(
         sensor_effective_configs: Dict[Any, Dict[str, Any]] = {}  # Cache für später
 
         for sensor in sensors:
-            effective = compute_effective_config_from_cached(
-                type_defaults_map, sensor
-            )
+            effective = compute_effective_config_from_cached(type_defaults_map, sensor)
             sensor_key = (sensor.esp_id, sensor.gpio, sensor.sensor_type)
             sensor_effective_configs[sensor_key] = effective
 
@@ -263,15 +260,11 @@ async def check_sensor_timeouts(
         latest_readings_map: Dict[Any, Any] = {}
 
         if sensors_to_check:
-            sensor_keys = [
-                (s.esp_id, s.gpio, s.sensor_type) for s in sensors_to_check
-            ]
+            sensor_keys = [(s.esp_id, s.gpio, s.sensor_type) for s in sensors_to_check]
 
             # Query 3: Batch-fetch all latest readings in ONE query
             # Uses sensor_type in key for correct multi-value sensor handling
-            latest_readings_map = await sensor_repo.get_latest_readings_batch_by_config(
-                sensor_keys
-            )
+            latest_readings_map = await sensor_repo.get_latest_readings_batch_by_config(sensor_keys)
 
             logger.debug(
                 f"Batch-fetched {len(latest_readings_map)} latest readings "
@@ -314,9 +307,7 @@ async def check_sensor_timeouts(
             if is_stale:
                 sensors_stale += 1
                 seconds_overdue = (
-                    int(age_seconds - timeout_seconds)
-                    if age_seconds != float("inf")
-                    else 0
+                    int(age_seconds - timeout_seconds) if age_seconds != float("inf") else 0
                 )
 
                 # FIX: Use device_id from cache for stale_info too
@@ -334,9 +325,7 @@ async def check_sensor_timeouts(
                 stale_details.append(stale_info)
 
                 # Log warning (use device_id from cache for readability)
-                age_display = (
-                    f"{age_seconds:.0f}s" if age_seconds != float("inf") else "never"
-                )
+                age_display = f"{age_seconds:.0f}s" if age_seconds != float("inf") else "never"
                 logger.warning(
                     f"Sensor stale: ESP {stale_device_id} GPIO {sensor.gpio} "
                     f"({sensor.sensor_type}) - no data for {age_display} "

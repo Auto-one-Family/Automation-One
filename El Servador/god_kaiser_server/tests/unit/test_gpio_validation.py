@@ -16,13 +16,12 @@ Tests:
 
 import pytest
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models.esp import ESPDevice
 from src.services.gpio_validation_service import (
     GpioValidationService,
-    GpioValidationResult,
     GpioConflictType,
     SYSTEM_RESERVED_PINS,
 )
@@ -177,9 +176,7 @@ class TestSensorConflictDetection:
         )
 
         # Mit exclude_sensor_id sollte der eigene Sensor ignoriert werden
-        result = await service.validate_gpio_available(
-            esp_id, gpio, exclude_sensor_id=sensor_id
-        )
+        result = await service.validate_gpio_available(esp_id, gpio, exclude_sensor_id=sensor_id)
 
         assert result.available, "Own sensor GPIO should be available for update"
 
@@ -372,7 +369,13 @@ class TestEspReportedStatus:
         mock_device.hardware_type = "ESP32_WROOM"  # Wichtig für Board-Constraints!
         mock_device.device_metadata = {
             "gpio_status": [
-                {"gpio": 15, "owner": "system", "component": "EXTERNAL_PERIPHERAL", "mode": 1, "safe": False}
+                {
+                    "gpio": 15,
+                    "owner": "system",
+                    "component": "EXTERNAL_PERIPHERAL",
+                    "mode": 1,
+                    "safe": False,
+                }
             ]
         }
         mock_esp_repo.get_by_id.return_value = mock_device
@@ -490,15 +493,16 @@ class TestGetAllUsedGpios:
 
 # ==================== Hardware Validation: Input-Only Pin Protection (Fix #2) ====================
 
+
 @pytest.mark.asyncio
 class TestInputOnlyPinProtection:
     """Tests for input-only pin protection (GPIO 34-39 on ESP32-WROOM).
-    
+
     ESP32-WROOM has pins 34-39 that are input-only (no OUTPUT mode).
     Actuators require OUTPUT → must be rejected on these pins.
     Sensors only need INPUT → are allowed on these pins.
     """
-    
+
     async def test_actuator_on_input_only_pin_34_rejected(
         self,
         db_session: AsyncSession,
@@ -512,12 +516,12 @@ class TestInputOnlyPinProtection:
             purpose="actuator",  # ← CRITICAL: Actuators need OUTPUT!
             interface_type="DIGITAL",
         )
-        
+
         assert not result.available, "GPIO 34 should be rejected for actuator"
         assert result.conflict_type == GpioConflictType.SYSTEM
         assert "input-only" in result.message.lower()
         assert "34" in result.message
-    
+
     async def test_actuator_on_all_input_only_pins_rejected(
         self,
         db_session: AsyncSession,
@@ -526,7 +530,7 @@ class TestInputOnlyPinProtection:
     ):
         """Test: Actuators on all input-only pins (34-39) rejected."""
         input_only_pins = [34, 35, 36, 39]  # ESP32-WROOM input-only pins
-        
+
         for gpio in input_only_pins:
             result = await gpio_service.validate_gpio_available(
                 esp_db_id=sample_esp_device.id,
@@ -534,11 +538,11 @@ class TestInputOnlyPinProtection:
                 purpose="actuator",
                 interface_type="DIGITAL",
             )
-            
+
             assert not result.available, f"GPIO {gpio} should be rejected for actuator"
             assert result.conflict_type == GpioConflictType.SYSTEM
             assert "input-only" in result.message.lower()
-    
+
     async def test_sensor_on_input_only_pin_34_accepted(
         self,
         db_session: AsyncSession,
@@ -552,12 +556,12 @@ class TestInputOnlyPinProtection:
             purpose="sensor",  # ← Sensors only need INPUT, OK!
             interface_type="ANALOG",
         )
-        
+
         assert result.available, "GPIO 34 should be accepted for sensor"
         assert result.conflict_type is None
         if result.message is not None:
             assert "available" in result.message.lower()
-    
+
     async def test_actuator_on_normal_pin_32_accepted(
         self,
         db_session: AsyncSession,
@@ -571,22 +575,23 @@ class TestInputOnlyPinProtection:
             purpose="actuator",
             interface_type="DIGITAL",
         )
-        
+
         assert result.available, "GPIO 32 should be accepted for actuator"
         assert result.conflict_type is None
 
 
 # ==================== Hardware Validation: I2C Pin Protection (Fix #3) ====================
 
+
 @pytest.mark.asyncio
 class TestI2CPinProtection:
     """Tests for I2C bus pin protection (GPIO 21/22 on ESP32-WROOM).
-    
+
     ESP32-WROOM uses GPIO 21 (SDA) and 22 (SCL) for I2C communication.
     These pins are auto-reserved by system and should NOT be used for
     ANALOG/DIGITAL sensors or actuators.
     """
-    
+
     async def test_analog_sensor_on_i2c_sda_pin_21_rejected(
         self,
         db_session: AsyncSession,
@@ -600,12 +605,12 @@ class TestI2CPinProtection:
             purpose="sensor",
             interface_type="ANALOG",  # ← NOT I2C!
         )
-        
+
         assert not result.available, "GPIO 21 should be rejected for ANALOG"
         assert result.conflict_type == GpioConflictType.SYSTEM
         assert "i2c" in result.message.lower()
         assert "21" in result.message
-    
+
     async def test_analog_sensor_on_i2c_scl_pin_22_rejected(
         self,
         db_session: AsyncSession,
@@ -619,12 +624,12 @@ class TestI2CPinProtection:
             purpose="sensor",
             interface_type="ANALOG",
         )
-        
+
         assert not result.available, "GPIO 22 should be rejected for ANALOG"
         assert result.conflict_type == GpioConflictType.SYSTEM
         assert "i2c" in result.message.lower()
         assert "22" in result.message
-    
+
     async def test_digital_actuator_on_i2c_pin_21_rejected(
         self,
         db_session: AsyncSession,
@@ -638,10 +643,10 @@ class TestI2CPinProtection:
             purpose="actuator",
             interface_type="DIGITAL",
         )
-        
+
         assert not result.available, "GPIO 21 should be rejected for DIGITAL"
         assert "i2c" in result.message.lower()
-    
+
     async def test_analog_sensor_on_normal_pin_32_accepted(
         self,
         db_session: AsyncSession,
@@ -655,6 +660,6 @@ class TestI2CPinProtection:
             purpose="sensor",
             interface_type="ANALOG",
         )
-        
+
         assert result.available, "GPIO 32 should be accepted for ANALOG"
         assert result.conflict_type is None

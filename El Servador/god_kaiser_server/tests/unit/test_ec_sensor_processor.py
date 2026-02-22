@@ -193,7 +193,7 @@ class TestECSensorProcessor:
     def test_calibrate_two_point_12bit(self, processor):
         """Test two-point calibration with 12-bit ADC."""
         calibration_points = [
-            {"raw": 1500, "reference": 1413},   # Low: 1413 µS/cm
+            {"raw": 1500, "reference": 1413},  # Low: 1413 µS/cm
             {"raw": 3000, "reference": 12880},  # High: 12880 µS/cm
         ]
         calibration = processor.calibrate(calibration_points, method="linear")
@@ -216,7 +216,7 @@ class TestECSensorProcessor:
     def test_calibrate_two_point_16bit(self, processor):
         """Test two-point calibration with 16-bit ADC."""
         calibration_points = [
-            {"raw": 10000, "reference": 1413},   # Low (16-bit ADC)
+            {"raw": 10000, "reference": 1413},  # Low (16-bit ADC)
             {"raw": 20000, "reference": 12880},  # High (16-bit ADC)
         ]
         calibration = processor.calibrate(calibration_points, method="linear")

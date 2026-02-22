@@ -6,11 +6,11 @@ Benötigt: Async Context, Singleton Reset
 
 Phase 3 Test-Suite: Broadcast, Filters, Rate Limiting, Thread-Safe Operations.
 """
+
 import pytest
 import pytest_asyncio
 import asyncio
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 from starlette.websockets import WebSocketState
 
 from src.websocket.manager import WebSocketManager
@@ -176,14 +176,20 @@ class TestSubscriptionManagement:
     async def test_unsubscribe_specific_filters(self, manager, mock_websocket):
         """unsubscribe with filters removes specific items."""
         await manager.connect(mock_websocket, "client_1")
-        await manager.subscribe("client_1", {
-            "types": ["sensor_data", "actuator_status", "esp_health"],
-            "esp_ids": ["ESP_1", "ESP_2"],
-        })
+        await manager.subscribe(
+            "client_1",
+            {
+                "types": ["sensor_data", "actuator_status", "esp_health"],
+                "esp_ids": ["ESP_1", "ESP_2"],
+            },
+        )
 
-        await manager.unsubscribe("client_1", {
-            "types": ["actuator_status"],
-        })
+        await manager.unsubscribe(
+            "client_1",
+            {
+                "types": ["actuator_status"],
+            },
+        )
 
         # actuator_status should be removed from types
         assert "sensor_data" in manager._subscriptions["client_1"]["types"]
@@ -411,11 +417,14 @@ class TestEventTypes:
         await manager.connect(mock_websocket, "client_1")
         await manager.subscribe("client_1", {})
 
-        await manager.broadcast("sensor_data", {
-            "esp_id": "ESP_12AB",
-            "gpio": 34,
-            "value": 25.5,
-        })
+        await manager.broadcast(
+            "sensor_data",
+            {
+                "esp_id": "ESP_12AB",
+                "gpio": 34,
+                "value": 25.5,
+            },
+        )
 
         mock_websocket.send_json.assert_called()
 
@@ -425,11 +434,14 @@ class TestEventTypes:
         await manager.connect(mock_websocket, "client_1")
         await manager.subscribe("client_1", {})
 
-        await manager.broadcast("actuator_status", {
-            "esp_id": "ESP_12AB",
-            "gpio": 18,
-            "state": "on",
-        })
+        await manager.broadcast(
+            "actuator_status",
+            {
+                "esp_id": "ESP_12AB",
+                "gpio": 18,
+                "state": "on",
+            },
+        )
 
         mock_websocket.send_json.assert_called()
 
@@ -439,11 +451,14 @@ class TestEventTypes:
         await manager.connect(mock_websocket, "client_1")
         await manager.subscribe("client_1", {})
 
-        await manager.broadcast("esp_health", {
-            "esp_id": "ESP_12AB",
-            "status": "online",
-            "heap_free": 50000,
-        })
+        await manager.broadcast(
+            "esp_health",
+            {
+                "esp_id": "ESP_12AB",
+                "status": "online",
+                "heap_free": 50000,
+            },
+        )
 
         mock_websocket.send_json.assert_called()
 
@@ -453,11 +468,14 @@ class TestEventTypes:
         await manager.connect(mock_websocket, "client_1")
         await manager.subscribe("client_1", {})
 
-        await manager.broadcast("config_response", {
-            "esp_id": "ESP_12AB",
-            "status": "success",
-            "type": "sensor",
-        })
+        await manager.broadcast(
+            "config_response",
+            {
+                "esp_id": "ESP_12AB",
+                "status": "success",
+                "type": "sensor",
+            },
+        )
 
         mock_websocket.send_json.assert_called()
 
@@ -467,9 +485,12 @@ class TestEventTypes:
         await manager.connect(mock_websocket, "client_1")
         await manager.subscribe("client_1", {})
 
-        await manager.broadcast("device_discovered", {
-            "esp_id": "ESP_NEW",
-            "status": "pending_approval",
-        })
+        await manager.broadcast(
+            "device_discovered",
+            {
+                "esp_id": "ESP_NEW",
+                "status": "pending_approval",
+            },
+        )
 
         mock_websocket.send_json.assert_called()

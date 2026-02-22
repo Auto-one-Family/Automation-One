@@ -53,6 +53,7 @@ def _get_websocket_manager():
     """
     try:
         from ..websocket.manager import WebSocketManager
+
         # Try to get the singleton instance without await (for sync context)
         return WebSocketManager._instance
     except Exception as e:
@@ -64,7 +65,7 @@ def _get_websocket_manager():
 # BACKUP_RETENTION_NEVER = 0 means backups never expire
 BACKUP_RETENTION_NEVER = 0
 DEFAULT_BACKUP_RETENTION_DAYS = 7  # Default: 7 days
-MAX_BACKUP_RETENTION_DAYS = 365    # Maximum: 1 year
+MAX_BACKUP_RETENTION_DAYS = 365  # Maximum: 1 year
 
 DEFAULT_BACKUP_CONFIG = {
     "backup_dir": "backups/audit_logs",
@@ -102,7 +103,11 @@ class AuditBackupService:
         """
         self.session = session
         # Use provided retention_days or default from config
-        self.retention_days = retention_days if retention_days is not None else DEFAULT_BACKUP_CONFIG["retention_days"]
+        self.retention_days = (
+            retention_days
+            if retention_days is not None
+            else DEFAULT_BACKUP_CONFIG["retention_days"]
+        )
 
         # Resolve backup directory relative to project root
         project_root = Path(__file__).parent.parent.parent  # god_kaiser_server/
@@ -111,7 +116,9 @@ class AuditBackupService:
         # Ensure backup directory exists
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.debug(f"AuditBackupService initialized. Backup dir: {self.backup_dir}, retention_days: {self.retention_days}")
+        logger.debug(
+            f"AuditBackupService initialized. Backup dir: {self.backup_dir}, retention_days: {self.retention_days}"
+        )
 
     async def create_backup(
         self,
@@ -144,28 +151,32 @@ class AuditBackupService:
             # Serialize events to JSON-compatible format
             serialized_events = []
             for event in events:
-                serialized_events.append({
-                    "id": str(event.id),
-                    "created_at": event.created_at.isoformat() if event.created_at else None,
-                    "event_type": event.event_type,
-                    "severity": event.severity,
-                    "source_type": event.source_type,
-                    "source_id": event.source_id,
-                    "status": event.status,
-                    "message": event.message,
-                    "details": event.details or {},
-                    "error_code": event.error_code,
-                    "error_description": event.error_description,
-                    "ip_address": event.ip_address,
-                    "user_agent": event.user_agent,
-                    "correlation_id": event.correlation_id,
-                })
+                serialized_events.append(
+                    {
+                        "id": str(event.id),
+                        "created_at": event.created_at.isoformat() if event.created_at else None,
+                        "event_type": event.event_type,
+                        "severity": event.severity,
+                        "source_type": event.source_type,
+                        "source_id": event.source_id,
+                        "status": event.status,
+                        "message": event.message,
+                        "details": event.details or {},
+                        "error_code": event.error_code,
+                        "error_description": event.error_description,
+                        "ip_address": event.ip_address,
+                        "user_agent": event.user_agent,
+                        "correlation_id": event.correlation_id,
+                    }
+                )
 
             # Build backup document
             backup_data = {
                 "backup_id": backup_id,
                 "created_at": now.isoformat(),
-                "expires_at": expires_at.isoformat() if expires_at else None,  # None = never expires
+                "expires_at": (
+                    expires_at.isoformat() if expires_at else None
+                ),  # None = never expires
                 "event_count": len(events),
                 "metadata": metadata or {},
                 "events": serialized_events,
@@ -173,7 +184,7 @@ class AuditBackupService:
 
             # Write to file
             backup_file = self.backup_dir / f"{backup_id}.json"
-            with open(backup_file, 'w', encoding='utf-8') as f:
+            with open(backup_file, "w", encoding="utf-8") as f:
                 json.dump(backup_data, f, indent=2, ensure_ascii=False)
 
             expires_info = expires_at.isoformat() if expires_at else "never"
@@ -218,7 +229,7 @@ class AuditBackupService:
             raise ValueError(f"Backup {backup_id} not found")
 
         # Load backup
-        with open(backup_file, 'r', encoding='utf-8') as f:
+        with open(backup_file, "r", encoding="utf-8") as f:
             backup_data = json.load(f)
 
         # Check expiration (None = never expires)
@@ -256,7 +267,11 @@ class AuditBackupService:
 
                 event = AuditLog(
                     id=event_id,
-                    created_at=datetime.fromisoformat(event_data["created_at"]) if event_data["created_at"] else datetime.now(timezone.utc),
+                    created_at=(
+                        datetime.fromisoformat(event_data["created_at"])
+                        if event_data["created_at"]
+                        else datetime.now(timezone.utc)
+                    ),
                     event_type=event_data["event_type"],
                     severity=event_data["severity"],
                     source_type=event_data["source_type"],
@@ -288,7 +303,9 @@ class AuditBackupService:
             try:
                 backup_file.unlink()
                 backup_deleted = True
-                logger.info(f"Backup {backup_id} deleted after restore (cleanup_after_restore=True)")
+                logger.info(
+                    f"Backup {backup_id} deleted after restore (cleanup_after_restore=True)"
+                )
             except Exception as e:
                 logger.warning(f"Failed to delete backup {backup_id} after restore: {e}")
 
@@ -340,7 +357,7 @@ class AuditBackupService:
 
         for backup_file in self.backup_dir.glob("*.json"):
             try:
-                with open(backup_file, 'r', encoding='utf-8') as f:
+                with open(backup_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
                 # Handle expires_at (None = never expires)
@@ -355,14 +372,16 @@ class AuditBackupService:
                 if is_expired and not include_expired:
                     continue
 
-                backups.append({
-                    "backup_id": data["backup_id"],
-                    "created_at": data["created_at"],
-                    "expires_at": expires_at_str,  # Can be None (never expires)
-                    "expired": is_expired,
-                    "event_count": data["event_count"],
-                    "metadata": data.get("metadata", {}),
-                })
+                backups.append(
+                    {
+                        "backup_id": data["backup_id"],
+                        "created_at": data["created_at"],
+                        "expires_at": expires_at_str,  # Can be None (never expires)
+                        "expired": is_expired,
+                        "event_count": data["event_count"],
+                        "metadata": data.get("metadata", {}),
+                    }
+                )
 
             except Exception as e:
                 logger.warning(f"Failed to read backup {backup_file}: {e}")
@@ -389,7 +408,7 @@ class AuditBackupService:
             return None
 
         try:
-            with open(backup_file, 'r', encoding='utf-8') as f:
+            with open(backup_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             now = datetime.now(timezone.utc)
@@ -449,7 +468,7 @@ class AuditBackupService:
 
         for backup_file in self.backup_dir.glob("*.json"):
             try:
-                with open(backup_file, 'r', encoding='utf-8') as f:
+                with open(backup_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
                 # Skip backups that never expire (expires_at=None)
@@ -489,7 +508,9 @@ class AuditBackupService:
             raise ValueError(f"retention_days must be <= {MAX_BACKUP_RETENTION_DAYS} or 0 (never)")
 
         self.retention_days = retention_days
-        logger.info(f"Backup retention updated to {retention_days} days ({'never expires' if retention_days == 0 else 'auto-expire'})")
+        logger.info(
+            f"Backup retention updated to {retention_days} days ({'never expires' if retention_days == 0 else 'auto-expire'})"
+        )
 
     def get_retention_config(self) -> Dict[str, Any]:
         """

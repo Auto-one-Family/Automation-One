@@ -18,13 +18,14 @@ logger = get_logger(__name__)
 class EmergencyState(Enum):
     """
     Emergency State Enum (MUST match ESP32 EmergencyState).
-    
+
     Values match ESP32 actuator_types.h:
     - EMERGENCY_NORMAL = "normal"
     - EMERGENCY_ACTIVE = "active"
     - EMERGENCY_CLEARING = "clearing"
     - EMERGENCY_RESUMING = "resuming"
     """
+
     NORMAL = "normal"
     ACTIVE = "active"
     CLEARING = "clearing"
@@ -35,12 +36,13 @@ class EmergencyState(Enum):
 class SafetyCheckResult:
     """
     Result of safety validation check.
-    
+
     Attributes:
         valid: Whether the command is safe to execute
         error: Error message if validation failed
         warnings: Optional list of warnings
     """
+
     valid: bool
     error: Optional[str] = None
     warnings: Optional[list[str]] = None
@@ -49,7 +51,7 @@ class SafetyCheckResult:
 class SafetyService:
     """
     Safety validation for actuator commands.
-    
+
     Validates commands before execution, handles emergency stops.
     Thread-safe for MQTT callback invocations.
     """
@@ -57,7 +59,7 @@ class SafetyService:
     def __init__(self, actuator_repo: ActuatorRepository, esp_repo: ESPRepository):
         """
         Initialize Safety Service.
-        
+
         Args:
             actuator_repo: ActuatorRepository instance
             esp_repo: ESPRepository instance
@@ -86,19 +88,19 @@ class SafetyService:
     ) -> SafetyCheckResult:
         """
         Validate actuator command before execution.
-        
+
         Checks:
         - Emergency stop status
         - PWM value range (0.0-1.0)
         - GPIO conflicts
         - Timeout constraints
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
             command: Command type (ON, OFF, PWM, TOGGLE)
             value: Command value (0.0-1.0 for PWM)
-            
+
         Returns:
             SafetyCheckResult indicating if command is safe
         """
@@ -109,21 +111,21 @@ class SafetyService:
                     valid=False,
                     error=f"Emergency stop is active for ESP {esp_id}",
                 )
-            
+
             # Check global emergency stop
             if self._is_emergency_stop_active_unlocked():
                 return SafetyCheckResult(
                     valid=False,
                     error="Global emergency stop is active",
                 )
-            
+
             # Validate value range
             if value < 0.0 or value > 1.0:
                 return SafetyCheckResult(
                     valid=False,
                     error=f"Value {value} out of range [0.0, 1.0]. PWM values must be 0.0-1.0, not 0-255!",
                 )
-            
+
             # Check safety constraints
             return await self.check_safety_constraints(esp_id, gpio, value)
 
@@ -132,23 +134,23 @@ class SafetyService:
     ) -> SafetyCheckResult:
         """
         Check safety constraints for actuator.
-        
+
         Checks:
         - Actuator exists and is enabled
         - Value is within min_value/max_value range
         - GPIO conflicts (if any)
         - Timeout constraints
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
             value: Command value
-            
+
         Returns:
             SafetyCheckResult
         """
         warnings = []
-        
+
         # Lookup ESP device
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
@@ -156,25 +158,23 @@ class SafetyService:
                 valid=False,
                 error=f"ESP device not found: {esp_id}",
             )
-        
+
         # Lookup actuator config
-        actuator_config = await self.actuator_repo.get_by_esp_and_gpio(
-            esp_device.id, gpio
-        )
-        
+        actuator_config = await self.actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+
         if not actuator_config:
             return SafetyCheckResult(
                 valid=False,
                 error=f"Actuator config not found: esp_id={esp_id}, gpio={gpio}",
             )
-        
+
         # Check if actuator is enabled
         if not actuator_config.enabled:
             return SafetyCheckResult(
                 valid=False,
                 error=f"Actuator is disabled: {actuator_config.actuator_name}",
             )
-        
+
         # Check value range
         if value < actuator_config.min_value or value > actuator_config.max_value:
             return SafetyCheckResult(
@@ -184,7 +184,7 @@ class SafetyService:
                     f"[{actuator_config.min_value}, {actuator_config.max_value}]"
                 ),
             )
-        
+
         # Check timeout (if actuator is currently active)
         actuator_state = await self.actuator_repo.get_state(esp_device.id, gpio)
         if actuator_state and actuator_config.timeout_seconds:
@@ -194,19 +194,16 @@ class SafetyService:
                 warnings.append(
                     f"Actuator is already active. Timeout: {actuator_config.timeout_seconds}s"
                 )
-        
+
         # Check GPIO conflicts (same GPIO used by multiple actuators on same ESP)
         # This is already enforced by unique constraint in DB, but we can add a warning
         all_actuators = await self.actuator_repo.get_by_esp(esp_device.id)
-        gpio_conflicts = [
-            a for a in all_actuators
-            if a.gpio == gpio and a.id != actuator_config.id
-        ]
+        gpio_conflicts = [a for a in all_actuators if a.gpio == gpio and a.id != actuator_config.id]
         if gpio_conflicts:
             warnings.append(
                 f"GPIO {gpio} is used by multiple actuators: {[a.actuator_name for a in gpio_conflicts]}"
             )
-        
+
         return SafetyCheckResult(
             valid=True,
             warnings=warnings if warnings else None,
@@ -215,7 +212,7 @@ class SafetyService:
     async def emergency_stop_all(self) -> None:
         """
         Emergency stop all ESPs.
-        
+
         Sets global emergency stop flag. All actuator commands will be blocked.
         """
         async with self._lock:
@@ -225,7 +222,7 @@ class SafetyService:
     async def emergency_stop_esp(self, esp_id: str) -> None:
         """
         Emergency stop specific ESP.
-        
+
         Args:
             esp_id: ESP device ID to stop
         """
@@ -236,7 +233,7 @@ class SafetyService:
     async def clear_emergency_stop(self, esp_id: Optional[str] = None) -> None:
         """
         Clear emergency stop for specific ESP or all ESPs.
-        
+
         Args:
             esp_id: ESP device ID to clear, or None to clear global emergency stop
         """
@@ -253,10 +250,10 @@ class SafetyService:
     async def is_emergency_stop_active(self, esp_id: Optional[str] = None) -> bool:
         """
         Check if emergency stop is active.
-        
+
         Args:
             esp_id: Optional ESP device ID to check. If None, checks global emergency stop.
-            
+
         Returns:
             True if emergency stop is active, False otherwise
         """

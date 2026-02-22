@@ -66,18 +66,18 @@ _server_start_time = time.time()
 async def health_check() -> HealthResponse:
     """
     Basic health check.
-    
+
     Returns basic server status for load balancer health probes.
     """
     mqtt_client = MQTTClient.get_instance()
-    
+
     # Determine overall status
     status = "healthy"
     if not mqtt_client.is_connected():
         status = "degraded"
-    
+
     uptime_seconds = int(time.time() - _server_start_time)
-    
+
     return HealthResponse(
         success=True,
         status=status,
@@ -105,20 +105,20 @@ async def detailed_health(
 ) -> DetailedHealthResponse:
     """
     Detailed health check.
-    
+
     Returns comprehensive health status including all components.
     """
     mqtt_client = MQTTClient.get_instance()
     websocket_manager = await WebSocketManager.get_instance()
-    
+
     uptime_seconds = int(time.time() - _server_start_time)
-    
+
     # Format uptime
     days = uptime_seconds // 86400
     hours = (uptime_seconds % 86400) // 3600
     minutes = (uptime_seconds % 3600) // 60
     uptime_formatted = f"{days}d {hours}h {minutes}m"
-    
+
     # Database health
     db_health = DatabaseHealth(
         connected=True,  # If we're here, DB is connected
@@ -127,7 +127,7 @@ async def detailed_health(
         latency_ms=5.0,  # Would measure actual query time
         database_type="SQLite" if "sqlite" in str(settings.database.url) else "PostgreSQL",
     )
-    
+
     # MQTT health
     mqtt_health = MQTTHealth(
         connected=mqtt_client.is_connected(),
@@ -138,15 +138,16 @@ async def detailed_health(
         messages_published=0,
         last_message_at=None,
     )
-    
+
     # WebSocket health
     ws_health = WebSocketHealth(
         active_connections=websocket_manager.connection_count if websocket_manager else 0,
         total_messages_sent=0,  # Would track
     )
-    
+
     # System resources
     import psutil
+
     cpu_percent = psutil.cpu_percent()
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
@@ -158,25 +159,25 @@ async def detailed_health(
         disk_percent=disk.percent,
         disk_free_gb=disk.free / (1024 * 1024 * 1024),
     )
-    
+
     # Determine overall status
     status = "healthy"
     warnings = []
-    
+
     if not mqtt_client.is_connected():
         status = "degraded"
         warnings.append("MQTT broker disconnected")
-    
+
     if system_health.disk_percent > 90:
         warnings.append("Disk space low")
         if status == "healthy":
             status = "degraded"
-    
+
     if system_health.memory_percent > 90:
         warnings.append("Memory usage high")
         if status == "healthy":
             status = "degraded"
-    
+
     return DetailedHealthResponse(
         success=True,
         status=status,
@@ -211,28 +212,28 @@ async def esp_health_summary(
 ) -> ESPHealthSummaryResponse:
     """
     Get ESP health summary.
-    
+
     Returns aggregate health status for all ESP devices.
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     # Get all devices
     devices = await esp_repo.get_all()
-    
+
     # Count by status
     online_count = sum(1 for d in devices if d.status == "online")
     offline_count = sum(1 for d in devices if d.status == "offline")
     error_count = sum(1 for d in devices if d.status == "error")
     unknown_count = sum(1 for d in devices if d.status == "unknown")
-    
+
     # Aggregate stats
     total_sensors = 0
     total_actuators = 0
     heap_values = []
     rssi_values = []
-    
+
     device_items = []
     problem_device_ids: list[str] = []
 
@@ -263,17 +264,19 @@ async def esp_health_summary(
         if is_problem:
             problem_device_ids.append(device.device_id)
 
-        device_items.append(ESPHealthItem(
-            device_id=device.device_id,
-            name=device.name,
-            status=device.status,
-            last_seen=device.last_seen,
-            uptime_seconds=uptime,
-            heap_free=heap_free,
-            wifi_rssi=wifi_rssi,
-            sensor_count=sensor_count,
-            actuator_count=actuator_count,
-        ))
+        device_items.append(
+            ESPHealthItem(
+                device_id=device.device_id,
+                name=device.name,
+                status=device.status,
+                last_seen=device.last_seen,
+                uptime_seconds=uptime,
+                heap_free=heap_free,
+                wifi_rssi=wifi_rssi,
+                sensor_count=sensor_count,
+                actuator_count=actuator_count,
+            )
+        )
 
     # Fetch recent errors for problem devices from audit log
     if problem_device_ids:
@@ -299,22 +302,24 @@ async def esp_health_summary(
             if did not in errors_by_device:
                 errors_by_device[did] = []
             if len(errors_by_device[did]) < 5:
-                errors_by_device[did].append(RecentError(
-                    timestamp=entry.created_at,
-                    severity=entry.severity,
-                    category=entry.event_type,
-                    message=entry.message or entry.error_description or entry.event_type,
-                ))
+                errors_by_device[did].append(
+                    RecentError(
+                        timestamp=entry.created_at,
+                        severity=entry.severity,
+                        category=entry.event_type,
+                        message=entry.message or entry.error_description or entry.event_type,
+                    )
+                )
 
         # Attach errors to device items
         for item in device_items:
             if item.device_id in errors_by_device:
                 item.recent_errors = errors_by_device[item.device_id]
-    
+
     # Calculate averages
     avg_heap = sum(heap_values) / len(heap_values) if heap_values else None
     avg_rssi = sum(rssi_values) / len(rssi_values) if rssi_values else None
-    
+
     return ESPHealthSummaryResponse(
         success=True,
         total_devices=len(devices),
@@ -344,7 +349,7 @@ async def esp_health_summary(
 async def liveness_probe() -> LivenessResponse:
     """
     Liveness probe for Kubernetes.
-    
+
     Simple check that server process is running.
     """
     return LivenessResponse(
@@ -364,25 +369,26 @@ async def readiness_probe(
 ) -> ReadinessResponse:
     """
     Readiness probe for Kubernetes.
-    
+
     Checks if server is ready to accept traffic.
     """
     mqtt_client = MQTTClient.get_instance()
-    
+
     # Check components
     checks = {
         "database": True,  # If we're here, DB is OK
         "mqtt": mqtt_client.is_connected(),
     }
-    
+
     # Check disk space
     import psutil
+
     disk = psutil.disk_usage("/")
     checks["disk_space"] = disk.percent < 95
-    
+
     # Ready if all critical checks pass
     ready = checks["database"] and checks["mqtt"]
-    
+
     return ReadinessResponse(
         success=ready,
         ready=ready,

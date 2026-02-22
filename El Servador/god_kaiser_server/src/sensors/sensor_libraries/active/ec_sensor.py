@@ -255,9 +255,7 @@ class ECSensorProcessor(BaseSensorProcessor):
                 "Very low ADC value (<100) - sensor may be disconnected or in pure water"
             )
         elif raw_value > (max_value - 100):
-            warnings.append(
-                f"Very high ADC value (>{max_value - 100}) - check sensor connection"
-            )
+            warnings.append(f"Very high ADC value (>{max_value - 100}) - check sensor connection")
 
         return ValidationResult(valid=True, warnings=warnings if warnings else None)
 
@@ -365,9 +363,7 @@ class ECSensorProcessor(BaseSensorProcessor):
         else:
             return (adc_value / self.ADC_MAX_12BIT) * self.ADC_VOLTAGE_RANGE_3V3
 
-    def _voltage_to_ec_calibrated(
-        self, voltage: float, slope: float, offset: float
-    ) -> float:
+    def _voltage_to_ec_calibrated(self, voltage: float, slope: float, offset: float) -> float:
         """
         Convert voltage to EC using calibration.
 

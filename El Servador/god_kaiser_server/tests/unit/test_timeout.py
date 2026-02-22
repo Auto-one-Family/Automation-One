@@ -99,10 +99,7 @@ class TestTimeoutWithFallback:
     async def test_fallback_returns_factory_value(self):
         """Test fallback uses factory function."""
 
-        @timeout_with_fallback(
-            seconds=0.1,
-            fallback_factory=lambda: {"cached": True}
-        )
+        @timeout_with_fallback(seconds=0.1, fallback_factory=lambda: {"cached": True})
         async def slow_func():
             await asyncio.sleep(1.0)
             return {"cached": False}
@@ -134,11 +131,7 @@ class TestWithTimeoutFunction:
             await asyncio.sleep(0.1)
             return "done"
 
-        result = await with_timeout(
-            fast_operation(),
-            seconds=1.0,
-            operation="fast_op"
-        )
+        result = await with_timeout(fast_operation(), seconds=1.0, operation="fast_op")
         assert result == "done"
 
     @pytest.mark.asyncio
@@ -149,11 +142,7 @@ class TestWithTimeoutFunction:
             await asyncio.sleep(1.0)
 
         with pytest.raises(OperationTimeoutError) as exc_info:
-            await with_timeout(
-                slow_operation(),
-                seconds=0.1,
-                operation="slow_op"
-            )
+            await with_timeout(slow_operation(), seconds=0.1, operation="slow_op")
 
         assert exc_info.value.operation == "slow_op"
 
@@ -170,10 +159,7 @@ class TestWithTimeoutFallbackFunction:
             return "never"
 
         result = await with_timeout_fallback(
-            slow_operation(),
-            seconds=0.1,
-            fallback_value=[],
-            operation="slow_op"
+            slow_operation(), seconds=0.1, fallback_value=[], operation="slow_op"
         )
         assert result == []
 

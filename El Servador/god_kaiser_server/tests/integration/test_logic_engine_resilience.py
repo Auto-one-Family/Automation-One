@@ -16,9 +16,7 @@ it does NOT check if the target ESP is online before sending commands.
 
 import pytest
 import uuid
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
-from sqlalchemy.ext.asyncio import AsyncSession
+from unittest.mock import AsyncMock
 
 from src.services.logic_engine import LogicEngine
 
@@ -162,9 +160,7 @@ class TestLogicEngineFireAndForget:
         self, logic_engine: LogicEngine, mock_actuator_service
     ):
         """Exception in actuator_service doesn't crash the engine."""
-        mock_actuator_service.send_command = AsyncMock(
-            side_effect=Exception("Connection refused")
-        )
+        mock_actuator_service.send_command = AsyncMock(side_effect=Exception("Connection refused"))
 
         actions = [
             {
@@ -198,9 +194,7 @@ class TestLogicEngineActionTypes:
     """Test different action type strings."""
 
     @pytest.mark.asyncio
-    async def test_actuator_command_type(
-        self, logic_engine: LogicEngine, mock_actuator_service
-    ):
+    async def test_actuator_command_type(self, logic_engine: LogicEngine, mock_actuator_service):
         """'actuator_command' action type triggers send_command."""
         actions = [
             {
@@ -227,9 +221,7 @@ class TestLogicEngineActionTypes:
         assert kwargs["duration"] == 60
 
     @pytest.mark.asyncio
-    async def test_actuator_shorthand_type(
-        self, logic_engine: LogicEngine, mock_actuator_service
-    ):
+    async def test_actuator_shorthand_type(self, logic_engine: LogicEngine, mock_actuator_service):
         """'actuator' action type also triggers send_command (schema compatibility)."""
         actions = [
             {
@@ -277,9 +269,7 @@ class TestLogicEngineActionTypes:
         assert kwargs["value"] >= 0.0
 
     @pytest.mark.asyncio
-    async def test_duration_field_fallback(
-        self, logic_engine: LogicEngine, mock_actuator_service
-    ):
+    async def test_duration_field_fallback(self, logic_engine: LogicEngine, mock_actuator_service):
         """Both 'duration' and 'duration_seconds' work, with duration_seconds taking precedence."""
         # Test with only 'duration'
         actions = [
@@ -379,9 +369,7 @@ class TestLogicEngineConditions:
         }
 
         result = await logic_engine._check_conditions(conditions, sensor_data)
-        assert result == expected, (
-            f"Condition {value} {operator} {threshold} should be {expected}"
-        )
+        assert result == expected, f"Condition {value} {operator} {threshold} should be {expected}"
 
     @pytest.mark.asyncio
     async def test_compound_and_conditions(self, logic_engine: LogicEngine):
@@ -511,12 +499,15 @@ class TestCrossESPScenario:
         target_esp.configure_actuator(gpio=25, actuator_type="fan")
 
         # Simulate command from logic engine
-        result = target_esp.handle_command("actuator_set", {
-            "gpio": 25,
-            "value": 0.75,
-            "mode": "pwm",
-            "type": "fan",
-        })
+        result = target_esp.handle_command(
+            "actuator_set",
+            {
+                "gpio": 25,
+                "value": 0.75,
+                "mode": "pwm",
+                "type": "fan",
+            },
+        )
 
         assert result["status"] == "ok"
         assert target_esp.get_actuator_state(25).pwm_value == 0.75
@@ -529,11 +520,14 @@ class TestCrossESPScenario:
         # No zone configured!
         target_esp.configure_actuator(gpio=25, actuator_type="relay")
 
-        result = target_esp.handle_command("actuator_set", {
-            "gpio": 25,
-            "value": 1,
-            "mode": "digital",
-        })
+        result = target_esp.handle_command(
+            "actuator_set",
+            {
+                "gpio": 25,
+                "value": 1,
+                "mode": "digital",
+            },
+        )
 
         assert result["status"] == "error"
         assert "zone" in result["error"].lower()

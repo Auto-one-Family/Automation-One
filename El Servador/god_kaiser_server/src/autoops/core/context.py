@@ -16,22 +16,24 @@ from typing import Any, Optional
 @dataclass
 class SensorSpec:
     """User-specified sensor to configure."""
-    sensor_type: str            # DS18B20, SHT31, PH, etc.
+
+    sensor_type: str  # DS18B20, SHT31, PH, etc.
     name: Optional[str] = None  # Human-readable name
     gpio: Optional[int] = None  # Specific GPIO (None = auto-assign)
-    count: int = 1              # How many of this type
+    count: int = 1  # How many of this type
     interface_type: Optional[str] = None  # I2C, ONEWIRE, ANALOG, DIGITAL
     i2c_address: Optional[int] = None
     onewire_address: Optional[str] = None
-    raw_value: float = 0.0      # Initial value for mock sensors
-    unit: str = ""              # Unit of measurement
+    raw_value: float = 0.0  # Initial value for mock sensors
+    unit: str = ""  # Unit of measurement
     interval_seconds: float = 30.0  # Reading interval
 
 
 @dataclass
 class ActuatorSpec:
     """User-specified actuator to configure."""
-    actuator_type: str          # relay, pump, valve, pwm_fan, etc.
+
+    actuator_type: str  # relay, pump, valve, pwm_fan, etc.
     name: Optional[str] = None
     gpio: Optional[int] = None
     count: int = 1
@@ -42,6 +44,7 @@ class ActuatorSpec:
 @dataclass
 class ESPSpec:
     """Full specification for an ESP to configure."""
+
     name: Optional[str] = None
     device_id: Optional[str] = None  # Auto-generated if None
     hardware_type: str = "ESP32_WROOM"  # ESP32_WROOM, XIAO_ESP32_C3, MOCK_ESP32
@@ -55,6 +58,7 @@ class ESPSpec:
 @dataclass
 class SystemSnapshot:
     """Snapshot of the current system state."""
+
     timestamp: str = ""
     esp_devices: list[dict[str, Any]] = field(default_factory=list)
     total_sensors: int = 0
@@ -110,19 +114,22 @@ class AutoOpsContext:
     def __post_init__(self):
         if not self.session_id:
             import uuid
+
             self.session_id = str(uuid.uuid4())[:8]
         if not self.started_at:
             self.started_at = datetime.now(timezone.utc).isoformat()
 
     def log_action(self, action: str, target: str, result: str, details: dict | None = None):
         """Log an action to the execution history."""
-        self.actions_log.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "action": action,
-            "target": target,
-            "result": result,
-            "details": details or {},
-        })
+        self.actions_log.append(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "action": action,
+                "target": target,
+                "result": result,
+                "details": details or {},
+            }
+        )
 
     def log_error(self, error: str):
         """Log an error."""

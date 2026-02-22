@@ -18,27 +18,8 @@ Dependencies:
 """
 
 import pytest
-import pytest_asyncio
-import uuid
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import fixtures
-from tests.integration.conftest_logic import (
-    mock_esp32_ds18b20_multi,
-    mock_esp32_ds18b20_dual_bus,
-    cross_esp_logic_setup,
-    multi_zone_esp_setup,
-    logic_engine,
-    mock_actuator_service,
-    mock_logic_repo,
-    mock_websocket_manager,
-    create_sensor_condition,
-    create_actuator_action,
-    create_notification_action,
-)
-
-from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
 
 
 pytestmark = [pytest.mark.logic, pytest.mark.ds18b20, pytest.mark.cross_esp]
@@ -48,9 +29,7 @@ class TestDS18B20MultiSensorAveraging:
     """Tests for multi-sensor averaging and aggregation."""
 
     @pytest.mark.asyncio
-    async def test_multi_sensor_average_trigger(
-        self, logic_engine, mock_esp32_ds18b20_multi
-    ):
+    async def test_multi_sensor_average_trigger(self, logic_engine, mock_esp32_ds18b20_multi):
         """
         SZENARIO: Durchschnittstemperatur aus 3 Sensoren triggert Aktion
 
@@ -72,7 +51,7 @@ class TestDS18B20MultiSensorAveraging:
         mock = mock_esp32_ds18b20_multi
 
         # Verify sensors exist
-        assert hasattr(mock, '_ds18b20_buses')
+        assert hasattr(mock, "_ds18b20_buses")
         bus = mock._ds18b20_buses[4]
         assert len(bus) == 3
 
@@ -86,9 +65,7 @@ class TestDS18B20MultiSensorAveraging:
         assert average > 22.5  # Threshold exceeded
 
     @pytest.mark.asyncio
-    async def test_multi_sensor_ignores_fault_in_average(
-        self, mock_esp32_ds18b20_multi
-    ):
+    async def test_multi_sensor_ignores_fault_in_average(self, mock_esp32_ds18b20_multi):
         """
         SZENARIO: Faulty Sensor wird vom Average ausgeschlossen
 
@@ -105,10 +82,7 @@ class TestDS18B20MultiSensorAveraging:
 
         # Set one sensor to fault value
         mock.set_ds18b20_value(
-            gpio=4,
-            rom_address="28-000000000002",
-            temperature=-127.0,
-            quality="bad"
+            gpio=4, rom_address="28-000000000002", temperature=-127.0, quality="bad"
         )
 
         # === CALCULATE AVERAGE ===
@@ -210,10 +184,7 @@ class TestDS18B20FaultHandling:
 
         # Set primary to fault
         mock.set_ds18b20_value(
-            gpio=4,
-            rom_address=rom_addresses[0],
-            temperature=-127.0,
-            quality="bad"
+            gpio=4, rom_address=rom_addresses[0], temperature=-127.0, quality="bad"
         )
 
         # === VERIFY BACKUP AVAILABLE ===
@@ -264,9 +235,7 @@ class TestDS18B20CrossESP:
     """Cross-ESP temperature control tests."""
 
     @pytest.mark.asyncio
-    async def test_cross_esp_temp_ventilation(
-        self, cross_esp_logic_setup, logic_engine
-    ):
+    async def test_cross_esp_temp_ventilation(self, cross_esp_logic_setup, logic_engine):
         """
         SZENARIO: Temperatur auf ESP_A → Lüfter auf ESP_B
 
@@ -293,10 +262,7 @@ class TestDS18B20CrossESP:
 
         # === TRIGGER ===
         await logic_engine.evaluate_sensor_data(
-            esp_id="ESP_SENSORS",
-            gpio=4,
-            sensor_type="DS18B20",
-            value=28.0
+            esp_id="ESP_SENSORS", gpio=4, sensor_type="DS18B20", value=28.0
         )
 
         # === VERIFY ===
@@ -392,10 +358,9 @@ class TestDS18B20ROMAddressing:
         mock = mock_esp32_ds18b20_dual_bus
 
         # Get initial values
-        bus_4_sensor = mock.get_sensor_state(4)
+        mock.get_sensor_state(4)
         bus_16_sensor = mock.get_ds18b20_by_rom(16, "28-OUTDOOR00001")
 
-        initial_4 = bus_4_sensor.raw_value
         initial_16 = bus_16_sensor.raw_value
 
         # === MODIFY BUS 4 ===
@@ -454,7 +419,6 @@ class TestDS18B20MinMaxTracking:
         - Action: notification("New temperature record")
         """
         # === SETUP ===
-        mock = mock_esp32_ds18b20_multi
 
         # Simulate temperature readings
         readings = [22.0, 23.5, 24.0, 21.5, 22.8, 25.0, 20.0]
@@ -493,10 +457,7 @@ class TestDS18B20SensorOfflineHandling:
 
         # Set one sensor to fault
         mock.set_ds18b20_value(
-            gpio=4,
-            rom_address="28-000000000001",
-            temperature=-127.0,
-            quality="bad"
+            gpio=4, rom_address="28-000000000001", temperature=-127.0, quality="bad"
         )
 
         # === VERIFY ===

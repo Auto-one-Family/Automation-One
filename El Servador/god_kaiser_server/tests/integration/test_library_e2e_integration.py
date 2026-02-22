@@ -26,18 +26,15 @@ Reference Values (from hardware datasheets):
 
 import pytest
 from contextlib import asynccontextmanager
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.sensors.library_loader import LibraryLoader, get_library_loader
+from src.sensors.library_loader import get_library_loader
 from src.sensors.sensor_libraries.active.temperature import (
     DS18B20Processor,
-    SHT31TemperatureProcessor,
 )
 from src.sensors.sensor_libraries.active.moisture import MoistureSensorProcessor
 from src.sensors.sensor_libraries.active.ph_sensor import PHSensorProcessor
 from src.sensors.sensor_libraries.active.ec_sensor import ECSensorProcessor
-from src.sensors.sensor_libraries.active.humidity import SHT31HumidityProcessor
 
 
 class TestLibraryLoaderRealProcessors:
@@ -357,16 +354,10 @@ class TestECRealProcessing:
     def test_temperature_compensation(self, processor):
         """Test temperature compensation (2% per °C)."""
         # At 30°C (5°C above reference)
-        result_30c = processor.process(
-            raw_value=1860,
-            params={"temperature_compensation": 30.0}
-        )
+        result_30c = processor.process(raw_value=1860, params={"temperature_compensation": 30.0})
 
         # At 25°C (reference, no compensation)
-        result_25c = processor.process(
-            raw_value=1860,
-            params={"temperature_compensation": 25.0}
-        )
+        result_25c = processor.process(raw_value=1860, params={"temperature_compensation": 25.0})
 
         # At 30°C, EC should be LOWER after compensation
         # EC_25C = EC_raw / 1.1 (10% lower)
@@ -374,10 +365,7 @@ class TestECRealProcessing:
 
     def test_unit_conversion_ms_cm(self, processor):
         """Test unit conversion to mS/cm."""
-        result = processor.process(
-            raw_value=1860,
-            params={"unit": "ms_cm"}
-        )
+        result = processor.process(raw_value=1860, params={"unit": "ms_cm"})
 
         # 9090 µS/cm = 9.09 mS/cm
         assert 8.0 <= result.value <= 10.0
@@ -385,10 +373,7 @@ class TestECRealProcessing:
 
     def test_unit_conversion_ppm(self, processor):
         """Test unit conversion to ppm (TDS approximation)."""
-        result = processor.process(
-            raw_value=1860,
-            params={"unit": "ppm"}
-        )
+        result = processor.process(raw_value=1860, params={"unit": "ppm"})
 
         # 9090 µS/cm * 0.5 ≈ 4545 ppm
         assert 4000 <= result.value <= 5000
@@ -512,8 +497,13 @@ class TestPiEnhancedFlowE2E:
         # Mock database session and repositories
         with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             # Patch repositories
-            with patch("src.mqtt.handlers.sensor_handler.ESPRepository", return_value=mock_esp_repo):
-                with patch("src.mqtt.handlers.sensor_handler.SensorRepository", return_value=mock_sensor_repo):
+            with patch(
+                "src.mqtt.handlers.sensor_handler.ESPRepository", return_value=mock_esp_repo
+            ):
+                with patch(
+                    "src.mqtt.handlers.sensor_handler.SensorRepository",
+                    return_value=mock_sensor_repo,
+                ):
                     # Process the sensor data
                     result = await handler.handle_sensor_data(topic, payload)
 
@@ -568,8 +558,13 @@ class TestPiEnhancedFlowE2E:
             yield MagicMock()
 
         with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
-            with patch("src.mqtt.handlers.sensor_handler.ESPRepository", return_value=mock_esp_repo):
-                with patch("src.mqtt.handlers.sensor_handler.SensorRepository", return_value=mock_sensor_repo):
+            with patch(
+                "src.mqtt.handlers.sensor_handler.ESPRepository", return_value=mock_esp_repo
+            ):
+                with patch(
+                    "src.mqtt.handlers.sensor_handler.SensorRepository",
+                    return_value=mock_sensor_repo,
+                ):
                     result = await handler.handle_sensor_data(topic, payload)
 
                     if result:
@@ -578,7 +573,9 @@ class TestPiEnhancedFlowE2E:
 
                         processed_value = call_args[0][2]
                         # pH 7.0 is neutral
-                        assert 6.5 <= processed_value <= 7.5, f"Expected ~7.0 pH, got {processed_value}"
+                        assert (
+                            6.5 <= processed_value <= 7.5
+                        ), f"Expected ~7.0 pH, got {processed_value}"
 
 
 class TestRealisticHardwareValues:
@@ -637,15 +634,9 @@ class TestRealisticHardwareValues:
         # DFRobot: 2% per °C compensation
         # At 30°C: EC_25C = EC_raw / 1.1
 
-        result_30c = processor.process(
-            raw_value=2000,
-            params={"temperature_compensation": 30.0}
-        )
+        result_30c = processor.process(raw_value=2000, params={"temperature_compensation": 30.0})
 
-        result_25c = processor.process(
-            raw_value=2000,
-            params={"temperature_compensation": 25.0}
-        )
+        result_25c = processor.process(raw_value=2000, params={"temperature_compensation": 25.0})
 
         # At 30°C, compensated EC should be ~9% lower
         ratio = result_30c.value / result_25c.value

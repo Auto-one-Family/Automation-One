@@ -71,10 +71,10 @@ class ESPDeviceBase(BaseModel):
 class ESPDeviceCreate(ESPDeviceBase):
     """
     ESP device registration request.
-    
+
     Used when manually registering an ESP or during auto-discovery.
     """
-    
+
     ip_address: str = Field(
         ...,
         description="Device IP address",
@@ -100,7 +100,7 @@ class ESPDeviceCreate(ESPDeviceBase):
         None,
         description="Device capabilities (GPIO count, features)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -117,8 +117,8 @@ class ESPDeviceCreate(ESPDeviceBase):
                     "gpio_count": 39,
                     "adc_channels": 18,
                     "has_wifi": True,
-                    "has_bluetooth": True
-                }
+                    "has_bluetooth": True,
+                },
             }
         }
     )
@@ -127,10 +127,10 @@ class ESPDeviceCreate(ESPDeviceBase):
 class ESPDeviceUpdate(BaseModel):
     """
     ESP device update request.
-    
+
     All fields optional - only provided fields are updated.
     """
-    
+
     name: Optional[str] = Field(
         None,
         max_length=100,
@@ -253,9 +253,9 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
                 "auto_heartbeat": None,
                 "heartbeat_interval_seconds": None,
                 "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-01T12:00:00Z"
+                "updated_at": "2025-01-01T12:00:00Z",
             }
-        }
+        },
     )
 
 
@@ -359,6 +359,7 @@ class GpioStatusItem(BaseModel):
         # Unknown value (3, 4, 6-255) - log warning and pass through
         # This allows future Arduino modes to be tolerated
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(
             f"Unknown GPIO mode value: {v} (0x{v:02X}). "
@@ -415,8 +416,20 @@ class GpioStatusList(BaseModel):
         json_schema_extra={
             "example": {
                 "gpio_status": [
-                    {"gpio": 4, "owner": "sensor", "component": "DS18B20", "mode": 1, "safe": False},
-                    {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False},
+                    {
+                        "gpio": 4,
+                        "owner": "sensor",
+                        "component": "DS18B20",
+                        "mode": 1,
+                        "safe": False,
+                    },
+                    {
+                        "gpio": 21,
+                        "owner": "system",
+                        "component": "I2C_SDA",
+                        "mode": 1,
+                        "safe": False,
+                    },
                 ],
                 "gpio_reserved_count": 2,
             }
@@ -477,7 +490,7 @@ class GpioUsageItem(BaseModel):
                 "component": "DS18B20",
                 "name": "Temperature Sensor 1",
                 "id": "550e8400-e29b-41d4-a716-446655440000",
-                "source": "database"
+                "source": "database",
             }
         }
     )
@@ -485,16 +498,22 @@ class GpioUsageItem(BaseModel):
 
 class I2CBusInfo(BaseModel):
     """I2C Bus information with connected devices."""
+
     sda_pin: int = Field(..., description="SDA pin number (typically 21)")
     scl_pin: int = Field(..., description="SCL pin number (typically 22)")
-    is_available: bool = Field(..., description="Whether I2C bus is available (always true for shared bus)")
+    is_available: bool = Field(
+        ..., description="Whether I2C bus is available (always true for shared bus)"
+    )
     devices: List[dict] = Field(default_factory=list, description="List of I2C devices on bus")
 
 
 class OneWireBusInfo(BaseModel):
     """OneWire Bus information with connected devices."""
+
     gpio: int = Field(..., description="OneWire bus GPIO pin")
-    is_available: bool = Field(..., description="Whether OneWire bus is available (always true for shared bus)")
+    is_available: bool = Field(
+        ..., description="Whether OneWire bus is available (always true for shared bus)"
+    )
     devices: List[dict] = Field(default_factory=list, description="List of OneWire devices on bus")
 
 
@@ -559,12 +578,26 @@ class GpioStatusResponse(BaseModel):
                 "esp_id": "ESP_12AB34CD",
                 "available": [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33, 34, 35],
                 "reserved": [
-                    {"gpio": 21, "owner": "system", "component": "I2C_SDA", "name": None, "id": None, "source": "static"},
-                    {"gpio": 22, "owner": "system", "component": "I2C_SCL", "name": None, "id": None, "source": "static"},
+                    {
+                        "gpio": 21,
+                        "owner": "system",
+                        "component": "I2C_SDA",
+                        "name": None,
+                        "id": None,
+                        "source": "static",
+                    },
+                    {
+                        "gpio": 22,
+                        "owner": "system",
+                        "component": "I2C_SCL",
+                        "name": None,
+                        "id": None,
+                        "source": "static",
+                    },
                 ],
                 "system": [0, 1, 2, 3, 6, 7, 8, 9, 10, 11],
                 "hardware_type": "ESP32_WROOM",
-                "last_esp_report": "2026-01-08T12:00:00Z"
+                "last_esp_report": "2026-01-08T12:00:00Z",
             }
         }
     )
@@ -578,10 +611,10 @@ class GpioStatusResponse(BaseModel):
 class ESPHealthMetrics(BaseModel):
     """
     ESP health metrics from heartbeat.
-    
+
     Matches El Trabajante heartbeat payload format.
     """
-    
+
     uptime: int = Field(
         ...,
         description="Seconds since boot",
@@ -611,7 +644,7 @@ class ESPHealthMetrics(BaseModel):
         ...,
         description="Heartbeat timestamp (Unix seconds)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -620,7 +653,7 @@ class ESPHealthMetrics(BaseModel):
                 "wifi_rssi": -65,
                 "sensor_count": 3,
                 "actuator_count": 2,
-                "timestamp": 1735818000
+                "timestamp": 1735818000,
             }
         }
     )
@@ -630,7 +663,7 @@ class ESPHealthResponse(BaseResponse):
     """
     ESP health check response.
     """
-    
+
     device_id: str = Field(
         ...,
         description="ESP device ID",
@@ -651,7 +684,7 @@ class ESPHealthResponse(BaseResponse):
         None,
         description="Human-readable uptime (e.g., '1d 2h 30m')",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -664,10 +697,10 @@ class ESPHealthResponse(BaseResponse):
                     "wifi_rssi": -55,
                     "sensor_count": 3,
                     "actuator_count": 2,
-                    "timestamp": 1735818000
+                    "timestamp": 1735818000,
                 },
                 "last_seen": "2025-01-01T12:00:00Z",
-                "uptime_formatted": "1d 0h 0m"
+                "uptime_formatted": "1d 0h 0m",
             }
         }
     )
@@ -677,7 +710,7 @@ class ESPHealthSummary(BaseModel):
     """
     Summary health status for one ESP.
     """
-    
+
     device_id: str = Field(..., description="ESP device ID")
     name: Optional[str] = Field(None, description="Device name")
     status: str = Field(..., description="online, offline, error, unknown")
@@ -690,7 +723,7 @@ class ESPHealthSummaryResponse(BaseResponse):
     """
     Summary health for all ESPs.
     """
-    
+
     total_devices: int = Field(..., description="Total registered devices", ge=0)
     online_count: int = Field(..., description="Online devices", ge=0)
     offline_count: int = Field(..., description="Offline devices", ge=0)
@@ -776,7 +809,7 @@ class ESPConfigUpdate(BaseModel):
             "example": {
                 "report_interval_ms": 30000,
                 "heartbeat_interval_ms": 60000,
-                "log_level": "INFO"
+                "log_level": "INFO",
             }
         }
     )
@@ -786,7 +819,7 @@ class ESPConfigResponse(BaseResponse):
     """
     ESP config update response.
     """
-    
+
     device_id: str = Field(..., description="ESP device ID")
     config_sent: bool = Field(..., description="Whether config was sent via MQTT")
     config_acknowledged: bool = Field(
@@ -804,7 +837,7 @@ class ESPRestartRequest(BaseModel):
     """
     ESP restart command request.
     """
-    
+
     delay_seconds: int = Field(
         0,
         ge=0,
@@ -822,7 +855,7 @@ class ESPResetRequest(BaseModel):
     """
     ESP factory reset command request.
     """
-    
+
     confirm: bool = Field(
         ...,
         description="Must be True to confirm factory reset",
@@ -837,7 +870,7 @@ class ESPCommandResponse(BaseResponse):
     """
     ESP command response.
     """
-    
+
     device_id: str = Field(..., description="ESP device ID")
     command: str = Field(..., description="Command sent (restart, reset, etc.)")
     command_sent: bool = Field(..., description="Whether command was published to MQTT")
@@ -852,26 +885,20 @@ class AssignKaiserRequest(BaseModel):
     """
     Assign ESP to Kaiser node request.
     """
-    
+
     kaiser_id: str = Field(
         ...,
         description="Kaiser node ID to assign ESP to",
     )
-    
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "kaiser_id": "KAISER_001"
-            }
-        }
-    )
+
+    model_config = ConfigDict(json_schema_extra={"example": {"kaiser_id": "KAISER_001"}})
 
 
 class AssignKaiserResponse(BaseResponse):
     """
     Kaiser assignment response.
     """
-    
+
     device_id: str = Field(..., description="ESP device ID")
     kaiser_id: str = Field(..., description="Assigned Kaiser ID")
     previous_kaiser_id: Optional[str] = Field(
@@ -889,14 +916,14 @@ class DiscoveredESP(BaseModel):
     """
     Discovered ESP device from network scan.
     """
-    
+
     device_id: str = Field(..., description="ESP device ID")
     ip_address: str = Field(..., description="IP address")
     mac_address: str = Field(..., description="MAC address")
     firmware_version: str = Field(..., description="Firmware version")
     hardware_type: str = Field(..., description="Hardware type")
     is_registered: bool = Field(..., description="Whether already registered in DB")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -905,7 +932,7 @@ class DiscoveredESP(BaseModel):
                 "mac_address": "11:22:33:44:55:66",
                 "firmware_version": "2.0.0",
                 "hardware_type": "ESP32_WROOM",
-                "is_registered": False
+                "is_registered": False,
             }
         }
     )
@@ -915,7 +942,7 @@ class ESPDiscoveryResponse(BaseResponse):
     """
     ESP discovery response.
     """
-    
+
     discovered_count: int = Field(
         ...,
         description="Number of discovered devices",
@@ -946,7 +973,7 @@ class ESPListFilter(BaseModel):
     """
     Filter parameters for ESP list endpoint.
     """
-    
+
     zone_id: Optional[str] = Field(None, description="Filter by zone ID")
     status: Optional[str] = Field(
         None,
@@ -967,6 +994,7 @@ class ESPDeviceListResponse(PaginatedResponse[ESPDeviceResponse]):
     """
     Paginated list of ESP devices.
     """
+
     pass
 
 
@@ -1021,7 +1049,7 @@ class ConfigFailureItem(BaseModel):
                 "gpio": 5,
                 "error_code": 1002,
                 "error": "GPIO_CONFLICT",
-                "detail": "GPIO 5 reserved by actuator (pump_1)"
+                "detail": "GPIO 5 reserved by actuator (pump_1)",
             }
         }
     )
@@ -1105,11 +1133,11 @@ class ConfigResponsePayload(BaseModel):
                         "gpio": 5,
                         "error_code": 1002,
                         "error": "GPIO_CONFLICT",
-                        "detail": "GPIO 5 reserved by actuator (pump_1)"
+                        "detail": "GPIO 5 reserved by actuator (pump_1)",
                     }
-                ]
+                ],
             }
-        }
+        },
     )
 
 
@@ -1183,7 +1211,7 @@ class PendingDevicesListResponse(BaseResponse):
     """
     List of pending ESP devices awaiting approval.
     """
-    
+
     devices: List[PendingESPDevice] = Field(
         default_factory=list,
         description="List of pending devices",
@@ -1197,10 +1225,10 @@ class PendingDevicesListResponse(BaseResponse):
 class ESPApprovalRequest(BaseModel):
     """
     Request to approve an ESP device.
-    
+
     Optional fields allow admin to assign name and zone during approval.
     """
-    
+
     name: Optional[str] = Field(
         None,
         max_length=100,
@@ -1224,10 +1252,10 @@ class ESPApprovalRequest(BaseModel):
 class ESPRejectionRequest(BaseModel):
     """
     Request to reject an ESP device.
-    
+
     Reason is required for audit trail.
     """
-    
+
     reason: str = Field(
         ...,
         max_length=500,
@@ -1241,7 +1269,7 @@ class ESPApprovalResponse(BaseResponse):
     """
     Response after approving or rejecting an ESP device.
     """
-    
+
     device_id: str = Field(
         ...,
         description="ESP device ID",

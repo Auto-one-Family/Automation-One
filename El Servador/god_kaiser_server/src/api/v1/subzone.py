@@ -172,9 +172,7 @@ async def remove_subzone(
     user: OperatorUser,
 ) -> SubzoneRemoveResponse:
     """Remove a subzone from ESP device."""
-    logger.info(
-        f"Subzone removal request for {esp_id}/{subzone_id} by {user.username}"
-    )
+    logger.info(f"Subzone removal request for {esp_id}/{subzone_id} by {user.username}")
 
     esp_repo = ESPRepository(session)
     service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
@@ -416,4 +414,3 @@ async def disable_safe_mode(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
-

@@ -25,7 +25,7 @@ class ActionResult:
 class BaseActionExecutor(ABC):
     """
     Abstract base class for action executors.
-    
+
     Each action type (actuator, notification, delay, etc.) has its own executor
     that implements this interface.
     """
@@ -34,11 +34,11 @@ class BaseActionExecutor(ABC):
     async def execute(self, action: Dict, context: Dict) -> ActionResult:
         """
         Execute an action.
-        
+
         Args:
             action: Action dictionary
             context: Execution context (rule info, trigger data, etc.)
-            
+
         Returns:
             ActionResult with execution status
         """
@@ -48,12 +48,11 @@ class BaseActionExecutor(ABC):
     def supports(self, action_type: str) -> bool:
         """
         Check if this executor supports the given action type.
-        
+
         Args:
             action_type: Action type string (e.g., "actuator_command", "notification")
-            
+
         Returns:
             True if this executor supports the type, False otherwise
         """
         pass
-

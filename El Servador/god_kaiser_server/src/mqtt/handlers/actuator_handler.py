@@ -88,7 +88,9 @@ class ActuatorStatusHandler:
             # Step 2: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
-                error_code = validation_result.get("error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD)
+                error_code = validation_result.get(
+                    "error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD
+                )
                 logger.error(
                     f"[{error_code}] Invalid actuator status payload from {esp_id_str}: "
                     f"{validation_result['error']}"
@@ -111,9 +113,7 @@ class ActuatorStatusHandler:
                     return False
 
                 # Step 5: Lookup actuator config
-                actuator_config = await actuator_repo.get_by_esp_and_gpio(
-                    esp_device.id, gpio
-                )
+                actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
                 if not actuator_config:
                     logger.warning(
                         f"Actuator config not found: esp_id={esp_id_str}, gpio={gpio}. "
@@ -137,8 +137,12 @@ class ActuatorStatusHandler:
                 # Same pattern as heartbeat_handler: auto-detect millis vs seconds
                 esp32_timestamp_raw = payload.get("ts")
                 esp32_timestamp = datetime.fromtimestamp(
-                    esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
-                    tz=timezone.utc
+                    (
+                        esp32_timestamp_raw / 1000
+                        if esp32_timestamp_raw > 1e10
+                        else esp32_timestamp_raw
+                    ),
+                    tz=timezone.utc,
                 )
 
                 # Step 7: Detect data source (mock/test/production)
@@ -197,6 +201,7 @@ class ActuatorStatusHandler:
                 # Audit log: actuator status with correlation
                 if correlation_id:
                     from ...db.repositories.audit_log_repo import AuditLogRepository
+
                     audit_repo = AuditLogRepository(session)
                     await audit_repo.log_actuator_command(
                         esp_id=esp_id_str,
@@ -213,6 +218,7 @@ class ActuatorStatusHandler:
                 # WebSocket Broadcast
                 try:
                     from ...websocket.manager import WebSocketManager
+
                     ws_manager = await WebSocketManager.get_instance()
                     broadcast_data = {
                         "esp_id": esp_id_str,
@@ -380,7 +386,9 @@ class ActuatorStatusHandler:
             try:
                 result = DataSource(source_value).value
                 detection_reason = f"payload._source='{source_value}'"
-                logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                logger.debug(
+                    f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})"
+                )
                 return result
             except ValueError:
                 logger.warning(f"Unknown data source: {source_value}, defaulting to production")
@@ -398,22 +406,24 @@ class ActuatorStatusHandler:
             if esp_device.capabilities.get("mock"):
                 detection_reason = "esp_device.capabilities.mock=True"
                 result = DataSource.MOCK.value
-                logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
+                logger.debug(
+                    f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})"
+                )
                 return result
 
         # Priority 5-7: ESP ID prefix detection
         if esp_id.startswith("MOCK_"):
-            detection_reason = f"esp_id prefix 'MOCK_'"
+            detection_reason = "esp_id prefix 'MOCK_'"
             result = DataSource.MOCK.value
             logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
             return result
         if esp_id.startswith("TEST_"):
-            detection_reason = f"esp_id prefix 'TEST_'"
+            detection_reason = "esp_id prefix 'TEST_'"
             result = DataSource.TEST.value
             logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
             return result
         if esp_id.startswith("SIM_"):
-            detection_reason = f"esp_id prefix 'SIM_'"
+            detection_reason = "esp_id prefix 'SIM_'"
             result = DataSource.SIMULATION.value
             logger.debug(f"DataSource detection [{esp_id}]: {result} (reason: {detection_reason})")
             return result

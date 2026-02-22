@@ -26,19 +26,19 @@ Die Server-Logik muss diese ESPs koordinieren und dabei:
 
 import pytest
 import time
-from typing import Dict, Any, List
-from datetime import datetime
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'esp32'))
 
-from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "esp32"))
+
+from tests.esp32.mocks.mock_esp32_client import MockESP32Client
 
 
 # =============================================================================
 # Fixtures for Cross-ESP Testing
 # =============================================================================
+
 
 @pytest.fixture
 def irrigation_system_3_esp():
@@ -63,7 +63,9 @@ def irrigation_system_3_esp():
     # Technikraum ESP
     pump_esp = MockESP32Client(esp_id="ESP_PUMP_TECH", kaiser_id="god")
     pump_esp.configure_zone("technical", "greenhouse", "pump_room")
-    pump_esp.configure_actuator(gpio=5, actuator_type="pump", name="Hauptpumpe", safety_timeout_ms=1800000)
+    pump_esp.configure_actuator(
+        gpio=5, actuator_type="pump", name="Hauptpumpe", safety_timeout_ms=1800000
+    )
     pump_esp.configure_actuator(gpio=6, actuator_type="valve", name="Hauptventil")
     pump_esp.set_sensor_value(gpio=39, raw_value=2100, sensor_type="pressure", name="Systemdruck")
     esps["pump"] = pump_esp
@@ -126,7 +128,7 @@ def climate_control_4_esp():
         sensor_type="SHT31",
         primary_value=2200,
         secondary_values={"humidity": 650},
-        name="Luft Klima"
+        name="Luft Klima",
     )
     esps["sensors"] = sensors
 
@@ -135,7 +137,9 @@ def climate_control_4_esp():
     ventilation.configure_zone("ventilation", "greenhouse", "roof")
     ventilation.configure_actuator(gpio=5, actuator_type="motor", name="Dachfenster")
     ventilation.configure_actuator(gpio=6, actuator_type="valve", name="Seitenlüftung")
-    ventilation.configure_actuator(gpio=7, actuator_type="fan", name="Umluft", min_value=0.2, max_value=1.0)
+    ventilation.configure_actuator(
+        gpio=7, actuator_type="fan", name="Umluft", min_value=0.2, max_value=1.0
+    )
     esps["ventilation"] = ventilation
 
     # Heizung
@@ -150,7 +154,9 @@ def climate_control_4_esp():
     weather.configure_zone("weather", "greenhouse", "outside")
     weather.set_sensor_value(gpio=34, raw_value=100, sensor_type="wind", name="Wind")  # 10 km/h
     weather.set_sensor_value(gpio=35, raw_value=0, sensor_type="rain", name="Regen")  # Kein Regen
-    weather.set_sensor_value(gpio=36, raw_value=1500, sensor_type="temperature", name="Außen")  # 15°C
+    weather.set_sensor_value(
+        gpio=36, raw_value=1500, sensor_type="temperature", name="Außen"
+    )  # 15°C
     esps["weather"] = weather
 
     for esp in esps.values():
@@ -165,6 +171,7 @@ def climate_control_4_esp():
 # =============================================================================
 # Test: Pump-Valve Coordination
 # =============================================================================
+
 
 class TestPumpValveCoordination:
     """
@@ -323,6 +330,7 @@ class TestPumpValveCoordination:
 # Test: Cross-Zone Sensor-Actuator Triggers
 # =============================================================================
 
+
 class TestCrossZoneTriggers:
     """
     Tests für Sensor in Zone X triggert Aktor in Zone Y.
@@ -370,16 +378,15 @@ class TestCrossZoneTriggers:
         # Temperatur > 28°C → Lüftung öffnen
         if temp_reading["data"]["raw_value"] > 2800:
             # Command geht an ANDEREN ESP!
-            vent_response = ventilation.handle_command("actuator_set", {
-                "gpio": 5,
-                "value": 1,
-                "mode": "digital"
-            })
+            vent_response = ventilation.handle_command(
+                "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+            )
             assert vent_response["status"] == "ok"
 
         # === VERIFY: Lüftung ist offen ===
-        assert ventilation.get_actuator_state(5).state is True, \
-            "Dachfenster sollte bei 30°C offen sein"
+        assert (
+            ventilation.get_actuator_state(5).state is True
+        ), "Dachfenster sollte bei 30°C offen sein"
 
     @pytest.mark.critical
     def test_rain_overrides_ventilation(self, climate_control_4_esp):
@@ -417,8 +424,9 @@ class TestCrossZoneTriggers:
             ventilation.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})
 
         # === VERIFY ===
-        assert ventilation.get_actuator_state(5).state is False, \
-            "Dachfenster MUSS bei Regen geschlossen sein"
+        assert (
+            ventilation.get_actuator_state(5).state is False
+        ), "Dachfenster MUSS bei Regen geschlossen sein"
 
     def test_wind_limits_ventilation_opening(self, climate_control_4_esp):
         """
@@ -459,21 +467,26 @@ class TestCrossZoneTriggers:
         assert max_opening == 0.5
 
         # Öffne Umluftventilator (PWM) mit Limit
-        ventilation.handle_command("actuator_set", {
-            "gpio": 7,
-            "value": min(1.0, max_opening),  # Angefordert: 100%, erlaubt: 50%
-            "mode": "pwm"
-        })
+        ventilation.handle_command(
+            "actuator_set",
+            {
+                "gpio": 7,
+                "value": min(1.0, max_opening),  # Angefordert: 100%, erlaubt: 50%
+                "mode": "pwm",
+            },
+        )
 
         # === VERIFY ===
         fan_state = ventilation.get_actuator_state(7)
-        assert fan_state.pwm_value <= 0.5, \
-            f"Lüftung sollte bei 35 km/h max 50% sein, ist aber {fan_state.pwm_value}"
+        assert (
+            fan_state.pwm_value <= 0.5
+        ), f"Lüftung sollte bei 35 km/h max 50% sein, ist aber {fan_state.pwm_value}"
 
 
 # =============================================================================
 # Test: Cascade Failure Isolation
 # =============================================================================
+
 
 class TestCascadeFailureIsolation:
     """
@@ -522,12 +535,14 @@ class TestCascadeFailureIsolation:
 
         # === VERIFY: Zone B unbeeinträchtigt ===
         # Zone B Ventil noch offen
-        assert zone_b.get_actuator_state(6).state is True, \
-            "Zone B Ventil sollte trotz Zone A Ausfall offen bleiben"
+        assert (
+            zone_b.get_actuator_state(6).state is True
+        ), "Zone B Ventil sollte trotz Zone A Ausfall offen bleiben"
 
         # Pumpe noch aktiv
-        assert pump.get_actuator_state(5).state is True, \
-            "Pumpe sollte trotz Zone A Ausfall weiterlaufen"
+        assert (
+            pump.get_actuator_state(5).state is True
+        ), "Pumpe sollte trotz Zone A Ausfall weiterlaufen"
 
         # === Zone B kann weiter gesteuert werden ===
         # Stoppe Zone B normal
@@ -612,13 +627,15 @@ class TestCascadeFailureIsolation:
             ventilation.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})
 
         # === VERIFY ===
-        assert ventilation.get_actuator_state(5).state is False, \
-            "Bei fehlender Innentemperatur und kühler Außentemperatur: Lüftung zu"
+        assert (
+            ventilation.get_actuator_state(5).state is False
+        ), "Bei fehlender Innentemperatur und kühler Außentemperatur: Lüftung zu"
 
 
 # =============================================================================
 # Test: Synchronized Multi-Zone Operations
 # =============================================================================
+
 
 class TestSynchronizedOperations:
     """
@@ -689,15 +706,16 @@ class TestSynchronizedOperations:
         # === VERIFY: Alles gestoppt ===
         for esp_name, esp in esps.items():
             for gpio, actuator in esp.actuators.items():
-                assert actuator.emergency_stopped is True, \
-                    f"{esp_name} GPIO {gpio} sollte emergency_stopped sein"
-                assert actuator.state is False, \
-                    f"{esp_name} GPIO {gpio} sollte aus sein"
+                assert (
+                    actuator.emergency_stopped is True
+                ), f"{esp_name} GPIO {gpio} sollte emergency_stopped sein"
+                assert actuator.state is False, f"{esp_name} GPIO {gpio} sollte aus sein"
 
 
 # =============================================================================
 # Pytest Configuration
 # =============================================================================
+
 
 def pytest_configure(config):
     """Register custom markers for cross-ESP tests."""

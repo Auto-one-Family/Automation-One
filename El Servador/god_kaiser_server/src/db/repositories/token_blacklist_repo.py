@@ -75,8 +75,10 @@ class TokenBlacklistRepository:
             True if token is blacklisted, False otherwise
         """
         token_hash = TokenBlacklist.hash_token(token)
-        stmt = select(func.count()).select_from(TokenBlacklist).where(
-            TokenBlacklist.token_hash == token_hash
+        stmt = (
+            select(func.count())
+            .select_from(TokenBlacklist)
+            .where(TokenBlacklist.token_hash == token_hash)
         )
         result = await self.session.execute(stmt)
         count = result.scalar_one()

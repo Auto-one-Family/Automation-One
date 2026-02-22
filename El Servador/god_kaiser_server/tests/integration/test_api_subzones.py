@@ -120,8 +120,7 @@ async def viewer_user(db_session: AsyncSession) -> User:
 async def auth_headers(operator_user: User) -> dict:
     """Create authentication headers with operator token."""
     token = create_access_token(
-        user_id=operator_user.id,
-        additional_claims={"role": operator_user.role}
+        user_id=operator_user.id, additional_claims={"role": operator_user.role}
     )
     return {"Authorization": f"Bearer {token}"}
 
@@ -130,8 +129,7 @@ async def auth_headers(operator_user: User) -> dict:
 async def viewer_headers(viewer_user: User) -> dict:
     """Create authentication headers with viewer token."""
     token = create_access_token(
-        user_id=viewer_user.id,
-        additional_claims={"role": viewer_user.role}
+        user_id=viewer_user.id, additional_claims={"role": viewer_user.role}
     )
     return {"Authorization": f"Bearer {token}"}
 
@@ -166,9 +164,7 @@ class TestSubzoneAssignmentAPI:
     """Test subzone assignment API endpoints."""
 
     @pytest.mark.asyncio
-    async def test_assign_subzone_success(
-        self, auth_headers: dict, test_esp_with_zone: ESPDevice
-    ):
+    async def test_assign_subzone_success(self, auth_headers: dict, test_esp_with_zone: ESPDevice):
         """Test successful subzone assignment via API."""
         request_data = {
             "subzone_id": "irrigation_section_a",
@@ -177,9 +173,7 @@ class TestSubzoneAssignmentAPI:
             "safe_mode_active": False,
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -203,9 +197,7 @@ class TestSubzoneAssignmentAPI:
             "assigned_gpios": [4, 5],
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/subzone/devices/ESP_FF000000/subzones/assign",
                 json=request_data,
@@ -216,18 +208,14 @@ class TestSubzoneAssignmentAPI:
         assert "not found" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
-    async def test_assign_subzone_no_zone(
-        self, auth_headers: dict, test_esp_no_zone: ESPDevice
-    ):
+    async def test_assign_subzone_no_zone(self, auth_headers: dict, test_esp_no_zone: ESPDevice):
         """Test assignment fails when ESP has no zone assigned."""
         request_data = {
             "subzone_id": "test_subzone",
             "assigned_gpios": [4, 5],
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_no_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -245,9 +233,7 @@ class TestSubzoneAssignmentAPI:
             "assigned_gpios": [50],  # Invalid GPIO (>39)
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/subzone/devices/ESP_EE000000/subzones/assign",
                 json=request_data,
@@ -265,9 +251,7 @@ class TestSubzoneAssignmentAPI:
             "assigned_gpios": [],  # Empty list
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/subzone/devices/ESP_EE000000/subzones/assign",
                 json=request_data,
@@ -285,9 +269,7 @@ class TestSubzoneAssignmentAPI:
             "assigned_gpios": [4, 5],
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -306,13 +288,9 @@ class TestSubzoneQueryAPI:
     """Test subzone query API endpoints."""
 
     @pytest.mark.asyncio
-    async def test_get_subzones_empty(
-        self, auth_headers: dict, test_esp_with_zone: ESPDevice
-    ):
+    async def test_get_subzones_empty(self, auth_headers: dict, test_esp_with_zone: ESPDevice):
         """Test getting subzones for ESP with none."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones",
                 headers=auth_headers,
@@ -332,9 +310,7 @@ class TestSubzoneQueryAPI:
         existing_subzone: SubzoneConfig,
     ):
         """Test getting subzones for ESP with existing subzone."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones",
                 headers=auth_headers,
@@ -356,9 +332,7 @@ class TestSubzoneQueryAPI:
         existing_subzone: SubzoneConfig,
     ):
         """Test getting specific subzone details."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/existing_subzone",
                 headers=auth_headers,
@@ -378,9 +352,7 @@ class TestSubzoneQueryAPI:
         self, auth_headers: dict, test_esp_with_zone: ESPDevice
     ):
         """Test getting non-existent subzone returns 404."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/non_existent",
                 headers=auth_headers,
@@ -391,9 +363,7 @@ class TestSubzoneQueryAPI:
     @pytest.mark.asyncio
     async def test_get_subzones_esp_not_found(self, auth_headers: dict):
         """Test getting subzones for non-existent ESP returns 404."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 "/api/v1/subzone/devices/ESP_FF000000/subzones",
                 headers=auth_headers,
@@ -418,9 +388,7 @@ class TestSafeModeAPI:
         existing_subzone: SubzoneConfig,
     ):
         """Test enabling safe-mode via API."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/existing_subzone/safe-mode",
                 json={"reason": "maintenance"},
@@ -441,9 +409,7 @@ class TestSafeModeAPI:
         existing_subzone: SubzoneConfig,
     ):
         """Test disabling safe-mode via API."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/existing_subzone/safe-mode",
                 headers=auth_headers,
@@ -458,9 +424,7 @@ class TestSafeModeAPI:
     @pytest.mark.asyncio
     async def test_safe_mode_esp_not_found(self, auth_headers: dict):
         """Test safe-mode for non-existent ESP returns 404."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/subzone/devices/ESP_FF000000/subzones/test/safe-mode",
                 json={"reason": "test"},
@@ -486,9 +450,7 @@ class TestSubzoneRemovalAPI:
         existing_subzone: SubzoneConfig,
     ):
         """Test successful subzone removal via API."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/existing_subzone",
                 headers=auth_headers,
@@ -504,9 +466,7 @@ class TestSubzoneRemovalAPI:
     @pytest.mark.asyncio
     async def test_remove_subzone_esp_not_found(self, auth_headers: dict):
         """Test removal with non-existent ESP returns 404."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 "/api/v1/subzone/devices/ESP_FF000000/subzones/test_subzone",
                 headers=auth_headers,
@@ -533,9 +493,7 @@ class TestSubzoneAuthorization:
             "assigned_gpios": [4, 5],
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -553,9 +511,7 @@ class TestSubzoneAuthorization:
         existing_subzone: SubzoneConfig,
     ):
         """Test viewer role can read subzones."""
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones",
                 headers=viewer_headers,
@@ -589,9 +545,7 @@ class TestSubzoneEdgeCases:
             "safe_mode_active": False,
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -613,9 +567,7 @@ class TestSubzoneEdgeCases:
             "assigned_gpios": [4, 5],
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -628,18 +580,14 @@ class TestSubzoneEdgeCases:
         assert data["subzone_id"] == "uppercase_subzone"
 
     @pytest.mark.asyncio
-    async def test_gpio_deduplication(
-        self, auth_headers: dict, test_esp_with_zone: ESPDevice
-    ):
+    async def test_gpio_deduplication(self, auth_headers: dict, test_esp_with_zone: ESPDevice):
         """Test duplicate GPIOs are removed."""
         request_data = {
             "subzone_id": "dedup_test",
             "assigned_gpios": [4, 5, 4, 5, 6, 6],  # Duplicates
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -652,18 +600,14 @@ class TestSubzoneEdgeCases:
         assert data["assigned_gpios"] == [4, 5, 6]
 
     @pytest.mark.asyncio
-    async def test_max_gpios_validation(
-        self, auth_headers: dict, test_esp_with_zone: ESPDevice
-    ):
+    async def test_max_gpios_validation(self, auth_headers: dict, test_esp_with_zone: ESPDevice):
         """Test maximum GPIOs per subzone validation."""
         request_data = {
             "subzone_id": "max_gpio_test",
             "assigned_gpios": list(range(25)),  # More than max_length=20
         }
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
@@ -672,21 +616,3 @@ class TestSubzoneEdgeCases:
 
         # Pydantic validation should reject too many GPIOs
         assert response.status_code in [400, 422]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

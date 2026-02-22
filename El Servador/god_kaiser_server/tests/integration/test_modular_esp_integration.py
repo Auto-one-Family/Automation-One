@@ -13,11 +13,6 @@ Test-Pattern:
 6. Cleanup
 """
 
-import pytest
-import time
-from datetime import datetime, timedelta
-from uuid import uuid4
-
 from tests.esp32.mocks.mock_esp32_client import BrokerMode, MockESP32Client
 
 
@@ -37,7 +32,7 @@ class TestModularSensorIntegration:
             sensor_type="DS18B20",
             name="Boden Temperatur",
             unit="C",
-            quality="good"
+            quality="good",
         )
 
         # 3. Sensor-Daten "publishen" (simuliert)
@@ -65,10 +60,7 @@ class TestModularSensorIntegration:
 
         # Feuchtigkeits-Sensor (Multi-Value)
         mock.set_multi_value_sensor(
-            gpio=21,
-            sensor_type="SHT31",
-            primary_value=25.0,
-            secondary_values={"humidity": 68.5}
+            gpio=21, sensor_type="SHT31", primary_value=25.0, secondary_values={"humidity": 68.5}
         )
 
         # pH-Sensor
@@ -94,7 +86,7 @@ class TestModularSensorIntegration:
             primary_value=23.8,
             secondary_values={"humidity": 65.2},
             name="Luft Sensor",
-            quality="excellent"
+            quality="excellent",
         )
 
         # Einzelnes Lesen
@@ -117,10 +109,7 @@ class TestModularSensorIntegration:
         for i, quality in enumerate(quality_levels):
             gpio = 30 + i
             mock.set_sensor_value(
-                gpio=gpio,
-                raw_value=20.0 + i,
-                sensor_type="generic",
-                quality=quality
+                gpio=gpio, raw_value=20.0 + i, sensor_type="generic", quality=quality
             )
 
             response = mock.handle_command("sensor_read", {"gpio": gpio})
@@ -145,11 +134,7 @@ class TestModularActuatorIntegration:
         mock.set_sensor_value(gpio=34, raw_value=30.0, sensor_type="moisture")
 
         # Pumpe einschalten
-        response = mock.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        response = mock.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
 
         assert response["status"] == "ok"
         assert response["data"]["state"] is True
@@ -167,29 +152,17 @@ class TestModularActuatorIntegration:
 
         # PWM Ventilator
         mock.configure_actuator(
-            gpio=18,
-            actuator_type="fan",
-            name="Ventilator",
-            min_value=0.1,
-            max_value=1.0
+            gpio=18, actuator_type="fan", name="Ventilator", min_value=0.1, max_value=1.0
         )
 
         # PWM auf 50%
-        response = mock.handle_command("actuator_set", {
-            "gpio": 18,
-            "value": 0.5,
-            "mode": "pwm"
-        })
+        response = mock.handle_command("actuator_set", {"gpio": 18, "value": 0.5, "mode": "pwm"})
 
         assert response["status"] == "ok"
         assert response["data"]["pwm_value"] == 0.5
 
         # PWM auf 100%
-        response = mock.handle_command("actuator_set", {
-            "gpio": 18,
-            "value": 1.0,
-            "mode": "pwm"
-        })
+        response = mock.handle_command("actuator_set", {"gpio": 18, "value": 1.0, "mode": "pwm"})
 
         assert response["status"] == "ok"
         assert response["data"]["pwm_value"] == 1.0
@@ -371,7 +344,7 @@ class TestZoneConfiguration:
             master_zone_id="main_greenhouse",
             subzone_id="section_a",
             zone_name="Gewaechshaus 1",
-            subzone_name="Sektion A"
+            subzone_name="Sektion A",
         )
 
         mock.set_sensor_value(gpio=4, raw_value=23.5, sensor_type="DS18B20")
@@ -389,11 +362,7 @@ class TestZoneConfiguration:
     def test_heartbeat_includes_zone_info(self):
         """Heartbeat enthaelt Zone-Informationen."""
         mock = MockESP32Client(esp_id="MOCK_ZONE_HB")
-        mock.configure_zone(
-            zone_id="test_zone",
-            master_zone_id="master",
-            zone_name="Test Zone"
-        )
+        mock.configure_zone(zone_id="test_zone", master_zone_id="master", zone_name="Test Zone")
 
         mock.handle_command("heartbeat", {})
 

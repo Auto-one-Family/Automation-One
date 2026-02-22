@@ -64,7 +64,7 @@ class TestMoistureSensorProcessor:
         """Test processing with inverted logic (HIGH voltage = DRY)."""
         calibration = {"dry_value": 3200, "wet_value": 1500}
         params = {"invert": True}
-        result = processor.process(raw_value=2350, calibration=calibration, params=params)
+        processor.process(raw_value=2350, calibration=calibration, params=params)
 
         # Normal: 50%, Inverted: 100 - 50 = 50% (coincidentally same)
         # Let's use dry point: 0% → inverted = 100%
@@ -142,7 +142,7 @@ class TestMoistureSensorProcessor:
     def test_calibrate_two_point(self, processor):
         """Test two-point dry/wet calibration."""
         calibration_points = [
-            {"raw": 3200, "reference": 0.0},    # Dry (in air)
+            {"raw": 3200, "reference": 0.0},  # Dry (in air)
             {"raw": 1500, "reference": 100.0},  # Wet (in water)
         ]
         calibration = processor.calibrate(calibration_points, method="linear")
@@ -156,7 +156,7 @@ class TestMoistureSensorProcessor:
         """Test calibration with explicitly marked reference values."""
         calibration_points = [
             {"raw": 1500, "reference": 100.0},  # Wet (order doesn't matter)
-            {"raw": 3200, "reference": 0.0},    # Dry
+            {"raw": 3200, "reference": 0.0},  # Dry
         ]
         calibration = processor.calibrate(calibration_points, method="linear")
 

@@ -24,8 +24,6 @@ Migration from ESP32 Tests:
 - sensor_onewire_bus.cpp → (Hardware-specific, not applicable for Mock)
 """
 
-import pytest
-
 
 class TestSensorReading:
     """Test sensor reading via MQTT commands."""
@@ -85,7 +83,7 @@ class TestSensorDataPublishing:
         """Test sensor_read publishes data to MQTT topic."""
         mock_esp32_with_sensors.clear_published_messages()
 
-        response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
+        mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
 
         messages = mock_esp32_with_sensors.get_published_messages()
         # With zone configured, publishes to both normal and zone topic
@@ -222,6 +220,7 @@ class TestSensorTimestamps:
         timestamp1 = response1["data"]["timestamp"]
 
         import time
+
         time.sleep(0.01)  # Small delay
 
         # Second read
@@ -298,9 +297,9 @@ class TestSensorIntegration:
     def test_sensor_read_doesnt_affect_actuators(self, mock_esp32_with_actuators):
         """Test sensor reads don't affect actuator states."""
         # Set actuator state
-        mock_esp32_with_actuators.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         # Read sensor (non-existent, will create)
         mock_esp32_with_actuators.handle_command("sensor_read", {"gpio": 34})
@@ -312,9 +311,9 @@ class TestSensorIntegration:
     def test_sensor_and_actuator_on_different_gpios(self, mock_esp32_with_sensors):
         """Test sensors and actuators can coexist on different GPIOs."""
         # Add actuator
-        mock_esp32_with_sensors.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        mock_esp32_with_sensors.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         # Read sensor (different GPIO)
         sensor_response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})

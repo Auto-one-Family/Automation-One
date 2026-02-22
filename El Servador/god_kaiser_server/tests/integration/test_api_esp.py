@@ -42,7 +42,7 @@ async def test_esp(db_session: AsyncSession):
 async def operator_user(db_session: AsyncSession):
     """Create an operator user."""
     from src.core.security import get_password_hash
-    
+
     user = User(
         username="operator",
         email="operator@example.com",
@@ -60,13 +60,15 @@ async def operator_user(db_session: AsyncSession):
 @pytest.fixture
 def auth_headers(operator_user: User):
     """Get authorization headers."""
-    token = create_access_token(user_id=operator_user.id, additional_claims={"role": operator_user.role})
+    token = create_access_token(
+        user_id=operator_user.id, additional_claims={"role": operator_user.role}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 class TestListDevices:
     """Test device listing endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_list_devices(self, auth_headers: dict, test_esp: ESPDevice):
         """Test listing ESP devices."""
@@ -75,13 +77,13 @@ class TestListDevices:
                 "/api/v1/esp/devices",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert len(data["data"]) >= 1
         assert data["pagination"]["total_items"] >= 1
-    
+
     @pytest.mark.asyncio
     async def test_list_devices_with_filter(self, auth_headers: dict, test_esp: ESPDevice):
         """Test listing ESP devices with zone filter."""
@@ -91,7 +93,7 @@ class TestListDevices:
                 params={"zone_id": "test-zone"},
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert all(d["zone_id"] == "test-zone" for d in data["data"])
@@ -99,7 +101,7 @@ class TestListDevices:
 
 class TestGetDevice:
     """Test getting single device."""
-    
+
     @pytest.mark.asyncio
     async def test_get_device(self, auth_headers: dict, test_esp: ESPDevice):
         """Test getting a device by ID."""
@@ -108,12 +110,12 @@ class TestGetDevice:
                 f"/api/v1/esp/devices/{test_esp.device_id}",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["device_id"] == test_esp.device_id
         assert data["name"] == "Test ESP"
-    
+
     @pytest.mark.asyncio
     async def test_get_device_not_found(self, auth_headers: dict):
         """Test getting non-existent device."""
@@ -122,13 +124,13 @@ class TestGetDevice:
                 "/api/v1/esp/devices/ESP_NOTFOUND",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 404
 
 
 class TestRegisterDevice:
     """Test device registration."""
-    
+
     @pytest.mark.asyncio
     async def test_register_device(self, auth_headers: dict):
         """Test registering a new device."""
@@ -148,12 +150,12 @@ class TestRegisterDevice:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 201
         data = response.json()
         assert data["device_id"] == "ESP_AABBCCDD"
         assert data["name"] == "New ESP Device"
-    
+
     @pytest.mark.asyncio
     async def test_register_duplicate_device(self, auth_headers: dict, test_esp: ESPDevice):
         """Test registering duplicate device."""
@@ -169,13 +171,13 @@ class TestRegisterDevice:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 400
 
 
 class TestUpdateDevice:
     """Test device update."""
-    
+
     @pytest.mark.asyncio
     async def test_update_device(self, auth_headers: dict, test_esp: ESPDevice):
         """Test updating device info."""
@@ -188,7 +190,7 @@ class TestUpdateDevice:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated ESP Name"
@@ -197,7 +199,7 @@ class TestUpdateDevice:
 
 class TestDeviceHealth:
     """Test device health endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_get_device_health(self, auth_headers: dict, test_esp: ESPDevice):
         """Test getting device health."""
@@ -206,7 +208,7 @@ class TestDeviceHealth:
                 f"/api/v1/esp/devices/{test_esp.device_id}/health",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["device_id"] == test_esp.device_id
@@ -370,4 +372,3 @@ class TestDeviceAuth:
             )
 
         assert response.status_code == 401
-

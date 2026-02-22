@@ -24,7 +24,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 
-from datetime import datetime, timezone
+from datetime import timezone
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
@@ -234,28 +234,28 @@ async def login(
 ) -> LoginResponse:
     """
     User login endpoint.
-    
+
     Authenticates user by username/email and password.
     Returns access and refresh JWT tokens.
-    
+
     Args:
         credentials: Login credentials (username, password)
         db: Database session
-        
+
     Returns:
         LoginResponse with tokens and user info
-        
+
     Raises:
         HTTPException: 401 if credentials invalid
     """
     user_repo = UserRepository(db)
-    
+
     # Try to authenticate
     user = await user_repo.authenticate(
         username=credentials.username,
         password=credentials.password,
     )
-    
+
     if not user:
         # Also try by email if username lookup failed
         user = await user_repo.get_by_email(credentials.username)
@@ -268,14 +268,14 @@ async def login(
                 detail="Invalid username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-    
+
     if not user.is_active:
         logger.warning(f"Login attempt for inactive user: {user.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account is disabled",
         )
-    
+
     # Generate tokens (include token_version for logout-all functionality)
     expires_delta = timedelta(days=7) if credentials.remember_me else None
     access_token = create_access_token(
@@ -287,15 +287,16 @@ async def login(
         expires_delta=expires_delta,
     )
     refresh_token = create_refresh_token(user_id=user.id)
-    
+
     # Calculate expiration time
     expires_in = (
-        7 * 24 * 60 * 60 if credentials.remember_me
+        7 * 24 * 60 * 60
+        if credentials.remember_me
         else settings.security.jwt_access_token_expire_minutes * 60
     )
-    
+
     logger.info(f"User logged in: {user.username}")
-    
+
     return LoginResponse(
         success=True,
         message="Login successful",
@@ -331,12 +332,12 @@ async def login_form(
     OAuth2 form login endpoint (for Swagger UI).
     """
     user_repo = UserRepository(db)
-    
+
     user = await user_repo.authenticate(
         username=form_data.username,
         password=form_data.password,
     )
-    
+
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -385,22 +386,22 @@ async def register(
 ) -> RegisterResponse:
     """
     User registration endpoint.
-    
+
     Creates a new user account. Requires admin privileges.
-    
+
     Args:
         request: Registration data
         db: Database session
         current_user: Current admin user
-        
+
     Returns:
         RegisterResponse with created user info
-        
+
     Raises:
         HTTPException: 400 if username/email exists, 403 if not admin
     """
     user_repo = UserRepository(db)
-    
+
     # Check if username already exists
     existing_user = await user_repo.get_by_username(request.username)
     if existing_user:
@@ -408,7 +409,7 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Username '{request.username}' already exists",
         )
-    
+
     # Check if email already exists
     existing_email = await user_repo.get_by_email(request.email)
     if existing_email:
@@ -416,7 +417,7 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Email '{request.email}' already registered",
         )
-    
+
     # Create user
     new_user = await user_repo.create_user(
         username=request.username,
@@ -426,9 +427,11 @@ async def register(
         full_name=request.full_name,
     )
     await db.commit()
-    
-    logger.info(f"User created by {current_user.username}: {new_user.username} (role={new_user.role})")
-    
+
+    logger.info(
+        f"User created by {current_user.username}: {new_user.username} (role={new_user.role})"
+    )
+
     return RegisterResponse(
         success=True,
         message=f"User '{new_user.username}' created successfully",
@@ -466,22 +469,22 @@ async def refresh_token(
 ) -> RefreshTokenResponse:
     """
     Token refresh endpoint.
-    
+
     Uses valid refresh token to get new access and refresh tokens.
     Implements token rotation: old refresh token is blacklisted before issuing new ones.
-    
+
     Args:
         request: Refresh token
         db: Database session
-        
+
     Returns:
         RefreshTokenResponse with new tokens
-        
+
     Raises:
         HTTPException: 401 if refresh token invalid
     """
     old_refresh_token = request.refresh_token
-    
+
     # Check if token is blacklisted BEFORE verification
     blacklist_repo = TokenBlacklistRepository(db)
     if await blacklist_repo.is_blacklisted(old_refresh_token):
@@ -490,37 +493,37 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has been revoked",
         )
-    
+
     try:
         # Verify refresh token
         payload = verify_token(old_refresh_token, expected_type="refresh")
         user_id = int(payload.get("sub"))
         expires_at = datetime.fromtimestamp(payload.get("exp"), tz=timezone.utc)
-        
+
     except Exception as e:
         logger.warning(f"Refresh token verification failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
         )
-    
+
     # Verify user still exists and is active
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(user_id)
-    
+
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
-    
+
     # TOKEN ROTATION: Blacklist old refresh token BEFORE creating new ones
     # Cache user data before any DB operations that might fail
     user_id = user.id
     user_role = user.role
     user_token_version = user.token_version
     user_username = user.username
-    
+
     try:
         await blacklist_repo.add_token(
             token=old_refresh_token,
@@ -537,7 +540,7 @@ async def refresh_token(
         logger.warning(f"Failed to blacklist old refresh token (might be already blacklisted): {e}")
         # Continue anyway - token rotation is best effort
         # Token might already be blacklisted by concurrent request (race condition)
-    
+
     # Generate new tokens (include token_version)
     # Use cached values to avoid accessing expired/rolled-back session objects
     new_access_token = create_access_token(
@@ -548,9 +551,9 @@ async def refresh_token(
         },
     )
     new_refresh_token = create_refresh_token(user_id=user_id)
-    
+
     logger.info(f"Token rotated for user: {user_username}")
-    
+
     return RefreshTokenResponse(
         success=True,
         message="Token refreshed successfully",
@@ -585,27 +588,27 @@ async def logout(
 ) -> LogoutResponse:
     """
     User logout endpoint.
-    
+
     Invalidates user tokens by adding them to the token blacklist.
-    
+
     Args:
         request: Logout request
         current_user: Current user
         token: JWT access token from Authorization header
         db: Database session
-        
+
     Returns:
         LogoutResponse with number of tokens invalidated
     """
     tokens_invalidated = 0
-    
+
     # Blacklist the current access token
     if token:
         try:
             # Verify token to extract expiration
             payload = verify_token(token, expected_type="access")
             expires_at = datetime.fromtimestamp(payload.get("exp"), tz=timezone.utc)
-            
+
             # Add token to blacklist
             blacklist_repo = TokenBlacklistRepository(db)
             await blacklist_repo.add_token(
@@ -620,20 +623,20 @@ async def logout(
             logger.info(f"Access token blacklisted for user: {current_user.username}")
         except Exception as e:
             logger.warning(f"Failed to blacklist access token: {e}")
-    
+
     # Handle "logout all devices" request (TOKEN VERSIONING)
     if request.all_devices:
         # Increment token_version to invalidate all existing tokens
-        user_repo = UserRepository(db)
+        UserRepository(db)
         current_user.token_version += 1
         await db.commit()
-        
+
         logger.info(
             f"All devices logged out for user: {current_user.username} "
             f"(token_version incremented to {current_user.token_version})"
         )
         tokens_invalidated = -1  # -1 indicates "all tokens" (not countable)
-    
+
     if request.all_devices:
         logger.info(f"User logged out from all devices: {current_user.username}")
         return LogoutResponse(
@@ -642,7 +645,9 @@ async def logout(
             tokens_invalidated=max(tokens_invalidated, 1),
         )
     else:
-        logger.info(f"User logged out: {current_user.username} (tokens_invalidated={tokens_invalidated})")
+        logger.info(
+            f"User logged out: {current_user.username} (tokens_invalidated={tokens_invalidated})"
+        )
         return LogoutResponse(
             success=True,
             message="Logged out successfully",
@@ -666,10 +671,10 @@ async def get_current_user_info(
 ) -> UserResponse:
     """
     Get current user info.
-    
+
     Args:
         current_user: Current authenticated user
-        
+
     Returns:
         UserResponse with user info
     """
@@ -708,17 +713,17 @@ async def configure_mqtt_auth(
 ) -> MQTTAuthConfigResponse:
     """
     Configure MQTT authentication.
-    
+
     Updates Mosquitto password file and reloads broker configuration.
-    
+
     Args:
         request: MQTT auth configuration
         current_user: Admin user
         db: Database session
-        
+
     Returns:
         MQTTAuthConfigResponse
-        
+
     Raises:
         HTTPException: 500 if configuration fails
     """
@@ -727,7 +732,7 @@ async def configure_mqtt_auth(
         system_config_repo = SystemConfigRepository(db)
         esp_repo = ESPRepository(db)
         mqtt_auth_service = MQTTAuthService(system_config_repo, esp_repo)
-        
+
         # Configure credentials
         if request.enabled:
             broker_reloaded = await mqtt_auth_service.configure_credentials(
@@ -735,7 +740,7 @@ async def configure_mqtt_auth(
                 password=request.password,
                 enabled=True,
             )
-            
+
             # Broadcast auth_update to all ESPs (only if TLS enabled)
             try:
                 broadcast_count = await mqtt_auth_service.broadcast_auth_update(
@@ -752,15 +757,15 @@ async def configure_mqtt_auth(
             # Disable authentication
             await mqtt_auth_service.disable_authentication()
             broker_reloaded = True
-        
+
         # Commit database changes
         await db.commit()
-        
+
         logger.info(
             f"MQTT auth configured by {current_user.username}: "
             f"username={request.username}, enabled={request.enabled}"
         )
-        
+
         return MQTTAuthConfigResponse(
             success=True,
             message="MQTT authentication configured successfully",
@@ -768,7 +773,7 @@ async def configure_mqtt_auth(
             enabled=request.enabled,
             broker_reloaded=broker_reloaded,
         )
-        
+
     except ValueError as e:
         logger.error(f"MQTT auth configuration failed (validation): {e}", exc_info=True)
         raise HTTPException(
@@ -796,31 +801,31 @@ async def get_mqtt_auth_status(
 ) -> MQTTAuthStatusResponse:
     """
     Get MQTT authentication status.
-    
+
     Returns current MQTT auth configuration.
-    
+
     Args:
         current_user: Authenticated user
         db: Database session
-        
+
     Returns:
         MQTTAuthStatusResponse
     """
     from ...mqtt.client import MQTTClient
     import os
-    
+
     # Get configuration from database
     system_config_repo = SystemConfigRepository(db)
     config = await system_config_repo.get_mqtt_auth_config()
-    
+
     # Check password file existence
     passwd_file_path = settings.mqtt.passwd_file_path
     password_file_exists = os.path.exists(passwd_file_path)
-    
+
     # Check MQTT client connection
     mqtt_client = MQTTClient.get_instance()
     broker_connected = mqtt_client.is_connected()
-    
+
     return MQTTAuthStatusResponse(
         success=True,
         enabled=config.get("enabled", False),

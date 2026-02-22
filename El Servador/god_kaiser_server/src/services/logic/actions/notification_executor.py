@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 class NotificationActionExecutor(BaseActionExecutor):
     """
     Executes notification actions.
-    
+
     Supports:
     - WebSocket notifications (implemented)
     - Email notifications (placeholder for future)
@@ -32,7 +32,7 @@ class NotificationActionExecutor(BaseActionExecutor):
     def __init__(self, websocket_manager: Optional[WebSocketManager] = None):
         """
         Initialize notification executor.
-        
+
         Args:
             websocket_manager: Optional WebSocketManager instance for WebSocket notifications
         """
@@ -45,7 +45,7 @@ class NotificationActionExecutor(BaseActionExecutor):
     async def execute(self, action: Dict, context: Dict) -> ActionResult:
         """
         Execute notification action.
-        
+
         Args:
             action: Action dictionary with:
                 - type: "notification"
@@ -56,32 +56,32 @@ class NotificationActionExecutor(BaseActionExecutor):
                 - trigger_data: Sensor data that triggered the rule
                 - rule_name: Rule name
                 - rule_id: Rule ID
-                
+
         Returns:
             ActionResult with execution status
         """
         channel = action.get("channel")
         target = action.get("target")
         message_template = action.get("message_template", "")
-        
+
         # Validate required fields
         if not channel:
             return ActionResult(
                 success=False,
                 message="Missing 'channel' field in notification action",
             )
-        
+
         if not target:
             return ActionResult(
                 success=False,
                 message="Missing 'target' field in notification action",
             )
-        
+
         # Get context data for template
         trigger_data = context.get("trigger_data", {})
         rule_name = context.get("rule_name", "Unknown Rule")
         rule_id = context.get("rule_id")
-        
+
         # Format message template
         try:
             message = message_template.format(
@@ -96,7 +96,7 @@ class NotificationActionExecutor(BaseActionExecutor):
         except KeyError as e:
             logger.warning(f"Error formatting notification template: {e}")
             message = message_template  # Use template as-is if formatting fails
-        
+
         # Execute based on channel
         if channel == "websocket":
             return await self._send_websocket_notification(target, message, context)
@@ -119,7 +119,7 @@ class NotificationActionExecutor(BaseActionExecutor):
                 success=False,
                 message="WebSocket manager not available",
             )
-        
+
         try:
             # Broadcast notification via WebSocket
             notification_data = {
@@ -130,15 +130,15 @@ class NotificationActionExecutor(BaseActionExecutor):
                 "rule_id": str(context.get("rule_id")) if context.get("rule_id") else None,
                 "timestamp": context.get("trigger_data", {}).get("timestamp"),
             }
-            
+
             await self.websocket_manager.broadcast("notification", notification_data)
-            
+
             return ActionResult(
                 success=True,
                 message=f"WebSocket notification sent to {target}",
                 data={"channel": "websocket", "target": target, "message": message},
             )
-        
+
         except Exception as e:
             logger.error(
                 f"Error sending WebSocket notification: {e}",
@@ -244,6 +244,3 @@ class NotificationActionExecutor(BaseActionExecutor):
                 success=False,
                 message=f"Error sending webhook notification: {str(e)}",
             )
-
-
-

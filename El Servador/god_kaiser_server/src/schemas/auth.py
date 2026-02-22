@@ -153,10 +153,10 @@ class AuthStatusResponse(BaseModel):
 class LoginRequest(BaseModel):
     """
     User login request.
-    
+
     Accepts username or email with password.
     """
-    
+
     username: str = Field(
         ...,
         min_length=3,
@@ -174,14 +174,10 @@ class LoginRequest(BaseModel):
         False,
         description="Extend token expiration (7 days instead of 24h)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "username": "admin",
-                "password": "SecureP@ss123",
-                "remember_me": False
-            }
+            "example": {"username": "admin", "password": "SecureP@ss123", "remember_me": False}
         }
     )
 
@@ -189,10 +185,10 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     """
     JWT token response.
-    
+
     Returned after successful login or token refresh.
     """
-    
+
     access_token: str = Field(
         ...,
         description="JWT access token",
@@ -210,14 +206,14 @@ class TokenResponse(BaseModel):
         description="Access token expiration time in seconds",
         ge=0,
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
                 "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
                 "token_type": "bearer",
-                "expires_in": 86400
+                "expires_in": 86400,
             }
         }
     )
@@ -227,7 +223,7 @@ class LoginResponse(BaseResponse):
     """
     Login response with tokens and user info.
     """
-    
+
     tokens: TokenResponse = Field(
         ...,
         description="JWT access and refresh tokens",
@@ -246,10 +242,10 @@ class LoginResponse(BaseResponse):
 class RegisterRequest(BaseModel):
     """
     User registration request.
-    
+
     Admin-only endpoint for creating new users.
     """
-    
+
     username: str = Field(
         ...,
         min_length=3,
@@ -280,7 +276,7 @@ class RegisterRequest(BaseModel):
         description="User role (admin, operator, viewer)",
         pattern=r"^(admin|operator|viewer)$",
     )
-    
+
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, v: str) -> str:
@@ -297,7 +293,7 @@ class RegisterRequest(BaseModel):
         if not any(c in special_chars for c in v):
             raise ValueError("Password must contain at least one special character")
         return v
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -305,7 +301,7 @@ class RegisterRequest(BaseModel):
                 "email": "newuser@example.com",
                 "password": "SecureP@ss123",
                 "full_name": "New User",
-                "role": "operator"
+                "role": "operator",
             }
         }
     )
@@ -315,7 +311,7 @@ class RegisterResponse(BaseResponse):
     """
     Registration response with created user info.
     """
-    
+
     user: "UserResponse" = Field(
         ...,
         description="Newly created user information",
@@ -330,21 +326,17 @@ class RegisterResponse(BaseResponse):
 class RefreshTokenRequest(BaseModel):
     """
     Token refresh request.
-    
+
     Uses refresh token to obtain new access token.
     """
-    
+
     refresh_token: str = Field(
         ...,
         description="Valid refresh token",
     )
-    
+
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-            }
-        }
+        json_schema_extra={"example": {"refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}}
     )
 
 
@@ -352,7 +344,7 @@ class RefreshTokenResponse(BaseResponse):
     """
     Token refresh response with new tokens.
     """
-    
+
     tokens: TokenResponse = Field(
         ...,
         description="New JWT access and refresh tokens",
@@ -366,7 +358,7 @@ class RefreshTokenResponse(BaseResponse):
 
 class UserBase(BaseModel):
     """Base user fields."""
-    
+
     username: str = Field(
         ...,
         description="Username",
@@ -392,11 +384,11 @@ class UserBase(BaseModel):
 class UserResponse(UserBase, IDMixin, TimestampMixin):
     """
     User response model.
-    
+
     Returned in auth responses and user queries.
     Never includes password hash.
     """
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -408,19 +400,19 @@ class UserResponse(UserBase, IDMixin, TimestampMixin):
                 "role": "admin",
                 "is_active": True,
                 "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-01T00:00:00Z"
+                "updated_at": "2025-01-01T00:00:00Z",
             }
-        }
+        },
     )
 
 
 class UserUpdate(BaseModel):
     """
     User update request.
-    
+
     All fields optional - only provided fields are updated.
     """
-    
+
     email: Optional[EmailStr] = Field(
         None,
         description="New email address",
@@ -445,7 +437,7 @@ class PasswordChangeRequest(BaseModel):
     """
     Password change request.
     """
-    
+
     current_password: str = Field(
         ...,
         description="Current password for verification",
@@ -456,7 +448,7 @@ class PasswordChangeRequest(BaseModel):
         max_length=128,
         description="New password",
     )
-    
+
     @field_validator("new_password")
     @classmethod
     def validate_new_password(cls, v: str) -> str:
@@ -480,10 +472,10 @@ class PasswordChangeRequest(BaseModel):
 class LogoutRequest(BaseModel):
     """
     Logout request.
-    
+
     Optionally blacklist specific token or all user tokens.
     """
-    
+
     refresh_token: Optional[str] = Field(
         None,
         description="Refresh token to invalidate (optional, invalidates current if not provided)",
@@ -498,7 +490,7 @@ class LogoutResponse(BaseResponse):
     """
     Logout response.
     """
-    
+
     tokens_invalidated: int = Field(
         1,
         description="Number of tokens invalidated",
@@ -514,11 +506,11 @@ class LogoutResponse(BaseResponse):
 class MQTTAuthConfigRequest(BaseModel):
     """
     MQTT authentication configuration request.
-    
+
     Configures MQTT broker credentials for ESP32 devices.
     Updates Mosquitto password file and reloads broker.
     """
-    
+
     username: str = Field(
         ...,
         min_length=3,
@@ -536,14 +528,10 @@ class MQTTAuthConfigRequest(BaseModel):
         True,
         description="Enable MQTT authentication (disable for testing)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "username": "esp_user",
-                "password": "SecureMqttP@ss",
-                "enabled": True
-            }
+            "example": {"username": "esp_user", "password": "SecureMqttP@ss", "enabled": True}
         }
     )
 
@@ -552,7 +540,7 @@ class MQTTAuthConfigResponse(BaseResponse):
     """
     MQTT auth configuration response.
     """
-    
+
     username: str = Field(
         ...,
         description="Configured MQTT username",
@@ -571,7 +559,7 @@ class MQTTAuthStatusResponse(BaseResponse):
     """
     MQTT authentication status response.
     """
-    
+
     enabled: bool = Field(
         ...,
         description="Whether MQTT authentication is enabled",
@@ -592,7 +580,7 @@ class MQTTAuthStatusResponse(BaseResponse):
         None,
         description="Last configuration timestamp",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -601,7 +589,7 @@ class MQTTAuthStatusResponse(BaseResponse):
                 "username": "esp_user",
                 "password_file_exists": True,
                 "broker_connected": True,
-                "last_configured": "2025-01-01T12:00:00Z"
+                "last_configured": "2025-01-01T12:00:00Z",
             }
         }
     )
@@ -616,7 +604,7 @@ class APIKeyCreate(BaseModel):
     """
     API key creation request.
     """
-    
+
     name: str = Field(
         ...,
         min_length=3,
@@ -635,10 +623,10 @@ class APIKeyCreate(BaseModel):
 class APIKeyResponse(BaseResponse):
     """
     API key creation response.
-    
+
     The key is only shown once on creation.
     """
-    
+
     name: str = Field(
         ...,
         description="API key name",
@@ -657,7 +645,7 @@ class APIKeyInfo(BaseModel):
     """
     API key information (without the key itself).
     """
-    
+
     id: int = Field(
         ...,
         description="API key ID",

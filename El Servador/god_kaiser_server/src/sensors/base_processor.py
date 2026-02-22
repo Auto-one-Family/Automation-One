@@ -193,9 +193,7 @@ class BaseSensorProcessor(ABC):
             )
             # Returns: {"offset": 0.5, "slope": 3.5}
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support calibration"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} does not support calibration")
 
     def get_default_params(self) -> Dict[str, Any]:
         """

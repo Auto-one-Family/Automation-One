@@ -6,11 +6,11 @@ Benötigt: DB-Session für Failure Processing
 
 Phase 3 Test-Suite: Config ACK Processing, Partial Success, Legacy Format.
 """
+
 import pytest
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.mqtt.handlers.config_handler import ConfigHandler, get_config_handler
+from src.mqtt.handlers.config_handler import ConfigHandler
 
 
 class TestConfigPayloadValidation:

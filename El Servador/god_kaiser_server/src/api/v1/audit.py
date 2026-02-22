@@ -15,7 +15,7 @@ Status: IMPLEMENTED
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from ...core.logging_config import get_logger
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/v1/audit", tags=["Audit Logs"])
 
 class AuditLogResponse(BaseModel):
     """Audit log entry response."""
-    
+
     id: str
     event_type: str
     severity: str
@@ -52,14 +52,14 @@ class AuditLogResponse(BaseModel):
     correlation_id: Optional[str]
     request_id: Optional[str]
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 
 class AuditLogListResponse(BaseModel):
     """Paginated audit log list response."""
-    
+
     data: List[AuditLogResponse]
     total: int
     page: int
@@ -69,7 +69,7 @@ class AuditLogListResponse(BaseModel):
 
 class RetentionConfigResponse(BaseModel):
     """Retention configuration response."""
-    
+
     enabled: bool
     default_days: int
     severity_days: Dict[str, int]
@@ -81,7 +81,7 @@ class RetentionConfigResponse(BaseModel):
 
 class RetentionConfigUpdate(BaseModel):
     """Retention configuration update request."""
-    
+
     enabled: Optional[bool] = None
     default_days: Optional[int] = Field(None, ge=1, le=3650)
     severity_days: Optional[Dict[str, int]] = None
@@ -131,23 +131,17 @@ class BackupInfo(BaseModel):
 class BackupRetentionConfigResponse(BaseModel):
     """Backup retention configuration response."""
 
-    retention_days: int = Field(
-        description="Days until backup expires (0 = never expire)"
-    )
+    retention_days: int = Field(description="Days until backup expires (0 = never expire)")
     max_backups: int = Field(description="Maximum number of backups to keep")
     max_retention_days: int = Field(description="Maximum allowed retention days")
-    never_expire_value: int = Field(
-        description="Value for 'never expire' (0)"
-    )
+    never_expire_value: int = Field(description="Value for 'never expire' (0)")
 
 
 class BackupRetentionConfigUpdate(BaseModel):
     """Backup retention configuration update request."""
 
     retention_days: int = Field(
-        ge=0,
-        le=365,
-        description="Days until backup expires (0 = never expire, max 365)"
+        ge=0, le=365, description="Days until backup expires (0 = never expire, max 365)"
     )
 
 
@@ -203,7 +197,7 @@ class AutoCleanupStatusResponse(BaseModel):
 
 class EventTypeInfo(BaseModel):
     """Event type information."""
-    
+
     value: str
     description: str
     category: str
@@ -233,12 +227,14 @@ class UnifiedEventResponse(BaseModel):
 
 class SourceCountsResponse(BaseModel):
     """Count information for a single data source."""
+
     loaded: int
     available: int
 
 
 class PaginationInfo(BaseModel):
     """Pagination information for cursor-based pagination."""
+
     has_more: bool
     oldest_timestamp: Optional[str] = None  # Cursor for next page
     total_available: int
@@ -288,7 +284,7 @@ async def list_audit_logs(
 ) -> AuditLogListResponse:
     """
     List audit logs with filters.
-    
+
     Supports filtering by:
     - event_type: Type of event (config_response, emergency_stop, etc.)
     - severity: Event severity (info, warning, error, critical)
@@ -300,10 +296,10 @@ async def list_audit_logs(
     """
     from sqlalchemy import and_, desc, select, func
     from ...db.models.audit_log import AuditLog
-    
+
     # Build filter conditions
     conditions = []
-    
+
     if event_type:
         conditions.append(AuditLog.event_type == event_type)
     if severity:
@@ -316,7 +312,7 @@ async def list_audit_logs(
         conditions.append(AuditLog.status == status)
     if error_code:
         conditions.append(AuditLog.error_code == error_code)
-    
+
     # Time range
     if hours:
         start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -324,28 +320,23 @@ async def list_audit_logs(
         conditions.append(AuditLog.created_at >= start_time)
     if end_time:
         conditions.append(AuditLog.created_at <= end_time)
-    
+
     # Count total
     count_stmt = select(func.count(AuditLog.id))
     if conditions:
         count_stmt = count_stmt.where(and_(*conditions))
     count_result = await db.execute(count_stmt)
     total = count_result.scalar_one()
-    
+
     # Get paginated data
     offset = (page - 1) * page_size
-    data_stmt = (
-        select(AuditLog)
-        .order_by(desc(AuditLog.created_at))
-        .offset(offset)
-        .limit(page_size)
-    )
+    data_stmt = select(AuditLog).order_by(desc(AuditLog.created_at)).offset(offset).limit(page_size)
     if conditions:
         data_stmt = data_stmt.where(and_(*conditions))
-    
+
     data_result = await db.execute(data_stmt)
     logs = list(data_result.scalars().all())
-    
+
     # Convert to response models
     response_data = [
         AuditLogResponse(
@@ -366,9 +357,9 @@ async def list_audit_logs(
         )
         for log in logs
     ]
-    
+
     total_pages = (total + page_size - 1) // page_size
-    
+
     return AuditLogListResponse(
         data=response_data,
         total=total,
@@ -388,33 +379,29 @@ async def get_aggregated_events(
     db: DBSession,
     current_user: ActiveUser,
     sources: List[DataSource] = Query(
-        default=['audit_log'],
-        description="Data sources to aggregate: audit_log, sensor_data, esp_health, actuators"
+        default=["audit_log"],
+        description="Data sources to aggregate: audit_log, sensor_data, esp_health, actuators",
     ),
     hours: Optional[int] = Query(
         default=None,
         ge=1,
         le=8760,  # Max 1 year (365 days)
-        description="Time range in hours (1-8760). None = load ALL events."
+        description="Time range in hours (1-8760). None = load ALL events.",
     ),
     limit_per_source: int = Query(
-        default=500,
-        ge=1,
-        le=2000,
-        description="Maximum events per source"
+        default=500, ge=1, le=2000, description="Maximum events per source"
     ),
     severity: Optional[List[str]] = Query(
         default=None,
-        description="Filter by severity levels: info, warning, error, critical. Only applies to audit_log source."
+        description="Filter by severity levels: info, warning, error, critical. Only applies to audit_log source.",
     ),
     esp_ids: Optional[List[str]] = Query(
-        default=None,
-        description="Filter by ESP device IDs (e.g., MOCK_067EA733, ESP_12AB34CD)"
+        default=None, description="Filter by ESP device IDs (e.g., MOCK_067EA733, ESP_12AB34CD)"
     ),
     before_timestamp: Optional[str] = Query(
         default=None,
         description="Cursor for pagination: Load events BEFORE this ISO timestamp. "
-                    "Use the 'oldest_timestamp' from the previous response."
+        "Use the 'oldest_timestamp' from the previous response.",
     ),
 ) -> AggregatedEventsResponse:
     """
@@ -477,12 +464,12 @@ async def get_aggregated_events(
     """
     # Validate severity parameter
     if severity:
-        valid_severities = {'info', 'warning', 'error', 'critical'}
+        valid_severities = {"info", "warning", "error", "critical"}
         invalid = set(severity) - valid_severities
         if invalid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid severity values: {invalid}. Valid values: {valid_severities}"
+                detail=f"Invalid severity values: {invalid}. Valid values: {valid_severities}",
             )
 
     # Validate esp_ids parameter (basic format check)
@@ -491,7 +478,7 @@ async def get_aggregated_events(
             if not esp_id or len(esp_id) > 100:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid ESP ID: '{esp_id}'. Must be non-empty and max 100 characters."
+                    detail=f"Invalid ESP ID: '{esp_id}'. Must be non-empty and max 100 characters.",
                 )
 
     service = EventAggregatorService(db)
@@ -505,11 +492,11 @@ async def get_aggregated_events(
     before_time = None
     if before_timestamp:
         try:
-            before_time = datetime.fromisoformat(before_timestamp.replace('Z', '+00:00'))
+            before_time = datetime.fromisoformat(before_timestamp.replace("Z", "+00:00"))
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid before_timestamp format: '{before_timestamp}'. Use ISO 8601 format."
+                detail=f"Invalid before_timestamp format: '{before_timestamp}'. Use ISO 8601 format.",
             )
 
     try:
@@ -519,30 +506,29 @@ async def get_aggregated_events(
             before=before_time,  # NEW: cursor for pagination
             limit_per_source=limit_per_source,
             severity_filter=severity,
-            esp_id_filter=esp_ids
+            esp_id_filter=esp_ids,
         )
 
-        events = [UnifiedEventResponse(**event) for event in result['events']]
+        events = [UnifiedEventResponse(**event) for event in result["events"]]
 
         # Calculate pagination info
         oldest_timestamp = None
         if events:
             oldest_timestamp = events[-1].timestamp  # Last event is oldest (sorted newest first)
 
-        has_more = result['total_loaded'] >= limit_per_source * len(sources)
+        has_more = result["total_loaded"] >= limit_per_source * len(sources)
         # More accurate: check if we hit the limit for any source
-        for source, counts in result['source_counts'].items():
-            if counts['loaded'] >= limit_per_source and counts['loaded'] < counts['available']:
+        for source, counts in result["source_counts"].items():
+            if counts["loaded"] >= limit_per_source and counts["loaded"] < counts["available"]:
                 has_more = True
                 break
 
         return AggregatedEventsResponse(
             events=events,
-            total_loaded=result['total_loaded'],
-            total_available=result['total_available'],
+            total_loaded=result["total_loaded"],
+            total_available=result["total_available"],
             source_counts={
-                k: SourceCountsResponse(**v)
-                for k, v in result['source_counts'].items()
+                k: SourceCountsResponse(**v) for k, v in result["source_counts"].items()
             },
             sources=list(sources),
             time_range_hours=hours if hours is not None else 0,  # 0 indicates "all"
@@ -550,14 +536,14 @@ async def get_aggregated_events(
             pagination=PaginationInfo(
                 has_more=has_more,
                 oldest_timestamp=oldest_timestamp,
-                total_available=result['total_available']
-            )
+                total_available=result["total_available"],
+            ),
         )
     except Exception as e:
         logger.error(f"Failed to aggregate events: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to aggregate events: {str(e)}"
+            detail=f"Failed to aggregate events: {str(e)}",
         )
 
 
@@ -620,10 +606,10 @@ async def get_recent_errors(
 ) -> List[AuditLogResponse]:
     """Get recent error and critical events for quick troubleshooting."""
     audit_repo = AuditLogRepository(db)
-    
+
     start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
     logs = await audit_repo.get_errors(start_time=start_time, limit=limit)
-    
+
     return [
         AuditLogResponse(
             id=str(log.id),
@@ -659,9 +645,9 @@ async def get_esp_config_history(
 ) -> List[AuditLogResponse]:
     """Get config response history for specific ESP device."""
     audit_repo = AuditLogRepository(db)
-    
+
     logs = await audit_repo.get_esp_config_history(esp_id=esp_id, limit=limit)
-    
+
     return [
         AuditLogResponse(
             id=str(log.id),
@@ -715,8 +701,7 @@ async def get_audit_statistics(
     db: DBSession,
     current_user: ActiveUser,
     time_range: TimeRange = Query(
-        "24h",
-        description="Time range for error count filter: 24h, 7d, 30d, or all"
+        "24h", description="Time range for error count filter: 24h, 7d, 30d, or all"
     ),
 ) -> AuditStatisticsResponse:
     """
@@ -848,11 +833,11 @@ async def update_retention_config(
 ) -> RetentionConfigResponse:
     """
     Update retention policy configuration.
-    
+
     Only provided fields are updated. Requires admin privileges.
     """
     retention_service = AuditRetentionService(db)
-    
+
     try:
         updated = await retention_service.set_config(
             enabled=config.enabled,
@@ -883,14 +868,10 @@ async def run_retention_cleanup(
     dry_run: bool = Query(False, description="Simulate without deleting"),
     create_backup: bool = Query(True, description="Create JSON backup before deletion"),
     include_preview_events: bool = Query(
-        False,
-        description="Include event details in preview (for UI display)"
+        False, description="Include event details in preview (for UI display)"
     ),
     preview_limit: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Maximum number of events to include in preview"
+        20, ge=1, le=100, description="Maximum number of events to include in preview"
     ),
 ) -> CleanupResponse:
     """
@@ -1158,9 +1139,7 @@ async def list_backups(
     They can be used to restore accidentally deleted events.
     """
     retention_service = AuditRetentionService(db)
-    backups = await retention_service.backup_service.list_backups(
-        include_expired=include_expired
-    )
+    backups = await retention_service.backup_service.list_backups(include_expired=include_expired)
 
     return BackupListResponse(
         backups=[BackupInfo(**b) for b in backups],
@@ -1203,8 +1182,7 @@ async def restore_backup(
     db: DBSession,
     current_user: AdminUser,
     delete_after_restore: bool = Query(
-        True,
-        description="Delete backup after successful restore (default: True)"
+        True, description="Delete backup after successful restore (default: True)"
     ),
 ) -> BackupRestoreResponse:
     """
@@ -1366,21 +1344,3 @@ async def update_backup_retention_config(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -15,9 +15,8 @@ Reference: El Trabajante/docs/Mqtt_Protocoll.md
 import pytest
 import pytest_asyncio
 import time
-import uuid
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -27,13 +26,13 @@ from sqlalchemy.orm import sessionmaker
 from src.db.base import Base
 from src.db.models import esp, sensor, actuator  # noqa: F401
 from src.db.models.esp import ESPDevice
-from src.db.models.sensor import SensorConfig, SensorData
-from src.db.models.actuator import ActuatorConfig, ActuatorState
+from src.db.models.sensor import SensorConfig
+from src.db.models.actuator import ActuatorConfig
 from src.db.repositories.esp_repo import ESPRepository
 from src.db.repositories.sensor_repo import SensorRepository
 from src.db.repositories.actuator_repo import ActuatorRepository
-from src.mqtt.handlers.sensor_handler import SensorDataHandler, handle_sensor_data
-from src.mqtt.handlers.actuator_handler import ActuatorStatusHandler, handle_actuator_status
+from src.mqtt.handlers.sensor_handler import SensorDataHandler
+from src.mqtt.handlers.actuator_handler import ActuatorStatusHandler
 from src.mqtt.topics import TopicBuilder
 
 
@@ -52,12 +51,12 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
         echo=False,
         future=True,
     )
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     yield engine
-    
+
     await engine.dispose()
 
 
@@ -71,7 +70,7 @@ async def test_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession,
         autocommit=False,
         autoflush=False,
     )
-    
+
     async with async_session_maker() as session:
         yield session
         await session.rollback()
@@ -81,7 +80,7 @@ async def test_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession,
 async def sample_esp_device(test_session: AsyncSession) -> ESPDevice:
     """
     Create a sample ESP device matching Mqtt_Protocoll.md format.
-    
+
     ESP ID format: ESP_{8 hex chars}
     """
     device = ESPDevice(
@@ -102,8 +101,7 @@ async def sample_esp_device(test_session: AsyncSession) -> ESPDevice:
 
 @pytest_asyncio.fixture
 async def sample_sensor_config(
-    test_session: AsyncSession, 
-    sample_esp_device: ESPDevice
+    test_session: AsyncSession, sample_esp_device: ESPDevice
 ) -> SensorConfig:
     """Create a sample sensor config with Pi-Enhanced enabled."""
     config = SensorConfig(
@@ -125,8 +123,7 @@ async def sample_sensor_config(
 
 @pytest_asyncio.fixture
 async def sample_actuator_config(
-    test_session: AsyncSession,
-    sample_esp_device: ESPDevice
+    test_session: AsyncSession, sample_esp_device: ESPDevice
 ) -> ActuatorConfig:
     """Create a sample actuator config."""
     config = ActuatorConfig(
@@ -150,29 +147,30 @@ async def sample_actuator_config(
 # Topic Parsing Tests
 # =============================================================================
 
+
 class TestTopicParsing:
     """Test that Server correctly parses ESP32 MQTT topics."""
-    
+
     def test_parse_sensor_data_topic_valid(self):
         """Parse valid sensor data topic."""
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
-        
+
         result = TopicBuilder.parse_sensor_data_topic(topic)
-        
+
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["gpio"] == 34
         assert result["type"] == "sensor_data"
-    
+
     def test_parse_sensor_data_topic_different_gpio(self):
         """Parse sensor topic with different GPIO values."""
         for gpio in [0, 4, 21, 34, 35, 36]:
             topic = f"kaiser/god/esp/ESP_AABBCCDD/sensor/{gpio}/data"
             result = TopicBuilder.parse_sensor_data_topic(topic)
-            
+
             assert result is not None, f"Failed for GPIO {gpio}"
             assert result["gpio"] == gpio
-    
+
     def test_parse_sensor_data_topic_invalid(self):
         """Invalid topics return None."""
         invalid_topics = [
@@ -181,32 +179,32 @@ class TestTopicParsing:
             "kaiser/god/esp/invalid/sensor/34/data",  # invalid esp_id format
             "completely/wrong/topic",
         ]
-        
+
         for topic in invalid_topics:
             result = TopicBuilder.parse_sensor_data_topic(topic)
             assert result is None, f"Should have failed for: {topic}"
-    
+
     def test_parse_actuator_status_topic_valid(self):
         """Parse valid actuator status topic."""
         topic = "kaiser/god/esp/ESP_12AB34CD/actuator/18/status"
-        
+
         result = TopicBuilder.parse_actuator_status_topic(topic)
-        
+
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["gpio"] == 18
         assert result["type"] == "actuator_status"
-    
+
     def test_parse_heartbeat_topic_valid(self):
         """Parse valid heartbeat topic."""
         topic = "kaiser/god/esp/ESP_12AB34CD/heartbeat"
-        
+
         result = TopicBuilder.parse_heartbeat_topic(topic)
-        
+
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "heartbeat"
-    
+
     def test_validate_esp_id_format(self):
         """Validate ESP ID format matches spec (6-8 hex characters)."""
         # Valid formats - 8 hex
@@ -218,7 +216,7 @@ class TestTopicParsing:
         assert TopicBuilder.validate_esp_id("ESP_AABBCC") is True
         # Valid formats - 7 hex
         assert TopicBuilder.validate_esp_id("ESP_12AB34C") is True
-        
+
         # Invalid formats
         assert TopicBuilder.validate_esp_id("ESP_12AB3") is False  # 5 hex - too short
         assert TopicBuilder.validate_esp_id("ESP_12AB34CDE") is False  # 9 hex - too long
@@ -232,9 +230,10 @@ class TestTopicParsing:
 # Sensor Handler Tests - Payload Validation
 # =============================================================================
 
+
 class TestSensorHandlerValidation:
     """Test SensorDataHandler payload validation."""
-    
+
     @pytest.fixture
     def sensor_handler(self):
         """Create SensorDataHandler with mocked publisher."""
@@ -242,12 +241,12 @@ class TestSensorHandlerValidation:
         handler.publisher = MagicMock()
         handler.publisher.publish_pi_enhanced_response = MagicMock()
         return handler
-    
+
     @pytest.fixture
     def valid_sensor_payload(self):
         """
         Payload exactly matching ACTUAL ESP32 implementation.
-        
+
         Reference: El Trabajante/src/services/sensor/sensor_manager.cpp
         Function: buildMQTTPayload() lines 705-755
         """
@@ -264,18 +263,18 @@ class TestSensorHandlerValidation:
             "ts": int(time.time()),
             "raw_mode": True,  # ESP32 always sends raw_mode: true
         }
-    
+
     def test_validate_complete_payload(self, sensor_handler, valid_sensor_payload):
         """Complete payload passes validation."""
         result = sensor_handler._validate_payload(valid_sensor_payload)
-        
+
         assert result["valid"] is True
         assert result["error"] == ""
-    
+
     def test_validate_missing_required_fields(self, sensor_handler):
         """Payload with missing required fields fails."""
         required_fields = ["ts", "esp_id", "gpio", "sensor_type", "raw", "raw_mode"]
-        
+
         for field in required_fields:
             payload = {
                 "ts": int(time.time()),
@@ -286,61 +285,69 @@ class TestSensorHandlerValidation:
                 "raw_mode": True,
             }
             del payload[field]
-            
+
             result = sensor_handler._validate_payload(payload)
-            
+
             assert result["valid"] is False, f"Should fail for missing {field}"
             assert field in result["error"]
-    
+
     def test_validate_wrong_types(self, sensor_handler):
         """Payload with wrong types fails."""
         # ts must be int
-        result = sensor_handler._validate_payload({
-            "ts": "not_an_int",
-            "esp_id": "ESP_12AB34CD",
-            "gpio": 34,
-            "sensor_type": "ph",
-            "raw": 2150,
-            "raw_mode": True,
-        })
+        result = sensor_handler._validate_payload(
+            {
+                "ts": "not_an_int",
+                "esp_id": "ESP_12AB34CD",
+                "gpio": 34,
+                "sensor_type": "ph",
+                "raw": 2150,
+                "raw_mode": True,
+            }
+        )
         assert result["valid"] is False
         assert "ts" in result["error"]
-        
+
         # gpio must be int
-        result = sensor_handler._validate_payload({
-            "ts": int(time.time()),
-            "esp_id": "ESP_12AB34CD",
-            "gpio": "34",  # string instead of int
-            "sensor_type": "ph",
-            "raw": 2150,
-            "raw_mode": True,
-        })
+        result = sensor_handler._validate_payload(
+            {
+                "ts": int(time.time()),
+                "esp_id": "ESP_12AB34CD",
+                "gpio": "34",  # string instead of int
+                "sensor_type": "ph",
+                "raw": 2150,
+                "raw_mode": True,
+            }
+        )
         assert result["valid"] is False
         assert "gpio" in result["error"]
-        
+
         # raw_mode must be bool
-        result = sensor_handler._validate_payload({
-            "ts": int(time.time()),
-            "esp_id": "ESP_12AB34CD",
-            "gpio": 34,
-            "sensor_type": "ph",
-            "raw": 2150,
-            "raw_mode": "true",  # string instead of bool
-        })
-        assert result["valid"] is False
-        assert "raw_mode" in result["error"]
-    
-    def test_validate_raw_value_numeric(self, sensor_handler):
-        """raw field can be int or float."""
-        for raw_value in [2150, 2150.5, 0, -100.5]:
-            result = sensor_handler._validate_payload({
+        result = sensor_handler._validate_payload(
+            {
                 "ts": int(time.time()),
                 "esp_id": "ESP_12AB34CD",
                 "gpio": 34,
                 "sensor_type": "ph",
-                "raw": raw_value,
-                "raw_mode": True,
-            })
+                "raw": 2150,
+                "raw_mode": "true",  # string instead of bool
+            }
+        )
+        assert result["valid"] is False
+        assert "raw_mode" in result["error"]
+
+    def test_validate_raw_value_numeric(self, sensor_handler):
+        """raw field can be int or float."""
+        for raw_value in [2150, 2150.5, 0, -100.5]:
+            result = sensor_handler._validate_payload(
+                {
+                    "ts": int(time.time()),
+                    "esp_id": "ESP_12AB34CD",
+                    "gpio": 34,
+                    "sensor_type": "ph",
+                    "raw": raw_value,
+                    "raw_mode": True,
+                }
+            )
             assert result["valid"] is True, f"Should accept raw={raw_value}"
 
 
@@ -348,9 +355,10 @@ class TestSensorHandlerValidation:
 # Sensor Handler Tests - Full Processing Flow
 # =============================================================================
 
+
 class TestSensorHandlerProcessing:
     """Test SensorDataHandler processing with real database."""
-    
+
     @pytest.mark.asyncio
     async def test_handle_sensor_data_success(
         self,
@@ -363,7 +371,7 @@ class TestSensorHandlerProcessing:
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
         handler.publisher.publish_pi_enhanced_response = MagicMock()
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
         payload = {
             "ts": int(time.time()),
@@ -376,31 +384,31 @@ class TestSensorHandlerProcessing:
             "quality": "good",
             "raw_mode": False,  # Local processing (no Pi-Enhanced)
         }
-        
+
         # Mock resilient_session to return our test session
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
 
         assert result is True
-        
+
         # Verify data was saved
         sensor_repo = SensorRepository(test_session)
         saved_data = await sensor_repo.get_latest_data(sample_esp_device.id, 34)
-        
+
         assert len(saved_data) == 1
         assert saved_data[0].raw_value == 2150
         assert saved_data[0].processing_mode == "local"
-    
+
     @pytest.mark.asyncio
     async def test_handle_sensor_data_unknown_esp(self, test_session: AsyncSession):
         """Handle sensor data from unknown ESP device."""
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         topic = "kaiser/god/esp/ESP_UNKNOWN1/sensor/34/data"
         payload = {
             "ts": int(time.time()),
@@ -413,23 +421,23 @@ class TestSensorHandlerProcessing:
             "quality": "good",
             "raw_mode": False,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
 
         # Should fail - ESP not in database
         assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_handle_sensor_data_invalid_topic(self):
         """Handle sensor data with invalid topic format."""
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         topic = "invalid/topic/format"
         payload = {
             "ts": int(time.time()),
@@ -442,9 +450,9 @@ class TestSensorHandlerProcessing:
             "quality": "good",
             "raw_mode": False,
         }
-        
+
         result = await handler.handle_sensor_data(topic, payload)
-        
+
         assert result is False
 
 
@@ -452,14 +460,15 @@ class TestSensorHandlerProcessing:
 # Actuator Handler Tests
 # =============================================================================
 
+
 class TestActuatorHandlerValidation:
     """Test ActuatorStatusHandler payload validation."""
-    
+
     @pytest.fixture
     def actuator_handler(self):
         """Create ActuatorStatusHandler."""
         return ActuatorStatusHandler()
-    
+
     @pytest.fixture
     def valid_actuator_payload(self):
         """
@@ -476,18 +485,18 @@ class TestActuatorHandlerValidation:
             "uptime": 3600,
             "error": None,
         }
-    
+
     def test_validate_complete_payload(self, actuator_handler, valid_actuator_payload):
         """Complete actuator payload passes validation."""
         result = actuator_handler._validate_payload(valid_actuator_payload)
-        
+
         assert result["valid"] is True
         assert result["error"] == ""
-    
+
     def test_validate_missing_required_fields(self, actuator_handler):
         """Actuator payload with missing required fields fails."""
         required_fields = ["ts", "esp_id", "gpio", "actuator_type", "state", "value"]
-        
+
         for field in required_fields:
             payload = {
                 "ts": int(time.time()),
@@ -498,15 +507,15 @@ class TestActuatorHandlerValidation:
                 "value": 255,
             }
             del payload[field]
-            
+
             result = actuator_handler._validate_payload(payload)
-            
+
             assert result["valid"] is False, f"Should fail for missing {field}"
-    
+
     def test_validate_state_values(self, actuator_handler):
         """Actuator state must be valid value."""
         valid_states = ["on", "off", "pwm", "error", "unknown"]
-        
+
         for state in valid_states:
             payload = {
                 "ts": int(time.time()),
@@ -518,7 +527,7 @@ class TestActuatorHandlerValidation:
             }
             result = actuator_handler._validate_payload(payload)
             assert result["valid"] is True, f"Should accept state={state}"
-        
+
         # Invalid state
         payload = {
             "ts": int(time.time()),
@@ -534,7 +543,7 @@ class TestActuatorHandlerValidation:
 
 class TestActuatorHandlerProcessing:
     """Test ActuatorStatusHandler processing with real database."""
-    
+
     @pytest.mark.asyncio
     async def test_handle_actuator_status_success(
         self,
@@ -544,7 +553,7 @@ class TestActuatorHandlerProcessing:
     ):
         """Successfully process actuator status and save to database."""
         handler = ActuatorStatusHandler()
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/actuator/18/status"
         payload = {
             "ts": int(time.time()),
@@ -557,12 +566,12 @@ class TestActuatorHandlerProcessing:
             "uptime": 3600,
             "error": None,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.actuator_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.actuator_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_actuator_status(topic, payload)
 
         assert result is True
@@ -583,7 +592,7 @@ class TestActuatorHandlerProcessing:
     ):
         """Handle actuator status with error reported."""
         handler = ActuatorStatusHandler()
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/actuator/18/status"
         payload = {
             "ts": int(time.time()),
@@ -596,12 +605,12 @@ class TestActuatorHandlerProcessing:
             "uptime": 3600,
             "error": "Motor stalled - overcurrent detected",
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.actuator_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.actuator_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_actuator_status(topic, payload)
 
         assert result is True  # Should still process, but log error
@@ -611,13 +620,14 @@ class TestActuatorHandlerProcessing:
 # Full Message Flow Tests (ESP32 → Server → Database)
 # =============================================================================
 
+
 class TestFullMessageFlow:
     """
     End-to-end tests: ESP32 message → Server handler → Database.
-    
+
     These tests simulate the complete flow as if a real ESP32 sent a message.
     """
-    
+
     @pytest.mark.asyncio
     async def test_sensor_batch_flow(
         self,
@@ -626,7 +636,7 @@ class TestFullMessageFlow:
     ):
         """
         Test processing multiple sensor readings.
-        
+
         Simulates: ESP32 sends batch of sensor data → Server processes each → DB saves
         """
         # Create sensor configs for batch
@@ -659,10 +669,10 @@ class TestFullMessageFlow:
         for s in sensors:
             test_session.add(s)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         # Simulate batch of sensor readings
         sensor_readings = [
             {
@@ -693,12 +703,12 @@ class TestFullMessageFlow:
                 "raw_mode": False,
             },
         ]
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             for reading in sensor_readings:
                 topic = f"kaiser/god/esp/ESP_12AB34CD/sensor/{reading['gpio']}/data"
                 payload = {
@@ -713,12 +723,12 @@ class TestFullMessageFlow:
 
         # Verify all data was saved
         sensor_repo = SensorRepository(test_session)
-        
+
         for reading in sensor_readings:
             saved = await sensor_repo.get_latest_data(sample_esp_device.id, reading["gpio"])
             assert len(saved) >= 1, f"No data saved for GPIO {reading['gpio']}"
             assert saved[0].raw_value == reading["raw"]
-    
+
     @pytest.mark.asyncio
     async def test_actuator_command_response_flow(
         self,
@@ -728,14 +738,14 @@ class TestFullMessageFlow:
     ):
         """
         Test actuator command → ESP32 response → Server processes status.
-        
+
         Flow:
         1. Server sends command to ESP32 (not tested here - that's publisher)
         2. ESP32 executes and sends status back
         3. Server processes status update
         """
         handler = ActuatorStatusHandler()
-        
+
         # ESP32 sends status after executing command
         topic = "kaiser/god/esp/ESP_12AB34CD/actuator/18/status"
         status_payload = {
@@ -749,12 +759,12 @@ class TestFullMessageFlow:
             "uptime": 3605,
             "error": None,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.actuator_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.actuator_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_actuator_status(topic, status_payload)
 
         assert result is True
@@ -764,9 +774,10 @@ class TestFullMessageFlow:
 # Edge Cases and Error Handling
 # =============================================================================
 
+
 class TestEdgeCases:
     """Test edge cases and error conditions."""
-    
+
     @pytest.mark.asyncio
     async def test_handle_malformed_json_topic_mismatch(
         self,
@@ -776,7 +787,7 @@ class TestEdgeCases:
         """Handle when topic ESP ID doesn't match payload ESP ID."""
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         # Topic says ESP_12AB34CD but payload says different
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
         payload = {
@@ -790,22 +801,24 @@ class TestEdgeCases:
             "quality": "good",
             "raw_mode": False,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
         # Should use topic ESP ID, but payload should still be processed
         # (or rejected based on implementation)
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
 
         # Behavior depends on implementation - document the expected behavior
         # Current implementation uses topic ESP ID, ignores payload ESP ID
         assert result is True  # Or False, depending on validation rules
-    
-    @pytest.mark.asyncio 
-    async def test_handle_extreme_values(self, test_session: AsyncSession, sample_esp_device: ESPDevice):
+
+    @pytest.mark.asyncio
+    async def test_handle_extreme_values(
+        self, test_session: AsyncSession, sample_esp_device: ESPDevice
+    ):
         """Handle extreme sensor values."""
         sensor_config = SensorConfig(
             esp_id=sample_esp_device.id,
@@ -817,12 +830,12 @@ class TestEdgeCases:
         )
         test_session.add(sensor_config)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         extreme_values = [0, -1000, 65535, 4294967295, 0.0001, -999999.99]
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
@@ -841,19 +854,19 @@ class TestEdgeCases:
                 "raw_mode": False,
             }
 
-            with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+            with patch(
+                "src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session
+            ):
                 result = await handler.handle_sensor_data(topic, payload)
 
             assert result is True, f"Should handle extreme value: {raw_value}"
-    
+
     def test_topic_with_special_characters(self):
         """Topic parsing handles edge cases correctly."""
         # Topics with numbers and underscores in ESP ID
-        valid = TopicBuilder.parse_sensor_data_topic(
-            "kaiser/god/esp/ESP_00000000/sensor/0/data"
-        )
+        valid = TopicBuilder.parse_sensor_data_topic("kaiser/god/esp/ESP_00000000/sensor/0/data")
         assert valid is not None
-        
+
         # Boundary GPIO values
         for gpio in [0, 39]:  # ESP32 GPIO range
             topic = f"kaiser/god/esp/ESP_12AB34CD/sensor/{gpio}/data"
@@ -866,9 +879,10 @@ class TestEdgeCases:
 # Performance and Concurrency Tests
 # =============================================================================
 
+
 class TestPerformance:
     """Test performance under load."""
-    
+
     @pytest.mark.asyncio
     async def test_rapid_sensor_updates(
         self,
@@ -879,7 +893,7 @@ class TestPerformance:
         """Handle rapid succession of sensor updates."""
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
@@ -887,7 +901,7 @@ class TestPerformance:
         # Simulate 100 rapid updates
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             for i in range(100):
                 payload = {
                     "ts": int(time.time()),
@@ -914,23 +928,25 @@ class TestPerformance:
 # Heartbeat Handler Tests
 # =============================================================================
 
+
 class TestHeartbeatHandlerValidation:
     """Test HeartbeatHandler payload validation."""
-    
+
     @pytest.fixture
     def heartbeat_handler(self):
         """Create HeartbeatHandler."""
         from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler
+
         return HeartbeatHandler()
-    
+
     @pytest.fixture
     def valid_heartbeat_payload(self):
         """
         Heartbeat payload matching ACTUAL ESP32 implementation.
-        
+
         Reference: El Trabajante/src/services/communication/mqtt_client.cpp
         Function: publishHeartbeat() lines 451-462
-        
+
         ESP32 sends: heap_free (not free_heap)
         Server accepts both for backward compatibility.
         """
@@ -946,19 +962,19 @@ class TestHeartbeatHandlerValidation:
             "sensor_count": 3,
             "actuator_count": 2,
         }
-    
+
     def test_validate_complete_payload(self, heartbeat_handler, valid_heartbeat_payload):
         """Complete heartbeat payload passes validation."""
         result = heartbeat_handler._validate_payload(valid_heartbeat_payload)
-        
+
         assert result["valid"] is True
         assert result["error"] == ""
-    
+
     def test_validate_missing_required_fields(self, heartbeat_handler):
         """Heartbeat payload with missing required fields fails."""
         # Server requires these 4 fields (accepts both heap_free and free_heap)
         required_fields = ["ts", "uptime", "heap_free", "wifi_rssi"]
-        
+
         for field in required_fields:
             payload = {
                 "ts": int(time.time()),
@@ -967,36 +983,40 @@ class TestHeartbeatHandlerValidation:
                 "wifi_rssi": -65,
             }
             del payload[field]
-            
+
             result = heartbeat_handler._validate_payload(payload)
-            
+
             # Note: heap_free error message says "heap_free or free_heap"
             assert result["valid"] is False, f"Should fail for missing {field}"
-    
+
     def test_validate_wrong_types(self, heartbeat_handler):
         """Heartbeat payload with wrong types fails."""
         # ts must be int
-        result = heartbeat_handler._validate_payload({
-            "ts": "not_an_int",
-            "uptime": 3600,
-            "free_heap": 245760,
-            "wifi_rssi": -65,
-        })
+        result = heartbeat_handler._validate_payload(
+            {
+                "ts": "not_an_int",
+                "uptime": 3600,
+                "free_heap": 245760,
+                "wifi_rssi": -65,
+            }
+        )
         assert result["valid"] is False
-        
+
         # uptime must be int
-        result = heartbeat_handler._validate_payload({
-            "ts": int(time.time()),
-            "uptime": "3600",
-            "free_heap": 245760,
-            "wifi_rssi": -65,
-        })
+        result = heartbeat_handler._validate_payload(
+            {
+                "ts": int(time.time()),
+                "uptime": "3600",
+                "free_heap": 245760,
+                "wifi_rssi": -65,
+            }
+        )
         assert result["valid"] is False
 
 
 class TestHeartbeatHandlerProcessing:
     """Test HeartbeatHandler processing with real database."""
-    
+
     @pytest.mark.asyncio
     async def test_handle_heartbeat_success(
         self,
@@ -1005,9 +1025,9 @@ class TestHeartbeatHandlerProcessing:
     ):
         """Successfully process heartbeat and update device status."""
         from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler
-        
+
         handler = HeartbeatHandler()
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/heartbeat"
         payload = {
             "ts": int(time.time()),
@@ -1015,12 +1035,12 @@ class TestHeartbeatHandlerProcessing:
             "free_heap": 245760,
             "wifi_rssi": -65,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.heartbeat_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_heartbeat(topic, payload)
 
         assert result is True
@@ -1029,7 +1049,7 @@ class TestHeartbeatHandlerProcessing:
         esp_repo = ESPRepository(test_session)
         device = await esp_repo.get_by_device_id("ESP_12AB34CD")
         assert device.status == "online"
-    
+
     @pytest.mark.asyncio
     async def test_handle_heartbeat_unknown_device(self, test_session: AsyncSession):
         """Handle heartbeat from unknown device - Auto-Discovery creates device with pending_approval."""
@@ -1054,8 +1074,8 @@ class TestHeartbeatHandlerProcessing:
         mock_mqtt = MagicMock()
         mock_mqtt.publish = MagicMock(return_value=True)
 
-        with patch('src.mqtt.handlers.heartbeat_handler.resilient_session', mock_resilient_session):
-            with patch('src.mqtt.client.MQTTClient.get_instance', return_value=mock_mqtt):
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session", mock_resilient_session):
+            with patch("src.mqtt.client.MQTTClient.get_instance", return_value=mock_mqtt):
                 result = await handler.handle_heartbeat(topic, payload)
 
         # Auto-Discovery: unknown device is registered with pending_approval status
@@ -1072,10 +1092,11 @@ class TestHeartbeatHandlerProcessing:
 # Pi-Enhanced Processing Tests
 # =============================================================================
 
+
 class TestPiEnhancedProcessing:
     """
     Test Pi-Enhanced sensor processing flow.
-    
+
     Flow:
     1. ESP32 sends raw sensor data with raw_mode=True
     2. Server loads appropriate processor from library_loader
@@ -1083,7 +1104,7 @@ class TestPiEnhancedProcessing:
     4. Server publishes processed value back to ESP32
     5. Server saves both raw and processed values to database
     """
-    
+
     @pytest.mark.asyncio
     async def test_pi_enhanced_triggers_for_raw_mode_sensor(
         self,
@@ -1103,11 +1124,11 @@ class TestPiEnhancedProcessing:
         )
         test_session.add(sensor_config)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         mock_publisher = MagicMock()
         handler.publisher = mock_publisher
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
         payload = {
             "ts": int(time.time()),
@@ -1120,34 +1141,32 @@ class TestPiEnhancedProcessing:
             "quality": "good",
             "raw_mode": True,  # Triggers Pi-Enhanced
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
         # Mock the library loader to return a fake processor
         mock_processor = MagicMock()
-        mock_processor.process.return_value = MagicMock(
-            value=7.2, unit="pH", quality="good"
-        )
+        mock_processor.process.return_value = MagicMock(value=7.2, unit="pH", quality="good")
 
         # Mock at the location where it's imported in _trigger_pi_enhanced_processing
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
-            with patch('src.sensors.library_loader.get_library_loader') as mock_loader:
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
+            with patch("src.sensors.library_loader.get_library_loader") as mock_loader:
                 mock_loader_instance = MagicMock()
                 mock_loader_instance.get_processor.return_value = mock_processor
                 mock_loader.return_value = mock_loader_instance
-                
+
                 result = await handler.handle_sensor_data(topic, payload)
-        
+
         assert result is True
-        
+
         # Verify processor was called
         mock_processor.process.assert_called_once()
-        
+
         # Verify processed data was published back
         mock_publisher.publish_pi_enhanced_response.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_pi_enhanced_skipped_for_local_mode(
         self,
@@ -1165,11 +1184,11 @@ class TestPiEnhancedProcessing:
         )
         test_session.add(sensor_config)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         mock_publisher = MagicMock()
         handler.publisher = mock_publisher
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
         payload = {
             "ts": int(time.time()),
@@ -1182,12 +1201,12 @@ class TestPiEnhancedProcessing:
             "quality": "good",
             "raw_mode": False,  # ...but ESP processed locally
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             result = await handler.handle_sensor_data(topic, payload)
 
         assert result is True
@@ -1201,7 +1220,7 @@ class TestPiEnhancedProcessing:
         assert len(saved) >= 1
         assert saved[0].processing_mode == "local"
         assert saved[0].processed_value == 23.5
-    
+
     @pytest.mark.asyncio
     async def test_pi_enhanced_fallback_on_processor_error(
         self,
@@ -1219,11 +1238,11 @@ class TestPiEnhancedProcessing:
         )
         test_session.add(sensor_config)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         mock_publisher = MagicMock()
         handler.publisher = mock_publisher
-        
+
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
         payload = {
             "ts": int(time.time()),
@@ -1236,24 +1255,24 @@ class TestPiEnhancedProcessing:
             "quality": "good",
             "raw_mode": True,
         }
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
         # Mock the library loader to return None (no processor found)
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
-            with patch('src.sensors.library_loader.get_library_loader') as mock_loader:
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
+            with patch("src.sensors.library_loader.get_library_loader") as mock_loader:
                 mock_loader_instance = MagicMock()
                 mock_loader_instance.get_processor.return_value = None
                 mock_loader_instance.get_available_sensors.return_value = []
                 mock_loader.return_value = mock_loader_instance
-                
+
                 result = await handler.handle_sensor_data(topic, payload)
-        
+
         # Should still save raw data even if processing failed
         assert result is True
-        
+
         # Verify data saved with error quality
         sensor_repo = SensorRepository(test_session)
         saved = await sensor_repo.get_latest_data(sample_esp_device.id, 34)
@@ -1265,13 +1284,14 @@ class TestPiEnhancedProcessing:
 # Complete Workflow Tests
 # =============================================================================
 
+
 class TestCompleteWorkflows:
     """
     End-to-end workflow tests simulating real ESP32 behavior.
-    
+
     These tests verify complete scenarios as they would occur in production.
     """
-    
+
     @pytest.mark.asyncio
     async def test_greenhouse_temperature_control_flow(
         self,
@@ -1285,7 +1305,7 @@ class TestCompleteWorkflows:
         3. Server could trigger actuator (logic not tested here)
         """
         from src.mqtt.handlers.sensor_handler import SensorDataHandler
-        
+
         # Setup sensor config
         temp_sensor = SensorConfig(
             esp_id=sample_esp_device.id,
@@ -1297,10 +1317,10 @@ class TestCompleteWorkflows:
         )
         test_session.add(temp_sensor)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         # Simulate temperature readings over time
         readings = [
             {"raw": 2350, "value": 23.5, "quality": "good"},
@@ -1309,12 +1329,12 @@ class TestCompleteWorkflows:
             {"raw": 2600, "value": 26.0, "quality": "fair"},  # Getting warm
             {"raw": 2800, "value": 28.0, "quality": "poor"},  # Too hot!
         ]
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             for reading in readings:
                 topic = "kaiser/god/esp/ESP_12AB34CD/sensor/4/data"
                 payload = {
@@ -1336,11 +1356,11 @@ class TestCompleteWorkflows:
         sensor_repo = SensorRepository(test_session)
         saved = await sensor_repo.get_latest_data(sample_esp_device.id, 4, limit=5)
         assert len(saved) == 5
-        
+
         # Verify most recent is hottest
         assert saved[0].processed_value == 28.0
         assert saved[0].quality == "poor"
-    
+
     @pytest.mark.asyncio
     async def test_multi_sensor_esp_batch_processing(
         self,
@@ -1349,15 +1369,15 @@ class TestCompleteWorkflows:
     ):
         """
         Process multiple sensors from single ESP32.
-        
+
         Simulates real greenhouse ESP32 with:
         - Temperature sensor (GPIO 4)
-        - Humidity sensor (GPIO 21) 
+        - Humidity sensor (GPIO 21)
         - Moisture sensor (GPIO 34)
         - pH sensor (GPIO 35)
         """
         from src.mqtt.handlers.sensor_handler import SensorDataHandler
-        
+
         # Create all sensor configs
         sensors = [
             SensorConfig(
@@ -1396,10 +1416,10 @@ class TestCompleteWorkflows:
         for s in sensors:
             test_session.add(s)
         await test_session.flush()
-        
+
         handler = SensorDataHandler()
         handler.publisher = MagicMock()
-        
+
         # Simulate batch of readings
         batch = [
             {"gpio": 4, "sensor_type": "temperature", "raw": 2350, "value": 23.5, "unit": "°C"},
@@ -1407,23 +1427,21 @@ class TestCompleteWorkflows:
             {"gpio": 34, "sensor_type": "moisture", "raw": 1800, "value": 1800, "unit": "raw"},
             {"gpio": 35, "sensor_type": "ph", "raw": 2150, "value": 0.0, "unit": ""},  # Pi-Enhanced
         ]
-        
+
         @asynccontextmanager
         async def mock_resilient_session():
             yield test_session
 
         # Mock processor for pH
         mock_processor = MagicMock()
-        mock_processor.process.return_value = MagicMock(
-            value=7.2, unit="pH", quality="good"
-        )
+        mock_processor.process.return_value = MagicMock(value=7.2, unit="pH", quality="good")
 
-        with patch('src.mqtt.handlers.sensor_handler.resilient_session', mock_resilient_session):
-            with patch('src.sensors.library_loader.get_library_loader') as mock_loader:
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
+            with patch("src.sensors.library_loader.get_library_loader") as mock_loader:
                 mock_loader_instance = MagicMock()
                 mock_loader_instance.get_processor.return_value = mock_processor
                 mock_loader.return_value = mock_loader_instance
-                
+
                 for reading in batch:
                     topic = f"kaiser/god/esp/ESP_12AB34CD/sensor/{reading['gpio']}/data"
                     payload = {
@@ -1437,10 +1455,10 @@ class TestCompleteWorkflows:
                         "quality": "good",
                         "raw_mode": reading["gpio"] == 35,  # Only pH is raw_mode
                     }
-                    
+
                     result = await handler.handle_sensor_data(topic, payload)
                     assert result is True, f"Failed for GPIO {reading['gpio']}"
-        
+
         # Verify all sensors have data
         sensor_repo = SensorRepository(test_session)
         for reading in batch:
@@ -1450,4 +1468,3 @@ class TestCompleteWorkflows:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
-

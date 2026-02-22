@@ -47,9 +47,7 @@ class HealthCheckPlugin(AutoOpsPlugin):
     def capabilities(self) -> list[PluginCapability]:
         return [PluginCapability.VALIDATE, PluginCapability.MONITOR]
 
-    async def execute(
-        self, context: AutoOpsContext, client: GodKaiserClient
-    ) -> PluginResult:
+    async def execute(self, context: AutoOpsContext, client: GodKaiserClient) -> PluginResult:
         """Run all health checks."""
         actions: list[PluginAction] = []
         errors: list[str] = []
@@ -64,56 +62,68 @@ class HealthCheckPlugin(AutoOpsPlugin):
             server_status = health.get("status", "unknown")
             health_data["server"] = {"status": server_status, "details": health}
 
-            actions.append(PluginAction.create(
-                action="Server Health Check",
-                target=context.server_url,
-                details=health,
-                result=f"Server: {server_status}",
-                severity=ActionSeverity.SUCCESS if server_status == "ok" else ActionSeverity.WARNING,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Server Health Check",
+                    target=context.server_url,
+                    details=health,
+                    result=f"Server: {server_status}",
+                    severity=(
+                        ActionSeverity.SUCCESS if server_status == "ok" else ActionSeverity.WARNING
+                    ),
+                )
+            )
         except APIError as e:
             health_data["server"] = {"status": "error", "detail": e.detail}
             errors.append(f"Server health check failed: {e.detail}")
-            actions.append(PluginAction.create(
-                action="Server Health Check",
-                target=context.server_url,
-                details={"error": e.detail},
-                result=f"FAILED: {e.detail}",
-                severity=ActionSeverity.CRITICAL,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Server Health Check",
+                    target=context.server_url,
+                    details={"error": e.detail},
+                    result=f"FAILED: {e.detail}",
+                    severity=ActionSeverity.CRITICAL,
+                )
+            )
         except Exception as e:
             health_data["server"] = {"status": "unreachable", "detail": str(e)}
             errors.append(f"Server unreachable: {str(e)}")
-            actions.append(PluginAction.create(
-                action="Server Health Check",
-                target=context.server_url,
-                details={"error": str(e)},
-                result=f"UNREACHABLE: {str(e)}",
-                severity=ActionSeverity.CRITICAL,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Server Health Check",
+                    target=context.server_url,
+                    details={"error": str(e)},
+                    result=f"UNREACHABLE: {str(e)}",
+                    severity=ActionSeverity.CRITICAL,
+                )
+            )
 
         # =============================================
         # Check 2: Authentication
         # =============================================
         if context.auth_token:
             health_data["auth"] = {"status": "authenticated"}
-            actions.append(PluginAction.create(
-                action="Authentication Check",
-                target="auth_token",
-                details={},
-                result="Authenticated",
-                severity=ActionSeverity.SUCCESS,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Authentication Check",
+                    target="auth_token",
+                    details={},
+                    result="Authenticated",
+                    severity=ActionSeverity.SUCCESS,
+                )
+            )
         else:
             health_data["auth"] = {"status": "not_authenticated"}
             warnings.append("Not authenticated - some operations may fail")
-            actions.append(PluginAction.create(
-                action="Authentication Check",
-                target="auth_token",
-                details={},
-                result="Not authenticated",
-                severity=ActionSeverity.WARNING,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Authentication Check",
+                    target="auth_token",
+                    details={},
+                    result="Not authenticated",
+                    severity=ActionSeverity.WARNING,
+                )
+            )
 
         # =============================================
         # Check 3: Device Overview
@@ -137,13 +147,15 @@ class HealthCheckPlugin(AutoOpsPlugin):
             elif total == 0:
                 severity = ActionSeverity.INFO
 
-            actions.append(PluginAction.create(
-                action="Device Overview",
-                target="all_devices",
-                details={"total": total, "online": online, "offline": offline},
-                result=f"{total} devices ({online} online, {offline} offline)",
-                severity=severity,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Device Overview",
+                    target="all_devices",
+                    details={"total": total, "online": online, "offline": offline},
+                    result=f"{total} devices ({online} online, {offline} offline)",
+                    severity=severity,
+                )
+            )
         except APIError as e:
             health_data["devices"] = {"status": "error", "detail": e.detail}
             warnings.append(f"Device overview failed: {e.detail}")
@@ -155,23 +167,27 @@ class HealthCheckPlugin(AutoOpsPlugin):
             tables = await client.list_tables()
             table_count = len(tables.get("tables", []))
             health_data["database"] = {"status": "ok", "tables": table_count}
-            actions.append(PluginAction.create(
-                action="Database Check",
-                target="database",
-                details={"table_count": table_count},
-                result=f"Database accessible ({table_count} tables)",
-                severity=ActionSeverity.SUCCESS,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Database Check",
+                    target="database",
+                    details={"table_count": table_count},
+                    result=f"Database accessible ({table_count} tables)",
+                    severity=ActionSeverity.SUCCESS,
+                )
+            )
         except APIError as e:
             health_data["database"] = {"status": "error", "detail": e.detail}
             warnings.append(f"Database check failed: {e.detail}")
-            actions.append(PluginAction.create(
-                action="Database Check",
-                target="database",
-                details={"error": e.detail},
-                result=f"FAILED: {e.detail}",
-                severity=ActionSeverity.WARNING,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Database Check",
+                    target="database",
+                    details={"error": e.detail},
+                    result=f"FAILED: {e.detail}",
+                    severity=ActionSeverity.WARNING,
+                )
+            )
 
         # =============================================
         # Check 5: Detailed Health (if available)
@@ -180,13 +196,19 @@ class HealthCheckPlugin(AutoOpsPlugin):
             detailed = await client.get_server_health()
             mqtt_status = detailed.get("mqtt", {}).get("status", "unknown")
             health_data["mqtt"] = {"status": mqtt_status}
-            actions.append(PluginAction.create(
-                action="MQTT Broker Check",
-                target="mqtt_broker",
-                details=detailed.get("mqtt", {}),
-                result=f"MQTT: {mqtt_status}",
-                severity=ActionSeverity.SUCCESS if mqtt_status in ("ok", "connected") else ActionSeverity.WARNING,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="MQTT Broker Check",
+                    target="mqtt_broker",
+                    details=detailed.get("mqtt", {}),
+                    result=f"MQTT: {mqtt_status}",
+                    severity=(
+                        ActionSeverity.SUCCESS
+                        if mqtt_status in ("ok", "connected")
+                        else ActionSeverity.WARNING
+                    ),
+                )
+            )
         except APIError:
             # Detailed health endpoint might not exist
             health_data["mqtt"] = {"status": "unknown"}

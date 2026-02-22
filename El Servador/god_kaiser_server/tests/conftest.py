@@ -199,7 +199,7 @@ async def sample_user(db_session: AsyncSession):
     """Create a sample user for testing."""
     from src.db.models.user import User
 
-    user = User(
+    user = User(  # noqa: F811
         username="testuser",
         email="test@example.com",
         password_hash="hashed_password",
@@ -258,17 +258,18 @@ async def sample_esp_no_zone(db_session: AsyncSession):
 
 # ==================== Hardware Validation Test Fixtures ====================
 
+
 @pytest_asyncio.fixture
 async def sample_esp_c3(db_session: AsyncSession):
     """Create a sample ESP32-C3 device for testing.
-    
+
     ESP32-C3 (XIAO) has different hardware constraints than WROOM:
     - GPIO Range: 0-21 (not 0-39!)
     - I2C Pins: GPIO 4 (SDA), GPIO 5 (SCL) - not 21/22!
     - No Input-Only Pins (all bidirectional)
     """
     from src.db.models.esp import ESPDevice
-    
+
     device = ESPDevice(
         device_id="ESP_C3_TEST_001",
         name="Test ESP32-C3",
@@ -293,12 +294,12 @@ async def gpio_service(
     esp_repo: "ESPRepository",
 ):
     """Create real GpioValidationService instance.
-    
+
     This fixture creates a real service (not mocked) for testing
     hardware validation logic.
     """
     from src.services.gpio_validation_service import GpioValidationService
-    
+
     service = GpioValidationService(
         session=db_session,
         sensor_repo=sensor_repo,
@@ -312,11 +313,11 @@ async def gpio_service(
 def mock_mqtt_publisher_for_subzone():
     """
     Create a mock MQTT publisher for subzone service tests.
-    
+
     Provides mock client with publish method for testing.
     """
     from unittest.mock import MagicMock
-    
+
     mock_publisher = MagicMock()
     mock_publisher.client = MagicMock()
     mock_publisher.client.publish = MagicMock(return_value=MagicMock(rc=0))
@@ -327,6 +328,7 @@ def mock_mqtt_publisher_for_subzone():
 # FIX 2: App Dependency Override with autouse=True
 # This ensures ALL tests use the test database, not the production database
 # =============================================================================
+
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def override_get_db(test_engine: AsyncEngine):
@@ -369,6 +371,7 @@ async def override_get_db(test_engine: AsyncEngine):
 # This prevents tests from hanging on MQTT connection attempts
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def override_mqtt_publisher(test_engine: AsyncEngine):
     """
@@ -378,7 +381,7 @@ async def override_mqtt_publisher(test_engine: AsyncEngine):
     This prevents tests from hanging on MQTT connection attempts.
     """
     from unittest.mock import MagicMock
-    
+
     from src.main import app
     from src.api.deps import get_mqtt_publisher
 
@@ -415,7 +418,7 @@ async def override_actuator_service(test_engine: AsyncEngine):
     This ensures ActuatorService uses mocked Publisher in tests.
     """
     from unittest.mock import MagicMock
-    
+
     from src.main import app
     from src.api.deps import get_actuator_service
     from src.db.repositories import ActuatorRepository, ESPRepository
@@ -425,33 +428,33 @@ async def override_actuator_service(test_engine: AsyncEngine):
     def override_get_actuator_service_func(db: AsyncSession = Depends(get_db)):
         """
         Override function that receives db session from FastAPI dependency injection.
-        
+
         Args:
             db: Database session (injected by FastAPI from override_get_db)
         """
         # Create repositories with the injected session
         actuator_repo = ActuatorRepository(db)
         esp_repo = ESPRepository(db)
-        
+
         # Create safety service
         safety_service = SafetyService(actuator_repo, esp_repo)
-        
+
         # Create mocked publisher
         mock_publisher = MagicMock()
         mock_publisher.publish_actuator_command.return_value = True
         mock_publisher._publish_with_retry.return_value = True
-        
+
         # Create ActuatorService with mocked publisher
         actuator_service = ActuatorService(
             actuator_repo=actuator_repo,
             safety_service=safety_service,
             publisher=mock_publisher,
         )
-        
+
         return actuator_service
 
     # Apply override
     app.dependency_overrides[get_actuator_service] = override_get_actuator_service_func
 
-    yield    # Cleanup - remove override
+    yield  # Cleanup - remove override
     app.dependency_overrides.pop(get_actuator_service, None)

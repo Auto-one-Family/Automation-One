@@ -6,8 +6,7 @@ Tests Logic Engine action execution with schema compatibility fixes.
 
 import pytest
 import uuid
-from unittest.mock import AsyncMock, MagicMock
-from sqlalchemy.ext.asyncio import AsyncSession
+from unittest.mock import AsyncMock
 
 from src.services.logic_engine import LogicEngine
 
@@ -47,9 +46,11 @@ async def logic_engine(mock_logic_repo, mock_actuator_service, mock_websocket_ma
 
 class TestLogicEngineSchemaCompatibility:
     """Test Logic Engine schema compatibility fixes."""
-    
+
     @pytest.mark.asyncio
-    async def test_action_type_actuator_command(self, logic_engine: LogicEngine, mock_actuator_service):
+    async def test_action_type_actuator_command(
+        self, logic_engine: LogicEngine, mock_actuator_service
+    ):
         """Test that action_type 'actuator_command' works (existing behavior)."""
         actions = [
             {
@@ -61,18 +62,15 @@ class TestLogicEngineSchemaCompatibility:
                 "duration_seconds": 10,
             }
         ]
-        
+
         rule_id = uuid.uuid4()
         trigger_data = {"type": "sensor", "timestamp": 1234567890}
         rule_name = "test_rule"
-        
+
         await logic_engine._execute_actions(
-            actions=actions,
-            trigger_data=trigger_data,
-            rule_id=rule_id,
-            rule_name=rule_name
+            actions=actions, trigger_data=trigger_data, rule_id=rule_id, rule_name=rule_name
         )
-        
+
         # Verify actuator service was called
         mock_actuator_service.send_command.assert_called_once()
         call_kwargs = mock_actuator_service.send_command.call_args[1]
@@ -81,7 +79,7 @@ class TestLogicEngineSchemaCompatibility:
         assert call_kwargs["command"] == "ON"
         assert call_kwargs["value"] == 1.0
         assert call_kwargs["duration"] == 10
-    
+
     @pytest.mark.asyncio
     async def test_action_type_actuator(self, logic_engine: LogicEngine, mock_actuator_service):
         """Test that action_type 'actuator' works (schema compatibility fix)."""
@@ -95,25 +93,22 @@ class TestLogicEngineSchemaCompatibility:
                 "duration_seconds": 10,
             }
         ]
-        
+
         rule_id = uuid.uuid4()
         trigger_data = {"type": "sensor", "timestamp": 1234567890}
         rule_name = "test_rule"
-        
+
         await logic_engine._execute_actions(
-            actions=actions,
-            trigger_data=trigger_data,
-            rule_id=rule_id,
-            rule_name=rule_name
+            actions=actions, trigger_data=trigger_data, rule_id=rule_id, rule_name=rule_name
         )
-        
+
         # Verify actuator service was called
         mock_actuator_service.send_command.assert_called_once()
         call_kwargs = mock_actuator_service.send_command.call_args[1]
         assert call_kwargs["esp_id"] == "ESP_TEST_001"
         assert call_kwargs["gpio"] == 5
         assert call_kwargs["duration"] == 10
-    
+
     @pytest.mark.asyncio
     async def test_duration_seconds(self, logic_engine: LogicEngine, mock_actuator_service):
         """Test that duration_seconds works (existing behavior)."""
@@ -127,22 +122,19 @@ class TestLogicEngineSchemaCompatibility:
                 "duration_seconds": 30,  # Existing field name
             }
         ]
-        
+
         rule_id = uuid.uuid4()
         trigger_data = {"type": "sensor", "timestamp": 1234567890}
         rule_name = "test_rule"
-        
+
         await logic_engine._execute_actions(
-            actions=actions,
-            trigger_data=trigger_data,
-            rule_id=rule_id,
-            rule_name=rule_name
+            actions=actions, trigger_data=trigger_data, rule_id=rule_id, rule_name=rule_name
         )
-        
+
         # Verify duration was read correctly
         call_kwargs = mock_actuator_service.send_command.call_args[1]
         assert call_kwargs["duration"] == 30
-    
+
     @pytest.mark.asyncio
     async def test_duration_field(self, logic_engine: LogicEngine, mock_actuator_service):
         """Test that duration field works (schema compatibility fix)."""
@@ -156,22 +148,19 @@ class TestLogicEngineSchemaCompatibility:
                 "duration": 60,  # Schema allows this, not just "duration_seconds"
             }
         ]
-        
+
         rule_id = uuid.uuid4()
         trigger_data = {"type": "sensor", "timestamp": 1234567890}
         rule_name = "test_rule"
-        
+
         await logic_engine._execute_actions(
-            actions=actions,
-            trigger_data=trigger_data,
-            rule_id=rule_id,
-            rule_name=rule_name
+            actions=actions, trigger_data=trigger_data, rule_id=rule_id, rule_name=rule_name
         )
-        
+
         # Verify duration was read correctly
         call_kwargs = mock_actuator_service.send_command.call_args[1]
         assert call_kwargs["duration"] == 60
-    
+
     @pytest.mark.asyncio
     async def test_duration_fallback(self, logic_engine: LogicEngine, mock_actuator_service):
         """Test that duration_seconds takes precedence over duration."""
@@ -186,22 +175,19 @@ class TestLogicEngineSchemaCompatibility:
                 "duration": 60,  # Should be ignored
             }
         ]
-        
+
         rule_id = uuid.uuid4()
         trigger_data = {"type": "sensor", "timestamp": 1234567890}
         rule_name = "test_rule"
-        
+
         await logic_engine._execute_actions(
-            actions=actions,
-            trigger_data=trigger_data,
-            rule_id=rule_id,
-            rule_name=rule_name
+            actions=actions, trigger_data=trigger_data, rule_id=rule_id, rule_name=rule_name
         )
-        
+
         # Verify duration_seconds was used
         call_kwargs = mock_actuator_service.send_command.call_args[1]
         assert call_kwargs["duration"] == 30
-    
+
     @pytest.mark.asyncio
     async def test_duration_default_zero(self, logic_engine: LogicEngine, mock_actuator_service):
         """Test that duration defaults to 0 if neither field is provided."""
@@ -215,21 +201,15 @@ class TestLogicEngineSchemaCompatibility:
                 # No duration fields
             }
         ]
-        
+
         rule_id = uuid.uuid4()
         trigger_data = {"type": "sensor", "timestamp": 1234567890}
         rule_name = "test_rule"
-        
+
         await logic_engine._execute_actions(
-            actions=actions,
-            trigger_data=trigger_data,
-            rule_id=rule_id,
-            rule_name=rule_name
+            actions=actions, trigger_data=trigger_data, rule_id=rule_id, rule_name=rule_name
         )
-        
+
         # Verify duration defaults to 0
         call_kwargs = mock_actuator_service.send_command.call_args[1]
         assert call_kwargs["duration"] == 0
-
-
-

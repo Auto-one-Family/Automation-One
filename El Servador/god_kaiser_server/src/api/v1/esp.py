@@ -42,8 +42,6 @@ from ...schemas import (
     ESPApprovalRequest,
     ESPApprovalResponse,
     ESPCommandResponse,
-    ESPConfigResponse,
-    ESPConfigUpdate,
     ESPDeviceCreate,
     ESPDeviceListResponse,
     ESPDeviceResponse,
@@ -59,7 +57,7 @@ from ...schemas import (
 )
 from ...schemas.esp import GpioStatusResponse, GpioUsageItem
 from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
-from ...schemas.common import PaginationMeta, PaginationParams
+from ...schemas.common import PaginationMeta
 from ..deps import ActiveUser, DBSession, OperatorUser, get_mqtt_publisher
 
 logger = get_logger(__name__)
@@ -91,9 +89,7 @@ def _extract_mock_fields(device) -> tuple[Optional[bool], Optional[int]]:
     heartbeat_interval = sim_config.get("heartbeat_interval")
 
     # Convert to int if present (DB stores as float)
-    heartbeat_interval_seconds = (
-        int(heartbeat_interval) if heartbeat_interval is not None else None
-    )
+    heartbeat_interval_seconds = int(heartbeat_interval) if heartbeat_interval is not None else None
 
     return auto_heartbeat, heartbeat_interval_seconds
 
@@ -113,14 +109,16 @@ async def list_devices(
     db: DBSession,
     current_user: ActiveUser,
     zone_id: Annotated[Optional[str], Query(description="Filter by zone ID")] = None,
-    status_filter: Annotated[Optional[str], Query(alias="status", description="Filter by status")] = None,
+    status_filter: Annotated[
+        Optional[str], Query(alias="status", description="Filter by status")
+    ] = None,
     hardware_type: Annotated[Optional[str], Query(description="Filter by hardware type")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> ESPDeviceListResponse:
     """
     List all ESP devices.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
@@ -129,14 +127,14 @@ async def list_devices(
         hardware_type: Optional hardware type filter
         page: Page number
         page_size: Items per page
-        
+
     Returns:
         Paginated list of ESP devices
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     # Get all devices (with filters)
     # By default, exclude pending_approval devices - they should be accessed via /devices/pending
     if zone_id:
@@ -151,13 +149,13 @@ async def list_devices(
     # Filter out pending_approval devices unless explicitly requested
     if status_filter != "pending_approval":
         devices = [d for d in devices if d.status != "pending_approval"]
-    
+
     # Apply pagination
     total_items = len(devices)
     start_idx = (page - 1) * page_size
     end_idx = start_idx + page_size
     paginated_devices = devices[start_idx:end_idx]
-    
+
     # Build response with sensor/actuator counts
     device_responses = []
     for device in paginated_devices:
@@ -167,29 +165,31 @@ async def list_devices(
         # Extract Mock-specific fields
         auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
 
-        device_responses.append(ESPDeviceResponse(
-            id=device.id,
-            device_id=device.device_id,
-            name=device.name,
-            zone_id=device.zone_id,
-            zone_name=device.zone_name,
-            is_zone_master=device.is_zone_master,
-            ip_address=device.ip_address,
-            mac_address=device.mac_address,
-            firmware_version=device.firmware_version,
-            hardware_type=device.hardware_type,
-            capabilities=device.capabilities,
-            status=device.status,
-            last_seen=device.last_seen,
-            metadata=device.device_metadata,
-            sensor_count=sensor_count,
-            actuator_count=actuator_count,
-            auto_heartbeat=auto_heartbeat,
-            heartbeat_interval_seconds=heartbeat_interval_seconds,
-            created_at=device.created_at,
-            updated_at=device.updated_at,
-        ))
-    
+        device_responses.append(
+            ESPDeviceResponse(
+                id=device.id,
+                device_id=device.device_id,
+                name=device.name,
+                zone_id=device.zone_id,
+                zone_name=device.zone_name,
+                is_zone_master=device.is_zone_master,
+                ip_address=device.ip_address,
+                mac_address=device.mac_address,
+                firmware_version=device.firmware_version,
+                hardware_type=device.hardware_type,
+                capabilities=device.capabilities,
+                status=device.status,
+                last_seen=device.last_seen,
+                metadata=device.device_metadata,
+                sensor_count=sensor_count,
+                actuator_count=actuator_count,
+                auto_heartbeat=auto_heartbeat,
+                heartbeat_interval_seconds=heartbeat_interval_seconds,
+                created_at=device.created_at,
+                updated_at=device.updated_at,
+            )
+        )
+
     return ESPDeviceListResponse(
         success=True,
         data=device_responses,
@@ -243,19 +243,35 @@ async def list_pending_devices(
         last_rssi = metadata.get("last_wifi_rssi")
         last_sensors = metadata.get("last_sensor_count")
         last_actuators = metadata.get("last_actuator_count")
-        pending_devices.append(PendingESPDevice(
-            device_id=device.device_id,
-            discovered_at=device.discovered_at or device.created_at,
-            last_seen=device.last_seen,  # Current activity timestamp (for UI "vor X Zeit")
-            ip_address=device.ip_address,  # IP from heartbeat wifi_ip field
-            zone_id=metadata.get("zone_id"),
-            heap_free=last_heap if last_heap is not None else initial_heartbeat.get("heap_free", initial_heartbeat.get("free_heap")),
-            wifi_rssi=last_rssi if last_rssi is not None else initial_heartbeat.get("wifi_rssi"),
-            sensor_count=last_sensors if last_sensors is not None else initial_heartbeat.get("sensor_count", 0),
-            actuator_count=last_actuators if last_actuators is not None else initial_heartbeat.get("actuator_count", 0),
-            heartbeat_count=metadata.get("heartbeat_count", 0),
-            hardware_type=device.hardware_type,  # From auto-registration
-        ))
+        pending_devices.append(
+            PendingESPDevice(
+                device_id=device.device_id,
+                discovered_at=device.discovered_at or device.created_at,
+                last_seen=device.last_seen,  # Current activity timestamp (for UI "vor X Zeit")
+                ip_address=device.ip_address,  # IP from heartbeat wifi_ip field
+                zone_id=metadata.get("zone_id"),
+                heap_free=(
+                    last_heap
+                    if last_heap is not None
+                    else initial_heartbeat.get("heap_free", initial_heartbeat.get("free_heap"))
+                ),
+                wifi_rssi=(
+                    last_rssi if last_rssi is not None else initial_heartbeat.get("wifi_rssi")
+                ),
+                sensor_count=(
+                    last_sensors
+                    if last_sensors is not None
+                    else initial_heartbeat.get("sensor_count", 0)
+                ),
+                actuator_count=(
+                    last_actuators
+                    if last_actuators is not None
+                    else initial_heartbeat.get("actuator_count", 0)
+                ),
+                heartbeat_count=metadata.get("heartbeat_count", 0),
+                hardware_type=device.hardware_type,  # From auto-registration
+            )
+        )
 
     return PendingDevicesListResponse(
         success=True,
@@ -286,29 +302,29 @@ async def get_device(
 ) -> ESPDeviceResponse:
     """
     Get ESP device by device_id.
-    
+
     Args:
         esp_id: ESP device ID (e.g., ESP_12AB34CD)
         db: Database session
         current_user: Authenticated user
-        
+
     Returns:
         ESP device details
-        
+
     Raises:
         HTTPException: 404 if not found
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     sensor_count = await sensor_repo.count_by_esp(device.id)
     actuator_count = await actuator_repo.count_by_esp(device.id)
 
@@ -362,20 +378,20 @@ async def register_device(
 ) -> ESPDeviceResponse:
     """
     Register a new ESP device.
-    
+
     Args:
         request: Device registration data
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Registered device details
-        
+
     Raises:
         HTTPException: 400 if device already exists
     """
     esp_repo = ESPRepository(db)
-    
+
     # Check if device already exists
     existing = await esp_repo.get_by_device_id(request.device_id)
     if existing:
@@ -383,10 +399,10 @@ async def register_device(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"ESP device '{request.device_id}' already registered",
         )
-    
+
     # Create device
     from ...db.models.esp import ESPDevice
-    
+
     device = ESPDevice(
         device_id=request.device_id,
         name=request.name,
@@ -401,12 +417,12 @@ async def register_device(
         status="pending_approval",
         device_metadata={},
     )
-    
+
     db.add(device)
     await db.flush()
     await db.refresh(device)
     await db.commit()
-    
+
     logger.info(f"ESP device registered: {device.device_id} by {current_user.username}")
 
     # Extract Mock-specific fields (will be None for newly registered real ESPs)
@@ -459,32 +475,32 @@ async def update_device(
 ) -> ESPDeviceResponse:
     """
     Update ESP device.
-    
+
     Args:
         esp_id: ESP device ID
         request: Update data
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Updated device details
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Update fields
     update_data = request.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(device, field, value)
-    
+
     await db.flush()
     await db.commit()
 
@@ -498,6 +514,7 @@ async def update_device(
     if device.hardware_type == "MOCK_ESP32":
         try:
             from ..deps import get_simulation_scheduler
+
             scheduler = get_simulation_scheduler()
             if scheduler.is_mock_active(esp_id):
                 await scheduler.trigger_heartbeat(esp_id)
@@ -598,7 +615,9 @@ async def delete_device(
     await db.delete(device)
     await db.commit()
 
-    logger.warning(f"ESP device deleted: {esp_id} (including {len(sensors)} sensors, {len(actuators)} actuators) by {current_user.username}")
+    logger.warning(
+        f"ESP device deleted: {esp_id} (including {len(sensors)} sensors, {len(actuators)} actuators) by {current_user.username}"
+    )
 
 
 # =============================================================================
@@ -642,26 +661,26 @@ async def restart_device(
 ) -> ESPCommandResponse:
     """
     Send restart command to ESP.
-    
+
     Args:
         esp_id: ESP device ID
         request: Restart parameters
         db: Database session
         current_user: Operator or admin user
         publisher: MQTT publisher
-        
+
     Returns:
         Command response
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Publish restart command
     success = publisher.publish_system_command(
         esp_id=esp_id,
@@ -671,9 +690,9 @@ async def restart_device(
             "reason": request.reason or f"Manual restart by {current_user.username}",
         },
     )
-    
+
     logger.info(f"Restart command sent to {esp_id} by {current_user.username}")
-    
+
     return ESPCommandResponse(
         success=success,
         message="Restart command sent" if success else "Failed to send restart command",
@@ -708,14 +727,14 @@ async def reset_device(
 ) -> ESPCommandResponse:
     """
     Send factory reset command to ESP.
-    
+
     Args:
         esp_id: ESP device ID
         request: Reset parameters (must confirm=True)
         db: Database session
         current_user: Operator or admin user
         publisher: MQTT publisher
-        
+
     Returns:
         Command response
     """
@@ -724,16 +743,16 @@ async def reset_device(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Factory reset requires confirm=true",
         )
-    
+
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Publish factory reset command
     success = publisher.publish_system_command(
         esp_id=esp_id,
@@ -743,9 +762,9 @@ async def reset_device(
             "initiated_by": current_user.username,
         },
     )
-    
+
     logger.warning(f"Factory reset sent to {esp_id} by {current_user.username}")
-    
+
     return ESPCommandResponse(
         success=success,
         message="Factory reset command sent" if success else "Failed to send reset command",
@@ -777,27 +796,27 @@ async def get_device_health(
 ) -> ESPHealthResponse:
     """
     Get ESP device health metrics.
-    
+
     Args:
         esp_id: ESP device ID
         db: Database session
         current_user: Authenticated user
-        
+
     Returns:
         Health metrics
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Get latest health from device_metadata (populated by heartbeat handler)
     health_data = device.device_metadata.get("health", {}) if device.device_metadata else {}
-    
+
     # Format uptime
     uptime_formatted = None
     if "uptime" in health_data:
@@ -806,9 +825,9 @@ async def get_device_health(
         hours = (uptime % 86400) // 3600
         minutes = (uptime % 3600) // 60
         uptime_formatted = f"{days}d {hours}h {minutes}m"
-    
+
     from ...schemas import ESPHealthMetrics
-    
+
     metrics = None
     if health_data:
         metrics = ESPHealthMetrics(
@@ -819,7 +838,7 @@ async def get_device_health(
             actuator_count=health_data.get("actuator_count", 0),
             timestamp=health_data.get("timestamp", 0),
         )
-    
+
     return ESPHealthResponse(
         success=True,
         device_id=esp_id,
@@ -901,10 +920,10 @@ async def get_gpio_status(
                 {
                     "i2c_address": f"0x{s.i2c_address:02X}" if s.i2c_address else None,
                     "sensor_type": s.sensor_type,
-                    "sensor_name": s.sensor_name
+                    "sensor_name": s.sensor_name,
                 }
                 for s in i2c_sensors
-            ]
+            ],
         }
 
     # OneWire Bus Info (group by GPIO)
@@ -913,18 +932,16 @@ async def get_gpio_status(
         gpio = sensor.gpio or 4  # Default to GPIO 4 if NULL
         if gpio not in onewire_by_gpio:
             onewire_by_gpio[gpio] = []
-        onewire_by_gpio[gpio].append({
-            "onewire_address": sensor.onewire_address,
-            "sensor_type": sensor.sensor_type,
-            "sensor_name": sensor.sensor_name
-        })
+        onewire_by_gpio[gpio].append(
+            {
+                "onewire_address": sensor.onewire_address,
+                "sensor_type": sensor.sensor_type,
+                "sensor_name": sensor.sensor_name,
+            }
+        )
 
     onewire_buses = [
-        {
-            "gpio": gpio,
-            "is_available": True,  # OneWire bus is always shareable
-            "devices": devices
-        }
+        {"gpio": gpio, "is_available": True, "devices": devices}  # OneWire bus is always shareable
         for gpio, devices in onewire_by_gpio.items()
     ]
 
@@ -932,14 +949,13 @@ async def get_gpio_status(
     # All GPIOs except reserved ones are available
     # ESP32 WROOM: GPIO 0-39 (exclude input-only 34-39 for output)
     all_gpios = set(range(0, 40))
-    available_gpios = [g for g in all_gpios if g not in reserved_gpios and g not in [34, 35, 36, 37, 38, 39]]
+    available_gpios = [
+        g for g in all_gpios if g not in reserved_gpios and g not in [34, 35, 36, 37, 38, 39]
+    ]
 
     # Use GpioValidationService for backwards-compat "reserved" field
     gpio_validator = GpioValidationService(
-        session=db,
-        sensor_repo=sensor_repo,
-        actuator_repo=actuator_repo,
-        esp_repo=esp_repo
+        session=db, sensor_repo=sensor_repo, actuator_repo=actuator_repo, esp_repo=esp_repo
     )
 
     used_gpios = await gpio_validator.get_all_used_gpios(device.id)
@@ -950,7 +966,7 @@ async def get_gpio_status(
             component=g["component"],
             name=g.get("name"),
             id=g.get("id"),
-            source=g["source"]
+            source=g["source"],
         )
         for g in used_gpios
     ]
@@ -997,37 +1013,37 @@ async def assign_kaiser(
 ) -> AssignKaiserResponse:
     """
     Assign ESP to Kaiser node.
-    
+
     Args:
         esp_id: ESP device ID
         request: Kaiser assignment
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Assignment response
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     previous_kaiser = device.device_metadata.get("kaiser_id") if device.device_metadata else None
-    
+
     # Update device_metadata with Kaiser assignment
     metadata = device.device_metadata or {}
     metadata["kaiser_id"] = request.kaiser_id
     device.device_metadata = metadata
-    
+
     await db.flush()
     await db.commit()
-    
+
     logger.info(f"ESP {esp_id} assigned to Kaiser {request.kaiser_id} by {current_user.username}")
-    
+
     return AssignKaiserResponse(
         success=True,
         message=f"ESP assigned to Kaiser '{request.kaiser_id}'",
@@ -1054,29 +1070,29 @@ async def get_discovery(
 ) -> ESPDiscoveryResponse:
     """
     Get discovered ESP devices.
-    
+
     Returns devices found via mDNS or the discovery MQTT topic.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
-        
+
     Returns:
         Discovery results
     """
     esp_repo = ESPRepository(db)
-    
+
     # Get all registered devices
     registered_devices = await esp_repo.get_all()
-    registered_ids = {d.device_id for d in registered_devices}
-    
+    {d.device_id for d in registered_devices}
+
     # In a full implementation, this would query:
     # 1. mDNS discovered devices
     # 2. Discovery MQTT topic (kaiser/god/discovery/esp32_nodes)
     # For now, return empty list (discovery handled by MQTT handler)
-    
+
     discovered: List[DiscoveredESP] = []
-    
+
     return ESPDiscoveryResponse(
         success=True,
         message="Discovery results",
@@ -1111,36 +1127,36 @@ async def approve_device(
 ) -> ESPApprovalResponse:
     """
     Approve a pending ESP device.
-    
+
     After approval, device will become 'online' on next heartbeat.
-    
+
     Args:
         esp_id: ESP device ID
         request: Approval request with optional name/zone
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Approval response
-        
+
     Raises:
         HTTPException: 404 if not found, 400 if not pending
     """
     esp_repo = ESPRepository(db)
     device = await esp_repo.get_by_device_id(esp_id)
-    
+
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     if device.status not in ("pending_approval", "rejected"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Device '{esp_id}' is not pending approval (status: {device.status})",
         )
-    
+
     # Capture old status before update
     old_status = device.status
 
@@ -1182,18 +1198,22 @@ async def approve_device(
     # Broadcast approval event
     try:
         from ...websocket.manager import WebSocketManager
+
         ws_manager = await WebSocketManager.get_instance()
-        await ws_manager.broadcast("device_approved", {
-            "device_id": esp_id,  # Frontend expects device_id, not esp_id
-            "approved_by": current_user.username,
-            "approved_at": device.approved_at.isoformat(),
-            "status": "approved",
-        })
+        await ws_manager.broadcast(
+            "device_approved",
+            {
+                "device_id": esp_id,  # Frontend expects device_id, not esp_id
+                "approved_by": current_user.username,
+                "approved_at": device.approved_at.isoformat(),
+                "status": "approved",
+            },
+        )
     except Exception as e:
         logger.warning(f"Failed to broadcast device_approved: {e}")
 
     logger.info(f"✅ Device approved: {esp_id} by {current_user.username}")
-    
+
     return ESPApprovalResponse(
         success=True,
         message=f"Device '{esp_id}' approved successfully",
@@ -1223,30 +1243,30 @@ async def reject_device(
 ) -> ESPApprovalResponse:
     """
     Reject a pending ESP device.
-    
+
     Rejected devices are ignored for 5 minutes, then can rediscover.
-    
+
     Args:
         esp_id: ESP device ID
         request: Rejection request with reason
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Rejection response
-        
+
     Raises:
         HTTPException: 404 if not found, 400 if not in valid state
     """
     esp_repo = ESPRepository(db)
     device = await esp_repo.get_by_device_id(esp_id)
-    
+
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     if device.status not in ("pending_approval", "approved", "online"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1285,18 +1305,24 @@ async def reject_device(
     # Broadcast rejection event
     try:
         from ...websocket.manager import WebSocketManager
+
         ws_manager = await WebSocketManager.get_instance()
-        await ws_manager.broadcast("device_rejected", {
-            "device_id": esp_id,  # Frontend expects device_id, not esp_id
-            "rejection_reason": request.reason,  # Frontend expects rejection_reason, not reason
-            "rejected_at": device.last_rejection_at.isoformat(),
-            "cooldown_until": None,  # No cooldown implemented yet
-        })
+        await ws_manager.broadcast(
+            "device_rejected",
+            {
+                "device_id": esp_id,  # Frontend expects device_id, not esp_id
+                "rejection_reason": request.reason,  # Frontend expects rejection_reason, not reason
+                "rejected_at": device.last_rejection_at.isoformat(),
+                "cooldown_until": None,  # No cooldown implemented yet
+            },
+        )
     except Exception as e:
         logger.warning(f"Failed to broadcast device_rejected: {e}")
 
-    logger.warning(f"❌ Device rejected: {esp_id} by {current_user.username}, reason: {request.reason}")
-    
+    logger.warning(
+        f"❌ Device rejected: {esp_id} by {current_user.username}, reason: {request.reason}"
+    )
+
     return ESPApprovalResponse(
         success=True,
         message=f"Device '{esp_id}' rejected",

@@ -78,9 +78,7 @@ class SubzoneAssignRequest(BaseModel):
     def validate_subzone_id_format(cls, v: str) -> str:
         """Validate subzone_id contains only valid characters."""
         if not v.replace("_", "").isalnum():
-            raise ValueError(
-                "subzone_id must contain only letters, numbers, and underscores"
-            )
+            raise ValueError("subzone_id must contain only letters, numbers, and underscores")
         return v.lower()
 
     @field_validator("assigned_gpios")
@@ -363,4 +361,3 @@ class SubzoneListResponse(BaseResponse):
     zone_id: Optional[str] = Field(None)
     subzones: List[SubzoneInfo] = Field(default_factory=list)
     total_count: int = Field(0)
-

@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from .mocks.mock_esp32_client import ActuatorState, MockESP32Client
+from .mocks.mock_esp32_client import MockESP32Client
 
 
 class ActuatorTimeoutSimulator:
@@ -42,9 +42,9 @@ class ActuatorTimeoutSimulator:
 
     def activate_actuator(self, gpio: int, value: float = 1.0, mode: str = "digital"):
         """Activate an actuator and record its start time."""
-        response = self.mock.handle_command("actuator_set", {
-            "gpio": gpio, "value": value, "mode": mode
-        })
+        response = self.mock.handle_command(
+            "actuator_set", {"gpio": gpio, "value": value, "mode": mode}
+        )
         if response.get("status") == "ok":
             self._actuator_start_times[gpio] = self._simulated_millis
         return response
@@ -84,8 +84,9 @@ class ActuatorTimeoutSimulator:
 
                 # Publish alert (mirrors publishTimeoutAlert)
                 self.mock._publish_actuator_alert(
-                    gpio, "runtime_protection",
-                    f"Actuator on GPIO {gpio} stopped after {runtime}ms (max: {actuator.safety_timeout_ms}ms)"
+                    gpio,
+                    "runtime_protection",
+                    f"Actuator on GPIO {gpio} stopped after {runtime}ms (max: {actuator.safety_timeout_ms}ms)",
                 )
                 stopped.append(gpio)
 
@@ -187,8 +188,8 @@ class TestActuatorTimeout:
         sim.advance_time(2001)  # gpio5: 3001ms, gpio6: 2001ms
         sim.process_actuator_loops()
 
-        assert sim.mock.get_actuator_state(5).state is False   # Timed out
-        assert sim.mock.get_actuator_state(6).state is True    # Still running
+        assert sim.mock.get_actuator_state(5).state is False  # Timed out
+        assert sim.mock.get_actuator_state(6).state is True  # Still running
 
     def test_pwm_actuator_zero_after_timeout(self, sim):
         """AT-007: PWM actuator PWM value goes to 0 after timeout."""

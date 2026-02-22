@@ -6,12 +6,12 @@ Benötigt: Event-Loop, Thread-Pool
 
 Phase 3 Test-Suite: Handler Registration, Message Routing, Error Isolation, Event Loop Binding.
 """
+
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from src.mqtt.subscriber import Subscriber
-from src.mqtt.topics import TopicBuilder
 
 
 class TestHandlerRegistration:
@@ -25,6 +25,7 @@ class TestHandlerRegistration:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler(topic, payload):
                     return True
 
@@ -43,6 +44,7 @@ class TestHandlerRegistration:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler1(topic, payload):
                     return True
 
@@ -66,6 +68,7 @@ class TestHandlerRegistration:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler(topic, payload):
                     return True
 
@@ -99,6 +102,7 @@ class TestHandlerRegistration:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler1(topic, payload):
                     return True
 
@@ -127,6 +131,7 @@ class TestMessageRouting:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def sensor_handler(topic, payload):
                     return True
 
@@ -145,6 +150,7 @@ class TestMessageRouting:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler(topic, payload):
                     return True
 
@@ -163,6 +169,7 @@ class TestMessageRouting:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def heartbeat_handler(topic, payload):
                     return True
 
@@ -202,6 +209,7 @@ class TestErrorIsolation:
     def test_handler_not_found_logs_warning(self, caplog):
         """Handler not found logs warning but doesn't fail."""
         import logging
+
         caplog.set_level(logging.WARNING)
 
         with patch("src.mqtt.subscriber.MQTTClient") as mock_client_class:
@@ -318,6 +326,7 @@ class TestSubscription:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler1(topic, payload):
                     return True
 
@@ -343,6 +352,7 @@ class TestSubscription:
 
             subscriber = Subscriber(max_workers=2)
             try:
+
                 async def handler(topic, payload):
                     return True
 
@@ -373,6 +383,7 @@ class TestShutdown:
     def test_shutdown_returns_stats(self, caplog):
         """Shutdown logs performance stats."""
         import logging
+
         caplog.set_level(logging.INFO)
 
         with patch("src.mqtt.subscriber.MQTTClient") as mock_client_class:
@@ -455,7 +466,9 @@ class TestInitialization:
 
             subscriber = Subscriber(max_workers=2)
             try:
-                mock_client.set_on_message_callback.assert_called_once_with(subscriber._route_message)
+                mock_client.set_on_message_callback.assert_called_once_with(
+                    subscriber._route_message
+                )
             finally:
                 subscriber.shutdown(wait=False)
 

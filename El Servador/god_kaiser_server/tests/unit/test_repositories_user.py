@@ -4,7 +4,6 @@ Tests for user authentication and management operations
 """
 
 import pytest
-import pytest_asyncio
 
 from src.core.security import verify_password
 from src.db.repositories.user_repo import UserRepository
@@ -173,7 +172,7 @@ class TestUserRepositoryGetActiveUsers:
         )
 
         # Create inactive user
-        inactive_user = await user_repo.create(
+        await user_repo.create(
             username="inactive",
             email="inactive@example.com",
             password_hash="hash",
@@ -219,4 +218,3 @@ class TestUserRepositoryGetByRole:
         assert len(admins) == 2
         usernames = {u.username for u in admins}
         assert usernames == {"admin1", "admin2"}
-

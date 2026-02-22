@@ -6,7 +6,6 @@ Tests für MQTT Offline Buffer gemäß Paket C.
 
 import asyncio
 import pytest
-import time
 
 from src.mqtt.offline_buffer import MQTTOfflineBuffer
 

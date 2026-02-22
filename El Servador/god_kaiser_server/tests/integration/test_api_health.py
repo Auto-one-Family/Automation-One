@@ -40,13 +40,13 @@ def auth_headers(test_user: User):
 
 class TestBasicHealth:
     """Test basic health endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_health_check(self):
         """Test basic health check (no auth required)."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/health/")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -54,13 +54,13 @@ class TestBasicHealth:
         assert data["status"] in ["healthy", "degraded", "unhealthy"]
         assert "version" in data
         assert "uptime_seconds" in data
-    
+
     @pytest.mark.asyncio
     async def test_root_health(self):
         """Test root endpoint health."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["service"] == "God-Kaiser Server"
@@ -69,7 +69,7 @@ class TestBasicHealth:
 
 class TestDetailedHealth:
     """Test detailed health endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_detailed_health(self, auth_headers: dict):
         """Test detailed health check (requires auth)."""
@@ -78,7 +78,7 @@ class TestDetailedHealth:
                 "/api/v1/health/detailed",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -86,19 +86,19 @@ class TestDetailedHealth:
         assert "mqtt" in data
         assert "websocket" in data
         assert "system" in data
-    
+
     @pytest.mark.asyncio
     async def test_detailed_health_no_auth(self):
         """Test detailed health without auth fails."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/health/detailed")
-        
+
         assert response.status_code == 401
 
 
 class TestESPHealth:
     """Test ESP health summary endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_esp_health_summary(self, auth_headers: dict):
         """Test ESP health summary."""
@@ -107,7 +107,7 @@ class TestESPHealth:
                 "/api/v1/health/esp",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -119,13 +119,13 @@ class TestESPHealth:
 
 class TestPrometheusMetrics:
     """Test Prometheus metrics endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_prometheus_metrics(self):
         """Test Prometheus metrics export."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/health/metrics")
-        
+
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/plain")
         # Check for Prometheus format
@@ -137,25 +137,24 @@ class TestPrometheusMetrics:
 
 class TestKubernetesProbes:
     """Test Kubernetes probe endpoints."""
-    
+
     @pytest.mark.asyncio
     async def test_liveness_probe(self):
         """Test liveness probe."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/health/live")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["alive"] is True
-    
+
     @pytest.mark.asyncio
     async def test_readiness_probe(self):
         """Test readiness probe."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/health/ready")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "ready" in data
         assert "checks" in data
-

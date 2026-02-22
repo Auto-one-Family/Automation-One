@@ -91,7 +91,7 @@ class TestBMP280PressureProcessor:
 
         # Manual calculation
         factor = 1 - (altitude / 44330.0)
-        expected_pressure = pressure_measured / (factor ** 5.255)
+        expected_pressure = pressure_measured / (factor**5.255)
 
         assert result.value == pytest.approx(expected_pressure, rel=0.01)
 

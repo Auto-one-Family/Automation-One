@@ -46,11 +46,7 @@ logger = get_logger(__name__)
 
 def _is_mock_esp(device_id: str) -> bool:
     """Check if device ID indicates a mock ESP."""
-    return (
-        device_id.startswith('ESP_MOCK_') or
-        device_id.startswith('MOCK_') or
-        'MOCK' in device_id
-    )
+    return device_id.startswith("ESP_MOCK_") or device_id.startswith("MOCK_") or "MOCK" in device_id
 
 
 class ZoneService:
@@ -171,7 +167,9 @@ class ZoneService:
         # mqtt_sent indicates whether ESP received the assignment via MQTT
         return ZoneAssignResponse(
             success=True,  # DB update succeeded
-            message="Zone assignment saved" if mqtt_sent else "Zone assignment saved (MQTT offline)",
+            message=(
+                "Zone assignment saved" if mqtt_sent else "Zone assignment saved (MQTT offline)"
+            ),
             device_id=device_id,
             zone_id=zone_id,
             master_zone_id=master_zone_id,
@@ -323,9 +321,7 @@ class ZoneService:
 
         elif status == "error":
             # Log error but keep pending assignment for retry
-            logger.error(
-                f"Zone assignment failed for {device_id}: {message or 'Unknown error'}"
-            )
+            logger.error(f"Zone assignment failed for {device_id}: {message or 'Unknown error'}")
             return False
 
         else:

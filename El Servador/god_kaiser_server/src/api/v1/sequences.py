@@ -6,6 +6,7 @@ Endpoints für Sequenz-Monitoring und -Steuerung.
 Phase: 3 - Sequence Action Executor
 Status: IMPLEMENTED
 """
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
