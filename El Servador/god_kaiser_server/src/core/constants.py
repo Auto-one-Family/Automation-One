@@ -102,8 +102,9 @@ def get_topic_with_kaiser_id(topic_template: str, **kwargs) -> str:
 # =============================================================================
 
 # ESP32 WROOM
+# Canonical source: SYSTEM_RESERVED_PINS in services/gpio_validation_service.py
 GPIO_RANGE_ESP32_WROOM = range(0, 40)
-GPIO_RESERVED_ESP32_WROOM = {6, 7, 8, 9, 10, 11}  # Flash pins
+GPIO_RESERVED_ESP32_WROOM = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12}  # Boot, UART, Flash, MTDI Strapping
 
 # XIAO ESP32-C3
 GPIO_RANGE_XIAO_ESP32C3 = range(0, 22)

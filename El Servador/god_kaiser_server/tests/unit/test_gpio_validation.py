@@ -25,6 +25,8 @@ from src.services.gpio_validation_service import (
     GpioValidationResult,
     GpioConflictType,
     SYSTEM_RESERVED_PINS,
+    ADC1_SAFE_PINS,
+    ADC2_WIFI_CONFLICT_PINS,
 )
 
 
@@ -107,8 +109,8 @@ class TestSystemPinRejection:
         und werden für ANALOG-Sensoren abgelehnt. Daher sind sie hier nicht mehr in der Liste.
         """
         esp_id = uuid.uuid4()
-        # GPIO 21/22 entfernt - sie sind jetzt durch I2C Pin Protection (Fix #3) reserviert
-        non_system_gpios = [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33]
+        # GPIO 21/22 entfernt (I2C Pin Protection), GPIO 12 entfernt (MTDI Strapping)
+        non_system_gpios = [4, 5, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33]
 
         for gpio in non_system_gpios:
             result = await gpio_service.validate_gpio_available(esp_id, gpio)
@@ -658,3 +660,101 @@ class TestI2CPinProtection:
         
         assert result.available, "GPIO 32 should be accepted for ANALOG"
         assert result.conflict_type is None
+
+
+# ==================== MTDI Strapping Pin Protection (GPIO 12) ====================
+
+class TestGpio12StrappingPin:
+    """Tests for GPIO 12 (MTDI strapping pin) rejection.
+
+    GPIO 12 controls flash voltage on ESP32-WROOM. If pulled HIGH during boot,
+    the board may fail to boot or corrupt flash. Must be blocked.
+    """
+
+    @pytest.mark.asyncio
+    async def test_gpio_12_rejected_as_system_pin(self, gpio_service):
+        """GPIO 12 must be rejected — MTDI strapping pin."""
+        esp_id = uuid.uuid4()
+        result = await gpio_service.validate_gpio_available(esp_id, 12)
+
+        assert not result.available
+        assert result.conflict_type == GpioConflictType.SYSTEM
+        assert "12" in result.message
+
+    @pytest.mark.asyncio
+    async def test_gpio_12_in_system_reserved_set(self):
+        """GPIO 12 must be in SYSTEM_RESERVED_PINS."""
+        assert 12 in SYSTEM_RESERVED_PINS
+
+
+# ==================== ADC2 WiFi Conflict Warning ====================
+
+class TestADC2WiFiWarning:
+    """Tests for ADC2 pin warning when used for ANALOG sensors.
+
+    ADC2 pins (0,2,4,12,13,14,15,25,26,27) do not work with analogRead()
+    when WiFi is active. ADC1 pins (32,33,34,35,36,39) are safe.
+    """
+
+    @pytest.mark.asyncio
+    async def test_adc2_pin_4_warns_for_analog_sensor(self, gpio_service):
+        """ADC2 pin 4 should produce warning for ANALOG sensor."""
+        esp_id = uuid.uuid4()
+        result = await gpio_service.validate_gpio_available(
+            esp_id, 4, interface_type="ANALOG"
+        )
+
+        assert result.available, "ADC2 pins are usable, just with warning"
+        assert result.warning is not None
+        assert "ADC2" in result.warning
+        assert "WiFi" in result.warning
+
+    @pytest.mark.asyncio
+    async def test_adc2_pin_25_warns_for_analog_sensor(self, gpio_service):
+        """ADC2 pin 25 should produce warning for ANALOG sensor."""
+        esp_id = uuid.uuid4()
+        result = await gpio_service.validate_gpio_available(
+            esp_id, 25, interface_type="ANALOG"
+        )
+
+        assert result.available
+        assert result.warning is not None
+        assert "ADC2" in result.warning
+
+    @pytest.mark.asyncio
+    async def test_adc1_pin_32_no_warning_for_analog_sensor(self, gpio_service):
+        """ADC1 pin 32 should NOT produce warning for ANALOG sensor."""
+        esp_id = uuid.uuid4()
+        result = await gpio_service.validate_gpio_available(
+            esp_id, 32, interface_type="ANALOG"
+        )
+
+        assert result.available
+        assert result.warning is None
+
+    @pytest.mark.asyncio
+    async def test_adc1_pin_34_no_warning_for_analog_sensor(self, gpio_service):
+        """ADC1 pin 34 — safe for analog sensors, no warning."""
+        esp_id = uuid.uuid4()
+        result = await gpio_service.validate_gpio_available(
+            esp_id, 34, interface_type="ANALOG"
+        )
+
+        assert result.available
+        assert result.warning is None
+
+    @pytest.mark.asyncio
+    async def test_no_warning_for_digital_sensor_on_adc2(self, gpio_service):
+        """DIGITAL sensor on ADC2 pin should NOT produce ADC warning."""
+        esp_id = uuid.uuid4()
+        result = await gpio_service.validate_gpio_available(
+            esp_id, 4, interface_type="DIGITAL"
+        )
+
+        assert result.available
+        assert result.warning is None
+
+    @pytest.mark.asyncio
+    async def test_adc_constants_disjoint(self):
+        """ADC1 and ADC2 pin sets must not overlap."""
+        assert ADC1_SAFE_PINS.isdisjoint(ADC2_WIFI_CONFLICT_PINS)

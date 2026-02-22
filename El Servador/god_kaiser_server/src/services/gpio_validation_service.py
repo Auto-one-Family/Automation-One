@@ -54,6 +54,7 @@ class GpioValidationResult:
     conflict_id: Optional[int] = None         # DB-ID der konfliktierenden Komponente
     esp_reported_owner: Optional[str] = None  # Was der ESP für diesen GPIO meldet
     message: Optional[str] = None             # Menschenlesbare Fehlermeldung
+    warning: Optional[str] = None             # Soft-Warnung (Pin nutzbar, aber suboptimal)
 
 
 @dataclass
@@ -79,6 +80,7 @@ SYSTEM_RESERVED_PINS: Set[int] = {
     9,   # Flash SPI D2
     10,  # Flash SPI D3
     11,  # Flash SPI CMD
+    12,  # MTDI Strapping (Flash-Spannung, muss LOW beim Boot)
 }
 
 # =============================================================================
@@ -95,6 +97,13 @@ INPUT_ONLY_PINS_LEGACY: Set[int] = {34, 35, 36, 39}  # ESP32-WROOM (Fallback)
 # XIAO ESP32-C3: {4, 5} (SDA=4, SCL=5)
 I2C_BUS_PINS_LEGACY: Set[int] = {21, 22}  # ESP32-WROOM (Fallback)
 
+# =============================================================================
+# ADC Pin Constraints (ESP32-WROOM)
+# ADC2 pins do NOT work when WiFi is active — only ADC1 is reliable
+# =============================================================================
+ADC1_SAFE_PINS: Set[int] = {32, 33, 34, 35, 36, 39}
+ADC2_WIFI_CONFLICT_PINS: Set[int] = {0, 2, 4, 12, 13, 14, 15, 25, 26, 27}
+
 # Menschenlesbare Namen für System-Pins
 SYSTEM_PIN_NAMES: Dict[int, str] = {
     0: "Boot-Strapping",
@@ -107,6 +116,7 @@ SYSTEM_PIN_NAMES: Dict[int, str] = {
     9: "Flash D2",
     10: "Flash D3",
     11: "Flash CMD",
+    12: "MTDI Strapping (Flash-Spannung)",
 }
 
 
@@ -367,11 +377,26 @@ class GpioValidationService:
                     )
 
         # =====================================================================
+        # 5. ADC2 Warning für ANALOG-Sensoren (WiFi-Konflikt)
+        # =====================================================================
+        adc_warning: Optional[str] = None
+        if interface_type == "ANALOG" and gpio in ADC2_WIFI_CONFLICT_PINS:
+            adc_warning = (
+                f"GPIO {gpio} nutzt ADC2, der bei aktivem WiFi nicht funktioniert. "
+                f"Empfohlen: ADC1-Pins (32, 33, 34, 35, 36, 39) für zuverlässige Messungen."
+            )
+            logger.info(
+                f"ADC2 warning: ESP {esp_db_id} ({hardware_type}), GPIO {gpio}, "
+                f"interface={interface_type} — ADC2+WiFi conflict"
+            )
+
+        # =====================================================================
         # Alles OK - GPIO ist verfügbar
         # =====================================================================
         return GpioValidationResult(
             available=True,
-            esp_reported_owner=esp_gpio_status.get("owner") if esp_gpio_status else None
+            esp_reported_owner=esp_gpio_status.get("owner") if esp_gpio_status else None,
+            warning=adc_warning
         )
 
     async def get_all_used_gpios(self, esp_db_id: uuid.UUID) -> List[Dict[str, Any]]:

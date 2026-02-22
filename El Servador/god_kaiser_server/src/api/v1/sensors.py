@@ -457,6 +457,11 @@ async def create_or_update_sensor(
                     "message": validation_result.message
                 }
             )
+
+        if validation_result.warning:
+            logger.info(
+                f"GPIO warning for ESP {esp_id}, GPIO {gpio}: {validation_result.warning}"
+            )
     # =========================================================================
 
     # Convert schema fields to model fields
