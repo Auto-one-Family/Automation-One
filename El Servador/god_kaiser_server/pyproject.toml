@@ -9,6 +9,11 @@ packages = [{include = "src"}]
 [tool.poetry.dependencies]
 python = "^3.11"
 # FastAPI Stack
+# KNOWN-CVE: fastapi 0.109.x depends on starlette 0.36.3 which has DoS CVEs:
+#   CVE-2024-24762 (ReDoS, HIGH), CVE-2024-47874 (memory DoS, HIGH).
+#   Upgrading to starlette >=0.40.0 requires FastAPI >=0.115.0 with API changes.
+#   Tracked for next major update. Risk: LOW (not public-facing).
+#   Suppressed in /.trivyignore for CI security scans.
 fastapi = "^0.109.0"
 uvicorn = {extras = ["standard"], version = "^0.27.0"}
 python-multipart = ">=0.0.18,<1.0.0"
