@@ -135,6 +135,7 @@ services:
     build:
       context: ./El Frontend
       dockerfile: Dockerfile
+      target: development
     container_name: automationone-frontend
     logging:
       driver: json-file
