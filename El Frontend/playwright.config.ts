@@ -52,6 +52,7 @@ export default defineConfig({
   // Reporter configuration
   reporter: [
     ['html', { outputFolder: './playwright-report', open: 'never' }],
+    ['junit', { outputFile: './junit-playwright.xml' }],
     ['list'],
     ...(process.env.CI ? [['github' as const]] : []),
   ],

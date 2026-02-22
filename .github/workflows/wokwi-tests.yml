@@ -1893,6 +1893,25 @@ jobs:
           cat error_nvs_corrupt.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::NVS Factory Reset: PASS" || echo "::error::NVS Factory Reset: FAIL (exit $EXIT_CODE)"
 
+      - name: "Error Test 10: Full Factory Reset Recovery"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_factory_reset.yaml \
+            > error_factory_reset.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/system/command" \
+            -m '{"command":"factory_reset","confirm":true}'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_factory_reset.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::Factory Reset: PASS" || echo "::error::Factory Reset: FAIL (exit $EXIT_CODE)"
+
       - name: Stop Mosquitto
         if: always()
         run: docker stop mosquitto && docker rm mosquitto || true

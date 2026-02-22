@@ -126,8 +126,9 @@ jobs:
         with:
           name: playwright-report
           path: |
-            logs/frontend/playwright/playwright-report/
-            logs/frontend/playwright/test-results/
+            El Frontend/playwright-report/
+            El Frontend/test-results/
+            El Frontend/junit-playwright.xml
           retention-days: 7
 
       - name: Upload traces on failure
@@ -158,3 +159,35 @@ jobs:
           POSTGRES_PASSWORD: e2e_test_password
           POSTGRES_DB: god_kaiser_db
           JWT_SECRET_KEY: e2e_test_secret_key_not_for_production
+
+  test-summary:
+    name: Playwright Test Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [e2e-tests]
+    if: always()
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: playwright-report
+          path: results/
+
+      - name: List downloaded files
+        run: |
+          echo "Downloaded artifacts:"
+          find results/ -type f 2>/dev/null || echo "No files found"
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: |
+            results/**/junit-playwright.xml
+          check_name: Playwright E2E Test Results
+          comment_mode: always
