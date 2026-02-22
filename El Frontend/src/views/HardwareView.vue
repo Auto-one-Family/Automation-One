@@ -315,6 +315,46 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
   logger.info(`Zone updated: ${payload.deviceId} → "${payload.zoneName}"`)
 }
 
+// =============================================================================
+// SlideOver handlers: open config panels from ESP detail view
+// =============================================================================
+
+function handleSensorClickFromDetail(payload: { espId: string; gpio: number }) {
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === payload.espId)
+  const sensors = (device?.sensors as any[]) || []
+  const sensor = sensors.find((s: any) => s.gpio === payload.gpio)
+  if (!sensor) return
+
+  configSensorData.value = {
+    espId: payload.espId,
+    gpio: payload.gpio,
+    sensorType: sensor.sensor_type || 'unknown',
+    unit: sensor.unit || '',
+  }
+  showSensorConfig.value = true
+}
+
+function handleActuatorClickFromDetail(payload: { espId: string; gpio: number }) {
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === payload.espId)
+  const actuators = (device?.actuators as any[]) || []
+  const actuator = actuators.find((a: any) => a.gpio === payload.gpio)
+  if (!actuator) return
+
+  configActuatorData.value = {
+    espId: payload.espId,
+    gpio: payload.gpio,
+    actuatorType: actuator.actuator_type || 'relay',
+  }
+  showActuatorConfig.value = true
+}
+
+function handleEspCenterClick() {
+  if (selectedDevice.value) {
+    configEspDevice.value = selectedDevice.value
+    showEspConfig.value = true
+  }
+}
+
 // Rules Activity
 const latestExecution = computed(() => logicStore.recentExecutions[0] ?? null)
 
@@ -431,6 +471,8 @@ function formatTimeAgo(timestamp: number): string {
               @delete="handleDelete"
               @heartbeat="handleHeartbeat"
               @name-updated="handleNameUpdated"
+              @sensor-click="handleSensorClickFromDetail"
+              @actuator-click="handleActuatorClickFromDetail"
             />
           </div>
 

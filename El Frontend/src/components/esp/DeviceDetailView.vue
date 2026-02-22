@@ -43,6 +43,8 @@ const emit = defineEmits<{
   (e: 'delete', deviceId: string): void
   (e: 'heartbeat', deviceId: string): void
   (e: 'name-updated', payload: { deviceId: string; name: string | null }): void
+  (e: 'sensor-click', payload: { espId: string; gpio: number }): void
+  (e: 'actuator-click', payload: { espId: string; gpio: number }): void
 }>()
 
 const espStore = useEspStore()
@@ -62,6 +64,14 @@ function handleSettings(device: ESPDevice) {
 
 function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
   emit('name-updated', payload)
+}
+
+function handleSensorClick(gpio: number) {
+  emit('sensor-click', { espId: espStore.getDeviceId(props.device), gpio })
+}
+
+function handleActuatorClick(gpio: number) {
+  emit('actuator-click', { espId: espStore.getDeviceId(props.device), gpio })
 }
 </script>
 
@@ -91,6 +101,8 @@ function handleNameUpdated(payload: { deviceId: string; name: string | null }) {
         @delete="handleDelete"
         @settings="handleSettings"
         @name-updated="handleNameUpdated"
+        @sensor-click="handleSensorClick"
+        @actuator-click="handleActuatorClick"
       />
     </div>
   </div>
