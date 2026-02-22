@@ -40,6 +40,7 @@ import type { Component } from 'vue'
 import type { LogicRule, SensorCondition, TimeCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
 import { useLogicStore } from '@/stores/logic'
 import { useEspStore } from '@/stores/esp'
+import { useToast } from '@/composables/useToast'
 
 // Vue Flow CSS
 import '@vue-flow/core/dist/style.css'
@@ -60,6 +61,7 @@ const emit = defineEmits<{
 
 const logicStore = useLogicStore()
 const espStore = useEspStore()
+const toast = useToast()
 
 // Vue Flow instance
 const {
@@ -252,9 +254,25 @@ function getDefaultNodeData(type: string, defaults: Record<string, unknown> = {}
   }
 }
 
-// ======================== CONNECT HANDLING ========================
+// ======================== CONNECT HANDLING (with validation) ========================
 
 onConnect((connection: Connection) => {
+  // Validate connection using logic store rules
+  const sourceNode = getNode(connection.source!)
+  const targetNode = getNode(connection.target!)
+
+  const validation = logicStore.isValidConnection(
+    sourceNode?.type,
+    targetNode?.type,
+    connection.source!,
+    connection.target!,
+  )
+
+  if (!validation.valid) {
+    toast.warning(validation.reason || 'Verbindung nicht erlaubt')
+    return
+  }
+
   addEdges([
     {
       id: `e-${connection.source}-${connection.target}-${Date.now()}`,
@@ -267,6 +285,13 @@ onConnect((connection: Connection) => {
       markerEnd: MarkerType.ArrowClosed,
     },
   ])
+
+  // Push to undo history
+  logicStore.pushToHistory(
+    JSON.parse(JSON.stringify(nodes.value)),
+    JSON.parse(JSON.stringify(edges.value))
+  )
+
   emit('graph-changed')
 })
 
