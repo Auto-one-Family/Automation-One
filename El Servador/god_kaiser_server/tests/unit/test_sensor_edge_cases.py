@@ -20,11 +20,10 @@ import math
 import pytest
 from unittest.mock import MagicMock
 
-from src.sensors.sensor_libraries.active.temperature import DS18B20Processor
-from src.sensors.sensor_libraries.active.ph_sensor import PHSensorProcessor
 from src.sensors.sensor_libraries.active.ec_sensor import ECSensorProcessor
 from src.sensors.sensor_libraries.active.humidity import SHT31HumidityProcessor
-from src.sensors.sensor_libraries.active.moisture import MoistureSensorProcessor
+from src.sensors.sensor_libraries.active.ph_sensor import PHSensorProcessor
+from src.sensors.sensor_libraries.active.temperature import DS18B20Processor
 
 # =============================================================================
 # DS18B20 Temperature Sensor Edge Cases
@@ -43,18 +42,18 @@ class TestDS18B20EdgeCases:
         -127°C is the DS18B20 'sensor disconnected' value.
         The processor should flag this as an error, not a valid reading.
         """
-        result = processor.process({"raw_value": -127.0})
+        result = processor.process(-127.0)
         # Should either raise error, return None, or flag as invalid
         assert result is not None  # At minimum, don't crash
 
     def test_minus_55_is_valid_minimum(self, processor):
         """DS18B20 valid range is -55 to +125°C. -55 should be accepted."""
-        result = processor.process({"raw_value": -55.0})
+        result = processor.process(-55.0)
         assert result is not None
 
     def test_plus_125_is_valid_maximum(self, processor):
         """DS18B20 valid range is -55 to +125°C. +125 should be accepted."""
-        result = processor.process({"raw_value": 125.0})
+        result = processor.process(125.0)
         assert result is not None
 
     def test_85c_poweron_reset_value(self, processor):
@@ -62,12 +61,12 @@ class TestDS18B20EdgeCases:
         85°C is the DS18B20 power-on reset default value.
         First reading of 85°C should be treated with suspicion.
         """
-        result = processor.process({"raw_value": 85.0})
+        result = processor.process(85.0)
         assert result is not None  # Should process but may flag as suspicious
 
     def test_zero_celsius_is_valid(self, processor):
         """0°C is a valid temperature, not a sensor error."""
-        result = processor.process({"raw_value": 0.0})
+        result = processor.process(0.0)
         assert result is not None
 
 
@@ -84,18 +83,18 @@ class TestPHSensorEdgeCases:
         return PHSensorProcessor()
 
     def test_ph_zero_is_extreme_but_valid(self, processor):
-        """pH 0 is theoretically possible (strong acid)."""
-        result = processor.process({"raw_value": 0})
+        """pH 0 is theoretically possible (strong acid). ADC value 0."""
+        result = processor.process(0.0)
         assert result is not None
 
     def test_ph_14_is_extreme_but_valid(self, processor):
-        """pH 14 is theoretically possible (strong base)."""
-        result = processor.process({"raw_value": 4095})  # Max ADC value
+        """pH 14 is theoretically possible (strong base). Max ADC value."""
+        result = processor.process(4095.0)
         assert result is not None
 
     def test_ph_adc_mid_range(self, processor):
         """Mid-range ADC value should produce a valid pH around 7."""
-        result = processor.process({"raw_value": 2048})
+        result = processor.process(2048.0)
         assert result is not None
 
 
@@ -113,12 +112,12 @@ class TestECSensorEdgeCases:
 
     def test_ec_zero_distilled_water(self, processor):
         """EC=0 (distilled water) is valid."""
-        result = processor.process({"raw_value": 0})
+        result = processor.process(0.0)
         assert result is not None
 
     def test_ec_very_high_salt_water(self, processor):
         """Very high EC (salt water) should be handled."""
-        result = processor.process({"raw_value": 4095})
+        result = processor.process(4095.0)
         assert result is not None
 
 
@@ -136,12 +135,12 @@ class TestHumiditySensorEdgeCases:
 
     def test_zero_humidity(self, processor):
         """0% RH is extremely dry but valid."""
-        result = processor.process({"raw_value": 0.0, "sensor_type": "humidity"})
+        result = processor.process(0.0)
         assert result is not None
 
     def test_hundred_percent_humidity(self, processor):
         """100% RH (condensation) is valid but indicates potential sensor issue."""
-        result = processor.process({"raw_value": 100.0, "sensor_type": "humidity"})
+        result = processor.process(100.0)
         assert result is not None
 
 
