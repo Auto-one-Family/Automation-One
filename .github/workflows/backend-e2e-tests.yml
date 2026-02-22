@@ -70,12 +70,24 @@ jobs:
           POSTGRES_USER: god_kaiser
           POSTGRES_PASSWORD: ci_password
           POSTGRES_DB: god_kaiser_db
+          # JWT secret to suppress docker-compose warning from base config
+          JWT_SECRET_KEY: ci_test_secret_key_not_for_production
 
       - name: Wait for healthy services
         run: |
           echo "Waiting for services to be healthy..."
           max_attempts=30
           for i in $(seq 1 $max_attempts); do
+            # Check if server container is still running
+            if ! docker ps --filter "name=automationone-server" --filter "status=running" -q | grep -q .; then
+              echo "❌ Server container is not running! Capturing logs..."
+              echo "=== Server Container Logs ==="
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml \
+                logs el-servador --tail 200 || true
+              echo "=== Container Status ==="
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml ps -a
+              exit 1
+            fi
             # Check if server is responding
             if curl -sf http://localhost:8000/api/v1/health/live > /dev/null 2>&1; then
               echo "✅ Server healthy after ${i} attempts"
@@ -83,7 +95,8 @@ jobs:
             fi
             if [ $i -eq $max_attempts ]; then
               echo "❌ Server not healthy after ${max_attempts} attempts"
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml logs el-servador
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml \
+                logs el-servador --tail 200 || true
               exit 1
             fi
             sleep 2
@@ -120,6 +133,7 @@ jobs:
       - name: Run Backend E2E Tests
         working-directory: El Servador/god_kaiser_server
         env:
+          # CI-only test credentials - not real secrets, safe to commit
           E2E_TEST_USER: admin
           E2E_TEST_PASSWORD: Admin123#
         run: |
