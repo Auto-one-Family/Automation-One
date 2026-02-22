@@ -65,17 +65,39 @@ jobs:
 
       - name: Start E2E stack
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --wait
+          docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --wait
           echo "Waiting for services to be healthy..."
           sleep 10
         env:
           DOCKER_BUILDKIT: 1
           COMPOSE_DOCKER_CLI_BUILD: 1
+          # Required by base docker-compose.yml which uses ${VAR} syntax
+          POSTGRES_USER: god_kaiser
+          POSTGRES_PASSWORD: e2e_test_password
+          POSTGRES_DB: god_kaiser_db
+          JWT_SECRET_KEY: e2e_test_secret_key_not_for_production
 
       - name: Verify services
         run: |
           echo "Checking Server health..."
-          curl -f http://localhost:8000/api/v1/health/live || exit 1
+          max_attempts=30
+          for i in $(seq 1 $max_attempts); do
+            if ! docker ps --filter "name=automationone-server" --filter "status=running" -q | grep -q .; then
+              echo "❌ Server container exited! Logs:"
+              docker compose -f docker-compose.yml -f docker-compose.e2e.yml logs el-servador --tail 100 || true
+              exit 1
+            fi
+            if curl -sf http://localhost:8000/api/v1/health/live > /dev/null 2>&1; then
+              echo "✅ Server healthy after ${i} attempts"
+              break
+            fi
+            if [ $i -eq $max_attempts ]; then
+              echo "❌ Server not healthy after ${max_attempts} attempts"
+              docker compose -f docker-compose.yml -f docker-compose.e2e.yml logs el-servador --tail 100 || true
+              exit 1
+            fi
+            sleep 2
+          done
 
           echo "Checking Frontend..."
           curl -f http://localhost:5173 || exit 1
@@ -94,6 +116,7 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:5173
           CI: true
+          # CI-only test credentials - not real secrets, safe to commit
           E2E_TEST_USER: admin
           E2E_TEST_PASSWORD: Admin123#
 
@@ -105,7 +128,7 @@ jobs:
           path: |
             logs/frontend/playwright/playwright-report/
             logs/frontend/playwright/test-results/
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload traces on failure
         uses: actions/upload-artifact@v4
@@ -119,14 +142,19 @@ jobs:
         if: failure()
         run: |
           echo "=== Server Logs ==="
-          docker logs automationone-server --tail 100
+          docker logs automationone-server --tail 100 2>&1 || true
 
           echo "=== Frontend Logs ==="
-          docker logs automationone-frontend --tail 50
+          docker logs automationone-frontend --tail 50 2>&1 || true
 
           echo "=== MQTT Logs ==="
-          docker logs automationone-mqtt --tail 50
+          docker logs automationone-mqtt --tail 50 2>&1 || true
 
       - name: Stop E2E stack
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.e2e.yml down -v
+        env:
+          POSTGRES_USER: god_kaiser
+          POSTGRES_PASSWORD: e2e_test_password
+          POSTGRES_DB: god_kaiser_db
+          JWT_SECRET_KEY: e2e_test_secret_key_not_for_production
