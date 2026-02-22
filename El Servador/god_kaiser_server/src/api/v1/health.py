@@ -146,18 +146,28 @@ async def detailed_health(
     )
     
     # System resources
-    import psutil
-    cpu_percent = psutil.cpu_percent()
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
-    system_health = SystemResourceHealth(
-        cpu_percent=cpu_percent,
-        memory_percent=memory.percent,
-        memory_used_mb=memory.used / (1024 * 1024),
-        memory_total_mb=memory.total / (1024 * 1024),
-        disk_percent=disk.percent,
-        disk_free_gb=disk.free / (1024 * 1024 * 1024),
-    )
+    try:
+        import psutil
+        cpu_percent = psutil.cpu_percent()
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        system_health = SystemResourceHealth(
+            cpu_percent=cpu_percent,
+            memory_percent=memory.percent,
+            memory_used_mb=memory.used / (1024 * 1024),
+            memory_total_mb=memory.total / (1024 * 1024),
+            disk_percent=disk.percent,
+            disk_free_gb=disk.free / (1024 * 1024 * 1024),
+        )
+    except ImportError:
+        system_health = SystemResourceHealth(
+            cpu_percent=0.0,
+            memory_percent=0.0,
+            memory_used_mb=0.0,
+            memory_total_mb=0.0,
+            disk_percent=0.0,
+            disk_free_gb=0.0,
+        )
     
     # Determine overall status
     status = "healthy"
@@ -376,9 +386,12 @@ async def readiness_probe(
     }
     
     # Check disk space
-    import psutil
-    disk = psutil.disk_usage("/")
-    checks["disk_space"] = disk.percent < 95
+    try:
+        import psutil
+        disk = psutil.disk_usage("/")
+        checks["disk_space"] = disk.percent < 95
+    except ImportError:
+        checks["disk_space"] = True
     
     # Ready if all critical checks pass
     ready = checks["database"] and checks["mqtt"]
