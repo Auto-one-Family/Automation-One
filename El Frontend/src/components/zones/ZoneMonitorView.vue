@@ -4,28 +4,19 @@
  *
  * Level 2: Sensor+Actuator-centric zone view.
  * Shows all sensors and actuators from all devices in the zone,
- * grouped by subzone, with a Vue Flow diagram area at the bottom
- * where sensors and actuators can be dragged to create automation connections.
+ * grouped by subzone.
  *
  * Replaces the device-centric ZoneDetailView for Level 2.
  */
 
-import { computed, ref, nextTick } from 'vue'
+import { computed } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator } from '@/types'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
-import { ArrowLeft, Cpu, Thermometer, Zap, Workflow } from 'lucide-vue-next'
-import { VueFlow, useVueFlow, MarkerType } from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
+import { ArrowLeft, Cpu, Thermometer, Zap } from 'lucide-vue-next'
 import SensorSatellite from '@/components/esp/SensorSatellite.vue'
 import ActuatorSatellite from '@/components/esp/ActuatorSatellite.vue'
-
-// Vue Flow CSS
-import '@vue-flow/core/dist/style.css'
-import '@vue-flow/core/dist/theme-default.css'
-import '@vue-flow/controls/dist/style.css'
 
 interface Props {
   zoneId: string
@@ -135,32 +126,6 @@ const subzoneGroups = computed((): SubzoneGroup[] => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Vue Flow — Automation Diagram
-// ═══════════════════════════════════════════════════════════════════════════
-
-const flowWrapper = ref<HTMLElement | null>(null)
-const isDragOver = ref(false)
-const nodeIdCounter = ref(0)
-
-const {
-  nodes: flowNodes,
-  edges: _flowEdges,
-  addNodes,
-  addEdges: _addEdges,
-  project,
-  fitView,
-} = useVueFlow({
-  defaultEdgeOptions: {
-    animated: true,
-    type: 'smoothstep',
-    markerEnd: MarkerType.ArrowClosed,
-  },
-  fitViewOnInit: false,
-  snapToGrid: true,
-  snapGrid: [20, 20] as [number, number],
-})
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Device Label Click → emit device-click to parent
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -168,77 +133,6 @@ function onDeviceLabelClick(deviceId: string, event: Event) {
   const el = (event.currentTarget || event.target) as HTMLElement
   const rect = el.getBoundingClientRect()
   emit('device-click', { deviceId, originRect: rect })
-}
-
-function onDragOverFlow(event: DragEvent) {
-  event.preventDefault()
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = 'copy'
-  }
-  isDragOver.value = true
-}
-
-function onDragLeaveFlow() {
-  isDragOver.value = false
-}
-
-function onDropOnFlow(event: DragEvent) {
-  event.preventDefault()
-  isDragOver.value = false
-
-  const rawData = event.dataTransfer?.getData('application/json')
-  if (!rawData) return
-
-  let data: Record<string, unknown>
-  try {
-    data = JSON.parse(rawData)
-  } catch {
-    return
-  }
-
-  const bounds = flowWrapper.value?.getBoundingClientRect()
-  if (!bounds) return
-
-  const position = project({
-    x: event.clientX - bounds.left,
-    y: event.clientY - bounds.top,
-  })
-
-  const type = data.type as string
-  const id = `${type}-${Date.now()}-${nodeIdCounter.value++}`
-
-  if (type === 'sensor') {
-    addNodes([{
-      id,
-      type: 'sensor-card',
-      position,
-      data: {
-        label: (data.name as string) || (data.sensorType as string) || 'Sensor',
-        espId: data.espId,
-        gpio: data.gpio,
-        sensorType: data.sensorType,
-        unit: data.unit || '',
-      },
-    }])
-  } else if (type === 'actuator') {
-    addNodes([{
-      id,
-      type: 'actuator-card',
-      position,
-      data: {
-        label: (data.name as string) || (data.actuatorType as string) || 'Aktor',
-        espId: data.espId,
-        gpio: data.gpio,
-        actuatorType: data.actuatorType,
-      },
-    }])
-  }
-
-  nextTick(() => {
-    if (flowNodes.value.length > 0) {
-      fitView({ padding: 0.3 })
-    }
-  })
 }
 </script>
 
@@ -369,71 +263,14 @@ function onDropOnFlow(event: DragEvent) {
       <p class="zone-monitor__empty-hint">Ziehe Geräte hierher, um sie zuzuweisen.</p>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════════════
-         Diagram Drop Area (Vue Flow)
-         ═══════════════════════════════════════════════════════════════════ -->
-    <section v-if="devices.length > 0" class="zone-monitor__diagram">
-      <div class="zone-monitor__diagram-header">
-        <Workflow class="zone-monitor__diagram-header-icon" />
-        <h3 class="zone-monitor__diagram-title">Automatisierung</h3>
-        <span class="zone-monitor__diagram-hint">
-          Sensoren & Aktoren hierher ziehen
-        </span>
-      </div>
-
-      <div
-        ref="flowWrapper"
-        class="zone-monitor__flow-container"
-        :class="{ 'zone-monitor__flow-container--dragover': isDragOver }"
-        @dragover="onDragOverFlow"
-        @dragleave="onDragLeaveFlow"
-        @drop="onDropOnFlow"
-      >
-        <VueFlow
-          :default-zoom="1"
-          :min-zoom="0.3"
-          :max-zoom="2"
-        >
-          <!-- Custom Sensor Node -->
-          <template #node-sensor-card="{ data }">
-            <div class="flow-node flow-node--sensor">
-              <div class="flow-node__dot flow-node__dot--sensor" />
-              <span class="flow-node__label">{{ data.label }}</span>
-              <span v-if="data.unit" class="flow-node__unit">{{ data.unit }}</span>
-            </div>
-          </template>
-
-          <!-- Custom Actuator Node -->
-          <template #node-actuator-card="{ data }">
-            <div class="flow-node flow-node--actuator">
-              <div class="flow-node__dot flow-node__dot--actuator" />
-              <span class="flow-node__label">{{ data.label }}</span>
-            </div>
-          </template>
-
-          <Background :gap="20" :size="1" pattern-color="rgba(255,255,255,0.03)" />
-          <Controls position="bottom-left" />
-        </VueFlow>
-
-        <!-- Empty flow hint -->
-        <div v-if="flowNodes.length === 0" class="zone-monitor__flow-empty">
-          <div class="zone-monitor__flow-empty-icon">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <rect x="4" y="12" width="14" height="10" rx="3" stroke="rgba(96,165,250,0.4)" stroke-width="1.5" stroke-dasharray="3 2" />
-              <rect x="30" y="12" width="14" height="10" rx="3" stroke="rgba(192,132,252,0.4)" stroke-width="1.5" stroke-dasharray="3 2" />
-              <path d="M18 17 L30 17" stroke="rgba(129,140,248,0.3)" stroke-width="1.5" stroke-dasharray="4 3">
-                <animate attributeName="stroke-dashoffset" values="7;0" dur="1.5s" repeatCount="indefinite" />
-              </path>
-              <circle cx="24" cy="17" r="2" fill="rgba(129,140,248,0.3)" />
-              <path d="M11 30 L11 36 M8 33 L14 33" stroke="rgba(96,165,250,0.25)" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
-          </div>
-          <p class="zone-monitor__flow-empty-text">
-            Sensoren und Aktoren hierher ziehen, um Regeln zu erstellen
-          </p>
-        </div>
-      </div>
-    </section>
+    <!-- Automation rules link (only shown when cross-ESP connections exist) -->
+    <RouterLink
+      v-if="crossEspCount > 0"
+      to="/logic"
+      class="zone-monitor__rules-link"
+    >
+      Regeln verwalten →
+    </RouterLink>
   </div>
 </template>
 
@@ -748,217 +585,22 @@ function onDropOnFlow(event: DragEvent) {
   margin-top: var(--space-2);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   Diagram Section — Vue Flow Area
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-.zone-monitor__diagram {
-  margin-top: var(--space-2);
-}
-
-.zone-monitor__diagram-header {
-  display: flex;
+/* ── Rules Link ── */
+.zone-monitor__rules-link {
+  display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-
-.zone-monitor__diagram-header-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--color-iridescent-2);
-  flex-shrink: 0;
-}
-
-.zone-monitor__diagram-title {
   font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.zone-monitor__diagram-hint {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  margin-left: auto;
-  opacity: 0.7;
-}
-
-.zone-monitor__flow-container {
-  position: relative;
-  height: 260px;
-  min-height: 200px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  transition: border-color var(--transition-fast);
-}
-
-.zone-monitor__flow-container--dragover {
-  border-color: var(--color-iridescent-2);
-  box-shadow: 0 0 20px rgba(129, 140, 248, 0.1);
-}
-
-/* ── Empty Flow Hint ── */
-.zone-monitor__flow-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  pointer-events: none;
-  z-index: 5;
-}
-
-.zone-monitor__flow-empty-icon {
-  opacity: 0.6;
-}
-
-.zone-monitor__flow-empty-text {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  text-align: center;
-  margin: 0;
-  max-width: 240px;
-  line-height: 1.5;
-}
-
-/* ── Flow Node Styles (Custom Nodes) ── */
-.flow-node {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  min-width: 100px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.15s ease;
-}
-
-.flow-node:hover {
-  border-color: var(--glass-border-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.flow-node--sensor {
-  border-left: 2px solid rgba(96, 165, 250, 0.5);
-}
-
-.flow-node--actuator {
-  border-left: 2px solid rgba(192, 132, 252, 0.5);
-}
-
-.flow-node__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.flow-node__dot--sensor {
-  background: var(--color-iridescent-1);
-  box-shadow: 0 0 6px rgba(96, 165, 250, 0.5);
-}
-
-.flow-node__dot--actuator {
-  background: var(--color-iridescent-4);
-  box-shadow: 0 0 6px rgba(192, 132, 252, 0.5);
-}
-
-.flow-node__label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 120px;
-}
-
-.flow-node__unit {
-  font-size: 0.625rem;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-/* ── Vue Flow Theme Overrides ── */
-:deep(.vue-flow) {
-  background: transparent;
-}
-
-:deep(.vue-flow__controls) {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-:deep(.vue-flow__controls-button) {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(13, 13, 22, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--glass-border);
+  color: var(--color-accent-bright);
+  text-decoration: none;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
   transition: all var(--transition-fast);
 }
 
-:deep(.vue-flow__controls-button:hover) {
-  background: var(--color-bg-tertiary);
-  border-color: rgba(129, 140, 248, 0.3);
-  color: var(--color-text-primary);
-}
-
-:deep(.vue-flow__controls-button svg) {
-  fill: currentColor;
-  width: 12px;
-  height: 12px;
-}
-
-:deep(.vue-flow__edge-path) {
-  stroke: rgba(129, 140, 248, 0.5);
-  stroke-width: 2;
-}
-
-:deep(.vue-flow__edge.animated .vue-flow__edge-path) {
-  stroke-dasharray: 6 4;
-  animation: monitor-edge-flow 1.8s linear infinite;
-}
-
-@keyframes monitor-edge-flow {
-  from { stroke-dashoffset: 10; }
-  to { stroke-dashoffset: 0; }
-}
-
-:deep(.vue-flow__handle) {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--color-bg-primary);
-  border: 2px solid rgba(129, 140, 248, 0.5);
-  transition: all 0.15s ease;
-}
-
-:deep(.vue-flow__handle:hover) {
-  background: var(--color-iridescent-2);
-  border-color: var(--color-iridescent-2);
-  box-shadow: 0 0 10px rgba(129, 140, 248, 0.5);
-  transform: scale(1.3);
+.zone-monitor__rules-link:hover {
+  background: rgba(96, 165, 250, 0.08);
+  color: var(--color-iridescent-2);
 }
 
 /* ── Mobile Responsive ── */
@@ -986,14 +628,6 @@ function onDropOnFlow(event: DragEvent) {
 
   .zone-monitor__card-grid--actuators {
     grid-template-columns: repeat(auto-fill, minmax(80px, 110px));
-  }
-
-  .zone-monitor__flow-container {
-    height: 200px;
-  }
-
-  .zone-monitor__diagram-hint {
-    display: none;
   }
 }
 </style>

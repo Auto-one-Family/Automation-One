@@ -136,6 +136,18 @@ const router = createRouter({
           component: () => import('@/views/SettingsView.vue'),
           meta: { title: 'Einstellungen' },
         },
+        {
+          path: 'calibration',
+          name: 'calibration',
+          component: () => import('@/views/CalibrationView.vue'),
+          meta: { requiresAdmin: true, title: 'Kalibrierung' },
+        },
+        {
+          path: 'sensor-history',
+          name: 'sensor-history',
+          component: () => import('@/views/SensorHistoryView.vue'),
+          meta: { title: 'Sensor-Zeitreihen' },
+        },
       ],
     },
 

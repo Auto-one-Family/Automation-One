@@ -728,6 +728,51 @@ export function getDefaultI2CAddress(sensorType: string): number | null {
   return null
 }
 
+/**
+ * Known I2C addresses for sensor types.
+ * Used by AddSensorModal to show an address dropdown for I2C sensors.
+ */
+const I2C_ADDRESS_REGISTRY: Record<string, Array<{ value: number; hex: string; label: string }>> = {
+  sht31: [
+    { value: 0x44, hex: '0x44', label: '0x44 (Standard)' },
+    { value: 0x45, hex: '0x45', label: '0x45 (ADDR HIGH)' },
+  ],
+  bmp280: [
+    { value: 0x76, hex: '0x76', label: '0x76 (SDO LOW)' },
+    { value: 0x77, hex: '0x77', label: '0x77 (SDO HIGH)' },
+  ],
+  bme280: [
+    { value: 0x76, hex: '0x76', label: '0x76 (SDO LOW)' },
+    { value: 0x77, hex: '0x77', label: '0x77 (SDO HIGH)' },
+  ],
+  bh1750: [
+    { value: 0x23, hex: '0x23', label: '0x23 (ADDR LOW)' },
+    { value: 0x5C, hex: '0x5C', label: '0x5C (ADDR HIGH)' },
+  ],
+  veml7700: [
+    { value: 0x10, hex: '0x10', label: '0x10 (Standard)' },
+  ],
+}
+
+/**
+ * Get I2C address options for a sensor type.
+ *
+ * @example
+ * getI2CAddressOptions('sht31_temp') // [{value: 0x44, hex: '0x44', label: '0x44 (Standard)'}, ...]
+ * getI2CAddressOptions('ds18b20') // [] (not I2C)
+ */
+export function getI2CAddressOptions(sensorType: string): Array<{ value: number; hex: string; label: string }> {
+  const lower = sensorType.toLowerCase()
+
+  for (const [key, options] of Object.entries(I2C_ADDRESS_REGISTRY)) {
+    if (lower.includes(key)) {
+      return options
+    }
+  }
+
+  return []
+}
+
 
 
 
