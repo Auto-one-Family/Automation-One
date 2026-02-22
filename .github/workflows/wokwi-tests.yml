@@ -29,15 +29,23 @@
 
 name: Wokwi ESP32 Tests
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
+    branches: [main, master, develop]
     paths:
       - 'El Trabajante/**'
       - '.github/workflows/wokwi-tests.yml'
   pull_request:
+    branches: [main, master, develop]
     paths:
       - 'El Trabajante/**'
       - '.github/workflows/wokwi-tests.yml'
+  schedule:
+    - cron: '0 2 * * *'  # Nightly at 2 AM UTC — runs ALL scenarios
   workflow_dispatch:  # Allow manual triggering
   schedule:
     - cron: '0 3 * * *'  # Nightly full suite at 03:00 UTC

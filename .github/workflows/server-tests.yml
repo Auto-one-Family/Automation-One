@@ -59,12 +59,10 @@ jobs:
       - name: Run Ruff (Linter)
         working-directory: El Servador/god_kaiser_server
         run: poetry run ruff check src/ tests/ --output-format=github
-        continue-on-error: true
 
       - name: Run Black (Format Check)
         working-directory: El Servador/god_kaiser_server
         run: poetry run black --check src/ tests/
-        continue-on-error: true
 
   unit-tests:
     name: Unit Tests
@@ -121,6 +119,7 @@ jobs:
           path: |
             El Servador/god_kaiser_server/junit-unit.xml
             El Servador/god_kaiser_server/coverage-unit.xml
+          retention-days: 7
 
   integration-tests:
     name: Integration Tests
@@ -207,6 +206,7 @@ jobs:
           path: |
             El Servador/god_kaiser_server/junit-integration.xml
             El Servador/god_kaiser_server/coverage-integration.xml
+          retention-days: 7
 
   test-summary:
     name: Test Summary

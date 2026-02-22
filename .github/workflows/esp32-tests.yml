@@ -91,3 +91,35 @@ jobs:
         with:
           name: esp32-test-results
           path: El Servador/god_kaiser_server/junit-esp32.xml
+          retention-days: 7
+
+  test-summary:
+    name: ESP32 Test Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [esp32-tests]
+    if: always()
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: esp32-test-results
+          path: results/
+
+      - name: List downloaded files
+        run: |
+          echo "Downloaded artifacts:"
+          find results/ -type f 2>/dev/null || echo "No files found"
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: results/junit-esp32.xml
+          check_name: ESP32 Test Results
+          comment_mode: always
