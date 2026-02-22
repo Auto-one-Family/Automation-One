@@ -12,6 +12,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
 
+from ..core.metrics import increment_http_error
 from ..core.request_context import (
     generate_request_id,
     set_request_id,
@@ -48,6 +49,9 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
                 response.status_code,
                 duration_ms,
             )
+
+            if response.status_code >= 400:
+                increment_http_error(response.status_code)
 
             response.headers["X-Request-ID"] = request_id
             return response

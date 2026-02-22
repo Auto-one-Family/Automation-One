@@ -37,6 +37,7 @@ from ...core.error_codes import (
     ValidationErrorCode,
 )
 from ...core.logging_config import get_logger
+from ...core.metrics import increment_esp_error
 from ...core.resilience import ServiceUnavailableError
 from ...db.repositories import AuditLogRepository, ESPRepository
 from ...db.session import resilient_session
@@ -176,6 +177,9 @@ class ErrorEventHandler:
 
                     # Commit transaction
                     await session.commit()
+
+                    # Update Prometheus metrics for Grafana alerting
+                    increment_esp_error(esp_id_str)
 
                     logger.info(
                         f"Error event saved: id={error_log.id}, esp_id={esp_id_str}, "

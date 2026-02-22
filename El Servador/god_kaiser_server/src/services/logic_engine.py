@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from ..core.logging_config import get_logger
+from ..core.metrics import increment_logic_error, increment_safety_trigger
 from ..db.repositories import LogicRepository
 from ..db.session import get_session
 from ..websocket.manager import WebSocketManager
@@ -297,6 +298,7 @@ class LogicEngine:
             )
 
             if not rate_result["allowed"]:
+                increment_safety_trigger()
                 logger.warning(
                     f"Rule {rule.rule_name} rate limited: {rate_result['reason']}"
                 )
@@ -344,6 +346,7 @@ class LogicEngine:
             await logic_repo.session.commit()
             
         except Exception as e:
+            increment_logic_error()
             logger.error(
                 f"Error evaluating rule {rule.rule_name}: {e}",
                 exc_info=True,
@@ -557,6 +560,7 @@ class LogicEngine:
             )
 
             if not can_execute:
+                increment_safety_trigger()
                 logger.warning(
                     f"Actuator conflict for rule {rule_name}: {conflict.message if conflict else 'Unknown conflict'}"
                 )

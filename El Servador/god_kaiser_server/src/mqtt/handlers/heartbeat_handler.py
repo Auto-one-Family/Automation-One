@@ -29,6 +29,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...core.metrics import update_esp_heartbeat_timestamp, update_esp_boot_count
 from ...core import constants
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
@@ -233,6 +234,12 @@ class HeartbeatHandler:
 
                 # Commit transaction
                 await session.commit()
+
+                # Update Prometheus metrics for Grafana alerting
+                update_esp_heartbeat_timestamp(esp_id_str)
+                boot_count = payload.get("boot_count")
+                if boot_count is not None:
+                    update_esp_boot_count(esp_id_str, int(boot_count))
 
                 # ============================================
                 # HEARTBEAT HISTORY LOGGING (Time-Series)

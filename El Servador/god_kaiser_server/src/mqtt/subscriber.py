@@ -156,6 +156,11 @@ class Subscriber:
             payload_str: Message payload (JSON string)
         """
         try:
+            # Skip empty payloads (used to clear retained messages per MQTT spec)
+            if not payload_str or not payload_str.strip():
+                logger.debug(f"Empty payload on topic {topic} (retained message cleared)")
+                return
+
             # Parse JSON payload
             try:
                 payload = json.loads(payload_str)
