@@ -60,9 +60,6 @@ useSwipeNavigation(zoomContainerRef, {
   },
 })
 
-// Modal states (triggered by TopBar via dashboard store)
-const pendingButtonAnchor = ref<HTMLElement | null>(null)
-
 // Settings popover state
 const settingsDevice = ref<ESPDevice | null>(null)
 const isSettingsOpen = ref(false)
