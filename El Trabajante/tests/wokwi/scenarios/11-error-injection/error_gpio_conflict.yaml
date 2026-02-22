@@ -1,0 +1,24 @@
+# Error Injection: GPIO Conflict
+# ===============================
+# Attempts to configure the same GPIO pin for both a sensor and actuator.
+# The firmware should detect the conflict and reject one configuration.
+#
+# MQTT Injection (external):
+#   Topic: kaiser/god/esp/ESP_00000001/config
+#   Payload: {"sensors":[{"gpio":5,"sensor_type":"ds18b20","sensor_name":"TempSensor","active":true,"raw_mode":true}],"actuators":[{"gpio":5,"actuator_type":"binary","actuator_name":"Relay","active":true}]}
+#
+# Expected: Firmware detects GPIO 5 conflict and logs GPIO_CONFLICT error.
+# Timeout: 90000ms
+
+name: Error Injection - GPIO Conflict
+version: 1
+steps:
+  # Wait for boot and MQTT
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "heartbeat"
+
+  # After config injection with conflicting GPIOs
+  - wait-serial: "config"
+  - delay: 5000
+  # Expect conflict detection — firmware should log about the conflict
+  - wait-serial: "CONFLICT"

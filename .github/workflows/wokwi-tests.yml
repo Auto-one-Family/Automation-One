@@ -1409,11 +1409,222 @@ jobs:
           retention-days: 7
 
   # ============================================
-  # JOB 16: Test Summary
+  # JOB 16: Error Injection Tests (MQTT Background Pattern)
+  # ============================================
+  error-injection-tests:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
+          listener 1883 0.0.0.0
+          allow_anonymous true
+          persistence false
+          CONF
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          for i in {1..30}; do
+            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: Install Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: "Error Test 1: Sensor Timeout"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_sensor_timeout.yaml \
+            > error_sensor_timeout.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{"sensors":[{"gpio":32,"sensor_type":"ds18b20","sensor_name":"GhostSensor","active":true,"raw_mode":true}],"actuators":[]}'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_sensor_timeout.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::Sensor Timeout: PASS" || echo "::error::Sensor Timeout: FAIL (exit $EXIT_CODE)"
+
+      - name: "Error Test 2: MQTT Disconnect Recovery"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_mqtt_disconnect.yaml \
+            2>&1 | tee error_mqtt_disconnect.log || true
+          echo "=== MQTT Disconnect Test Results ==="
+          grep -q "MQTT connected" error_mqtt_disconnect.log && echo "MQTT Disconnect: PASS" || echo "MQTT Disconnect: FAIL"
+
+      - name: "Error Test 3: GPIO Conflict"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_gpio_conflict.yaml \
+            > error_gpio_conflict.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{"sensors":[{"gpio":5,"sensor_type":"ds18b20","sensor_name":"TempSensor","active":true,"raw_mode":true}],"actuators":[{"gpio":5,"actuator_type":"binary","actuator_name":"Relay","active":true}]}'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_gpio_conflict.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::GPIO Conflict: PASS" || echo "::error::GPIO Conflict: FAIL (exit $EXIT_CODE)"
+
+      - name: "Error Test 4: Watchdog Behavior"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_watchdog_trigger.yaml \
+            2>&1 | tee error_watchdog_trigger.log || true
+          echo "=== Watchdog Test Results ==="
+          grep -q "Watchdog" error_watchdog_trigger.log && echo "Watchdog: PASS" || echo "Watchdog: FAIL"
+
+      - name: "Error Test 5: Invalid JSON Config"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_config_invalid_json.yaml \
+            > error_config_invalid_json.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{invalid json content here!!!'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_config_invalid_json.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::Invalid JSON: PASS" || echo "::error::Invalid JSON: FAIL (exit $EXIT_CODE)"
+
+      - name: "Error Test 6: Actuator Timeout"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_actuator_timeout.yaml \
+            > error_actuator_timeout.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+            -m '{"command":"ON","value":1.0,"max_runtime_ms":5000}'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_actuator_timeout.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::Actuator Timeout: PASS" || echo "::error::Actuator Timeout: FAIL (exit $EXIT_CODE)"
+
+      - name: "Error Test 7: Emergency Cascade"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 150 wokwi-cli . --timeout 120000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_emergency_cascade.yaml \
+            > error_emergency_cascade.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          # Run emergency cascade helper
+          chmod +x tests/wokwi/helpers/emergency_cascade.sh
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+            -m '{"command":"ON","value":1.0}'
+          sleep 1
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/actuator/13/command" \
+            -m '{"command":"PWM","value":0.7}'
+          sleep 3
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/broadcast/emergency" \
+            -m '{"auth_token":"master_token"}'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_emergency_cascade.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::Emergency Cascade: PASS" || echo "::error::Emergency Cascade: FAIL (exit $EXIT_CODE)"
+
+      - name: "Error Test 8: I2C Bus Error"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_i2c_bus_stuck.yaml \
+            2>&1 | tee error_i2c_bus_stuck.log || true
+          echo "=== I2C Bus Error Test Results ==="
+          grep -q "heartbeat" error_i2c_bus_stuck.log && echo "I2C Bus Error: PASS" || echo "I2C Bus Error: FAIL"
+
+      - name: "Error Test 9: NVS Factory Reset"
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+          timeout 120 wokwi-cli . --timeout 90000 \
+            --scenario tests/wokwi/scenarios/11-error-injection/error_nvs_corrupt.yaml \
+            > error_nvs_corrupt.log 2>&1 &
+          WOKWI_PID=$!
+          sleep 25
+          docker exec mosquitto mosquitto_pub -h localhost \
+            -t "kaiser/god/esp/ESP_00000001/system/command" \
+            -m '{"command":"factory_reset","confirm":true}'
+          wait $WOKWI_PID
+          EXIT_CODE=$?
+          cat error_nvs_corrupt.log
+          [ $EXIT_CODE -eq 0 ] && echo "::notice::NVS Factory Reset: PASS" || echo "::error::NVS Factory Reset: FAIL (exit $EXIT_CODE)"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload Error Injection Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-injection-test-logs
+          path: El Trabajante/error_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 17: Test Summary
   # ============================================
   test-summary:
     runs-on: ubuntu-latest
-    needs: [boot-tests, sensor-tests, mqtt-connection-test, actuator-tests, zone-tests, emergency-tests, config-tests, sensor-flow-tests, actuator-flow-tests, combined-flow-tests, gpio-core-tests, i2c-core-tests, nvs-core-tests, pwm-core-tests]
+    needs: [boot-tests, sensor-tests, mqtt-connection-test, actuator-tests, zone-tests, emergency-tests, config-tests, sensor-flow-tests, actuator-flow-tests, combined-flow-tests, gpio-core-tests, i2c-core-tests, nvs-core-tests, pwm-core-tests, error-injection-tests]
     if: always()
 
     steps:

@@ -1,0 +1,26 @@
+# Error Injection: Actuator Timeout
+# ===================================
+# Sends an actuator ON command with a short max_runtime_ms.
+# The firmware should automatically turn the actuator OFF after timeout.
+#
+# MQTT Injection (external):
+#   Topic: kaiser/god/esp/ESP_00000001/actuator/5/command
+#   Payload: {"command":"ON","value":1.0,"max_runtime_ms":5000}
+#
+# Expected: Actuator turns ON, then auto-OFF after ~5 seconds.
+# Timeout: 90000ms
+
+name: Error Injection - Actuator Timeout
+version: 1
+steps:
+  # Wait for full boot and system ready
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "heartbeat"
+
+  # After ON command with timeout injection:
+  # Wait for actuator activation
+  - wait-serial: "actuator"
+  - delay: 10000
+
+  # After timeout, actuator should auto-off
+  - wait-serial: "timeout"

@@ -1,0 +1,21 @@
+# Error Injection: NVS Factory Reset via MQTT
+# ==============================================
+# Sends a factory_reset command via MQTT system topic.
+# The firmware should clear NVS and confirm the reset.
+#
+# MQTT Injection (external):
+#   Topic: kaiser/god/esp/ESP_00000001/system/command
+#   Payload: {"command":"factory_reset","confirm":true}
+#
+# Expected: NVS cleared, factory reset confirmation logged.
+# Timeout: 90000ms
+
+name: Error Injection - NVS Factory Reset
+version: 1
+steps:
+  # Wait for full boot
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "heartbeat"
+
+  # After factory reset MQTT injection:
+  - wait-serial: "FACTORY RESET"

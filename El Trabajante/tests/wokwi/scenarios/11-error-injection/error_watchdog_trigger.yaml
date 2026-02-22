@@ -1,0 +1,21 @@
+# Error Injection: Watchdog Behavior
+# ====================================
+# Validates that the ESP32 correctly handles watchdog configuration.
+# In Wokwi simulation, the hardware watchdog is skipped but the
+# firmware should log this appropriately.
+#
+# This is a passive test — no MQTT injection needed.
+# Timeout: 90000ms
+
+name: Error Injection - Watchdog Behavior
+version: 1
+steps:
+  # Wait for boot
+  - wait-serial: "ESP32 Sensor Network"
+
+  # In simulation, watchdog is skipped
+  - wait-serial: "Watchdog skipped"
+
+  # Verify system continues to operate normally
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "heartbeat"

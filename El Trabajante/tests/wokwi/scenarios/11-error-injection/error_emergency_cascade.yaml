@@ -1,0 +1,27 @@
+# Error Injection: Emergency Cascade
+# ====================================
+# Activates multiple actuators, then triggers a broadcast emergency stop.
+# All actuators must be turned OFF immediately.
+#
+# MQTT Injection (external, sequential):
+#   1. kaiser/god/esp/ESP_00000001/actuator/5/command  → {"command":"ON","value":1.0}
+#   2. kaiser/god/esp/ESP_00000001/actuator/13/command → {"command":"PWM","value":0.7}
+#   3. sleep 3
+#   4. kaiser/broadcast/emergency → {"auth_token":"master_token"}
+#
+# Expected: All actuators deactivated, emergency state logged.
+# Timeout: 90000ms
+
+name: Error Injection - Emergency Cascade
+version: 1
+steps:
+  # Wait for full boot
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "heartbeat"
+
+  # After actuator activation + emergency injection:
+  # Verify actuator commands received
+  - wait-serial: "actuator"
+
+  # Verify emergency broadcast received and processed
+  - wait-serial: "BROADCAST EMERGENCY-STOP RECEIVED"

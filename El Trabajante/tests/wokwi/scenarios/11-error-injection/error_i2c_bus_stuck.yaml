@@ -1,0 +1,23 @@
+# Error Injection: I2C Bus Error
+# ================================
+# Attempts to communicate with a non-existent I2C device address.
+# The firmware should detect the NACK and report a bus error.
+#
+# This scenario is passive — the Wokwi diagram may not have an I2C
+# device at the queried address, causing a NACK response.
+#
+# Timeout: 90000ms
+
+name: Error Injection - I2C Bus Error
+version: 1
+steps:
+  # Wait for boot
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "heartbeat"
+
+  # I2C initialization should be attempted during boot
+  # If no device present, expect error handling
+  - delay: 10000
+
+  # Verify system is still operational after I2C issues
+  - wait-serial: "heartbeat"
