@@ -24,7 +24,7 @@ import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.st
 import { useToast } from '@/composables/useToast'
 import { useEspStore } from '@/stores/esp'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
-import { h, render, type Component, type VNode, getCurrentInstance } from 'vue'
+import { h, render, type Component, getCurrentInstance } from 'vue'
 
 // Widget components
 import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
@@ -117,7 +117,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   // Cleanup all mounted Vue vnodes
-  for (const [id, el] of mountedWidgets) {
+  for (const [, el] of mountedWidgets) {
     render(null, el)
   }
   mountedWidgets.clear()
@@ -135,7 +135,7 @@ function loadWidgetsToGrid(widgets: any[]) {
   if (!grid) return
 
   // Cleanup existing mounted widgets
-  for (const [id, el] of mountedWidgets) {
+  for (const [, el] of mountedWidgets) {
     render(null, el)
   }
   mountedWidgets.clear()
