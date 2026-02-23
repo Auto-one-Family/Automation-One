@@ -9,7 +9,7 @@
  * - Statistics (ESP count, sensor count, actuator count)
  */
 
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { MapPin, Cpu, Activity, Zap } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import type { MockSensor, MockActuator } from '@/types'

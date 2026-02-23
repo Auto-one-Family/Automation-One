@@ -13,14 +13,14 @@
  */
 
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
-import { GridStack } from 'gridstack'
+import { GridStack, type GridItemHTMLElement } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import {
-  LayoutGrid, Plus, Save, Trash2, Download, Upload,
-  BarChart3, Gauge, Activity, Zap, Shield, Bell, Cpu,
+  LayoutGrid, Plus, Trash2, Download, Upload,
+  BarChart3, Gauge, Activity, Zap, Bell, Cpu,
   ChevronDown,
 } from 'lucide-vue-next'
-import { useDashboardStore } from '@/shared/stores/dashboard.store'
+import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.store'
 import { useToast } from '@/composables/useToast'
 
 const dashStore = useDashboardStore()
@@ -154,11 +154,11 @@ function autoSave() {
   if (!grid || !dashStore.activeLayoutId) return
 
   const items = grid.getGridItems()
-  const widgets = items.map(el => {
+  const widgets = items.map((el: GridItemHTMLElement) => {
     const node = el.gridstackNode
     return {
       id: node?.id || '',
-      type: el.querySelector('.dashboard-widget')?.getAttribute('data-type') || 'unknown',
+      type: (el.querySelector('.dashboard-widget')?.getAttribute('data-type') || 'line-chart') as WidgetType,
       x: node?.x || 0,
       y: node?.y || 0,
       w: node?.w || 3,

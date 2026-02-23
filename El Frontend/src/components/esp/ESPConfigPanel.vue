@@ -11,7 +11,7 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
-import { Save, Wifi, Radio, Cpu, AlertOctagon, RefreshCw } from 'lucide-vue-next'
+import { Save, Wifi, Radio, Cpu, AlertOctagon } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { getWifiStrength } from '@/utils/wifiStrength'

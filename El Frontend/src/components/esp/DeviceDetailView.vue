@@ -35,7 +35,7 @@ interface Props {
   zoneName: string
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'back'): void

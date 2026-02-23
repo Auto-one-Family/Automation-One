@@ -120,7 +120,7 @@ interface SensorItem {
   value: number
   unit: string
   quality: string
-  lastRead: string | undefined
+  lastRead: string | null
 }
 
 interface ActuatorItem {

@@ -115,10 +115,10 @@ async function loadData() {
       limit,
     })
 
-    if (response && Array.isArray(response.data)) {
-      dataBuffer.value = response.data.map((d: any) => ({
+    if (response && Array.isArray(response.readings)) {
+      dataBuffer.value = response.readings.map((d) => ({
         timestamp: new Date(d.timestamp),
-        value: typeof d.value === 'number' ? d.value : parseFloat(d.value),
+        value: typeof d.raw_value === 'number' ? d.raw_value : parseFloat(String(d.raw_value)),
       }))
     } else {
       dataBuffer.value = []

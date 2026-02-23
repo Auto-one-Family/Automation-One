@@ -16,7 +16,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { useUiStore, useDashboardStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
@@ -37,7 +37,8 @@ import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
-import { LoadingState, EmptyState } from '@/components/common'
+import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
+import { EmptyState } from '@/shared/design/patterns'
 
 // Zoom components
 import ZonePlate from '@/components/dashboard/ZonePlate.vue'
@@ -303,7 +304,7 @@ function handleSettingsClose() {
   setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
 }
 
-function handleDeviceDeleted(payload: { deviceId: string }) {
+function handleDeviceDeleted(_payload: { deviceId: string }) {
   handleSettingsClose()
 }
 
@@ -346,13 +347,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
     actuatorType: actuator.actuator_type || 'relay',
   }
   showActuatorConfig.value = true
-}
-
-function handleEspCenterClick() {
-  if (selectedDevice.value) {
-    configEspDevice.value = selectedDevice.value
-    showEspConfig.value = true
-  }
 }
 
 // Rules Activity

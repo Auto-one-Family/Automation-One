@@ -60,14 +60,6 @@ const isValve = computed(() => props.actuatorType.toLowerCase() === 'valve')
 const isPWM = computed(() => props.actuatorType.toLowerCase() === 'pwm')
 const isRelay = computed(() => props.actuatorType.toLowerCase() === 'relay')
 
-/** PWM-capable GPIO pins */
-const pwmPins = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33]
-
-/** General actuator GPIO pins */
-const actuatorPins = [4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27]
-
-const availablePins = computed(() => isPWM.value ? pwmPins : actuatorPins)
-
 /** Live actuator state from store */
 const liveActuator = computed<MockActuator | null>(() => {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
@@ -384,7 +376,7 @@ function formatDuration(seconds: number): string {
         <div class="actuator-config__safety-info">
           <div class="actuator-config__safety-row">
             <Clock class="w-3.5 h-3.5" />
-            <span>Letzter Befehl: {{ liveActuator?.last_command_at || '—' }}</span>
+            <span>Letzter Befehl: {{ liveActuator?.last_command || '—' }}</span>
           </div>
           <div class="actuator-config__safety-row">
             <Zap class="w-3.5 h-3.5" />

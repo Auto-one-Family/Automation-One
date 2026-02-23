@@ -9,10 +9,48 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 
 export type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
 export type TypeFilter = 'all' | 'mock' | 'real'
+
+/** Widget type identifiers */
+export type WidgetType = 'line-chart' | 'gauge' | 'multi-sensor' | 'sensor-card' |
+  'heatmap' | 'historical' | 'actuator-card' | 'actuator-runtime' |
+  'esp-health' | 'alarm-list'
+
+/** Single widget configuration */
+export interface DashboardWidget {
+  id: string
+  type: WidgetType
+  x: number
+  y: number
+  w: number
+  h: number
+  config: {
+    sensorId?: string
+    actuatorId?: string
+    espId?: string
+    gpio?: number
+    sensorType?: string
+    zoneId?: string
+    timeRange?: '1h' | '6h' | '24h' | '7d' | 'custom'
+    showThresholds?: boolean
+    title?: string
+    color?: string
+    syncTimeAxis?: boolean
+  }
+}
+
+/** Dashboard layout */
+export interface DashboardLayout {
+  id: string
+  name: string
+  description?: string
+  createdAt: string
+  updatedAt: string
+  widgets: DashboardWidget[]
+}
 
 export const useDashboardStore = defineStore('dashboard', () => {
   /* ── Visibility ── */
@@ -87,44 +125,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // ═══════════════════════════════════════════════════════════════════════════
   // CUSTOM DASHBOARD LAYOUTS (Phase 2)
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Widget type identifiers */
-  type WidgetType = 'line-chart' | 'gauge' | 'multi-sensor' | 'sensor-card' |
-    'heatmap' | 'historical' | 'actuator-card' | 'actuator-runtime' |
-    'esp-health' | 'alarm-list'
-
-  /** Single widget configuration */
-  interface DashboardWidget {
-    id: string
-    type: WidgetType
-    x: number
-    y: number
-    w: number
-    h: number
-    config: {
-      sensorId?: string
-      actuatorId?: string
-      espId?: string
-      gpio?: number
-      sensorType?: string
-      zoneId?: string
-      timeRange?: '1h' | '6h' | '24h' | '7d' | 'custom'
-      showThresholds?: boolean
-      title?: string
-      color?: string
-      syncTimeAxis?: boolean
-    }
-  }
-
-  /** Dashboard layout */
-  interface DashboardLayout {
-    id: string
-    name: string
-    description?: string
-    createdAt: string
-    updatedAt: string
-    widgets: DashboardWidget[]
-  }
 
   const STORAGE_KEY = 'automation-one-dashboard-layouts'
 

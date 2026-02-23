@@ -258,8 +258,8 @@ function getDefaultNodeData(type: string, defaults: Record<string, unknown> = {}
 
 onConnect((connection: Connection) => {
   // Validate connection using logic store rules
-  const sourceNode = getNode(connection.source!)
-  const targetNode = getNode(connection.target!)
+  const sourceNode = getNode.value(connection.source!)
+  const targetNode = getNode.value(connection.target!)
 
   const validation = logicStore.isValidConnection(
     sourceNode?.type,
