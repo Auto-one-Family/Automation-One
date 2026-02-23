@@ -19,6 +19,9 @@ import {
   Power,
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
+import SlideOver from '@/shared/design/primitives/SlideOver.vue'
+import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
+import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
 
 type TabType = 'sensors' | 'actuators'
 type ActuatorStateFilter = 'on' | 'off' | 'emergency'
@@ -54,6 +57,43 @@ function setActiveTab(tab: TabType) {
 
 // Track updated items for visual feedback
 const updatedSensorKeys = ref<Set<string>>(new Set())
+
+// =============================================================================
+// SlideOver Config Panels
+// =============================================================================
+const showSensorPanel = ref(false)
+const showActuatorPanel = ref(false)
+const selectedSensorConfig = ref<{ espId: string; gpio: number; sensorType: string; unit: string } | null>(null)
+const selectedActuatorConfig = ref<{ espId: string; gpio: number; actuatorType: string } | null>(null)
+
+function openSensorConfig(sensor: { esp_id: string; gpio: number; sensor_type: string; unit: string }) {
+  selectedSensorConfig.value = {
+    espId: sensor.esp_id,
+    gpio: sensor.gpio,
+    sensorType: sensor.sensor_type,
+    unit: sensor.unit,
+  }
+  showSensorPanel.value = true
+}
+
+function closeSensorPanel() {
+  showSensorPanel.value = false
+  setTimeout(() => { selectedSensorConfig.value = null }, 300)
+}
+
+function openActuatorConfig(actuator: { esp_id: string; gpio: number; actuator_type: string }) {
+  selectedActuatorConfig.value = {
+    espId: actuator.esp_id,
+    gpio: actuator.gpio,
+    actuatorType: actuator.actuator_type,
+  }
+  showActuatorPanel.value = true
+}
+
+function closeActuatorPanel() {
+  showActuatorPanel.value = false
+  setTimeout(() => { selectedActuatorConfig.value = null }, 300)
+}
 
 // =============================================================================
 // Common Filter State
@@ -500,9 +540,10 @@ function getQualityColor(quality: string): string {
           v-for="sensor in filteredSensors"
           :key="`${sensor.esp_id}-${sensor.gpio}`"
           :class="[
-            'card hover:border-dark-600 transition-colors',
+            'card hover:border-dark-600 transition-colors cursor-pointer',
             updatedSensorKeys.has(`${sensor.esp_id}-${sensor.gpio}`) ? 'sensor-value--updated' : ''
           ]"
+          @click="openSensorConfig(sensor)"
         >
           <div class="card-header flex items-center gap-3">
             <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -558,8 +599,9 @@ function getQualityColor(quality: string): string {
         <div
           v-for="actuator in filteredActuators"
           :key="`${actuator.esp_id}-${actuator.gpio}`"
-          class="card hover:border-dark-600 transition-colors"
+          class="card hover:border-dark-600 transition-colors cursor-pointer"
           :class="{ 'border-red-500/30': actuator.emergency_stopped }"
+          @click="openActuatorConfig(actuator)"
         >
           <div class="card-header flex items-center gap-3">
             <div
@@ -588,7 +630,7 @@ function getQualityColor(quality: string): string {
               <button
                 class="btn-secondary btn-sm flex-shrink-0 touch-target"
                 :disabled="actuator.emergency_stopped"
-                @click="toggleActuator(actuator.esp_id, actuator.gpio, actuator.state)"
+                @click.stop="toggleActuator(actuator.esp_id, actuator.gpio, actuator.state)"
               >
                 {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
               </button>
@@ -597,6 +639,37 @@ function getQualityColor(quality: string): string {
         </div>
       </div>
     </template>
+
+    <!-- Sensor Config SlideOver -->
+    <SlideOver
+      :open="showSensorPanel"
+      :title="selectedSensorConfig?.sensorType || 'Sensor'"
+      width="lg"
+      @close="closeSensorPanel"
+    >
+      <SensorConfigPanel
+        v-if="selectedSensorConfig"
+        :esp-id="selectedSensorConfig.espId"
+        :gpio="selectedSensorConfig.gpio"
+        :sensor-type="selectedSensorConfig.sensorType"
+        :unit="selectedSensorConfig.unit"
+      />
+    </SlideOver>
+
+    <!-- Actuator Config SlideOver -->
+    <SlideOver
+      :open="showActuatorPanel"
+      :title="selectedActuatorConfig?.actuatorType || 'Aktor'"
+      width="lg"
+      @close="closeActuatorPanel"
+    >
+      <ActuatorConfigPanel
+        v-if="selectedActuatorConfig"
+        :esp-id="selectedActuatorConfig.espId"
+        :gpio="selectedActuatorConfig.gpio"
+        :actuator-type="selectedActuatorConfig.actuatorType"
+      />
+    </SlideOver>
   </div>
 </template>
 

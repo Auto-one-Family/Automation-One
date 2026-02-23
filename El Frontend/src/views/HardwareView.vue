@@ -25,7 +25,8 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('HardwareView')
 
-// SlideOver + Config Panels
+// Tab Bar + SlideOver + Config Panels
+import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
 import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
@@ -363,6 +364,9 @@ function formatTimeAgo(timestamp: number): string {
 
 <template>
   <div :class="['hardware-view', 'hardware-view--level-' + currentLevel]">
+    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
+    <ViewTabBar />
+
     <!-- Rules Activity Ribbon -->
     <div v-if="logicStore.ruleCount > 0 || logicStore.recentExecutions.length > 0" class="rules-ribbon">
       <div class="rules-ribbon__status">

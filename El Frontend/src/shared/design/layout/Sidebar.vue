@@ -10,17 +10,13 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import {
   X,
-  LayoutDashboard,
   Cpu,
   Workflow,
   Monitor,
   Users,
-  Settings,
   Wrench,
-  Zap,
   UserCog,
   Activity,
-  LayoutGrid,
 } from 'lucide-vue-next'
 
 defineProps<{
@@ -76,32 +72,12 @@ function handleNavClick() {
 
       <RouterLink
         to="/hardware"
-        :class="['sidebar__link', isActive('/hardware') && 'sidebar__link--active']"
+        :class="['sidebar__link', (isActive('/hardware') || isActive('/monitor') || isActive('/custom-dashboard')) && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
         <Cpu class="sidebar__link-icon" />
         <span>Hardware</span>
-      </RouterLink>
-
-      <RouterLink
-        to="/monitor"
-        :class="['sidebar__link', isActive('/monitor') && 'sidebar__link--active']"
-        @click="handleNavClick"
-      >
-        <div class="sidebar__link-indicator" />
-        <Activity class="sidebar__link-icon" />
-        <span>Monitor</span>
-      </RouterLink>
-
-      <RouterLink
-        to="/custom-dashboard"
-        :class="['sidebar__link', isActive('/custom-dashboard') && 'sidebar__link--active']"
-        @click="handleNavClick"
-      >
-        <div class="sidebar__link-indicator" />
-        <LayoutGrid class="sidebar__link-icon" />
-        <span>Dashboard</span>
       </RouterLink>
 
       <RouterLink
@@ -120,30 +96,24 @@ function handleNavClick() {
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
-        <LayoutDashboard class="sidebar__link-icon" />
+        <Activity class="sidebar__link-icon" />
         <span>Komponenten</span>
-      </RouterLink>
-
-      <!-- Divider -->
-      <div class="sidebar__divider" />
-
-      <!-- Monitoring Section -->
-      <div class="sidebar__section-label">Monitoring</div>
-
-      <RouterLink
-        to="/system-monitor"
-        :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
-        @click="handleNavClick"
-      >
-        <div class="sidebar__link-indicator" />
-        <Monitor class="sidebar__link-icon" />
-        <span>System Monitor</span>
       </RouterLink>
 
       <!-- Admin Section -->
       <template v-if="authStore.isAdmin">
         <div class="sidebar__divider" />
         <div class="sidebar__section-label">Administration</div>
+
+        <RouterLink
+          to="/system-monitor"
+          :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
+          @click="handleNavClick"
+        >
+          <div class="sidebar__link-indicator" />
+          <Monitor class="sidebar__link-icon" />
+          <span>System</span>
+        </RouterLink>
 
         <RouterLink
           to="/users"
@@ -156,16 +126,6 @@ function handleNavClick() {
         </RouterLink>
 
         <RouterLink
-          to="/system-config"
-          :class="['sidebar__link', isActive('/system-config') && 'sidebar__link--active']"
-          @click="handleNavClick"
-        >
-          <div class="sidebar__link-indicator" />
-          <Settings class="sidebar__link-icon" />
-          <span>System</span>
-        </RouterLink>
-
-        <RouterLink
           to="/maintenance"
           :class="['sidebar__link', isActive('/maintenance') && 'sidebar__link--active']"
           @click="handleNavClick"
@@ -173,16 +133,6 @@ function handleNavClick() {
           <div class="sidebar__link-indicator" />
           <Wrench class="sidebar__link-icon" />
           <span>Wartung</span>
-        </RouterLink>
-
-        <RouterLink
-          to="/load-test"
-          :class="['sidebar__link', isActive('/load-test') && 'sidebar__link--active']"
-          @click="handleNavClick"
-        >
-          <div class="sidebar__link-indicator" />
-          <Zap class="sidebar__link-icon" />
-          <span>Last-Tests</span>
         </RouterLink>
       </template>
     </nav>

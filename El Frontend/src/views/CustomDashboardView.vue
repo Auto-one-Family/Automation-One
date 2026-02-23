@@ -22,9 +22,30 @@ import {
 } from 'lucide-vue-next'
 import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.store'
 import { useToast } from '@/composables/useToast'
+import { useEspStore } from '@/stores/esp'
+import ViewTabBar from '@/components/common/ViewTabBar.vue'
+import { h, render, type Component, type VNode, getCurrentInstance } from 'vue'
+
+// Widget components
+import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
+import GaugeWidget from '@/components/dashboard-widgets/GaugeWidget.vue'
+import SensorCardWidget from '@/components/dashboard-widgets/SensorCardWidget.vue'
+import ActuatorCardWidget from '@/components/dashboard-widgets/ActuatorCardWidget.vue'
 
 const dashStore = useDashboardStore()
+const espStore = useEspStore()
 const toast = useToast()
+
+// Widget component registry
+const widgetComponentMap: Record<string, Component> = {
+  'line-chart': LineChartWidget,
+  'gauge': GaugeWidget,
+  'sensor-card': SensorCardWidget,
+  'actuator-card': ActuatorCardWidget,
+}
+
+// Track mounted Vue vnodes for cleanup
+const mountedWidgets = new Map<string, HTMLElement>()
 
 // GridStack instance
 let grid: GridStack | null = null
@@ -60,6 +81,11 @@ const groupedWidgets = computed(() => {
 // =============================================================================
 
 onMounted(() => {
+  // Ensure ESP data is loaded for widgets
+  if (espStore.devices.length === 0) {
+    espStore.fetchAll()
+  }
+
   nextTick(() => {
     if (!gridContainer.value) return
 
@@ -90,42 +116,107 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // Cleanup all mounted Vue vnodes
+  for (const [id, el] of mountedWidgets) {
+    render(null, el)
+  }
+  mountedWidgets.clear()
+
   if (grid) {
     grid.destroy(false)
     grid = null
   }
 })
 
+// Widget config cache (stored per widget ID)
+const widgetConfigs = ref<Map<string, Record<string, any>>>(new Map())
+
 function loadWidgetsToGrid(widgets: any[]) {
   if (!grid) return
+
+  // Cleanup existing mounted widgets
+  for (const [id, el] of mountedWidgets) {
+    render(null, el)
+  }
+  mountedWidgets.clear()
+
   grid.removeAll(false)
 
   for (const w of widgets) {
+    const mountId = `widget-mount-${w.id}`
+    if (w.config) {
+      widgetConfigs.value.set(w.id, w.config)
+    }
     grid.addWidget({
       x: w.x,
       y: w.y,
       w: w.w,
       h: w.h,
       id: w.id,
-      content: createWidgetContent(w.type, w.config?.title || w.type),
+      content: createWidgetContent(w.type, w.config?.title || w.type, w.id, mountId),
+    })
+
+    // Mount Vue component after DOM insertion
+    nextTick(() => {
+      mountWidgetComponent(w.id, mountId, w.type, w.config || {})
     })
   }
 }
 
-function createWidgetContent(type: string, title: string): string {
+function createWidgetContent(type: string, title: string, widgetId: string, mountId: string): string {
   const widgetDef = widgetTypes.find(w => w.type === type)
   const label = widgetDef?.label || type
+  const hasVueComponent = type in widgetComponentMap
   return `
-    <div class="dashboard-widget" data-type="${type}">
-      <div class="dashboard-widget__header">
-        <span class="dashboard-widget__title">${title || label}</span>
-        <span class="dashboard-widget__type">${type}</span>
-      </div>
-      <div class="dashboard-widget__body">
-        <div class="dashboard-widget__placeholder">${label}</div>
-      </div>
+    <div class="dashboard-widget" data-type="${type}" data-widget-id="${widgetId}">
+      ${hasVueComponent
+        ? `<div id="${mountId}" class="dashboard-widget__vue-mount" style="height: 100%;"></div>`
+        : `<div class="dashboard-widget__header">
+            <span class="dashboard-widget__title">${title || label}</span>
+            <span class="dashboard-widget__type">${type}</span>
+          </div>
+          <div class="dashboard-widget__body">
+            <div class="dashboard-widget__placeholder">${label}</div>
+          </div>`
+      }
     </div>
   `
+}
+
+// Get current Vue instance for app context sharing
+const currentInstance = getCurrentInstance()
+
+/**
+ * Mount a Vue widget component into a GridStack cell.
+ * Uses Vue's render() API with appContext to share Pinia stores.
+ */
+function mountWidgetComponent(widgetId: string, mountId: string, type: string, config: Record<string, any>) {
+  const WidgetComponent = widgetComponentMap[type]
+  if (!WidgetComponent) return
+
+  const mountEl = document.getElementById(mountId)
+  if (!mountEl) return
+
+  // Build props based on widget type
+  const props: Record<string, any> = {}
+  if (config.sensorId) props.sensorId = config.sensorId
+  if (config.actuatorId) props.actuatorId = config.actuatorId
+
+  // onUpdate:config handler
+  props['onUpdate:config'] = (newConfig: Record<string, any>) => {
+    const existing = widgetConfigs.value.get(widgetId) || {}
+    widgetConfigs.value.set(widgetId, { ...existing, ...newConfig })
+    autoSave()
+  }
+
+  // Create vnode and attach appContext for Pinia/router access
+  const vnode = h(WidgetComponent, props)
+  if (currentInstance?.appContext) {
+    vnode.appContext = currentInstance.appContext
+  }
+
+  render(vnode, mountEl)
+  mountedWidgets.set(widgetId, mountEl)
 }
 
 // =============================================================================
@@ -139,12 +230,20 @@ function addWidget(type: string) {
   if (!widgetDef) return
 
   const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const mountId = `widget-mount-${id}`
+  const config = { title: widgetDef.label }
+  widgetConfigs.value.set(id, config)
 
   grid.addWidget({
     w: widgetDef.w,
     h: widgetDef.h,
     id,
-    content: createWidgetContent(type, widgetDef.label),
+    content: createWidgetContent(type, widgetDef.label, id, mountId),
+  })
+
+  // Mount Vue component
+  nextTick(() => {
+    mountWidgetComponent(id, mountId, type, config)
   })
 
   autoSave()
@@ -156,14 +255,16 @@ function autoSave() {
   const items = grid.getGridItems()
   const widgets = items.map((el: GridItemHTMLElement) => {
     const node = el.gridstackNode
+    const widgetEl = el.querySelector('.dashboard-widget')
+    const widgetId = widgetEl?.getAttribute('data-widget-id') || node?.id || ''
     return {
-      id: node?.id || '',
-      type: (el.querySelector('.dashboard-widget')?.getAttribute('data-type') || 'line-chart') as WidgetType,
+      id: widgetId,
+      type: (widgetEl?.getAttribute('data-type') || 'line-chart') as WidgetType,
       x: node?.x || 0,
       y: node?.y || 0,
       w: node?.w || 3,
       h: node?.h || 2,
-      config: {},
+      config: widgetConfigs.value.get(widgetId) || {},
     }
   })
 
@@ -241,6 +342,9 @@ function handleImport() {
 
 <template>
   <div class="dashboard-builder">
+    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
+    <ViewTabBar />
+
     <!-- Toolbar -->
     <div class="dashboard-builder__toolbar">
       <div class="dashboard-builder__toolbar-left">

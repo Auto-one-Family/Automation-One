@@ -7,7 +7,7 @@
  */
 
 import { Cpu, Activity, Map } from 'lucide-vue-next'
-import type { ZoomLevel } from '@/composables/useZoomNavigation'
+type ZoomLevel = 1 | 2 | 3
 
 interface Props {
   currentLevel: ZoomLevel

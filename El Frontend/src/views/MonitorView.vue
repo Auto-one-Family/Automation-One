@@ -12,15 +12,20 @@
  * threshold monitoring, manual actuator control.
  */
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
-import { ArrowLeft, Thermometer, Droplets, Zap, Activity, AlertTriangle } from 'lucide-vue-next'
+import { ArrowLeft, Thermometer, Droplets, Zap, Activity, AlertTriangle, ChevronDown, Settings2 } from 'lucide-vue-next'
 import type { MockSensor, MockActuator } from '@/types'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
 import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
+import LiveLineChart from '@/components/charts/LiveLineChart.vue'
+import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
+import HistoricalChart from '@/components/charts/HistoricalChart.vue'
+import GaugeChart from '@/components/charts/GaugeChart.vue'
+import ViewTabBar from '@/components/common/ViewTabBar.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -35,6 +40,48 @@ const showSensorPanel = ref(false)
 const showActuatorPanel = ref(false)
 const selectedSensor = ref<SensorItem | null>(null)
 const selectedActuator = ref<ActuatorItem | null>(null)
+
+// Expanded sensor card state (for inline charts)
+const expandedSensorKey = ref<string | null>(null)
+const historicalTimeRange = ref<'1h' | '6h' | '24h' | '7d'>('1h')
+
+// Sparkline data cache: stores recent data points per sensor
+const sparklineCache = ref<Map<string, ChartDataPoint[]>>(new Map())
+const SPARKLINE_MAX_POINTS = 30
+
+function getSensorKey(espId: string, gpio: number): string {
+  return `${espId}-${gpio}`
+}
+
+function toggleExpanded(sensorKey: string) {
+  expandedSensorKey.value = expandedSensorKey.value === sensorKey ? null : sensorKey
+}
+
+// Watch store for live sensor data updates → cache for sparklines
+watch(
+  () => espStore.devices,
+  () => {
+    for (const device of espStore.devices) {
+      const deviceId = espStore.getDeviceId(device)
+      const sensors = (device.sensors as MockSensor[]) || []
+      for (const s of sensors) {
+        if (typeof s.raw_value !== 'number') continue
+        const key = getSensorKey(deviceId, s.gpio)
+        const existing = sparklineCache.value.get(key) || []
+        const lastPoint = existing[existing.length - 1]
+        const now = new Date()
+        // Only add if value changed or >5s elapsed
+        if (!lastPoint || s.raw_value !== lastPoint.value ||
+            (now.getTime() - new Date(lastPoint.timestamp).getTime()) > 5000) {
+          const updated = [...existing, { timestamp: now, value: s.raw_value }]
+          if (updated.length > SPARKLINE_MAX_POINTS) updated.shift()
+          sparklineCache.value.set(key, updated)
+        }
+      }
+    }
+  },
+  { deep: true }
+)
 
 // Fetch data on mount
 onMounted(() => {
@@ -250,6 +297,9 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
 
 <template>
   <div class="monitor-view">
+    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
+    <ViewTabBar />
+
     <!-- Level 1: Zone Overview -->
     <template v-if="!isZoneDetail">
       <h2 class="monitor-view__title">Sensor & Aktor Monitoring</h2>
@@ -272,6 +322,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
             <span
               v-if="zone.alarmCount > 0"
               class="monitor-zone-tile__alarm-badge"
+              :title="`${zone.alarmCount} Sensor${zone.alarmCount > 1 ? 'en' : ''} mit Alarm in dieser Zone`"
             >
               <AlertTriangle class="w-3 h-3" />
               {{ zone.alarmCount }}
@@ -314,21 +365,105 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
           <div
             v-for="sensor in zoneSensors"
             :key="`${sensor.espId}-${sensor.gpio}`"
-            :class="['monitor-sensor-card', `monitor-sensor-card--${qualityToStatus(sensor.quality)}`]"
-            @click="openSensorConfig(sensor)"
+            :class="[
+              'monitor-sensor-card',
+              `monitor-sensor-card--${qualityToStatus(sensor.quality)}`,
+              { 'monitor-sensor-card--expanded': expandedSensorKey === getSensorKey(sensor.espId, sensor.gpio) }
+            ]"
+            @click="toggleExpanded(getSensorKey(sensor.espId, sensor.gpio))"
           >
             <div class="monitor-sensor-card__header">
               <span class="monitor-sensor-card__name">{{ sensor.name }}</span>
-              <span :class="['monitor-sensor-card__dot', `monitor-sensor-card__dot--${qualityToStatus(sensor.quality)}`]" />
+              <span
+                :class="['monitor-sensor-card__dot', `monitor-sensor-card__dot--${qualityToStatus(sensor.quality)}`]"
+                :title="`${qualityToStatus(sensor.quality) === 'good' ? 'OK' : qualityToStatus(sensor.quality) === 'warning' ? 'Warnung' : qualityToStatus(sensor.quality) === 'alarm' ? 'Alarm' : 'Offline'}: ${sensor.name} — ${formatValue(sensor.value)} ${sensor.unit}`"
+              />
             </div>
             <div class="monitor-sensor-card__value">
               <span class="monitor-sensor-card__number">{{ formatValue(sensor.value) }}</span>
               <span class="monitor-sensor-card__unit">{{ sensor.unit }}</span>
             </div>
+
+            <!-- Sparkline (compact mini chart) -->
+            <div
+              v-if="sparklineCache.get(getSensorKey(sensor.espId, sensor.gpio))?.length"
+              class="monitor-sensor-card__sparkline"
+            >
+              <LiveLineChart
+                :data="sparklineCache.get(getSensorKey(sensor.espId, sensor.gpio)) || []"
+                :compact="true"
+                height="36px"
+                :fill="true"
+                :show-grid="false"
+              />
+            </div>
+
             <div class="monitor-sensor-card__meta">
               <span>{{ sensor.espName }}</span>
-              <span>GPIO {{ sensor.gpio }}</span>
+              <span class="monitor-sensor-card__expand-hint">
+                <ChevronDown
+                  class="w-3 h-3"
+                  :style="{ transform: expandedSensorKey === getSensorKey(sensor.espId, sensor.gpio) ? 'rotate(180deg)' : 'rotate(0)' }"
+                />
+              </span>
             </div>
+
+            <!-- Expanded Chart Panel -->
+            <Transition name="expand">
+              <div
+                v-if="expandedSensorKey === getSensorKey(sensor.espId, sensor.gpio)"
+                class="monitor-sensor-card__charts"
+                @click.stop
+              >
+                <div class="monitor-sensor-card__charts-grid">
+                  <!-- Gauge -->
+                  <div class="monitor-sensor-card__gauge">
+                    <GaugeChart
+                      :value="sensor.value"
+                      :unit="sensor.unit"
+                      size="sm"
+                    />
+                  </div>
+
+                  <!-- Live Line Chart -->
+                  <div class="monitor-sensor-card__live-chart">
+                    <LiveLineChart
+                      :data="sparklineCache.get(getSensorKey(sensor.espId, sensor.gpio)) || []"
+                      height="120px"
+                      :unit="sensor.unit"
+                      :fill="true"
+                    />
+                  </div>
+                </div>
+
+                <!-- Historical Chart -->
+                <div class="monitor-sensor-card__historical">
+                  <div class="monitor-sensor-card__time-range">
+                    <button
+                      v-for="tr in (['1h', '6h', '24h', '7d'] as const)"
+                      :key="tr"
+                      :class="['monitor-sensor-card__time-btn', { 'monitor-sensor-card__time-btn--active': historicalTimeRange === tr }]"
+                      @click.stop="historicalTimeRange = tr"
+                    >{{ tr }}</button>
+                  </div>
+                  <HistoricalChart
+                    :esp-id="sensor.espId"
+                    :gpio="sensor.gpio"
+                    :sensor-type="sensor.sensorType"
+                    :time-range="historicalTimeRange"
+                  />
+                </div>
+
+                <!-- Config Button -->
+                <button
+                  class="monitor-sensor-card__config-btn"
+                  @click.stop="openSensorConfig(sensor)"
+                >
+                  <Settings2 class="w-4 h-4" />
+                  <span>Konfigurieren</span>
+                </button>
+              </div>
+            </Transition>
           </div>
         </div>
       </section>
@@ -353,7 +488,10 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
                 {{ actuator.state ? 'AUS' : 'EIN' }}
               </button>
             </div>
-            <div class="monitor-actuator-card__status">
+            <div
+              class="monitor-actuator-card__status"
+              :title="actuator.state ? 'Aktiv: Aktor eingeschaltet' : 'Inaktiv: Aktor ausgeschaltet'"
+            >
               <Zap class="w-4 h-4" />
               <span>{{ actuator.state ? 'Aktiv' : 'Inaktiv' }}</span>
             </div>
@@ -635,11 +773,146 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
   color: var(--color-text-muted);
 }
 
+.monitor-sensor-card__sparkline {
+  margin: var(--space-1) 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
 .monitor-sensor-card__meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 10px;
   color: var(--color-text-muted);
+}
+
+.monitor-sensor-card__expand-hint {
+  transition: transform var(--transition-fast);
+  color: var(--color-text-muted);
+}
+
+.monitor-sensor-card--expanded {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 640px) {
+  .monitor-sensor-card--expanded {
+    grid-column: span 2;
+  }
+}
+
+/* Charts Panel (expanded) */
+.monitor-sensor-card__charts {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.monitor-sensor-card__charts-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+@media (max-width: 480px) {
+  .monitor-sensor-card__charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.monitor-sensor-card__gauge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.monitor-sensor-card__live-chart {
+  min-width: 0;
+}
+
+.monitor-sensor-card__historical {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.monitor-sensor-card__time-range {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-primary);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  width: fit-content;
+}
+
+.monitor-sensor-card__time-btn {
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.monitor-sensor-card__time-btn:hover {
+  color: var(--color-text-secondary);
+}
+
+.monitor-sensor-card__time-btn--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.monitor-sensor-card__config-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-bright);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  width: fit-content;
+}
+
+.monitor-sensor-card__config-btn:hover {
+  border-color: var(--color-accent);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+/* Expand transition */
+.expand-enter-active {
+  transition: all var(--duration-base) var(--ease-out);
+}
+
+.expand-leave-active {
+  transition: all var(--duration-fast) var(--ease-in-out);
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  max-height: 600px;
 }
 
 /* Actuator Card */

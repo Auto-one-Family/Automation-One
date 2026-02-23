@@ -1,8 +1,8 @@
 /**
  * Dashboard Store
  *
- * Bridge between DashboardView (data producer) and TopBar (UI consumer).
- * DashboardView writes counts, breadcrumb, and reads filter state.
+ * Bridge between HardwareView (data producer) and TopBar (UI consumer).
+ * HardwareView writes counts, breadcrumb, and reads filter state.
  * TopBar reads counts/breadcrumb and writes filter changes.
  *
  * Extended with Custom Dashboard Layout management (Phase 2).

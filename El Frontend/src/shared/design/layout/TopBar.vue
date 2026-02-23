@@ -27,6 +27,7 @@ import {
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
+import ColorLegend from '@/components/common/ColorLegend.vue'
 
 const emit = defineEmits<{
   'toggle-sidebar': []
@@ -98,12 +99,6 @@ const routeBreadcrumbs = computed(() => {
   return crumbs
 })
 
-function onBreadcrumbClick(level: 1 | 2 | 3) {
-  if (level < dashStore.breadcrumb.level) {
-    dashStore.requestNavigate(level)
-  }
-}
-
 function navigateCrumb(to: string | undefined) {
   if (to) router.push(to)
 }
@@ -133,27 +128,6 @@ async function handleLogout() {
             @click="navigateCrumb(crumb.to)"
           >{{ crumb.label }}</button>
           <span v-else class="header__crumb--current">{{ crumb.label }}</span>
-        </template>
-      </nav>
-
-      <!-- Legacy Dashboard: Zoom Breadcrumb (DashboardView) -->
-      <nav v-else-if="dashStore.showControls" class="header__breadcrumb" aria-label="Zoom-Navigation">
-        <button
-          :class="dashStore.breadcrumb.level === 1 ? 'header__crumb--current' : 'header__crumb'"
-          @click="onBreadcrumbClick(1)"
-        >Dashboard</button>
-
-        <template v-if="dashStore.breadcrumb.level >= 2 && dashStore.breadcrumb.zoneName">
-          <span class="header__crumb-sep" aria-hidden="true">›</span>
-          <button
-            :class="dashStore.breadcrumb.level === 2 ? 'header__crumb--current' : 'header__crumb'"
-            @click="onBreadcrumbClick(2)"
-          >{{ dashStore.breadcrumb.zoneName }}</button>
-        </template>
-
-        <template v-if="dashStore.breadcrumb.level >= 3 && dashStore.breadcrumb.deviceName">
-          <span class="header__crumb-sep" aria-hidden="true">›</span>
-          <span class="header__crumb--current">{{ dashStore.breadcrumb.deviceName }}</span>
         </template>
       </nav>
 
@@ -265,6 +239,9 @@ async function handleLogout() {
 
         <div class="header__divider" />
       </template>
+
+      <!-- Color Legend -->
+      <ColorLegend />
 
       <!-- Emergency Stop -->
       <EmergencyStopButton />

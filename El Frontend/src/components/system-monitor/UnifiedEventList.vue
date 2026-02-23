@@ -884,7 +884,7 @@ onUnmounted(() => {
 
 /* ESP-Status (Blue) */
 .event-item--category-esp-status .event-item__category-bar {
-  background-color: #3b82f6;
+  background-color: var(--color-accent);
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
 }
 
@@ -947,22 +947,22 @@ onUnmounted(() => {
 /* Category-based icon styling */
 .event-item--category-esp-status .event-item__icon {
   background-color: rgba(59, 130, 246, 0.12);
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .event-item--category-sensors .event-item__icon {
   background-color: rgba(16, 185, 129, 0.12);
-  color: #34d399;
+  color: var(--color-success);
 }
 
 .event-item--category-actuators .event-item__icon {
   background-color: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .event-item--category-system .event-item__icon {
   background-color: rgba(139, 92, 246, 0.12);
-  color: #a78bfa;
+  color: var(--color-mock);
 }
 
 /* NOTE: Icon color is now ALWAYS determined by category (not severity)
@@ -1037,11 +1037,11 @@ onUnmounted(() => {
 
 .event-item--severity-error .event-item__severity,
 .event-item--severity-critical .event-item__severity {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .event-item--severity-warning .event-item__severity {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 /* Mobile Responsive */
@@ -1329,7 +1329,7 @@ onUnmounted(() => {
 }
 
 /* Category colors for group headers */
-.event-group__header--esp-status { border-left-color: #3b82f6; }
+.event-group__header--esp-status { border-left-color: var(--color-accent); }
 .event-group__header--sensors { border-left-color: #10b981; }
 .event-group__header--actuators { border-left-color: #f59e0b; }
 .event-group__header--system { border-left-color: #8b5cf6; }
@@ -1445,7 +1445,7 @@ onUnmounted(() => {
 }
 
 .event-group__header--emergency {
-  border-left-color: #ef4444 !important;
+  border-left-color: var(--color-error) !important;
   background: rgba(239, 68, 68, 0.08);
 }
 
@@ -1461,7 +1461,7 @@ onUnmounted(() => {
   height: 2rem;
   background: rgba(239, 68, 68, 0.15);
   border-radius: 0.5rem;
-  color: #ef4444;
+  color: var(--color-error);
   flex-shrink: 0;
   animation: emergency-pulse 2s ease-in-out infinite;
 }
@@ -1484,7 +1484,7 @@ onUnmounted(() => {
 
 .event-group__emergency-gpios {
   font-size: 0.6875rem;
-  color: #ef4444;
+  color: var(--color-error);
   font-weight: 500;
 }
 
@@ -1498,7 +1498,7 @@ onUnmounted(() => {
 .event-group__count-badge--emergency {
   padding: 0.125rem 0.5rem;
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--color-error);
   font-weight: 600;
   font-size: 0.75rem;
   border-radius: 9999px;
@@ -1523,7 +1523,7 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 0.625rem 0.75rem;
   background: rgba(239, 68, 68, 0.08);
-  color: #ef4444;
+  color: var(--color-error);
   font-weight: 600;
   font-size: 0.8125rem;
 }
@@ -1565,7 +1565,7 @@ onUnmounted(() => {
   border-radius: 0.25rem;
   font-family: monospace;
   font-size: 0.75rem;
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 /* Trigger Event Highlight */
@@ -1575,7 +1575,7 @@ onUnmounted(() => {
 
 .event-item__trigger-badge {
   padding: 0.125rem 0.5rem;
-  background: #ef4444;
+  background: var(--color-error);
   color: white;
   font-size: 0.625rem;
   font-weight: 700;

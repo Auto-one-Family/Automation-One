@@ -658,7 +658,11 @@ const offlineTimeAbsolute = computed(() => {
             >
               {{ espId }}
             </RouterLink>
-            <Badge :variant="isMock ? 'mock' : 'real'" size="sm">
+            <Badge
+              :variant="isMock ? 'mock' : 'real'"
+              size="sm"
+              :title="isMock ? 'Mock-Gerät (simuliert)' : 'Hardware-Gerät'"
+            >
               {{ isMock ? 'MOCK' : 'REAL' }}
             </Badge>
           </div>
@@ -671,6 +675,7 @@ const offlineTimeAbsolute = computed(() => {
             variant="warning"
             size="sm"
             :dot="true"
+            title="Verwaist: Nur in Datenbank, nicht im Debug-Store"
           >
             <AlertOctagon class="w-3 h-3 mr-1" />
             Verwaist
@@ -683,6 +688,7 @@ const offlineTimeAbsolute = computed(() => {
             :pulse="isOnline"
             :dot="true"
             size="sm"
+            :title="isOnline ? 'Online: Gerät verbunden' : 'Offline: Keine Verbindung'"
           >
             {{ stateInfo.label }}
           </Badge>
@@ -692,11 +698,17 @@ const offlineTimeAbsolute = computed(() => {
             v-if="mockStateInfo && !isOrphanedMock"
             :variant="mockStateInfo.variant as any"
             size="sm"
+            :title="`Systemzustand: ${mockStateInfo.label}`"
           >
             {{ mockStateInfo.label }}
           </Badge>
 
-          <Badge v-if="hasEmergencyStopped" variant="danger" size="sm">
+          <Badge
+            v-if="hasEmergencyStopped"
+            variant="danger"
+            size="sm"
+            title="Notaus: Alle Aktoren dieses Geräts wurden gestoppt"
+          >
             E-STOP
           </Badge>
         </div>

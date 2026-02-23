@@ -9,6 +9,7 @@
 
 import { computed } from 'vue'
 import { Bar } from 'vue-chartjs'
+import { tokens } from '@/utils/cssTokens'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -47,7 +48,7 @@ const props = withDefaults(defineProps<Props>(), {
   showValues: true,
 })
 
-const DEFAULT_COLORS = ['#22c55e', '#eab308', '#ef4444', '#3b82f6', '#8b5cf6']
+const DEFAULT_COLORS = [tokens.statusGood, tokens.statusWarning, tokens.statusAlarm, tokens.accent, '#8b5cf6']
 
 const chartData = computed(() => ({
   labels: props.data.map(d => d.label),
@@ -76,8 +77,8 @@ const chartOptions = computed(() => ({
       borderWidth: 1,
       titleFont: { family: 'JetBrains Mono', size: 11 },
       bodyFont: { family: 'JetBrains Mono', size: 12 },
-      titleColor: '#8585a0',
-      bodyColor: '#eaeaf2',
+      titleColor: tokens.textSecondary,
+      bodyColor: tokens.textPrimary,
       padding: 8,
     },
   },
@@ -87,14 +88,14 @@ const chartOptions = computed(() => ({
       : {
           display: true,
           grid: { display: false },
-          ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 } },
+          ticks: { color: tokens.textMuted, font: { family: 'JetBrains Mono', size: 10 } },
           border: { display: false },
         },
     y: props.horizontal
       ? {
           display: true,
           grid: { display: false },
-          ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 } },
+          ticks: { color: tokens.textMuted, font: { family: 'JetBrains Mono', size: 10 } },
           border: { display: false },
         }
       : { display: false, grid: { display: false }, border: { display: false } },
