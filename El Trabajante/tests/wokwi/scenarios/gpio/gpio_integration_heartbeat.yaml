@@ -22,6 +22,14 @@
 #   0 = INPUT
 #   1 = OUTPUT
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure sensor:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor","active":true}]}'
+#   Step 2 - Configure actuator (after ~2s delay):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"TestPump","active":true}]}'
+#
 # Firmware reference:
 #   - mqtt_client.cpp (publishHeartbeat method)
 #   - gpio_manager.cpp (getReservedPinsList method)
@@ -39,43 +47,13 @@ steps:
   # (auto-reserved during GPIO init)
   - wait-serial: "heartbeat"
 
-  # Configure sensor to add to GPIO status
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "TempSensor",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT config injection: sensor on GPIO 4 (CI helper script)
 
   # Verify sensor allocated
   - wait-serial: "Pin 4 allocated"
 
-  # Configure actuator to add to GPIO status
+  # External MQTT config injection: actuator on GPIO 5 (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "pump",
-              "actuator_name": "TestPump",
-              "active": true
-            }]
-          }
-        }
 
   # Verify actuator allocated
   - wait-serial: "Pin 5 allocated"

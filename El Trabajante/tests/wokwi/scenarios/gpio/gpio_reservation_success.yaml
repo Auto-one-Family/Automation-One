@@ -13,6 +13,10 @@
 #   3. Verify GPIO Manager logs successful reservation
 #   4. Verify sensor becomes operational
 #
+# MQTT-Injection (extern via CI):
+#   mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#     -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true,"raw_mode":true}]}'
+#
 # Firmware reference: gpio_manager.cpp lines 97-129
 
 name: Successful GPIO Pin Reservation
@@ -24,23 +28,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Inject sensor configuration via MQTT
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "TempSensor1",
-              "active": true,
-              "raw_mode": true
-            }]
-          }
-        }
+  # External MQTT config injection happens here (CI helper script)
 
   # Verify GPIO Manager received reservation request
   - wait-serial: "Pin 4 allocated"

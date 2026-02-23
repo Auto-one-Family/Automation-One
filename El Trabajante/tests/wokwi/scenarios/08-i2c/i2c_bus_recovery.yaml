@@ -31,53 +31,20 @@
 # The virtual bus is always functional.
 # This test documents EXPECTED behavior for code review.
 #
-# FIRMWARE GAP IDENTIFIED (2026-01-29):
+# FIRMWARE LIMITATION: Recovery exists but Wokwi cannot simulate I2C bus errors
 # File: El Trabajante/src/drivers/i2c_bus.cpp
-# Status: NO bus recovery mechanism exists
+# Status: Bus recovery mechanism EXISTS (I2CBusManager::recoverBus(), line ~398)
 #
-# Current behavior (line 103-110):
-#   if (error == 4) {
-#       LOG_ERROR("I2C bus error: Bus not functional");
-#       errorTracker.trackError(ERROR_I2C_BUS_ERROR, ...);
-#       Wire.end();
-#       return false;  // FAILS PERMANENTLY!
-#   }
+# Implemented recovery (verified 2026-02-23):
+#   - Wire.end() to release current session
+#   - 9 SCL clock pulses to release stuck slaves
+#   - STOP condition generation (SDA rising while SCL high)
+#   - Wire.begin() re-initialization
+#   - Bus verification via general-call probe
+#   - Error tracking with ERROR_I2C_BUS_RECOVERY_STARTED/FAILED
 #
-# REQUIRED FIRMWARE FIX:
-# Add bus recovery function and use it:
-#
-#   bool I2CBusManager::recoverBus() {
-#       LOG_WARNING("I2C bus recovery initiated");
-#
-#       // Release Wire
-#       Wire.end();
-#
-#       // Clock out stuck data: Toggle SCL 9 times
-#       pinMode(scl_pin_, OUTPUT);
-#       pinMode(sda_pin_, INPUT_PULLUP);
-#       for (int i = 0; i < 9; i++) {
-#           digitalWrite(scl_pin_, LOW);
-#           delayMicroseconds(5);
-#           digitalWrite(scl_pin_, HIGH);
-#           delayMicroseconds(5);
-#       }
-#
-#       // Generate STOP: SDA low→high while SCL high
-#       pinMode(sda_pin_, OUTPUT);
-#       digitalWrite(sda_pin_, LOW);
-#       delayMicroseconds(5);
-#       digitalWrite(sda_pin_, HIGH);
-#
-#       // Re-initialize
-#       bool success = Wire.begin(sda_pin_, scl_pin_, frequency_);
-#       if (success) {
-#           LOG_INFO("I2C bus recovery successful");
-#       } else {
-#           LOG_ERROR("I2C bus recovery FAILED");
-#           errorTracker.trackError(ERROR_I2C_BUS_ERROR, ...);
-#       }
-#       return success;
-#   }
+# Cannot be tested in Wokwi because the virtual I2C bus never produces
+# error codes 4/5. Test on real hardware by shorting SDA to GND.
 # ============================================================================
 
 name: I2C Auto Bus Recovery

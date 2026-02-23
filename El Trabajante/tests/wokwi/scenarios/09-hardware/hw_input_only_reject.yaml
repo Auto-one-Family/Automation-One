@@ -23,6 +23,17 @@
 #
 # XIAO ESP32-C3 has NO input-only pins (all GPIOs are bidirectional)
 #
+# MQTT-Injection (extern via CI):
+#   Test 1 - Actuator on GPIO 34 (INPUT-only):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":34,"actuator_type":"relay","actuator_name":"InvalidRelay34","active":true}]}'
+#   Test 2 - Actuator on GPIO 39 (INPUT-only, after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":39,"actuator_type":"pump","actuator_name":"InvalidPump39","active":true}]}'
+#   Test 3 - Sensor on GPIO 34 (also fails, after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":34,"sensor_type":"analog","sensor_name":"AnalogSensor34","active":true}]}'
+#
 # Firmware references:
 #   - esp32_dev.h lines 57-60: INPUT_ONLY_PINS array
 #   - gpio_manager.cpp: Rejects pins not in SAFE_GPIO_PINS
@@ -36,23 +47,8 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # TEST 1: Try to configure actuator on GPIO 34 (INPUT-only)
+  # TEST 1: External MQTT injection - actuator on GPIO 34 (CI helper script)
   # This MUST fail because GPIO 34 is not in SAFE_GPIO_PINS
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 34,
-              "actuator_type": "relay",
-              "actuator_name": "InvalidRelay34",
-              "active": true
-            }]
-          }
-        }
 
   # Verify pin is rejected (not in safe pins list)
   - wait-serial: "not in safe pins"
@@ -60,22 +56,7 @@ steps:
   # Wait before next test
   - delay: 500
 
-  # TEST 2: Try to configure actuator on GPIO 39 (INPUT-only)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 39,
-              "actuator_type": "pump",
-              "actuator_name": "InvalidPump39",
-              "active": true
-            }]
-          }
-        }
+  # TEST 2: External MQTT injection - actuator on GPIO 39 (CI helper script)
 
   # Verify pin is rejected
   - wait-serial: "not in safe pins"
@@ -83,24 +64,9 @@ steps:
   # Wait before next test
   - delay: 500
 
-  # TEST 3: Try to configure sensor on GPIO 34
+  # TEST 3: External MQTT injection - sensor on GPIO 34 (CI helper script)
   # Note: This will ALSO fail because GPIO 34 is not in SAFE_GPIO_PINS
   # The current implementation does NOT allow GPIO 34-39 even as inputs
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 34,
-              "sensor_type": "analog",
-              "sensor_name": "AnalogSensor34",
-              "active": true
-            }]
-          }
-        }
 
   # Verify pin is rejected
   - wait-serial: "not in safe pins"

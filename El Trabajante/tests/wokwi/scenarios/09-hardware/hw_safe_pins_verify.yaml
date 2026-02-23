@@ -14,6 +14,14 @@
 #
 # Note: GPIO 21, 22 (WROOM) or 4, 5 (XIAO) are auto-reserved for I2C
 #
+# MQTT-Injection (extern via CI):
+#   Test 1 - Sensor on valid safe pin GPIO 4:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ValidSensor","active":true}]}'
+#   Test 2 - Actuator on valid safe pin GPIO 5 (after ~1.5s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"ValidLED","active":true}]}'
+#
 # Firmware references:
 #   - esp32_dev.h lines 46-49: SAFE_GPIO_PINS array
 #   - gpio_manager.cpp: Uses SAFE_GPIO_PINS for validation
@@ -40,23 +48,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # TEST: Configure sensor on valid safe pin (GPIO 4)
-  # GPIO 4 is in SAFE_GPIO_PINS for both WROOM and XIAO
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "ValidSensor",
-              "active": true
-            }]
-          }
-        }
+  # TEST 1: External MQTT injection - sensor on valid safe pin GPIO 4 (CI helper script)
 
   # Verify sensor configuration succeeds
   # Should see pin reservation success, not "not in safe pins"
@@ -65,23 +57,7 @@ steps:
   # Wait for config response
   - delay: 1500
 
-  # TEST: Configure actuator on valid safe pin (GPIO 5)
-  # GPIO 5 is in SAFE_GPIO_PINS for both WROOM and XIAO
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "led",
-              "actuator_name": "ValidLED",
-              "active": true
-            }]
-          }
-        }
+  # TEST 2: External MQTT injection - actuator on valid safe pin GPIO 5 (CI helper script)
 
   # Verify actuator configuration succeeds
   - wait-serial: "Actuator"

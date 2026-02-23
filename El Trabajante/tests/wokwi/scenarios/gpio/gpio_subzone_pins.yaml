@@ -12,6 +12,14 @@
 #   - Bulk operations on subzone (safe-mode, etc.)
 #   - Heartbeat includes subzone information
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure multiple components:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ClimateTemp","active":true}],"actuators":[{"gpio":5,"actuator_type":"fan","actuator_name":"ClimateFan","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"ClimateVent","active":true}]}'
+#   Step 2 - Assign all to climate_control subzone (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+#       -m '{"subzone_id":"climate_control","gpios":[4,5,14]}'
+#
 # Firmware reference: gpio_manager.cpp lines 566-572
 
 name: Get Subzone Pins List
@@ -23,57 +31,15 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure multiple sensors/actuators for a subzone
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [
-              {
-                "gpio": 4,
-                "sensor_type": "temp_ds18b20",
-                "sensor_name": "ClimateTemp",
-                "active": true
-              }
-            ],
-            "actuators": [
-              {
-                "gpio": 5,
-                "actuator_type": "fan",
-                "actuator_name": "ClimateFan",
-                "active": true
-              },
-              {
-                "gpio": 14,
-                "actuator_type": "valve",
-                "actuator_name": "ClimateVent",
-                "active": true
-              }
-            ]
-          }
-        }
+  # External MQTT injection: configure multiple sensors/actuators (CI helper script)
 
   # Verify all components configured
   - wait-serial: "Pin 4 allocated"
   - wait-serial: "Pin 5 allocated"
   - wait-serial: "Pin 14 allocated"
 
-  # Assign all to climate_control subzone
+  # External MQTT injection: assign all to climate_control subzone (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
-          "payload": {
-            "subzone_id": "climate_control",
-            "gpios": [4, 5, 14]
-          }
-        }
 
   # Verify all pins assigned to subzone
   - wait-serial: "climate_control"

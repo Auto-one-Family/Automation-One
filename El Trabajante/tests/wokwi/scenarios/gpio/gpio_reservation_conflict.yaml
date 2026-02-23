@@ -16,6 +16,14 @@
 # This test prevents the dangerous scenario where two components
 # try to use the same GPIO pin, potentially causing hardware damage.
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - First sensor on GPIO 4:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true}]}'
+#   Step 2 - Second sensor on same GPIO 4 (after ~1s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"ph_sensor","sensor_name":"ConflictSensor","active":true}]}'
+#
 # Firmware reference: gpio_manager.cpp lines 104-109
 
 name: GPIO Conflict Detection - Reject Double Reservation
@@ -27,22 +35,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # STEP 1: First sensor config on GPIO 4 (should succeed)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "TempSensor1",
-              "active": true
-            }]
-          }
-        }
+  # STEP 1: External MQTT injection - first sensor on GPIO 4 (CI helper script)
 
   # Verify first reservation succeeds
   - wait-serial: "Pin 4 allocated"
@@ -50,22 +43,7 @@ steps:
   # Wait a moment for config to be applied
   - delay: 1000
 
-  # STEP 2: Second sensor on SAME GPIO 4 (should FAIL)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "ph_sensor",
-              "sensor_name": "ConflictSensor",
-              "active": true
-            }]
-          }
-        }
+  # STEP 2: External MQTT injection - second sensor on SAME GPIO 4 (CI helper script)
 
   # Verify conflict is detected
   # GPIO Manager should log conflict error

@@ -19,24 +19,19 @@
 # 3. DO NOT publish to MQTT as valid data
 # 4. Track error via ErrorTracker
 #
-# WOKWI LIMITATION:
+# WOKWI LIMITATION: Cannot simulate -127°C (sensor disconnect). Detection verified in native tests.
 # The Wokwi DS18B20 simulator does NOT return -127°C under any conditions.
 # Setting temperature=-127 in diagram.json may not work as Wokwi simulates
 # a "healthy" sensor. This test documents EXPECTED behavior for code review.
+# Verification: Backend unit tests (test_services_sensor.py, test_ds18b20_cross_esp_logic.py)
+# cover -127°C / RAW -2032 detection. No ESP32 native unit test exists yet.
 #
-# FIRMWARE GAP IDENTIFIED (2026-01-29):
-# File: El Trabajante/src/drivers/onewire_bus.cpp
-# Function: readRawTemperature()
-# Status: NO validation for -127°C error value exists
-# The function returns true with raw_value=-2032 without checking!
-#
-# REQUIRED FIRMWARE FIX:
-# Add validation in readRawTemperature() or SensorManager:
-#   if (raw_value == -2032) {  // -127°C in 1/16th degree units
-#       LOG_ERROR("DS18B20 error value detected: -127°C (disconnected/fault)");
-#       errorTracker.trackError(ERROR_ONEWIRE_DEVICE_DISCONNECTED, ...);
-#       return false;
-#   }
+# FIRMWARE STATUS (updated 2026-02-23):
+# Detection IS implemented in SensorManager (not in onewire_bus.cpp):
+# File: El Trabajante/src/services/sensor/sensor_manager.cpp:693
+# LOG_E: "SensorManager: DS18B20 SENSOR FAULT detected: -127°C (GPIO %d)"
+# LOG_E: "Possible causes: Sensor disconnected, CRC failure, bus wiring issue"
+# RAW -2032 = -127°C is correctly flagged as sensor fault.
 # ============================================================================
 
 name: DS18B20 Error Value -127°C Detection
