@@ -148,6 +148,12 @@ const router = createRouter({
           component: () => import('@/views/SensorHistoryView.vue'),
           meta: { title: 'Sensor-Zeitreihen' },
         },
+        {
+          path: 'custom-dashboard',
+          name: 'custom-dashboard',
+          component: () => import('@/views/CustomDashboardView.vue'),
+          meta: { title: 'Widget-Dashboard' },
+        },
       ],
     },
 

@@ -24,7 +24,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
-import { useUiStore, useDashboardStore } from '@/shared/stores'
+import { useUiStore, useDashboardStore, useDragStateStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
 import { useZoomNavigation } from '@/composables/useZoomNavigation'
@@ -34,6 +34,7 @@ import { createLogger } from '@/utils/logger'
 const logger = createLogger('Dashboard')
 
 // Components
+import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
@@ -53,6 +54,7 @@ const espStore = useEspStore()
 const logicStore = useLogicStore()
 const uiStore = useUiStore()
 const dashStore = useDashboardStore()
+const dragStore = useDragStateStore()
 const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
 const zoomNav = useZoomNavigation()
 const { register } = useKeyboardShortcuts()
@@ -405,6 +407,9 @@ function formatTimeAgo(timestamp: number): string {
 
 <template>
   <div :class="['dashboard-view', 'dashboard-view--level-' + zoomNav.currentLevel.value]">
+    <!-- Tab Navigation (Hardware / Monitor / Dashboard) -->
+    <ViewTabBar />
+
     <!-- Rules Activity Ribbon (compact, visible on all levels) -->
     <div v-if="logicStore.ruleCount > 0 || logicStore.recentExecutions.length > 0" class="rules-ribbon">
       <div class="rules-ribbon__status">
@@ -488,6 +493,7 @@ function formatTimeAgo(timestamp: number): string {
                 :zone-id="group.zoneId"
                 :zone-name="group.zoneName"
                 :devices="group.devices"
+                :is-drop-target="dragStore.isDraggingEspCard"
                 @click="onZonePlateClick"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"

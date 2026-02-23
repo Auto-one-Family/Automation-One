@@ -215,12 +215,9 @@ export function useZoneDragDrop() {
       // Refresh store from server to get updated data
       await espStore.fetchAll()
 
-      // Success toast
+      // Record in history for undo (before toast so undo works)
       const deviceName = device.name || deviceId
       const zoneName = zoneIdToDisplayName(toZoneId)
-      toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
-
-      // Record in history for undo
       pushToHistory({
         deviceId,
         deviceName,
@@ -229,6 +226,18 @@ export function useZoneDragDrop() {
         toZoneId: toZoneId,
         toZoneName: zoneName,
         timestamp: Date.now()
+      })
+
+      // Success toast with undo action
+      toast.success(`ESP verschoben → ${zoneName}`, {
+        duration: 5000,
+        actions: [
+          {
+            label: 'Rückgängig',
+            variant: 'secondary',
+            onClick: async () => { await undo() }
+          }
+        ]
       })
 
       logger.debug(`Assigned ${deviceId} → ${toZoneId}`)
@@ -294,12 +303,10 @@ export function useZoneDragDrop() {
       // Refresh store from server to get updated data
       await espStore.fetchAll()
 
-      // Success toast
       const deviceName = device.name || deviceId
       const zoneName = originalZoneName || zoneIdToDisplayName(originalZoneId)
-      toast.success(`"${deviceName}" wurde aus "${zoneName}" entfernt`)
 
-      // Record in history for undo
+      // Record in history for undo (before toast so undo works)
       pushToHistory({
         deviceId,
         deviceName,
@@ -308,6 +315,18 @@ export function useZoneDragDrop() {
         toZoneId: null,
         toZoneName: null,
         timestamp: Date.now()
+      })
+
+      // Success toast with undo action
+      toast.success(`"${deviceName}" aus "${zoneName}" entfernt`, {
+        duration: 5000,
+        actions: [
+          {
+            label: 'Rückgängig',
+            variant: 'secondary',
+            onClick: async () => { await undo() }
+          }
+        ]
       })
 
       logger.info(`Successfully removed ${deviceId} from zone`)

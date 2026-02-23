@@ -1,0 +1,419 @@
+/* =============================================================================
+   ESPCompactCard Styles
+   Extracted from ESPOrbitalLayout.css for maintainability.
+   ============================================================================= */
+
+/* =============================================================================
+   Compact ESP Info Card
+   ============================================================================= */
+.esp-info-compact {
+  position: relative; /* For absolute positioning of overlay dropzone */
+  width: 100%;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4375rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  outline: none;
+  overflow: visible; /* So overlay is visible */
+  user-select: none; /* Prevents text selection during drag */
+}
+
+.esp-info-compact:hover {
+  border-color: rgba(96, 165, 250, 0.4);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.esp-info-compact:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
+}
+
+.esp-info-compact__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* =============================================================================
+   Mock vs Real Visual Distinction
+   ============================================================================= */
+
+.esp-info-compact--mock {
+  border-left: 3px solid var(--color-mock, #a78bfa);
+  border-color: rgba(167, 139, 250, 0.25);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 20px rgba(167, 139, 250, 0.08);
+}
+
+.esp-info-compact--mock:hover {
+  border-color: rgba(167, 139, 250, 0.4);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.25),
+    0 0 25px rgba(167, 139, 250, 0.12);
+}
+
+.esp-info-compact--real {
+  border-left: 3px solid var(--color-real, #22d3ee);
+  border-color: rgba(34, 211, 238, 0.2);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 20px rgba(34, 211, 238, 0.06);
+}
+
+.esp-info-compact--real:hover {
+  border-color: rgba(34, 211, 238, 0.35);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.25),
+    0 0 25px rgba(34, 211, 238, 0.1);
+}
+
+/* Top Row: Name + Settings (flexbox with space-between) */
+.esp-info-compact__top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* Info Row: Badges, ID, Status, WiFi (compact horizontal) */
+.esp-info-compact__info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.esp-info-compact__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  margin: 0;
+  max-width: 140px;
+  /* Fade-out gradient for long names */
+  mask-image: linear-gradient(to right, black 75%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 75%, transparent 100%);
+}
+
+.esp-info-compact__title--empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* =============================================================================
+   Name Editing (Phase 3)
+   ============================================================================= */
+
+.esp-info-compact__name-display {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  padding: 0.125rem 0.25rem;
+  margin: -0.125rem -0.25rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.15s ease;
+}
+
+.esp-info-compact__name-display:hover {
+  background-color: var(--glass-bg);
+}
+
+.esp-info-compact__name-display:hover .esp-info-compact__name-pencil {
+  opacity: 1;
+}
+
+.esp-info-compact__name-pencil {
+  color: var(--color-text-muted);
+  opacity: 0.3;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.esp-info-compact__name-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.esp-info-compact__name-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 120px;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid var(--color-iridescent-1);
+  outline: none;
+  font-family: inherit;
+}
+
+.esp-info-compact__name-input::placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.esp-info-compact__name-input:disabled {
+  opacity: 0.6;
+}
+
+.esp-info-compact__name-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.esp-info-compact__name-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 0.25rem;
+  background-color: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.esp-info-compact__name-btn:hover:not(:disabled) {
+  background-color: var(--glass-bg);
+}
+
+.esp-info-compact__name-btn:disabled {
+  cursor: not-allowed;
+}
+
+.esp-info-compact__name-btn--save:hover:not(:disabled) {
+  color: var(--color-success);
+  background-color: rgba(34, 197, 94, 0.1);
+}
+
+.esp-info-compact__name-btn--cancel:hover:not(:disabled) {
+  color: var(--color-error);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.esp-info-compact__name-error {
+  font-size: 0.625rem;
+  color: var(--color-error);
+  margin-left: 0.25rem;
+}
+
+.esp-info-compact__id {
+  font-size: 0.5625rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+  letter-spacing: -0.025em;
+}
+
+/* Settings Button */
+.esp-info-compact__settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.esp-info-compact__settings-btn:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
+  color: var(--color-text-secondary);
+}
+
+.esp-info-compact__settings-btn:active {
+  transform: scale(0.95);
+}
+
+/* =============================================================================
+   WiFi Signal Bars
+   ============================================================================= */
+
+.esp-info-compact__wifi {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: help;
+}
+
+.esp-info-compact__wifi-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 12px;
+}
+
+.esp-info-compact__wifi-bar {
+  width: 2px;
+  background-color: var(--color-text-muted);
+  border-radius: 1px;
+  opacity: 0.25;
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+/* Bar heights: increasing from left to right */
+.esp-info-compact__wifi-bar:nth-child(1) { height: 3px; }
+.esp-info-compact__wifi-bar:nth-child(2) { height: 5px; }
+.esp-info-compact__wifi-bar:nth-child(3) { height: 8px; }
+.esp-info-compact__wifi-bar:nth-child(4) { height: 11px; }
+
+/* Active bars inherit color from parent and are fully opaque */
+.esp-info-compact__wifi-bar.active {
+  opacity: 1;
+  background-color: currentColor;
+}
+
+.esp-info-compact__wifi-label {
+  font-size: 0.5625rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* WiFi color classes */
+.text-emerald-400 { color: #34d399; }
+.text-yellow-400 { color: #facc15; }
+.text-orange-400 { color: #fb923c; }
+.text-red-400 { color: #f87171; }
+.text-slate-500 { color: #64748b; }
+
+/* =============================================================================
+   Heartbeat Indicator
+   ============================================================================= */
+
+.esp-info-compact__heartbeat {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1875rem 0.375rem;
+  font-size: 0.5625rem;
+  color: var(--color-text-muted);
+  background-color: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  cursor: default;
+  transition: all 0.2s ease;
+}
+
+.esp-info-compact__heartbeat--mock {
+  cursor: pointer;
+}
+
+.esp-info-compact__heartbeat--mock:hover:not(:disabled) {
+  background-color: var(--glass-bg);
+  border-color: rgba(244, 114, 182, 0.3);
+  color: var(--color-text-secondary);
+}
+
+.esp-info-compact__heartbeat:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Fresh heartbeat (< 30s) - show success color */
+.esp-info-compact__heartbeat--fresh {
+  border-color: rgba(74, 222, 128, 0.3);
+  color: var(--color-success);
+}
+
+.esp-info-compact__heartbeat-text {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Pulse animation for fresh heartbeat */
+.esp-info-compact__heart-pulse {
+  animation: heart-pulse 1s ease-in-out infinite;
+}
+
+@keyframes heart-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+/* =============================================================================
+   Analysis DropZone States
+   ============================================================================= */
+
+/*
+ * DropZone is ALWAYS in DOM, but hidden by default.
+ * Two modes:
+ * 1. Normal (manually opened): Inline display, affects layout
+ * 2. Overlay (auto-opened during drag): Absolute position, layout stable
+ */
+.esp-info-compact__dropzone {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-height 0.2s ease, pointer-events 0s;
+  margin-top: 0;
+}
+
+/* Visible state - normal (manually opened) */
+.esp-info-compact__dropzone--visible {
+  opacity: 1;
+  pointer-events: auto;
+  max-height: 350px;
+  overflow: visible;
+  margin-top: 0.375rem;
+}
+
+/* Overlay mode (auto-opened during drag) */
+.esp-info-compact__dropzone--overlay {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: var(--z-drag-overlay);
+  margin-top: 0.25rem;
+  max-height: none;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-success);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25),
+              0 0 0 4px rgba(16, 185, 129, 0.1);
+  animation: dropzone-appear 0.1s ease-out;
+}
+
+@keyframes dropzone-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* =============================================================================
+   Utility classes for SVG icons
+   ============================================================================= */
+.w-3 { width: 0.75rem; }
+.h-3 { height: 0.75rem; }
