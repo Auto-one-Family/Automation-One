@@ -4,7 +4,7 @@
 > **Parallel zu:** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) ✅ abgeschlossen
 > **Nachfolger:** [Phase 3](./PHASE_3_KI_ERROR_ANALYSE.md) (Sensordaten muessen fliessen), [Phase 4](./PHASE_4_INTEGRATION.md)
 > **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 2"
-> **Aktualisiert:** 2026-02-23 (Frontend-Implementierung verifiziert, Logging-Sektionen ergaenzt)
+> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Wokwi MCP Debugging-Referenz, Frontend verifiziert, Logging ergaenzt)
 
 ---
 
@@ -76,7 +76,7 @@ docker compose ps  # Alle 11+ Services "healthy" oder "running"
 curl -s http://localhost:8000/ | python -m json.tool
 
 # Health-Check
-curl -s http://localhost:8000/health
+curl -s http://localhost:8000/api/v1/health/
 
 # Frontend erreichbar
 curl -s -o /dev/null -w "%{http_code}" http://localhost:5173
@@ -279,6 +279,10 @@ cd "El Frontend" && npx vitest run
 | Frontend zeigt falsche Daten | Playwright MCP | Navigate zu Dashboard, Screenshot |
 | MQTT-Nachricht kommt nicht an | Docker MCP | Container-Logs, mosquitto_sub |
 | Code-Impact pruefen | Serena MCP | `find_referencing_symbols` fuer geaenderte Funktion |
+| **Firmware-Verhalten reproduzieren** | **Wokwi MCP** | **Simulation starten, Fehler reproduzieren, Serial in Echtzeit lesen** |
+| **Error-Injection validieren** | **Wokwi MCP** | **Produktionsfehler in Simulation nachstellen, Fix verifizieren** |
+
+> **NEU (2026-02-23):** Wokwi MCP Server (experimentell) erlaubt es, Produktionsfehler direkt in der Simulation zu reproduzieren. Konfiguration siehe [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "Wokwi MCP Server". Besonders nuetzlich fuer Phase 2.4 (Kritischer Pfad) und Phase 2.5 (Chaos Engineering): Firmware-seitige Probleme koennen erst in Wokwi isoliert werden bevor am echten ESP32 getestet wird.
 
 ---
 

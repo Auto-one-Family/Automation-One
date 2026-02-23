@@ -2,6 +2,7 @@
 
 > **Erstellt:** 2026-02-21
 > **Erstellt von:** Automation-Experte (Life-Repo)
+> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Wokwi MCP Server Integration, Agent-Driven Testing, 14+ neue Papers, Closed-Loop-Architektur, MQTT-Trace-Analyse, Causal Graph RCA)
 > **Zweck:** Ueberblick ueber den Aufbau der Testinfrastruktur mit zwei parallelen Spuren (Wokwi-Simulation + Produktionstestfeld), gemeinsamer Error-Taxonomie und phasenweiser Fertigstellung.
 > **Charakter:** Offen und flexibel — Phasen geben Richtung, nicht starre Deadlines.
 
@@ -18,7 +19,7 @@
 ║  ┌────────────────────────────┐         ┌────────────────────────────┐     ║
 ║  │ Laeuft unabhaengig         │         │ Echter ESP32 + Sensoren   │     ║
 ║  │ Kein echter ESP32 noetig   │         │ Docker-Stack vollstaendig │     ║
-║  │ 163 Szenarien vorhanden    │         │ Monitoring aktiv          │     ║
+║  │ 173 Szenarien vorhanden    │         │ Monitoring aktiv          │     ║
 ║  │ CI/CD-integrierbar         │         │ KI-Error-Analyse aktiv    │     ║
 ║  │ Firmware-Regression        │         │ Frontend vollstaendig     │     ║
 ║  └──────────────┬─────────────┘         └──────────────┬────────────┘     ║
@@ -32,7 +33,7 @@
 ║                    │  Error-Codes: 1000-5699  │                             ║
 ║                    │  Severity: info→critical │                             ║
 ║                    │  Kategorien: 6 Typen     │                             ║
-║                    │  Grafana-Alerts: 28+     │                             ║
+║                    │  Grafana-Alerts: 26      │                             ║
 ║                    │  KI: 3-Stufen-Strategie  │                             ║
 ║                    └─────────────────────────┘                             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -70,7 +71,7 @@
 | Frontend Unit | Vitest | 1118 Tests (64 Dateien) | GRUEN |
 | Firmware Native | Unity | 22 Tests | GRUEN |
 | Wokwi Simulation | pytest + Wokwi | **173 Szenarien** (163 + 10 Error-Injection) | GRUEN |
-| Wokwi CI/CD | wokwi-tests.yml | **52 CI-Szenarien** (16 Jobs + Nightly), **inkl. Error-Injection** | KONFIGURIERT |
+| Wokwi CI/CD | wokwi-tests.yml | **PR/Push: 16 Jobs (~52 Szenarien), Nightly: 23 Jobs (alle 173)**, **inkl. Error-Injection** | KONFIGURIERT |
 | E2E Backend | pytest + Docker | Stack-abhaengig | Manuell |
 | E2E Frontend | Playwright | Stack-abhaengig | Manuell |
 
@@ -88,6 +89,102 @@
 | **Sequential Thinking** | Strukturierte Analyse — Komplexe Debug-Szenarien mehrstufig durchdenken |
 | **Sentry** | Error-Tracking — Production-Error-Analyse (spaeter relevant) |
 | **Filesystem** | Config-Zugriff — System-Konfigurationen ausserhalb Sandbox |
+| **Wokwi** (**NEU**) | **Agent-Driven SIL-Testing** — Direkte ESP32-Simulation, Serial-Monitoring, Echtzeit-Hardware-Interaktion via MCP |
+
+### Wokwi MCP Server — KRITISCHER FUND (2026-02-23)
+
+> **Game Changer:** Wokwi CLI v0.26.1 enthaelt einen experimentellen MCP-Server. Claude Code kann die ESP32-Simulation DIREKT steuern — kein eigener Orchestrator noetig.
+
+**Konfiguration (`.mcp.json` im auto-one Repo):**
+```json
+{
+  "mcpServers": {
+    "wokwi": {
+      "type": "stdio",
+      "command": "wokwi-cli",
+      "args": ["mcp"],
+      "env": {
+        "WOKWI_CLI_TOKEN": "${WOKWI_CLI_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+**Faehigkeiten des Wokwi MCP-Servers:**
+1. ESP32-Simulation starten und stoppen
+2. Serial-Console-Output in Echtzeit lesen
+3. Automatisierte Tests ausfuehren und Ergebnisse interpretieren
+4. Mit virtueller Hardware in Echtzeit interagieren
+5. Screenshots und VCD-Traces aufnehmen
+
+**Unterstuetzte AI-Agenten:** Claude Code, Copilot, Cursor, Gemini, ChatGPT
+**Status:** Experimentell (Alpha) — API kann sich aendern
+
+**Bedeutung fuer Testinfrastruktur:**
+- auto-ops kann Wokwi-Simulation DIREKT steuern (kein Shell-Umweg)
+- Closed-Loop moeglich: Szenario generieren → ausfuehren → Logs analysieren → verbessern
+- `test-log-analyst` und `esp32-debug` koennen Simulation-Output in Echtzeit verarbeiten
+- Wokwi wird zum 11. MCP-Server im auto-one Repo
+
+**Quellen:** [Wokwi MCP Support Docs](https://docs.wokwi.com/wokwi-ci/mcp-support), [wokwi-cli README](https://github.com/wokwi/wokwi-cli)
+
+---
+
+### AGENT-DRIVEN TESTING — Closed-Loop-Architektur (NEU)
+
+> **Wissenschaftliche Basis:** Naqvi et al. (2026), Chan & Alalfi (2025), Georgiev et al. (2025), Wang et al. (2025)
+> **Praktische Basis:** Wokwi MCP Server + Claude Code Agent-System
+
+**Architektur: Drei-Agenten-Closed-Loop fuer AutomationOne**
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    CLOSED-LOOP TEST AGENT                        │
+│                                                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │  AGENT 1:        │  │  AGENT 2:        │  │  AGENT 3:        │  │
+│  │  Scenario        │→ │  Wokwi MCP       │→ │  Log Analyst     │  │
+│  │  Generator       │  │  Executor        │  │  + Optimizer     │  │
+│  │                  │  │                  │  │                  │  │
+│  │  • Use-Case →    │  │  • MCP: start    │  │  • Serial-Log    │  │
+│  │    YAML-Szenario │  │  • MCP: monitor  │  │    parsen        │  │
+│  │  • Coverage-     │  │  • MCP: interact │  │  • Error-Code    │  │
+│  │    Feedback      │  │  • MCP: stop     │  │    extrahieren   │  │
+│  │  • Error-Code →  │  │  • Serial lesen  │  │  • Root-Cause    │  │
+│  │    Regression    │  │  • MQTT capturen │  │  • Verbesserungs- │  │
+│  └────────┬────────┘  └─────────────────┘  │    vorschlag      │  │
+│           │                                 └────────┬──────────┘  │
+│           └───────────── Feedback-Loop ──────────────┘              │
+└──────────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌──────────────┐    ┌──────────────────┐  ┌──────────────────┐
+│ Wokwi Cloud  │    │ Serial Logs +    │  │ ai_predictions   │
+│ Simulation   │    │ MQTT Traces      │  │ (PostgreSQL)     │
+│ (ESP32)      │    │                  │  │                  │
+└──────────────┘    └──────────────────┘  └──────────────────┘
+```
+
+**Umsetzungsreihenfolge:**
+
+| Stufe | Was | Aufwand | Paper-Basis |
+|-------|-----|---------|-------------|
+| **Sofort** | Wokwi MCP in `.mcp.json` integrieren | 5 Minuten | Wokwi Docs |
+| **Stufe 1** | Claude Code nutzt MCP fuer manuelle Szenario-Ausfuehrung | 1-2 Tage | — |
+| **Stufe 2** | LLM-basiertes Log-Parsing fuer Wokwi Serial-Output | 1 Woche | Fariha et al. (2024) |
+| **Stufe 3** | Drei-Agenten-Closed-Loop (Generator → Executor → Analyst) | 2-3 Wochen | Naqvi et al. (2026) |
+| **Stufe 4** | Coverage-getriebene Test-Verfeinerung (gcov + Feedback) | 3-4 Wochen | Jain & Le Goues (2025) |
+| **Stufe 5** | RL-Agent fuer exploratives Wokwi-Testing | 2-3 Monate | Chan & Alalfi (2025) |
+
+**Forschungsluecken (AutomationOne als Pionier):**
+
+| Luecke | Warum offenes Feld | Pionier-Potential |
+|--------|-------------------|-------------------|
+| **MQTT-Trace-Analyse mit LLMs** | Kein Paper behandelt MQTT-Payload-Sequenz-Analyse mit LLMs | Sehr hoch — AutomationOne-spezifisch |
+| **Action-Observation Correlation** | Kausalkettenanalyse (Agent-Aktion → System-Reaktion) ist in keinem Paper explizit adressiert | Sehr hoch — offenes Forschungsfeld |
+| **ESP32 Fehler-Knowledge-Graph** | AetherLog-Ansatz fuer WiFi-Stack, ADC, MQTT-QoS Patterns nicht adaptiert | Hoch — adaptierbar |
+| **MCP-gesteuerte SIL-Testing** | Wokwi MCP ist zu neu, kein Paper nutzt MCP fuer SIL-Testing | Sehr hoch — Robins Use-Case ist Weltpremiere |
 
 **MCP-Einschraenkung:** Subagenten (13 Debug/Dev-Agents) haben KEINEN MCP-Zugriff. Sie arbeiten mit Grep/Glob/Read/Bash. MCP-Tools sind nur im Hauptkontext verfuegbar. Das bedeutet: Komplexe Diagnosen die MCP erfordern (Serena-Symbolsuche, Playwright-Inspektion, DB-Queries) muessen im Hauptkontext oder ueber auto-ops orchestriert werden.
 
@@ -122,12 +219,12 @@
 |--------|---------|------------|--------|
 | ~~Kalibrierungs-Wizard UI~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — CalibrationWizard.vue + CalibrationStep.vue + calibration.ts + CalibrationView.vue |
 | ~~Historische Zeitreihen-View~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — SensorHistoryView.vue + TimeRangeSelector.vue |
-| **Sidebar-Navigation** | Frontend | **HOCH** | ❌ Links zu /calibration und /sensor-history fehlen in Sidebar.vue |
+| ~~Sidebar-Navigation~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — TrendingUp (Zeitreihen) + SlidersHorizontal (Kalibrierung) in Sidebar.vue |
 | Analyse-Profile UI | Frontend | MITTEL | Offen — Dashboard fuer Datenerfassungs-Steuerung |
 | Benutzer-Management UI | Frontend | NIEDRIG | Offen — Admin-Panel (JWT/RBAC funktioniert bereits) |
 | ~~Erweiterte Grafana-Alert-Regeln~~ | ~~Monitoring~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — 26 Regeln aktiv (8 alt + 18 Phase-0 neu) |
 | ~~Handler-Integration Metriken~~ | ~~Backend~~ | ~~KRITISCH~~ | ✅ **ERLEDIGT** — Alle 12 Update-Funktionen in Handlern integriert |
-| Isolation Forest Service | Backend | MITTEL | Offen — ai_prediction.py Model FEHLT, ai_repo.py/ai_service.py sind Stubs |
+| Isolation Forest Service | Backend | MITTEL | Offen — `ai.py` Model existiert (AIPredictions), scikit-learn/numpy NICHT in pyproject.toml |
 | Grafana Deployment-Verifikation | Monitoring | MITTEL | Offen — 26 Alerts definiert, Grafana-Reload nach Deployment steht aus |
 | MQTT-ACL | Security | NIEDRIG (fuer Testlauf) | Offen — Vorlage existiert, fuer Produktion MUSS |
 | Incident-Management-Prozess | Operations | NIEDRIG | Offen — Wer macht was bei Ausfall |
@@ -306,6 +403,16 @@ Die Error-Taxonomie ist bereits zweistufig definiert:
 
 **Agent-Verknuepfung:** auto-ops Plugin (`/auto-ops:ops-diagnose`) aggregiert Grafana-Alert-Status und korreliert zusammenhaengende Events. System-Health Skill hat Eskalationsmatrix.
 
+**Automatisierte Alert-Agent-Verknuepfung (Stufe 0.3 integriert):**
+Die 26 Grafana-Alerts sind bereits mit dem auto-ops Agent-System verknuepft:
+- `/ops-diagnose` liest Alert-Status via Grafana HTTP API und korreliert zusammenhaengende Events automatisch
+- `system-health` Skill hat Eskalationsmatrix: WARNING → auto-ops analysiert, CRITICAL → sofortige Cross-Layer-Diagnose
+- `cross-layer-correlation` Skill verbindet Alert-Events ueber Timestamp-Abgleich (±5s Fenster)
+- Jeder Alert hat Labels (`severity`, `component`) die auto-ops zur Routing-Entscheidung nutzt
+- **Strukturiert pro Event:** Alert → auto-ops bewertet → Relevante Debug-Agents einzeln → Report
+- **Zusammenhaengende Events:** Kaskaden-Erkennung (3+ Alerts in 60s) → meta-analyst fuer Cross-Report-Korrelation
+- **Aktuell fehlt:** Webhook-Integration (Grafana → auto-ops automatisch). Fuer Testlauf: manueller Trigger `/ops-diagnose` reicht
+
 ### 0.3 KI-Error-Analyse Stufe 1 aktivieren ✅ KONFIGURIERT
 
 **Sofort nutzbar (0 Code, nur Konfiguration):**
@@ -327,6 +434,39 @@ Stufe 1: RULE-BASED (Grafana Alerting)
 
 ---
 
+## PHASE 0.5: CI/CD-INFRASTRUKTUR REPARIEREN (BLOCKER)
+
+> **Ziel:** Alle 8 Pipelines funktionsfaehig, Required Status Checks aktiv, sauberer GitHub-State.
+> **Status: ⚠️ 4/8 GRUEN** (nach PR #8, 2026-02-22)
+> **Aufwand:** ~1 Tag konzentrierte Arbeit fuer verbleibende 4
+
+### Audit-Ergebnis (2026-02-22, aktualisiert nach PR #8)
+
+| Pipeline | Status | Kritikalitaet |
+|----------|--------|---------------|
+| server-tests (Unit) | **GRUEN** (gefixt durch PR #8) | OK |
+| frontend-tests | **GRUEN** (gefixt durch PR #8) | OK |
+| esp32-tests | GRUEN | OK |
+| wokwi-tests | GRUEN | OK |
+| server-tests (Integration) | ROT | Pre-existing: MQTT-Timeout |
+| backend-e2e-tests | ROT | Pre-existing: Docker-Crash |
+| playwright-tests | ROT | Pre-existing: Docker-Crash |
+| security-scan | ROT | Pre-existing: Dockerfile + CVEs |
+
+**Branches aufgeraeumt:** 7 geloescht, nur master + feature/frontend-consolidation aktiv.
+**Required Status Checks:** Noch nicht aktiviert (wartet auf stabile Basis).
+
+### Detaillierter Fix-Plan
+
+→ Siehe `auftrag-test-engine-komplett.md` — Umfassender Auftrag fuer die verbleibenden 4 Pipelines (9 Teile, 22 Schritte)
+→ Siehe `auftrag-cicd-fix.md` — Urspruenglicher Fix-Plan (teilweise durch PR #8 erledigt)
+
+### Beziehung zu Phase 1
+
+Phase 0.5 MUSS vor Phase 1 CI-Verifizierung abgeschlossen sein. Ohne funktionierende CI/CD ist jede Erweiterung der Wokwi-Szenarien (Phase 1) oder des Produktionstestfelds (Phase 2) riskant, weil Regressionen nicht erkannt werden.
+
+---
+
 ## PHASE 1: SPUR A — Wokwi-Simulation (SIL) stabilisieren
 
 > **Ziel:** Wokwi-Szenarien als dauerhaft laufende Regressionstests. Unabhaengig vom echten Testfeld.
@@ -339,10 +479,41 @@ Stufe 1: RULE-BASED (Grafana Alerting)
 |-----------|--------|---------|
 | Wokwi-Szenarien | **173 vorhanden** | 163 Normal + **10 Error-Injection** (Kategorie 11) |
 | CI/CD Pipeline | **Erweitert** | Push/PR + Manual + **Nightly (cron 03:00 UTC)** |
-| CI/CD Jobs | **16 Jobs, 52 Szenarien** | Inkl. **JOB 16: error-injection-tests** |
+| CI/CD Jobs | **PR/Push: 16 Jobs (~52 Szenarien), Nightly: 23 Jobs (173 Szenarien)** | Inkl. **error-injection-tests** |
 | pytest Integration | **Vorhanden** | Wokwi-Tests als pytest-Szenarien |
 | HAL-Pattern | **Implementiert** | `igpio_hal.h` / `esp32_gpio_hal.h` — Hardware-Abstraktion fuer Testbarkeit |
 | Error-Mapping | **Dokumentiert** | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` |
+
+### 1.1b Wokwi-Erstanalyse Erkenntnisse (2026-02-23)
+
+> Quelle: `auftrag-wokwi-erstanalyse.md` — Gesamtbericht, 10 Teile
+
+**Inventar (verifiziert):**
+
+| Kategorie | Anzahl | Status |
+|-----------|--------|--------|
+| 01-boot | 2 | OK |
+| 02-sensor | 5 | OK |
+| 03-actuator | 7 | OK |
+| 04-zone | 2 | OK |
+| 05-emergency | 3 | OK |
+| 06-config | 2 | OK |
+| 07-combined | 2 | OK |
+| 08-i2c | 20 | OK |
+| 08-onewire | 29 | OK |
+| 09-hardware | 9 | **8 GEBROCHEN** (part-id: "mqtt") |
+| 09-pwm | 18 | OK |
+| 10-nvs | 40 | OK (kein persistenter NVS noetig) |
+| 11-error-injection | 10 | OK (passives Pattern, CI auf Log-Polling) |
+| gpio | 24 | **20 GEBROCHEN** (part-id: "mqtt") |
+| **Gesamt** | **173** | **145 OK, 28 gebrochen** |
+
+**Wokwi-Flow-Fix Status:** 26/26 Probleme ERLEDIGT (W1-W21 + FINAL). Nur M6 (CI-Run) ausstehend.
+
+**Verbleibende Arbeit:**
+- 28 Dateien in gpio/ (20) + 09-hardware/ (8) → `part-id: "mqtt"` auf passives Pattern umstellen
+- M6: CI-Pipeline komplett GRUEN verifizieren
+- Lokale Verifikation der 10 Error-Injection-Szenarien (F4)
 
 ### 1.2 Erweiterungsplan ✅ IMPLEMENTIERT
 
@@ -363,9 +534,10 @@ Die Wokwi-Simulation nutzt dieselbe Fehler-Taxonomie wie das Produktionstestfeld
 **B. CI/CD-Automatisierung:** ✅ KONFIGURIERT
 
 ```
-✅ ERLEDIGT: Push/PR + Manual + Nightly (cron 03:00 UTC)
-   - 16 Jobs, 52 CI-Szenarien
-   - Error-Injection als JOB 16 integriert
+✅ ERLEDIGT: Push/PR + Manual + Nightly (cron 02:00 UTC)
+   - PR/Push: 16 Jobs (~52 Szenarien, fast feedback)
+   - Nightly: 23 Jobs (alle 173 Szenarien + 6 extended)
+   - Error-Injection als eigener Job integriert
    - test-summary Job zaehlt alle Jobs
 ```
 
@@ -390,6 +562,8 @@ Wichtig: Dennoch beide Systeme immer klar voneinander trennen.
 | CI/CD Pipeline | `.github/workflows/wokwi-tests.yml` | Push/PR + Manual + **Nightly** |
 | pytest-Wokwi-Config | `tests/wokwi/conftest.py` | Konfiguriert |
 | Seed-Script | `scripts/seed_wokwi_esp.py` | Testdaten-Generator |
+| Helper-Scripts | `El Trabajante/tests/wokwi/helpers/` | preflight_check.sh, wait_for_mqtt.sh, emergency_cascade.sh |
+| Makefile-Targets | `Makefile` | wokwi-test-full, wokwi-test-all, wokwi-test-error-injection, wokwi-count |
 | Error-Mapping | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` | **Dokumentiert** |
 
 ### 1.4 Wokwi-Logging fuer Testlauf
@@ -448,7 +622,7 @@ Schritt 4: Verifizieren
    - http://localhost:8000/docs        → Swagger UI (API)
    - http://localhost:5173             → Frontend
    - http://localhost:3000             → Grafana
-   - http://localhost:8000/health/ready → Readiness-Check
+   - http://localhost:8000/api/v1/health/ready → Readiness-Check
 ```
 
 **Startup-Order (erzwungen durch Docker health-checks):**
@@ -465,8 +639,8 @@ postgres + mqtt-broker (parallel)
 | # | Anforderung | Aktueller Stand | Was fehlt |
 |---|-------------|----------------|-----------|
 | 1 | Sensordaten fliessen E2E | **95% bereit** | ESP32 muss konfiguriert sein + in DB registriert |
-| 2 | Kalibrierung | **95% bereit** | ✅ CalibrationWizard FERTIG — ❌ Sidebar-Link fehlt |
-| 3 | Live-Daten im Frontend | **95% bereit** | ✅ SensorHistoryView FERTIG — ❌ Sidebar-Link fehlt |
+| 2 | Kalibrierung | **100% bereit** | ✅ CalibrationWizard + Sidebar-Link FERTIG |
+| 3 | Live-Daten im Frontend | **100% bereit** | ✅ SensorHistoryView + Sidebar-Link FERTIG |
 | 4 | Logic Engine | **95% bereit** | End-to-End implementiert, Safety-System aktiv |
 | 5 | Safety-System | **100% bereit** | Emergency-Stop, ConflictManager, RateLimiter, LoopDetector |
 
@@ -476,12 +650,12 @@ postgres + mqtt-broker (parallel)
 |---------------|-----------|--------|---------|
 | ~~Kalibrierungs-Wizard~~ | ~~HOCH~~ | ✅ **FERTIG** | `CalibrationWizard.vue`, `CalibrationStep.vue`, `calibration.ts`, `CalibrationView.vue` |
 | ~~Zeitreihen-Chart-View~~ | ~~HOCH~~ | ✅ **FERTIG** | `SensorHistoryView.vue`, `TimeRangeSelector.vue` |
-| **Sidebar-Links** | **HOCH** | ❌ **FEHLT** | `/calibration` und `/sensor-history` nicht in `Sidebar.vue` |
+| ~~Sidebar-Links~~ | ~~HOCH~~ | ✅ **FERTIG** | `TrendingUp` + `SlidersHorizontal` Icons in `Sidebar.vue` |
 | Analyse-Profile Dashboard | MITTEL | Offen | Datenerfassungs-Steuerung |
 | Admin/User-Management | NIEDRIG | Offen | JWT/RBAC funktioniert bereits |
 | Mobile-Responsive | NIEDRIG | Offen | Tailwind CSS vorhanden |
 
-**Fuer den ERSTEN Testlauf:** Kalibrierungs-Wizard und Zeitreihen-View sind FERTIG. **Einzige Frontend-Luecke: Sidebar-Navigation.**
+**Fuer den ERSTEN Testlauf:** Kalibrierungs-Wizard, Zeitreihen-View und Sidebar-Navigation sind ✅ **KOMPLETT FERTIG**.
 
 ### 2.5 Chaos Engineering (nach Basis-Stabilitaet)
 
@@ -621,9 +795,10 @@ Fix wird in Produktion deployed
 | Phase | Fokus | Status | Verbleibend |
 |-------|-------|--------|-------------|
 | **0** | Error-Taxonomie + Grafana-Alerts erweitern | ✅ **ABGESCHLOSSEN** | Grafana-Deployment-Verifikation (Reload) |
-| **1** | Wokwi-Simulation stabilisieren + CI/CD automatisieren | ✅ **ABGESCHLOSSEN** | Makefile-Echo (22→52), lokaler/CI Test-Run |
-| **2** | Produktionstestfeld aufbauen + Frontend-Luecken schliessen | ⚠️ **CODE FERTIG** | Sidebar-Links, Deployment, Hardware-Verifikation |
-| **3** | KI-Error-Analyse (Stufe 1 sofort, Stufe 2 iterativ) | 🔲 **OFFEN** | ai_prediction Model + Repo + Service |
+| **0.5** | **CI/CD-Infrastruktur reparieren** | ⚠️ **4/8 GRUEN** | 4 pre-existing Issues (`auftrag-test-engine-komplett.md`) |
+| **1** | Wokwi-Simulation stabilisieren + CI/CD automatisieren | ✅ **ABGESCHLOSSEN** | 28 gpio/hardware Dateien, M6 CI-Run, lokaler Test-Run |
+| **2** | Produktionstestfeld aufbauen + Frontend-Luecken schliessen | ⚠️ **CODE KOMPLETT** | Deployment + Hardware-Verifikation |
+| **3** | KI-Error-Analyse (Stufe 1 sofort, Stufe 2 iterativ) | 🔲 **OFFEN** | scikit-learn/numpy installieren, Isolation Forest Service + Scheduler |
 | **4** | Integration beider Spuren, Dashboards, Feedback-Loop | 🔲 **OFFEN** | Braucht Phase 2+3 |
 
 **Wichtig:** Phase 1 und Phase 2 laufen PARALLEL. Wokwi braucht keine echte Hardware. Das Produktionstestfeld braucht keine Wokwi-Szenarien. Beide teilen sich Phase 0 (Error-Taxonomie) und Phase 3 (KI-Error-Analyse).
@@ -677,7 +852,9 @@ auto-ops Plugin: Autonome Diagnose + Fix-Vorschlag
 
 ## Wissenschaftliche Fundierung
 
-Dieser Phasenplan stuetzt sich auf folgende Forschung:
+Dieser Phasenplan stuetzt sich auf folgende Forschung (aktualisiert 2026-02-23, 16 Papers):
+
+### Bestehende Basis (Testinfrastruktur)
 
 | Paper | Kernaussage | Anwendung im Plan |
 |-------|-------------|-------------------|
@@ -686,8 +863,36 @@ Dieser Phasenplan stuetzt sich auf folgende Forschung:
 | Devi et al. (2024) — Self-Healing IoT | Isolation Forest fuer Erkennung UND Recovery | Phase 3: KI-Error-Analyse Stufe 2 |
 | Phan & Nguyen (2025) — Anomaly Detection | Isolation Forest schlaegt LSTM bei Sensordaten | Phase 3: Algorithmus-Wahl bestaetigt |
 | Chirumamilla et al. (2025) — Hybrid Pipeline | Autoencoder → Isolation Forest → LSTM | Langfrist-Strategie (Stufe 3 auf Jetson) |
+| Balan et al. (2025) — SIL/HIL Digital Twin | V-Cycle Validation Gates (G10-G120), SIL komplementaer zu HIL | Phase 1: Wokwi als SIL wissenschaftlich validiert |
+| Presti et al. (2025) — Renode Digital Twin | Firmware laeuft ohne Modifikation auf virtuellem Board | Phase 1: Alternative zu Wokwi evaluiert |
+| Gunawat et al. (2025) — AI-Driven Fault Injection | RL-basiertes adaptives Fault Injection, 28% bessere Erkennung | Phase 1/3: Langfrist-Vision fuer intelligente Error-Injection |
 
-**Zusammenfassungen:** `wissen/iot-automation/2025-devops-iot-deployment-hil-testing.md`, `wissen/iot-automation/2024-chaos-engineering-iot-resilience-testing.md`, `wissen/iot-automation/2024-self-healing-iot-isolation-forest.md`
+### Neue Papers (Forschungs-Update 2026-02-23: Agent-Driven Testing, KG-RCA, Trace-Analyse)
+
+| Paper | Kernaussage | Anwendung im Plan |
+|-------|-------------|-------------------|
+| **Naqvi et al. (2026) — Agentic Testing** | Closed-Loop Agent-Architektur: Test generieren → ausfuehren → analysieren → verfeinern | **Phase 4: Closed-Loop-Architektur**, Agent-Driven Testing Referenzmodell |
+| **Chan & Alalfi (2025) — SmartTinkerer** | RL-Agent + Multi-Agent Committee fuer IoT Firmware-Testing, 8-15% Verbesserung | **Phase 1: MCP-Extension**, Exploratives Testing Langfrist-Vision |
+| **Abtahi & Azim (2025) — LLM Firmware Validation** | Dreiphasig: LLM generiert → Fuzzing → Agenten reparieren, 92.4% Fix-Rate | Phase 1/3: Automatisierte Firmware-Validierung |
+| **LLMs-DCGRCA (2025, IEEE IoT Journal)** | Dynamische Kausal-Graphen + LLMs fuer IoT Root-Cause-Analyse, 14% HR@7 Verbesserung | **Phase 3 Stufe 3: Causal Graph RCA** fuer ESP32/MQTT-Fehler |
+| **TAAF (2026, arXiv) — Trace Abstraction** | Knowledge Graphs + LLMs fuer Trace-Analyse, 31.2% Verbesserung kausales Reasoning | **Phase 3 Stufe 3: MQTT-Trace-Analyse** mit KG-Abstraktion |
+| **TRAIL (2025, arXiv) — Agentic Issue Localization** | Formale Error-Taxonomie + Trace Reasoning fuer Issue-Lokalisierung | Phase 3: Taxonomie-Integration mit Trace-Analyse |
+| **TraceCoder (2026) — Multi-Agent Debugging** | Multi-Agenten trace-basiertes Debugging mit Historical Lesson Learning, +34.43% Pass@1 | **Phase 4: Multi-Agent Debugging** Cross-Layer |
+| **FVDebug (2025, arXiv) — Causal Graph Synthesis** | For-and-Against Prompting fuer kausale Graphen, 61.2% F1 | Phase 3 Stufe 3: Kausalgraph-Generierung |
+
+### Paper-Referenzen nach Phase
+
+| Phase | Papers | Fokus |
+|-------|--------|-------|
+| **Phase 1** (Wokwi MCP) | Chan & Alalfi (2025), Abtahi & Azim (2025), Wokwi MCP Docs | Agent-Driven Simulation, MCP-Integration |
+| **Phase 3** (KI-Error) | LLMs-DCGRCA (2025), TAAF (2026), TRAIL (2025), FVDebug (2025), Fariha (2024) | Causal Graph RCA, Trace-Analyse, KG-basierte Diagnose |
+| **Phase 4** (Integration) | Naqvi (2026), TraceCoder (2026), SmartTinkerer (2025) | Closed-Loop, Multi-Agent Feedback |
+
+**Zusammenfassungen (life-repo):**
+- `wissen/iot-automation/wokwi-ai-testing-recherche-2026-02-23.md` — Wokwi MCP + AI-Driven Testing (15 Web-Quellen)
+- `wissen/sammlungen/forschungsbericht-llm-testing-iot-2026-02-23.md` — 14 Papers: LLM-Testing, Agent-Loops, Log-Analyse, Digital Twins
+- `wissen/iot-automation/ki-error-analyse-iot.md` — KI-Error-Analyse Architektur (4 Ebenen)
+- `wissen/iot-automation/2025-devops-iot-deployment-hil-testing.md`, `2024-chaos-engineering-iot-resilience-testing.md`, `2024-self-healing-iot-isolation-forest.md`, `2025-sil-hil-digital-twin-validation-framework.md`, `2025-renode-digital-twin-iot-firmware-testing.md`, `2025-ai-driven-fault-injection-chaos-engineering.md`
 
 ---
 
@@ -718,6 +923,8 @@ Diese Punkte sind Beobachtungen und Empfehlungen — keine festen Vorgaben:
 | Datei | Inhalt |
 |-------|--------|
 | `arbeitsbereiche/automation-one/systemueberblick-fuer-auto-one.md` | Vollstaendiger 7-Domain-Systemueberblick |
+| `arbeitsbereiche/automation-one/wokwi-integrationsleitfaden.md` | **Wokwi-Integrationsleitfaden:** Korrektes Testing-Pattern, 10 korrigierte Error-Injection-Szenarien, CI/CD-Rebuild |
+| `arbeitsbereiche/automation-one/auftrag-wokwi-erstanalyse.md` | **Wokwi-Erstanalyse-Gesamtbericht:** 10 Teile, 173 Szenarien inventarisiert, 28 gebrochene gpio/hardware Dateien |
 | `arbeitsbereiche/automation-one/STATUS.md` | Aktueller Entwicklungsstand |
 | `arbeitsbereiche/automation-one/roadmap.md` | Entwicklungsplan |
 | `wissen/iot-automation/ki-error-analyse-iot.md` | KI-Error-Analyse Architektur (4 Ebenen) |
