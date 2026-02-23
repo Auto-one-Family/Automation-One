@@ -213,14 +213,14 @@ async function createEsp() {
   background-color: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.3);
   border-radius: 0.5rem;
-  color: #f87171;
+  color: var(--color-error);
   font-size: 0.875rem;
 }
 
 .error-close {
   background: none;
   border: none;
-  color: #f87171;
+  color: var(--color-error);
   cursor: pointer;
   font-size: 1.25rem;
   line-height: 1;

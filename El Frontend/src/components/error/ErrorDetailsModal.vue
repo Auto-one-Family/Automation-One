@@ -302,9 +302,9 @@ onUnmounted(() => {
   gap: 0.625rem;
 }
 
-.error-modal__icon--info { color: #60a5fa; }
-.error-modal__icon--warning { color: #fbbf24; }
-.error-modal__icon--error { color: #f87171; }
+.error-modal__icon--info { color: var(--color-info); }
+.error-modal__icon--warning { color: var(--color-warning); }
+.error-modal__icon--error { color: var(--color-error); }
 .error-modal__icon--critical { color: #dc2626; }
 
 .error-modal__title {
@@ -382,7 +382,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   font-size: 0.8125rem;
-  color: #60a5fa;
+  color: var(--color-info);
   text-decoration: none;
   transition: color 0.2s;
 }

@@ -41,6 +41,7 @@ import type { LogicRule, SensorCondition, TimeCondition, ActuatorAction, Notific
 import { useLogicStore } from '@/stores/logic'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
+import { tokens } from '@/utils/cssTokens'
 
 // Vue Flow CSS
 import '@vue-flow/core/dist/style.css'
@@ -587,19 +588,16 @@ function padHour(h: number): string {
 }
 
 // MiniMap node color by type
-const MINIMAP_NODE_COLORS: Record<string, string> = {
-  sensor: '#60a5fa',
-  time: '#fbbf24',
-  logic: '#a78bfa',
-  actuator: '#c084fc',
-  notification: '#34d399',
-  delay: '#707080',
-}
-
-const DEFAULT_MINIMAP_COLOR = '#707080'
-
 function miniMapNodeColor(node: Node): string {
-  return MINIMAP_NODE_COLORS[node.type || ''] || DEFAULT_MINIMAP_COLOR
+  const colors: Record<string, () => string> = {
+    sensor: () => tokens.info,
+    time: () => tokens.warning,
+    logic: () => tokens.mock,
+    actuator: () => '#c084fc',
+    notification: () => tokens.success,
+    delay: () => '#707080',
+  }
+  return colors[node.type || '']?.() || '#707080'
 }
 
 defineExpose({

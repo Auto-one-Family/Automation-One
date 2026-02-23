@@ -10,6 +10,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Thermometer } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
+import { tokens } from '@/utils/cssTokens'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { LiveLineChart, type ChartDataPoint } from '@/components/charts'
 import WidgetCard from './WidgetCard.vue'
@@ -142,7 +143,7 @@ onUnmounted(() => {
         :max-data-points="MAX_DATA_POINTS"
         :unit="selectedUnit"
         height="160px"
-        color="#3b82f6"
+        :color="tokens.accent"
       />
       <div v-else class="sensor-widget__empty">
         <span class="sensor-widget__empty-text">

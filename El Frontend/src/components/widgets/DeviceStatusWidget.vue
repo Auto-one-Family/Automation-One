@@ -9,6 +9,7 @@
 import { computed } from 'vue'
 import { Cpu } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
+import { tokens } from '@/utils/cssTokens'
 import { GaugeChart } from '@/components/charts'
 import { StatusBarChart, type StatusBarItem } from '@/components/charts'
 import WidgetCard from './WidgetCard.vue'
@@ -42,9 +43,9 @@ const statusCounts = computed(() => {
 })
 
 const barData = computed<StatusBarItem[]>(() => [
-  { label: 'Online', value: statusCounts.value.online, color: '#22c55e' },
-  { label: 'Offline', value: statusCounts.value.offline, color: '#6b7280' },
-  { label: 'Error', value: statusCounts.value.error, color: '#ef4444' },
+  { label: 'Online', value: statusCounts.value.online, color: tokens.success },
+  { label: 'Offline', value: statusCounts.value.offline, color: tokens.statusOffline },
+  { label: 'Error', value: statusCounts.value.error, color: tokens.error },
   ...(statusCounts.value.other > 0
     ? [{ label: 'Andere', value: statusCounts.value.other, color: '#8b5cf6' }]
     : []),
@@ -71,9 +72,9 @@ const onlinePercentage = computed(() =>
           unit="%"
           size="sm"
           :thresholds="[
-            { value: 0, color: '#ef4444' },
-            { value: 50, color: '#eab308' },
-            { value: 80, color: '#22c55e' },
+            { value: 0, color: tokens.error },
+            { value: 50, color: tokens.warning },
+            { value: 80, color: tokens.success },
           ]"
         />
         <span class="device-status-widget__gauge-label">Online</span>
