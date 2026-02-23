@@ -62,14 +62,15 @@ class BoardConstraints:
     """Board-spezifische GPIO-Constraints"""
     input_only_pins: Set[int]
     i2c_bus_pins: Set[int]
+    system_reserved_pins: Set[int]
     gpio_max: int
 
 
 # =============================================================================
-# System-reservierte Pins (ESP32-WROOM)
+# System-reservierte Pins (board-specific)
 # Diese Pins dürfen NIEMALS für Sensoren/Aktoren verwendet werden
 # =============================================================================
-SYSTEM_RESERVED_PINS: Set[int] = {
+SYSTEM_RESERVED_PINS_WROOM: Set[int] = {
     0,   # Boot-Strapping (muss HIGH sein beim Boot)
     1,   # TX0 (UART)
     2,   # Boot-Strapping (muss LOW sein beim Boot für Flash)
@@ -82,6 +83,14 @@ SYSTEM_RESERVED_PINS: Set[int] = {
     11,  # Flash SPI CMD
     12,  # MTDI Strapping (Flash-Spannung, muss LOW beim Boot)
 }
+
+SYSTEM_RESERVED_PINS_C3: Set[int] = {
+    18,  # USB D- (reserved for USB on XIAO ESP32-C3)
+    19,  # USB D+ (reserved for USB on XIAO ESP32-C3)
+}
+
+# Legacy alias — used by get_all_used_gpios as fallback
+SYSTEM_RESERVED_PINS = SYSTEM_RESERVED_PINS_WROOM
 
 # =============================================================================
 # Hardware-spezifische Pin-Constraints (Legacy - wird durch Fix #4 ersetzt)
@@ -173,6 +182,7 @@ class GpioValidationService:
             return BoardConstraints(
                 input_only_pins={34, 35, 36, 39},
                 i2c_bus_pins={21, 22},
+                system_reserved_pins=SYSTEM_RESERVED_PINS_WROOM,
                 gpio_max=39
             )
 
@@ -181,6 +191,7 @@ class GpioValidationService:
             return BoardConstraints(
                 input_only_pins=set(),  # XIAO has no input-only pins
                 i2c_bus_pins={4, 5},
+                system_reserved_pins=SYSTEM_RESERVED_PINS_C3,
                 gpio_max=21
             )
 
@@ -191,6 +202,7 @@ class GpioValidationService:
         return BoardConstraints(
             input_only_pins={34, 35, 36, 39},
             i2c_bus_pins={21, 22},
+            system_reserved_pins=SYSTEM_RESERVED_PINS_WROOM,
             gpio_max=39
         )
 
@@ -256,9 +268,9 @@ class GpioValidationService:
             )
 
         # =====================================================================
-        # 1. System-Pin Check (sofort, ohne DB-Query)
+        # 1. System-Pin Check (board-specific, ohne DB-Query)
         # =====================================================================
-        if gpio in SYSTEM_RESERVED_PINS:
+        if gpio in board_constraints.system_reserved_pins:
             pin_name = self._get_system_pin_name(gpio)
             rejection_reason = f"GPIO {gpio} ist ein System-Pin ({pin_name}) und kann nicht verwendet werden"
             logger.info(

@@ -374,12 +374,12 @@ class TestValidators:
 
     def test_validate_gpio_wroom_valid(self):
         """GPIO validation for ESP32 WROOM - valid pins."""
-        # Standard GPIO pins
+        # Standard GPIO pins (not reserved, not out of range)
         valid, error = validate_gpio(34, constants.HARDWARE_TYPE_ESP32_WROOM)
         assert valid is True
         assert error is None
 
-        valid, error = validate_gpio(0, constants.HARDWARE_TYPE_ESP32_WROOM)
+        valid, error = validate_gpio(13, constants.HARDWARE_TYPE_ESP32_WROOM)
         assert valid is True
         assert error is None
 
