@@ -17,6 +17,8 @@ services:
   # ============================================
   postgres:
     # Real PostgreSQL for integration tests (not SQLite)
+    # Override command: base config references postgresql.conf which is removed by volumes: !reset
+    command: postgres
     environment:
       POSTGRES_USER: god_kaiser
       POSTGRES_PASSWORD: ci_password
@@ -57,6 +59,12 @@ services:
         condition: service_healthy
       mqtt-broker:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     environment:
       DATABASE_URL: postgresql+asyncpg://god_kaiser:ci_password@postgres:5432/god_kaiser_db
       DATABASE_AUTO_INIT: "true"
@@ -69,6 +77,8 @@ services:
       # JWT for test environment
       JWT_SECRET_KEY: ci_test_secret_key_not_for_production
     restart: "no"
+    # No host volume mounts in CI (avoids PermissionError on /app/logs)
+    volumes: !reset []
     # No watch/develop section in CI
     develop: !reset null
 

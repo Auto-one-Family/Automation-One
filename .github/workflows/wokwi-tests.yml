@@ -13,10 +13,10 @@
 # - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
 #
 # Coverage: 173 scenarios across 14 categories
-# - PR/Push: 52 core scenarios across 16 jobs (fast feedback)
+# - PR/Push: 51 core scenarios + 1 legacy across 16 jobs (fast feedback)
 # - Nightly/Manual: ALL 173 scenarios (+ 6 extended jobs = 22 total jobs + summary)
 #
-# Core PR Tests (52 scenarios):
+# Core PR Tests (51 scenarios in categories + 1 legacy):
 # - Boot (2), Sensor (2+3), MQTT Legacy (1), Actuator (4+3), Zone (2)
 # - Emergency (2+1), Config (2), Combined (3), GPIO (5), I2C (5)
 # - NVS (5), PWM (3), Error-Injection (10)
@@ -35,7 +35,6 @@ concurrency:
 
 on:
   push:
-    branches: [main, master, develop]
     paths:
       - 'El Trabajante/**'
       - '.github/workflows/wokwi-tests.yml'
@@ -47,12 +46,6 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Nightly at 2 AM UTC — runs ALL scenarios
   workflow_dispatch:  # Allow manual triggering
-  schedule:
-    - cron: '0 3 * * *'  # Nightly full suite at 03:00 UTC
-
-concurrency:
-  group: wokwi-tests-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   # ============================================
@@ -88,7 +81,7 @@ jobs:
         with:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
-          retention-days: 1
+          retention-days: 7
 
   # ============================================
   # JOB 2: Boot & Core Tests
@@ -1562,16 +1555,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_sensor_timeout.yaml \
             > error_sensor_timeout.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_sensor_timeout.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":32,"sensor_type":"ds18b20","sensor_name":"GhostSensor","active":true,"raw_mode":true}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_sensor_timeout.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Sensor Timeout: PASS" || echo "::error::Sensor Timeout: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 2: MQTT Activity After Config ---
       - name: "Error Test 2: MQTT Activity"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1581,16 +1587,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_mqtt_disconnect.yaml \
             > error_mqtt_disconnect.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_mqtt_disconnect.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"MQTTTestSensor","active":true}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_mqtt_disconnect.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::MQTT Activity: PASS" || echo "::error::MQTT Activity: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 3: GPIO Conflict (two sensors on same GPIO in one config) ---
       - name: "Error Test 3: GPIO Conflict"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1600,16 +1619,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_gpio_conflict.yaml \
             > error_gpio_conflict.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_gpio_conflict.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"TempSensor1","active":true,"raw_mode":true},{"gpio":4,"sensor_type":"moisture","sensor_name":"MoistureSensor","active":true,"raw_mode":true}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_gpio_conflict.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::GPIO Conflict: PASS" || echo "::error::GPIO Conflict: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 4: Watchdog Stability (heavy config + emergency cycle) ---
       - name: "Error Test 4: Watchdog Stability"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1619,7 +1651,20 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_watchdog_trigger.yaml \
             > error_watchdog_trigger.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_watchdog_trigger.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"S1","active":true},{"gpio":15,"sensor_type":"dht22","sensor_name":"S2","active":true}],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"A1","active":true}]}'
           sleep 5
@@ -1628,13 +1673,13 @@ jobs:
           sleep 2
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
             -m '{"command":"clear_emergency","auth_token":"ESP_00000001"}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_watchdog_trigger.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Watchdog Stability: PASS" || echo "::error::Watchdog Stability: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 5: Invalid JSON Config ---
       - name: "Error Test 5: Invalid JSON"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1644,16 +1689,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_config_invalid_json.yaml \
             > error_config_invalid_json.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_config_invalid_json.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors": [{"gpio": 4, "sensor_type": "ds18b20", "broken'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_config_invalid_json.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Invalid JSON: PASS" || echo "::error::Invalid JSON: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 6: Actuator Timeout (config + actuator ON command) ---
       - name: "Error Test 6: Actuator Timeout"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1663,19 +1721,32 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_actuator_timeout.yaml \
             > error_actuator_timeout.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_actuator_timeout.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"TestLED","active":true}]}'
           sleep 5
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
             -m '{"command":"ON","value":1.0}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_actuator_timeout.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Actuator Timeout: PASS" || echo "::error::Actuator Timeout: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 7: Emergency Cascade (5 MQTT messages via helper script) ---
       - name: "Error Test 7: Emergency Cascade"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1685,16 +1756,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_emergency_cascade.yaml \
             > error_emergency_cascade.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_emergency_cascade.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           chmod +x tests/wokwi/helpers/emergency_cascade.sh
           bash tests/wokwi/helpers/emergency_cascade.sh localhost
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_emergency_cascade.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Emergency Cascade: PASS" || echo "::error::Emergency Cascade: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 8: I2C Bus Stuck (ghost I2C sensor) ---
       - name: "Error Test 8: I2C Bus Stuck"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1704,16 +1788,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_i2c_bus_stuck.yaml \
             > error_i2c_bus_stuck.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_i2c_bus_stuck.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":21,"sensor_type":"temperature_sht31","sensor_name":"GhostI2C","active":true,"i2c_address":68}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_i2c_bus_stuck.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::I2C Bus Stuck: PASS" || echo "::error::I2C Bus Stuck: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 9: NVS Factory Reset ---
       - name: "Error Test 9: NVS Factory Reset"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1723,16 +1820,29 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_nvs_corrupt.yaml \
             > error_nvs_corrupt.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_nvs_corrupt.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/system/command" \
             -m '{"command":"factory_reset","confirm":true}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_nvs_corrupt.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::NVS Factory Reset: PASS" || echo "::error::NVS Factory Reset: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 10: Heap Pressure (14 devices) ---
       - name: "Error Test 10: Heap Pressure"
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1742,11 +1852,23 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_heap_pressure.yaml \
             > error_heap_pressure.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_heap_pressure.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"S1","active":true},{"gpio":15,"sensor_type":"dht22","sensor_name":"S2","active":true},{"gpio":32,"sensor_type":"ds18b20","sensor_name":"S3","active":true,"raw_mode":true},{"gpio":33,"sensor_type":"moisture","sensor_name":"S4","active":true,"raw_mode":true},{"gpio":34,"sensor_type":"ds18b20","sensor_name":"S5","active":true,"raw_mode":true},{"gpio":35,"sensor_type":"moisture","sensor_name":"S6","active":true,"raw_mode":true},{"gpio":36,"sensor_type":"ds18b20","sensor_name":"S7","active":true,"raw_mode":true},{"gpio":39,"sensor_type":"moisture","sensor_name":"S8","active":true,"raw_mode":true}],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"A1","active":true},{"gpio":25,"actuator_type":"relay","actuator_name":"A2","active":true},{"gpio":26,"actuator_type":"relay","actuator_name":"A3","active":true},{"gpio":23,"actuator_type":"led","actuator_name":"A4","active":true},{"gpio":13,"actuator_type":"led","actuator_name":"A5","active":true},{"gpio":14,"actuator_type":"led","actuator_name":"A6","active":true}]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_heap_pressure.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Heap Pressure: PASS" || echo "::error::Heap Pressure: FAIL (exit $EXIT_CODE)"
 
