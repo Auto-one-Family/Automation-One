@@ -392,7 +392,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
               <LiveLineChart
                 :data="sparklineCache.get(getSensorKey(sensor.espId, sensor.gpio)) || []"
                 :compact="true"
-                height="36px"
+                height="50px"
                 :fill="true"
                 :show-grid="false"
               />

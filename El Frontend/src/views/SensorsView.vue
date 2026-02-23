@@ -9,6 +9,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import type { QualityLevel } from '@/types'
+import { getQualityLabel } from '@/utils/labels'
 import {
   Thermometer,
   Gauge,
@@ -16,6 +17,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Power,
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
@@ -58,6 +60,33 @@ function setActiveTab(tab: TabType) {
 // Track updated items for visual feedback
 const updatedSensorKeys = ref<Set<string>>(new Set())
 
+// Accordion collapse state (default: all expanded, so empty = none collapsed)
+const collapsedZones = ref<Set<string>>(new Set())
+const collapsedSubzones = ref<Set<string>>(new Set())
+
+function toggleZone(zoneKey: string) {
+  if (collapsedZones.value.has(zoneKey)) {
+    collapsedZones.value.delete(zoneKey)
+  } else {
+    collapsedZones.value.add(zoneKey)
+  }
+  collapsedZones.value = new Set(collapsedZones.value)
+}
+function toggleSubzone(subzoneKey: string) {
+  if (collapsedSubzones.value.has(subzoneKey)) {
+    collapsedSubzones.value.delete(subzoneKey)
+  } else {
+    collapsedSubzones.value.add(subzoneKey)
+  }
+  collapsedSubzones.value = new Set(collapsedSubzones.value)
+}
+function isZoneExpanded(zoneKey: string): boolean {
+  return !collapsedZones.value.has(zoneKey)
+}
+function isSubzoneExpanded(subzoneKey: string): boolean {
+  return !collapsedSubzones.value.has(subzoneKey)
+}
+
 // =============================================================================
 // SlideOver Config Panels
 // =============================================================================
@@ -66,7 +95,10 @@ const showActuatorPanel = ref(false)
 const selectedSensorConfig = ref<{ espId: string; gpio: number; sensorType: string; unit: string } | null>(null)
 const selectedActuatorConfig = ref<{ espId: string; gpio: number; actuatorType: string } | null>(null)
 
-function openSensorConfig(sensor: { esp_id: string; gpio: number; sensor_type: string; unit: string }) {
+const lastClickedSensorName = ref<string | null>(null)
+
+function openSensorConfig(sensor: { esp_id: string; gpio: number; sensor_type: string; unit: string; name?: string | null }) {
+  lastClickedSensorName.value = sensor.name || sensor.sensor_type
   selectedSensorConfig.value = {
     espId: sensor.esp_id,
     gpio: sensor.gpio,
@@ -151,16 +183,40 @@ onMounted(async () => {
 })
 
 // =============================================================================
-// Sensor Data & Filters
+// Sensor Data & Filters (with zone/subzone context)
 // =============================================================================
-const allSensors = computed(() => {
+interface SensorWithContext {
+  gpio: number
+  sensor_type: string
+  name: string | null
+  raw_value: number
+  unit: string
+  quality: QualityLevel
+  esp_id: string
+  esp_state?: string
+  zone_id: string | null
+  zone_name: string
+  subzone_id: string | null
+  subzone_name: string
+}
+
+const allSensors = computed((): SensorWithContext[] => {
   return espStore.devices.flatMap(esp => {
     const sensors = esp.sensors as { gpio: number; sensor_type: string; name: string | null; raw_value: number; unit: string; quality: QualityLevel }[] | undefined
     if (!sensors) return []
+    const espId = espStore.getDeviceId(esp)
+    const zoneId = esp.zone_id || null
+    const zoneName = esp.zone_name || (zoneId ?? '')
+    const subzoneId = esp.subzone_id || null
+    const subzoneName = esp.subzone_name || (subzoneId ?? '')
     return sensors.map(sensor => ({
       ...sensor,
-      esp_id: espStore.getDeviceId(esp),
+      esp_id: espId,
       esp_state: esp.system_state,
+      zone_id: zoneId,
+      zone_name: zoneName,
+      subzone_id: subzoneId,
+      subzone_name: subzoneName,
     }))
   })
 })
@@ -180,6 +236,69 @@ const filteredSensors = computed(() => {
   })
 })
 
+// Group sensors by zone, then by subzone
+interface SubzoneGroup {
+  subzoneId: string | null
+  subzoneName: string
+  sensors: SensorWithContext[]
+}
+interface ZoneGroup {
+  zoneId: string | null
+  zoneName: string
+  subzones: SubzoneGroup[]
+  sensorCount: number
+}
+const ZONE_UNASSIGNED = '__unassigned__'
+
+const sensorsByZone = computed((): ZoneGroup[] => {
+  const zoneMap = new Map<string | null, Map<string | null, SensorWithContext[]>>()
+  for (const sensor of filteredSensors.value) {
+    const zId = sensor.zone_id || ZONE_UNASSIGNED
+    const szId = sensor.subzone_id ?? '__none__'
+    if (!zoneMap.has(zId)) {
+      zoneMap.set(zId, new Map())
+    }
+    const subMap = zoneMap.get(zId)!
+    if (!subMap.has(szId)) {
+      subMap.set(szId, [])
+    }
+    subMap.get(szId)!.push(sensor)
+  }
+  const result: ZoneGroup[] = []
+  for (const [zoneId, subMap] of zoneMap) {
+    const subzones: SubzoneGroup[] = []
+    let total = 0
+    for (const [szId, sensors] of subMap) {
+      const subzoneName: string = szId === '__none__'
+        ? (zoneId === ZONE_UNASSIGNED ? '' : 'Keine Subzone')
+        : (sensors[0]?.subzone_name || szId || '')
+      subzones.push({
+        subzoneId: szId === '__none__' ? null : szId,
+        subzoneName,
+        sensors,
+      })
+      total += sensors.length
+    }
+    subzones.sort((a, b) => {
+      if (a.subzoneId === null) return 1
+      if (b.subzoneId === null) return -1
+      return (a.subzoneName || '').localeCompare(b.subzoneName || '')
+    })
+    result.push({
+      zoneId: zoneId === ZONE_UNASSIGNED ? null : zoneId,
+      zoneName: zoneId === ZONE_UNASSIGNED ? 'Nicht zugewiesen' : (filteredSensors.value.find(s => s.zone_id === zoneId)?.zone_name || zoneId || ''),
+      subzones,
+      sensorCount: total,
+    })
+  }
+  result.sort((a, b) => {
+    if (a.zoneId === null) return 1
+    if (b.zoneId === null) return -1
+    return (a.zoneName || '').localeCompare(b.zoneName || '')
+  })
+  return result
+})
+
 const hasSensorFilters = computed(() => {
   return filterEspId.value !== '' ||
     filterSensorType.value.length > 0 ||
@@ -187,16 +306,40 @@ const hasSensorFilters = computed(() => {
 })
 
 // =============================================================================
-// Actuator Data & Filters
+// Actuator Data & Filters (with zone/subzone context)
 // =============================================================================
-const allActuators = computed(() => {
+interface ActuatorWithContext {
+  gpio: number
+  actuator_type: string
+  name: string | null
+  state: boolean
+  pwm_value: number
+  emergency_stopped: boolean
+  esp_id: string
+  esp_state?: string
+  zone_id: string | null
+  zone_name: string
+  subzone_id: string | null
+  subzone_name: string
+}
+
+const allActuators = computed((): ActuatorWithContext[] => {
   return espStore.devices.flatMap(esp => {
     const actuators = esp.actuators as { gpio: number; actuator_type: string; name: string | null; state: boolean; pwm_value: number; emergency_stopped: boolean }[] | undefined
     if (!actuators) return []
+    const espId = espStore.getDeviceId(esp)
+    const zoneId = esp.zone_id || null
+    const zoneName = esp.zone_name || (zoneId ?? '')
+    const subzoneId = esp.subzone_id || null
+    const subzoneName = esp.subzone_name || (subzoneId ?? '')
     return actuators.map(actuator => ({
       ...actuator,
-      esp_id: espStore.getDeviceId(esp),
+      esp_id: espId,
       esp_state: esp.system_state,
+      zone_id: zoneId,
+      zone_name: zoneName,
+      subzone_id: subzoneId,
+      subzone_name: subzoneName,
     }))
   })
 })
@@ -221,12 +364,6 @@ const filteredActuators = computed(() => {
   })
 })
 
-const hasActuatorFilters = computed(() => {
-  return filterEspId.value !== '' ||
-    filterActuatorType.value.length > 0 ||
-    filterState.value.length > 0
-})
-
 const actuatorStats = computed(() => {
   const stats = { on: 0, off: 0, emergency: 0 }
   allActuators.value.forEach(actuator => {
@@ -235,6 +372,74 @@ const actuatorStats = computed(() => {
     else stats.off++
   })
   return stats
+})
+
+// Group actuators by zone, then by subzone
+interface ActuatorSubzoneGroup {
+  subzoneId: string | null
+  subzoneName: string
+  actuators: ActuatorWithContext[]
+}
+interface ActuatorZoneGroup {
+  zoneId: string | null
+  zoneName: string
+  subzones: ActuatorSubzoneGroup[]
+  actuatorCount: number
+}
+
+const actuatorsByZone = computed((): ActuatorZoneGroup[] => {
+  const zoneMap = new Map<string | null, Map<string | null, ActuatorWithContext[]>>()
+  for (const actuator of filteredActuators.value) {
+    const zId = actuator.zone_id || ZONE_UNASSIGNED
+    const szId = actuator.subzone_id ?? '__none__'
+    if (!zoneMap.has(zId)) {
+      zoneMap.set(zId, new Map())
+    }
+    const subMap = zoneMap.get(zId)!
+    if (!subMap.has(szId)) {
+      subMap.set(szId, [])
+    }
+    subMap.get(szId)!.push(actuator)
+  }
+  const result: ActuatorZoneGroup[] = []
+  for (const [zoneId, subMap] of zoneMap) {
+    const subzones: ActuatorSubzoneGroup[] = []
+    let total = 0
+    for (const [szId, actuators] of subMap) {
+      const subzoneName: string = szId === '__none__'
+        ? (zoneId === ZONE_UNASSIGNED ? '' : 'Keine Subzone')
+        : (actuators[0]?.subzone_name || szId || '')
+      subzones.push({
+        subzoneId: szId === '__none__' ? null : szId,
+        subzoneName,
+        actuators,
+      })
+      total += actuators.length
+    }
+    subzones.sort((a, b) => {
+      if (a.subzoneId === null) return 1
+      if (b.subzoneId === null) return -1
+      return (a.subzoneName || '').localeCompare(b.subzoneName || '')
+    })
+    result.push({
+      zoneId: zoneId === ZONE_UNASSIGNED ? null : zoneId,
+      zoneName: zoneId === ZONE_UNASSIGNED ? 'Nicht zugewiesen' : (filteredActuators.value.find(a => a.zone_id === zoneId)?.zone_name || zoneId || ''),
+      subzones,
+      actuatorCount: total,
+    })
+  }
+  result.sort((a, b) => {
+    if (a.zoneId === null) return 1
+    if (b.zoneId === null) return -1
+    return (a.zoneName || '').localeCompare(b.zoneName || '')
+  })
+  return result
+})
+
+const hasActuatorFilters = computed(() => {
+  return filterEspId.value !== '' ||
+    filterActuatorType.value.length > 0 ||
+    filterState.value.length > 0
 })
 
 // =============================================================================
@@ -378,7 +583,7 @@ function getQualityColor(quality: string): string {
       </div>
       <div class="card p-3 md:p-4 text-center">
         <p class="text-2xl md:text-3xl font-bold text-red-400">{{ actuatorStats.emergency }}</p>
-        <p class="text-xs md:text-sm text-dark-400">Emergency Stop</p>
+        <p class="text-xs md:text-sm text-dark-400">Not-Stopp</p>
       </div>
     </div>
 
@@ -445,7 +650,7 @@ function getQualityColor(quality: string): string {
                   ]"
                   @click="toggleQuality(quality)"
                 >
-                  {{ quality }}
+                  {{ getQualityLabel(quality) }}
                 </button>
               </div>
             </div>
@@ -534,39 +739,86 @@ function getQualityColor(quality: string): string {
         </button>
       </div>
 
-      <!-- Sensor Grid -->
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+      <!-- Sensor List grouped by Zone → Subzone -->
+      <div v-else class="space-y-4">
         <div
-          v-for="sensor in filteredSensors"
-          :key="`${sensor.esp_id}-${sensor.gpio}`"
-          :class="[
-            'card hover:border-dark-600 transition-colors cursor-pointer',
-            updatedSensorKeys.has(`${sensor.esp_id}-${sensor.gpio}`) ? 'sensor-value--updated' : ''
-          ]"
-          @click="openSensorConfig(sensor)"
+          v-for="zone in sensorsByZone"
+          :key="zone.zoneId ?? '__unassigned__'"
+          class="sensors-zone-section"
         >
-          <div class="card-header flex items-center gap-3">
-            <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Gauge class="w-5 h-5 text-purple-400" />
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="font-medium text-dark-100 truncate">{{ sensor.name || `GPIO ${sensor.gpio}` }}</p>
-              <p class="text-xs text-dark-400 truncate">{{ sensor.esp_id }} · {{ sensor.sensor_type }}</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="flex items-end justify-between gap-2">
-              <div class="min-w-0">
-                <p class="text-2xl md:text-3xl font-bold font-mono text-dark-100 truncate">
-                  {{ sensor.raw_value.toFixed(2) }}
-                </p>
-                <p class="text-sm text-dark-400">{{ sensor.unit }}</p>
+          <!-- Zone Header (accordion) -->
+          <button
+            :class="['sensors-zone-header', { 'sensors-zone-header--collapsed': !isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+            @click="toggleZone(zone.zoneId ?? '__unassigned__')"
+          >
+            <ChevronRight
+              :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+            />
+            <span class="sensors-zone-name">{{ zone.zoneName }}</span>
+            <span class="sensors-zone-count">{{ zone.sensorCount }} {{ zone.sensorCount === 1 ? 'Sensor' : 'Sensoren' }}</span>
+          </button>
+
+          <!-- Subzones (nested accordion) -->
+          <Transition name="accordion">
+            <div v-show="isZoneExpanded(zone.zoneId ?? '__unassigned__')" class="sensors-zone-content">
+              <div
+                v-for="subzone in zone.subzones"
+                :key="subzone.subzoneId ?? '__none__'"
+                class="sensors-subzone"
+              >
+                <button
+                  v-if="zone.subzones.length > 1 || subzone.subzoneName"
+                  :class="['sensors-subzone-header', { 'sensors-subzone-header--collapsed': !isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                  @click="toggleSubzone(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                >
+                  <ChevronRight
+                    :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                  />
+                  <span class="sensors-subzone-name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
+                  <span class="sensors-zone-count">{{ subzone.sensors.length }} {{ subzone.sensors.length === 1 ? 'Sensor' : 'Sensoren' }}</span>
+                </button>
+                <Transition name="accordion">
+                  <div
+                    v-show="zone.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                    class="sensors-subzone-cards"
+                  >
+                    <div
+                      v-for="sensor in subzone.sensors"
+                      :key="`${sensor.esp_id}-${sensor.gpio}`"
+                      :class="[
+                        'card hover:border-dark-600 transition-colors cursor-pointer',
+                        updatedSensorKeys.has(`${sensor.esp_id}-${sensor.gpio}`) ? 'sensor-value--updated' : ''
+                      ]"
+                      @click="openSensorConfig(sensor)"
+                    >
+                      <div class="card-header flex items-center gap-3">
+                        <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Gauge class="w-5 h-5 text-purple-400" />
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="font-medium text-dark-100 truncate">{{ sensor.name || `GPIO ${sensor.gpio}` }}</p>
+                          <p class="text-xs text-dark-400 truncate">{{ sensor.esp_id }} · {{ sensor.sensor_type }}</p>
+                        </div>
+                      </div>
+                      <div class="card-body">
+                        <div class="flex items-end justify-between gap-2">
+                          <div class="min-w-0">
+                            <p class="text-2xl md:text-3xl font-bold font-mono text-dark-100 truncate">
+                              {{ sensor.raw_value.toFixed(2) }}
+                            </p>
+                            <p class="text-sm text-dark-400">{{ sensor.unit }}</p>
+                          </div>
+                          <span :class="['badge flex-shrink-0', getQualityColor(sensor.quality)]">
+                            {{ getQualityLabel(sensor.quality) }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
               </div>
-              <span :class="['badge flex-shrink-0', getQualityColor(sensor.quality)]">
-                {{ sensor.quality }}
-              </span>
             </div>
-          </div>
+          </Transition>
         </div>
       </div>
     </template>
@@ -594,48 +846,95 @@ function getQualityColor(quality: string): string {
         </button>
       </div>
 
-      <!-- Actuator Grid -->
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+      <!-- Actuator List grouped by Zone → Subzone -->
+      <div v-else class="space-y-4">
         <div
-          v-for="actuator in filteredActuators"
-          :key="`${actuator.esp_id}-${actuator.gpio}`"
-          class="card hover:border-dark-600 transition-colors cursor-pointer"
-          :class="{ 'border-red-500/30': actuator.emergency_stopped }"
-          @click="openActuatorConfig(actuator)"
+          v-for="zone in actuatorsByZone"
+          :key="zone.zoneId ?? '__unassigned__'"
+          class="sensors-zone-section"
         >
-          <div class="card-header flex items-center gap-3">
-            <div
-              :class="[
-                'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-                actuator.state ? 'bg-green-500/20' : 'bg-dark-700'
-              ]"
-            >
-              <Power :class="['w-5 h-5', actuator.state ? 'text-green-400' : 'text-dark-400']" />
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="font-medium text-dark-100 truncate">{{ actuator.name || `GPIO ${actuator.gpio}` }}</p>
-              <p class="text-xs text-dark-400 truncate">{{ actuator.esp_id }} · {{ actuator.actuator_type }}</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
-                  {{ actuator.state ? 'ON' : 'OFF' }}
-                </span>
-                <span v-if="actuator.emergency_stopped" class="badge badge-danger">
-                  E-STOP
-                </span>
-              </div>
-              <button
-                class="btn-secondary btn-sm flex-shrink-0 touch-target"
-                :disabled="actuator.emergency_stopped"
-                @click.stop="toggleActuator(actuator.esp_id, actuator.gpio, actuator.state)"
+          <!-- Zone Header (accordion) -->
+          <button
+            :class="['sensors-zone-header', { 'sensors-zone-header--collapsed': !isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+            @click="toggleZone(zone.zoneId ?? '__unassigned__')"
+          >
+            <ChevronRight
+              :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+            />
+            <span class="sensors-zone-name">{{ zone.zoneName }}</span>
+            <span class="sensors-zone-count">{{ zone.actuatorCount }} {{ zone.actuatorCount === 1 ? 'Aktor' : 'Aktoren' }}</span>
+          </button>
+
+          <!-- Subzones (nested accordion) -->
+          <Transition name="accordion">
+            <div v-show="isZoneExpanded(zone.zoneId ?? '__unassigned__')" class="sensors-zone-content">
+              <div
+                v-for="subzone in zone.subzones"
+                :key="subzone.subzoneId ?? '__none__'"
+                class="sensors-subzone"
               >
-                {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
-              </button>
+                <button
+                  v-if="zone.subzones.length > 1 || subzone.subzoneName"
+                  :class="['sensors-subzone-header', { 'sensors-subzone-header--collapsed': !isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                  @click="toggleSubzone(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                >
+                  <ChevronRight
+                    :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                  />
+                  <span class="sensors-subzone-name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
+                  <span class="sensors-zone-count">{{ subzone.actuators.length }} {{ subzone.actuators.length === 1 ? 'Aktor' : 'Aktoren' }}</span>
+                </button>
+                <Transition name="accordion">
+                  <div
+                    v-show="zone.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                    class="sensors-subzone-cards"
+                  >
+                    <div
+                      v-for="actuator in subzone.actuators"
+                      :key="`${actuator.esp_id}-${actuator.gpio}`"
+                      class="card hover:border-dark-600 transition-colors cursor-pointer"
+                      :class="{ 'border-red-500/30': actuator.emergency_stopped }"
+                      @click="openActuatorConfig(actuator)"
+                    >
+                      <div class="card-header flex items-center gap-3">
+                        <div
+                          :class="[
+                            'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
+                            actuator.state ? 'bg-green-500/20' : 'bg-dark-700'
+                          ]"
+                        >
+                          <Power :class="['w-5 h-5', actuator.state ? 'text-green-400' : 'text-dark-400']" />
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="font-medium text-dark-100 truncate">{{ actuator.name || `GPIO ${actuator.gpio}` }}</p>
+                          <p class="text-xs text-dark-400 truncate">{{ actuator.esp_id }} · {{ actuator.actuator_type }}</p>
+                        </div>
+                      </div>
+                      <div class="card-body">
+                        <div class="flex items-center justify-between gap-2">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
+                              {{ actuator.state ? 'ON' : 'OFF' }}
+                            </span>
+                            <span v-if="actuator.emergency_stopped" class="badge badge-danger">
+                              E-STOP
+                            </span>
+                          </div>
+                          <button
+                            class="btn-secondary btn-sm flex-shrink-0 touch-target"
+                            :disabled="actuator.emergency_stopped"
+                            @click.stop="toggleActuator(actuator.esp_id, actuator.gpio, actuator.state)"
+                          >
+                            {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
+              </div>
             </div>
-          </div>
+          </Transition>
         </div>
       </div>
     </template>
@@ -643,7 +942,7 @@ function getQualityColor(quality: string): string {
     <!-- Sensor Config SlideOver -->
     <SlideOver
       :open="showSensorPanel"
-      :title="selectedSensorConfig?.sensorType || 'Sensor'"
+      :title="selectedSensorConfig ? (lastClickedSensorName || selectedSensorConfig.sensorType) : 'Sensor konfigurieren'"
       width="lg"
       @close="closeSensorPanel"
     >
@@ -760,5 +1059,113 @@ function getQualityColor(quality: string): string {
     border-color: transparent;
     background-color: transparent;
   }
+}
+
+/* Zone/Subzone accordion */
+.sensors-zone-section {
+  background: var(--color-bg-tertiary, #1a1a2e);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.sensors-zone-header,
+.sensors-subzone-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  transition: background var(--transition-fast);
+}
+
+.sensors-zone-header:hover,
+.sensors-subzone-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sensors-zone-chevron {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+  color: var(--color-text-muted);
+}
+
+.sensors-zone-chevron--expanded {
+  transform: rotate(90deg);
+}
+
+.sensors-zone-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sensors-subzone-header {
+  padding: var(--space-2) var(--space-4);
+  padding-left: var(--space-8);
+  font-weight: 500;
+  font-size: var(--text-xs);
+}
+
+.sensors-subzone-name {
+  flex: 1;
+  color: var(--color-text-secondary);
+}
+
+.sensors-zone-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.sensors-zone-content {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.sensors-subzone {
+  margin-bottom: var(--space-2);
+}
+
+.sensors-subzone:last-child {
+  margin-bottom: 0;
+}
+
+.sensors-subzone-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.sensors-subzone-header + .sensors-subzone-cards {
+  padding-left: var(--space-8);
+}
+
+.accordion-enter-active,
+.accordion-leave-active {
+  transition: all var(--transition-base);
+}
+
+.accordion-enter-from,
+.accordion-leave-to {
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+}
+
+.accordion-enter-to,
+.accordion-leave-from {
+  max-height: 2000px;
 }
 </style>

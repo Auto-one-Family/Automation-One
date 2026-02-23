@@ -24,6 +24,7 @@ import {
   getValueConfigForSensorType
 } from '@/utils/sensorDefaults'
 import { formatNumber } from '@/utils/formatters'
+import { getQualityLabel } from '@/utils/labels'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { createLogger } from '@/utils/logger'
 import type { QualityLevel, MultiValueEntry } from '@/types'
@@ -150,19 +151,8 @@ function getWorstQuality(qualities: QualityLevel[]): QualityLevel {
   return 'good'
 }
 
-/** Quality label for display */
-const qualityLabel = computed(() => {
-  const labels: Record<QualityLevel, string> = {
-    excellent: 'Excellent',
-    good: 'Good',
-    fair: 'Fair',
-    poor: 'Poor',
-    bad: 'Bad',
-    stale: 'Stale',
-    error: 'Error'
-  }
-  return labels[displayQuality.value] || displayQuality.value
-})
+/** Quality label for display (German) */
+const qualityLabel = computed(() => getQualityLabel(displayQuality.value))
 
 /** Formatted values for template */
 interface FormattedValue {
