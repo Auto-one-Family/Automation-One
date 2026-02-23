@@ -25,6 +25,7 @@ import LiveLineChart from '@/components/charts/LiveLineChart.vue'
 import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
 import HistoricalChart from '@/components/charts/HistoricalChart.vue'
 import GaugeChart from '@/components/charts/GaugeChart.vue'
+import ViewTabBar from '@/components/common/ViewTabBar.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -296,6 +297,9 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
 
 <template>
   <div class="monitor-view">
+    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
+    <ViewTabBar />
+
     <!-- Level 1: Zone Overview -->
     <template v-if="!isZoneDetail">
       <h2 class="monitor-view__title">Sensor & Aktor Monitoring</h2>

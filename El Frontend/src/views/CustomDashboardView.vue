@@ -22,6 +22,7 @@ import {
 } from 'lucide-vue-next'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useToast } from '@/composables/useToast'
+import ViewTabBar from '@/components/common/ViewTabBar.vue'
 
 const dashStore = useDashboardStore()
 const toast = useToast()
@@ -241,6 +242,9 @@ function handleImport() {
 
 <template>
   <div class="dashboard-builder">
+    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
+    <ViewTabBar />
+
     <!-- Toolbar -->
     <div class="dashboard-builder__toolbar">
       <div class="dashboard-builder__toolbar-left">
