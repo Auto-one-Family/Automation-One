@@ -390,17 +390,17 @@ function handleDragEnd(event: DragEvent) {
   border-left-color: #10b981;
 }
 .sensor-satellite:has(.sensor-satellite__quality--good) {
-  border-left-color: #22c55e;
+  border-left-color: var(--color-status-good);
 }
 .sensor-satellite:has(.sensor-satellite__quality--fair) {
-  border-left-color: #eab308;
+  border-left-color: var(--color-status-warning);
 }
 .sensor-satellite:has(.sensor-satellite__quality--poor) {
   border-left-color: #f97316;
 }
 .sensor-satellite:has(.sensor-satellite__quality--bad),
 .sensor-satellite:has(.sensor-satellite__quality--error) {
-  border-left-color: #ef4444;
+  border-left-color: var(--color-status-alarm);
 }
 .sensor-satellite:has(.sensor-satellite__quality--stale) {
   border-left-color: #4b5563;
@@ -477,17 +477,17 @@ function handleDragEnd(event: DragEvent) {
 
 .sensor-satellite__icon--success {
   background: rgba(52, 211, 153, 0.15);
-  color: #34d399;
+  color: var(--color-success);
 }
 
 .sensor-satellite__icon--warning {
   background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .sensor-satellite__icon--danger {
   background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .sensor-satellite__icon--gray {
@@ -660,12 +660,12 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__quality--good .sensor-satellite__quality-dot {
-  background-color: #22c55e;
+  background-color: var(--color-status-good);
   box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
 }
 
 .sensor-satellite__quality--fair .sensor-satellite__quality-dot {
-  background-color: #eab308;
+  background-color: var(--color-status-warning);
   box-shadow: 0 0 6px rgba(234, 179, 8, 0.5);
 }
 
@@ -675,7 +675,7 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__quality--bad .sensor-satellite__quality-dot {
-  background-color: #ef4444;
+  background-color: var(--color-status-alarm);
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
 }
 
@@ -706,7 +706,7 @@ function handleDragEnd(event: DragEvent) {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background-color: #34d399;
+  background-color: var(--color-success);
   box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
   animation: conn-pulse 2s infinite;
 }

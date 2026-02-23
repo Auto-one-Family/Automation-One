@@ -20,6 +20,7 @@ import { X, ChartLine, Plus, Settings } from 'lucide-vue-next'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
 import type { ChartSensor } from '@/types'
 import { createLogger } from '@/utils/logger'
+import { tokens } from '@/utils/cssTokens'
 
 const log = createLogger('AnalysisDropZone')
 
@@ -59,11 +60,11 @@ const showYAxisSettings = ref(false)
 
 // Chart colors palette
 const chartColors = [
-  '#a78bfa', // Purple
-  '#34d399', // Green
-  '#60a5fa', // Blue
-  '#f472b6', // Pink
-  '#fbbf24', // Yellow
+  tokens.mock,
+  tokens.success,
+  tokens.accentBright,
+  '#f472b6',
+  tokens.warning,
 ]
 
 // Time range options

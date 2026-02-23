@@ -9,6 +9,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { LiveLineChart, type ChartDataPoint } from '@/components/charts'
+import { tokens } from '@/utils/cssTokens'
 
 interface Props {
   /** ESP device ID */
@@ -112,7 +113,7 @@ const QUALITY_COLORS: Record<string, string> = {
         height="60px"
         :show-grid="false"
         :fill="false"
-        color="#3b82f6"
+        :color="tokens.accent"
       />
     </div>
   </div>

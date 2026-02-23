@@ -1296,7 +1296,7 @@ onUnmounted(() => {
 
 .auto-heartbeat__toggle--active .auto-heartbeat__toggle-knob {
   left: 25px;
-  background-color: #a78bfa;
+  background-color: var(--color-mock);
   box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
 }
 
@@ -1345,10 +1345,10 @@ onUnmounted(() => {
 .text-success { color: var(--color-success); }
 .text-muted { color: var(--color-text-muted); }
 
-.text-emerald-400 { color: #34d399; }
+.text-emerald-400 { color: var(--color-success); }
 .text-yellow-400 { color: #facc15; }
 .text-orange-400 { color: #fb923c; }
-.text-red-400 { color: #f87171; }
+.text-red-400 { color: var(--color-error); }
 .text-slate-500 { color: #64748b; }
 
 .text-sm { font-size: 0.8125rem; }
