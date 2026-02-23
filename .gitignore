@@ -122,6 +122,9 @@ scripts/__pycache__/
 logs/wokwi/reports/*.xml
 logs/wokwi/reports/*.json
 
+# Wokwi serial logs (local only)
+logs/wokwi/
+
 # ========== ROOT SCREENSHOTS ==========
 /*.png
 

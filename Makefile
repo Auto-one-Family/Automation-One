@@ -324,6 +324,14 @@ wokwi-test-error-injection:
 		done && \
 		echo "Error-injection tests complete (check logs for details)"
 
+wokwi-count:
+	@echo "=== Wokwi Scenario Count ==="
+	@for dir in "El Trabajante/tests/wokwi/scenarios"/*/; do \
+		count=$$(find "$$dir" -name '*.yaml' | wc -l); \
+		echo "  $$(basename $$dir): $$count scenarios"; \
+	done
+	@echo "  TOTAL: $$(find 'El Trabajante/tests/wokwi/scenarios' -name '*.yaml' | wc -l)"
+
 wokwi-run:
 	@echo "Starting Wokwi simulation interactively (ESP_00000001)..."
 	@echo "Press Ctrl+C to stop."
