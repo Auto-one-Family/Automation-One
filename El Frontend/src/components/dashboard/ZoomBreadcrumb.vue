@@ -10,7 +10,7 @@
  * Level 3: Dashboard > Gewaechshaus A > ESP_Temp_01
  */
 
-import type { ZoomLevel } from '@/composables/useZoomNavigation'
+type ZoomLevel = 1 | 2 | 3
 
 interface Props {
   level: ZoomLevel

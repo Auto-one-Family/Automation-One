@@ -8,9 +8,6 @@
  * - Navigation: LevelNavigation tabs (ESPs | Komponenten | Zonen)
  */
 
-// Navigation
-export { default as LevelNavigation } from './LevelNavigation.vue'
-
 // Level 1: ESP-Orbital
 export { default as ActionBar } from './ActionBar.vue'
 export { default as StatCard } from './StatCard.vue'

@@ -24,10 +24,10 @@ const router = createRouter({
       component: () => import('@/components/layout/MainLayout.vue'),
       meta: { requiresAuth: true },
       children: [
-        // Default redirect to /monitor
+        // Default redirect to /hardware (primary landing page)
         {
           path: '',
-          redirect: '/monitor',
+          redirect: '/hardware',
         },
 
         // ═══════════════════════════════════════════════════════════════════
@@ -78,14 +78,10 @@ const router = createRouter({
           meta: { title: 'Dashboard' },
         },
 
-        // ═══════════════════════════════════════════════════════════════════
-        // LEGACY: Old Dashboard route → redirect to Hardware
-        // ═══════════════════════════════════════════════════════════════════
+        // DEPRECATED 2026-02-23: DashboardView-Legacy → Hardware
         {
           path: 'dashboard-legacy',
-          name: 'dashboard-legacy',
-          component: () => import('@/views/DashboardView.vue'),
-          meta: { title: 'Dashboard (Legacy)' },
+          redirect: '/hardware',
         },
 
         // DEPRECATED redirects (backward compatibility)
@@ -198,7 +194,7 @@ const router = createRouter({
     // Catch-all redirect
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/monitor',
+      redirect: '/hardware',
     },
   ],
 })
@@ -224,12 +220,12 @@ router.beforeEach(async (to, _from, next) => {
 
   // Check if route requires admin
   if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    return next({ name: 'monitor' })
+    return next({ name: 'hardware' })
   }
 
   // Redirect authenticated users away from login/setup
   if (authStore.isAuthenticated && (to.name === 'login' || to.name === 'setup')) {
-    return next({ name: 'monitor' })
+    return next({ name: 'hardware' })
   }
 
   next()
