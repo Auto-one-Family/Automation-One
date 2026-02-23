@@ -17,10 +17,10 @@
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "TOPIC";
-    #define LOG_E(TAG, msg) Logger::getInstance().error(msg)
+    #define LOG_E(tag, msg) Logger::getInstance().error(tag, msg)
 #else
     // Native test mode: Logging disabled
-    #define LOG_E(TAG, msg) ((void)0)
+    #define LOG_E(tag, msg) ((void)0)
 #endif
 // END NATIVE_TEST_GUARD
 // ============================================
@@ -62,9 +62,11 @@ const char* TopicBuilder::validateTopicBuffer(int snprintf_result) {
   if (snprintf_result >= (int)sizeof(topic_buffer_)) {
     // NATIVE_TEST_GUARD: LOG_ERROR macro is no-op in native tests
     #ifndef NATIVE_TEST
-        LOG_E(TAG, "TopicBuilder: Topic truncated! Required: " +
-                  String(snprintf_result) + " bytes, buffer: " +
-                  String(sizeof(topic_buffer_)) + " bytes");
+        char truncation_msg[96];
+        snprintf(truncation_msg, sizeof(truncation_msg),
+                 "Topic truncated! Required: %d bytes, buffer: %d bytes",
+                 snprintf_result, (int)sizeof(topic_buffer_));
+        LOG_E(TAG, truncation_msg);
     #else
         // Native test: String concatenation not available, skip detailed error
         LOG_E(TAG, "TopicBuilder: Topic truncated!");
