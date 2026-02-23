@@ -43,6 +43,7 @@ import {
   Maximize2,
 } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
+import { tokens } from '@/utils/cssTokens'
 
 const log = createLogger('ServerLogsTab')
 
@@ -76,12 +77,12 @@ const LOG_LEVELS: { value: LogLevel | ''; label: string; icon: typeof Info; colo
 // Level colors for border + glow (consistent with Events tab)
 const LEVEL_COLORS: Record<string, { border: string; glow: string; tint: string }> = {
   DEBUG: {
-    border: '#6B7280',
+    border: tokens.statusOffline,
     glow: 'rgba(107, 114, 128, 0.4)',
     tint: 'transparent',
   },
   INFO: {
-    border: '#3B82F6',
+    border: tokens.accent,
     glow: 'rgba(59, 130, 246, 0.4)',
     tint: 'rgba(59, 130, 246, 0.02)',
   },
@@ -91,7 +92,7 @@ const LEVEL_COLORS: Record<string, { border: string; glow: string; tint: string 
     tint: 'rgba(245, 158, 11, 0.03)',
   },
   ERROR: {
-    border: '#EF4444',
+    border: tokens.error,
     glow: 'rgba(239, 68, 68, 0.4)',
     tint: 'rgba(239, 68, 68, 0.04)',
   },
@@ -1478,7 +1479,7 @@ watch(selectedFile, () => {
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 500;
-  color: #a78bfa;
+  color: var(--color-mock);
 }
 
 .time-window-chip__expand,
@@ -1502,7 +1503,7 @@ watch(selectedFile, () => {
 
 .time-window-chip__clear:hover {
   background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 /* =============================================================================

@@ -546,7 +546,7 @@ onMounted(fetchHealth)
 
 .status-online {
   background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .status-offline {

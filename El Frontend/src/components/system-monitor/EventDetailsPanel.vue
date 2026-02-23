@@ -733,7 +733,7 @@ onUnmounted(() => {
       <section v-if="hasCorrelationId" class="panel-section panel-section--correlated">
         <div class="correlated-header" @click="toggleCorrelatedSection">
           <div class="correlated-header__left">
-            <GitBranch class="w-4 h-4" style="color: #60a5fa;" />
+            <GitBranch class="w-4 h-4" style="color: var(--color-info);" />
             <span class="correlated-header__title">Event-Verlauf</span>
             <span v-if="correlatedEvents.length > 1" class="correlated-header__count">
               {{ correlatedEvents.length }}
@@ -936,19 +936,19 @@ onUnmounted(() => {
 
 .severity-badge--info {
   background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
+  color: var(--color-info);
   border: 1px solid rgba(96, 165, 250, 0.25);
 }
 
 .severity-badge--warning {
   background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  color: var(--color-warning);
   border: 1px solid rgba(245, 158, 11, 0.25);
 }
 
 .severity-badge--error {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: var(--color-error);
   border: 1px solid rgba(239, 68, 68, 0.25);
 }
 
@@ -1079,7 +1079,7 @@ onUnmounted(() => {
 }
 
 .detail-value--copyable:hover {
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .detail-value--copyable .copy-icon {
@@ -1148,18 +1148,18 @@ onUnmounted(() => {
   transition: width 0.5s ease;
 }
 
-.metric-bar__fill--good { background: #22c55e; }
+.metric-bar__fill--good { background: var(--color-success); }
 .metric-bar__fill--warning { background: #f59e0b; }
-.metric-bar__fill--critical { background: #ef4444; }
+.metric-bar__fill--critical { background: var(--color-error); }
 
 .metric-sublabel {
   font-size: 0.6875rem;
   color: var(--color-text-muted);
 }
 
-.text-good { color: #22c55e; }
+.text-good { color: var(--color-success); }
 .text-fair { color: #f59e0b; }
-.text-weak { color: #ef4444; }
+.text-weak { color: var(--color-error); }
 
 /* ============================================================================
    SENSOR DATA DISPLAY
@@ -1208,7 +1208,7 @@ onUnmounted(() => {
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
   background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
+  color: var(--color-mock);
   text-transform: uppercase;
 }
 
@@ -1286,7 +1286,7 @@ onUnmounted(() => {
 
 .error-status-badge--failed {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .error-failures {
@@ -1409,12 +1409,12 @@ onUnmounted(() => {
 
 .action-btn--filter:hover {
   border-color: rgba(96, 165, 250, 0.3);
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .action-btn--logs:hover {
   border-color: rgba(139, 92, 246, 0.3);
-  color: #a78bfa;
+  color: var(--color-mock);
 }
 
 @media (max-width: 480px) {
@@ -1608,7 +1608,7 @@ onUnmounted(() => {
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .correlated-header__right {
@@ -1631,17 +1631,17 @@ onUnmounted(() => {
 
 .latency-badge--fast {
   background: rgba(52, 211, 153, 0.15);
-  color: #34d399;
+  color: var(--color-success);
 }
 
 .latency-badge--medium {
   background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .latency-badge--slow {
   background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .correlated-chevron {
@@ -1667,7 +1667,7 @@ onUnmounted(() => {
 }
 
 .correlated-state--error {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .correlation-id-footer {

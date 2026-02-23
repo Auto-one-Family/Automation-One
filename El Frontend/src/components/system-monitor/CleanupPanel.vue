@@ -1216,17 +1216,17 @@ onMounted(() => {
 
 .severity-icon--info {
   background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  color: var(--color-accent);
 }
 
 .severity-icon--warning {
   background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .severity-icon--error {
   background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .severity-icon--critical {
@@ -1603,7 +1603,7 @@ onMounted(() => {
 }
 
 .summary-icon {
-  color: #fbbf24;
+  color: var(--color-warning);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -1630,17 +1630,17 @@ onMounted(() => {
 
 .severity-info {
   background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
+  color: var(--color-accent);
 }
 
 .severity-warning {
   background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .severity-error {
   background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 .severity-critical {

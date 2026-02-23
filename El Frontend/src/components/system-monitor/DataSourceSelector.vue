@@ -631,22 +631,22 @@ onMounted(() => {
 
 .pill-icon--audit {
   background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .pill-icon--sensor {
   background: rgba(96, 165, 250, 0.2);
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .pill-icon--health {
   background: rgba(34, 197, 94, 0.2);
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .pill-icon--actuator {
   background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .pill-text {
@@ -656,7 +656,7 @@ onMounted(() => {
 .pill-check {
   width: 1rem;
   height: 1rem;
-  color: #60a5fa;                          /* Consistent blue */
+  color: var(--color-info);
   margin-left: 0.125rem;
 }
 
@@ -720,7 +720,7 @@ onMounted(() => {
 @keyframes filter-highlight {
   0% {
     box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.5);
-    border-color: #60a5fa;
+    border-color: var(--color-info);
     background: rgba(96, 165, 250, 0.12);
   }
   100% {
@@ -767,21 +767,21 @@ onMounted(() => {
 }
 
 .level-pill--info.level-pill--active {
-  background: linear-gradient(135deg, #3b82f6 0%, #38bdf8 100%);
-  border-color: #3b82f6;
+  background: linear-gradient(135deg, var(--color-accent) 0%, #38bdf8 100%);
+  border-color: var(--color-accent);
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.35);
 }
 
 .level-pill--warning.level-pill--active {
-  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  background: linear-gradient(135deg, #f59e0b 0%, var(--color-warning) 100%);
   border-color: #f59e0b;
   color: #1a1a24;
   box-shadow: 0 0 12px rgba(245, 158, 11, 0.35);
 }
 
 .level-pill--error.level-pill--active {
-  background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
-  border-color: #ef4444;
+  background: linear-gradient(135deg, var(--color-error) 0%, var(--color-error) 100%);
+  border-color: var(--color-error);
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
 }
 
@@ -1171,7 +1171,7 @@ onMounted(() => {
 .grouping-toggle--active {
   background: rgba(96, 165, 250, 0.1);
   border-color: rgba(96, 165, 250, 0.3);
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .grouping-toggle__label {
