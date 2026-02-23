@@ -165,7 +165,7 @@ function isHighlighted(item: typeof state.value.items[0]): boolean {
 .context-menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: var(--z-popover);
 }
 
 .context-menu {

@@ -21,7 +21,7 @@ import {
   Loader2,
   ArrowUpRight
 } from 'lucide-vue-next'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design/primitives'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
@@ -266,7 +266,7 @@ async function handleDragAdd(event: any) {
   bottom: 0;
   left: var(--sidebar-width);
   right: 0;
-  z-index: 100;
+  z-index: var(--z-tray);
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--glass-border);
   transition: all var(--transition-base);

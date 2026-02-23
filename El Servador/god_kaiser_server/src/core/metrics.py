@@ -13,8 +13,36 @@ Update strategy:
 
 import time
 
-import psutil
-from prometheus_client import Counter, Gauge, Histogram
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+try:
+    from prometheus_client import Counter, Gauge, Histogram
+except ImportError:
+
+    class _NoOpMetric:
+        """Stub metric when prometheus_client is not installed (e.g. local test runs)."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def set(self, value):
+            pass
+
+        def inc(self, amount=1):
+            pass
+
+        def observe(self, amount):
+            pass
+
+        def labels(self, **kwargs):
+            return self
+
+    Counter = _NoOpMetric
+    Gauge = _NoOpMetric
+    Histogram = _NoOpMetric
 
 from .logging_config import get_logger
 
@@ -122,6 +150,85 @@ ESP_AVG_UPTIME_GAUGE = Gauge(
     "Average uptime across online ESP devices",
 )
 
+# =============================================================================
+# Sensor Gauges (Phase 0 — for Grafana alerting)
+# =============================================================================
+
+SENSOR_VALUE_GAUGE = Gauge(
+    "god_kaiser_sensor_value",
+    "Latest sensor reading value",
+    ["sensor_type", "esp_id"],
+)
+
+SENSOR_LAST_UPDATE_GAUGE = Gauge(
+    "god_kaiser_sensor_last_update",
+    "Unix timestamp of last sensor data update",
+    ["sensor_type", "esp_id"],
+)
+
+# =============================================================================
+# ESP Per-Device Gauges/Counters (Phase 0 — for Grafana alerting)
+# =============================================================================
+
+ESP_LAST_HEARTBEAT_GAUGE = Gauge(
+    "god_kaiser_esp_last_heartbeat",
+    "Unix timestamp of last heartbeat per ESP device",
+    ["esp_id"],
+)
+
+ESP_BOOT_COUNT_GAUGE = Gauge(
+    "god_kaiser_esp_boot_count",
+    "Boot count reported by ESP device (from heartbeat metadata)",
+    ["esp_id"],
+)
+
+ESP_ERRORS_TOTAL = Counter(
+    "god_kaiser_esp_errors_total",
+    "Total error reports received from ESP devices",
+    ["esp_id"],
+)
+
+ESP_SAFE_MODE_GAUGE = Gauge(
+    "god_kaiser_esp_safe_mode",
+    "Whether ESP device is in safe mode (1=safe_mode, 0=normal)",
+    ["esp_id"],
+)
+
+# =============================================================================
+# Application Counters (Phase 0 — for Grafana alerting)
+# =============================================================================
+
+WS_DISCONNECTS_TOTAL = Counter(
+    "god_kaiser_ws_disconnects_total",
+    "Total WebSocket client disconnections",
+)
+
+MQTT_QUEUED_MESSAGES_GAUGE = Gauge(
+    "god_kaiser_mqtt_queued_messages",
+    "Number of messages currently queued in MQTT offline buffer",
+)
+
+HTTP_ERRORS_TOTAL = Counter(
+    "god_kaiser_http_errors_total",
+    "Total HTTP error responses (4xx/5xx)",
+    ["status_class"],  # 4xx, 5xx
+)
+
+LOGIC_ERRORS_TOTAL = Counter(
+    "god_kaiser_logic_errors_total",
+    "Total logic engine evaluation errors",
+)
+
+ACTUATOR_TIMEOUTS_TOTAL = Counter(
+    "god_kaiser_actuator_timeouts_total",
+    "Total actuator command timeouts",
+)
+
+SAFETY_TRIGGERS_TOTAL = Counter(
+    "god_kaiser_safety_triggers_total",
+    "Total safety system trigger events (emergency stops, rate limits, conflict blocks)",
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 
@@ -135,8 +242,9 @@ def set_server_start_time(start_time: float) -> None:
 def update_system_metrics() -> None:
     """Update system-level metrics (CPU, memory, uptime). No DB needed."""
     UPTIME_GAUGE.set(time.time() - _server_start_time)
-    CPU_GAUGE.set(psutil.cpu_percent(interval=None))
-    MEMORY_GAUGE.set(psutil.virtual_memory().percent)
+    if psutil:
+        CPU_GAUGE.set(psutil.cpu_percent(interval=None))
+        MEMORY_GAUGE.set(psutil.virtual_memory().percent)
 
 
 def update_mqtt_metrics(connected: bool) -> None:
@@ -189,6 +297,69 @@ def update_esp_heartbeat_metrics(
     ESP_AVG_UPTIME_GAUGE.set(avg_uptime)
 
 
+# =========================================================================
+# Phase 0 metric update helpers
+# =========================================================================
+
+def update_sensor_value(esp_id: str, sensor_type: str, value: float) -> None:
+    """Update sensor reading gauge. Call from sensor MQTT handler."""
+    SENSOR_VALUE_GAUGE.labels(sensor_type=sensor_type, esp_id=esp_id).set(value)
+    SENSOR_LAST_UPDATE_GAUGE.labels(sensor_type=sensor_type, esp_id=esp_id).set(time.time())
+
+
+def update_esp_heartbeat_timestamp(esp_id: str) -> None:
+    """Record heartbeat timestamp for an ESP. Call from heartbeat MQTT handler."""
+    ESP_LAST_HEARTBEAT_GAUGE.labels(esp_id=esp_id).set(time.time())
+
+
+def update_esp_boot_count(esp_id: str, boot_count: int) -> None:
+    """Update boot count from heartbeat metadata."""
+    ESP_BOOT_COUNT_GAUGE.labels(esp_id=esp_id).set(boot_count)
+
+
+def increment_esp_error(esp_id: str) -> None:
+    """Increment ESP error counter. Call from error MQTT handler."""
+    ESP_ERRORS_TOTAL.labels(esp_id=esp_id).inc()
+
+
+def update_esp_safe_mode(esp_id: str, in_safe_mode: bool) -> None:
+    """Update safe mode gauge for an ESP device."""
+    ESP_SAFE_MODE_GAUGE.labels(esp_id=esp_id).set(1 if in_safe_mode else 0)
+
+
+def increment_ws_disconnect() -> None:
+    """Increment WebSocket disconnect counter."""
+    WS_DISCONNECTS_TOTAL.inc()
+
+
+def update_mqtt_queue_size(size: int) -> None:
+    """Update MQTT offline buffer queue size."""
+    MQTT_QUEUED_MESSAGES_GAUGE.set(size)
+
+
+def increment_http_error(status_code: int) -> None:
+    """Increment HTTP error counter by status class (4xx or 5xx)."""
+    if 400 <= status_code < 500:
+        HTTP_ERRORS_TOTAL.labels(status_class="4xx").inc()
+    elif 500 <= status_code < 600:
+        HTTP_ERRORS_TOTAL.labels(status_class="5xx").inc()
+
+
+def increment_logic_error() -> None:
+    """Increment logic engine error counter."""
+    LOGIC_ERRORS_TOTAL.inc()
+
+
+def increment_actuator_timeout() -> None:
+    """Increment actuator timeout counter."""
+    ACTUATOR_TIMEOUTS_TOTAL.inc()
+
+
+def increment_safety_trigger() -> None:
+    """Increment safety system trigger counter."""
+    SAFETY_TRIGGERS_TOTAL.inc()
+
+
 async def update_all_metrics_async(get_session_func: callable) -> None:
     """
     Full metrics update cycle (called by scheduler every 15s).
@@ -232,9 +403,27 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
             uptime_values: list[float] = []
 
             for d in devices:
+                esp_id = d.esp_id if hasattr(d, "esp_id") else str(d.id)
+                meta = d.device_metadata or {}
+
+                # Per-device Phase 0 metrics (from metadata)
+                boot_count = meta.get("boot_count") or meta.get("last_boot_count")
+                if boot_count is not None:
+                    update_esp_boot_count(esp_id, int(boot_count))
+
+                safe_mode = meta.get("safe_mode", False)
+                update_esp_safe_mode(esp_id, bool(safe_mode))
+
+                last_seen = getattr(d, "last_seen", None)
+                if last_seen is not None:
+                    try:
+                        ts = last_seen.timestamp() if hasattr(last_seen, "timestamp") else float(last_seen)
+                        ESP_LAST_HEARTBEAT_GAUGE.labels(esp_id=esp_id).set(ts)
+                    except (TypeError, ValueError):
+                        pass
+
                 if d.status != "online":
                     continue
-                meta = d.device_metadata or {}
                 heap = meta.get("last_heap_free")
                 rssi = meta.get("last_wifi_rssi")
                 uptime = meta.get("last_uptime")

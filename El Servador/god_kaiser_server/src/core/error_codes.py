@@ -52,6 +52,10 @@ class ESP32HardwareError(IntEnum):
     I2C_READ_FAILED = 1012
     I2C_WRITE_FAILED = 1013
     I2C_BUS_ERROR = 1014
+    I2C_BUS_STUCK = 1015
+    I2C_BUS_RECOVERY_STARTED = 1016
+    I2C_BUS_RECOVERY_FAILED = 1017
+    I2C_BUS_RECOVERED = 1018
     I2C_PROTOCOL_UNSUPPORTED = 1019
 
     ONEWIRE_INIT_FAILED = 1020
@@ -78,6 +82,12 @@ class ESP32HardwareError(IntEnum):
     ACTUATOR_INIT_FAILED = 1051
     ACTUATOR_NOT_FOUND = 1052
     ACTUATOR_CONFLICT = 1053
+
+    # DS18B20-specific Temperature Errors (1060-1069)
+    DS18B20_SENSOR_FAULT = 1060
+    DS18B20_POWER_ON_RESET = 1061
+    DS18B20_OUT_OF_RANGE = 1062
+    DS18B20_DISCONNECTED_RUNTIME = 1063
 
 
 class ESP32ServiceError(IntEnum):
@@ -308,6 +318,23 @@ class SequenceErrorCode(IntEnum):
     SEQ_SAFETY_BLOCKED = 5642
 
 
+class TestErrorCodes(IntEnum):
+    """Test infrastructure error codes (6000-6099). Only used in test reports, NOT in production."""
+
+    WOKWI_TIMEOUT = 6000
+    WOKWI_BOOT_INCOMPLETE = 6001
+    MOCK_ESP_CONFIG_INVALID = 6002
+    SCENARIO_ASSERTION_FAILED = 6010
+    SCENARIO_NOT_FOUND = 6011
+    MQTT_INJECTION_FAILED = 6020
+    MQTT_BROKER_UNAVAILABLE = 6021
+    DOCKER_SERVICE_UNHEALTHY = 6030
+    DB_SEED_FAILED = 6031
+    PLAYWRIGHT_TIMEOUT = 6040
+    PLAYWRIGHT_ELEMENT_NOT_FOUND = 6041
+    SERIAL_LOG_MISSING = 6050
+
+
 # =============================================================================
 # Error Code Descriptions (All Systems)
 # =============================================================================
@@ -331,6 +358,10 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     1012: "Failed to read from I2C device",
     1013: "Failed to write to I2C device",
     1014: "I2C bus error (SDA/SCL stuck or timeout)",
+    1015: "I2C bus stuck (SDA or SCL held low by slave device)",
+    1016: "I2C bus recovery initiated",
+    1017: "I2C bus recovery failed after max attempts",
+    1018: "I2C bus recovered successfully",
     1019: "I2C sensor type has no registered communication protocol",
 
     1020: "Failed to initialize OneWire bus",
@@ -357,7 +388,13 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     1051: "Failed to initialize actuator",
     1052: "Actuator not configured or not found",
     1053: "Actuator GPIO conflict with sensor",
-    
+
+    # DS18B20-specific Temperature Errors (1060-1069)
+    1060: "DS18B20 sensor fault: -127°C indicates disconnected sensor or CRC failure",
+    1061: "DS18B20 power-on reset: 85°C indicates no conversion was performed",
+    1062: "DS18B20 temperature outside valid range (-55°C to +125°C)",
+    1063: "DS18B20 device was present but is now disconnected",
+
     # Service (2000-2999)
     2001: "Failed to initialize NVS (Non-Volatile Storage)",
     2002: "Failed to read from NVS",
@@ -541,6 +578,22 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5642: "Action blocked by safety system",
 }
 
+# Test infrastructure error descriptions
+TEST_ERROR_DESCRIPTIONS: Dict[int, str] = {
+    6000: "Wokwi simulation timeout exceeded",
+    6001: "ESP32 boot in simulation incomplete",
+    6002: "Mock-ESP configuration invalid",
+    6010: "Wokwi scenario assertion failed",
+    6011: "Referenced scenario does not exist",
+    6020: "MQTT inject in test failed",
+    6021: "Test MQTT broker not reachable",
+    6030: "Docker service unhealthy during test",
+    6031: "Test data seeding failed",
+    6040: "Frontend E2E test (Playwright) timeout",
+    6041: "UI element not found in E2E test",
+    6050: "Expected serial log pattern not found",
+}
+
 
 def get_error_code_description(code: int) -> str:
     """
@@ -571,7 +624,11 @@ def get_error_code_description(code: int) -> str:
     # Server errors (5000-5999)
     if 5000 <= code < 6000:
         return SERVER_ERROR_DESCRIPTIONS.get(code, f"Unknown server error: {code}")
-    
+
+    # Test infrastructure errors (6000-6099)
+    if 6000 <= code < 6100:
+        return TEST_ERROR_DESCRIPTIONS.get(code, f"Unknown test error: {code}")
+
     return f"Unknown error code: {code}"
 
 
@@ -620,6 +677,8 @@ def get_error_code_range(code: int) -> str:
         return "SERVER_AUDIT"
     elif 5600 <= code < 5700:
         return "SERVER_SEQUENCE"
+    elif 6000 <= code < 6100:
+        return "TEST"
     return "UNKNOWN"
 
 
@@ -637,6 +696,8 @@ def get_error_code_source(code: int) -> str:
         return "esp32"
     elif 5000 <= code < 6000:
         return "server"
+    elif 6000 <= code < 6100:
+        return "test"
     return "unknown"
 
 
@@ -666,7 +727,16 @@ def get_all_error_codes() -> List[Dict]:
             "range": get_error_code_range(code),
             "source": "server",
         })
-    
+
+    # Test infrastructure errors
+    for code, desc in TEST_ERROR_DESCRIPTIONS.items():
+        all_codes.append({
+            "code": code,
+            "description": desc,
+            "range": get_error_code_range(code),
+            "source": "test",
+        })
+
     return sorted(all_codes, key=lambda x: x["code"])
 
 

@@ -73,6 +73,9 @@ El Trabajante/
 ---
 
 ## Build Commands
+
+**Hinweis:** `pio` ist in Git Bash nicht im PATH → `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Upload/Monitor erfordern COM-Port → PowerShell oder PlatformIO Terminal nutzen (Git Bash kann COM-Ports nicht öffnen).
+
 ```bash
 # Build ESP32 Dev Board
 cd "El Trabajante" && pio run -e esp32_dev
@@ -85,10 +88,10 @@ cd "El Trabajante" && pio run -e wokwi_esp01  # ESP_00000001
 cd "El Trabajante" && pio run -e wokwi_esp02  # ESP_00000002
 cd "El Trabajante" && pio run -e wokwi_esp03  # ESP_00000003
 
-# Flash
+# Flash (PowerShell/PlatformIO Terminal, NICHT Git Bash)
 cd "El Trabajante" && pio run -e esp32_dev -t upload
 
-# Serial Monitor
+# Serial Monitor (PowerShell/PlatformIO Terminal, NICHT Git Bash)
 cd "El Trabajante" && pio device monitor
 
 # Native Unit Tests (22 Tests, laeuft auf Host-PC ohne Hardware)

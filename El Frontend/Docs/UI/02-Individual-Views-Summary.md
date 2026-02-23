@@ -823,9 +823,7 @@ Basierend auf Hierarchie.md **FEHLT** die Unterscheidung zwischen echten ESPs un
 - ⚠️ Verwendet von: SensorsView, ActuatorsView
 - ❌ Blockiert echte ESP Integration
 
-### 📋 **Betroffene Views - Migrations-Status**
-
-#### **SensorsView - KRITISCHE LÜCKE**
+### 📋 **Betroffene Views - Migrations-Status**#### **SensorsView - KRITISCHE LÜCKE**
 - **Aktuell:** Nutzt `useMockEspStore` → Zeigt NUR Mock-ESPs
 - **Fehlt:** Echte ESP Sensoren komplett
 - **Benötigt:** Migration zu `useEspStore`, ESP-Typ-Badges#### **ActuatorsView - KRITISCHE LÜCKE**

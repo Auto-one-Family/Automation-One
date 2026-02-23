@@ -553,8 +553,8 @@
   top: 100%;
   left: 0;
   right: 0;
-  /* WICHTIG: z-index muss höher sein als .zone-item--drag (9999) */
-  z-index: 10000;
+  /* WICHTIG: z-index via --z-drag-overlay Token, über .zone-item--drag */
+  z-index: var(--z-drag-overlay);
   margin-top: 0.25rem;
   max-height: none;
   background: var(--color-bg-secondary);
@@ -677,7 +677,7 @@
   background: rgba(16, 185, 129, 0.1);
   border-radius: 0.75rem;
   pointer-events: none;
-  z-index: 100;
+  z-index: var(--z-sticky);
 }
 
 .esp-horizontal-layout__drop-text {
@@ -712,7 +712,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   padding: 1rem;
 }
 
@@ -783,23 +783,6 @@
   flex: 1;
 }
 
-/* Delete Button Styling */
-.btn--danger {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: var(--color-error);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-}
-
-.btn--danger:hover {
-  background-color: rgba(239, 68, 68, 0.25);
-  border-color: rgba(239, 68, 68, 0.5);
-}
-
-.btn--danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .btn--icon {
   display: inline-flex;
   align-items: center;
@@ -846,39 +829,6 @@
   background: var(--color-bg-primary);
   color: var(--color-text-muted);
   cursor: not-allowed;
-}
-
-/* Buttons */
-.btn {
-  flex: 1;
-  padding: 0.625rem 1rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  border-radius: 0.375rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  border: none;
-}
-
-.btn--primary {
-  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
-  color: white;
-}
-
-.btn--primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(167, 139, 250, 0.4);
-}
-
-.btn--secondary {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  border: 1px solid var(--glass-border);
-}
-
-.btn--secondary:hover {
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
 }
 
 /* =============================================================================
@@ -1033,20 +983,6 @@
 .btn--accent:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-/* Animation for loading spinner */
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Schedule Configuration Styles */
@@ -1430,20 +1366,6 @@
 
 .onewire-scan-loading svg {
   color: #60a5fa;
-}
-
-/* Spin animation for Loader2 */
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Text color utilities */

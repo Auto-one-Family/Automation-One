@@ -14,6 +14,7 @@
  */
 
 import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
+import { useScrollLock } from '@/composables/useScrollLock'
 import {
   X,
   Heart,
@@ -350,12 +351,14 @@ function syncAutoHeartbeatFromStore() {
   autoHeartbeatEnabled.value = deviceAutoHB ?? false
 }
 
-// Body scroll lock
+// Reference-counted scroll lock
+const scrollLock = useScrollLock()
+
 watch(
   () => props.isOpen,
   (isOpen) => {
     if (isOpen) {
-      document.body.style.overflow = 'hidden'
+      scrollLock.lock()
       showDeleteConfirm.value = false
       syncAutoHeartbeatFromStore()
       uiStore.pushModal('esp-settings-sheet')
@@ -363,7 +366,7 @@ watch(
         sheetRef.value?.focus()
       })
     } else {
-      document.body.style.overflow = ''
+      scrollLock.unlock()
       uiStore.popModal('esp-settings-sheet')
     }
   }
@@ -398,7 +401,7 @@ watch(
 )
 
 onUnmounted(() => {
-  document.body.style.overflow = ''
+  scrollLock.unlock()
   uiStore.popModal('esp-settings-sheet')
 })
 </script>
@@ -808,9 +811,10 @@ onUnmounted(() => {
 .sheet-overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
-  background-color: rgba(10, 10, 15, 0.6);
-  backdrop-filter: blur(2px);
+  z-index: var(--z-modal);
+  background-color: var(--backdrop-color-light);
+  -webkit-backdrop-filter: blur(var(--backdrop-blur-light));
+  backdrop-filter: blur(var(--backdrop-blur-light));
 }
 
 /* =============================================================================
@@ -826,6 +830,7 @@ onUnmounted(() => {
   max-width: 420px;
   display: flex;
   flex-direction: column;
+  z-index: var(--z-modal);
   background-color: var(--color-bg-secondary);
   border-left: 1px solid var(--glass-border);
   box-shadow: -20px 0 40px rgba(0, 0, 0, 0.4);
@@ -1363,12 +1368,12 @@ onUnmounted(() => {
 
 .sheet-enter-active,
 .sheet-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity var(--transition-sheet);
 }
 
 .sheet-enter-active .sheet-content,
 .sheet-leave-active .sheet-content {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--transition-sheet);
 }
 
 .sheet-enter-from,

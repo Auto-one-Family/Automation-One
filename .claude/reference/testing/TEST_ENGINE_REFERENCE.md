@@ -168,9 +168,10 @@ El Trabajante/tests/wokwi/scenarios/
 ├── 09-hardware/    # 9 Szenarien
 ├── 09-pwm/         # 18 Szenarien
 ├── 10-nvs/         # 40 Szenarien (5 skipped)
+├── 11-error-injection/ # 10 Szenarien (MQTT background pattern)
 └── gpio/           # 24 Szenarien
                     ────────────────
-                    163 Szenarien total (42 in CI)
+                    173 Szenarien total (52 in CI)
 ```
 
 ### 3.2 CI-Coverage
@@ -189,9 +190,10 @@ El Trabajante/tests/wokwi/scenarios/
 | 09-hardware | 9 | 0 | 0% |
 | 09-pwm | 18 | 3 | 17% |
 | 10-nvs | 40 | 5 | 13% |
+| 11-error-injection | 10 | 10 | 100% |
 | gpio | 24 | 5 | 21% |
 | mqtt_connection (legacy) | 1 | 1 | 100% |
-| **Gesamt** | **163** | **42** | **26%** |
+| **Gesamt** | **173** | **52** | **30%** |
 
 ### 3.3 Befehle
 
@@ -309,7 +311,7 @@ pio test -e native -f test_managers
 | **Server Tests** | `server-tests.yml` | `El Servador/**` | lint, unit, integration, summary |
 | **ESP32 Tests** | `esp32-tests.yml` | `tests/esp32/**` | esp32-tests, summary |
 | **Frontend Tests** | `frontend-tests.yml` | `El Frontend/**` | type-check, unit, build, summary |
-| **Wokwi Tests** | `wokwi-tests.yml` | `El Trabajante/**` | build + 12 test jobs + summary |
+| **Wokwi Tests** | `wokwi-tests.yml` | `El Trabajante/**` | build + 15 test jobs + summary |
 | **PR Checks** | `pr-checks.yml` | Pull Requests | label, validation |
 
 ### 4.2 Docker in CI

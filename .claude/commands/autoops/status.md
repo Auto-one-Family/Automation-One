@@ -10,8 +10,8 @@ description: AutoOps Status - Zeige AutoOps Plugin-Übersicht und letzte Reports
 
 ### 1. Plugin-Registry anzeigen
 ```bash
-cd "El Servador" && poetry run python -c "
-from god_kaiser_server.src.autoops.core.plugin_registry import PluginRegistry
+cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
+from src.autoops.core.plugin_registry import PluginRegistry
 registry = PluginRegistry()
 discovered = registry.discover_plugins()
 print(f'Discovered: {discovered} plugins')
@@ -31,9 +31,9 @@ Falls Reports existieren, lies den neuesten und fasse die Ergebnisse zusammen.
 
 ### 4. System-Übersicht
 ```bash
-cd "El Servador" && poetry run python -c "
+cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
 import asyncio
-from god_kaiser_server.src.autoops.core.agent import AutoOpsAgent
+from src.autoops.core.agent import AutoOpsAgent
 agent = AutoOpsAgent()
 async def check():
     init = await agent.initialize()

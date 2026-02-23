@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Optional
 
 from ..core.logging_config import get_logger
+from ..core.metrics import increment_safety_trigger
 from ..db.repositories import ActuatorRepository, ESPRepository
 
 logger = get_logger(__name__)
@@ -220,6 +221,7 @@ class SafetyService:
         """
         async with self._lock:
             self._emergency_stop_active["__ALL__"] = True
+            increment_safety_trigger()
             logger.critical("EMERGENCY STOP ACTIVATED: All ESPs stopped")
 
     async def emergency_stop_esp(self, esp_id: str) -> None:
@@ -231,6 +233,7 @@ class SafetyService:
         """
         async with self._lock:
             self._emergency_stop_active[esp_id] = True
+            increment_safety_trigger()
             logger.critical(f"EMERGENCY STOP ACTIVATED: ESP {esp_id} stopped")
 
     async def clear_emergency_stop(self, esp_id: Optional[str] = None) -> None:

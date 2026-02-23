@@ -113,12 +113,13 @@ export function useZoomNavigation(): UseZoomNavigationReturn {
 
   // Watch for store loading completion to restore URL state.
   // The immediate: true option handles the case where devices are already loaded.
+  // Uses nextTick to avoid TDZ (stopLoadingWatch not yet assigned during immediate callback).
   const stopLoadingWatch = watch(
     () => espStore.isLoading,
     (loading) => {
       if (!loading && espStore.devices.length > 0) {
         initFromQuery()
-        stopLoadingWatch()
+        nextTick(() => stopLoadingWatch())
       }
     },
     { immediate: true }

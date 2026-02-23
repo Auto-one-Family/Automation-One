@@ -18,7 +18,7 @@
 
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import {
@@ -329,7 +329,7 @@ async function handleLogout() {
   padding: 0 var(--space-4);
   flex-shrink: 0;
   position: relative;
-  z-index: 10;
+  z-index: var(--z-dropdown);
   gap: var(--space-3);
 }
 
@@ -836,7 +836,7 @@ async function handleLogout() {
   padding: var(--space-2) var(--space-4);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--glass-border);
-  z-index: 9;
+  z-index: var(--z-dropdown);
 }
 
 @media (max-width: 1023px) {

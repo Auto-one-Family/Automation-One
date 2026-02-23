@@ -12,6 +12,7 @@
 
 import { X } from 'lucide-vue-next'
 import { onMounted, onUnmounted, watch } from 'vue'
+import { useScrollLock } from '@/composables/useScrollLock'
 
 interface Props {
   /** Whether the modal is open */
@@ -57,12 +58,14 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-// Handle body scroll lock
+// Reference-counted scroll lock
+const scrollLock = useScrollLock()
+
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
-    document.body.style.overflow = 'hidden'
+    scrollLock.lock()
   } else {
-    document.body.style.overflow = ''
+    scrollLock.unlock()
   }
 })
 
@@ -72,7 +75,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
-  document.body.style.overflow = ''
+  scrollLock.unlock()
 })
 </script>
 
@@ -81,7 +84,8 @@ onUnmounted(() => {
     <Transition name="modal">
       <div
         v-if="open"
-        class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
+        class="fixed inset-0 flex items-center justify-center p-2 sm:p-4"
+        style="z-index: var(--z-modal)"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="title"
@@ -189,12 +193,12 @@ onUnmounted(() => {
 /* Modal enter/leave transitions */
 .modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--transition-overlay), transform var(--transition-overlay);
 }
 
 .modal-enter-active .modal-content,
 .modal-leave-active .modal-content {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform var(--transition-overlay), opacity var(--transition-overlay);
 }
 
 .modal-enter-from,

@@ -170,9 +170,11 @@ describe('ESP Store - fetchAll', () => {
     )
 
     const store = useEspStore()
-    await store.fetchAll()
+    // Store catches error, sets error.value, then re-throws
+    await expect(store.fetchAll()).rejects.toThrow()
 
-    // Both API calls failed, devices should be empty but no crash
+    // Error was set, devices remain empty
+    expect(store.error).toBeTruthy()
     expect(store.devices).toEqual([])
   })
 
@@ -579,8 +581,8 @@ describe('ESP Store - Getters', () => {
     it('should filter by status=offline', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: 'online' },
-        { ...mockESPDevice, device_id: 'ESP_002', status: 'offline' }
+        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', connected: true },
+        { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', connected: false }
       ]
 
       expect(store.offlineDevices.length).toBe(1)

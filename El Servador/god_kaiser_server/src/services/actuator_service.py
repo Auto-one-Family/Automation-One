@@ -8,6 +8,7 @@ import uuid
 from typing import Optional
 
 from ..core.logging_config import get_logger
+from ..core.metrics import increment_actuator_timeout
 from ..db.repositories import ActuatorRepository, ESPRepository
 from ..db.repositories.audit_log_repo import AuditLogRepository
 from ..db.session import get_session
@@ -174,6 +175,7 @@ class ActuatorService:
                 )
                 
                 if not success:
+                    increment_actuator_timeout()
                     logger.error(
                         f"Failed to publish actuator command: esp_id={esp_id}, gpio={gpio}"
                     )

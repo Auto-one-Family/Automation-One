@@ -18,7 +18,7 @@ import {
   type SensorTypeDragPayload,
   type SensorDragPayload,
   type ActuatorTypeDragPayload
-} from '@/stores/dragState'
+} from '@/shared/stores/dragState.store'
 
 // =============================================================================
 // MOCK LOGGER

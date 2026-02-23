@@ -12,7 +12,7 @@
 |----------|-------|---------|------|---------|
 | **Server Tests** | `server-tests.yml` | Push/PR zu `El Servador/**` | lint, unit-tests, integration-tests, test-summary | 15min/Job |
 | **ESP32 Tests** | `esp32-tests.yml` | Push/PR zu `tests/esp32/**`, `src/mqtt/**`, `src/services/**` | esp32-tests | 15min |
-| **Wokwi ESP32 Tests** | `wokwi-tests.yml` | Push/PR zu `El Trabajante/**` | 12 Jobs (build-firmware, boot-tests, sensor-tests, etc.) | 10-20min/Job |
+| **Wokwi ESP32 Tests** | `wokwi-tests.yml` | Push/PR zu `El Trabajante/**` | 17 Jobs (build-firmware, 15 test-jobs, test-summary) | 10-20min/Job |
 | **PR Checks** | `pr-checks.yml` | Pull Requests | label-pr, pr-validation | 15min |
 
 **Concurrency:** Alle Workflows nutzen `cancel-in-progress: true` - bei mehreren Pushes wird der alte Run abgebrochen.
@@ -95,7 +95,7 @@ env:
 - GitHub Secret `WOKWI_CLI_TOKEN` muss konfiguriert sein
 - Token erstellen: https://wokwi.com/dashboard/ci
 
-**Jobs (12 parallel):**
+**Jobs (17 total: 1 build + 15 test + 1 summary):**
 
 | Job | Timeout | Tests | Beschreibung |
 |-----|---------|-------|--------------|
@@ -110,6 +110,11 @@ env:
 | `sensor-flow-tests` | 15min | ds18b20_full_flow, dht22_full_flow, analog_flow | E2E Sensor |
 | `actuator-flow-tests` | 20min | binary_full_flow, pwm_full_flow, timeout_e2e | E2E Actuator |
 | `combined-flow-tests` | 20min | combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel | E2E Combined |
+| `gpio-core-tests` | 15min | 5 GPIO scenarios | GPIO-Manager |
+| `i2c-core-tests` | 15min | 5 I2C scenarios | I2C-Bus |
+| `nvs-core-tests` | 15min | 5 NVS scenarios | NVS-Storage |
+| `pwm-core-tests` | 15min | 3 PWM scenarios | PWM-Control |
+| `error-injection-tests` | 20min | 10 error scenarios (background pattern + mosquitto_pub) | Error-Injection |
 | `test-summary` | - | - | Ergebnis-Zusammenfassung |
 
 **Artifacts:**
@@ -126,6 +131,7 @@ env:
 | `sensor-flow-test-logs` | `sensor_*_flow.log` | 7 Tage |
 | `actuator-flow-test-logs` | `actuator_*_flow.log` | 7 Tage |
 | `combined-flow-test-logs` | `combined_*.log`, `emergency_stop_full_flow.log`, `multi_device_parallel.log` | 7 Tage |
+| `error-injection-test-logs` | `error_*.log` | 7 Tage |
 
 ---
 

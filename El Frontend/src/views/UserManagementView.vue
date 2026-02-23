@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { usersApi, type User, type UserCreate, type UserUpdate, type UserRole } from '@/api/users'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import {
   Plus, Edit, Trash2, Key, RefreshCw, AlertCircle, Check, X,
   Shield, Eye, Settings, UserCheck, UserX
 } from 'lucide-vue-next'
+import BaseModal from '@/shared/design/primitives/BaseModal.vue'
 
 const authStore = useAuthStore()
 
@@ -370,165 +371,136 @@ onMounted(() => {
     </div>
 
     <!-- Create User Modal -->
-    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div class="card w-full max-w-md">
-        <div class="flex items-center justify-between p-4 border-b border-dark-700">
-          <h3 class="text-lg font-semibold text-dark-100">Create User</h3>
-          <button class="text-dark-400 hover:text-dark-200" @click="showCreateModal = false">
-            <X class="w-5 h-5" />
-          </button>
+    <BaseModal :open="showCreateModal" @update:open="showCreateModal = $event" title="Create User" max-width="max-w-md">
+      <div class="space-y-4">
+        <div>
+          <label class="label">Username</label>
+          <input v-model="createForm.username" type="text" class="input w-full" />
         </div>
-        <div class="p-4 space-y-4">
-          <div>
-            <label class="label">Username</label>
-            <input v-model="createForm.username" type="text" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Email</label>
-            <input v-model="createForm.email" type="email" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Password</label>
-            <input v-model="createForm.password" type="password" class="input w-full" />
-            <p class="text-xs text-dark-500 mt-1">Min 8 chars, with uppercase, lowercase, and digit</p>
-          </div>
-          <div>
-            <label class="label">Full Name (optional)</label>
-            <input v-model="createForm.full_name" type="text" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Role</label>
-            <select v-model="createForm.role" class="input w-full">
-              <option v-for="role in ROLES" :key="role.value" :value="role.value">
-                {{ role.label }}
-              </option>
-            </select>
-          </div>
+        <div>
+          <label class="label">Email</label>
+          <input v-model="createForm.email" type="email" class="input w-full" />
         </div>
-        <div class="p-4 border-t border-dark-700 flex justify-end gap-2">
+        <div>
+          <label class="label">Password</label>
+          <input v-model="createForm.password" type="password" class="input w-full" />
+          <p class="text-xs text-dark-500 mt-1">Min 8 chars, with uppercase, lowercase, and digit</p>
+        </div>
+        <div>
+          <label class="label">Full Name (optional)</label>
+          <input v-model="createForm.full_name" type="text" class="input w-full" />
+        </div>
+        <div>
+          <label class="label">Role</label>
+          <select v-model="createForm.role" class="input w-full">
+            <option v-for="role in ROLES" :key="role.value" :value="role.value">
+              {{ role.label }}
+            </option>
+          </select>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
           <button class="btn-secondary" @click="showCreateModal = false">Cancel</button>
           <button class="btn-primary" :disabled="isLoading" @click="createUser">
             Create User
           </button>
         </div>
-      </div>
-    </div>
+      </template>
+    </BaseModal>
 
     <!-- Edit User Modal -->
-    <div v-if="showEditModal && selectedUser" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div class="card w-full max-w-md">
-        <div class="flex items-center justify-between p-4 border-b border-dark-700">
-          <h3 class="text-lg font-semibold text-dark-100">Edit User: {{ selectedUser.username }}</h3>
-          <button class="text-dark-400 hover:text-dark-200" @click="showEditModal = false">
-            <X class="w-5 h-5" />
-          </button>
+    <BaseModal :open="showEditModal && !!selectedUser" @update:open="showEditModal = $event" :title="`Edit User: ${selectedUser?.username ?? ''}`" max-width="max-w-md">
+      <div class="space-y-4">
+        <div>
+          <label class="label">Email</label>
+          <input v-model="editForm.email" type="email" class="input w-full" />
         </div>
-        <div class="p-4 space-y-4">
-          <div>
-            <label class="label">Email</label>
-            <input v-model="editForm.email" type="email" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Full Name</label>
-            <input v-model="editForm.full_name" type="text" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Role</label>
-            <select v-model="editForm.role" class="input w-full">
-              <option v-for="role in ROLES" :key="role.value" :value="role.value">
-                {{ role.label }}
-              </option>
-            </select>
-          </div>
-          <div>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" v-model="editForm.is_active" class="rounded" />
-              <span class="text-dark-200">Account Active</span>
-            </label>
-          </div>
+        <div>
+          <label class="label">Full Name</label>
+          <input v-model="editForm.full_name" type="text" class="input w-full" />
         </div>
-        <div class="p-4 border-t border-dark-700 flex justify-end gap-2">
+        <div>
+          <label class="label">Role</label>
+          <select v-model="editForm.role" class="input w-full">
+            <option v-for="role in ROLES" :key="role.value" :value="role.value">
+              {{ role.label }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="editForm.is_active" class="rounded" />
+            <span class="text-dark-200">Account Active</span>
+          </label>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
           <button class="btn-secondary" @click="showEditModal = false">Cancel</button>
           <button class="btn-primary" :disabled="isLoading" @click="updateUser">
             Save Changes
           </button>
         </div>
-      </div>
-    </div>
+      </template>
+    </BaseModal>
 
     <!-- Delete Confirmation Modal -->
-    <div v-if="showDeleteModal && selectedUser" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div class="card w-full max-w-md">
-        <div class="p-4 border-b border-dark-700">
-          <h3 class="text-lg font-semibold text-dark-100">Delete User</h3>
-        </div>
-        <div class="p-4">
-          <p class="text-dark-300">
-            Are you sure you want to delete user <strong class="text-dark-100">{{ selectedUser.username }}</strong>?
-            This action cannot be undone.
-          </p>
-        </div>
-        <div class="p-4 border-t border-dark-700 flex justify-end gap-2">
+    <BaseModal :open="showDeleteModal && !!selectedUser" @update:open="showDeleteModal = $event" title="Delete User" max-width="max-w-md">
+      <p class="text-dark-300">
+        Are you sure you want to delete user <strong class="text-dark-100">{{ selectedUser?.username }}</strong>?
+        This action cannot be undone.
+      </p>
+      <template #footer>
+        <div class="flex justify-end gap-2">
           <button class="btn-secondary" @click="showDeleteModal = false">Cancel</button>
           <button class="btn-danger" :disabled="isLoading" @click="deleteUser">
             Delete User
           </button>
         </div>
-      </div>
-    </div>
+      </template>
+    </BaseModal>
 
     <!-- Reset Password Modal -->
-    <div v-if="showResetPasswordModal && selectedUser" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div class="card w-full max-w-md">
-        <div class="flex items-center justify-between p-4 border-b border-dark-700">
-          <h3 class="text-lg font-semibold text-dark-100">Reset Password: {{ selectedUser.username }}</h3>
-          <button class="text-dark-400 hover:text-dark-200" @click="showResetPasswordModal = false">
-            <X class="w-5 h-5" />
-          </button>
+    <BaseModal :open="showResetPasswordModal && !!selectedUser" @update:open="showResetPasswordModal = $event" :title="`Reset Password: ${selectedUser?.username ?? ''}`" max-width="max-w-md">
+      <div class="space-y-4">
+        <div>
+          <label class="label">New Password</label>
+          <input v-model="newPassword" type="password" class="input w-full" />
         </div>
-        <div class="p-4 space-y-4">
-          <div>
-            <label class="label">New Password</label>
-            <input v-model="newPassword" type="password" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Confirm Password</label>
-            <input v-model="confirmPassword" type="password" class="input w-full" />
-          </div>
+        <div>
+          <label class="label">Confirm Password</label>
+          <input v-model="confirmPassword" type="password" class="input w-full" />
         </div>
-        <div class="p-4 border-t border-dark-700 flex justify-end gap-2">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
           <button class="btn-secondary" @click="showResetPasswordModal = false">Cancel</button>
           <button class="btn-primary" :disabled="isLoading || !newPassword || newPassword !== confirmPassword" @click="resetPassword">
             Reset Password
           </button>
         </div>
-      </div>
-    </div>
+      </template>
+    </BaseModal>
 
     <!-- Change Own Password Modal -->
-    <div v-if="showChangePasswordModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div class="card w-full max-w-md">
-        <div class="flex items-center justify-between p-4 border-b border-dark-700">
-          <h3 class="text-lg font-semibold text-dark-100">Change Your Password</h3>
-          <button class="text-dark-400 hover:text-dark-200" @click="showChangePasswordModal = false">
-            <X class="w-5 h-5" />
-          </button>
+    <BaseModal :open="showChangePasswordModal" @update:open="showChangePasswordModal = $event" title="Change Your Password" max-width="max-w-md">
+      <div class="space-y-4">
+        <div>
+          <label class="label">Current Password</label>
+          <input v-model="currentPassword" type="password" class="input w-full" />
         </div>
-        <div class="p-4 space-y-4">
-          <div>
-            <label class="label">Current Password</label>
-            <input v-model="currentPassword" type="password" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">New Password</label>
-            <input v-model="newPassword" type="password" class="input w-full" />
-          </div>
-          <div>
-            <label class="label">Confirm New Password</label>
-            <input v-model="confirmPassword" type="password" class="input w-full" />
-          </div>
+        <div>
+          <label class="label">New Password</label>
+          <input v-model="newPassword" type="password" class="input w-full" />
         </div>
-        <div class="p-4 border-t border-dark-700 flex justify-end gap-2">
+        <div>
+          <label class="label">Confirm New Password</label>
+          <input v-model="confirmPassword" type="password" class="input w-full" />
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
           <button class="btn-secondary" @click="showChangePasswordModal = false">Cancel</button>
           <button
             class="btn-primary"
@@ -538,8 +510,8 @@ onMounted(() => {
             Change Password
           </button>
         </div>
-      </div>
-    </div>
+      </template>
+    </BaseModal>
   </div>
 </template>
 

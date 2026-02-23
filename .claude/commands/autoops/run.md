@@ -21,9 +21,9 @@ Falls der User keine Sensoren/Aktoren angegeben hat, frage mit `AskUserQuestion`
 
 **Phase 1: System-Check**
 ```bash
-cd "El Servador" && poetry run python -c "
+cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
 import asyncio
-from god_kaiser_server.src.autoops.runner import run_autoops
+from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(mode='health', server_url='http://localhost:8000'))
 print('Health:', 'OK' if result.get('all_passed') else 'ISSUES')
 "
@@ -31,9 +31,9 @@ print('Health:', 'OK' if result.get('all_passed') else 'ISSUES')
 
 **Phase 2: ESP konfigurieren**
 ```bash
-cd "El Servador" && poetry run python -c "
+cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
 import asyncio
-from god_kaiser_server.src.autoops.runner import run_autoops
+from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(
     mode='configure',
     sensors_str='DS18B20,SHT31',  # Vom User angegeben
@@ -48,9 +48,9 @@ print('Report:', result.get('report_path', 'N/A'))
 
 **Phase 3: Debug & Fix**
 ```bash
-cd "El Servador" && poetry run python -c "
+cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
 import asyncio
-from god_kaiser_server.src.autoops.runner import run_autoops
+from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(mode='debug'))
 "
 ```
@@ -79,8 +79,8 @@ Lies den generierten Report und fasse die Ergebnisse für den User zusammen.
 
 ### Direkte Python-API Nutzung
 ```python
-from god_kaiser_server.src.autoops.core.agent import AutoOpsAgent
-from god_kaiser_server.src.autoops.core.context import ESPSpec, SensorSpec, ActuatorSpec
+from src.autoops.core.agent import AutoOpsAgent
+from src.autoops.core.context import ESPSpec, SensorSpec, ActuatorSpec
 
 agent = AutoOpsAgent(server_url="http://localhost:8000")
 await agent.initialize()
@@ -146,7 +146,7 @@ Plugins werden automatisch durch die `PluginRegistry` entdeckt.
 
 ## Bei Fehlern
 
-1. **Server nicht erreichbar:** `cd "El Servador" && poetry run uvicorn god_kaiser_server.src.main:app --reload`
-2. **Auth fehlgeschlagen:** Standard-Credentials: admin/admin
-3. **Import-Fehler:** `cd "El Servador" && poetry install`
+1. **Server nicht erreichbar:** `cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
+2. **Auth fehlgeschlagen:** Standard-Credentials: admin / Admin123#
+3. **Import-Fehler:** `cd "El Servador/god_kaiser_server" && .venv/Scripts/pip.exe install -e .`
 4. **Plugin nicht gefunden:** Prüfe `autoops/plugins/` ob Datei vorhanden

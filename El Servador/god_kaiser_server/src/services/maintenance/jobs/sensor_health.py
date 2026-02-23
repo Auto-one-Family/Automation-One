@@ -29,7 +29,6 @@ from src.core.logging_config import get_logger
 from src.db.repositories.esp_repo import ESPRepository
 from src.db.repositories.sensor_repo import SensorRepository
 from src.db.repositories.sensor_type_defaults_repo import SensorTypeDefaultsRepository
-from src.mqtt.websocket_utils import build_device_id_cache
 from src.websocket.manager import WebSocketManager
 
 if TYPE_CHECKING:
@@ -216,12 +215,17 @@ async def check_sensor_timeouts(
             f"{len(sensors)} sensors"
         )
 
-        # FIX: Build device_id cache for WebSocket broadcasts
+        # Build device_id cache AND offline device set in single pass
         # CRITICAL: Frontend expects device_id (e.g., "ESP_00000001"), NOT UUID!
-        device_id_cache = await build_device_id_cache(
-            [sensor.esp_id for sensor in sensors],
-            esp_repo
-        )
+        unique_esp_uuids = list(set(sensor.esp_id for sensor in sensors))
+        device_id_cache: Dict[Any, str] = {}
+        offline_esp_ids: set = set()
+        for esp_uuid in unique_esp_uuids:
+            device = await esp_repo.get_by_id(esp_uuid)
+            if device:
+                device_id_cache[esp_uuid] = device.device_id
+                if device.status == "offline":
+                    offline_esp_ids.add(esp_uuid)
 
         # =====================================================================
         # PHASE 2: Determine which sensors need latest-reading check
@@ -233,6 +237,11 @@ async def check_sensor_timeouts(
         sensor_effective_configs: Dict[Any, Dict[str, Any]] = {}  # Cache für später
 
         for sensor in sensors:
+            # Skip sensors from offline devices (can't send data → stale is expected)
+            if sensor.esp_id in offline_esp_ids:
+                sensors_skipped += 1
+                continue
+
             effective = compute_effective_config_from_cached(
                 type_defaults_map, sensor
             )

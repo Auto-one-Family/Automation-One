@@ -50,6 +50,7 @@ allowed-tools: Read
 | **5400-5499** | Server | SERVICE_ERROR |
 | **5500-5599** | Server | AUDIT_ERROR |
 | **5600-5699** | Server | SEQUENCE_ERROR |
+| **6000-6099** | Test | TEST (Testinfrastruktur-Fehler) |
 
 ---
 
@@ -515,29 +516,27 @@ const char* range = getErrorCodeRange(1002);   // → "HARDWARE"
 | Watchdog (4070-4072) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | Discovery (4200-4202) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 
-### ⚠️ Lücken identifiziert
+### ✅ Korrigiert in Phase 0
 
-#### 1. I2C Bus Recovery Codes (1015-1018) - Server ESP32HardwareError fehlt
-
-Diese Codes sind in `error_codes.h` definiert, aber nicht in `ESP32HardwareError` enum:
+#### 1. I2C Bus Recovery Codes (1015-1018) — KORRIGIERT
 
 | Code | Name | Status |
 |------|------|--------|
-| 1015 | `I2C_BUS_STUCK` | ⚠️ Nur in ESP32_ERROR_DESCRIPTIONS |
-| 1016 | `I2C_BUS_RECOVERY_STARTED` | ⚠️ Nur in ESP32_ERROR_DESCRIPTIONS |
-| 1017 | `I2C_BUS_RECOVERY_FAILED` | ⚠️ Nur in ESP32_ERROR_DESCRIPTIONS |
-| 1018 | `I2C_BUS_RECOVERED` | ⚠️ Nur in ESP32_ERROR_DESCRIPTIONS |
+| 1015 | `I2C_BUS_STUCK` | ✅ In ESP32HardwareError enum + Descriptions |
+| 1016 | `I2C_BUS_RECOVERY_STARTED` | ✅ In ESP32HardwareError enum + Descriptions |
+| 1017 | `I2C_BUS_RECOVERY_FAILED` | ✅ In ESP32HardwareError enum + Descriptions |
+| 1018 | `I2C_BUS_RECOVERED` | ✅ In ESP32HardwareError enum + Descriptions |
 
-#### 2. DS18B20 Codes (1060-1063) - Server ESP32HardwareError fehlt
-
-Diese Codes sind in `error_codes.h` definiert, aber nicht in `ESP32HardwareError` enum:
+#### 2. DS18B20 Codes (1060-1063) — KORRIGIERT
 
 | Code | Name | Status |
 |------|------|--------|
-| 1060 | `DS18B20_SENSOR_FAULT` | ⚠️ Nicht im enum |
-| 1061 | `DS18B20_POWER_ON_RESET` | ⚠️ Nicht im enum |
-| 1062 | `DS18B20_OUT_OF_RANGE` | ⚠️ Nicht im enum |
-| 1063 | `DS18B20_DISCONNECTED_RUNTIME` | ⚠️ Nicht im enum |
+| 1060 | `DS18B20_SENSOR_FAULT` | ✅ In ESP32HardwareError enum + Descriptions |
+| 1061 | `DS18B20_POWER_ON_RESET` | ✅ In ESP32HardwareError enum + Descriptions |
+| 1062 | `DS18B20_OUT_OF_RANGE` | ✅ In ESP32HardwareError enum + Descriptions |
+| 1063 | `DS18B20_DISCONNECTED_RUNTIME` | ✅ In ESP32HardwareError enum + Descriptions |
+
+### ⚠️ Offene Lücken
 
 #### 3. ValidationErrorCode - INVALID_PAYLOAD_FORMAT fehlt
 
@@ -928,7 +927,9 @@ GET /api/v1/actuators/{actuator_id}/locks
 
 ## 18. Empfohlene Korrekturen
 
-### 1. Server error_codes.py - ESP32HardwareError erweitern
+> **Status:** Korrektur 1 und 3 wurden in Phase 0 umgesetzt (I2C 1015-1018, DS18B20 1060-1063 in Python-Mirror eingefuegt).
+
+### 1. Server error_codes.py - ESP32HardwareError erweitern (ERLEDIGT)
 
 ```python
 class ESP32HardwareError(IntEnum):
@@ -970,3 +971,26 @@ ESP32_ERROR_DESCRIPTIONS: Dict[int, str] = {
     1063: "DS18B20 device was present but is now disconnected",
 }
 ```
+
+---
+
+## 19. Test Infrastructure Errors (6000-6099)
+
+> **Hinzugefuegt:** Phase 0 Testinfrastruktur-Phasenplan
+> **Quellen:** `error_codes.h` (C++), `error_codes.py` (Python)
+> **Zweck:** Nur in Test-Reports, NICHT in Produktion
+
+| Code | Name | Beschreibung | Kontext |
+|------|------|-------------|---------|
+| 6000 | `WOKWI_TIMEOUT` | Wokwi-Simulation Timeout ueberschritten | CI/CD + Lokal |
+| 6001 | `WOKWI_BOOT_INCOMPLETE` | ESP32-Boot in Simulation unvollstaendig | CI/CD |
+| 6002 | `MOCK_ESP_CONFIG_INVALID` | Mock-ESP Konfiguration ungueltig | Seed-Script |
+| 6010 | `SCENARIO_ASSERTION_FAILED` | Wokwi-Szenario Assertion fehlgeschlagen | pytest |
+| 6011 | `SCENARIO_NOT_FOUND` | Referenziertes Szenario existiert nicht | CI/CD |
+| 6020 | `MQTT_INJECTION_FAILED` | MQTT-Inject im Test fehlgeschlagen | Wokwi CI |
+| 6021 | `MQTT_BROKER_UNAVAILABLE` | Test-Broker nicht erreichbar | CI/CD |
+| 6030 | `DOCKER_SERVICE_UNHEALTHY` | Docker-Service unhealthy waehrend Test | E2E |
+| 6031 | `DB_SEED_FAILED` | Testdaten-Seeding fehlgeschlagen | E2E |
+| 6040 | `PLAYWRIGHT_TIMEOUT` | Frontend E2E Test Timeout | Playwright |
+| 6041 | `PLAYWRIGHT_ELEMENT_NOT_FOUND` | UI-Element nicht gefunden | Playwright |
+| 6050 | `SERIAL_LOG_MISSING` | Expected Serial-Log Pattern nicht gefunden | Wokwi |

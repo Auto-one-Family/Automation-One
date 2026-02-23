@@ -167,6 +167,23 @@
 #define ERROR_APPROVAL_REVOKED      4202  // Previously approved device was revoked
 
 // ============================================
+// TEST INFRASTRUCTURE ERROR CODES (6000-6099)
+// Only used in test reports, NOT in production
+// ============================================
+#define ERROR_TEST_WOKWI_TIMEOUT              6000  // Wokwi simulation timeout exceeded
+#define ERROR_TEST_WOKWI_BOOT_INCOMPLETE      6001  // ESP32 boot in simulation incomplete
+#define ERROR_TEST_MOCK_ESP_CONFIG_INVALID     6002  // Mock-ESP configuration invalid
+#define ERROR_TEST_SCENARIO_ASSERTION_FAILED   6010  // Wokwi scenario assertion failed
+#define ERROR_TEST_SCENARIO_NOT_FOUND          6011  // Referenced scenario does not exist
+#define ERROR_TEST_MQTT_INJECTION_FAILED       6020  // MQTT inject in test failed
+#define ERROR_TEST_MQTT_BROKER_UNAVAILABLE     6021  // Test MQTT broker not reachable
+#define ERROR_TEST_DOCKER_SERVICE_UNHEALTHY    6030  // Docker service unhealthy during test
+#define ERROR_TEST_DB_SEED_FAILED              6031  // Test data seeding failed
+#define ERROR_TEST_PLAYWRIGHT_TIMEOUT          6040  // Frontend E2E test timeout
+#define ERROR_TEST_PLAYWRIGHT_ELEMENT_NOT_FOUND 6041  // UI element not found in E2E test
+#define ERROR_TEST_SERIAL_LOG_MISSING          6050  // Expected serial log pattern not found
+
+// ============================================
 // CONFIGURATION RESPONSE ERROR CODES (Enum)
 // ============================================
 enum class ConfigErrorCode : uint8_t {
@@ -380,6 +397,20 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_APPROVAL_TIMEOUT: return "Timeout waiting for server approval";
     case ERROR_APPROVAL_REVOKED: return "Previously approved device was revoked";
 
+    // TEST INFRASTRUCTURE (6000-6099)
+    case ERROR_TEST_WOKWI_TIMEOUT: return "Wokwi simulation timeout exceeded";
+    case ERROR_TEST_WOKWI_BOOT_INCOMPLETE: return "ESP32 boot in simulation incomplete";
+    case ERROR_TEST_MOCK_ESP_CONFIG_INVALID: return "Mock-ESP configuration invalid";
+    case ERROR_TEST_SCENARIO_ASSERTION_FAILED: return "Wokwi scenario assertion failed";
+    case ERROR_TEST_SCENARIO_NOT_FOUND: return "Referenced scenario does not exist";
+    case ERROR_TEST_MQTT_INJECTION_FAILED: return "MQTT inject in test failed";
+    case ERROR_TEST_MQTT_BROKER_UNAVAILABLE: return "Test MQTT broker not reachable";
+    case ERROR_TEST_DOCKER_SERVICE_UNHEALTHY: return "Docker service unhealthy during test";
+    case ERROR_TEST_DB_SEED_FAILED: return "Test data seeding failed";
+    case ERROR_TEST_PLAYWRIGHT_TIMEOUT: return "Frontend E2E test (Playwright) timeout";
+    case ERROR_TEST_PLAYWRIGHT_ELEMENT_NOT_FOUND: return "UI element not found in E2E test";
+    case ERROR_TEST_SERIAL_LOG_MISSING: return "Expected serial log pattern not found";
+
     default: return "Unknown error code";
   }
 }
@@ -390,6 +421,7 @@ inline const char* getErrorCodeRange(uint16_t error_code) {
   if (error_code >= 2000 && error_code < 3000) return "SERVICE";
   if (error_code >= 3000 && error_code < 4000) return "COMMUNICATION";
   if (error_code >= 4000 && error_code < 5000) return "APPLICATION";
+  if (error_code >= 6000 && error_code < 6100) return "TEST";
   return "UNKNOWN";
 }
 

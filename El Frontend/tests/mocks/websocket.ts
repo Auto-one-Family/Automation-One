@@ -76,6 +76,7 @@ export type MessageHandler = (message: WebSocketMessage) => void
 export class MockWebSocketService {
   private handlers = new Map<MessageType | string, Set<MessageHandler>>()
   private globalHandlers = new Set<MessageHandler>()
+  private statusChangeCallbacks = new Set<(status: string) => void>()
   private _isConnected = false
   private _status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected'
 
@@ -105,9 +106,11 @@ export class MockWebSocketService {
    */
   async connect(): Promise<void> {
     this._status = 'connecting'
+    this.notifyStatusChange('connecting')
     // Immediate resolution - no delay for unit tests
     this._isConnected = true
     this._status = 'connected'
+    this.notifyStatusChange('connected')
   }
 
   /**
@@ -116,6 +119,7 @@ export class MockWebSocketService {
   disconnect(): void {
     this._isConnected = false
     this._status = 'disconnected'
+    this.notifyStatusChange('disconnected')
     this.handlers.clear()
     this.globalHandlers.clear()
     this.subscriptions.clear()
@@ -153,6 +157,16 @@ export class MockWebSocketService {
       if (this.handlers.get(type)?.size === 0) {
         this.handlers.delete(type)
       }
+    }
+  }
+
+  /**
+   * Register callback for connection status changes (matches service interface)
+   */
+  onStatusChange(callback: (status: string) => void): () => void {
+    this.statusChangeCallbacks.add(callback)
+    return () => {
+      this.statusChangeCallbacks.delete(callback)
     }
   }
 
@@ -238,6 +252,7 @@ export class MockWebSocketService {
   simulateError(): void {
     this._isConnected = false
     this._status = 'error'
+    this.notifyStatusChange('error')
   }
 
   /**
@@ -246,6 +261,16 @@ export class MockWebSocketService {
   simulateReconnect(): void {
     this._isConnected = true
     this._status = 'connected'
+    this.notifyStatusChange('connected')
+  }
+
+  /**
+   * Notify all status change callbacks
+   */
+  private notifyStatusChange(status: string): void {
+    this.statusChangeCallbacks.forEach(callback => {
+      try { callback(status) } catch { /* ignore */ }
+    })
   }
 
   /**
@@ -282,6 +307,7 @@ export class MockWebSocketService {
   reset(): void {
     this.handlers.clear()
     this.globalHandlers.clear()
+    this.statusChangeCallbacks.clear()
     this.subscriptions.clear()
     this._isConnected = false
     this._status = 'disconnected'

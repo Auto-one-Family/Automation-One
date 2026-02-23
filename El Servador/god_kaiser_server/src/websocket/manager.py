@@ -12,6 +12,7 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 from ..core.logging_config import get_logger
+from ..core.metrics import increment_ws_disconnect
 from ..utils.time_helpers import unix_timestamp_s
 
 logger = get_logger(__name__)
@@ -126,6 +127,7 @@ class WebSocketManager:
                 # Log other unexpected errors but continue cleanup
                 logger.warning(f"Error closing WebSocket for {client_id}: {e}")
 
+            increment_ws_disconnect()
             logger.info(f"WebSocket client disconnected: {client_id}")
 
     async def subscribe(self, client_id: str, filters: dict) -> None:

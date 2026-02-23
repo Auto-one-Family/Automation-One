@@ -13,7 +13,7 @@
 import { ref, computed, watch } from 'vue'
 import { X, Loader2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square, Check } from 'lucide-vue-next'
 import GpioPicker from './GpioPicker.vue'
-import Badge from '@/components/common/Badge.vue'
+import { Badge } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import {
@@ -21,7 +21,10 @@ import {
   getSensorUnit,
   getSensorDefault,
   getSensorTypeOptions,
+  inferInterfaceType,
+  getI2CAddressOptions,
 } from '@/utils/sensorDefaults'
+import { getRecommendedGpios } from '@/utils/gpioConfig'
 import type { MockSensorConfig } from '@/types'
 import { createLogger } from '@/utils/logger'
 
@@ -79,6 +82,13 @@ watch(() => newSensor.value.sensor_type, (newType) => {
   if (newType.toLowerCase().includes('ds18b20')) {
     newSensor.value.gpio = oneWireScanPin.value
   }
+  // Pre-select default I2C address when switching to I2C sensor
+  if (inferInterfaceType(newType) === 'I2C') {
+    const options = getI2CAddressOptions(newType)
+    selectedI2CAddress.value = options.length > 0 ? options[0].value : null
+  } else {
+    selectedI2CAddress.value = null
+  }
 })
 
 watch(oneWireScanPin, (newPin) => {
@@ -98,6 +108,9 @@ watch(() => props.modelValue, (isOpen) => {
 // ── Computed ─────────────────────────────────────────────────────────
 
 const isOneWireSensor = computed(() => newSensor.value.sensor_type.toLowerCase().includes('ds18b20'))
+const isI2CSensor = computed(() => inferInterfaceType(newSensor.value.sensor_type) === 'I2C')
+const i2cAddressOptions = computed(() => getI2CAddressOptions(newSensor.value.sensor_type))
+const selectedI2CAddress = ref<number | null>(null)
 const oneWireScanState = computed(() => espStore.getOneWireScanState(props.espId))
 const newOneWireDevices = computed(() => oneWireScanState.value.scanResults.filter(d => !d.already_configured))
 const newOneWireDeviceCount = computed(() => newOneWireDevices.value.length)
@@ -119,6 +132,8 @@ const supportsOnDemand = computed(() => {
   return config?.supportsOnDemand ?? false
 })
 
+const oneWireScanPins = computed(() => getRecommendedGpios('ds18b20', 'sensor'))
+
 // ── Actions ──────────────────────────────────────────────────────────
 
 function close() {
@@ -139,11 +154,18 @@ function resetForm() {
     timeout_seconds: 180,
   }
   sensorGpioValid.value = false
+  selectedI2CAddress.value = null
 }
 
 async function addSensor() {
   try {
-    await espStore.addSensor(props.espId, newSensor.value)
+    const sensorData: any = { ...newSensor.value }
+    if (isI2CSensor.value && selectedI2CAddress.value !== null) {
+      sensorData.interface_type = 'I2C'
+      sensorData.i2c_address = selectedI2CAddress.value
+      sensorData.gpio = 0
+    }
+    await espStore.addSensor(props.espId, sensorData)
     toast.success('Sensor erfolgreich hinzugefügt')
     close()
     resetForm()
@@ -259,7 +281,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
               </h4>
               <div class="onewire-scan-controls">
                 <select v-model="oneWireScanPin" class="form-select form-select--sm">
-                  <option v-for="pin in [4,5,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33]" :key="pin" :value="pin">GPIO {{ pin }}</option>
+                  <option v-for="pin in oneWireScanPins" :key="pin" :value="pin">GPIO {{ pin }}</option>
                 </select>
                 <button type="button" class="btn btn--scan" :disabled="oneWireScanState.isScanning" @click="handleOneWireScan">
                   <Loader2 v-if="oneWireScanState.isScanning" class="animate-spin" :size="16" />
@@ -312,8 +334,19 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
             <div v-else class="onewire-scan-loading"><Loader2 class="animate-spin" :size="24" /><span>Scanne OneWire-Bus auf GPIO {{ oneWireScanPin }}...</span></div>
           </div>
 
-          <!-- GPIO (non-OneWire only) -->
-          <div v-if="!isOneWireSensor" class="form-group">
+          <!-- I2C Address (I2C sensors only) -->
+          <div v-if="isI2CSensor" class="form-group">
+            <label class="form-label">I2C-Adresse</label>
+            <select v-model.number="selectedI2CAddress" class="form-select">
+              <option v-for="opt in i2cAddressOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+            <p class="form-hint">
+              <Info :size="12" class="inline-block mr-1 opacity-70" />I2C-Bus: SDA/SCL werden automatisch konfiguriert
+            </p>
+          </div>
+
+          <!-- GPIO (non-OneWire, non-I2C only) -->
+          <div v-if="!isOneWireSensor && !isI2CSensor" class="form-group">
             <label class="form-label">GPIO</label>
             <GpioPicker v-model="newSensor.gpio" :esp-id="espId" :sensor-type="newSensor.sensor_type" variant="dropdown" @validation-change="onSensorGpioValidation" />
           </div>
@@ -365,7 +398,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
         <!-- Footer -->
         <div class="modal-footer">
           <button class="btn btn--secondary" @click="close">Abbrechen</button>
-          <button v-if="!isOneWireSensor" class="btn btn--primary" :disabled="!sensorGpioValid" @click="addSensor">Hinzufügen</button>
+          <button v-if="!isOneWireSensor" class="btn btn--primary" :disabled="isI2CSensor ? selectedI2CAddress === null : !sensorGpioValid" @click="addSensor">Hinzufügen</button>
         </div>
       </div>
     </div>
@@ -373,7 +406,11 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
 </template>
 
 <style scoped>
-/* Modal styles are inherited from global/parent scope — 
-   ESPOrbitalLayout defines .modal-overlay, .modal-content, etc.
-   If used standalone, these need to be defined here or imported. */
+.form-hint {
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+}
 </style>

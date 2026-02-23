@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -21,7 +21,7 @@ const router = createRouter({
     // Protected routes (require auth)
     {
       path: '/',
-      component: () => import('@/components/layout/MainLayout.vue'),
+      component: () => import('@/shared/design/layout/AppShell.vue'),
       meta: { requiresAuth: true },
       children: [
         {
@@ -135,6 +135,18 @@ const router = createRouter({
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
           meta: { title: 'Einstellungen' },
+        },
+        {
+          path: 'calibration',
+          name: 'calibration',
+          component: () => import('@/views/CalibrationView.vue'),
+          meta: { requiresAdmin: true, title: 'Kalibrierung' },
+        },
+        {
+          path: 'sensor-history',
+          name: 'sensor-history',
+          component: () => import('@/views/SensorHistoryView.vue'),
+          meta: { title: 'Sensor-Zeitreihen' },
         },
       ],
     },

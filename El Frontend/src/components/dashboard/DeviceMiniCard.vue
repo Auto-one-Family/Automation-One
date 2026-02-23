@@ -12,6 +12,7 @@
 
 import type { ESPDevice } from '@/api/esp'
 import { computed, ref } from 'vue'
+import { Settings2 } from 'lucide-vue-next'
 
 interface Props {
   device: ESPDevice
@@ -22,6 +23,7 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'click', payload: { deviceId: string; originRect: DOMRect }): void
+  (e: 'settings', device: ESPDevice): void
 }>()
 
 const cardRef = ref<HTMLElement | null>(null)
@@ -118,11 +120,32 @@ const sensorFallback = computed(() => {
   return ''
 })
 
+/** Sensor & actuator counts for component count pills */
+const sensorCount = computed(() => {
+  const sensors = props.device.sensors as any[] | undefined
+  return sensors?.length ?? props.device.sensor_count ?? 0
+})
+
+const actuatorCount = computed(() => {
+  const actuators = props.device.actuators as any[] | undefined
+  return actuators?.length ?? props.device.actuator_count ?? 0
+})
+
+const hasComponentCounts = computed(() => sensorCount.value > 0 || actuatorCount.value > 0)
+
+/** Subzone label (if assigned) */
+const subzoneName = computed(() => props.device.subzone_name || '')
+
 function handleClick() {
   const rect = cardRef.value?.getBoundingClientRect()
   if (rect) {
     emit('click', { deviceId: deviceId.value, originRect: rect })
   }
+}
+
+function handleSettings(event: MouseEvent) {
+  event.stopPropagation()
+  emit('settings', props.device)
 }
 </script>
 
@@ -137,14 +160,26 @@ function handleClick() {
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
   >
-    <!-- Header row: status dot + name + badge -->
+    <!-- Header row: status dot + name + badge + settings gear -->
     <div class="device-mini-card__header esp-drag-handle">
       <span
         class="device-mini-card__status-dot"
-        :style="{ backgroundColor: statusColor }"
+        :style="{ backgroundColor: statusColor, color: statusColor }"
       />
       <span class="device-mini-card__name">{{ displayName }}</span>
       <span class="device-mini-card__badge" :class="badgeClass">{{ badgeText }}</span>
+      <button
+        class="device-mini-card__settings-btn"
+        title="Einstellungen"
+        @click="handleSettings"
+      >
+        <Settings2 class="device-mini-card__settings-icon" />
+      </button>
+    </div>
+
+    <!-- Subzone indicator -->
+    <div v-if="subzoneName" class="device-mini-card__subzone">
+      {{ subzoneName }}
     </div>
 
     <!-- Sensor values with spark-bars -->
@@ -171,6 +206,13 @@ function handleClick() {
     <!-- Fallback: sensor count text -->
     <div v-else-if="sensorFallback" class="device-mini-card__values">
       {{ sensorFallback }}
+    </div>
+
+    <!-- Component count pills (sensor + actuator) -->
+    <div v-if="hasComponentCounts" class="device-mini-card__counts">
+      <span v-if="sensorCount > 0" class="device-mini-card__count-pill">{{ sensorCount }}S</span>
+      <span v-if="sensorCount > 0 && actuatorCount > 0" class="device-mini-card__count-sep">·</span>
+      <span v-if="actuatorCount > 0" class="device-mini-card__count-pill">{{ actuatorCount }}A</span>
     </div>
   </div>
 </template>
@@ -290,6 +332,73 @@ function handleClick() {
 .device-mini-card__badge--real {
   color: var(--color-real);
   background: rgba(34, 211, 238, 0.12);
+}
+
+/* ── Settings gear button (hover-only) ── */
+.device-mini-card__settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  padding: 0;
+  margin-left: auto;
+}
+
+.device-mini-card:hover .device-mini-card__settings-btn {
+  opacity: 1;
+}
+
+.device-mini-card__settings-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.device-mini-card__settings-icon {
+  width: 11px;
+  height: 11px;
+}
+
+/* ── Subzone indicator ── */
+.device-mini-card__subzone {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+/* ── Component count pills ── */
+.device-mini-card__counts {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 1px;
+}
+
+.device-mini-card__count-pill {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.device-mini-card__count-sep {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  opacity: 0.5;
 }
 
 /* ── Sensor values with spark-bars ── */

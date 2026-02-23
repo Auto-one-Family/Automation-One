@@ -30,6 +30,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...core.metrics import update_sensor_value
 from ...utils.sensor_formatters import format_sensor_message
 from ...core.resilience import (
     ServiceUnavailableError,
@@ -296,6 +297,10 @@ class SensorDataHandler:
                         f"Sensor data saved: id={sensor_data.id}, esp_id={esp_id_str}, "
                         f"gpio={gpio}, processing_mode={processing_mode}"
                     )
+
+                    # Update Prometheus metrics for Grafana alerting
+                    display_value = processed_value if processed_value is not None else raw_value
+                    update_sensor_value(esp_id_str, sensor_type, display_value)
 
                     # WebSocket Broadcast (best-effort, outside transaction)
                     try:

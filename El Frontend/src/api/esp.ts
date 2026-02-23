@@ -226,8 +226,8 @@ async function enrichDbDevicesWithSensors(devices: ESPDevice[]): Promise<void> {
   if (devicesWithSensors.length === 0) return
 
   try {
-    // Fetch all sensor configs in one call (page_size large enough for typical setups)
-    const { data: allSensors } = await sensorsApi.list({ page_size: 500 })
+    // Fetch all sensor configs in one call (server max page_size is 100)
+    const { data: allSensors } = await sensorsApi.list({ page_size: 100 })
 
     // Group sensors by ESP device ID
     const sensorsByEsp = new Map<string, MockSensor[]>()

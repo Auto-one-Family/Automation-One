@@ -2,12 +2,18 @@
 /**
  * DashboardView
  *
- * Main dashboard with three-level zoom navigation:
+ * Main dashboard with two-level zoom navigation:
  * Level 1: Zone Overview (ZonePlates)
- * Level 2: Zone Detail (DeviceSummaryCards)
- * Level 3: Device Detail (ESPOrbitalLayout)
+ * Level 2: Zone Detail (ZoneMonitorView — sensors & actuators)
  *
- * All three levels exist in DOM simultaneously (v-show),
+ * Clicking a device in Level 2 opens the ESPSettingsSheet slide-in
+ * panel instead of zooming to a separate Level 3.
+ *
+ * Level 3 (DeviceDetailView) is preserved in DOM for backwards-
+ * compatible route-based access but is not reached via normal
+ * dashboard navigation.
+ *
+ * All levels exist in DOM simultaneously (v-show),
  * connected by CSS zoom transitions via useZoomNavigation.
  *
  * Header controls (filters, breadcrumb, actions) are delegated
@@ -17,7 +23,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
-import { useLogicStore } from '@/stores/logic'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { useUiStore, useDashboardStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
@@ -33,11 +39,12 @@ import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
-import { LoadingState, EmptyState } from '@/components/common'
+import { EmptyState } from '@/shared/design/patterns'
+import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 
 // Zoom components
 import ZonePlate from '@/components/dashboard/ZonePlate.vue'
-import ZoneDetailView from '@/components/zones/ZoneDetailView.vue'
+import ZoneMonitorView from '@/components/zones/ZoneMonitorView.vue'
 import DeviceDetailView from '@/components/esp/DeviceDetailView.vue'
 
 const router = useRouter()
@@ -59,9 +66,6 @@ useSwipeNavigation(zoomContainerRef, {
     }
   },
 })
-
-// Modal states (triggered by TopBar via dashboard store)
-const pendingButtonAnchor = ref<HTMLElement | null>(null)
 
 // Settings popover state
 const settingsDevice = ref<ESPDevice | null>(null)
@@ -371,7 +375,14 @@ function onZonePlateClick(payload: { zoneId: string; originRect: DOMRect }) {
 }
 
 function onDeviceCardClick(payload: { deviceId: string; originRect: DOMRect }) {
-  zoomNav.zoomToDevice(payload.deviceId, payload.originRect)
+  // Instead of zooming to Level 3, open the ESPSettingsSheet for this device.
+  // Level 3 is kept in DOM for backwards-compatible route-based access.
+  const device = espStore.devices.find(d =>
+    espStore.getDeviceId(d) === payload.deviceId
+  )
+  if (device) {
+    handleSettings(device)
+  }
 }
 
 // =============================================================================
@@ -422,7 +433,7 @@ function formatTimeAgo(timestamp: number): string {
     </div>
 
     <!-- Loading -->
-    <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
+    <BaseSkeleton v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
 
     <!-- Empty State -->
     <EmptyState
@@ -480,6 +491,7 @@ function formatTimeAgo(timestamp: number): string {
                 @click="onZonePlateClick"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"
+                @settings="handleSettings"
               />
             </div>
 
@@ -501,7 +513,7 @@ function formatTimeAgo(timestamp: number): string {
             v-show="zoomNav.currentLevel.value === 2 || zoomNav.isTransitioning.value"
             :class="zoomNav.level2Class.value"
           >
-            <ZoneDetailView
+            <ZoneMonitorView
               v-if="zoomNav.selectedZoneId.value"
               :zone-id="zoomNav.selectedZoneId.value"
               :zone-name="selectedZoneName"
@@ -514,7 +526,9 @@ function formatTimeAgo(timestamp: number): string {
             />
           </div>
 
-          <!-- ═══ LEVEL 3: Device Detail ═══════════════════════════════ -->
+          <!-- ═══ LEVEL 3: Device Detail (Legacy — kept for route-based access) ═══
+               Normal dashboard navigation now opens ESPSettingsSheet instead.
+               This level is only reached if someone navigates directly via URL. -->
           <div
             v-show="zoomNav.currentLevel.value === 3 || zoomNav.isTransitioning.value"
             :class="zoomNav.level3Class.value"
@@ -534,7 +548,7 @@ function formatTimeAgo(timestamp: number): string {
 
         </div>
 
-        <!-- Component Sidebar (visible only on Level 3) -->
+        <!-- Component Sidebar (Legacy — only visible if Level 3 is reached via direct route) -->
         <ComponentSidebar v-show="zoomNav.currentLevel.value === 3" />
       </div>
     </template>
@@ -904,7 +918,7 @@ function formatTimeAgo(timestamp: number): string {
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-base);
-  z-index: 100;
+  z-index: var(--z-tray);
   box-shadow: var(--elevation-raised);
 }
 

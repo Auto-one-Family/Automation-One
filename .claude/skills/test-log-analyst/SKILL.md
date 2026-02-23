@@ -60,7 +60,7 @@ allowed-tools: Read, Grep, Glob, Bash
 | esp32-tests | esp32-test-results | junit-esp32.xml |
 | frontend-tests | frontend-test-results | junit-results.xml, coverage/ |
 | playwright-tests | playwright-report, playwright-traces | test-results/, playwright-report/ |
-| wokwi-tests | boot-test-logs, sensor-test-logs, etc. | *.log, junit_*.xml |
+| wokwi-tests | boot-test-logs, sensor-test-logs, error-injection-test-logs, etc. | *.log, junit_*.xml |
 
 ---
 

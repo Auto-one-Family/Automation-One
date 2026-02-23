@@ -24,7 +24,7 @@ import {
   getValueConfigForSensorType
 } from '@/utils/sensorDefaults'
 import { formatNumber } from '@/utils/formatters'
-import { useDragStateStore } from '@/stores/dragState'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { createLogger } from '@/utils/logger'
 import type { QualityLevel, MultiValueEntry } from '@/types'
 

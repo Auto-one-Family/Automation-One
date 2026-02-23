@@ -41,7 +41,7 @@ import {
   type SensorTypeConfig,
   type SensorCategoryId
 } from '@/utils/sensorDefaults'
-import { useDragStateStore } from '@/stores/dragState'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
 
 const dragStore = useDragStateStore()
 

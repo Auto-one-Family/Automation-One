@@ -15,7 +15,7 @@
 
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { UserPlus, Eye, EyeOff, AlertCircle, CheckCircle, Cpu } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -712,11 +712,6 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
   width: 20px;
   height: 20px;
   animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .setup-form__spinner-track {

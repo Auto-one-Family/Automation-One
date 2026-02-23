@@ -45,7 +45,7 @@ import {
   type AutoCleanupStatus,
   type BackupRetentionConfig,
 } from '@/api/audit'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('CleanupPanel')
@@ -1805,19 +1805,6 @@ onMounted(() => {
 .slide-up-leave-to {
   opacity: 0;
   transform: translateY(20px);
-}
-
-/* ============================================================================
-   Animations
-   ============================================================================ */
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 /* ============================================================================

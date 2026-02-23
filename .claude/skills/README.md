@@ -9,7 +9,7 @@ allowed-tools: Read
 
 # AutomationOne Skills - Index
 
-> **Version:** 3.3 | **Aktualisiert:** 2026-02-11 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
+> **Version:** 3.4 | **Aktualisiert:** 2026-02-22 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
 
 ## Skill-Auswahl
 
@@ -148,5 +148,6 @@ Auto-one/
 | **Log-System** | `.claude/reference/debugging/LOG_SYSTEM.md` | Bei Log-Analyse, Serial Capture |
 | **CI Pipeline** | `.claude/reference/debugging/CI_PIPELINE.md` | Bei CI-Failures, GitHub Actions |
 | **KI-Limitationen** | `.claude/reference/debugging/ACCESS_LIMITATIONS.md` | Bei Zugriffsproblemen |
+| **Wokwi Error-Mapping** | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` | Bei Error-Injection-Szenarien (11-error-injection/) |
 
 **WICHTIG:** Test- und Debugging-Dokumentation nur bei Bedarf lesen, nicht automatisch.
