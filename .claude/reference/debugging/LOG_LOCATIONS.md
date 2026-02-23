@@ -85,7 +85,16 @@ el-frontend:
 | `log_rotation_age` | `1d` | Tägliche Rotation |
 | `log_rotation_size` | `50MB` | Max 50MB pro Log |
 
-### Frontend Global Error Handler
+### Frontend Structured Logger
+
+**Datei:** `El Frontend/src/utils/logger.ts`
+
+```typescript
+// createLogger(namespace) outputs JSON to stdout for Promtail/Loki:
+// {"level":"info","component":"ESPCard","message":"...","timestamp":"2026-02-23T..."}
+// In DEV mode: also logs human-readable to browser console
+// Level filtering via VITE_LOG_LEVEL env var (default: debug)
+```
 
 **Datei:** `El Frontend/src/main.ts`
 
@@ -939,9 +948,10 @@ curl -s http://localhost:9090/api/v1/targets
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-13
-**Version:** 3.7
+**Letzte Aktualisierung:** 2026-02-23
+**Version:** 4.0
 **Changelog:**
+- 4.0: Frontend Logger jetzt JSON-strukturiert (Promtail Stage 3 funktioniert), Promtail Stage 5 Mosquitto healthcheck drop, `logs/esp32/` Verzeichnis erstellt, Server apscheduler noise reduziert
 - 3.9: Error-Injection Wokwi-Logs (`11-error-injection/`), Verweis auf `WOKWI_ERROR_MAPPING.md`
 - 3.7: §12.0 Erreichbarkeit aller Ebenen (Tabelle KI-Optimalität); Loki-Beispiele für postgres + esp32-serial-logger
 - 3.6: Frontend-Container-Logs als Log-Quelle ergänzt (stdout → Loki, kein Bind-Mount; Tabelle Log-Verzeichnisse, 1.1, 1.2, 12.2)

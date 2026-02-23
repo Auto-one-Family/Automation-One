@@ -221,7 +221,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 **Aenderungen zum Basis-Stack:**
 - postgres: Dummy-Container (busybox sleep)
 - el-servador: `DATABASE_URL: sqlite+aiosqlite:///./test_db.sqlite`
-- `ENVIRONMENT: test`, `LOG_LEVEL: WARNING`
+- `ENVIRONMENT: testing`, `LOG_LEVEL: WARNING`
 - Frontend: Profile `frontend` (nicht automatisch gestartet)
 - `restart: "no"` fuer alle
 

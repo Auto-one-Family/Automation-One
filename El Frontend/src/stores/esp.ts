@@ -280,10 +280,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     try {
       const fetchedDevices = await espApi.listDevices(params)
 
-      // DEBUG: Log fetched devices with name field
-      logger.info('fetchAll: Fetched devices:')
+      logger.debug('fetchAll: Fetched devices:')
       fetchedDevices.forEach((d) => {
-        logger.info(`  - ${d.device_id || d.esp_id}: name="${d.name}"`)
+        logger.debug(`  - ${d.device_id || d.esp_id}: name="${d.name ?? '(unnamed)'}"`)
       })
 
       // Deduplicate by device ID (safety net for API-level deduplication failures)

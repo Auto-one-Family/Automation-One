@@ -396,7 +396,7 @@ Located in `.claude/` directory:
 ### docker-compose.ci.yml (GitHub Actions)
 - postgres: tmpfs (RAM-based, 512M), hardcoded credentials
 - mqtt-broker: CI-specific config (.github/mosquitto/)
-- el-servador: ENVIRONMENT=test, LOG_LEVEL=WARNING, TESTING=true
+- el-servador: ENVIRONMENT=testing, LOG_LEVEL=WARNING, TESTING=true
 - el-frontend: profile=frontend (opt-in only)
 - **No monitoring services** (profiles not activated)
 - **Usage:** `docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait`
@@ -522,7 +522,7 @@ make test-fe-coverage- HTML coverage report
 make test-full       - Backend + Frontend tests
 ```
 
-**Wokwi Simulation (163 total scenarios, 13 categories):**
+**Wokwi Simulation (173 total scenarios, 14 categories):**
 ```
 make wokwi-build         - Build firmware
 make wokwi-test-boot     - Boot test
@@ -537,7 +537,7 @@ make wokwi-test-hardware - 9 scenarios
 make wokwi-test-nvs-all  - 40 scenarios (Makefile help says 35, actual count 40)
 make wokwi-test-gpio-all - 24 scenarios
 make wokwi-test-pwm-all  - 18 scenarios (Makefile help says 15, actual count 18)
-make wokwi-test-extended - Full ~163 scenarios (Makefile help says ~135, outdated)
+make wokwi-test-extended - Full ~173 scenarios (Makefile help says ~135, outdated)
 make wokwi-status        - Status check
 ```
 
@@ -567,8 +567,8 @@ make e2e-test-ui - Interactive UI mode
 | Backend (Python) | Unit + Integration + E2E + ESP32 | 105 test files | pytest ^8.0, pytest-asyncio |
 | Frontend (Vue) | Unit tests | 5 test files | vitest ^2.1.8 (jsdom) |
 | Frontend (Vue) | E2E (Playwright) | 5 spec files | @playwright/test ^1.50.0 |
-| ESP32 (Wokwi) | Simulation scenarios | 163 YAML files | wokwi-cli |
-| **Total** | | **278 test files/scenarios** | |
+| ESP32 (Wokwi) | Simulation scenarios | 173 YAML files | wokwi-cli |
+| **Total** | | **288 test files/scenarios** | |
 
 ### Backend Test Structure:
 ```
@@ -614,7 +614,8 @@ El Frontend/tests/
 | 09-pwm | 18 | PWM controller |
 | 10-nvs | 40 | NVS storage operations |
 | gpio | 24 | GPIO manager |
-| **Total** | **163** | |
+| 11-error-injection | 10 | Error injection scenarios |
+| **Total** | **173** | |
 
 ### Vitest Config:
 - Environment: jsdom

@@ -1,7 +1,8 @@
 # Operationale Readiness - Phasenplan Validierung
 
 > **Erfasst:** 2026-02-21
-> **Quelle:** SYSTEM_STATE.md + Live-Checks
+> **Aktualisiert:** 2026-02-23 (Handler-Integration abgeschlossen, Phase 0+1 DONE)
+> **Quelle:** SYSTEM_STATE.md + Live-Checks + Codebase-Verifikation
 > **Zweck:** Bereitschaftsbewertung fuer Phase 0-4
 
 ---
@@ -21,13 +22,15 @@
 | ao-cadvisor-down | cAdvisor unreachable | warning | up{job="cadvisor"} | AKTIV |
 | ao-prometheus-down | Prometheus self-check | critical | up{job="prometheus"} | AKTIV |
 
-**Gesamt: 8 aktive Regeln** (Ziel Phase 0: 28+)
+**Gesamt: ~~8~~ → 26 aktive Regeln** (Ziel Phase 0: 28+ → **26 implementiert**, 2 begruendet weggelassen)
 
-### Readiness-Bewertung
+### Readiness-Bewertung (aktualisiert 2026-02-23)
 
 - Alert-Pipeline funktioniert (3-Stage A→B→C korrekt)
 - Evaluation-Intervalle korrekt (Vielfache von 10s)
-- **GAP:** 20 neue Alerts benoetigen 15 fehlende Metriken in metrics.py
+- ~~**GAP:** 20 neue Alerts benoetigen 15 fehlende Metriken in metrics.py~~ ✅ **GELOEST**
+- **ALLE 12 Phase-0 Metriken definiert UND in Handlern integriert**
+- 26 Alerts in `alert-rules.yml`, 6 Gruppen (critical, warnings, infrastructure, sensor, device, application)
 
 ---
 
@@ -57,7 +60,9 @@
 
 **Bewertung:** 4/5 Targets aktiv. Mosquitto-Exporter unhealthy hat keinen Einfluss auf Phase 0 Alerts (nutzen god_kaiser_* Metriken).
 
-### Exponierte God-Kaiser Metriken (15 total)
+### Exponierte God-Kaiser Metriken (27 total — 15 alt + 12 Phase-0 neu)
+
+**Bestehende Metriken (15):**
 
 | Metrik | Typ | Wert |
 |--------|-----|------|
@@ -76,6 +81,23 @@
 | god_kaiser_esp_min_heap_free_bytes | Gauge | 0.0 |
 | god_kaiser_esp_avg_wifi_rssi_dbm | Gauge | 0.0 |
 | god_kaiser_esp_avg_uptime_seconds | Gauge | 0.0 |
+
+**Phase-0 Metriken (12 NEU — alle definiert + Handler-integriert):**
+
+| Metrik | Typ | Labels | Handler-Integration |
+|--------|-----|--------|---------------------|
+| god_kaiser_sensor_value | Gauge | sensor_type, esp_id | ✅ sensor_handler.py |
+| god_kaiser_sensor_last_update | Gauge | sensor_type, esp_id | ✅ sensor_handler.py |
+| god_kaiser_esp_last_heartbeat | Gauge | esp_id | ✅ heartbeat_handler.py |
+| god_kaiser_esp_boot_count | Gauge | esp_id | ✅ heartbeat_handler.py |
+| god_kaiser_esp_errors_total | Counter | esp_id | ✅ error_handler.py |
+| god_kaiser_esp_safe_mode | Gauge | esp_id | ✅ heartbeat_handler.py |
+| god_kaiser_ws_disconnects_total | Counter | - | ✅ websocket/manager.py |
+| god_kaiser_mqtt_queued_messages | Gauge | - | ✅ mqtt/client.py |
+| god_kaiser_http_errors_total | Counter | status_class | ✅ middleware/request_id.py |
+| god_kaiser_logic_errors_total | Counter | - | ✅ logic_engine.py |
+| god_kaiser_actuator_timeouts_total | Counter | - | ✅ actuator_service.py |
+| god_kaiser_safety_triggers_total | Counter | - | ✅ safety_service.py + logic_engine.py |
 
 ---
 
@@ -107,37 +129,74 @@
 
 ---
 
-## 6. Readiness-Matrix
+## 6. Readiness-Matrix (aktualisiert 2026-02-23)
 
-| Phase | Readiness | Blocker | Naechster Schritt |
-|-------|-----------|---------|-------------------|
-| **Phase 0** | 70% | 15 fehlende Metriken, Test-Error-Block 6000 | server-dev: metrics.py erweitern |
-| **Phase 1** | 90% | Error-Injection-Job + Nightly in CI | esp32-dev: Szenarien + CI-Config |
-| **Phase 2** | 85% | Frontend-Luecken (Wizard + Zeitreihen) | frontend-dev + ESP32 flashen |
-| **Phase 3** | 30% | AI-Service komplett leer | server-dev: Model + Repo + Service |
-| **Phase 4** | 50% | Dashboards fehlen, Error-Report-Format | Nach Phase 0-3 |
+| Phase | Readiness | Status | Verbleibende Schritte |
+|-------|-----------|--------|----------------------|
+| **Phase 0** | **98%** | ✅ ABGESCHLOSSEN | Grafana-Reload nach Deployment verifizieren |
+| **Phase 1** | **95%** | ✅ ABGESCHLOSSEN | Makefile-Echo (22→52), lokaler Wokwi-Test, CI-Run |
+| **Phase 2** | **90%** | ⚠️ CODE FERTIG | Sidebar-Links, Stack-Deployment, ESP32-Hardware |
+| **Phase 3** | 30% | 🔲 OFFEN | AI-Service komplett leer (Model + Repo + Service) |
+| **Phase 4** | 50% | 🔲 OFFEN | Dashboards fehlen, Error-Report-Format |
 
-### Kritischer Pfad
+### Kritischer Pfad (aktualisiert)
 
 ```
-server-dev (Metriken) → Phase 0 → Phase 1+2 (parallel) → Phase 3 → Phase 4
+✅ Phase 0 (DONE) → ✅ Phase 1 (DONE)
+                   → ⚠️ Phase 2 (Deploy + Hardware) → Phase 3 → Phase 4
 ```
 
-### Sofort Machbare Phase-0-Alerts (ohne neue Metriken)
+### Verbleibende Aktionen fuer Testlauf-Start
 
-1. ao-db-query-slow (Histogram existiert)
-2. ao-db-connections-high (pg_stat_activity via postgres-exporter)
-3. ao-container-restart (container_restart_count via cAdvisor)
-4. ao-cadvisor-down (up{job="cadvisor"}) - BEREITS AKTIV
-5. ao-prometheus-down (up{job="prometheus"}) - BEREITS AKTIV
+| # | Aktion | Agent/Skill | Prioritaet |
+|---|--------|-------------|-----------|
+| 1 | Sidebar-Links fuer /calibration + /sensor-history | frontend-dev | HOCH |
+| 2 | Makefile Echo 22→52 aktualisieren | Hauptkontext | NIEDRIG |
+| 3 | Grafana Reload verifizieren (26 Alerts aktiv) | system-control | MITTEL |
+| 4 | Stack hochfahren + Health pruefen | system-control | HOCH |
+| 5 | ESP32 flashen + konfigurieren | User (PowerShell) | HOCH |
+| 6 | E2E Datenpfad verifizieren (ESP→MQTT→Server→DB→Frontend) | auto-ops | HOCH |
 
 ---
 
-## 7. Empfehlung
+## 7. Logging-Readiness fuer Testlauf
 
-**Phase 0 starten mit:**
-1. Error-Taxonomie Audit (Sync-Luecken schliessen)
-2. Test-Error-Block 6000-6099 definieren
-3. 5 sofort machbare Alerts hinzufuegen
-4. Dann: server-dev fuer 15 fehlende Metriken
-5. Dann: Restliche 15 Alerts mit neuen Metriken
+### Agent-Log-Zugriff verifiziert
+
+| Agent | Log-Quelle | Zugriffsmethode | Bereit |
+|-------|-----------|----------------|--------|
+| server-debug | `logs/server/god_kaiser.log` | Read (JSON, rotating 10MB×10) | ✅ |
+| mqtt-debug | Docker stdout | `docker compose logs mqtt-broker` / Loki | ✅ |
+| esp32-debug | `logs/current/esp32_serial.log` | Read (Text, User-Capture) | ⚠️ Nur mit Serial-Capture |
+| frontend-debug | Docker stdout | `docker compose logs el-frontend` / Loki | ✅ |
+| test-log-analyst | `logs/wokwi/reports/` | Read (JSON/XML) | ✅ |
+| db-inspector | `logs/postgres/postgresql-*.log` | Read (Text, daily rotation) | ✅ |
+
+### Loki-Integration (Monitoring-Profil erforderlich)
+
+| Label | Service | Log-Format |
+|-------|---------|-----------|
+| `compose_service="el-servador"` | Server | JSON (level, logger extrahiert) |
+| `compose_service="el-frontend"` | Frontend | JSON (level, component extrahiert) |
+| `compose_service="mqtt-broker"` | MQTT | Text (raw stdout) |
+| `compose_service="postgres"` | PostgreSQL | Text (raw stdout) |
+| `compose_service="esp32-serial-logger"` | ESP32 Serial Bridge | JSON (level, device, component) |
+
+### Voraussetzungen fuer vollstaendiges Logging
+
+- [ ] Monitoring-Profil aktiv: `docker compose --profile monitoring up -d`
+- [ ] ESP32 Serial-Capture eingerichtet (Wokwi: `--serial-log-file`, Real: `pio device monitor > log`)
+- [ ] Session-Script ausgefuehrt: `scripts/debug/start_session.sh` (erstellt `logs/current/` Symlinks)
+
+---
+
+## 8. Empfehlung (aktualisiert)
+
+**Naechste Schritte fuer Testlauf:**
+1. ✅ ~~Error-Taxonomie Audit~~ ERLEDIGT
+2. ✅ ~~Test-Error-Block 6000-6099~~ ERLEDIGT
+3. ✅ ~~Metriken + Handler-Integration~~ ERLEDIGT
+4. ✅ ~~Grafana-Alerts~~ ERLEDIGT
+5. **Sidebar-Links hinzufuegen** (frontend-dev, 5 Min)
+6. **Stack deployen + Grafana verifizieren** (system-control)
+7. **ESP32 flashen + E2E pruefen** (User + auto-ops)

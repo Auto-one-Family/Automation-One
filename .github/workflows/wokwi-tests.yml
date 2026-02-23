@@ -12,24 +12,18 @@
 # Prerequisites:
 # - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
 #
-# Test Categories (52 scenarios total across 16 jobs):
-# - Boot Tests (passive): boot_full, boot_safe_mode
-# - Sensor Tests (passive): sensor_heartbeat, sensor_ds18b20_read
-# - MQTT Connection (passive, legacy): mqtt_connection
-# - Actuator Tests (MQTT injection): actuator_led_on, actuator_pwm, actuator_status_publish, actuator_emergency_clear
-# - Zone Tests (MQTT injection): zone_assignment, subzone_assignment
-# - Emergency Tests (MQTT injection): emergency_broadcast, emergency_esp_stop
-# - Config Tests (MQTT injection): config_sensor_add, config_actuator_add
-# - Sensor Flow Tests (E2E): sensor_ds18b20_full_flow, sensor_dht22_full_flow, sensor_analog_flow
-# - Actuator Flow Tests (E2E): actuator_binary_full_flow, actuator_pwm_full_flow, actuator_timeout_e2e
-# - Combined Flow Tests (E2E): combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel
-# - GPIO Core Tests: gpio_boot_first, gpio_boot_mode_verify, gpio_edge_max_pins, gpio_integration_actuator, gpio_integration_emergency
-# - I2C Core Tests: i2c_device_present, i2c_device_not_present, i2c_error_nack, i2c_scan_devices, i2c_double_init
-# - NVS Core Tests: nvs_init_success, nvs_key_exists, nvs_del_factory, nvs_ns_isolation, nvs_del_key
-# - PWM Core Tests: pwm_duty_percent_50, pwm_frequency_change, pwm_resolution_verify
-# - Error-Injection Tests: error_sensor_timeout, error_mqtt_disconnect, error_gpio_conflict,
-#     error_watchdog_trigger, error_config_invalid_json, error_actuator_timeout,
-#     error_emergency_cascade, error_i2c_bus_stuck, error_nvs_corrupt, error_heap_pressure
+# Coverage: 173 scenarios across 14 categories
+# - PR/Push: 52 core scenarios across 16 jobs (fast feedback)
+# - Nightly/Manual: ALL 173 scenarios (+ 6 extended jobs = 22 total jobs + summary)
+#
+# Core PR Tests (52 scenarios):
+# - Boot (2), Sensor (2+3), MQTT Legacy (1), Actuator (4+3), Zone (2)
+# - Emergency (2+1), Config (2), Combined (3), GPIO (5), I2C (5)
+# - NVS (5), PWM (3), Error-Injection (10)
+#
+# Nightly Extended Tests (122 additional scenarios):
+# - I2C Extended (15), OneWire (29), Hardware (9)
+# - PWM Extended (15), NVS Extended (35), GPIO Extended (19)
 #
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
 
@@ -47,6 +41,10 @@ on:
   workflow_dispatch:  # Allow manual triggering
   schedule:
     - cron: '0 3 * * *'  # Nightly full suite at 03:00 UTC
+
+concurrency:
+  group: wokwi-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # ============================================
@@ -1120,6 +1118,15 @@ jobs:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
 
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
       - name: Run GPIO Boot First Test
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
@@ -1170,6 +1177,10 @@ jobs:
             --scenario tests/wokwi/scenarios/gpio/gpio_integration_emergency.yaml \
             2>&1 | tee gpio_integration_emergency.log || true
 
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
       - name: Upload GPIO Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -1201,6 +1212,20 @@ jobs:
         with:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Use I2C Diagram (SHT31 + BME280)
+        run: |
+          cp "El Trabajante/tests/wokwi/diagrams/diagram_i2c.json" "El Trabajante/diagram.json"
+          echo "Switched to I2C diagram with SHT31 and BME280"
 
       - name: Run I2C Device Present Test
         env:
@@ -1252,6 +1277,14 @@ jobs:
             --scenario tests/wokwi/scenarios/08-i2c/i2c_double_init.yaml \
             2>&1 | tee i2c_double_init.log || true
 
+      - name: Restore Default Diagram
+        if: always()
+        run: git checkout "El Trabajante/diagram.json"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
       - name: Upload I2C Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -1283,6 +1316,15 @@ jobs:
         with:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
 
       - name: Run NVS Init Success Test
         env:
@@ -1334,6 +1376,10 @@ jobs:
             --scenario tests/wokwi/scenarios/10-nvs/nvs_del_key.yaml \
             2>&1 | tee nvs_del_key.log || true
 
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
       - name: Upload NVS Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -1349,7 +1395,7 @@ jobs:
   pwm-core-tests:
     runs-on: ubuntu-latest
     needs: build-firmware
-    timeout-minutes: 12
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -1366,15 +1412,44 @@ jobs:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
 
-      - name: Run PWM Duty Percent 50 Test
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          for i in {1..30}; do
+            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: Run PWM Duty Percent 50 Test (MQTT Injection)
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
           cd "El Trabajante"
+
           timeout 120 wokwi-cli . \
             --timeout 90000 \
             --scenario tests/wokwi/scenarios/09-pwm/pwm_duty_percent_50.yaml \
-            2>&1 | tee pwm_duty_percent_50.log || true
+            2>&1 | tee pwm_duty_percent_50.log &
+          WOKWI_PID=$!
+          sleep 25
+
+          # Configure PWM actuator on GPIO 25
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{"sensors":[],"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"TestPWM","active":true}]}'
+          sleep 5
+
+          # Set 50% duty cycle
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/actuator/25/command" \
+            -m '{"command":"SET","value":0.5}'
+
+          wait $WOKWI_PID && echo "PWM Duty 50%: PASS" || echo "PWM Duty 50%: FAIL (exit $?)"
 
       - name: Run PWM Frequency Change Test
         env:
@@ -1386,15 +1461,36 @@ jobs:
             --scenario tests/wokwi/scenarios/09-pwm/pwm_frequency_change.yaml \
             2>&1 | tee pwm_frequency_change.log || true
 
-      - name: Run PWM Resolution Verify Test
+      - name: Run PWM Resolution Verify Test (MQTT Injection)
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
           cd "El Trabajante"
+
           timeout 120 wokwi-cli . \
             --timeout 90000 \
             --scenario tests/wokwi/scenarios/09-pwm/pwm_resolution_verify.yaml \
-            2>&1 | tee pwm_resolution_verify.log || true
+            2>&1 | tee pwm_resolution_verify.log &
+          WOKWI_PID=$!
+          sleep 25
+
+          # Configure PWM actuator on GPIO 25
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{"sensors":[],"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"ResPWM","active":true}]}'
+          sleep 5
+
+          # Set 50% duty cycle to verify resolution
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/actuator/25/command" \
+            -m '{"command":"SET","value":0.5}'
+
+          wait $WOKWI_PID && echo "PWM Resolution: PASS" || echo "PWM Resolution: FAIL (exit $?)"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
 
       - name: Upload PWM Test Logs
         if: always()
@@ -1659,7 +1755,475 @@ jobs:
           retention-days: 7
 
   # ============================================
-  # JOB 17: Test Summary
+  # NIGHTLY EXTENDED TESTS (schedule + workflow_dispatch only)
+  # Runs remaining 122 scenarios not covered by core PR tests
+  # ============================================
+
+  # --- Nightly: I2C Extended (15 remaining, needs I2C diagram) ---
+  nightly-i2c-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Use I2C Diagram (SHT31 + BME280)
+        run: |
+          cp "El Trabajante/tests/wokwi/diagrams/diagram_i2c.json" "El Trabajante/diagram.json"
+
+      - name: Run All I2C Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core I2C job
+          CORE_TESTS="i2c_device_present i2c_device_not_present i2c_error_nack i2c_scan_devices i2c_double_init"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/08-i2c/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== I2C Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Restore Default Diagram
+        if: always()
+        run: git checkout "El Trabajante/diagram.json"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload I2C Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-i2c-extended-logs
+          path: El Trabajante/i2c_*.log
+          retention-days: 7
+
+  # --- Nightly: OneWire Extended (29 scenarios) ---
+  nightly-onewire-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All OneWire Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          PASSED=0
+          FAILED=0
+
+          for scenario in tests/wokwi/scenarios/08-onewire/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== OneWire Results: $PASSED passed, $FAILED failed out of 29 ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload OneWire Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-onewire-logs
+          path: El Trabajante/onewire_*.log
+          retention-days: 7
+
+  # --- Nightly: Hardware Extended (9 scenarios) ---
+  nightly-hardware-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All Hardware Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          PASSED=0
+          FAILED=0
+
+          for scenario in tests/wokwi/scenarios/09-hardware/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== Hardware Results: $PASSED passed, $FAILED failed out of 9 ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload Hardware Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-hardware-logs
+          path: El Trabajante/hw_*.log
+          retention-days: 7
+
+  # --- Nightly: PWM Extended (15 remaining) ---
+  nightly-pwm-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          for i in {1..30}; do
+            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All PWM Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core PWM job
+          CORE_TESTS="pwm_duty_percent_50 pwm_frequency_change pwm_resolution_verify"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/09-pwm/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== PWM Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload PWM Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-pwm-extended-logs
+          path: El Trabajante/pwm_*.log
+          retention-days: 7
+
+  # --- Nightly: NVS Extended (35 remaining) ---
+  nightly-nvs-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All NVS Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core NVS job
+          CORE_TESTS="nvs_init_success nvs_key_exists nvs_del_factory nvs_ns_isolation nvs_del_key"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/10-nvs/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== NVS Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload NVS Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-nvs-extended-logs
+          path: El Trabajante/nvs_*.log
+          retention-days: 7
+
+  # --- Nightly: GPIO Extended (19 remaining) ---
+  nightly-gpio-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All GPIO Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core GPIO job
+          CORE_TESTS="gpio_boot_first gpio_boot_mode_verify gpio_edge_max_pins gpio_integration_actuator gpio_integration_emergency"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/gpio/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== GPIO Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload GPIO Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-gpio-extended-logs
+          path: El Trabajante/gpio_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 23: Test Summary
   # ============================================
   test-summary:
     runs-on: ubuntu-latest

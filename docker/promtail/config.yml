@@ -6,13 +6,16 @@
 # Pipeline Overview:
 #   1. docker: {}          - Parse Docker json-file log driver format
 #   2. el-servador match   - Health drop → Multiline → Regex parser → Labels
-#   3. el-frontend match   - JSON parser → Labels
+#   3. el-frontend match   - JSON parser → Labels (structured logger output)
+#   4. esp32-serial-logger - JSON parser → Labels (TCP serial bridge)
+#   5. mqtt-broker match   - Drop healthcheck noise
+#   6. loki match          - Extract level, drop self-referencing queries
 #
 # Label Strategy:
 #   - compose_service, container, stream, compose_project: from Docker SD (all services)
-#   - level:     extracted by parser (el-servador: regex, el-frontend: json)
+#   - level:     extracted by parser (el-servador: regex, el-frontend: json, esp32: json)
 #   - logger:    extracted by regex (el-servador only, e.g. "src.mqtt.handlers.sensor_handler")
-#   - component: extracted by json  (el-frontend only, e.g. "ESPCard")
+#   - component: extracted by json  (el-frontend, esp32-serial-logger)
 #
 # NOT as labels (high cardinality):
 #   - request_id, function, line: remain in log text, queryable via |= filter
@@ -138,7 +141,18 @@ scrape_configs:
                 device:
                 component:
 
-      # Stage 5: Loki - Extract level and drop query-stats noise
+      # Stage 5: mqtt-broker - Drop healthcheck noise
+      # Docker healthcheck runs mosquitto_sub every 30s, generating 3 log lines each time:
+      #   "New client connected ... healthcheck", "healthcheck 0 $SYS/#", "Client healthcheck closed"
+      # These are high-frequency noise (4320 lines/day) with no diagnostic value.
+      - match:
+          selector: '{compose_service="mqtt-broker"}'
+          stages:
+            - drop:
+                source: ""
+                expression: ".*healthcheck.*"
+
+      # Stage 6: Loki - Extract level and drop query-stats noise
       # Grafana polls Loki every 10s with error-monitoring queries (|~ "error|...").
       # Loki logs these API calls as level=info with the full query text embedded.
       # Promtail sends them back to Loki, where embedded keywords "error|exception"

@@ -60,7 +60,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://god_kaiser:ci_password@postgres:5432/god_kaiser_db
       DATABASE_AUTO_INIT: "true"
-      ENVIRONMENT: test
+      ENVIRONMENT: testing
       LOG_LEVEL: WARNING
       TESTING: "true"
       # MQTT points to service name

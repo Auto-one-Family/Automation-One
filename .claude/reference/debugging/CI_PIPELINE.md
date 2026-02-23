@@ -1,6 +1,6 @@
 # CI/CD Pipeline - AutomationOne
 
-> **Version:** 1.0 | **Aktualisiert:** 2026-02-01
+> **Version:** 1.1 | **Aktualisiert:** 2026-02-23
 > **Zweck:** Vollständige Dokumentation der GitHub Actions Workflows
 > **Themengebiet:** CI/CD, Artifacts, GitHub CLI
 
@@ -12,7 +12,7 @@
 |----------|-------|---------|------|---------|
 | **Server Tests** | `server-tests.yml` | Push/PR zu `El Servador/**` | lint, unit-tests, integration-tests, test-summary | 15min/Job |
 | **ESP32 Tests** | `esp32-tests.yml` | Push/PR zu `tests/esp32/**`, `src/mqtt/**`, `src/services/**` | esp32-tests | 15min |
-| **Wokwi ESP32 Tests** | `wokwi-tests.yml` | Push/PR zu `El Trabajante/**` | 17 Jobs (build-firmware, 15 test-jobs, test-summary) | 10-20min/Job |
+| **Wokwi ESP32 Tests** | `wokwi-tests.yml` | Push/PR + Nightly 03:00 UTC + Manual | 23 Jobs (1 build + 15 core + 6 nightly-extended + 1 summary) | 10-75min/Job |
 | **PR Checks** | `pr-checks.yml` | Pull Requests | label-pr, pr-validation | 15min |
 
 **Concurrency:** Alle Workflows nutzen `cancel-in-progress: true` - bei mehreren Pushes wird der alte Run abgebrochen.
@@ -89,33 +89,63 @@ env:
 **Trigger:**
 - `push` zu `El Trabajante/**`
 - `pull_request` zu `El Trabajante/**`
+- `schedule: cron '0 3 * * *'` (Nightly 03:00 UTC)
 - `workflow_dispatch` (manuell)
+
+**Concurrency:**
+```yaml
+concurrency:
+  group: wokwi-tests-${{ github.ref }}
+  cancel-in-progress: true
+```
 
 **Voraussetzungen:**
 - GitHub Secret `WOKWI_CLI_TOKEN` muss konfiguriert sein
 - Token erstellen: https://wokwi.com/dashboard/ci
 
-**Jobs (17 total: 1 build + 15 test + 1 summary):**
+**CI-Strategie:**
+| Modus | Trigger | Szenarien | Jobs |
+|-------|---------|-----------|------|
+| **Core (PR/Push)** | push, pull_request | 52 | 16 (1 build + 15 test) |
+| **Nightly (Full)** | schedule, workflow_dispatch | 173 (52 core + 122 extended) | 23 (16 core + 6 nightly + 1 summary) |
 
-| Job | Timeout | Tests | Beschreibung |
-|-----|---------|-------|--------------|
-| `build-firmware` | 10min | - | Firmware bauen mit PlatformIO |
-| `boot-tests` | 15min | boot_full, boot_safe_mode | Boot-Sequenz prüfen |
-| `sensor-tests` | 15min | sensor_heartbeat, sensor_ds18b20_read | Sensor-Funktionen |
-| `mqtt-connection-test` | 15min | mqtt_connection | Legacy MQTT Test |
-| `actuator-tests` | 15min | led_on, pwm, status_publish, emergency_clear | Actuator-Steuerung |
-| `zone-tests` | 15min | zone_assignment, subzone_assignment | Zone-System |
-| `emergency-tests` | 15min | emergency_broadcast, emergency_esp_stop | Emergency-Stop |
-| `config-tests` | 15min | config_sensor_add, config_actuator_add | Dynamische Config |
-| `sensor-flow-tests` | 15min | ds18b20_full_flow, dht22_full_flow, analog_flow | E2E Sensor |
-| `actuator-flow-tests` | 20min | binary_full_flow, pwm_full_flow, timeout_e2e | E2E Actuator |
-| `combined-flow-tests` | 20min | combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel | E2E Combined |
-| `gpio-core-tests` | 15min | 5 GPIO scenarios | GPIO-Manager |
-| `i2c-core-tests` | 15min | 5 I2C scenarios | I2C-Bus |
-| `nvs-core-tests` | 15min | 5 NVS scenarios | NVS-Storage |
-| `pwm-core-tests` | 15min | 3 PWM scenarios | PWM-Control |
-| `error-injection-tests` | 20min | 10 error scenarios (background pattern + mosquitto_pub) | Error-Injection |
-| `test-summary` | - | - | Ergebnis-Zusammenfassung |
+**Core Jobs (bei jedem PR/Push, 52 Szenarien):**
+
+| Job | Timeout | Tests | Mosquitto | Beschreibung |
+|-----|---------|-------|-----------|--------------|
+| `build-firmware` | 10min | - | - | Firmware bauen mit PlatformIO |
+| `boot-tests` | 15min | boot_full, boot_safe_mode | Ja | Boot-Sequenz prüfen |
+| `sensor-tests` | 15min | sensor_heartbeat, sensor_ds18b20_read | Ja | Sensor-Funktionen |
+| `mqtt-connection-test` | 15min | mqtt_connection | Ja | Legacy MQTT Test |
+| `actuator-tests` | 15min | led_on, pwm, status_publish, emergency_clear | Ja | Actuator-Steuerung |
+| `zone-tests` | 15min | zone_assignment, subzone_assignment | Ja | Zone-System |
+| `emergency-tests` | 15min | emergency_broadcast, emergency_esp_stop | Ja | Emergency-Stop |
+| `config-tests` | 15min | config_sensor_add, config_actuator_add | Ja | Dynamische Config |
+| `sensor-flow-tests` | 15min | ds18b20_full_flow, dht22_full_flow, analog_flow | Ja | E2E Sensor |
+| `actuator-flow-tests` | 20min | binary_full_flow, pwm_full_flow, timeout_e2e | Ja | E2E Actuator |
+| `combined-flow-tests` | 20min | combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel | Ja | E2E Combined |
+| `gpio-core-tests` | 15min | 5 GPIO scenarios | Ja | GPIO-Manager |
+| `i2c-core-tests` | 15min | 5 I2C scenarios (diagram_i2c.json) | Ja | I2C-Bus |
+| `nvs-core-tests` | 15min | 5 NVS scenarios | Ja | NVS-Storage |
+| `pwm-core-tests` | 15min | 3 PWM scenarios (2 mit MQTT-Injection) | Ja | PWM-Control |
+| `error-injection-tests` | 20min | 10 error scenarios (background pattern + mosquitto_pub) | Ja | Error-Injection |
+
+**Nightly Extended Jobs (nur bei schedule/workflow_dispatch, 122 Szenarien):**
+
+| Job | Timeout | Szenarien | Beschreibung |
+|-----|---------|-----------|--------------|
+| `nightly-i2c-extended` | 45min | 15 (diagram_i2c.json) | Erweiterte I2C-Tests |
+| `nightly-onewire-extended` | 60min | 29 | OneWire-Bus-Tests |
+| `nightly-hardware-extended` | 25min | 9 | Hardware-Peripherie-Tests |
+| `nightly-pwm-extended` | 40min | 15 | Erweiterte PWM-Tests |
+| `nightly-nvs-extended` | 75min | 35 | Erweiterte NVS-Tests |
+| `nightly-gpio-extended` | 50min | 19 | Erweiterte GPIO-Tests |
+
+**Summary Job:**
+
+| Job | Beschreibung |
+|-----|--------------|
+| `test-summary` | Ergebnis-Zusammenfassung aller Core + Nightly Jobs |
 
 **Artifacts:**
 | Artifact | Inhalt | Retention |
@@ -294,11 +324,17 @@ poetry run pytest tests/unit/ -v --no-cov
 poetry run pytest tests/integration/ -v --no-cov
 poetry run pytest tests/esp32/ -v --no-cov
 
-# Wokwi Test lokal (benötigt Token)
+# Wokwi Test lokal (benötigt Token + Mosquitto auf localhost:1883)
 export WOKWI_CLI_TOKEN=your_token
 cd "El Trabajante"
-pio run -e wokwi_simulation
-wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
+pio run -e wokwi_esp01
+wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.yaml
+
+# Oder via Makefile
+make wokwi-test-quick          # 3 Boot-Tests
+make wokwi-test-full           # 22 Core-Szenarien
+make wokwi-test-all            # Alle 173 Szenarien
+make wokwi-test-error-injection # 10 Error-Injection
 ```
 
 ---
@@ -365,5 +401,5 @@ gh workflow run wokwi-tests.yml
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-01
-**Version:** 1.0
+**Letzte Aktualisierung:** 2026-02-23
+**Version:** 1.1

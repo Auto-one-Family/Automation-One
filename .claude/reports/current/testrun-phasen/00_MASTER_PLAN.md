@@ -49,18 +49,18 @@
 | Docker-Stack (13 Services) | **12/13 healthy** | Core (4) + Monitoring (7) + DevTools (1) + Hardware (1). Mosquitto-Exporter unhealthy — kein Einfluss |
 | PostgreSQL | **Laeuft** | 19 Tabellen, Alembic Migrations, ai_predictions vorbereitet |
 | Mosquitto MQTT | **Laeuft** | Port 1883 + 9001 (WS), allow_anonymous (Testmodus) |
-| Grafana | **Laeuft** | 26 Panels, 8 Alert-Regeln, Auto-Refresh 10s |
-| Prometheus | **Laeuft** | 15 Gauges, 2 Counters, 1 Histogram, 7 Scrape-Jobs |
+| Grafana | **Laeuft** | 26 Panels, **26 Alert-Regeln** (Phase 0 ERLEDIGT), Auto-Refresh 10s |
+| Prometheus | **Laeuft** | **27 Metriken** (15 alt + 12 Phase-0 neu), 7 Scrape-Jobs |
 | Loki + Promtail | **Laeuft** | Zentrale Log-Aggregation, 7d Retention, JSON-Logs |
 | cAdvisor | **Laeuft** | Container-Ressourcen-Monitoring |
 
 ### Software-Stack (vorhanden)
 
-| Schicht | Fortschritt | Testlauf-Readiness |
-|---------|-------------|-------------------|
-| El Servador (FastAPI) | 95% | 95% bereit — ~170 Endpoints, 12 MQTT-Handler, 9 Sensor-Libraries |
-| El Trabajante (ESP32) | 90% | 92% bereit — Full Boot bestanden, 163 Wokwi-Szenarien |
-| El Frontend (Vue3) | 85% | 90% bereit — 97 Komponenten, 9 Pinia Stores, WebSocket stabil |
+| Schicht | Fortschritt | Testlauf-Readiness | Phase-0/1/2 Updates |
+|---------|-------------|-------------------|---------------------|
+| El Servador (FastAPI) | 97% | **98% bereit** — ~170 Endpoints, 12 MQTT-Handler, 9 Sensor-Libraries, **27 Prometheus-Metriken**, **Handler-Integration komplett** | Phase 0: ✅ Metriken + Handler FERTIG |
+| El Trabajante (ESP32) | 92% | **95% bereit** — Full Boot bestanden, **173 Wokwi-Szenarien** (163 + 10 Error-Injection), 12 Test-Error-Codes | Phase 1: ✅ Error-Injection FERTIG |
+| El Frontend (Vue3) | 90% | **93% bereit** — 129 Komponenten, 13 Pinia Stores, WebSocket stabil, **CalibrationWizard + SensorHistoryView FERTIG** | Phase 2: ✅ Frontend-Code FERTIG (Sidebar-Links fehlen) |
 
 ### Test-Suite (vorhanden)
 
@@ -69,7 +69,8 @@
 | Backend Unit | pytest | 759 Tests (109 Dateien) | GRUEN |
 | Frontend Unit | Vitest | 1118 Tests (64 Dateien) | GRUEN |
 | Firmware Native | Unity | 22 Tests | GRUEN |
-| Wokwi Simulation | pytest + Wokwi | 163 Szenarien | GRUEN |
+| Wokwi Simulation | pytest + Wokwi | **173 Szenarien** (163 + 10 Error-Injection) | GRUEN |
+| Wokwi CI/CD | wokwi-tests.yml | **52 CI-Szenarien** (16 Jobs + Nightly), **inkl. Error-Injection** | KONFIGURIERT |
 | E2E Backend | pytest + Docker | Stack-abhaengig | Manuell |
 | E2E Frontend | Playwright | Stack-abhaengig | Manuell |
 
@@ -101,39 +102,168 @@
 | Test (1) | test-log-analyst | Test-Failure-Analyse |
 | auto-ops (3) | auto-ops, backend-inspector, frontend-inspector | Autonome Cross-Layer-Diagnose |
 
-### Error-System (vorhanden)
+### Error-System (vorhanden — Phase 0 ABGESCHLOSSEN)
 
 | Komponente | Status | Details |
 |-----------|--------|---------|
-| ESP32 Error-Codes | **Definiert** | 1000-4999 (error_codes.h) |
-| Server Error-Codes | **Definiert** | 5000-5699 (constants.py) |
+| ESP32 Error-Codes | **Definiert** | 1000-4999 (error_codes.h) + **6000-6050 Test-Codes** |
+| Server Error-Codes | **Definiert** | 5000-5699 (error_codes.py) + **TestErrorCodes(IntEnum) 6000-6050** |
 | Severity-Stufen | **Aktiv** | info, warning, error, critical |
-| Fehler-Kategorien | **Aktiv** | sensor, actuator, mqtt, system, config, safety |
+| Fehler-Kategorien | **Aktiv** | sensor, actuator, mqtt, system, config, safety, **test** |
 | Audit-Log-Tabelle | **Laeuft** | event_type, severity, correlation_id, error_code |
-| Grafana-Alerts | **8 aktiv** | 5 Critical + 3 Warning |
-| Error-Code-Referenz | **Dokumentiert** | `.claude/reference/errors/ERROR_CODES.md` |
+| Grafana-Alerts | **26 aktiv** | 5 Critical + 3 Warning + 3 Infrastructure + 5 Sensor + 4 Device + 6 Application |
+| Prometheus-Metriken | **27 aktiv** | 15 alt + **12 Phase-0 neu**, alle Handler-integriert |
+| Error-Code-Referenz | **Dokumentiert** | `.claude/reference/errors/ERROR_CODES.md` (inkl. Sektion 19: Test-Codes) |
+| Wokwi-Error-Mapping | **Dokumentiert** | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` |
 
-### Was FEHLT (identifizierte Luecken)
+### Was FEHLT (identifizierte Luecken — aktualisiert 2026-02-23)
 
-| Luecke | Bereich | Prioritaet | Ergaenzungshinweis |
-|--------|---------|------------|-------------------|
-| Kalibrierungs-Wizard UI | Frontend | HOCH | Server-API existiert (`POST /sensors/calibrate`), nur Frontend-Wizard fehlt |
-| Historische Zeitreihen-View | Frontend | HOCH | Chart.js vorhanden, eigene View als Komponente fehlt |
-| Analyse-Profile UI | Frontend | MITTEL | Dashboard fuer Datenerfassungs-Steuerung |
-| Benutzer-Management UI | Frontend | NIEDRIG | Admin-Panel (JWT/RBAC funktioniert bereits) |
-| Erweiterte Grafana-Alert-Regeln | Monitoring | HOCH | 8 Regeln aktiv, 20+ empfohlen fuer Testlauf |
-| Isolation Forest Service | Backend | MITTEL | scikit-learn verfuegbar, ai_predictions-Tabelle bereit |
-| MQTT-ACL | Security | NIEDRIG (fuer Testlauf) | Vorlage existiert, fuer Produktion MUSS |
-| Incident-Management-Prozess | Operations | NIEDRIG | Wer macht was bei Ausfall |
+| Luecke | Bereich | Prioritaet | Status |
+|--------|---------|------------|--------|
+| ~~Kalibrierungs-Wizard UI~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — CalibrationWizard.vue + CalibrationStep.vue + calibration.ts + CalibrationView.vue |
+| ~~Historische Zeitreihen-View~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — SensorHistoryView.vue + TimeRangeSelector.vue |
+| **Sidebar-Navigation** | Frontend | **HOCH** | ❌ Links zu /calibration und /sensor-history fehlen in Sidebar.vue |
+| Analyse-Profile UI | Frontend | MITTEL | Offen — Dashboard fuer Datenerfassungs-Steuerung |
+| Benutzer-Management UI | Frontend | NIEDRIG | Offen — Admin-Panel (JWT/RBAC funktioniert bereits) |
+| ~~Erweiterte Grafana-Alert-Regeln~~ | ~~Monitoring~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — 26 Regeln aktiv (8 alt + 18 Phase-0 neu) |
+| ~~Handler-Integration Metriken~~ | ~~Backend~~ | ~~KRITISCH~~ | ✅ **ERLEDIGT** — Alle 12 Update-Funktionen in Handlern integriert |
+| Isolation Forest Service | Backend | MITTEL | Offen — ai_prediction.py Model FEHLT, ai_repo.py/ai_service.py sind Stubs |
+| Grafana Deployment-Verifikation | Monitoring | MITTEL | Offen — 26 Alerts definiert, Grafana-Reload nach Deployment steht aus |
+| MQTT-ACL | Security | NIEDRIG (fuer Testlauf) | Offen — Vorlage existiert, fuer Produktion MUSS |
+| Incident-Management-Prozess | Operations | NIEDRIG | Offen — Wer macht was bei Ausfall |
+
+---
+
+## LOGGING-INFRASTRUKTUR — Wo was geloggt wird und wie Agenten es erreichen
+
+> **Kritisch fuer Testlauf-Vorbereitung.** Jeder Debug-Agent muss wissen wo seine Logs liegen.
+
+### Uebersicht: Log-Quellen und Zugriffspfade
+
+| Quelle | Speicherort | Format | Rotation | Docker-Mount | Loki-Label | Agent |
+|--------|------------|--------|----------|--------------|------------|-------|
+| **Server (God Kaiser)** | `logs/server/god_kaiser.log` | JSON | RotatingFile 10MB × 10 | `./logs/server:/app/logs` | `compose_service="el-servador"` | server-debug |
+| **PostgreSQL** | `logs/postgres/postgresql-YYYY-MM-DD.log` | Text | Daily + 50MB | `./logs/postgres:/var/log/postgresql` | `compose_service="postgres"` | db-inspector |
+| **MQTT Broker** | stdout (kein Datei-Log) | Text | Docker json-file 10m × 3 | Kein Mount | `compose_service="mqtt-broker"` | mqtt-debug |
+| **Frontend** | stdout (Browser-Console) | JSON | Docker json-file 5m × 3 | Kein Mount | `compose_service="el-frontend"` | frontend-debug |
+| **ESP32 Serial (Wokwi)** | `logs/wokwi/serial/` | Text | Pro Test | Kein Mount | Nicht in Loki | esp32-debug |
+| **ESP32 Serial (Real)** | `logs/current/esp32_serial.log` | Text | Manuell | Kein Mount | `compose_service="esp32-serial-logger"` (Hardware-Profil) | esp32-debug |
+| **Wokwi Reports** | `logs/wokwi/reports/` | JSON/XML | Pro Test | Kein Mount | Nicht in Loki | test-log-analyst |
+| **CI/CD** | GitHub Actions Artifacts | Text | Per Run | Kein Mount | Nicht in Loki | test-log-analyst (via `gh` CLI) |
+
+### Server-Logging Detail
+
+**Config:** `El Servador/god_kaiser_server/src/core/config.py` (LoggingSettings, Zeile 159-186)
+
+| Setting | Default | ENV-Variable |
+|---------|---------|-------------|
+| Level | INFO | `LOG_LEVEL` |
+| Format | json | `LOG_FORMAT` |
+| File Path | logs/god_kaiser.log | `LOG_FILE_PATH` |
+| Max Bytes | 10MB | `LOG_FILE_MAX_BYTES` |
+| Backup Count | 10 | `LOG_FILE_BACKUP_COUNT` |
+
+**JSON-Log-Format:**
+```json
+{"timestamp": "2026-02-01 10:23:45", "level": "INFO", "logger": "src.mqtt.handlers.sensor_handler", "message": "...", "request_id": "abc123"}
+```
+
+**Agent-Zugriff:** `server-debug` liest `logs/server/god_kaiser.log` direkt per Read-Tool.
+
+### MQTT Broker Detail
+
+**Config:** `docker/mosquitto/mosquitto.conf` (Zeile 42-54)
+- Log Destination: `stdout` (KEIN File-Log seit Mosquitto v3.1)
+- Log Types: error, warning, notice, information, subscribe, unsubscribe
+- **MQTT-Payload-Inhalte werden NICHT geloggt** — nur Connection-Events
+
+**Agent-Zugriff:** `mqtt-debug` nutzt `docker compose logs mqtt-broker` oder Loki-Query `{compose_service="mqtt-broker"}`. Fuer Message-Inhalte: `mosquitto_sub -h localhost -t "kaiser/#" -v`
+
+### PostgreSQL Detail
+
+**Config:** `docker/postgres/postgresql.conf` (Zeile 9-34)
+- Slow Query Threshold: 100ms (`log_min_duration_statement`)
+- Logged: INSERT/UPDATE/DELETE/DDL (`log_statement=mod`)
+- Log Prefix: `%t [%p] %u@%d` (Timestamp + PID + user@db)
+
+**Agent-Zugriff:** `db-inspector` liest `logs/postgres/postgresql-YYYY-MM-DD.log` direkt.
+
+### ESP32 Serial Detail
+
+**Firmware Logger:** `El Trabajante/src/utils/logger.h` + `logger.cpp`
+- Log Levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- Circular Buffer (50 Eintraege, 128 Byte pro Message)
+- Macros: `LOG_DEBUG()`, `LOG_INFO()`, `LOG_WARNING()`, `LOG_ERROR()`, `LOG_CRITICAL()`
+
+**Capture-Methoden:**
+| Methode | Befehl | Kontext |
+|---------|--------|---------|
+| Wokwi CLI | `wokwi-cli . --serial-log-file output.log` | Simulation |
+| PlatformIO Monitor | `pio device monitor > serial.log 2>&1` | Echter ESP (PowerShell!) |
+| Docker Serial Bridge | Hardware-Profil starten | Promtail → Loki |
+
+**Agent-Zugriff:** `esp32-debug` liest `logs/current/esp32_serial.log`. Bei Wokwi: `logs/wokwi/serial/`.
+
+### Frontend Detail
+
+**Logger:** `El Frontend/src/utils/logger.ts` — `createLogger(namespace)` → `console.debug/info/warn/error`
+- Kein File-basiertes Logging
+- Global Error Handler in `main.ts`: `app.config.errorHandler`
+- Log Viewer API: `GET /api/v1/logs` (Server-Logs via REST)
+
+**Agent-Zugriff:** `frontend-debug` nutzt `docker compose logs el-frontend`. Browser-Console ist Blind Spot — User muss Infos liefern.
+
+### Loki/Promtail Integration
+
+**Promtail Config:** `docker/promtail/config.yml`
+- Docker Service Discovery → Container mit Label `auto-one`
+- Pipeline-Stages extrahieren `level`, `logger`, `component` Labels
+- Health-Check/Metrics-Logs werden gefiltert
+
+**Verfuegbare Loki-Labels:**
+```
+{compose_service="el-servador"}                    # Server
+{compose_service="el-servador", level="ERROR"}     # Nur Server-Errors
+{compose_service="el-frontend"}                     # Frontend
+{compose_service="mqtt-broker"}                     # MQTT
+{compose_service="postgres"}                        # PostgreSQL
+{compose_service="esp32-serial-logger"}             # ESP32 (Hardware-Profil)
+```
+
+**Loki-Query per curl:**
+```bash
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={compose_service="el-servador"} |= "ERROR"' \
+  --data-urlencode 'limit=50'
+```
+
+### Session-Script und Agent-Log-Hierarchie
+
+**Script:** `scripts/debug/start_session.sh`
+- Erstellt Symlinks in `logs/current/` fuer schnellen Agent-Zugriff
+- Exportiert optional Loki-Queries zu `*_loki_*.log`
+- Generiert `STATUS.md` Zusammenfassung
+
+**Agent-Log-Zuordnung (aus LOG_ACCESS_REFERENCE.md):**
+
+| Agent | Primaere Quelle | Fallback |
+|-------|----------------|----------|
+| `server-debug` | `logs/server/god_kaiser.log` | `docker compose logs el-servador` |
+| `mqtt-debug` | `docker compose logs mqtt-broker` | Loki `{compose_service="mqtt-broker"}` |
+| `esp32-debug` | `logs/current/esp32_serial.log` | User-Capture |
+| `frontend-debug` | `docker compose logs el-frontend` | Browser Console (User liefert) |
+| `test-log-analyst` | `logs/wokwi/reports/` | `gh run view --log` |
+| `db-inspector` | `logs/postgres/postgresql-*.log` | MCP Database Server |
 
 ---
 
 ## PHASE 0: FUNDAMENT — Gemeinsame Error-Taxonomie
 
 > **Ziel:** Einheitliches Fehlersystem das BEIDE Spuren nutzen — egal ob Wokwi-Simulation oder echtes Testfeld.
+> **Status: ✅ PHASE 0 ABGESCHLOSSEN** (2026-02-23 verifiziert)
 > **Aufwand:** Konfiguration + Alert-Regeln, minimal neuer Code.
 
-### 0.1 Error-Taxonomie konsolidieren
+### 0.1 Error-Taxonomie konsolidieren ✅ ERLEDIGT
 
 Die Error-Taxonomie ist bereits zweistufig definiert:
 
@@ -152,13 +282,14 @@ Die Error-Taxonomie ist bereits zweistufig definiert:
 | Server | actuator | 5400-5499 | `5401: ACTUATOR_CONFLICT` |
 | Server | safety | 5500-5599 | `5501: RATE_LIMIT_EXCEEDED` |
 
-**Ergaenzungshinweis:** Noch nicht abgedeckt sind Test-spezifische Fehler (z.B. Wokwi-Simulation-Timeout, Mock-ESP-Konfigurationsfehler). Ein optionaler Block 6000-6099 koennte Testinfrastruktur-Fehler abdecken. MUSS!!
+**✅ ERLEDIGT:** Test-Error-Block 6000-6099 implementiert. 12 Test-Codes in `TestErrorCodes(IntEnum)` (Python) und `#define ERROR_TEST_*` (C++). Dokumentiert in ERROR_CODES.md Sektion 19.
 
-### 0.2 Grafana-Alert-Regeln erweitern
+### 0.2 Grafana-Alert-Regeln erweitern ✅ ERLEDIGT
 
-Aktuelle 8 Regeln → Ziel: 28+ Regeln fuer den Testlauf.
+~~Aktuelle 8 Regeln → Ziel: 28+ Regeln fuer den Testlauf.~~
+**Aktuell: 26 Alert-Regeln aktiv** (8 alt + 18 Phase-0 neu). 2 Regeln begruendet weggelassen (Node Exporter fehlt, cAdvisor-Bug).
 
-**Neue Regeln (Empfehlung, kein Code noetig — nur `alert-rules.yml` erweitern):**
+**Implementierte Regeln (Empfehlung, kein Code noetig — nur `alert-rules.yml` erweitern):**
 
 | Alert | PromQL / LogQL | Severity | Kategorie |
 |-------|---------------|----------|-----------|
@@ -173,9 +304,9 @@ Aktuelle 8 Regeln → Ziel: 28+ Regeln fuer den Testlauf.
 | Disk Usage High | `disk_usage_percent > 80` | WARNING | operations |
 | ESP Boot-Loop | `boot_count > 3 in 10min` | CRITICAL | device |
 
-Kann das Direkt mit Agenten verknüpft werden, der alle alerts immer genau im überblick hält und genau zusammefässt und ist es bereits in stufe 0.3 integriert? dass es automatisiert abläuft, aber gut strukturiert für jedes event und für die die relevant miteinander zusammenhängen.
+**Agent-Verknuepfung:** auto-ops Plugin (`/auto-ops:ops-diagnose`) aggregiert Grafana-Alert-Status und korreliert zusammenhaengende Events. System-Health Skill hat Eskalationsmatrix.
 
-### 0.3 KI-Error-Analyse Stufe 1 aktivieren
+### 0.3 KI-Error-Analyse Stufe 1 aktivieren ✅ KONFIGURIERT
 
 **Sofort nutzbar (0 Code, nur Konfiguration):**
 
@@ -199,22 +330,25 @@ Stufe 1: RULE-BASED (Grafana Alerting)
 ## PHASE 1: SPUR A — Wokwi-Simulation (SIL) stabilisieren
 
 > **Ziel:** Wokwi-Szenarien als dauerhaft laufende Regressionstests. Unabhaengig vom echten Testfeld.
+> **Status: ✅ PHASE 1 ABGESCHLOSSEN** (2026-02-23 verifiziert)
 > **Vorteil:** Kein ESP32 noetig, keine Hardware-Abhaengigkeit, CI/CD-integrierbar.
 
-### 1.1 Bestehende Wokwi-Infrastruktur
+### 1.1 Bestehende Wokwi-Infrastruktur ✅ ERWEITERT
 
 | Komponente | Status | Details |
 |-----------|--------|---------|
-| Wokwi-Szenarien | **163 vorhanden** | Full Boot, MQTT, Heartbeat, Zone Assignment |
-| CI/CD Pipeline | **Vorhanden** | `wokwi-tests.yml` (Manual Dispatch) |
+| Wokwi-Szenarien | **173 vorhanden** | 163 Normal + **10 Error-Injection** (Kategorie 11) |
+| CI/CD Pipeline | **Erweitert** | Push/PR + Manual + **Nightly (cron 03:00 UTC)** |
+| CI/CD Jobs | **16 Jobs, 52 Szenarien** | Inkl. **JOB 16: error-injection-tests** |
 | pytest Integration | **Vorhanden** | Wokwi-Tests als pytest-Szenarien |
 | HAL-Pattern | **Implementiert** | `igpio_hal.h` / `esp32_gpio_hal.h` — Hardware-Abstraktion fuer Testbarkeit |
+| Error-Mapping | **Dokumentiert** | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` |
 
-### 1.2 Erweiterungsplan
+### 1.2 Erweiterungsplan ✅ IMPLEMENTIERT
 
-**A. Wokwi-Szenarien mit Error-Injection:**
+**A. Wokwi-Szenarien mit Error-Injection:** ✅ 10 Szenarien erstellt
 
-Die Wokwi-Simulation kann dieselbe Fehler-Taxonomie nutzen wie das Produktionstestfeld:
+Die Wokwi-Simulation nutzt dieselbe Fehler-Taxonomie wie das Produktionstestfeld:
 
 | Fehlertyp | Wokwi-Simulation | Error-Code |
 |-----------|-------------------|------------|
@@ -226,14 +360,13 @@ Die Wokwi-Simulation kann dieselbe Fehler-Taxonomie nutzen wie das Produktionste
 
 **Referenz:** Yu et al. (2024) identifiziert 5 Fault-Injection-Kategorien (Network Latency, Service Crash, Resource Exhaustion, Message Loss, Security Attack) — alle in Wokwi simulierbar.
 
-**B. CI/CD-Automatisierung:**
+**B. CI/CD-Automatisierung:** ✅ KONFIGURIERT
 
 ```
-Aktuell: wokwi-tests.yml (Manual Dispatch)
-   ↓
-Ziel: Automatischer Trigger bei Push/PR auf El Trabajante/**
-   ↓
-Ergaenzung: Nightly-Run fuer Full-Suite (163+ Szenarien)
+✅ ERLEDIGT: Push/PR + Manual + Nightly (cron 03:00 UTC)
+   - 16 Jobs, 52 CI-Szenarien
+   - Error-Injection als JOB 16 integriert
+   - test-summary Job zaehlt alle Jobs
 ```
 
 **Referenz:** Kalimuthu (2025) empfiehlt SIL-Tests automatisch in CI/CD, HIL-Tests manuell oder periodisch.
@@ -247,21 +380,41 @@ Wokwi-Test-Reports sollten dieselben Error-Codes und Severity-Stufen verwenden w
 
 Wichtig: Dennoch beide Systeme immer klar voneinander trennen.
 
-### 1.3 Wokwi-spezifische Ressourcen
+### 1.3 Wokwi-spezifische Ressourcen ✅ AKTUALISIERT
 
 | Ressource | Pfad / Ort | Status |
 |-----------|-----------|--------|
-| Wokwi-Szenarien | `tests/wokwi/` (auto-one Repo) | 163 Szenarien |
-| HAL-Interface | `igpio_hal.h` (Firmware) | Implementiert |
-| CI/CD Pipeline | `.github/workflows/wokwi-tests.yml` | Manual Dispatch |
+| Wokwi-Szenarien | `El Trabajante/tests/wokwi/scenarios/` (14 Kategorien) | **173 Szenarien** |
+| Error-Injection | `El Trabajante/tests/wokwi/scenarios/11-error-injection/` | **10 Szenarien** |
+| HAL-Interface | `El Trabajante/src/drivers/hal/igpio_hal.h` | Implementiert |
+| CI/CD Pipeline | `.github/workflows/wokwi-tests.yml` | Push/PR + Manual + **Nightly** |
 | pytest-Wokwi-Config | `tests/wokwi/conftest.py` | Konfiguriert |
 | Seed-Script | `scripts/seed_wokwi_esp.py` | Testdaten-Generator |
+| Error-Mapping | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` | **Dokumentiert** |
+
+### 1.4 Wokwi-Logging fuer Testlauf
+
+**Wo Wokwi-Logs landen:**
+
+| Log-Typ | Pfad | Format | Erstellt durch |
+|---------|------|--------|---------------|
+| Serial-Output | `logs/wokwi/serial/<kategorie>/<szenario>_<timestamp>.log` | Text | `wokwi-cli --serial-log-file` |
+| MQTT-Capture | `logs/wokwi/mqtt/<kategorie>/<szenario>_<timestamp>.log` | Text | `mosquitto_sub` im Makefile |
+| Test-Report | `logs/wokwi/reports/test_report_<timestamp>.json` | JSON | pytest |
+| JUnit-Report | `logs/wokwi/reports/junit_<timestamp>.xml` | XML | pytest (CI) |
+| Error-Injection | `logs/wokwi/error-injection/error_*.log` | Text | Error-Injection-Szenarien |
+
+**Agent-Zugriff:**
+- `esp32-debug`: Liest `logs/wokwi/serial/` fuer Serial-Analyse
+- `test-log-analyst`: Liest `logs/wokwi/reports/` fuer Test-Ergebnisse, `gh run view --log` fuer CI
+- `mqtt-debug`: Liest `logs/wokwi/mqtt/` fuer MQTT-Nachrichten waehrend Simulation
 
 ---
 
 ## PHASE 2: SPUR B — Produktionstestfeld aufbauen
 
 > **Ziel:** Echter ESP32 mit echten Sensoren, vollstaendiger Docker-Stack, Monitoring, KI-Error-Analyse.
+> **Status: ⚠️ IMPLEMENTIERUNG ABGESCHLOSSEN — DEPLOYMENT/HARDWARE-VERIFIKATION OFFEN**
 > **Vorteil:** Reale Betriebsbedingungen, echte Sensordaten, End-to-End-Validierung.
 
 ### 2.1 Hardware-Setup
@@ -307,29 +460,28 @@ postgres + mqtt-broker (parallel)
   el-frontend
 ```
 
-### 2.3 Kritischer Pfad — Was muss funktionieren
+### 2.3 Kritischer Pfad — Was muss funktionieren (aktualisiert 2026-02-23)
 
 | # | Anforderung | Aktueller Stand | Was fehlt |
 |---|-------------|----------------|-----------|
 | 1 | Sensordaten fliessen E2E | **95% bereit** | ESP32 muss konfiguriert sein + in DB registriert |
-| 2 | Kalibrierung | **80% bereit** | Frontend-Wizard fehlt — Workaround: Swagger UI (`POST /sensors/calibrate`) |
-| 3 | Live-Daten im Frontend | **90% bereit** | WebSocket stabil, historische Zeitreihen-View fehlt |
+| 2 | Kalibrierung | **95% bereit** | ✅ CalibrationWizard FERTIG — ❌ Sidebar-Link fehlt |
+| 3 | Live-Daten im Frontend | **95% bereit** | ✅ SensorHistoryView FERTIG — ❌ Sidebar-Link fehlt |
 | 4 | Logic Engine | **95% bereit** | End-to-End implementiert, Safety-System aktiv |
 | 5 | Safety-System | **100% bereit** | Emergency-Stop, ConflictManager, RateLimiter, LoopDetector |
 
-### 2.4 Frontend-Vervollstaendigung
+### 2.4 Frontend-Vervollstaendigung (aktualisiert 2026-02-23)
 
-Das Frontend ist die primaere Luecke fuer ein vollstaendiges Testfeld:
+| UI-Komponente | Prioritaet | Status | Dateien |
+|---------------|-----------|--------|---------|
+| ~~Kalibrierungs-Wizard~~ | ~~HOCH~~ | ✅ **FERTIG** | `CalibrationWizard.vue`, `CalibrationStep.vue`, `calibration.ts`, `CalibrationView.vue` |
+| ~~Zeitreihen-Chart-View~~ | ~~HOCH~~ | ✅ **FERTIG** | `SensorHistoryView.vue`, `TimeRangeSelector.vue` |
+| **Sidebar-Links** | **HOCH** | ❌ **FEHLT** | `/calibration` und `/sensor-history` nicht in `Sidebar.vue` |
+| Analyse-Profile Dashboard | MITTEL | Offen | Datenerfassungs-Steuerung |
+| Admin/User-Management | NIEDRIG | Offen | JWT/RBAC funktioniert bereits |
+| Mobile-Responsive | NIEDRIG | Offen | Tailwind CSS vorhanden |
 
-| UI-Komponente | Prioritaet | Abhaengigkeit | Beschreibung |
-|---------------|-----------|---------------|-------------|
-| Kalibrierungs-Wizard | **HOCH** | Server-API existiert | 2-Punkt pH/EC-Kalibrierung im Browser. Aktuell nur via Swagger moeglich |
-| Zeitreihen-Chart-View | **HOCH** | Chart.js vorhanden | Historische Sensordaten als Zeitreihe. Aktuelle Werte werden schon angezeigt, historisch fehlt |
-| Analyse-Profile Dashboard | **MITTEL** | Backend-API existiert | Datenerfassungs-Steuerung (welche Sensoren, wie oft, welches Profil) |
-| Admin/User-Management | **NIEDRIG** | JWT/RBAC funktioniert | Benutzer anlegen/loeschen im Browser statt API |
-| Mobile-Responsive | **NIEDRIG** | Tailwind CSS vorhanden | Smartphone-Nutzung im Gewaechshaus |
-
-**Ergaenzungshinweis:** Fuer den ERSTEN Testlauf reichen Kalibrierungs-Wizard und Zeitreihen-View. Der Rest kann iterativ nachgezogen werden.
+**Fuer den ERSTEN Testlauf:** Kalibrierungs-Wizard und Zeitreihen-View sind FERTIG. **Einzige Frontend-Luecke: Sidebar-Navigation.**
 
 ### 2.5 Chaos Engineering (nach Basis-Stabilitaet)
 
@@ -464,15 +616,15 @@ Fix wird in Produktion deployed
 
 ---
 
-## Phasen-Uebersicht (Reihenfolge, nicht Zeitplan)
+## Phasen-Uebersicht (Reihenfolge, nicht Zeitplan) — aktualisiert 2026-02-23
 
-| Phase | Fokus | Voraussetzung | Aufwand-Indikation |
-|-------|-------|---------------|-------------------|
-| **0** | Error-Taxonomie + Grafana-Alerts erweitern | Stack laeuft | Konfiguration, kein Code |
-| **1** | Wokwi-Simulation stabilisieren + CI/CD automatisieren | Phase 0 | Gering — Bestehendes erweitern |
-| **2** | Produktionstestfeld aufbauen + Frontend-Luecken schliessen | Phase 0, Hardware | Mittel — Frontend-Arbeit |
-| **3** | KI-Error-Analyse (Stufe 1 sofort, Stufe 2 iterativ) | Sensordaten fliessen | Stufe 1: Konfiguration, Stufe 2: ~1 Woche |
-| **4** | Integration beider Spuren, Dashboards, Feedback-Loop | Phase 1+2+3 | Gering — Orchestrierung |
+| Phase | Fokus | Status | Verbleibend |
+|-------|-------|--------|-------------|
+| **0** | Error-Taxonomie + Grafana-Alerts erweitern | ✅ **ABGESCHLOSSEN** | Grafana-Deployment-Verifikation (Reload) |
+| **1** | Wokwi-Simulation stabilisieren + CI/CD automatisieren | ✅ **ABGESCHLOSSEN** | Makefile-Echo (22→52), lokaler/CI Test-Run |
+| **2** | Produktionstestfeld aufbauen + Frontend-Luecken schliessen | ⚠️ **CODE FERTIG** | Sidebar-Links, Deployment, Hardware-Verifikation |
+| **3** | KI-Error-Analyse (Stufe 1 sofort, Stufe 2 iterativ) | 🔲 **OFFEN** | ai_prediction Model + Repo + Service |
+| **4** | Integration beider Spuren, Dashboards, Feedback-Loop | 🔲 **OFFEN** | Braucht Phase 2+3 |
 
 **Wichtig:** Phase 1 und Phase 2 laufen PARALLEL. Wokwi braucht keine echte Hardware. Das Produktionstestfeld braucht keine Wokwi-Szenarien. Beide teilen sich Phase 0 (Error-Taxonomie) und Phase 3 (KI-Error-Analyse).
 
@@ -547,9 +699,9 @@ Diese Punkte sind Beobachtungen und Empfehlungen — keine festen Vorgaben:
 
 2. **MQTT-Skalierung kein Problem** — Forschung zeigt 8.900 msg/s pro Core (TBMQ-Paper). Mosquitto reicht fuer AutomationOne's aktuellen Umfang bei weitem.
 
-3. **Frontend-Testabdeckung niedrig** — 10 Frontend-Test-Dateien vs. 97 Komponenten. Vitest-Tests sind gut (1118), aber Playwright E2E-Tests sollten fuer kritische Flows ergaenzt werden (Kalibrierung, Live-Daten, Rule-Builder).
+3. **Frontend-Testabdeckung niedrig** — 10 Frontend-Test-Dateien vs. 129 Komponenten. Vitest-Tests sind gut (1118), aber Playwright E2E-Tests sollten fuer kritische Flows ergaenzt werden (Kalibrierung, Live-Daten, Rule-Builder).
 
-4. **Wokwi → CI/CD Automatisierung** — Aktuell Manual Dispatch. Der Wechsel zu Push/PR-Trigger ist eine Konfigurationsaenderung in `wokwi-tests.yml`, kein Code.
+4. ~~**Wokwi → CI/CD Automatisierung** — Aktuell Manual Dispatch.~~ ✅ **ERLEDIGT** — Push/PR + Nightly konfiguriert.
 
 5. **ai_predictions-Tabelle** — Schema existiert, ist leer. Perfekt vorbereitet fuer Isolation Forest-Ergebnisse. Kein DB-Migration noetig.
 

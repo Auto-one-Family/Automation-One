@@ -37,8 +37,8 @@ steps:
   # Verify Logger starts AFTER GPIO (order check)
   - wait-serial: "Logger System Initialized"
 
-  # Verify WiFi starts AFTER GPIO (order check)
-  - wait-serial: "Phase 2: Communication"
-
-  # Final verification - Phase 1 complete means GPIO was successful
+  # Phase 1 complete means GPIO was successful (comes before Phase 2)
   - wait-serial: "Phase 1: Core Infrastructure READY"
+
+  # Verify WiFi/MQTT starts AFTER GPIO (Phase 2 requires Phase 1 complete)
+  - wait-serial: "Phase 2: Communication"

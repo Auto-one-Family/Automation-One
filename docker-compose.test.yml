@@ -23,7 +23,7 @@ services:
   el-servador:
     environment:
       DATABASE_URL: sqlite+aiosqlite:///./test_db.sqlite
-      ENVIRONMENT: test
+      ENVIRONMENT: testing
       LOG_LEVEL: WARNING
     restart: "no"
 

@@ -4,20 +4,20 @@
 # Note: Frequency changes require firmware-level test commands
 # This test validates initial frequency configuration
 # Timeout: 120000ms
+#
+# NOTE: "Freq=1000Hz" is LOG_DEBUG, invisible at CORE_DEBUG_LEVEL=3.
+# Use LOG_INFO "Default Frequency: 1000 Hz" instead.
 
 name: PWM Frequency Configuration
 version: 1
 steps:
-  # Wait for boot
-  - wait-serial: "Boot started"
+  # Wait for boot banner
+  - wait-serial: "ESP32 Sensor Network"
 
-  # Verify default frequency in initialization log
-  - wait-serial: "Freq=1000Hz"
-
-  # Wait for full initialization
+  # Wait for full initialization (LOG_INFO)
   - wait-serial: "PWM Controller initialized successfully"
 
-  # Verify frequency is logged
+  # Verify default frequency is logged (LOG_INFO)
   - wait-serial: "Default Frequency: 1000 Hz"
 
   # Wait for system ready

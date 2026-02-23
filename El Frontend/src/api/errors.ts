@@ -49,7 +49,7 @@ export async function translateErrorCode(code: number): Promise<TranslatedError>
   if (cached) return cached
 
   try {
-    const response = await api.get<TranslatedError>(`/v1/errors/codes/${code}`)
+    const response = await api.get<TranslatedError>(`/errors/codes/${code}`)
     const result = response.data
     translationCache.set(code, result)
     return result

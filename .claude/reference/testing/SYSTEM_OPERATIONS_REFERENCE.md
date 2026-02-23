@@ -1,7 +1,9 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.10 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-21
+> **Version:** 2.12 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-23
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
+> **Änderungen 2.11:** Wokwi: make wokwi-test-all (173), make wokwi-test-error-injection (10), wokwi-seed fix (lokal statt docker exec)
 > **Änderungen 2.10:** Serena MCP-Server Pfade in §9, .mcp.json Pfad ergänzt
 > **Änderungen 2.9:** Health-Response korrigiert (Code-Abgleich), Provisioning Portal für Real-Hardware (§6.1), `tasklist` → Docker-Alternative, sqlite3 → PostgreSQL in §6.2/6.3, PlatformIO Git-Bash-Hinweis, Auth-Header ergänzt
 > **Änderungen 2.8:** Frontend-Container-Logs als Quelle ergänzt (Loki/docker compose logs, §9 + Log-Verzeichnisse)
@@ -1161,19 +1163,22 @@ make wokwi-build-esp03  # ESP_00000003
 
 # Database seeden mit 3 Wokwi test devices (ESP_00000001/02/03, status="approved")
 make wokwi-seed
-# HINWEIS: make wokwi-seed nutzt docker exec, aber das Script ist NICHT im Container gemountet!
-# Lokaler Workaround (PowerShell):
-#   cd "El Servador\god_kaiser_server"
-#   .venv\Scripts\python.exe scripts\seed_wokwi_esp.py
+# Nutzt lokales .venv/Scripts/python.exe (Script ist nicht im Container gemountet)
 
-# Alle verfügbaren Szenarien auflisten (163 total)
+# Alle verfügbaren Szenarien auflisten (173 total, 14 Kategorien)
 make wokwi-list
 
 # Schnelltest (3 Szenarien: boot_full, boot_safe_mode, sensor_heartbeat)
 make wokwi-test-quick
 
-# Alle CI-Szenarien lokal (22 Szenarien, ~30 Minuten)
+# Alle CI core-Szenarien lokal (22 passive Szenarien, ~30 Minuten)
 make wokwi-test-full
+
+# ALLE 173 Szenarien (Nightly-Equivalent, erfordert Mosquitto)
+make wokwi-test-all
+
+# 10 Error-Injection Szenarien (erfordert Mosquitto + mosquitto_pub)
+make wokwi-test-error-injection
 
 # Einzelnes Szenario (default: ESP_00000001)
 make wokwi-test-scenario SCENARIO=tests/wokwi/scenarios/01-boot/boot_full.yaml
@@ -1510,6 +1515,10 @@ curl -X POST http://localhost:8000/api/v1/actuators/ESP_XXXXX/5/command \
 ### 6.7 Sensor-Daten Flow verifizieren
 
 ```bash
+# E2E-Test via Python (umgeht Shell-Escaping-Probleme mit mosquitto_pub):
+cd "El Servador/god_kaiser_server"
+.venv/Scripts/python.exe ../../scripts/test_e2e_sensor_publish.py
+
 # MQTT beobachten
 mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
 
@@ -1737,4 +1746,4 @@ Wenn Cursor den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-21 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-23 | AutomationOne Debug-Operations-Reference*
