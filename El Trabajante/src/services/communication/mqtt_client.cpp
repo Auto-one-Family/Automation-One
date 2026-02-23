@@ -8,6 +8,9 @@
 #include "../../config/feature_flags.h"
 #include <WiFi.h>
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "MQTT";
+
 // ============================================
 // EXTERNAL GLOBAL VARIABLES (from main.cpp)
 // ============================================
@@ -55,7 +58,8 @@ MQTTClient::MQTTClient()
       last_heartbeat_(0),
       circuit_breaker_("MQTT", 5, 30000, 10000),
       registration_confirmed_(false),
-      registration_start_ms_(0) {
+      registration_start_ms_(0),
+      publish_seq_(0) {
   // Circuit Breaker configured:
   // - 5 failures → OPEN
   // - 30s recovery timeout
@@ -71,14 +75,14 @@ MQTTClient::~MQTTClient() {
 // ============================================
 bool MQTTClient::begin() {
     if (initialized_) {
-        LOG_WARNING("MQTTClient already initialized");
+        LOG_W(TAG, "MQTTClient already initialized");
         return true;
     }
     
     mqtt_.setCallback(staticCallback);
     
     initialized_ = true;
-    LOG_INFO("MQTTClient initialized");
+    LOG_I(TAG, "MQTTClient initialized");
     return true;
 }
 
@@ -101,7 +105,7 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     #endif
     
     if (!initialized_) {
-        LOG_ERROR("MQTTClient not initialized");
+        LOG_E(TAG, "MQTTClient not initialized");
         errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
                                            "MQTTClient not initialized");
         return false;
@@ -120,7 +124,7 @@ bool MQTTClient::connect(const MQTTConfig& config) {
           Serial.println(dbg); }
         // #endregion
         #endif
-        LOG_ERROR("MQTT server address is empty");
+        LOG_E(TAG, "MQTT server address is empty");
         errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
                                            "MQTT server address is empty");
         return false;
@@ -133,9 +137,9 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Check authentication mode
     anonymous_mode_ = (config.username.length() == 0);
     if (anonymous_mode_) {
-        LOG_INFO("MQTT connecting in Anonymous Mode");
+        LOG_I(TAG, "MQTT connecting in Anonymous Mode");
     } else {
-        LOG_INFO("MQTT connecting with authentication");
+        LOG_I(TAG, "MQTT connecting with authentication");
     }
     
     // Set server
@@ -175,7 +179,7 @@ bool MQTTClient::connectToBroker() {
     // #endregion
     #endif
     
-    LOG_INFO("Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
+    LOG_I(TAG, "Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
 
     // ============================================
     // LAST-WILL CONFIGURATION (Critical for ESP failure detection)
@@ -191,8 +195,8 @@ bool MQTTClient::connectToBroker() {
     String last_will_message = "{\"status\":\"offline\",\"reason\":\"unexpected_disconnect\",\"timestamp\":" +
                                String((unsigned long)will_timestamp) + "}";
 
-    LOG_INFO("Last-Will Topic: " + last_will_topic);
-    LOG_INFO("Last-Will Message: " + last_will_message);
+    LOG_I(TAG, "Last-Will Topic: " + last_will_topic);
+    LOG_I(TAG, "Last-Will Message: " + last_will_message);
 
     // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
     // Try configured port first (likely 8883 for TLS)
@@ -213,22 +217,22 @@ bool MQTTClient::connectToBroker() {
 
     // If connection failed and port is 8883 (TLS), try fallback to 1883 (plain MQTT)
     if (!connected && current_config_.port == 8883) {
-        LOG_WARNING("╔════════════════════════════════════════╗");
-        LOG_WARNING("║  ⚠️  MQTT PORT FALLBACK               ║");
-        LOG_WARNING("╚════════════════════════════════════════╝");
-        LOG_WARNING("Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
-        LOG_WARNING("Reason: Server may not support TLS on port 8883");
-        LOG_WARNING("Empfehlung: Update .env.example MQTT_BROKER_PORT=1883");
+        LOG_W(TAG, "╔════════════════════════════════════════╗");
+        LOG_W(TAG, "║  ⚠️  MQTT PORT FALLBACK               ║");
+        LOG_W(TAG, "╚════════════════════════════════════════╝");
+        LOG_W(TAG, "Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
+        LOG_W(TAG, "Reason: Server may not support TLS on port 8883");
+        LOG_W(TAG, "Empfehlung: Update .env.example MQTT_BROKER_PORT=1883");
 
         // Update port and retry
         current_config_.port = 1883;
         mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
 
-        LOG_INFO("Retrying MQTT connection with port 1883...");
+        LOG_I(TAG, "Retrying MQTT connection with port 1883...");
         connected = attemptMQTTConnection(last_will_topic, last_will_message);
 
         if (connected) {
-            LOG_INFO("✅ Port-Fallback successful! Connected on port 1883");
+            LOG_I(TAG, "✅ Port-Fallback successful! Connected on port 1883");
         }
     }
 
@@ -245,7 +249,7 @@ bool MQTTClient::connectToBroker() {
           Serial.println(dbg); }
         // #endregion
         #endif
-        LOG_INFO("MQTT connected!");
+        LOG_I(TAG, "MQTT connected!");
         reconnect_attempts_ = 0;
         reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
 
@@ -257,7 +261,7 @@ bool MQTTClient::connectToBroker() {
         // ============================================
         registration_confirmed_ = false;
         registration_start_ms_ = millis();
-        LOG_INFO("Registration gate closed - awaiting heartbeat ACK");
+        LOG_I(TAG, "Registration gate closed - awaiting heartbeat ACK");
 
         // Process offline buffer
         processOfflineBuffer();
@@ -278,7 +282,7 @@ bool MQTTClient::connectToBroker() {
           Serial.println(dbg); }
         // #endregion
         #endif
-        LOG_ERROR("MQTT connection failed, rc=" + String(mqtt_.state()));
+        LOG_E(TAG, "MQTT connection failed, rc=" + String(mqtt_.state()));
         errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
                                            ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
         return false;
@@ -370,7 +374,7 @@ bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const Stri
 bool MQTTClient::disconnect() {
     if (mqtt_.connected()) {
         mqtt_.disconnect();
-        LOG_INFO("MQTT disconnected");
+        LOG_I(TAG, "MQTT disconnected");
     }
     return true;
 }
@@ -381,7 +385,7 @@ bool MQTTClient::isConnected() {
 
 void MQTTClient::reconnect() {
     if (isConnected()) {
-        LOG_DEBUG("MQTT already connected");
+        LOG_D(TAG, "MQTT already connected");
         circuit_breaker_.recordSuccess();  // Reset on successful connection
         return;
     }
@@ -407,7 +411,7 @@ void MQTTClient::reconnect() {
               Serial.println(dbg); }
             // #endregion
             #endif
-            LOG_DEBUG("MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
+            LOG_D(TAG, "MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
         }
         return;  // Skip reconnect attempt
     }
@@ -421,7 +425,7 @@ void MQTTClient::reconnect() {
     last_reconnect_attempt_ = millis();
 
     // ✅ IMPROVEMENT #3: Keine Reconnect-Limit (Circuit Breaker regelt Fehlerbehandlung)
-    LOG_INFO("Attempting MQTT reconnection (attempt " +
+    LOG_I(TAG, "Attempting MQTT reconnection (attempt " +
              String(reconnect_attempts_) + ")");
 
     // Debug log only when reconnect is actually attempted (after all checks)
@@ -454,9 +458,9 @@ void MQTTClient::reconnect() {
 
         // Check if Circuit Breaker opened
         if (circuit_breaker_.isOpen()) {
-            LOG_WARNING("Circuit Breaker OPENED after reconnect failures");
-            LOG_WARNING("  Will retry in 30 seconds");
-            LOG_WARNING("  Attempt count: " + String(reconnect_attempts_));
+            LOG_W(TAG, "Circuit Breaker OPENED after reconnect failures");
+            LOG_W(TAG, "  Will retry in 30 seconds");
+            LOG_W(TAG, "  Attempt count: " + String(reconnect_attempts_));
         }
     } else {
         // ✅ RECONNECT SUCCESS
@@ -469,11 +473,11 @@ void MQTTClient::reconnect() {
 // ============================================
 bool MQTTClient::transitionToAuthenticated(const String& username, const String& password) {
     if (!anonymous_mode_) {
-        LOG_WARNING("Already in authenticated mode");
+        LOG_W(TAG, "Already in authenticated mode");
         return true;
     }
     
-    LOG_INFO("Transitioning from Anonymous to Authenticated mode");
+    LOG_I(TAG, "Transitioning from Anonymous to Authenticated mode");
     
     // Update config
     current_config_.username = username;
@@ -490,6 +494,17 @@ bool MQTTClient::isAnonymousMode() const {
 }
 
 // ============================================
+// SEQUENCE NUMBER (Correlation-ID support)
+// ============================================
+uint32_t MQTTClient::getNextSeq() {
+    return ++publish_seq_;
+}
+
+uint32_t MQTTClient::getCurrentSeq() const {
+    return publish_seq_;
+}
+
+// ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER - Phase 6+)
 // ============================================
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
@@ -502,9 +517,9 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // CIRCUIT BREAKER CHECK
     // ============================================
     if (!circuit_breaker_.allowRequest()) {
-        LOG_WARNING("MQTT publish blocked by Circuit Breaker (Service DOWN)");
-        LOG_DEBUG("  Topic: " + topic);
-        LOG_DEBUG("  Circuit State: OPEN (waiting for recovery)");
+        LOG_W(TAG, "MQTT publish blocked by Circuit Breaker (Service DOWN)");
+        LOG_D(TAG, "  Topic: " + topic);
+        LOG_D(TAG, "  Circuit State: OPEN (waiting for recovery)");
         // Don't add to offline buffer when circuit is open - it will retry on recovery
         return false;
     }
@@ -520,10 +535,10 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         // Check timeout: Nach 10s Gate automatisch öffnen (Fallback)
         if (registration_start_ms_ > 0 &&
             (millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
-            LOG_WARNING("Registration timeout - opening gate (fallback)");
+            LOG_W(TAG, "Registration timeout - opening gate (fallback)");
             registration_confirmed_ = true;
         } else {
-            LOG_DEBUG("Publish blocked (awaiting registration): " + topic);
+            LOG_D(TAG, "Publish blocked (awaiting registration): " + topic);
             return false;
         }
     }
@@ -532,7 +547,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // EMPTY PAYLOAD GUARD (Bug #2 Fix)
     // ============================================
     if (payload.length() == 0) {
-        LOG_ERROR("Empty payload blocked for topic: " + topic);
+        LOG_E(TAG, "Empty payload blocked for topic: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID,
                                            ("Empty payload for: " + topic).c_str());
         return false;
@@ -542,7 +557,7 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // CONNECTION CHECK
     // ============================================
     if (!isConnected()) {
-        LOG_WARNING("MQTT not connected, adding to offline buffer");
+        LOG_W(TAG, "MQTT not connected, adding to offline buffer");
         circuit_breaker_.recordFailure();  // Connection failure counts
         return addToOfflineBuffer(topic, payload, qos);
     }
@@ -555,26 +570,26 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     if (success) {
         // ✅ SUCCESS
         circuit_breaker_.recordSuccess();
-        LOG_DEBUG("Published: " + topic);
+        LOG_D(TAG, "Published: " + topic);
         
         // Optional: Payload preview (first 50 chars)
         if (payload.length() > 50) {
-            LOG_DEBUG("  Payload: " + payload.substring(0, 50) + "...");
+            LOG_D(TAG, "  Payload: " + payload.substring(0, 50) + "...");
         } else {
-            LOG_DEBUG("  Payload: " + payload);
+            LOG_D(TAG, "  Payload: " + payload);
         }
         
     } else {
         // ❌ FAILURE
         circuit_breaker_.recordFailure();
-        LOG_ERROR("Publish failed: " + topic);
+        LOG_E(TAG, "Publish failed: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED, 
                                            ("Publish failed: " + topic).c_str());
         
         // Check if Circuit Breaker opened
         if (circuit_breaker_.isOpen()) {
-            LOG_WARNING("Circuit Breaker OPENED after failure threshold");
-            LOG_WARNING("  MQTT will be unavailable for 30 seconds");
+            LOG_W(TAG, "Circuit Breaker OPENED after failure threshold");
+            LOG_W(TAG, "  MQTT will be unavailable for 30 seconds");
         }
         
         addToOfflineBuffer(topic, payload, qos);
@@ -588,7 +603,7 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
     // But we reduce retries if Circuit Breaker is OPEN to avoid spam
     
     if (circuit_breaker_.isOpen()) {
-        LOG_DEBUG("SafePublish: Circuit Breaker OPEN, skipping retries");
+        LOG_D(TAG, "SafePublish: Circuit Breaker OPEN, skipping retries");
         return publish(topic, payload, qos);  // Single attempt only
     }
     
@@ -600,7 +615,7 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
 
     // Don't retry if Circuit Breaker opened
     if (circuit_breaker_.isOpen()) {
-        LOG_DEBUG("SafePublish: Circuit Breaker OPENED after first attempt");
+        LOG_D(TAG, "SafePublish: Circuit Breaker OPENED after first attempt");
         return false;
     }
 
@@ -610,7 +625,7 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
         return true;
     }
 
-    LOG_ERROR("SafePublish failed after retry");
+    LOG_E(TAG, "SafePublish failed after retry");
     return false;
 }
 
@@ -619,7 +634,7 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
 // ============================================
 bool MQTTClient::subscribe(const String& topic) {
     if (!isConnected()) {
-        LOG_ERROR("Cannot subscribe, MQTT not connected");
+        LOG_E(TAG, "Cannot subscribe, MQTT not connected");
         errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED, 
                                            "Cannot subscribe, not connected");
         return false;
@@ -628,9 +643,9 @@ bool MQTTClient::subscribe(const String& topic) {
     bool success = mqtt_.subscribe(topic.c_str());
     
     if (success) {
-        LOG_INFO("Subscribed to: " + topic);
+        LOG_I(TAG, "Subscribed to: " + topic);
     } else {
-        LOG_ERROR("Subscribe failed: " + topic);
+        LOG_E(TAG, "Subscribe failed: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED, 
                                            ("Subscribe failed: " + topic).c_str());
     }
@@ -640,16 +655,16 @@ bool MQTTClient::subscribe(const String& topic) {
 
 bool MQTTClient::unsubscribe(const String& topic) {
     if (!isConnected()) {
-        LOG_WARNING("Cannot unsubscribe, MQTT not connected");
+        LOG_W(TAG, "Cannot unsubscribe, MQTT not connected");
         return false;
     }
     
     bool success = mqtt_.unsubscribe(topic.c_str());
     
     if (success) {
-        LOG_INFO("Unsubscribed from: " + topic);
+        LOG_I(TAG, "Unsubscribed from: " + topic);
     } else {
-        LOG_ERROR("Unsubscribe failed: " + topic);
+        LOG_E(TAG, "Unsubscribe failed: " + topic);
     }
     
     return success;
@@ -692,6 +707,7 @@ void MQTTClient::publishHeartbeat(bool force) {
     
     String payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+    payload += "\"seq\":" + String(getNextSeq()) + ",";
     payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
     payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
     payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
@@ -748,10 +764,10 @@ bool MQTTClient::isRegistrationConfirmed() const {
 void MQTTClient::confirmRegistration() {
     if (!registration_confirmed_) {
         registration_confirmed_ = true;
-        LOG_INFO("╔════════════════════════════════════════╗");
-        LOG_INFO("║  REGISTRATION CONFIRMED BY SERVER     ║");
-        LOG_INFO("╚════════════════════════════════════════╝");
-        LOG_INFO("Gate opened - publishes now allowed");
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  REGISTRATION CONFIRMED BY SERVER     ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
+        LOG_I(TAG, "Gate opened - publishes now allowed");
     }
 }
 
@@ -786,10 +802,10 @@ void MQTTClient::handleDisconnection() {
     // ============================================
     registration_confirmed_ = false;
     registration_start_ms_ = 0;
-    LOG_DEBUG("Registration gate closed due to disconnect");
+    LOG_D(TAG, "Registration gate closed due to disconnect");
 
     if (!disconnection_logged) {
-        LOG_WARNING("MQTT disconnected");
+        LOG_W(TAG, "MQTT disconnected");
         errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT,
                                            "MQTT connection lost");
         disconnection_logged = true;
@@ -844,7 +860,7 @@ void MQTTClient::processOfflineBuffer() {
         return;
     }
     
-    LOG_INFO("Processing offline buffer (" + String(offline_buffer_count_) + " messages)");
+    LOG_I(TAG, "Processing offline buffer (" + String(offline_buffer_count_) + " messages)");
     
     uint16_t processed = 0;
     for (uint16_t i = 0; i < offline_buffer_count_; i++) {
@@ -866,7 +882,7 @@ void MQTTClient::processOfflineBuffer() {
         }
         offline_buffer_count_ = remaining;
         
-        LOG_INFO("Processed " + String(processed) + " offline messages, " + 
+        LOG_I(TAG, "Processed " + String(processed) + " offline messages, " + 
                  String(remaining) + " remaining");
     }
 }
@@ -874,12 +890,12 @@ void MQTTClient::processOfflineBuffer() {
 bool MQTTClient::addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos) {
     // Bug #2 Fix: Don't buffer empty payloads
     if (payload.length() == 0) {
-        LOG_WARNING("Empty payload rejected from offline buffer: " + topic);
+        LOG_W(TAG, "Empty payload rejected from offline buffer: " + topic);
         return false;
     }
 
     if (offline_buffer_count_ >= MAX_OFFLINE_MESSAGES) {
-        LOG_ERROR("Offline buffer full, dropping message");
+        LOG_E(TAG, "Offline buffer full, dropping message");
         errorTracker.logCommunicationError(ERROR_MQTT_BUFFER_FULL, 
                                            "Offline buffer full");
         return false;
@@ -891,7 +907,7 @@ bool MQTTClient::addToOfflineBuffer(const String& topic, const String& payload, 
     offline_buffer_[offline_buffer_count_].timestamp = millis();
     offline_buffer_count_++;
     
-    LOG_DEBUG("Added to offline buffer (count: " + String(offline_buffer_count_) + ")");
+    LOG_D(TAG, "Added to offline buffer (count: " + String(offline_buffer_count_) + ")");
     return true;
 }
 

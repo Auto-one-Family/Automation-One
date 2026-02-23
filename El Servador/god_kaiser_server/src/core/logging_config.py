@@ -148,6 +148,7 @@ def setup_logging() -> None:
     logging.getLogger("paho.mqtt").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     root_logger.info(
         f"Logging configured: level={settings.logging.level}, "

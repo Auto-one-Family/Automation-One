@@ -2,6 +2,9 @@
 #include "../../utils/logger.h"
 #include <nvs_flash.h>
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "NVS";
+
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
 namespace {
 class StorageLockGuard {
@@ -10,7 +13,7 @@ class StorageLockGuard {
     if (mutex_) {
       locked_ = xSemaphoreTake(mutex_, portMAX_DELAY) == pdTRUE;
       if (!locked_) {
-        LOG_ERROR("StorageManager: Failed to acquire mutex");
+        LOG_E(TAG, "StorageManager: Failed to acquire mutex");
       }
     } else {
       locked_ = true;
@@ -67,15 +70,15 @@ bool StorageManager::begin() {
   if (nvs_mutex_ == nullptr) {
     nvs_mutex_ = xSemaphoreCreateMutex();
     if (nvs_mutex_ == nullptr) {
-      LOG_ERROR("StorageManager: Failed to create mutex");
+      LOG_E(TAG, "StorageManager: Failed to create mutex");
       return false;
     }
-    LOG_INFO("StorageManager: Thread-safety enabled (mutex created)");
+    LOG_I(TAG, "StorageManager: Thread-safety enabled (mutex created)");
   }
 #endif
   namespace_open_ = false;
   current_namespace_[0] = '\0';
-  LOG_INFO("StorageManager: Initialized");
+  LOG_I(TAG, "StorageManager: Initialized");
   return true;
 }
 
@@ -90,10 +93,10 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
   }
 #endif
   if (namespace_open_) {
-    LOG_WARNING("StorageManager: Namespace already open, closing first");
+    LOG_W(TAG, "StorageManager: Namespace already open, closing first");
     preferences_.end();
     namespace_open_ = false;
-    LOG_DEBUG("StorageManager: Closed namespace: " + String(current_namespace_));
+    LOG_D(TAG, "StorageManager: Closed namespace: " + String(current_namespace_));
     current_namespace_[0] = '\0';
   }
   
@@ -101,9 +104,9 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
     // For read-only access, a missing namespace is expected (e.g., new device without subzones)
     // Only log ERROR for write access failures, use DEBUG for read-only
     if (read_only) {
-      LOG_DEBUG("StorageManager: Namespace not found (expected for new device): " + String(namespace_name));
+      LOG_D(TAG, "StorageManager: Namespace not found (expected for new device): " + String(namespace_name));
     } else {
-      LOG_ERROR("StorageManager: Failed to open namespace for write: " + String(namespace_name));
+      LOG_E(TAG, "StorageManager: Failed to open namespace for write: " + String(namespace_name));
     }
     return false;
   }
@@ -112,7 +115,7 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
   strncpy(current_namespace_, namespace_name, sizeof(current_namespace_) - 1);
   current_namespace_[sizeof(current_namespace_) - 1] = '\0';
   
-  LOG_DEBUG("StorageManager: Opened namespace: " + String(namespace_name));
+  LOG_D(TAG, "StorageManager: Opened namespace: " + String(namespace_name));
   return true;
 }
 
@@ -126,7 +129,7 @@ void StorageManager::endNamespace() {
   if (namespace_open_) {
     preferences_.end();
     namespace_open_ = false;
-    LOG_DEBUG("StorageManager: Closed namespace: " + String(current_namespace_));
+    LOG_D(TAG, "StorageManager: Closed namespace: " + String(current_namespace_));
     current_namespace_[0] = '\0';
   }
 }
@@ -141,17 +144,17 @@ bool StorageManager::checkNVSQuota(const char* key) {
 
   size_t free_entries = preferences_.freeEntries();
   if (free_entries == 0) {
-    LOG_ERROR("╔════════════════════════════════════════╗");
-    LOG_ERROR("║  NVS FULL - CANNOT SAVE DATA!         ║");
-    LOG_ERROR("╚════════════════════════════════════════╝");
-    LOG_ERROR("NVS namespace '" + String(current_namespace_) + "' has 0 free entries");
-    LOG_ERROR("Cannot write key: " + String(key));
+    LOG_E(TAG, "╔════════════════════════════════════════╗");
+    LOG_E(TAG, "║  NVS FULL - CANNOT SAVE DATA!         ║");
+    LOG_E(TAG, "╚════════════════════════════════════════╝");
+    LOG_E(TAG, "NVS namespace '" + String(current_namespace_) + "' has 0 free entries");
+    LOG_E(TAG, "Cannot write key: " + String(key));
     return false;
   } else if (free_entries < 10) {
-    LOG_WARNING("╔════════════════════════════════════════╗");
-    LOG_WARNING("║  NVS NEARLY FULL - " + String(free_entries) + " entries left        ║");
-    LOG_WARNING("╚════════════════════════════════════════╝");
-    LOG_WARNING("NVS namespace '" + String(current_namespace_) + "' low on space");
+    LOG_W(TAG, "╔════════════════════════════════════════╗");
+    LOG_W(TAG, "║  NVS NEARLY FULL - " + String(free_entries) + " entries left        ║");
+    LOG_W(TAG, "╚════════════════════════════════════════╝");
+    LOG_W(TAG, "NVS namespace '" + String(current_namespace_) + "' low on space");
   }
   return true;
 }
@@ -169,7 +172,7 @@ bool StorageManager::putString(const char* key, const char* value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putString");
+    LOG_E(TAG, "StorageManager: No namespace open for putString");
     return false;
   }
 
@@ -180,11 +183,11 @@ bool StorageManager::putString(const char* key, const char* value) {
 
   size_t bytes = preferences_.putString(key, value);
   if (bytes == 0 && strlen(value) > 0) {
-    LOG_ERROR("StorageManager: Failed to write string key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write string key: " + String(key));
     return false;
   }
 
-  LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value));
+  LOG_D(TAG, "StorageManager: Write " + String(key) + " = " + String(value));
   return true;
 }
 
@@ -196,7 +199,7 @@ const char* StorageManager::getString(const char* key, const char* default_value
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getString");
+    LOG_E(TAG, "StorageManager: No namespace open for getString");
     return default_value;
   }
   
@@ -204,7 +207,7 @@ const char* StorageManager::getString(const char* key, const char* default_value
   strncpy(string_buffer_, value.c_str(), sizeof(string_buffer_) - 1);
   string_buffer_[sizeof(string_buffer_) - 1] = '\0';
   
-  LOG_DEBUG("StorageManager: Read " + String(key) + " = " + value);
+  LOG_D(TAG, "StorageManager: Read " + String(key) + " = " + value);
   return string_buffer_;
 }
 
@@ -217,7 +220,7 @@ bool StorageManager::putInt(const char* key, int value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putInt");
+    LOG_E(TAG, "StorageManager: No namespace open for putInt");
     return false;
   }
 
@@ -227,11 +230,11 @@ bool StorageManager::putInt(const char* key, int value) {
 
   size_t bytes = preferences_.putInt(key, value);
   if (bytes == 0) {
-    LOG_ERROR("StorageManager: Failed to write int key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write int key: " + String(key));
     return false;
   }
   
-  LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value));
+  LOG_D(TAG, "StorageManager: Write " + String(key) + " = " + String(value));
   return true;
 }
 
@@ -243,12 +246,12 @@ int StorageManager::getInt(const char* key, int default_value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getInt");
+    LOG_E(TAG, "StorageManager: No namespace open for getInt");
     return default_value;
   }
   
   int value = preferences_.getInt(key, default_value);
-  LOG_DEBUG("StorageManager: Read " + String(key) + " = " + String(value));
+  LOG_D(TAG, "StorageManager: Read " + String(key) + " = " + String(value));
   return value;
 }
 
@@ -261,7 +264,7 @@ bool StorageManager::putUInt8(const char* key, uint8_t value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putUInt8");
+    LOG_E(TAG, "StorageManager: No namespace open for putUInt8");
     return false;
   }
 
@@ -271,7 +274,7 @@ bool StorageManager::putUInt8(const char* key, uint8_t value) {
 
   size_t bytes = preferences_.putUChar(key, value);
   if (bytes == 0) {
-    LOG_ERROR("StorageManager: Failed to write uint8 key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write uint8 key: " + String(key));
     return false;
   }
   
@@ -286,7 +289,7 @@ uint8_t StorageManager::getUInt8(const char* key, uint8_t default_value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getUInt8");
+    LOG_E(TAG, "StorageManager: No namespace open for getUInt8");
     return default_value;
   }
   
@@ -302,7 +305,7 @@ bool StorageManager::putUInt16(const char* key, uint16_t value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putUInt16");
+    LOG_E(TAG, "StorageManager: No namespace open for putUInt16");
     return false;
   }
 
@@ -312,7 +315,7 @@ bool StorageManager::putUInt16(const char* key, uint16_t value) {
 
   size_t bytes = preferences_.putUShort(key, value);
   if (bytes == 0) {
-    LOG_ERROR("StorageManager: Failed to write uint16 key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write uint16 key: " + String(key));
     return false;
   }
   
@@ -327,7 +330,7 @@ uint16_t StorageManager::getUInt16(const char* key, uint16_t default_value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getUInt16");
+    LOG_E(TAG, "StorageManager: No namespace open for getUInt16");
     return default_value;
   }
   
@@ -343,7 +346,7 @@ bool StorageManager::putBool(const char* key, bool value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putBool");
+    LOG_E(TAG, "StorageManager: No namespace open for putBool");
     return false;
   }
 
@@ -353,7 +356,7 @@ bool StorageManager::putBool(const char* key, bool value) {
 
   size_t bytes = preferences_.putBool(key, value);
   if (bytes == 0) {
-    LOG_ERROR("StorageManager: Failed to write bool key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write bool key: " + String(key));
     return false;
   }
   
@@ -368,7 +371,7 @@ bool StorageManager::getBool(const char* key, bool default_value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getBool");
+    LOG_E(TAG, "StorageManager: No namespace open for getBool");
     return default_value;
   }
 
@@ -384,7 +387,7 @@ bool StorageManager::putFloat(const char* key, float value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putFloat");
+    LOG_E(TAG, "StorageManager: No namespace open for putFloat");
     return false;
   }
 
@@ -394,11 +397,11 @@ bool StorageManager::putFloat(const char* key, float value) {
 
   size_t bytes = preferences_.putFloat(key, value);
   if (bytes == 0) {
-    LOG_ERROR("StorageManager: Failed to write float key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write float key: " + String(key));
     return false;
   }
 
-  LOG_DEBUG("StorageManager: Write " + String(key) + " = " + String(value, 4));
+  LOG_D(TAG, "StorageManager: Write " + String(key) + " = " + String(value, 4));
   return true;
 }
 
@@ -410,12 +413,12 @@ float StorageManager::getFloat(const char* key, float default_value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getFloat");
+    LOG_E(TAG, "StorageManager: No namespace open for getFloat");
     return default_value;
   }
 
   float value = preferences_.getFloat(key, default_value);
-  LOG_DEBUG("StorageManager: Read " + String(key) + " = " + String(value, 4));
+  LOG_D(TAG, "StorageManager: Read " + String(key) + " = " + String(value, 4));
   return value;
 }
 
@@ -428,7 +431,7 @@ bool StorageManager::putULong(const char* key, unsigned long value) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for putULong");
+    LOG_E(TAG, "StorageManager: No namespace open for putULong");
     return false;
   }
 
@@ -438,7 +441,7 @@ bool StorageManager::putULong(const char* key, unsigned long value) {
 
   size_t bytes = preferences_.putULong(key, value);
   if (bytes == 0) {
-    LOG_ERROR("StorageManager: Failed to write ulong key: " + String(key));
+    LOG_E(TAG, "StorageManager: Failed to write ulong key: " + String(key));
     return false;
   }
   
@@ -453,7 +456,7 @@ unsigned long StorageManager::getULong(const char* key, unsigned long default_va
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for getULong");
+    LOG_E(TAG, "StorageManager: No namespace open for getULong");
     return default_value;
   }
   
@@ -471,15 +474,15 @@ bool StorageManager::clearNamespace() {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for clear");
+    LOG_E(TAG, "StorageManager: No namespace open for clear");
     return false;
   }
   
   bool success = preferences_.clear();
   if (success) {
-    LOG_INFO("StorageManager: Cleared namespace: " + String(current_namespace_));
+    LOG_I(TAG, "StorageManager: Cleared namespace: " + String(current_namespace_));
   } else {
-    LOG_ERROR("StorageManager: Failed to clear namespace: " + String(current_namespace_));
+    LOG_E(TAG, "StorageManager: Failed to clear namespace: " + String(current_namespace_));
   }
   
   return success;
@@ -493,16 +496,16 @@ bool StorageManager::eraseKey(const char* key) {
   }
 #endif
   if (!namespace_open_) {
-    LOG_ERROR("StorageManager: No namespace open for eraseKey");
+    LOG_E(TAG, "StorageManager: No namespace open for eraseKey");
     return false;
   }
 
   bool success = preferences_.remove(key);
   if (success) {
-    LOG_INFO("StorageManager: Erased key: " + String(key));
+    LOG_I(TAG, "StorageManager: Erased key: " + String(key));
   } else {
     // remove() returns false if key didn't exist, which is acceptable
-    LOG_DEBUG("StorageManager: Key not found or already erased: " + String(key));
+    LOG_D(TAG, "StorageManager: Key not found or already erased: " + String(key));
   }
 
   // Return true even if key didn't exist (idempotent operation)
@@ -517,31 +520,31 @@ bool StorageManager::eraseAll() {
   }
 #endif
 
-  LOG_WARNING("StorageManager: FACTORY RESET - Erasing ALL NVS data!");
+  LOG_W(TAG, "StorageManager: FACTORY RESET - Erasing ALL NVS data!");
 
   // Close any open namespace first
   if (namespace_open_) {
     preferences_.end();
     namespace_open_ = false;
-    LOG_DEBUG("StorageManager: Closed namespace before erase: " + String(current_namespace_));
+    LOG_D(TAG, "StorageManager: Closed namespace before erase: " + String(current_namespace_));
     current_namespace_[0] = '\0';
   }
 
   // Erase entire NVS partition
   esp_err_t err = nvs_flash_erase();
   if (err != ESP_OK) {
-    LOG_ERROR("StorageManager: Failed to erase NVS flash, error: " + String(err));
+    LOG_E(TAG, "StorageManager: Failed to erase NVS flash, error: " + String(err));
     return false;
   }
 
   // Re-initialize NVS after erase
   err = nvs_flash_init();
   if (err != ESP_OK) {
-    LOG_ERROR("StorageManager: Failed to re-initialize NVS flash, error: " + String(err));
+    LOG_E(TAG, "StorageManager: Failed to re-initialize NVS flash, error: " + String(err));
     return false;
   }
 
-  LOG_INFO("StorageManager: Factory reset complete - NVS erased and re-initialized");
+  LOG_I(TAG, "StorageManager: Factory reset complete - NVS erased and re-initialized");
   return true;
 }
 

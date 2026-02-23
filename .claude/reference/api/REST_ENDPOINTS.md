@@ -187,6 +187,12 @@ allowed-tools: Read
 | `/debug/scheduler/jobs/{job_id}/run` | POST | JWT | Job manuell ausführen |
 | `/debug/resilience/status` | GET | JWT | Resilience-Status |
 
+### Logs (`/logs`) - 1 Endpoint
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/logs/frontend` | POST | None | Frontend Error Log Ingestion (fire-and-forget, rate-limited 10/min/IP) |
+
 ### Errors (`/errors`) - 4 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |

@@ -7,6 +7,9 @@
 #include "../../../models/error_codes.h"
 #include "../../../utils/logger.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "PUMP";
+
 PumpActuator::PumpActuator()
     : gpio_(255),
       initialized_(false),
@@ -29,7 +32,7 @@ bool PumpActuator::begin(const ActuatorConfig& config) {
   }
 
   if (config.gpio == 255) {
-    LOG_ERROR("PumpActuator: invalid GPIO");
+    LOG_E(TAG, "PumpActuator: invalid GPIO");
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "PumpActuator invalid GPIO");
@@ -40,7 +43,7 @@ bool PumpActuator::begin(const ActuatorConfig& config) {
   gpio_ = config.gpio;
 
   if (!gpio_manager_->requestPin(gpio_, "actuator", config_.actuator_name.c_str())) {
-    LOG_ERROR("PumpActuator: failed to reserve GPIO " + String(gpio_));
+    LOG_E(TAG, "PumpActuator: failed to reserve GPIO " + String(gpio_));
     errorTracker.trackError(ERROR_GPIO_RESERVED,
                             ERROR_SEVERITY_ERROR,
                             ("Pump GPIO busy: " + String(gpio_)).c_str());
@@ -48,7 +51,7 @@ bool PumpActuator::begin(const ActuatorConfig& config) {
   }
 
   if (!gpio_manager_->configurePinMode(gpio_, OUTPUT)) {
-    LOG_ERROR("PumpActuator: pinMode failed for GPIO " + String(gpio_));
+    LOG_E(TAG, "PumpActuator: pinMode failed for GPIO " + String(gpio_));
     errorTracker.trackError(ERROR_GPIO_INVALID_MODE,
                             ERROR_SEVERITY_ERROR,
                             ("pump pinMode failed: " + String(gpio_)).c_str());
@@ -68,7 +71,7 @@ bool PumpActuator::begin(const ActuatorConfig& config) {
   initialized_ = true;
   emergency_stopped_ = false;
 
-  LOG_INFO("PumpActuator initialized on GPIO " + String(gpio_));
+  LOG_I(TAG, "PumpActuator initialized on GPIO " + String(gpio_));
   return true;
 }
 
@@ -100,17 +103,17 @@ bool PumpActuator::setBinary(bool state) {
 // Dokumentiert in: docs/ZZZ.md - "Server-Centric Pragmatic Deviations"
 bool PumpActuator::applyState(bool state, bool force) {
   if (!initialized_) {
-    LOG_ERROR("PumpActuator::applyState called before init");
+    LOG_E(TAG, "PumpActuator::applyState called before init");
     return false;
   }
 
   if (!force && emergency_stopped_) {
-    LOG_WARNING("PumpActuator: command ignored, emergency active");
+    LOG_W(TAG, "PumpActuator: command ignored, emergency active");
     return false;
   }
 
   if (state && !force && !canActivate()) {
-    LOG_WARNING("PumpActuator: runtime protection prevented activation on GPIO " + String(gpio_));
+    LOG_W(TAG, "PumpActuator: runtime protection prevented activation on GPIO " + String(gpio_));
     errorTracker.trackError(ERROR_ACTUATOR_SET_FAILED,
                             ERROR_SEVERITY_WARNING,
                             "Pump runtime protection triggered");
@@ -144,7 +147,7 @@ bool PumpActuator::applyState(bool state, bool force) {
   config_.current_pwm = state ? 255 : 0;
   config_.last_command_ts = now;
 
-  LOG_INFO("PumpActuator GPIO " + String(gpio_) + (state ? " ON" : " OFF"));
+  LOG_I(TAG, "PumpActuator GPIO " + String(gpio_) + (state ? " ON" : " OFF"));
   return true;
 }
 
@@ -190,7 +193,7 @@ bool PumpActuator::canActivate() const {
 }
 
 bool PumpActuator::emergencyStop(const String& reason) {
-  LOG_WARNING("PumpActuator emergency stop (" + reason + ") on GPIO " + String(gpio_));
+  LOG_W(TAG, "PumpActuator emergency stop (" + reason + ") on GPIO " + String(gpio_));
   emergency_stopped_ = true;
   return applyState(false, true);
 }

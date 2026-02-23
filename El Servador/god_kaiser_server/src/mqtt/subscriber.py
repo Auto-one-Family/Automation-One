@@ -12,11 +12,13 @@ Features:
 
 import asyncio
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 
 from ..core import constants
 from ..core.logging_config import get_logger
+from ..core.request_context import set_request_id, clear_request_id
 from .client import MQTTClient
 from .topics import TopicBuilder
 
@@ -169,12 +171,21 @@ class Subscriber:
                 self.messages_failed += 1
                 return
 
+            # Generate correlation ID from MQTT payload for cross-layer tracing
+            # Format: {esp_id}:{topic_suffix}:{seq}:{timestamp_ms}
+            esp_id = payload.get("esp_id", "unknown")
+            seq = payload.get("seq", "")
+            topic_suffix = topic.rsplit("/", 1)[-1] if "/" in topic else topic
+            ts_ms = int(time.time() * 1000)
+            correlation_id = f"{esp_id}:{topic_suffix}:{seq}:{ts_ms}" if seq else f"{esp_id}:{topic_suffix}:{ts_ms}"
+            set_request_id(correlation_id)
+
             # Find matching handler
             handler = self._find_handler(topic)
             if handler:
                 # Submit handler to thread pool for async execution
                 # This prevents blocking MQTT network loop
-                self.executor.submit(self._execute_handler, handler, topic, payload)
+                self.executor.submit(self._execute_handler, handler, topic, payload, correlation_id)
                 self.messages_processed += 1
             else:
                 logger.warning(f"No handler registered for topic: {topic}")
@@ -215,7 +226,8 @@ class Subscriber:
             "Call set_main_loop() to set a valid event loop."
         )
 
-    def _execute_handler(self, handler: Callable, topic: str, payload: dict) -> None:
+    def _execute_handler(self, handler: Callable, topic: str, payload: dict,
+                         correlation_id: str = "") -> None:
         """
         Execute handler in thread pool.
 
@@ -234,8 +246,12 @@ class Subscriber:
             handler: Handler function (sync or async)
             topic: MQTT topic
             payload: Parsed payload dict
+            correlation_id: Cross-layer correlation ID (esp_id:topic:seq:ts)
         """
         try:
+            # Set correlation ID in thread-local context for all log entries
+            if correlation_id:
+                set_request_id(correlation_id)
             # Check if handler is async (coroutine function)
             if asyncio.iscoroutinefunction(handler):
                 # CRITICAL: Run async handler in MAIN event loop
