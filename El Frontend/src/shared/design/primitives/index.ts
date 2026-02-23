@@ -24,3 +24,8 @@ export { default as Modal } from './BaseModal.vue'
 export { default as Select } from './BaseSelect.vue'
 export { default as Toggle } from './BaseToggle.vue'
 export { default as Spinner } from './BaseSpinner.vue'
+
+// New primitives (Dashboard Redesign)
+export { default as SlideOver } from './SlideOver.vue'
+export { default as RangeSlider } from './RangeSlider.vue'
+export { default as QualityIndicator } from './QualityIndicator.vue'

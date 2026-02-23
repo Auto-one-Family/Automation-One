@@ -19,6 +19,8 @@ import {
   Wrench,
   Zap,
   UserCog,
+  Activity,
+  LayoutGrid,
 } from 'lucide-vue-next'
 
 defineProps<{
@@ -73,23 +75,33 @@ function handleNavClick() {
       <div class="sidebar__section-label">Navigation</div>
 
       <RouterLink
-        to="/"
-        :class="['sidebar__link', isActive('/') && 'sidebar__link--active']"
-        @click="handleNavClick"
-      >
-        <div class="sidebar__link-indicator" />
-        <LayoutDashboard class="sidebar__link-icon" />
-        <span>Dashboard</span>
-      </RouterLink>
-
-      <RouterLink
-        to="/sensors"
-        :class="['sidebar__link', isActive('/sensors') && 'sidebar__link--active']"
+        to="/hardware"
+        :class="['sidebar__link', isActive('/hardware') && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
         <Cpu class="sidebar__link-icon" />
-        <span>Komponenten</span>
+        <span>Hardware</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/monitor"
+        :class="['sidebar__link', isActive('/monitor') && 'sidebar__link--active']"
+        @click="handleNavClick"
+      >
+        <div class="sidebar__link-indicator" />
+        <Activity class="sidebar__link-icon" />
+        <span>Monitor</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/custom-dashboard"
+        :class="['sidebar__link', isActive('/custom-dashboard') && 'sidebar__link--active']"
+        @click="handleNavClick"
+      >
+        <div class="sidebar__link-indicator" />
+        <LayoutGrid class="sidebar__link-icon" />
+        <span>Dashboard</span>
       </RouterLink>
 
       <RouterLink
@@ -100,6 +112,16 @@ function handleNavClick() {
         <div class="sidebar__link-indicator" />
         <Workflow class="sidebar__link-icon" />
         <span>Regeln</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/sensors"
+        :class="['sidebar__link', isActive('/sensors') && 'sidebar__link--active']"
+        @click="handleNavClick"
+      >
+        <div class="sidebar__link-indicator" />
+        <LayoutDashboard class="sidebar__link-icon" />
+        <span>Komponenten</span>
       </RouterLink>
 
       <!-- Divider -->

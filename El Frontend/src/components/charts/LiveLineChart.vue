@@ -18,6 +18,7 @@ import {
   Filler,
   TimeScale,
 } from 'chart.js'
+import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
 
 ChartJS.register(
@@ -27,13 +28,21 @@ ChartJS.register(
   LineElement,
   Tooltip,
   Filler,
-  TimeScale
+  TimeScale,
+  annotationPlugin
 )
 
 export interface ChartDataPoint {
   timestamp: string | Date
   value: number
   label?: string
+}
+
+interface ThresholdConfig {
+  alarmLow?: number
+  warnLow?: number
+  warnHigh?: number
+  alarmHigh?: number
 }
 
 interface Props {
@@ -51,6 +60,10 @@ interface Props {
   unit?: string
   /** Show area fill under line */
   fill?: boolean
+  /** Threshold lines for annotation overlay */
+  thresholds?: ThresholdConfig
+  /** Whether to show threshold lines */
+  showThresholds?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -61,6 +74,8 @@ const props = withDefaults(defineProps<Props>(), {
   height: '200px',
   unit: '',
   fill: true,
+  thresholds: undefined,
+  showThresholds: false,
 })
 
 // Internal data buffer
@@ -89,6 +104,57 @@ const chartData = computed(() => ({
   }],
 }))
 
+/** Build annotation config for threshold lines */
+const thresholdAnnotations = computed(() => {
+  if (!props.showThresholds || !props.thresholds) return {}
+
+  const annotations: Record<string, any> = {}
+  const t = props.thresholds
+
+  if (t.alarmLow != null) {
+    annotations.alarmLow = {
+      type: 'line',
+      yMin: t.alarmLow,
+      yMax: t.alarmLow,
+      borderColor: 'rgba(239, 68, 68, 0.5)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+  if (t.warnLow != null) {
+    annotations.warnLow = {
+      type: 'line',
+      yMin: t.warnLow,
+      yMax: t.warnLow,
+      borderColor: 'rgba(234, 179, 8, 0.4)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+  if (t.warnHigh != null) {
+    annotations.warnHigh = {
+      type: 'line',
+      yMin: t.warnHigh,
+      yMax: t.warnHigh,
+      borderColor: 'rgba(234, 179, 8, 0.4)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+  if (t.alarmHigh != null) {
+    annotations.alarmHigh = {
+      type: 'line',
+      yMin: t.alarmHigh,
+      yMax: t.alarmHigh,
+      borderColor: 'rgba(239, 68, 68, 0.5)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+
+  return annotations
+})
+
 const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
@@ -111,6 +177,9 @@ const chartOptions = computed(() => ({
       callbacks: {
         label: (ctx: any) => `${ctx.parsed.y}${props.unit ? ' ' + props.unit : ''}`,
       },
+    },
+    annotation: {
+      annotations: thresholdAnnotations.value,
     },
   },
   scales: {
