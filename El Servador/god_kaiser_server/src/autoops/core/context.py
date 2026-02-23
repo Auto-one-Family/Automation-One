@@ -6,11 +6,40 @@ The context holds:
 - Current system state (discovered ESPs, health)
 - Execution history (what was done, what failed)
 - User answers to questions
+- Device mode (mock vs real hardware)
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Optional
+
+
+class DeviceMode(str, Enum):
+    """How devices are created and managed."""
+    MOCK = "mock"        # Mock ESP via debug API (default, safe)
+    REAL = "real"        # Real ESP via device registration API
+    HYBRID = "hybrid"    # Use existing real devices, fill gaps with mocks
+
+
+class SimulationPattern(str, Enum):
+    """Sensor value simulation patterns for mock devices."""
+    CONSTANT = "constant"
+    SINE = "sine"
+    RANDOM = "random"
+    SAWTOOTH = "sawtooth"
+    STEP = "step"
+    REALISTIC = "realistic"  # Combines sine + random noise
+
+
+def _get_logger(name: str) -> logging.Logger:
+    """Get a logger, preferring the server's logging_config if available."""
+    try:
+        from ...core.logging_config import get_logger
+        return get_logger(name)
+    except (ImportError, ValueError):
+        return logging.getLogger(name)
 
 
 @dataclass
@@ -26,6 +55,8 @@ class SensorSpec:
     raw_value: float = 0.0      # Initial value for mock sensors
     unit: str = ""              # Unit of measurement
     interval_seconds: float = 30.0  # Reading interval
+    variation_pattern: SimulationPattern = SimulationPattern.CONSTANT
+    variation_range: float = 0.0    # +/- range for simulation
 
 
 @dataclass
@@ -44,12 +75,14 @@ class ESPSpec:
     """Full specification for an ESP to configure."""
     name: Optional[str] = None
     device_id: Optional[str] = None  # Auto-generated if None
-    hardware_type: str = "ESP32_WROOM"  # ESP32_WROOM, XIAO_ESP32_C3, MOCK_ESP32
+    hardware_type: str = "ESP32_WROOM"  # ESP32_WROOM, XIAO_ESP32_C3
     zone_name: Optional[str] = None
+    subzone_name: Optional[str] = None
     sensors: list[SensorSpec] = field(default_factory=list)
     actuators: list[ActuatorSpec] = field(default_factory=list)
     auto_heartbeat: bool = True
     heartbeat_interval: int = 60
+    device_mode: DeviceMode = DeviceMode.MOCK
 
 
 @dataclass
@@ -64,6 +97,8 @@ class SystemSnapshot:
     zones: list[str] = field(default_factory=list)
     server_health: dict[str, Any] = field(default_factory=dict)
     mqtt_connected: bool = False
+    mock_devices: int = 0
+    real_devices: int = 0
 
 
 @dataclass
@@ -78,7 +113,10 @@ class AutoOpsContext:
     server_url: str = "http://localhost:8000"
     auth_token: Optional[str] = None
     username: str = "admin"
-    password: str = "admin"
+    password: str = "TestAdmin123!"
+
+    # Device mode
+    device_mode: DeviceMode = DeviceMode.MOCK
 
     # User-provided specs
     esp_specs: list[ESPSpec] = field(default_factory=list)
@@ -99,6 +137,8 @@ class AutoOpsContext:
     dry_run: bool = False
     verbose: bool = True
     auto_approve: bool = False  # Skip confirmation for destructive actions
+    max_retries: int = 3        # API retry attempts
+    retry_delay: float = 1.0    # Base delay between retries (exponential backoff)
 
     # Results from previous plugin runs (shared between plugins)
     created_devices: list[dict[str, Any]] = field(default_factory=list)
@@ -106,6 +146,10 @@ class AutoOpsContext:
     configured_actuators: list[dict[str, Any]] = field(default_factory=list)
     diagnosed_issues: list[dict[str, Any]] = field(default_factory=list)
     fixed_issues: list[dict[str, Any]] = field(default_factory=list)
+    cleaned_resources: list[dict[str, Any]] = field(default_factory=list)
+
+    # Logger (set after init)
+    _logger: Optional[logging.Logger] = field(default=None, repr=False)
 
     def __post_init__(self):
         if not self.session_id:
@@ -113,20 +157,36 @@ class AutoOpsContext:
             self.session_id = str(uuid.uuid4())[:8]
         if not self.started_at:
             self.started_at = datetime.now(timezone.utc).isoformat()
+        self._logger = _get_logger(f"autoops.session.{self.session_id}")
+
+    @property
+    def logger(self) -> logging.Logger:
+        """Get the session logger."""
+        if self._logger is None:
+            self._logger = _get_logger(f"autoops.session.{self.session_id}")
+        return self._logger
 
     def log_action(self, action: str, target: str, result: str, details: dict | None = None):
         """Log an action to the execution history."""
-        self.actions_log.append({
+        entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "action": action,
             "target": target,
             "result": result,
             "details": details or {},
-        })
+        }
+        self.actions_log.append(entry)
+        self.logger.info("Action: %s -> %s: %s", action, target, result)
 
     def log_error(self, error: str):
         """Log an error."""
-        self.errors.append(f"[{datetime.now(timezone.utc).isoformat()}] {error}")
+        timestamped = f"[{datetime.now(timezone.utc).isoformat()}] {error}"
+        self.errors.append(timestamped)
+        self.logger.error("AutoOps Error: %s", error)
+
+    def log_warning(self, warning: str):
+        """Log a warning."""
+        self.logger.warning("AutoOps Warning: %s", warning)
 
     def get_summary(self) -> dict[str, Any]:
         """Get a summary of the current context state."""
@@ -135,12 +195,24 @@ class AutoOpsContext:
             "started_at": self.started_at,
             "server_url": self.server_url,
             "authenticated": self.auth_token is not None,
+            "device_mode": self.device_mode.value,
             "esp_specs_count": len(self.esp_specs),
             "created_devices": len(self.created_devices),
             "configured_sensors": len(self.configured_sensors),
             "configured_actuators": len(self.configured_actuators),
             "diagnosed_issues": len(self.diagnosed_issues),
             "fixed_issues": len(self.fixed_issues),
+            "cleaned_resources": len(self.cleaned_resources),
             "total_actions": len(self.actions_log),
             "total_errors": len(self.errors),
         }
+
+    @property
+    def is_mock_mode(self) -> bool:
+        """Check if we're operating in mock device mode."""
+        return self.device_mode in (DeviceMode.MOCK, DeviceMode.HYBRID)
+
+    @property
+    def is_real_mode(self) -> bool:
+        """Check if we're operating in real device mode."""
+        return self.device_mode in (DeviceMode.REAL, DeviceMode.HYBRID)

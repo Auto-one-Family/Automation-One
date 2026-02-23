@@ -174,12 +174,12 @@ class HealthCheckPlugin(AutoOpsPlugin):
             ))
 
         # =============================================
-        # Check 5: Detailed Health (if available)
+        # Check 5: Detailed Health (MQTT, services)
         # =============================================
         try:
             detailed = await client.get_server_health()
             mqtt_status = detailed.get("mqtt", {}).get("status", "unknown")
-            health_data["mqtt"] = {"status": mqtt_status}
+            health_data["mqtt"] = {"status": mqtt_status, "details": detailed.get("mqtt", {})}
             actions.append(PluginAction.create(
                 action="MQTT Broker Check",
                 target="mqtt_broker",
@@ -187,9 +187,87 @@ class HealthCheckPlugin(AutoOpsPlugin):
                 result=f"MQTT: {mqtt_status}",
                 severity=ActionSeverity.SUCCESS if mqtt_status in ("ok", "connected") else ActionSeverity.WARNING,
             ))
+
+            # Additional service statuses from detailed health
+            for service_key in ("database", "redis", "scheduler"):
+                service_info = detailed.get(service_key)
+                if isinstance(service_info, dict):
+                    svc_status = service_info.get("status", "unknown")
+                    health_data[service_key] = service_info
+                    actions.append(PluginAction.create(
+                        action=f"{service_key.title()} Service Check",
+                        target=service_key,
+                        details=service_info,
+                        result=f"{service_key}: {svc_status}",
+                        severity=ActionSeverity.SUCCESS if svc_status in ("ok", "connected", "running") else ActionSeverity.WARNING,
+                    ))
         except APIError:
-            # Detailed health endpoint might not exist
             health_data["mqtt"] = {"status": "unknown"}
+
+        # =============================================
+        # Check 6: Server Metrics (performance)
+        # =============================================
+        try:
+            metrics = await client.get_health_metrics()
+            health_data["metrics"] = metrics
+            actions.append(PluginAction.create(
+                action="Performance Metrics",
+                target="server_metrics",
+                details=metrics,
+                result="Metrics collected",
+                severity=ActionSeverity.SUCCESS,
+            ))
+        except APIError:
+            pass  # Metrics endpoint may not exist
+
+        # =============================================
+        # Check 7: Sensor Data Freshness
+        # =============================================
+        try:
+            sensor_data = await client.list_sensor_data(limit=5)
+            data_items = sensor_data.get("data", sensor_data.get("items", []))
+            if isinstance(data_items, list) and data_items:
+                health_data["sensor_data"] = {
+                    "recent_readings": len(data_items),
+                    "latest": data_items[0] if data_items else None,
+                }
+                actions.append(PluginAction.create(
+                    action="Sensor Data Freshness",
+                    target="sensor_data",
+                    details={"count": len(data_items)},
+                    result=f"{len(data_items)} recent reading(s) found",
+                    severity=ActionSeverity.SUCCESS,
+                ))
+            else:
+                health_data["sensor_data"] = {"recent_readings": 0}
+                actions.append(PluginAction.create(
+                    action="Sensor Data Freshness",
+                    target="sensor_data",
+                    details={},
+                    result="No recent sensor data",
+                    severity=ActionSeverity.INFO,
+                ))
+        except APIError:
+            pass
+
+        # =============================================
+        # Check 8: Zone Configuration
+        # =============================================
+        try:
+            zones_response = await client.list_zones()
+            zones = self._extract_list(zones_response, "zones")
+            health_data["zones"] = {"count": len(zones), "names": [
+                z.get("name", "?") for z in zones if isinstance(z, dict)
+            ]}
+            actions.append(PluginAction.create(
+                action="Zone Configuration Check",
+                target="zones",
+                details={"zone_count": len(zones)},
+                result=f"{len(zones)} zone(s) configured",
+                severity=ActionSeverity.SUCCESS if zones else ActionSeverity.INFO,
+            ))
+        except APIError:
+            pass
 
         # =============================================
         # Build Summary

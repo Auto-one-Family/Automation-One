@@ -4,9 +4,10 @@ AutoOps Agent - Main orchestrator for autonomous operations.
 The agent:
 1. Initializes context and discovers plugins
 2. Asks initial questions if needed (sensor types, preferences)
-3. Executes plugins in the correct order
-4. Documents everything
-5. Reports results
+3. Executes plugins in the correct order (capability-based)
+4. Handles rollback on critical failures
+5. Documents everything with structured logging
+6. Reports results
 
 Usage:
     agent = AutoOpsAgent(server_url="http://localhost:8000")
@@ -21,13 +22,26 @@ Usage:
     result = await agent.run_with_answers(answers={...})
 """
 
+import logging
 from typing import Any, Optional
 
 from .api_client import APIError, GodKaiserClient
 from .base_plugin import AutoOpsPlugin, PluginCapability, PluginResult
-from .context import AutoOpsContext, ESPSpec
+from .context import AutoOpsContext, DeviceMode, ESPSpec
 from .plugin_registry import PluginRegistry
 from .reporter import AutoOpsReporter
+
+
+def _get_logger(name: str) -> logging.Logger:
+    """Get a logger, preferring the server's logging_config if available."""
+    try:
+        from ...core.logging_config import get_logger
+        return get_logger(name)
+    except (ImportError, ValueError):
+        return logging.getLogger(name)
+
+
+logger = _get_logger("autoops.agent")
 
 
 class AutoOpsAgent:
@@ -42,9 +56,11 @@ class AutoOpsAgent:
         self,
         server_url: str = "http://localhost:8000",
         username: str = "admin",
-        password: str = "admin",
+        password: str = "TestAdmin123!",
         dry_run: bool = False,
         verbose: bool = True,
+        device_mode: str = "mock",
+        max_retries: int = 3,
     ):
         self.context = AutoOpsContext(
             server_url=server_url,
@@ -52,8 +68,13 @@ class AutoOpsAgent:
             password=password,
             dry_run=dry_run,
             verbose=verbose,
+            device_mode=DeviceMode(device_mode),
+            max_retries=max_retries,
         )
-        self.client = GodKaiserClient(base_url=server_url)
+        self.client = GodKaiserClient(
+            base_url=server_url,
+            max_retries=max_retries,
+        )
         self.registry = PluginRegistry()
         self.reporter = AutoOpsReporter()
         self._plugin_results: list[tuple[str, PluginResult]] = []
@@ -65,9 +86,12 @@ class AutoOpsAgent:
 
         Returns dict with initialization status and discovered plugins.
         """
+        logger.info("Initializing AutoOps session %s", self.context.session_id)
+
         # Discover plugins
         self.registry.reset()
         discovered = self.registry.discover_plugins()
+        logger.info("Discovered %d plugins", discovered)
 
         # Authenticate with server
         auth_status = "not_attempted"
@@ -75,6 +99,7 @@ class AutoOpsAgent:
             await self.client.authenticate(self.context.username, self.context.password)
             self.context.auth_token = self.client._token
             auth_status = "authenticated"
+            logger.info("Authentication successful for user '%s'", self.context.username)
         except APIError as e:
             auth_status = f"failed: {e.detail}"
             self.context.log_error(f"Authentication failed: {e.detail}")
@@ -88,8 +113,10 @@ class AutoOpsAgent:
             health = await self.client.check_health()
             health_status = health.get("status", "unknown")
             self.context.system_snapshot = None  # Will be populated on first scan
+            logger.info("Server health: %s", health_status)
         except Exception as e:
             health_status = f"unreachable: {str(e)}"
+            logger.error("Server unreachable: %s", e)
 
         self._initialized = True
 
@@ -100,6 +127,7 @@ class AutoOpsAgent:
             "auth_status": auth_status,
             "health_status": health_status,
             "server_url": self.context.server_url,
+            "device_mode": self.context.device_mode.value,
         }
 
     async def scan_system(self) -> dict[str, Any]:
@@ -124,6 +152,14 @@ class AutoOpsAgent:
                 if isinstance(d, dict) and d.get("status") == "online"
             )
             snapshot.offline_devices = len(snapshot.esp_devices) - snapshot.online_devices
+            snapshot.mock_devices = sum(
+                1 for d in snapshot.esp_devices
+                if isinstance(d, dict) and (
+                    d.get("device_id", "").startswith("MOCK_")
+                    or d.get("is_mock", False)
+                )
+            )
+            snapshot.real_devices = len(snapshot.esp_devices) - snapshot.mock_devices
 
             # Get zones
             try:
@@ -158,10 +194,19 @@ class AutoOpsAgent:
         snapshot.timestamp = datetime.now(timezone.utc).isoformat()
         self.context.system_snapshot = snapshot
 
+        logger.info(
+            "System scan: %d devices (%d online, %d mock, %d real), %d sensors, %d actuators",
+            len(snapshot.esp_devices), snapshot.online_devices,
+            snapshot.mock_devices, snapshot.real_devices,
+            snapshot.total_sensors, snapshot.total_actuators,
+        )
+
         return {
             "devices": len(snapshot.esp_devices),
             "online": snapshot.online_devices,
             "offline": snapshot.offline_devices,
+            "mock": snapshot.mock_devices,
+            "real": snapshot.real_devices,
             "sensors": snapshot.total_sensors,
             "actuators": snapshot.total_actuators,
             "zones": snapshot.zones,
@@ -386,18 +431,38 @@ class AutoOpsAgent:
                         plugins_to_run.append(p)
 
         # Execute plugins
+        logger.info("Executing %d plugins in order", len(plugins_to_run))
         for plugin in plugins_to_run:
             if plugin is None:
                 continue
-            result = await self.run_plugin(plugin.name)
 
-            # Stop on critical failure
+            logger.info("Running plugin: %s", plugin.name)
+            result = await self.run_plugin(plugin.name)
+            logger.info(
+                "Plugin %s: %s - %s",
+                plugin.name,
+                "PASS" if result.success else "FAIL",
+                result.summary,
+            )
+
+            # Stop on critical failure, attempt rollback
             if not result.success and any(
                 a.severity.value == "critical" for a in result.actions
             ):
                 self.context.log_error(
                     f"Critical failure in {plugin.name}, stopping execution"
                 )
+                # Attempt rollback for the failed plugin
+                try:
+                    rollback_result = await plugin.rollback(
+                        self.context, self.client, result.actions,
+                    )
+                    if rollback_result.success:
+                        logger.info("Rollback for %s completed", plugin.name)
+                    else:
+                        logger.warning("Rollback for %s failed: %s", plugin.name, rollback_result.summary)
+                except Exception as e:
+                    logger.error("Rollback error for %s: %s", plugin.name, e)
                 break
 
         # Generate report
@@ -409,6 +474,15 @@ class AutoOpsAgent:
         )
 
         summary = self.reporter.generate_quick_summary(self._plugin_results)
+        all_passed = all(r.success for _, r in self._plugin_results)
+
+        logger.info(
+            "Session %s complete: %d plugins, %s, report: %s",
+            self.context.session_id,
+            len(self._plugin_results),
+            "ALL PASSED" if all_passed else "ISSUES FOUND",
+            report_path,
+        )
 
         return {
             "session_id": self.context.session_id,
@@ -416,7 +490,7 @@ class AutoOpsAgent:
             "summary": summary,
             "scan": scan_result,
             "plugins_run": len(self._plugin_results),
-            "all_passed": all(r.success for _, r in self._plugin_results),
+            "all_passed": all_passed,
             "context": self.context.get_summary(),
         }
 
