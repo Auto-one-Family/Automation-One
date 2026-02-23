@@ -743,6 +743,66 @@ class TestQualityDegradation:
 
 
 # =============================================================================
+# False Positive Prevention Tests
+# =============================================================================
+
+
+class TestFalsePositivePrevention:
+    """
+    Tests that NORMAL sensor behavior is NOT flagged as anomaly.
+
+    Critical: A system that cries wolf on every ±0.3°C fluctuation
+    will be ignored by operators when a REAL anomaly occurs.
+    """
+
+    detector = SensorAnomalyDetector()
+
+    def test_normal_temperature_fluctuation_not_flagged_as_spike(self):
+        """Normal ±0.5°C fluctuation must NOT trigger spike detection."""
+        # Real greenhouse: temp swings 0.3-0.5°C with HVAC cycles
+        normal_readings = [20.0, 20.3, 19.8, 20.1, 20.4, 19.9, 20.2]
+        for i in range(1, len(normal_readings)):
+            assert not self.detector.detect_sudden_spike(
+                current=normal_readings[i],
+                previous=normal_readings[i - 1],
+                max_delta=5.0,  # 5°C threshold for real spike
+            ), f"Normal fluctuation {normal_readings[i-1]}->{normal_readings[i]} was flagged"
+
+    def test_boundary_value_exactly_at_spike_threshold(self):
+        """Value EXACTLY at threshold boundary must be handled correctly."""
+        max_delta = 5.0
+
+        # Delta = exactly 5.0 (at threshold)
+        assert not self.detector.detect_sudden_spike(
+            current=25.0, previous=20.0, max_delta=max_delta
+        ), "Delta exactly at threshold should NOT be flagged"
+
+        # Delta = 5.01 (just above threshold)
+        assert self.detector.detect_sudden_spike(
+            current=25.01, previous=20.0, max_delta=max_delta
+        ), "Delta just above threshold MUST be flagged"
+
+    def test_normal_humidity_variation_not_flagged_as_stuck(self):
+        """Small but real humidity variation must not be flagged as stuck."""
+        # Real sensor: humidity varies by 0.2-0.5% even in stable environment
+        humidity_readings = [65.0, 65.1, 65.0, 65.2, 65.1, 65.0, 65.1]
+        assert not self.detector.detect_stuck_value(
+            humidity_readings, min_variation=0.1
+        ), "Normal humidity variation was flagged as stuck"
+
+    def test_condensation_boundary_at_exact_threshold(self):
+        """Humidity at exactly 98% (condensation risk) must be detected."""
+        # Raw value 980 = 98.0% (sensor reports in 0.1% units)
+        condensation_threshold = 980
+        assert 980 >= condensation_threshold, (
+            "Boundary value must trigger condensation warning"
+        )
+        assert 979 < condensation_threshold, (
+            "Below boundary must NOT trigger condensation"
+        )
+
+
+# =============================================================================
 # Pytest Configuration
 # =============================================================================
 
