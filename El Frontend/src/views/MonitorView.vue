@@ -318,6 +318,7 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
             <span
               v-if="zone.alarmCount > 0"
               class="monitor-zone-tile__alarm-badge"
+              :title="`${zone.alarmCount} Sensor${zone.alarmCount > 1 ? 'en' : ''} mit Alarm in dieser Zone`"
             >
               <AlertTriangle class="w-3 h-3" />
               {{ zone.alarmCount }}
@@ -369,7 +370,10 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
           >
             <div class="monitor-sensor-card__header">
               <span class="monitor-sensor-card__name">{{ sensor.name }}</span>
-              <span :class="['monitor-sensor-card__dot', `monitor-sensor-card__dot--${qualityToStatus(sensor.quality)}`]" />
+              <span
+                :class="['monitor-sensor-card__dot', `monitor-sensor-card__dot--${qualityToStatus(sensor.quality)}`]"
+                :title="`${qualityToStatus(sensor.quality) === 'good' ? 'OK' : qualityToStatus(sensor.quality) === 'warning' ? 'Warnung' : qualityToStatus(sensor.quality) === 'alarm' ? 'Alarm' : 'Offline'}: ${sensor.name} — ${formatValue(sensor.value)} ${sensor.unit}`"
+              />
             </div>
             <div class="monitor-sensor-card__value">
               <span class="monitor-sensor-card__number">{{ formatValue(sensor.value) }}</span>
@@ -480,7 +484,10 @@ function qualityToStatus(quality: string): 'good' | 'warning' | 'alarm' | 'offli
                 {{ actuator.state ? 'AUS' : 'EIN' }}
               </button>
             </div>
-            <div class="monitor-actuator-card__status">
+            <div
+              class="monitor-actuator-card__status"
+              :title="actuator.state ? 'Aktiv: Aktor eingeschaltet' : 'Inaktiv: Aktor ausgeschaltet'"
+            >
               <Zap class="w-4 h-4" />
               <span>{{ actuator.state ? 'Aktiv' : 'Inaktiv' }}</span>
             </div>

@@ -31,10 +31,20 @@ const statusLabels: Record<string, string> = {
   alarm: 'Alarm',
   offline: 'Offline',
 }
+
+const statusTitles: Record<string, string> = {
+  good: 'Normal: Werte im erwarteten Bereich',
+  warning: 'Warnung: Wert nahe Schwellwert',
+  alarm: 'Alarm: Schwellwert überschritten',
+  offline: 'Offline: Keine Daten verfügbar',
+}
 </script>
 
 <template>
-  <div :class="['quality-indicator', `quality-indicator--${status}`, `quality-indicator--${size}`]">
+  <div
+    :class="['quality-indicator', `quality-indicator--${status}`, `quality-indicator--${size}`]"
+    :title="statusTitles[status] || `Qualität: ${statusLabels[status]}`"
+  >
     <span class="quality-indicator__dot" />
     <span v-if="showLabel" class="quality-indicator__label">{{ statusLabels[status] }}</span>
   </div>

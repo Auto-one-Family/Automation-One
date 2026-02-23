@@ -222,7 +222,11 @@ function handleDragEnd() {
       <h3 class="zone-plate__title">{{ zoneName }}</h3>
       <div class="zone-plate__stats" aria-live="polite">
         <span class="zone-plate__count">{{ stats.online }}/{{ stats.total }} Online</span>
-        <span v-if="stats.warnings > 0" class="zone-plate__warning">
+        <span
+          v-if="stats.warnings > 0"
+          class="zone-plate__warning"
+          :title="`${stats.warnings} Gerät${stats.warnings > 1 ? 'e' : ''} mit Warnung/Fehler`"
+        >
           · {{ stats.warnings }} Warning{{ stats.warnings > 1 ? 's' : '' }}
         </span>
       </div>

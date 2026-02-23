@@ -338,7 +338,11 @@ function handleDragEnd(event: DragEvent) {
     </div>
 
     <!-- Quality Indicator -->
-    <div class="sensor-satellite__quality" :class="`sensor-satellite__quality--${displayQuality}`">
+    <div
+      class="sensor-satellite__quality"
+      :class="`sensor-satellite__quality--${displayQuality}`"
+      :title="`Qualität: ${qualityLabel}${isMultiValue ? ' (aggregiert)' : ''}`"
+    >
       <span class="sensor-satellite__quality-dot" />
       <span class="sensor-satellite__quality-text">{{ qualityLabel }}</span>
     </div>

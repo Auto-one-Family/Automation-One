@@ -142,9 +142,14 @@ function handleClick() {
       <span
         class="device-mini-card__status-dot"
         :style="{ backgroundColor: statusColor }"
+        :title="device.status === 'online' || device.connected === true ? 'Online: Gerät verbunden' : device.status === 'error' ? 'Fehler: Gerät meldet Fehler' : 'Offline: Keine Verbindung'"
       />
       <span class="device-mini-card__name">{{ displayName }}</span>
-      <span class="device-mini-card__badge" :class="badgeClass">{{ badgeText }}</span>
+      <span
+        class="device-mini-card__badge"
+        :class="badgeClass"
+        :title="isMock ? 'Mock-Gerät (simuliert)' : 'Hardware-Gerät'"
+      >{{ badgeText }}</span>
     </div>
 
     <!-- Sensor values with spark-bars -->
