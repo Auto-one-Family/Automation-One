@@ -783,23 +783,33 @@ class E2EMQTTClient:
         self._connected = False
         self._received_messages: list = []
 
-    async def connect(self):
-        """Connect to MQTT broker."""
+    async def connect(self, max_retries: int = 3, retry_delay: float = 2.0):
+        """Connect to MQTT broker with retry/backoff for CI resilience."""
         try:
             import aiomqtt
-            print(f"[E2E MQTT] Connecting to {self.config.mqtt_host}:{self.config.mqtt_port}...")
-            self._client = aiomqtt.Client(
-                hostname=self.config.mqtt_host,
-                port=self.config.mqtt_port
-            )
-            await self._client.__aenter__()
-            self._connected = True
-            print(f"[E2E MQTT] Connected successfully!")
         except ImportError:
             pytest.skip("aiomqtt not installed - skipping MQTT E2E tests")
-        except Exception as e:
-            print(f"[E2E MQTT] Connection failed: {type(e).__name__}: {e}")
-            raise
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"[E2E MQTT] Connecting to {self.config.mqtt_host}:{self.config.mqtt_port} (attempt {attempt}/{max_retries})...")
+                self._client = aiomqtt.Client(
+                    hostname=self.config.mqtt_host,
+                    port=self.config.mqtt_port
+                )
+                await self._client.__aenter__()
+                self._connected = True
+                print("[E2E MQTT] Connected successfully!")
+                return
+            except Exception as e:
+                if attempt < max_retries:
+                    wait = retry_delay * attempt
+                    print(f"[E2E MQTT] Connection failed (attempt {attempt}): {type(e).__name__}: {e}. Retrying in {wait:.0f}s...")
+                    import asyncio
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"[E2E MQTT] Connection failed after {max_retries} attempts: {type(e).__name__}: {e}")
+                    raise
 
     async def disconnect(self):
         """Disconnect from MQTT broker."""

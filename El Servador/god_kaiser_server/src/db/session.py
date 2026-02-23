@@ -152,38 +152,63 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def init_db() -> None:
+async def init_db(max_retries: int = 5, retry_delay: float = 2.0) -> None:
     """
     Initialize the database by creating all tables.
 
+    Retries on connection failure to handle CI/Docker startup timing
+    where PostgreSQL reports pg_isready but asyncpg cannot yet connect.
+
     This should be called on application startup in development.
     In production, use Alembic migrations instead.
+
+    Args:
+        max_retries: Maximum number of connection attempts.
+        retry_delay: Seconds to wait between retries (doubles each attempt).
     """
+    import asyncio as _asyncio
+
     from .base import Base
 
     logger.info("Initializing database...")
 
     engine = get_engine()
 
-    async with engine.begin() as conn:
-        # Import all models to ensure they're registered
-        from .models import (  # noqa: F401
-            actuator,
-            ai,
-            auth,  # TokenBlacklist model
-            esp,
-            kaiser,
-            library,
-            logic,
-            sensor,
-            system,
-            user,
-        )
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with engine.begin() as conn:
+                # Import all models to ensure they're registered
+                from .models import (  # noqa: F401
+                    actuator,
+                    ai,
+                    auth,  # TokenBlacklist model
+                    esp,
+                    kaiser,
+                    library,
+                    logic,
+                    sensor,
+                    system,
+                    user,
+                )
 
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
+                # Create all tables
+                await conn.run_sync(Base.metadata.create_all)
 
-    logger.info("Database initialization complete")
+            logger.info("Database initialization complete")
+            return
+        except (OperationalError, InterfaceError, OSError) as e:
+            if attempt < max_retries:
+                wait = retry_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    f"Database connection failed (attempt {attempt}/{max_retries}): {e}. "
+                    f"Retrying in {wait:.1f}s..."
+                )
+                await _asyncio.sleep(wait)
+            else:
+                logger.error(
+                    f"Database initialization failed after {max_retries} attempts: {e}"
+                )
+                raise
 
 
 async def dispose_engine() -> None:
