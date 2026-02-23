@@ -1,120 +1,175 @@
 # Log-Zugriff -- Agent-Referenz
 
-> **Version:** 2.0 | **Stand:** 2026-02-23
-> **Zweck:** Zentrale Referenz fuer Log-Dateien, Prioritaeten und Erstellung
+> **Version:** 3.0 | **Stand:** 2026-02-23
+> **Zweck:** Zentrale Referenz fuer Log-Dateien, Prioritaeten, Correlation-IDs und Erstellung
 > **Verknuepfung:** [LOG_LOCATIONS.md](LOG_LOCATIONS.md) fuer Pfade und Capture-Methoden
 
 ---
 
 ## 1. Agent -> Log-Hierarchie (Prioritaet beim Lesen)
 
-| Agent | Primaer (immer verfuegbar) | Session-Logs (nach start_session.sh) | Fallback |
-|-------|---------------------------|--------------------------------------|----------|
-| server-debug | `logs/server/god_kaiser.log` (JSON, 10MB x 10 Rotation) | `logs/current/god_kaiser.log` (Symlink) | `docker compose logs --tail=100 el-servador` |
-| mqtt-debug | `docker compose logs --tail=100 mqtt-broker` | `logs/current/mqtt_traffic.log` (Payload-Capture) | Loki `{compose_service="mqtt-broker"}` |
-| frontend-debug | `docker compose logs --tail=100 el-frontend` | - | Loki `{compose_service="el-frontend"}`, Playwright MCP `browser_console_messages` |
-| esp32-debug | `logs/current/esp32_serial.log` (manuell durch User) | Same | `logs/wokwi/serial/` (Makefile-Tests) |
-| db-inspector | `logs/postgres/postgresql-YYYY-MM-DD.log` | - | `docker compose logs --tail=50 postgres` |
-| test-log-analyst | `logs/backend/`, `logs/frontend/`, `logs/wokwi/reports/` | - | CI: `gh run view --log`, Artifacts |
+| Agent | Primaer | Erweitert (wenn vorhanden) | Fallback |
+|-------|--------|---------------------------|----------|
+| server-debug | `logs/current/god_kaiser.log` | `logs/current/server_loki_errors.log`, `logs/current/server_api_filtered.log` | `logs/server/god_kaiser.log` |
+| mqtt-debug | `logs/current/mqtt_traffic.log` | `logs/current/mqtt_capture_*.log` (via mqtt_capture.sh) | `docker compose logs mqtt-broker` / Loki |
+| frontend-debug | `logs/current/frontend_container.log` | Server-Log `[FRONTEND]` Eintraege (via `/api/v1/logs/frontend`) | Loki `compose_service=el-frontend` / `docker compose logs el-frontend` |
+| esp32-debug | `logs/current/esp32_serial.log` | `docker compose logs esp32-serial-logger` | Loki `compose_service=esp32-serial-logger` -> `logs/wokwi/serial/*.log` -> "Bitte starte Serial-Capture manuell" |
+| test-log-analyst | `logs/backend/`, `logs/frontend/`, `logs/wokwi/reports/`, `logs/server/` | CI: `gh run view --log` | - |
 
-**Regeln:**
-- Debug-Agents haben Terminal (Bash) fuer `docker compose logs` und `curl`
-- `logs/server/god_kaiser.log` existiert IMMER wenn Server jemals lief (persistentes Bind-Mount)
-- `logs/current/` Dateien existieren NUR nach `scripts/debug/start_session.sh`
-- ESP32 Serial-Log erfordert MANUELLE User-Aktion (Wokwi `--serial-log-file` oder PIO Monitor Redirect)
+**esp32-debug Fallback-Kette (Prioritaet):**
+1. `logs/current/esp32_serial.log` (manuelles Capture)
+2. `docker compose logs esp32-serial-logger` (Hardware-Profil)
+3. Loki: `{compose_service="esp32-serial-logger"}`
+4. `logs/wokwi/serial/*.log` (Wokwi-Tests)
+5. Fallback: "Bitte starte Serial-Capture manuell"
+
+**Regel:** Debug-Agents haben Terminal fuer vollen Stack-Zugriff. PowerShell: `;` statt `&&`.
 
 ---
 
 ## 2. Wer erstellt welche Dateien
 
-| Quelle | Erstellt von | Zeitpunkt | Anmerkung |
-|--------|--------------|-----------|-----------|
-| `logs/server/god_kaiser.log` | Server (RotatingFileHandler) | Automatisch | JSON-Format, 10MB x 10 Rotation |
-| `logs/postgres/postgresql-YYYY-MM-DD.log` | PostgreSQL (logging_collector) | Automatisch | Daily Rotation, UTC |
-| `logs/current/mqtt_traffic.log` | `start_session.sh` | Session-Start | mosquitto_sub Capture mit Timestamps |
-| `logs/current/god_kaiser.log` | `start_session.sh` (Symlink) | Session-Start | Zeigt auf `logs/server/god_kaiser.log` |
-| `logs/current/esp32_serial.log` | User (manuell) | Waehrend Test | Wokwi: `--serial-log-file`, PIO: `> file 2>&1` |
-| `logs/current/STATUS.md` | `start_session.sh` | Session-Start | Agent-Kontext, Docker-Status |
-| `logs/wokwi/serial/*.log` | Makefile wokwi-test-* | CI/lokale Tests | Automatisch bei Wokwi-Szenarien |
-
-> **ACHTUNG:** Die frueheren Eintraege zu `server_loki_errors.log`, `mqtt_broker_loki.log`, `frontend_loki.log` und `frontend_container.log` waren FALSCH. `start_session.sh` erzeugt diese Dateien NICHT. Loki-Exports muessen manuell via `curl` abgerufen werden.
+| Quelle | Erstellt von | Zeitpunkt | Debug-Agent |
+|--------|--------------|-----------|-------------|
+| `logs/current/mqtt_traffic.log` | session.sh | Session-Start | mqtt-debug |
+| `logs/current/mqtt_capture_*.log` | `scripts/debug/mqtt_capture.sh` | Manuell | mqtt-debug |
+| `logs/current/god_kaiser.log` | session.sh (Symlink) | Session-Start | server-debug |
+| `logs/current/esp32_serial.log` | User (Wokwi/Monitor) | Waehrend Test | esp32-debug |
+| `logs/current/frontend_container.log` | session.sh + system-control | Start + Ende | frontend-debug |
+| `logs/current/server_loki_errors.log` | session.sh | Session-Start (Monitoring) | server-debug |
+| `logs/current/STATUS.md` | session.sh | Session-Start | Alle |
 
 ---
 
-## 3. Loki / Docker Logs Verfuegbarkeit
+## 3. MQTT Payload Capture
 
-| Quelle | Wann verfuegbar | Agent-Zugriff |
-|--------|-----------------|---------------|
-| Loki (`localhost:3100`) | Nur bei `docker compose --profile monitoring up` | `curl` in Bash Tool |
-| `docker compose logs <service>` | Immer wenn Container laeuft/lief | Bash Tool (IMMER mit `--tail=N`) |
-| Browser Console | Nur bei laufendem Frontend | Playwright MCP `browser_console_messages` (NUR Hauptkontext) |
-
-### Loki-Labels (verifiziert)
-
-| Label | Werte |
-|-------|-------|
-| `compose_service` | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres`, `loki`, `promtail`, `prometheus`, `grafana`, `esp32-serial-logger` |
-| `level` | Server: `INFO`/`WARNING`/`ERROR`/`DEBUG`/`CRITICAL`. Frontend: `info`/`warn`/`error`/`debug` (nach Logger-Update). ESP32: `info`/`warning`/`error`/`debug` |
-| `logger` | Server only: Python module path (z.B. `src.mqtt.handlers.sensor_handler`) |
-| `component` | Frontend: Vue component name. ESP32: `mqtt`/`sensor`/`logger`/`wifi`/`app` |
-
-### Loki-Queries fuer Agents
+Mosquitto loggt designbedingt KEINE Message-Payloads. Fuer Payload-Analyse:
 
 ```bash
-# Server Errors (letzte Stunde)
-curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={compose_service="el-servador",level="ERROR"}' \
-  --data-urlencode 'limit=50'
-
-# MQTT Broker Events
-curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={compose_service="mqtt-broker"}' \
-  --data-urlencode 'limit=50'
-
-# Frontend Errors
-curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={compose_service="el-frontend",level="error"}' \
-  --data-urlencode 'limit=50'
-
-# ESP32 Serial (nur bei Hardware-Profil + ser2net Bridge)
-curl -s "http://localhost:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={compose_service="esp32-serial-logger"}' \
-  --data-urlencode 'limit=50'
+# Starte MQTT Debug Capture
+./scripts/debug/mqtt_capture.sh                                    # Alle kaiser/# Topics
+./scripts/debug/mqtt_capture.sh "kaiser/god/esp/+/sensor/+/data"   # Nur Sensor-Daten
+./scripts/debug/mqtt_capture.sh "kaiser/#" logs/current/mqtt.log   # Custom Output
 ```
+
+Output-Format: `[2026-02-23T12:00:00Z] topic payload`
 
 ---
 
-## 4. ESP32 Serial-Capture Workflow
+## 4. Correlation-ID Pattern
 
-ESP32 Serial-Logging ist der einzige Log-Pfad der MANUELLE User-Aktion erfordert:
+### Wie Correlation-IDs funktionieren
 
-### Wokwi (Simulation)
+1. **ESP32** sendet `"seq"` in MQTT-Payloads (monoton steigend pro ESP)
+2. **Server** generiert Correlation-ID: `{esp_id}:{topic_suffix}:{seq}:{timestamp_ms}`
+3. **Alle Server-Log-Eintraege** enthalten die Correlation-ID im `request_id` Feld
+
+### Cross-Layer Debugging mit Correlation-IDs
+
 ```bash
-cd "El Trabajante"
-wokwi-cli . --timeout 90000 --serial-log-file "logs/current/esp32_serial.log"
+# Schritt 1: Finde ESP-ID und Seq in MQTT-Capture
+grep "ESP_12AB34CD" logs/current/mqtt_capture_*.log
+
+# Schritt 2: Suche Correlation-ID im Server-Log
+grep "ESP_12AB34CD:data:42" logs/server/god_kaiser.log
+
+# Schritt 3: Loki-Query (wenn Monitoring laeuft)
+# {compose_service="el-servador"} |= "ESP_12AB34CD:data:42"
 ```
 
-### Hardware (Echter ESP32)
-```bash
-# PowerShell (EMPFOHLEN fuer COM-Port)
-pio device monitor --baud 115200 2>&1 | Tee-Object -FilePath "logs/current/esp32_serial.log"
+### Beispiel
 
-# Git Bash (falls COM-Port erreichbar)
-pio device monitor --baud 115200 > logs/current/esp32_serial.log 2>&1
 ```
-
-### Docker Hardware-Profil (ser2net Bridge)
-```bash
-# Voraussetzung: ser2net auf Host laeuft und COM-Port auf TCP:3333 bridged
-docker compose --profile hardware up esp32-serial-logger
-# → Logs via Promtail → Loki: {compose_service="esp32-serial-logger"}
+ESP32 sendet:   {"esp_id":"ESP_12AB34CD","seq":42,"gpio":34,"raw":2048,...}
+Server loggt:   2026-02-23 12:00:00 - sensor_handler - INFO - [ESP_12AB34CD:data:42:1708704000000] - Processing sensor data
 ```
 
 ---
 
-## 5. Verweis
+## 5. Frontend Error Reporting
+
+Frontend-Errors werden automatisch an den Server gemeldet:
+- **Vue Error Handler** -> POST `/api/v1/logs/frontend`
+- **Unhandled Rejection** -> POST `/api/v1/logs/frontend`
+- **window.onerror** -> POST `/api/v1/logs/frontend`
+
+Im Server-Log suchen:
+```bash
+grep "\[FRONTEND\]" logs/server/god_kaiser.log
+```
+
+Rate-Limited: Max 10 Requests/Minute pro IP.
+
+---
+
+## 6. ESP32 Log-Format (TAG-basiert)
+
+ESP32 Firmware verwendet TAG-basierte Logs (ESP-IDF Konvention):
+
+```
+[     12345] [INFO    ] [SENSOR  ] pH sensor initialized on GPIO 34
+[     12346] [ERROR   ] [MQTT    ] Connection failed
+[     12347] [WARNING ] [SAFETY  ] Emergency stop triggered
+```
+
+**Format:** `[millis] [LEVEL   ] [TAG     ] message`
+
+**TAGs:** BOOT, SENSOR, ACTUATOR, MQTT, WIFI, GPIO, NVS, CONFIG, SAFETY, I2C, ONEWIRE, PWM, HEALTH, CBREAKER, ERRTRAK, HTTP, PROV, TIME, TOPIC, PUMP, VALVE, PWMACT
+
+**MQTT Log-Level aendern:**
+```bash
+mosquitto_pub -h localhost \
+  -t "kaiser/god/esp/ESP_12AB34CD/system/command" \
+  -m '{"command":"set_log_level","params":{"level":"DEBUG"}}'
+```
+
+---
+
+## 7. Loki-Queries fuer Agents
+
+### server-debug
+```
+{compose_service="el-servador"} |= "ERROR"
+{compose_service="el-servador"} | json | level="ERROR"
+{compose_service="el-servador"} |= "ESP_12AB34CD"
+{compose_service="el-servador"} |= "[FRONTEND]"
+```
+
+### mqtt-debug
+```
+{compose_service="mqtt-broker"} |= "disconnect"
+{compose_service="mqtt-broker"} |= "error"
+```
+
+### frontend-debug
+```
+{compose_service="el-frontend"} | json | level="error"
+{compose_service="el-frontend"} | json | component="ESPCard"
+```
+
+### esp32-debug
+```
+{compose_service="esp32-serial-logger"} |= "ERROR"
+{compose_service="esp32-serial-logger", device="esp32-xiao-01"}
+{compose_service="esp32-serial-logger"} |= "[SENSOR"
+```
+
+---
+
+## 8. Loki / Debug API Verfuegbarkeit
+
+| Quelle | Wann verfuegbar | Nutzung |
+|--------|----------------|---------|
+| Loki (`localhost:3100`) | Nur bei `docker compose --profile monitoring up` | session.sh fuehrt Loki-Queries aus |
+| Debug API (`/api/v1/debug/logs`) | Immer wenn Server laeuft | `level=ERROR` exportieren |
+| Frontend Log Endpoint | Immer wenn Server laeuft | Automatisch (Vue Error Handler) |
+
+---
+
+## 9. Verweis
 
 - **Pfad-Details:** [LOG_LOCATIONS.md](LOG_LOCATIONS.md)
 - **Flow-Kontext:** [flow_reference.md](../testing/flow_reference.md) F1.2-F1.4
 - **Session-Script:** `scripts/debug/start_session.sh`
-- **Analyse-Report:** `.claude/reports/current/LOGGING_INFRASTRUCTURE_ANALYSIS.md`
+- **MQTT Capture:** `scripts/debug/mqtt_capture.sh`
+- **REST Endpoints:** [REST_ENDPOINTS.md](../api/REST_ENDPOINTS.md)

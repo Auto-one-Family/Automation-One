@@ -5,6 +5,9 @@
 #include "../../models/watchdog_types.h"
 #include <ArduinoJson.h>
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "PROV";
+
 // ============================================
 // HTML LANDING PAGE (Captive Portal with Form)
 // ============================================
@@ -310,26 +313,26 @@ ProvisionManager::~ProvisionManager() {
 // ============================================
 bool ProvisionManager::begin() {
   if (initialized_) {
-    LOG_WARNING("ProvisionManager already initialized");
+    LOG_W(TAG, "ProvisionManager already initialized");
     return true;
   }
 
-  LOG_INFO("╔════════════════════════════════════════╗");
-  LOG_INFO("║  PROVISION MANAGER INITIALIZATION     ║");
-  LOG_INFO("╚════════════════════════════════════════╝");
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  PROVISION MANAGER INITIALIZATION     ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
 
   // Get ESP ID from global system config
   esp_id_ = configManager.getESPId();
 
   if (esp_id_.length() == 0) {
-    LOG_ERROR("ProvisionManager: ESP ID not available");
+    LOG_E(TAG, "ProvisionManager: ESP ID not available");
     errorTracker.trackError(ERROR_SYSTEM_INIT_FAILED,
                            ERROR_SEVERITY_CRITICAL,
                            "ESP ID not available for provisioning");
     return false;
   }
 
-  LOG_INFO("ESP ID: " + esp_id_);
+  LOG_I(TAG, "ESP ID: " + esp_id_);
 
   // Check if last connection failed (config exists but provisioning was triggered)
   // This happens when WiFi connection fails after 3 attempts
@@ -340,7 +343,7 @@ bool ProvisionManager::begin() {
     last_connection_failed_ = true;
     last_error_message_ = "Verbindung zum Netzwerk '" + wifi_config.ssid +
                           "' fehlgeschlagen. Bitte Zugangsdaten pruefen.";
-    LOG_WARNING("Previous connection failed - showing error in form");
+    LOG_W(TAG, "Previous connection failed - showing error in form");
   } else {
     last_connection_failed_ = false;
     last_error_message_ = "";
@@ -349,7 +352,7 @@ bool ProvisionManager::begin() {
   initialized_ = true;
   state_ = PROVISION_IDLE;
 
-  LOG_INFO("ProvisionManager initialized successfully");
+  LOG_I(TAG, "ProvisionManager initialized successfully");
   return true;
 }
 
@@ -358,13 +361,13 @@ bool ProvisionManager::needsProvisioning() const {
 
   // Check if config is marked as configured
   if (!config.configured) {
-    LOG_INFO("ProvisionManager: Config not marked as configured");
+    LOG_I(TAG, "ProvisionManager: Config not marked as configured");
     return true;
   }
 
   // Check if SSID is empty
   if (config.ssid.length() == 0) {
-    LOG_INFO("ProvisionManager: WiFi SSID is empty");
+    LOG_I(TAG, "ProvisionManager: WiFi SSID is empty");
     return true;
   }
 
@@ -374,13 +377,13 @@ bool ProvisionManager::needsProvisioning() const {
 
 bool ProvisionManager::startAPMode() {
   if (!initialized_) {
-    LOG_ERROR("ProvisionManager not initialized");
+    LOG_E(TAG, "ProvisionManager not initialized");
     return false;
   }
 
-  LOG_INFO("╔════════════════════════════════════════╗");
-  LOG_INFO("║  STARTING ACCESS POINT MODE           ║");
-  LOG_INFO("╚════════════════════════════════════════╝");
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  STARTING ACCESS POINT MODE           ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
 
   ap_start_time_ = millis();
   retry_count_ = 0;
@@ -388,47 +391,47 @@ bool ProvisionManager::startAPMode() {
 
   // Start WiFi AP
   if (!startWiFiAP()) {
-    LOG_ERROR("Failed to start WiFi AP");
+    LOG_E(TAG, "Failed to start WiFi AP");
     transitionTo(PROVISION_ERROR);
     return false;
   }
 
   // Start HTTP Server
   if (!startHTTPServer()) {
-    LOG_ERROR("Failed to start HTTP Server");
+    LOG_E(TAG, "Failed to start HTTP Server");
     transitionTo(PROVISION_ERROR);
     return false;
   }
 
   // Start mDNS (optional - non-critical)
   if (!startMDNS()) {
-    LOG_WARNING("Failed to start mDNS (optional feature)");
+    LOG_W(TAG, "Failed to start mDNS (optional feature)");
     // Continue anyway
   }
 
   // Transition to AP_MODE state
   transitionTo(PROVISION_AP_MODE);
 
-  LOG_INFO("╔════════════════════════════════════════╗");
-  LOG_INFO("║  ACCESS POINT MODE ACTIVE             ║");
-  LOG_INFO("╚════════════════════════════════════════╝");
-  LOG_INFO("Please connect to this ESP and configure:");
-  LOG_INFO("  1. Connect to WiFi SSID: AutoOne-" + esp_id_);
-  LOG_INFO("  2. Password: provision");
-  LOG_INFO("  3. Open browser: http://192.168.4.1");
-  LOG_INFO("  4. Or use API: POST http://192.168.4.1/provision");
-  LOG_INFO("Timeout: " + String(AP_MODE_TIMEOUT_MS / 60000) + " minutes");
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  ACCESS POINT MODE ACTIVE             ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "Please connect to this ESP and configure:");
+  LOG_I(TAG, "  1. Connect to WiFi SSID: AutoOne-" + esp_id_);
+  LOG_I(TAG, "  2. Password: provision");
+  LOG_I(TAG, "  3. Open browser: http://192.168.4.1");
+  LOG_I(TAG, "  4. Or use API: POST http://192.168.4.1/provision");
+  LOG_I(TAG, "Timeout: " + String(AP_MODE_TIMEOUT_MS / 60000) + " minutes");
 
   return true;
 }
 
 bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
   if (state_ != PROVISION_AP_MODE && state_ != PROVISION_WAITING_CONFIG) {
-    LOG_ERROR("ProvisionManager: Not in AP-Mode or Waiting state");
+    LOG_E(TAG, "ProvisionManager: Not in AP-Mode or Waiting state");
     return false;
   }
 
-  LOG_INFO("Waiting for configuration (timeout: " + String(timeout_ms / 1000) + " seconds)");
+  LOG_I(TAG, "Waiting for configuration (timeout: " + String(timeout_ms / 1000) + " seconds)");
 
   unsigned long start_time = millis();
   unsigned long last_feed_time = millis();
@@ -456,13 +459,13 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
         // ─────────────────────────────────────────────────
         if (millis() - last_feed_log_time >= LOG_THROTTLE_MS) {
           unsigned long uptime_sec = (millis() - start_time) / 1000;
-          LOG_INFO("🔄 Provisioning alive: " + String(uptime_sec) +
+          LOG_I(TAG, "🔄 Provisioning alive: " + String(uptime_sec) +
                    "s uptime, " + String(feed_count) + " watchdog feeds");
           last_feed_log_time = millis();
         }
       } else {
         feed_failures++;
-        LOG_WARNING("⚠️ Watchdog feed blocked (failure #" + String(feed_failures) + ")");
+        LOG_W(TAG, "⚠️ Watchdog feed blocked (failure #" + String(feed_failures) + ")");
         // Continue anyway - user can manually reset
       }
     }
@@ -473,8 +476,8 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
     // Check if config received
     if (config_received_) {
       unsigned long elapsed_sec = (millis() - start_time) / 1000;
-      LOG_INFO("✅ Configuration received successfully");
-      LOG_INFO("📊 Provisioning summary: " + String(feed_count) + " feeds, " +
+      LOG_I(TAG, "✅ Configuration received successfully");
+      LOG_I(TAG, "📊 Provisioning summary: " + String(feed_count) + " feeds, " +
                String(feed_failures) + " failures over " + String(elapsed_sec) + "s");
       transitionTo(PROVISION_COMPLETE);
       return true;
@@ -483,7 +486,7 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
     // Check for timeout
     if (checkTimeouts()) {
       // Timeout occurred
-      LOG_ERROR("❌ Provisioning timeout");
+      LOG_E(TAG, "❌ Provisioning timeout");
       return false;
     }
 
@@ -495,21 +498,21 @@ bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
   // FINAL SUMMARY (Industrial Diagnostics)
   // ─────────────────────────────────────────────────────
   unsigned long total_time_sec = (millis() - start_time) / 1000;
-  LOG_INFO("📊 Provisioning summary: " + String(feed_count) + " feeds, " +
+  LOG_I(TAG, "📊 Provisioning summary: " + String(feed_count) + " feeds, " +
            String(feed_failures) + " failures over " + String(total_time_sec) + "s");
 
   // Timeout reached
-  LOG_ERROR("❌ Wait timeout reached");
+  LOG_E(TAG, "❌ Wait timeout reached");
   transitionTo(PROVISION_TIMEOUT);
   return false;
 }
 
 void ProvisionManager::stop() {
-  LOG_INFO("Stopping Provision Manager");
+  LOG_I(TAG, "Stopping Provision Manager");
 
   // Stop DNS Server (Captive Portal)
   dns_server_.stop();
-  LOG_INFO("DNS Server stopped");
+  LOG_I(TAG, "DNS Server stopped");
 
   // Stop HTTP Server
   if (server_) {
@@ -526,7 +529,7 @@ void ProvisionManager::stop() {
 
   transitionTo(PROVISION_IDLE);
 
-  LOG_INFO("Provision Manager stopped");
+  LOG_I(TAG, "Provision Manager stopped");
 }
 
 // ============================================
@@ -562,7 +565,7 @@ bool ProvisionManager::transitionTo(ProvisionState new_state) {
     return true;  // Already in this state
   }
 
-  LOG_INFO("Provision State Transition: " + getStateString(state_) + " → " + getStateString(new_state));
+  LOG_I(TAG, "Provision State Transition: " + getStateString(state_) + " → " + getStateString(new_state));
 
   state_ = new_state;
   state_start_time_ = millis();
@@ -578,13 +581,13 @@ bool ProvisionManager::checkTimeouts() {
     case PROVISION_AP_MODE:
     case PROVISION_WAITING_CONFIG:
       if (elapsed > AP_MODE_TIMEOUT_MS) {
-        LOG_WARNING("⏰ AP-Mode timeout reached (" + String(AP_MODE_TIMEOUT_MS / 60000) + " minutes)");
+        LOG_W(TAG, "⏰ AP-Mode timeout reached (" + String(AP_MODE_TIMEOUT_MS / 60000) + " minutes)");
         transitionTo(PROVISION_TIMEOUT);
 
         // Check retry count
         if (retry_count_ < MAX_RETRY_COUNT) {
           retry_count_++;
-          LOG_INFO("Retrying provisioning (attempt " + String(retry_count_ + 1) + "/" + String(MAX_RETRY_COUNT + 1) + ")");
+          LOG_I(TAG, "Retrying provisioning (attempt " + String(retry_count_ + 1) + "/" + String(MAX_RETRY_COUNT + 1) + ")");
 
           // Restart provisioning
           stop();
@@ -593,7 +596,7 @@ bool ProvisionManager::checkTimeouts() {
 
           return false;  // Continue waiting
         } else {
-          LOG_CRITICAL("❌ Max provisioning retries reached (" + String(MAX_RETRY_COUNT) + ")");
+          LOG_C(TAG, "❌ Max provisioning retries reached (" + String(MAX_RETRY_COUNT) + ")");
           enterSafeMode();
           return true;  // Timeout
         }
@@ -608,10 +611,10 @@ bool ProvisionManager::checkTimeouts() {
 }
 
 void ProvisionManager::enterSafeMode() {
-  LOG_CRITICAL("╔════════════════════════════════════════╗");
-  LOG_CRITICAL("║  ENTERING SAFE-MODE (PROVISIONING)    ║");
-  LOG_CRITICAL("║  AP-Mode remains active indefinitely  ║");
-  LOG_CRITICAL("╚════════════════════════════════════════╝");
+  LOG_C(TAG, "╔════════════════════════════════════════╗");
+  LOG_C(TAG, "║  ENTERING SAFE-MODE (PROVISIONING)    ║");
+  LOG_C(TAG, "║  AP-Mode remains active indefinitely  ║");
+  LOG_C(TAG, "╚════════════════════════════════════════╝");
 
   // Update system state
   SystemConfig sys_config = configManager.getSystemConfig();
@@ -625,31 +628,31 @@ void ProvisionManager::enterSafeMode() {
                          "Provisioning timeout - Safe-Mode active with AP");
 
   // User-Instructions (ERWEITERT)
-  LOG_INFO("");
-  LOG_INFO("╔═══════════════════════════════════════════════════════════╗");
-  LOG_INFO("║  MANUAL PROVISIONING REQUIRED                             ║");
-  LOG_INFO("╠═══════════════════════════════════════════════════════════╣");
+  LOG_I(TAG, "");
+  LOG_I(TAG, "╔═══════════════════════════════════════════════════════════╗");
+  LOG_I(TAG, "║  MANUAL PROVISIONING REQUIRED                             ║");
+  LOG_I(TAG, "╠═══════════════════════════════════════════════════════════╣");
 
   // ESP-ID-abhängige SSID-Anzeige
   String ssid_lower = esp_id_;
   ssid_lower.toLowerCase();
 
-  LOG_INFO("║  1. Connect to WiFi: AutoOne-" + esp_id_ + "                  ");
-  LOG_INFO("║  2. Password: provision                                   ║");
-  LOG_INFO("║  3. Open: http://192.168.4.1                              ║");
-  LOG_INFO("║     OR:   http://" + ssid_lower + ".local                    ");
-  LOG_INFO("║  4. Use POST /provision endpoint                          ║");
-  LOG_INFO("║                                                           ║");
-  LOG_INFO("║  Alternative: Factory-Reset (Boot-Button 10s)             ║");
-  LOG_INFO("╚═══════════════════════════════════════════════════════════╝");
-  LOG_INFO("");
+  LOG_I(TAG, "║  1. Connect to WiFi: AutoOne-" + esp_id_ + "                  ");
+  LOG_I(TAG, "║  2. Password: provision                                   ║");
+  LOG_I(TAG, "║  3. Open: http://192.168.4.1                              ║");
+  LOG_I(TAG, "║     OR:   http://" + ssid_lower + ".local                    ");
+  LOG_I(TAG, "║  4. Use POST /provision endpoint                          ║");
+  LOG_I(TAG, "║                                                           ║");
+  LOG_I(TAG, "║  Alternative: Factory-Reset (Boot-Button 10s)             ║");
+  LOG_I(TAG, "╚═══════════════════════════════════════════════════════════╝");
+  LOG_I(TAG, "");
 
   // Visual feedback (LED-Blink-Pattern)
   const uint8_t LED_PIN = 2;  // ESP32 onboard LED
   pinMode(LED_PIN, OUTPUT);
 
   // Pattern: 10× kurzes Blinken (200ms on/off)
-  LOG_INFO("LED Pattern: 10× blink (GPIO 2)");
+  LOG_I(TAG, "LED Pattern: 10× blink (GPIO 2)");
   for (int i = 0; i < 10; i++) {
     digitalWrite(LED_PIN, HIGH);
     delay(200);
@@ -680,7 +683,7 @@ void ProvisionManager::loop() {
 // WIFI & SERVER SETUP
 // ============================================
 bool ProvisionManager::startWiFiAP() {
-  LOG_INFO("Starting WiFi Access Point...");
+  LOG_I(TAG, "Starting WiFi Access Point...");
 
   String ssid = "AutoOne-" + esp_id_;
   String password = "provision";
@@ -694,7 +697,7 @@ bool ProvisionManager::startWiFiAP() {
   bool success = WiFi.softAP(ssid.c_str(), password.c_str(), 1, 0, MAX_CLIENTS);
 
   if (!success) {
-    LOG_ERROR("Failed to start WiFi AP");
+    LOG_E(TAG, "Failed to start WiFi AP");
     errorTracker.trackError(ERROR_WIFI_INIT_FAILED,
                            ERROR_SEVERITY_CRITICAL,
                            "WiFi.softAP() failed");
@@ -704,12 +707,12 @@ bool ProvisionManager::startWiFiAP() {
   // Get AP IP
   IPAddress ip = WiFi.softAPIP();
 
-  LOG_INFO("✅ WiFi AP started:");
-  LOG_INFO("  SSID: " + ssid);
-  LOG_INFO("  Password: " + password);
-  LOG_INFO("  IP Address: " + ip.toString());
-  LOG_INFO("  Channel: 1");
-  LOG_INFO("  Max Connections: " + String(MAX_CLIENTS));
+  LOG_I(TAG, "✅ WiFi AP started:");
+  LOG_I(TAG, "  SSID: " + ssid);
+  LOG_I(TAG, "  Password: " + password);
+  LOG_I(TAG, "  IP Address: " + ip.toString());
+  LOG_I(TAG, "  Channel: 1");
+  LOG_I(TAG, "  Max Connections: " + String(MAX_CLIENTS));
 
   // ============================================
   // DNS SERVER FOR CAPTIVE PORTAL DETECTION
@@ -718,31 +721,31 @@ bool ProvisionManager::startWiFiAP() {
   // Without DNS response, OS rejects connection with "No internet" error
   // Solution: Redirect all DNS queries to AP IP → Client opens browser automatically
 
-  LOG_INFO("Starting DNS Server for Captive Portal...");
+  LOG_I(TAG, "Starting DNS Server for Captive Portal...");
 
   bool dns_started = dns_server_.start(DNS_PORT, "*", ip);
 
   if (!dns_started) {
-    LOG_WARNING("Failed to start DNS Server - Captive Portal may not work");
-    LOG_WARNING("  Windows/macOS might reject connection");
+    LOG_W(TAG, "Failed to start DNS Server - Captive Portal may not work");
+    LOG_W(TAG, "  Windows/macOS might reject connection");
     // Continue without DNS - AP still works, just less convenient
   } else {
-    LOG_INFO("✅ DNS Server started:");
-    LOG_INFO("  Port: 53");
-    LOG_INFO("  Redirect: All DNS queries -> " + ip.toString());
+    LOG_I(TAG, "✅ DNS Server started:");
+    LOG_I(TAG, "  Port: 53");
+    LOG_I(TAG, "  Redirect: All DNS queries -> " + ip.toString());
   }
 
   return true;
 }
 
 bool ProvisionManager::startHTTPServer() {
-  LOG_INFO("Starting HTTP Server...");
+  LOG_I(TAG, "Starting HTTP Server...");
 
   // Create WebServer instance
   server_ = new WebServer(80);
 
   if (!server_) {
-    LOG_ERROR("Failed to allocate WebServer");
+    LOG_E(TAG, "Failed to allocate WebServer");
     errorTracker.trackError(ERROR_SYSTEM_INIT_FAILED,
                            ERROR_SEVERITY_CRITICAL,
                            "WebServer allocation failed");
@@ -759,18 +762,18 @@ bool ProvisionManager::startHTTPServer() {
   // Start server
   server_->begin();
 
-  LOG_INFO("✅ HTTP Server started on port 80");
-  LOG_INFO("  Endpoints:");
-  LOG_INFO("    GET  / (Landing page)");
-  LOG_INFO("    POST /provision (Config submission)");
-  LOG_INFO("    GET  /status (ESP status)");
-  LOG_INFO("    POST /reset (Factory reset)");
+  LOG_I(TAG, "✅ HTTP Server started on port 80");
+  LOG_I(TAG, "  Endpoints:");
+  LOG_I(TAG, "    GET  / (Landing page)");
+  LOG_I(TAG, "    POST /provision (Config submission)");
+  LOG_I(TAG, "    GET  /status (ESP status)");
+  LOG_I(TAG, "    POST /reset (Factory reset)");
 
   return true;
 }
 
 bool ProvisionManager::startMDNS() {
-  LOG_INFO("Starting mDNS...");
+  LOG_I(TAG, "Starting mDNS...");
 
   // Extract short ID (e.g., "ESP_AB12CD" → "ab12cd")
   String hostname = esp_id_;
@@ -779,7 +782,7 @@ bool ProvisionManager::startMDNS() {
 
   // Start mDNS
   if (!MDNS.begin(hostname.c_str())) {
-    LOG_WARNING("Failed to start mDNS");
+    LOG_W(TAG, "Failed to start mDNS");
     return false;
   }
 
@@ -787,9 +790,9 @@ bool ProvisionManager::startMDNS() {
   MDNS.addService("http", "tcp", 80);
   MDNS.addService("autoone", "tcp", 80);
 
-  LOG_INFO("✅ mDNS started:");
-  LOG_INFO("  Hostname: " + hostname + ".local");
-  LOG_INFO("  Services: http, autoone");
+  LOG_I(TAG, "✅ mDNS started:");
+  LOG_I(TAG, "  Hostname: " + hostname + ".local");
+  LOG_I(TAG, "  Services: http, autoone");
 
   return true;
 }
@@ -798,7 +801,7 @@ bool ProvisionManager::startMDNS() {
 // HTTP HANDLERS
 // ============================================
 void ProvisionManager::handleRoot() {
-  LOG_DEBUG("HTTP GET /");
+  LOG_D(TAG, "HTTP GET /");
 
   // Load stored configuration for form pre-fill
   WiFiConfig wifi_config = configManager.getWiFiConfig();
@@ -856,9 +859,9 @@ void ProvisionManager::handleRoot() {
 }
 
 void ProvisionManager::handleProvision() {
-  LOG_INFO("╔════════════════════════════════════════╗");
-  LOG_INFO("║  HTTP POST /provision                 ║");
-  LOG_INFO("╚════════════════════════════════════════╝");
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  HTTP POST /provision                 ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
 
   // Check state
   if (state_ != PROVISION_AP_MODE && state_ != PROVISION_WAITING_CONFIG) {
@@ -874,7 +877,7 @@ void ProvisionManager::handleProvision() {
     return;
   }
 
-  LOG_DEBUG("Request body length: " + String(body.length()) + " bytes");
+  LOG_D(TAG, "Request body length: " + String(body.length()) + " bytes");
 
   // Parse JSON
   DynamicJsonDocument doc(1024);
@@ -882,7 +885,7 @@ void ProvisionManager::handleProvision() {
 
   if (error) {
     String error_msg = "JSON parse error: " + String(error.c_str());
-    LOG_ERROR(error_msg);
+    LOG_E(TAG, error_msg);
     sendJsonError(400, "JSON_PARSE_ERROR", error_msg);
     return;
   }
@@ -897,29 +900,29 @@ void ProvisionManager::handleProvision() {
   config.mqtt_password = doc["mqtt_password"] | "";
   config.configured = true;  // Mark as configured
 
-  LOG_INFO("Received configuration:");
-  LOG_INFO("  SSID: " + config.ssid);
-  LOG_INFO("  Password: " + String(config.password.length() > 0 ? "***" : "(empty)"));
-  LOG_INFO("  Server: " + config.server_address);
-  LOG_INFO("  MQTT Port: " + String(config.mqtt_port));
-  LOG_INFO("  MQTT Username: " + (config.mqtt_username.length() > 0 ? config.mqtt_username : "(anonymous)"));
+  LOG_I(TAG, "Received configuration:");
+  LOG_I(TAG, "  SSID: " + config.ssid);
+  LOG_I(TAG, "  Password: " + String(config.password.length() > 0 ? "***" : "(empty)"));
+  LOG_I(TAG, "  Server: " + config.server_address);
+  LOG_I(TAG, "  MQTT Port: " + String(config.mqtt_port));
+  LOG_I(TAG, "  MQTT Username: " + (config.mqtt_username.length() > 0 ? config.mqtt_username : "(anonymous)"));
 
   // Validate config
   String validation_error = validateProvisionConfig(config);
   if (validation_error.length() > 0) {
-    LOG_ERROR("Validation failed: " + validation_error);
+    LOG_E(TAG, "Validation failed: " + validation_error);
     sendJsonError(400, "VALIDATION_FAILED", validation_error);
     return;
   }
 
   // Save WiFi Config to NVS
   if (!configManager.saveWiFiConfig(config)) {
-    LOG_ERROR("Failed to save WiFi config to NVS");
+    LOG_E(TAG, "Failed to save WiFi config to NVS");
     sendJsonError(500, "NVS_WRITE_FAILED", "Failed to save configuration to NVS");
     return;
   }
 
-  LOG_INFO("✅ WiFi configuration saved to NVS");
+  LOG_I(TAG, "✅ WiFi configuration saved to NVS");
 
   // Extract and save Zone Config (optional)
   if (doc.containsKey("kaiser_id") || doc.containsKey("master_zone_id") || doc.containsKey("zone_name")) {
@@ -928,24 +931,24 @@ void ProvisionManager::handleProvision() {
 
     if (doc.containsKey("kaiser_id")) {
       kaiser.kaiser_id = doc["kaiser_id"].as<String>();
-      LOG_INFO("  Kaiser ID: " + kaiser.kaiser_id);
+      LOG_I(TAG, "  Kaiser ID: " + kaiser.kaiser_id);
     }
 
     if (doc.containsKey("master_zone_id")) {
       master.master_zone_id = doc["master_zone_id"].as<String>();
-      LOG_INFO("  Master Zone ID: " + master.master_zone_id);
+      LOG_I(TAG, "  Master Zone ID: " + master.master_zone_id);
     }
 
     // NEW: zone_name processing (Server generates zone_id automatically)
     if (doc.containsKey("zone_name")) {
       kaiser.zone_name = doc["zone_name"].as<String>();
-      LOG_INFO("  Zone Name: " + kaiser.zone_name);
+      LOG_I(TAG, "  Zone Name: " + kaiser.zone_name);
     }
 
     if (configManager.saveZoneConfig(kaiser, master)) {
-      LOG_INFO("✅ Zone configuration saved to NVS");
+      LOG_I(TAG, "✅ Zone configuration saved to NVS");
     } else {
-      LOG_WARNING("⚠️ Failed to save zone configuration (non-critical)");
+      LOG_W(TAG, "⚠️ Failed to save zone configuration (non-critical)");
     }
   }
 
@@ -967,13 +970,13 @@ void ProvisionManager::handleProvision() {
   SystemConfig sys_config = configManager.getSystemConfig();
   if (sys_config.current_state == STATE_SAFE_MODE_PROVISIONING ||
       sys_config.current_state == STATE_SAFE_MODE) {
-    LOG_INFO("Resetting system state from " + String(sys_config.current_state) +
+    LOG_I(TAG, "Resetting system state from " + String(sys_config.current_state) +
              " to STATE_BOOT");
     sys_config.current_state = STATE_BOOT;
     sys_config.safe_mode_reason = "";  // Clear safe mode reason
     sys_config.boot_count = 0;         // Reset boot counter (stable config now)
     if (!configManager.saveSystemConfig(sys_config)) {
-      LOG_ERROR("Failed to save system config - state reset may not persist!");
+      LOG_E(TAG, "Failed to save system config - state reset may not persist!");
       // Continue anyway - better to try than to stay in broken state
     }
   }
@@ -994,10 +997,10 @@ void ProvisionManager::handleProvision() {
   config_received_ = true;
   transitionTo(PROVISION_CONFIG_RECEIVED);
 
-  LOG_INFO("╔════════════════════════════════════════╗");
-  LOG_INFO("║  ✅ PROVISIONING SUCCESSFUL           ║");
-  LOG_INFO("╚════════════════════════════════════════╝");
-  LOG_INFO("Rebooting in " + String(REBOOT_DELAY_MS / 1000) + " seconds...");
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  ✅ PROVISIONING SUCCESSFUL           ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "Rebooting in " + String(REBOOT_DELAY_MS / 1000) + " seconds...");
 
   // Delay before reboot (allow HTTP response to be sent)
   delay(REBOOT_DELAY_MS);
@@ -1007,7 +1010,7 @@ void ProvisionManager::handleProvision() {
 }
 
 void ProvisionManager::handleStatus() {
-  LOG_DEBUG("HTTP GET /status");
+  LOG_D(TAG, "HTTP GET /status");
 
   DynamicJsonDocument doc(512);
 
@@ -1031,10 +1034,10 @@ void ProvisionManager::handleStatus() {
 }
 
 void ProvisionManager::handleReset() {
-  LOG_WARNING("╔════════════════════════════════════════╗");
-  LOG_WARNING("║  HTTP POST /reset                     ║");
-  LOG_WARNING("║  FACTORY RESET REQUESTED              ║");
-  LOG_WARNING("╚════════════════════════════════════════╝");
+  LOG_W(TAG, "╔════════════════════════════════════════╗");
+  LOG_W(TAG, "║  HTTP POST /reset                     ║");
+  LOG_W(TAG, "║  FACTORY RESET REQUESTED              ║");
+  LOG_W(TAG, "╚════════════════════════════════════════╝");
 
   // Parse request
   String body = server_->arg("plain");
@@ -1048,17 +1051,17 @@ void ProvisionManager::handleReset() {
     return;
   }
 
-  LOG_WARNING("Confirmation received - proceeding with factory reset");
+  LOG_W(TAG, "Confirmation received - proceeding with factory reset");
 
   // Clear WiFi config
   configManager.resetWiFiConfig();
-  LOG_INFO("✅ WiFi configuration cleared");
+  LOG_I(TAG, "✅ WiFi configuration cleared");
 
   // Clear zone config
   KaiserZone kaiser;
   MasterZone master;
   configManager.saveZoneConfig(kaiser, master);
-  LOG_INFO("✅ Zone configuration cleared");
+  LOG_I(TAG, "✅ Zone configuration cleared");
 
   // Success response
   DynamicJsonDocument response(256);
@@ -1070,10 +1073,10 @@ void ProvisionManager::handleReset() {
 
   server_->send(200, "application/json", response_str);
 
-  LOG_INFO("╔════════════════════════════════════════╗");
-  LOG_INFO("║  ✅ FACTORY RESET COMPLETE            ║");
-  LOG_INFO("╚════════════════════════════════════════╝");
-  LOG_INFO("Rebooting in 3 seconds...");
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  ✅ FACTORY RESET COMPLETE            ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
+  LOG_I(TAG, "Rebooting in 3 seconds...");
 
   // Delay before reboot
   delay(3000);
@@ -1083,7 +1086,7 @@ void ProvisionManager::handleReset() {
 }
 
 void ProvisionManager::handleNotFound() {
-  LOG_DEBUG("HTTP 404: " + server_->uri());
+  LOG_D(TAG, "HTTP 404: " + server_->uri());
 
   DynamicJsonDocument doc(256);
   doc["success"] = false;
@@ -1164,7 +1167,7 @@ bool ProvisionManager::validateIPv4(const String& ip) const {
 }
 
 void ProvisionManager::sendJsonError(int status_code, const String& error_code, const String& message) {
-  LOG_ERROR("HTTP Error " + String(status_code) + ": " + error_code + " - " + message);
+  LOG_E(TAG, "HTTP Error " + String(status_code) + ": " + error_code + " - " + message);
 
   DynamicJsonDocument doc(256);
   doc["success"] = false;

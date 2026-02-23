@@ -6,6 +6,9 @@
 #include "../../models/error_codes.h"
 #include "actuator_manager.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "SAFETY";
+
 SafetyController& safetyController = SafetyController::getInstance();
 
 SafetyController::SafetyController()
@@ -28,13 +31,13 @@ bool SafetyController::begin() {
     emergency_reason_.clear();
     emergency_timestamp_ = 0;
     initialized_ = true;
-    LOG_INFO("SafetyController initialized");
+    LOG_I(TAG, "SafetyController initialized");
     return true;
 }
 
 void SafetyController::end() {
     initialized_ = false;
-    LOG_INFO("SafetyController shutdown");
+    LOG_I(TAG, "SafetyController shutdown");
 }
 
 bool SafetyController::emergencyStopAll(const String& reason) {
@@ -64,12 +67,12 @@ bool SafetyController::emergencyStopActuator(uint8_t gpio, const String& reason)
 }
 
 bool SafetyController::isolateSubzone(const String& subzone_id, const String& reason) {
-  LOG_WARNING("SafetyController: Emergency isolation of subzone: " + subzone_id);
-  LOG_WARNING("Reason: " + reason);
+  LOG_W(TAG, "SafetyController: Emergency isolation of subzone: " + subzone_id);
+  LOG_W(TAG, "Reason: " + reason);
   
   // Enable safe-mode for all pins in subzone
   if (!gpioManager.enableSafeModeForSubzone(subzone_id)) {
-    LOG_ERROR("SafetyController: Failed to isolate subzone " + subzone_id);
+    LOG_E(TAG, "SafetyController: Failed to isolate subzone " + subzone_id);
     errorTracker.trackError(ERROR_SUBZONE_SAFE_MODE_FAILED,
                            ERROR_SEVERITY_CRITICAL,
                            ("Subzone isolation failed: " + subzone_id).c_str());
@@ -81,7 +84,7 @@ bool SafetyController::isolateSubzone(const String& subzone_id, const String& re
                          ERROR_SEVERITY_CRITICAL,
                          ("Subzone isolated: " + subzone_id + " - " + reason).c_str());
   
-  LOG_INFO("SafetyController: Subzone " + subzone_id + " isolated successfully");
+  LOG_I(TAG, "SafetyController: Subzone " + subzone_id + " isolated successfully");
   return true;
 }
 
@@ -89,7 +92,7 @@ bool SafetyController::clearEmergencyStop() {
     emergency_state_ = EmergencyState::EMERGENCY_CLEARING;
     if (!verifySystemSafety()) {
     actuatorManager.publishActuatorAlert(255, "verification_failed", "clear_emergency");
-        LOG_WARNING("SafetyController verification failed during clearEmergencyStop");
+        LOG_W(TAG, "SafetyController verification failed during clearEmergencyStop");
         return false;
     }
 
@@ -170,6 +173,6 @@ void SafetyController::logEmergencyEvent(const String& reason, uint8_t gpio) {
     if (gpio != 255) {
         message += " gpio=" + String(gpio);
     }
-    LOG_WARNING(message);
+    LOG_W(TAG, message);
 }
 

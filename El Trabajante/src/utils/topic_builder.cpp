@@ -14,10 +14,13 @@
 //
 #ifndef NATIVE_TEST
     #include "logger.h"
-    #define LOG_ERROR(msg) Logger::getInstance().error(msg)
+
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "TOPIC";
+    #define LOG_E(TAG, msg) Logger::getInstance().error(msg)
 #else
     // Native test mode: Logging disabled
-    #define LOG_ERROR(msg) ((void)0)
+    #define LOG_E(TAG, msg) ((void)0)
 #endif
 // END NATIVE_TEST_GUARD
 // ============================================
@@ -51,7 +54,7 @@ const char* TopicBuilder::validateTopicBuffer(int snprintf_result) {
   // ✅ Check 1: Encoding error (snprintf returned negative)
   if (snprintf_result < 0) {
     // NATIVE_TEST_GUARD: LOG_ERROR macro is no-op in native tests
-    LOG_ERROR("TopicBuilder: snprintf encoding error!");
+    LOG_E(TAG, "TopicBuilder: snprintf encoding error!");
     return "";
   }
 
@@ -59,12 +62,12 @@ const char* TopicBuilder::validateTopicBuffer(int snprintf_result) {
   if (snprintf_result >= (int)sizeof(topic_buffer_)) {
     // NATIVE_TEST_GUARD: LOG_ERROR macro is no-op in native tests
     #ifndef NATIVE_TEST
-        LOG_ERROR("TopicBuilder: Topic truncated! Required: " +
+        LOG_E(TAG, "TopicBuilder: Topic truncated! Required: " +
                   String(snprintf_result) + " bytes, buffer: " +
                   String(sizeof(topic_buffer_)) + " bytes");
     #else
         // Native test: String concatenation not available, skip detailed error
-        LOG_ERROR("TopicBuilder: Topic truncated!");
+        LOG_E(TAG, "TopicBuilder: Topic truncated!");
     #endif
     return "";
   }

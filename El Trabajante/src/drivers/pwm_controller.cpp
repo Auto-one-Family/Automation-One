@@ -14,6 +14,9 @@
     #include "../config/hardware/xiao_esp32c3.h"
 #else
     #include "../config/hardware/esp32_dev.h"
+
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "PWM";
 #endif
 
 // ============================================
@@ -27,18 +30,18 @@ PWMController& pwmController = PWMController::getInstance();
 bool PWMController::begin() {
     // Prevent double initialization
     if (initialized_) {
-        LOG_WARNING("PWM Controller already initialized");
+        LOG_W(TAG, "PWM Controller already initialized");
         return true;
     }
 
-    LOG_INFO("PWM Controller initialization started");
+    LOG_I(TAG, "PWM Controller initialization started");
     
     // Load hardware-specific configuration
     max_channels_ = HardwareConfig::PWM_CHANNELS;
     default_frequency_ = HardwareConfig::PWM_FREQUENCY;
     default_resolution_ = HardwareConfig::PWM_RESOLUTION;
     
-    LOG_DEBUG("PWM Config: Channels=" + String(max_channels_) + 
+    LOG_D(TAG, "PWM Config: Channels=" + String(max_channels_) + 
               ", Freq=" + String(default_frequency_) + "Hz" +
               ", Resolution=" + String(default_resolution_) + " bits");
     
@@ -53,16 +56,16 @@ bool PWMController::begin() {
         channels_[channel].frequency = default_frequency_;
         channels_[channel].resolution = default_resolution_;
         
-        LOG_DEBUG("PWM Channel " + String(channel) + " configured (not attached)");
+        LOG_D(TAG, "PWM Channel " + String(channel) + " configured (not attached)");
     }
     
     initialized_ = true;
     
-    LOG_INFO("PWM Controller initialized successfully");
-    LOG_INFO("  Board: " + String(BOARD_TYPE));
-    LOG_INFO("  Channels: " + String(max_channels_));
-    LOG_INFO("  Default Frequency: " + String(default_frequency_) + " Hz");
-    LOG_INFO("  Default Resolution: " + String(default_resolution_) + " bits");
+    LOG_I(TAG, "PWM Controller initialized successfully");
+    LOG_I(TAG, "  Board: " + String(BOARD_TYPE));
+    LOG_I(TAG, "  Channels: " + String(max_channels_));
+    LOG_I(TAG, "  Default Frequency: " + String(default_frequency_) + " Hz");
+    LOG_I(TAG, "  Default Resolution: " + String(default_resolution_) + " bits");
     
     return true;
 }
@@ -72,11 +75,11 @@ bool PWMController::begin() {
 // ============================================
 void PWMController::end() {
     if (!initialized_) {
-        LOG_WARNING("PWM Controller not initialized, nothing to end");
+        LOG_W(TAG, "PWM Controller not initialized, nothing to end");
         return;
     }
     
-    LOG_INFO("PWM Controller shutdown initiated");
+    LOG_I(TAG, "PWM Controller shutdown initiated");
     
     // Detach all channels
     for (uint8_t channel = 0; channel < max_channels_; channel++) {
@@ -87,7 +90,7 @@ void PWMController::end() {
     
     initialized_ = false;
     
-    LOG_INFO("PWM Controller shutdown complete");
+    LOG_I(TAG, "PWM Controller shutdown complete");
 }
 
 // ============================================
@@ -95,7 +98,7 @@ void PWMController::end() {
 // ============================================
 bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
     if (!initialized_) {
-        LOG_ERROR("PWM Controller not initialized");
+        LOG_E(TAG, "PWM Controller not initialized");
         errorTracker.trackError(ERROR_PWM_INIT_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Attach failed: controller not initialized");
@@ -105,7 +108,7 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
     // Check if GPIO is already attached
     for (uint8_t ch = 0; ch < max_channels_; ch++) {
         if (channels_[ch].attached && channels_[ch].gpio == gpio) {
-            LOG_WARNING("GPIO " + String(gpio) + " already attached to channel " + String(ch));
+            LOG_W(TAG, "GPIO " + String(gpio) + " already attached to channel " + String(ch));
             channel_out = ch;
             return true;
         }
@@ -121,7 +124,7 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
     }
     
     if (free_channel == 255) {
-        LOG_ERROR("No free PWM channels available");
+        LOG_E(TAG, "No free PWM channels available");
         errorTracker.trackError(ERROR_PWM_CHANNEL_FULL,
                                ERROR_SEVERITY_ERROR,
                                ("All " + String(max_channels_) + " channels in use").c_str());
@@ -130,7 +133,7 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
     
     // Reserve GPIO pin
     if (!gpioManager.requestPin(gpio, "actuator", "PWM")) {
-        LOG_ERROR("Failed to reserve GPIO " + String(gpio) + " for PWM");
+        LOG_E(TAG, "Failed to reserve GPIO " + String(gpio) + " for PWM");
         errorTracker.trackError(ERROR_PWM_INIT_FAILED,
                                ERROR_SEVERITY_ERROR,
                                ("GPIO reservation failed: " + String(gpio)).c_str());
@@ -146,7 +149,7 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
     
     channel_out = free_channel;
     
-    LOG_INFO("PWM Channel " + String(free_channel) + " attached to GPIO " + String(gpio));
+    LOG_I(TAG, "PWM Channel " + String(free_channel) + " attached to GPIO " + String(gpio));
     
     return true;
 }
@@ -156,17 +159,17 @@ bool PWMController::attachChannel(uint8_t gpio, uint8_t& channel_out) {
 // ============================================
 bool PWMController::detachChannel(uint8_t channel) {
     if (!initialized_) {
-        LOG_ERROR("PWM Controller not initialized");
+        LOG_E(TAG, "PWM Controller not initialized");
         return false;
     }
     
     if (channel >= max_channels_) {
-        LOG_ERROR("Invalid channel: " + String(channel));
+        LOG_E(TAG, "Invalid channel: " + String(channel));
         return false;
     }
     
     if (!channels_[channel].attached) {
-        LOG_WARNING("Channel " + String(channel) + " not attached");
+        LOG_W(TAG, "Channel " + String(channel) + " not attached");
         return false;
     }
     
@@ -185,7 +188,7 @@ bool PWMController::detachChannel(uint8_t channel) {
     channels_[channel].attached = false;
     channels_[channel].gpio = 255;
     
-    LOG_INFO("PWM Channel " + String(channel) + " detached from GPIO " + String(gpio));
+    LOG_I(TAG, "PWM Channel " + String(channel) + " detached from GPIO " + String(gpio));
     
     return true;
 }
@@ -195,22 +198,22 @@ bool PWMController::detachChannel(uint8_t channel) {
 // ============================================
 bool PWMController::setFrequency(uint8_t channel, uint32_t frequency) {
     if (!initialized_) {
-        LOG_ERROR("PWM Controller not initialized");
+        LOG_E(TAG, "PWM Controller not initialized");
         return false;
     }
     
     if (channel >= max_channels_) {
-        LOG_ERROR("Invalid channel: " + String(channel));
+        LOG_E(TAG, "Invalid channel: " + String(channel));
         return false;
     }
     
     if (!channels_[channel].attached) {
-        LOG_ERROR("Channel " + String(channel) + " not attached");
+        LOG_E(TAG, "Channel " + String(channel) + " not attached");
         return false;
     }
     
     if (frequency == 0 || frequency > 40000000) {  // Max 40MHz
-        LOG_ERROR("Invalid frequency: " + String(frequency) + " Hz");
+        LOG_E(TAG, "Invalid frequency: " + String(frequency) + " Hz");
         return false;
     }
     
@@ -222,7 +225,7 @@ bool PWMController::setFrequency(uint8_t channel, uint32_t frequency) {
     
     channels_[channel].frequency = frequency;
     
-    LOG_DEBUG("PWM Channel " + String(channel) + " frequency set to " + String(frequency) + " Hz");
+    LOG_D(TAG, "PWM Channel " + String(channel) + " frequency set to " + String(frequency) + " Hz");
     
     return true;
 }
@@ -232,22 +235,22 @@ bool PWMController::setFrequency(uint8_t channel, uint32_t frequency) {
 // ============================================
 bool PWMController::setResolution(uint8_t channel, uint8_t resolution_bits) {
     if (!initialized_) {
-        LOG_ERROR("PWM Controller not initialized");
+        LOG_E(TAG, "PWM Controller not initialized");
         return false;
     }
     
     if (channel >= max_channels_) {
-        LOG_ERROR("Invalid channel: " + String(channel));
+        LOG_E(TAG, "Invalid channel: " + String(channel));
         return false;
     }
     
     if (!channels_[channel].attached) {
-        LOG_ERROR("Channel " + String(channel) + " not attached");
+        LOG_E(TAG, "Channel " + String(channel) + " not attached");
         return false;
     }
     
     if (resolution_bits == 0 || resolution_bits > 16) {
-        LOG_ERROR("Invalid resolution: " + String(resolution_bits) + " bits (1-16)");
+        LOG_E(TAG, "Invalid resolution: " + String(resolution_bits) + " bits (1-16)");
         return false;
     }
     
@@ -259,7 +262,7 @@ bool PWMController::setResolution(uint8_t channel, uint8_t resolution_bits) {
     
     channels_[channel].resolution = resolution_bits;
     
-    LOG_DEBUG("PWM Channel " + String(channel) + " resolution set to " + String(resolution_bits) + " bits");
+    LOG_D(TAG, "PWM Channel " + String(channel) + " resolution set to " + String(resolution_bits) + " bits");
     
     return true;
 }
@@ -269,7 +272,7 @@ bool PWMController::setResolution(uint8_t channel, uint8_t resolution_bits) {
 // ============================================
 bool PWMController::write(uint8_t channel, uint32_t duty_cycle) {
     if (!initialized_) {
-        LOG_ERROR("PWM Controller not initialized");
+        LOG_E(TAG, "PWM Controller not initialized");
         errorTracker.trackError(ERROR_PWM_SET_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Write failed: controller not initialized");
@@ -277,12 +280,12 @@ bool PWMController::write(uint8_t channel, uint32_t duty_cycle) {
     }
     
     if (channel >= max_channels_) {
-        LOG_ERROR("Invalid channel: " + String(channel));
+        LOG_E(TAG, "Invalid channel: " + String(channel));
         return false;
     }
     
     if (!channels_[channel].attached) {
-        LOG_ERROR("Channel " + String(channel) + " not attached");
+        LOG_E(TAG, "Channel " + String(channel) + " not attached");
         return false;
     }
     
@@ -290,7 +293,7 @@ bool PWMController::write(uint8_t channel, uint32_t duty_cycle) {
     uint32_t max_duty = (1 << channels_[channel].resolution) - 1;
     
     if (duty_cycle > max_duty) {
-        LOG_ERROR("Duty cycle " + String(duty_cycle) + " exceeds max " + String(max_duty));
+        LOG_E(TAG, "Duty cycle " + String(duty_cycle) + " exceeds max " + String(max_duty));
         errorTracker.trackError(ERROR_PWM_SET_FAILED,
                                ERROR_SEVERITY_WARNING,
                                "Duty cycle out of range");
@@ -300,7 +303,7 @@ bool PWMController::write(uint8_t channel, uint32_t duty_cycle) {
     // Write duty cycle to LEDC channel
     ledcWrite(channel, duty_cycle);
     
-    LOG_DEBUG("PWM Channel " + String(channel) + " duty set to " + String(duty_cycle) + 
+    LOG_D(TAG, "PWM Channel " + String(channel) + " duty set to " + String(duty_cycle) + 
               "/" + String(max_duty));
     
     return true;
@@ -311,22 +314,22 @@ bool PWMController::write(uint8_t channel, uint32_t duty_cycle) {
 // ============================================
 bool PWMController::writePercent(uint8_t channel, float percent) {
     if (!initialized_) {
-        LOG_ERROR("PWM Controller not initialized");
+        LOG_E(TAG, "PWM Controller not initialized");
         return false;
     }
     
     if (channel >= max_channels_) {
-        LOG_ERROR("Invalid channel: " + String(channel));
+        LOG_E(TAG, "Invalid channel: " + String(channel));
         return false;
     }
     
     if (!channels_[channel].attached) {
-        LOG_ERROR("Channel " + String(channel) + " not attached");
+        LOG_E(TAG, "Channel " + String(channel) + " not attached");
         return false;
     }
     
     if (percent < 0.0 || percent > 100.0) {
-        LOG_ERROR("Invalid percentage: " + String(percent, 1) + "% (0-100)");
+        LOG_E(TAG, "Invalid percentage: " + String(percent, 1) + "% (0-100)");
         return false;
     }
     
@@ -339,7 +342,7 @@ bool PWMController::writePercent(uint8_t channel, float percent) {
     // Write duty cycle
     ledcWrite(channel, duty_cycle);
     
-    LOG_DEBUG("PWM Channel " + String(channel) + " set to " + String(percent, 1) + 
+    LOG_D(TAG, "PWM Channel " + String(channel) + " set to " + String(percent, 1) + 
               "% (" + String(duty_cycle) + "/" + String(max_duty) + ")");
     
     return true;

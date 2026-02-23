@@ -3,6 +3,9 @@
 #include "../utils/topic_builder.h"
 #include "../utils/time_manager.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "ERRTRAK";
+
 // ============================================
 // GLOBAL ERROR TRACKER INSTANCE
 // ============================================
@@ -40,7 +43,7 @@ void ErrorTracker::begin() {
     error_buffer_[i] = ErrorEntry();
   }
   
-  LOG_INFO("ErrorTracker: Initialized");
+  LOG_I(TAG, "ErrorTracker: Initialized");
 }
 
 // ============================================
@@ -175,7 +178,7 @@ bool ErrorTracker::hasCriticalErrors() const {
 void ErrorTracker::clearErrors() {
   error_buffer_index_ = 0;
   error_count_ = 0;
-  LOG_INFO("ErrorTracker: Error history cleared");
+  LOG_I(TAG, "ErrorTracker: Error history cleared");
 }
 
 // ============================================
@@ -219,13 +222,13 @@ void ErrorTracker::logErrorToLogger(uint16_t error_code, ErrorSeverity severity,
   
   switch (severity) {
     case ERROR_SEVERITY_WARNING:
-      LOG_WARNING(log_msg.c_str());
+      LOG_W(TAG, log_msg.c_str());
       break;
     case ERROR_SEVERITY_ERROR:
-      LOG_ERROR(log_msg.c_str());
+      LOG_E(TAG, log_msg.c_str());
       break;
     case ERROR_SEVERITY_CRITICAL:
-      LOG_CRITICAL(log_msg.c_str());
+      LOG_C(TAG, log_msg.c_str());
       break;
   }
 }
@@ -268,7 +271,7 @@ void ErrorTracker::setMqttPublishCallback(MqttErrorPublishCallback callback, con
   mqtt_publishing_enabled_ = (callback != nullptr && esp_id.length() > 0);
   
   if (mqtt_publishing_enabled_) {
-    LOG_INFO("ErrorTracker: MQTT error publishing enabled for ESP " + esp_id);
+    LOG_I(TAG, "ErrorTracker: MQTT error publishing enabled for ESP " + esp_id);
   }
 }
 
@@ -276,7 +279,7 @@ void ErrorTracker::clearMqttPublishCallback() {
   mqtt_callback_ = nullptr;
   mqtt_esp_id_ = "";
   mqtt_publishing_enabled_ = false;
-  LOG_DEBUG("ErrorTracker: MQTT error publishing disabled");
+  LOG_D(TAG, "ErrorTracker: MQTT error publishing disabled");
 }
 
 void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severity, const char* message) {

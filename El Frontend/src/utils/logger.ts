@@ -1,8 +1,29 @@
 /**
- * Structured logger factory for frontend components.
- * Outputs JSON to stdout (Docker → Promtail → Loki) with level/component labels.
- * Also logs human-readable format to browser console for dev convenience.
+ * Structured Logger for AutomationOne Frontend.
+ *
+ * Outputs JSON-structured logs to console for Docker/Promtail ingestion.
+ * In DEV mode, also outputs human-readable format to browser console.
+ *
+ * JSON format: {"level","component","message","timestamp"}
+ * Promtail Stage 3 extracts level + component as Loki labels.
  */
+
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+}
+
+const configuredLevel: LogLevel = (
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_LOG_LEVEL) || 'debug'
+).toLowerCase() as LogLevel
+
+function shouldLog(level: LogLevel): boolean {
+  return LOG_LEVEL_PRIORITY[level] >= (LOG_LEVEL_PRIORITY[configuredLevel] ?? 0)
+}
 
 export interface Logger {
   debug: (...args: unknown[]) => void
@@ -11,75 +32,62 @@ export interface Logger {
   error: (...args: unknown[]) => void
 }
 
-const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const
-type LogLevel = (typeof LOG_LEVELS)[number]
-
-const configuredLevel: LogLevel = (
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_LOG_LEVEL) || 'debug'
-) as LogLevel
-
-const levelIndex = LOG_LEVELS.indexOf(configuredLevel)
-
-function shouldLog(level: LogLevel): boolean {
-  return LOG_LEVELS.indexOf(level) >= levelIndex
-}
-
-function formatArgs(args: unknown[]): string {
-  return args
-    .map((a) => {
-      if (typeof a === 'string') return a
-      try {
-        return JSON.stringify(a)
-      } catch {
-        return String(a)
-      }
-    })
-    .join(' ')
-}
-
-function structuredLog(level: LogLevel, component: string, args: unknown[]): void {
-  const entry = JSON.stringify({
-    level,
-    component,
-    message: formatArgs(args),
-    timestamp: new Date().toISOString(),
-  })
-  // Structured JSON goes to stdout (captured by Docker json-file → Promtail → Loki)
-  // Use console methods so Docker log driver picks it up with correct stream
-  switch (level) {
-    case 'error':
-      console.error(entry)
-      break
-    case 'warn':
-      console.warn(entry)
-      break
-    default:
-      console.log(entry)
-  }
-}
-
 export function createLogger(namespace: string): Logger {
-  const prefix = `[${namespace}]`
+  const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV
+
+  function emit(level: LogLevel, args: unknown[]): void {
+    if (!shouldLog(level)) return
+
+    const message = args
+      .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+      .join(' ')
+
+    // Structured JSON output for Docker stdout → Promtail → Loki
+    const entry = JSON.stringify({
+      level,
+      component: namespace,
+      message,
+      timestamp: new Date().toISOString(),
+    })
+
+    // Use console methods so Docker json-file driver captures via stdout/stderr
+    switch (level) {
+      case 'error':
+        console.error(entry)
+        break
+      case 'warn':
+        console.warn(entry)
+        break
+      case 'info':
+        console.info(entry)
+        break
+      default:
+        console.debug(entry)
+    }
+
+    // DEV mode: also print human-readable for browser DevTools
+    if (isDev) {
+      const prefix = `[${namespace}]`
+      switch (level) {
+        case 'error':
+          console.error(prefix, ...args)
+          break
+        case 'warn':
+          console.warn(prefix, ...args)
+          break
+        case 'info':
+          console.info(prefix, ...args)
+          break
+        default:
+          console.debug(prefix, ...args)
+      }
+    }
+  }
+
   return {
-    debug: (...args: unknown[]) => {
-      if (!shouldLog('debug')) return
-      structuredLog('debug', namespace, args)
-      if (import.meta.env?.DEV) console.debug(prefix, ...args)
-    },
-    info: (...args: unknown[]) => {
-      if (!shouldLog('info')) return
-      structuredLog('info', namespace, args)
-      if (import.meta.env?.DEV) console.info(prefix, ...args)
-    },
-    warn: (...args: unknown[]) => {
-      if (!shouldLog('warn')) return
-      structuredLog('warn', namespace, args)
-      if (import.meta.env?.DEV) console.warn(prefix, ...args)
-    },
-    error: (...args: unknown[]) => {
-      if (!shouldLog('error')) return
-      structuredLog('error', namespace, args)
-      if (import.meta.env?.DEV) console.error(prefix, ...args)
-    },
+    debug: (...args: unknown[]) => emit('debug', args),
+    info: (...args: unknown[]) => emit('info', args),
+    warn: (...args: unknown[]) => emit('warn', args),
+    error: (...args: unknown[]) => emit('error', args),
   }
 }

@@ -4,6 +4,9 @@
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "HTTP";
+
 // ============================================
 // GLOBAL HTTP CLIENT INSTANCE
 // ============================================
@@ -34,15 +37,15 @@ HTTPClient::~HTTPClient() {
 // ============================================
 bool HTTPClient::begin() {
     if (initialized_) {
-        LOG_WARNING("HTTPClient already initialized");
+        LOG_W(TAG, "HTTPClient already initialized");
         return true;
     }
     
-    LOG_INFO("HTTPClient: Initializing...");
+    LOG_I(TAG, "HTTPClient: Initializing...");
     
     initialized_ = true;
     
-    LOG_INFO("HTTPClient: Initialized");
+    LOG_I(TAG, "HTTPClient: Initialized");
     return true;
 }
 
@@ -59,7 +62,7 @@ void HTTPClient::end() {
     }
     
     initialized_ = false;
-    LOG_INFO("HTTPClient: Deinitialized");
+    LOG_I(TAG, "HTTPClient: Deinitialized");
 }
 
 // ============================================

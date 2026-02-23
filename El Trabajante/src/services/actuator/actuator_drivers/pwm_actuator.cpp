@@ -5,6 +5,9 @@
 #include "../../../models/error_codes.h"
 #include "../../../utils/logger.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "PWMACT";
+
 PWMActuator::PWMActuator()
     : initialized_(false),
       emergency_stopped_(false),
@@ -21,7 +24,7 @@ bool PWMActuator::begin(const ActuatorConfig& config) {
   }
 
   if (config.gpio == 255) {
-    LOG_ERROR("PWMActuator: invalid GPIO");
+    LOG_E(TAG, "PWMActuator: invalid GPIO");
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "PWMActuator invalid GPIO");
@@ -29,7 +32,7 @@ bool PWMActuator::begin(const ActuatorConfig& config) {
   }
 
   if (!pwmController.isInitialized()) {
-    LOG_ERROR("PWMActuator: PWM controller not initialized");
+    LOG_E(TAG, "PWMActuator: PWM controller not initialized");
     errorTracker.trackError(ERROR_PWM_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "PWM controller not ready");
@@ -39,7 +42,7 @@ bool PWMActuator::begin(const ActuatorConfig& config) {
   config_ = config;
   uint8_t channel = 255;
   if (!pwmController.attachChannel(config_.gpio, channel)) {
-    LOG_ERROR("PWMActuator: attach channel failed for GPIO " + String(config_.gpio));
+    LOG_E(TAG, "PWMActuator: attach channel failed for GPIO " + String(config_.gpio));
     return false;
   }
 
@@ -53,7 +56,7 @@ bool PWMActuator::begin(const ActuatorConfig& config) {
   initialized_ = true;
   emergency_stopped_ = false;
 
-  LOG_INFO("PWMActuator initialized on GPIO " + String(config_.gpio) + " (channel " + String(channel) + ")");
+  LOG_I(TAG, "PWMActuator initialized on GPIO " + String(config_.gpio) + " (channel " + String(channel) + ")");
   return true;
 }
 
@@ -73,17 +76,17 @@ void PWMActuator::end() {
 
 bool PWMActuator::setValue(float normalized_value) {
   if (!initialized_) {
-    LOG_ERROR("PWMActuator::setValue before init");
+    LOG_E(TAG, "PWMActuator::setValue before init");
     return false;
   }
 
   if (emergency_stopped_) {
-    LOG_WARNING("PWMActuator command ignored, emergency active");
+    LOG_W(TAG, "PWMActuator command ignored, emergency active");
     return false;
   }
 
   if (!validateActuatorValue(ActuatorTypeTokens::PWM, normalized_value)) {
-    LOG_ERROR("PWMActuator: invalid value " + String(normalized_value));
+    LOG_E(TAG, "PWMActuator: invalid value " + String(normalized_value));
     errorTracker.trackError(ERROR_COMMAND_INVALID,
                             ERROR_SEVERITY_ERROR,
                             "PWMActuator value invalid");
@@ -106,7 +109,7 @@ bool PWMActuator::applyValue(uint8_t pwm_value, bool force_publish) {
 
   float percent = (pwm_value / 255.0f) * 100.0f;
   if (!pwmController.writePercent(pwm_channel_, percent)) {
-    LOG_ERROR("PWMActuator: writePercent failed on channel " + String(pwm_channel_));
+    LOG_E(TAG, "PWMActuator: writePercent failed on channel " + String(pwm_channel_));
     errorTracker.trackError(ERROR_PWM_SET_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "PWMActuator write failed");
@@ -120,13 +123,13 @@ bool PWMActuator::applyValue(uint8_t pwm_value, bool force_publish) {
     config_.last_command_ts = millis();
   }
 
-  LOG_INFO("PWMActuator channel " + String(pwm_channel_) +
+  LOG_I(TAG, "PWMActuator channel " + String(pwm_channel_) +
            " value set to " + String(pwm_value));
   return true;
 }
 
 bool PWMActuator::emergencyStop(const String& reason) {
-  LOG_WARNING("PWMActuator emergency stop (" + reason + ")");
+  LOG_W(TAG, "PWMActuator emergency stop (" + reason + ")");
   emergency_stopped_ = true;
   return applyValue(0, false);
 }

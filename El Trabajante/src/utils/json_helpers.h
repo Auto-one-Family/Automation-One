@@ -8,6 +8,9 @@
 
 namespace JsonHelpers {
 
+// Header-local TAG (not static to avoid shadowing issues in including .cpp files)
+namespace { const char* const JSON_TAG = "JSON"; }
+
 inline bool extractInt(const JsonObjectConst& obj, const char* key, int& out, int default_val = 0) {
   if (!obj.containsKey(key)) {
     out = default_val;
@@ -20,7 +23,7 @@ inline bool extractInt(const JsonObjectConst& obj, const char* key, int& out, in
     return true;
   }
 
-  LOG_WARNING("JSON key '" + String(key) + "' is not an integer");
+  LOG_W(JSON_TAG, "JSON key '" + String(key) + "' is not an integer");
   out = default_val;
   return false;
 }
@@ -40,7 +43,7 @@ inline bool extractString(const JsonObjectConst& obj,
     return true;
   }
 
-  LOG_WARNING("JSON key '" + String(key) + "' is not a string");
+  LOG_W(JSON_TAG, "JSON key '" + String(key) + "' is not a string");
   out = default_val;
   return false;
 }
@@ -74,7 +77,7 @@ inline bool extractBool(const JsonObjectConst& obj, const char* key, bool& out, 
     }
   }
 
-  LOG_WARNING("JSON key '" + String(key) + "' is not a boolean");
+  LOG_W(JSON_TAG, "JSON key '" + String(key) + "' is not a boolean");
   out = default_val;
   return false;
 }

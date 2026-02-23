@@ -11,6 +11,9 @@
     #include "../config/hardware/xiao_esp32c3.h"
 #else
     #include "../config/hardware/esp32_dev.h"
+
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "ONEWIRE";
 #endif
 
 // ============================================
@@ -38,13 +41,13 @@ bool OneWireBusManager::begin(uint8_t pin) {
     if (initialized_) {
         // Same pin → OK, bus already active
         if (requested_pin == pin_) {
-            LOG_DEBUG("OneWire: Already initialized on GPIO " + String(pin_) + ", reusing bus");
+            LOG_D(TAG, "OneWire: Already initialized on GPIO " + String(pin_) + ", reusing bus");
             return true;
         }
         
         // Different pin → ERROR (Single-Bus-Design!)
         // Cannot switch OneWire bus to different pin without calling end() first
-        LOG_ERROR("OneWire: Bus active on GPIO " + String(pin_) + 
+        LOG_E(TAG, "OneWire: Bus active on GPIO " + String(pin_) + 
                  ", cannot switch to GPIO " + String(requested_pin) + 
                  " (Single-Bus-Design - call end() first if pin change needed)");
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
@@ -53,22 +56,22 @@ bool OneWireBusManager::begin(uint8_t pin) {
         return false;
     }
 
-    LOG_INFO("OneWire Bus Manager initialization started");
+    LOG_I(TAG, "OneWire Bus Manager initialization started");
 
     // ============================================
     // PIN ASSIGNMENT
     // ============================================
     pin_ = requested_pin;
     if (pin != 0 && pin <= 39) {
-        LOG_INFO("OneWireBus: Using configured pin GPIO " + String(pin_));
+        LOG_I(TAG, "OneWireBus: Using configured pin GPIO " + String(pin_));
     } else {
-        LOG_INFO("OneWireBus: Using hardware default pin GPIO " + String(pin_));
+        LOG_I(TAG, "OneWireBus: Using hardware default pin GPIO " + String(pin_));
         #ifdef WOKWI_SIMULATION
-            LOG_DEBUG("  (Wokwi mode - using diagram.json pin configuration)");
+            LOG_D(TAG, "  (Wokwi mode - using diagram.json pin configuration)");
         #endif
     }
 
-    LOG_DEBUG("OneWire Config: Pin=" + String(pin_));
+    LOG_D(TAG, "OneWire Config: Pin=" + String(pin_));
 
     // ============================================
     // GPIO SAFETY VALIDATION
@@ -77,7 +80,7 @@ bool OneWireBusManager::begin(uint8_t pin) {
     // This allows SensorManager to recognize the pin as a shared OneWire bus
     String bus_owner = "bus/onewire/" + String(pin_);
     if (!gpioManager.requestPin(pin_, bus_owner.c_str(), "OneWireBus")) {
-        LOG_ERROR("Failed to reserve OneWire pin " + String(pin_));
+        LOG_E(TAG, "Failed to reserve OneWire pin " + String(pin_));
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,
                                ("Pin reservation failed: GPIO " + String(pin_)).c_str());
@@ -88,7 +91,7 @@ bool OneWireBusManager::begin(uint8_t pin) {
     onewire_ = new OneWire(pin_);
     
     if (onewire_ == nullptr) {
-        LOG_ERROR("OneWire object allocation failed");
+        LOG_E(TAG, "OneWire object allocation failed");
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,
                                "Memory allocation failed");
@@ -98,15 +101,15 @@ bool OneWireBusManager::begin(uint8_t pin) {
     
     // Verify bus is functional by attempting a reset
     if (!onewire_->reset()) {
-        LOG_WARNING("OneWire bus reset failed - no devices present or bus error");
+        LOG_W(TAG, "OneWire bus reset failed - no devices present or bus error");
         // This is not necessarily an error - just means no devices connected yet
     }
     
     initialized_ = true;
     
-    LOG_INFO("OneWire Bus Manager initialized successfully");
-    LOG_INFO("  Board: " + String(BOARD_TYPE));
-    LOG_INFO("  Pin: GPIO " + String(pin_));
+    LOG_I(TAG, "OneWire Bus Manager initialized successfully");
+    LOG_I(TAG, "  Board: " + String(BOARD_TYPE));
+    LOG_I(TAG, "  Pin: GPIO " + String(pin_));
     
     return true;
 }
@@ -116,11 +119,11 @@ bool OneWireBusManager::begin(uint8_t pin) {
 // ============================================
 void OneWireBusManager::end() {
     if (!initialized_) {
-        LOG_WARNING("OneWire bus not initialized, nothing to end");
+        LOG_W(TAG, "OneWire bus not initialized, nothing to end");
         return;
     }
     
-    LOG_INFO("OneWire Bus Manager shutdown initiated");
+    LOG_I(TAG, "OneWire Bus Manager shutdown initiated");
     
     // Delete OneWire object
     if (onewire_ != nullptr) {
@@ -133,7 +136,7 @@ void OneWireBusManager::end() {
     
     initialized_ = false;
     
-    LOG_INFO("OneWire Bus Manager shutdown complete");
+    LOG_I(TAG, "OneWire Bus Manager shutdown complete");
 }
 
 // ============================================
@@ -141,11 +144,11 @@ void OneWireBusManager::end() {
 // ============================================
 bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices, uint8_t& found_count) {
     if (!initialized_ || onewire_ == nullptr) {
-        LOG_ERROR("OneWire bus not initialized");
+        LOG_E(TAG, "OneWire bus not initialized");
         return false;
     }
     
-    LOG_INFO("OneWire bus scan started");
+    LOG_I(TAG, "OneWire bus scan started");
     
     found_count = 0;
     
@@ -157,7 +160,7 @@ bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices,
     while (onewire_->search(rom)) {
         // Check CRC
         if (OneWire::crc8(rom, 7) != rom[7]) {
-            LOG_WARNING("OneWire CRC error - device ignored");
+            LOG_W(TAG, "OneWire CRC error - device ignored");
             continue;
         }
         
@@ -167,22 +170,22 @@ bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices,
                 rom_codes[found_count][i] = rom[i];
             }
             
-            LOG_INFO("  Found device: Family=0x" + String(rom[0], HEX) + 
+            LOG_I(TAG, "  Found device: Family=0x" + String(rom[0], HEX) + 
                      " Serial=" + String((rom[6] << 8) | rom[5], HEX));
             
             found_count++;
         } else {
-            LOG_WARNING("  Device found but buffer full - increase max_devices");
+            LOG_W(TAG, "  Device found but buffer full - increase max_devices");
         }
     }
     
     if (found_count == 0) {
-        LOG_WARNING("OneWire bus scan complete: No devices found");
+        LOG_W(TAG, "OneWire bus scan complete: No devices found");
         errorTracker.trackError(ERROR_ONEWIRE_NO_DEVICES,
                                ERROR_SEVERITY_WARNING,
                                "No devices found on bus");
     } else {
-        LOG_INFO("OneWire bus scan complete: " + String(found_count) + " devices found");
+        LOG_I(TAG, "OneWire bus scan complete: " + String(found_count) + " devices found");
     }
     
     return true;
@@ -193,7 +196,7 @@ bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices,
 // ============================================
 bool OneWireBusManager::isDevicePresent(const uint8_t rom_code[8]) {
     if (!initialized_ || onewire_ == nullptr) {
-        LOG_ERROR("OneWire bus not initialized");
+        LOG_E(TAG, "OneWire bus not initialized");
         return false;
     }
     
@@ -224,7 +227,7 @@ bool OneWireBusManager::isDevicePresent(const uint8_t rom_code[8]) {
 // ============================================
 bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& raw_value) {
     if (!initialized_ || onewire_ == nullptr) {
-        LOG_ERROR("OneWire bus not initialized");
+        LOG_E(TAG, "OneWire bus not initialized");
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Read failed: bus not initialized");
@@ -233,7 +236,7 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
     
     // Verify device is present
     if (!onewire_->reset()) {
-        LOG_ERROR("OneWire reset failed - no devices on bus");
+        LOG_E(TAG, "OneWire reset failed - no devices on bus");
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Bus reset failed");
@@ -252,7 +255,7 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
     
     // Reset and select device again
     if (!onewire_->reset()) {
-        LOG_ERROR("OneWire reset failed after conversion");
+        LOG_E(TAG, "OneWire reset failed after conversion");
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Bus reset failed after conversion");
@@ -272,7 +275,7 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
     
     // Verify CRC
     if (OneWire::crc8(scratchpad, 8) != scratchpad[8]) {
-        LOG_ERROR("OneWire CRC error on temperature read");
+        LOG_E(TAG, "OneWire CRC error on temperature read");
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "CRC validation failed");
@@ -287,7 +290,7 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
     // Range: -550 to +1250 (-55.0°C to +125.0°C)
     // Conversion formula (done on server): temp_celsius = raw_value * 0.0625
     
-    LOG_DEBUG("OneWire raw temperature: " + String(raw_value) + 
+    LOG_D(TAG, "OneWire raw temperature: " + String(raw_value) + 
               " (will be processed by God-Kaiser)");
     
     return true;
