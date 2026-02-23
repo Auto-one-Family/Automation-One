@@ -15,8 +15,8 @@ export type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
 export type TypeFilter = 'all' | 'mock' | 'real'
 
 /** Widget type identifiers */
-export type WidgetType = 'line-chart' | 'gauge' | 'multi-sensor' | 'sensor-card' |
-  'heatmap' | 'historical' | 'actuator-card' | 'actuator-runtime' |
+export type WidgetType = 'line-chart' | 'gauge' | 'sensor-card' |
+  'historical' | 'actuator-card' | 'actuator-runtime' |
   'esp-health' | 'alarm-list'
 
 /** Single widget configuration */

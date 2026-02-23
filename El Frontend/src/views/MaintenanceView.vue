@@ -51,18 +51,18 @@
           <h3>Sensor Data Cleanup</h3>
           <div class="config-item">
             <span class="config-label">Status:</span>
-            <span class="config-value" :class="config.sensor_data.retention_enabled ? 'enabled' : 'disabled'">
-              {{ config.sensor_data.retention_enabled ? '✅ ENABLED' : '⚠️ DISABLED' }}
+            <span class="config-value" :class="config.sensor_data_retention_enabled ? 'enabled' : 'disabled'">
+              {{ config.sensor_data_retention_enabled ? '✅ ENABLED' : '⚠️ DISABLED' }}
             </span>
           </div>
-          <div v-if="config.sensor_data.retention_enabled" class="config-item">
+          <div v-if="config.sensor_data_retention_enabled" class="config-item">
             <span class="config-label">Retention:</span>
-            <span class="config-value">{{ config.sensor_data.retention_days }} days</span>
+            <span class="config-value">{{ config.sensor_data_retention_days }} days</span>
           </div>
-          <div v-if="config.sensor_data.retention_enabled" class="config-item">
+          <div v-if="config.sensor_data_retention_enabled" class="config-item">
             <span class="config-label">Mode:</span>
-            <span class="config-value" :class="config.sensor_data.dry_run ? 'dry-run' : 'active'">
-              {{ config.sensor_data.dry_run ? '🔍 DRY-RUN' : '🗑️ ACTIVE' }}
+            <span class="config-value" :class="config.sensor_data_cleanup_dry_run ? 'dry-run' : 'active'">
+              {{ config.sensor_data_cleanup_dry_run ? '🔍 DRY-RUN' : '🗑️ ACTIVE' }}
             </span>
           </div>
         </div>
@@ -71,18 +71,18 @@
           <h3>Command History Cleanup</h3>
           <div class="config-item">
             <span class="config-label">Status:</span>
-            <span class="config-value" :class="config.command_history.retention_enabled ? 'enabled' : 'disabled'">
-              {{ config.command_history.retention_enabled ? '✅ ENABLED' : '⚠️ DISABLED' }}
+            <span class="config-value" :class="config.command_history_retention_enabled ? 'enabled' : 'disabled'">
+              {{ config.command_history_retention_enabled ? '✅ ENABLED' : '⚠️ DISABLED' }}
             </span>
           </div>
-          <div v-if="config.command_history.retention_enabled" class="config-item">
+          <div v-if="config.command_history_retention_enabled" class="config-item">
             <span class="config-label">Retention:</span>
-            <span class="config-value">{{ config.command_history.retention_days }} days</span>
+            <span class="config-value">{{ config.command_history_retention_days }} days</span>
           </div>
-          <div v-if="config.command_history.retention_enabled" class="config-item">
+          <div v-if="config.command_history_retention_enabled" class="config-item">
             <span class="config-label">Mode:</span>
-            <span class="config-value" :class="config.command_history.dry_run ? 'dry-run' : 'active'">
-              {{ config.command_history.dry_run ? '🔍 DRY-RUN' : '🗑️ ACTIVE' }}
+            <span class="config-value" :class="config.command_history_cleanup_dry_run ? 'dry-run' : 'active'">
+              {{ config.command_history_cleanup_dry_run ? '🔍 DRY-RUN' : '🗑️ ACTIVE' }}
             </span>
           </div>
         </div>
@@ -91,19 +91,19 @@
           <h3>Orphaned Mocks Cleanup</h3>
           <div class="config-item">
             <span class="config-label">Status:</span>
-            <span class="config-value" :class="config.orphaned_mocks.cleanup_enabled ? 'enabled' : 'disabled'">
-              {{ config.orphaned_mocks.cleanup_enabled ? '✅ ENABLED' : '⚠️ DISABLED' }}
+            <span class="config-value" :class="config.orphaned_mock_cleanup_enabled ? 'enabled' : 'disabled'">
+              {{ config.orphaned_mock_cleanup_enabled ? '✅ ENABLED' : '⚠️ DISABLED' }}
             </span>
           </div>
-          <div v-if="config.orphaned_mocks.cleanup_enabled" class="config-item">
+          <div v-if="config.orphaned_mock_cleanup_enabled" class="config-item">
             <span class="config-label">Mode:</span>
-            <span class="config-value" :class="config.orphaned_mocks.auto_delete ? 'active' : 'warn'">
-              {{ config.orphaned_mocks.auto_delete ? '🗑️ AUTO-DELETE' : '⚠️ WARN ONLY' }}
+            <span class="config-value" :class="config.orphaned_mock_auto_delete ? 'active' : 'warn'">
+              {{ config.orphaned_mock_auto_delete ? '🗑️ AUTO-DELETE' : '⚠️ WARN ONLY' }}
             </span>
           </div>
-          <div v-if="config.orphaned_mocks.cleanup_enabled" class="config-item">
+          <div v-if="config.orphaned_mock_cleanup_enabled" class="config-item">
             <span class="config-label">Age Threshold:</span>
-            <span class="config-value">{{ config.orphaned_mocks.age_hours }}h</span>
+            <span class="config-value">{{ config.orphaned_mock_age_hours }}h</span>
           </div>
         </div>
       </div>

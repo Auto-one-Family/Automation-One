@@ -31,17 +31,25 @@ import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
 import GaugeWidget from '@/components/dashboard-widgets/GaugeWidget.vue'
 import SensorCardWidget from '@/components/dashboard-widgets/SensorCardWidget.vue'
 import ActuatorCardWidget from '@/components/dashboard-widgets/ActuatorCardWidget.vue'
+import HistoricalChartWidget from '@/components/dashboard-widgets/HistoricalChartWidget.vue'
+import ESPHealthWidget from '@/components/dashboard-widgets/ESPHealthWidget.vue'
+import AlarmListWidget from '@/components/dashboard-widgets/AlarmListWidget.vue'
+import ActuatorRuntimeWidget from '@/components/dashboard-widgets/ActuatorRuntimeWidget.vue'
 
 const dashStore = useDashboardStore()
 const espStore = useEspStore()
 const toast = useToast()
 
-// Widget component registry
+// Widget component registry (all 8 types)
 const widgetComponentMap: Record<string, Component> = {
   'line-chart': LineChartWidget,
   'gauge': GaugeWidget,
   'sensor-card': SensorCardWidget,
   'actuator-card': ActuatorCardWidget,
+  'historical': HistoricalChartWidget,
+  'esp-health': ESPHealthWidget,
+  'alarm-list': AlarmListWidget,
+  'actuator-runtime': ActuatorRuntimeWidget,
 }
 
 // Track mounted Vue vnodes for cleanup
@@ -57,14 +65,14 @@ const showLayoutDropdown = ref(false)
 const newLayoutName = ref('')
 
 const widgetTypes = [
-  { type: 'line-chart', label: 'Linien-Chart', icon: BarChart3, w: 6, h: 4, category: 'Sensoren' },
-  { type: 'gauge', label: 'Gauge-Chart', icon: Gauge, w: 3, h: 3, category: 'Sensoren' },
-  { type: 'sensor-card', label: 'Sensor-Karte', icon: Activity, w: 3, h: 2, category: 'Sensoren' },
-  { type: 'historical', label: 'Historische Zeitreihe', icon: BarChart3, w: 6, h: 4, category: 'Sensoren' },
-  { type: 'actuator-card', label: 'Aktor-Status', icon: Zap, w: 3, h: 2, category: 'Aktoren' },
-  { type: 'actuator-runtime', label: 'Aktor-Laufzeit', icon: BarChart3, w: 4, h: 3, category: 'Aktoren' },
-  { type: 'esp-health', label: 'ESP-Health', icon: Cpu, w: 6, h: 3, category: 'System' },
-  { type: 'alarm-list', label: 'Alarm-Liste', icon: Bell, w: 4, h: 4, category: 'System' },
+  { type: 'line-chart', label: 'Linien-Chart', icon: BarChart3, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
+  { type: 'gauge', label: 'Gauge-Chart', icon: Gauge, w: 3, h: 3, minW: 2, minH: 3, category: 'Sensoren' },
+  { type: 'sensor-card', label: 'Sensor-Karte', icon: Activity, w: 3, h: 2, minW: 2, minH: 2, category: 'Sensoren' },
+  { type: 'historical', label: 'Historische Zeitreihe', icon: BarChart3, w: 6, h: 4, minW: 6, minH: 4, category: 'Sensoren' },
+  { type: 'actuator-card', label: 'Aktor-Status', icon: Zap, w: 3, h: 2, minW: 2, minH: 2, category: 'Aktoren' },
+  { type: 'actuator-runtime', label: 'Aktor-Laufzeit', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 3, category: 'Aktoren' },
+  { type: 'esp-health', label: 'ESP-Health', icon: Cpu, w: 6, h: 3, minW: 4, minH: 3, category: 'System' },
+  { type: 'alarm-list', label: 'Alarm-Liste', icon: Bell, w: 4, h: 4, minW: 4, minH: 4, category: 'System' },
 ]
 
 const groupedWidgets = computed(() => {
@@ -147,11 +155,14 @@ function loadWidgetsToGrid(widgets: any[]) {
     if (w.config) {
       widgetConfigs.value.set(w.id, w.config)
     }
+    const widgetDef = widgetTypes.find(t => t.type === w.type)
     grid.addWidget({
       x: w.x,
       y: w.y,
       w: w.w,
       h: w.h,
+      minW: widgetDef?.minW,
+      minH: widgetDef?.minH,
       id: w.id,
       content: createWidgetContent(w.type, w.config?.title || w.type, w.id, mountId),
     })
@@ -197,10 +208,17 @@ function mountWidgetComponent(widgetId: string, mountId: string, type: string, c
   const mountEl = document.getElementById(mountId)
   if (!mountEl) return
 
-  // Build props based on widget type
+  // Build props based on widget type and config
   const props: Record<string, any> = {}
   if (config.sensorId) props.sensorId = config.sensorId
   if (config.actuatorId) props.actuatorId = config.actuatorId
+  if (config.timeRange) props.timeRange = config.timeRange
+  if (config.showThresholds != null) props.showThresholds = config.showThresholds
+  if (config.zoneFilter) props.zoneFilter = config.zoneFilter
+  if (config.showOfflineOnly != null) props.showOfflineOnly = config.showOfflineOnly
+  if (config.maxItems) props.maxItems = config.maxItems
+  if (config.showResolved != null) props.showResolved = config.showResolved
+  if (config.actuatorFilter) props.actuatorFilter = config.actuatorFilter
 
   // onUpdate:config handler
   props['onUpdate:config'] = (newConfig: Record<string, any>) => {
@@ -237,6 +255,8 @@ function addWidget(type: string) {
   grid.addWidget({
     w: widgetDef.w,
     h: widgetDef.h,
+    minW: widgetDef.minW,
+    minH: widgetDef.minH,
     id,
     content: createWidgetContent(type, widgetDef.label, id, mountId),
   })

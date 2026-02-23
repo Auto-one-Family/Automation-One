@@ -17,6 +17,8 @@ import {
   Wrench,
   UserCog,
   Activity,
+  TrendingUp,
+  SlidersHorizontal,
 } from 'lucide-vue-next'
 
 defineProps<{
@@ -100,6 +102,16 @@ function handleNavClick() {
         <span>Komponenten</span>
       </RouterLink>
 
+      <RouterLink
+        to="/sensor-history"
+        :class="['sidebar__link', isActive('/sensor-history') && 'sidebar__link--active']"
+        @click="handleNavClick"
+      >
+        <div class="sidebar__link-indicator" />
+        <TrendingUp class="sidebar__link-icon" />
+        <span>Zeitreihen</span>
+      </RouterLink>
+
       <!-- Admin Section -->
       <template v-if="authStore.isAdmin">
         <div class="sidebar__divider" />
@@ -133,6 +145,16 @@ function handleNavClick() {
           <div class="sidebar__link-indicator" />
           <Wrench class="sidebar__link-icon" />
           <span>Wartung</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/calibration"
+          :class="['sidebar__link', isActive('/calibration') && 'sidebar__link--active']"
+          @click="handleNavClick"
+        >
+          <div class="sidebar__link-indicator" />
+          <SlidersHorizontal class="sidebar__link-icon" />
+          <span>Kalibrierung</span>
         </RouterLink>
       </template>
     </nav>

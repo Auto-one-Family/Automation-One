@@ -412,49 +412,51 @@ export interface MaintenanceStatusResponse {
     sensors_by_type?: Record<string, number>
     actuators_by_type?: Record<string, number>
   }
-  config: {
-    sensor_data_retention_enabled: boolean
-    command_history_retention_enabled: boolean
-    orphaned_mock_auto_delete: boolean
-  }
 }
 
 /**
  * Maintenance configuration response
  */
 export interface MaintenanceConfigResponse {
-  sensor_data: {
-    retention_enabled: boolean
-    retention_days: number
-    dry_run: boolean
-    batch_size: number
-    max_batches: number
-  }
-  command_history: {
-    retention_enabled: boolean
-    retention_days: number
-    dry_run: boolean
-    batch_size: number
-    max_batches: number
-  }
-  orphaned_mocks: {
-    cleanup_enabled: boolean
-    auto_delete: boolean
-    age_hours: number
-  }
-  health_checks: {
-    heartbeat_timeout_seconds: number
-    mqtt_interval_seconds: number
-    esp_interval_seconds: number
-  }
-  stats: {
-    aggregation_enabled: boolean
-    interval_minutes: number
-  }
-  advanced_safety: {
-    alert_threshold_percent: number
-    max_records_per_run: number
-  }
+  // Sensor Data Cleanup
+  sensor_data_retention_enabled: boolean
+  sensor_data_retention_days: number
+  sensor_data_cleanup_dry_run: boolean
+  sensor_data_cleanup_batch_size: number
+  sensor_data_cleanup_max_batches: number
+
+  // Command History Cleanup
+  command_history_retention_enabled: boolean
+  command_history_retention_days: number
+  command_history_cleanup_dry_run: boolean
+  command_history_cleanup_batch_size: number
+  command_history_cleanup_max_batches: number
+
+  // Audit Log Cleanup
+  audit_log_retention_enabled: boolean
+  audit_log_retention_days: number
+  audit_log_cleanup_dry_run: boolean
+  audit_log_cleanup_batch_size: number
+  audit_log_cleanup_max_batches: number
+
+  // Orphaned Mocks
+  orphaned_mock_cleanup_enabled: boolean
+  orphaned_mock_auto_delete: boolean
+  orphaned_mock_age_hours: number
+
+  // Health Checks
+  heartbeat_timeout_seconds: number
+  mqtt_health_check_interval_seconds: number
+  esp_health_check_interval_seconds: number
+
+  // Stats Aggregation
+  stats_aggregation_enabled: boolean
+  stats_aggregation_interval_minutes: number
+
+  // Safety Features
+  cleanup_require_confirmation: boolean
+  cleanup_alert_threshold_percent: number
+  cleanup_max_records_per_run: number
 }
 
 /**
@@ -463,5 +465,5 @@ export interface MaintenanceConfigResponse {
 export interface MaintenanceTriggerResponse {
   job_id: string
   triggered: boolean
-  result: Record<string, unknown>
+  message: string
 }
