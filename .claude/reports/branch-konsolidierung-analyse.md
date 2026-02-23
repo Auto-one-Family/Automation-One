@@ -77,9 +77,20 @@
 
 **Alle 7 Quick-Wins sind vorhanden. 6 davon sind noch uncommittet!**
 
-## Risiken
+## Durchführung (2026-02-23) — ERLEDIGT
 
-1. **Uncommittete Quick-Wins:** 6 von 7 Quick-Wins sind nur im Working-Tree. MÜSSEN zuerst committed werden.
+1. ✅ Stash erstellt, Quick-Wins committed (045a1d4)
+2. ✅ Merge frontend-ux (47a9495) — Konflikte in DeviceMiniCard, CustomDashboardView, tsconfig gelöst
+3. ✅ Merge autoops (7eb8936) — konfliktfrei
+4. ✅ Merge logging (b20e5bf) — Konflikte in logger.ts, logging_config.py, promtail, LOG_ACCESS_REFERENCE gelöst
+5. ✅ Archiv-Tags: archive/feature-phase2-wokwi-ci, archive/backup-frontend-consolidation-full
+6. ⏸️ automatisierungs-engine: NICHT gemerged (319 Dateien, hohes Risiko) — selektiver Cherry-Pick bei Bedarf
+
+**Ergebnis:** 37 Commits auf feature/frontend-consolidation, bereit für Push.
+
+## Risiken (aktualisiert)
+
+1. ~~Uncommittete Quick-Wins~~ — ERLEDIGT, alle committed
 2. **improve-logging Merge-Konflikte:** logger.ts und logging_config.py haben sowohl Working-Tree-Änderungen als auch Branch-Änderungen. Manuelle Lösung nötig.
 3. **automatisierungs-engine Größe:** 319 Dateien. Cherry-Pick einzelner Commits kann Dependency-Probleme verursachen (z.B. ruff config ohne den formatierten Code).
 4. **frontend-ux könnte Breaking Changes einführen:** 14 Commits mit View-Umstrukturierung. Nach Merge TypeScript-Check nötig.

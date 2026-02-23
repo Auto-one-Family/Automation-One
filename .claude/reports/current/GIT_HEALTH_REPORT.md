@@ -1,8 +1,8 @@
 # Git & GitHub Health Report
 
-**Erstellt:** 2026-02-23T09:15:00
-**Branch:** feature/frontend-consolidation (aktiv), master (gerade gemerged)
-**Analyst:** git-health Skill (+ manueller Merge via PR #8)
+**Erstellt:** 2026-02-23 (nach Branch-Konsolidierung)
+**Branch:** feature/frontend-consolidation
+**Analyst:** git-health Skill + Branch-Konsolidierung
 
 ---
 
@@ -10,12 +10,12 @@
 
 | Bereich | Status | Details |
 |---------|--------|---------|
-| Ungepushte Commits | 🟢 | 0 - alle Branches in Sync mit Remote |
-| Secrets-Sicherheit | 🟢 | Keine Plaintext-Secrets, alle via ${ENV_VARS} |
+| Ungepushte Commits | 🟡 | 37 auf feature/frontend-consolidation — Push erforderlich |
+| Secrets-Sicherheit | 🟢 | Keine Plaintext-Secrets |
 | .gitignore Abdeckung | 🟢 | Alle kritischen Patterns vorhanden |
-| CI/CD Pipeline | 🟡 | 8 Workflows, Actions version-pinned, CI-Checks pending |
-| Repo-Hygiene | 🟡 | 72MB .git/, 2 stale lokale Branches |
-| Branch-Strategie | 🟢 | PR #8 gemerged, master aktuell |
+| CI/CD Pipeline | 🟢 | 8 Workflows, Actions version-pinned |
+| Repo-Hygiene | 🟢 | Stale Branches archiviert als Tags |
+| Branch-Konsolidierung | 🟢 | Abgeschlossen — 3 Branches gemerged |
 
 ---
 
@@ -26,205 +26,94 @@
 origin  https://github.com/Auto-one-Family/Automation-One.git (fetch/push)
 ```
 
-### User
-```
-user.name  = VibeCodeBeginner
-user.email = rh@11growers.com
-```
-
-### Settings
-- `core.autocrlf = true` (global)
-- `pull.rebase = false` (global)
-- Keine Hooks aktiv
-- Keine Tags
-- Kein LFS
-- Keine Submodules
-
 ### Branches (Lokal)
 
-| Branch | Alter | Letzter Commit | Remote-Status |
-|--------|-------|----------------|---------------|
-| **master** | 2 min | `a5324b8` Merge PR #8 | ✅ In Sync |
-| **feature/frontend-consolidation** | 10h | `8395dcb` docs: update REST_ENDPOINTS... | ✅ In Sync |
-| feature/phase2-wokwi-ci | 11 Tage | `5ebd1f6` WIP: frontend components... | ⚠️ Kein Remote-Tracking |
-| backup/frontend-consolidation-full | 8 Tage | `c6f026f` chore(backup): full WIP state | ⚠️ Kein Remote-Tracking |
+| Branch | Status | Letzter Commit |
+|--------|--------|----------------|
+| **feature/frontend-consolidation** | AKTIV | b20e5bf merge: claude/improve-logging-infrastructure |
+| master | Basis | a5324b8 Merge PR #8 |
+| feature/phase2-wokwi-ci | Archiviert | archive/feature-phase2-wokwi-ci |
+| backup/frontend-consolidation-full | Archiviert | archive/backup-frontend-consolidation-full |
 
-### Remote Branches (nach Prune)
+### Remote Branches (noch vorhanden)
 
 | Remote Branch | Status |
 |---------------|--------|
-| origin/master | `a5324b8` (nach PR #8 Merge) |
-| origin/feature/frontend-consolidation | `8395dcb` |
-| origin/cursor/dashboard-neue-struktur-23ef | `6bc7b8c` (Draft PR #11) |
-| origin/cursor/automatisierungs-engine-berpr-fung-1c86 | `21b238b` (Draft PR #10) |
-| origin/cursor/testinfrastruktur-berarbeitung-2f8b | `ead9ff0` (Draft PR #9) |
-
-**7 gelöschte Remote-Branches** wurden durch `git fetch --prune` bereinigt.
-
----
-
-## 2. Arbeitsverzeichnis
-
-| Datei | Status | Kategorie |
-|-------|--------|-----------|
-| docker-compose.yml | Modified (unstaged) | Config |
-| .claude/reports/current/FRONTEND_DASHBOARD_ANALYSE.md | Untracked | Report |
-
-**docker-compose.yml Änderung:** 2 neue Env-Vars (`VITE_API_TARGET`, `VITE_WS_TARGET`) für Docker-internen Service-Namen.
+| origin/master | a5324b8 |
+| origin/feature/frontend-consolidation | 37 Commits hinter lokal |
+| origin/cursor/frontend-ux-konsolidierung-8829 | GEMERGT |
+| origin/claude/improve-logging-infrastructure-aXF7I | GEMERGT |
+| origin/claude/optimize-autoops-performance-S0dO6 | GEMERGT |
+| origin/cursor/automatisierungs-engine-berpr-fung-1c86 | Nicht gemerged (selektiver Cherry-Pick empfohlen) |
+| origin/cursor/testinfrastruktur-berarbeitung-2f8b | Subset von automatisierungs-engine |
+| origin/cursor/dashboard-neue-struktur-23ef | Bereits in feature/frontend-consolidation |
 
 ---
 
-## 3. Secrets & Sicherheit
+## 2. Branch-Konsolidierung (2026-02-23)
 
-### 3a. .gitignore Abdeckung
+### Durchgeführte Merges
 
-| Pattern | Vorhanden | Details |
-|---------|-----------|---------|
-| `.env`, `.env.*` | ✅ | `.env`, `.env.local`, `.env.*.local`, `El Servador/.env`, `El Trabajante/.env` |
-| `*.key`, `*.pem`, `*.crt` | ✅ | Mit Ausnahme `!ca.crt` |
-| `*.log` | ✅ | `*.log`, `logs/server/*.log*` |
-| `node_modules/` | ✅ | Abgedeckt |
-| `__pycache__/`, `*.pyc` | ✅ | Abgedeckt |
-| `.pio/`, `build/` | ✅ | `El Trabajante/.pio/` |
-| `.serena/` | ✅ | Abgedeckt |
-| `.cursor/` | ❌ | Gewollt: enthält Project Rules |
+| # | Branch | Commit | Ergebnis |
+|---|--------|--------|----------|
+| 1 | Quick-Wins + WIP | 045a1d4 | 51 Dateien, Logging/CI/Wokwi/Docs |
+| 2 | cursor/frontend-ux-konsolidierung-8829 | 47a9495 | 14 Frontend-UX-Commits, Konflikte gelöst |
+| 3 | claude/optimize-autoops-performance-S0dO6 | 7eb8936 | 13 Dateien, AutoOps v2.0 |
+| 4 | claude/improve-logging-infrastructure-aXF7I | b20e5bf | Cross-Layer Logging (ESP32, Server, Frontend) |
 
-### 3b. Getrackte sensible Dateien
+### Archivierte Branches (als Tags)
 
-| Datei | Risiko | Bewertung |
-|-------|--------|-----------|
-| `.env.ci` | ⚠️ Niedrig | CI-Environment, keine echten Secrets |
-| `.env.example` | ✅ Sicher | Template ohne echte Werte |
-| `El Frontend/.env.development` | ⚠️ Niedrig | Nur localhost-URLs, keine Secrets |
-| `El Servador/.env.example` | ✅ Sicher | Template ohne echte Werte |
-| `El Servador/god_kaiser_server/.env.example` | ✅ Sicher | Template |
+- `archive/feature-phase2-wokwi-ci` — WIP, Serial-Logger/Promtail fehlen auf Branch
+- `archive/backup-frontend-consolidation-full` — Backup von 8 Tagen
 
-**Keine kritischen Secrets im Repository.**
+### Quick-Wins verifiziert
 
-### 3c. Docker-Secrets
+| Quick-Win | Status |
+|-----------|--------|
+| Frontend JSON Logger | ✅ logger.ts |
+| Server apscheduler Noise Reduction | ✅ logging_config.py |
+| Promtail MQTT healthcheck Drop | ✅ config.yml |
+| Serial-Logger Service | ✅ docker/esp32-serial-logger/ |
+| CI .env.ci | ✅ |
+| TypeScript ?? 0 Fix | ✅ SensorHistoryView.vue |
+| Wokwi Total 52 | ✅ wokwi-tests.yml |
 
-Alle Credentials via Environment-Variablen - **keine Plaintext-Passwörter** in docker-compose.yml:
-```
-POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+---
+
+## 3. Nächste Schritte
+
+### Sofort
+
+```bash
+git push origin feature/frontend-consolidation
 ```
 
----
+### Optional (Robin entscheidet)
 
-## 4. CI/CD Pipeline
+1. **automatisierungs-engine** — Selektiver Cherry-Pick von CI/Security-Commits (nicht vollständiger Merge)
+2. **Lokale Branches löschen** — feature/phase2-wokwi-ci, backup/frontend-consolidation-full (bereits archiviert)
+3. **Remote-Branches löschen** — Nach Push: frontend-ux, improve-logging, optimize-autoops (bereits gemerged)
 
-### Workflows (8 Dateien)
+### master aktualisieren
 
-| Workflow | Datei | Größe |
-|----------|-------|-------|
-| PR Checks | pr-checks.yml | 2.0 KB |
-| Server Tests | server-tests.yml | 6.3 KB |
-| Frontend Tests | frontend-tests.yml | 4.0 KB |
-| Backend E2E Tests | backend-e2e-tests.yml | 6.5 KB |
-| ESP32 Tests | esp32-tests.yml | 2.6 KB |
-| Playwright Tests | playwright-tests.yml | 3.8 KB |
-| Security Scan | security-scan.yml | 2.0 KB |
-| Wokwi Tests | wokwi-tests.yml | 71 KB |
-
-### Action Versions
-
-| Action | Version | Status |
-|--------|---------|--------|
-| actions/checkout | @v4 | ✅ Pinned |
-| actions/setup-python | @v5 | ✅ Pinned |
-| actions/setup-node | @v4 | ✅ Pinned |
-| actions/cache | @v4 | ✅ Pinned |
-| actions/upload-artifact | @v4 | ✅ Pinned |
-| actions/download-artifact | @v4 | ✅ Pinned |
-| actions/labeler | @v5 | ✅ Pinned |
-| docker/setup-buildx-action | @v3 | ✅ Pinned |
-| aquasecurity/trivy-action | @0.28.0 | ✅ Semver-Pinned |
-| snok/install-poetry | @v1 | ⚠️ Major-only |
-| EnricoMi/publish-unit-test-result-action | @v2 | ⚠️ Major-only |
+- **Option A:** PR erstellen feature/frontend-consolidation → master
+- **Option B:** master unverändert lassen, Feature-Branch weiterentwickeln
 
 ---
 
-## 5. Branch-Strategie
-
-### Merge-Methode
-- **Merge-Commits** (Standard GitHub Merge)
-- PR #5: `c907f79` - erster Merge von feature/frontend-consolidation
-- PR #8: `a5324b8` - gerade durchgeführt (diese Session)
-
-### Conventional Commits
-- **16/20** (80%) der letzten 20 Commits folgen Conventional Commits
-- Prefixes: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`
-
-### Branch Protection
-- master hat Branch Protection Rules aktiv (PR-Merge ohne `--admin` blockiert)
-- Required Status Checks konfiguriert
-
-### Fehlend
-- Kein CODEOWNERS File
-- Kein PR-Template (`.github/pull_request_template.md`)
-
----
-
-## 6. Repo-Hygiene
-
-### Größe
-- `.git/` Verzeichnis: **72 MB**
-- Pack-Größe: 42.47 MiB
-- Objekte: 9.692 (gepackt) + 1.191 (lose)
-- Prune-packable: 71
-
-### Stale Lokale Branches
-
-| Branch | Alter | Empfehlung |
-|--------|-------|------------|
-| `feature/phase2-wokwi-ci` | 11 Tage | Löschen (kein Remote, WIP-Stand) |
-| `backup/frontend-consolidation-full` | 8 Tage | Löschen (Merge erfolgreich) |
-
-### Open Draft PRs (ignoriert per User-Entscheidung)
-
-| # | Branch | Status |
-|---|--------|--------|
-| #9 | cursor/testinfrastruktur-berarbeitung-2f8b | DRAFT |
-| #10 | cursor/automatisierungs-engine-berpr-fung-1c86 | DRAFT |
-| #11 | cursor/dashboard-neue-struktur-23ef | DRAFT |
-
----
-
-## Durchgeführte Aktionen (Session 2026-02-23)
-
-| Aktion | Details | Ergebnis |
-|--------|---------|----------|
-| `git fetch --prune` | 7 gelöschte Remote-Branches bereinigt | ✅ |
-| `gh pr merge 8 --merge --admin` | PR #8 auf GitHub gemerged | ✅ `a5324b8` |
-| `git checkout master && git pull` | Master lokal aktualisiert | ✅ Fast-forward |
-| `git stash` / `git stash pop` | docker-compose.yml gesichert/wiederhergestellt | ✅ |
-
----
-
-## Bewertung
+## 4. Bewertung
 
 ### 🟢 GUT
-- Alle Branches in Sync mit Remote (0 ungepushte Commits)
-- Keine Plaintext-Secrets im Repository
-- .gitignore deckt alle kritischen Patterns ab
-- 80% Conventional Commits Einhaltung
-- Actions mit Version-Pins
-- Branch Protection auf master aktiv
-- **PR #8 erfolgreich gemerged - master ist aktuell mit allen 14 Commits aus feature/frontend-consolidation**
+- Branch-Konsolidierung abgeschlossen
+- Alle 7 Quick-Wins erhalten
+- Keine Merge-Marker im Code
+- Backup-Tag gesetzt: backup/vor-konsolidierung-20260223
 
 ### 🟡 WICHTIG
-- 2 stale lokale Branches können aufgeräumt werden
-- 3 Draft-PRs (#9, #10, #11) bei Gelegenheit evaluieren
-- `snok/install-poetry@v1` und `EnricoMi/publish-unit-test-result-action@v2` nur Major-Version gepinned
-- Kein CODEOWNERS / PR-Template
-- `wokwi-tests.yml` mit 71 KB ungewöhnlich groß
+- 37 Commits unpushed — Push vor weiteren Arbeiten
+- automatisierungs-engine nicht gemerged (319 Dateien, hohes Konfliktrisiko)
 
 ### 📋 EMPFEHLUNGEN
-1. Stale lokale Branches löschen: `feature/phase2-wokwi-ci`, `backup/frontend-consolidation-full`
-2. CODEOWNERS erstellen (mindestens `* @VibeCodeBeginner`)
-3. PR-Template anlegen (`.github/pull_request_template.md`)
-4. Action-Pins verschärfen: `snok/install-poetry`, `EnricoMi/publish-unit-test-result-action`
-5. Draft PRs #9-#11 evaluieren und ggf. schließen
-6. `git gc --aggressive` für 71 lose prune-packable Objekte
+1. `git push origin feature/frontend-consolidation`
+2. Backend Unit-Tests + Frontend vue-tsc vor PR auf master
+3. Robin: Entscheidung master-Update (PR vs. weiter entwickeln)

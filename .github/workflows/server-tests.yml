@@ -134,10 +134,11 @@ jobs:
         ports:
           - 1883:1883
         options: >-
-          --health-cmd "mosquitto_pub -h localhost -t test -m test || exit 0"
-          --health-interval 10s
+          --health-cmd "mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok"
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
+          --health-start-period 5s
 
     steps:
       - name: Checkout code
@@ -168,6 +169,21 @@ jobs:
       - name: Install dependencies
         working-directory: El Servador/god_kaiser_server
         run: poetry install --no-root --no-interaction
+
+      - name: Verify Mosquitto is ready
+        run: |
+          echo "Verifying Mosquitto MQTT broker is accepting connections..."
+          for i in $(seq 1 30); do
+            if nc -z localhost 1883 2>/dev/null; then
+              echo "✅ Mosquitto ready on port 1883 (attempt $i)"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Mosquitto not ready after 30 attempts"
+              exit 1
+            fi
+            sleep 1
+          done
 
       - name: Run Integration Tests
         working-directory: El Servador/god_kaiser_server
