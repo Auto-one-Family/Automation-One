@@ -5,20 +5,11 @@
 # documented with a justification for why it is not immediately fixable.
 #
 # Review this file periodically and remove entries when fixes are available.
+#
+# Last reviewed: 2026-02-23
 
-# -----------------------------------------------------------------------------
-# Starlette DoS Vulnerabilities (transitive dependency via FastAPI)
-# -----------------------------------------------------------------------------
-# fastapi ^0.109.0 depends on starlette 0.36.3 which cannot be independently
-# upgraded without breaking the FastAPI version constraint.
-# Upgrading FastAPI to a version that depends on starlette >=0.40.0 requires
-# API changes and is tracked for the next major update cycle.
-# Risk assessment: LOW — the server is not public-facing (internal IoT backend).
-
-# CVE-2024-24762: ReDoS via malformed Content-Type header in multipart form data
-# Severity: HIGH (CVSS 7.5) | Fixed in starlette >=0.36.2 (but needs FastAPI upgrade)
-CVE-2024-24762
-
-# CVE-2024-47874: DoS via unbounded multipart form field buffering
-# Severity: HIGH (CVSS 8.7) | Fixed in starlette >=0.40.0
-CVE-2024-47874
+# (empty — all previously suppressed CVEs have been resolved)
+#
+# History:
+#   CVE-2024-24762 (starlette ReDoS) — RESOLVED by FastAPI upgrade to >=0.115.0
+#   CVE-2024-47874 (starlette DoS)   — RESOLVED by FastAPI upgrade to >=0.115.0

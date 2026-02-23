@@ -9,14 +9,11 @@ packages = [{include = "src"}]
 [tool.poetry.dependencies]
 python = "^3.11"
 # FastAPI Stack
-# KNOWN-CVE: fastapi 0.109.x depends on starlette 0.36.3 which has DoS CVEs:
-#   CVE-2024-24762 (ReDoS, HIGH), CVE-2024-47874 (memory DoS, HIGH).
-#   Upgrading to starlette >=0.40.0 requires FastAPI >=0.115.0 with API changes.
-#   Tracked for next major update. Risk: LOW (not public-facing).
-#   Suppressed in /.trivyignore for CI security scans.
-fastapi = "^0.109.0"
+# Upgraded from 0.109→0.115 to fix starlette DoS CVEs (CVE-2024-24762, CVE-2024-47874).
+# FastAPI 0.115+ depends on starlette >=0.40.0 which resolves both CVEs.
+fastapi = ">=0.115.0,<1.0.0"
 uvicorn = {extras = ["standard"], version = "^0.27.0"}
-python-multipart = ">=0.0.18,<1.0.0"
+python-multipart = ">=0.0.22,<1.0.0"  # CVE-2026-24486 fix requires >=0.0.22
 
 # Database
 sqlalchemy = "^2.0.25"
@@ -33,7 +30,7 @@ paho-mqtt = "^1.6.1"
 aiomqtt = "^2.0.1"  # Async MQTT client
 
 # Security
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+python-jose = {extras = ["cryptography"], version = "^3.3.1"}  # CVE-2024-33664 (JWE-Bomb DoS) fix
 passlib = {extras = ["bcrypt"], version = "^1.7.4"}
 python-dotenv = "^1.0.0"
 
