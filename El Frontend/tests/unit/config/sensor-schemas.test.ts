@@ -32,9 +32,10 @@ describe('sensor-schemas', () => {
     it('returns SHT31 schema with I2C fields', () => {
       const schema = getSensorSchema('SHT31')
       const hwFields = schema.groups[0].fields
-      expect(hwFields.some(f => f.key === 'gpio_sda')).toBe(true)
-      expect(hwFields.some(f => f.key === 'gpio_scl')).toBe(true)
+      // SHT31 is an I2C sensor - it uses i2c_address and i2c_bus, no dedicated GPIO pins
       expect(hwFields.some(f => f.key === 'i2c_address')).toBe(true)
+      expect(hwFields.some(f => f.key === 'i2c_bus')).toBe(true)
+      expect(hwFields.some(f => f.key === 'interface_type')).toBe(true)
     })
 
     it('returns pH schema with calibration group', () => {
@@ -64,15 +65,25 @@ describe('sensor-schemas', () => {
       expect(interfaceField!.options!.length).toBeGreaterThanOrEqual(3)
     })
 
-    it('all schemas have required gpio field', () => {
-      const types = ['DS18B20', 'SHT31', 'pH', 'soil_moisture', 'UNKNOWN']
-      for (const t of types) {
+    it('non-I2C schemas have required gpio field', () => {
+      // DS18B20, pH, soil_moisture, and generic sensors use GPIO pins
+      const gpioTypes = ['DS18B20', 'pH', 'soil_moisture', 'UNKNOWN']
+      for (const t of gpioTypes) {
         const schema = getSensorSchema(t)
         const allFields = schema.groups.flatMap(g => g.fields)
-        const gpioField = allFields.find(f => f.key === 'gpio' || f.key === 'gpio_sda')
+        const gpioField = allFields.find(f => f.key === 'gpio')
         expect(gpioField, `${t} should have a gpio field`).toBeDefined()
         expect(gpioField!.required).toBe(true)
       }
+    })
+
+    it('I2C schemas have required i2c_address field instead of gpio', () => {
+      // SHT31 is I2C: uses i2c_address as required field, no dedicated GPIO pin
+      const schema = getSensorSchema('SHT31')
+      const allFields = schema.groups.flatMap(g => g.fields)
+      const i2cAddressField = allFields.find(f => f.key === 'i2c_address')
+      expect(i2cAddressField, 'SHT31 should have an i2c_address field').toBeDefined()
+      expect(i2cAddressField!.required).toBe(true)
     })
   })
 
