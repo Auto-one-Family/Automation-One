@@ -5,26 +5,30 @@ Can be invoked directly or via Claude Code slash commands.
 
 Usage:
     # Full autonomous run with sensor specs
-    python -m autoops.runner --mode configure --sensors DS18B20,SHT31 --actuators relay
+    python -m src.autoops.runner --mode configure --sensors DS18B20,SHT31 --actuators relay
 
     # Health check only
-    python -m autoops.runner --mode health
+    python -m src.autoops.runner --mode health
 
     # Debug & fix scan
-    python -m autoops.runner --mode debug
+    python -m src.autoops.runner --mode debug
 
     # Full workflow (health -> configure -> debug -> verify)
-    python -m autoops.runner --mode full --sensors DS18B20,PH --zone "Gewächshaus"
+    python -m src.autoops.runner --mode full --sensors DS18B20,PH --zone "Gewächshaus"
+
+    # Real device mode (register existing hardware)
+    python -m src.autoops.runner --mode configure --device-mode real --device-id ESP_AABBCCDD
 """
 
 import argparse
 import asyncio
 import json
+import os
 import sys
 from typing import Any
 
 from .core.agent import AutoOpsAgent
-from .core.context import ActuatorSpec, ESPSpec, SensorSpec
+from .core.context import ActuatorSpec, DeviceMode, ESPSpec, SensorSpec, SimulationPattern
 
 
 # Sensor type presets with intelligent defaults
@@ -149,24 +153,28 @@ def build_esp_spec(
     name: str = "AutoOps ESP",
     zone: str | None = None,
     hardware: str = "ESP32_WROOM",
+    device_mode: DeviceMode = DeviceMode.MOCK,
+    device_id: str | None = None,
 ) -> ESPSpec:
     """Build an ESPSpec from parsed components."""
     return ESPSpec(
         name=name,
+        device_id=device_id,
         hardware_type=hardware,
         zone_name=zone,
         sensors=sensors,
         actuators=actuators,
-        auto_heartbeat=True,
+        auto_heartbeat=device_mode == DeviceMode.MOCK,  # Only auto-heartbeat for mocks
         heartbeat_interval=60,
+        device_mode=device_mode,
     )
 
 
 async def run_autoops(
     mode: str = "full",
-    server_url: str = "http://localhost:8000",
-    username: str = "admin",
-    password: str = "admin",
+    server_url: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
     sensors_str: str = "",
     actuators_str: str = "",
     zone: str | None = None,
@@ -174,13 +182,18 @@ async def run_autoops(
     hardware: str = "ESP32_WROOM",
     dry_run: bool = False,
     verbose: bool = True,
+    device_mode: str = "mock",
+    device_id: str | None = None,
+    max_retries: int = 3,
 ) -> dict[str, Any]:
     """
     Main entry point for AutoOps execution.
 
     Args:
         mode: "full", "health", "configure", "debug"
-        server_url: God-Kaiser server URL
+        server_url: God-Kaiser server URL (env: AUTOOPS_SERVER)
+        username: Auth username (env: AUTOOPS_USER)
+        password: Auth password (env: AUTOOPS_PASSWORD)
         sensors_str: Comma-separated sensor types (DS18B20,SHT31,PH)
         actuators_str: Comma-separated actuator types (RELAY,PUMP,FAN)
         zone: Zone name to assign
@@ -188,16 +201,26 @@ async def run_autoops(
         hardware: Hardware type (ESP32_WROOM, XIAO_ESP32_C3)
         dry_run: If True, only plan without executing
         verbose: Verbose output
+        device_mode: "mock", "real", or "hybrid"
+        device_id: Specific device ID (for real mode)
+        max_retries: Max API retry attempts
 
     Returns:
         Session result dict
     """
+    # Resolve from environment with correct defaults
+    resolved_url = server_url or os.environ.get("AUTOOPS_SERVER", "http://localhost:8000")
+    resolved_user = username or os.environ.get("AUTOOPS_USER", "admin")
+    resolved_pass = password or os.environ.get("AUTOOPS_PASSWORD", "TestAdmin123!")
+
     agent = AutoOpsAgent(
-        server_url=server_url,
-        username=username,
-        password=password,
+        server_url=resolved_url,
+        username=resolved_user,
+        password=resolved_pass,
         dry_run=dry_run,
         verbose=verbose,
+        device_mode=device_mode,
+        max_retries=max_retries,
     )
 
     try:
@@ -211,14 +234,22 @@ async def run_autoops(
             print()
 
         # Build ESP specs if configuring
-        if mode in ("full", "configure") and sensors_str:
-            sensors = parse_sensors(sensors_str)
+        if mode in ("full", "configure") and (sensors_str or device_id):
+            sensors = parse_sensors(sensors_str) if sensors_str else []
             actuators = parse_actuators(actuators_str) if actuators_str else []
-            spec = build_esp_spec(sensors, actuators, name=esp_name, zone=zone, hardware=hardware)
+            spec = build_esp_spec(
+                sensors, actuators,
+                name=esp_name, zone=zone, hardware=hardware,
+                device_mode=DeviceMode(device_mode),
+                device_id=device_id,
+            )
             agent.context.esp_specs = [spec]
 
             if verbose:
                 print(f"[AutoOps] ESP Config: {esp_name}")
+                print(f"[AutoOps]   Mode: {device_mode}")
+                if device_id:
+                    print(f"[AutoOps]   Device ID: {device_id}")
                 print(f"[AutoOps]   Sensors: {[s.sensor_type for s in sensors]}")
                 print(f"[AutoOps]   Actuators: {[a.actuator_type for a in actuators]}")
                 if zone:
@@ -260,11 +291,17 @@ def main():
         default="full", help="Operation mode"
     )
     parser.add_argument(
-        "--server", default="http://localhost:8000",
-        help="God-Kaiser server URL"
+        "--server", default=None,
+        help="God-Kaiser server URL (env: AUTOOPS_SERVER, default: http://localhost:8000)"
     )
-    parser.add_argument("--username", default="admin", help="Auth username")
-    parser.add_argument("--password", default="admin", help="Auth password")
+    parser.add_argument(
+        "--username", default=None,
+        help="Auth username (env: AUTOOPS_USER, default: admin)"
+    )
+    parser.add_argument(
+        "--password", default=None,
+        help="Auth password (env: AUTOOPS_PASSWORD)"
+    )
     parser.add_argument(
         "--sensors", default="",
         help="Comma-separated sensor types (DS18B20,SHT31,PH,EC,MOISTURE,CO2,LIGHT)"
@@ -279,6 +316,19 @@ def main():
         "--hardware", default="ESP32_WROOM",
         choices=["ESP32_WROOM", "XIAO_ESP32_C3"],
         help="Hardware type"
+    )
+    parser.add_argument(
+        "--device-mode", default="mock",
+        choices=["mock", "real", "hybrid"],
+        help="Device mode: mock (default), real (hardware), hybrid (mix)"
+    )
+    parser.add_argument(
+        "--device-id", default=None,
+        help="Specific device ID (for real mode, e.g. ESP_AABBCCDD)"
+    )
+    parser.add_argument(
+        "--max-retries", type=int, default=3,
+        help="Max API retry attempts (default: 3)"
     )
     parser.add_argument("--dry-run", action="store_true", help="Plan only, no execution")
     parser.add_argument("--quiet", action="store_true", help="Minimal output")
@@ -298,6 +348,9 @@ def main():
         hardware=args.hardware,
         dry_run=args.dry_run,
         verbose=not args.quiet,
+        device_mode=args.device_mode,
+        device_id=args.device_id,
+        max_retries=args.max_retries,
     ))
 
     if args.json:

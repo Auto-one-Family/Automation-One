@@ -21,7 +21,7 @@ Falls der User keine Sensoren/Aktoren angegeben hat, frage mit `AskUserQuestion`
 
 **Phase 1: System-Check**
 ```bash
-cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
+cd "El Servador/god_kaiser_server" && python -c "
 import asyncio
 from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(mode='health', server_url='http://localhost:8000'))
@@ -31,7 +31,7 @@ print('Health:', 'OK' if result.get('all_passed') else 'ISSUES')
 
 **Phase 2: ESP konfigurieren**
 ```bash
-cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
+cd "El Servador/god_kaiser_server" && python -c "
 import asyncio
 from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(
@@ -48,7 +48,7 @@ print('Report:', result.get('report_path', 'N/A'))
 
 **Phase 3: Debug & Fix**
 ```bash
-cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
+cd "El Servador/god_kaiser_server" && python -c "
 import asyncio
 from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(mode='debug'))
@@ -107,9 +107,10 @@ AutoOps ist plugin-basiert. Jedes Plugin ist ein eigenständiges Modul:
 
 | Plugin | Capabilities | Beschreibung |
 |--------|-------------|--------------|
-| `health_check` | VALIDATE, MONITOR | System-Gesundheitscheck |
-| `esp_configurator` | CONFIGURE, VALIDATE | Autonome ESP-Konfiguration |
+| `health_check` | VALIDATE, MONITOR | System-Gesundheitscheck (inkl. Metrics, Data Freshness) |
+| `esp_configurator` | CONFIGURE, VALIDATE | ESP-Konfiguration (mock + real, Rollback) |
 | `debug_fix` | DIAGNOSE, FIX, DOCUMENT | Debug, Fix und Dokumentation |
+| `system_cleanup` | CLEANUP, VALIDATE | Stale Devices, Orphaned Configs aufräumen |
 
 ### Eigene Plugins erstellen
 
@@ -146,7 +147,7 @@ Plugins werden automatisch durch die `PluginRegistry` entdeckt.
 
 ## Bei Fehlern
 
-1. **Server nicht erreichbar:** `cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
-2. **Auth fehlgeschlagen:** Standard-Credentials: admin / Admin123#
-3. **Import-Fehler:** `cd "El Servador/god_kaiser_server" && .venv/Scripts/pip.exe install -e .`
+1. **Server nicht erreichbar:** `cd "El Servador/god_kaiser_server" && python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
+2. **Auth fehlgeschlagen:** Standard-Credentials: admin / TestAdmin123! (oder env: AUTOOPS_PASSWORD)
+3. **Import-Fehler:** `cd "El Servador/god_kaiser_server" && pip install -e .`
 4. **Plugin nicht gefunden:** Prüfe `autoops/plugins/` ob Datei vorhanden

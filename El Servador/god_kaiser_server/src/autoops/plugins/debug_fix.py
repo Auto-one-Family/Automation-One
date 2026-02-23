@@ -307,7 +307,7 @@ class DebugFixPlugin(AutoOpsPlugin):
     async def _scan_sensors(
         self, client: GodKaiserClient, context: AutoOpsContext
     ) -> list[DiagnosticIssue]:
-        """Scan all sensors for issues."""
+        """Scan all sensors for issues including data freshness."""
         issues: list[DiagnosticIssue] = []
 
         try:
@@ -333,6 +333,48 @@ class DebugFixPlugin(AutoOpsPlugin):
                         suggested_fix="Enable sensor if it should be active",
                         auto_fixable=False,
                     ))
+
+                # Check for missing calibration (sensors that need it)
+                if sensor_type in ("ph", "ec") and not sensor.get("calibration_data"):
+                    issues.append(DiagnosticIssue(
+                        category="sensor",
+                        severity="info",
+                        target=target,
+                        description=f"Sensor {sensor_type} has no calibration data",
+                        suggested_fix="Calibrate sensor for accurate readings",
+                    ))
+
+            # Check sensor data freshness
+            try:
+                data_response = await client.list_sensor_data(limit=20)
+                data_items = data_response.get("data", data_response.get("items", []))
+                if isinstance(data_items, list):
+                    # Group by esp_id to check which devices have recent data
+                    devices_with_data = set()
+                    for item in data_items:
+                        if isinstance(item, dict):
+                            devices_with_data.add(item.get("esp_id", ""))
+
+                    # Check if any configured sensors have no data at all
+                    configured_devices = set()
+                    for s in sensors:
+                        if isinstance(s, dict) and s.get("enabled", True):
+                            configured_devices.add(s.get("esp_id", ""))
+
+                    devices_without_data = configured_devices - devices_with_data
+                    if devices_without_data:
+                        issues.append(DiagnosticIssue(
+                            category="sensor",
+                            severity="warning",
+                            target="sensor_data",
+                            description=(
+                                f"{len(devices_without_data)} device(s) with sensors "
+                                f"but no recent data: {list(devices_without_data)[:5]}"
+                            ),
+                            suggested_fix="Check device connectivity and sensor configuration",
+                        ))
+            except APIError:
+                pass  # Data endpoint may not be accessible
 
         except APIError as e:
             issues.append(DiagnosticIssue(
