@@ -27,6 +27,7 @@ import {
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
+import ColorLegend from '@/components/common/ColorLegend.vue'
 
 const emit = defineEmits<{
   'toggle-sidebar': []
@@ -238,6 +239,9 @@ async function handleLogout() {
 
         <div class="header__divider" />
       </template>
+
+      <!-- Color Legend -->
+      <ColorLegend />
 
       <!-- Emergency Stop -->
       <EmergencyStopButton />
