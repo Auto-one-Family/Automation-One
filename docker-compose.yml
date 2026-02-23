@@ -144,6 +144,8 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
+      VITE_API_TARGET: http://el-servador:8000
+      VITE_WS_TARGET: ws://el-servador:8000
       VITE_LOG_LEVEL: ${VITE_LOG_LEVEL:-debug}
     ports:
       - "5173:5173"
