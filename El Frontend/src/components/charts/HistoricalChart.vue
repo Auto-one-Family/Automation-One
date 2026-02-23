@@ -28,6 +28,7 @@ import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
 import { sensorsApi } from '@/api/sensors'
 import { useEspStore } from '@/stores/esp'
+import { tokens } from '@/utils/cssTokens'
 
 ChartJS.register(
   CategoryScale,
@@ -65,7 +66,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   timeRange: '1h',
-  color: '#3b82f6',
+  color: tokens.accent,
   unit: '',
   height: '300px',
   thresholds: () => ({}),
@@ -256,8 +257,8 @@ const chartOptions = computed(() => {
         borderWidth: 1,
         titleFont: { family: 'JetBrains Mono', size: 11 },
         bodyFont: { family: 'JetBrains Mono', size: 12 },
-        titleColor: '#8585a0',
-        bodyColor: '#eaeaf2',
+        titleColor: tokens.textSecondary,
+        bodyColor: tokens.textPrimary,
         padding: 8,
         callbacks: {
           label: (ctx: any) => `${ctx.parsed.y?.toFixed(2)}${props.unit ? ' ' + props.unit : ''}`,
@@ -273,7 +274,7 @@ const chartOptions = computed(() => {
         display: true,
         grid: { display: true, color: 'rgba(29, 29, 42, 0.8)' },
         ticks: {
-          color: '#484860',
+          color: tokens.textMuted,
           font: { family: 'JetBrains Mono', size: 10 },
           maxTicksLimit: 8,
         },
@@ -283,7 +284,7 @@ const chartOptions = computed(() => {
         display: true,
         grid: { display: true, color: 'rgba(29, 29, 42, 0.8)' },
         ticks: {
-          color: '#484860',
+          color: tokens.textMuted,
           font: { family: 'JetBrains Mono', size: 10 },
           callback: (val: any) => `${val}${props.unit ? ' ' + props.unit : ''}`,
         },
