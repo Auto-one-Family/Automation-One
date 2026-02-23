@@ -141,18 +141,6 @@ scrape_configs:
                 device:
                 component:
 
-<<<<<<< HEAD
-      # Stage 5: mqtt-broker - Drop healthcheck noise
-      # Docker healthcheck runs mosquitto_sub every 30s, generating 3 log lines each time:
-      #   "New client connected ... healthcheck", "healthcheck 0 $SYS/#", "Client healthcheck closed"
-      # These are high-frequency noise (4320 lines/day) with no diagnostic value.
-      - match:
-          selector: '{compose_service="mqtt-broker"}'
-          stages:
-            - drop:
-                source: ""
-                expression: ".*healthcheck.*"
-=======
       # Stage 5: mqtt-broker - Drop healthcheck noise and extract level
       # Mosquitto logs Docker healthcheck connection/disconnection events every 30s.
       # These are pure noise (~4320 lines/day). Drop them and extract basic level.
@@ -160,7 +148,10 @@ scrape_configs:
           selector: '{compose_service="mqtt-broker"}'
           stages:
             # 5a: Drop Docker healthcheck connect/disconnect noise
-            # Pattern: "New connection from 127.0.0.1" or "Client <unknown> disconnected"
+            # Covers both specific IP patterns and generic healthcheck client names
+            - drop:
+                source: ""
+                expression: '.*healthcheck.*'
             - drop:
                 source: ""
                 expression: '.*New connection from 127\.0\.0\.1.*'
@@ -173,7 +164,6 @@ scrape_configs:
                 expression: '(?i)(?P<level>error)'
             - labels:
                 level:
->>>>>>> origin/claude/improve-logging-infrastructure-aXF7I
 
       # Stage 6: Loki - Extract level and drop query-stats noise
       # Grafana polls Loki every 10s with error-monitoring queries (|~ "error|...").
