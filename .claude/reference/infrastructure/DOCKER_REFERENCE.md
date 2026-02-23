@@ -1,7 +1,7 @@
 # Docker-Infrastruktur Referenz - AutomationOne
 
-**Version:** 1.8
-**Datum:** 2026-02-11
+**Version:** 1.9
+**Datum:** 2026-02-23
 **Zweck:** Vollstaendige Referenz fuer Docker-Stack Architektur und Befehle
 
 ---
@@ -35,7 +35,8 @@
 | prometheus | automationone-prometheus | prom/prometheus:v3.2.1 | 9090 | monitoring | wget /-/healthy |
 | grafana | automationone-grafana | grafana/grafana:11.5.2 | 3000 | monitoring | wget /api/health |
 | postgres-exporter | automationone-postgres-exporter | prometheuscommunity/postgres-exporter:v0.16.0 | 9187 | monitoring | wget /metrics |
-| mosquitto-exporter | automationone-mosquitto-exporter | sapcc/mosquitto-exporter:0.8.0 | 9234 | monitoring | wget /metrics |
+| mosquitto-exporter | automationone-mosquitto-exporter | sapcc/mosquitto-exporter:0.8.0 | 9234 | monitoring | ["NONE"] (scratch binary, kein Shell) |
+| cadvisor | automationone-cadvisor | gcr.io/cadvisor/cadvisor:v0.49.1 | 8080 | monitoring | wget /healthz |
 | pgadmin | automationone-pgadmin | dpage/pgadmin4:9.12 | 5050 | devtools | wget /misc/ping |
 | esp32-serial-logger | automationone-esp32-serial | Custom Build (Python 3.11-slim) | - (TCP 3333 via socat) | hardware | pgrep serial_logger.py |
 
@@ -43,17 +44,21 @@
 
 | Datei | Zweck | Verwendung |
 |-------|-------|------------|
-| docker-compose.yml | Basis-Stack (4 Core + 6 Monitoring + 1 DevTools) | `docker compose up -d` |
+| docker-compose.yml | Basis-Stack (4 Core + 7 Monitoring + 1 DevTools + 1 Hardware) | `docker compose up -d` |
 | docker-compose.dev.yml | Dev Overrides (Volume-Mounts, Reload) | `-f ... -f docker-compose.dev.yml` |
 | docker-compose.test.yml | Test Overrides (SQLite, Dummy-Postgres) | `-f ... -f docker-compose.test.yml` |
 | docker-compose.ci.yml | CI Overrides (tmpfs, schnelle Healthchecks) | In GitHub Actions |
 | docker-compose.e2e.yml | E2E Overrides (Full-Stack fuer Playwright) | `make e2e-up` |
+| docker-compose.override.yml | Lokales Dev Override (gitignored) | Auto-merged bei `docker compose up` |
 
 ### 1.3 Netzwerk
 
 | Netzwerk | Driver | Zweck |
 |----------|--------|-------|
 | automationone-net | bridge | Alle Services verbunden |
+| shared-infra-net | bridge | External: muss VOR `docker compose up` existieren |
+
+**Voraussetzung:** `docker network create shared-infra-net` (einmalig, wird nicht automatisch erstellt).
 
 **Service-Discovery:** Alle Services erreichen sich via Container-Name (z.B. `postgres:5432`).
 

@@ -280,7 +280,7 @@ Include: src/**/*.ts, src/**/*.tsx, src/**/*.vue
 
 | Quelle | Zugriff | Format |
 |--------|---------|--------|
-| Docker stdout/stderr | `docker compose logs el-frontend` | Text (Vite + console.*) |
+| Docker stdout/stderr | `docker compose logs el-frontend` | JSON structured (createLogger → Promtail Stage 3) + Text (Vite) |
 | **Loki** (Monitoring-Profil) | `curl` Loki API, Label `compose_service="el-frontend"` (ROADMAP §1.1) | JSON, 7 Tage Retention |
 | **Grafana** (Monitoring-Profil) | `http://localhost:3000` (Panel 5: Log Volume, Panel 6: Errors) | Dashboard |
 | Browser Console | Nur Browser DevTools (Blind Spot) | DOM-Events, User-Interaktionen |

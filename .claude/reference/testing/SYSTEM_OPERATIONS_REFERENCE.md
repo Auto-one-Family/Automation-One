@@ -1,7 +1,8 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.12 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-23
+> **Version:** 2.13 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-23
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.13:** Auth-Token-Pfad korrigiert (response.tokens.access_token statt response.access_token)
 > **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
 > **Änderungen 2.11:** Wokwi: make wokwi-test-all (173), make wokwi-test-error-injection (10), wokwi-seed fix (lokal statt docker exec)
 > **Änderungen 2.10:** Serena MCP-Server Pfade in §9, .mcp.json Pfad ergänzt
@@ -35,8 +36,8 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "Robin", "password": "Robin123!"}'
 
-# Token aus Response extrahieren und verwenden:
-TOKEN="<access_token aus Response>"
+# Token aus Response extrahieren (verschachtelt unter "tokens"):
+TOKEN="<response.tokens.access_token>"
 
 # Authentifizierte Requests:
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/...
@@ -57,7 +58,7 @@ curl -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: applicati
 # Token speichern
 $response = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/login" `
   -Method POST -ContentType "application/json" -Body $body
-$TOKEN = $response.access_token
+$TOKEN = $response.tokens.access_token
 ```
 
 ### 0.4 Windows-Umgebung

@@ -95,7 +95,7 @@ El Servador/god_kaiser_server/src/
 ```
 
 **request_id:** UUID via `RequestIdMiddleware` für HTTP. MQTT-Handler: `request_id = "-"`.
-**Noise-Reduction:** paho.mqtt, urllib3, asyncio auf WARNING.
+**Noise-Reduction:** paho.mqtt, urllib3, asyncio, apscheduler (+ executors.default, scheduler) auf WARNING.
 **Rotation:** 10 MB, 10 Backups (`LOG_FILE_MAX_BYTES`, `LOG_FILE_BACKUP_COUNT`).
 
 ### Logger→Handler-Zuordnung (21+)
