@@ -88,7 +88,7 @@ services:
   # Frontend (ALWAYS included in E2E)
   # ============================================
   el-frontend:
-    profiles: !override []  # !override replaces (not merges) the ci.yml [frontend] profile
+    profiles: !reset []  # Reset profile restriction so el-frontend always starts in E2E mode
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000

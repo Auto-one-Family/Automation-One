@@ -74,7 +74,11 @@ jobs:
           # NOTE: Do NOT use --wait — it fails immediately on container exit
           # without showing logs. The "Verify services" step handles health
           # polling with proper diagnostics instead.
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml up -d --build
+          # NOTE: --profile frontend is explicit safety net in case Docker Compose
+          # does not honour profiles: !reset [] from docker-compose.e2e.yml.
+          docker compose --profile frontend \
+            -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml \
+            up -d --build
         env:
           DOCKER_BUILDKIT: 1
           COMPOSE_DOCKER_CLI_BUILD: 1
@@ -114,13 +118,19 @@ jobs:
           done
 
           echo "--- Waiting for Frontend ---"
-          for i in $(seq 1 45); do
+          for i in $(seq 1 90); do
             if curl -sf http://localhost:5173 > /dev/null 2>&1; then
               echo "✅ Frontend healthy after ${i} attempts"
               break
             fi
-            if [ $i -eq 45 ]; then
-              echo "❌ Frontend not healthy after 45 attempts (135s)"
+            # Every 30 attempts, show container status for early diagnosis
+            if [ $(( i % 30 )) -eq 0 ]; then
+              echo "ℹ️ Still waiting for frontend (attempt $i)..."
+              $COMPOSE ps el-frontend || true
+              $COMPOSE logs el-frontend --tail 20 || true
+            fi
+            if [ $i -eq 90 ]; then
+              echo "❌ Frontend not healthy after 90 attempts (270s)"
               $COMPOSE logs el-frontend --tail 100 || true
               exit 1
             fi
@@ -185,7 +195,10 @@ jobs:
 
       - name: Stop E2E stack
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml down -v
+        run: |
+          docker compose --profile frontend \
+            -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml \
+            down -v
         env:
           POSTGRES_USER: god_kaiser
           POSTGRES_PASSWORD: e2e_test_password
