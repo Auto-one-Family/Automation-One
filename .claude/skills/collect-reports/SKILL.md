@@ -167,7 +167,7 @@ Robin: "konsolidiere die Reports in .technical-manager/inbox/agent-reports/"
 2. Inventar:
    Glob: .technical-manager/inbox/agent-reports/*.md
    → 11 Reports gefunden
-   → Zusammenhänge: 5x Monitoring-Stack (Grafana, Prometheus, Promtail, Loki, pgAdmin),
+   → Zusammenhänge: 5x Monitoring-Stack (Grafana, Prometheus, Alloy, Loki, pgAdmin),
      3x system-control Korrekturen, 2x Dev-Reports, 1x agent-manager
    → Robin: "11 Reports, 3 thematische Gruppen. Soll ich konsolidieren?"
 

@@ -280,13 +280,13 @@ Include: src/**/*.ts, src/**/*.tsx, src/**/*.vue
 
 | Quelle | Zugriff | Format |
 |--------|---------|--------|
-| Docker stdout/stderr | `docker compose logs el-frontend` | JSON structured (createLogger → Promtail Stage 3) + Text (Vite) |
+| Docker stdout/stderr | `docker compose logs el-frontend` | JSON structured (createLogger → Alloy Stage 3) + Text (Vite) |
 | **Loki** (Monitoring-Profil) | `curl` Loki API, Label `compose_service="el-frontend"` (ROADMAP §1.1) | JSON, 7 Tage Retention |
 | **Grafana** (Monitoring-Profil) | `http://localhost:3000` (Panel 5: Log Volume, Panel 6: Errors) | Dashboard |
 | Browser Console | Nur Browser DevTools (Blind Spot) | DOM-Events, User-Interaktionen |
 | `logs/current/frontend_container.log` | Nach `scripts/debug/start_session.sh` | Ephemer, Snapshot |
 
-Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend"`, `stream="stdout"/"stderr"` (Promtail: `reference/ROADMAP_KI_MONITORING.md` §1.1)
+Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend"`, `stream="stdout"/"stderr"` (Alloy: `reference/ROADMAP_KI_MONITORING.md` §1.1)
 
 ---
 

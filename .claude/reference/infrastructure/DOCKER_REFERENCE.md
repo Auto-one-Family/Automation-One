@@ -31,7 +31,7 @@
 | el-servador | automationone-server | Custom Build | 8000 | - | curl /api/v1/health/live |
 | el-frontend | automationone-frontend | Custom Build | 5173 | - | node fetch |
 | loki | automationone-loki | grafana/loki:3.4 | 3100 | monitoring | wget /ready |
-| promtail | automationone-promtail | grafana/promtail:3.4 | 9080 (intern) | monitoring | bash /dev/tcp/localhost/9080 |
+| alloy | automationone-alloy | grafana/alloy:v1.13.1 | 12345 | monitoring | wget /-/ready |
 | prometheus | automationone-prometheus | prom/prometheus:v3.2.1 | 9090 | monitoring | wget /-/healthy |
 | grafana | automationone-grafana | grafana/grafana:11.5.2 | 3000 | monitoring | wget /api/health |
 | postgres-exporter | automationone-postgres-exporter | prometheuscommunity/postgres-exporter:v0.16.0 | 9187 | monitoring | wget /metrics |
@@ -124,7 +124,7 @@
 
 | Target | Befehl | Beschreibung |
 |--------|--------|--------------|
-| `make monitor-up` | `--profile monitoring up -d` | Start Monitoring (Loki, Promtail, Prometheus, Grafana, postgres-exporter, mosquitto-exporter) |
+| `make monitor-up` | `--profile monitoring up -d` | Start Monitoring (Loki, Alloy, Prometheus, Grafana, postgres-exporter, mosquitto-exporter) |
 | `make monitor-down` | `--profile monitoring down` | Stop Monitoring |
 | `make monitor-logs` | `--profile monitoring logs -f --tail=100` | Monitoring-Logs folgen |
 | `make monitor-status` | `--profile monitoring ps` | Monitoring-Status |
@@ -311,15 +311,19 @@ services:
 
 **Queries:** Siehe `.claude/reference/debugging/LOG_LOCATIONS.md` Section 12
 
-### 5.2 Promtail (Log-Collection)
+### 5.2 Grafana Alloy (Log-Collection)
 
 | Eigenschaft | Wert |
 |-------------|------|
-| Config | docker/promtail/config.yml |
+| Image | grafana/alloy:v1.13.1 |
+| Port | 12345 (UI + Metrics) |
+| Config | docker/promtail/config.yml (read via --config.format=promtail) |
 | Target | Docker Container Logs |
 | Label | com.docker.compose.project=auto-one |
+| UI | http://localhost:12345 (Graph-Ansicht, Komponenten-Status) |
 
 **Docker Socket Mount:** `/var/run/docker.sock` (read-only)
+**Migration:** Ersetzt Promtail (EOL 2026-03-02). Backup: `docker/promtail/config.yml.backup`
 
 ### 5.3 Prometheus (Metriken)
 

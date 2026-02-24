@@ -42,7 +42,7 @@ Der Umfang der Prüfung ergibt sich aus dem **User-Kontext**:
 |----|-----|---------|
 | 1.1 | **Halluzinierte APIs/Properties** | Funktionen, Parameter, Config-Optionen gegen echte Version prüfen. Bei dir: Grafana-Panel-Options (Version?), PromQL-Funktionen, Docker-Compose-Keys (v2), Python-Imports (FastAPI-Version), ESP32/Arduino-Funktionen (Board-Package). |
 | 1.2 | **Veraltete Syntax** | Gemischte Versionen? Bei dir: Grafana Datasource String vs Objekt (pre-v9), `version:` in Compose (deprecated), Mosquitto-Config, python-prometheus-client, ESP32 Arduino Core v2 vs v3. |
-| 1.3 | **Falsche Verschachtelung (Nesting)** | Properties auf richtiger Ebene? Bei dir: Grafana `fieldConfig.defaults.custom` vs `fieldConfig.defaults` vs `options`; Compose `healthcheck.test` vs `healthcheck.command`; Alert Rules `data[].model.conditions`; Promtail Pipeline Stage-Reihenfolge und Nesting. |
+| 1.3 | **Falsche Verschachtelung (Nesting)** | Properties auf richtiger Ebene? Bei dir: Grafana `fieldConfig.defaults.custom` vs `fieldConfig.defaults` vs `options`; Compose `healthcheck.test` vs `healthcheck.command`; Alert Rules `data[].model.conditions`; Alloy/Promtail Pipeline Stage-Reihenfolge und Nesting. |
 | 1.4 | **Copy-Paste-Propagation** | Duplizierte IDs/Labels/Refs? Bei dir: Panel-IDs im Dashboard-JSON, gleiche `refId` in Targets, identische Container-Names, doppelte Port-Bindings. |
 
 ### 2.2 Logik- und Semantikfehler
@@ -58,7 +58,7 @@ Der Umfang der Prüfung ergibt sich aus dem **User-Kontext**:
 
 | ID | Typ | Prüfung |
 |----|-----|---------|
-| 3.1 | **YAML-Indentation** | Einrückung konsistent und semantisch korrekt. Promtail Stages, Alert Rules `data:`, Compose `depends_on` auf richtiger Ebene. |
+| 3.1 | **YAML-Indentation** | Einrückung konsistent und semantisch korrekt. Alloy/Promtail Stages, Alert Rules `data:`, Compose `depends_on` auf richtiger Ebene. |
 | 3.2 | **JSON** | Keine Trailing Commas, keine Smart-Quotes; UTF-8 bei Umlauten. Dashboard-JSON: Grafana lädt oft ohne hilfreichen Fehler. |
 | 3.3 | **Escape in verschachtelten Kontexten** | Regex in YAML/JSON, LogQL/PromQL in YAML/JSON: Anführungszeichen und Sonderzeichen korrekt. |
 

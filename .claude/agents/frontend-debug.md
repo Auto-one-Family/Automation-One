@@ -96,7 +96,7 @@ Kein SESSION_BRIEFING oder STATUS.md erforderlich – beides wird genutzt wenn v
 
 **Regel:** Wenn ein Problem nur im Browser sichtbar ist (z.B. visuelles Rendering), sage dem User klar was er im Browser pruefen soll und warum.
 
-**Partieller Workaround:** Alle `console.*`-Aufrufe des Vue-Codes werden ueber Docker stdout an Promtail/Loki weitergeleitet. Der Global Error Handler (`main.ts`) gibt strukturierte JSON-Objekte aus (`[Vue Error]`, `[Vue Warning]`, `[Unhandled Rejection]`). Diese sind via Loki-API durchsuchbar - ein partieller Workaround fuer den Browser-Console Blind Spot. Voraussetzung: Monitoring-Profil aktiv (`docker compose --profile monitoring up -d`). Nicht abgedeckt: DOM-Events und User-Interaktionen die keine console-Ausgabe erzeugen.
+**Partieller Workaround:** Alle `console.*`-Aufrufe des Vue-Codes werden ueber Docker stdout an Alloy/Loki weitergeleitet. Der Global Error Handler (`main.ts`) gibt strukturierte JSON-Objekte aus (`[Vue Error]`, `[Vue Warning]`, `[Unhandled Rejection]`). Diese sind via Loki-API durchsuchbar - ein partieller Workaround fuer den Browser-Console Blind Spot. Voraussetzung: Monitoring-Profil aktiv (`docker compose --profile monitoring up -d`). Nicht abgedeckt: DOM-Events und User-Interaktionen die keine console-Ausgabe erzeugen.
 
 ---
 

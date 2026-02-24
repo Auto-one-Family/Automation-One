@@ -3,7 +3,7 @@
 **Version:** 1.1
 **Datum:** 2026-02-13
 **Status:** Living Document (verify-plan Full-Stack 2026-02-13)
-**Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings; Full-Stack-Abgleich gegen echte Configs (docker-compose, Promtail, Prometheus, metrics.py, Alert Rules)
+**Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings; Full-Stack-Abgleich gegen echte Configs (docker-compose, Alloy/Promtail, Prometheus, metrics.py, Alert Rules)
 
 ---
 
@@ -21,7 +21,7 @@ Dieser Plan fuehrt von der aktuellen Debugging-Phase schrittweise zu einem volls
 
 **Ziel:** Alle Datenstroeme zentral sichtbar machen. Kein blindes Debuggen mehr.
 
-### 1.1 Loki + Promtail + Grafana in Docker-Stack
+### 1.1 Loki + Alloy + Grafana in Docker-Stack
 
 > **STATUS: DONE**
 
@@ -30,7 +30,7 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 | Service | Container | Port | Image | Status |
 |---------|-----------|------|-------|--------|
 | loki | automationone-loki | 3100 | grafana/loki:3.4 | DONE |
-| promtail | automationone-promtail | 9080 (intern) | grafana/promtail:3.4 | DONE |
+| alloy | automationone-alloy | 12345 | grafana/alloy:v1.13.1 | DONE (migrated from Promtail 2026-02-24) |
 | cadvisor | automationone-cadvisor | 8080 | gcr.io/cadvisor/cadvisor:v0.49.1 | DONE |
 | postgres-exporter | automationone-postgres-exporter | 9187 (intern) | prometheuscommunity/postgres-exporter:v0.16.0 | DONE |
 | mosquitto-exporter | automationone-mosquitto-exporter | 9234 (intern) | sapcc/mosquitto-exporter:0.8.0 | DONE |
@@ -40,7 +40,7 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 
 **Makefile-Targets (DONE):** `make monitor-up`, `make monitor-down`, `make monitor-logs`, `make monitor-status`
 
-**Promtail-Config (DONE):** Docker Service Discovery mit folgenden Labels:
+**Alloy-Config (DONE, migrated from Promtail 2026-02-24):** Docker Service Discovery mit folgenden Labels:
 
 | Label | Quelle | Beschreibung |
 |-------|--------|-------------|
@@ -52,7 +52,7 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 | `logger` | Regex Parser | Python module path (el-servador only) |
 | `component` | JSON Parser | Vue component name (el-frontend only) |
 
-**Promtail Pipeline (DONE):**
+**Alloy Pipeline (DONE, 6 Stages via --config.format=promtail):**
 - Health-Endpoint-Logs werden gedroppt (noise reduction)
 - Multiline-Aggregation fuer Python Tracebacks
 - Structured regex parsing fuer el-servador Text-Logs
@@ -84,13 +84,13 @@ Schweregrade als Payload-Feld: `ERROR`, `WARN`, `INFO`, `DEBUG`
 }
 ```
 
-El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die Promtail abgreifen kann. Passt zur server-zentrischen Architektur.
+El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die Alloy abgreifen kann. Passt zur server-zentrischen Architektur.
 
 **B) Serial-zu-Netzwerk-Bridge (fester Bestandteil des Stacks)**
 
 > **STATUS: TEILWEISE DONE**
 
-- **DONE:** Container `esp32-serial-logger` (Profile: `hardware`) in `docker-compose.yml`. Verbindet sich per TCP mit einem Serial-Bridge auf dem Host (`SERIAL_HOST`/`SERIAL_PORT`, Default: `host.docker.internal:3333`). Liest Zeilen, gibt strukturiertes JSON auf stdout aus. Promtail scraped den Container und sendet nach Loki (Pipeline Stage 4 in `docker/promtail/config.yml`). **ESP32-Logs landen also bereits in Loki**, wenn: (1) ser2net oder socat auf dem Host auf Port 3333 laeuft, (2) `make monitor-up` und Hardware-Profil gestartet werden (`docker compose --profile monitoring --profile hardware up -d`).
+- **DONE:** Container `esp32-serial-logger` (Profile: `hardware`) in `docker-compose.yml`. Verbindet sich per TCP mit einem Serial-Bridge auf dem Host (`SERIAL_HOST`/`SERIAL_PORT`, Default: `host.docker.internal:3333`). Liest Zeilen, gibt strukturiertes JSON auf stdout aus. Alloy scraped den Container und sendet nach Loki (Pipeline Stage 4 in `docker/promtail/config.yml`). **ESP32-Logs landen also bereits in Loki**, wenn: (1) ser2net oder socat auf dem Host auf Port 3333 laeuft, (2) `make monitor-up` und Hardware-Profil gestartet werden (`docker compose --profile monitoring --profile hardware up -d`).
 - **Voraussetzung:** Auf dem Host muss eine Serial-Bridge laufen (z. B. ser2net oder `socat TCP-LISTEN:3333,reuseaddr,fork FILE:/dev/ttyUSB0,raw,echo=0`). WSL2: USB-Passthrough via `usbipd-win` fuer `/dev/ttyUSB0`.
 - **Hinweis:** Der Plan nannte zuerst "ser2net-Container"; im Stack heisst der Service `esp32-serial-logger` (Build: `docker/esp32-serial-logger`, Image nutzt ser2net/socat **auf dem Host**, nicht im Container).
 
@@ -150,13 +150,13 @@ El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die 
 - Job `prometheus` -> `localhost:9090`
 - Job `cadvisor` -> `cadvisor:8080`
 - Job `loki` -> `loki:3100`
-- Job `promtail` -> `promtail:9080`
+- Job `alloy` -> `alloy:12345`
 
 **DONE - cAdvisor:** Service in `docker-compose.yml` (Profile: monitoring), Port 8080. Prometheus scraped `cadvisor:8080`. Container-CPU, -RAM, -Restart-Count als Prometheus-Metriken verfuegbar.
 
 ### Ergebnis Phase 1
 
-**DONE:** Loki, Promtail, Grafana, Prometheus laufen im Monitoring-Profil. cAdvisor, postgres-exporter, mosquitto-exporter aktiv. Server exponiert Custom Gauges, Counter (MQTT messages/errors), WebSocket-Gauge, DB-Histogram und HTTP-Metriken. Prometheus scraped zusaetzlich Loki, Promtail, cAdvisor. ESP32-Serial-Output fluesst in Loki ueber Container `esp32-serial-logger` (Profile: hardware) + Promtail Pipeline. Basis-Dashboard vorhanden (`docker/grafana/provisioning/dashboards/system-health.json`).
+**DONE:** Loki, Alloy (migrated from Promtail 2026-02-24), Grafana, Prometheus laufen im Monitoring-Profil. cAdvisor, postgres-exporter, mosquitto-exporter aktiv. Server exponiert Custom Gauges, Counter (MQTT messages/errors), WebSocket-Gauge, DB-Histogram und HTTP-Metriken. Prometheus scraped zusaetzlich Loki, Alloy, cAdvisor. ESP32-Serial-Output fliesst in Loki ueber Container `esp32-serial-logger` (Profile: hardware) + Alloy Pipeline. Basis-Dashboard vorhanden (`docker/grafana/provisioning/dashboards/system-health.json`).
 
 **TODO:** MQTT Debug-Topic (A); auf Host ser2net/socat fuer esp32-serial-logger (B bereits im Stack); Log-Panel-Dashboard, Korrelations-View.
 
@@ -180,7 +180,7 @@ El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die 
 | MQTT Disconnected | ao-mqtt-disconnected | critical | god_kaiser_mqtt_connected < 1 | 1m |
 | Database Down | ao-database-down | critical | pg_up < 1 | 1m |
 | Loki Down | ao-loki-down | critical | up{job="loki"} < 1 | 2m |
-| Promtail Down | ao-promtail-down | critical | up{job="promtail"} < 1 | 2m |
+| Alloy Down | ao-alloy-down | critical | up{job="alloy"} < 1 | 2m |
 | High Memory | ao-high-memory | warning | god_kaiser_memory_percent > 85 | 5m |
 | ESP Offline | ao-esp-offline | warning | (esp_offline/esp_total) > 0.5 AND esp_online > 0 | 3m |
 | High MQTT Error Rate | ao-high-mqtt-error-rate | warning | increase(god_kaiser_mqtt_errors_total[5m]) > 10 | 2m |
@@ -252,7 +252,7 @@ patterns:
 
 > **STATUS: TODO**
 
-Definiert Labels fuer spaeteres ML-Training. Bestehende Promtail-Labels als Basis:
+Definiert Labels fuer spaeteres ML-Training. Bestehende Alloy-Labels (Promtail-Format) als Basis:
 
 | Label | Typ | Werte | Quelle |
 |-------|-----|-------|--------|
@@ -262,7 +262,7 @@ Definiert Labels fuer spaeteres ML-Training. Bestehende Promtail-Labels als Basi
 | `component` | extracted | ESPCard, DashboardView; mqtt/sensor/logger (Firmware) | JSON (el-frontend, esp32-serial-logger) |
 | `device` | extracted | esp32-xiao-01, etc. | JSON (esp32-serial-logger, Feld device_id) |
 | `error_pattern` | manual | MQTT_RECONNECT_LOOP, etc. | Fehlermuster-Katalog |
-| `layer` | static | firmware, broker, backend, frontend, database | Promtail relabel |
+| `layer` | static | firmware, broker, backend, frontend, database | Alloy relabel |
 
 ### Ergebnis Phase 2
 
@@ -540,7 +540,7 @@ Jetson laeuft 24/7 als intelligenter Debug-Assistent. Erkennt bekannte Fehler, w
 | # | Original (TM) | Korrektur | Grund |
 |---|---------------|-----------|-------|
 | 1 | `ao/devices/{device_id}/debug` | `kaiser/god/esp/{esp_id}/system/debug` | Bestehendes Topic-Schema nutzt `kaiser/` Prefix |
-| 2 | Labels `layer`/`service` | `compose_service`, `container`, `level`, `logger`, `component` | Promtail bereits mit Docker SD Labels konfiguriert |
+| 2 | Labels `layer`/`service` | `compose_service`, `container`, `level`, `logger`, `component` | Alloy (Promtail-Format) bereits mit Docker SD Labels konfiguriert |
 | 3 | `/metrics` Endpoint | `/api/v1/health/metrics` | prometheus-fastapi-instrumentator konfiguriert |
 | 4 | Phase 1 als Zukunft | Phase 1a DONE, Phase 1b TODO | ~60-70% bereits implementiert |
 | 5 | PATTERNS.yaml Pfad | `.claude/reference/errors/PATTERNS.yaml` | Korrekt, ERROR_CODES.md existiert bereits dort |
@@ -552,15 +552,15 @@ Jetson laeuft 24/7 als intelligenter Debug-Assistent. Erkennt bekannte Fehler, w
 
 ## verify-plan Full-Stack (2026-02-13) – echte Configs
 
-Abgleich gegen `docker-compose.yml`, `docker/promtail/config.yml`, `docker/prometheus/prometheus.yml`, `El Servador/.../core/metrics.py`, `docker/grafana/provisioning/alerting/alert-rules.yml`.
+Abgleich gegen `docker-compose.yml`, `docker/promtail/config.yml` (read by Alloy via --config.format=promtail), `docker/prometheus/prometheus.yml`, `El Servador/.../core/metrics.py`, `docker/grafana/provisioning/alerting/alert-rules.yml`.
 
 | # | Im Plan / Doku | Im System | Aenderung im Dokument |
 |---|----------------|-----------|------------------------|
 | 9 | cAdvisor TODO | cAdvisor Service in docker-compose (Profile monitoring), Port 8080; Prometheus scraped cadvisor:8080 | Phase 1.4 + Ergebnis Phase 1: cAdvisor als DONE gefuehrt |
 | 10 | ser2net-Container | Service heisst `esp32-serial-logger` (Profile: hardware), verbindet zu Host (SERIAL_HOST:SERIAL_PORT), baut nicht ser2net im Container | 1.2 B) auf esp32-serial-logger umgestellt, Voraussetzung Host-Bridge erlaeutert |
-| 11 | ESP hat keine Loki-Anbindung | Promtail Stage 4 scraped `esp32-serial-logger`-Container, Labels level/device/component; ESP-Logs in Loki wenn Hardware-Profil + Host-Bridge | 1.1 Promtail-Pipeline + 1.2 B) ergaenzt (ESP→Loki) |
-| 12 | Nur 4 Prometheus-Jobs | 7 Jobs: el-servador, postgres, prometheus, mqtt-broker, cadvisor, loki, promtail | 1.4 Scrape-Config vollstaendig aufgelistet |
+| 11 | ESP hat keine Loki-Anbindung | Alloy Stage 4 scraped `esp32-serial-logger`-Container, Labels level/device/component; ESP-Logs in Loki wenn Hardware-Profil + Host-Bridge | 1.1 Alloy-Pipeline + 1.2 B) ergaenzt (ESP→Loki) |
+| 12 | Nur 4 Prometheus-Jobs | 7 Jobs: el-servador, postgres, prometheus, mqtt-broker, cadvisor, loki, alloy | 1.4 Scrape-Config vollstaendig aufgelistet |
 | 13 | MQTT/WS/DB-Metriken TODO | metrics.py: god_kaiser_mqtt_messages_total, god_kaiser_mqtt_errors_total, god_kaiser_websocket_connections, god_kaiser_db_query_duration_seconds | 1.4 Custom-Metriken-Tabelle erweitert, TODO-Block entfernt |
 | 14 | Metrikname websocket_connections_active | Code: `god_kaiser_websocket_connections` | 1.4 exakter Name eingetragen |
-| 15 | 5 Alert Rules | 7 Rules: zusaetzlich ao-loki-down, ao-promtail-down, ao-high-mqtt-error-rate; ESP-Offline-Formel: 50% offline + esp_online>0 | 2.1 Tabelle auf 7 Rules erweitert, Bedingungen angepasst |
+| 15 | 5 Alert Rules | 7 Rules: zusaetzlich ao-loki-down, ao-alloy-down, ao-high-mqtt-error-rate; ESP-Offline-Formel: 50% offline + esp_online>0 | 2.1 Tabelle auf 7 Rules erweitert, Bedingungen angepasst |
 | 16 | Grafana Dashboard-Pfad | `docker/grafana/provisioning/dashboards/system-health.json` + dashboards.yml | 1.3 bereits korrekt; Ergebnis Phase 1 Pfad explizit genannt |

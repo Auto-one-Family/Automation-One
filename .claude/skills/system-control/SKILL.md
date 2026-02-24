@@ -186,7 +186,7 @@ postgres + mqtt-broker (parallel starten)
 | Service | Container-Name | Image | Ports |
 |---------|---------------|-------|-------|
 | loki | `automationone-loki` | `grafana/loki:3.4` | 3100 |
-| promtail | `automationone-promtail` | `grafana/promtail:3.4` | 9080 (intern) |
+| alloy | `automationone-alloy` | `grafana/alloy:v1.13.1` | 12345 |
 | prometheus | `automationone-prometheus` | `prom/prometheus:v3.2.1` | 9090 |
 | grafana | `automationone-grafana` | `grafana/grafana:11.5.2` | 3000 |
 | postgres-exporter | `automationone-postgres-exporter` | `prometheuscommunity/postgres-exporter:v0.16.0` | 9187 |
@@ -228,7 +228,7 @@ cd "El Servador\god_kaiser_server"
 | el-servador | `curl -f http://localhost:8000/api/v1/health/live` | 30s | 10s | 3 | 30s |
 | el-frontend | `node -e "fetch('http://localhost:5173')..."` | 30s | 10s | 3 | 30s |
 | loki | `wget --spider http://localhost:3100/ready` | 15s | 5s | 5 | - |
-| promtail | `bash -c 'echo > /dev/tcp/localhost/9080'` | 15s | 5s | 5 | - |
+| alloy | `wget --spider http://localhost:12345/-/ready` | 15s | 5s | 5 | 15s |
 | prometheus | `wget --spider http://localhost:9090/-/healthy` | 15s | 5s | 5 | - |
 | grafana | `wget --spider http://localhost:3000/api/health` | 15s | 5s | 5 | - |
 

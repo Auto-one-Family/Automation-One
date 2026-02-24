@@ -53,7 +53,7 @@ el-servador:
       max-file: "3"
 
 # MQTT-Logs (in docker-compose auskommentiert: Mosquitto stdout-only)
-# mqtt-broker: kein Bind-Mount; Logs via Promtail → Loki (compose_service=mqtt-broker)
+# mqtt-broker: kein Bind-Mount; Logs via Alloy → Loki (compose_service=mqtt-broker)
 
 # PostgreSQL-Logs
 postgres:
@@ -90,7 +90,7 @@ el-frontend:
 **Datei:** `El Frontend/src/utils/logger.ts`
 
 ```typescript
-// createLogger(namespace) outputs JSON to stdout for Promtail/Loki:
+// createLogger(namespace) outputs JSON to stdout for Alloy/Loki:
 // {"level":"info","component":"ESPCard","message":"...","timestamp":"2026-02-23T..."}
 // In DEV mode: also logs human-readable to browser console
 // Level filtering via VITE_LOG_LEVEL env var (default: debug)
@@ -894,7 +894,7 @@ curl -s "http://localhost:3100/loki/api/v1/query_range" \
   --data-urlencode 'query={compose_service="mqtt-broker"}' \
   --data-urlencode 'limit=50'
 
-# Frontend-Logs (Vue/Vite stdout, Promtail Stage 3: JSON level/component)
+# Frontend-Logs (Vue/Vite stdout, Alloy Stage 3: JSON level/component)
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
   --data-urlencode 'query={compose_service="el-frontend"}' \
   --data-urlencode 'limit=50'
@@ -912,7 +912,7 @@ curl -s "http://localhost:3100/loki/api/v1/query_range" \
 # Verfuegbare Labels
 curl -s http://localhost:3100/loki/api/v1/labels
 
-# Services auflisten (compose_service = Promtail-Target-Label)
+# Services auflisten (compose_service = Alloy-Target-Label)
 curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 ```
 
@@ -922,7 +922,7 @@ curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 |-------|-------------|----------------|
 | `compose_service` | Docker Compose Service-Name (Primär für Queries, ROADMAP §1.1) | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres`, `esp32-serial-logger` |
 | `container` | Container-Name | `automationone-server`, `automationone-mqtt`, `automationone-esp32-serial` |
-| `service` | Wie compose_service (Promtail setzt beide) | `el-servador` |
+| `service` | Wie compose_service (Alloy setzt beide) | `el-servador` |
 | `compose_project` | Compose-Projekt | `auto-one` |
 | `stream` | Log-Stream | `stdout`, `stderr` |
 
@@ -951,7 +951,8 @@ curl -s http://localhost:9090/api/v1/targets
 **Letzte Aktualisierung:** 2026-02-23
 **Version:** 4.0
 **Changelog:**
-- 4.0: Frontend Logger jetzt JSON-strukturiert (Promtail Stage 3 funktioniert), Promtail Stage 5 Mosquitto healthcheck drop, `logs/esp32/` Verzeichnis erstellt, Server apscheduler noise reduziert
+- 4.1: Promtail → Grafana Alloy Migration (EOL 2026-03-02). Alle Promtail-Referenzen aktualisiert. Pipeline identisch (6 Stages via --config.format=promtail)
+- 4.0: Frontend Logger jetzt JSON-strukturiert (Stage 3 funktioniert), Stage 5 Mosquitto healthcheck drop, `logs/esp32/` Verzeichnis erstellt, Server apscheduler noise reduziert
 - 3.9: Error-Injection Wokwi-Logs (`11-error-injection/`), Verweis auf `WOKWI_ERROR_MAPPING.md`
 - 3.7: §12.0 Erreichbarkeit aller Ebenen (Tabelle KI-Optimalität); Loki-Beispiele für postgres + esp32-serial-logger
 - 3.6: Frontend-Container-Logs als Log-Quelle ergänzt (stdout → Loki, kein Bind-Mount; Tabelle Log-Verzeichnisse, 1.1, 1.2, 12.2)

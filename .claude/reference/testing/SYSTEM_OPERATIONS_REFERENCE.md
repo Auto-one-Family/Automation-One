@@ -14,7 +14,8 @@
 > **Änderungen 2.4:** Native Tests vollständig: 22 Tests (12 TopicBuilder + 10 GPIOManager), Toolchain-Fix (set_native_toolchain.py), korrigierte Pfade
 > **Änderungen 2.3:** Native Test-Commands (pio test -e native/esp32dev_test), wokwi-test-full Count korrigiert (22 Szenarien)
 > **Änderungen 2.2:** Wokwi-Testing Makefile-Targets (8 neue Targets für ESP32-Simulation)
-> **Änderungen 2.1:** Monitoring-Stack (Loki, Promtail, Prometheus, Grafana), Monitoring-Configs in Pfade
+> **Änderungen 2.5:** Promtail → Grafana Alloy Migration (EOL 2026-03-02). Service alloy:12345
+> **Änderungen 2.1:** Monitoring-Stack (Loki, Alloy, Prometheus, Grafana), Monitoring-Configs in Pfade
 > **Änderungen 2.0:** Docker-Flow als primärer Workflow, .env-Auslagerung, session.sh v4.0
 
 ---
@@ -1618,7 +1619,7 @@ grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10
 ### 8.1 Starten/Stoppen
 
 ```bash
-# Monitoring starten (Loki, Promtail, Prometheus, Grafana, postgres-exporter, mosquitto-exporter)
+# Monitoring starten (Loki, Alloy, Prometheus, Grafana, postgres-exporter, mosquitto-exporter)
 make monitor-up
 # oder: docker compose --profile monitoring up -d
 
@@ -1652,7 +1653,7 @@ curl -s "http://localhost:3100/loki/api/v1/query_range" \
 # Verfuegbare Labels
 curl -s http://localhost:3100/loki/api/v1/labels
 
-# Verfuegbare Services (compose_service = Promtail-Target-Label)
+# Verfuegbare Services (compose_service = Alloy-Target-Label)
 curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 ```
 
@@ -1724,7 +1725,7 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **PostgreSQL Config** | `docker/postgres/postgresql.conf` |
 | **Mosquitto Config** | `docker/mosquitto/mosquitto.conf` |
 | **Loki Config** | `docker/loki/loki-config.yml` |
-| **Promtail Config** | `docker/promtail/config.yml` |
+| **Alloy Config** | `docker/promtail/config.yml` (read by Alloy via --config.format=promtail) |
 | **Prometheus Config** | `docker/prometheus/prometheus.yml` |
 | **Grafana Provisioning** | `docker/grafana/provisioning/` |
 | **Session Script** | `scripts/debug/start_session.sh` (v4.0) |

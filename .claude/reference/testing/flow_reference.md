@@ -269,7 +269,7 @@ SCHRITT 3: ZURÜCK ZUM TEST-FLOW
 
 ### F3.1 Überblick
 
-**Ziel:** Monitoring-Stack (Loki, Promtail, Prometheus, Grafana) einrichten.
+**Ziel:** Monitoring-Stack (Loki, Alloy, Prometheus, Grafana) einrichten.
 **Trigger:** Robin oder TM entscheidet dass Monitoring benötigt wird.
 **Ergebnis:** `docker compose --profile monitoring up -d` startet den vollständigen Stack.
 
@@ -278,7 +278,7 @@ SCHRITT 3: ZURÜCK ZUM TEST-FLOW
 ```
 Block 1: Vorbereitung — Verzeichnisse, .env, .gitignore
 Block 2: Loki — Log-Speicher (test: curl localhost:3100/ready)
-Block 3: Promtail — Log-Sammler (test: Loki-Query nach Server-Logs)
+Block 3: Alloy — Log-Sammler (test: Loki-Query nach Server-Logs)
 Block 4: Agent-Docs — Loki-Queries in bestehende Agents ergänzen
 Block 5: FastAPI /metrics — Instrumentierung (test: curl localhost:8000/metrics)
 Block 6: Prometheus — Metriken-Speicher (test: Targets UP in localhost:9090)
