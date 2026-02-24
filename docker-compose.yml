@@ -377,8 +377,9 @@ services:
     image: sapcc/mosquitto-exporter:0.8.0
     container_name: automationone-mosquitto-exporter
     profiles: ["monitoring"]
-    environment:
-      BROKER_ENDPOINT: "tcp://mqtt-broker:1883"
+    command:
+      - --endpoint=tcp://mqtt-broker:1883
+      - --bind-address=0.0.0.0:9234
     ports:
       - "9234:9234"
     depends_on:

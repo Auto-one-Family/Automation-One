@@ -1,9 +1,16 @@
 # Grafana Alerting Provisioning - AutomationOne
 # Phase 2: Expanded Alerting (UI-only, no webhook yet)
 #
-# Rules:
-# - 5 Critical: server-down, mqtt-disconnected, database-down, loki-down, alloy-down
-# - 3 Warning: high-memory, esp-devices-offline, high-error-rate
+# 28 Rules across 6 groups:
+#   Critical (10s): server-down, mqtt-disconnected, database-down, loki-down, alloy-down
+#   Warning (1m):   high-memory, esp-devices-offline, high-mqtt-error-rate
+#   Infrastructure (1m): db-query-slow, db-connections-high, cadvisor-down
+#   Sensor/ESP (1m): sensor-temp/ph/humidity/ec-range, sensor-stale, heartbeat-gap,
+#                    esp-boot-loop, esp-error-cascade, esp-safe-mode
+#   Application (1m): ws-disconnects, mqtt-message-backlog, api-errors-high,
+#                     logic-engine-errors, actuator-timeout, safety-triggered
+#   MQTT Broker (30s): mqtt-broker-no-clients, mqtt-broker-messages-stored
+#                      (requires mosquitto-exporter healthy, port 9234, job=mqtt-broker)
 #
 # Pipeline per rule: A (PromQL query) -> B (Reduce to last value) -> C (Threshold)
 # All datasource UIDs verified against datasources.yml (2026-02-09)

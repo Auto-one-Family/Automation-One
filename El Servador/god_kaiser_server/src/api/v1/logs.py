@@ -28,6 +28,7 @@ def _sanitize(value: str) -> str:
     """Remove control characters and ANSI escapes from a log field."""
     return _CONTROL_CHARS.sub(" ", value)
 
+
 router = APIRouter(prefix="/logs", tags=["logs"])
 
 # Rate limiting: max 10 requests per minute per IP
@@ -120,10 +121,7 @@ async def receive_frontend_log(entry: FrontendLogEntry, request: Request) -> Res
     info = _sanitize(entry.info or "-")
 
     # Build log message with structured context
-    log_msg = (
-        f"[FRONTEND] [{component}] {message}"
-        f" (url: {url}, info: {info})"
-    )
+    log_msg = f"[FRONTEND] [{component}] {message}" f" (url: {url}, info: {info})"
 
     # Log at appropriate level
     level = entry.level.lower()
