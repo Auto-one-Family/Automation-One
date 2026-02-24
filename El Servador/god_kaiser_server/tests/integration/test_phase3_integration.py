@@ -248,6 +248,7 @@ class TestDiscoveryApprovalOnlineFlow:
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
             mock_db.commit = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -273,6 +274,7 @@ class TestDiscoveryApprovalOnlineFlow:
                 with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
+                    mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
                     with patch("src.mqtt.handlers.heartbeat_handler.AuditLogRepository") as mock_audit_class:
@@ -451,6 +453,7 @@ class TestNetworkPartitionRecovery:
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
             mock_db.commit = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -481,6 +484,7 @@ class TestNetworkPartitionRecovery:
                 with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
+                    mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
                     with patch("src.mqtt.handlers.heartbeat_handler.AuditLogRepository") as mock_audit_class:
@@ -494,17 +498,20 @@ class TestNetworkPartitionRecovery:
                             mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
                             with patch.object(heartbeat_handler, "_send_heartbeat_ack", AsyncMock()):
-                                result = await heartbeat_handler.handle_heartbeat(
-                                    topic, heartbeat_payload
-                                )
+                                with patch.object(
+                                    heartbeat_handler, "_update_esp_metadata", AsyncMock()
+                                ):
+                                    result = await heartbeat_handler.handle_heartbeat(
+                                        topic, heartbeat_payload
+                                    )
 
-                                assert result is True
+                                    assert result is True
 
-                                # Status should be updated back to online
-                                mock_repo.update_status.assert_called()
-                                update_call = mock_repo.update_status.call_args
-                                assert update_call.args[0] == "ESP_RECOVERED"
-                                assert update_call.args[1] == "online"
+                                    # Status should be updated back to online
+                                    mock_repo.update_status.assert_called()
+                                    update_call = mock_repo.update_status.call_args
+                                    assert update_call.args[0] == "ESP_RECOVERED"
+                                    assert update_call.args[1] == "online"
 
     @pytest.mark.asyncio
     async def test_full_partition_recovery_cycle(

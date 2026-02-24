@@ -306,7 +306,7 @@ function handleNavClick() {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
 }
@@ -430,7 +430,7 @@ function handleNavClick() {
 
 .sidebar__user-role {
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: capitalize;
 }
 </style>

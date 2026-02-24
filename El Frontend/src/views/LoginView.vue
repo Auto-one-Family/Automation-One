@@ -455,7 +455,7 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   transition: color var(--transition-fast);
 }
 
