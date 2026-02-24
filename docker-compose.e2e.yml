@@ -79,6 +79,9 @@ services:
       retries: 20
       start_period: 10s
     restart: "no"
+    # No host volume mounts in E2E: removes ./logs/server:/app/logs (permission error)
+    # and ./El Servador/.../src:/app/src (no live-reload needed, code is in image)
+    volumes: !reset []
     # No watch/develop section in E2E
     develop: !reset null
 

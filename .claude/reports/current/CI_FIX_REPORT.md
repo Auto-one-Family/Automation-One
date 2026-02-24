@@ -36,12 +36,20 @@
 - Cause 1: Mosquitto healthcheck used `|| exit 0` — always reported healthy even if broker was not listening. Tests started before Mosquitto was ready. Some tests hung waiting for MQTT messages.
 - Cause 2: No `--timeout` option in pytest, no `pytest-timeout` package installed.
 
-### 3. Backend E2E + Playwright Server Crash (exit code 1)
+### 3. Backend E2E + Playwright Server Crash (exit code 1) — Round 1
 
 - `El Servador/Dockerfile` builder stage runs `poetry install` without `--no-root`.
 - Poetry tried to install the project package itself, requiring `README.md` (declared via `readme = "README.md"` in `pyproject.toml`).
 - The Dockerfile copies only `pyproject.toml` and `poetry.lock`, not `README.md`.
 - Error: `The current project could not be installed: [Errno 2] No such file or directory: '/app/README.md'`
+
+### 4. Backend E2E + Playwright Server Crash (exit code 1) — Round 2
+
+- After the `--no-root` fix, the server container still crashed with a new error.
+- `PermissionError: [Errno 13] Permission denied: '/app/logs/god_kaiser.log'`
+- Root cause: `docker-compose.yml` (base) mounts `./logs/server:/app/logs` into `el-servador`. This host directory is created by the CI runner as root-owned. The container runs as `appuser` (UID 1000) and cannot write to the root-owned mount.
+- The Dockerfile correctly creates `/app/logs` with `chown -R appuser:appuser /app`, but the Docker volume mount overwrites the directory ownership at container start.
+- `docker-compose.ci.yml` and `docker-compose.e2e.yml` did not override the volumes section → the problematic mount was inherited from the base compose file.
 
 ---
 
@@ -84,6 +92,17 @@
 
 - Same Mosquitto healthcheck fix as server-tests.yml.
 
+### `docker-compose.ci.yml`
+
+- Added `volumes: !reset []` to `el-servador` service.
+- Removes the inherited `./logs/server:/app/logs` mount from base docker-compose.yml.
+- Removes the inherited `./El Servador/.../src:/app/src` live-reload mount (not needed in CI; code is baked into image).
+- The container now uses its own `/app/logs` directory created and owned by `appuser` during Docker build.
+
+### `docker-compose.e2e.yml`
+
+- Same `volumes: !reset []` fix as docker-compose.ci.yml.
+
 ---
 
 ## Local Verification
@@ -106,8 +125,8 @@ Previously passing tests still pass:
 |-------|----------|-----|
 | Unit Tests | PASS | Board-aware GPIO validation |
 | Integration Tests | PASS | Mosquitto healthcheck + pytest-timeout |
-| Backend E2E Tests | PASS | `--no-root` in Dockerfile |
-| Playwright E2E Tests | PASS | `--no-root` in Dockerfile |
+| Backend E2E Tests | PASS | `--no-root` in Dockerfile + `volumes: !reset []` in CI/E2E compose |
+| Playwright E2E Tests | PASS | `--no-root` in Dockerfile + `volumes: !reset []` in CI/E2E compose |
 
 ---
 
@@ -116,3 +135,4 @@ Previously passing tests still pass:
 - **Lint warnings**: Unused imports in `esp.py`, `errors.py`, `auth.py` show as annotations. These use `continue-on-error: true` and do not fail the pipeline. Not fixed to keep scope minimal.
 - **Integration Tests — MQTT hang**: Root cause is likely a missing cleanup in a test fixture that creates MQTT connections. The 60-second per-test timeout prevents the 15-minute job timeout. Long-term fix: add proper teardown to the offending fixture.
 - **Frontend Dockerfile**: No multi-stage build was needed. The `--target development` reference in the task was not present in the actual `playwright-tests.yml`. The single-stage Dockerfile is correct.
+- **el-frontend volumes**: The `el-frontend` service also has source mounts in base docker-compose.yml. These are not removed in CI/E2E because the frontend is built from the Dockerfile in E2E tests (volumes don't affect the built image, and el-frontend uses `profiles: []` in e2e to always start). If frontend crashes similarly, the same `volumes: !reset []` pattern applies.
