@@ -90,6 +90,11 @@ services:
   el-frontend:
     profiles: !reset []  # Reset profile restriction so el-frontend always starts in E2E mode
     environment:
+      # Vite server-side proxy targets (used by Node.js proxy inside the container)
+      # Must use Docker service name — localhost:8000 resolves to the frontend container itself
+      VITE_API_TARGET: http://el-servador:8000
+      VITE_WS_TARGET: ws://el-servador:8000
+      # Legacy vars kept for compatibility (not used by vite.config.ts proxy)
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
     healthcheck:
