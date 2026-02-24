@@ -244,6 +244,12 @@ class TestSafetyServiceEmergencyStop:
         """SafetyService with mocked repositories."""
         actuator_repo = AsyncMock()
         esp_repo = AsyncMock()
+        # Configure actuator_config mock so check_safety_constraints works
+        mock_actuator = MagicMock()
+        mock_actuator.enabled = True
+        mock_actuator.min_value = 0.0
+        mock_actuator.max_value = 1.0
+        actuator_repo.get_by_esp_and_gpio.return_value = mock_actuator
         return SafetyService(actuator_repo=actuator_repo, esp_repo=esp_repo)
 
     @pytest.mark.asyncio

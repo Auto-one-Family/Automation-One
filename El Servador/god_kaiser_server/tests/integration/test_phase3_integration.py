@@ -284,6 +284,7 @@ class TestDiscoveryApprovalOnlineFlow:
                 ) as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
+                    mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
                     with patch(
@@ -498,6 +499,7 @@ class TestNetworkPartitionRecovery:
                 ) as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
+                    mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
                     with patch(
