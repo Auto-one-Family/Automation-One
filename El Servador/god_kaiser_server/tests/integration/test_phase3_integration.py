@@ -472,8 +472,10 @@ class TestNetworkPartitionRecovery:
                 }
                 mock_device.last_seen = datetime.now(timezone.utc) - timedelta(minutes=2)
                 mock_device.zone_id = "zone_1"
+                mock_device.zone_name = "Test Zone"  # Required by _update_esp_metadata zone resync
                 mock_device.master_zone_id = "master"
                 mock_device.kaiser_id = "god"
+                mock_device.ip_address = None  # Explicitly set to avoid MagicMock attribute side-effects
 
                 mock_repo = MagicMock()
                 mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
@@ -498,20 +500,17 @@ class TestNetworkPartitionRecovery:
                             mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
                             with patch.object(heartbeat_handler, "_send_heartbeat_ack", AsyncMock()):
-                                with patch.object(
-                                    heartbeat_handler, "_update_esp_metadata", AsyncMock()
-                                ):
-                                    result = await heartbeat_handler.handle_heartbeat(
-                                        topic, heartbeat_payload
-                                    )
+                                result = await heartbeat_handler.handle_heartbeat(
+                                    topic, heartbeat_payload
+                                )
 
-                                    assert result is True
+                                assert result is True
 
-                                    # Status should be updated back to online
-                                    mock_repo.update_status.assert_called()
-                                    update_call = mock_repo.update_status.call_args
-                                    assert update_call.args[0] == "ESP_RECOVERED"
-                                    assert update_call.args[1] == "online"
+                                # Status should be updated back to online
+                                mock_repo.update_status.assert_called()
+                                update_call = mock_repo.update_status.call_args
+                                assert update_call.args[0] == "ESP_RECOVERED"
+                                assert update_call.args[1] == "online"
 
     @pytest.mark.asyncio
     async def test_full_partition_recovery_cycle(
