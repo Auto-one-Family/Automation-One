@@ -51,10 +51,18 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Upgrade pip/setuptools and fix known CVEs
-# jaraco.context CVE-2026-23949 (path traversal), wheel CVE-2026-24049 (privilege escalation)
+# Upgrade pip/setuptools and fix known CVEs in transitive/lock-pinned packages:
+# python-multipart CVE-2024-24762, CVE-2024-53981, CVE-2026-24486 → >=0.0.22
+# starlette CVE-2024-47874 → >=0.40.0 (via FastAPI >=0.115.0)
+# jaraco.context CVE-2026-23949 (path traversal) → >=6.1.0
+# wheel CVE-2026-24049 (privilege escalation) → >=0.46.2
 RUN pip install --no-cache-dir --upgrade pip setuptools && \
-    pip install --no-cache-dir --upgrade "jaraco.context>=6.1.0" "wheel>=0.46.2"
+    pip install --no-cache-dir --upgrade \
+        "python-multipart>=0.0.22" \
+        "fastapi>=0.115.0" \
+        "starlette>=0.40.0" \
+        "jaraco.context>=6.1.0" \
+        "wheel>=0.46.2"
 
 # Copy application code
 COPY god_kaiser_server/src ./src

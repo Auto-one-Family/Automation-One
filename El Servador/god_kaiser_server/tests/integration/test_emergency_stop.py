@@ -241,15 +241,37 @@ class TestSafetyServiceEmergencyStop:
 
     @pytest.fixture
     def safety_service(self):
-        """SafetyService with mocked repositories."""
+        """SafetyService with mocked repositories.
+
+        Configures mock actuator with valid range (0.0–1.0) so that
+        validate_actuator_command can reach SafetyCheckResult(valid=True)
+        after an emergency stop is cleared.  Without this setup the
+        AsyncMock default return values for get_by_esp_and_gpio cause a
+        TypeError when safety_service.py compares float < AsyncMock.
+        """
         actuator_repo = AsyncMock()
         esp_repo = AsyncMock()
-        # Configure actuator_config mock so check_safety_constraints works
+
+        # Provide a real-looking ESP device so check_safety_constraints
+        # does not fail with "ESP device not found".
+        mock_esp = MagicMock()
+        mock_esp.id = 1
+        esp_repo.get_by_device_id.return_value = mock_esp
+
+        # Provide an actuator config with a valid value range so the
+        # range check (value < min_value or value > max_value) passes.
         mock_actuator = MagicMock()
         mock_actuator.enabled = True
         mock_actuator.min_value = 0.0
         mock_actuator.max_value = 1.0
+        mock_actuator.timeout_seconds = None
         actuator_repo.get_by_esp_and_gpio.return_value = mock_actuator
+        # get_by_esp is called during GPIO conflict check in check_safety_constraints.
+        # Return empty list so no false GPIO-conflict warnings are raised.
+        actuator_repo.get_by_esp.return_value = []
+        actuator_repo.get_state.return_value = None
+
+
         return SafetyService(actuator_repo=actuator_repo, esp_repo=esp_repo)
 
     @pytest.mark.asyncio

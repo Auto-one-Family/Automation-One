@@ -10,6 +10,9 @@ import { createWebSocketHelper, WS_MESSAGE_TYPES } from '../helpers/websocket'
 import { publishHeartbeat, publishEmergencyStop, publishActuatorAlert, generateMockId } from '../helpers/mqtt'
 
 test.describe('Emergency Stop', () => {
+  // Requires live MQTT/IoT data — will be linked to Wokwi SIL testing
+  test.skip(!!process.env.CI, 'Requires live IoT data — use Wokwi integration for CI')
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('load')

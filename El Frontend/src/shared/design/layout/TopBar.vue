@@ -516,7 +516,7 @@ async function handleLogout() {
   padding: 3px 8px;
   font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   background: transparent;
   border: none;
   border-radius: 3px;
@@ -745,7 +745,7 @@ async function handleLogout() {
 
 .header__connection-label {
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 

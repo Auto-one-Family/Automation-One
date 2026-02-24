@@ -257,6 +257,7 @@ class TestDiscoveryApprovalOnlineFlow:
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
             mock_db.commit = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -467,6 +468,7 @@ class TestNetworkPartitionRecovery:
         with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
             mock_db = MagicMock()
             mock_db.commit = AsyncMock()
+            mock_db.rollback = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -485,8 +487,10 @@ class TestNetworkPartitionRecovery:
                 }
                 mock_device.last_seen = datetime.now(timezone.utc) - timedelta(minutes=2)
                 mock_device.zone_id = "zone_1"
+                mock_device.zone_name = "Test Zone"  # Required by _update_esp_metadata zone resync
                 mock_device.master_zone_id = "master"
                 mock_device.kaiser_id = "god"
+                mock_device.ip_address = None  # Explicitly set to avoid MagicMock attribute side-effects
 
                 mock_repo = MagicMock()
                 mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)

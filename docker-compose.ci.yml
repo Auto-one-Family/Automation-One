@@ -88,6 +88,11 @@ services:
   el-frontend:
     profiles:
       - frontend  # Only start when explicitly requested
+    environment:
+      # Vite server-side proxy targets (Node.js proxy inside the container)
+      # Must use Docker service name — localhost resolves to the frontend container itself
+      VITE_API_TARGET: http://el-servador:8000
+      VITE_WS_TARGET: ws://el-servador:8000
     restart: "no"
     develop: !reset null
 

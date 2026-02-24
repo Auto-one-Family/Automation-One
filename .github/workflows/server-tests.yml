@@ -124,37 +124,23 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
     needs: lint
+
+    services:
+      mosquitto:
+        image: eclipse-mosquitto:2
+        ports:
+          - 1883:1883
+        options: >-
+          --health-cmd "mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Start Mosquitto MQTT broker
-        run: |
-          # Start Mosquitto with CI config (allows anonymous, listens on 0.0.0.0)
-          # NOTE: Cannot use GitHub Actions 'services:' because Mosquitto 2.x
-          # requires a config file to allow anonymous connections, and services
-          # start before checkout (so we can't mount the repo config file).
-          docker run -d --name mosquitto \
-            -p 1883:1883 \
-            -v "${{ github.workspace }}/.github/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
-            eclipse-mosquitto:2
-
-          echo "Waiting for Mosquitto to accept connections..."
-          for i in $(seq 1 30); do
-            if docker exec mosquitto mosquitto_pub -h localhost -t healthcheck -m ok 2>/dev/null; then
-              echo "✅ Mosquitto ready (attempt $i)"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Mosquitto not ready after 30 attempts"
-              docker logs mosquitto
-              exit 1
-            fi
-            sleep 1
-          done
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -182,6 +168,18 @@ jobs:
         working-directory: El Servador/god_kaiser_server
         run: poetry install --no-root --no-interaction
 
+      - name: Install mosquitto clients
+        run: sudo apt-get install -y mosquitto-clients
+
+      - name: Wait for Mosquitto ready
+        run: |
+          for i in $(seq 1 30); do
+            mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok 2>/dev/null && echo "Mosquitto ready" && exit 0
+            echo "Waiting for Mosquitto... ($i/30)"
+            sleep 1
+          done
+          echo "Mosquitto not ready after 30s" && exit 1
+
       - name: Run Integration Tests
         working-directory: El Servador/god_kaiser_server
         env:
@@ -192,6 +190,7 @@ jobs:
           poetry run pytest tests/integration/ \
             -v \
             --tb=short \
+            --timeout=30 \
             --junitxml=junit-integration.xml \
             --cov=src \
             --cov-report=xml:coverage-integration.xml
@@ -205,10 +204,6 @@ jobs:
             El Servador/god_kaiser_server/junit-integration.xml
             El Servador/god_kaiser_server/coverage-integration.xml
           retention-days: 7
-
-      - name: Stop Mosquitto
-        if: always()
-        run: docker rm -f mosquitto || true
 
   test-summary:
     name: Test Summary

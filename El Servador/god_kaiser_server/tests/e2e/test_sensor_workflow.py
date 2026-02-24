@@ -16,6 +16,7 @@ Dependencies:
 
 import asyncio
 import json
+import os
 import time
 
 import pytest
@@ -28,7 +29,14 @@ from conftest import (
     generate_unique_mock_id,
 )
 
-pytestmark = [pytest.mark.e2e, pytest.mark.asyncio]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        os.environ.get("CI") == "true",
+        reason="Requires live MQTT/IoT data — TODO: link to Wokwi SIL testing",
+    ),
+]
 
 
 async def publish_sht31_data(

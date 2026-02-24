@@ -107,20 +107,11 @@ def get_topic_with_kaiser_id(topic_template: str, **kwargs) -> str:
 
 # ESP32 WROOM
 # Canonical source: SYSTEM_RESERVED_PINS in services/gpio_validation_service.py
+# Only Flash SPI pins (6-11) are hard-reserved and cannot be used at all.
+# Boot-Strapping pins (0, 2, 12, 15) and UART pins (1, 3) are usable at runtime
+# but require care. Strapping pins are sampled only at boot.
 GPIO_RANGE_ESP32_WROOM = range(0, 40)
-GPIO_RESERVED_ESP32_WROOM = {
-    0,
-    1,
-    2,
-    3,
-    6,
-    7,
-    8,
-    9,
-    10,
-    11,
-    12,
-}  # Boot, UART, Flash, MTDI Strapping
+GPIO_RESERVED_ESP32_WROOM = {6, 7, 8, 9, 10, 11}  # Flash SPI pins only
 
 # XIAO ESP32-C3
 GPIO_RANGE_XIAO_ESP32C3 = range(0, 22)
