@@ -43,9 +43,9 @@ scrape_configs:
           service: 'loki'
           environment: 'development'
 
-  - job_name: 'promtail'
+  - job_name: 'alloy'
     static_configs:
-      - targets: ['promtail:9080']
+      - targets: ['alloy:12345']
         labels:
-          service: 'promtail'
+          service: 'alloy'
           environment: 'development'

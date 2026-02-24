@@ -3,11 +3,12 @@
 ## Primary Log Path (Queries & Monitoring)
 
 ```
-stdout -> Docker json-file driver -> Promtail -> Loki (7-day retention)
+stdout -> Docker json-file driver -> Alloy -> Loki (7-day retention)
 ```
 
 All services use the Docker `json-file` logging driver with rotation (`max-size: 5-10m`, `max-file: 3`).
-Promtail scrapes Docker container logs via the Docker socket and ships them to Loki.
+Grafana Alloy scrapes Docker container logs via the Docker socket and ships them to Loki.
+(Migrated from Promtail 2026-02-24; Promtail EOL: 2026-03-02)
 
 ## Bind-Mount Logs (Direct Debugging)
 
@@ -72,5 +73,5 @@ rm -f logs/mqtt/*.log
 | Mosquitto logging | `docker/mosquitto/mosquitto.conf` | `log_dest stdout` |
 | PostgreSQL logging | `docker/postgres/postgresql.conf` | `logging_collector = on`, daily rotation |
 | Docker log driver | `docker-compose.yml` (per service) | `json-file`, max-size/max-file |
-| Promtail pipeline | `docker/promtail/config.yml` | Docker SD, label extraction |
+| Alloy pipeline | `docker/promtail/config.yml` | Docker SD, label extraction (read by Alloy via --config.format=promtail) |
 | Loki retention | `docker/loki/loki-config.yml` | `retention_period: 168h` |

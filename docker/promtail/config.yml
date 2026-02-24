@@ -1,7 +1,10 @@
-# Promtail Configuration for AutomationOne
-# ==========================================
+# Promtail-format Configuration for AutomationOne (read by Grafana Alloy)
+# =========================================================================
 # Collects Docker container logs and ships them to Loki.
 # Uses Docker service discovery to automatically find containers.
+# NOTE: This file is in Promtail YAML format but read by Grafana Alloy
+# via --config.format=promtail (automatic internal conversion).
+# Promtail EOL: 2026-03-02. Migrated to Alloy: 2026-02-24.
 #
 # Pipeline Overview:
 #   1. docker: {}          - Parse Docker json-file log driver format

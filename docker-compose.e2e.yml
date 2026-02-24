@@ -88,7 +88,7 @@ services:
   # Frontend (ALWAYS included in E2E)
   # ============================================
   el-frontend:
-    profiles: []  # Empty = always start (removes profile restriction)
+    profiles: !override []  # !override replaces (not merges) the ci.yml [frontend] profile
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
@@ -99,12 +99,14 @@ services:
       retries: 20
       start_period: 15s
     restart: "no"
+    # No host volume mounts in E2E (use built-in container files, not host mounts)
+    volumes: !reset []
     # No watch/develop section in E2E
     develop: !reset null
 
 # ============================================
 # Notes:
 # ============================================
-# - pgadmin, loki, promtail, prometheus, grafana excluded via profiles
+# - pgadmin, loki, alloy, prometheus, grafana excluded via profiles
 # - Playwright runs on HOST, not in container (browser GPU access)
 # - Frontend healthcheck uses Node.js fetch (Alpine-compatible)

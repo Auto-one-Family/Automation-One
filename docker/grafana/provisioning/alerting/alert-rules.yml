@@ -2,7 +2,7 @@
 # Phase 2: Expanded Alerting (UI-only, no webhook yet)
 #
 # Rules:
-# - 5 Critical: server-down, mqtt-disconnected, database-down, loki-down, promtail-down
+# - 5 Critical: server-down, mqtt-disconnected, database-down, loki-down, alloy-down
 # - 3 Warning: high-memory, esp-devices-offline, high-error-rate
 #
 # Pipeline per rule: A (PromQL query) -> B (Reduce to last value) -> C (Threshold)
@@ -216,10 +216,10 @@ groups:
           severity: critical
           component: monitoring
 
-      # Rule 7: Promtail Down
-      # Fires when Prometheus cannot scrape Promtail metrics endpoint
-      - uid: ao-promtail-down
-        title: "Promtail Down"
+      # Rule 7: Alloy Down
+      # Fires when Prometheus cannot scrape Alloy metrics endpoint
+      - uid: ao-alloy-down
+        title: "Alloy Down"
         condition: C
         data:
           - refId: A
@@ -228,7 +228,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: "up{job=\"promtail\"}"
+              expr: "up{job=\"alloy\"}"
               intervalMs: 15000
               maxDataPoints: 43200
               refId: A
@@ -259,8 +259,8 @@ groups:
         execErrState: Alerting
         for: 2m
         annotations:
-          summary: "Promtail Log-Shipping nicht erreichbar"
-          description: "Prometheus kann Promtail :9080/metrics nicht scrapen seit >2m. Container-Logs werden nicht nach Loki geschickt."
+          summary: "Alloy Log-Shipping nicht erreichbar"
+          description: "Prometheus kann Alloy :12345/metrics nicht scrapen seit >2m. Container-Logs werden nicht nach Loki geschickt."
         labels:
           severity: critical
           component: monitoring

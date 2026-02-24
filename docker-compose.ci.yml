@@ -94,5 +94,5 @@ services:
 # ============================================
 # Override: No monitoring services in CI
 # ============================================
-# pgadmin, loki, promtail, prometheus, grafana are excluded
+# pgadmin, loki, alloy, prometheus, grafana are excluded
 # via their profiles (devtools, monitoring) which are not activated in CI
