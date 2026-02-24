@@ -105,6 +105,7 @@ onMounted(() => {
       animate: true,
       removable: true,
       acceptWidgets: true,
+      handle: '.dashboard-widget__header',
     }, gridContainer.value)
 
     // Load active layout
@@ -180,13 +181,13 @@ function createWidgetContent(type: string, title: string, widgetId: string, moun
   const hasVueComponent = type in widgetComponentMap
   return `
     <div class="dashboard-widget" data-type="${type}" data-widget-id="${widgetId}">
+      <div class="dashboard-widget__header">
+        <span class="dashboard-widget__title">${title || label}</span>
+        <span class="dashboard-widget__type">${type}</span>
+      </div>
       ${hasVueComponent
-        ? `<div id="${mountId}" class="dashboard-widget__vue-mount" style="height: 100%;"></div>`
-        : `<div class="dashboard-widget__header">
-            <span class="dashboard-widget__title">${title || label}</span>
-            <span class="dashboard-widget__type">${type}</span>
-          </div>
-          <div class="dashboard-widget__body">
+        ? `<div id="${mountId}" class="dashboard-widget__vue-mount"></div>`
+        : `<div class="dashboard-widget__body">
             <div class="dashboard-widget__placeholder">${label}</div>
           </div>`
       }
@@ -718,6 +719,12 @@ function handleImport() {
   background: var(--color-bg-quaternary);
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+:deep(.dashboard-widget__vue-mount) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 :deep(.dashboard-widget__body) {

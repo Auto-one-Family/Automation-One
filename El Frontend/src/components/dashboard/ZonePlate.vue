@@ -216,7 +216,7 @@ function handleDragEnd() {
   <article
     ref="plateRef"
     class="zone-plate"
-    :class="[statusVariant, { 'zone-plate--drop-target': isDropTarget }]"
+    :class="[statusVariant, { 'zone-plate--drop-target': isDropTarget || dragStore.isDraggingEspCard }]"
     role="region"
     :aria-label="`Zone ${zoneName}: ${stats.online}/${stats.total} Geräte online`"
     tabindex="0"

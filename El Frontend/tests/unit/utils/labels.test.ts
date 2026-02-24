@@ -34,9 +34,9 @@ import {
 
 describe('QUALITY_LABELS', () => {
   it('contains expected quality keys', () => {
-    expect(QUALITY_LABELS.excellent).toBe('Ausgezeichnet')
+    expect(QUALITY_LABELS.excellent).toBe('Exzellent')
     expect(QUALITY_LABELS.good).toBe('Gut')
-    expect(QUALITY_LABELS.fair).toBe('Akzeptabel')
+    expect(QUALITY_LABELS.fair).toBe('Mittel')
     expect(QUALITY_LABELS.poor).toBe('Schlecht')
     expect(QUALITY_LABELS.stale).toBe('Veraltet')
     expect(QUALITY_LABELS.unknown).toBe('Unbekannt')
@@ -86,7 +86,7 @@ describe('DEVICE_TYPE_LABELS', () => {
 describe('getQualityInfo', () => {
   it('returns label and colorClass for excellent', () => {
     const info = getQualityInfo('excellent')
-    expect(info.label).toBe('Ausgezeichnet')
+    expect(info.label).toBe('Exzellent')
     expect(info.colorClass).toBe('text-success')
   })
 
@@ -98,7 +98,7 @@ describe('getQualityInfo', () => {
 
   it('returns label and colorClass for fair', () => {
     const info = getQualityInfo('fair')
-    expect(info.label).toBe('Akzeptabel')
+    expect(info.label).toBe('Mittel')
     expect(info.colorClass).toBe('text-warning')
   })
 
@@ -248,7 +248,7 @@ describe('getLabel', () => {
 
 describe('getQualityLabel', () => {
   it('returns quality label', () => {
-    expect(getQualityLabel('excellent')).toBe('Ausgezeichnet')
+    expect(getQualityLabel('excellent')).toBe('Exzellent')
     expect(getQualityLabel('poor')).toBe('Schlecht')
   })
 

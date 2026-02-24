@@ -462,14 +462,14 @@ export const useLogicStore = defineStore('logic', () => {
       return { valid: false, reason: 'Selbst-Schleifen sind nicht erlaubt' }
     }
 
-    // Action nodes cannot be sources
-    if (sourceNodeType === 'action' || sourceNodeType === 'notification' || sourceNodeType === 'delay') {
+    // Action nodes cannot be sources (actuator, notification, delay have no outgoing connections)
+    if (sourceNodeType === 'actuator' || sourceNodeType === 'notification') {
       return { valid: false, reason: 'Aktions-Knoten können keine Verbindung starten' }
     }
 
-    // Sensor → Action direct: NOT allowed
-    if (sourceNodeType === 'sensor' && (targetNodeType === 'action' || targetNodeType === 'notification' || targetNodeType === 'delay')) {
-      return { valid: false, reason: 'Sensor kann nicht direkt mit Aktion verbunden werden. Verwende einen Bedingungs-Knoten dazwischen.' }
+    // Sensor/Time → Actuator/Notification direct: NOT allowed (must go through logic node)
+    if ((sourceNodeType === 'sensor' || sourceNodeType === 'time') && (targetNodeType === 'actuator' || targetNodeType === 'notification')) {
+      return { valid: false, reason: 'Bedingung kann nicht direkt mit Aktion verbunden werden. Verwende einen Logik-Knoten (UND/ODER) dazwischen.' }
     }
 
     // Everything else is allowed

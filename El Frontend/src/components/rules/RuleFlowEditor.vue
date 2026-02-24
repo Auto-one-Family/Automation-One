@@ -812,7 +812,6 @@ defineExpose({
           :class="{ 'rule-node--active': isNodeActive(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--delay">
               <Timer class="rule-node__icon" />
