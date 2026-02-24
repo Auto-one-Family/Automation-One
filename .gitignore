@@ -134,3 +134,9 @@ El\ Trabajante/*.o
 .claude/local-marketplace/
 docker/**/__pycache__/
 .serena/
+
+# ========== WINDOWS INSTALLER BINARIES ==========
+mosquitto-installer.exe
+*.exe
+ARCHIV/
+growy-frontend-archive-20260224.zip
