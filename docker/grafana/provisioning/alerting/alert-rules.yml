@@ -1323,3 +1323,117 @@ groups:
         labels:
           severity: critical
           component: safety
+
+  # ============================================
+  # MQTT Broker Alerts (broker_* metrics from mosquitto-exporter)
+  # Requires: mosquitto-exporter healthy (port 9234, job=mqtt-broker)
+  # ============================================
+  - orgId: 1
+    name: automationone-mqtt-broker-alerts
+    folder: AutomationOne Alerts
+    interval: 30s
+    rules:
+      # Rule 27: MQTT Broker No Clients
+      # Fires when broker has 0 connected clients for >2m
+      # Indicates all ESPs and server have lost MQTT connectivity
+      - uid: ao-mqtt-broker-no-clients
+        title: "MQTT Broker No Clients"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 180
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "broker_clients_connected{job=\"mqtt-broker\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "MQTT-Broker hat keine verbundenen Clients"
+          description: "broker_clients_connected == 0 seit >2m. Kein ESP32 oder Server verbunden. MQTT-Broker, Netzwerk pruefen."
+        labels:
+          severity: critical
+          component: mqtt
+
+      # Rule 28: MQTT Broker Messages Stored High
+      # Fires when broker has >5000 retained/stored messages
+      # Indicates persistent backlog or misconfigured retained messages
+      - uid: ao-mqtt-broker-messages-stored
+        title: "MQTT Broker Messages Stored High"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "broker_messages_stored{job=\"mqtt-broker\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5000]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "MQTT-Broker hat >5000 gespeicherte Nachrichten"
+          description: "broker_messages_stored > 5000 seit >5m. Moeglicherweise Retained-Messages-Backlog oder Subscriber-Ausfaelle. Broker-State pruefen."
+        labels:
+          severity: warning
+          component: mqtt
+
+# Remove legacy Promtail rule (migrated to Alloy 2026-02-24)
+deleteRules:
+  - orgId: 1
+    uid: ao-promtail-down
