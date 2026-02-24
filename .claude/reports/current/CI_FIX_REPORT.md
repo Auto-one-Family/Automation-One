@@ -119,20 +119,43 @@ Previously passing tests still pass:
 
 ---
 
-## Expected CI Outcome
+## Actual CI Outcome (Verified 2026-02-24 ~15:20)
 
-| Check | Expected | Fix |
-|-------|----------|-----|
-| Unit Tests | PASS | Board-aware GPIO validation |
-| Integration Tests | PASS | Mosquitto healthcheck + pytest-timeout |
-| Backend E2E Tests | PASS | `--no-root` in Dockerfile + `volumes: !reset []` in CI/E2E compose |
-| Playwright E2E Tests | PASS | `--no-root` in Dockerfile + `volumes: !reset []` in CI/E2E compose |
+| Check | Status | Notes |
+|-------|--------|-------|
+| Unit Tests (server-tests) | PASS | GPIO board-awareness fix |
+| Integration Tests (server-tests) | PASS | Mosquitto healthcheck + pytest-timeout |
+| Backend E2E Tests | PASS | `--no-root` + `volumes: !reset []` |
+| Playwright E2E Tests | PARTIAL FAIL | Infrastructure fixed; 11 pre-existing test failures remain |
+| ESP32 Tests | PASS | Mosquitto healthcheck fix |
+| Frontend Tests | PASS | No changes needed |
+| Security Scan | FAIL | Pre-existing, out of scope |
 
 ---
 
 ## Open Points
 
+### Playwright E2E — 11 Remaining Test Failures (Pre-existing)
+
+The Playwright pipeline now starts the E2E stack successfully. However, 11 tests fail with logic-level errors that pre-existed the CI infrastructure failures (they were hidden behind the server crash):
+
+**Failing tests:**
+- `css/forms.spec.ts` — `labels have font-weight 500` (CSS assertion mismatch)
+- `scenarios/auth.spec.ts` (2) — Login redirect fails: stays on `/login` instead of navigating to dashboard
+- `scenarios/auth.spec.ts` (1) — auth persistence across reload
+- `scenarios/device-discovery.spec.ts` (2) — WebSocket events not received in time
+- `scenarios/emergency.spec.ts` (1) — multiple emergency events
+- `scenarios/esp-registration-flow.spec.ts` (1) — UI flow
+- `scenarios/sensor-live.spec.ts` (4) — MQTT sensor data not arriving at UI
+
+**Root cause candidates:**
+1. Auth: GlobalSetup creates admin via `/api/v1/auth/setup`. The test itself tries to login with `admin/Admin123#`. If the setup-endpoint sets a different password or the login form has a timing issue, the test fails.
+2. Sensor/Discovery/Emergency: Tests depend on real-time MQTT→WS propagation within timeout windows. CI latency may cause timeouts.
+3. CSS forms: `font-weight` CSS token mismatch (`.login-form__label` has wrong weight).
+
+**Scope note:** These are functional test failures, NOT CI infrastructure failures. They were invisible before because the server always crashed before tests ran. Fix requires investigation of the Vue auth flow and MQTT→WebSocket propagation timing in CI.
+
+### Other Open Points
 - **Lint warnings**: Unused imports in `esp.py`, `errors.py`, `auth.py` show as annotations. These use `continue-on-error: true` and do not fail the pipeline. Not fixed to keep scope minimal.
-- **Integration Tests — MQTT hang**: Root cause is likely a missing cleanup in a test fixture that creates MQTT connections. The 60-second per-test timeout prevents the 15-minute job timeout. Long-term fix: add proper teardown to the offending fixture.
-- **Frontend Dockerfile**: No multi-stage build was needed. The `--target development` reference in the task was not present in the actual `playwright-tests.yml`. The single-stage Dockerfile is correct.
-- **el-frontend volumes**: The `el-frontend` service also has source mounts in base docker-compose.yml. These are not removed in CI/E2E because the frontend is built from the Dockerfile in E2E tests (volumes don't affect the built image, and el-frontend uses `profiles: []` in e2e to always start). If frontend crashes similarly, the same `volumes: !reset []` pattern applies.
+- **Integration Tests — MQTT hang**: Root cause is likely a missing cleanup in a test fixture. The 60s per-test timeout prevents the 15-minute job timeout. Long-term fix: add proper teardown.
+- **Security Scan**: Pre-existing CVE findings, out of scope for this session.
