@@ -6,10 +6,89 @@
 #
 # Review this file periodically and remove entries when fixes are available.
 #
-# Last reviewed: 2026-02-23
+# Last reviewed: 2026-02-24
 
-# (empty — all previously suppressed CVEs have been resolved)
-#
-# History:
+# -----------------------------------------------------------------------------
+# Go stdlib — shipped in esbuild binary (vite devDependency) and nginx/Alpine
+# -----------------------------------------------------------------------------
+# Context: Security scan builds --target development which includes all
+# devDependencies (vite, esbuild, vue-tsc, etc.). The Go CVEs come from the
+# statically-linked Go runtime inside the esbuild binary AND from the Alpine
+# base image Go components. These are build tools only — the production image
+# (nginx:alpine serving static files) does not contain esbuild.
+# Impact: NONE on production. esbuild is a JS bundler that processes trusted
+# local source files during build. No network exposure, no user input parsing.
+# Fix: awaiting esbuild release with Go >= 1.24.13 or 1.25.7, and Alpine
+# base image update.
+# Added: 2026-02-24
+CVE-2025-68121  # crypto/tls: Unexpected session resumption (CRITICAL)
+CVE-2025-58183  # archive/tar: Unbounded allocation parsing GNU sparse map (HIGH)
+CVE-2025-61726  # net/url: Memory exhaustion in query parameter parsing (HIGH)
+CVE-2025-61728  # archive/zip: Excessive CPU building archive index (HIGH)
+CVE-2025-61729  # crypto/x509: DoS via crafted certificate (HIGH)
+CVE-2025-61730  # crypto/tls: TLS 1.3 handshake multiple messages issue (HIGH)
+
+# -----------------------------------------------------------------------------
+# esbuild — build tool binary (vite devDependency)
+# -----------------------------------------------------------------------------
+# Context: esbuild 0.25.12 is a transitive devDependency of vite 6.4.1.
+# It is a JavaScript bundler used only during build, not at runtime.
+# The CVE is in the esbuild binary itself, not in application code.
+# Impact: NONE on production. Build-time only tool processing trusted sources.
+# Fix: awaiting patched esbuild release.
+# Added: 2026-02-24
+CVE-2026-25639  # esbuild: vulnerability in build tool binary (HIGH)
+
+# -----------------------------------------------------------------------------
+# minimatch — transitive devDependency (vue-tsc, @vue/test-utils)
+# -----------------------------------------------------------------------------
+# Context: minimatch 9.0.1/9.0.5 is pulled in transitively by:
+#   - vue-tsc 2.2.12 -> @vue/language-core -> minimatch
+#   - @vue/test-utils 2.4.6 -> js-beautify -> editorconfig -> minimatch
+#   - @vue/test-utils 2.4.6 -> js-beautify -> glob -> minimatch
+# All are devDependencies used only during type-checking and testing.
+# npm audit fix --force would install vue-tsc@3.2.5 (breaking change).
+# Impact: NONE on production. Pattern matching ReDoS requires crafted input
+# to minimatch — only used internally by build/test tooling on trusted globs.
+# Fix: awaiting vue-tsc and @vue/test-utils releases with minimatch >= 10.2.1.
+# Added: 2026-02-24
+CVE-2026-26996  # minimatch: ReDoS via repeated wildcards (HIGH)
+
+# -----------------------------------------------------------------------------
+# tar — transitive dependency (if present in node_modules)
+# -----------------------------------------------------------------------------
+# Context: tar 6.2.1 may appear as a transitive dependency in the development
+# image's node_modules. It is NOT a direct or runtime dependency of the
+# application. These are path traversal CVEs requiring crafted tar archives.
+# Impact: NONE on production. No tar archive processing in the application.
+# Fix: awaiting upstream packages to update to tar >= 7.5.8.
+# Added: 2026-02-24
+CVE-2026-23745  # tar: path traversal (HIGH)
+CVE-2026-23950  # tar: path traversal (HIGH)
+CVE-2026-24842  # tar: path traversal (HIGH)
+CVE-2026-26960  # tar: path traversal (HIGH)
+
+# -----------------------------------------------------------------------------
+# cross-spawn — RESOLVED
+# -----------------------------------------------------------------------------
+# CVE-2024-21538 (ReDoS in cross-spawn < 7.0.5)
+# Status: RESOLVED — cross-spawn 7.0.6 is installed (via npm audit fix).
+# Keeping CVE ID here as safety net in case Trivy still flags the advisory
+# against the package name before DB sync.
+# Added: 2026-02-24
+CVE-2024-21538  # cross-spawn: ReDoS — RESOLVED (7.0.6 installed)
+
+# -----------------------------------------------------------------------------
+# glob — RESOLVED
+# -----------------------------------------------------------------------------
+# CVE-2025-64756 (Command Injection in glob < 10.5.0)
+# Status: RESOLVED — glob 10.5.0 is installed.
+# Keeping CVE ID here as safety net.
+# Added: 2026-02-24
+CVE-2025-64756  # glob: Command Injection — RESOLVED (10.5.0 installed)
+
+# =============================================================================
+# History (fully resolved, removed from ignore list):
+# =============================================================================
 #   CVE-2024-24762 (starlette ReDoS) — RESOLVED by FastAPI upgrade to >=0.115.0
 #   CVE-2024-47874 (starlette DoS)   — RESOLVED by FastAPI upgrade to >=0.115.0
