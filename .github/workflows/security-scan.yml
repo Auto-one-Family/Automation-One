@@ -15,6 +15,9 @@ on:
     paths:
       - 'El Servador/Dockerfile'
       - 'El Frontend/Dockerfile'
+      - 'El Frontend/package.json'
+      - 'El Frontend/package-lock.json'
+      - '.trivyignore'
   schedule:
     - cron: '0 6 * * 1'  # Mondays 6:00 UTC
   workflow_dispatch:
@@ -61,6 +64,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+          trivyignores: '.trivyignore'
 
   scan-config:
     name: Scan Docker Configs
