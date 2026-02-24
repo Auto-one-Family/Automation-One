@@ -11,6 +11,7 @@ The endpoint is intentionally unauthenticated (fire-and-forget from browser).
 Rate limiting prevents log flooding.
 """
 
+import re
 import time
 from typing import Optional
 
@@ -18,6 +19,14 @@ from fastapi import APIRouter, Request, Response, status
 from pydantic import BaseModel, Field
 
 from ...core.logging_config import get_logger
+
+# Strip newlines and ANSI escape sequences to prevent log-injection attacks.
+_CONTROL_CHARS = re.compile(r"[\r\n\x00-\x1f\x7f]|\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _sanitize(value: str) -> str:
+    """Remove control characters and ANSI escapes from a log field."""
+    return _CONTROL_CHARS.sub(" ", value)
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -103,10 +112,17 @@ async def receive_frontend_log(entry: FrontendLogEntry, request: Request) -> Res
     if not _check_rate_limit(client_ip):
         return Response(status_code=status.HTTP_429_TOO_MANY_REQUESTS)
 
+    # Sanitize all free-text fields before logging to prevent log-injection
+    # (newlines, ANSI codes) from unauthenticated callers.
+    component = _sanitize(entry.component)
+    message = _sanitize(entry.message)
+    url = _sanitize(entry.url or "-")
+    info = _sanitize(entry.info or "-")
+
     # Build log message with structured context
     log_msg = (
-        f"[FRONTEND] [{entry.component}] {entry.message}"
-        f" (url: {entry.url or '-'}, info: {entry.info or '-'})"
+        f"[FRONTEND] [{component}] {message}"
+        f" (url: {url}, info: {info})"
     )
 
     # Log at appropriate level
@@ -114,7 +130,7 @@ async def receive_frontend_log(entry: FrontendLogEntry, request: Request) -> Res
     if level == "error":
         frontend_logger.error(log_msg)
         if entry.stack:
-            frontend_logger.error(f"[FRONTEND] [{entry.component}] Stack: {entry.stack}")
+            frontend_logger.error(f"[FRONTEND] [{component}] Stack: {_sanitize(entry.stack)}")
     elif level == "warn":
         frontend_logger.warning(log_msg)
     elif level == "info":

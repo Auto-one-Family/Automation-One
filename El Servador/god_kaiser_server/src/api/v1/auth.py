@@ -18,13 +18,11 @@ References:
 - core/security.py (JWT utilities)
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-
-from datetime import timezone
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger

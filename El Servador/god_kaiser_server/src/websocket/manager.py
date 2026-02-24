@@ -103,32 +103,43 @@ class WebSocketManager:
             client_id: Client identifier
         """
         async with self._lock:
-            if client_id not in self._connections:
-                # Already disconnected (race condition handled)
-                return
+            await self._disconnect_unlocked(client_id)
 
-            websocket = self._connections.pop(client_id)
-            self._subscriptions.pop(client_id, None)
-            self._rate_limiter.pop(client_id, None)
+    async def _disconnect_unlocked(self, client_id: str) -> None:
+        """
+        Internal disconnect without acquiring lock.
 
-            # Try to close WebSocket gracefully
-            try:
-                # Check if WebSocket is still open before closing
-                # WebSocketState: CONNECTING=0, CONNECTED=1, DISCONNECTED=2
-                if websocket.client_state == WebSocketState.CONNECTED:
-                    await websocket.close()
-            except RuntimeError as e:
-                # WebSocket already closed by client - expected in race conditions
-                if "after sending 'websocket.close'" in str(e) or "already completed" in str(e):
-                    logger.debug(f"WebSocket {client_id} already closed by client")
-                else:
-                    logger.warning(f"RuntimeError closing WebSocket for {client_id}: {e}")
-            except Exception as e:
-                # Log other unexpected errors but continue cleanup
-                logger.warning(f"Error closing WebSocket for {client_id}: {e}")
+        Caller MUST hold self._lock before calling this method.
 
-            increment_ws_disconnect()
-            logger.info(f"WebSocket client disconnected: {client_id}")
+        Args:
+            client_id: Client identifier
+        """
+        if client_id not in self._connections:
+            # Already disconnected (race condition handled)
+            return
+
+        websocket = self._connections.pop(client_id)
+        self._subscriptions.pop(client_id, None)
+        self._rate_limiter.pop(client_id, None)
+
+        # Try to close WebSocket gracefully
+        try:
+            # Check if WebSocket is still open before closing
+            # WebSocketState: CONNECTING=0, CONNECTED=1, DISCONNECTED=2
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
+        except RuntimeError as e:
+            # WebSocket already closed by client - expected in race conditions
+            if "after sending 'websocket.close'" in str(e) or "already completed" in str(e):
+                logger.debug(f"WebSocket {client_id} already closed by client")
+            else:
+                logger.warning(f"RuntimeError closing WebSocket for {client_id}: {e}")
+        except Exception as e:
+            # Log other unexpected errors but continue cleanup
+            logger.warning(f"Error closing WebSocket for {client_id}: {e}")
+
+        increment_ws_disconnect()
+        logger.info(f"WebSocket client disconnected: {client_id}")
 
     async def subscribe(self, client_id: str, filters: dict) -> None:
         """
@@ -240,9 +251,9 @@ class WebSocketManager:
                     logger.warning(f"Error sending message to {client_id}: {e}")
                     disconnected_clients.append(client_id)
 
-            # Clean up disconnected clients
+            # Clean up disconnected clients (use unlocked variant - we hold the lock)
             for client_id in disconnected_clients:
-                await self.disconnect(client_id)
+                await self._disconnect_unlocked(client_id)
 
     def broadcast_threadsafe(
         self, message_type: str, data: dict, filters: Optional[dict] = None
@@ -304,10 +315,10 @@ class WebSocketManager:
         async with self._lock:
             logger.info("Shutting down WebSocket Manager...")
 
-            # Close all connections
+            # Close all connections (use unlocked variant - we hold the lock)
             client_ids = list(self._connections.keys())
             for client_id in client_ids:
-                await self.disconnect(client_id)
+                await self._disconnect_unlocked(client_id)
 
             self._connections.clear()
             self._subscriptions.clear()
