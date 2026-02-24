@@ -16,6 +16,9 @@ import { publishHeartbeat, publishSensorData, generateMockId } from '../helpers/
 import { createMockEspWithSensors } from '../helpers/api'
 
 test.describe('Sensor Live Updates', () => {
+  // Requires live MQTT/IoT data — will be linked to Wokwi SIL testing
+  test.skip(!!process.env.CI, 'Requires live IoT data — use Wokwi integration for CI')
+
   test.setTimeout(60000) // createMockEsp + MQTT + WebSocket + UI checks can take time
 
   let wsHelper: WebSocketHelper
