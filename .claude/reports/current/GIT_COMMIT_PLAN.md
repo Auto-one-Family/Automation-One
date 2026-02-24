@@ -1,143 +1,103 @@
-# Git Commit Plan (Executed)
-**Erstellt:** 2026-02-22
-**Branch:** feature/frontend-consolidation
-**Status:** ✅ Alle 10 Commits ausgefuehrt und gepusht
-**Aenderungen gesamt:** 132 Dateien (30 modified, ~93 deleted, ~40 new)
+# Git Commit Plan
+**Erstellt:** 2026-02-24
+**Branch:** fix/ci-pipelines → origin/fix/ci-pipelines (up to date)
+**Ungepushte Commits:** 0
+**Änderungen gesamt:** 6 modified, 1 untracked, 0 staged
 
 ---
 
-## Commit 1: `chore: add .serena/ to gitignore and Cursor project rules`
+## Commit 1: fix(docker): add --no-root to poetry install to avoid missing README in build
 
-**Was:** .serena/ (lokale Serena LSP Config) zu .gitignore hinzugefuegt. Cursor-Projektregeln (.cursor/rules/ + BUGBOT.md) erstmals getrackt.
+**Was:** Der Dockerfile-Build scheiterte in CI weil `poetry install` versucht, das Projekt-Package
+selbst zu installieren — dafür braucht es eine `README.md` die im Build-Stage nicht vorhanden ist.
+`--no-root` weist Poetry an, nur die Dependencies zu installieren, nicht das Package selbst.
 
 **Dateien:**
-- `.gitignore` — .serena/ Pattern hinzugefuegt
-- `.cursor/BUGBOT.md` — BugBot Review-Regeln (neu)
-- `.cursor/rules/backend.mdc` — Backend-Review-Regeln (neu)
-- `.cursor/rules/firmware.mdc` — Firmware-Review-Regeln (neu)
-- `.cursor/rules/frontend.mdc` — Frontend-Review-Regeln (neu)
+- `El Servador/Dockerfile` – `--no-root` zu `poetry install` hinzugefügt + erklärender Kommentar
+
+**Befehle:**
+```bash
+git add "El Servador/Dockerfile"
+git commit -m "fix(docker): add --no-root to poetry install to avoid missing README in build"
+```
 
 ---
 
-## Commit 2: `chore(docker): fix mosquitto-exporter healthcheck and update Makefile help text`
+## Commit 2: fix(ci): improve MQTT health check reliability in test pipelines
 
-**Was:** Mosquitto-Exporter ist ein Scratch-Go-Binary ohne Shell — Healthcheck-Strategie auf NONE gesetzt. Makefile-Hilfetext korrigiert (22 statt 23 Tests).
+**Was:** Beide CI-Pipelines (esp32-tests, server-tests) hatten einen fehlerhaften MQTT-Health-Check
+der immer `exit 0` zurückgab (`|| exit 0` am Ende). Der neue Health-Check testet tatsächlich ob
+Mosquitto erreichbar ist (korrekte `mosquitto_pub` Syntax ohne falschen Fallback). Zusätzlich wurde
+in server-tests ein expliziter Wait-Step (30s Retry-Loop) + `mosquitto-clients` Installation
+hinzugefügt damit die Mosquitto-Connection vor den Integration-Tests stabil ist.
 
 **Dateien:**
-- `docker-compose.yml` — Healthcheck CMD-SHELL → NONE
-- `Makefile` — Hilfetext aktualisiert
+- `.github/workflows/esp32-tests.yml` – Health-Cmd korrigiert, Interval 10s→5s, Retries 5→10
+- `.github/workflows/server-tests.yml` – Health-Cmd korrigiert + `apt install mosquitto-clients` + 30s Wait-Step
+
+**Befehle:**
+```bash
+git add .github/workflows/esp32-tests.yml .github/workflows/server-tests.yml
+git commit -m "fix(ci): improve MQTT health check reliability in test pipelines"
+```
 
 ---
 
-## Commit 3: `feat(server,firmware): add I2C recovery, DS18B20 and test infrastructure error codes (6000-6099)`
+## Commit 3: fix(server): make GPIO pin reservation board-aware (WROOM vs C3)
 
-**Was:** I2C Bus-Recovery Codes 1015-1018, DS18B20-spezifische Codes 1060-1063 und komplette Testinfrastruktur-Codes 6000-6099 in Python und C++ synchron hinzugefuegt.
+**Was:** Der GPIO-Validierungsservice reservierte Pins 0, 1, 2, 3, 12 fälschlicherweise als
+nicht nutzbar. Boot-Strapping-Pins (0, 2, 12, 15) werden nur beim Boot abgetastet und sind
+zur Laufzeit frei. UART-Pins (1, 3) sind optional konfigurierbar. Nur Flash-SPI-Pins (6–11)
+sind wirklich nicht nutzbar. Außerdem war die Reservierung nicht board-aware — XIAO ESP32-C3
+braucht andere reservierte Pins (18=USB D-, 19=USB D+).
+
+Änderungen:
+- `constants.py`: `GPIO_RESERVED_ESP32_WROOM` auf Flash-SPI-Only {6-11} korrigiert (war {0,1,2,3,6-11,12})
+- `gpio_validation_service.py`: Board-spezifische Sets WROOM+C3, Legacy-Alias für Backward-Compat,
+  neue Methode `_get_system_reserved_pins(board_model)`, Validation nutzt jetzt board-aware Set
 
 **Dateien:**
-- `El Servador/god_kaiser_server/src/core/error_codes.py` — Python-Mirror erweitert
-- `El Trabajante/src/models/error_codes.h` — C++ Definitionen + Descriptions
+- `El Servador/god_kaiser_server/src/core/constants.py` – GPIO_RESERVED_ESP32_WROOM korrigiert + Kommentare
+- `El Servador/god_kaiser_server/src/services/gpio_validation_service.py` – Board-aware pin sets + neue Methode
+
+**Befehle:**
+```bash
+git add "El Servador/god_kaiser_server/src/core/constants.py"
+git add "El Servador/god_kaiser_server/src/services/gpio_validation_service.py"
+git commit -m "fix(server): make GPIO pin reservation board-aware (WROOM vs C3)"
+```
 
 ---
 
-## Commit 4: `fix(server): add GPIO 12 MTDI strapping rejection and ADC2 WiFi conflict warning`
+## Commit 4: chore(reports): update git health report and add frontend playwright fix report
 
-**Was:** GPIO 12 (MTDI Strapping Pin) wird jetzt als System-Pin blockiert. ADC2-Pins bekommen eine Warnung bei ANALOG-Sensoren (WiFi-Konflikt). Tests erweitert.
+**Was:** Zwei Report-Dateien — aktualisierter Git-Health-Report (2026-02-24, major rewrite +325/-98)
+und ein neuer Report zur Frontend-Playwright-Fix-Session (bisher untracked).
 
 **Dateien:**
-- `El Servador/god_kaiser_server/src/core/constants.py` — GPIO_RESERVED erweitert
-- `El Servador/god_kaiser_server/src/services/gpio_validation_service.py` — ADC2 Warning + GPIO 12
-- `El Servador/god_kaiser_server/src/api/v1/sensors.py` — Warning-Logging
-- `El Servador/god_kaiser_server/tests/unit/test_gpio_validation.py` — 8 neue Tests
+- `.claude/reports/current/GIT_HEALTH_REPORT.md` – Major update (325 insertions, 98 deletions)
+- `.claude/reports/current/FRONTEND_PLAYWRIGHT_FIX.md` – Neuer Report (neu, bisher untracked)
+
+**Befehle:**
+```bash
+git add .claude/reports/current/GIT_HEALTH_REPORT.md
+git add .claude/reports/current/FRONTEND_PLAYWRIGHT_FIX.md
+git commit -m "chore(reports): update git health report and add frontend playwright fix report"
+```
 
 ---
 
-## Commit 5: `feat(server): add Prometheus metrics instrumentation and skip offline ESPs in sensor health`
+## Abschluss
 
-**Was:** Prometheus-Metriken in 9 Services instrumentiert (HTTP errors, ESP heartbeats, MQTT reconnects, safety triggers, WS disconnects). Sensor-Health-Job ueberspringt jetzt offline-ESPs.
+**Nach allen Commits:**
+```bash
+# Status prüfen
+git status
+# Erwartung: nothing to commit, working tree clean
 
-**Dateien:**
-- `middleware/request_id.py` — HTTP error metric
-- `mqtt/handlers/error_handler.py` — ESP error metric
-- `mqtt/handlers/heartbeat_handler.py` — Heartbeat + boot_count metrics
-- `mqtt/handlers/sensor_handler.py` — Sensor reading metric
-- `mqtt/subscriber.py` — MQTT reconnect metric
-- `services/actuator_service.py` — Actuator timeout metric
-- `services/logic_engine.py` — Logic error + safety trigger metrics
-- `services/safety_service.py` — Safety trigger metric
-- `websocket/manager.py` — WS disconnect metric
-- `services/maintenance/jobs/sensor_health.py` — Skip offline ESPs, inline cache
-
----
-
-## Commit 6: `feat(frontend): add I2C sensor support, calibration view and simplify ZoneMonitorView`
-
-**Was:** AddSensorModal unterstuetzt jetzt I2C-Sensoren mit Adress-Picker. Neuer CalibrationView mit Wizard. ZoneMonitorView: Vue Flow Diagramm entfernt (vereinfacht). Vite-Proxy auf localhost geaendert.
-
-**Dateien:**
-- `El Frontend/src/api/esp.ts` — page_size 500→100
-- `El Frontend/src/api/calibration.ts` — Neuer API-Client (neu)
-- `El Frontend/src/components/esp/AddSensorModal.vue` — I2C-Support
-- `El Frontend/src/components/calibration/` — CalibrationStep + Wizard (neu)
-- `El Frontend/src/components/charts/TimeRangeSelector.vue` — Zeitraum-Selektor (neu)
-- `El Frontend/src/components/zones/ZoneMonitorView.vue` — Vue Flow entfernt
-- `El Frontend/src/composables/index.ts` — Trailing newline fix
-- `El Frontend/src/router/index.ts` — Calibration + SensorHistory Routes
-- `El Frontend/src/utils/sensorDefaults.ts` — I2C Address Registry
-- `El Frontend/src/views/CalibrationView.vue` — Neuer View (neu)
-- `El Frontend/src/views/UserManagementView.vue` — Whitespace
-- `El Frontend/vite.config.ts` — Proxy el-servador → localhost
-- `El Frontend/Docs/UI/02-Individual-Views-Summary.md` — Formatting
-
----
-
-## Commit 7: `feat(docker): add 18 Grafana alert rules for infrastructure, ESP32 and application monitoring`
-
-**Was:** 18 neue Prometheus-basierte Alert-Rules fuer Grafana: DB-Performance, Container-Health, ESP32-Heartbeats, MQTT-Latenz, Safety-System, API-Errors, Logic-Engine, WebSocket-Disconnects.
-
-**Dateien:**
-- `docker/grafana/provisioning/alerting/alert-rules.yml` — +901 Zeilen
-
----
-
-## Commit 8: `feat(firmware): add 10 Wokwi error-injection test scenarios for CI`
-
-**Was:** 10 YAML-Szenarien fuer Error-Injection-Tests: MQTT disconnect, heap pressure, watchdog trigger, NVS corrupt, I2C bus stuck, sensor timeout, actuator timeout, GPIO conflict, invalid JSON config, emergency cascade.
-
-**Dateien:**
-- `El Trabajante/tests/wokwi/scenarios/11-error-injection/` — 10 YAML-Dateien (neu)
-- `El Trabajante/tests/wokwi/helpers/emergency_cascade.sh` — Mode change
-
----
-
-## Commit 9: `docs: update reference docs, CI pipeline, error codes and autoops commands for venv paths`
-
-**Was:** CI-Pipeline-Doku aktualisiert (17 Jobs statt 12). Error-Code-Doku: Luecken als korrigiert markiert, Test-Codes 6000-6099 dokumentiert. AutoOps-Commands: poetry → venv Pfade. WOKWI_ERROR_MAPPING.md neu.
-
-**Dateien:**
-- `.claude/CLAUDE.md` — Figma MCP Integration Rules + Design Token Mapping
-- `.claude/commands/autoops/debug.md` — venv Pfade
-- `.claude/commands/autoops/run.md` — venv Pfade
-- `.claude/commands/autoops/status.md` — venv Pfade
-- `.claude/settings.json` — venv + Credentials Update
-- `.claude/reference/debugging/CI_PIPELINE.md` — 17 Jobs, Artifacts
-- `.claude/reference/errors/ERROR_CODES.md` — Luecken korrigiert, Test-Codes
-- `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` — MCP/Serena Pfade
-- `.claude/reference/testing/TEST_ENGINE_REFERENCE.md` — 173 Szenarien, 52 CI
-- `.claude/reference/testing/WOKWI_TESTING.md` — Error-Injection Pattern
-- `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` — Neues Referenzdokument
-- `.claude/skills/test-log-analyst/SKILL.md` — error-injection-test-logs
-- `.technical-manager/TECHNICAL_MANAGER.md` — Boot-Orientierung
-
----
-
-## Commit 10: `chore(reports): clean up 90+ stale reports and add current session reports`
-
-**Was:** 90+ veraltete Reports aus .claude/reports/current/ entfernt. Aktuelle Session-Reports hinzugefuegt (AUTO-ONE, testrun-phasen/, CI_CD_FULL_AUDIT, WOKWI_VALIDATION, etc.). GIT_HEALTH_REPORT aktualisiert.
-
-**Dateien:**
-- 90+ geloeschte alte Reports
-- 12+ neue/aktualisierte Reports
-- `testrun-phasen/` Verzeichnis mit 9 Phasendokumenten
+# Push
+git push origin fix/ci-pipelines
+```
 
 ---
 
@@ -145,13 +105,19 @@
 
 | # | Commit | Dateien | Typ |
 |---|--------|---------|-----|
-| 1 | `chore: add .serena/ to gitignore and Cursor project rules` | 5 | chore |
-| 2 | `chore(docker): fix mosquitto-exporter healthcheck` | 2 | chore |
-| 3 | `feat(server,firmware): add error codes 6000-6099` | 2 | feat |
-| 4 | `fix(server): GPIO 12 MTDI + ADC2 WiFi warning` | 4 | fix |
-| 5 | `feat(server): Prometheus metrics + offline ESP skip` | 10 | feat |
-| 6 | `feat(frontend): I2C support + calibration view` | 13 | feat |
-| 7 | `feat(docker): 18 Grafana alert rules` | 1 | feat |
-| 8 | `feat(firmware): 10 Wokwi error-injection scenarios` | 11 | feat |
-| 9 | `docs: reference docs + CI pipeline + autoops venv` | 13 | docs |
-| 10 | `chore(reports): clean up 90+ stale reports` | 112 | chore |
+| 1 | `fix(docker): add --no-root to poetry install to avoid missing README in build` | 1 | fix |
+| 2 | `fix(ci): improve MQTT health check reliability in test pipelines` | 2 | fix |
+| 3 | `fix(server): make GPIO pin reservation board-aware (WROOM vs C3)` | 2 | fix |
+| 4 | `chore(reports): update git health report and add frontend playwright fix report` | 2 | chore |
+
+**Reihenfolge-Begründung:**
+1. Docker-Fix (Build-Infrastruktur) zuerst — Voraussetzung für CI-Runs
+2. CI-Workflows — bauen auf Docker-Fix auf, sind Fix-Gruppe zusammen
+3. Server-Code — inhaltlich unabhängig, aber logisch nach Infra/CI
+4. Reports — zuletzt, reine Dokumentation
+
+**Hinweise:**
+- Alle Commits gehen direkt auf `fix/ci-pipelines` (kein Force-Push nötig)
+- Die GPIO-Änderung ist ein echtes Fix (Pins 0,1,2,3,12 waren fälschlicherweise blockiert)
+- `SYSTEM_RESERVED_PINS` bleibt als Legacy-Alias erhalten → kein Breaking Change
+- Nach dem Push: PR #14 (fix/ci-pipelines → master) ist bereit zum Merge
