@@ -2095,20 +2095,139 @@ jobs:
           PASSED=0
           FAILED=0
 
+          # MQTT injection per hardware scenario (called after "MQTT connected" detected in log)
+          inject_mqtt_for_hw_scenario() {
+            local name="$1"
+            case "$name" in
+              hw_actuator_limit)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"LED1","active":true},{"gpio":14,"actuator_type":"relay","actuator_name":"Relay1","active":true},{"gpio":15,"actuator_type":"pump","actuator_name":"Pump1","active":true},{"gpio":16,"actuator_type":"relay","actuator_name":"Relay2","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":17,"actuator_type":"relay","actuator_name":"Relay3","active":true},{"gpio":18,"actuator_type":"led","actuator_name":"LED2","active":true},{"gpio":19,"actuator_type":"led","actuator_name":"LED3","active":true},{"gpio":23,"actuator_type":"relay","actuator_name":"Relay4","active":true}]}'
+                ;;
+              hw_cross_board_constants)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":32,"sensor_type":"analog","sensor_name":"WROOMOnlySensor","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":33,"actuator_type":"relay","actuator_name":"WROOMOnlyRelay","active":true}]}'
+                ;;
+              hw_i2c_config)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":21,"sensor_type":"analog","sensor_name":"ConflictSensor","active":true}]}'
+                ;;
+              hw_input_only_reject)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":34,"actuator_type":"relay","actuator_name":"InvalidRelay34","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":39,"actuator_type":"pump","actuator_name":"InvalidPump39","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":34,"sensor_type":"analog","sensor_name":"AnalogSensor34","active":true}]}'
+                ;;
+              hw_pwm_config)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"PWM_LED","active":true,"pwm_enabled":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"PWM","value":0.5}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"PWM","value":1.0}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"OFF","value":0}'
+                ;;
+              hw_reserved_pins)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":0,"sensor_type":"digital_input","sensor_name":"BootPinSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":1,"actuator_type":"relay","actuator_name":"UARTRelay","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":3,"sensor_type":"analog","sensor_name":"RXSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":12,"actuator_type":"pump","actuator_name":"FlashPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":6,"sensor_type":"digital_input","sensor_name":"FlashSensor","active":true}]}'
+                ;;
+              hw_safe_pins_verify)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ValidSensor","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"ValidLED","active":true}]}'
+                ;;
+              hw_sensor_limit)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"Sensor1","active":true},{"gpio":5,"sensor_type":"analog","sensor_name":"Sensor2","active":true},{"gpio":14,"sensor_type":"analog","sensor_name":"Sensor3","active":true},{"gpio":15,"sensor_type":"analog","sensor_name":"Sensor4","active":true},{"gpio":16,"sensor_type":"analog","sensor_name":"Sensor5","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":17,"sensor_type":"analog","sensor_name":"Sensor6","active":true},{"gpio":18,"sensor_type":"analog","sensor_name":"Sensor7","active":true},{"gpio":19,"sensor_type":"analog","sensor_name":"Sensor8","active":true},{"gpio":23,"sensor_type":"analog","sensor_name":"Sensor9","active":true},{"gpio":25,"sensor_type":"analog","sensor_name":"Sensor10","active":true}]}'
+                ;;
+              *)
+                # Passive scenario (hw_board_type): no MQTT injection needed
+                ;;
+            esac
+          }
+
           for scenario in tests/wokwi/scenarios/09-hardware/*.yaml; do
             name=$(basename "$scenario" .yaml)
             echo "=== Running: $name ==="
-            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+
+            # Start Wokwi in background, log to file
+            timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" > "${name}.log" 2>&1 &
+            WOKWI_PID=$!
+
+            # Wait for MQTT connection (up to 60s) before injecting
+            for i in {1..60}; do
+              grep -q "MQTT connected" "${name}.log" 2>/dev/null && break
+              sleep 1
+            done
+
+            # Inject scenario-specific MQTT messages
+            inject_mqtt_for_hw_scenario "$name"
+
+            # Wait for Wokwi to complete, capture exit code
+            if wait $WOKWI_PID; then
               echo "PASS: $name"
               PASSED=$((PASSED + 1))
             else
               echo "FAIL: $name (exit $?)"
+              tail -10 "${name}.log" || true
               FAILED=$((FAILED + 1))
             fi
           done
 
           echo ""
           echo "=== Hardware Results: $PASSED passed, $FAILED failed out of 9 ==="
+          [ $FAILED -eq 0 ]
 
       - name: Stop Mosquitto
         if: always()
@@ -2327,6 +2446,231 @@ jobs:
           FAILED=0
           SKIPPED=0
 
+          # MQTT injection per GPIO scenario (called after "MQTT connected" detected in log)
+          inject_mqtt_for_gpio_scenario() {
+            local name="$1"
+            case "$name" in
+              gpio_reservation_success)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true,"raw_mode":true}]}'
+                ;;
+              gpio_integration_heartbeat)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"TestPump","active":true}]}'
+                ;;
+              gpio_safe_mode_emergency)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"WaterPump","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"DrainValve","active":true},{"gpio":15,"actuator_type":"relay","actuator_name":"LightRelay","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/14/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/15/command" \
+                  -m '{"command":"ON"}'
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/broadcast/emergency" \
+                  -m '{"command":"STOP","reason":"System-wide emergency test"}'
+                ;;
+              gpio_edge_invalid_pin)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":255,"sensor_type":"analog","sensor_name":"InvalidGPIO","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":50,"sensor_type":"analog","sensor_name":"OutOfRangeGPIO","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":6,"sensor_type":"analog","sensor_name":"FlashGPIO","active":true}]}'
+                ;;
+              gpio_edge_multi_init)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TestSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/broadcast/emergency" \
+                  -m '{"command":"STOP","reason":"Test re-initialization"}'
+                ;;
+              gpio_edge_strings)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ThisIsAVeryLongSensorNameThatExceedsThirtyOneCharacters","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":5,"sensor_type":"analog","sensor_name":"X","active":true}]}'
+                ;;
+              gpio_integration_sensor)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"GreenhouseTemp","raw_mode":true,"active":true}]}'
+                sleep 3
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":255,"sensor_type":"sht31","sensor_name":"HumiditySensor","i2c_address":68,"raw_mode":true,"active":true}]}'
+                ;;
+              gpio_reservation_conflict)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"ph_sensor","sensor_name":"ConflictSensor","active":true}]}'
+                ;;
+              gpio_reservation_invalid)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":12,"sensor_type":"analog","sensor_name":"InvalidSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":1,"sensor_type":"analog","sensor_name":"UARTSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":34,"actuator_type":"pump","actuator_name":"InvalidPump","active":true}]}'
+                ;;
+              gpio_reservation_owner)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"GreenhouseTemp","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"IrrigationPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":5,"sensor_type":"analog","sensor_name":"ConflictTest","active":true}]}'
+                ;;
+              gpio_reservation_release)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":false}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":4,"actuator_type":"pump","actuator_name":"WaterPump","active":true}]}'
+                ;;
+              gpio_safe_mode_single)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"TestPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
+                  -m '{"command":"STOP","reason":"Test safe mode"}'
+                ;;
+              gpio_safe_mode_verify)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"VerifyPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
+                  -m '{"command":"STOP","reason":"Verify safe mode override"}'
+                ;;
+              gpio_subzone_assign)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"IrrigationTemp","subzone":"irrigation_zone","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"irrigation_zone","gpios":[4,5,14]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/remove" \
+                  -m '{"subzone_id":"irrigation_zone","gpios":[4]}'
+                ;;
+              gpio_subzone_conflict)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"SharedSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"subzone_alpha","gpios":[4]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"subzone_beta","gpios":[4]}'
+                ;;
+              gpio_subzone_pins)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ClimateTemp","active":true}],"actuators":[{"gpio":5,"actuator_type":"fan","actuator_name":"ClimateFan","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"ClimateVent","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"climate_control","gpios":[4,5,14]}'
+                ;;
+              gpio_subzone_safe)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"IrrigationPump","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"IrrigationValve","active":true},{"gpio":15,"actuator_type":"fan","actuator_name":"VentilationFan","active":true},{"gpio":16,"actuator_type":"relay","actuator_name":"VentilationDamper","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"irrigation","gpios":[5,14]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"ventilation","gpios":[15,16]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                sleep 0.1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/14/command" \
+                  -m '{"command":"ON"}'
+                sleep 0.1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/15/command" \
+                  -m '{"command":"ON"}'
+                sleep 0.1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/16/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/safe" \
+                  -m '{"subzone_id":"irrigation","enable":true}'
+                ;;
+              *)
+                # Passive scenarios (gpio_boot_i2c_auto, gpio_boot_pin_count): no MQTT injection needed
+                ;;
+            esac
+          }
+
           for scenario in tests/wokwi/scenarios/gpio/*.yaml; do
             name=$(basename "$scenario" .yaml)
 
@@ -2338,17 +2682,34 @@ jobs:
             fi
 
             echo "=== Running: $name ==="
-            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+
+            # Start Wokwi in background, log to file
+            timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" > "${name}.log" 2>&1 &
+            WOKWI_PID=$!
+
+            # Wait for MQTT connection (up to 60s) before injecting
+            for i in {1..60}; do
+              grep -q "MQTT connected" "${name}.log" 2>/dev/null && break
+              sleep 1
+            done
+
+            # Inject scenario-specific MQTT messages
+            inject_mqtt_for_gpio_scenario "$name"
+
+            # Wait for Wokwi to complete, capture exit code
+            if wait $WOKWI_PID; then
               echo "PASS: $name"
               PASSED=$((PASSED + 1))
             else
               echo "FAIL: $name (exit $?)"
+              tail -10 "${name}.log" || true
               FAILED=$((FAILED + 1))
             fi
           done
 
           echo ""
           echo "=== GPIO Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+          [ $FAILED -eq 0 ]
 
       - name: Stop Mosquitto
         if: always()

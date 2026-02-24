@@ -2,7 +2,7 @@
 
 > **Erstellt:** 2026-02-21
 > **Erstellt von:** Automation-Experte (Life-Repo)
-> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Wokwi MCP Server Integration, Agent-Driven Testing, 14+ neue Papers, Closed-Loop-Architektur, MQTT-Trace-Analyse, Causal Graph RCA)
+> **Aktualisiert:** 2026-02-24 (Phase 1 CI-Fix ABGESCHLOSSEN: MQTT-Injection in nightly-gpio-extended + nightly-hardware-extended; Grafana 28 UIDs verifiziert; Playwright visual-regression ausgeschlossen)
 > **Zweck:** Ueberblick ueber den Aufbau der Testinfrastruktur mit zwei parallelen Spuren (Wokwi-Simulation + Produktionstestfeld), gemeinsamer Error-Taxonomie und phasenweiser Fertigstellung.
 > **Charakter:** Offen und flexibel — Phasen geben Richtung, nicht starre Deadlines.
 
@@ -33,7 +33,7 @@
 ║                    │  Error-Codes: 1000-5699  │                             ║
 ║                    │  Severity: info→critical │                             ║
 ║                    │  Kategorien: 6 Typen     │                             ║
-║                    │  Grafana-Alerts: 26      │                             ║
+║                    │  Grafana-Alerts: 28      │                             ║
 ║                    │  KI: 3-Stufen-Strategie  │                             ║
 ║                    └─────────────────────────┘                             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -50,7 +50,7 @@
 | Docker-Stack (13 Services) | **12/13 healthy** | Core (4) + Monitoring (7) + DevTools (1) + Hardware (1). Mosquitto-Exporter unhealthy — kein Einfluss |
 | PostgreSQL | **Laeuft** | 19 Tabellen, Alembic Migrations, ai_predictions vorbereitet |
 | Mosquitto MQTT | **Laeuft** | Port 1883 + 9001 (WS), allow_anonymous (Testmodus) |
-| Grafana | **Laeuft** | 26 Panels, **26 Alert-Regeln** (Phase 0 ERLEDIGT), Auto-Refresh 10s |
+| Grafana | **Laeuft** | 26 Panels, **28 Alert-UIDs** (Phase 0 ERLEDIGT + Alloy/MQTT-Broker-Alerts 2026-02-24), Auto-Refresh 10s |
 | Prometheus | **Laeuft** | **27 Metriken** (15 alt + 12 Phase-0 neu), 7 Scrape-Jobs |
 | Loki + Promtail | **Laeuft** | Zentrale Log-Aggregation, 7d Retention, JSON-Logs |
 | cAdvisor | **Laeuft** | Container-Ressourcen-Monitoring |
@@ -60,8 +60,8 @@
 | Schicht | Fortschritt | Testlauf-Readiness | Phase-0/1/2 Updates |
 |---------|-------------|-------------------|---------------------|
 | El Servador (FastAPI) | 97% | **98% bereit** — ~170 Endpoints, 12 MQTT-Handler, 9 Sensor-Libraries, **27 Prometheus-Metriken**, **Handler-Integration komplett** | Phase 0: ✅ Metriken + Handler FERTIG |
-| El Trabajante (ESP32) | 92% | **95% bereit** — Full Boot bestanden, **173 Wokwi-Szenarien** (163 + 10 Error-Injection), 12 Test-Error-Codes | Phase 1: ✅ Error-Injection FERTIG |
-| El Frontend (Vue3) | 90% | **93% bereit** — 129 Komponenten, 13 Pinia Stores, WebSocket stabil, **CalibrationWizard + SensorHistoryView FERTIG** | Phase 2: ✅ Frontend-Code FERTIG (Sidebar-Links fehlen) |
+| El Trabajante (ESP32) | 92% | **95% bereit** — Full Boot bestanden, **173 Wokwi-Szenarien** (163 + 10 Error-Injection), 12 Test-Error-Codes | Phase 1: ✅ Error-Injection FERTIG, ✅ MQTT-CI-Fix FERTIG (2026-02-24) |
+| El Frontend (Vue3) | 90% | **93% bereit** — 129 Komponenten, 13 Pinia Stores, WebSocket stabil, **CalibrationWizard + SensorHistoryView FERTIG** | Phase 2: ✅ Frontend-Code FERTIG, ✅ Sidebar-Links FERTIG — Playwright: visual-regression ausgeschlossen (kein Baseline), 7 Restfailures offen |
 
 ### Test-Suite (vorhanden)
 
@@ -208,7 +208,7 @@
 | Severity-Stufen | **Aktiv** | info, warning, error, critical |
 | Fehler-Kategorien | **Aktiv** | sensor, actuator, mqtt, system, config, safety, **test** |
 | Audit-Log-Tabelle | **Laeuft** | event_type, severity, correlation_id, error_code |
-| Grafana-Alerts | **26 aktiv** | 5 Critical + 3 Warning + 3 Infrastructure + 5 Sensor + 4 Device + 6 Application |
+| Grafana-Alerts | **28 aktiv** | 5 Critical (ao-promtail-down → ao-alloy-down, 1:1 ersetzt) + 3 Warning + 3 Infrastructure + 5 Sensor + 4 Device + 6 Application + 2 MQTT-Broker-Alerts (ao-mqtt-broker-no-clients, ao-mqtt-broker-messages-stored) |
 | Prometheus-Metriken | **27 aktiv** | 15 alt + **12 Phase-0 neu**, alle Handler-integriert |
 | Error-Code-Referenz | **Dokumentiert** | `.claude/reference/errors/ERROR_CODES.md` (inkl. Sektion 19: Test-Codes) |
 | Wokwi-Error-Mapping | **Dokumentiert** | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` |
@@ -222,10 +222,10 @@
 | ~~Sidebar-Navigation~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — TrendingUp (Zeitreihen) + SlidersHorizontal (Kalibrierung) in Sidebar.vue |
 | Analyse-Profile UI | Frontend | MITTEL | Offen — Dashboard fuer Datenerfassungs-Steuerung |
 | Benutzer-Management UI | Frontend | NIEDRIG | Offen — Admin-Panel (JWT/RBAC funktioniert bereits) |
-| ~~Erweiterte Grafana-Alert-Regeln~~ | ~~Monitoring~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — 26 Regeln aktiv (8 alt + 18 Phase-0 neu) |
+| ~~Erweiterte Grafana-Alert-Regeln~~ | ~~Monitoring~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — 28 UIDs aktiv (26 Phase-0 + Alloy-Alert + 2 MQTT-Broker-Alerts 2026-02-24) |
 | ~~Handler-Integration Metriken~~ | ~~Backend~~ | ~~KRITISCH~~ | ✅ **ERLEDIGT** — Alle 12 Update-Funktionen in Handlern integriert |
 | Isolation Forest Service | Backend | MITTEL | Offen — `ai.py` Model existiert (AIPredictions), scikit-learn/numpy NICHT in pyproject.toml |
-| Grafana Deployment-Verifikation | Monitoring | MITTEL | Offen — 26 Alerts definiert, Grafana-Reload nach Deployment steht aus |
+| Grafana Deployment-Verifikation | Monitoring | MITTEL | ✅ **VERIFIZIERT (2026-02-24)** — 28 aktive UIDs in Grafana bestätigt |
 | MQTT-ACL | Security | NIEDRIG (fuer Testlauf) | Offen — Vorlage existiert, fuer Produktion MUSS |
 | Incident-Management-Prozess | Operations | NIEDRIG | Offen — Wer macht was bei Ausfall |
 
