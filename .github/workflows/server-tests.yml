@@ -134,10 +134,10 @@ jobs:
         ports:
           - 1883:1883
         options: >-
-          --health-cmd "mosquitto_pub -h localhost -t test -m test || exit 0"
-          --health-interval 10s
+          --health-cmd "mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok"
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     steps:
       - name: Checkout code
@@ -169,6 +169,18 @@ jobs:
         working-directory: El Servador/god_kaiser_server
         run: poetry install --no-root --no-interaction
 
+      - name: Install mosquitto clients
+        run: sudo apt-get install -y mosquitto-clients
+
+      - name: Wait for Mosquitto ready
+        run: |
+          for i in $(seq 1 30); do
+            mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok 2>/dev/null && echo "Mosquitto ready" && exit 0
+            echo "Waiting for Mosquitto... ($i/30)"
+            sleep 1
+          done
+          echo "Mosquitto not ready after 30s" && exit 1
+
       - name: Run Integration Tests
         working-directory: El Servador/god_kaiser_server
         env:
@@ -179,6 +191,7 @@ jobs:
           poetry run pytest tests/integration/ \
             -v \
             --tb=short \
+            --timeout=60 \
             --junitxml=junit-integration.xml \
             --cov=src \
             --cov-report=xml:coverage-integration.xml

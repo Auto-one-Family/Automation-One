@@ -1,140 +1,118 @@
-# CI Fix Report — fix/ci-pipelines
+# CI Fix Report — PR #14 (Session 2)
 
 **Date:** 2026-02-24
-**Branch:** fix/ci-pipelines (from master)
-**Scope:** Fix 4 red CI pipelines on feature/frontend-consolidation
+**Branch:** fix/ci-pipelines
+**Session:** auto-ops CI analysis & fix (round 2)
 
 ---
 
-## Pipeline Status
+## Status Before This Session
 
-| Pipeline | Before | After | Root Cause |
-|----------|--------|-------|-----------|
-| server-tests | RED | GREEN | AsyncMock typing bugs in integration tests |
-| backend-e2e-tests | (was GREEN on master) | GREEN | No change needed |
-| playwright-tests | RED | GREEN | Visual regression exclusion + CSS token fixes |
-| security-scan | (was GREEN on master) | GREEN | No change needed |
-
----
-
-## Fix 1: Backend Integration Tests (server-tests pipeline)
-
-### Files Modified
-- `El Servador/god_kaiser_server/tests/integration/test_emergency_stop.py`
-- `El Servador/god_kaiser_server/tests/integration/test_phase3_integration.py`
-
-### Root Causes Found
-
-**test_emergency_stop.py — TypeError: float < AsyncMock**
-- `safety_service` fixture had bare `actuator_repo = AsyncMock()` without configuring `.get_by_esp_and_gpio.return_value`
-- Default AsyncMock return value is another AsyncMock (not a real object)
-- `safety_service.py:180`: `if value < actuator_config.min_value` fails because `min_value` is AsyncMock
-
-**Fix:** Added proper mock return values with real actuator config (`min_value=0.0`, `max_value=1.0`)
-
-**test_phase3_integration.py — TypeError: MagicMock not awaitable**
-- `mock_db.rollback` was default MagicMock (not AsyncMock), but `heartbeat_handler.py:257` does `await session.rollback()`
-- `mock_hb_repo.log_heartbeat` was missing AsyncMock declaration
-
-**Fix A (test_approved_device_transitions_to_online):**
-- Added `mock_db.rollback = AsyncMock()`
-- Added `mock_hb_repo.log_heartbeat = AsyncMock()`
-
-**Fix B (test_reconnect_heartbeat_brings_device_online):**
-- Added `mock_db.rollback = AsyncMock()`
-- Added `mock_hb_repo.log_heartbeat = AsyncMock()`
-- Added `patch.object(heartbeat_handler, "_update_esp_metadata", AsyncMock())` to avoid `json.dumps(MagicMock)` error
-
-### Verification
-```
-31 tests passed (test_emergency_stop.py + test_phase3_integration.py)
-773 unit tests passed (no regressions)
-```
+| Check | Status |
+|-------|--------|
+| Backend E2E Tests | FAIL |
+| E2E Tests (Playwright) | FAIL |
+| Unit Tests (server-tests) | FAIL |
+| Integration Tests (server-tests) | FAIL (15min timeout) |
+| Build Check | PASS |
+| ESP32 Unit Tests | PASS |
+| Lint & Format Check | PASS |
+| TypeScript Check | PASS |
 
 ---
 
-## Fix 2: Playwright Tests (playwright-tests pipeline)
+## Root Cause Analysis
 
-### Files Modified
-- `.github/workflows/playwright-tests.yml`
-- `El Frontend/src/styles/tokens.css`
-- `El Frontend/src/views/LoginView.vue`
-- `El Frontend/src/shared/design/layout/Sidebar.vue`
-- `El Frontend/src/shared/design/layout/TopBar.vue`
-- `El Frontend/src/components/dashboard/StatusPill.vue`
+### 1. Unit Test Failures (2 tests)
 
-### Root Causes Found
+**`test_c3_no_input_only_restriction_on_gpio_12`**
+- `SYSTEM_RESERVED_PINS` in `gpio_validation_service.py` was a single board-agnostic set containing GPIO 12 (MTDI Strapping). Applied to all boards including ESP32-C3 where GPIO 12 is a normal bidirectional pin.
 
-**Visual Regression Tests running despite ignore-glob**
-- `playwright-tests.yml` had `npx playwright test` without `--ignore-glob` or `--project` flags
-- All 6 browser projects ran (chromium, firefox, webkit, mobile-chrome, mobile-safari, tablet)
-- 14 visual-regression tests ran and failed (no baseline screenshots in CI)
+**`test_validate_gpio_wroom_valid`**
+- `GPIO_RESERVED_ESP32_WROOM` in `constants.py` contained `{0,1,2,3,6,7,8,9,10,11,12}`. The `validate_gpio()` function in `validators.py` used this set, incorrectly rejecting GPIO 0 on WROOM (strapping pins are only sampled at boot, usable at runtime).
 
-**Fix:** Added `--project=chromium --ignore-glob="**/visual-regression.spec.ts"` to playwright command
+### 2. Integration Tests Timeout (15 minutes)
 
-**Header height token mismatch**
-- `tokens.css` defined `--header-height: 3rem` (48px)
-- Test `design-tokens.spec.ts:330` and `responsive-layout.spec.ts:213` expect `3.5rem` (56px)
+- Cause 1: Mosquitto healthcheck used `|| exit 0` — always reported healthy even if broker was not listening. Tests started before Mosquitto was ready. Some tests hung waiting for MQTT messages.
+- Cause 2: No `--timeout` option in pytest, no `pytest-timeout` package installed.
 
-**Fix:** Changed `--header-height: 3rem` to `3.5rem` in `tokens.css`
+### 3. Backend E2E + Playwright Server Crash (exit code 1)
 
-**Form label color wrong**
-- `LoginView.vue .login-form__label` used `color: var(--color-text-muted)` (#484860)
-- Test `forms.spec.ts:121` expects labels to use `--color-text-secondary` (#8585a0)
+- `El Servador/Dockerfile` builder stage runs `poetry install` without `--no-root`.
+- Poetry tried to install the project package itself, requiring `README.md` (declared via `readme = "README.md"` in `pyproject.toml`).
+- The Dockerfile copies only `pyproject.toml` and `poetry.lock`, not `README.md`.
+- Error: `The current project could not be installed: [Errno 2] No such file or directory: '/app/README.md'`
 
-**Fix:** Changed `color: var(--color-text-muted)` to `var(--color-text-secondary)` in `.login-form__label`
+---
 
-**Accessibility violations: insufficient color contrast**
-- Multiple elements used `--color-text-muted` (#484860) on `--color-bg-secondary` (#0d0d16)
-- Contrast ratio: 2.18:1 — fails WCAG 2.1 AA requirement of 4.5:1
-- Affected elements: sidebar section labels, sidebar user role, status pill labels, header type buttons, header connection label
-- Token documentation notes: "use on tertiary+ bg only" — these elements were on secondary background
+## Changes Made
 
-**Fix:** Changed these elements from `--color-text-muted` to `--color-text-secondary` (#8585a0, 5.61:1 contrast):
-- `Sidebar.vue .sidebar__section-label`
-- `Sidebar.vue .sidebar__user-role`
-- `StatusPill.vue .status-pill__label`
-- `TopBar.vue .header__type-btn`
-- `TopBar.vue .header__connection-label`
+### `El Servador/god_kaiser_server/src/services/gpio_validation_service.py`
 
-### Verification
+- Replaced single `SYSTEM_RESERVED_PINS` with two board-specific sets:
+  - `SYSTEM_RESERVED_PINS_WROOM` = `{0,1,2,3,6,7,8,9,10,11,12}` (Boot-Strapping + UART + Flash + MTDI)
+  - `SYSTEM_RESERVED_PINS_C3` = `{18,19}` (USB D+/D- only)
+- `SYSTEM_RESERVED_PINS` kept as legacy alias pointing to WROOM set (backward compat for tests that check the constant directly).
+- Added board-specific pin name dicts: `SYSTEM_PIN_NAMES_WROOM`, `SYSTEM_PIN_NAMES_C3`.
+- Added `_get_system_reserved_pins(board_model)` method to `GpioValidationService`.
+- Updated `validate_gpio_available()` to use board-specific reserved set via `_get_system_reserved_pins`.
+
+### `El Servador/god_kaiser_server/src/core/constants.py`
+
+- Changed `GPIO_RESERVED_ESP32_WROOM` from `{0,1,2,3,6,7,8,9,10,11,12}` to `{6,7,8,9,10,11}` (Flash SPI pins only).
+- Fixes `validate_gpio()` in `validators.py`: GPIO 0 is no longer rejected (strapping pins are runtime-usable on WROOM).
+
+### `El Servador/Dockerfile`
+
+- Added `--no-root` flag to `poetry install` in builder stage.
+- Prevents Poetry from trying to install the project package (which requires README.md not present in build context).
+
+### `El Servador/god_kaiser_server/pyproject.toml`
+
+- Added `pytest-timeout = "^2.3.1"` to dev dependencies.
+- Enables `--timeout` CLI flag in pytest.
+
+### `.github/workflows/server-tests.yml`
+
+- Fixed Mosquitto healthcheck: removed `|| exit 0`, now uses `mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok`.
+- Increased health-retries from 5 to 10, interval reduced to 5s.
+- Added `Install mosquitto clients` step (apt-get).
+- Added `Wait for Mosquitto ready` polling step (30s loop) before pytest.
+- Added `--timeout=60` to integration tests pytest command.
+
+### `.github/workflows/esp32-tests.yml`
+
+- Same Mosquitto healthcheck fix as server-tests.yml.
+
+---
+
+## Local Verification
+
 ```
-TypeScript type-check: PASSED (no errors)
+Unit Tests: 775 passed, 3 skipped — all passing
+Previously failing tests now pass:
+  - test_c3_no_input_only_restriction_on_gpio_12: PASS
+  - test_validate_gpio_wroom_valid: PASS
+Previously passing tests still pass:
+  - test_gpio_12_in_system_reserved_set: PASS (SYSTEM_RESERVED_PINS alias still has GPIO 12)
+  - test_gpio_0_flash_boot_rejected: PASS (WROOM-specific reserved pins include GPIO 0)
 ```
 
 ---
 
-## Remaining Known Failures (Pre-existing, not caused by this PR)
+## Expected CI Outcome
 
-**Unit tests (2 pre-existing failures on master):**
-- `test_esp_model_validation.py::TestESP32C3Validation::test_c3_no_input_only_restriction_on_gpio_12`
-- `test_topic_validation.py::TestValidators::test_validate_gpio_wroom_valid`
-
-**auth.spec.ts scenario test:** `should login successfully with valid credentials`
-- On feature/frontend-consolidation: Router redirects to `/hardware` instead of `/dashboard`
-- On fix/ci-pipelines (from master): Router correctly redirects to `/` = dashboard
-- This will be resolved when the router fix from feature/frontend-consolidation is merged
-
-**device-discovery WebSocket test:**
-- `should update device list in real-time via WebSocket`
-- Flaky: depends on timing of pending-panel button visibility
-- Not related to this PR's scope
-
-**ESP registration flow:**
-- `Vollständiger Flow: Login -> Pending öffnen -> ESP genehmigen`
-- Depends on auth flow working + `/dashboard` redirect
-- Will be fixed when auth router fix is merged
+| Check | Expected | Fix |
+|-------|----------|-----|
+| Unit Tests | PASS | Board-aware GPIO validation |
+| Integration Tests | PASS | Mosquitto healthcheck + pytest-timeout |
+| Backend E2E Tests | PASS | `--no-root` in Dockerfile |
+| Playwright E2E Tests | PASS | `--no-root` in Dockerfile |
 
 ---
 
-## Summary
+## Open Points
 
-| Fix Type | Count | Status |
-|----------|-------|--------|
-| Python AsyncMock fixes | 3 | DONE |
-| Playwright workflow flag | 1 | DONE |
-| CSS token (header height) | 1 | DONE |
-| CSS accessibility fixes | 5 | DONE |
-| Form label color | 1 | DONE |
-
-**Total:** 11 fixes across 8 files
+- **Lint warnings**: Unused imports in `esp.py`, `errors.py`, `auth.py` show as annotations. These use `continue-on-error: true` and do not fail the pipeline. Not fixed to keep scope minimal.
+- **Integration Tests — MQTT hang**: Root cause is likely a missing cleanup in a test fixture that creates MQTT connections. The 60-second per-test timeout prevents the 15-minute job timeout. Long-term fix: add proper teardown to the offending fixture.
+- **Frontend Dockerfile**: No multi-stage build was needed. The `--target development` reference in the task was not present in the actual `playwright-tests.yml`. The single-stage Dockerfile is correct.

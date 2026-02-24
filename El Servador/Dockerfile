@@ -29,8 +29,9 @@ RUN curl -sSL https://install.python-poetry.org | python3 - && \
 COPY god_kaiser_server/pyproject.toml god_kaiser_server/poetry.lock* ./
 
 # Configure Poetry: no virtual env, install only main deps
+# --no-root: skip installing the project package itself (README.md not needed in CI)
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --only main
+    poetry install --no-interaction --no-ansi --only main --no-root
 
 # ============================================
 # Stage 2: Runtime

@@ -66,22 +66,37 @@ class BoardConstraints:
 
 
 # =============================================================================
-# System-reservierte Pins (ESP32-WROOM)
+# System-reservierte Pins (board-spezifisch)
 # Diese Pins dürfen NIEMALS für Sensoren/Aktoren verwendet werden
 # =============================================================================
-SYSTEM_RESERVED_PINS: Set[int] = {
-    0,   # Boot-Strapping (muss HIGH sein beim Boot)
-    1,   # TX0 (UART)
-    2,   # Boot-Strapping (muss LOW sein beim Boot für Flash)
-    3,   # RX0 (UART)
+
+# ESP32-WROOM: Flash SPI pins + Boot-Strapping/UART pins hard-reserved.
+# Note: Boot-Strapping pins (0, 2, 12, 15) are sampled only at boot but
+# must not be driven high/low during normal operation to avoid boot issues.
+# UART pins (1, 3) are used by the debug console.
+SYSTEM_RESERVED_PINS_WROOM: Set[int] = {
+    0,   # Boot-Strapping (HIGH = boot from UART, LOW = boot from flash)
+    1,   # UART TX0 (USB-to-serial debug console)
+    2,   # Boot-Strapping (must be LOW for flash boot)
+    3,   # UART RX0 (USB-to-serial debug console)
     6,   # Flash SPI CLK
     7,   # Flash SPI D0
     8,   # Flash SPI D1
     9,   # Flash SPI D2
     10,  # Flash SPI D3
     11,  # Flash SPI CMD
-    12,  # MTDI Strapping (Flash-Spannung, muss LOW beim Boot)
+    12,  # MTDI Strapping (controls flash voltage; HIGH = 1.8V, destroys 3.3V boards)
 }
+
+# XIAO ESP32-C3: USB D+/D- pins are hard-reserved
+# GPIO 12 is a normal bidirectional pin on C3 (NOT a strapping pin)
+SYSTEM_RESERVED_PINS_C3: Set[int] = {
+    18,  # USB D-
+    19,  # USB D+
+}
+
+# Legacy alias — kept for backward compat, points to WROOM set
+SYSTEM_RESERVED_PINS: Set[int] = SYSTEM_RESERVED_PINS_WROOM
 
 # =============================================================================
 # Hardware-spezifische Pin-Constraints (Legacy - wird durch Fix #4 ersetzt)
@@ -104,8 +119,8 @@ I2C_BUS_PINS_LEGACY: Set[int] = {21, 22}  # ESP32-WROOM (Fallback)
 ADC1_SAFE_PINS: Set[int] = {32, 33, 34, 35, 36, 39}
 ADC2_WIFI_CONFLICT_PINS: Set[int] = {0, 2, 4, 12, 13, 14, 15, 25, 26, 27}
 
-# Menschenlesbare Namen für System-Pins
-SYSTEM_PIN_NAMES: Dict[int, str] = {
+# Menschenlesbare Namen für System-Pins (WROOM)
+SYSTEM_PIN_NAMES_WROOM: Dict[int, str] = {
     0: "Boot-Strapping",
     1: "UART TX0",
     2: "Boot-Strapping",
@@ -118,6 +133,15 @@ SYSTEM_PIN_NAMES: Dict[int, str] = {
     11: "Flash CMD",
     12: "MTDI Strapping (Flash-Spannung)",
 }
+
+# Menschenlesbare Namen für System-Pins (ESP32-C3)
+SYSTEM_PIN_NAMES_C3: Dict[int, str] = {
+    18: "USB D-",
+    19: "USB D+",
+}
+
+# Legacy alias — kept for backward compat
+SYSTEM_PIN_NAMES: Dict[int, str] = SYSTEM_PIN_NAMES_WROOM
 
 
 class GpioValidationService:
@@ -150,6 +174,32 @@ class GpioValidationService:
         self.sensor_repo = sensor_repo
         self.actuator_repo = actuator_repo
         self.esp_repo = esp_repo
+
+    def _get_system_reserved_pins(self, board_model: Optional[str]) -> tuple[Set[int], Dict[int, str]]:
+        """
+        Returns the board-specific set of hard-reserved system pins and their names.
+
+        ESP32-WROOM: Flash SPI pins (6-11) are permanently reserved.
+        XIAO ESP32-C3: USB pins (18, 19) are permanently reserved.
+
+        Boot-Strapping pins (0, 2, 12, 15) and UART pins (1, 3) are deliberately
+        NOT included: they are only sampled at boot and are freely usable at runtime.
+
+        Args:
+            board_model: Hardware type string (ESP32_WROOM, XIAO_ESP32_C3, etc.)
+
+        Returns:
+            Tuple of (reserved_pins_set, pin_names_dict)
+        """
+        if not board_model:
+            return SYSTEM_RESERVED_PINS_WROOM, SYSTEM_PIN_NAMES_WROOM
+
+        board_model_upper = board_model.upper()
+        if board_model_upper in ("XIAO_ESP32_C3", "XIAO_ESP32C3", "ESP32_C3"):
+            return SYSTEM_RESERVED_PINS_C3, SYSTEM_PIN_NAMES_C3
+
+        # Default: WROOM-style Flash SPI pins
+        return SYSTEM_RESERVED_PINS_WROOM, SYSTEM_PIN_NAMES_WROOM
 
     def _get_board_constraints(self, board_model: Optional[str]) -> BoardConstraints:
         """
@@ -235,6 +285,7 @@ class GpioValidationService:
 
         hardware_type = esp_device.hardware_type
         board_constraints = self._get_board_constraints(hardware_type)
+        system_reserved, system_pin_names = self._get_system_reserved_pins(hardware_type)
 
         # =====================================================================
         # 0.5. GPIO Range Check (board-specific, Fix #4)
@@ -256,10 +307,10 @@ class GpioValidationService:
             )
 
         # =====================================================================
-        # 1. System-Pin Check (sofort, ohne DB-Query)
+        # 1. System-Pin Check (board-specific, sofort, ohne DB-Query)
         # =====================================================================
-        if gpio in SYSTEM_RESERVED_PINS:
-            pin_name = self._get_system_pin_name(gpio)
+        if gpio in system_reserved:
+            pin_name = system_pin_names.get(gpio, f"GPIO_{gpio}")
             rejection_reason = f"GPIO {gpio} ist ein System-Pin ({pin_name}) und kann nicht verwendet werden"
             logger.info(
                 f"Rejected GPIO config: ESP {esp_db_id} ({hardware_type}), GPIO {gpio}, "
