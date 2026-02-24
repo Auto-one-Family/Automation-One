@@ -90,7 +90,7 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: El Frontend
-        run: npx playwright test --project=chromium --ignore-glob="**/visual-regression.spec.ts"
+        run: npx playwright test --project=chromium
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:5173
           CI: true
