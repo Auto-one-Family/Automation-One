@@ -244,6 +244,12 @@ async def e2e_http_client() -> AsyncGenerator[aiohttp.ClientSession, None]:
 # Module-level flag to avoid redundant health checks
 _server_health_verified = False
 
+# Shared auth token cache — prevents auth rate limit exhaustion across tests.
+# The auth endpoint allows 10 requests/min per IP; with function-scoped fixtures
+# each test would re-authenticate and exhaust the limit after ~10 tests.
+# The token is valid for the full test session (default JWT expiry: 24h).
+_shared_e2e_auth_token: Optional[str] = None
+
 
 @pytest_asyncio.fixture(scope="function")
 async def server_health_check(e2e_config: E2EConfig, e2e_http_client: aiohttp.ClientSession):
@@ -731,11 +737,19 @@ async def api_client(
     """
     Create an API client for E2E tests with authentication.
 
-    Tries multiple credential combinations and raises pytest.fail if all fail.
+    Tries multiple credential combinations and warns if all fail.
+    The auth token is cached at module level to avoid exhausting the server's
+    auth rate limit (10 requests/min) when running many tests in one session.
     """
+    global _shared_e2e_auth_token
     client = E2EAPIClient(e2e_config, e2e_http_client)
 
-    # Try multiple credential combinations
+    # Reuse cached token from earlier fixture call in this session
+    if _shared_e2e_auth_token:
+        client._auth_token = _shared_e2e_auth_token
+        return client
+
+    # First call: authenticate and cache the token
     credentials_to_try = [
         ("admin", "Admin123#"),  # Seeded admin user
         ("Robin", "Robin123!"),  # Default admin
@@ -746,6 +760,7 @@ async def api_client(
     for username, password in credentials_to_try:
         auth_success = await client.authenticate(username, password)
         if auth_success and client._auth_token:
+            _shared_e2e_auth_token = client._auth_token
             return client
         # Capture error for debugging
         if hasattr(client, '_last_auth_error') and client._last_auth_error:
