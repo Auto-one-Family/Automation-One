@@ -490,7 +490,9 @@ class TestNetworkPartitionRecovery:
                 mock_device.zone_name = "Test Zone"  # Required by _update_esp_metadata zone resync
                 mock_device.master_zone_id = "master"
                 mock_device.kaiser_id = "god"
-                mock_device.ip_address = None  # Explicitly set to avoid MagicMock attribute side-effects
+                mock_device.ip_address = (
+                    None  # Explicitly set to avoid MagicMock attribute side-effects
+                )
 
                 mock_repo = MagicMock()
                 mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)

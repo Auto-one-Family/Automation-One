@@ -76,14 +76,14 @@ class BoardConstraints:
 # must not be driven high/low during normal operation to avoid boot issues.
 # UART pins (1, 3) are used by the debug console.
 SYSTEM_RESERVED_PINS_WROOM: Set[int] = {
-    0,   # Boot-Strapping (HIGH = boot from UART, LOW = boot from flash)
-    1,   # UART TX0 (USB-to-serial debug console)
-    2,   # Boot-Strapping (must be LOW for flash boot)
-    3,   # UART RX0 (USB-to-serial debug console)
-    6,   # Flash SPI CLK
-    7,   # Flash SPI D0
-    8,   # Flash SPI D1
-    9,   # Flash SPI D2
+    0,  # Boot-Strapping (HIGH = boot from UART, LOW = boot from flash)
+    1,  # UART TX0 (USB-to-serial debug console)
+    2,  # Boot-Strapping (must be LOW for flash boot)
+    3,  # UART RX0 (USB-to-serial debug console)
+    6,  # Flash SPI CLK
+    7,  # Flash SPI D0
+    8,  # Flash SPI D1
+    9,  # Flash SPI D2
     10,  # Flash SPI D3
     11,  # Flash SPI CMD
     12,  # MTDI Strapping (controls flash voltage; HIGH = 1.8V, destroys 3.3V boards)
@@ -176,7 +176,9 @@ class GpioValidationService:
         self.actuator_repo = actuator_repo
         self.esp_repo = esp_repo
 
-    def _get_system_reserved_pins(self, board_model: Optional[str]) -> tuple[Set[int], Dict[int, str]]:
+    def _get_system_reserved_pins(
+        self, board_model: Optional[str]
+    ) -> tuple[Set[int], Dict[int, str]]:
         """
         Returns the board-specific set of hard-reserved system pins and their names.
 
@@ -313,7 +315,9 @@ class GpioValidationService:
         # =====================================================================
         if gpio in system_reserved:
             pin_name = system_pin_names.get(gpio, f"GPIO_{gpio}")
-            rejection_reason = f"GPIO {gpio} ist ein System-Pin ({pin_name}) und kann nicht verwendet werden"
+            rejection_reason = (
+                f"GPIO {gpio} ist ein System-Pin ({pin_name}) und kann nicht verwendet werden"
+            )
             logger.info(
                 f"Rejected GPIO config: ESP {esp_db_id} ({hardware_type}), GPIO {gpio}, "
                 f"purpose={purpose}, interface={interface_type} (reason: {rejection_reason})"
@@ -523,14 +527,16 @@ class GpioValidationService:
         for gpio_num in board_reserved_pins:
             if not any(g["gpio"] == gpio_num for g in used_gpios):
                 pin_name = board_pin_names.get(gpio_num, f"System GPIO {gpio_num}")
-                used_gpios.append({
-                    "gpio": gpio_num,
-                    "owner": "system",
-                    "component": pin_name,
-                    "name": None,
-                    "id": None,
-                    "source": "static"
-                })
+                used_gpios.append(
+                    {
+                        "gpio": gpio_num,
+                        "owner": "system",
+                        "component": pin_name,
+                        "name": None,
+                        "id": None,
+                        "source": "static",
+                    }
+                )
 
         return sorted(used_gpios, key=lambda x: x["gpio"])
 
