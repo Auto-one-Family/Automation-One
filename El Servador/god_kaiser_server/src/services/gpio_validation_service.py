@@ -179,11 +179,13 @@ class GpioValidationService:
         """
         Returns the board-specific set of hard-reserved system pins and their names.
 
-        ESP32-WROOM: Flash SPI pins (6-11) are permanently reserved.
+        ESP32-WROOM: Flash SPI pins (6-11), Boot-Strapping pins (0, 2, 12) and
+        UART pins (1, 3) are permanently reserved (see SYSTEM_RESERVED_PINS_WROOM).
         XIAO ESP32-C3: USB pins (18, 19) are permanently reserved.
 
-        Boot-Strapping pins (0, 2, 12, 15) and UART pins (1, 3) are deliberately
-        NOT included: they are only sampled at boot and are freely usable at runtime.
+        Note: GPIO 12 (MTDI) is reserved on WROOM because driving it HIGH at any
+        time can latch the flash voltage to 1.8 V and permanently destroy 3.3 V boards.
+        It is NOT freely usable at runtime despite being a boot-strapping pin.
 
         Args:
             board_model: Hardware type string (ESP32_WROOM, XIAO_ESP32_C3, etc.)
@@ -455,6 +457,9 @@ class GpioValidationService:
         Gibt alle belegten GPIOs für einen ESP zurück.
         Kombiniert DB-Daten mit ESP-gemeldetem Status.
 
+        Uses board-specific reserved pins via _get_system_reserved_pins() so that
+        XIAO ESP32-C3 does not report WROOM-only pins (e.g. 6-12) as reserved.
+
         Args:
             esp_db_id: Datenbank-ID des ESP-Devices (UUID)
 
@@ -462,6 +467,11 @@ class GpioValidationService:
             Liste von Dictionaries mit gpio, owner, component, name, id, source
         """
         used_gpios: List[Dict[str, Any]] = []
+
+        # Fetch board type for board-aware system pin selection
+        esp_device = await self.esp_repo.get_by_id(esp_db_id)
+        hardware_type: Optional[str] = esp_device.hardware_type if esp_device else None
+        board_reserved_pins, board_pin_names = self._get_system_reserved_pins(hardware_type)
 
         # Sensoren aus DB
         sensors = await self.sensor_repo.get_by_esp(esp_db_id)
@@ -503,13 +513,14 @@ class GpioValidationService:
                         "source": "esp_reported"
                     })
 
-        # Statische System-Pins hinzufügen (falls nicht bereits vorhanden)
-        for gpio_num in SYSTEM_RESERVED_PINS:
+        # Statische System-Pins hinzufügen — board-aware (nicht Legacy WROOM-only)
+        for gpio_num in board_reserved_pins:
             if not any(g["gpio"] == gpio_num for g in used_gpios):
+                pin_name = board_pin_names.get(gpio_num, f"System GPIO {gpio_num}")
                 used_gpios.append({
                     "gpio": gpio_num,
                     "owner": "system",
-                    "component": self._get_system_pin_name(gpio_num),
+                    "component": pin_name,
                     "name": None,
                     "id": None,
                     "source": "static"
