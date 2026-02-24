@@ -71,6 +71,18 @@ jobs:
         working-directory: El Servador/god_kaiser_server
         run: poetry install --no-root --no-interaction
 
+      - name: Install mosquitto clients
+        run: sudo apt-get install -y mosquitto-clients
+
+      - name: Wait for Mosquitto ready
+        run: |
+          for i in $(seq 1 30); do
+            mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok 2>/dev/null && echo "Mosquitto ready" && exit 0
+            echo "Waiting for Mosquitto... ($i/30)"
+            sleep 1
+          done
+          echo "Mosquitto not ready after 30s" && exit 1
+
       - name: Run ESP32 Tests
         working-directory: El Servador/god_kaiser_server
         env:

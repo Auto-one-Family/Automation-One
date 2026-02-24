@@ -274,6 +274,9 @@ class TestSafetyServiceEmergencyStop:
         mock_actuator.max_value = 1.0
         mock_actuator.timeout_seconds = None
         actuator_repo.get_by_esp_and_gpio.return_value = mock_actuator
+        # get_by_esp is called during GPIO conflict check in check_safety_constraints.
+        # Return empty list so no false GPIO-conflict warnings are raised.
+        actuator_repo.get_by_esp.return_value = []
         actuator_repo.get_state.return_value = None
 
         return SafetyService(actuator_repo=actuator_repo, esp_repo=esp_repo)
