@@ -18,6 +18,7 @@ Dependencies:
 - PostgreSQL Database
 """
 
+import os
 import pytest
 import pytest_asyncio
 import uuid
@@ -53,7 +54,14 @@ except ImportError:
     generate_unique_mock_id = None
 
 # Mark all tests as E2E
-pytestmark = [pytest.mark.e2e, pytest.mark.asyncio]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        os.environ.get("CI") == "true",
+        reason="Requires live MQTT/IoT data — TODO: link to Wokwi SIL testing",
+    ),
+]
 
 
 # =============================================================================
