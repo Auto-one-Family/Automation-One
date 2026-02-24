@@ -17,6 +17,17 @@
 #   - Heartbeat GPIO status reporting
 #   - Debug logging
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure sensor:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"GreenhouseTemp","active":true}]}'
+#   Step 2 - Configure actuator (after heartbeat wait):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"IrrigationPump","active":true}]}'
+#   Step 3 - Cause conflict on GPIO 5 (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":5,"sensor_type":"analog","sensor_name":"ConflictTest","active":true}]}'
+#
 # Firmware reference: gpio_manager.cpp lines 113-124
 
 name: GPIO Owner and Component Tracking
@@ -28,22 +39,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure sensor with specific name
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "GreenhouseTemp",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure sensor with specific name (CI helper script)
 
   # Verify allocation message includes component name
   - wait-serial: "GreenhouseTemp"
@@ -54,22 +50,7 @@ steps:
   # Trigger a heartbeat manually or wait for periodic one
   # The heartbeat payload should include gpio_status array
 
-  # Configure actuator with specific name
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "pump",
-              "actuator_name": "IrrigationPump",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure actuator with specific name (CI helper script)
 
   # Verify actuator allocation includes name
   - wait-serial: "IrrigationPump"
@@ -77,21 +58,7 @@ steps:
   # Now try to cause a conflict to verify owner is shown in error
   - delay: 500
 
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 5,
-              "sensor_type": "analog",
-              "sensor_name": "ConflictTest",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: try to use GPIO 5 for sensor (conflict) (CI helper script)
 
   # Verify error message contains the existing owner's component name
   - wait-serial: "IrrigationPump"

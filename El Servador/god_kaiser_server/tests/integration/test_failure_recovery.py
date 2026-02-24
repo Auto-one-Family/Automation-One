@@ -202,14 +202,13 @@ class TestSafetyServiceRecovery:
     @pytest.mark.asyncio
     async def test_concurrent_emergency_operations(self, safety_service):
         """Concurrent stop/clear operations maintain consistency (asyncio.Lock)."""
+
         async def stop_and_clear(esp_id: str):
             await safety_service.emergency_stop_esp(esp_id)
             await safety_service.clear_emergency_stop(esp_id)
 
         # 10 concurrent operations on different ESPs
-        await asyncio.gather(*[
-            stop_and_clear(f"ESP_CONC{i:03d}") for i in range(10)
-        ])
+        await asyncio.gather(*[stop_and_clear(f"ESP_CONC{i:03d}") for i in range(10)])
 
         # All should be cleared
         for i in range(10):
@@ -234,8 +233,6 @@ class TestSafetyServiceRecovery:
         await safety_service.clear_emergency_stop()
 
         # Out-of-range value still rejected
-        result = await safety_service.validate_actuator_command(
-            "ESP_VAL001", 25, "PWM", 1.5
-        )
+        result = await safety_service.validate_actuator_command("ESP_VAL001", 25, "PWM", 1.5)
         assert result.valid is False
         assert "range" in result.error.lower()

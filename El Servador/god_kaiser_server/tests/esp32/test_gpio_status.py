@@ -3,6 +3,7 @@ Tests for GPIO status in Mock ESP32 heartbeat.
 
 Verifies that MockESP32Client produces gpio_status matching real ESP32 behavior.
 """
+
 import pytest
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, BrokerMode
 
@@ -11,9 +12,7 @@ from tests.esp32.mocks.mock_esp32_client import MockESP32Client, BrokerMode
 def mock_esp():
     """Create mock ESP32 with some sensors and actuators."""
     client = MockESP32Client(
-        esp_id="MOCK_GPIO_TEST",
-        kaiser_id="god",
-        broker_mode=BrokerMode.DIRECT
+        esp_id="MOCK_GPIO_TEST", kaiser_id="god", broker_mode=BrokerMode.DIRECT
     )
     return client
 
@@ -58,10 +57,7 @@ class TestMockHeartbeatGpioStatus:
         mock_esp.handle_command("heartbeat", {})
         heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
 
-        actuator_items = [
-            item for item in heartbeat["gpio_status"]
-            if item["owner"] == "actuator"
-        ]
+        actuator_items = [item for item in heartbeat["gpio_status"] if item["owner"] == "actuator"]
         gpio_pins = [item["gpio"] for item in actuator_items]
         assert 14 in gpio_pins, "Actuator GPIO 14 not in gpio_status"
         assert 15 in gpio_pins, "Actuator GPIO 15 not in gpio_status"
@@ -104,8 +100,7 @@ class TestMockHeartbeatGpioStatus:
         heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
 
         actuator_status = next(
-            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14),
-            None
+            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14), None
         )
         assert actuator_status is not None
         assert actuator_status["safe"] is True, "Emergency-stopped actuator should have safe=True"
@@ -117,10 +112,7 @@ class TestMockHeartbeatGpioStatus:
         mock_esp.handle_command("heartbeat", {})
         heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
 
-        system_pins = [
-            item for item in heartbeat["gpio_status"]
-            if item["owner"] == "system"
-        ]
+        system_pins = [item for item in heartbeat["gpio_status"] if item["owner"] == "system"]
         gpio_pins = [item["gpio"] for item in system_pins]
 
         assert 21 in gpio_pins, "I2C_SDA (GPIO 21) should be in gpio_status"
@@ -141,10 +133,7 @@ class TestMockHeartbeatGpioStatus:
         mock_esp.handle_command("heartbeat", {})
         heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
 
-        sensor_status = next(
-            (item for item in heartbeat["gpio_status"] if item["gpio"] == 4),
-            None
-        )
+        sensor_status = next((item for item in heartbeat["gpio_status"] if item["gpio"] == 4), None)
         assert sensor_status is not None
         assert sensor_status["mode"] == 0, "Sensor should have mode=0 (INPUT)"
 
@@ -157,8 +146,7 @@ class TestMockHeartbeatGpioStatus:
         heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
 
         actuator_status = next(
-            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14),
-            None
+            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14), None
         )
         assert actuator_status is not None
         assert actuator_status["mode"] == 1, "Actuator should have mode=1 (OUTPUT)"
@@ -171,8 +159,5 @@ class TestMockHeartbeatGpioStatus:
         mock_esp.handle_command("heartbeat", {})
         heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
 
-        system_pins = [
-            item for item in heartbeat["gpio_status"]
-            if item["owner"] == "system"
-        ]
+        system_pins = [item for item in heartbeat["gpio_status"] if item["owner"] == "system"]
         assert len(system_pins) == 0, "Non-I2C sensors should not add system pins"

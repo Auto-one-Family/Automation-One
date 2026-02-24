@@ -82,6 +82,10 @@ public:
     CircuitState getCircuitBreakerState() const;
     uint8_t getCircuitBreakerFailureCount() const;
 
+    // Sequence number for cross-layer correlation
+    uint32_t getNextSeq();
+    uint32_t getCurrentSeq() const;
+
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)
     // ============================================
@@ -122,6 +126,9 @@ private:
     
     // Circuit Breaker (Phase 6+)
     CircuitBreaker circuit_breaker_;
+
+    // Sequence number for correlation (monotonically increasing per publish)
+    uint32_t publish_seq_;
 
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)

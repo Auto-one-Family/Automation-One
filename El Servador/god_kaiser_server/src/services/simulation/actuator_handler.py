@@ -22,7 +22,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 from ...core.logging_config import get_logger
 from ...core.scheduler import get_central_scheduler, JobCategory
@@ -54,11 +54,7 @@ class MockActuatorHandler:
         use asyncio.Lock for thread-safe async operations.
     """
 
-    def __init__(
-        self,
-        scheduler: "SimulationScheduler",
-        mqtt_publish: Optional[Callable] = None
-    ):
+    def __init__(self, scheduler: "SimulationScheduler", mqtt_publish: Optional[Callable] = None):
         """
         Initialize MockActuatorHandler.
 
@@ -122,8 +118,7 @@ class MockActuatorHandler:
             except json.JSONDecodeError as e:
                 logger.error(f"[MockActuator] Invalid JSON payload: {e}")
                 await self._publish_response(
-                    esp_id, gpio, "UNKNOWN", 0.0, 0, False,
-                    f"Invalid JSON payload: {e}"
+                    esp_id, gpio, "UNKNOWN", 0.0, 0, False, f"Invalid JSON payload: {e}"
                 )
                 return False
 
@@ -134,8 +129,13 @@ class MockActuatorHandler:
                     f"{validation_result['error']}"
                 )
                 await self._publish_response(
-                    esp_id, gpio, payload.get("command", "UNKNOWN"), 0.0, 0, False,
-                    validation_result["error"]
+                    esp_id,
+                    gpio,
+                    payload.get("command", "UNKNOWN"),
+                    0.0,
+                    0,
+                    False,
+                    validation_result["error"],
                 )
                 return False
 
@@ -156,9 +156,7 @@ class MockActuatorHandler:
                 )
 
             # Step 6: Publish response
-            await self._publish_response(
-                esp_id, gpio, command, value, duration, success, message
-            )
+            await self._publish_response(esp_id, gpio, command, value, duration, success, message)
 
             # Step 7: Publish status (only if command succeeded)
             if success:
@@ -235,13 +233,13 @@ class MockActuatorHandler:
     async def emergency_stop(self, esp_id: str, reason: Optional[str] = None) -> bool:
         """
         Trigger emergency stop for a specific ESP (direct API call).
-        
+
         Paket X: Direct emergency stop without MQTT message.
-        
+
         Args:
             esp_id: ESP device ID
             reason: Optional reason for emergency stop
-            
+
         Returns:
             True if emergency stop activated successfully
         """
@@ -249,7 +247,7 @@ class MockActuatorHandler:
         payload = {"reason": reason} if reason else {}
         payload_str = json.dumps(payload)
         topic = f"kaiser/god/esp/{esp_id}/actuator/emergency"
-        
+
         return await self.handle_emergency(topic, payload_str, esp_id)
 
     async def clear_emergency(self, esp_id: str) -> bool:
@@ -335,7 +333,7 @@ class MockActuatorHandler:
                 "error": "Missing required field: command",
                 "command": "",
                 "value": 0.0,
-                "duration": 0
+                "duration": 0,
             }
 
         if command not in VALID_COMMANDS:
@@ -344,7 +342,7 @@ class MockActuatorHandler:
                 "error": f"Unknown command: {command}. Valid: {VALID_COMMANDS}",
                 "command": command,
                 "value": 0.0,
-                "duration": 0
+                "duration": 0,
             }
 
         # Validate value for PWM command
@@ -358,7 +356,7 @@ class MockActuatorHandler:
                         "error": f"PWM value out of range (0.0-1.0): {value}",
                         "command": command,
                         "value": value,
-                        "duration": 0
+                        "duration": 0,
                     }
             except (ValueError, TypeError):
                 return {
@@ -366,7 +364,7 @@ class MockActuatorHandler:
                     "error": f"PWM value must be numeric: {value}",
                     "command": command,
                     "value": 0.0,
-                    "duration": 0
+                    "duration": 0,
                 }
 
         # Validate duration (optional, default 0 = unlimited)
@@ -383,7 +381,7 @@ class MockActuatorHandler:
             "error": "",
             "command": command,
             "value": float(value),
-            "duration": duration
+            "duration": duration,
         }
 
     # ================================================================
@@ -391,12 +389,7 @@ class MockActuatorHandler:
     # ================================================================
 
     async def _execute_command(
-        self,
-        esp_id: str,
-        gpio: int,
-        command: str,
-        value: float,
-        duration: int
+        self, esp_id: str, gpio: int, command: str, value: float, duration: int
     ) -> Tuple[bool, str]:
         """
         Execute actuator command and update runtime state.
@@ -445,7 +438,7 @@ class MockActuatorHandler:
 
         elif command == "PWM":
             pwm_value = int(value * 255)
-            runtime.actuator_states[gpio] = (pwm_value > 0)
+            runtime.actuator_states[gpio] = pwm_value > 0
             runtime.actuator_pwm_values[gpio] = pwm_value
             runtime.last_commands[gpio] = "PWM"
             message = f"PWM set to {pwm_value} ({value:.2%})"
@@ -499,7 +492,7 @@ class MockActuatorHandler:
             func=self._auto_off_callback,
             run_at=run_at,
             args=[esp_id, gpio],
-            category=JobCategory.MOCK_ESP
+            category=JobCategory.MOCK_ESP,
         )
 
         logger.debug(
@@ -558,7 +551,7 @@ class MockActuatorHandler:
         value: float,
         duration: int,
         success: bool,
-        message: str
+        message: str,
     ) -> bool:
         """
         Publish actuator command response to MQTT.
@@ -596,14 +589,13 @@ class MockActuatorHandler:
             "value": round(value, 3),
             "duration": duration,
             "success": success,
-            "message": message
+            "message": message,
         }
 
         try:
             self._mqtt_publish(topic, payload, 1)
             logger.debug(
-                f"[MockActuator] Published response: {esp_id} GPIO {gpio} "
-                f"success={success}"
+                f"[MockActuator] Published response: {esp_id} GPIO {gpio} " f"success={success}"
             )
             return True
         except Exception as e:
@@ -660,7 +652,7 @@ class MockActuatorHandler:
             "last_command": last_command,
             "runtime_ms": runtime_ms,
             "emergency": emergency,
-            "error": None
+            "error": None,
         }
 
         try:
@@ -710,11 +702,7 @@ class MockActuatorHandler:
     # ACTUATOR INITIALIZATION
     # ================================================================
 
-    async def initialize_actuators(
-        self,
-        esp_id: str,
-        runtime: "MockESPRuntime"
-    ) -> int:
+    async def initialize_actuators(self, esp_id: str, runtime: "MockESPRuntime") -> int:
         """
         Initialize actuator states from database configuration.
 
@@ -767,4 +755,3 @@ class MockActuatorHandler:
         except Exception as e:
             logger.error(f"[MockActuator] Failed to initialize actuators: {e}", exc_info=True)
             return 0
-

@@ -7,6 +7,7 @@ These models are the contract between ESP32 and Server.
 Phase 2 (2026-01-15): Added tests for Arduino pinMode normalization.
 ESP32 sends Arduino values (1, 2, 5), server normalizes to protocol (0, 1, 2).
 """
+
 import pytest
 from pydantic import ValidationError
 from src.schemas.esp import GpioStatusItem, GpioStatusList
@@ -22,7 +23,7 @@ class TestGpioStatusItem:
             owner="sensor",
             component="DS18B20",
             mode=0,  # INPUT for sensors (protocol value)
-            safe=False
+            safe=False,
         )
         assert item.gpio == 4
         assert item.owner == "sensor"
@@ -37,7 +38,7 @@ class TestGpioStatusItem:
             owner="actuator",
             component="pump_main",
             mode=2,  # Arduino OUTPUT (2) → normalizes to Protocol OUTPUT (1)
-            safe=False
+            safe=False,
         )
         assert item.owner == "actuator"
         assert item.mode == 1, "Arduino OUTPUT (2) should normalize to Protocol OUTPUT (1)"
@@ -49,7 +50,7 @@ class TestGpioStatusItem:
             owner="system",
             component="I2C_SDA",
             mode=1,  # Arduino INPUT (1) → normalizes to Protocol INPUT (0)
-            safe=False
+            safe=False,
         )
         assert item.owner == "system"
         assert item.mode == 0, "Arduino INPUT (1) should normalize to Protocol INPUT (0)"
@@ -62,7 +63,7 @@ class TestGpioStatusItem:
                 owner="invalid",  # Must be sensor/actuator/system
                 component="test",
                 mode=1,
-                safe=False
+                safe=False,
             )
         assert "owner" in str(exc.value).lower()
 
@@ -107,25 +108,21 @@ class TestGpioStatusItem:
             owner="sensor",
             component="a" * 32,
             mode=0,  # Protocol INPUT (0) - passes through unchanged
-            safe=False
+            safe=False,
         )
         assert len(item.component) == 32
 
         # Invalid - too long
         with pytest.raises(ValidationError):
             GpioStatusItem(
-                gpio=4,
-                owner="sensor",
-                component="a" * 33,
-                mode=0,  # Protocol INPUT (0)
-                safe=False
+                gpio=4, owner="sensor", component="a" * 33, mode=0, safe=False  # Protocol INPUT (0)
             )
 
 
 class TestGpioModeNormalization:
     """
     Test suite for GPIO mode normalization (Phase 2).
-    
+
     Arduino pinMode values (1, 2, 5) are normalized to protocol values (0, 1, 2).
     This allows deployed ESPs to send raw Arduino values without breaking.
     """
@@ -133,11 +130,7 @@ class TestGpioModeNormalization:
     def test_arduino_input_normalized_to_zero(self):
         """Arduino INPUT (1) should normalize to protocol INPUT (0)."""
         item = GpioStatusItem(
-            gpio=21,
-            owner="sensor",
-            component="DHT22",
-            mode=1,  # Arduino INPUT (0x01)
-            safe=False
+            gpio=21, owner="sensor", component="DHT22", mode=1, safe=False  # Arduino INPUT (0x01)
         )
         assert item.mode == 0, "Arduino INPUT (1) should normalize to protocol 0"
 
@@ -148,7 +141,7 @@ class TestGpioModeNormalization:
             owner="actuator",
             component="Relay",
             mode=2,  # Arduino OUTPUT (0x02)
-            safe=False
+            safe=False,
         )
         assert item.mode == 1, "Arduino OUTPUT (2) should normalize to protocol 1"
 
@@ -159,35 +152,29 @@ class TestGpioModeNormalization:
             owner="sensor",
             component="Button",
             mode=5,  # Arduino INPUT_PULLUP (0x05)
-            safe=True
+            safe=True,
         )
         assert item.mode == 2, "Arduino INPUT_PULLUP (5) should normalize to protocol 2"
 
     def test_protocol_zero_passes_through(self):
         """
         Protocol INPUT (0) passes through unchanged.
-        
-        Value 0 has no Arduino equivalent, so it's always treated as 
+
+        Value 0 has no Arduino equivalent, so it's always treated as
         already-normalized Protocol INPUT.
         """
-        item = GpioStatusItem(
-            gpio=21,
-            owner="system",
-            component="Test",
-            mode=0,
-            safe=False
-        )
+        item = GpioStatusItem(gpio=21, owner="system", component="Test", mode=0, safe=False)
         assert item.mode == 0, "Protocol INPUT (0) should pass through unchanged"
 
     def test_normalization_is_idempotent(self):
         """
         After normalization, re-validating the normalized value should be stable.
-        
+
         Protocol values 0, 1, 2 (after normalization) should stay stable:
         - 0 → 0 (no Arduino equivalent)
         - 1 → 0 (would be treated as Arduino INPUT, but we document this)
         - 2 → 1 (would be treated as Arduino OUTPUT, but we document this)
-        
+
         Note: This test documents that values 1 and 2 are ALWAYS treated as
         Arduino values. If a system needs to send already-normalized data,
         it should not re-validate through this model.
@@ -195,22 +182,25 @@ class TestGpioModeNormalization:
         # Value 0 is stable
         item = GpioStatusItem(gpio=21, owner="system", component="Test", mode=0, safe=False)
         assert item.mode == 0
-        
+
         # Re-validate: 0 → 0 (stable)
-        item2 = GpioStatusItem(gpio=21, owner="system", component="Test", mode=item.mode, safe=False)
+        item2 = GpioStatusItem(
+            gpio=21, owner="system", component="Test", mode=item.mode, safe=False
+        )
         assert item2.mode == 0
 
     def test_unknown_mode_passes_through_with_warning(self, caplog):
         """Unknown mode values should pass through but log warning."""
         import logging
+
         caplog.set_level(logging.WARNING)
-        
+
         item = GpioStatusItem(
             gpio=21,
             owner="system",
             component="Unknown",
             mode=99,  # Unknown mode - not Arduino or protocol
-            safe=False
+            safe=False,
         )
         assert item.mode == 99, "Unknown mode should pass through unchanged"
         assert "Unknown GPIO mode value: 99" in caplog.text
@@ -219,11 +209,7 @@ class TestGpioModeNormalization:
         """Mode values >255 should be rejected (uint8 overflow)."""
         with pytest.raises(ValidationError) as exc_info:
             GpioStatusItem(
-                gpio=21,
-                owner="system",
-                component="Test",
-                mode=256,  # Exceeds uint8
-                safe=False
+                gpio=21, owner="system", component="Test", mode=256, safe=False  # Exceeds uint8
             )
         error_str = str(exc_info.value)
         assert "mode" in error_str.lower()
@@ -232,13 +218,7 @@ class TestGpioModeNormalization:
     def test_negative_mode_rejected(self):
         """Negative mode values should be rejected."""
         with pytest.raises(ValidationError) as exc_info:
-            GpioStatusItem(
-                gpio=21,
-                owner="system",
-                component="Test",
-                mode=-1,
-                safe=False
-            )
+            GpioStatusItem(gpio=21, owner="system", component="Test", mode=-1, safe=False)
         error_str = str(exc_info.value)
         assert "mode" in error_str.lower()
         assert "0" in error_str or "greater" in error_str.lower()
@@ -246,12 +226,12 @@ class TestGpioModeNormalization:
     def test_real_esp_heartbeat_scenario(self):
         """
         Test realistic ESP32 heartbeat scenario.
-        
+
         ESP32 sends:
           - mode=5 for INPUT_PULLUP sensors (OneWire, I2C)
           - mode=2 for OUTPUT actuators (relays, pumps)
           - mode=1 for INPUT sensors (ADC, digital)
-        
+
         Server should normalize all to protocol values.
         """
         # Simulate ESP32 heartbeat gpio_status array
@@ -269,7 +249,7 @@ class TestGpioModeNormalization:
 
         # Expected protocol values after normalization
         expected_modes = {
-            4: 2,   # INPUT_PULLUP: 5 → 2
+            4: 2,  # INPUT_PULLUP: 5 → 2
             21: 0,  # INPUT: 1 → 0
             22: 0,  # INPUT: 1 → 0
             14: 1,  # OUTPUT: 2 → 1
@@ -312,7 +292,7 @@ class TestGpioStatusList:
             gpio_status=[
                 GpioStatusItem(gpio=4, owner="sensor", component="test", mode=0, safe=False)
             ],
-            gpio_reserved_count=5  # Wrong count - should be accepted
+            gpio_reserved_count=5,  # Wrong count - should be accepted
         )
         # Should still work - count is just metadata
         assert len(gpio_list.gpio_status) == 1

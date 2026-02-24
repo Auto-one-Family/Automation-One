@@ -128,7 +128,7 @@ Count matches
 [LIST FROM PARSING]
 
 ### Profiles (2 Expected)
-- monitoring (loki, promtail, prometheus, grafana, postgres-exporter, mosquitto-exporter)
+- monitoring (loki, alloy, prometheus, grafana, postgres-exporter, mosquitto-exporter)
 - devtools (pgadmin)
 
 ### Port Mappings

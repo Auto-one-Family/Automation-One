@@ -75,7 +75,7 @@ class ZoneAssignRequest(BaseModel):
             "example": {
                 "zone_id": "greenhouse_zone_1",
                 "master_zone_id": "greenhouse_master",
-                "zone_name": "Greenhouse Section 1"
+                "zone_name": "Greenhouse Section 1",
             }
         }
     )
@@ -129,7 +129,7 @@ class ZoneAssignResponse(BaseResponse):
                 "master_zone_id": "greenhouse_master",
                 "zone_name": "Greenhouse Section 1",
                 "mqtt_topic": "kaiser/god/esp/ESP_12AB34CD/zone/assign",
-                "mqtt_sent": True
+                "mqtt_sent": True,
             }
         }
     )
@@ -164,7 +164,7 @@ class ZoneRemoveResponse(BaseResponse):
                 "message": "Zone removal sent to ESP",
                 "device_id": "ESP_12AB34CD",
                 "mqtt_topic": "kaiser/god/esp/ESP_12AB34CD/zone/assign",
-                "mqtt_sent": True
+                "mqtt_sent": True,
             }
         }
     )
@@ -231,7 +231,7 @@ class ZoneAckPayload(BaseModel):
                 "status": "zone_assigned",
                 "zone_id": "greenhouse_zone_1",
                 "master_zone_id": "greenhouse_master",
-                "ts": 1734523800
+                "ts": 1734523800,
             }
         }
     )
@@ -287,7 +287,7 @@ class ZoneInfo(BaseModel):
                 "master_zone_id": "greenhouse_master",
                 "zone_name": "Greenhouse Section 1",
                 "is_zone_master": False,
-                "kaiser_id": "god"
+                "kaiser_id": "god",
             }
-        }
+        },
     )

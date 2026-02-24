@@ -217,7 +217,9 @@ class TestBatchSensorOrdering:
         esp.handle_command("sensor_read", {"gpio": 35})
 
         messages = esp.get_published_messages()
-        sensor_msgs = {m["payload"]["gpio"]: m["payload"] for m in messages if "/sensor/" in m["topic"]}
+        sensor_msgs = {
+            m["payload"]["gpio"]: m["payload"] for m in messages if "/sensor/" in m["topic"]
+        }
 
         assert sensor_msgs[34]["value"] == 22.0
         assert sensor_msgs[35]["value"] == 65.0

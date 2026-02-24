@@ -205,13 +205,9 @@ class MoistureSensorProcessor(BaseSensorProcessor):
         # Warning if value is near extremes (might indicate sensor issues)
         warnings = []
         if raw_value < 100:
-            warnings.append(
-                "Very low ADC value (<100) - sensor may be disconnected or in water"
-            )
+            warnings.append("Very low ADC value (<100) - sensor may be disconnected or in water")
         elif raw_value > 4000:
-            warnings.append(
-                "Very high ADC value (>4000) - sensor may be disconnected or very dry"
-            )
+            warnings.append("Very high ADC value (>4000) - sensor may be disconnected or very dry")
 
         return ValidationResult(valid=True, warnings=warnings if warnings else None)
 
@@ -375,7 +371,9 @@ class MoistureSensorProcessor(BaseSensorProcessor):
         DEFAULT_DRY_VALUE = 3200.0
         DEFAULT_WET_VALUE = 1500.0
 
-        moisture = ((adc_value - DEFAULT_DRY_VALUE) / (DEFAULT_WET_VALUE - DEFAULT_DRY_VALUE)) * 100.0
+        moisture = (
+            (adc_value - DEFAULT_DRY_VALUE) / (DEFAULT_WET_VALUE - DEFAULT_DRY_VALUE)
+        ) * 100.0
 
         return moisture
 

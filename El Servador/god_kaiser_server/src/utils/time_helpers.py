@@ -11,7 +11,7 @@ import time
 def unix_timestamp_ms() -> int:
     """
     Get current Unix timestamp in milliseconds.
-    
+
     Returns:
         Current Unix timestamp in milliseconds (int)
     """
@@ -21,7 +21,7 @@ def unix_timestamp_ms() -> int:
 def unix_timestamp_s() -> int:
     """
     Get current Unix timestamp in seconds.
-    
+
     Returns:
         Current Unix timestamp in seconds (int)
     """
@@ -31,13 +31,13 @@ def unix_timestamp_s() -> int:
 def parse_timestamp(timestamp: Union[int, str]) -> datetime:
     """
     Parse timestamp from Unix seconds or ISO string.
-    
+
     Args:
         timestamp: Unix timestamp (int, seconds) or ISO format string
-        
+
     Returns:
         datetime object
-        
+
     Raises:
         ValueError: If timestamp format is invalid
     """
@@ -62,10 +62,10 @@ def parse_timestamp(timestamp: Union[int, str]) -> datetime:
 def format_timestamp(dt: datetime) -> str:
     """
     Format datetime to ISO string.
-    
+
     Args:
         dt: datetime object to format
-        
+
     Returns:
         ISO format string (e.g., "2025-01-29T12:34:56.789Z")
     """

@@ -30,17 +30,17 @@ from ..core.base_plugin import (
     PluginCapability,
     PluginResult,
 )
-from ..core.context import AutoOpsContext, ESPSpec, SensorSpec, ActuatorSpec
+from ..core.context import AutoOpsContext, DeviceMode, SensorSpec, ActuatorSpec
 
 
 # GPIO Assignment Tables (ESP32 WROOM defaults)
 # These mirror the GpioPicker component in the frontend
-GPIO_ONEWIRE = [4]                    # OneWire bus default
-GPIO_I2C_SDA = [21]                   # I2C SDA default
-GPIO_I2C_SCL = [22]                   # I2C SCL default
+GPIO_ONEWIRE = [4]  # OneWire bus default
+GPIO_I2C_SDA = [21]  # I2C SDA default
+GPIO_I2C_SCL = [22]  # I2C SCL default
 GPIO_ANALOG = [32, 33, 34, 35, 36, 39]  # ADC1 pins (safe for analog read)
-GPIO_DIGITAL_OUT = [16, 17, 18, 19]   # Safe digital output pins
-GPIO_PWM = [25, 26, 27]              # PWM-capable pins
+GPIO_DIGITAL_OUT = [16, 17, 18, 19]  # Safe digital output pins
+GPIO_PWM = [25, 26, 27]  # PWM-capable pins
 GPIO_GENERAL = [5, 12, 13, 14, 15, 23]  # General-purpose pins
 
 # XIAO ESP32-C3 alternative GPIO map
@@ -110,9 +110,7 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             f"Ready to configure {len(context.esp_specs)} ESP device(s)"
         )
 
-    async def plan(
-        self, context: AutoOpsContext, client: GodKaiserClient
-    ) -> list[str]:
+    async def plan(self, context: AutoOpsContext, client: GodKaiserClient) -> list[str]:
         """Generate execution plan."""
         steps = []
         for i, spec in enumerate(context.esp_specs, 1):
@@ -128,9 +126,7 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             steps.append(f"  Verify Configuration")
         return steps
 
-    async def execute(
-        self, context: AutoOpsContext, client: GodKaiserClient
-    ) -> PluginResult:
+    async def execute(self, context: AutoOpsContext, client: GodKaiserClient) -> PluginResult:
         """Execute full ESP configuration workflow."""
         actions: list[PluginAction] = []
         errors: list[str] = []
@@ -141,15 +137,28 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             device_name = spec.name or f"AutoOps_ESP_{spec_idx + 1}"
 
             # =============================================
-            # Step 1: Create Mock ESP
+            # Step 1: Create ESP (mock or real based on device_mode)
             # =============================================
+            esp_mode = spec.device_mode or context.device_mode
             try:
-                create_result = await client.create_mock_esp(
-                    name=device_name,
-                    hardware_type=spec.hardware_type,
-                    device_id=spec.device_id,
-                    zone_name=spec.zone_name,
-                )
+                if esp_mode == DeviceMode.REAL:
+                    # Real device: register via ESP devices API
+                    create_result = await client.register_real_device(
+                        device_id=spec.device_id or device_name.replace(" ", "_").upper(),
+                        name=device_name,
+                        hardware_type=spec.hardware_type,
+                    )
+                    action_label = "Register Real ESP"
+                else:
+                    # Mock device: create via debug API
+                    create_result = await client.create_mock_esp(
+                        name=device_name,
+                        hardware_type=spec.hardware_type,
+                        device_id=spec.device_id,
+                        zone_name=spec.zone_name,
+                    )
+                    action_label = "Create Mock ESP"
+
                 device_id = (
                     create_result.get("device_id")
                     or create_result.get("data", {}).get("device_id")
@@ -162,28 +171,41 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
                             device_id = create_result[key].get("device_id", "")
                             break
 
-                actions.append(PluginAction.create(
-                    action="Create Mock ESP",
-                    target=device_id or device_name,
-                    details={"hardware_type": spec.hardware_type, "response": create_result},
-                    result=f"Created: {device_id}",
-                    severity=ActionSeverity.SUCCESS,
-                ))
-                context.created_devices.append({
-                    "device_id": device_id,
-                    "name": device_name,
-                    "hardware_type": spec.hardware_type,
-                })
+                actions.append(
+                    PluginAction.create(
+                        action=action_label,
+                        target=device_id or device_name,
+                        details={
+                            "hardware_type": spec.hardware_type,
+                            "device_mode": esp_mode.value,
+                            "response": create_result,
+                        },
+                        result=f"Created ({esp_mode.value}): {device_id}",
+                        severity=ActionSeverity.SUCCESS,
+                    )
+                )
+                context.created_devices.append(
+                    {
+                        "device_id": device_id,
+                        "name": device_name,
+                        "hardware_type": spec.hardware_type,
+                        "device_mode": esp_mode.value,
+                    }
+                )
 
             except APIError as e:
-                actions.append(PluginAction.create(
-                    action="Create Mock ESP",
-                    target=device_name,
-                    details={"error": e.detail},
-                    result=f"FAILED: {e.detail}",
-                    severity=ActionSeverity.ERROR,
-                ))
-                errors.append(f"Failed to create ESP '{device_name}': {e.detail}")
+                actions.append(
+                    PluginAction.create(
+                        action=f"Create ESP ({esp_mode.value})",
+                        target=device_name,
+                        details={"error": e.detail, "device_mode": esp_mode.value},
+                        result=f"FAILED: {e.detail}",
+                        severity=ActionSeverity.ERROR,
+                    )
+                )
+                errors.append(
+                    f"Failed to create ESP '{device_name}' ({esp_mode.value}): {e.detail}"
+                )
                 continue  # Skip to next ESP spec
 
             # =============================================
@@ -193,13 +215,10 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             is_xiao = "XIAO" in spec.hardware_type.upper()
 
             for sensor_idx, sensor_spec in enumerate(spec.sensors):
-                gpio = self._assign_sensor_gpio(
-                    sensor_spec, used_gpios, is_xiao
-                )
+                gpio = self._assign_sensor_gpio(sensor_spec, used_gpios, is_xiao)
                 if gpio is None:
                     warnings.append(
-                        f"No available GPIO for sensor {sensor_spec.sensor_type} "
-                        f"on {device_id}"
+                        f"No available GPIO for sensor {sensor_spec.sensor_type} " f"on {device_id}"
                     )
                     continue
 
@@ -211,23 +230,26 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
                 unit = sensor_spec.unit or defaults.get("unit", "")
 
                 try:
-                    # Add to mock ESP (via Debug API)
-                    mock_result = await client.add_mock_sensor(
-                        esp_id=device_id,
-                        gpio=gpio,
-                        sensor_type=sensor_spec.sensor_type,
-                        name=sensor_spec.name,
-                        raw_value=raw_value,
-                        unit=unit,
-                        interval_seconds=sensor_spec.interval_seconds,
-                        interface_type=sensor_spec.interface_type,
-                        i2c_address=sensor_spec.i2c_address,
-                        onewire_address=sensor_spec.onewire_address,
-                    )
+                    # Add mock sensor via Debug API (only for mock devices)
+                    if esp_mode != DeviceMode.REAL:
+                        _mock_result = await client.add_mock_sensor(
+                            esp_id=device_id,
+                            gpio=gpio,
+                            sensor_type=sensor_spec.sensor_type,
+                            name=sensor_spec.name,
+                            raw_value=raw_value,
+                            unit=unit,
+                            interval_seconds=sensor_spec.interval_seconds,
+                            interface_type=sensor_spec.interface_type,
+                            i2c_address=sensor_spec.i2c_address,
+                            onewire_address=sensor_spec.onewire_address,
+                            variation_pattern=sensor_spec.variation_pattern.value,
+                            variation_range=sensor_spec.variation_range,
+                        )
 
-                    # Also register in sensor config (via Sensor API)
+                    # Register in sensor config (via Sensor API) - for both mock and real
                     try:
-                        sensor_result = await client.add_sensor(
+                        _sensor_result = await client.add_sensor(
                             esp_id=device_id,
                             gpio=gpio,
                             sensor_type=sensor_spec.sensor_type,
@@ -240,41 +262,47 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
                             onewire_address=sensor_spec.onewire_address,
                         )
                     except APIError as e:
-                        # Mock sensor added but config registration failed - not critical
+                        # Config registration failed - not critical for mocks
                         warnings.append(
                             f"Sensor config registration failed for "
                             f"{sensor_spec.sensor_type}@GPIO{gpio}: {e.detail}"
                         )
 
-                    actions.append(PluginAction.create(
-                        action=f"Add Sensor ({sensor_spec.sensor_type})",
-                        target=f"{device_id}/GPIO:{gpio}",
-                        details={
+                    actions.append(
+                        PluginAction.create(
+                            action=f"Add Sensor ({sensor_spec.sensor_type})",
+                            target=f"{device_id}/GPIO:{gpio}",
+                            details={
+                                "sensor_type": sensor_spec.sensor_type,
+                                "name": sensor_spec.name,
+                                "gpio": gpio,
+                                "raw_value": raw_value,
+                                "unit": unit,
+                                "interface": sensor_spec.interface_type,
+                            },
+                            result=f"Added: {sensor_spec.sensor_type} on GPIO {gpio}",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
+                    context.configured_sensors.append(
+                        {
+                            "device_id": device_id,
+                            "gpio": gpio,
                             "sensor_type": sensor_spec.sensor_type,
                             "name": sensor_spec.name,
-                            "gpio": gpio,
-                            "raw_value": raw_value,
-                            "unit": unit,
-                            "interface": sensor_spec.interface_type,
-                        },
-                        result=f"Added: {sensor_spec.sensor_type} on GPIO {gpio}",
-                        severity=ActionSeverity.SUCCESS,
-                    ))
-                    context.configured_sensors.append({
-                        "device_id": device_id,
-                        "gpio": gpio,
-                        "sensor_type": sensor_spec.sensor_type,
-                        "name": sensor_spec.name,
-                    })
+                        }
+                    )
 
                 except APIError as e:
-                    actions.append(PluginAction.create(
-                        action=f"Add Sensor ({sensor_spec.sensor_type})",
-                        target=f"{device_id}/GPIO:{gpio}",
-                        details={"error": e.detail},
-                        result=f"FAILED: {e.detail}",
-                        severity=ActionSeverity.ERROR,
-                    ))
+                    actions.append(
+                        PluginAction.create(
+                            action=f"Add Sensor ({sensor_spec.sensor_type})",
+                            target=f"{device_id}/GPIO:{gpio}",
+                            details={"error": e.detail},
+                            result=f"FAILED: {e.detail}",
+                            severity=ActionSeverity.ERROR,
+                        )
+                    )
                     errors.append(
                         f"Failed to add sensor {sensor_spec.sensor_type} "
                         f"on GPIO {gpio}: {e.detail}"
@@ -284,9 +312,7 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             # Step 3: Assign GPIOs and Add Actuators
             # =============================================
             for act_idx, act_spec in enumerate(spec.actuators):
-                gpio = self._assign_actuator_gpio(
-                    act_spec, used_gpios, is_xiao
-                )
+                gpio = self._assign_actuator_gpio(act_spec, used_gpios, is_xiao)
                 if gpio is None:
                     warnings.append(
                         f"No available GPIO for actuator {act_spec.actuator_type} "
@@ -297,17 +323,18 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
                 used_gpios.add(gpio)
 
                 try:
-                    # Add to mock ESP (via Debug API)
-                    mock_result = await client.add_mock_actuator(
-                        esp_id=device_id,
-                        gpio=gpio,
-                        actuator_type=act_spec.actuator_type,
-                        name=act_spec.name,
-                    )
+                    # Add mock actuator via Debug API (only for mock devices)
+                    if esp_mode != DeviceMode.REAL:
+                        _mock_result = await client.add_mock_actuator(
+                            esp_id=device_id,
+                            gpio=gpio,
+                            actuator_type=act_spec.actuator_type,
+                            name=act_spec.name,
+                        )
 
-                    # Also register in actuator config (via Actuator API)
+                    # Register in actuator config (via Actuator API) - for both mock and real
                     try:
-                        act_result = await client.add_actuator(
+                        _act_result = await client.add_actuator(
                             esp_id=device_id,
                             gpio=gpio,
                             actuator_type=act_spec.actuator_type,
@@ -320,85 +347,98 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
                             f"{act_spec.actuator_type}@GPIO{gpio}: {e.detail}"
                         )
 
-                    actions.append(PluginAction.create(
-                        action=f"Add Actuator ({act_spec.actuator_type})",
-                        target=f"{device_id}/GPIO:{gpio}",
-                        details={
+                    actions.append(
+                        PluginAction.create(
+                            action=f"Add Actuator ({act_spec.actuator_type})",
+                            target=f"{device_id}/GPIO:{gpio}",
+                            details={
+                                "actuator_type": act_spec.actuator_type,
+                                "name": act_spec.name,
+                                "gpio": gpio,
+                            },
+                            result=f"Added: {act_spec.actuator_type} on GPIO {gpio}",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
+                    context.configured_actuators.append(
+                        {
+                            "device_id": device_id,
+                            "gpio": gpio,
                             "actuator_type": act_spec.actuator_type,
                             "name": act_spec.name,
-                            "gpio": gpio,
-                        },
-                        result=f"Added: {act_spec.actuator_type} on GPIO {gpio}",
-                        severity=ActionSeverity.SUCCESS,
-                    ))
-                    context.configured_actuators.append({
-                        "device_id": device_id,
-                        "gpio": gpio,
-                        "actuator_type": act_spec.actuator_type,
-                        "name": act_spec.name,
-                    })
+                        }
+                    )
 
                 except APIError as e:
-                    actions.append(PluginAction.create(
-                        action=f"Add Actuator ({act_spec.actuator_type})",
-                        target=f"{device_id}/GPIO:{gpio}",
-                        details={"error": e.detail},
-                        result=f"FAILED: {e.detail}",
-                        severity=ActionSeverity.ERROR,
-                    ))
+                    actions.append(
+                        PluginAction.create(
+                            action=f"Add Actuator ({act_spec.actuator_type})",
+                            target=f"{device_id}/GPIO:{gpio}",
+                            details={"error": e.detail},
+                            result=f"FAILED: {e.detail}",
+                            severity=ActionSeverity.ERROR,
+                        )
+                    )
                     errors.append(
                         f"Failed to add actuator {act_spec.actuator_type} "
                         f"on GPIO {gpio}: {e.detail}"
                     )
 
             # =============================================
-            # Step 4: Enable Auto-Heartbeat
+            # Step 4: Enable Auto-Heartbeat (mock only)
             # =============================================
-            if spec.auto_heartbeat:
+            if spec.auto_heartbeat and esp_mode != DeviceMode.REAL:
                 try:
                     await client.set_auto_heartbeat(
                         device_id,
                         enabled=True,
                         interval_seconds=spec.heartbeat_interval,
                     )
-                    actions.append(PluginAction.create(
-                        action="Enable Auto-Heartbeat",
-                        target=device_id,
-                        details={"interval": spec.heartbeat_interval},
-                        result=f"Enabled ({spec.heartbeat_interval}s interval)",
-                        severity=ActionSeverity.SUCCESS,
-                    ))
+                    actions.append(
+                        PluginAction.create(
+                            action="Enable Auto-Heartbeat",
+                            target=device_id,
+                            details={"interval": spec.heartbeat_interval},
+                            result=f"Enabled ({spec.heartbeat_interval}s interval)",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
                 except APIError as e:
                     warnings.append(f"Auto-heartbeat setup failed for {device_id}: {e.detail}")
 
             # =============================================
-            # Step 5: Trigger Initial Heartbeat
+            # Step 5: Trigger Initial Heartbeat (mock only)
             # =============================================
-            try:
-                await client.trigger_heartbeat(device_id)
-                actions.append(PluginAction.create(
-                    action="Trigger Initial Heartbeat",
-                    target=device_id,
-                    details={},
-                    result="Heartbeat sent",
-                    severity=ActionSeverity.SUCCESS,
-                ))
-            except APIError as e:
-                warnings.append(f"Initial heartbeat failed for {device_id}: {e.detail}")
+            if esp_mode != DeviceMode.REAL:
+                try:
+                    await client.trigger_heartbeat(device_id)
+                    actions.append(
+                        PluginAction.create(
+                            action="Trigger Initial Heartbeat",
+                            target=device_id,
+                            details={},
+                            result="Heartbeat sent",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
+                except APIError as e:
+                    warnings.append(f"Initial heartbeat failed for {device_id}: {e.detail}")
 
             # =============================================
-            # Step 6: Start Simulation (if sensors exist)
+            # Step 6: Start Simulation (mock only, if sensors exist)
             # =============================================
-            if spec.sensors:
+            if spec.sensors and esp_mode != DeviceMode.REAL:
                 try:
                     await client.start_simulation(device_id)
-                    actions.append(PluginAction.create(
-                        action="Start Sensor Simulation",
-                        target=device_id,
-                        details={"sensor_count": len(spec.sensors)},
-                        result="Simulation started",
-                        severity=ActionSeverity.SUCCESS,
-                    ))
+                    actions.append(
+                        PluginAction.create(
+                            action="Start Sensor Simulation",
+                            target=device_id,
+                            details={"sensor_count": len(spec.sensors)},
+                            result="Simulation started",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
                 except APIError as e:
                     warnings.append(f"Simulation start failed for {device_id}: {e.detail}")
 
@@ -407,21 +447,25 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             # =============================================
             try:
                 device_info = await client.get_device(device_id)
-                actions.append(PluginAction.create(
-                    action="Verify Configuration",
-                    target=device_id,
-                    details={"device_info": device_info},
-                    result="Configuration verified",
-                    severity=ActionSeverity.SUCCESS,
-                ))
-                created_data["devices"].append({
-                    "device_id": device_id,
-                    "name": device_name,
-                    "sensors_configured": len(spec.sensors),
-                    "actuators_configured": len(spec.actuators),
-                    "zone": spec.zone_name,
-                    "status": "configured",
-                })
+                actions.append(
+                    PluginAction.create(
+                        action="Verify Configuration",
+                        target=device_id,
+                        details={"device_info": device_info},
+                        result="Configuration verified",
+                        severity=ActionSeverity.SUCCESS,
+                    )
+                )
+                created_data["devices"].append(
+                    {
+                        "device_id": device_id,
+                        "name": device_name,
+                        "sensors_configured": len(spec.sensors),
+                        "actuators_configured": len(spec.actuators),
+                        "zone": spec.zone_name,
+                        "status": "configured",
+                    }
+                )
             except APIError as e:
                 warnings.append(f"Verification failed for {device_id}: {e.detail}")
 
@@ -450,6 +494,55 @@ class ESPConfiguratorPlugin(AutoOpsPlugin):
             ),
             actions=actions,
             data=created_data,
+        )
+
+    async def rollback(
+        self,
+        context: AutoOpsContext,
+        client: GodKaiserClient,
+        actions: list[PluginAction],
+    ) -> PluginResult:
+        """Rollback: delete devices created during this execution."""
+        rollback_actions: list[PluginAction] = []
+        errors: list[str] = []
+
+        for device_info in context.created_devices:
+            device_id = device_info.get("device_id", "")
+            device_mode = device_info.get("device_mode", "mock")
+            if not device_id:
+                continue
+
+            try:
+                if device_mode == "mock":
+                    await client.delete_mock_esp(device_id)
+                else:
+                    await client.delete_device(device_id)
+                rollback_actions.append(
+                    PluginAction.create(
+                        action=f"Rollback: Delete {device_mode} ESP",
+                        target=device_id,
+                        details={},
+                        result="Deleted",
+                        severity=ActionSeverity.SUCCESS,
+                    )
+                )
+            except APIError as e:
+                errors.append(f"Rollback failed for {device_id}: {e.detail}")
+
+        # Clear context
+        context.created_devices.clear()
+        context.configured_sensors.clear()
+        context.configured_actuators.clear()
+
+        if errors:
+            return PluginResult.failure(
+                f"Rollback partially failed: {len(errors)} error(s)",
+                errors=errors,
+                actions=rollback_actions,
+            )
+        return PluginResult.success_result(
+            f"Rollback complete: {len(rollback_actions)} device(s) removed",
+            actions=rollback_actions,
         )
 
     def _assign_sensor_gpio(

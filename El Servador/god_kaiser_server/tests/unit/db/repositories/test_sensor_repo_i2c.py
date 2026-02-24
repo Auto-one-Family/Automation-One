@@ -42,9 +42,7 @@ class TestSensorRepoI2CLookup:
         await db_session.flush()
 
         # Query with 4-way lookup
-        result = await repo.get_by_esp_gpio_type_and_i2c(
-            sample_esp_device.id, 21, "sht31_temp", 68
-        )
+        result = await repo.get_by_esp_gpio_type_and_i2c(sample_esp_device.id, 21, "sht31_temp", 68)
 
         assert result is not None
         assert result.id == sensor.id
@@ -175,9 +173,7 @@ class TestSensorRepoI2CMultiDevice:
         assert result1.i2c_address == 68
         assert result2.i2c_address == 69
 
-    async def test_sht31_plus_bmp280_same_bus(
-        self, db_session: AsyncSession, sample_esp_device
-    ):
+    async def test_sht31_plus_bmp280_same_bus(self, db_session: AsyncSession, sample_esp_device):
         """Test SHT31 and BMP280 on same I2C bus (different addresses)."""
         repo = SensorRepository(db_session)
 
@@ -222,7 +218,9 @@ class TestSensorRepoI2CMultiDevice:
 class TestSensorRepoI2CUniqueConstraint:
     """Tests for unique constraint enforcement."""
 
-    @pytest.mark.skip(reason="Unique constraint enforcement depends on database config; tested in integration tests")
+    @pytest.mark.skip(
+        reason="Unique constraint enforcement depends on database config; tested in integration tests"
+    )
     async def test_duplicate_i2c_address_same_type_rejected(
         self, db_session: AsyncSession, sample_esp_device
     ):
@@ -306,9 +304,7 @@ class TestSensorRepoI2CUniqueConstraint:
 class TestSensorRepoI2CAddressValidation:
     """Tests for I2C address range validation."""
 
-    async def test_i2c_address_in_valid_range(
-        self, db_session: AsyncSession, sample_esp_device
-    ):
+    async def test_i2c_address_in_valid_range(self, db_session: AsyncSession, sample_esp_device):
         """Test I2C address in valid 7-bit range (0-127)."""
         valid_addresses = [0x08, 0x44, 0x45, 0x76, 0x77]
 
@@ -359,9 +355,7 @@ class TestSensorRepoI2CFallback:
         await db_session.flush()
 
         # 3-way lookup should work
-        result = await repo.get_by_esp_gpio_and_type(
-            sample_esp_device.id, 34, "ph"
-        )
+        result = await repo.get_by_esp_gpio_and_type(sample_esp_device.id, 34, "ph")
 
         assert result is not None
         assert result.sensor_type == "ph"

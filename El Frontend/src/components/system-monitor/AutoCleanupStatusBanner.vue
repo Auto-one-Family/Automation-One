@@ -258,12 +258,12 @@ function formatNumber(num: number): string {
 
 .banner-active .banner-icon {
   background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .banner-inactive .banner-icon {
   background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .banner-loading .banner-icon {
@@ -283,11 +283,11 @@ function formatNumber(num: number): string {
 }
 
 .banner-active .banner-title {
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .banner-inactive .banner-title {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .banner-loading .banner-title {
@@ -318,19 +318,19 @@ function formatNumber(num: number): string {
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.2);
   border-radius: 8px;
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .detail-item.preview strong {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .detail-item.success {
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .detail-item.warning {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .banner-actions {

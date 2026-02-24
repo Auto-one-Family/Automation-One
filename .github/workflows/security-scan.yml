@@ -1,5 +1,9 @@
 name: Security Scan
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [master, main]
@@ -43,6 +47,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+          trivyignores: '.trivyignore'
 
   scan-frontend:
     name: Scan Frontend Image

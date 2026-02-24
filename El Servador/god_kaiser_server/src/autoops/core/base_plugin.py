@@ -32,18 +32,20 @@ from typing import Any, Optional
 
 class PluginCapability(str, Enum):
     """What a plugin can do."""
-    CONFIGURE = "configure"          # Can configure ESP devices
-    DIAGNOSE = "diagnose"            # Can diagnose problems
-    FIX = "fix"                      # Can fix problems
-    VALIDATE = "validate"            # Can validate system state
-    MONITOR = "monitor"              # Can monitor system health
-    DOCUMENT = "document"            # Can generate documentation
-    TEST = "test"                    # Can run tests
-    CLEANUP = "cleanup"              # Can clean up resources
+
+    CONFIGURE = "configure"  # Can configure ESP devices
+    DIAGNOSE = "diagnose"  # Can diagnose problems
+    FIX = "fix"  # Can fix problems
+    VALIDATE = "validate"  # Can validate system state
+    MONITOR = "monitor"  # Can monitor system health
+    DOCUMENT = "document"  # Can generate documentation
+    TEST = "test"  # Can run tests
+    CLEANUP = "cleanup"  # Can clean up resources
 
 
 class ActionSeverity(str, Enum):
     """Severity of an action taken."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -54,6 +56,7 @@ class ActionSeverity(str, Enum):
 @dataclass
 class PluginAction:
     """A single action taken by a plugin, fully documented."""
+
     timestamp: str
     action: str
     target: str
@@ -92,6 +95,7 @@ class PluginAction:
 @dataclass
 class PluginQuestion:
     """A question the plugin needs to ask the user."""
+
     question: str
     options: list[str] | None = None
     default: str | None = None
@@ -102,6 +106,7 @@ class PluginQuestion:
 @dataclass
 class PluginResult:
     """Result of a plugin execution."""
+
     success: bool
     summary: str
     actions: list[PluginAction] = field(default_factory=list)
@@ -285,6 +290,7 @@ class AutoOpsPlugin(ABC):
             lines.append("### Data")
             lines.append("```json")
             import json
+
             lines.append(json.dumps(result.data, indent=2, default=str))
             lines.append("```")
             lines.append("")

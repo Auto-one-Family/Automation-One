@@ -1,18 +1,24 @@
-# Promtail Configuration for AutomationOne
-# ==========================================
+# Promtail-format Configuration for AutomationOne (read by Grafana Alloy)
+# =========================================================================
 # Collects Docker container logs and ships them to Loki.
 # Uses Docker service discovery to automatically find containers.
+# NOTE: This file is in Promtail YAML format but read by Grafana Alloy
+# via --config.format=promtail (automatic internal conversion).
+# Promtail EOL: 2026-03-02. Migrated to Alloy: 2026-02-24.
 #
 # Pipeline Overview:
 #   1. docker: {}          - Parse Docker json-file log driver format
 #   2. el-servador match   - Health drop → Multiline → Regex parser → Labels
-#   3. el-frontend match   - JSON parser → Labels
+#   3. el-frontend match   - JSON parser → Labels (structured logger output)
+#   4. esp32-serial-logger - JSON parser → Labels (TCP serial bridge)
+#   5. mqtt-broker match   - Drop healthcheck noise
+#   6. loki match          - Extract level, drop self-referencing queries
 #
 # Label Strategy:
 #   - compose_service, container, stream, compose_project: from Docker SD (all services)
-#   - level:     extracted by parser (el-servador: regex, el-frontend: json)
+#   - level:     extracted by parser (el-servador: regex, el-frontend: json, esp32: json)
 #   - logger:    extracted by regex (el-servador only, e.g. "src.mqtt.handlers.sensor_handler")
-#   - component: extracted by json  (el-frontend only, e.g. "ESPCard")
+#   - component: extracted by json  (el-frontend, esp32-serial-logger)
 #
 # NOT as labels (high cardinality):
 #   - request_id, function, line: remain in log text, queryable via |= filter
@@ -138,7 +144,31 @@ scrape_configs:
                 device:
                 component:
 
-      # Stage 5: Loki - Extract level and drop query-stats noise
+      # Stage 5: mqtt-broker - Drop healthcheck noise and extract level
+      # Mosquitto logs Docker healthcheck connection/disconnection events every 30s.
+      # These are pure noise (~4320 lines/day). Drop them and extract basic level.
+      - match:
+          selector: '{compose_service="mqtt-broker"}'
+          stages:
+            # 5a: Drop Docker healthcheck connect/disconnect noise
+            # Covers both specific IP patterns and generic healthcheck client names
+            - drop:
+                source: ""
+                expression: '.*healthcheck.*'
+            - drop:
+                source: ""
+                expression: '.*New connection from 127\.0\.0\.1.*'
+            - drop:
+                source: ""
+                expression: '.*Client <unknown> disconnected.*'
+            # 5b: Extract level from Mosquitto log lines
+            # Lines containing "error" → level=error, everything else → level=info
+            - regex:
+                expression: '(?i)(?P<level>error)'
+            - labels:
+                level:
+
+      # Stage 6: Loki - Extract level and drop query-stats noise
       # Grafana polls Loki every 10s with error-monitoring queries (|~ "error|...").
       # Loki logs these API calls as level=info with the full query text embedded.
       # Promtail sends them back to Loki, where embedded keywords "error|exception"

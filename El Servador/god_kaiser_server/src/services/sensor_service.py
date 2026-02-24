@@ -34,10 +34,10 @@ logger = get_logger(__name__)
 class SensorService:
     """
     Sensor business logic service.
-    
+
     Handles sensor configuration, data processing, and queries.
     """
-    
+
     def __init__(
         self,
         sensor_repo: SensorRepository,
@@ -58,11 +58,11 @@ class SensorService:
         self.esp_repo = esp_repo
         self.publisher = publisher or Publisher()
         self.library_loader = library_loader or SensorLibraryLoader()
-    
+
     # =========================================================================
     # Configuration Management
     # =========================================================================
-    
+
     async def get_config(
         self,
         esp_id: str,
@@ -70,20 +70,20 @@ class SensorService:
     ) -> Optional[SensorConfig]:
         """
         Get sensor configuration.
-        
+
         Args:
             esp_id: ESP device ID (ESP_XXXXXXXX format)
             gpio: GPIO pin number
-            
+
         Returns:
             SensorConfig or None if not found
         """
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             return None
-        
+
         return await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-    
+
     async def create_or_update_config(
         self,
         esp_id: str,
@@ -102,7 +102,7 @@ class SensorService:
     ) -> SensorConfig:
         """
         Create or update sensor configuration.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
@@ -117,16 +117,16 @@ class SensorService:
             warning_min: Warning threshold (low)
             warning_max: Warning threshold (high)
             metadata: Custom metadata
-            
+
         Returns:
             Created or updated SensorConfig
         """
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             raise ValueError(f"ESP device '{esp_id}' not found")
-        
+
         existing = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-        
+
         if existing:
             # Update existing
             existing.sensor_type = sensor_type
@@ -140,7 +140,7 @@ class SensorService:
             existing.warning_min = warning_min
             existing.warning_max = warning_max
             existing.metadata = metadata or existing.metadata
-            
+
             logger.info(f"Sensor config updated: {esp_id} GPIO {gpio}")
             return existing
         else:
@@ -161,10 +161,10 @@ class SensorService:
                 metadata=metadata or {},
             )
             await self.sensor_repo.create(sensor)
-            
+
             logger.info(f"Sensor config created: {esp_id} GPIO {gpio} type={sensor_type}")
             return sensor
-    
+
     async def delete_config(
         self,
         esp_id: str,
@@ -172,30 +172,30 @@ class SensorService:
     ) -> bool:
         """
         Delete sensor configuration.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
-            
+
         Returns:
             True if deleted, False if not found
         """
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             return False
-        
+
         sensor = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
         if not sensor:
             return False
-        
+
         await self.sensor_repo.delete(sensor.id)
         logger.info(f"Sensor config deleted: {esp_id} GPIO {gpio}")
         return True
-    
+
     # =========================================================================
     # Data Processing
     # =========================================================================
-    
+
     async def process_reading(
         self,
         esp_id: str,
@@ -208,7 +208,7 @@ class SensorService:
     ) -> Dict[str, Any]:
         """
         Process a sensor reading using Pi-Enhanced processing.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin
@@ -217,7 +217,7 @@ class SensorService:
             calibration: Calibration data (or use stored)
             params: Processing parameters
             timestamp: Unix timestamp
-            
+
         Returns:
             Processed result dictionary
         """
@@ -226,7 +226,7 @@ class SensorService:
             config = await self.get_config(esp_id, gpio)
             if config and config.calibration:
                 calibration = config.calibration
-        
+
         # Get processor from library
         processor = self.library_loader.get_processor(sensor_type)
         if not processor:
@@ -236,7 +236,7 @@ class SensorService:
                 "error": f"No processor for sensor type: {sensor_type}",
                 "raw_value": raw_value,
             }
-        
+
         # Process the reading
         try:
             result = processor.process(
@@ -244,7 +244,7 @@ class SensorService:
                 calibration=calibration or {},
                 params=params or {},
             )
-            
+
             # Store the processed reading
             await self._store_reading(
                 esp_id=esp_id,
@@ -256,7 +256,7 @@ class SensorService:
                 quality=result.get("quality", "good"),
                 timestamp=timestamp,
             )
-            
+
             return {
                 "success": True,
                 "processed_value": result.get("value"),
@@ -264,7 +264,7 @@ class SensorService:
                 "quality": result.get("quality", "good"),
                 "metadata": result.get("metadata", {}),
             }
-            
+
         except Exception as e:
             logger.error(f"Processing failed for {sensor_type}: {e}")
             return {
@@ -272,7 +272,7 @@ class SensorService:
                 "error": str(e),
                 "raw_value": raw_value,
             }
-    
+
     async def _store_reading(
         self,
         esp_id: str,
@@ -289,7 +289,7 @@ class SensorService:
         if not esp_device:
             logger.warning(f"Cannot store reading: ESP {esp_id} not found")
             return
-        
+
         reading = SensorData(
             esp_id=esp_device.id,
             gpio=gpio,
@@ -298,15 +298,19 @@ class SensorService:
             processed_value=processed_value,
             unit=unit,
             quality=quality,
-            timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp else datetime.now(timezone.utc),
+            timestamp=(
+                datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                if timestamp
+                else datetime.now(timezone.utc)
+            ),
         )
-        
+
         await self.sensor_repo.store_reading(reading)
-    
+
     # =========================================================================
     # Data Queries
     # =========================================================================
-    
+
     async def query_data(
         self,
         esp_id: Optional[str] = None,
@@ -319,7 +323,7 @@ class SensorService:
     ) -> List[SensorData]:
         """
         Query sensor data with filters.
-        
+
         Args:
             esp_id: Filter by ESP device ID
             gpio: Filter by GPIO
@@ -328,7 +332,7 @@ class SensorService:
             end_time: End of time range
             quality: Filter by quality level
             limit: Max results
-            
+
         Returns:
             List of SensorData readings
         """
@@ -337,7 +341,7 @@ class SensorService:
             esp_device = await self.esp_repo.get_by_device_id(esp_id)
             if esp_device:
                 esp_db_id = esp_device.id
-        
+
         return await self.sensor_repo.query_data(
             esp_id=esp_db_id,
             gpio=gpio,
@@ -347,7 +351,7 @@ class SensorService:
             quality=quality,
             limit=limit,
         )
-    
+
     async def get_latest_reading(
         self,
         esp_id: str,
@@ -355,20 +359,20 @@ class SensorService:
     ) -> Optional[SensorData]:
         """
         Get latest reading for a sensor.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin
-            
+
         Returns:
             Latest SensorData or None
         """
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             return None
-        
+
         return await self.sensor_repo.get_latest_reading(esp_device.id, gpio)
-    
+
     async def get_stats(
         self,
         esp_id: str,
@@ -378,31 +382,31 @@ class SensorService:
     ) -> Dict[str, Any]:
         """
         Get statistical summary for sensor data.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin
             start_time: Start of time range
             end_time: End of time range
-            
+
         Returns:
             Statistics dictionary
         """
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             return {"error": "ESP not found"}
-        
+
         return await self.sensor_repo.get_stats(
             esp_id=esp_device.id,
             gpio=gpio,
             start_time=start_time,
             end_time=end_time,
         )
-    
+
     # =========================================================================
     # Calibration
     # =========================================================================
-    
+
     async def calibrate(
         self,
         esp_id: str,
@@ -414,7 +418,7 @@ class SensorService:
     ) -> Dict[str, Any]:
         """
         Calculate calibration from reference points.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin
@@ -422,27 +426,27 @@ class SensorService:
             calibration_points: List of {raw, reference} points
             method: Calibration method (linear, offset, polynomial)
             save_to_config: Save to database config
-            
+
         Returns:
             Calibration result
         """
         if len(calibration_points) < 1:
             return {"success": False, "error": "At least 1 calibration point required"}
-        
+
         # Calculate calibration based on method
         if method == "offset" and len(calibration_points) >= 1:
             # Simple offset calibration
             point = calibration_points[0]
             offset = point["reference"] - point["raw"]
             calibration = {"offset": offset}
-            
+
         elif method == "linear" and len(calibration_points) >= 2:
             # Linear calibration (y = mx + b)
             p1, p2 = calibration_points[0], calibration_points[1]
             slope = (p2["reference"] - p1["reference"]) / (p2["raw"] - p1["raw"])
             offset = p1["reference"] - slope * p1["raw"]
             calibration = {"slope": slope, "offset": offset}
-            
+
         elif method == "polynomial" and len(calibration_points) >= 3:
             # Would need numpy for polynomial fitting
             # Fallback to linear
@@ -455,7 +459,7 @@ class SensorService:
             point = calibration_points[0]
             offset = point["reference"] - point["raw"]
             calibration = {"offset": offset}
-        
+
         # Save to config if requested
         saved = False
         if save_to_config:
@@ -464,7 +468,7 @@ class SensorService:
                 config.calibration = calibration
                 saved = True
                 logger.info(f"Calibration saved for {esp_id} GPIO {gpio}: {calibration}")
-        
+
         return {
             "success": True,
             "calibration": calibration,
@@ -505,9 +509,7 @@ class SensorService:
             raise ValueError(f"ESP device not found: {esp_id}")
 
         if esp.status != "online":
-            raise RuntimeError(
-                f"ESP device is offline: {esp_id} (status: {esp.status})"
-            )
+            raise RuntimeError(f"ESP device is offline: {esp_id} (status: {esp.status})")
 
         # 2. Validate sensor exists and is enabled
         sensor = await self.sensor_repo.get_by_esp_and_gpio(esp.id, gpio)
@@ -526,9 +528,7 @@ class SensorService:
         )
 
         if not success:
-            raise RuntimeError(
-                f"Failed to publish measurement command to {esp_id}/GPIO {gpio}"
-            )
+            raise RuntimeError(f"Failed to publish measurement command to {esp_id}/GPIO {gpio}")
 
         logger.info(
             f"Measurement triggered for {esp_id}/GPIO {gpio} "

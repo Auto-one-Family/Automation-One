@@ -15,6 +15,17 @@
 #   - Error recovery for specific components
 #   - Maintenance operations
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure actuator on GPIO 5:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"TestPump","active":true}]}'
+#   Step 2 - Turn actuator ON (after ~1s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+#       -m '{"command":"ON"}'
+#   Step 3 - Trigger ESP-specific emergency stop:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
+#       -m '{"command":"STOP","reason":"Test safe mode"}'
+#
 # Firmware reference: gpio_manager.cpp (implicit in enableSafeModeForSubzone)
 
 name: Single Pin Safe-Mode Enable and Disable
@@ -26,22 +37,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure actuator on GPIO 5 (will be used as OUTPUT)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "pump",
-              "actuator_name": "TestPump",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure actuator on GPIO 5 (CI helper script)
 
   # Verify actuator is configured
   - wait-serial: "Pin 5 allocated"
@@ -49,34 +45,12 @@ steps:
   # Wait for actuator to be operational
   - delay: 1000
 
-  # Turn actuator ON
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
-          "payload": {
-            "command": "ON"
-          }
-        }
+  # External MQTT injection: turn actuator ON (CI helper script)
 
   # Verify actuator is ON
   - wait-serial: "GPIO 5"
 
-  # Trigger ESP-specific emergency stop
-  # This should put GPIO 5 into safe mode
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/emergency",
-          "payload": {
-            "command": "STOP",
-            "reason": "Test safe mode"
-          }
-        }
+  # External MQTT injection: trigger ESP-specific emergency stop (CI helper script)
 
   # Verify safe mode is activated for actuator pin
   - wait-serial: "Emergency"

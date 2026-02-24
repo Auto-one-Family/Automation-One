@@ -68,10 +68,10 @@ jobs:
       - name: Create log directories
         run: mkdir -p logs/frontend/vitest/coverage
 
-      - name: Run Unit Tests
+      - name: Run Unit & Integration Tests
         working-directory: El Frontend
         run: |
-          npm run test:unit -- \
+          npm run test -- \
             --reporter=default \
             --reporter=junit \
             --outputFile.junit=junit-results.xml
@@ -84,6 +84,7 @@ jobs:
           path: |
             El Frontend/junit-results.xml
             logs/frontend/vitest/coverage/
+          retention-days: 7
 
   build:
     name: Build Check

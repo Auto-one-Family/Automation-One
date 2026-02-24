@@ -18,6 +18,9 @@
 #include "logger.h"
 #include <WiFi.h>
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "TIME";
+
 // ============================================
 // SINGLETON INSTANCE
 // ============================================
@@ -48,26 +51,26 @@ TimeManager::TimeManager()
 
 bool TimeManager::begin() {
     if (initialized_) {
-        LOG_WARNING("TimeManager already initialized");
+        LOG_W(TAG, "TimeManager already initialized");
         return synchronized_;
     }
     
-    LOG_INFO("╔════════════════════════════════════════╗");
-    LOG_INFO("║  TimeManager: NTP Initialization       ║");
-    LOG_INFO("╚════════════════════════════════════════╝");
+    LOG_I(TAG, "╔════════════════════════════════════════╗");
+    LOG_I(TAG, "║  TimeManager: NTP Initialization       ║");
+    LOG_I(TAG, "╚════════════════════════════════════════╝");
     
     // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
-        LOG_ERROR("TimeManager: WiFi not connected - cannot sync NTP");
-        LOG_ERROR("  Call TimeManager::begin() AFTER WiFi is connected");
+        LOG_E(TAG, "TimeManager: WiFi not connected - cannot sync NTP");
+        LOG_E(TAG, "  Call TimeManager::begin() AFTER WiFi is connected");
         initialized_ = true;  // Mark as initialized but not synchronized
         return false;
     }
     
-    LOG_INFO("TimeManager: Configuring NTP servers...");
-    LOG_INFO("  Primary:   " + String(ntp_server_primary_));
-    LOG_INFO("  Secondary: " + String(ntp_server_secondary_));
-    LOG_INFO("  Tertiary:  " + String(ntp_server_tertiary_));
+    LOG_I(TAG, "TimeManager: Configuring NTP servers...");
+    LOG_I(TAG, "  Primary:   " + String(ntp_server_primary_));
+    LOG_I(TAG, "  Secondary: " + String(ntp_server_secondary_));
+    LOG_I(TAG, "  Tertiary:  " + String(ntp_server_tertiary_));
 
     // CRITICAL: Set timezone to UTC BEFORE configTime
     // This ensures mktime() interprets tm structs as UTC, not local timezone.
@@ -87,18 +90,18 @@ bool TimeManager::begin() {
     
     // Perform initial synchronization
     if (synchronizeNTP(NTP_SYNC_TIMEOUT_MS)) {
-        LOG_INFO("╔════════════════════════════════════════╗");
-        LOG_INFO("║  ✅ NTP Sync Successful                ║");
-        LOG_INFO("╚════════════════════════════════════════╝");
-        LOG_INFO("  Unix Timestamp: " + String((unsigned long)last_sync_time_));
-        LOG_INFO("  Formatted:      " + getFormattedTime());
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  ✅ NTP Sync Successful                ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
+        LOG_I(TAG, "  Unix Timestamp: " + String((unsigned long)last_sync_time_));
+        LOG_I(TAG, "  Formatted:      " + getFormattedTime());
         return true;
     } else {
-        LOG_WARNING("╔════════════════════════════════════════╗");
-        LOG_WARNING("║  ⚠️  NTP Sync Failed                   ║");
-        LOG_WARNING("╚════════════════════════════════════════╝");
-        LOG_WARNING("  Will retry in background");
-        LOG_WARNING("  Timestamps will use estimated time");
+        LOG_W(TAG, "╔════════════════════════════════════════╗");
+        LOG_W(TAG, "║  ⚠️  NTP Sync Failed                   ║");
+        LOG_W(TAG, "╚════════════════════════════════════════╝");
+        LOG_W(TAG, "  Will retry in background");
+        LOG_W(TAG, "  Timestamps will use estimated time");
         return false;
     }
 }
@@ -119,19 +122,19 @@ void TimeManager::loop() {
     
     // Check WiFi before attempting resync
     if (WiFi.status() != WL_CONNECTED) {
-        LOG_DEBUG("TimeManager: Skipping resync - WiFi disconnected");
+        LOG_D(TAG, "TimeManager: Skipping resync - WiFi disconnected");
         return;
     }
     
     // Check if we never synchronized successfully
     if (!synchronized_) {
-        LOG_INFO("TimeManager: Attempting delayed NTP sync...");
+        LOG_I(TAG, "TimeManager: Attempting delayed NTP sync...");
         synchronizeNTP(NTP_SYNC_TIMEOUT_MS / 2);  // Shorter timeout for background sync
         return;
     }
     
     // Periodic re-sync for long-running systems
-    LOG_DEBUG("TimeManager: Periodic NTP re-sync...");
+    LOG_D(TAG, "TimeManager: Periodic NTP re-sync...");
     synchronizeNTP(NTP_SYNC_TIMEOUT_MS / 2);
 }
 
@@ -141,7 +144,7 @@ void TimeManager::loop() {
 
 time_t TimeManager::getUnixTimestamp() const {
     if (!initialized_) {
-        LOG_WARNING("TimeManager: Not initialized, returning 0");
+        LOG_W(TAG, "TimeManager: Not initialized, returning 0");
         return 0;
     }
     
@@ -168,7 +171,7 @@ time_t TimeManager::getUnixTimestamp() const {
     
     // Last resort: return 0 to indicate no valid timestamp
     // Server should use server-time as fallback
-    LOG_WARNING("TimeManager: No valid timestamp available");
+    LOG_W(TAG, "TimeManager: No valid timestamp available");
     return 0;
 }
 
@@ -246,16 +249,16 @@ String TimeManager::getSyncStatus() const {
 
 bool TimeManager::forceResync() {
     if (!initialized_) {
-        LOG_ERROR("TimeManager: Cannot resync - not initialized");
+        LOG_E(TAG, "TimeManager: Cannot resync - not initialized");
         return false;
     }
     
     if (WiFi.status() != WL_CONNECTED) {
-        LOG_ERROR("TimeManager: Cannot resync - WiFi disconnected");
+        LOG_E(TAG, "TimeManager: Cannot resync - WiFi disconnected");
         return false;
     }
     
-    LOG_INFO("TimeManager: Forcing NTP re-synchronization...");
+    LOG_I(TAG, "TimeManager: Forcing NTP re-synchronization...");
     
     // Reconfigure NTP (clears cached time)
     configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
@@ -273,10 +276,10 @@ void TimeManager::setNTPServers(const char* primary,
     ntp_server_secondary_ = secondary ? secondary : NTP_SERVER_SECONDARY;
     ntp_server_tertiary_ = tertiary ? tertiary : NTP_SERVER_TERTIARY;
     
-    LOG_INFO("TimeManager: NTP servers updated");
-    LOG_INFO("  Primary:   " + String(ntp_server_primary_));
-    LOG_INFO("  Secondary: " + String(ntp_server_secondary_));
-    LOG_INFO("  Tertiary:  " + String(ntp_server_tertiary_));
+    LOG_I(TAG, "TimeManager: NTP servers updated");
+    LOG_I(TAG, "  Primary:   " + String(ntp_server_primary_));
+    LOG_I(TAG, "  Secondary: " + String(ntp_server_secondary_));
+    LOG_I(TAG, "  Tertiary:  " + String(ntp_server_tertiary_));
     
     // If already initialized, reconfigure
     if (initialized_) {
@@ -296,12 +299,12 @@ bool TimeManager::synchronizeNTP(unsigned long timeout_ms) {
     unsigned long start = millis();
     uint8_t retries = 0;
     
-    LOG_DEBUG("TimeManager: Waiting for NTP sync (timeout: " + String(timeout_ms) + "ms)");
+    LOG_D(TAG, "TimeManager: Waiting for NTP sync (timeout: " + String(timeout_ms) + "ms)");
     
     while (retries < NTP_MAX_RETRIES) {
         // Check timeout
         if (millis() - start > timeout_ms) {
-            LOG_WARNING("TimeManager: NTP sync timeout after " + String(timeout_ms) + "ms");
+            LOG_W(TAG, "TimeManager: NTP sync timeout after " + String(timeout_ms) + "ms");
             return false;
         }
         
@@ -317,22 +320,22 @@ bool TimeManager::synchronizeNTP(unsigned long timeout_ms) {
                 last_sync_time_ = now;
                 last_sync_millis_ = millis();
                 
-                LOG_DEBUG("TimeManager: NTP sync successful after " + 
+                LOG_D(TAG, "TimeManager: NTP sync successful after " + 
                           String(retries + 1) + " attempt(s)");
                 return true;
             } else {
-                LOG_WARNING("TimeManager: Invalid timestamp received: " + String((unsigned long)now));
+                LOG_W(TAG, "TimeManager: Invalid timestamp received: " + String((unsigned long)now));
             }
         }
         
         retries++;
-        LOG_DEBUG("TimeManager: NTP retry " + String(retries) + "/" + String(NTP_MAX_RETRIES));
+        LOG_D(TAG, "TimeManager: NTP retry " + String(retries) + "/" + String(NTP_MAX_RETRIES));
         
         // Small delay between retries
         delay(NTP_RETRY_DELAY_MS);
     }
     
-    LOG_ERROR("TimeManager: NTP sync failed after " + String(NTP_MAX_RETRIES) + " retries");
+    LOG_E(TAG, "TimeManager: NTP sync failed after " + String(NTP_MAX_RETRIES) + " retries");
     return false;
 }
 

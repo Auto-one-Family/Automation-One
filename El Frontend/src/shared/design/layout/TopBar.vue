@@ -27,6 +27,7 @@ import {
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
+import ColorLegend from '@/components/common/ColorLegend.vue'
 
 const emit = defineEmits<{
   'toggle-sidebar': []
@@ -64,10 +65,42 @@ const pageTitle = computed(() =>
   (route.meta.title as string) || 'Dashboard'
 )
 
-function onBreadcrumbClick(level: 1 | 2 | 3) {
-  if (level < dashStore.breadcrumb.level) {
-    dashStore.requestNavigate(level)
+/** Is user on hardware or monitor route? */
+const isHardwareRoute = computed(() => route.path.startsWith('/hardware'))
+const isMonitorRoute = computed(() => route.path.startsWith('/monitor'))
+const isRouteBasedView = computed(() => isHardwareRoute.value || isMonitorRoute.value)
+
+/** Route-based breadcrumb segments */
+const routeBreadcrumbs = computed(() => {
+  const crumbs: Array<{ label: string; to?: string; current: boolean }> = []
+
+  if (isHardwareRoute.value) {
+    crumbs.push({ label: 'Hardware', to: '/hardware', current: !route.params.zoneId })
+    if (route.params.zoneId) {
+      const zoneName = dashStore.breadcrumb.zoneName || (route.params.zoneId as string)
+      crumbs.push({
+        label: zoneName,
+        to: `/hardware/${route.params.zoneId}`,
+        current: !route.params.espId,
+      })
+    }
+    if (route.params.espId) {
+      const deviceName = dashStore.breadcrumb.deviceName || (route.params.espId as string)
+      crumbs.push({ label: deviceName, current: true })
+    }
+  } else if (isMonitorRoute.value) {
+    crumbs.push({ label: 'Monitor', to: '/monitor', current: !route.params.zoneId })
+    if (route.params.zoneId) {
+      const zoneName = dashStore.breadcrumb.zoneName || (route.params.zoneId as string)
+      crumbs.push({ label: zoneName, current: true })
+    }
   }
+
+  return crumbs
+})
+
+function navigateCrumb(to: string | undefined) {
+  if (to) router.push(to)
 }
 
 async function handleLogout() {
@@ -85,24 +118,16 @@ async function handleLogout() {
         <Menu class="header__hamburger-icon" />
       </button>
 
-      <!-- Dashboard: Zoom Breadcrumb -->
-      <nav v-if="dashStore.showControls" class="header__breadcrumb" aria-label="Zoom-Navigation">
-        <button
-          :class="dashStore.breadcrumb.level === 1 ? 'header__crumb--current' : 'header__crumb'"
-          @click="onBreadcrumbClick(1)"
-        >Dashboard</button>
-
-        <template v-if="dashStore.breadcrumb.level >= 2 && dashStore.breadcrumb.zoneName">
-          <span class="header__crumb-sep" aria-hidden="true">›</span>
+      <!-- Route-based Breadcrumb (Hardware / Monitor views) -->
+      <nav v-if="isRouteBasedView && routeBreadcrumbs.length > 0" class="header__breadcrumb" aria-label="Navigation">
+        <template v-for="(crumb, idx) in routeBreadcrumbs" :key="idx">
+          <span v-if="idx > 0" class="header__crumb-sep" aria-hidden="true">›</span>
           <button
-            :class="dashStore.breadcrumb.level === 2 ? 'header__crumb--current' : 'header__crumb'"
-            @click="onBreadcrumbClick(2)"
-          >{{ dashStore.breadcrumb.zoneName }}</button>
-        </template>
-
-        <template v-if="dashStore.breadcrumb.level >= 3 && dashStore.breadcrumb.deviceName">
-          <span class="header__crumb-sep" aria-hidden="true">›</span>
-          <span class="header__crumb--current">{{ dashStore.breadcrumb.deviceName }}</span>
+            v-if="!crumb.current && crumb.to"
+            class="header__crumb"
+            @click="navigateCrumb(crumb.to)"
+          >{{ crumb.label }}</button>
+          <span v-else class="header__crumb--current">{{ crumb.label }}</span>
         </template>
       </nav>
 
@@ -214,6 +239,9 @@ async function handleLogout() {
 
         <div class="header__divider" />
       </template>
+
+      <!-- Color Legend -->
+      <ColorLegend />
 
       <!-- Emergency Stop -->
       <EmergencyStopButton />

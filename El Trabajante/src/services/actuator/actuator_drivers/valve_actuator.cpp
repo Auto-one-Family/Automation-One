@@ -5,6 +5,9 @@
 #include "../../../models/error_codes.h"
 #include "../../../utils/logger.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "VALVE";
+
 namespace {
 constexpr uint8_t kMaxValvePosition = 2;
 constexpr uint8_t kValveMidPosition = 1;
@@ -33,7 +36,7 @@ bool ValveActuator::begin(const ActuatorConfig& config) {
   }
 
   if (config.gpio == 255) {
-    LOG_ERROR("ValveActuator: invalid primary GPIO");
+    LOG_E(TAG, "ValveActuator: invalid primary GPIO");
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "ValveActuator invalid gpio");
@@ -46,12 +49,12 @@ bool ValveActuator::begin(const ActuatorConfig& config) {
   enable_pin_ = (config_.aux_gpio != 255) ? config_.aux_gpio : static_cast<uint8_t>(config_.gpio + 1);
 
   if (enable_pin_ == 255) {
-    LOG_ERROR("ValveActuator: missing enable pin");
+    LOG_E(TAG, "ValveActuator: missing enable pin");
     return false;
   }
 
   if (!gpio_manager_->requestPin(direction_pin_, "actuator", config_.actuator_name.c_str())) {
-    LOG_ERROR("ValveActuator: failed to reserve direction pin " + String(direction_pin_));
+    LOG_E(TAG, "ValveActuator: failed to reserve direction pin " + String(direction_pin_));
     errorTracker.trackError(ERROR_GPIO_RESERVED,
                             ERROR_SEVERITY_ERROR,
                             "Valve direction GPIO busy");
@@ -59,7 +62,7 @@ bool ValveActuator::begin(const ActuatorConfig& config) {
   }
 
   if (!gpio_manager_->requestPin(enable_pin_, "actuator", config_.actuator_name.c_str())) {
-    LOG_ERROR("ValveActuator: failed to reserve enable pin " + String(enable_pin_));
+    LOG_E(TAG, "ValveActuator: failed to reserve enable pin " + String(enable_pin_));
     gpio_manager_->releasePin(direction_pin_);
     errorTracker.trackError(ERROR_GPIO_RESERVED,
                             ERROR_SEVERITY_ERROR,
@@ -69,7 +72,7 @@ bool ValveActuator::begin(const ActuatorConfig& config) {
 
   if (!gpio_manager_->configurePinMode(direction_pin_, OUTPUT) ||
       !gpio_manager_->configurePinMode(enable_pin_, OUTPUT)) {
-    LOG_ERROR("ValveActuator: pinMode failed");
+    LOG_E(TAG, "ValveActuator: pinMode failed");
     gpio_manager_->releasePin(direction_pin_);
     gpio_manager_->releasePin(enable_pin_);
     errorTracker.trackError(ERROR_GPIO_INVALID_MODE,
@@ -90,7 +93,7 @@ bool ValveActuator::begin(const ActuatorConfig& config) {
   initialized_ = true;
   emergency_stopped_ = false;
 
-  LOG_INFO("ValveActuator initialized on pins dir=" + String(direction_pin_) +
+  LOG_I(TAG, "ValveActuator initialized on pins dir=" + String(direction_pin_) +
            ", enable=" + String(enable_pin_));
   return true;
 }
@@ -111,12 +114,12 @@ void ValveActuator::end() {
 
 bool ValveActuator::setValue(float normalized_value) {
   if (!initialized_) {
-    LOG_ERROR("ValveActuator::setValue before init");
+    LOG_E(TAG, "ValveActuator::setValue before init");
     return false;
   }
 
   if (emergency_stopped_) {
-    LOG_WARNING("ValveActuator: command ignored, emergency active");
+    LOG_W(TAG, "ValveActuator: command ignored, emergency active");
     return false;
   }
 
@@ -171,7 +174,7 @@ bool ValveActuator::moveToPosition(uint8_t target_pos) {
   move_start_ms_ = millis();
   target_position_ = target_pos;
 
-  LOG_INFO("ValveActuator moving from " + String(current_position_) +
+  LOG_I(TAG, "ValveActuator moving from " + String(current_position_) +
            " to " + String(target_position_) + " (" + String(move_duration_ms_) + "ms)");
   return true;
 }
@@ -196,7 +199,7 @@ void ValveActuator::stopMovement() {
 }
 
 bool ValveActuator::emergencyStop(const String& reason) {
-  LOG_WARNING("ValveActuator emergency stop (" + reason + ")");
+  LOG_W(TAG, "ValveActuator emergency stop (" + reason + ")");
   emergency_stopped_ = true;
   stopMovement();
   current_position_ = 0;

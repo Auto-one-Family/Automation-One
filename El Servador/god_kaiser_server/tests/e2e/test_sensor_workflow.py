@@ -105,9 +105,7 @@ class TestSHT31SingleValuePersist:
             await asyncio.sleep(1.0)
 
             # 2. Publish SHT31 temperature
-            await publish_sht31_data(
-                mqtt_client, esp_id, gpio=21, value=28.5, unit="°C"
-            )
+            await publish_sht31_data(mqtt_client, esp_id, gpio=21, value=28.5, unit="°C")
             await asyncio.sleep(2.0)
 
             # 3. Verify in DB via REST API
@@ -158,23 +156,31 @@ class TestSHT31MultiValue:
 
             # Publish temperature
             await publish_sht31_data(
-                mqtt_client, esp_id, gpio=21, value=28.5, unit="°C",
-                sensor_type="SHT31", sensor_name="SHT31_temp"
+                mqtt_client,
+                esp_id,
+                gpio=21,
+                value=28.5,
+                unit="°C",
+                sensor_type="SHT31",
+                sensor_name="SHT31_temp",
             )
             await asyncio.sleep(0.5)
 
             # Publish humidity (same GPIO, different sensor_type)
             await publish_sht31_data(
-                mqtt_client, esp_id, gpio=21, value=72.3, unit="%RH",
-                sensor_type="SHT31_humidity", sensor_name="SHT31_humidity"
+                mqtt_client,
+                esp_id,
+                gpio=21,
+                value=72.3,
+                unit="%RH",
+                sensor_type="SHT31_humidity",
+                sensor_name="SHT31_humidity",
             )
             await asyncio.sleep(2.0)
 
             # Verify: both values in DB
             all_readings = await api_client.get_sensor_data(esp_id, gpio=21, limit=10)
-            assert len(all_readings) >= 2, (
-                f"Expected >= 2 readings, got {len(all_readings)}"
-            )
+            assert len(all_readings) >= 2, f"Expected >= 2 readings, got {len(all_readings)}"
 
             # Temperature check
             temp_readings = [r for r in all_readings if r.get("unit") == "°C"]
@@ -222,30 +228,23 @@ class TestSHT31WebSocketBroadcast:
         cleanup_test_devices(esp_id)
 
         try:
-            await api_client.register_esp(
-                ESPDeviceTestData(device_id=esp_id, name="SHT31 WS Test")
-            )
+            await api_client.register_esp(ESPDeviceTestData(device_id=esp_id, name="SHT31 WS Test"))
             await mqtt_client.publish_heartbeat(esp_id)
             await asyncio.sleep(1.0)
 
             # Subscribe to sensor_data events for this ESP
-            await ws_client.subscribe({
-                "types": ["sensor_data"],
-                "esp_ids": [esp_id]
-            })
+            await ws_client.subscribe({"types": ["sensor_data"], "esp_ids": [esp_id]})
             await asyncio.sleep(0.5)
             ws_client.clear_messages()
 
             # Publish SHT31 temperature
-            await publish_sht31_data(
-                mqtt_client, esp_id, gpio=21, value=28.5, unit="°C"
-            )
+            await publish_sht31_data(mqtt_client, esp_id, gpio=21, value=28.5, unit="°C")
 
             # Verify WebSocket event
             event = await ws_client.wait_for_event(
                 event_type="sensor_data",
                 timeout=10.0,
-                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id
+                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id,
             )
 
             assert event is not None, "sensor_data WS event should be received"

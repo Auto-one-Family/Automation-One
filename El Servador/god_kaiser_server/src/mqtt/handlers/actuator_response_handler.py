@@ -66,9 +66,7 @@ class ActuatorResponseHandler:
             # Step 1: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
-                logger.error(
-                    f"Invalid actuator response payload: {validation_result['error']}"
-                )
+                logger.error(f"Invalid actuator response payload: {validation_result['error']}")
                 return False
 
             esp_id_str = payload["esp_id"]
@@ -123,6 +121,7 @@ class ActuatorResponseHandler:
                 # Step 5b: Audit log with correlation_id for event linking
                 if correlation_id:
                     from ...db.repositories.audit_log_repo import AuditLogRepository
+
                     audit_repo = AuditLogRepository(session)
                     await audit_repo.log_actuator_command(
                         esp_id=esp_id_str,
@@ -153,6 +152,7 @@ class ActuatorResponseHandler:
                 # Step 7: WebSocket broadcast (non-blocking)
                 try:
                     from ...websocket.manager import WebSocketManager
+
                     ws_manager = await WebSocketManager.get_instance()
                     broadcast_data = {
                         "esp_id": esp_id_str,
@@ -240,9 +240,7 @@ class ActuatorResponseHandler:
         if MIN_VALID_TIMESTAMP <= ts_seconds <= MAX_VALID_TIMESTAMP:
             return datetime.fromtimestamp(ts_seconds, tz=timezone.utc)
         else:
-            logger.warning(
-                f"Invalid timestamp {ts_raw} (out of range), using server time"
-            )
+            logger.warning(f"Invalid timestamp {ts_raw} (out of range), using server time")
             return datetime.now(timezone.utc)
 
 
@@ -276,4 +274,3 @@ async def handle_actuator_response(topic: str, payload: dict) -> bool:
     """
     handler = get_actuator_response_handler()
     return await handler.handle_actuator_response(topic, payload)
-

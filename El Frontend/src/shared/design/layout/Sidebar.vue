@@ -10,15 +10,15 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import {
   X,
-  LayoutDashboard,
   Cpu,
   Workflow,
   Monitor,
   Users,
-  Settings,
   Wrench,
-  Zap,
   UserCog,
+  Activity,
+  TrendingUp,
+  SlidersHorizontal,
 } from 'lucide-vue-next'
 
 defineProps<{
@@ -73,23 +73,13 @@ function handleNavClick() {
       <div class="sidebar__section-label">Navigation</div>
 
       <RouterLink
-        to="/"
-        :class="['sidebar__link', isActive('/') && 'sidebar__link--active']"
-        @click="handleNavClick"
-      >
-        <div class="sidebar__link-indicator" />
-        <LayoutDashboard class="sidebar__link-icon" />
-        <span>Dashboard</span>
-      </RouterLink>
-
-      <RouterLink
-        to="/sensors"
-        :class="['sidebar__link', isActive('/sensors') && 'sidebar__link--active']"
+        to="/hardware"
+        :class="['sidebar__link', (isActive('/hardware') || isActive('/monitor') || isActive('/custom-dashboard')) && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
         <Cpu class="sidebar__link-icon" />
-        <span>Komponenten</span>
+        <span>Hardware</span>
       </RouterLink>
 
       <RouterLink
@@ -102,26 +92,40 @@ function handleNavClick() {
         <span>Regeln</span>
       </RouterLink>
 
-      <!-- Divider -->
-      <div class="sidebar__divider" />
-
-      <!-- Monitoring Section -->
-      <div class="sidebar__section-label">Monitoring</div>
-
       <RouterLink
-        to="/system-monitor"
-        :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
+        to="/sensors"
+        :class="['sidebar__link', isActive('/sensors') && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
-        <Monitor class="sidebar__link-icon" />
-        <span>System Monitor</span>
+        <Activity class="sidebar__link-icon" />
+        <span>Komponenten</span>
+      </RouterLink>
+
+      <RouterLink
+        to="/sensor-history"
+        :class="['sidebar__link', isActive('/sensor-history') && 'sidebar__link--active']"
+        @click="handleNavClick"
+      >
+        <div class="sidebar__link-indicator" />
+        <TrendingUp class="sidebar__link-icon" />
+        <span>Zeitreihen</span>
       </RouterLink>
 
       <!-- Admin Section -->
       <template v-if="authStore.isAdmin">
         <div class="sidebar__divider" />
         <div class="sidebar__section-label">Administration</div>
+
+        <RouterLink
+          to="/system-monitor"
+          :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
+          @click="handleNavClick"
+        >
+          <div class="sidebar__link-indicator" />
+          <Monitor class="sidebar__link-icon" />
+          <span>System</span>
+        </RouterLink>
 
         <RouterLink
           to="/users"
@@ -131,16 +135,6 @@ function handleNavClick() {
           <div class="sidebar__link-indicator" />
           <Users class="sidebar__link-icon" />
           <span>Benutzer</span>
-        </RouterLink>
-
-        <RouterLink
-          to="/system-config"
-          :class="['sidebar__link', isActive('/system-config') && 'sidebar__link--active']"
-          @click="handleNavClick"
-        >
-          <div class="sidebar__link-indicator" />
-          <Settings class="sidebar__link-icon" />
-          <span>System</span>
         </RouterLink>
 
         <RouterLink
@@ -154,13 +148,13 @@ function handleNavClick() {
         </RouterLink>
 
         <RouterLink
-          to="/load-test"
-          :class="['sidebar__link', isActive('/load-test') && 'sidebar__link--active']"
+          to="/calibration"
+          :class="['sidebar__link', isActive('/calibration') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
-          <Zap class="sidebar__link-icon" />
-          <span>Last-Tests</span>
+          <SlidersHorizontal class="sidebar__link-icon" />
+          <span>Kalibrierung</span>
         </RouterLink>
       </template>
     </nav>

@@ -80,20 +80,21 @@ router = APIRouter(prefix="/v1/debug", tags=["Debug"])
 # Helper Functions for DB-First Mock ESP Management
 # =========================================================================
 
+
 def _build_mock_esp_response(
-    device,
-    simulation_active: bool = False,
-    runtime_status: Optional[Dict[str, Any]] = None
+    device, simulation_active: bool = False, runtime_status: Optional[Dict[str, Any]] = None
 ) -> MockESPResponse:
     """
     Build MockESPResponse from ESPDevice model.
-    
+
     Combines database state with optional runtime status from SimulationScheduler.
     """
-    sim_config = device.device_metadata.get("simulation_config", {}) if device.device_metadata else {}
+    sim_config = (
+        device.device_metadata.get("simulation_config", {}) if device.device_metadata else {}
+    )
     sensors_config = sim_config.get("sensors", {})
     actuators_config = sim_config.get("actuators", {})
-    
+
     # Build sensor responses
     # MULTI-VALUE SUPPORT: Keys are now "{gpio}_{sensor_type}" format
     sensors = []
@@ -123,36 +124,40 @@ def _build_mock_esp_response(
             # Legacy format: just GPIO
             gpio = int(sensor_key)
 
-        sensors.append(MockSensorResponse(
-            gpio=gpio,
-            sensor_type=config.get("sensor_type", "GENERIC"),
-            name=config.get("name"),
-            subzone_id=config.get("subzone_id"),
-            raw_value=sensor_value,
-            unit=config.get("unit", ""),
-            quality=config.get("quality", "good"),
-            raw_mode=config.get("raw_mode", True),
-            last_read=None,
-        ))
-    
+        sensors.append(
+            MockSensorResponse(
+                gpio=gpio,
+                sensor_type=config.get("sensor_type", "GENERIC"),
+                name=config.get("name"),
+                subzone_id=config.get("subzone_id"),
+                raw_value=sensor_value,
+                unit=config.get("unit", ""),
+                quality=config.get("quality", "good"),
+                raw_mode=config.get("raw_mode", True),
+                last_read=None,
+            )
+        )
+
     # Build actuator responses
     actuators = []
     for gpio_str, config in actuators_config.items():
-        actuators.append(MockActuatorResponse(
-            gpio=int(gpio_str),
-            actuator_type=config.get("actuator_type", "relay"),
-            name=config.get("name"),
-            state=config.get("state", False),
-            pwm_value=config.get("pwm_value", 0.0),
-            emergency_stopped=False,
-            last_command=None,
-        ))
-    
+        actuators.append(
+            MockActuatorResponse(
+                gpio=int(gpio_str),
+                actuator_type=config.get("actuator_type", "relay"),
+                name=config.get("name"),
+                state=config.get("state", False),
+                pwm_value=config.get("pwm_value", 0.0),
+                emergency_stopped=False,
+                last_command=None,
+            )
+        )
+
     # Get uptime from runtime if available
     uptime = 0
     if runtime_status:
         uptime = int(runtime_status.get("uptime_seconds", 0))
-    
+
     # Get auto_heartbeat from DB config (fallback to simulation_active for backwards compatibility)
     auto_heartbeat_config = sim_config.get("auto_heartbeat", simulation_active)
 
@@ -190,7 +195,7 @@ def _build_mock_esp_response(
     response_model=MockESPResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Mock ESP32",
-    description="Create a new mock ESP32 device for testing. Requires admin role."
+    description="Create a new mock ESP32 device for testing. Requires admin role.",
 )
 async def create_mock_esp(
     config: MockESPCreate,
@@ -203,14 +208,14 @@ async def create_mock_esp(
     DB-FIRST ARCHITECTURE:
     1. Create device in database (Single Source of Truth)
     2. Start simulation via SimulationScheduler if auto_heartbeat=True
-    
+
     The mock ESP will simulate real ESP32 behavior including:
     - MQTT message publishing (via SimulationScheduler)
     - Sensor readings
     - Actuator control
     """
     esp_repo = ESPRepository(db)
-    
+
     try:
         # Build simulation config for DB storage
         # =====================================================================
@@ -221,7 +226,7 @@ async def create_mock_esp(
             "sensors": {
                 str(sensor.gpio): {
                     "sensor_type": sensor.sensor_type,
-                    "raw_value": sensor.raw_value,   # For Frontend display
+                    "raw_value": sensor.raw_value,  # For Frontend display
                     "base_value": sensor.raw_value,  # For SimulationScheduler
                     "unit": sensor.unit,
                     "quality": sensor.quality,
@@ -255,13 +260,14 @@ async def create_mock_esp(
             simulation_config=simulation_config,
             auto_start=config.auto_heartbeat,
         )
-        
+
         # Update metadata with creator info
         if device.device_metadata:
             device.device_metadata["created_by"] = current_user.username
             from sqlalchemy.orm.attributes import flag_modified
+
             flag_modified(device, "device_metadata")
-        
+
         await db.commit()
         await db.refresh(device)
 
@@ -282,7 +288,7 @@ async def create_mock_esp(
                         "source": "mock_esp",
                         "unit": sensor.unit,
                         "subzone_id": sensor.subzone_id,
-                    }
+                    },
                 )
                 logger.debug(f"Created SensorConfig for {config.esp_id} GPIO {sensor.gpio}")
             except Exception as e:
@@ -299,9 +305,9 @@ async def create_mock_esp(
                     esp_id=config.esp_id,
                     kaiser_id="god",
                     zone_id=config.zone_id or "",
-                    heartbeat_interval=float(config.heartbeat_interval_seconds)
+                    heartbeat_interval=float(config.heartbeat_interval_seconds),
                 )
-                
+
                 if simulation_started:
                     # Update status to online
                     device.status = "online"
@@ -315,36 +321,37 @@ async def create_mock_esp(
         # WebSocket Broadcast: Notify Frontend about new Mock-ESP
         try:
             from ...websocket.manager import WebSocketManager
+
             ws_manager = await WebSocketManager.get_instance()
-            await ws_manager.broadcast("device_discovered", {
-                "esp_id": config.esp_id,
-                "device_id": config.esp_id,
-                "status": device.status,
-                "zone_id": config.zone_id,
-                "zone_name": config.zone_name,
-                "hardware_type": "MOCK_ESP32",
-                "simulation_active": simulation_started,
-                "created_by": current_user.username,
-                "sensor_count": len(config.sensors),
-                "actuator_count": len(config.actuators),
-            })
+            await ws_manager.broadcast(
+                "device_discovered",
+                {
+                    "esp_id": config.esp_id,
+                    "device_id": config.esp_id,
+                    "status": device.status,
+                    "zone_id": config.zone_id,
+                    "zone_name": config.zone_name,
+                    "hardware_type": "MOCK_ESP32",
+                    "simulation_active": simulation_started,
+                    "created_by": current_user.username,
+                    "sensor_count": len(config.sensors),
+                    "actuator_count": len(config.actuators),
+                },
+            )
             logger.info(f"📡 WebSocket broadcast: device_discovered for {config.esp_id}")
         except Exception as ws_error:
             logger.warning(f"Failed to broadcast device_discovered: {ws_error}")
 
         # Build response
         return _build_mock_esp_response(device, simulation_active=simulation_started)
-        
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to create mock ESP: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create mock ESP: {str(e)}"
+            detail=f"Failed to create mock ESP: {str(e)}",
         )
 
 
@@ -352,7 +359,7 @@ async def create_mock_esp(
     "/mock-esp",
     response_model=MockESPListResponse,
     summary="List Mock ESPs",
-    description="Get all mock ESP32 devices from database."
+    description="Get all mock ESP32 devices from database.",
 )
 async def list_mock_esps(
     current_user: AdminUser,
@@ -360,15 +367,15 @@ async def list_mock_esps(
 ) -> MockESPListResponse:
     """
     List all mock ESP32 instances from database.
-    
+
     DB-FIRST: Loads all Mock-ESPs from database and combines with
     runtime status from SimulationScheduler.
     """
     esp_repo = ESPRepository(db)
-    
+
     # Load all mocks from database
     devices = await esp_repo.get_all_mock_devices()
-    
+
     # Get active simulation IDs
     active_ids: List[str] = []
     try:
@@ -376,34 +383,30 @@ async def list_mock_esps(
         active_ids = sim_scheduler.get_active_mocks()
     except RuntimeError:
         pass  # Scheduler not initialized
-    
+
     # Build responses
     responses = []
     for device in devices:
         is_active = device.device_id in active_ids
         runtime_status = None
-        
+
         if is_active:
             try:
                 sim_scheduler = get_simulation_scheduler()
                 runtime_status = sim_scheduler.get_mock_status(device.device_id)
             except RuntimeError:
                 pass
-        
+
         responses.append(_build_mock_esp_response(device, is_active, runtime_status))
-    
-    return MockESPListResponse(
-        success=True,
-        data=responses,
-        total=len(responses)
-    )
+
+    return MockESPListResponse(success=True, data=responses, total=len(responses))
 
 
 @router.get(
     "/mock-esp/{esp_id}",
     response_model=MockESPResponse,
     summary="Get Mock ESP",
-    description="Get details of a specific mock ESP32 device from database."
+    description="Get details of a specific mock ESP32 device from database.",
 )
 async def get_mock_esp(
     esp_id: str,
@@ -412,19 +415,18 @@ async def get_mock_esp(
 ) -> MockESPResponse:
     """
     Get mock ESP32 details by ID from database.
-    
+
     DB-FIRST: Loads Mock-ESP configuration from database and combines
     with runtime status from SimulationScheduler.
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
-    
+
     # Get runtime status
     is_active = False
     runtime_status = None
@@ -435,7 +437,7 @@ async def get_mock_esp(
             runtime_status = sim_scheduler.get_mock_status(esp_id)
     except RuntimeError:
         pass
-    
+
     return _build_mock_esp_response(device, is_active, runtime_status)
 
 
@@ -443,7 +445,7 @@ async def get_mock_esp(
     "/mock-esp/{esp_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete Mock ESP",
-    description="Delete a mock ESP32 device."
+    description="Delete a mock ESP32 device.",
 )
 async def delete_mock_esp(
     esp_id: str,
@@ -452,19 +454,18 @@ async def delete_mock_esp(
 ):
     """
     Delete a mock ESP32 instance.
-    
+
     DB-FIRST FLOW:
     1. Stop simulation if running
     2. Delete from database
     """
     esp_repo = ESPRepository(db)
-    
+
     # Check if mock exists in DB
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
     # 1. Stop simulation if running
@@ -490,7 +491,7 @@ async def delete_mock_esp(
     "/mock-esp/{esp_id}/simulation/start",
     response_model=CommandResponse,
     summary="Start Mock Simulation",
-    description="Start simulation for an existing mock ESP32 from database."
+    description="Start simulation for an existing mock ESP32 from database.",
 )
 async def start_mock_simulation(
     esp_id: str,
@@ -499,54 +500,53 @@ async def start_mock_simulation(
 ) -> CommandResponse:
     """
     Start simulation for an existing mock ESP.
-    
+
     Loads configuration from database and starts heartbeat job.
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
-    
+
     try:
         sim_scheduler = get_simulation_scheduler()
-        
+
         if sim_scheduler.is_mock_active(esp_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Simulation for {esp_id} already running"
+                detail=f"Simulation for {esp_id} already running",
             )
-        
+
         # Get heartbeat interval from metadata
         heartbeat_interval = esp_repo.get_heartbeat_interval(device)
-        
+
         success = await sim_scheduler.start_mock(
             esp_id=esp_id,
             kaiser_id=device.kaiser_id or "god",
             zone_id=device.zone_id or "",
-            heartbeat_interval=heartbeat_interval
+            heartbeat_interval=heartbeat_interval,
         )
-        
+
         if success:
             # Update simulation state in DB
             await esp_repo.update_simulation_state(esp_id, "running")
             device.status = "online"
             await db.commit()
-        
+
         return CommandResponse(
             success=success,
             esp_id=esp_id,
             command="start_simulation",
-            result={"started": success, "heartbeat_interval": heartbeat_interval}
+            result={"started": success, "heartbeat_interval": heartbeat_interval},
         )
-        
+
     except RuntimeError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"SimulationScheduler not available: {e}"
+            detail=f"SimulationScheduler not available: {e}",
         )
 
 
@@ -554,7 +554,7 @@ async def start_mock_simulation(
     "/mock-esp/{esp_id}/simulation/stop",
     response_model=CommandResponse,
     summary="Stop Mock Simulation",
-    description="Stop simulation for a mock ESP32."
+    description="Stop simulation for a mock ESP32.",
 )
 async def stop_mock_simulation(
     esp_id: str,
@@ -563,46 +563,42 @@ async def stop_mock_simulation(
 ) -> CommandResponse:
     """
     Stop simulation for a mock ESP.
-    
+
     Stops heartbeat job and updates database state.
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
-    
+
     try:
         sim_scheduler = get_simulation_scheduler()
-        
+
         if not sim_scheduler.is_mock_active(esp_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Simulation for {esp_id} not running"
+                detail=f"Simulation for {esp_id} not running",
             )
-        
+
         success = await sim_scheduler.stop_mock(esp_id)
-        
+
         if success:
             # Update simulation state in DB
             await esp_repo.update_simulation_state(esp_id, "stopped")
             device.status = "offline"
             await db.commit()
-        
+
         return CommandResponse(
-            success=success,
-            esp_id=esp_id,
-            command="stop_simulation",
-            result={"stopped": success}
+            success=success, esp_id=esp_id, command="stop_simulation", result={"stopped": success}
         )
-        
+
     except RuntimeError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"SimulationScheduler not available: {e}"
+            detail=f"SimulationScheduler not available: {e}",
         )
 
 
@@ -613,7 +609,7 @@ async def stop_mock_simulation(
     "/mock-esp/{esp_id}/heartbeat",
     response_model=HeartbeatResponse,
     summary="Trigger Heartbeat",
-    description="Manually trigger a heartbeat from a mock ESP32."
+    description="Manually trigger a heartbeat from a mock ESP32.",
 )
 async def trigger_heartbeat(
     esp_id: str,
@@ -652,7 +648,7 @@ async def trigger_heartbeat(
             esp_id=esp_id,
             kaiser_id=device.kaiser_id or "god",
             zone_id=device.zone_id or "",
-            heartbeat_interval=heartbeat_interval
+            heartbeat_interval=heartbeat_interval,
         )
 
         if success:
@@ -675,7 +671,7 @@ async def trigger_heartbeat(
         esp_id=esp_id,
         timestamp=datetime.now(timezone.utc),
         message_published=True,
-        payload=result
+        payload=result,
     )
 
 
@@ -683,7 +679,7 @@ async def trigger_heartbeat(
     "/mock-esp/{esp_id}/state",
     response_model=CommandResponse,
     summary="Set System State",
-    description="Transition mock ESP32 to a specific system state."
+    description="Transition mock ESP32 to a specific system state.",
 )
 async def set_state(
     esp_id: str,
@@ -693,26 +689,21 @@ async def set_state(
 ) -> CommandResponse:
     """
     Set the system state of a mock ESP.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
     """
     result = await scheduler.set_state(esp_id, request.state, request.reason)
     if result is None:
         raise SimulationNotRunningError(esp_id)
 
-    return CommandResponse(
-        success=True,
-        esp_id=esp_id,
-        command="set_state",
-        result=result
-    )
+    return CommandResponse(success=True, esp_id=esp_id, command="set_state", result=result)
 
 
 @router.post(
     "/mock-esp/{esp_id}/auto-heartbeat",
     response_model=CommandResponse,
     summary="Configure Auto-Heartbeat",
-    description="Enable or disable automatic heartbeat for a mock ESP32."
+    description="Enable or disable automatic heartbeat for a mock ESP32.",
 )
 async def configure_auto_heartbeat(
     esp_id: str,
@@ -724,7 +715,7 @@ async def configure_auto_heartbeat(
 ) -> CommandResponse:
     """
     Configure auto-heartbeat for a mock ESP.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
     """
     try:
@@ -735,17 +726,16 @@ async def configure_auto_heartbeat(
             session=db,
         )
         await db.commit()
-        
+
         return CommandResponse(
             success=success,
             esp_id=esp_id,
             command="auto_heartbeat",
-            result={"enabled": enabled, "interval_seconds": interval_seconds}
+            result={"enabled": enabled, "interval_seconds": interval_seconds},
         )
     except ESPNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
 
@@ -756,7 +746,7 @@ async def configure_auto_heartbeat(
     "/mock-esp/{esp_id}/sensors",
     response_model=CommandResponse,
     summary="Add Sensor",
-    description="Add a new sensor to a mock ESP32."
+    description="Add a new sensor to a mock ESP32.",
 )
 async def add_sensor(
     esp_id: str,
@@ -775,8 +765,7 @@ async def add_sensor(
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
     # =========================================================================
@@ -795,7 +784,7 @@ async def add_sensor(
     # Mock ESPs bypass the ADC layer entirely - the value the user enters
     # is the value that gets displayed and processed.
     # =========================================================================
-    
+
     # Infer interface_type if not provided
     interface_type = config.interface_type
     if not interface_type:
@@ -806,10 +795,10 @@ async def add_sensor(
             interface_type = "I2C"
         else:
             interface_type = "ANALOG"
-    
+
     sensor_config = {
         "sensor_type": config.sensor_type,
-        "raw_value": config.raw_value,   # For Frontend display
+        "raw_value": config.raw_value,  # For Frontend display
         "base_value": config.raw_value,  # For SimulationScheduler calculations
         "unit": config.unit,
         "quality": config.quality,
@@ -833,8 +822,7 @@ async def add_sensor(
     success = await esp_repo.add_sensor_to_mock(esp_id, config.gpio, sensor_config)
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to add sensor to database"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to add sensor to database"
         )
 
     # 1.5 Create SensorConfig entry if it doesn't exist (fixes Bug P)
@@ -845,7 +833,9 @@ async def add_sensor(
     )
 
     if existing_sensor:
-        logger.debug(f"SensorConfig already exists for {esp_id} GPIO {config.gpio} type {config.sensor_type}, skipping creation")
+        logger.debug(
+            f"SensorConfig already exists for {esp_id} GPIO {config.gpio} type {config.sensor_type}, skipping creation"
+        )
     else:
         try:
             await sensor_repo.create(
@@ -866,16 +856,20 @@ async def add_sensor(
                     "source": "mock_esp",
                     "unit": config.unit,
                     "subzone_id": config.subzone_id,
-                }
+                },
             )
-            logger.debug(f"Created SensorConfig for {esp_id} GPIO {config.gpio} (type={interface_type})")
+            logger.debug(
+                f"Created SensorConfig for {esp_id} GPIO {config.gpio} (type={interface_type})"
+            )
         except Exception as e:
             # Race condition fallback - sensor was created between check and create
             # Rollback the failed insert to clear pending transaction state
             await db.rollback()
             # Re-apply the mock config (rollback undid it)
             await esp_repo.add_sensor_to_mock(esp_id, config.gpio, sensor_config)
-            logger.warning(f"Failed to create SensorConfig for GPIO {config.gpio} (race condition): {e}")
+            logger.warning(
+                f"Failed to create SensorConfig for GPIO {config.gpio} (race condition): {e}"
+            )
 
     await db.commit()
 
@@ -890,19 +884,23 @@ async def add_sensor(
                 esp_id=esp_id,
                 gpio=config.gpio,
                 interval_seconds=sensor_config["interval_seconds"],
-                sensor_type=config.sensor_type  # MULTI-VALUE: Pass sensor_type
+                sensor_type=config.sensor_type,  # MULTI-VALUE: Pass sensor_type
             )
             if job_started:
-                logger.info(f"Started sensor job for {esp_id} GPIO {config.gpio} type {config.sensor_type}")
+                logger.info(
+                    f"Started sensor job for {esp_id} GPIO {config.gpio} type {config.sensor_type}"
+                )
 
                 # 3. Sofortiger initialer Publish damit Frontend nicht auf Intervall warten muss
                 initial_published = await sim_scheduler.trigger_immediate_sensor_publish(
                     esp_id=esp_id,
                     gpio=config.gpio,
-                    sensor_type=config.sensor_type  # MULTI-VALUE: Pass sensor_type
+                    sensor_type=config.sensor_type,  # MULTI-VALUE: Pass sensor_type
                 )
                 if initial_published:
-                    logger.info(f"Initial sensor value published for {esp_id} GPIO {config.gpio} type {config.sensor_type}")
+                    logger.info(
+                        f"Initial sensor value published for {esp_id} GPIO {config.gpio} type {config.sensor_type}"
+                    )
     except RuntimeError:
         pass  # Scheduler not initialized
 
@@ -915,8 +913,8 @@ async def add_sensor(
             "sensor_type": config.sensor_type,
             "db_updated": success,
             "job_started": job_started,
-            "initial_published": initial_published
-        }
+            "initial_published": initial_published,
+        },
     )
 
 
@@ -943,43 +941,38 @@ async def mock_onewire_scan(
     esp_id: str,
     current_user: AdminUser,
     db: DBSession,
-    pin: int = Query(4, ge=0, le=48, description="GPIO pin for OneWire bus (ignored, returns fake data)"),
+    pin: int = Query(
+        4, ge=0, le=48, description="GPIO pin for OneWire bus (ignored, returns fake data)"
+    ),
 ) -> CommandResponse:
     """
     Simulate OneWire bus scan for mock ESP.
-    
+
     Returns 2 fake DS18B20 devices for testing:
     - Device 1: ROM 28FF641E8D3C0C79
     - Device 2: ROM 28FF123456789ABC
-    
+
     **Note:** Real ESP scans are handled by `/api/v1/sensors/esp/{esp_id}/onewire/scan`
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
-    
+
     # Generate fake OneWire devices for testing
     # Real ROM codes start with family code 0x28 (DS18B20)
     fake_devices = [
-        {
-            "rom_code": "28FF641E8D3C0C79",
-            "device_type": "ds18b20",
-            "pin": pin
-        },
-        {
-            "rom_code": "28FF123456789ABC",
-            "device_type": "ds18b20",
-            "pin": pin
-        }
+        {"rom_code": "28FF641E8D3C0C79", "device_type": "ds18b20", "pin": pin},
+        {"rom_code": "28FF123456789ABC", "device_type": "ds18b20", "pin": pin},
     ]
-    
-    logger.info(f"Mock OneWire scan on {esp_id} GPIO {pin}: returning {len(fake_devices)} fake devices")
-    
+
+    logger.info(
+        f"Mock OneWire scan on {esp_id} GPIO {pin}: returning {len(fake_devices)} fake devices"
+    )
+
     return CommandResponse(
         success=True,
         esp_id=esp_id,
@@ -988,8 +981,8 @@ async def mock_onewire_scan(
             "devices": fake_devices,
             "found_count": len(fake_devices),
             "pin": pin,
-            "message": f"Mock scan: {len(fake_devices)} fake DS18B20 devices (for testing)"
-        }
+            "message": f"Mock scan: {len(fake_devices)} fake DS18B20 devices (for testing)",
+        },
     )
 
 
@@ -998,7 +991,7 @@ async def mock_onewire_scan(
     response_model=CommandResponse,
     status_code=status.HTTP_200_OK,
     summary="Remove Sensor",
-    description="Remove a sensor from a mock ESP32. MULTI-VALUE: Optionally specify sensor_type to remove only that type."
+    description="Remove a sensor from a mock ESP32. MULTI-VALUE: Optionally specify sensor_type to remove only that type.",
 )
 async def remove_sensor(
     esp_id: str,
@@ -1007,7 +1000,7 @@ async def remove_sensor(
     db: DBSession,
     sensor_type: Optional[str] = Query(
         None,
-        description="Optional sensor type to remove (e.g., 'sht31_temp'). If not specified, removes ALL sensors on this GPIO."
+        description="Optional sensor type to remove (e.g., 'sht31_temp'). If not specified, removes ALL sensors on this GPIO.",
     ),
 ) -> CommandResponse:
     """
@@ -1024,8 +1017,7 @@ async def remove_sensor(
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
     # 1. Stop sensor job if simulation is running
@@ -1036,7 +1028,9 @@ async def remove_sensor(
         if sim_scheduler.is_mock_active(esp_id):
             job_stopped = sim_scheduler.remove_sensor_job(esp_id, gpio, sensor_type)
             if job_stopped:
-                logger.info(f"Stopped sensor job for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}")
+                logger.info(
+                    f"Stopped sensor job for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}"
+                )
     except RuntimeError:
         pass  # Scheduler not initialized
 
@@ -1046,7 +1040,7 @@ async def remove_sensor(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor GPIO {gpio} (type={sensor_type or 'any'}) not found on {esp_id}"
+            detail=f"Sensor GPIO {gpio} (type={sensor_type or 'any'}) not found on {esp_id}",
         )
 
     # 2.5 Delete SensorConfig entry (fixes Bug P cleanup)
@@ -1057,7 +1051,9 @@ async def remove_sensor(
         # Only delete if sensor_type matches or no type specified
         if sensor_config and (not sensor_type or sensor_config.sensor_type == sensor_type):
             await sensor_repo.delete(sensor_config.id)
-            logger.debug(f"Deleted SensorConfig for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}")
+            logger.debug(
+                f"Deleted SensorConfig for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}"
+            )
     except Exception as e:
         logger.warning(f"Failed to delete SensorConfig for GPIO {gpio}: {e}")
 
@@ -1071,8 +1067,8 @@ async def remove_sensor(
             "gpio": gpio,
             "sensor_type": sensor_type,
             "db_updated": success,
-            "job_stopped": job_stopped
-        }
+            "job_stopped": job_stopped,
+        },
     )
 
 
@@ -1080,7 +1076,7 @@ async def remove_sensor(
     "/mock-esp/{esp_id}/sensors/{gpio}/value",
     response_model=CommandResponse,
     summary="Set Manual Sensor Override",
-    description="Set manual override value for a sensor (DB-First). Overrides variation pattern until cleared."
+    description="Set manual override value for a sensor (DB-First). Overrides variation pattern until cleared.",
 )
 async def set_manual_sensor_override(
     esp_id: str,
@@ -1101,23 +1097,21 @@ async def set_manual_sensor_override(
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
     sim_config = esp_repo.get_simulation_config(device)
     if str(gpio) not in sim_config.get("sensors", {}):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor GPIO {gpio} not found on {esp_id}"
+            detail=f"Sensor GPIO {gpio} not found on {esp_id}",
         )
 
     # Set manual override
     success = await esp_repo.set_manual_sensor_override(esp_id, gpio, request.raw_value)
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to set manual override"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to set manual override"
         )
 
     await db.commit()
@@ -1130,11 +1124,7 @@ async def set_manual_sensor_override(
         success=True,
         esp_id=esp_id,
         command="set_manual_sensor_override",
-        result={
-            "gpio": gpio,
-            "override_value": request.raw_value,
-            "db_updated": True
-        }
+        result={"gpio": gpio, "override_value": request.raw_value, "db_updated": True},
     )
 
 
@@ -1143,7 +1133,7 @@ async def set_manual_sensor_override(
     response_model=CommandResponse,
     status_code=status.HTTP_200_OK,
     summary="Clear Manual Sensor Override",
-    description="Clear manual override value for a sensor (DB-First). Sensor returns to pattern-based simulation."
+    description="Clear manual override value for a sensor (DB-First). Sensor returns to pattern-based simulation.",
 )
 async def clear_manual_sensor_override(
     esp_id: str,
@@ -1163,8 +1153,7 @@ async def clear_manual_sensor_override(
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
     # Clear manual override
@@ -1172,23 +1161,18 @@ async def clear_manual_sensor_override(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No manual override found for GPIO {gpio} on {esp_id}"
+            detail=f"No manual override found for GPIO {gpio} on {esp_id}",
         )
 
     await db.commit()
 
-    logger.info(
-        f"Admin {current_user.username} cleared manual override for {esp_id} GPIO {gpio}"
-    )
+    logger.info(f"Admin {current_user.username} cleared manual override for {esp_id} GPIO {gpio}")
 
     return CommandResponse(
         success=True,
         esp_id=esp_id,
         command="clear_manual_sensor_override",
-        result={
-            "gpio": gpio,
-            "override_cleared": True
-        }
+        result={"gpio": gpio, "override_cleared": True},
     )
 
 
@@ -1196,7 +1180,7 @@ async def clear_manual_sensor_override(
     "/mock-esp/{esp_id}/sensors/batch",
     response_model=CommandResponse,
     summary="Set Batch Sensor Values",
-    description="Set multiple sensor values at once."
+    description="Set multiple sensor values at once.",
 )
 async def set_batch_sensor_values(
     esp_id: str,
@@ -1207,28 +1191,22 @@ async def set_batch_sensor_values(
 ) -> CommandResponse:
     """
     Set multiple sensor values and optionally publish batch message.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
     """
     try:
         result = await scheduler.set_batch_sensor_values(
-            esp_id=esp_id,
-            values=request.values,
-            session=db,
-            publish=request.publish
+            esp_id=esp_id, values=request.values, session=db, publish=request.publish
         )
         await db.commit()
 
         return CommandResponse(
-            success=True,
-            esp_id=esp_id,
-            command="set_batch_sensor_values",
-            result=result
+            success=True, esp_id=esp_id, command="set_batch_sensor_values", result=result
         )
     except SimulationNotRunningError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found or simulation not running"
+            detail=f"Mock ESP {esp_id} not found or simulation not running",
         )
 
 
@@ -1239,7 +1217,7 @@ async def set_batch_sensor_values(
     "/mock-esp/{esp_id}/actuators",
     response_model=CommandResponse,
     summary="Add Actuator",
-    description="Add a new actuator to a mock ESP32."
+    description="Add a new actuator to a mock ESP32.",
 )
 async def add_actuator(
     esp_id: str,
@@ -1249,18 +1227,17 @@ async def add_actuator(
 ) -> CommandResponse:
     """
     Add an actuator to a mock ESP.
-    
+
     DB-FIRST: Updates database configuration.
     """
     esp_repo = ESPRepository(db)
-    
+
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
-    
+
     actuator_config = {
         "actuator_type": config.actuator_type,
         "name": config.name,
@@ -1269,7 +1246,7 @@ async def add_actuator(
         "min_value": config.min_value,
         "max_value": config.max_value,
     }
-    
+
     # Update database
     success = await esp_repo.add_actuator_to_mock(esp_id, config.gpio, actuator_config)
     if success:
@@ -1279,7 +1256,7 @@ async def add_actuator(
         success=success,
         esp_id=esp_id,
         command="add_actuator",
-        result={"gpio": config.gpio, "actuator_type": config.actuator_type, "db_updated": success}
+        result={"gpio": config.gpio, "actuator_type": config.actuator_type, "db_updated": success},
     )
 
 
@@ -1287,7 +1264,7 @@ async def add_actuator(
     "/mock-esp/{esp_id}/actuators/{gpio}",
     response_model=CommandResponse,
     summary="Set Actuator State",
-    description="Set the state of an actuator on a mock ESP32."
+    description="Set the state of an actuator on a mock ESP32.",
 )
 async def set_actuator_state(
     esp_id: str,
@@ -1299,11 +1276,11 @@ async def set_actuator_state(
 ) -> CommandResponse:
     """
     Set an actuator's state and optionally publish MQTT status.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
     """
     from ...core.exceptions import ActuatorNotFoundError
-    
+
     try:
         success = await scheduler.set_actuator_state(
             esp_id=esp_id,
@@ -1317,17 +1294,16 @@ async def set_actuator_state(
             success=success,
             esp_id=esp_id,
             command="set_actuator_state",
-            result={"gpio": gpio, "state": request.state, "pwm_value": request.pwm_value}
+            result={"gpio": gpio, "state": request.state, "pwm_value": request.pwm_value},
         )
     except SimulationNotRunningError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Simulation for {esp_id} not running"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Simulation for {esp_id} not running"
         )
     except ActuatorNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Actuator GPIO {gpio} not found on {esp_id}"
+            detail=f"Actuator GPIO {gpio} not found on {esp_id}",
         )
 
 
@@ -1338,7 +1314,7 @@ async def set_actuator_state(
     "/mock-esp/{esp_id}/emergency-stop",
     response_model=CommandResponse,
     summary="Emergency Stop",
-    description="Trigger emergency stop on a mock ESP32, stopping all actuators."
+    description="Trigger emergency stop on a mock ESP32, stopping all actuators.",
 )
 async def emergency_stop(
     esp_id: str,
@@ -1348,12 +1324,12 @@ async def emergency_stop(
 ) -> CommandResponse:
     """
     Trigger emergency stop on a mock ESP.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
     """
     if not scheduler.is_mock_active(esp_id):
         raise SimulationNotRunningError(esp_id)
-    
+
     success = await scheduler.emergency_stop(esp_id, reason)
 
     logger.warning(
@@ -1362,15 +1338,15 @@ async def emergency_stop(
             "esp_id": esp_id,
             "user": current_user.username,
             "reason": reason,
-            "category": "actuator_operation"
-        }
+            "category": "actuator_operation",
+        },
     )
 
     return CommandResponse(
         success=success,
         esp_id=esp_id,
         command="emergency_stop",
-        result={"reason": reason, "emergency_stopped": True}
+        result={"reason": reason, "emergency_stopped": True},
     )
 
 
@@ -1378,7 +1354,7 @@ async def emergency_stop(
     "/mock-esp/{esp_id}/clear-emergency",
     response_model=CommandResponse,
     summary="Clear Emergency",
-    description="Clear emergency stop state on a mock ESP32."
+    description="Clear emergency stop state on a mock ESP32.",
 )
 async def clear_emergency(
     esp_id: str,
@@ -1387,28 +1363,24 @@ async def clear_emergency(
 ) -> CommandResponse:
     """
     Clear emergency stop on a mock ESP.
-    
+
     Paket X: Uses SimulationScheduler instead of MockESPManager.
     """
     if not scheduler.is_mock_active(esp_id):
         raise SimulationNotRunningError(esp_id)
-    
+
     success = await scheduler.clear_emergency(esp_id)
 
     logger.info(
         f"Emergency cleared on mock ESP {esp_id} by {current_user.username}",
-        extra={
-            "esp_id": esp_id,
-            "user": current_user.username,
-            "category": "actuator_operation"
-        }
+        extra={"esp_id": esp_id, "user": current_user.username, "category": "actuator_operation"},
     )
 
     return CommandResponse(
         success=success,
         esp_id=esp_id,
         command="clear_emergency",
-        result={"emergency_stopped": False}
+        result={"emergency_stopped": False},
     )
 
 
@@ -1431,7 +1403,7 @@ async def clear_emergency(
     Unlike set_actuator_state (which directly sets state), this endpoint
     simulates the complete command flow including emergency stop checks
     and duration-based auto-off scheduling.
-    """
+    """,
 )
 async def simulate_actuator_command(
     esp_id: str,
@@ -1442,7 +1414,7 @@ async def simulate_actuator_command(
 ) -> ActuatorCommandResponse:
     """
     Simulate an actuator command via the MQTT flow.
-    
+
     This endpoint is useful for testing:
     - Logic Engine integration
     - Emergency stop behavior
@@ -1454,24 +1426,24 @@ async def simulate_actuator_command(
     except RuntimeError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="SimulationScheduler not available"
+            detail="SimulationScheduler not available",
         )
-    
+
     # Check if mock is active
     if not sim_scheduler.is_mock_active(esp_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not running. Start it first with auto_heartbeat=true"
+            detail=f"Mock ESP {esp_id} not running. Start it first with auto_heartbeat=true",
         )
-    
+
     # Get actuator handler
     handler = sim_scheduler.get_actuator_handler()
     if not handler:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MockActuatorHandler not initialized"
+            detail="MockActuatorHandler not initialized",
         )
-    
+
     # Build mock MQTT topic and payload
     from ...mqtt.topics import TopicBuilder
     import json
@@ -1479,20 +1451,22 @@ async def simulate_actuator_command(
 
     # Use TopicBuilder for consistency (TopicBuilder adds kaiser_id automatically)
     topic = TopicBuilder.build_actuator_command_topic(esp_id, gpio)
-    payload = json.dumps({
-        "command": request.command,
-        "value": request.value,
-        "duration": request.duration,
-        "timestamp": int(time.time()),
-        "command_id": f"api_{int(time.time())}"
-    })
-    
+    payload = json.dumps(
+        {
+            "command": request.command,
+            "value": request.value,
+            "duration": request.duration,
+            "timestamp": int(time.time()),
+            "command_id": f"api_{int(time.time())}",
+        }
+    )
+
     # Execute command via handler
     success = await handler.handle_command(topic, payload)
-    
+
     # Get updated state
     state_info = sim_scheduler.get_actuator_state(esp_id, gpio)
-    
+
     if state_info:
         return ActuatorCommandResponse(
             success=success,
@@ -1501,7 +1475,7 @@ async def simulate_actuator_command(
             command=request.command,
             state=state_info["state"],
             pwm_value=state_info["pwm_value"],
-            message=f"Command {request.command} {'executed' if success else 'failed'}"
+            message=f"Command {request.command} {'executed' if success else 'failed'}",
         )
     else:
         # Command may have failed, but return response anyway
@@ -1512,7 +1486,7 @@ async def simulate_actuator_command(
             command=request.command,
             state=False,
             pwm_value=0,
-            message="Command processed but actuator state not found"
+            message="Command processed but actuator state not found",
         )
 
 
@@ -1520,7 +1494,7 @@ async def simulate_actuator_command(
     "/mock-esp/{esp_id}/actuators/{gpio}/emergency-stop",
     response_model=CommandResponse,
     summary="Emergency Stop Single Actuator",
-    description="Trigger emergency stop on a mock ESP32 via SimulationScheduler."
+    description="Trigger emergency stop on a mock ESP32 via SimulationScheduler.",
 )
 async def emergency_stop_via_scheduler(
     esp_id: str,
@@ -1530,7 +1504,7 @@ async def emergency_stop_via_scheduler(
 ) -> CommandResponse:
     """
     Trigger emergency stop on a mock ESP using SimulationScheduler.
-    
+
     This uses the new Paket G infrastructure instead of MockESPManager.
     """
     try:
@@ -1538,31 +1512,33 @@ async def emergency_stop_via_scheduler(
     except RuntimeError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="SimulationScheduler not available"
+            detail="SimulationScheduler not available",
         )
-    
+
     if not sim_scheduler.is_mock_active(esp_id):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not running"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not running"
         )
-    
+
     # Get handler and trigger emergency
     handler = sim_scheduler.get_actuator_handler()
     if handler:
         # Simulate emergency message
         import json
+
         topic = f"kaiser/god/esp/{esp_id}/actuator/emergency"
-        payload = json.dumps({"reason": "manual_api_trigger", "timestamp": int(__import__('time').time())})
+        payload = json.dumps(
+            {"reason": "manual_api_trigger", "timestamp": int(__import__("time").time())}
+        )
         await handler.handle_emergency(topic, payload, esp_id)
-    
+
     logger.warning(f"Emergency stop triggered on mock ESP {esp_id} by {current_user.username}")
-    
+
     return CommandResponse(
         success=True,
         esp_id=esp_id,
         command="emergency_stop_scheduler",
-        result={"gpio": gpio, "emergency_stopped": True}
+        result={"gpio": gpio, "emergency_stopped": True},
     )
 
 
@@ -1570,7 +1546,7 @@ async def emergency_stop_via_scheduler(
     "/mock-esp/{esp_id}/clear-emergency-scheduler",
     response_model=CommandResponse,
     summary="Clear Emergency (Scheduler)",
-    description="Clear emergency stop state using SimulationScheduler."
+    description="Clear emergency stop state using SimulationScheduler.",
 )
 async def clear_emergency_via_scheduler(
     esp_id: str,
@@ -1579,7 +1555,7 @@ async def clear_emergency_via_scheduler(
 ) -> CommandResponse:
     """
     Clear emergency stop on a mock ESP using SimulationScheduler.
-    
+
     This uses the new Paket G infrastructure instead of MockESPManager.
     """
     try:
@@ -1587,22 +1563,21 @@ async def clear_emergency_via_scheduler(
     except RuntimeError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="SimulationScheduler not available"
+            detail="SimulationScheduler not available",
         )
-    
+
     if not sim_scheduler.is_mock_active(esp_id):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not running"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not running"
         )
-    
+
     success = await sim_scheduler.clear_emergency(esp_id)
-    
+
     return CommandResponse(
         success=success,
         esp_id=esp_id,
         command="clear_emergency_scheduler",
-        result={"emergency_cleared": success}
+        result={"emergency_cleared": success},
     )
 
 
@@ -1610,7 +1585,7 @@ async def clear_emergency_via_scheduler(
     "/mock-esp/{esp_id}/actuator-states",
     response_model=Dict[str, Any],
     summary="Get All Actuator States",
-    description="Get all actuator states for a running mock ESP."
+    description="Get all actuator states for a running mock ESP.",
 )
 async def get_actuator_states(
     esp_id: str,
@@ -1619,7 +1594,7 @@ async def get_actuator_states(
 ) -> Dict[str, Any]:
     """
     Get all actuator states from SimulationScheduler runtime.
-    
+
     Returns real-time state information for all actuators.
     """
     try:
@@ -1627,22 +1602,21 @@ async def get_actuator_states(
     except RuntimeError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="SimulationScheduler not available"
+            detail="SimulationScheduler not available",
         )
-    
+
     if not sim_scheduler.is_mock_active(esp_id):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not running"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not running"
         )
-    
+
     states = sim_scheduler.get_all_actuator_states(esp_id)
     runtime = sim_scheduler.get_runtime(esp_id)
 
     return {
         "esp_id": esp_id,
         "emergency_stopped": runtime.emergency_stopped if runtime else False,
-        "actuators": states
+        "actuators": states,
     }
 
 
@@ -1653,7 +1627,7 @@ async def get_actuator_states(
     "/mock-esp/{esp_id}/messages",
     response_model=MockESPMessagesResponse,
     summary="Get Published Messages",
-    description="Get MQTT messages published by a mock ESP32. Note: Message history is not persisted after migration to SimulationScheduler."
+    description="Get MQTT messages published by a mock ESP32. Note: Message history is not persisted after migration to SimulationScheduler.",
 )
 async def get_messages(
     esp_id: str,
@@ -1664,34 +1638,28 @@ async def get_messages(
 ) -> MockESPMessagesResponse:
     """
     Get recently published MQTT messages from a mock ESP.
-    
+
     Paket X: Message history is no longer stored in-memory.
     Returns empty list - messages should be queried from MQTT broker or database logs.
     """
     esp_repo = ESPRepository(db)
     device = await esp_repo.get_mock_device(esp_id)
-    
+
     if device is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Mock ESP {esp_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
 
     # Message history is not stored in SimulationScheduler
     # Return empty list with note about where to find messages
-    return MockESPMessagesResponse(
-        success=True,
-        esp_id=esp_id,
-        messages=[],
-        total=0
-    )
+    return MockESPMessagesResponse(success=True, esp_id=esp_id, messages=[], total=0)
 
 
 @router.delete(
     "/mock-esp/{esp_id}/messages",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Clear Messages",
-    description="Clear message history for a mock ESP32. (Deprecated - no longer applicable)"
+    description="Clear message history for a mock ESP32. (Deprecated - no longer applicable)",
 )
 async def clear_messages(
     esp_id: str,
@@ -1708,15 +1676,21 @@ async def clear_messages(
 # Database Explorer
 # =============================================================================
 
+
 def _get_sqlalchemy_type_to_column_type(sqlalchemy_type: str) -> ColumnType:
     """Map SQLAlchemy type string to ColumnType enum."""
     type_lower = sqlalchemy_type.lower()
-    
+
     if "uuid" in type_lower:
         return ColumnType.UUID
     elif "int" in type_lower:
         return ColumnType.INTEGER
-    elif "float" in type_lower or "numeric" in type_lower or "decimal" in type_lower or "real" in type_lower:
+    elif (
+        "float" in type_lower
+        or "numeric" in type_lower
+        or "decimal" in type_lower
+        or "real" in type_lower
+    ):
         return ColumnType.FLOAT
     elif "bool" in type_lower:
         return ColumnType.BOOLEAN
@@ -1744,7 +1718,7 @@ def _serialize_value(value: Any) -> Any:
         return None
     elif isinstance(value, datetime):
         return value.isoformat()
-    elif hasattr(value, '__str__') and not isinstance(value, (str, int, float, bool, list, dict)):
+    elif hasattr(value, "__str__") and not isinstance(value, (str, int, float, bool, list, dict)):
         # UUID and other objects
         return str(value)
     elif isinstance(value, dict):
@@ -1758,12 +1732,12 @@ def _parse_filters(filters_json: Optional[str], columns: List[str]) -> Dict[str,
     """Parse filter JSON string into a dict, validating column names."""
     if not filters_json:
         return {}
-    
+
     try:
         filters = json.loads(filters_json)
         if not isinstance(filters, dict):
             raise ValueError("Filters must be a JSON object")
-        
+
         # Validate that filter keys reference valid columns
         valid_filters = {}
         for key, value in filters.items():
@@ -1773,7 +1747,7 @@ def _parse_filters(filters_json: Optional[str], columns: List[str]) -> Dict[str,
                 valid_filters[key] = value
             else:
                 logger.warning(f"Ignoring filter for unknown column: {base_column}")
-        
+
         return valid_filters
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid filter JSON: {e}")
@@ -1789,51 +1763,48 @@ async def _get_db_session():
     "/db/tables",
     response_model=TableListResponse,
     summary="List Database Tables",
-    description="Get list of all accessible database tables with metadata."
+    description="Get list of all accessible database tables with metadata.",
 )
 async def list_database_tables(
-    current_user: AdminUser,
-    db: AsyncSession = Depends(_get_db_session)
+    current_user: AdminUser, db: AsyncSession = Depends(_get_db_session)
 ) -> TableListResponse:
     """
     List all database tables accessible via the explorer.
-    
+
     Returns table names, column schemas, and row counts.
     Only tables in the whitelist are returned.
     """
     tables = []
-    
+
     # Get SQLAlchemy inspector
     def get_table_info(connection):
         inspector = inspect(connection)
         return inspector.get_table_names()
-    
+
     # Run synchronously in the async context
     async with db.begin():
         connection = await db.connection()
-        all_tables = await connection.run_sync(
-            lambda conn: inspect(conn).get_table_names()
-        )
-        
+        all_tables = await connection.run_sync(lambda conn: inspect(conn).get_table_names())
+
         for table_name in all_tables:
             if table_name not in ALLOWED_TABLES:
                 continue
-            
+
             # Get column info
             columns_info = await connection.run_sync(
                 lambda conn, tn=table_name: inspect(conn).get_columns(tn)
             )
-            
+
             # Get primary key info
             pk_info = await connection.run_sync(
                 lambda conn, tn=table_name: inspect(conn).get_pk_constraint(tn)
             )
-            
+
             # Get foreign key info
             fk_info = await connection.run_sync(
                 lambda conn, tn=table_name: inspect(conn).get_foreign_keys(tn)
             )
-            
+
             # Build foreign key lookup
             fk_lookup = {}
             for fk in fk_info:
@@ -1842,39 +1813,43 @@ async def list_database_tables(
                     ref_cols = fk.get("referred_columns", [])
                     if ref_cols:
                         fk_lookup[local_col] = f"{ref_table}.{ref_cols[0]}"
-            
+
             # Get primary key column(s)
             pk_columns = pk_info.get("constrained_columns", []) if pk_info else []
             primary_key = pk_columns[0] if pk_columns else "id"
-            
+
             # Build column schemas
             columns = []
             for col in columns_info:
                 col_name = col["name"]
                 col_type = str(col["type"])
-                
-                columns.append(ColumnSchema(
-                    name=col_name,
-                    type=_get_sqlalchemy_type_to_column_type(col_type),
-                    nullable=col.get("nullable", True),
-                    primary_key=col_name in pk_columns,
-                    foreign_key=fk_lookup.get(col_name)
-                ))
-            
+
+                columns.append(
+                    ColumnSchema(
+                        name=col_name,
+                        type=_get_sqlalchemy_type_to_column_type(col_type),
+                        nullable=col.get("nullable", True),
+                        primary_key=col_name in pk_columns,
+                        foreign_key=fk_lookup.get(col_name),
+                    )
+                )
+
             # Get row count
             result = await db.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
             row_count = result.scalar() or 0
-            
-            tables.append(TableSchema(
-                table_name=table_name,
-                columns=columns,
-                row_count=row_count,
-                primary_key=primary_key
-            ))
-    
+
+            tables.append(
+                TableSchema(
+                    table_name=table_name,
+                    columns=columns,
+                    row_count=row_count,
+                    primary_key=primary_key,
+                )
+            )
+
     # Sort tables alphabetically
     tables.sort(key=lambda t: t.table_name)
-    
+
     logger.info(f"Admin {current_user.username} listed {len(tables)} database tables")
     return TableListResponse(success=True, tables=tables)
 
@@ -1883,49 +1858,41 @@ async def list_database_tables(
     "/db/{table_name}/schema",
     response_model=TableSchema,
     summary="Get Table Schema",
-    description="Get detailed schema information for a specific table."
+    description="Get detailed schema information for a specific table.",
 )
 async def get_table_schema(
-    table_name: str,
-    current_user: AdminUser,
-    db: AsyncSession = Depends(_get_db_session)
+    table_name: str, current_user: AdminUser, db: AsyncSession = Depends(_get_db_session)
 ) -> TableSchema:
     """Get detailed schema of a database table."""
     if table_name not in ALLOWED_TABLES:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Table '{table_name}' not found or not accessible"
+            detail=f"Table '{table_name}' not found or not accessible",
         )
-    
+
     async with db.begin():
         connection = await db.connection()
-        
+
         # Check if table exists
-        all_tables = await connection.run_sync(
-            lambda conn: inspect(conn).get_table_names()
-        )
-        
+        all_tables = await connection.run_sync(lambda conn: inspect(conn).get_table_names())
+
         if table_name not in all_tables:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Table '{table_name}' not found in database"
+                detail=f"Table '{table_name}' not found in database",
             )
-        
+
         # Get column info
-        columns_info = await connection.run_sync(
-            lambda conn: inspect(conn).get_columns(table_name)
-        )
-        
+        columns_info = await connection.run_sync(lambda conn: inspect(conn).get_columns(table_name))
+
         # Get primary key info
         pk_info = await connection.run_sync(
             lambda conn: inspect(conn).get_pk_constraint(table_name)
         )
-        
+
         # Get foreign key info
-        fk_info = await connection.run_sync(
-            lambda conn: inspect(conn).get_foreign_keys(table_name)
-        )
-        
+        fk_info = await connection.run_sync(lambda conn: inspect(conn).get_foreign_keys(table_name))
+
         # Build foreign key lookup
         fk_lookup = {}
         for fk in fk_info:
@@ -1934,32 +1901,31 @@ async def get_table_schema(
                 ref_cols = fk.get("referred_columns", [])
                 if ref_cols:
                     fk_lookup[local_col] = f"{ref_table}.{ref_cols[0]}"
-        
+
         pk_columns = pk_info.get("constrained_columns", []) if pk_info else []
         primary_key = pk_columns[0] if pk_columns else "id"
-        
+
         columns = []
         for col in columns_info:
             col_name = col["name"]
             col_type = str(col["type"])
-            
-            columns.append(ColumnSchema(
-                name=col_name,
-                type=_get_sqlalchemy_type_to_column_type(col_type),
-                nullable=col.get("nullable", True),
-                primary_key=col_name in pk_columns,
-                foreign_key=fk_lookup.get(col_name)
-            ))
-        
+
+            columns.append(
+                ColumnSchema(
+                    name=col_name,
+                    type=_get_sqlalchemy_type_to_column_type(col_type),
+                    nullable=col.get("nullable", True),
+                    primary_key=col_name in pk_columns,
+                    foreign_key=fk_lookup.get(col_name),
+                )
+            )
+
         # Get row count
         result = await db.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
         row_count = result.scalar() or 0
-    
+
     return TableSchema(
-        table_name=table_name,
-        columns=columns,
-        row_count=row_count,
-        primary_key=primary_key
+        table_name=table_name, columns=columns, row_count=row_count, primary_key=primary_key
     )
 
 
@@ -1967,7 +1933,7 @@ async def get_table_schema(
     "/db/{table_name}",
     response_model=TableDataResponse,
     summary="Query Table Data",
-    description="Query data from a database table with pagination, sorting, and filtering."
+    description="Query data from a database table with pagination, sorting, and filtering.",
 )
 async def query_table(
     table_name: str,
@@ -1977,58 +1943,53 @@ async def query_table(
     sort_by: Optional[str] = Query(default=None, description="Column to sort by"),
     sort_order: SortOrder = Query(default=SortOrder.DESC, description="Sort order"),
     filters: Optional[str] = Query(default=None, description="JSON-encoded filters"),
-    db: AsyncSession = Depends(_get_db_session)
+    db: AsyncSession = Depends(_get_db_session),
 ) -> TableDataResponse:
     """
     Query data from a database table.
-    
+
     Supports:
     - Pagination (page, page_size)
     - Sorting (sort_by, sort_order)
     - Filtering (filters as JSON string)
-    
+
     Filter syntax (Django-style):
     - {"column": "value"} - exact match
     - {"column__gte": 100} - greater than or equal
     - {"column__lte": 200} - less than or equal
     - {"column__in": ["a", "b"]} - in list
-    
+
     Time-series tables (sensor_data, actuator_history, logic_execution_history)
     default to last 24 hours unless overridden with timestamp filters.
     """
     if table_name not in ALLOWED_TABLES:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Table '{table_name}' not found or not accessible"
+            detail=f"Table '{table_name}' not found or not accessible",
         )
-    
+
     async with db.begin():
         connection = await db.connection()
-        
+
         # Get column names for validation
-        columns_info = await connection.run_sync(
-            lambda conn: inspect(conn).get_columns(table_name)
-        )
+        columns_info = await connection.run_sync(lambda conn: inspect(conn).get_columns(table_name))
         column_names = [col["name"] for col in columns_info]
-        
+
         # Parse and validate filters
         try:
             parsed_filters = _parse_filters(filters, column_names)
         except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
-            )
-        
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
         # Build base query
         base_query = f"SELECT * FROM {table_name}"
         count_query = f"SELECT COUNT(*) FROM {table_name}"
-        
+
         # Build WHERE clause
         where_clauses = []
         params = {}
         param_index = 0
-        
+
         # For time-series tables, add default time filter if not provided
         if table_name in TIME_SERIES_TABLES:
             timestamp_col = TIME_SERIES_TABLES[table_name]
@@ -2038,23 +1999,25 @@ async def query_table(
 
             if not has_timestamp_filter:
                 # Default to last 24 hours
-                cutoff = datetime.now(timezone.utc) - timedelta(hours=DEFAULT_TIME_SERIES_LIMIT_HOURS)
+                cutoff = datetime.now(timezone.utc) - timedelta(
+                    hours=DEFAULT_TIME_SERIES_LIMIT_HOURS
+                )
                 param_name = f"p{param_index}"
                 where_clauses.append(f"{timestamp_col} >= :{param_name}")
                 params[param_name] = cutoff.isoformat()
                 param_index += 1
-        
+
         # Process filters
         for key, value in parsed_filters.items():
             parts = key.split("__")
             col_name = parts[0]
             operator = parts[1] if len(parts) > 1 else "eq"
-            
+
             if col_name not in column_names:
                 continue
-            
+
             param_name = f"p{param_index}"
-            
+
             if operator == "eq" or operator == col_name:
                 where_clauses.append(f"{col_name} = :{param_name}")
                 params[param_name] = value
@@ -2081,19 +2044,19 @@ async def query_table(
             elif operator == "contains":
                 where_clauses.append(f"{col_name} LIKE :{param_name}")
                 params[param_name] = f"%{value}%"
-            
+
             param_index += 1
-        
+
         # Add WHERE clause to queries
         if where_clauses:
             where_sql = " AND ".join(where_clauses)
             base_query += f" WHERE {where_sql}"
             count_query += f" WHERE {where_sql}"
-        
+
         # Get total count
         result = await db.execute(text(count_query), params)
         total_count = result.scalar() or 0
-        
+
         # Add sorting
         if sort_by and sort_by in column_names:
             order_dir = "ASC" if sort_order == SortOrder.ASC else "DESC"
@@ -2106,30 +2069,30 @@ async def query_table(
             base_query += " ORDER BY timestamp DESC"
         elif "id" in column_names:
             base_query += " ORDER BY id DESC"
-        
+
         # Add pagination
         offset = (page - 1) * page_size
         base_query += f" LIMIT {page_size} OFFSET {offset}"
-        
+
         # Execute query
         result = await db.execute(text(base_query), params)
         rows = result.mappings().all()
-        
+
         # Serialize and mask data
         data = []
         for row in rows:
             record = {k: _serialize_value(v) for k, v in dict(row).items()}
             record = _mask_sensitive_fields(table_name, record)
             data.append(record)
-    
+
     # Calculate total pages
     total_pages = math.ceil(total_count / page_size) if total_count > 0 else 0
-    
+
     logger.info(
         f"Admin {current_user.username} queried table {table_name}: "
         f"page={page}, page_size={page_size}, total={total_count}"
     )
-    
+
     return TableDataResponse(
         success=True,
         table_name=table_name,
@@ -2137,7 +2100,7 @@ async def query_table(
         total_count=total_count,
         page=page,
         page_size=page_size,
-        total_pages=total_pages
+        total_pages=total_pages,
     )
 
 
@@ -2145,63 +2108,61 @@ async def query_table(
     "/db/{table_name}/{record_id}",
     response_model=RecordResponse,
     summary="Get Single Record",
-    description="Get a single record from a database table by its primary key."
+    description="Get a single record from a database table by its primary key.",
 )
 async def get_record(
     table_name: str,
     record_id: str,
     current_user: AdminUser,
-    db: AsyncSession = Depends(_get_db_session)
+    db: AsyncSession = Depends(_get_db_session),
 ) -> RecordResponse:
     """Get a single record by its primary key."""
     if table_name not in ALLOWED_TABLES:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Table '{table_name}' not found or not accessible"
+            detail=f"Table '{table_name}' not found or not accessible",
         )
-    
+
     async with db.begin():
         connection = await db.connection()
-        
+
         # Get primary key info
         pk_info = await connection.run_sync(
             lambda conn: inspect(conn).get_pk_constraint(table_name)
         )
-        
+
         pk_columns = pk_info.get("constrained_columns", []) if pk_info else []
         if not pk_columns:
             pk_columns = ["id"]
-        
+
         primary_key = pk_columns[0]
-        
+
         # Build and execute query
         query = f"SELECT * FROM {table_name} WHERE {primary_key} = :record_id"
         result = await db.execute(text(query), {"record_id": record_id})
         row = result.mappings().first()
-        
+
         if not row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Record with {primary_key}={record_id} not found in {table_name}"
+                detail=f"Record with {primary_key}={record_id} not found in {table_name}",
             )
-        
+
         # Serialize and mask
         record = {k: _serialize_value(v) for k, v in dict(row).items()}
         record = _mask_sensitive_fields(table_name, record)
-    
-    return RecordResponse(
-        success=True,
-        table_name=table_name,
-        record=record
-    )
+
+    return RecordResponse(success=True, table_name=table_name, record=record)
 
 
 # =============================================================================
 # Log Viewer
 # =============================================================================
 
+
 class LogLevel(str, Enum):
     """Log level filter options."""
+
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
@@ -2211,6 +2172,7 @@ class LogLevel(str, Enum):
 
 class LogEntry(BaseModel):
     """A single log entry."""
+
     timestamp: str
     level: str
     logger: str
@@ -2225,6 +2187,7 @@ class LogEntry(BaseModel):
 
 class LogsResponse(BaseModel):
     """Response for log queries."""
+
     success: bool = True
     logs: List[LogEntry]
     total_count: int
@@ -2235,6 +2198,7 @@ class LogsResponse(BaseModel):
 
 class LogFilesResponse(BaseModel):
     """Response for available log files."""
+
     success: bool = True
     files: List[Dict[str, Any]]
     log_directory: str
@@ -2242,6 +2206,7 @@ class LogFilesResponse(BaseModel):
 
 class LogFileInfo(BaseModel):
     """Detailed log file information."""
+
     name: str
     size_mb: float
     size_bytes: int
@@ -2252,6 +2217,7 @@ class LogFileInfo(BaseModel):
 
 class LogStatisticsResponse(BaseModel):
     """Response for log statistics."""
+
     success: bool = True
     total_size_mb: float
     total_size_bytes: int
@@ -2261,6 +2227,7 @@ class LogStatisticsResponse(BaseModel):
 
 class LogCleanupResponse(BaseModel):
     """Response for log cleanup operations."""
+
     success: bool = True
     dry_run: bool
     files_to_delete: List[str]
@@ -2271,6 +2238,7 @@ class LogCleanupResponse(BaseModel):
 
 class LogDeleteResponse(BaseModel):
     """Response for single log file deletion."""
+
     success: bool = True
     deleted: bool
     filename: str
@@ -2285,8 +2253,15 @@ _log_backups: Dict[str, Dict[str, Any]] = {}
 def _parse_log_line(line: str) -> Optional[LogEntry]:
     """Parse a single log line (JSON format)."""
     _KNOWN_JSON_KEYS = {
-        "timestamp", "level", "logger", "message", "module",
-        "function", "line", "exception", "request_id",
+        "timestamp",
+        "level",
+        "logger",
+        "message",
+        "module",
+        "function",
+        "line",
+        "exception",
+        "request_id",
     }
     try:
         data = json.loads(line.strip())
@@ -2300,12 +2275,14 @@ def _parse_log_line(line: str) -> Optional[LogEntry]:
             line=data.get("line"),
             exception=data.get("exception"),
             request_id=data.get("request_id"),
-            extra={k: v for k, v in data.items() if k not in _KNOWN_JSON_KEYS} or None
+            extra={k: v for k, v in data.items() if k not in _KNOWN_JSON_KEYS} or None,
         )
     except json.JSONDecodeError:
         # Try parsing as text format
         # New format: "2025-01-01 12:00:00 - logger - LEVEL - [req-id] - message"
-        pattern_with_rid = r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) - (\w+) - \[([^\]]+)\] - (.*)$'
+        pattern_with_rid = (
+            r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) - (\w+) - \[([^\]]+)\] - (.*)$"
+        )
         match = re.match(pattern_with_rid, line.strip())
         if match:
             rid = match.group(4)
@@ -2314,17 +2291,17 @@ def _parse_log_line(line: str) -> Optional[LogEntry]:
                 logger=match.group(2),
                 level=match.group(3),
                 request_id=rid if rid != "-" else None,
-                message=match.group(5)
+                message=match.group(5),
             )
         # Legacy format: "2025-01-01 12:00:00 - logger - LEVEL - message"
-        pattern = r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) - (\w+) - (.*)$'
+        pattern = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) - (\w+) - (.*)$"
         match = re.match(pattern, line.strip())
         if match:
             return LogEntry(
                 timestamp=match.group(1),
                 logger=match.group(2),
                 level=match.group(3),
-                message=match.group(4)
+                message=match.group(4),
             )
         return None
     except Exception:
@@ -2351,18 +2328,17 @@ def _filter_log_entry(
         if level.value in level_order and entry.level in level_order:
             if level_order.index(entry.level) < level_order.index(level.value):
                 return False
-    
+
     # Module filter
     if module and module.lower() not in entry.logger.lower():
         return False
-    
+
     # Search filter
     if search:
         search_lower = search.lower()
-        if (search_lower not in entry.message.lower() and 
-            search_lower not in entry.logger.lower()):
+        if search_lower not in entry.message.lower() and search_lower not in entry.logger.lower():
             return False
-    
+
     # Time filters
     # Log timestamps are in server-local time (naive datetime).
     # Query params from the frontend arrive as UTC-aware datetimes (ISO with Z).
@@ -2375,7 +2351,11 @@ def _filter_log_entry(
 
             # Convert timezone-aware query times to local naive datetimes
             if start_time:
-                st = start_time.astimezone().replace(tzinfo=None) if start_time.tzinfo else start_time
+                st = (
+                    start_time.astimezone().replace(tzinfo=None)
+                    if start_time.tzinfo
+                    else start_time
+                )
                 if entry_time < st.replace(microsecond=0):
                     return False
             if end_time:
@@ -2384,7 +2364,7 @@ def _filter_log_entry(
                     return False
         except ValueError:
             pass  # Can't parse timestamp, include entry anyway
-    
+
     return True
 
 
@@ -2392,42 +2372,42 @@ def _filter_log_entry(
     "/logs/files",
     response_model=LogFilesResponse,
     summary="List Log Files",
-    description="Get list of available log files."
+    description="Get list of available log files.",
 )
-async def list_log_files(
-    current_user: AdminUser
-) -> LogFilesResponse:
+async def list_log_files(current_user: AdminUser) -> LogFilesResponse:
     """List all available log files."""
     settings = get_settings()
     log_path = Path(settings.logging.file_path)
     log_dir = log_path.parent
-    
+
     files = []
-    
+
     if log_dir.exists():
         for f in sorted(log_dir.glob("*.log*"), key=lambda x: x.stat().st_mtime, reverse=True):
             stat = f.stat()
-            files.append({
-                "name": f.name,
-                "path": str(f),
-                "size_bytes": stat.st_size,
-                "size_human": f"{stat.st_size / 1024:.1f} KB" if stat.st_size < 1024 * 1024 else f"{stat.st_size / (1024 * 1024):.1f} MB",
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "is_current": f.name == log_path.name
-            })
-    
-    return LogFilesResponse(
-        success=True,
-        files=files,
-        log_directory=str(log_dir)
-    )
+            files.append(
+                {
+                    "name": f.name,
+                    "path": str(f),
+                    "size_bytes": stat.st_size,
+                    "size_human": (
+                        f"{stat.st_size / 1024:.1f} KB"
+                        if stat.st_size < 1024 * 1024
+                        else f"{stat.st_size / (1024 * 1024):.1f} MB"
+                    ),
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "is_current": f.name == log_path.name,
+                }
+            )
+
+    return LogFilesResponse(success=True, files=files, log_directory=str(log_dir))
 
 
 @router.get(
     "/logs",
     response_model=LogsResponse,
     summary="Query Logs",
-    description="Query server logs with filtering and pagination."
+    description="Query server logs with filtering and pagination.",
 )
 async def query_logs(
     current_user: AdminUser,
@@ -2436,10 +2416,12 @@ async def query_logs(
     search: Optional[str] = Query(default=None, description="Search in message text"),
     start_time: Optional[datetime] = Query(default=None, description="Start time filter"),
     end_time: Optional[datetime] = Query(default=None, description="End time filter"),
-    request_id: Optional[str] = Query(default=None, description="Filter by request_id (exact match)"),
+    request_id: Optional[str] = Query(
+        default=None, description="Filter by request_id (exact match)"
+    ),
     file: Optional[str] = Query(default=None, description="Specific log file to read"),
     page: int = Query(default=1, ge=1, description="Page number"),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Entries per page")
+    page_size: int = Query(default=100, ge=1, le=1000, description="Entries per page"),
 ) -> LogsResponse:
     """
     Query server logs with filtering.
@@ -2458,27 +2440,21 @@ async def query_logs(
         log_paths = [log_dir / file]
         if not log_paths[0].exists():
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Log file '{file}' not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Log file '{file}' not found"
             )
     elif start_time or end_time or request_id:
         # Multi-file search: scan all log files when time range or request_id is specified
-        log_paths = sorted(
-            log_dir.glob("god_kaiser.log*"),
-            key=lambda x: x.stat().st_mtime,
-            reverse=True
-        ) if log_dir.exists() else []
+        log_paths = (
+            sorted(log_dir.glob("god_kaiser.log*"), key=lambda x: x.stat().st_mtime, reverse=True)
+            if log_dir.exists()
+            else []
+        )
     else:
         log_paths = [Path(settings.logging.file_path)]
 
     if not log_paths or not any(p.exists() for p in log_paths):
         return LogsResponse(
-            success=True,
-            logs=[],
-            total_count=0,
-            page=page,
-            page_size=page_size,
-            has_more=False
+            success=True, logs=[], total_count=0, page=page, page_size=page_size, has_more=False
         )
 
     # Read and parse logs (reverse order for newest first)
@@ -2505,7 +2481,9 @@ async def query_logs(
                     continue
 
                 entry = _parse_log_line(line)
-                if entry and _filter_log_entry(entry, level, module, search, start_time, end_time, request_id):
+                if entry and _filter_log_entry(
+                    entry, level, module, search, start_time, end_time, request_id
+                ):
                     all_entries.append(entry)
 
                 if len(all_entries) >= MAX_MATCHED:
@@ -2517,31 +2495,31 @@ async def query_logs(
         logger.error(f"Error reading log file: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error reading log file: {str(e)}"
+            detail=f"Error reading log file: {str(e)}",
         )
 
     # Sort by timestamp (newest first) when merging multiple files
     if len(log_paths) > 1 and all_entries:
-        all_entries.sort(key=lambda e: e.timestamp if hasattr(e, 'timestamp') else '', reverse=True)
-    
+        all_entries.sort(key=lambda e: e.timestamp if hasattr(e, "timestamp") else "", reverse=True)
+
     # Pagination
     total_count = len(all_entries)
     start_idx = (page - 1) * page_size
     end_idx = start_idx + page_size
     page_entries = all_entries[start_idx:end_idx]
-    
+
     logger.info(
         f"Admin {current_user.username} queried logs: "
         f"file={log_path.name}, level={level}, page={page}, total={total_count}"
     )
-    
+
     return LogsResponse(
         success=True,
         logs=page_entries,
         total_count=total_count,
         page=page,
         page_size=page_size,
-        has_more=end_idx < total_count
+        has_more=end_idx < total_count,
     )
 
 
@@ -2560,18 +2538,22 @@ def _get_log_files_info(log_dir: Path, current_log_name: str) -> List[LogFileInf
         stat = f.stat()
         # Count lines for entry estimation (fast: just count newlines)
         try:
-            entry_count = sum(1 for line in open(f, "r", encoding="utf-8", errors="replace") if line.strip())
+            entry_count = sum(
+                1 for line in open(f, "r", encoding="utf-8", errors="replace") if line.strip()
+            )
         except Exception:
             entry_count = None
 
-        files.append(LogFileInfo(
-            name=f.name,
-            size_mb=round(stat.st_size / (1024 * 1024), 2),
-            size_bytes=stat.st_size,
-            modified_at=datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            entry_count=entry_count,
-            is_current=f.name == current_log_name,
-        ))
+        files.append(
+            LogFileInfo(
+                name=f.name,
+                size_mb=round(stat.st_size / (1024 * 1024), 2),
+                size_bytes=stat.st_size,
+                modified_at=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                entry_count=entry_count,
+                is_current=f.name == current_log_name,
+            )
+        )
     return files
 
 
@@ -2604,7 +2586,8 @@ def _cleanup_expired_backups() -> None:
     """Remove backups older than 1 hour."""
     now = datetime.now(timezone.utc)
     expired = [
-        bid for bid, info in _log_backups.items()
+        bid
+        for bid, info in _log_backups.items()
         if (now - info["created_at"]).total_seconds() > 3600
     ]
     for bid in expired:
@@ -2653,7 +2636,9 @@ async def get_log_statistics(
 async def cleanup_logs(
     current_user: AdminUser,
     dry_run: bool = Query(default=True, description="Preview only, don't delete"),
-    files: Optional[List[str]] = Query(default=None, description="Files to delete (empty = all non-current)"),
+    files: Optional[List[str]] = Query(
+        default=None, description="Files to delete (empty = all non-current)"
+    ),
     create_backup: bool = Query(default=True, description="Create ZIP backup before deletion"),
 ) -> LogCleanupResponse:
     """Cleanup log files with dry-run support."""
@@ -2671,8 +2656,7 @@ async def cleanup_logs(
         # All non-current log files
         if log_dir.exists():
             files_to_delete = [
-                f.name for f in log_dir.glob("*.log*")
-                if f.name != current_name and f.is_file()
+                f.name for f in log_dir.glob("*.log*") if f.name != current_name and f.is_file()
             ]
         else:
             files_to_delete = []
@@ -2750,24 +2734,20 @@ async def delete_log_file(
     if filename == current_name:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Cannot delete the current active log file '{current_name}'"
+            detail=f"Cannot delete the current active log file '{current_name}'",
         )
 
     target = log_dir / filename
     if not target.exists():
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Log file '{filename}' not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Log file '{filename}' not found"
         )
 
     # Security: prevent path traversal
     try:
         target.resolve().relative_to(log_dir.resolve())
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid filename"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid filename")
 
     size_mb = round(target.stat().st_size / (1024 * 1024), 2)
 
@@ -2783,7 +2763,7 @@ async def delete_log_file(
         logger.error(f"Failed to delete log file {filename}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete file: {str(e)}"
+            detail=f"Failed to delete file: {str(e)}",
         )
 
     logger.info(f"Admin {current_user.username} deleted log file: {filename} ({size_mb} MB)")
@@ -2813,7 +2793,7 @@ async def download_log_backup(
     if backup_id not in _log_backups:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Backup '{backup_id}' not found or expired"
+            detail=f"Backup '{backup_id}' not found or expired",
         )
 
     backup_info = _log_backups[backup_id]
@@ -2822,8 +2802,7 @@ async def download_log_backup(
     if not backup_path.exists():
         del _log_backups[backup_id]
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Backup file no longer exists"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Backup file no longer exists"
         )
 
     logger.info(f"Admin {current_user.username} downloaded log backup: {backup_id}")
@@ -2839,8 +2818,10 @@ async def download_log_backup(
 # System Configuration
 # =============================================================================
 
+
 class ConfigEntry(BaseModel):
     """A single configuration entry."""
+
     id: str
     config_key: str
     config_value: Any
@@ -2853,6 +2834,7 @@ class ConfigEntry(BaseModel):
 
 class ConfigListResponse(BaseModel):
     """Response for config list."""
+
     success: bool = True
     configs: List[ConfigEntry]
     total: int
@@ -2860,6 +2842,7 @@ class ConfigListResponse(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     """Request to update a config value."""
+
     config_value: Any = Field(..., description="New configuration value (JSON)")
 
 
@@ -2867,102 +2850,99 @@ class ConfigUpdateRequest(BaseModel):
     "/config",
     response_model=ConfigListResponse,
     summary="List System Configuration",
-    description="Get all system configuration entries."
+    description="Get all system configuration entries.",
 )
 async def list_config(
     current_user: AdminUser,
     config_type: Optional[str] = Query(default=None, description="Filter by config type"),
-    db: AsyncSession = Depends(_get_db_session)
+    db: AsyncSession = Depends(_get_db_session),
 ) -> ConfigListResponse:
     """List all system configuration."""
     query = "SELECT * FROM system_config"
     params = {}
-    
+
     if config_type:
         query += " WHERE config_type = :config_type"
         params["config_type"] = config_type
-    
+
     query += " ORDER BY config_type, config_key"
-    
+
     result = await db.execute(text(query), params)
     rows = result.mappings().all()
-    
+
     configs = []
     for row in rows:
         row_dict = dict(row)
         # Mask secret values
         if row_dict.get("is_secret"):
             row_dict["config_value"] = "***MASKED***"
-        
-        configs.append(ConfigEntry(
-            id=str(row_dict["id"]),
-            config_key=row_dict["config_key"],
-            config_value=row_dict["config_value"],
-            config_type=row_dict["config_type"],
-            description=row_dict.get("description"),
-            is_secret=row_dict.get("is_secret", False),
-            created_at=row_dict["created_at"].isoformat() if row_dict.get("created_at") else "",
-            updated_at=row_dict["updated_at"].isoformat() if row_dict.get("updated_at") else ""
-        ))
-    
-    return ConfigListResponse(
-        success=True,
-        configs=configs,
-        total=len(configs)
-    )
+
+        configs.append(
+            ConfigEntry(
+                id=str(row_dict["id"]),
+                config_key=row_dict["config_key"],
+                config_value=row_dict["config_value"],
+                config_type=row_dict["config_type"],
+                description=row_dict.get("description"),
+                is_secret=row_dict.get("is_secret", False),
+                created_at=row_dict["created_at"].isoformat() if row_dict.get("created_at") else "",
+                updated_at=row_dict["updated_at"].isoformat() if row_dict.get("updated_at") else "",
+            )
+        )
+
+    return ConfigListResponse(success=True, configs=configs, total=len(configs))
 
 
 @router.patch(
     "/config/{config_key}",
     response_model=ConfigEntry,
     summary="Update Configuration",
-    description="Update a system configuration value."
+    description="Update a system configuration value.",
 )
 async def update_config(
     config_key: str,
     update_data: ConfigUpdateRequest,
     current_user: AdminUser,
-    db: AsyncSession = Depends(_get_db_session)
+    db: AsyncSession = Depends(_get_db_session),
 ) -> ConfigEntry:
     """Update a system configuration entry."""
     # Check if config exists
     result = await db.execute(
-        text("SELECT * FROM system_config WHERE config_key = :key"),
-        {"key": config_key}
+        text("SELECT * FROM system_config WHERE config_key = :key"), {"key": config_key}
     )
     row = result.mappings().first()
-    
+
     if not row:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Configuration '{config_key}' not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Configuration '{config_key}' not found"
         )
-    
+
     # Update the config
     await db.execute(
-        text("""
+        text(
+            """
             UPDATE system_config
             SET config_value = :value, updated_at = :updated_at
             WHERE config_key = :key
-        """),
+        """
+        ),
         {
             "value": update_data.config_value,
             "updated_at": datetime.now(timezone.utc),
-            "key": config_key
-        }
+            "key": config_key,
+        },
     )
     await db.commit()
-    
+
     # Fetch updated row
     result = await db.execute(
-        text("SELECT * FROM system_config WHERE config_key = :key"),
-        {"key": config_key}
+        text("SELECT * FROM system_config WHERE config_key = :key"), {"key": config_key}
     )
     updated_row = result.mappings().first()
     row_dict = dict(updated_row)
-    
+
     logger.info(f"Admin {current_user.username} updated config: {config_key}")
-    
+
     return ConfigEntry(
         id=str(row_dict["id"]),
         config_key=row_dict["config_key"],
@@ -2971,7 +2951,7 @@ async def update_config(
         description=row_dict.get("description"),
         is_secret=row_dict.get("is_secret", False),
         created_at=row_dict["created_at"].isoformat() if row_dict.get("created_at") else "",
-        updated_at=row_dict["updated_at"].isoformat() if row_dict.get("updated_at") else ""
+        updated_at=row_dict["updated_at"].isoformat() if row_dict.get("updated_at") else "",
     )
 
 
@@ -2979,8 +2959,10 @@ async def update_config(
 # Load Testing
 # =============================================================================
 
+
 class BulkCreateRequest(BaseModel):
     """Request to bulk-create mock ESPs."""
+
     count: int = Field(..., ge=1, le=100, description="Number of mock ESPs to create")
     prefix: str = Field(default="LOAD_TEST", description="ESP ID prefix")
     with_sensors: int = Field(default=2, ge=0, le=10, description="Sensors per ESP")
@@ -2989,6 +2971,7 @@ class BulkCreateRequest(BaseModel):
 
 class BulkCreateResponse(BaseModel):
     """Response for bulk create."""
+
     success: bool = True
     created_count: int
     esp_ids: List[str]
@@ -2997,13 +2980,19 @@ class BulkCreateResponse(BaseModel):
 
 class SimulationRequest(BaseModel):
     """Request to start sensor simulation."""
-    esp_ids: Optional[List[str]] = Field(default=None, description="ESPs to simulate (all if empty)")
-    interval_ms: int = Field(default=1000, ge=100, le=60000, description="Simulation interval in ms")
+
+    esp_ids: Optional[List[str]] = Field(
+        default=None, description="ESPs to simulate (all if empty)"
+    )
+    interval_ms: int = Field(
+        default=1000, ge=100, le=60000, description="Simulation interval in ms"
+    )
     duration_seconds: int = Field(default=60, ge=10, le=3600, description="Simulation duration")
 
 
 class SimulationResponse(BaseModel):
     """Response for simulation control."""
+
     success: bool = True
     message: str
     active_simulations: int = 0
@@ -3011,6 +3000,7 @@ class SimulationResponse(BaseModel):
 
 class MetricsResponse(BaseModel):
     """Response for performance metrics."""
+
     success: bool = True
     mock_esp_count: int
     total_sensors: int
@@ -3023,7 +3013,7 @@ class MetricsResponse(BaseModel):
     "/load-test/bulk-create",
     response_model=BulkCreateResponse,
     summary="Bulk Create Mock ESPs",
-    description="Create multiple mock ESPs for load testing using SimulationScheduler."
+    description="Create multiple mock ESPs for load testing using SimulationScheduler.",
 )
 async def bulk_create_mock_esps(
     request: BulkCreateRequest,
@@ -3045,25 +3035,29 @@ async def bulk_create_mock_esps(
             # Build sensor configs
             sensors = []
             for s in range(request.with_sensors):
-                sensors.append({
-                    "gpio": 2 + s,
-                    "sensor_type": "DHT22" if s % 2 == 0 else "DS18B20",
-                    "name": f"Sensor_{s+1}",
-                    "unit": "°C" if s % 2 == 0 else "%",
-                    "raw_value": 20.0 + s,
-                    "interval_seconds": 30.0,
-                    "variation_pattern": "random",
-                    "variation_range": 5.0,
-                })
+                sensors.append(
+                    {
+                        "gpio": 2 + s,
+                        "sensor_type": "DHT22" if s % 2 == 0 else "DS18B20",
+                        "name": f"Sensor_{s+1}",
+                        "unit": "°C" if s % 2 == 0 else "%",
+                        "raw_value": 20.0 + s,
+                        "interval_seconds": 30.0,
+                        "variation_pattern": "random",
+                        "variation_range": 5.0,
+                    }
+                )
 
             # Build actuator configs
             actuators = []
             for a in range(request.with_actuators):
-                actuators.append({
-                    "gpio": 12 + a,
-                    "actuator_type": "relay" if a % 2 == 0 else "pwm",
-                    "name": f"Actuator_{a+1}",
-                })
+                actuators.append(
+                    {
+                        "gpio": 12 + a,
+                        "actuator_type": "relay" if a % 2 == 0 else "pwm",
+                        "name": f"Actuator_{a+1}",
+                    }
+                )
 
             # Create via SimulationScheduler (DB-first)
             await scheduler.create_mock_esp(
@@ -3087,15 +3081,15 @@ async def bulk_create_mock_esps(
             "admin_user": current_user.username,
             "created_count": len(created_ids),
             "prefix": request.prefix,
-            "category": "esp_lifecycle"
-        }
+            "category": "esp_lifecycle",
+        },
     )
 
     return BulkCreateResponse(
         success=True,
         created_count=len(created_ids),
         esp_ids=created_ids,
-        message=f"Created {len(created_ids)} mock ESPs with prefix '{request.prefix}'"
+        message=f"Created {len(created_ids)} mock ESPs with prefix '{request.prefix}'",
     )
 
 
@@ -3103,7 +3097,7 @@ async def bulk_create_mock_esps(
     "/load-test/simulate",
     response_model=SimulationResponse,
     summary="Start Sensor Simulation",
-    description="Start automatic sensor value simulation for load testing using SimulationScheduler."
+    description="Start automatic sensor value simulation for load testing using SimulationScheduler.",
 )
 async def start_simulation(
     request: SimulationRequest,
@@ -3152,14 +3146,14 @@ async def start_simulation(
             "active_count": active_count,
             "interval_ms": request.interval_ms,
             "duration_seconds": request.duration_seconds,
-            "category": "simulation_control"
-        }
+            "category": "simulation_control",
+        },
     )
 
     return SimulationResponse(
         success=True,
         message=f"Started simulation on {active_count} mock ESPs",
-        active_simulations=active_count
+        active_simulations=active_count,
     )
 
 
@@ -3167,7 +3161,7 @@ async def start_simulation(
     "/load-test/stop",
     response_model=SimulationResponse,
     summary="Stop Simulation",
-    description="Stop all sensor simulations using SimulationScheduler."
+    description="Stop all sensor simulations using SimulationScheduler.",
 )
 async def stop_simulation(
     current_user: AdminUser,
@@ -3186,14 +3180,14 @@ async def stop_simulation(
         extra={
             "admin_user": current_user.username,
             "stopped_count": stopped_count,
-            "category": "simulation_control"
-        }
+            "category": "simulation_control",
+        },
     )
 
     return SimulationResponse(
         success=True,
         message=f"Stopped simulation on {stopped_count} mock ESPs",
-        active_simulations=0
+        active_simulations=0,
     )
 
 
@@ -3201,7 +3195,7 @@ async def stop_simulation(
     "/load-test/metrics",
     response_model=MetricsResponse,
     summary="Get Load Test Metrics",
-    description="Get performance metrics for load testing from database."
+    description="Get performance metrics for load testing from database.",
 )
 async def get_load_test_metrics(
     current_user: AdminUser,
@@ -3228,6 +3222,7 @@ async def get_load_test_metrics(
 
     # Count sensor_data entries (as proxy for MQTT messages)
     from ..models.sensor import SensorData
+
     sensor_data_count_result = await db.execute(
         select(func.count(SensorData.id))
         .join(SensorData.esp_device)
@@ -3237,6 +3232,7 @@ async def get_load_test_metrics(
 
     # Count actuator_history entries
     from ..models.actuator import ActuatorHistory
+
     actuator_history_count_result = await db.execute(
         select(func.count(ActuatorHistory.id))
         .join(ActuatorHistory.esp_device)
@@ -3259,7 +3255,7 @@ async def get_load_test_metrics(
         total_sensors=total_sensors,
         total_actuators=total_actuators,
         messages_published=total_messages,
-        uptime_seconds=uptime_seconds
+        uptime_seconds=uptime_seconds,
     )
 
 
@@ -3267,8 +3263,10 @@ async def get_load_test_metrics(
 # Cleanup Operations
 # =============================================================================
 
+
 class CleanupResponse(BaseModel):
     """Response for cleanup operations."""
+
     success: bool = True
     deleted_count: int
     deleted_ids: List[str]
@@ -3280,7 +3278,7 @@ class CleanupResponse(BaseModel):
     response_model=CleanupResponse,
     summary="Cleanup Orphaned Mock ESPs",
     description="DEPRECATED: With DB-first architecture, orphaned mocks no longer exist. Use DELETE /mock-esp/{id} instead.",
-    deprecated=True
+    deprecated=True,
 )
 async def cleanup_orphaned_mocks(
     current_user: AdminUser,
@@ -3300,21 +3298,20 @@ async def cleanup_orphaned_mocks(
 
     # Only delete entries with NULL required fields (legacy cleanup)
     result = await db.execute(
-        text("""
+        text(
+            """
             SELECT id, device_id
             FROM esp_devices
             WHERE hardware_type = 'MOCK_ESP32'
               AND (ip_address IS NULL OR mac_address IS NULL OR firmware_version IS NULL)
-        """)
+        """
+        )
     )
     invalid_esps = result.fetchall()
 
     for esp in invalid_esps:
         esp_id = esp[1]  # device_id
-        await db.execute(
-            text("DELETE FROM esp_devices WHERE id = :id"),
-            {"id": str(esp[0])}
-        )
+        await db.execute(text("DELETE FROM esp_devices WHERE id = :id"), {"id": str(esp[0])})
         deleted_ids.append(esp_id)
 
     if deleted_ids:
@@ -3325,20 +3322,21 @@ async def cleanup_orphaned_mocks(
                 "admin_user": current_user.username,
                 "deleted_count": len(deleted_ids),
                 "deleted_ids": deleted_ids,
-                "category": "esp_lifecycle"
-            }
+                "category": "esp_lifecycle",
+            },
         )
 
     return CleanupResponse(
         success=True,
         deleted_count=len(deleted_ids),
         deleted_ids=deleted_ids,
-        message=f"Cleaned up {len(deleted_ids)} legacy mock ESP entries (use DELETE /mock-esp/{{id}} for individual deletion)"
+        message=f"Cleaned up {len(deleted_ids)} legacy mock ESP entries (use DELETE /mock-esp/{{id}} for individual deletion)",
     )
 
 
 class TestDataCleanupResponse(BaseModel):
     """Response for test data cleanup operations."""
+
     success: bool = True
     dry_run: bool
     sensor_data: Dict[str, Any]
@@ -3351,14 +3349,16 @@ class TestDataCleanupResponse(BaseModel):
     "/test-data/cleanup",
     response_model=TestDataCleanupResponse,
     summary="Cleanup Test Data",
-    description="Delete test/mock/simulation data from sensor_data and actuator_history tables."
+    description="Delete test/mock/simulation data from sensor_data and actuator_history tables.",
 )
 async def cleanup_test_data(
     current_user: AdminUser,
     db: DBSession,
     dry_run: bool = Query(default=True, description="Preview deletions without actually deleting"),
     include_mock: bool = Query(default=True, description="Include MOCK data in cleanup"),
-    include_simulation: bool = Query(default=True, description="Include SIMULATION data in cleanup")
+    include_simulation: bool = Query(
+        default=True, description="Include SIMULATION data in cleanup"
+    ),
 ) -> TestDataCleanupResponse:
     """
     Clean up test data from the database.
@@ -3375,9 +3375,7 @@ async def cleanup_test_data(
 
     try:
         result = await retention_service.run_full_test_cleanup(
-            dry_run=dry_run,
-            include_mock=include_mock,
-            include_simulation=include_simulation
+            dry_run=dry_run, include_mock=include_mock, include_simulation=include_simulation
         )
 
         # Service returns "total_deleted" in sub-dicts, not "deleted_count"
@@ -3410,14 +3408,14 @@ async def cleanup_test_data(
                 "errors": actuator_result.get("errors", []),
             },
             total_deleted=total_deleted,
-            message=f"{action} {total_deleted} test data records"
+            message=f"{action} {total_deleted} test data records",
         )
 
     except Exception as e:
         logger.error(f"Error during test data cleanup: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cleanup test data: {str(e)}"
+            detail=f"Failed to cleanup test data: {str(e)}",
         )
 
 
@@ -3425,8 +3423,10 @@ async def cleanup_test_data(
 # Library Management Endpoints
 # =============================================================================
 
+
 class LibraryReloadResponse(BaseModel):
     """Response for library reload operations."""
+
     success: bool = True
     processors_before: int
     processors_after: int
@@ -3438,7 +3438,7 @@ class LibraryReloadResponse(BaseModel):
     "/libraries/reload",
     response_model=LibraryReloadResponse,
     summary="Reload Sensor Libraries",
-    description="Hot-reload sensor processing libraries without server restart."
+    description="Hot-reload sensor processing libraries without server restart.",
 )
 async def reload_sensor_libraries(
     current_user: AdminUser,
@@ -3477,12 +3477,13 @@ async def reload_sensor_libraries(
         processors_before=processors_before,
         processors_after=processors_after,
         available_types=available_types,
-        message=f"Reloaded sensor libraries: {processors_after} processors available"
+        message=f"Reloaded sensor libraries: {processors_after} processors available",
     )
 
 
 class LibraryInfoResponse(BaseModel):
     """Response for library info."""
+
     available_types: List[str]
     count: int
     library_path: str
@@ -3492,7 +3493,7 @@ class LibraryInfoResponse(BaseModel):
     "/libraries/info",
     response_model=LibraryInfoResponse,
     summary="Get Library Info",
-    description="Get information about loaded sensor processing libraries."
+    description="Get information about loaded sensor processing libraries.",
 )
 async def get_library_info(
     current_user: AdminUser,
@@ -3510,7 +3511,7 @@ async def get_library_info(
     return LibraryInfoResponse(
         available_types=available_types,
         count=len(available_types),
-        library_path=str(loader.library_path)
+        library_path=str(loader.library_path),
     )
 
 
@@ -3518,8 +3519,10 @@ async def get_library_info(
 # Mock ESP Sync Status Endpoints
 # =============================================================================
 
+
 class MockESPSyncStatusResponse(BaseModel):
     """Response for Mock ESP sync status."""
+
     in_memory_count: int
     in_database_count: int
     synced_count: int
@@ -3549,7 +3552,7 @@ async def get_mock_esp_sync_status(
     and sync issues should not occur.
 
     Use GET /mock-esp instead to list all Mock ESPs from database.
-    
+
     Migration:
         OLD: GET /v1/debug/mock-esp/sync-status
         NEW: GET /v1/debug/mock-esp (lists all mocks from DB with runtime status)
@@ -3559,7 +3562,7 @@ async def get_mock_esp_sync_status(
     # Get all Mock ESPs from database (Single Source of Truth)
     db_mock_esps = await esp_repo.get_all_mock_devices()
     db_mock_ids = [esp.device_id for esp in db_mock_esps]
-    
+
     # Get active simulations from SimulationScheduler
     active_ids: List[str] = []
     try:
@@ -3595,12 +3598,13 @@ async def get_mock_esp_sync_status(
         orphaned_ids=orphaned_ids,
         memory_only_ids=memory_only_ids,
         is_synced=is_synced,
-        message=message
+        message=message,
     )
 
 
 class DataSourceDetectionRequest(BaseModel):
     """Request for data source detection test."""
+
     esp_id: str
     hardware_type: Optional[str] = None
     capabilities_mock: Optional[bool] = None
@@ -3610,6 +3614,7 @@ class DataSourceDetectionRequest(BaseModel):
 
 class DataSourceDetectionResponse(BaseModel):
     """Response for data source detection test."""
+
     esp_id: str
     detected_source: str
     detection_reason: str
@@ -3620,7 +3625,7 @@ class DataSourceDetectionResponse(BaseModel):
     "/data-source/detect",
     response_model=DataSourceDetectionResponse,
     summary="Test Data Source Detection",
-    description="Test data source detection logic with custom parameters."
+    description="Test data source detection logic with custom parameters.",
 )
 async def test_data_source_detection(
     request: DataSourceDetectionRequest,
@@ -3649,23 +3654,27 @@ async def test_data_source_detection(
         payload["_source"] = request.payload_source
 
     # Check 1: _test_mode
-    checks.append({
-        "priority": 1,
-        "check": "payload._test_mode",
-        "value": payload.get("_test_mode"),
-        "matched": bool(payload.get("_test_mode")),
-    })
+    checks.append(
+        {
+            "priority": 1,
+            "check": "payload._test_mode",
+            "value": payload.get("_test_mode"),
+            "matched": bool(payload.get("_test_mode")),
+        }
+    )
     if payload.get("_test_mode") and detected_source is None:
         detected_source = DataSource.TEST.value
         detection_reason = "payload._test_mode=True"
 
     # Check 2: _source
-    checks.append({
-        "priority": 2,
-        "check": "payload._source",
-        "value": payload.get("_source"),
-        "matched": "_source" in payload and detected_source is None,
-    })
+    checks.append(
+        {
+            "priority": 2,
+            "check": "payload._source",
+            "value": payload.get("_source"),
+            "matched": "_source" in payload and detected_source is None,
+        }
+    )
     if "_source" in payload and detected_source is None:
         try:
             detected_source = DataSource(payload["_source"].lower()).value
@@ -3674,23 +3683,27 @@ async def test_data_source_detection(
             pass
 
     # Check 3: hardware_type
-    checks.append({
-        "priority": 3,
-        "check": "hardware_type='MOCK_ESP32'",
-        "value": request.hardware_type,
-        "matched": request.hardware_type == "MOCK_ESP32" and detected_source is None,
-    })
+    checks.append(
+        {
+            "priority": 3,
+            "check": "hardware_type='MOCK_ESP32'",
+            "value": request.hardware_type,
+            "matched": request.hardware_type == "MOCK_ESP32" and detected_source is None,
+        }
+    )
     if request.hardware_type == "MOCK_ESP32" and detected_source is None:
         detected_source = DataSource.MOCK.value
         detection_reason = "hardware_type='MOCK_ESP32'"
 
     # Check 4: capabilities.mock
-    checks.append({
-        "priority": 4,
-        "check": "capabilities.mock=True",
-        "value": request.capabilities_mock,
-        "matched": request.capabilities_mock is True and detected_source is None,
-    })
+    checks.append(
+        {
+            "priority": 4,
+            "check": "capabilities.mock=True",
+            "value": request.capabilities_mock,
+            "matched": request.capabilities_mock is True and detected_source is None,
+        }
+    )
     if request.capabilities_mock is True and detected_source is None:
         detected_source = DataSource.MOCK.value
         detection_reason = "capabilities.mock=True"
@@ -3703,12 +3716,14 @@ async def test_data_source_detection(
     ]
     for priority, prefix, source in prefixes:
         matched = esp_id.startswith(prefix) and detected_source is None
-        checks.append({
-            "priority": priority,
-            "check": f"esp_id.startswith('{prefix}')",
-            "value": esp_id,
-            "matched": matched,
-        })
+        checks.append(
+            {
+                "priority": priority,
+                "check": f"esp_id.startswith('{prefix}')",
+                "value": esp_id,
+                "matched": matched,
+            }
+        )
         if matched:
             detected_source = source
             detection_reason = f"esp_id prefix '{prefix}'"
@@ -3718,18 +3733,20 @@ async def test_data_source_detection(
         detected_source = DataSource.PRODUCTION.value
         detection_reason = "default (no matching criteria)"
 
-    checks.append({
-        "priority": 8,
-        "check": "default",
-        "value": None,
-        "matched": detection_reason == "default (no matching criteria)",
-    })
+    checks.append(
+        {
+            "priority": 8,
+            "check": "default",
+            "value": None,
+            "matched": detection_reason == "default (no matching criteria)",
+        }
+    )
 
     return DataSourceDetectionResponse(
         esp_id=esp_id,
         detected_source=detected_source,
         detection_reason=detection_reason,
-        checks_performed=checks
+        checks_performed=checks,
     )
 
 
@@ -3737,8 +3754,10 @@ async def test_data_source_detection(
 # Maintenance Service Endpoints
 # =============================================================================
 
+
 class MaintenanceStatusResponse(BaseModel):
     """Response for maintenance service status."""
+
     service_running: bool
     jobs: List[Dict[str, Any]]
     stats_cache: Dict[str, Any]
@@ -3746,6 +3765,7 @@ class MaintenanceStatusResponse(BaseModel):
 
 class MaintenanceTriggerResponse(BaseModel):
     """Response for manual job trigger."""
+
     job_id: str
     triggered: bool
     message: str
@@ -3753,41 +3773,42 @@ class MaintenanceTriggerResponse(BaseModel):
 
 class MaintenanceConfigResponse(BaseModel):
     """Response for maintenance configuration (Data-Safe Version)."""
+
     # Sensor Data Cleanup
     sensor_data_retention_enabled: bool
     sensor_data_retention_days: int
     sensor_data_cleanup_dry_run: bool
     sensor_data_cleanup_batch_size: int
     sensor_data_cleanup_max_batches: int
-    
+
     # Command History Cleanup
     command_history_retention_enabled: bool
     command_history_retention_days: int
     command_history_cleanup_dry_run: bool
     command_history_cleanup_batch_size: int
     command_history_cleanup_max_batches: int
-    
+
     # Audit Log Cleanup
     audit_log_retention_enabled: bool
     audit_log_retention_days: int
     audit_log_cleanup_dry_run: bool
     audit_log_cleanup_batch_size: int
     audit_log_cleanup_max_batches: int
-    
+
     # Orphaned Mocks
     orphaned_mock_cleanup_enabled: bool
     orphaned_mock_auto_delete: bool
     orphaned_mock_age_hours: int
-    
+
     # Health Checks
     heartbeat_timeout_seconds: int
     mqtt_health_check_interval_seconds: int
     esp_health_check_interval_seconds: int
-    
+
     # Stats Aggregation
     stats_aggregation_enabled: bool
     stats_aggregation_interval_minutes: int
-    
+
     # Safety Features
     cleanup_require_confirmation: bool
     cleanup_alert_threshold_percent: float
@@ -3798,7 +3819,7 @@ class MaintenanceConfigResponse(BaseModel):
     "/maintenance/status",
     response_model=MaintenanceStatusResponse,
     summary="Get Maintenance Service Status",
-    description="Get status of all maintenance and monitoring jobs."
+    description="Get status of all maintenance and monitoring jobs.",
 )
 async def get_maintenance_status(
     current_user: AdminUser,
@@ -3806,15 +3827,15 @@ async def get_maintenance_status(
     """Get status of maintenance service and all registered jobs."""
     try:
         from ...services.maintenance import get_maintenance_service
-        
+
         maintenance_service = get_maintenance_service()
         status = maintenance_service.get_status()
-        
+
         return MaintenanceStatusResponse(**status)
     except RuntimeError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"MaintenanceService not available: {e}"
+            detail=f"MaintenanceService not available: {e}",
         )
 
 
@@ -3822,7 +3843,7 @@ async def get_maintenance_status(
     "/maintenance/trigger/{job_name}",
     response_model=MaintenanceTriggerResponse,
     summary="Trigger Maintenance Job Manually",
-    description="Manually trigger a maintenance or monitoring job immediately."
+    description="Manually trigger a maintenance or monitoring job immediately.",
 )
 async def trigger_maintenance_job(
     job_name: str,
@@ -3830,7 +3851,7 @@ async def trigger_maintenance_job(
 ) -> MaintenanceTriggerResponse:
     """
     Manually trigger a maintenance job.
-    
+
     Available job names:
     - cleanup_sensor_data
     - cleanup_command_history
@@ -3842,10 +3863,10 @@ async def trigger_maintenance_job(
     try:
         from ...services.maintenance import get_maintenance_service
         from ...core.scheduler import get_central_scheduler
-        
+
         maintenance_service = get_maintenance_service()
         get_central_scheduler()  # Verify scheduler is running
-        
+
         # Map job name to full job ID
         job_id_map = {
             "cleanup_sensor_data": "maintenance_cleanup_sensor_data",
@@ -3855,14 +3876,14 @@ async def trigger_maintenance_job(
             "health_check_mqtt": "monitor_health_check_mqtt",
             "aggregate_stats": "maintenance_aggregate_stats",
         }
-        
+
         full_job_id = job_id_map.get(job_name)
         if not full_job_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown job name: {job_name}. Available: {list(job_id_map.keys())}"
+                detail=f"Unknown job name: {job_name}. Available: {list(job_id_map.keys())}",
             )
-        
+
         # Get job function from maintenance service
         job_func_map = {
             "maintenance_cleanup_sensor_data": maintenance_service._cleanup_sensor_data,
@@ -3872,30 +3893,31 @@ async def trigger_maintenance_job(
             "monitor_health_check_mqtt": maintenance_service._health_check_mqtt,
             "maintenance_aggregate_stats": maintenance_service._aggregate_stats,
         }
-        
+
         job_func = job_func_map.get(full_job_id)
         if not job_func:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Job function not found for {full_job_id}"
+                detail=f"Job function not found for {full_job_id}",
             )
-        
+
         # Trigger job asynchronously
         import asyncio
+
         asyncio.create_task(job_func())
-        
+
         logger.info(f"Admin {current_user.username} manually triggered maintenance job: {job_name}")
-        
+
         return MaintenanceTriggerResponse(
             job_id=full_job_id,
             triggered=True,
-            message=f"Job {job_name} triggered manually, will run immediately"
+            message=f"Job {job_name} triggered manually, will run immediately",
         )
-        
+
     except RuntimeError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"MaintenanceService not available: {e}"
+            detail=f"MaintenanceService not available: {e}",
         )
 
 
@@ -3903,7 +3925,7 @@ async def trigger_maintenance_job(
     "/maintenance/config",
     response_model=MaintenanceConfigResponse,
     summary="Get Maintenance Configuration",
-    description="Get current maintenance service configuration."
+    description="Get current maintenance service configuration.",
 )
 async def get_maintenance_config(
     current_user: AdminUser,
@@ -3911,7 +3933,7 @@ async def get_maintenance_config(
     """Get maintenance service configuration."""
     settings = get_settings()
     maintenance_settings = settings.maintenance
-    
+
     return MaintenanceConfigResponse(
         # Sensor Data Cleanup
         sensor_data_retention_enabled=maintenance_settings.sensor_data_retention_enabled,
@@ -3919,35 +3941,29 @@ async def get_maintenance_config(
         sensor_data_cleanup_dry_run=maintenance_settings.sensor_data_cleanup_dry_run,
         sensor_data_cleanup_batch_size=maintenance_settings.sensor_data_cleanup_batch_size,
         sensor_data_cleanup_max_batches=maintenance_settings.sensor_data_cleanup_max_batches,
-        
         # Command History Cleanup
         command_history_retention_enabled=maintenance_settings.command_history_retention_enabled,
         command_history_retention_days=maintenance_settings.command_history_retention_days,
         command_history_cleanup_dry_run=maintenance_settings.command_history_cleanup_dry_run,
         command_history_cleanup_batch_size=maintenance_settings.command_history_cleanup_batch_size,
         command_history_cleanup_max_batches=maintenance_settings.command_history_cleanup_max_batches,
-        
         # Audit Log Cleanup
         audit_log_retention_enabled=maintenance_settings.audit_log_retention_enabled,
         audit_log_retention_days=maintenance_settings.audit_log_retention_days,
         audit_log_cleanup_dry_run=maintenance_settings.audit_log_cleanup_dry_run,
         audit_log_cleanup_batch_size=maintenance_settings.audit_log_cleanup_batch_size,
         audit_log_cleanup_max_batches=maintenance_settings.audit_log_cleanup_max_batches,
-        
         # Orphaned Mocks
         orphaned_mock_cleanup_enabled=maintenance_settings.orphaned_mock_cleanup_enabled,
         orphaned_mock_auto_delete=maintenance_settings.orphaned_mock_auto_delete,
         orphaned_mock_age_hours=maintenance_settings.orphaned_mock_age_hours,
-        
         # Health Checks
         heartbeat_timeout_seconds=maintenance_settings.heartbeat_timeout_seconds,
         mqtt_health_check_interval_seconds=maintenance_settings.mqtt_health_check_interval_seconds,
         esp_health_check_interval_seconds=maintenance_settings.esp_health_check_interval_seconds,
-        
         # Stats Aggregation
         stats_aggregation_enabled=maintenance_settings.stats_aggregation_enabled,
         stats_aggregation_interval_minutes=maintenance_settings.stats_aggregation_interval_minutes,
-        
         # Safety Features
         cleanup_require_confirmation=maintenance_settings.cleanup_require_confirmation,
         cleanup_alert_threshold_percent=maintenance_settings.cleanup_alert_threshold_percent,
@@ -3959,8 +3975,10 @@ async def get_maintenance_config(
 # Resilience Debug Endpoints
 # =============================================================================
 
+
 class ResilienceStatusResponse(BaseModel):
     """Response for resilience status."""
+
     healthy: bool
     circuit_breakers: Dict[str, Any]
     summary: Dict[str, int]
@@ -3969,6 +3987,7 @@ class ResilienceStatusResponse(BaseModel):
 
 class CircuitBreakerActionResponse(BaseModel):
     """Response for circuit breaker actions."""
+
     name: str
     previous_state: str
     new_state: str
@@ -3977,6 +3996,7 @@ class CircuitBreakerActionResponse(BaseModel):
 
 class CircuitBreakerMetricsResponse(BaseModel):
     """Response for circuit breaker metrics."""
+
     name: str
     state: str
     metrics: Dict[str, Any]
@@ -3986,14 +4006,14 @@ class CircuitBreakerMetricsResponse(BaseModel):
     "/resilience/status",
     response_model=ResilienceStatusResponse,
     summary="Get Resilience Status",
-    description="Get status of all circuit breakers and resilience components."
+    description="Get status of all circuit breakers and resilience components.",
 )
 async def get_resilience_status(
     current_user: AdminUser,
 ) -> ResilienceStatusResponse:
     """
     Get aggregated resilience status.
-    
+
     Returns:
     - Health status of all circuit breakers
     - Individual breaker states and metrics
@@ -4001,14 +4021,14 @@ async def get_resilience_status(
     """
     from ...core.resilience import ResilienceRegistry
     from ...mqtt.client import MQTTClient
-    
+
     registry = ResilienceRegistry.get_instance()
     health_status = registry.get_health_status()
-    
+
     # Get MQTT client resilience status
     mqtt_client = MQTTClient.get_instance()
     mqtt_status = mqtt_client.get_resilience_status()
-    
+
     return ResilienceStatusResponse(
         healthy=health_status["healthy"],
         circuit_breakers=health_status["breakers"],
@@ -4021,14 +4041,14 @@ async def get_resilience_status(
     "/resilience/metrics",
     response_model=Dict[str, Any],
     summary="Get Resilience Metrics",
-    description="Get detailed metrics from all circuit breakers."
+    description="Get detailed metrics from all circuit breakers.",
 )
 async def get_resilience_metrics(
     current_user: AdminUser,
 ) -> Dict[str, Any]:
     """
     Get detailed metrics from all circuit breakers.
-    
+
     Returns metrics including:
     - Total requests
     - Success/failure counts
@@ -4037,14 +4057,14 @@ async def get_resilience_metrics(
     """
     from ...core.resilience import ResilienceRegistry
     from ...mqtt.publisher import Publisher
-    
+
     registry = ResilienceRegistry.get_instance()
     breaker_metrics = registry.get_metrics()
-    
+
     # Get publisher metrics
     publisher = Publisher()
     publisher_metrics = publisher.get_metrics()
-    
+
     return {
         "circuit_breakers": breaker_metrics,
         "publisher": publisher_metrics,
@@ -4055,7 +4075,7 @@ async def get_resilience_metrics(
     "/resilience/circuit-breaker/{name}",
     response_model=CircuitBreakerMetricsResponse,
     summary="Get Circuit Breaker Details",
-    description="Get detailed information about a specific circuit breaker."
+    description="Get detailed information about a specific circuit breaker.",
 )
 async def get_circuit_breaker_details(
     name: str,
@@ -4063,19 +4083,19 @@ async def get_circuit_breaker_details(
 ) -> CircuitBreakerMetricsResponse:
     """Get details of a specific circuit breaker."""
     from ...core.resilience import ResilienceRegistry
-    
+
     registry = ResilienceRegistry.get_instance()
     breaker = registry.get_circuit_breaker(name)
-    
+
     if breaker is None:
         available = registry.get_breaker_names()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Circuit breaker '{name}' not found. Available: {available}"
+            detail=f"Circuit breaker '{name}' not found. Available: {available}",
         )
-    
+
     metrics = breaker.get_metrics()
-    
+
     return CircuitBreakerMetricsResponse(
         name=name,
         state=breaker.get_state().value,
@@ -4087,7 +4107,7 @@ async def get_circuit_breaker_details(
     "/resilience/circuit-breaker/{name}/reset",
     response_model=CircuitBreakerActionResponse,
     summary="Reset Circuit Breaker",
-    description="Manually reset a circuit breaker to CLOSED state."
+    description="Manually reset a circuit breaker to CLOSED state.",
 )
 async def reset_circuit_breaker(
     name: str,
@@ -4095,31 +4115,31 @@ async def reset_circuit_breaker(
 ) -> CircuitBreakerActionResponse:
     """
     Manually reset a circuit breaker to CLOSED state.
-    
+
     Use this to recover from an OPEN state after resolving
     the underlying issue.
     """
     from ...core.resilience import ResilienceRegistry
-    
+
     registry = ResilienceRegistry.get_instance()
     breaker = registry.get_circuit_breaker(name)
-    
+
     if breaker is None:
         available = registry.get_breaker_names()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Circuit breaker '{name}' not found. Available: {available}"
+            detail=f"Circuit breaker '{name}' not found. Available: {available}",
         )
-    
+
     previous_state = breaker.get_state().value
     await breaker.reset_async()
     new_state = breaker.get_state().value
-    
+
     logger.info(
         f"Admin {current_user.username} reset circuit breaker '{name}': "
         f"{previous_state} → {new_state}"
     )
-    
+
     return CircuitBreakerActionResponse(
         name=name,
         previous_state=previous_state,
@@ -4132,7 +4152,7 @@ async def reset_circuit_breaker(
     "/resilience/circuit-breaker/{name}/force-open",
     response_model=CircuitBreakerActionResponse,
     summary="Force Open Circuit Breaker",
-    description="Force a circuit breaker to OPEN state for testing."
+    description="Force a circuit breaker to OPEN state for testing.",
 )
 async def force_open_circuit_breaker(
     name: str,
@@ -4140,31 +4160,31 @@ async def force_open_circuit_breaker(
 ) -> CircuitBreakerActionResponse:
     """
     Force a circuit breaker to OPEN state.
-    
+
     WARNING: This is for testing purposes only.
     The breaker will reject all requests until manually reset.
     """
     from ...core.resilience import ResilienceRegistry
-    
+
     registry = ResilienceRegistry.get_instance()
     breaker = registry.get_circuit_breaker(name)
-    
+
     if breaker is None:
         available = registry.get_breaker_names()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Circuit breaker '{name}' not found. Available: {available}"
+            detail=f"Circuit breaker '{name}' not found. Available: {available}",
         )
-    
+
     previous_state = breaker.get_state().value
     await breaker.force_open_async()
     new_state = "open (forced)"
-    
+
     logger.warning(
         f"Admin {current_user.username} FORCED OPEN circuit breaker '{name}' "
         f"(previous state: {previous_state})"
     )
-    
+
     return CircuitBreakerActionResponse(
         name=name,
         previous_state=previous_state,
@@ -4177,38 +4197,34 @@ async def force_open_circuit_breaker(
     "/resilience/reset-all",
     response_model=Dict[str, Any],
     summary="Reset All Circuit Breakers",
-    description="Reset all circuit breakers to CLOSED state."
+    description="Reset all circuit breakers to CLOSED state.",
 )
 async def reset_all_circuit_breakers(
     current_user: AdminUser,
 ) -> Dict[str, Any]:
     """
     Reset all circuit breakers to CLOSED state.
-    
+
     Use this for emergency recovery after resolving system-wide issues.
     """
     from ...core.resilience import ResilienceRegistry
-    
+
     registry = ResilienceRegistry.get_instance()
-    
+
     # Get states before reset
     before = {
-        name: breaker.get_state().value
-        for name, breaker in registry.get_all_breakers().items()
+        name: breaker.get_state().value for name, breaker in registry.get_all_breakers().items()
     }
-    
+
     count = await registry.reset_all_async()
-    
+
     # Get states after reset
     after = {
-        name: breaker.get_state().value
-        for name, breaker in registry.get_all_breakers().items()
+        name: breaker.get_state().value for name, breaker in registry.get_all_breakers().items()
     }
-    
-    logger.warning(
-        f"Admin {current_user.username} reset ALL {count} circuit breakers"
-    )
-    
+
+    logger.warning(f"Admin {current_user.username} reset ALL {count} circuit breakers")
+
     return {
         "reset_count": count,
         "before": before,
@@ -4221,24 +4237,24 @@ async def reset_all_circuit_breakers(
     "/resilience/offline-buffer",
     response_model=Dict[str, Any],
     summary="Get Offline Buffer Status",
-    description="Get MQTT offline buffer status and metrics."
+    description="Get MQTT offline buffer status and metrics.",
 )
 async def get_offline_buffer_status(
     current_user: AdminUser,
 ) -> Dict[str, Any]:
     """
     Get MQTT offline buffer status.
-    
+
     Returns:
     - Current buffer size
     - Messages added/flushed/dropped
     - Buffer utilization
     """
     from ...mqtt.client import MQTTClient
-    
+
     mqtt_client = MQTTClient.get_instance()
     metrics = mqtt_client.get_offline_buffer_metrics()
-    
+
     return {
         "enabled": metrics.get("enabled", True) if "enabled" in metrics else True,
         "metrics": metrics,
@@ -4249,34 +4265,34 @@ async def get_offline_buffer_status(
     "/resilience/offline-buffer/flush",
     response_model=Dict[str, Any],
     summary="Flush Offline Buffer",
-    description="Manually flush the MQTT offline buffer."
+    description="Manually flush the MQTT offline buffer.",
 )
 async def flush_offline_buffer(
     current_user: AdminUser,
 ) -> Dict[str, Any]:
     """
     Manually flush the MQTT offline buffer.
-    
+
     Attempts to send all buffered messages to the MQTT broker.
     """
     from ...mqtt.client import MQTTClient
-    
+
     mqtt_client = MQTTClient.get_instance()
-    
+
     if not mqtt_client._offline_buffer:
         return {
             "success": False,
             "message": "Offline buffer not available",
             "flushed_count": 0,
         }
-    
+
     flushed_count = await mqtt_client._offline_buffer.flush_all(mqtt_client)
-    
+
     logger.info(
         f"Admin {current_user.username} manually flushed offline buffer: "
         f"{flushed_count} messages"
     )
-    
+
     return {
         "success": True,
         "message": f"Flushed {flushed_count} messages from offline buffer",
@@ -4289,34 +4305,34 @@ async def flush_offline_buffer(
     "/resilience/offline-buffer",
     response_model=Dict[str, Any],
     summary="Clear Offline Buffer",
-    description="Clear all messages from the MQTT offline buffer."
+    description="Clear all messages from the MQTT offline buffer.",
 )
 async def clear_offline_buffer(
     current_user: AdminUser,
 ) -> Dict[str, Any]:
     """
     Clear all messages from the offline buffer.
-    
+
     WARNING: This will permanently delete all buffered messages.
     """
     from ...mqtt.client import MQTTClient
-    
+
     mqtt_client = MQTTClient.get_instance()
-    
+
     if not mqtt_client._offline_buffer:
         return {
             "success": False,
             "message": "Offline buffer not available",
             "cleared_count": 0,
         }
-    
+
     cleared_count = await mqtt_client._offline_buffer.clear()
-    
+
     logger.warning(
         f"Admin {current_user.username} CLEARED offline buffer: "
         f"{cleared_count} messages deleted"
     )
-    
+
     return {
         "success": True,
         "message": f"Cleared {cleared_count} messages from offline buffer",

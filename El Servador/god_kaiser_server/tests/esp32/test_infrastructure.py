@@ -35,7 +35,7 @@ class TestConfigManagement:
         """Test retrieving all configuration."""
         # Configure zone first (production ESPs have zone configured)
         mock_esp32.configure_zone("test-zone", "test-master", "test-subzone")
-        
+
         response = mock_esp32.handle_command("config_get", {})
 
         assert response["status"] == "ok"
@@ -59,7 +59,7 @@ class TestConfigManagement:
         """Test retrieving zone configuration."""
         # Configure zone first (production ESPs have zone configured)
         mock_esp32.configure_zone("test-zone", "test-master", "test-subzone", "Test Zone Name")
-        
+
         response = mock_esp32.handle_command("config_get", {"key": "zone"})
 
         assert response["status"] == "ok"
@@ -86,10 +86,9 @@ class TestConfigManagement:
     def test_config_set_mock_only(self, mock_esp32):
         """Test config_set (MOCK ONLY - should NOT work on real hardware)."""
         # This test verifies config_set works on Mock but would be blocked on real hardware
-        response = mock_esp32.handle_command("config_set", {
-            "key": "test_key",
-            "value": {"test": "value"}
-        })
+        response = mock_esp32.handle_command(
+            "config_set", {"key": "test_key", "value": {"test": "value"}}
+        )
 
         assert response["status"] == "ok"
         assert response["data"]["key"] == "test_key"
@@ -123,7 +122,11 @@ class TestTopicFormats:
         assert len(sensor_msgs) >= 1
 
         # Find the main (non-zone) topic
-        main_topic_msgs = [m for m in sensor_msgs if f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data" == m["topic"]]
+        main_topic_msgs = [
+            m
+            for m in sensor_msgs
+            if f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data" == m["topic"]
+        ]
         assert len(main_topic_msgs) == 1
 
         topic = main_topic_msgs[0]["topic"]
@@ -134,9 +137,9 @@ class TestTopicFormats:
         """Test actuator status topic follows correct format."""
         mock_esp32.clear_published_messages()
 
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         messages = mock_esp32.get_published_messages()
         # Now publishes both status and response
@@ -199,10 +202,13 @@ class TestErrorHandling:
 
     def test_missing_parameter_error(self, mock_esp32):
         """Test error when required parameter is missing."""
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5
-            # Missing "value"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set",
+            {
+                "gpio": 5
+                # Missing "value"
+            },
+        )
 
         assert response["status"] == "error"
         assert "missing" in response["error"].lower() or "required" in response["error"].lower()
@@ -327,7 +333,7 @@ class TestZoneConfiguration:
         """Test zone config has expected structure."""
         # Configure zone first (production ESPs have zone configured)
         mock_esp32.configure_zone("test-zone", "test-master", "test-subzone", "Test Zone")
-        
+
         response = mock_esp32.handle_command("config_get", {"key": "zone"})
 
         zone_config = response["data"]["value"]
@@ -338,74 +344,74 @@ class TestZoneConfiguration:
 class TestNetworkResilience:
     """
     Test network failure and recovery scenarios.
-    
+
     NOTE: These tests simulate network issues to validate system resilience.
     Critical for production IoT systems where network failures are common.
     """
-    
+
     def test_command_during_disconnect(self, mock_esp32):
         """
         Test command handling when ESP is disconnected.
-        
+
         Real-world scenario: WiFi signal loss during operation.
         """
         # Set actuator state while connected
         mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
-        
+
         # Simulate disconnect
         mock_esp32.connected = False
-        
+
         # Attempt command during disconnect
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 0, "mode": "digital"
-        })
-        
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}
+        )
+
         # Mock returns error when disconnected
         # Real ESP would queue in offline buffer
         assert response["status"] in ["error", "ok"]
-    
+
     def test_reconnect_resends_status(self, mock_esp32):
         """
         Test ESP republishes status after reconnect.
-        
-        Real-world scenario: After WiFi reconnect, ESP should 
+
+        Real-world scenario: After WiFi reconnect, ESP should
         update server with current state.
         """
         # Set actuator state
         mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
         mock_esp32.clear_published_messages()
-        
+
         # Simulate disconnect/reconnect
         mock_esp32.connected = False
         mock_esp32.connected = True
-        
+
         # On reconnect, ESP should republish heartbeat
         # (This is a Mock limitation - real ESP does this automatically)
         # Verify system still functional after reconnect
         response = mock_esp32.handle_command("ping", {})
         assert response["status"] == "ok"
-    
+
     def test_config_operations_during_network_issues(self, mock_esp32):
         """
         Test config operations with intermittent connectivity.
-        
+
         Config operations should be robust to network issues.
         """
         # Get config (should work)
         response1 = mock_esp32.handle_command("config_get", {})
         assert response1["status"] == "ok"
-        
+
         # Simulate network issue
         mock_esp32.connected = False
-        
+
         # Config get during disconnect (may fail or use cache)
         response2 = mock_esp32.handle_command("config_get", {})
         # Mock may return error or cached data
         assert response2["status"] in ["ok", "error"]
-        
+
         # Reconnect
         mock_esp32.connected = True
-        
+
         # Config should work again
         response3 = mock_esp32.handle_command("config_get", {})
         assert response3["status"] == "ok"
@@ -414,7 +420,7 @@ class TestNetworkResilience:
         """Test zone ID is a string."""
         # Configure zone first (production ESPs have zone configured)
         mock_esp32.configure_zone("test-zone-123", "test-master", "test-subzone")
-        
+
         response = mock_esp32.handle_command("config_get", {"key": "zone"})
 
         zone_config = response["data"]["value"]

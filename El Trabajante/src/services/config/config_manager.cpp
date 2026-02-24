@@ -8,6 +8,9 @@
 #include "../../models/sensor_registry.h"  // For I2C sensor detection
 #include <WiFi.h>
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "CONFIG";
+
 // ============================================
 // GLOBAL CONFIG MANAGER INSTANCE
 // ============================================
@@ -37,12 +40,12 @@ bool ConfigManager::begin() {
   zone_config_loaded_ = false;
   system_config_loaded_ = false;
 
-  LOG_INFO("ConfigManager: Initialized (Phase 1 - WiFi/Zone/System only)");
+  LOG_I(TAG, "ConfigManager: Initialized (Phase 1 - WiFi/Zone/System only)");
   return true;
 }
 
 bool ConfigManager::loadAllConfigs() {
-  LOG_INFO("ConfigManager: Loading Phase 1 configurations...");
+  LOG_I(TAG, "ConfigManager: Loading Phase 1 configurations...");
 
   bool success = true;
   success &= loadWiFiConfig(wifi_config_);
@@ -53,9 +56,9 @@ bool ConfigManager::loadAllConfigs() {
   generateESPIdIfMissing();
 
   if (success) {
-    LOG_INFO("ConfigManager: All Phase 1 configurations loaded successfully");
+    LOG_I(TAG, "ConfigManager: All Phase 1 configurations loaded successfully");
   } else {
-    LOG_WARNING("ConfigManager: Some configurations failed to load");
+    LOG_W(TAG, "ConfigManager: Some configurations failed to load");
   }
 
   return success;
@@ -69,7 +72,7 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
   // WOKWI SIMULATION MODE: Use compile-time credentials
   // ============================================
   #ifdef WOKWI_SIMULATION
-    LOG_INFO("ConfigManager: WOKWI_SIMULATION mode - using compile-time credentials");
+    LOG_I(TAG, "ConfigManager: WOKWI_SIMULATION mode - using compile-time credentials");
 
     // WiFi credentials (Wokwi-GUEST is open network in Wokwi simulator)
     #ifdef WOKWI_WIFI_SSID
@@ -104,7 +107,7 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
 
     wifi_config_loaded_ = true;
 
-    LOG_INFO("ConfigManager: Wokwi WiFi config - SSID: " + config.ssid +
+    LOG_I(TAG, "ConfigManager: Wokwi WiFi config - SSID: " + config.ssid +
              ", MQTT: " + config.server_address + ":" + String(config.mqtt_port));
 
     return true;
@@ -114,7 +117,7 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
   // NORMAL MODE: Load from NVS
   // ============================================
   if (!storageManager.beginNamespace("wifi_config", true)) {
-    LOG_ERROR("ConfigManager: Failed to open wifi_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open wifi_config namespace");
     return false;
   }
 
@@ -137,22 +140,22 @@ bool ConfigManager::loadWiFiConfig(WiFiConfig& config) {
 
   wifi_config_loaded_ = true;
 
-  LOG_INFO("ConfigManager: WiFi config loaded - SSID: " + config.ssid +
+  LOG_I(TAG, "ConfigManager: WiFi config loaded - SSID: " + config.ssid +
            ", Server: " + config.server_address);
 
   return true;
 }
 
 bool ConfigManager::saveWiFiConfig(const WiFiConfig& config) {
-  LOG_INFO("ConfigManager: Saving WiFi configuration...");
+  LOG_I(TAG, "ConfigManager: Saving WiFi configuration...");
 
   if (!validateWiFiConfig(config)) {
-    LOG_ERROR("ConfigManager: WiFi config validation failed, not saving");
+    LOG_E(TAG, "ConfigManager: WiFi config validation failed, not saving");
     return false;
   }
 
   if (!storageManager.beginNamespace("wifi_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open wifi_config namespace for writing");
+    LOG_E(TAG, "ConfigManager: Failed to open wifi_config namespace for writing");
     return false;
   }
 
@@ -176,9 +179,9 @@ bool ConfigManager::saveWiFiConfig(const WiFiConfig& config) {
 
   if (success) {
     wifi_config_ = config;
-    LOG_INFO("ConfigManager: WiFi configuration saved");
+    LOG_I(TAG, "ConfigManager: WiFi configuration saved");
   } else {
-    LOG_ERROR("ConfigManager: Failed to save WiFi configuration");
+    LOG_E(TAG, "ConfigManager: Failed to save WiFi configuration");
   }
 
   return success;
@@ -187,19 +190,19 @@ bool ConfigManager::saveWiFiConfig(const WiFiConfig& config) {
 bool ConfigManager::validateWiFiConfig(const WiFiConfig& config) const {
   // SSID must not be empty
   if (config.ssid.length() == 0) {
-    LOG_WARNING("ConfigManager: WiFi SSID is empty");
+    LOG_W(TAG, "ConfigManager: WiFi SSID is empty");
     return false;
   }
 
   // Server address must not be empty
   if (config.server_address.length() == 0) {
-    LOG_WARNING("ConfigManager: Server address is empty");
+    LOG_W(TAG, "ConfigManager: Server address is empty");
     return false;
   }
 
   // MQTT port must be in valid range
   if (config.mqtt_port == 0 || config.mqtt_port > 65535) {
-    LOG_WARNING("ConfigManager: Invalid MQTT port: " + String(config.mqtt_port));
+    LOG_W(TAG, "ConfigManager: Invalid MQTT port: " + String(config.mqtt_port));
     return false;
   }
 
@@ -207,7 +210,7 @@ bool ConfigManager::validateWiFiConfig(const WiFiConfig& config) const {
 }
 
 void ConfigManager::resetWiFiConfig() {
-  LOG_INFO("ConfigManager: Resetting WiFi configuration to defaults");
+  LOG_I(TAG, "ConfigManager: Resetting WiFi configuration to defaults");
 
   if (!storageManager.beginNamespace("wifi_config", false)) {
     return;
@@ -253,11 +256,11 @@ void ConfigManager::resetWiFiConfig() {
 // ZONE CONFIGURATION
 // ============================================
 bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
-  LOG_INFO("ConfigManager: Loading Zone configuration...");
+  LOG_I(TAG, "ConfigManager: Loading Zone configuration...");
 
   // false = read/write mode for migration writes
   if (!storageManager.beginNamespace("zone_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open zone_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open zone_config namespace");
     return false;
   }
 
@@ -293,7 +296,7 @@ bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
 
   zone_config_loaded_ = true;
 
-  LOG_INFO("ConfigManager: Zone config loaded - Zone: " + kaiser.zone_id +
+  LOG_I(TAG, "ConfigManager: Zone config loaded - Zone: " + kaiser.zone_id +
            ", Master: " + kaiser.master_zone_id +
            ", Kaiser: " + kaiser.kaiser_id);
 
@@ -301,10 +304,10 @@ bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
 }
 
 bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& master) {
-  LOG_INFO("ConfigManager: Saving Zone configuration...");
+  LOG_I(TAG, "ConfigManager: Saving Zone configuration...");
 
   if (!storageManager.beginNamespace("zone_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open zone_config namespace for writing");
+    LOG_E(TAG, "ConfigManager: Failed to open zone_config namespace for writing");
     return false;
   }
 
@@ -334,10 +337,10 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
   if (success) {
     kaiser_ = kaiser;
     master_ = master;
-    LOG_INFO("ConfigManager: Zone configuration saved (Zone: " +
+    LOG_I(TAG, "ConfigManager: Zone configuration saved (Zone: " +
              kaiser.zone_id + ", Master: " + kaiser.master_zone_id + ")");
   } else {
-    LOG_ERROR("ConfigManager: Failed to save Zone configuration");
+    LOG_E(TAG, "ConfigManager: Failed to save Zone configuration");
   }
 
   return success;
@@ -356,37 +359,37 @@ bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& m
 bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
   // 1. Kaiser ID required
   if (kaiser.kaiser_id.length() == 0) {
-    LOG_WARNING("ConfigManager: Kaiser ID is empty");
+    LOG_W(TAG, "ConfigManager: Kaiser ID is empty");
     return false;
   }
 
   // 2. Kaiser ID length check (MQTT topic limit)
   if (kaiser.kaiser_id.length() > 63) {
-    LOG_WARNING("ConfigManager: Kaiser ID too long (max 63 chars)");
+    LOG_W(TAG, "ConfigManager: Kaiser ID too long (max 63 chars)");
     return false;
   }
 
   // 3. If zone assigned, zone_id must be set
   if (kaiser.zone_assigned && kaiser.zone_id.length() == 0) {
-    LOG_WARNING("ConfigManager: Zone assigned but zone_id is empty");
+    LOG_W(TAG, "ConfigManager: Zone assigned but zone_id is empty");
     return false;
   }
 
   // 4. Zone_id length check (if not empty)
   if (kaiser.zone_id.length() > 0 && kaiser.zone_id.length() > 32) {
-    LOG_WARNING("ConfigManager: Zone ID too long (max 32 chars)");
+    LOG_W(TAG, "ConfigManager: Zone ID too long (max 32 chars)");
     return false;
   }
 
   // 5. Master_zone_id length check (if not empty)
   if (kaiser.master_zone_id.length() > 0 && kaiser.master_zone_id.length() > 32) {
-    LOG_WARNING("ConfigManager: Master Zone ID too long (max 32 chars)");
+    LOG_W(TAG, "ConfigManager: Master Zone ID too long (max 32 chars)");
     return false;
   }
 
   // 6. Zone_name length check (if not empty)
   if (kaiser.zone_name.length() > 0 && kaiser.zone_name.length() > 64) {
-    LOG_WARNING("ConfigManager: Zone Name too long (max 64 chars)");
+    LOG_W(TAG, "ConfigManager: Zone Name too long (max 64 chars)");
     return false;
   }
 
@@ -395,7 +398,7 @@ bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
     for (size_t i = 0; i < kaiser.zone_id.length(); i++) {
       char c = kaiser.zone_id.charAt(i);
       if (!isalnum(c) && c != '_' && c != '-') {
-        LOG_WARNING("ConfigManager: Zone ID contains invalid character: " + String(c));
+        LOG_W(TAG, "ConfigManager: Zone ID contains invalid character: " + String(c));
         return false;
       }
     }
@@ -420,11 +423,11 @@ bool ConfigManager::validateZoneConfig(const KaiserZone& kaiser) const {
  */
 bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& master_zone_id,
                                         const String& zone_name, const String& kaiser_id) {
-  LOG_INFO("ConfigManager: Updating zone assignment...");
-  LOG_INFO("  Zone ID: " + zone_id);
-  LOG_INFO("  Master Zone: " + master_zone_id);
-  LOG_INFO("  Zone Name: " + zone_name);
-  LOG_INFO("  Kaiser ID: " + kaiser_id);
+  LOG_I(TAG, "ConfigManager: Updating zone assignment...");
+  LOG_I(TAG, "  Zone ID: " + zone_id);
+  LOG_I(TAG, "  Master Zone: " + master_zone_id);
+  LOG_I(TAG, "  Zone Name: " + zone_name);
+  LOG_I(TAG, "  Kaiser ID: " + kaiser_id);
 
   // WP1: Empty zone_id means zone removal
   bool is_removal = (zone_id.length() == 0);
@@ -448,9 +451,9 @@ bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& ma
   bool success = saveZoneConfig(kaiser_, master_);
 
   if (success) {
-    LOG_INFO("ConfigManager: Zone " + String(is_removal ? "removal" : "assignment") + " updated successfully");
+    LOG_I(TAG, "ConfigManager: Zone " + String(is_removal ? "removal" : "assignment") + " updated successfully");
   } else {
-    LOG_ERROR("ConfigManager: Failed to update zone " + String(is_removal ? "removal" : "assignment"));
+    LOG_E(TAG, "ConfigManager: Failed to update zone " + String(is_removal ? "removal" : "assignment"));
     // WP5: Rollback cache on NVS failure
     kaiser_ = previous_kaiser;
     master_ = previous_master;
@@ -623,10 +626,10 @@ bool ConfigManager::removeSubzoneFromIndexMap(const String& subzone_id, String& 
 // ============================================
 
 bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
-  LOG_INFO("ConfigManager: Saving subzone config: " + config.subzone_id);
+  LOG_I(TAG, "ConfigManager: Saving subzone config: " + config.subzone_id);
 
   if (!storageManager.beginNamespace("subzone_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open subzone_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open subzone_config namespace");
     return false;
   }
 
@@ -638,7 +641,7 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   int8_t index = addSubzoneToIndexMap(config.subzone_id, index_map);
 
   if (index < 0 || index > 99) {
-    LOG_ERROR("ConfigManager: Failed to assign index for subzone " + config.subzone_id);
+    LOG_E(TAG, "ConfigManager: Failed to assign index for subzone " + config.subzone_id);
     storageManager.endNamespace();
     return false;
   }
@@ -646,12 +649,12 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   // Save updated index map
   bool success = storageManager.putString(NVS_SZ_INDEX_MAP, index_map);
   if (!success) {
-    LOG_ERROR("ConfigManager: Failed to save subzone index map");
+    LOG_E(TAG, "ConfigManager: Failed to save subzone index map");
     storageManager.endNamespace();
     return false;
   }
 
-  LOG_DEBUG("ConfigManager: Subzone " + config.subzone_id + " assigned index " + String(index));
+  LOG_D(TAG, "ConfigManager: Subzone " + config.subzone_id + " assigned index " + String(index));
 
   // Save subzone fields using index-based keys
   char key[16];
@@ -729,9 +732,9 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
     // BUG-005 FIX: Update cache after saving subzone
     subzone_count_cache_ = count;
     subzone_count_initialized_ = true;
-    LOG_INFO("ConfigManager: Subzone config saved successfully (index " + String(index) + ")");
+    LOG_I(TAG, "ConfigManager: Subzone config saved successfully (index " + String(index) + ")");
   } else {
-    LOG_ERROR("ConfigManager: Failed to save subzone config");
+    LOG_E(TAG, "ConfigManager: Failed to save subzone config");
   }
 
   return success;
@@ -803,7 +806,7 @@ bool ConfigManager::loadSubzoneConfig(const String& subzone_id, SubzoneConfig& c
 
   if (config.subzone_id.length() > 0) {
     // Old format found → MIGRATE
-    LOG_INFO("ConfigManager: Migrating subzone " + subzone_id + " to indexed pattern");
+    LOG_I(TAG, "ConfigManager: Migrating subzone " + subzone_id + " to indexed pattern");
 
     config.subzone_name = storageManager.getStringObj((key_base + "_name").c_str(), "");
     config.parent_zone_id = storageManager.getStringObj((key_base + "_parent").c_str(), "");
@@ -833,7 +836,7 @@ bool ConfigManager::loadSubzoneConfig(const String& subzone_id, SubzoneConfig& c
     // Migrate to new format immediately
     saveSubzoneConfig(config);
 
-    LOG_INFO("ConfigManager: Subzone " + subzone_id + " migrated successfully");
+    LOG_I(TAG, "ConfigManager: Subzone " + subzone_id + " migrated successfully");
     return true;
   }
 
@@ -845,7 +848,7 @@ bool ConfigManager::loadAllSubzoneConfigs(SubzoneConfig configs[], uint8_t max_c
   loaded_count = 0;
 
   if (!storageManager.beginNamespace("subzone_config", true)) {
-    LOG_WARNING("ConfigManager: No subzone_config namespace found");
+    LOG_W(TAG, "ConfigManager: No subzone_config namespace found");
     return false;
   }
 
@@ -879,21 +882,21 @@ bool ConfigManager::loadAllSubzoneConfigs(SubzoneConfig configs[], uint8_t max_c
       }
       start_idx = comma_idx + 1;
     }
-    LOG_DEBUG("ConfigManager: Using index map, found IDs: " + subzone_ids_str);
+    LOG_D(TAG, "ConfigManager: Using index map, found IDs: " + subzone_ids_str);
   }
 
   // Fallback to legacy subzone_ids list
   if (subzone_ids_str.length() == 0) {
     subzone_ids_str = storageManager.getStringObj(NVS_SZ_IDS_OLD, "");
     if (subzone_ids_str.length() > 0) {
-      LOG_DEBUG("ConfigManager: Using legacy subzone_ids list");
+      LOG_D(TAG, "ConfigManager: Using legacy subzone_ids list");
     }
   }
 
   storageManager.endNamespace();
 
   if (subzone_ids_str.length() == 0) {
-    LOG_INFO("ConfigManager: No subzones configured");
+    LOG_I(TAG, "ConfigManager: No subzones configured");
     return false;
   }
 
@@ -910,19 +913,19 @@ bool ConfigManager::loadAllSubzoneConfigs(SubzoneConfig configs[], uint8_t max_c
       SubzoneConfig config;
       if (loadSubzoneConfig(subzone_id, config) && config.subzone_id.length() > 0) {
         configs[loaded_count++] = config;
-        LOG_DEBUG("ConfigManager: Loaded subzone: " + subzone_id);
+        LOG_D(TAG, "ConfigManager: Loaded subzone: " + subzone_id);
       }
     }
 
     start_idx = comma_idx + 1;
   }
 
-  LOG_INFO("ConfigManager: Loaded " + String(loaded_count) + " subzone configs");
+  LOG_I(TAG, "ConfigManager: Loaded " + String(loaded_count) + " subzone configs");
   return loaded_count > 0;
 }
 
 bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
-  LOG_INFO("ConfigManager: Removing subzone config: " + subzone_id);
+  LOG_I(TAG, "ConfigManager: Removing subzone config: " + subzone_id);
 
   if (!storageManager.beginNamespace("subzone_config", false)) {
     return false;
@@ -970,7 +973,7 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
     }
     storageManager.putUInt8(NVS_SZ_COUNT, count);
 
-    LOG_INFO("ConfigManager: Subzone " + subzone_id + " removed (index " + String(index) + ")");
+    LOG_I(TAG, "ConfigManager: Subzone " + subzone_id + " removed (index " + String(index) + ")");
   } else {
     // Try old pattern cleanup
     String key_base = "subzone_" + subzone_id;
@@ -981,7 +984,7 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
     storageManager.putBool((key_base + "_safe_mode").c_str(), true);
     storageManager.putULong((key_base + "_timestamp").c_str(), 0);
 
-    LOG_WARNING("ConfigManager: Subzone " + subzone_id + " not in index map, cleared old keys");
+    LOG_W(TAG, "ConfigManager: Subzone " + subzone_id + " not in index map, cleared old keys");
   }
 
   // Also remove from legacy subzone_ids list (for complete cleanup)
@@ -1015,20 +1018,20 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
   // BUG-005 FIX: Invalidate cache after removing subzone (force re-read on next access)
   subzone_count_initialized_ = false;
 
-  LOG_INFO("ConfigManager: Subzone " + subzone_id + " removed");
+  LOG_I(TAG, "ConfigManager: Subzone " + subzone_id + " removed");
   return true;
 }
 
 bool ConfigManager::validateSubzoneConfig(const SubzoneConfig& config) const {
   // Validation 1: subzone_id Format (1-32 chars, alphanumeric + underscore)
   if (config.subzone_id.length() == 0 || config.subzone_id.length() > 32) {
-    LOG_WARNING("ConfigManager: Invalid subzone_id length");
+    LOG_W(TAG, "ConfigManager: Invalid subzone_id length");
     return false;
   }
 
   // Validation 2: parent_zone_id muss mit ESP-Zone übereinstimmen
   if (config.parent_zone_id.length() > 0 && config.parent_zone_id != kaiser_.zone_id) {
-    LOG_WARNING("ConfigManager: parent_zone_id doesn't match ESP zone");
+    LOG_W(TAG, "ConfigManager: parent_zone_id doesn't match ESP zone");
     return false;
   }
 
@@ -1041,7 +1044,7 @@ bool ConfigManager::validateSubzoneConfig(const SubzoneConfig& config) const {
       // Prüfe ob Pin überhaupt existiert (in pins_ vector)
       GPIOPinInfo pin_info = gpioManager.getPinInfo(gpio);
       if (pin_info.pin == 255) {  // Invalid pin marker
-        LOG_WARNING("ConfigManager: GPIO " + String(gpio) + " not in safe pins list");
+        LOG_W(TAG, "ConfigManager: GPIO " + String(gpio) + " not in safe pins list");
         return false;
       }
     }
@@ -1140,11 +1143,11 @@ uint8_t ConfigManager::getSubzoneCount() const {
 // SYSTEM CONFIGURATION (NEU für Phase 1)
 // ============================================
 bool ConfigManager::loadSystemConfig(SystemConfig& config) {
-  LOG_INFO("ConfigManager: Loading System configuration...");
+  LOG_I(TAG, "ConfigManager: Loading System configuration...");
 
   // false = read/write mode for migration writes
   if (!storageManager.beginNamespace("system_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open system_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open system_config namespace");
     return false;
   }
 
@@ -1171,16 +1174,16 @@ bool ConfigManager::loadSystemConfig(SystemConfig& config) {
 
   system_config_loaded_ = true;
 
-  LOG_INFO("ConfigManager: System config loaded - ESP ID: " + config.esp_id);
+  LOG_I(TAG, "ConfigManager: System config loaded - ESP ID: " + config.esp_id);
 
   return true;
 }
 
 bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
-  LOG_INFO("ConfigManager: Saving System configuration...");
+  LOG_I(TAG, "ConfigManager: Saving System configuration...");
 
   if (!storageManager.beginNamespace("system_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open system_config namespace for writing");
+    LOG_E(TAG, "ConfigManager: Failed to open system_config namespace for writing");
     return false;
   }
 
@@ -1197,9 +1200,9 @@ bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
 
   if (success) {
     system_config_ = config;
-    LOG_INFO("ConfigManager: System configuration saved");
+    LOG_I(TAG, "ConfigManager: System configuration saved");
   } else {
-    LOG_ERROR("ConfigManager: Failed to save System configuration");
+    LOG_E(TAG, "ConfigManager: Failed to save System configuration");
   }
 
   return success;
@@ -1215,7 +1218,7 @@ static const char* NVS_APPR_TS = "appr_ts";            // uint32: approval times
 bool ConfigManager::isDeviceApproved() const {
   // Use system_config namespace for approval status
   if (!storageManager.beginNamespace("system_config", true)) {
-    LOG_WARNING("ConfigManager: Cannot read approval status - namespace error");
+    LOG_W(TAG, "ConfigManager: Cannot read approval status - namespace error");
     return false;  // Default to not approved on error
   }
 
@@ -1227,7 +1230,7 @@ bool ConfigManager::isDeviceApproved() const {
 
 void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
   if (!storageManager.beginNamespace("system_config", false)) {
-    LOG_ERROR("ConfigManager: Cannot save approval status - namespace error");
+    LOG_E(TAG, "ConfigManager: Cannot save approval status - namespace error");
     return;
   }
 
@@ -1239,10 +1242,10 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
   storageManager.endNamespace();
 
   if (approved) {
-    LOG_INFO("ConfigManager: Device approval saved (approved=true, ts=" +
+    LOG_I(TAG, "ConfigManager: Device approval saved (approved=true, ts=" +
              String((unsigned long)timestamp) + ")");
   } else {
-    LOG_INFO("ConfigManager: Device approval cleared (pending/rejected)");
+    LOG_I(TAG, "ConfigManager: Device approval cleared (pending/rejected)");
   }
 }
 
@@ -1269,13 +1272,13 @@ bool ConfigManager::isConfigurationComplete() const {
 }
 
 void ConfigManager::printConfigurationStatus() const {
-  LOG_INFO("=== Configuration Status (Phase 1) ===");
-  LOG_INFO("WiFi Config: " + String(wifi_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
-  LOG_INFO("Zone Config: " + String(zone_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
-  LOG_INFO("System Config: " + String(system_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
-  LOG_INFO("Sensor/Actuator Config: ⚠️  Deferred to Phase 3 (Server-Centric)");
-  LOG_INFO("Configuration Complete: " + String(isConfigurationComplete() ? "✅ YES" : "❌ NO"));
-  LOG_INFO("======================================");
+  LOG_I(TAG, "=== Configuration Status (Phase 1) ===");
+  LOG_I(TAG, "WiFi Config: " + String(wifi_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
+  LOG_I(TAG, "Zone Config: " + String(zone_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
+  LOG_I(TAG, "System Config: " + String(system_config_loaded_ ? "✅ Loaded" : "❌ Not loaded"));
+  LOG_I(TAG, "Sensor/Actuator Config: ⚠️  Deferred to Phase 3 (Server-Centric)");
+  LOG_I(TAG, "Configuration Complete: " + String(isConfigurationComplete() ? "✅ YES" : "❌ NO"));
+  LOG_I(TAG, "======================================");
 }
 
 // ============================================
@@ -1330,10 +1333,10 @@ void ConfigManager::generateESPIdIfMissing() {
     #ifdef WOKWI_SIMULATION
       #ifdef WOKWI_ESP_ID
         system_config_.esp_id = WOKWI_ESP_ID;
-        LOG_INFO("ConfigManager: Using Wokwi ESP ID: " + system_config_.esp_id);
+        LOG_I(TAG, "ConfigManager: Using Wokwi ESP ID: " + system_config_.esp_id);
       #else
         system_config_.esp_id = "ESP_WOKWI001";
-        LOG_INFO("ConfigManager: Using default Wokwi ESP ID: " + system_config_.esp_id);
+        LOG_I(TAG, "ConfigManager: Using default Wokwi ESP ID: " + system_config_.esp_id);
       #endif
       saveSystemConfig(system_config_);
       return;
@@ -1342,7 +1345,7 @@ void ConfigManager::generateESPIdIfMissing() {
     // ============================================
     // NORMAL MODE: Generate from MAC address
     // ============================================
-    LOG_WARNING("ConfigManager: ESP ID not configured - generating from MAC address");
+    LOG_W(TAG, "ConfigManager: ESP ID not configured - generating from MAC address");
 
     WiFi.mode(WIFI_STA);  // Must be before macAddress()
     uint8_t mac[6];
@@ -1355,7 +1358,7 @@ void ConfigManager::generateESPIdIfMissing() {
     system_config_.esp_id = String(esp_id);
     saveSystemConfig(system_config_);
 
-    LOG_INFO("ConfigManager: Generated ESP ID: " + system_config_.esp_id);
+    LOG_I(TAG, "ConfigManager: Generated ESP ID: " + system_config_.esp_id);
   }
 }
 
@@ -1471,10 +1474,10 @@ String ConfigManager::migrateReadString(const char* new_key,
         // Old key exists → MIGRATE
         bool write_success = storageManager.putString(new_key, value);
         if (write_success) {
-            LOG_INFO("ConfigManager: Migrated NVS key '" +
+            LOG_I(TAG, "ConfigManager: Migrated NVS key '" +
                      String(old_key) + "' → '" + String(new_key) + "'");
         } else {
-            LOG_WARNING("ConfigManager: Migration failed for '" +
+            LOG_W(TAG, "ConfigManager: Migration failed for '" +
                         String(old_key) + "' → '" + String(new_key) + "'");
         }
         return value;
@@ -1501,7 +1504,7 @@ bool ConfigManager::migrateReadBool(const char* new_key,
         bool value = storageManager.getBool(old_key, default_value);
         bool write_success = storageManager.putBool(new_key, value);
         if (write_success) {
-            LOG_INFO("ConfigManager: Migrated bool key '" +
+            LOG_I(TAG, "ConfigManager: Migrated bool key '" +
                      String(old_key) + "' → '" + String(new_key) + "'");
         }
         return value;
@@ -1527,7 +1530,7 @@ uint8_t ConfigManager::migrateReadUInt8(const char* new_key,
         uint8_t value = storageManager.getUInt8(old_key, default_value);
         bool write_success = storageManager.putUInt8(new_key, value);
         if (write_success) {
-            LOG_INFO("ConfigManager: Migrated uint8 key '" +
+            LOG_I(TAG, "ConfigManager: Migrated uint8 key '" +
                      String(old_key) + "' → '" + String(new_key) + "'");
         }
         return value;
@@ -1552,7 +1555,7 @@ uint32_t ConfigManager::migrateReadUInt32(const char* new_key,
         uint32_t value = storageManager.getULong(old_key, default_value);
         bool write_success = storageManager.putULong(new_key, value);
         if (write_success) {
-            LOG_INFO("ConfigManager: Migrated uint32 key '" +
+            LOG_I(TAG, "ConfigManager: Migrated uint32 key '" +
                      String(old_key) + "' → '" + String(new_key) + "'");
         }
         return value;
@@ -1566,7 +1569,7 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   // VALIDATION FIRST (Security - auch für Wokwi!)
   // ============================================
   if (!validateSensorConfig(config)) {
-    LOG_ERROR("ConfigManager: Sensor config validation failed");
+    LOG_E(TAG, "ConfigManager: Sensor config validation failed");
     return false;
   }
 
@@ -1574,8 +1577,8 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   // WOKWI MODE: Skip NVS, store in RAM only
   // ============================================
   #ifdef WOKWI_SIMULATION
-    LOG_INFO("ConfigManager: WOKWI mode - sensor config stored in RAM only (NVS not supported)");
-    LOG_DEBUG("  Sensor: GPIO " + String(config.gpio) +
+    LOG_I(TAG, "ConfigManager: WOKWI mode - sensor config stored in RAM only (NVS not supported)");
+    LOG_D(TAG, "  Sensor: GPIO " + String(config.gpio) +
               ", Type: " + String(config.sensor_type) +
               ", Name: " + String(config.sensor_name));
     return true;  // ✅ Signalisiere Erfolg - RAM-Config ist aktiv
@@ -1587,7 +1590,7 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   // NOTE: Only writes to NEW keys - old keys become orphaned but harmless
   // ============================================
   if (!storageManager.beginNamespace("sensor_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open sensor_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open sensor_config namespace");
     return false;
   }
 
@@ -1664,7 +1667,7 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
 
     // 1. Length validation (must be exactly 16 hex chars)
     if (config.onewire_address.length() != 16) {
-      LOG_ERROR("ConfigManager: OneWire ROM-Code invalid length - expected 16, got " +
+      LOG_E(TAG, "ConfigManager: OneWire ROM-Code invalid length - expected 16, got " +
                String(config.onewire_address.length()) + " for sensor GPIO " + String(config.gpio));
       errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_LENGTH, ERROR_SEVERITY_ERROR,
                              ("ROM length " + String(config.onewire_address.length()) + " != 16").c_str());
@@ -1674,7 +1677,7 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
       // 2. Parse ROM-Code to validate hex format
       uint8_t rom[8];
       if (!OneWireUtils::hexStringToRom(config.onewire_address, rom)) {
-        LOG_ERROR("ConfigManager: OneWire ROM-Code invalid format (non-hex chars): " +
+        LOG_E(TAG, "ConfigManager: OneWire ROM-Code invalid format (non-hex chars): " +
                  config.onewire_address);
         errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_FORMAT, ERROR_SEVERITY_ERROR,
                                ("Invalid ROM format: " + config.onewire_address).c_str());
@@ -1682,7 +1685,7 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
       } else {
         // 3. CRC validation (WARNING only - may be transmission error, let server decide)
         if (!OneWireUtils::isValidRom(rom)) {
-          LOG_WARNING("ConfigManager: OneWire ROM-Code CRC invalid (may be fake/corrupted): " +
+          LOG_W(TAG, "ConfigManager: OneWire ROM-Code CRC invalid (may be fake/corrupted): " +
                      config.onewire_address + " - saving anyway for server validation");
           errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_CRC, ERROR_SEVERITY_WARNING,
                                  ("ROM CRC invalid: " + config.onewire_address).c_str());
@@ -1692,12 +1695,12 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
         // 4. Save validated ROM-Code to NVS
         snprintf(key, sizeof(key), NVS_SEN_OW, index);
         if (!storageManager.putString(key, config.onewire_address)) {
-          LOG_ERROR("ConfigManager: Failed to save OneWire ROM-Code to NVS");
+          LOG_E(TAG, "ConfigManager: Failed to save OneWire ROM-Code to NVS");
           errorTracker.trackError(ERROR_NVS_WRITE_FAILED, ERROR_SEVERITY_ERROR,
                                  "OneWire ROM-Code NVS write failed");
           success = false;
         } else {
-          LOG_DEBUG("ConfigManager: Saved OneWire ROM-Code " + config.onewire_address +
+          LOG_D(TAG, "ConfigManager: Saved OneWire ROM-Code " + config.onewire_address +
                    " for sensor on GPIO " + String(config.gpio));
         }
       }
@@ -1712,9 +1715,9 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   storageManager.endNamespace();
 
   if (success) {
-    LOG_INFO("ConfigManager: Saved sensor config for GPIO " + String(config.gpio));
+    LOG_I(TAG, "ConfigManager: Saved sensor config for GPIO " + String(config.gpio));
   } else {
-    LOG_ERROR("ConfigManager: Failed to save sensor config");
+    LOG_E(TAG, "ConfigManager: Failed to save sensor config");
   }
 
   return success;
@@ -1730,17 +1733,17 @@ bool ConfigManager::saveSensorConfig(const SensorConfig* sensors, uint8_t count)
   // WOKWI MODE: Save array in RAM only
   // ============================================
   #ifdef WOKWI_SIMULATION
-    LOG_INFO("ConfigManager: WOKWI mode - saving " + String(count) +
+    LOG_I(TAG, "ConfigManager: WOKWI mode - saving " + String(count) +
              " sensor configs in RAM only (NVS not supported)");
     // Validate and log each sensor
     bool all_valid = true;
     for (uint8_t i = 0; i < count; i++) {
       if (!validateSensorConfig(sensors[i])) {
-        LOG_WARNING("  Sensor " + String(i) + " validation failed, skipping");
+        LOG_W(TAG, "  Sensor " + String(i) + " validation failed, skipping");
         all_valid = false;
         continue;
       }
-      LOG_DEBUG("  [" + String(i) + "] GPIO " + String(sensors[i].gpio) +
+      LOG_D(TAG, "  [" + String(i) + "] GPIO " + String(sensors[i].gpio) +
                 ": " + String(sensors[i].sensor_type));
     }
     return all_valid;  // ✅ RAM-Erfolg
@@ -1762,7 +1765,7 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
 
   // Input validation
   if (!sensors || max_sensors == 0) {
-    LOG_ERROR("ConfigManager: Invalid input to loadSensorConfig");
+    LOG_E(TAG, "ConfigManager: Invalid input to loadSensorConfig");
     return false;
   }
 
@@ -1770,8 +1773,8 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
   // WOKWI MODE: No persistent config to load
   // ============================================
   #ifdef WOKWI_SIMULATION
-    LOG_INFO("ConfigManager: WOKWI mode - no sensor config to load (NVS not supported)");
-    LOG_DEBUG("  Sensors will be configured via MQTT during runtime");
+    LOG_I(TAG, "ConfigManager: WOKWI mode - no sensor config to load (NVS not supported)");
+    LOG_D(TAG, "  Sensors will be configured via MQTT during runtime");
     return false;  // ✅ false = keine persistenten Daten vorhanden (korrekt!)
   #endif
 
@@ -1779,11 +1782,11 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
   // NORMAL MODE: Load from NVS with Migration
   // 2026-01-15 Phase 1E-B: New key schema for NVS 15-char limit
   // ============================================
-  LOG_INFO("ConfigManager: Loading Sensor configurations...");
+  LOG_I(TAG, "ConfigManager: Loading Sensor configurations...");
 
   // false = read/write mode for migration writes
   if (!storageManager.beginNamespace("sensor_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open sensor_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open sensor_config namespace");
     return false;
   }
 
@@ -1795,11 +1798,11 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     if (sensor_count > 0) {
       // Migrate count key
       storageManager.putUInt8(NVS_SEN_COUNT, sensor_count);
-      LOG_INFO("ConfigManager: Migrated sensor_count → sen_count");
+      LOG_I(TAG, "ConfigManager: Migrated sensor_count → sen_count");
     }
   }
 
-  LOG_INFO("ConfigManager: Found " + String(sensor_count) + " sensor(s) in NVS");
+  LOG_I(TAG, "ConfigManager: Found " + String(sensor_count) + " sensor(s) in NVS");
 
   if (sensor_count == 0) {
     storageManager.endNamespace();
@@ -1808,7 +1811,7 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
 
   // Limit to max_sensors
   if (sensor_count > max_sensors) {
-    LOG_WARNING("ConfigManager: Sensor count " + String(sensor_count) +
+    LOG_W(TAG, "ConfigManager: Sensor count " + String(sensor_count) +
                 " exceeds max_sensors (" + String(max_sensors) +
                 "), limiting");
     sensor_count = max_sensors;
@@ -1875,7 +1878,7 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
 
     // Validate & Store
     if (config.gpio != 255 && config.sensor_type.length() > 0) {
-      LOG_DEBUG("ConfigManager: Loaded sensor " + String(i) +
+      LOG_D(TAG, "ConfigManager: Loaded sensor " + String(i) +
                " - GPIO: " + String(config.gpio) +
                ", Type: " + config.sensor_type +
                ", Subzone: " + (config.subzone_id.isEmpty() ? "none" : config.subzone_id) +
@@ -1884,13 +1887,13 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
                ", Interval: " + String(config.measurement_interval_ms) + "ms");
       loaded_count++;
     } else {
-      LOG_WARNING("ConfigManager: Skipped invalid sensor " + String(i));
+      LOG_W(TAG, "ConfigManager: Skipped invalid sensor " + String(i));
     }
   }
 
   storageManager.endNamespace();
 
-  LOG_INFO("ConfigManager: Loaded " + String(loaded_count) + " sensor configurations");
+  LOG_I(TAG, "ConfigManager: Loaded " + String(loaded_count) + " sensor configurations");
   return loaded_count > 0 || sensor_count == 0;
 }
 
@@ -1899,7 +1902,7 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
   // 2026-01-15 Phase 1E-B: Use new key schema (≤15 chars)
   // ============================================
   if (!storageManager.beginNamespace("sensor_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open sensor_config namespace");
+    LOG_E(TAG, "ConfigManager: Failed to open sensor_config namespace");
     return false;
   }
 
@@ -1929,7 +1932,7 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
 
   if (found_index < 0) {
     storageManager.endNamespace();
-    LOG_WARNING("ConfigManager: Sensor config for GPIO " + String(gpio) + " not found");
+    LOG_W(TAG, "ConfigManager: Sensor config for GPIO " + String(gpio) + " not found");
     return false;
   }
 
@@ -2019,14 +2022,14 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
 
   storageManager.endNamespace();
 
-  LOG_INFO("ConfigManager: Removed sensor config for GPIO " + String(gpio));
+  LOG_I(TAG, "ConfigManager: Removed sensor config for GPIO " + String(gpio));
   return true;
 }
 
 bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
   // Sensor type must not be empty (check first - needed for I2C lookup)
   if (config.sensor_type.length() == 0) {
-    LOG_WARNING("ConfigManager: Sensor type is empty");
+    LOG_W(TAG, "ConfigManager: Sensor type is empty");
     return false;
   }
 
@@ -2036,20 +2039,20 @@ bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
 
   // For I2C sensors: Skip GPIO validation (they use shared I2C bus GPIO 21/22)
   if (is_i2c_sensor) {
-    LOG_INFO("ConfigManager: I2C sensor '" + config.sensor_type +
+    LOG_I(TAG, "ConfigManager: I2C sensor '" + config.sensor_type +
              "' - GPIO validation skipped (uses I2C bus)");
     return true;
   }
 
   // For non-I2C sensors: Standard GPIO validation
   if (config.gpio == 255) {
-    LOG_WARNING("ConfigManager: Invalid GPIO (255)");
+    LOG_W(TAG, "ConfigManager: Invalid GPIO (255)");
     return false;
   }
 
   // GPIO must be in valid range (0-39 for ESP32)
   if (config.gpio > 39) {
-    LOG_WARNING("ConfigManager: GPIO out of range: " + String(config.gpio));
+    LOG_W(TAG, "ConfigManager: GPIO out of range: " + String(config.gpio));
     return false;
   }
 
@@ -2057,23 +2060,23 @@ bool ConfigManager::validateSensorConfig(const SensorConfig& config) const {
 }
 
 bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t actuator_count) {
-  LOG_INFO("ConfigManager: Saving Actuator configurations...");
+  LOG_I(TAG, "ConfigManager: Saving Actuator configurations...");
 
   // ============================================
   // WOKWI MODE: Save in RAM only
   // ============================================
   #ifdef WOKWI_SIMULATION
-    LOG_INFO("ConfigManager: WOKWI mode - actuator config stored in RAM only (NVS not supported)");
+    LOG_I(TAG, "ConfigManager: WOKWI mode - actuator config stored in RAM only (NVS not supported)");
     // Validate and log each actuator
     bool all_valid = true;
     for (uint8_t i = 0; i < actuator_count; i++) {
       const ActuatorConfig& config = actuators[i];
       if (!validateActuatorConfig(config)) {
-        LOG_WARNING("  Actuator " + String(i) + " validation failed, skipping");
+        LOG_W(TAG, "  Actuator " + String(i) + " validation failed, skipping");
         all_valid = false;
         continue;
       }
-      LOG_DEBUG("  [" + String(i) + "] GPIO " + String(config.gpio) +
+      LOG_D(TAG, "  [" + String(i) + "] GPIO " + String(config.gpio) +
                 ", Type: " + String(config.actuator_type) +
                 ", Name: " + String(config.actuator_name));
     }
@@ -2086,7 +2089,7 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
   // NOTE: Only writes to NEW keys - old keys become orphaned but harmless
   // ============================================
   if (!storageManager.beginNamespace("actuator_config", false)) {
-    LOG_ERROR("ConfigManager: Failed to open actuator_config namespace for writing");
+    LOG_E(TAG, "ConfigManager: Failed to open actuator_config namespace for writing");
     return false;
   }
 
@@ -2094,7 +2097,7 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
   bool success = storageManager.putUInt8(NVS_ACT_COUNT, actuator_count);
 
   if (!success) {
-    LOG_ERROR("ConfigManager: Failed to save actuator count");
+    LOG_E(TAG, "ConfigManager: Failed to save actuator count");
     storageManager.endNamespace();
     return false;
   }
@@ -2106,7 +2109,7 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
     const ActuatorConfig& config = actuators[i];
 
     if (!validateActuatorConfig(config)) {
-      LOG_WARNING("ConfigManager: Skipping invalid actuator " + String(i));
+      LOG_W(TAG, "ConfigManager: Skipping invalid actuator " + String(i));
       continue;
     }
 
@@ -2151,17 +2154,17 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
     success &= storageManager.putUInt8(key, config.default_pwm);
 
     if (!success) {
-      LOG_ERROR("ConfigManager: Failed to save actuator " + String(i));
+      LOG_E(TAG, "ConfigManager: Failed to save actuator " + String(i));
     }
   }
 
   storageManager.endNamespace();
 
   if (success) {
-    LOG_INFO("ConfigManager: Actuator configurations saved successfully (" +
+    LOG_I(TAG, "ConfigManager: Actuator configurations saved successfully (" +
              String(actuator_count) + " actuators)");
   } else {
-    LOG_ERROR("ConfigManager: Some actuator configurations failed to save");
+    LOG_E(TAG, "ConfigManager: Some actuator configurations failed to save");
   }
 
   return success;
@@ -2172,7 +2175,7 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
 
   // Input validation
   if (!actuators || max_actuators == 0) {
-    LOG_ERROR("ConfigManager: Invalid input to loadActuatorConfig");
+    LOG_E(TAG, "ConfigManager: Invalid input to loadActuatorConfig");
     return false;
   }
 
@@ -2180,8 +2183,8 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
   // WOKWI MODE: No persistent config to load
   // ============================================
   #ifdef WOKWI_SIMULATION
-    LOG_INFO("ConfigManager: WOKWI mode - no actuator config to load (NVS not supported)");
-    LOG_DEBUG("  Actuators will be configured via MQTT during runtime");
+    LOG_I(TAG, "ConfigManager: WOKWI mode - no actuator config to load (NVS not supported)");
+    LOG_D(TAG, "  Actuators will be configured via MQTT during runtime");
     return false;  // ✅ Keine persistenten Daten
   #endif
 
@@ -2189,10 +2192,10 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
   // NORMAL MODE: Load from NVS with Migration
   // 2026-01-15: New key schema for NVS 15-char limit
   // ============================================
-  LOG_INFO("ConfigManager: Loading Actuator configurations...");
+  LOG_I(TAG, "ConfigManager: Loading Actuator configurations...");
 
   if (!storageManager.beginNamespace("actuator_config", false)) {  // false = read/write for migration
-    LOG_WARNING("ConfigManager: actuator_config namespace not found");
+    LOG_W(TAG, "ConfigManager: actuator_config namespace not found");
     return false;
   }
 
@@ -2204,14 +2207,14 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
     if (stored_count > 0) {
       // Migrate count key
       storageManager.putUInt8(NVS_ACT_COUNT, stored_count);
-      LOG_INFO("ConfigManager: Migrated actuator_count → act_count");
+      LOG_I(TAG, "ConfigManager: Migrated actuator_count → act_count");
     }
   }
 
-  LOG_INFO("ConfigManager: Found " + String(stored_count) + " actuator(s) in NVS");
+  LOG_I(TAG, "ConfigManager: Found " + String(stored_count) + " actuator(s) in NVS");
 
   if (stored_count > max_actuators) {
-    LOG_WARNING("ConfigManager: Actuator count " + String(stored_count) +
+    LOG_W(TAG, "ConfigManager: Actuator count " + String(stored_count) +
                 " exceeds max_actuators (" + String(max_actuators) +
                 "), limiting");
     stored_count = max_actuators;
@@ -2277,29 +2280,29 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
     // Validate & Store
     if (validateActuatorConfig(config)) {
       actuators[loaded_count++] = config;
-      LOG_DEBUG("ConfigManager: Loaded actuator " + String(i) +
+      LOG_D(TAG, "ConfigManager: Loaded actuator " + String(i) +
                " - GPIO: " + String(config.gpio) +
                ", Type: " + config.actuator_type +
                ", Active: " + String(config.active ? "true" : "false") +
                ", Critical: " + String(config.critical ? "true" : "false"));
     } else {
-      LOG_WARNING("ConfigManager: Skipped invalid actuator " + String(i));
+      LOG_W(TAG, "ConfigManager: Skipped invalid actuator " + String(i));
     }
   }
 
   storageManager.endNamespace();
 
-  LOG_INFO("ConfigManager: Loaded " + String(loaded_count) + " actuator configurations");
+  LOG_I(TAG, "ConfigManager: Loaded " + String(loaded_count) + " actuator configurations");
   return loaded_count > 0;
 }
 
 bool ConfigManager::validateActuatorConfig(const ActuatorConfig& config) const {
   if (config.gpio == 255 || config.gpio > 39) {
-    LOG_WARNING("ConfigManager: Invalid actuator GPIO " + String(config.gpio));
+    LOG_W(TAG, "ConfigManager: Invalid actuator GPIO " + String(config.gpio));
     return false;
   }
   if (config.actuator_type.length() == 0) {
-    LOG_WARNING("ConfigManager: Actuator type is empty");
+    LOG_W(TAG, "ConfigManager: Actuator type is empty");
     return false;
   }
   return true;

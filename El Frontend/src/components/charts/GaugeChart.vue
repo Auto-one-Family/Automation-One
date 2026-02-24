@@ -9,6 +9,7 @@
 
 import { computed } from 'vue'
 import { Doughnut } from 'vue-chartjs'
+import { tokens } from '@/utils/cssTokens'
 import {
   Chart as ChartJS,
   ArcElement,
@@ -44,9 +45,9 @@ const props = withDefaults(defineProps<Props>(), {
   max: 100,
   unit: '',
   thresholds: () => [
-    { value: 0, color: '#22c55e' },
-    { value: 60, color: '#eab308' },
-    { value: 80, color: '#ef4444' },
+    { value: 0, color: tokens.statusGood },
+    { value: 60, color: tokens.statusWarning },
+    { value: 80, color: tokens.statusAlarm },
   ],
   size: 'md',
 })
@@ -139,7 +140,7 @@ const chartOptions = computed(() => ({
 /** Determine current value color based on thresholds */
 const valueColor = computed(() => {
   const sorted = [...props.thresholds].sort((a, b) => a.value - b.value)
-  let color = sorted[0]?.color ?? '#3b82f6'
+  let color = sorted[0]?.color ?? tokens.accent
   for (const t of sorted) {
     if (clampedValue.value >= t.value) {
       color = t.color

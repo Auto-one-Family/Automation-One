@@ -17,6 +17,17 @@
 #   3. Verify pin is released back to safe mode
 #   4. Configure different component on GPIO 4 (should succeed)
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Reserve GPIO 4 for sensor:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true}]}'
+#   Step 2 - Remove sensor (active=false, after ~1s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":false}]}'
+#   Step 3 - Re-reserve GPIO 4 for actuator (after ~1s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":4,"actuator_type":"pump","actuator_name":"WaterPump","active":true}]}'
+#
 # Firmware reference: gpio_manager.cpp lines 136-162
 
 name: GPIO Pin Release and Re-Reserve
@@ -28,22 +39,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # STEP 1: Reserve GPIO 4 for sensor
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "TempSensor1",
-              "active": true
-            }]
-          }
-        }
+  # STEP 1: External MQTT injection - reserve GPIO 4 for sensor (CI helper script)
 
   # Verify reservation succeeds
   - wait-serial: "Pin 4 allocated"
@@ -51,23 +47,7 @@ steps:
   # Wait for config to be applied
   - delay: 1000
 
-  # STEP 2: Remove sensor (release pin)
-  # Setting active=false should trigger pin release
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "TempSensor1",
-              "active": false
-            }]
-          }
-        }
+  # STEP 2: External MQTT injection - remove sensor (active=false) (CI helper script)
 
   # Verify pin is released
   - wait-serial: "released"
@@ -78,22 +58,7 @@ steps:
   # Wait for release to complete
   - delay: 1000
 
-  # STEP 3: Re-reserve same GPIO for actuator (should succeed)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 4,
-              "actuator_type": "pump",
-              "actuator_name": "WaterPump",
-              "active": true
-            }]
-          }
-        }
+  # STEP 3: External MQTT injection - re-reserve GPIO 4 for actuator (CI helper script)
 
   # Verify re-reservation succeeds
   # Pin was released, so new allocation should work

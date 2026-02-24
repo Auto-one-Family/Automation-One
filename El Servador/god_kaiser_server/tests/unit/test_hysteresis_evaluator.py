@@ -229,11 +229,19 @@ class TestHysteresisEvaluator:
     async def test_state_isolation_different_condition_indices(self, evaluator, cooling_condition):
         """Verschiedene Condition-Indizes in derselben Regel haben isolierte States."""
         # Condition 0 aktivieren
-        context0 = {"rule_id": "rule-1", "condition_index": 0, "sensor_data": {"esp_id": "ESP_TEST", "gpio": 4, "value": 29.0}}
+        context0 = {
+            "rule_id": "rule-1",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_TEST", "gpio": 4, "value": 29.0},
+        }
         await evaluator.evaluate(cooling_condition, context0)
 
         # Condition 1 sollte eigenen State haben
-        context1 = {"rule_id": "rule-1", "condition_index": 1, "sensor_data": {"esp_id": "ESP_TEST", "gpio": 4, "value": 26.0}}
+        context1 = {
+            "rule_id": "rule-1",
+            "condition_index": 1,
+            "sensor_data": {"esp_id": "ESP_TEST", "gpio": 4, "value": 26.0},
+        }
         result1 = await evaluator.evaluate(cooling_condition, context1)
 
         assert result1 is False  # Condition 1 hat eigenen State

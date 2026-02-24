@@ -40,6 +40,8 @@ import type { Component } from 'vue'
 import type { LogicRule, SensorCondition, TimeCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useEspStore } from '@/stores/esp'
+import { useToast } from '@/composables/useToast'
+import { tokens } from '@/utils/cssTokens'
 
 // Vue Flow CSS
 import '@vue-flow/core/dist/style.css'
@@ -60,6 +62,7 @@ const emit = defineEmits<{
 
 const logicStore = useLogicStore()
 const espStore = useEspStore()
+const toast = useToast()
 
 // Vue Flow instance
 const {
@@ -252,9 +255,25 @@ function getDefaultNodeData(type: string, defaults: Record<string, unknown> = {}
   }
 }
 
-// ======================== CONNECT HANDLING ========================
+// ======================== CONNECT HANDLING (with validation) ========================
 
 onConnect((connection: Connection) => {
+  // Validate connection using logic store rules
+  const sourceNode = getNode.value(connection.source!)
+  const targetNode = getNode.value(connection.target!)
+
+  const validation = logicStore.isValidConnection(
+    sourceNode?.type,
+    targetNode?.type,
+    connection.source!,
+    connection.target!,
+  )
+
+  if (!validation.valid) {
+    toast.warning(validation.reason || 'Verbindung nicht erlaubt')
+    return
+  }
+
   addEdges([
     {
       id: `e-${connection.source}-${connection.target}-${Date.now()}`,
@@ -267,6 +286,13 @@ onConnect((connection: Connection) => {
       markerEnd: MarkerType.ArrowClosed,
     },
   ])
+
+  // Push to undo history
+  logicStore.pushToHistory(
+    JSON.parse(JSON.stringify(nodes.value)),
+    JSON.parse(JSON.stringify(edges.value))
+  )
+
   emit('graph-changed')
 })
 
@@ -562,19 +588,16 @@ function padHour(h: number): string {
 }
 
 // MiniMap node color by type
-const MINIMAP_NODE_COLORS: Record<string, string> = {
-  sensor: '#60a5fa',
-  time: '#fbbf24',
-  logic: '#a78bfa',
-  actuator: '#c084fc',
-  notification: '#34d399',
-  delay: '#707080',
-}
-
-const DEFAULT_MINIMAP_COLOR = '#707080'
-
 function miniMapNodeColor(node: Node): string {
-  return MINIMAP_NODE_COLORS[node.type || ''] || DEFAULT_MINIMAP_COLOR
+  const colors: Record<string, () => string> = {
+    sensor: () => tokens.info,
+    time: () => tokens.warning,
+    logic: () => tokens.mock,
+    actuator: () => '#c084fc',
+    notification: () => tokens.success,
+    delay: () => '#707080',
+  }
+  return colors[node.type || '']?.() || '#707080'
 }
 
 defineExpose({
@@ -789,7 +812,6 @@ defineExpose({
           :class="{ 'rule-node--active': isNodeActive(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
-          <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
             <div class="rule-node__icon-wrap rule-node__icon-wrap--delay">
               <Timer class="rule-node__icon" />

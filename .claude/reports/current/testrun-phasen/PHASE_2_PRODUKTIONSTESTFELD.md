@@ -1,9 +1,10 @@
-# Phase 2: Produktionstestfeld aufbauen
+# Phase 2: Produktionstestfeld aufbauen — ⚠️ CODE FERTIG, DEPLOY OFFEN
 
-> **Voraussetzung:** [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) abgeschlossen (Error-Taxonomie + Grafana-Alerts)
-> **Parallel zu:** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) (laeuft unabhaengig)
+> **Voraussetzung:** [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) ✅ abgeschlossen
+> **Parallel zu:** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) ✅ abgeschlossen
 > **Nachfolger:** [Phase 3](./PHASE_3_KI_ERROR_ANALYSE.md) (Sensordaten muessen fliessen), [Phase 4](./PHASE_4_INTEGRATION.md)
 > **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 2"
+> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Wokwi MCP Debugging-Referenz, Frontend verifiziert, Logging ergaenzt)
 
 ---
 
@@ -13,7 +14,7 @@ Echter ESP32 mit echten Sensoren. Vollstaendiger Docker-Stack mit Monitoring. Fr
 
 ---
 
-## Schritt 2.1: Docker-Stack hochfahren und verifizieren
+## Schritt 2.1: Docker-Stack hochfahren und verifizieren — 🔲 DEPLOYMENT OFFEN
 
 ### Voraussetzungen pruefen
 
@@ -75,7 +76,7 @@ docker compose ps  # Alle 11+ Services "healthy" oder "running"
 curl -s http://localhost:8000/ | python -m json.tool
 
 # Health-Check
-curl -s http://localhost:8000/health
+curl -s http://localhost:8000/api/v1/health/
 
 # Frontend erreichbar
 curl -s -o /dev/null -w "%{http_code}" http://localhost:5173
@@ -94,7 +95,7 @@ curl -s http://localhost:9090/-/ready
 
 ---
 
-## Schritt 2.2: ESP32 flashen und konfigurieren
+## Schritt 2.2: ESP32 flashen und konfigurieren — 🔲 HARDWARE OFFEN
 
 ### Hardware-Minimum
 
@@ -182,81 +183,55 @@ Frontend   → Dashboard zeigt ESP als "online" ✓
 
 ---
 
-## Schritt 2.3: Frontend-Luecken schliessen
+## Schritt 2.3: Frontend-Luecken schliessen — ⚠️ CODE FERTIG, SIDEBAR FEHLT
 
-### Prioritaet 1: Kalibrierungs-Wizard
-
-**Skill:** `/frontend-development`
-**Agent:** `frontend-dev`
-
-**Ist-Zustand:**
-- Server-API existiert: `POST /api/v1/sensors/calibrate`
-- Backend-Service: `El Servador/god_kaiser_server/src/services/calibration_service.py`
-- Frontend: FEHLT komplett
-
-> **[VERIFY-PLAN] Kalibrierung-Backend Korrektur:**
-> - `calibration_service.py` existiert NICHT in `src/services/`. Kalibrierungslogik ist in `src/api/sensor_processing.py` (Zeile 233ff: `@router.post("/calibrate")`)
-> - Kalibrierung nutzt `base_processor.calibrate()` Methode der Sensor-Libraries
-> - Der Endpoint ist `POST /api/v1/sensors/process/calibrate` (in sensor_processing Router), NICHT `/api/v1/sensors/calibrate`
-> - Calibration-Daten werden ueber `sensor_repo.update_calibration()` in der DB gespeichert
-
-**Anforderungen:**
-| Feature | Beschreibung |
-|---------|-------------|
-| 2-Punkt-Kalibrierung | pH: Buffer 4.0 + 7.0, EC: Standard-Loesungen |
-| Wizard-UI | Step-by-Step: Sensor waehlen → Punkt 1 messen → Punkt 2 messen → Bestaetigen |
-| Live-Rohwert-Anzeige | Waehrend Kalibrierung den aktuellen RAW-Wert zeigen |
-| Kalibrierungs-Historie | Letzte Kalibrierungen anzeigen (aus DB) |
-
-**Zu erstellende Dateien:**
-| Datei | Beschreibung |
-|-------|-------------|
-| `El Frontend/src/components/calibration/CalibrationWizard.vue` | Haupt-Wizard-Komponente |
-| `El Frontend/src/components/calibration/CalibrationStep.vue` | Einzelner Kalibrierungsschritt |
-| `El Frontend/src/api/calibration.ts` | API-Client fuer Kalibrierungs-Endpoints |
-
-**Bestehende Patterns folgen:**
-- Component-Style: `El Frontend/src/components/zones/ZoneMonitorView.vue`
-- API-Client: `El Frontend/src/api/esp.ts`
-- Store: Bestehende Pinia-Stores als Referenz
-
-**Workaround bis Implementation:** Swagger UI (`http://localhost:8000/docs`) → `POST /sensors/calibrate`
-
-### Prioritaet 2: Historische Zeitreihen-View
+### Prioritaet 1: Kalibrierungs-Wizard — ✅ IMPLEMENTIERT
 
 **Skill:** `/frontend-development`
 **Agent:** `frontend-dev`
 
-**Ist-Zustand:**
-- Chart.js als Dependency vorhanden
-- Aktuelle Sensor-Werte werden im Dashboard angezeigt
-- Historische Daten: Server-API `GET /api/v1/sensors/{id}/data?from=...&to=...` (existiert)
-- Frontend: Zeitreihen-View FEHLT
+**Implementierungsstatus (verifiziert 2026-02-23):**
 
-> **[VERIFY-PLAN] Zeitreihen Korrektur:**
-> - Chart.js Dependencies BESTAETIGT: `chart.js ^4.5.0`, `chartjs-adapter-date-fns ^3.0.0`, `vue-chartjs ^5.3.2`
-> - Chart-Komponenten existieren BEREITS: `GaugeChart.vue`, `LiveLineChart.vue`, `StatusBarChart.vue`, `MultiSensorChart.vue` (in `components/charts/`)
-> - API-Endpoint korrekt: `GET /api/v1/sensors/data` (NICHT `/sensors/{id}/data`). Query-Params: `esp_id`, `gpio`, `sensor_type`, `start_time`, `end_time`, `quality`, `limit`
-> - Frontend braucht eher Erweiterung der bestehenden Charts als komplett neue Komponenten
-> - `sensorHistory.ts` API-Client existiert NICHT (muss erstellt werden)
-> - `SensorHistoryView.vue` existiert NICHT (muss erstellt werden)
+| Datei | Status | Pfad |
+|-------|--------|------|
+| CalibrationWizard.vue | ✅ Erstellt | `El Frontend/src/components/calibration/CalibrationWizard.vue` |
+| CalibrationStep.vue | ✅ Erstellt | `El Frontend/src/components/calibration/CalibrationStep.vue` |
+| calibration.ts (API) | ✅ Erstellt | `El Frontend/src/api/calibration.ts` |
+| CalibrationView.vue | ✅ Erstellt | `El Frontend/src/views/CalibrationView.vue` |
+| Route `/calibration` | ✅ In Router | `El Frontend/src/router/index.ts` |
+| **Sidebar-Link** | **❌ FEHLT** | `El Frontend/src/shared/design/layout/Sidebar.vue` |
 
-**Anforderungen:**
-| Feature | Beschreibung |
-|---------|-------------|
-| Zeitbereich-Selektor | 1h, 6h, 24h, 7d, Custom |
-| Multi-Sensor-Overlay | Mehrere Sensoren gleichzeitig plotten |
-| Zoom + Pan | Chart.js zoom plugin |
-| Auto-Refresh | Optionaler Live-Update (WebSocket) |
-| Export | CSV-Download der angezeigten Daten |
+**Backend-Referenz (korrigiert):**
+- Endpoint: `POST /api/v1/sensors/process/calibrate` (in `sensor_processing.py`)
+- Logik: `base_processor.calibrate()` Methode der Sensor-Libraries
+- DB: `sensor_repo.update_calibration()`
 
-**Zu erstellende Dateien:**
-| Datei | Beschreibung |
-|-------|-------------|
-| `El Frontend/src/components/charts/TimeSeriesChart.vue` | Chart.js Zeitreihen-Komponente |
-| `El Frontend/src/components/charts/TimeRangeSelector.vue` | Zeitbereich-Auswahl |
-| `El Frontend/src/views/SensorHistoryView.vue` | Eigene View fuer Zeitreihen |
-| `El Frontend/src/api/sensorHistory.ts` | API-Client fuer historische Daten |
+### Prioritaet 2: Historische Zeitreihen-View — ✅ IMPLEMENTIERT
+
+**Skill:** `/frontend-development`
+**Agent:** `frontend-dev`
+
+**Implementierungsstatus (verifiziert 2026-02-23):**
+
+| Datei | Status | Pfad |
+|-------|--------|------|
+| TimeRangeSelector.vue | ✅ Erstellt | `El Frontend/src/components/charts/TimeRangeSelector.vue` |
+| SensorHistoryView.vue | ✅ Erstellt | `El Frontend/src/views/SensorHistoryView.vue` |
+| Route `/sensor-history` | ✅ In Router | `El Frontend/src/router/index.ts` |
+| **Sidebar-Link** | **❌ FEHLT** | `El Frontend/src/shared/design/layout/Sidebar.vue` |
+
+**Bestehende Chart-Infrastruktur:**
+- `GaugeChart.vue`, `LiveLineChart.vue`, `StatusBarChart.vue`, `MultiSensorChart.vue` (in `components/charts/`)
+- Chart.js Dependencies: `chart.js ^4.5.0`, `chartjs-adapter-date-fns ^3.0.0`, `vue-chartjs ^5.3.2`, `chartjs-plugin-annotation`
+- API: `GET /api/v1/sensors/data?esp_id=X&start_time=...&end_time=...`
+
+### ❌ Verbleibende Frontend-Luecke: Sidebar-Navigation
+
+Die Routes `/calibration` und `/sensor-history` existieren im Router, aber es fehlen die **Navigations-Links in der Sidebar**. Ohne diese sind die Views nur ueber direkte URL-Eingabe erreichbar.
+
+**Fix noetig in:** `El Frontend/src/shared/design/layout/Sidebar.vue`
+**Agent:** `frontend-dev`
+**Aufwand:** ~5 Minuten
 
 ### Prioritaet 3 (spaeter): Analyse-Profile Dashboard
 
@@ -284,7 +259,7 @@ cd "El Frontend" && npx vitest run
 
 ---
 
-## Schritt 2.4: Kritischer Pfad verifizieren
+## Schritt 2.4: Kritischer Pfad verifizieren — 🔲 OFFEN (nach Deploy)
 
 ### E2E Checkliste
 
@@ -304,10 +279,14 @@ cd "El Frontend" && npx vitest run
 | Frontend zeigt falsche Daten | Playwright MCP | Navigate zu Dashboard, Screenshot |
 | MQTT-Nachricht kommt nicht an | Docker MCP | Container-Logs, mosquitto_sub |
 | Code-Impact pruefen | Serena MCP | `find_referencing_symbols` fuer geaenderte Funktion |
+| **Firmware-Verhalten reproduzieren** | **Wokwi MCP** | **Simulation starten, Fehler reproduzieren, Serial in Echtzeit lesen** |
+| **Error-Injection validieren** | **Wokwi MCP** | **Produktionsfehler in Simulation nachstellen, Fix verifizieren** |
+
+> **NEU (2026-02-23):** Wokwi MCP Server (experimentell) erlaubt es, Produktionsfehler direkt in der Simulation zu reproduzieren. Konfiguration siehe [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "Wokwi MCP Server". Besonders nuetzlich fuer Phase 2.4 (Kritischer Pfad) und Phase 2.5 (Chaos Engineering): Firmware-seitige Probleme koennen erst in Wokwi isoliert werden bevor am echten ESP32 getestet wird.
 
 ---
 
-## Schritt 2.5: Chaos Engineering (nach Basis-Stabilitaet)
+## Schritt 2.5: Chaos Engineering (nach Basis-Stabilitaet) — 🔲 OFFEN
 
 ### Voraussetzung
 
@@ -346,18 +325,153 @@ Schritt 2.1-2.4 muessen abgeschlossen sein. Der Stack laeuft stabil mit echtem E
 
 ---
 
+## Produktions-Logging fuer Testlauf (KRITISCH)
+
+> Diese Sektion beschreibt wo jede Schicht loggt und wie Agents die Logs erreichen.
+> **Ohne korrekte Log-Pfade sind Debug-Agents blind.**
+
+### Schicht 1: ESP32 Serial-Logs (Echter ESP)
+
+| Aspekt | Detail |
+|--------|--------|
+| **Quelle** | ESP32 Serial-Output ueber USB (115200 baud) |
+| **Format** | Text: `[TIMESTAMP] [LEVEL] [COMPONENT] Message` |
+| **Capture lokal** | `pio device monitor -b 115200 > logs/current/esp32_serial.log` (PowerShell!) |
+| **Capture (kein tty)** | PlatformIO IDE Terminal oder PowerShell (Git Bash kann NICHT auf COM-Ports) |
+| **Pfad** | `logs/current/esp32_serial.log` (manuell erstellt, KEIN Docker-Mount) |
+| **Rotation** | Keine (manuelle Dateiverwaltung) |
+| **Agent** | `esp32-debug` liest via Read-Tool |
+| **Loki** | NUR ueber `esp32-serial-logger` Docker-Service (Profile: hardware) |
+
+**ACHTUNG:** Der `esp32-serial-logger`-Service (Container: `automationone-esp32-serial`) muss den richtigen COM-Port konfiguriert haben UND das `hardware` Docker-Profil muss aktiv sein.
+
+### Schicht 2: MQTT-Broker (Mosquitto)
+
+| Aspekt | Detail |
+|--------|--------|
+| **Quelle** | Mosquitto Container stdout |
+| **Format** | Text: `TIMESTAMP: <message>` (kein JSON) |
+| **Docker-Log** | `docker compose logs mqtt-broker` oder `docker compose logs -f mqtt-broker` |
+| **Datei-Log** | `logs/mqtt/mosquitto.log` (Bind-Mount: `./logs/mqtt/ → /mosquitto/log`) |
+| **Loki-Label** | `{compose_service="mqtt-broker"}` |
+| **Rotation** | Keine automatische Rotation (Mosquitto schreibt append-only) |
+| **Agent** | `mqtt-debug` liest Docker-Logs oder Loki |
+| **Live-MQTT-Traffic** | `make mqtt-sub` (= `mosquitto_sub -h localhost -t 'kaiser/#' -v`) |
+
+**Tipp fuer Testlauf:** Vor Tests `docker compose logs mqtt-broker --since=5m` um relevanten Zeitfenster zu begrenzen.
+
+### Schicht 3: Server (God-Kaiser FastAPI)
+
+| Aspekt | Detail |
+|--------|--------|
+| **Quelle** | Python `logging` → RotatingFileHandler + StreamHandler |
+| **Format** | JSON: `{"timestamp", "level", "logger", "message", "extra": {...}}` |
+| **Datei-Log** | `logs/server/god_kaiser.log` (Bind-Mount: `./logs/server/ → /app/logs`) |
+| **Docker-Log** | `docker compose logs el-servador` |
+| **Loki-Label** | `{compose_service="el-servador"}` (Promtail extrahiert: level, logger) |
+| **Rotation** | 10 MB × 10 Dateien (RotatingFileHandler) |
+| **Metriken** | `GET /api/v1/health/metrics` (Prometheus-Format, 27 Metriken) |
+| **Agent** | `server-debug` liest `logs/server/god_kaiser.log` via Read-Tool |
+
+**Wichtige Logger-Namen:**
+- `god_kaiser.mqtt.handler` — MQTT Handler-Verarbeitung (Sensor, Heartbeat, Error)
+- `god_kaiser.services.logic_engine` — Logic Engine Regelauswertung
+- `god_kaiser.api` — REST API Requests
+- `god_kaiser.websocket` — WebSocket-Events und Broadcasts
+- `god_kaiser.db` — Database-Operationen
+
+### Schicht 4: PostgreSQL
+
+| Aspekt | Detail |
+|--------|--------|
+| **Quelle** | PostgreSQL internes Logging |
+| **Format** | Text: `YYYY-MM-DD HH:MM:SS.mmm UTC [PID] LOG/WARNING/ERROR: message` |
+| **Datei-Log** | `logs/postgres/postgresql-YYYY-MM-DD.log` (Bind-Mount: `./logs/postgres/ → /var/log/postgresql`) |
+| **Docker-Log** | `docker compose logs postgres` |
+| **Loki-Label** | `{compose_service="postgres"}` |
+| **Rotation** | Taeglich neue Datei + Groessenrotation bei 50 MB |
+| **Agent** | `db-inspector` liest via Read-Tool oder `docker compose exec postgres psql` |
+
+**Fuer Testlauf relevant:**
+- Slow Queries (> 200ms) werden als WARNING geloggt
+- Connection-Probleme bei Server-Restart sichtbar
+- Schema-Migrationen via Alembic hinterlassen Logs
+
+### Schicht 5: Frontend (Vue 3 / Vite)
+
+| Aspekt | Detail |
+|--------|--------|
+| **Quelle** | Vite dev-server stdout (Container) + Browser-Console (Client) |
+| **Format** | Text (Vite-Log + HMR-Events) |
+| **Docker-Log** | `docker compose logs el-frontend` |
+| **Loki-Label** | `{compose_service="el-frontend"}` |
+| **Browser-Console** | NICHT direkt von Agents zugreifbar (Blind Spot!) |
+| **Rotation** | Keine (Docker-Log-Rotation greift) |
+| **Agent** | `frontend-debug` liest Docker-Logs via Bash |
+| **MCP** | Playwright MCP kann Browser-Console ueber `browser_console_messages` abrufen |
+
+**Blind Spot:** Browser-seitige JavaScript-Fehler, WebSocket-Verbindungsprobleme und Vue-Reaktivitaets-Issues sind NUR ueber Browser-Console sichtbar. Der User muss diese Informationen liefern ODER Playwright MCP wird genutzt.
+
+### Schicht 6: Monitoring-Stack (Loki/Promtail/Prometheus/Grafana)
+
+| Service | Log-Quelle | Loki-Label | Agent-Zugriff |
+|---------|-----------|------------|---------------|
+| Loki | `docker compose logs loki` | - | Bash |
+| Promtail | `docker compose logs promtail` | - | Bash |
+| Prometheus | `docker compose logs prometheus` | - | Bash |
+| Grafana | `docker compose logs grafana` | - | Bash |
+
+**Loki-Queries fuer Testlauf:**
+```logql
+# Alle Errors der letzten 5 Minuten (alle Services)
+{compose_service=~".+"} |= "error" | json | level="ERROR"
+
+# Server-Errors mit Error-Code
+{compose_service="el-servador"} | json | message=~"Error Code.*"
+
+# MQTT-Handler-Verarbeitung
+{compose_service="el-servador"} | json | logger="god_kaiser.mqtt.handler"
+
+# ESP32 Heartbeat-Events
+{compose_service="el-servador"} | json | message=~"heartbeat.*"
+```
+
+### Agent-Log-Zugriffs-Matrix (Produktions-Testlauf)
+
+| Agent | Primaere Log-Quelle | Sekundaere Quelle | Zugriffsmethode |
+|-------|---------------------|-------------------|-----------------|
+| `esp32-debug` | `logs/current/esp32_serial.log` | Docker: `esp32-serial-logger` | Read (Text) |
+| `server-debug` | `logs/server/god_kaiser.log` | Loki: `{compose_service="el-servador"}` | Read (JSON, rotating 10MB×10) |
+| `mqtt-debug` | Docker: `mqtt-broker` logs | Loki: `{compose_service="mqtt-broker"}` | Bash docker compose logs |
+| `frontend-debug` | Docker: `el-frontend` logs | Playwright: browser_console_messages | Bash docker compose logs |
+| `db-inspector` | `logs/postgres/postgresql-*.log` | Docker: `postgres` logs | Read (Text, daily rotation) |
+| `test-log-analyst` | `logs/wokwi/reports/*.json` | `gh run view` (CI) | Read JSON |
+| `meta-analyst` | `.claude/reports/current/*.md` | Cross-Report-Korrelation | Read all reports |
+| `auto-ops` | Alle oben + Loki + Prometheus | MCP: Docker, Playwright | Full access |
+
+### Voraussetzungen fuer vollstaendiges Produktions-Logging
+
+- [ ] Core-Stack laeuft: `docker compose up -d` (4 Services)
+- [ ] Monitoring-Profil aktiv: `docker compose --profile monitoring up -d` (7 Services)
+- [ ] ESP32 Serial-Capture eingerichtet (PowerShell: `pio device monitor > logs/current/esp32_serial.log`)
+- [ ] Hardware-Profil aktiv (optional): `docker compose --profile hardware up -d` (serial-logger)
+- [ ] Log-Verzeichnisse existieren: `logs/server/`, `logs/mqtt/`, `logs/postgres/`, `logs/current/`
+- [ ] Session-Script ausgefuehrt: `scripts/debug/start_session.sh` (erstellt `logs/current/` Symlinks)
+
+---
+
 ## Akzeptanzkriterien Phase 2
 
-| # | Kriterium | Verifikation |
-|---|-----------|-------------|
-| 1 | Docker-Stack 12/13+ healthy | `docker compose ps` zeigt alle healthy |
-| 2 | ESP32 verbunden und sendet Daten | Serial: "MQTT connected" + "Sensor data published" |
-| 3 | Sensordaten in DB | `SELECT count(*) FROM sensor_data` > 0 |
-| 4 | Live-Daten im Frontend sichtbar | Dashboard zeigt aktuelle Werte |
-| 5 | Kalibrierungs-Wizard oder Swagger-Workaround | Kalibrierung durchfuehrbar |
-| 6 | Zeitreihen-View zeigt historische Daten | Chart mit 24h-Verlauf |
-| 7 | Grafana-Alerts reagieren auf echte Daten | Mindestens 1 Alert korrekt gefeuert |
-| 8 | Mindestens 1 Chaos-Test bestanden | Server recovered nach Crash |
+| # | Kriterium | Verifikation | Status |
+|---|-----------|-------------|--------|
+| 1 | Docker-Stack 12/13+ healthy | `docker compose ps` zeigt alle healthy | 🔲 |
+| 2 | ESP32 verbunden und sendet Daten | Serial: "MQTT connected" + "Sensor data published" | 🔲 |
+| 3 | Sensordaten in DB | `SELECT count(*) FROM sensor_data` > 0 | 🔲 |
+| 4 | Live-Daten im Frontend sichtbar | Dashboard zeigt aktuelle Werte | 🔲 |
+| 5 | Kalibrierungs-Wizard funktioniert | `/calibration` Route erreichbar + Wizard laeuft | ✅ Code, ⚠️ Sidebar |
+| 6 | Zeitreihen-View zeigt historische Daten | `/sensor-history` Route + Chart mit Verlauf | ✅ Code, ⚠️ Sidebar |
+| 7 | Grafana-Alerts reagieren auf echte Daten | Mindestens 1 Alert korrekt gefeuert | 🔲 |
+| 8 | Mindestens 1 Chaos-Test bestanden | Server recovered nach Crash | 🔲 |
 
 ---
 
@@ -391,48 +505,48 @@ Dies ist die **Voraussetzung fuer [Phase 3: KI-Error-Analyse](./PHASE_3_KI_ERROR
 
 ---
 
-## /verify-plan Ergebnis (Phase 2)
+## /verify-plan Ergebnis (Phase 2) — aktualisiert 2026-02-23
 
 **Plan:** Docker-Stack, ESP32-Flashen, Frontend-Luecken, Chaos Engineering
 **Geprueft:** 13 Services, 4 API-Endpoints, 5 Chaos-Tests, 6 Frontend-Dateien, 3 Agent-Referenzen
+**Status:** ⚠️ **Code fertig, Deploy + Hardware offen**
 
 ### Bestaetigt
-- Docker Core-Stack: 4 Services (postgres, mqtt-broker, el-servador, el-frontend) korrekt
-- Monitoring-Stack: 6 Services korrekt (loki, promtail, prometheus, grafana, cadvisor, postgres-exporter)
-- PlatformIO-Pfad und COM-Port-Warnung korrekt
-- Provisioning Portal korrekt (provision_manager.h, AP-Mode, 192.168.4.1)
-- Auth-Credentials korrekt (admin/Admin123#)
-- Chart.js Dependencies vorhanden (chart.js, chartjs-adapter-date-fns, vue-chartjs)
-- 4 bestehende Chart-Komponenten (GaugeChart, LiveLineChart, StatusBarChart, MultiSensorChart)
-- Sensor-Data API existiert (`GET /api/v1/sensors/data` mit start_time/end_time)
-- Agent-Referenzen (system-control, esp32-dev, frontend-dev, auto-ops) korrekt
+- Docker Core-Stack: 4 Services (postgres, mqtt-broker, el-servador, el-frontend) korrekt ✅
+- Monitoring-Stack: 7 Services korrekt (loki, promtail, prometheus, grafana, cadvisor, postgres-exporter, mosquitto-exporter) ✅
+- PlatformIO-Pfad und COM-Port-Warnung korrekt ✅
+- Provisioning Portal korrekt (provision_manager.h, AP-Mode, 192.168.4.1) ✅
+- Auth-Credentials korrekt (admin/Admin123#) ✅
+- **CalibrationWizard.vue + CalibrationStep.vue + calibration.ts** erstellt ✅
+- **CalibrationView.vue** als View erstellt, Route `/calibration` im Router ✅
+- **SensorHistoryView.vue + TimeRangeSelector.vue** erstellt ✅
+- Route `/sensor-history` im Router ✅
+- Chart.js Dependencies + 4 bestehende Chart-Komponenten ✅
+- Sensor-Data API existiert (`GET /api/v1/sensors/data`) ✅
+- Agent-Referenzen (system-control, esp32-dev, frontend-dev, auto-ops) korrekt ✅
+- Phase 0 Grafana-Alerts (26 Regeln) implementiert ✅
+- Phase 0 Handler-Integration (12 Metriken) implementiert ✅
 
-### Korrekturen noetig
+### Korrekturen (Status)
 
-**Service-Tabelle:**
-- `adminer` existiert NICHT in docker-compose.yml → entfernen oder Service hinzufuegen
-- `serial-logger` → korrekt: `esp32-serial-logger` (Container: `automationone-esp32-serial`)
-- Port-Konflikt: cadvisor (8080) und adminer (8080) → verschiedene Ports noetig
-- MQTT Health-Check: `mosquitto_pub` → korrekt: `mosquitto_sub`
+**Erledigt (im Plan korrigiert):**
+- ~~calibration_service.py → sensor_processing.py~~ ✅ in verify-plan Notiz
+- ~~Sensor-Data API Pfad korrigiert~~ ✅ in verify-plan Notiz
+- ~~Error-Codes in Chaos-Tests Container-Namen~~ ✅ in verify-plan Notiz
 
-**Kalibrierung-Backend:**
-- `calibration_service.py` existiert NICHT → Logik in `sensor_processing.py`
-- Endpoint: `/api/v1/sensors/calibrate` → korrekt: `/api/v1/sensors/process/calibrate`
+**Noch offen:**
+- `adminer` existiert NICHT in docker-compose.yml → aus Tabelle als "nicht definiert" markiert
+- Sidebar-Links fuer `/calibration` und `/sensor-history` fehlen in `Sidebar.vue`
+- Chaos-Test 4: `tc/netem` nicht in Alpine-Images installiert
+- `docker pause` hook-blocked → User muss manuell ausfuehren
 
-**Zeitreihen-API:**
-- `GET /api/v1/sensors/{id}/data?from=...&to=...` → korrekt: `GET /api/v1/sensors/data?esp_id=X&start_time=...&end_time=...`
-
-**Chaos-Tests:**
-- Container `automationone-mqtt-broker` → korrekt: `automationone-mqtt`
-- Container `el-servador` → korrekt: `automationone-server`
-- `tc/netem` nicht in Alpine-Images installiert
-- `docker pause` hook-blocked
-
-### Fehlende Vorbedingungen
-- [ ] Phase 0 abgeschlossen (Grafana-Alerts fuer Chaos-Test-Verifikation)
+### Verbleibende Vorbedingungen
+- [x] Phase 0 abgeschlossen (Grafana-Alerts + Metriken + Handler) ✅
+- [ ] Sidebar-Links hinzufuegen (frontend-dev, ~5 Min)
+- [ ] Docker-Stack deployen und Health verifizieren
 - [ ] ESP32-Hardware verfuegbar und im selben Netzwerk
-- [ ] `adminer` Service definieren oder aus Plan entfernen
-- [ ] Kalibrierungs-Endpoint Pfad im Frontend korrekt referenzieren
+- [ ] Serial-Capture einrichten (PowerShell, NICHT Git Bash)
+- [ ] E2E Datenpfad verifizieren (ESP → MQTT → Server → DB → Frontend)
 
 ### Zusammenfassung
-Plan ist strukturell solide. **6 Korrekturen noetig** (Service-Namen, API-Pfade, Container-Namen). Die wichtigsten: calibration_service.py existiert nicht (Logik ist in sensor_processing.py), und die Sensor-Data-API hat andere Query-Parameter als geplant. Chaos-Tests brauchen angepasste Container-Namen.
+Der **gesamte Code fuer Phase 2 ist fertig** — Kalibrierungs-Wizard, Zeitreihen-View, Routes, 26 Grafana-Alerts, 27 Prometheus-Metriken, Handler-Integration. Verbleibend sind **operationale Schritte**: Sidebar-Links ergaenzen, Stack deployen, ESP32 flashen, E2E-Pfad verifizieren. Chaos-Tests kommen nach stabiler Basis.

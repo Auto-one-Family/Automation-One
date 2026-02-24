@@ -59,31 +59,31 @@ DEFAULT_RETENTION_CONFIG = {
 class AuditRetentionService:
     """
     Service for managing audit log retention.
-    
+
     Provides:
     - Configurable retention policies
     - Batch cleanup operations
     - Statistics and reporting
     - Integration with SystemConfig for frontend control
-    
+
     Usage:
         service = AuditRetentionService(db)
-        
+
         # Get current config
         config = await service.get_config()
-        
+
         # Update config from frontend
         await service.set_config(default_days=60, severity_days={...})
-        
+
         # Run cleanup
         result = await service.cleanup()
-        
+
         # Get statistics
         stats = await service.get_statistics()
     """
-    
+
     CONFIG_KEY_PREFIX = "audit_retention"
-    
+
     def __init__(self, session: AsyncSession):
         """
         Initialize AuditRetentionService.
@@ -94,26 +94,26 @@ class AuditRetentionService:
         self.session = session
         self.config_repo = SystemConfigRepository(session)
         self.backup_service = AuditBackupService(session)
-    
+
     # =========================================================================
     # Configuration Management
     # =========================================================================
-    
+
     async def get_config(self) -> Dict[str, Any]:
         """
         Get current retention configuration.
-        
+
         Returns config from SystemConfig, falling back to defaults
         for any missing values.
-        
+
         Returns:
             Dict with retention configuration
         """
         config = dict(DEFAULT_RETENTION_CONFIG)
-        
+
         # Load from SystemConfig
         stored_config = await self.config_repo.get_by_key(f"{self.CONFIG_KEY_PREFIX}.config")
-        
+
         if stored_config and isinstance(stored_config.config_value, dict):
             # Merge stored config with defaults
             stored = stored_config.config_value
@@ -124,20 +124,20 @@ class AuditRetentionService:
             config["preserve_emergency_stops"] = stored.get(
                 "preserve_emergency_stops", config["preserve_emergency_stops"]
             )
-            
+
             # Merge severity days
             if "severity_days" in stored:
                 config["severity_days"].update(stored["severity_days"])
-        
+
         # Load last cleanup timestamp
         last_cleanup = await self.config_repo.get_by_key(f"{self.CONFIG_KEY_PREFIX}.last_cleanup")
         if last_cleanup:
             config["last_cleanup"] = last_cleanup.config_value
         else:
             config["last_cleanup"] = None
-        
+
         return config
-    
+
     async def set_config(
         self,
         enabled: Optional[bool] = None,
@@ -149,10 +149,10 @@ class AuditRetentionService:
     ) -> Dict[str, Any]:
         """
         Update retention configuration.
-        
+
         Only provided values are updated; others remain unchanged.
         Validates input before saving.
-        
+
         Args:
             enabled: Enable/disable auto-cleanup
             default_days: Default retention period (days)
@@ -160,50 +160,52 @@ class AuditRetentionService:
             max_records: Maximum records to keep (0 = unlimited)
             batch_size: Records per deletion batch
             preserve_emergency_stops: Never delete emergency stop events
-            
+
         Returns:
             Updated configuration dict
-            
+
         Raises:
             ValueError: If validation fails
         """
         # Load current config
         current = await self.get_config()
-        
+
         # Apply updates with validation
         if enabled is not None:
             current["enabled"] = bool(enabled)
-        
+
         if default_days is not None:
             if default_days < 1:
                 raise ValueError("default_days must be at least 1")
             if default_days > 3650:  # ~10 years max
                 raise ValueError("default_days cannot exceed 3650 (10 years)")
             current["default_days"] = default_days
-        
+
         if severity_days is not None:
             for sev, days in severity_days.items():
                 if days < 0:
-                    raise ValueError(f"Retention for {sev} cannot be negative (use 0 for never delete)")
+                    raise ValueError(
+                        f"Retention for {sev} cannot be negative (use 0 for never delete)"
+                    )
                 if days > 3650:
                     raise ValueError(f"Retention for {sev} cannot exceed 3650 days")
             current["severity_days"].update(severity_days)
-        
+
         if max_records is not None:
             if max_records < 0:
                 raise ValueError("max_records cannot be negative")
             current["max_records"] = max_records
-        
+
         if batch_size is not None:
             if batch_size < 100:
                 raise ValueError("batch_size must be at least 100")
             if batch_size > 10000:
                 raise ValueError("batch_size cannot exceed 10000")
             current["batch_size"] = batch_size
-        
+
         if preserve_emergency_stops is not None:
             current["preserve_emergency_stops"] = bool(preserve_emergency_stops)
-        
+
         # Save to SystemConfig
         await self.config_repo.set_config(
             config_key=f"{self.CONFIG_KEY_PREFIX}.config",
@@ -219,14 +221,14 @@ class AuditRetentionService:
             description="Audit log retention policy configuration",
             is_secret=False,
         )
-        
+
         logger.info(f"Audit retention config updated: {current}")
         return current
-    
+
     # =========================================================================
     # Cleanup Operations
     # =========================================================================
-    
+
     async def cleanup(
         self,
         dry_run: bool = False,
@@ -280,7 +282,7 @@ class AuditRetentionService:
                 "retention_enabled": False,
                 "reason": "Retention cleanup is disabled. Enable in retention settings first.",
             }
-        
+
         results = {
             "deleted_count": 0,
             "deleted_by_severity": {},
@@ -420,15 +422,15 @@ class AuditRetentionService:
         if config["max_records"] > 0 and not dry_run:
             try:
                 total_count = await self._get_total_count()
-                
+
                 if total_count > config["max_records"]:
                     excess = total_count - config["max_records"]
-                    
+
                     # Delete oldest records (preserving emergency stops if configured)
                     conditions = []
                     if config["preserve_emergency_stops"]:
                         conditions.append(AuditLog.event_type != "emergency_stop")
-                    
+
                     # Get oldest IDs to delete
                     oldest_stmt = (
                         select(AuditLog.id)
@@ -438,20 +440,20 @@ class AuditRetentionService:
                     )
                     oldest_result = await self.session.execute(oldest_stmt)
                     ids_to_delete = [row[0] for row in oldest_result.all()]
-                    
+
                     if ids_to_delete:
                         delete_stmt = delete(AuditLog).where(AuditLog.id.in_(ids_to_delete))
                         await self.session.execute(delete_stmt)
                         await self.session.flush()
-                        
+
                         results["deleted_count"] += len(ids_to_delete)
                         results["deleted_by_max_records"] = len(ids_to_delete)
-                        
+
             except Exception as e:
                 error_msg = f"Error applying max_records limit: {str(e)}"
                 results["errors"].append(error_msg)
                 logger.error(error_msg)
-        
+
         # Update last cleanup timestamp
         if not dry_run and results["deleted_count"] > 0:
             await self.config_repo.set_config(
@@ -481,11 +483,15 @@ class AuditRetentionService:
                     message=f"Audit log cleanup: {results['deleted_count']} events deleted",
                     details={
                         "deleted_count": results["deleted_count"],
-                        "deleted_by_severity": {str(k): v for k, v in results["deleted_by_severity"].items()},
+                        "deleted_by_severity": {
+                            str(k): v for k, v in results["deleted_by_severity"].items()
+                        },
                         "backup_id": results.get("backup_id"),
                         "retention_config": {
                             "default_days": config["default_days"],
-                            "severity_days": {str(k): v for k, v in config["severity_days"].items()},
+                            "severity_days": {
+                                str(k): v for k, v in config["severity_days"].items()
+                            },
                             "preserve_emergency_stops": config["preserve_emergency_stops"],
                         },
                         "duration_ms": results["duration_ms"],
@@ -527,11 +533,11 @@ class AuditRetentionService:
             results["preview_limited"] = results["deleted_count"] > len(preview_events)
 
         return results
-    
+
     # =========================================================================
     # Statistics
     # =========================================================================
-    
+
     async def get_statistics(
         self,
         error_cutoff_time: Optional[datetime] = None,
@@ -570,10 +576,8 @@ class AuditRetentionService:
 
         severity_stmt = severity_stmt.group_by(AuditLog.severity)
         severity_result = await self.session.execute(severity_stmt)
-        stats["count_by_severity"] = {
-            row.severity: row.count for row in severity_result.all()
-        }
-        
+        stats["count_by_severity"] = {row.severity: row.count for row in severity_result.all()}
+
         # Count by event type (top 10)
         event_type_stmt = (
             select(
@@ -588,14 +592,14 @@ class AuditRetentionService:
         stats["count_by_event_type"] = {
             row.event_type: row.count for row in event_type_result.all()
         }
-        
+
         # Oldest and newest entries
         if stats["total_count"] > 0:
             oldest_stmt = select(func.min(AuditLog.created_at))
             oldest_result = await self.session.execute(oldest_stmt)
             oldest = oldest_result.scalar_one_or_none()
             stats["oldest_entry"] = oldest.isoformat() if oldest else None
-            
+
             newest_stmt = select(func.max(AuditLog.created_at))
             newest_result = await self.session.execute(newest_stmt)
             newest = newest_result.scalar_one_or_none()
@@ -603,20 +607,20 @@ class AuditRetentionService:
         else:
             stats["oldest_entry"] = None
             stats["newest_entry"] = None
-        
+
         # Storage estimate (rough calculation: ~500 bytes per record)
         stats["storage_estimate_mb"] = round(stats["total_count"] * 500 / (1024 * 1024), 2)
-        
+
         # Current retention config
         stats["retention_config"] = await self.get_config()
-        
+
         # Calculate what would be deleted
         dry_run_result = await self.cleanup(dry_run=True)
         stats["pending_cleanup_count"] = dry_run_result["deleted_count"]
         stats["pending_cleanup_by_severity"] = dry_run_result.get("deleted_by_severity", {})
-        
+
         return stats
-    
+
     async def _get_total_count(self) -> int:
         """Get total audit log count."""
         stmt = select(func.count(AuditLog.id))
@@ -654,10 +658,10 @@ class AuditRetentionService:
 
     # Retention policies for test data (shorter than production)
     TEST_DATA_RETENTION = {
-        DataSource.TEST: timedelta(hours=24),       # 24 hours
-        DataSource.MOCK: timedelta(days=7),         # 7 days
-        DataSource.SIMULATION: timedelta(days=30), # 30 days
-        DataSource.PRODUCTION: None,               # Never auto-delete
+        DataSource.TEST: timedelta(hours=24),  # 24 hours
+        DataSource.MOCK: timedelta(days=7),  # 7 days
+        DataSource.SIMULATION: timedelta(days=30),  # 30 days
+        DataSource.PRODUCTION: None,  # Never auto-delete
     }
 
     async def cleanup_test_sensor_data(
@@ -865,30 +869,10 @@ class AuditRetentionService:
         return {
             "sensor_data": sensor_result,
             "actuator_history": actuator_result,
-            "total_deleted": (
-                sensor_result["total_deleted"] + actuator_result["total_deleted"]
-            ),
+            "total_deleted": (sensor_result["total_deleted"] + actuator_result["total_deleted"]),
             "dry_run": dry_run,
             "include_mock": include_mock,
             "include_simulation": include_simulation,
             "duration_ms": int((end_time - start_time).total_seconds() * 1000),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

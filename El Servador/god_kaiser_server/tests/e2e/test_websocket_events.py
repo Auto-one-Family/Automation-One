@@ -74,10 +74,7 @@ class TestSensorDataWebSocketEvent:
             await asyncio.sleep(1.0)
 
             # Subscribe to sensor_data events for this ESP
-            await ws_client.subscribe({
-                "types": ["sensor_data"],
-                "esp_ids": [esp_id]
-            })
+            await ws_client.subscribe({"types": ["sensor_data"], "esp_ids": [esp_id]})
             await asyncio.sleep(0.5)
 
             # === EXECUTE ===
@@ -98,7 +95,7 @@ class TestSensorDataWebSocketEvent:
             event = await ws_client.wait_for_event(
                 event_type="sensor_data",
                 timeout=10.0,
-                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id
+                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id,
             )
 
             assert event is not None, "sensor_data WebSocket event should be received"
@@ -143,9 +140,7 @@ class TestDeviceDiscoveredWebSocketEvent:
         cleanup_test_devices(esp_id)
 
         # Subscribe to device discovery events
-        await ws_client.subscribe({
-            "types": ["device_discovered"]
-        })
+        await ws_client.subscribe({"types": ["device_discovered"]})
         await asyncio.sleep(0.5)
         ws_client.clear_messages()
 
@@ -157,7 +152,7 @@ class TestDeviceDiscoveredWebSocketEvent:
         event = await ws_client.wait_for_event(
             event_type="device_discovered",
             timeout=10.0,
-            match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id
+            match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id,
         )
 
         assert event is not None, "device_discovered WebSocket event should be received"
@@ -199,29 +194,19 @@ class TestActuatorResponseWebSocketEvent:
             esp = ESPDeviceTestData(device_id=esp_id, name="WS Actuator Test ESP")
             await api_client.register_esp(esp)
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="relay",
-                name="WS Test Relay"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="relay", name="WS Test Relay"
             )
             await mqtt_client.publish_heartbeat(esp_id)
             await asyncio.sleep(1.0)
 
             # Subscribe to actuator events
-            await ws_client.subscribe({
-                "types": ["actuator_response"],
-                "esp_ids": [esp_id]
-            })
+            await ws_client.subscribe({"types": ["actuator_response"], "esp_ids": [esp_id]})
             await asyncio.sleep(0.5)
             ws_client.clear_messages()
 
             # === EXECUTE ===
             # Send actuator command via API
-            await api_client.send_actuator_command(
-                device_id=esp_id,
-                gpio=actuator_gpio,
-                value=1.0
-            )
+            await api_client.send_actuator_command(device_id=esp_id, gpio=actuator_gpio, value=1.0)
 
             # Simulate ESP response
             await mqtt_client.publish_actuator_response(
@@ -230,14 +215,14 @@ class TestActuatorResponseWebSocketEvent:
                 command="ON",
                 value=1.0,
                 success=True,
-                message="Command executed"
+                message="Command executed",
             )
 
             # === VERIFY ===
             event = await ws_client.wait_for_event(
                 event_type="actuator_response",
                 timeout=10.0,
-                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id
+                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id,
             )
 
             assert event is not None, "actuator_response WebSocket event should be received"
@@ -283,18 +268,13 @@ class TestActuatorAlertWebSocketEvent:
             esp = ESPDeviceTestData(device_id=esp_id, name="WS Alert Test ESP")
             await api_client.register_esp(esp)
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="pump",
-                name="WS Test Pump"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="pump", name="WS Test Pump"
             )
             await mqtt_client.publish_heartbeat(esp_id)
             await asyncio.sleep(1.0)
 
             # Subscribe to alert events
-            await ws_client.subscribe({
-                "types": ["actuator_alert"]
-            })
+            await ws_client.subscribe({"types": ["actuator_alert"]})
             await asyncio.sleep(0.5)
             ws_client.clear_messages()
 
@@ -304,14 +284,14 @@ class TestActuatorAlertWebSocketEvent:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 alert_type="emergency_stop",
-                message="High temperature - emergency stop activated"
+                message="High temperature - emergency stop activated",
             )
 
             # === VERIFY ===
             event = await ws_client.wait_for_event(
                 event_type="actuator_alert",
                 timeout=10.0,
-                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id
+                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id,
             )
 
             assert event is not None, "actuator_alert WebSocket event should be received"
@@ -403,10 +383,7 @@ class TestWebSocketEventFiltering:
             await asyncio.sleep(1.0)
 
             # Subscribe ONLY to sensor_data (NOT actuator_alert)
-            await ws_client.subscribe({
-                "types": ["sensor_data"],
-                "esp_ids": [esp_id]
-            })
+            await ws_client.subscribe({"types": ["sensor_data"], "esp_ids": [esp_id]})
             await asyncio.sleep(0.5)
             ws_client.clear_messages()
 
@@ -473,26 +450,19 @@ class TestESPHealthWebSocketEvent:
             await asyncio.sleep(1.0)
 
             # Subscribe to esp_health events
-            await ws_client.subscribe({
-                "types": ["esp_health"],
-                "esp_ids": [esp_id]
-            })
+            await ws_client.subscribe({"types": ["esp_health"], "esp_ids": [esp_id]})
             await asyncio.sleep(0.5)
             ws_client.clear_messages()
 
             # === EXECUTE ===
             # Send another heartbeat
-            await mqtt_client.publish_heartbeat(
-                esp_id=esp_id,
-                heap_free=100000,
-                uptime=7200
-            )
+            await mqtt_client.publish_heartbeat(esp_id=esp_id, heap_free=100000, uptime=7200)
 
             # === VERIFY ===
             event = await ws_client.wait_for_event(
                 event_type="esp_health",
                 timeout=10.0,
-                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id
+                match_fn=lambda e: e.get("data", {}).get("esp_id") == esp_id,
             )
 
             assert event is not None, "esp_health WebSocket event should be received"

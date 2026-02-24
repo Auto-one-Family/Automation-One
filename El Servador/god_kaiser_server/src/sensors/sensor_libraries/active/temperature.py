@@ -164,7 +164,7 @@ class DS18B20Processor(BaseSensorProcessor):
                     quality="suspect",
                     metadata={
                         "warning": "DS18B20 power-on reset value (85°C) detected. "
-                                   "This may indicate sensor not yet initialized or actual high temperature.",
+                        "This may indicate sensor not yet initialized or actual high temperature.",
                         "warning_code": 1061,  # ERROR_DS18B20_POWER_ON_RESET
                         "raw_mode": raw_mode,
                         "original_raw_value": original_raw_value,
@@ -346,11 +346,11 @@ class DS18B20Processor(BaseSensorProcessor):
         For DS18B20 in RAW mode (Pi-Enhanced):
         - ESP sends 12-bit signed integer
         - Range: -880 (-55°C) to +2000 (+125°C)
-        
+
         For pre-converted mode (backward compatible):
         - ESP sends Celsius directly
         - Range: -55.0 to +125.0
-        
+
         This returns the Celsius range since it's used for validation
         AFTER conversion to Celsius.
         """
@@ -573,9 +573,7 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
                 "raw_mode": raw_mode,
                 "original_raw_value": original_raw_value if raw_mode else None,
                 "conversion_formula": (
-                    f"-45 + (175 * {int(original_raw_value)} / 65535)"
-                    if raw_mode
-                    else None
+                    f"-45 + (175 * {int(original_raw_value)} / 65535)" if raw_mode else None
                 ),
             },
         )

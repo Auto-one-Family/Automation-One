@@ -15,6 +15,20 @@
 #   5. GPIO Manager reserves pin and sets OUTPUT mode
 #   6. Actuator becomes operational
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure pump actuator:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"WaterPump","active":true}]}'
+#   Step 2 - Send ON command (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+#       -m '{"command":"ON"}'
+#   Step 3 - Configure fan actuator (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":14,"actuator_type":"fan","actuator_name":"VentFan","active":true}]}'
+#   Step 4 - Send PWM command (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/14/command" \
+#       -m '{"command":"PWM","value":0.5}'
+#
 # Firmware reference:
 #   - actuator_manager.cpp (configureActuator method)
 #   - gpio_manager.cpp (requestPin, configurePinMode methods)
@@ -34,22 +48,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure binary actuator (pump)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "pump",
-              "actuator_name": "WaterPump",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure binary actuator (pump) (CI helper script)
 
   # Verify GPIO Manager allocates pin
   - wait-serial: "Pin 5 allocated"
@@ -64,56 +63,20 @@ steps:
   # Wait for actuator to be ready
   - delay: 500
 
-  # Test actuator command (verifies GPIO is correctly configured as OUTPUT)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
-          "payload": {
-            "command": "ON"
-          }
-        }
+  # External MQTT injection: test actuator ON command (CI helper script)
 
   # Verify actuator responds (GPIO is working as OUTPUT)
   - wait-serial: "GPIO 5"
 
-  # Configure PWM actuator (fan)
+  # External MQTT injection: configure PWM actuator (fan) (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 14,
-              "actuator_type": "fan",
-              "actuator_name": "VentFan",
-              "active": true
-            }]
-          }
-        }
 
   # Verify PWM actuator allocation
   - wait-serial: "Pin 14 allocated"
   - wait-serial: "VentFan"
 
-  # Test PWM command
+  # External MQTT injection: test PWM command (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/14/command",
-          "payload": {
-            "command": "PWM",
-            "value": 0.5
-          }
-        }
 
   # Verify PWM response
   - wait-serial: "GPIO 14"

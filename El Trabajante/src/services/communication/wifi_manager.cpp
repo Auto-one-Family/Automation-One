@@ -3,6 +3,9 @@
 #include "../../utils/time_manager.h"
 #ifdef ESP_PLATFORM
 #include "esp_task_wdt.h"
+
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "WIFI";
 #endif
 
 // ============================================
@@ -48,7 +51,7 @@ WiFiManager::~WiFiManager() {
 // ============================================
 bool WiFiManager::begin() {
     if (initialized_) {
-        LOG_WARNING("WiFiManager already initialized");
+        LOG_W(TAG, "WiFiManager already initialized");
         return true;
     }
     
@@ -56,7 +59,7 @@ bool WiFiManager::begin() {
     WiFi.setAutoReconnect(false);  // We handle reconnection manually
     
     initialized_ = true;
-    LOG_INFO("WiFiManager initialized");
+    LOG_I(TAG, "WiFiManager initialized");
     return true;
 }
 
@@ -65,7 +68,7 @@ bool WiFiManager::begin() {
 // ============================================
 bool WiFiManager::connect(const WiFiConfig& config) {
     if (!initialized_) {
-        LOG_ERROR("WiFiManager not initialized");
+        LOG_E(TAG, "WiFiManager not initialized");
         errorTracker.logCommunicationError(ERROR_WIFI_INIT_FAILED, 
                                            "WiFiManager not initialized");
         return false;
@@ -73,7 +76,7 @@ bool WiFiManager::connect(const WiFiConfig& config) {
     
     // Validate config
     if (config.ssid.length() == 0) {
-        LOG_ERROR("WiFi SSID is empty");
+        LOG_E(TAG, "WiFi SSID is empty");
         errorTracker.logCommunicationError(ERROR_WIFI_NO_SSID, 
                                            "WiFi SSID is empty");
         return false;
@@ -86,7 +89,7 @@ bool WiFiManager::connect(const WiFiConfig& config) {
 }
 
 bool WiFiManager::connectToNetwork() {
-    LOG_INFO("Connecting to WiFi: " + current_config_.ssid);
+    LOG_I(TAG, "Connecting to WiFi: " + current_config_.ssid);
 
     WiFi.begin(current_config_.ssid.c_str(),
                current_config_.password.c_str());
@@ -100,28 +103,28 @@ bool WiFiManager::connectToNetwork() {
             wl_status_t status = WiFi.status();
             String error_message = getWiFiStatusMessage(status);
 
-            LOG_ERROR("╔════════════════════════════════════════╗");
-            LOG_ERROR("║  ❌ WIFI CONNECTION FAILED            ║");
-            LOG_ERROR("╚════════════════════════════════════════╝");
-            LOG_ERROR("SSID: " + current_config_.ssid);
-            LOG_ERROR("Status Code: " + String(status));
-            LOG_ERROR("Reason: " + error_message);
-            LOG_ERROR("");
-            LOG_ERROR("Possible solutions:");
+            LOG_E(TAG, "╔════════════════════════════════════════╗");
+            LOG_E(TAG, "║  ❌ WIFI CONNECTION FAILED            ║");
+            LOG_E(TAG, "╚════════════════════════════════════════╝");
+            LOG_E(TAG, "SSID: " + current_config_.ssid);
+            LOG_E(TAG, "Status Code: " + String(status));
+            LOG_E(TAG, "Reason: " + error_message);
+            LOG_E(TAG, "");
+            LOG_E(TAG, "Possible solutions:");
 
             // Status-specific recommendations
             if (status == WL_NO_SSID_AVAIL) {
-                LOG_ERROR("  1. Check SSID spelling (case-sensitive!)");
-                LOG_ERROR("  2. Ensure router is powered on and broadcasting");
-                LOG_ERROR("  3. Check if ESP is within WiFi range");
+                LOG_E(TAG, "  1. Check SSID spelling (case-sensitive!)");
+                LOG_E(TAG, "  2. Ensure router is powered on and broadcasting");
+                LOG_E(TAG, "  3. Check if ESP is within WiFi range");
             } else if (status == WL_CONNECT_FAILED) {
-                LOG_ERROR("  1. Verify WiFi password is correct");
-                LOG_ERROR("  2. Check WiFi security mode (WPA2 recommended)");
-                LOG_ERROR("  3. Restart router if issues persist");
+                LOG_E(TAG, "  1. Verify WiFi password is correct");
+                LOG_E(TAG, "  2. Check WiFi security mode (WPA2 recommended)");
+                LOG_E(TAG, "  3. Restart router if issues persist");
             } else if (status == WL_IDLE_STATUS || status == WL_DISCONNECTED) {
-                LOG_ERROR("  1. WiFi signal too weak - move ESP closer to router");
-                LOG_ERROR("  2. Router may be overloaded - restart router");
-                LOG_ERROR("  3. Check for WiFi interference (2.4GHz congestion)");
+                LOG_E(TAG, "  1. WiFi signal too weak - move ESP closer to router");
+                LOG_E(TAG, "  2. Router may be overloaded - restart router");
+                LOG_E(TAG, "  3. Check for WiFi interference (2.4GHz congestion)");
             }
 
             errorTracker.logCommunicationError(ERROR_WIFI_CONNECT_TIMEOUT,
@@ -130,8 +133,8 @@ bool WiFiManager::connectToNetwork() {
 
             // Check if Circuit Breaker opened
             if (circuit_breaker_.isOpen()) {
-                LOG_WARNING("WiFi Circuit Breaker OPENED after failure threshold");
-                LOG_WARNING("  Will retry in 60 seconds");
+                LOG_W(TAG, "WiFi Circuit Breaker OPENED after failure threshold");
+                LOG_W(TAG, "  Will retry in 60 seconds");
             }
 
             return false;
@@ -146,8 +149,8 @@ bool WiFiManager::connectToNetwork() {
     }
 
     // ✅ CONNECTION SUCCESS
-    LOG_INFO("WiFi connected! IP: " + WiFi.localIP().toString());
-    LOG_INFO("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
+    LOG_I(TAG, "WiFi connected! IP: " + WiFi.localIP().toString());
+    LOG_I(TAG, "WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
 
     reconnect_attempts_ = 0;
     circuit_breaker_.recordSuccess();  // Phase 6+
@@ -156,13 +159,13 @@ bool WiFiManager::connectToNetwork() {
     // NTP TIME SYNCHRONIZATION (Phase 8)
     // ============================================
     // Initialize TimeManager after WiFi connection for accurate timestamps
-    LOG_INFO("Initializing NTP time synchronization...");
+    LOG_I(TAG, "Initializing NTP time synchronization...");
     if (timeManager.begin()) {
-        LOG_INFO("NTP sync successful - Unix timestamp: " + 
+        LOG_I(TAG, "NTP sync successful - Unix timestamp: " + 
                  String((unsigned long)timeManager.getUnixTimestamp()));
     } else {
-        LOG_WARNING("NTP sync failed - timestamps may be inaccurate");
-        LOG_WARNING("TimeManager will retry in background");
+        LOG_W(TAG, "NTP sync failed - timestamps may be inaccurate");
+        LOG_W(TAG, "TimeManager will retry in background");
     }
 
     return true;
@@ -193,7 +196,7 @@ String WiFiManager::getWiFiStatusMessage(wl_status_t status) {
 bool WiFiManager::disconnect() {
     if (WiFi.status() == WL_CONNECTED) {
         WiFi.disconnect(true);
-        LOG_INFO("WiFi disconnected");
+        LOG_I(TAG, "WiFi disconnected");
     }
     return true;
 }
@@ -204,7 +207,7 @@ bool WiFiManager::isConnected() const {
 
 void WiFiManager::reconnect() {
     if (isConnected()) {
-        LOG_DEBUG("WiFi already connected");
+        LOG_D(TAG, "WiFi already connected");
         circuit_breaker_.recordSuccess();  // Reset on successful connection
         return;
     }
@@ -213,7 +216,7 @@ void WiFiManager::reconnect() {
     // CIRCUIT BREAKER CHECK (Phase 6+)
     // ============================================
     if (!circuit_breaker_.allowRequest()) {
-        LOG_DEBUG("WiFi reconnect blocked by Circuit Breaker (waiting for recovery)");
+        LOG_D(TAG, "WiFi reconnect blocked by Circuit Breaker (waiting for recovery)");
         return;  // Skip reconnect attempt
     }
     
@@ -224,7 +227,7 @@ void WiFiManager::reconnect() {
     reconnect_attempts_++;
     last_reconnect_attempt_ = millis();
     
-    LOG_INFO("Attempting WiFi reconnection (attempt " +
+    LOG_I(TAG, "Attempting WiFi reconnection (attempt " +
              String(reconnect_attempts_) + ")");
 
     if (!connectToNetwork()) {
@@ -254,7 +257,7 @@ void WiFiManager::handleDisconnection() {
     static bool disconnection_logged = false;
     
     if (!disconnection_logged) {
-        LOG_WARNING("WiFi disconnected");
+        LOG_W(TAG, "WiFi disconnected");
         errorTracker.logCommunicationError(ERROR_WIFI_DISCONNECT, 
                                            "WiFi connection lost");
         disconnection_logged = true;

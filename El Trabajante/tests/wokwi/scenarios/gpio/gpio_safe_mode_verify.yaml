@@ -19,6 +19,17 @@
 #   3. Verify pin is now in safe mode
 #   4. Verify heartbeat shows pin as "safe"
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure actuator:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"VerifyPump","active":true}]}'
+#   Step 2 - Turn actuator ON (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+#       -m '{"command":"ON"}'
+#   Step 3 - Trigger emergency (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
+#       -m '{"command":"STOP","reason":"Verify safe mode override"}'
+#
 # Firmware reference:
 #   - gpio_manager.cpp lines 284-291 (isPinInSafeMode)
 #   - gpio_manager.cpp lines 176-200 (enableSafeModeForAllPins)
@@ -35,53 +46,19 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure actuator
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "pump",
-              "actuator_name": "VerifyPump",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure actuator (CI helper script)
 
   # Verify pin is allocated (no longer in safe mode)
   - wait-serial: "Pin 5 allocated"
 
-  # Turn actuator ON (OUTPUT HIGH)
+  # External MQTT injection: turn actuator ON (OUTPUT HIGH) (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
-          "payload": { "command": "ON" }
-        }
 
   # Verify actuator state is ON
   - wait-serial: "GPIO 5"
 
-  # Now trigger emergency - this should override the OUTPUT HIGH
+  # External MQTT injection: trigger emergency (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/emergency",
-          "payload": {
-            "command": "STOP",
-            "reason": "Verify safe mode override"
-          }
-        }
 
   # Verify emergency is processed
   - wait-serial: "Emergency"

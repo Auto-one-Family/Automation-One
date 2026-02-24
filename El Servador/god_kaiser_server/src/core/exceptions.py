@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 class GodKaiserException(Exception):
     """
     Base exception for all God-Kaiser Server errors.
-    
+
     Paket X: Code Consolidation & Industrial Quality
     Alle Exceptions erben von dieser Basis-Klasse.
     """
@@ -406,7 +406,11 @@ class ServiceUnavailableError(GodKaiserException):
         super().__init__(
             message=f"Service {service_name} is unavailable",
             error_code="SERVICE_UNAVAILABLE",
-            details={"service_name": service_name, "details": details} if details else {"service_name": service_name},
+            details=(
+                {"service_name": service_name, "details": details}
+                if details
+                else {"service_name": service_name}
+            ),
         )
 
 

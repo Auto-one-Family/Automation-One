@@ -679,9 +679,7 @@ Backend:
   - api/v1/websocket/realtime.py  # WebSocket-Endpoint
   - websocket/manager.py          # Connection-Management
   - mqtt/handlers/*.py            # MQTT Message-Handler (subscribe/forward)
-```
-
-#### DatabaseExplorerView
+```#### DatabaseExplorerView
 ```
 Frontend:
   - src/views/DatabaseExplorerView.vue

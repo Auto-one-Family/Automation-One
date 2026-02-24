@@ -385,4 +385,3 @@ class TestESPRepositoryAssignZone:
         """Test zone assignment with non-existent device."""
         result = await esp_repo.assign_zone("ESP_NONEXISTENT", "zone_1", "Zone 1")
         assert result is None
-

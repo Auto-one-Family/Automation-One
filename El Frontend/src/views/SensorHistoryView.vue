@@ -28,9 +28,7 @@ import { BarChart3, Download } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useEspStore } from '@/stores/esp'
 import type { SensorReading } from '@/types'
-import TimeRangeSelector from '@/components/charts/TimeRangeSelector.vue'
-
-type TimePreset = '1h' | '6h' | '24h' | '7d' | 'custom'
+import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
 
 ChartJS.register(
   CategoryScale,

@@ -21,24 +21,19 @@ def maintenance_settings():
         sensor_data_cleanup_dry_run=True,
         sensor_data_cleanup_batch_size=1000,
         sensor_data_cleanup_max_batches=100,
-
         command_history_retention_enabled=False,
         command_history_retention_days=14,
         command_history_cleanup_dry_run=True,
         command_history_cleanup_batch_size=1000,
         command_history_cleanup_max_batches=50,
-
         orphaned_mock_cleanup_enabled=True,
         orphaned_mock_auto_delete=False,
         orphaned_mock_age_hours=24,
-
         heartbeat_timeout_seconds=180,
         mqtt_health_check_interval_seconds=30,
         esp_health_check_interval_seconds=60,
-
         stats_aggregation_enabled=True,
         stats_aggregation_interval_minutes=60,
-
         cleanup_alert_threshold_percent=10.0,
         cleanup_max_records_per_run=100000,
     )
@@ -146,10 +141,14 @@ class TestCommandHistoryCleanup:
         mock_session.execute.side_effect = [
             total_records_mock,
             to_delete_mock,
-            batch, delete_result,
-            batch, delete_result,
-            batch, delete_result,
-            batch, delete_result,
+            batch,
+            delete_result,
+            batch,
+            delete_result,
+            batch,
+            delete_result,
+            batch,
+            delete_result,
             empty_batch,
         ]
 

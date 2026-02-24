@@ -16,6 +16,9 @@
 #include "../../models/sensor_registry.h"
 #include <map>
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "SENSOR";
+
 // ============================================
 // DS18B20 SPECIAL VALUE DETECTION (Defense-in-Depth)
 // ============================================
@@ -58,11 +61,11 @@ SensorManager::~SensorManager() {
 // ============================================
 bool SensorManager::begin() {
     if (initialized_) {
-        LOG_WARNING("Sensor Manager already initialized");
+        LOG_W(TAG, "Sensor Manager already initialized");
         return true;
     }
 
-    LOG_INFO("Sensor Manager initialization started (Phase 4)");
+    LOG_I(TAG, "Sensor Manager initialization started (Phase 4)");
     
     // Get component references
     pi_processor_ = &PiEnhancedProcessor::getInstance();
@@ -73,7 +76,7 @@ bool SensorManager::begin() {
     
     // Initialize PiEnhancedProcessor
     if (!pi_processor_->begin()) {
-        LOG_ERROR("Sensor Manager: PiEnhancedProcessor initialization failed");
+        LOG_E(TAG, "Sensor Manager: PiEnhancedProcessor initialization failed");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                "PiEnhancedProcessor initialization failed");
         return false;
@@ -89,7 +92,7 @@ bool SensorManager::begin() {
     initialized_ = true;
     last_measurement_time_ = 0;
     
-    LOG_INFO("Sensor Manager initialized (Phase 4)");
+    LOG_I(TAG, "Sensor Manager initialized (Phase 4)");
     
     return true;
 }
@@ -99,7 +102,7 @@ bool SensorManager::begin() {
 // ============================================
 void SensorManager::end() {
     if (!initialized_) {
-        LOG_WARNING("Sensor Manager not initialized");
+        LOG_W(TAG, "Sensor Manager not initialized");
         return;
     }
 
@@ -120,7 +123,7 @@ void SensorManager::end() {
     sensor_count_ = 0;
     initialized_ = false;
 
-    LOG_INFO("Sensor Manager shutdown");
+    LOG_I(TAG, "Sensor Manager shutdown");
 }
 
 // ============================================
@@ -129,7 +132,7 @@ void SensorManager::end() {
 bool SensorManager::performI2CMeasurement(uint8_t device_address, uint8_t reg,
                                           uint8_t* buffer, size_t len) {
     if (!initialized_) {
-        LOG_ERROR("Sensor Manager not initialized");
+        LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
     
@@ -143,7 +146,7 @@ bool SensorManager::performI2CMeasurement(uint8_t device_address, uint8_t reg,
 // ============================================
 bool SensorManager::performOneWireMeasurement(const uint8_t rom[8], int16_t& raw_value) {
     if (!initialized_) {
-        LOG_ERROR("Sensor Manager not initialized");
+        LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
     
@@ -157,13 +160,13 @@ bool SensorManager::performOneWireMeasurement(const uint8_t rom[8], int16_t& raw
 // ============================================
 bool SensorManager::configureSensor(const SensorConfig& config) {
     if (!initialized_) {
-        LOG_ERROR("Sensor Manager not initialized");
+        LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
 
     // Validate GPIO
     if (config.gpio == 255) {
-        LOG_ERROR("Sensor Manager: Invalid GPIO (255)");
+        LOG_E(TAG, "Sensor Manager: Invalid GPIO (255)");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                "Invalid GPIO for sensor");
         return false;
@@ -187,7 +190,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 // Same I2C device, different value type - this is allowed
                 // Find an empty slot for the new sensor type
                 if (sensor_count_ >= MAX_SENSORS) {
-                    LOG_ERROR("Sensor Manager: Maximum sensor count reached");
+                    LOG_E(TAG, "Sensor Manager: Maximum sensor count reached");
                     return false;
                 }
 
@@ -198,12 +201,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 sensor_count_++;
 
                 if (!configManager.saveSensorConfig(config)) {
-                    LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+                    LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
                 } else {
-                    LOG_INFO("  ✅ Configuration persisted to NVS");
+                    LOG_I(TAG, "  ✅ Configuration persisted to NVS");
                 }
 
-                LOG_INFO("Sensor Manager: Added multi-value sensor '" + config.sensor_type +
+                LOG_I(TAG, "Sensor Manager: Added multi-value sensor '" + config.sensor_type +
                          "' on GPIO " + String(config.gpio) + " (I2C 0x" +
                          String(capability->i2c_address, HEX) + ")");
                 return true;
@@ -211,12 +214,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         }
 
         // Runtime reconfiguration: Update existing sensor
-        LOG_INFO("Sensor Manager: Updating existing sensor on GPIO " + String(config.gpio));
+        LOG_I(TAG, "Sensor Manager: Updating existing sensor on GPIO " + String(config.gpio));
 
         // Check if sensor type changed
         bool type_changed = (existing->sensor_type != config.sensor_type);
         if (type_changed) {
-            LOG_INFO("  Sensor type changed: " + existing->sensor_type + " → " + config.sensor_type);
+            LOG_I(TAG, "  Sensor type changed: " + existing->sensor_type + " → " + config.sensor_type);
         }
 
         // Update configuration
@@ -225,19 +228,19 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         // Phase 7: Persist to NVS immediately
         if (!configManager.saveSensorConfig(config)) {
-            LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+            LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
         } else {
-            LOG_INFO("  ✅ Configuration persisted to NVS");
+            LOG_I(TAG, "  ✅ Configuration persisted to NVS");
         }
 
-        LOG_INFO("Sensor Manager: Updated sensor on GPIO " + String(config.gpio) +
+        LOG_I(TAG, "Sensor Manager: Updated sensor on GPIO " + String(config.gpio) +
                  " (" + config.sensor_type + ")");
         return true;
     }
 
     // New sensor: Check if we have space
     if (sensor_count_ >= MAX_SENSORS) {
-        LOG_ERROR("Sensor Manager: Maximum sensor count reached");
+        LOG_E(TAG, "Sensor Manager: Maximum sensor count reached");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                "Maximum sensor count reached");
         return false;
@@ -252,7 +255,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         // Check 1: I2C bus must be initialized
         if (!i2c_bus_->isInitialized()) {
-            LOG_ERROR("Sensor Manager: I2C bus not initialized");
+            LOG_E(TAG, "Sensor Manager: I2C bus not initialized");
             errorTracker.trackError(ERROR_I2C_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "I2C bus not initialized for I2C sensor");
             return false;
@@ -269,7 +272,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 existing_cap->i2c_address == i2c_address) {
                 // Same I2C address - check if same device type (allowed for multi-value)
                 if (String(existing_cap->device_type) != String(capability->device_type)) {
-                    LOG_ERROR("Sensor Manager: I2C address 0x" + String(i2c_address, HEX) +
+                    LOG_E(TAG, "Sensor Manager: I2C address 0x" + String(i2c_address, HEX) +
                               " already in use by different device type '" +
                               String(existing_cap->device_type) + "'");
                     errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_ERROR,
@@ -282,7 +285,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         // Optional: Check if I2C device is present (skip in simulation)
         if (!i2c_bus_->isDevicePresent(i2c_address)) {
-            LOG_WARNING("Sensor Manager: I2C device at 0x" + String(i2c_address, HEX) +
+            LOG_W(TAG, "Sensor Manager: I2C device at 0x" + String(i2c_address, HEX) +
                         " not responding (may be simulation mode)");
             // Don't fail - Wokwi simulation doesn't have real I2C devices
         }
@@ -294,12 +297,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         sensor_count_++;
 
         if (!configManager.saveSensorConfig(config)) {
-            LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+            LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
         } else {
-            LOG_INFO("  ✅ Configuration persisted to NVS");
+            LOG_I(TAG, "  ✅ Configuration persisted to NVS");
         }
 
-        LOG_INFO("Sensor Manager: Configured I2C sensor '" + config.sensor_type +
+        LOG_I(TAG, "Sensor Manager: Configured I2C sensor '" + config.sensor_type +
                  "' at address 0x" + String(i2c_address, HEX) +
                  " (GPIO " + String(config.gpio) + " is I2C bus)" +
                  " [sensor_count=" + String(sensor_count_) + ", active=true]");
@@ -323,11 +326,11 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                        lower_sensor_type.indexOf("ds18b20") >= 0);
     
     if (is_onewire) {
-        LOG_DEBUG("SensorManager: OneWire sensor detected: " + config.sensor_type);
+        LOG_D(TAG, "SensorManager: OneWire sensor detected: " + config.sensor_type);
         
         // 1. Validate ROM-Code format (must be 16 hex chars)
         if (config.onewire_address.length() != 16) {
-            LOG_ERROR("SensorManager: Invalid OneWire ROM-Code length (expected 16, got " + 
+            LOG_E(TAG, "SensorManager: Invalid OneWire ROM-Code length (expected 16, got " + 
                      String(config.onewire_address.length()) + ")");
             errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "Invalid OneWire ROM-Code length");
@@ -337,7 +340,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         // 2. Parse and validate ROM-Code
         uint8_t rom[8];
         if (!OneWireUtils::hexStringToRom(config.onewire_address, rom)) {
-            LOG_ERROR("SensorManager: Failed to parse OneWire ROM-Code: " + 
+            LOG_E(TAG, "SensorManager: Failed to parse OneWire ROM-Code: " + 
                      config.onewire_address);
             errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "Failed to parse OneWire ROM-Code");
@@ -347,7 +350,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         if (!OneWireUtils::isValidRom(rom)) {
             // CRC invalid - log as WARNING (may be transmission error) but continue
             // Server can do additional validation if needed
-            LOG_WARNING("SensorManager: OneWire ROM-Code CRC invalid: " + 
+            LOG_W(TAG, "SensorManager: OneWire ROM-Code CRC invalid: " + 
                        config.onewire_address + " - continuing anyway (server will validate)");
             errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_CRC, ERROR_SEVERITY_WARNING,
                                    ("ROM CRC invalid: " + config.onewire_address).c_str());
@@ -357,7 +360,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         // 2b. Duplicate ROM-Code Check (prevent same device being registered twice)
         for (uint8_t i = 0; i < sensor_count_; i++) {
             if (sensors_[i].onewire_address == config.onewire_address) {
-                LOG_ERROR("SensorManager: OneWire ROM-Code already registered: " + 
+                LOG_E(TAG, "SensorManager: OneWire ROM-Code already registered: " + 
                          config.onewire_address + " on GPIO " + String(sensors_[i].gpio));
                 errorTracker.trackError(ERROR_ONEWIRE_DUPLICATE_ROM, ERROR_SEVERITY_ERROR,
                                        ("Duplicate ROM: " + config.onewire_address).c_str());
@@ -372,16 +375,16 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         if (owner.length() == 0) {
             // CASE A: Pin free → Bus will be initialized below (which reserves the pin)
             // No explicit reservation here - OneWireBusManager::begin() handles it
-            LOG_DEBUG("SensorManager: GPIO " + String(config.gpio) +
+            LOG_D(TAG, "SensorManager: GPIO " + String(config.gpio) +
                      " is free, OneWire bus will reserve it");
         } else if (owner.startsWith("bus/onewire/")) {
             // CASE B: OneWire bus already exists → Sharing allowed
             // No new requestPin() needed - bus already owns the GPIO
-            LOG_INFO("SensorManager: Using existing OneWire bus on GPIO " + String(config.gpio) +
+            LOG_I(TAG, "SensorManager: Using existing OneWire bus on GPIO " + String(config.gpio) +
                     " (owner: " + owner + ")");
         } else {
             // CASE C: Pin used by something else → Conflict
-            LOG_ERROR("SensorManager: GPIO " + String(config.gpio) +
+            LOG_E(TAG, "SensorManager: GPIO " + String(config.gpio) +
                      " already in use by: " + owner +
                      " (expected: free or bus/onewire/" + String(config.gpio) + ")");
             errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
@@ -393,37 +396,37 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         if (onewire_bus_->isInitialized()) {
             uint8_t current_pin = onewire_bus_->getPin();
             if (current_pin != config.gpio) {
-                LOG_ERROR("SensorManager: OneWire bus already active on GPIO " + 
+                LOG_E(TAG, "SensorManager: OneWire bus already active on GPIO " + 
                          String(current_pin) + ", cannot use GPIO " + String(config.gpio) + 
                          " (single-bus architecture)");
                 errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                        "Single-bus conflict");
                 return false;
             }
-            LOG_DEBUG("SensorManager: OneWire bus already initialized on GPIO " + 
+            LOG_D(TAG, "SensorManager: OneWire bus already initialized on GPIO " + 
                      String(current_pin));
         } else {
             // First OneWire sensor → Initialize bus
             if (!onewire_bus_->begin(config.gpio)) {
-                LOG_ERROR("SensorManager: Failed to initialize OneWire bus on GPIO " + 
+                LOG_E(TAG, "SensorManager: Failed to initialize OneWire bus on GPIO " + 
                          String(config.gpio));
                 errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                        "OneWire bus init failed");
                 return false;
             }
-            LOG_INFO("SensorManager: OneWire bus initialized on GPIO " + String(config.gpio));
+            LOG_I(TAG, "SensorManager: OneWire bus initialized on GPIO " + String(config.gpio));
         }
         
         // 5. Verify device presence on bus
         if (!onewire_bus_->isDevicePresent(rom)) {
-            LOG_ERROR("SensorManager: OneWire device " + config.onewire_address + 
+            LOG_E(TAG, "SensorManager: OneWire device " + config.onewire_address + 
                      " not found on bus (GPIO " + String(config.gpio) + ")");
             errorTracker.trackError(ERROR_ONEWIRE_NO_DEVICES, ERROR_SEVERITY_ERROR,
                                    "OneWire device not found");
             return false;
         }
         
-        LOG_INFO("SensorManager: OneWire device " + config.onewire_address + 
+        LOG_I(TAG, "SensorManager: OneWire device " + config.onewire_address + 
                 " verified on GPIO " + String(config.gpio) + 
                 " (type: " + OneWireUtils::getDeviceType(rom) + ")");
                 
@@ -434,7 +437,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         // ============================================
         // Check GPIO availability
         if (!gpio_manager_->isPinAvailable(config.gpio)) {
-            LOG_ERROR("Sensor Manager: GPIO " + String(config.gpio) + " not available");
+            LOG_E(TAG, "Sensor Manager: GPIO " + String(config.gpio) + " not available");
             errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
                                    "GPIO conflict for sensor");
             return false;
@@ -442,7 +445,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         // Reserve GPIO
         if (!gpio_manager_->requestPin(config.gpio, "sensor", config.sensor_name.c_str())) {
-            LOG_ERROR("Sensor Manager: Failed to reserve GPIO " + String(config.gpio));
+            LOG_E(TAG, "Sensor Manager: Failed to reserve GPIO " + String(config.gpio));
             errorTracker.trackError(ERROR_GPIO_RESERVED, ERROR_SEVERITY_ERROR,
                                    "Failed to reserve GPIO");
             return false;
@@ -456,12 +459,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
     // Phase 7: Persist to NVS immediately
     if (!configManager.saveSensorConfig(config)) {
-        LOG_ERROR("Sensor Manager: Failed to persist sensor config to NVS");
+        LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
     } else {
-        LOG_INFO("  ✅ Configuration persisted to NVS");
+        LOG_I(TAG, "  ✅ Configuration persisted to NVS");
     }
 
-    LOG_INFO("Sensor Manager: Configured " + String(is_onewire ? "OneWire" : "GPIO") + 
+    LOG_I(TAG, "Sensor Manager: Configured " + String(is_onewire ? "OneWire" : "GPIO") + 
              " sensor '" + config.sensor_type + "' on GPIO " + String(config.gpio));
 
     return true;
@@ -469,17 +472,17 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
 bool SensorManager::removeSensor(uint8_t gpio) {
     if (!initialized_) {
-        LOG_ERROR("Sensor Manager not initialized");
+        LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
 
     SensorConfig* config = findSensorConfig(gpio);
     if (!config) {
-        LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " not found");
+        LOG_W(TAG, "Sensor Manager: Sensor on GPIO " + String(gpio) + " not found");
         return false;
     }
 
-    LOG_INFO("Sensor Manager: Removing sensor on GPIO " + String(gpio));
+    LOG_I(TAG, "Sensor Manager: Removing sensor on GPIO " + String(gpio));
 
     // Check if this is an I2C sensor (don't release GPIO - managed by I2CBusManager)
     const SensorCapability* capability = findSensorCapability(config->sensor_type);
@@ -488,9 +491,9 @@ bool SensorManager::removeSensor(uint8_t gpio) {
     if (!is_i2c_sensor) {
         // Non-I2C sensor: Release GPIO
         gpio_manager_->releasePin(gpio);
-        LOG_INFO("  ✅ GPIO " + String(gpio) + " released");
+        LOG_I(TAG, "  ✅ GPIO " + String(gpio) + " released");
     } else {
-        LOG_INFO("  ℹ️ I2C sensor - GPIO managed by I2C bus");
+        LOG_I(TAG, "  ℹ️ I2C sensor - GPIO managed by I2C bus");
     }
 
     // Remove sensor (shift array)
@@ -509,12 +512,12 @@ bool SensorManager::removeSensor(uint8_t gpio) {
 
     // Phase 7: Persist removal to NVS immediately
     if (!configManager.removeSensorConfig(gpio)) {
-        LOG_ERROR("Sensor Manager: Failed to remove sensor config from NVS");
+        LOG_E(TAG, "Sensor Manager: Failed to remove sensor config from NVS");
     } else {
-        LOG_INFO("  ✅ Configuration removed from NVS");
+        LOG_I(TAG, "  ✅ Configuration removed from NVS");
     }
 
-    LOG_INFO("Sensor Manager: Removed sensor on GPIO " + String(gpio));
+    LOG_I(TAG, "Sensor Manager: Removed sensor on GPIO " + String(gpio));
     return true;
 }
 
@@ -540,7 +543,7 @@ bool SensorManager::hasSensorOnGPIO(uint8_t gpio) const {
 
 uint8_t SensorManager::getActiveSensorCount() const {
     if (!initialized_) {
-        LOG_DEBUG("getActiveSensorCount: NOT initialized, returning 0");
+        LOG_D(TAG, "getActiveSensorCount: NOT initialized, returning 0");
         return 0;
     }
 
@@ -550,7 +553,7 @@ uint8_t SensorManager::getActiveSensorCount() const {
             count++;
         }
     }
-    LOG_DEBUG("getActiveSensorCount: sensor_count_=" + String(sensor_count_) + ", active=" + String(count));
+    LOG_D(TAG, "getActiveSensorCount: sensor_count_=" + String(sensor_count_) + ", active=" + String(count));
     return count;
 }
 
@@ -559,14 +562,14 @@ uint8_t SensorManager::getActiveSensorCount() const {
 // ============================================
 bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out) {
     if (!initialized_) {
-        LOG_ERROR("Sensor Manager not initialized");
+        LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
     
     // Find sensor config
     SensorConfig* config = findSensorConfig(gpio);
     if (!config || !config->active) {
-        LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " not found or inactive");
+        LOG_W(TAG, "Sensor Manager: Sensor on GPIO " + String(gpio) + " not found or inactive");
         return false;
     }
     
@@ -616,7 +619,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 if (config->onewire_address.length() != 16) {
                     reading_out.valid = false;
                     reading_out.error_message = "OneWire ROM-Code missing or invalid length";
-                    LOG_ERROR("SensorManager: DS18B20 ROM-Code missing for GPIO " + String(gpio));
+                    LOG_E(TAG, "SensorManager: DS18B20 ROM-Code missing for GPIO " + String(gpio));
                     errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_LENGTH, ERROR_SEVERITY_ERROR,
                                            "ROM-Code missing for measurement");
                     return false;
@@ -627,7 +630,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 if (!OneWireUtils::hexStringToRom(config->onewire_address, rom)) {
                     reading_out.valid = false;
                     reading_out.error_message = "OneWire ROM-Code parse failed";
-                    LOG_ERROR("SensorManager: Failed to parse ROM-Code: " + config->onewire_address);
+                    LOG_E(TAG, "SensorManager: Failed to parse ROM-Code: " + config->onewire_address);
                     errorTracker.trackError(ERROR_ONEWIRE_INVALID_ROM_FORMAT, ERROR_SEVERITY_ERROR,
                                            ("ROM parse failed: " + config->onewire_address).c_str());
                     return false;
@@ -637,7 +640,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 if (!onewire_bus_ || !onewire_bus_->isInitialized()) {
                     reading_out.valid = false;
                     reading_out.error_message = "OneWire bus not initialized";
-                    LOG_ERROR("SensorManager: OneWire bus not ready for measurement");
+                    LOG_E(TAG, "SensorManager: OneWire bus not ready for measurement");
                     errorTracker.trackError(ERROR_ONEWIRE_BUS_NOT_INITIALIZED, ERROR_SEVERITY_ERROR,
                                            "Bus not initialized for read");
                     return false;
@@ -653,14 +656,14 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                     if (readRawOneWire(gpio, rom, raw_temp)) {
                         read_success = true;
                         if (retry > 0) {
-                            LOG_INFO("SensorManager: OneWire read succeeded on attempt " + 
+                            LOG_I(TAG, "SensorManager: OneWire read succeeded on attempt " + 
                                     String(retry + 1) + " for " + config->onewire_address);
                         }
                         break;
                     }
                     
                     if (retry < MAX_RETRIES - 1) {
-                        LOG_WARNING("SensorManager: OneWire read attempt " + String(retry + 1) + 
+                        LOG_W(TAG, "SensorManager: OneWire read attempt " + String(retry + 1) + 
                                    " failed for " + config->onewire_address + ", retrying...");
                         delay(RETRY_DELAY_MS);
                     }
@@ -669,7 +672,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 if (!read_success) {
                     reading_out.valid = false;
                     reading_out.error_message = "OneWire read failed after " + String(MAX_RETRIES) + " attempts";
-                    LOG_ERROR("SensorManager: OneWire read failed after " + String(MAX_RETRIES) +
+                    LOG_E(TAG, "SensorManager: OneWire read failed after " + String(MAX_RETRIES) +
                              " retries for device " + config->onewire_address + " on GPIO " + String(gpio));
                     errorTracker.trackError(ERROR_ONEWIRE_READ_TIMEOUT, ERROR_SEVERITY_ERROR,
                                            ("Read timeout: " + config->onewire_address).c_str());
@@ -687,9 +690,9 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 // This indicates: disconnected sensor, CRC failure, or bus error
                 // CRITICAL: Do NOT publish this value - it's not a temperature!
                 if (raw_temp == DS18B20_RAW_SENSOR_FAULT) {
-                    LOG_ERROR("SensorManager: DS18B20 SENSOR FAULT detected: -127°C (GPIO " +
+                    LOG_E(TAG, "SensorManager: DS18B20 SENSOR FAULT detected: -127°C (GPIO " +
                               String(gpio) + ", ROM: " + config->onewire_address + ")");
-                    LOG_ERROR("  → Possible causes: Sensor disconnected, CRC failure, bus wiring issue");
+                    LOG_E(TAG, "  → Possible causes: Sensor disconnected, CRC failure, bus wiring issue");
 
                     errorTracker.trackError(
                         ERROR_DS18B20_SENSOR_FAULT,
@@ -709,9 +712,9 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 // After power-up, DS18B20 reports 85°C until first conversion completes
                 // CRITICAL: Only reject on FIRST reading; after that, 85°C could be real (fire!)
                 if (raw_temp == DS18B20_RAW_POWER_ON_RESET && reading_count == 0) {
-                    LOG_WARNING("SensorManager: DS18B20 power-on reset detected: 85°C (GPIO " +
+                    LOG_W(TAG, "SensorManager: DS18B20 power-on reset detected: 85°C (GPIO " +
                                String(gpio) + ", ROM: " + config->onewire_address + ")");
-                    LOG_INFO("  → First reading after boot - triggering retry with conversion delay...");
+                    LOG_I(TAG, "  → First reading after boot - triggering retry with conversion delay...");
 
                     // Wait for conversion to complete (750ms for 12-bit resolution)
                     delay(100);  // Short delay, then retry
@@ -721,12 +724,12 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                     if (readRawOneWire(gpio, rom, retry_raw)) {
                         if (retry_raw == DS18B20_RAW_POWER_ON_RESET) {
                             // Still 85°C after retry - accept it (could be fire or faulty sensor)
-                            LOG_WARNING("SensorManager: DS18B20 still 85°C after retry - accepting as potentially valid");
+                            LOG_W(TAG, "SensorManager: DS18B20 still 85°C after retry - accepting as potentially valid");
                             raw_temp = retry_raw;
                             // Fall through to normal processing
                         } else if (retry_raw == DS18B20_RAW_SENSOR_FAULT) {
                             // Retry returned fault
-                            LOG_ERROR("SensorManager: DS18B20 retry returned sensor fault (-127°C)");
+                            LOG_E(TAG, "SensorManager: DS18B20 retry returned sensor fault (-127°C)");
                             errorTracker.trackError(
                                 ERROR_DS18B20_SENSOR_FAULT,
                                 ERROR_SEVERITY_ERROR,
@@ -738,13 +741,13 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                             return false;
                         } else {
                             // Good value on retry
-                            LOG_INFO("SensorManager: DS18B20 retry successful: " +
+                            LOG_I(TAG, "SensorManager: DS18B20 retry successful: " +
                                     String(retry_raw * 0.0625) + "°C (was power-on 85°C)");
                             raw_temp = retry_raw;
                         }
                     } else {
                         // Retry read failed
-                        LOG_ERROR("SensorManager: DS18B20 retry read failed after power-on reset");
+                        LOG_E(TAG, "SensorManager: DS18B20 retry read failed after power-on reset");
                         errorTracker.trackError(
                             ERROR_DS18B20_POWER_ON_RESET,
                             ERROR_SEVERITY_WARNING,
@@ -759,7 +762,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
 
                 // 5c. RANGE VALIDATION: Check datasheet limits (-55°C to +125°C)
                 if (raw_temp < DS18B20_RAW_MIN_VALID || raw_temp > DS18B20_RAW_MAX_VALID) {
-                    LOG_WARNING("SensorManager: DS18B20 raw value " + String(raw_temp) +
+                    LOG_W(TAG, "SensorManager: DS18B20 raw value " + String(raw_temp) +
                                " (" + String(raw_temp * 0.0625) + "°C) out of datasheet range " +
                                "[" + String(DS18B20_RAW_MIN_VALID) + ", " + String(DS18B20_RAW_MAX_VALID) +
                                "] for " + config->onewire_address);
@@ -780,7 +783,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
                 reading_out.onewire_address = config->onewire_address;
                 reading_out.raw_mode = true;  // Always true for DS18B20 (Server-Centric)
                 
-                LOG_DEBUG("SensorManager: DS18B20 read: " + config->onewire_address + 
+                LOG_D(TAG, "SensorManager: DS18B20 read: " + config->onewire_address + 
                          " = " + String(raw_temp) + " RAW (GPIO " + String(gpio) + 
                          ", quality=" + reading_out.quality + ")");
             } else {
@@ -802,7 +805,7 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
             if (config->onewire_address.length() != 16) {
                 reading_out.valid = false;
                 reading_out.error_message = "OneWire ROM-Code missing";
-                LOG_ERROR("SensorManager: DS18B20 ROM-Code missing (fallback path)");
+                LOG_E(TAG, "SensorManager: DS18B20 ROM-Code missing (fallback path)");
                 return false;
             }
             
@@ -885,14 +888,14 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     // Find sensor config
     SensorConfig* config = findSensorConfig(gpio);
     if (!config || !config->active) {
-        LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " not found or inactive");
+        LOG_W(TAG, "Sensor Manager: Sensor on GPIO " + String(gpio) + " not found or inactive");
         return 0;
     }
     
     // Get sensor capability
     const SensorCapability* capability = findSensorCapability(config->sensor_type);
     if (!capability || !capability->is_multi_value) {
-        LOG_WARNING("Sensor Manager: Sensor on GPIO " + String(gpio) + " is not a multi-value sensor");
+        LOG_W(TAG, "Sensor Manager: Sensor on GPIO " + String(gpio) + " is not a multi-value sensor");
         return 0;
     }
     
@@ -902,13 +905,13 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     uint8_t value_count = getMultiValueTypes(device_type, value_types, 4);
     
     if (value_count == 0 || value_count > max_readings) {
-        LOG_ERROR("Sensor Manager: Invalid value count for multi-value sensor");
+        LOG_E(TAG, "Sensor Manager: Invalid value count for multi-value sensor");
         return 0;
     }
     
     // Read raw data from sensor (I2C for SHT31/BMP280)
     if (!capability->is_i2c) {
-        LOG_ERROR("Sensor Manager: Multi-value sensor must be I2C");
+        LOG_E(TAG, "Sensor Manager: Multi-value sensor must be I2C");
         return 0;
     }
 
@@ -922,14 +925,14 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     uint8_t device_addr = capability->i2c_address;
     size_t bytes_read = 0;
 
-    LOG_INFO("SensorManager: I2C READ START for " + device_type + " addr=0x" + String(device_addr, HEX));
+    LOG_I(TAG, "SensorManager: I2C READ START for " + device_type + " addr=0x" + String(device_addr, HEX));
     if (!i2c_bus_->readSensorRaw(device_type, device_addr, buffer, sizeof(buffer), bytes_read)) {
-        LOG_ERROR("Sensor Manager: I2C read failed for " + device_type);
+        LOG_E(TAG, "Sensor Manager: I2C read failed for " + device_type);
         return 0;
     }
-    LOG_INFO("SensorManager: I2C READ COMPLETE, bytes=" + String(bytes_read));
+    LOG_I(TAG, "SensorManager: I2C READ COMPLETE, bytes=" + String(bytes_read));
 
-    LOG_DEBUG("Sensor Manager: " + device_type + " raw data (" + String(bytes_read) + " bytes): " +
+    LOG_D(TAG, "Sensor Manager: " + device_type + " raw data (" + String(bytes_read) + " bytes): " +
               String(buffer[0], HEX) + " " + String(buffer[1], HEX) + " " +
               String(buffer[2], HEX) + " " + String(buffer[3], HEX) + " " +
               String(buffer[4], HEX) + " " + String(buffer[5], HEX));
@@ -957,10 +960,10 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
         raw_data.timestamp = millis();
         raw_data.metadata = "{}";
 
-        LOG_INFO("SensorManager: PiEnhancedProcessor START for " + server_sensor_type + " raw=" + String(raw_value));
+        LOG_I(TAG, "SensorManager: PiEnhancedProcessor START for " + server_sensor_type + " raw=" + String(raw_value));
         ProcessedSensorData processed;
         bool success = pi_processor_->sendRawData(raw_data, processed);
-        LOG_INFO("SensorManager: PiEnhancedProcessor END success=" + String(success ? "YES" : "NO"));
+        LOG_I(TAG, "SensorManager: PiEnhancedProcessor END success=" + String(success ? "YES" : "NO"));
         
         // Fill reading output
         reading.gpio = gpio;
@@ -979,11 +982,11 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
             created_count++;
 
             // Publish reading via MQTT
-            LOG_INFO("SensorManager: MQTT PUBLISH START for " + server_sensor_type);
+            LOG_I(TAG, "SensorManager: MQTT PUBLISH START for " + server_sensor_type);
             publishSensorReading(reading);
-            LOG_INFO("SensorManager: MQTT PUBLISH END for " + server_sensor_type);
+            LOG_I(TAG, "SensorManager: MQTT PUBLISH END for " + server_sensor_type);
         } else {
-            LOG_INFO("SensorManager: Skipping publish - success=" + String(success ? "YES" : "NO") + " valid=" + String(processed.valid ? "YES" : "NO"));
+            LOG_I(TAG, "SensorManager: Skipping publish - success=" + String(success ? "YES" : "NO") + " valid=" + String(processed.valid ? "YES" : "NO"));
         }
     }
 
@@ -991,7 +994,7 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     config->last_raw_value = readings_out[0].raw_value;  // Use first reading
     config->last_reading = millis();
 
-    LOG_INFO("SensorManager: MULTI-VALUE COMPLETE, created " + String(created_count) + " readings");
+    LOG_I(TAG, "SensorManager: MULTI-VALUE COMPLETE, created " + String(created_count) + " readings");
 
     return created_count;
 }
@@ -1010,14 +1013,14 @@ void SensorManager::performAllMeasurements() {
         return;
     }
 
-    LOG_DEBUG("SensorManager::performAllMeasurements() ENTER, sensor_count=" + String(sensor_count_));
+    LOG_D(TAG, "SensorManager::performAllMeasurements() ENTER, sensor_count=" + String(sensor_count_));
 
     unsigned long now = millis();
 
     // ✅ Phase 2C: Pro-Sensor Iteration with Mode-Check
     // (Removed global interval check - each sensor has its own interval)
     for (uint8_t i = 0; i < sensor_count_; i++) {
-        LOG_DEBUG("SensorManager: Processing sensor[" + String(i) + "] GPIO=" + String(sensors_[i].gpio) + " type=" + sensors_[i].sensor_type);
+        LOG_D(TAG, "SensorManager: Processing sensor[" + String(i) + "] GPIO=" + String(sensors_[i].gpio) + " type=" + sensors_[i].sensor_type);
         // Check 1: Sensor must be active
         if (!sensors_[i].active) {
             continue;
@@ -1055,43 +1058,43 @@ void SensorManager::performAllMeasurements() {
         // ✅ Continuous Mode: Perform measurement
         // Check if this is a multi-value sensor
         const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
-        LOG_DEBUG("SensorManager: sensor[" + String(i) + "] is_multi_value=" + String(capability && capability->is_multi_value ? "YES" : "NO"));
+        LOG_D(TAG, "SensorManager: sensor[" + String(i) + "] is_multi_value=" + String(capability && capability->is_multi_value ? "YES" : "NO"));
 
         if (capability && capability->is_multi_value) {
             // Multi-value sensor - create multiple readings
-            LOG_DEBUG("SensorManager: MULTI-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
+            LOG_D(TAG, "SensorManager: MULTI-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading readings[4];  // Max 4 values per sensor
             uint8_t count = performMultiValueMeasurement(sensors_[i].gpio, readings, 4);
-            LOG_DEBUG("SensorManager: MULTI-VALUE measurement END count=" + String(count));
+            LOG_D(TAG, "SensorManager: MULTI-VALUE measurement END count=" + String(count));
 
             // Readings are already published by performMultiValueMeasurement
             if (count == 0) {
-                LOG_WARNING("Sensor Manager: Multi-value measurement failed for GPIO " + String(sensors_[i].gpio));
+                LOG_W(TAG, "Sensor Manager: Multi-value measurement failed for GPIO " + String(sensors_[i].gpio));
             } else {
                 sensors_[i].last_reading = now;  // Update timestamp
             }
         } else {
             // Single-value sensor - standard measurement
-            LOG_DEBUG("SensorManager: SINGLE-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
+            LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading reading;
             if (performMeasurement(sensors_[i].gpio, reading)) {
-                LOG_DEBUG("SensorManager: SINGLE-VALUE measurement OK, publishing");
+                LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement OK, publishing");
                 // Publish via MQTT
                 publishSensorReading(reading);
                 sensors_[i].last_reading = now;  // Update timestamp
             } else {
-                LOG_DEBUG("SensorManager: SINGLE-VALUE measurement FAILED");
+                LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement FAILED");
             }
         }
 
         // Feed watchdog between sensor measurements to prevent timeout
-        LOG_DEBUG("SensorManager: sensor[" + String(i) + "] DONE, yielding");
+        LOG_D(TAG, "SensorManager: sensor[" + String(i) + "] DONE, yielding");
         yield();
     }
 
     // Update global timestamp for compatibility
     last_measurement_time_ = now;
-    LOG_DEBUG("SensorManager::performAllMeasurements() EXIT");
+    LOG_D(TAG, "SensorManager::performAllMeasurements() EXIT");
 }
 
 // ============================================
@@ -1099,7 +1102,7 @@ void SensorManager::performAllMeasurements() {
 // ============================================
 void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
     measurement_interval_ = interval_ms;
-    LOG_INFO("Measurement interval set to " + String(interval_ms) + " ms");
+    LOG_I(TAG, "Measurement interval set to " + String(interval_ms) + " ms");
 }
 
 // ============================================
@@ -1107,24 +1110,24 @@ void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
 // ============================================
 bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
     if (!initialized_) {
-        LOG_ERROR("SensorManager: Not initialized, cannot trigger manual measurement");
+        LOG_E(TAG, "SensorManager: Not initialized, cannot trigger manual measurement");
         return false;
     }
 
     // Find sensor configuration
     SensorConfig* config = findSensorConfig(gpio);
     if (!config) {
-        LOG_ERROR("SensorManager: Sensor not found on GPIO " + String(gpio));
+        LOG_E(TAG, "SensorManager: Sensor not found on GPIO " + String(gpio));
         return false;
     }
 
     // Check if sensor is active
     if (!config->active) {
-        LOG_WARNING("SensorManager: Cannot measure inactive sensor on GPIO " + String(gpio));
+        LOG_W(TAG, "SensorManager: Cannot measure inactive sensor on GPIO " + String(gpio));
         return false;
     }
 
-    LOG_INFO("SensorManager: Manual measurement triggered for GPIO " + String(gpio) +
+    LOG_I(TAG, "SensorManager: Manual measurement triggered for GPIO " + String(gpio) +
              " (mode: " + config->operating_mode + ")");
 
     unsigned long now = millis();
@@ -1138,7 +1141,7 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
         uint8_t count = performMultiValueMeasurement(gpio, readings, 4);
 
         if (count == 0) {
-            LOG_ERROR("SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
+            LOG_E(TAG, "SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
             return false;
         }
 
@@ -1153,7 +1156,7 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
             return true;
         }
 
-        LOG_ERROR("SensorManager: Manual measurement failed for GPIO " + String(gpio));
+        LOG_E(TAG, "SensorManager: Manual measurement failed for GPIO " + String(gpio));
         return false;
     }
 }
@@ -1197,26 +1200,26 @@ bool SensorManager::readRawI2C(uint8_t gpio, uint8_t device_address,
 
 bool SensorManager::readRawOneWire(uint8_t gpio, const uint8_t rom[8], int16_t& raw_value) {
     if (!initialized_ || !onewire_bus_) {
-        LOG_ERROR("SensorManager: Not initialized or OneWire bus missing");
+        LOG_E(TAG, "SensorManager: Not initialized or OneWire bus missing");
         return false;
     }
     
     // Verify OneWire bus is initialized
     if (!onewire_bus_->isInitialized()) {
-        LOG_ERROR("SensorManager: OneWire bus not initialized");
+        LOG_E(TAG, "SensorManager: OneWire bus not initialized");
         return false;
     }
     
     // Verify GPIO matches bus pin (safety check)
     if (onewire_bus_->getPin() != gpio) {
-        LOG_ERROR("SensorManager: OneWire bus on GPIO " + String(onewire_bus_->getPin()) + 
+        LOG_E(TAG, "SensorManager: OneWire bus on GPIO " + String(onewire_bus_->getPin()) + 
                  ", requested GPIO " + String(gpio));
         return false;
     }
     
     // Read RAW temperature from device
     if (!onewire_bus_->readRawTemperature(rom, raw_value)) {
-        LOG_WARNING("SensorManager: Failed to read OneWire device " + 
+        LOG_W(TAG, "SensorManager: Failed to read OneWire device " + 
                    OneWireUtils::romToHexString(rom));
         return false;
     }
@@ -1263,7 +1266,7 @@ const SensorConfig* SensorManager::findSensorConfig(uint8_t gpio) const {
 
 void SensorManager::publishSensorReading(const SensorReading& reading) {
     if (!mqtt_client_ || !mqtt_client_->isConnected()) {
-        LOG_WARNING("Sensor Manager: MQTT not connected, skipping publish");
+        LOG_W(TAG, "Sensor Manager: MQTT not connected, skipping publish");
         return;
     }
     
@@ -1275,7 +1278,7 @@ void SensorManager::publishSensorReading(const SensorReading& reading) {
     
     // Publish
     if (!mqtt_client_->publish(topic, payload, 1)) {
-        LOG_ERROR("Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
+        LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
         errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_ERROR,
                                "Failed to publish sensor data");
     }
@@ -1295,11 +1298,14 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     // Phase 8: Use NTP-synchronized Unix timestamp
     time_t unix_ts = timeManager.getUnixTimestamp();
     
-    // Build JSON payload with zone information
+    // Build JSON payload with zone information and correlation seq
     payload = "{";
     payload += "\"esp_id\":\"";
     payload += esp_id;
     payload += "\",";
+    payload += "\"seq\":";
+    payload += String(mqtt_client_->getNextSeq());
+    payload += ",";
     payload += "\"zone_id\":\"";
     payload += g_kaiser.zone_id;
     payload += "\",";

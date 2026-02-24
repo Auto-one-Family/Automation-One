@@ -10,13 +10,14 @@
 // =============================================================================
 
 export const QUALITY_LABELS: Record<string, string> = {
-  'excellent': 'Ausgezeichnet',
+  'excellent': 'Exzellent',
   'good': 'Gut',
-  'fair': 'Akzeptabel',
+  'fair': 'Mittel',
   'degraded': 'Eingeschränkt',
   'poor': 'Schlecht',
-  'bad': 'Sehr schlecht',
+  'bad': 'Kritisch',
   'stale': 'Veraltet',
+  'error': 'Fehler',
   'unknown': 'Unbekannt',
 }
 
@@ -25,13 +26,14 @@ export const QUALITY_LABELS: Record<string, string> = {
  */
 export function getQualityInfo(quality: string): { label: string; colorClass: string } {
   const info: Record<string, { label: string; colorClass: string }> = {
-    'excellent': { label: 'Ausgezeichnet', colorClass: 'text-success' },
+    'excellent': { label: 'Exzellent', colorClass: 'text-success' },
     'good': { label: 'Gut', colorClass: 'text-success' },
-    'fair': { label: 'Akzeptabel', colorClass: 'text-warning' },
+    'fair': { label: 'Mittel', colorClass: 'text-warning' },
     'degraded': { label: 'Eingeschränkt', colorClass: 'text-warning' },
     'poor': { label: 'Schlecht', colorClass: 'text-error' },
-    'bad': { label: 'Sehr schlecht', colorClass: 'text-error' },
+    'bad': { label: 'Kritisch', colorClass: 'text-error' },
     'stale': { label: 'Veraltet', colorClass: 'text-muted' },
+    'error': { label: 'Fehler', colorClass: 'text-error' },
     'unknown': { label: 'Unbekannt', colorClass: 'text-muted' },
   }
   return info[quality] ?? { label: quality, colorClass: 'text-muted' }

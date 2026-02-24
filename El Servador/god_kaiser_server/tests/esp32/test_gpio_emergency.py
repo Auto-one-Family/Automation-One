@@ -131,8 +131,7 @@ class TestGPIOEmergency:
         sim.enable_safe_mode_for_all_pins()
 
         # INPUT pin should not have write operations
-        input_writes = [(op, g, v) for op, g, v in sim.operations
-                        if g == 34 and op == "write"]
+        input_writes = [(op, g, v) for op, g, v in sim.operations if g == 34 and op == "write"]
         assert len(input_writes) == 0, "INPUT pins should not be de-energized"
 
         # But owner should still be cleared

@@ -9,6 +9,7 @@ Test-Szenarien:
 2. Discovery → Approval → Online: Device Lifecycle
 3. Network Partition Recovery: Offline → Reconnect → Online
 """
+
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
@@ -130,7 +131,9 @@ class TestFullConfigCycle:
                 mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
                 mock_esp_repo_class.return_value = mock_esp_repo
 
-                with patch("src.mqtt.handlers.config_handler.SensorRepository") as mock_sensor_repo_class:
+                with patch(
+                    "src.mqtt.handlers.config_handler.SensorRepository"
+                ) as mock_sensor_repo_class:
                     mock_sensor = MagicMock()
                     mock_sensor.id = 100
                     mock_sensor_repo = MagicMock()
@@ -139,7 +142,9 @@ class TestFullConfigCycle:
                     mock_sensor_repo_class.return_value = mock_sensor_repo
 
                     with patch("src.mqtt.handlers.config_handler.ActuatorRepository"):
-                        with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                        with patch(
+                            "src.mqtt.handlers.config_handler.AuditLogRepository"
+                        ) as mock_audit_class:
                             mock_audit = MagicMock()
                             mock_audit.log_config_response = AsyncMock()
                             mock_audit_class.return_value = mock_audit
@@ -191,7 +196,9 @@ class TestDiscoveryApprovalOnlineFlow:
         }
 
     @pytest.mark.asyncio
-    async def test_new_device_discovery_creates_pending(self, heartbeat_handler, new_device_payload):
+    async def test_new_device_discovery_creates_pending(
+        self, heartbeat_handler, new_device_payload
+    ):
         """New device heartbeat triggers discovery with pending_approval status."""
         topic = "kaiser/god/esp/ESP_BRAND_NEW/system/heartbeat"
 
@@ -241,7 +248,9 @@ class TestDiscoveryApprovalOnlineFlow:
                             assert ws_call.args[1]["esp_id"] == "ESP_BRAND_NEW"
 
     @pytest.mark.asyncio
-    async def test_approved_device_transitions_to_online(self, heartbeat_handler, new_device_payload):
+    async def test_approved_device_transitions_to_online(
+        self, heartbeat_handler, new_device_payload
+    ):
         """Approved device heartbeat transitions status to online."""
         topic = "kaiser/god/esp/ESP_APPROVED/system/heartbeat"
 
@@ -271,13 +280,17 @@ class TestDiscoveryApprovalOnlineFlow:
                 mock_repo.update_last_seen = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_hb_repo_class:
+                with patch(
+                    "src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"
+                ) as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
                     mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
-                    with patch("src.mqtt.handlers.heartbeat_handler.AuditLogRepository") as mock_audit_class:
+                    with patch(
+                        "src.mqtt.handlers.heartbeat_handler.AuditLogRepository"
+                    ) as mock_audit_class:
                         mock_audit = MagicMock()
                         mock_audit.log_device_event = AsyncMock()
                         mock_audit_class.return_value = mock_audit
@@ -287,7 +300,9 @@ class TestDiscoveryApprovalOnlineFlow:
                             mock_ws.broadcast = AsyncMock()
                             mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                            with patch.object(heartbeat_handler, "_send_heartbeat_ack", AsyncMock()):
+                            with patch.object(
+                                heartbeat_handler, "_send_heartbeat_ack", AsyncMock()
+                            ):
                                 result = await heartbeat_handler.handle_heartbeat(
                                     topic, new_device_payload
                                 )
@@ -329,7 +344,9 @@ class TestDiscoveryApprovalOnlineFlow:
                 mock_repo.update_last_seen = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_hb_repo_class:
+                with patch(
+                    "src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"
+                ) as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
                     mock_hb_repo.log_heartbeat = AsyncMock()
@@ -432,9 +449,7 @@ class TestNetworkPartitionRecovery:
                         assert result is True
 
                         # Status should be updated to offline
-                        mock_repo.update_status.assert_called_once_with(
-                            "ESP_PARTITION", "offline"
-                        )
+                        mock_repo.update_status.assert_called_once_with("ESP_PARTITION", "offline")
 
                         # WebSocket should broadcast offline status
                         mock_ws.broadcast.assert_called()
@@ -475,7 +490,9 @@ class TestNetworkPartitionRecovery:
                 mock_device.zone_name = "Test Zone"  # Required by _update_esp_metadata zone resync
                 mock_device.master_zone_id = "master"
                 mock_device.kaiser_id = "god"
-                mock_device.ip_address = None  # Explicitly set to avoid MagicMock attribute side-effects
+                mock_device.ip_address = (
+                    None  # Explicitly set to avoid MagicMock attribute side-effects
+                )
 
                 mock_repo = MagicMock()
                 mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
@@ -483,13 +500,17 @@ class TestNetworkPartitionRecovery:
                 mock_repo.update_last_seen = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_hb_repo_class:
+                with patch(
+                    "src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"
+                ) as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
                     mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
-                    with patch("src.mqtt.handlers.heartbeat_handler.AuditLogRepository") as mock_audit_class:
+                    with patch(
+                        "src.mqtt.handlers.heartbeat_handler.AuditLogRepository"
+                    ) as mock_audit_class:
                         mock_audit = MagicMock()
                         mock_audit.log_device_event = AsyncMock()
                         mock_audit_class.return_value = mock_audit
@@ -499,7 +520,9 @@ class TestNetworkPartitionRecovery:
                             mock_ws.broadcast = AsyncMock()
                             mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                            with patch.object(heartbeat_handler, "_send_heartbeat_ack", AsyncMock()):
+                            with patch.object(
+                                heartbeat_handler, "_send_heartbeat_ack", AsyncMock()
+                            ):
                                 result = await heartbeat_handler.handle_heartbeat(
                                     topic, heartbeat_payload
                                 )
@@ -595,13 +618,17 @@ class TestNetworkPartitionRecovery:
                 mock_repo.update_last_seen = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository") as mock_hb_repo_class:
+                with patch(
+                    "src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"
+                ) as mock_hb_repo_class:
                     mock_hb_repo = MagicMock()
                     mock_hb_repo.create = AsyncMock()
                     mock_hb_repo.log_heartbeat = AsyncMock()
                     mock_hb_repo_class.return_value = mock_hb_repo
 
-                    with patch("src.mqtt.handlers.heartbeat_handler.AuditLogRepository") as mock_audit_class:
+                    with patch(
+                        "src.mqtt.handlers.heartbeat_handler.AuditLogRepository"
+                    ) as mock_audit_class:
                         mock_audit = MagicMock()
                         mock_audit.log_device_event = AsyncMock()
                         mock_audit_class.return_value = mock_audit
@@ -611,7 +638,9 @@ class TestNetworkPartitionRecovery:
                             mock_ws.broadcast = AsyncMock()
                             mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                            with patch.object(heartbeat_handler, "_send_heartbeat_ack", AsyncMock()):
+                            with patch.object(
+                                heartbeat_handler, "_send_heartbeat_ack", AsyncMock()
+                            ):
                                 hb_result = await heartbeat_handler.handle_heartbeat(
                                     heartbeat_topic, heartbeat_payload
                                 )
@@ -657,9 +686,7 @@ class TestCrossHandlerInteraction:
                     mock_ws.broadcast = AsyncMock()
                     mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                    result = await config_handler.handle_config_ack(
-                        config_topic, config_payload
-                    )
+                    result = await config_handler.handle_config_ack(config_topic, config_payload)
 
                     assert result is True
 

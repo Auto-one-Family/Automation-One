@@ -367,6 +367,129 @@ export const useLogicStore = defineStore('logic', () => {
   }
 
   // =============================================================================
+  // UNDO/REDO — Command Pattern (Phase 2, Schritt 10)
+  // =============================================================================
+
+  interface RuleHistoryEntry {
+    nodes: any[]
+    edges: any[]
+    timestamp: number
+  }
+
+  const history = ref<RuleHistoryEntry[]>([])
+  const historyIndex = ref(-1)
+  const MAX_HISTORY = 50
+
+  /** Can undo? */
+  const canUndo = computed(() => historyIndex.value > 0)
+
+  /** Can redo? */
+  const canRedo = computed(() => historyIndex.value < history.value.length - 1)
+
+  /**
+   * Push a snapshot to history.
+   * Called after every graph change in the rule editor.
+   */
+  function pushToHistory(nodes: any[], edges: any[]) {
+    // Discard any "future" entries if we undid something and then changed
+    history.value = history.value.slice(0, historyIndex.value + 1)
+
+    history.value.push({
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      edges: JSON.parse(JSON.stringify(edges)),
+      timestamp: Date.now(),
+    })
+
+    // Trim to max size
+    if (history.value.length > MAX_HISTORY) {
+      history.value.shift()
+    }
+
+    historyIndex.value = history.value.length - 1
+  }
+
+  /**
+   * Undo — returns the previous graph state.
+   */
+  function undo(): RuleHistoryEntry | null {
+    if (!canUndo.value) return null
+    historyIndex.value--
+    return history.value[historyIndex.value]
+  }
+
+  /**
+   * Redo — returns the next graph state.
+   */
+  function redo(): RuleHistoryEntry | null {
+    if (!canRedo.value) return null
+    historyIndex.value++
+    return history.value[historyIndex.value]
+  }
+
+  /**
+   * Clear history (e.g., when switching rules).
+   */
+  function clearHistory() {
+    history.value = []
+    historyIndex.value = -1
+  }
+
+  // =============================================================================
+  // CONNECTION VALIDATION (Phase 2, Schritt 10)
+  // =============================================================================
+
+  /**
+   * Validate whether a connection between two node types is allowed.
+   *
+   * Rules:
+   * 1. Sensor → Condition: ALLOWED
+   * 2. Sensor → Action: NOT ALLOWED (must go through condition)
+   * 3. Condition → Condition: ALLOWED (AND/OR chaining)
+   * 4. Condition → Action: ALLOWED
+   * 5. Action → anything: NOT ALLOWED (action is terminal)
+   * 6. No self-loops
+   * 7. Time → Condition: ALLOWED
+   * 8. Time → Action: ALLOWED
+   */
+  function isValidConnection(
+    sourceNodeType: string | undefined,
+    targetNodeType: string | undefined,
+    sourceId: string,
+    targetId: string
+  ): { valid: boolean; reason?: string } {
+    // No self-loops
+    if (sourceId === targetId) {
+      return { valid: false, reason: 'Selbst-Schleifen sind nicht erlaubt' }
+    }
+
+    // Action nodes cannot be sources (actuator, notification, delay have no outgoing connections)
+    if (sourceNodeType === 'actuator' || sourceNodeType === 'notification') {
+      return { valid: false, reason: 'Aktions-Knoten können keine Verbindung starten' }
+    }
+
+    // Sensor/Time → Actuator/Notification direct: NOT allowed (must go through logic node)
+    if ((sourceNodeType === 'sensor' || sourceNodeType === 'time') && (targetNodeType === 'actuator' || targetNodeType === 'notification')) {
+      return { valid: false, reason: 'Bedingung kann nicht direkt mit Aktion verbunden werden. Verwende einen Logik-Knoten (UND/ODER) dazwischen.' }
+    }
+
+    // Everything else is allowed
+    return { valid: true }
+  }
+
+  /**
+   * Get validation message for connection.
+   */
+  function getConnectionValidationMessage(
+    sourceNodeType: string | undefined,
+    targetNodeType: string | undefined,
+    sourceId: string,
+    targetId: string
+  ): string {
+    const result = isValidConnection(sourceNodeType, targetNodeType, sourceId, targetId)
+    return result.reason || ''
+  }
+
+  // =============================================================================
   // Return
   // =============================================================================
   return {
@@ -403,5 +526,19 @@ export const useLogicStore = defineStore('logic', () => {
     unsubscribeFromWebSocket,
     isRuleActive,
     isConnectionActive,
+
+    // Undo/Redo (Phase 2)
+    history,
+    historyIndex,
+    canUndo,
+    canRedo,
+    pushToHistory,
+    undo,
+    redo,
+    clearHistory,
+
+    // Connection Validation (Phase 2)
+    isValidConnection,
+    getConnectionValidationMessage,
   }
 })

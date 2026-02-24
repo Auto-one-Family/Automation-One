@@ -78,13 +78,15 @@ async def operator_user(db_session: AsyncSession):
 @pytest.fixture
 def auth_headers(operator_user: User):
     """Get authorization headers."""
-    token = create_access_token(user_id=operator_user.id, additional_claims={"role": operator_user.role})
+    token = create_access_token(
+        user_id=operator_user.id, additional_claims={"role": operator_user.role}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 class TestListSensors:
     """Test sensor listing."""
-    
+
     @pytest.mark.asyncio
     async def test_list_sensors(self, auth_headers: dict, test_sensor: SensorConfig):
         """Test listing sensors."""
@@ -93,14 +95,16 @@ class TestListSensors:
                 "/api/v1/sensors/",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert len(data["data"]) >= 1
-    
+
     @pytest.mark.asyncio
-    async def test_list_sensors_with_type_filter(self, auth_headers: dict, test_sensor: SensorConfig):
+    async def test_list_sensors_with_type_filter(
+        self, auth_headers: dict, test_sensor: SensorConfig
+    ):
         """Test listing sensors filtered by type."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
@@ -108,7 +112,7 @@ class TestListSensors:
                 params={"sensor_type": "ph"},
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert all(d["sensor_type"] == "ph" for d in data["data"])
@@ -116,22 +120,24 @@ class TestListSensors:
 
 class TestGetSensor:
     """Test getting single sensor."""
-    
+
     @pytest.mark.asyncio
-    async def test_get_sensor(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
+    async def test_get_sensor(
+        self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
+    ):
         """Test getting sensor by ESP and GPIO."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["gpio"] == test_sensor.gpio
         assert data["sensor_type"] == "ph"
         assert data["name"] == "Test pH Sensor"
-    
+
     @pytest.mark.asyncio
     async def test_get_sensor_not_found(self, auth_headers: dict, test_esp: ESPDevice):
         """Test getting non-existent sensor."""
@@ -140,13 +146,13 @@ class TestGetSensor:
                 f"/api/v1/sensors/{test_esp.device_id}/99",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 404
 
 
 class TestCreateSensor:
     """Test sensor creation."""
-    
+
     @pytest.mark.asyncio
     async def test_create_sensor(self, auth_headers: dict, test_esp: ESPDevice):
         """Test creating a sensor."""
@@ -164,7 +170,7 @@ class TestCreateSensor:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["gpio"] == 35
@@ -173,16 +179,18 @@ class TestCreateSensor:
 
 class TestDeleteSensor:
     """Test sensor deletion."""
-    
+
     @pytest.mark.asyncio
-    async def test_delete_sensor(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
+    async def test_delete_sensor(
+        self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
+    ):
         """Test deleting a sensor."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["gpio"] == test_sensor.gpio
@@ -190,9 +198,11 @@ class TestDeleteSensor:
 
 class TestQueryData:
     """Test sensor data query."""
-    
+
     @pytest.mark.asyncio
-    async def test_query_sensor_data(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
+    async def test_query_sensor_data(
+        self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
+    ):
         """Test querying sensor data."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
@@ -203,7 +213,7 @@ class TestQueryData:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -215,7 +225,9 @@ class TestSensorStats:
     """Test sensor statistics."""
 
     @pytest.mark.asyncio
-    async def test_get_sensor_stats(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
+    async def test_get_sensor_stats(
+        self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
+    ):
         """Test getting sensor statistics."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
@@ -289,7 +301,9 @@ class TestSensorValidation:
     """Test sensor input validation."""
 
     @pytest.mark.asyncio
-    async def test_create_duplicate_sensor(self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice):
+    async def test_create_duplicate_sensor(
+        self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
+    ):
         """Test creating sensor on already-used GPIO."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -305,4 +319,3 @@ class TestSensorValidation:
 
         # Should reject duplicate GPIO
         assert response.status_code in [400, 409]
-

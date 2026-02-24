@@ -18,7 +18,6 @@ MULTI-VALUE SUPPORT:
 - SHT31: Creates "21_sht31_temp" + "21_sht31_humidity" jobs on same GPIO 21
 """
 
-import json
 import re
 import time
 import random
@@ -48,6 +47,7 @@ class MockESPRuntime:
     - Uptime-Tracking
     - Actuator-States für Actuator-Simulation (Paket G)
     """
+
     esp_id: str
     kaiser_id: str
     zone_id: str
@@ -61,12 +61,12 @@ class MockESPRuntime:
     active_sensor_jobs: Dict[int, str] = field(default_factory=dict)  # {gpio: job_id}
 
     # Actuator-State (Paket G - Actuator-Simulation)
-    actuator_states: Dict[int, bool] = field(default_factory=dict)       # {gpio: True/False}
-    actuator_pwm_values: Dict[int, int] = field(default_factory=dict)    # {gpio: 0-255}
-    actuator_runtime_ms: Dict[int, int] = field(default_factory=dict)    # {gpio: milliseconds}
-    last_commands: Dict[int, str] = field(default_factory=dict)          # {gpio: last_command}
-    emergency_stopped: bool = False                                       # Global E-Stop flag
-    subscriptions: List[str] = field(default_factory=list)               # Active MQTT subscriptions
+    actuator_states: Dict[int, bool] = field(default_factory=dict)  # {gpio: True/False}
+    actuator_pwm_values: Dict[int, int] = field(default_factory=dict)  # {gpio: 0-255}
+    actuator_runtime_ms: Dict[int, int] = field(default_factory=dict)  # {gpio: milliseconds}
+    last_commands: Dict[int, str] = field(default_factory=dict)  # {gpio: last_command}
+    emergency_stopped: bool = False  # Global E-Stop flag
+    subscriptions: List[str] = field(default_factory=list)  # Active MQTT subscriptions
 
     @property
     def uptime_seconds(self) -> float:
@@ -125,9 +125,9 @@ class SimulationScheduler:
         """Initialize the MockActuatorHandler (lazy initialization)."""
         if self._actuator_handler is None:
             from .actuator_handler import MockActuatorHandler
+
             self._actuator_handler = MockActuatorHandler(
-                scheduler=self,
-                mqtt_publish=self._mqtt_publish
+                scheduler=self, mqtt_publish=self._mqtt_publish
             )
             logger.debug("MockActuatorHandler initialized")
 
@@ -141,7 +141,7 @@ class SimulationScheduler:
         kaiser_id: str = "god",
         zone_id: str = "",
         heartbeat_interval: float = 60.0,
-        session: Optional[AsyncSession] = None
+        session: Optional[AsyncSession] = None,
     ) -> bool:
         """
         Startet Simulation für einen Mock-ESP.
@@ -174,11 +174,7 @@ class SimulationScheduler:
         await self._register_actuator_command_handler()
 
         # Runtime erstellen
-        runtime = MockESPRuntime(
-            esp_id=esp_id,
-            kaiser_id=kaiser_id,
-            zone_id=zone_id
-        )
+        runtime = MockESPRuntime(esp_id=esp_id, kaiser_id=kaiser_id, zone_id=zone_id)
         self._runtimes[esp_id] = runtime
 
         # Heartbeat Job (job_id pattern: mock_{esp_id}_heartbeat)
@@ -188,7 +184,7 @@ class SimulationScheduler:
             seconds=heartbeat_interval,
             args=[esp_id],
             category=JobCategory.MOCK_ESP,
-            start_immediately=True
+            start_immediately=True,
         )
 
         # Sensor-Jobs aus DB laden
@@ -203,11 +199,14 @@ class SimulationScheduler:
                 actuator_count = await self._actuator_handler.initialize_actuators(esp_id, runtime)
             else:
                 from ...db.session import get_session
+
                 async for db_session in get_session():
                     await self._start_sensor_jobs_from_db(esp_id, runtime, db_session)
                     sensor_count = len(runtime.active_sensor_jobs)
                     # Initialize actuators (Paket G)
-                    actuator_count = await self._actuator_handler.initialize_actuators(esp_id, runtime)
+                    actuator_count = await self._actuator_handler.initialize_actuators(
+                        esp_id, runtime
+                    )
                     break
 
         except Exception as e:
@@ -230,7 +229,6 @@ class SimulationScheduler:
             return
 
         try:
-            from ...mqtt.subscriber import Subscriber
             from ...mqtt.client import MQTTClient
 
             # Get the global subscriber instance
@@ -313,10 +311,7 @@ class SimulationScheduler:
         return None
 
     async def _start_sensor_jobs_from_db(
-        self,
-        esp_id: str,
-        runtime: MockESPRuntime,
-        session: AsyncSession
+        self, esp_id: str, runtime: MockESPRuntime, session: AsyncSession
     ) -> None:
         """
         Lädt Sensor-Config aus DB und startet Sensor-Jobs.
@@ -365,7 +360,7 @@ class SimulationScheduler:
                     seconds=interval,
                     args=[esp_id, gpio, sensor_type],  # Pass sensor_type to job
                     category=JobCategory.MOCK_ESP,
-                    start_immediately=True
+                    start_immediately=True,
                 )
 
                 # Track in Runtime using sensor_key (gpio_type)
@@ -453,7 +448,6 @@ class SimulationScheduler:
             for device in running_mocks:
                 try:
                     # Get simulation config from metadata
-                    sim_config = esp_repo.get_simulation_config(device)
                     heartbeat_interval = esp_repo.get_heartbeat_interval(device)
 
                     # Start simulation
@@ -461,7 +455,7 @@ class SimulationScheduler:
                         esp_id=device.device_id,
                         kaiser_id=device.kaiser_id or "god",
                         zone_id=device.zone_id or "",
-                        heartbeat_interval=heartbeat_interval
+                        heartbeat_interval=heartbeat_interval,
                     )
 
                     if success:
@@ -515,11 +509,7 @@ class SimulationScheduler:
         return True
 
     def add_sensor_job(
-        self,
-        esp_id: str,
-        gpio: int,
-        interval_seconds: float = 30.0,
-        sensor_type: str = "GENERIC"
+        self, esp_id: str, gpio: int, interval_seconds: float = 30.0, sensor_type: str = "GENERIC"
     ) -> bool:
         """
         Fügt dynamisch einen Sensor-Job hinzu (während Simulation läuft).
@@ -561,7 +551,7 @@ class SimulationScheduler:
             seconds=interval_seconds,
             args=[esp_id, gpio, sensor_type],  # Pass sensor_type to job
             category=JobCategory.MOCK_ESP,
-            start_immediately=True
+            start_immediately=True,
         )
 
         # Track in Runtime using sensor_key
@@ -573,10 +563,7 @@ class SimulationScheduler:
         return True
 
     async def trigger_immediate_sensor_publish(
-        self,
-        esp_id: str,
-        gpio: int,
-        sensor_type: str = "GENERIC"
+        self, esp_id: str, gpio: int, sensor_type: str = "GENERIC"
     ) -> bool:
         """
         Triggert sofortigen Sensor-Publish (für initialen Wert nach Sensor-Erstellung).
@@ -608,12 +595,7 @@ class SimulationScheduler:
             logger.error(f"[{esp_id}] Immediate publish failed: {e}")
             return False
 
-    def remove_sensor_job(
-        self,
-        esp_id: str,
-        gpio: int,
-        sensor_type: Optional[str] = None
-    ) -> bool:
+    def remove_sensor_job(self, esp_id: str, gpio: int, sensor_type: Optional[str] = None) -> bool:
         """
         Entfernt dynamisch einen Sensor-Job (während Simulation läuft).
 
@@ -651,8 +633,7 @@ class SimulationScheduler:
         else:
             # BACKWARDS COMPAT: Remove all sensors on this GPIO
             keys_to_remove = [
-                k for k in runtime.active_sensor_jobs
-                if k == str(gpio) or k.startswith(f"{gpio}_")
+                k for k in runtime.active_sensor_jobs if k == str(gpio) or k.startswith(f"{gpio}_")
             ]
             for sensor_key in keys_to_remove:
                 job_id = runtime.active_sensor_jobs[sensor_key]
@@ -702,7 +683,7 @@ class SimulationScheduler:
             "actuator_count": actuator_count,
             "state": state,
             "mqtt_connected": True,
-            "safe_mode": runtime.emergency_stopped
+            "safe_mode": runtime.emergency_stopped,
         }
 
         try:
@@ -714,27 +695,27 @@ class SimulationScheduler:
     async def trigger_heartbeat(self, esp_id: str) -> Optional[Dict[str, Any]]:
         """
         Manually trigger a heartbeat for a mock ESP.
-        
+
         Paket X: Manual heartbeat trigger for API endpoints.
-        
+
         Args:
             esp_id: ESP Device ID
-            
+
         Returns:
             Heartbeat payload dict or None if mock not active
         """
         runtime = self._runtimes.get(esp_id)
         if not runtime:
             return None
-            
+
         # Call the heartbeat job directly
         await self._heartbeat_job(esp_id)
-        
+
         # Return payload for API response
         sensor_count = len(runtime.active_sensor_jobs)
         actuator_count = len(runtime.actuator_states)
         state = "SAFE_MODE" if runtime.emergency_stopped else "OPERATIONAL"
-        
+
         return {
             "esp_id": esp_id,
             "zone_id": runtime.zone_id,
@@ -748,7 +729,7 @@ class SimulationScheduler:
             "actuator_count": actuator_count,
             "state": state,
             "mqtt_connected": True,
-            "safe_mode": runtime.emergency_stopped
+            "safe_mode": runtime.emergency_stopped,
         }
 
     async def _sensor_job(self, esp_id: str, gpio: int, sensor_type: str = "GENERIC") -> None:
@@ -803,7 +784,7 @@ class SimulationScheduler:
                     gpio=gpio,
                     sensor_config=sensor_config,
                     runtime=runtime,
-                    manual_overrides=sim_config.get("manual_overrides", {})
+                    manual_overrides=sim_config.get("manual_overrides", {}),
                 )
 
                 # Build MQTT Topic (MUST use TopicBuilder!)
@@ -815,14 +796,14 @@ class SimulationScheduler:
                     "ts": int(time.time() * 1000),  # MILLISEKUNDEN (KRITISCH!)
                     "esp_id": esp_id,
                     "gpio": gpio,
-                    "sensor_type": sensor_type,   # Use parameter for precision
-                    "raw_value": value,           # FLOAT - Der korrekte Sensor-Wert
-                    "raw_mode": True,             # BOOLEAN (KRITISCH! - Required by handler)
+                    "sensor_type": sensor_type,  # Use parameter for precision
+                    "raw_value": value,  # FLOAT - Der korrekte Sensor-Wert
+                    "raw_mode": True,  # BOOLEAN (KRITISCH! - Required by handler)
                     "value": value,
                     "unit": sensor_config.get("unit", ""),
                     "quality": sensor_config.get("quality", "good"),
                     "zone_id": runtime.zone_id or "",
-                    "subzone_id": sensor_config.get("subzone_id", "")
+                    "subzone_id": sensor_config.get("subzone_id", ""),
                 }
 
                 # MQTT Publish
@@ -838,11 +819,7 @@ class SimulationScheduler:
             logger.error(f"[{esp_id}] Sensor {sensor_key} job failed: {e}", exc_info=True)
 
     def _calculate_sensor_value(
-        self,
-        gpio: int,
-        sensor_config: dict,
-        runtime: MockESPRuntime,
-        manual_overrides: dict
+        self, gpio: int, sensor_config: dict, runtime: MockESPRuntime, manual_overrides: dict
     ) -> float:
         """
         Berechnet simulierten Sensor-Wert basierend auf Pattern.
@@ -929,13 +906,13 @@ class SimulationScheduler:
     async def emergency_stop(self, esp_id: str, reason: Optional[str] = None) -> bool:
         """
         Trigger emergency stop for a specific mock ESP.
-        
+
         Paket X: Emergency stop operation.
-        
+
         Args:
             esp_id: ESP device ID
             reason: Optional reason for emergency stop
-            
+
         Returns:
             True if emergency stop activated successfully
         """
@@ -987,7 +964,7 @@ class SimulationScheduler:
             "pwm_value": runtime.actuator_pwm_values.get(gpio, 0),
             "last_command": runtime.last_commands.get(gpio, ""),
             "runtime_ms": runtime.actuator_runtime_ms.get(gpio, 0),
-            "emergency_stopped": runtime.emergency_stopped
+            "emergency_stopped": runtime.emergency_stopped,
         }
 
     def get_all_actuator_states(self, esp_id: str) -> Dict[int, Dict[str, Any]]:
@@ -1099,7 +1076,7 @@ class SimulationScheduler:
             ValidationError: If validation fails
         """
         from ...db.repositories import ESPRepository
-        from ...core.exceptions import DuplicateESPError, ValidationError
+        from ...core.exceptions import DuplicateESPError
 
         esp_repo = ESPRepository(session)
 
@@ -1137,8 +1114,7 @@ class SimulationScheduler:
 
         simulation_config = {
             "sensors": {
-                str(sensor["gpio"]): build_sensor_config(sensor)
-                for sensor in (sensors or [])
+                str(sensor["gpio"]): build_sensor_config(sensor) for sensor in (sensors or [])
             },
             "actuators": {
                 str(actuator["gpio"]): {
@@ -1186,9 +1162,7 @@ class SimulationScheduler:
                 device.status = "online"
                 await session.commit()
 
-        logger.info(
-            f"Created mock ESP: {esp_id} (simulation_started={simulation_started})"
-        )
+        logger.info(f"Created mock ESP: {esp_id} (simulation_started={simulation_started})")
 
         return {
             "esp_id": esp_id,
@@ -1270,7 +1244,9 @@ class SimulationScheduler:
             runtime_status = self.get_mock_status(esp_id)
 
         # Combine DB + Runtime
-        sim_config = device.device_metadata.get("simulation_config", {}) if device.device_metadata else {}
+        sim_config = (
+            device.device_metadata.get("simulation_config", {}) if device.device_metadata else {}
+        )
 
         return {
             "esp_id": device.device_id,
@@ -1414,11 +1390,11 @@ class SimulationScheduler:
                     "esp_id": esp_id,
                     "gpio": gpio,
                     "sensor_type": sensor_type,
-                    "raw_value": value,      # User-entered value (human-readable)
-                    "value": value,          # Same as raw_value for Mock ESPs
+                    "raw_value": value,  # User-entered value (human-readable)
+                    "value": value,  # Same as raw_value for Mock ESPs
                     "unit": unit,
                     "quality": "good",
-                    "raw_mode": True,        # Server should use raw_value directly
+                    "raw_mode": True,  # Server should use raw_value directly
                 }
                 self._mqtt_publish(topic, payload, 0)
 
@@ -1531,11 +1507,7 @@ class SimulationScheduler:
 
         logger.info(
             f"Batch set sensors for {esp_id}: {len(values)} values",
-            extra={
-                "esp_id": esp_id,
-                "gpio_count": len(values),
-                "category": "sensor_operation"
-            }
+            extra={"esp_id": esp_id, "gpio_count": len(values), "category": "sensor_operation"},
         )
         return {
             "esp_id": esp_id,
@@ -1659,8 +1631,8 @@ class SimulationScheduler:
                 "esp_id": esp_id,
                 "state": current_state,
                 "reason": reason,
-                "category": "simulation_control"
-            }
+                "category": "simulation_control",
+            },
         )
 
         return {

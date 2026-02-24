@@ -32,6 +32,7 @@ pytestmark = [
 # FIXTURES
 # =============================================================================
 
+
 @pytest.fixture
 def sht31_sensor_config() -> Dict[str, Any]:
     """SHT31 I2C Temperature/Humidity sensor configuration."""
@@ -41,7 +42,7 @@ def sht31_sensor_config() -> Dict[str, Any]:
         "i2c_address": 0x44,
         "measurement_interval_ms": 30000,
         "pi_enhanced": True,
-        "name": "Greenhouse Temp/Humidity"
+        "name": "Greenhouse Temp/Humidity",
     }
 
 
@@ -54,7 +55,7 @@ def bmp280_sensor_config() -> Dict[str, Any]:
         "i2c_address": 0x76,
         "measurement_interval_ms": 60000,
         "pi_enhanced": True,
-        "name": "Atmospheric Pressure"
+        "name": "Atmospheric Pressure",
     }
 
 
@@ -67,10 +68,7 @@ def i2c_sensor_data_payload() -> Dict[str, Any]:
         "sensor_type": "SHT31",
         "i2c_address": 68,  # 0x44 in decimal
         "raw_mode": True,
-        "values": {
-            "temperature_raw": 0x6C5A,  # ~24.5°C
-            "humidity_raw": 0x5E4D      # ~55% RH
-        }
+        "values": {"temperature_raw": 0x6C5A, "humidity_raw": 0x5E4D},  # ~24.5°C  # ~55% RH
     }
 
 
@@ -86,14 +84,15 @@ def i2c_error_payload() -> Dict[str, Any]:
             "i2c_address": 68,  # 0x44
             "register": 0xFD,
             "expected_bytes": 6,
-            "received_bytes": 0
-        }
+            "received_bytes": 0,
+        },
     }
 
 
 # =============================================================================
 # I2C INITIALIZATION TESTS (Mock Validation)
 # =============================================================================
+
 
 class TestI2CInitialization:
     """
@@ -102,11 +101,7 @@ class TestI2CInitialization:
     These tests verify that ESP32 reports I2C status correctly.
     """
 
-    async def test_i2c_init_reported_in_heartbeat(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_init_reported_in_heartbeat(self, mqtt_test_client, sample_esp_device):
         """
         I2C-INIT-001: Verify I2C initialization status in heartbeat.
 
@@ -124,7 +119,7 @@ class TestI2CInitialization:
             "i2c_initialized": True,
             "i2c_device_count": 2,
             "sensor_count": 3,
-            "actuator_count": 1
+            "actuator_count": 1,
         }
         await mqtt_test_client.publish(heartbeat_topic, json.dumps(heartbeat_payload))
 
@@ -134,11 +129,7 @@ class TestI2CInitialization:
         assert heartbeat_payload["i2c_initialized"] is True
         assert heartbeat_payload["i2c_device_count"] == 2
 
-    async def test_i2c_init_failure_reported(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_init_failure_reported(self, mqtt_test_client, sample_esp_device):
         """
         I2C-INIT-003: Verify I2C initialization failure is reported.
 
@@ -153,11 +144,7 @@ class TestI2CInitialization:
             "error_code": 1010,  # ERROR_I2C_INIT_FAILED
             "severity": "CRITICAL",
             "message": "I2C Bus Manager initialization failed!",
-            "context": {
-                "sda_pin": 21,
-                "scl_pin": 22,
-                "reason": "Wire.begin() returned false"
-            }
+            "context": {"sda_pin": 21, "scl_pin": 22, "reason": "Wire.begin() returned false"},
         }
         await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
@@ -170,16 +157,13 @@ class TestI2CInitialization:
 # I2C BUS SCANNING TESTS
 # =============================================================================
 
+
 class TestI2CBusScanning:
     """
     Tests for I2C bus scanning validation through diagnostics.
     """
 
-    async def test_i2c_scan_results_in_diagnostics(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_scan_results_in_diagnostics(self, mqtt_test_client, sample_esp_device):
         """
         I2C-SCAN-001: Verify I2C scan results are included in diagnostics.
 
@@ -199,8 +183,8 @@ class TestI2CBusScanning:
                 "scl_pin": 22,
                 "frequency_khz": 100,
                 "devices_found": [0x44, 0x76],  # SHT31, BMP280
-                "last_scan_ts": int(datetime.now().timestamp())
-            }
+                "last_scan_ts": int(datetime.now().timestamp()),
+            },
         }
         await mqtt_test_client.publish(diagnostics_topic, json.dumps(diagnostics_payload))
 
@@ -211,11 +195,7 @@ class TestI2CBusScanning:
         assert 0x76 in i2c_status["devices_found"]
         assert len(i2c_status["devices_found"]) == 2
 
-    async def test_i2c_device_not_found_error(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_device_not_found_error(self, mqtt_test_client, sample_esp_device):
         """
         I2C-SCAN-005: Verify device not found error is reported.
 
@@ -233,8 +213,8 @@ class TestI2CBusScanning:
             "context": {
                 "i2c_address": 0x99,
                 "operation": "write",
-                "wire_error": 2  # NACK on address
-            }
+                "wire_error": 2,  # NACK on address
+            },
         }
         await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
@@ -247,16 +227,14 @@ class TestI2CBusScanning:
 # I2C COMMUNICATION TESTS
 # =============================================================================
 
+
 class TestI2CCommunication:
     """
     Tests for I2C read/write operations validation.
     """
 
     async def test_i2c_sensor_data_received(
-        self,
-        mqtt_test_client,
-        sample_esp_device,
-        i2c_sensor_data_payload
+        self, mqtt_test_client, sample_esp_device, i2c_sensor_data_payload
     ):
         """
         I2C-COMM-001: Verify I2C sensor data is correctly received.
@@ -275,11 +253,7 @@ class TestI2CCommunication:
         assert "humidity_raw" in i2c_sensor_data_payload["values"]
 
     async def test_i2c_multi_device_data(
-        self,
-        mqtt_test_client,
-        sample_esp_device,
-        sht31_sensor_config,
-        bmp280_sensor_config
+        self, mqtt_test_client, sample_esp_device, sht31_sensor_config, bmp280_sensor_config
     ):
         """
         I2C-MULTI-002: Verify multiple I2C sensors report data correctly.
@@ -295,7 +269,7 @@ class TestI2CCommunication:
             "sensor_type": "SHT31",
             "i2c_address": 0x44,
             "raw_mode": True,
-            "values": {"temperature_raw": 0x6C5A, "humidity_raw": 0x5E4D}
+            "values": {"temperature_raw": 0x6C5A, "humidity_raw": 0x5E4D},
         }
 
         bmp280_data = {
@@ -304,7 +278,7 @@ class TestI2CCommunication:
             "sensor_type": "BMP280",
             "i2c_address": 0x76,
             "raw_mode": True,
-            "values": {"pressure_raw": 0x523456, "temperature_raw": 0x8ABC}
+            "values": {"pressure_raw": 0x523456, "temperature_raw": 0x8ABC},
         }
 
         # Act
@@ -318,10 +292,7 @@ class TestI2CCommunication:
         assert bmp280_data["i2c_address"] == 0x76
 
     async def test_i2c_read_failure_reported(
-        self,
-        mqtt_test_client,
-        sample_esp_device,
-        i2c_error_payload
+        self, mqtt_test_client, sample_esp_device, i2c_error_payload
     ):
         """
         I2C-COMM-007: Verify I2C read failure is reported via error topic.
@@ -344,16 +315,13 @@ class TestI2CCommunication:
 # I2C ERROR HANDLING TESTS
 # =============================================================================
 
+
 class TestI2CErrorHandling:
     """
     Tests for I2C error handling and recovery validation.
     """
 
-    async def test_i2c_bus_error_critical(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_bus_error_critical(self, mqtt_test_client, sample_esp_device):
         """
         I2C-ERR-003: Verify bus error is reported with CRITICAL severity.
 
@@ -368,10 +336,7 @@ class TestI2CErrorHandling:
             "error_code": 1014,  # ERROR_I2C_BUS_ERROR
             "severity": "CRITICAL",
             "message": "I2C bus verification failed",
-            "context": {
-                "wire_error": 4,  # Other error
-                "operation": "init_verification"
-            }
+            "context": {"wire_error": 4, "operation": "init_verification"},  # Other error
         }
         await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
@@ -380,11 +345,7 @@ class TestI2CErrorHandling:
         assert error_payload["severity"] == "CRITICAL"
         assert error_payload["context"]["wire_error"] == 4
 
-    async def test_i2c_write_failure_reported(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_write_failure_reported(self, mqtt_test_client, sample_esp_device):
         """
         I2C-ERR-001: Verify write failure (NACK) is reported.
 
@@ -399,11 +360,7 @@ class TestI2CErrorHandling:
             "error_code": 1013,  # ERROR_I2C_WRITE_FAILED
             "severity": "ERROR",
             "message": "Write error 3 to 0x44",
-            "context": {
-                "i2c_address": 0x44,
-                "register": 0x30,
-                "wire_error": 3  # NACK on data
-            }
+            "context": {"i2c_address": 0x44, "register": 0x30, "wire_error": 3},  # NACK on data
         }
         await mqtt_test_client.publish(error_topic, json.dumps(error_payload))
 
@@ -411,11 +368,7 @@ class TestI2CErrorHandling:
         assert error_payload["error_code"] == 1013
         assert error_payload["context"]["wire_error"] == 3
 
-    async def test_i2c_error_tracking_in_diagnostics(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_error_tracking_in_diagnostics(self, mqtt_test_client, sample_esp_device):
         """
         I2C-ERR-005: Verify I2C errors are tracked in diagnostics.
 
@@ -431,7 +384,7 @@ class TestI2CErrorHandling:
             "error_count": 2,
             "errors": [
                 {"code": 1012, "count": 1, "last_ts": int(datetime.now().timestamp()) - 30},
-                {"code": 1011, "count": 1, "last_ts": int(datetime.now().timestamp()) - 60}
+                {"code": 1011, "count": 1, "last_ts": int(datetime.now().timestamp()) - 60},
             ],
             "i2c_status": {
                 "initialized": True,
@@ -439,9 +392,9 @@ class TestI2CErrorHandling:
                 "last_error": {
                     "code": 1012,
                     "message": "Read failed",
-                    "ts": int(datetime.now().timestamp()) - 30
-                }
-            }
+                    "ts": int(datetime.now().timestamp()) - 30,
+                },
+            },
         }
         await mqtt_test_client.publish(diagnostics_topic, json.dumps(diagnostics_payload))
 
@@ -455,16 +408,14 @@ class TestI2CErrorHandling:
 # I2C SENSOR CONFIGURATION TESTS
 # =============================================================================
 
+
 class TestI2CSensorConfiguration:
     """
     Tests for I2C sensor runtime configuration.
     """
 
     async def test_i2c_sensor_config_success(
-        self,
-        mqtt_test_client,
-        sample_esp_device,
-        sht31_sensor_config
+        self, mqtt_test_client, sample_esp_device, sht31_sensor_config
     ):
         """
         Verify I2C sensor can be configured via MQTT.
@@ -475,11 +426,7 @@ class TestI2CSensorConfiguration:
         config_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/config"
         response_topic = f"kaiser/god/esp/{sample_esp_device.device_id}/config_response"
 
-        config_payload = {
-            "config_type": "sensor",
-            "action": "add",
-            "sensor": sht31_sensor_config
-        }
+        config_payload = {"config_type": "sensor", "action": "add", "sensor": sht31_sensor_config}
 
         # Act
         await mqtt_test_client.publish(config_topic, json.dumps(config_payload))
@@ -490,18 +437,14 @@ class TestI2CSensorConfiguration:
             "config_type": "sensor",
             "status": "SUCCESS",
             "gpio": 21,
-            "sensor_type": "SHT31"
+            "sensor_type": "SHT31",
         }
 
         # Assert
         assert config_payload["sensor"]["i2c_address"] == 0x44
         assert expected_response["status"] == "SUCCESS"
 
-    async def test_i2c_sensor_config_invalid_address(
-        self,
-        mqtt_test_client,
-        sample_esp_device
-    ):
+    async def test_i2c_sensor_config_invalid_address(self, mqtt_test_client, sample_esp_device):
         """
         Verify invalid I2C address is rejected in config.
 
@@ -517,8 +460,8 @@ class TestI2CSensorConfiguration:
                 "gpio": 21,
                 "sensor_type": "SHT31",
                 "i2c_address": 0x05,  # Reserved address!
-                "measurement_interval_ms": 30000
-            }
+                "measurement_interval_ms": 30000,
+            },
         }
 
         # Act
@@ -529,7 +472,7 @@ class TestI2CSensorConfiguration:
             "config_type": "sensor",
             "status": "FAILURE",
             "error_code": "VALIDATION_FAILED",
-            "message": "Invalid I2C address: 0x05"
+            "message": "Invalid I2C address: 0x05",
         }
 
         # Assert - address 0x05 is in reserved range (0x00-0x07)
@@ -539,6 +482,7 @@ class TestI2CSensorConfiguration:
 # =============================================================================
 # I2C PARAMETER VALIDATION TESTS
 # =============================================================================
+
 
 class TestI2CParameterValidation:
     """
@@ -579,17 +523,14 @@ class TestI2CParameterValidation:
 # INTEGRATION TESTS
 # =============================================================================
 
+
 class TestI2CIntegration:
     """
     Integration tests combining multiple I2C operations.
     """
 
     async def test_full_i2c_sensor_flow(
-        self,
-        mqtt_test_client,
-        sample_esp_device,
-        sht31_sensor_config,
-        i2c_sensor_data_payload
+        self, mqtt_test_client, sample_esp_device, sht31_sensor_config, i2c_sensor_data_payload
     ):
         """
         Full I2C sensor flow: Config → Init → Read → Publish → Heartbeat.
@@ -601,11 +542,7 @@ class TestI2CIntegration:
 
         # 1. Configure sensor
         config_topic = f"kaiser/god/esp/{esp_id}/config"
-        config_payload = {
-            "config_type": "sensor",
-            "action": "add",
-            "sensor": sht31_sensor_config
-        }
+        config_payload = {"config_type": "sensor", "action": "add", "sensor": sht31_sensor_config}
         await mqtt_test_client.publish(config_topic, json.dumps(config_payload))
 
         # 2. Sensor data published
@@ -620,7 +557,7 @@ class TestI2CIntegration:
             "uptime_seconds": 120,
             "sensor_count": 1,
             "i2c_initialized": True,
-            "i2c_device_count": 1
+            "i2c_device_count": 1,
         }
         await mqtt_test_client.publish(heartbeat_topic, json.dumps(heartbeat_payload))
 

@@ -1,8 +1,8 @@
 # Wokwi Self-Hosted CI Server Evaluation
 
-**Datum:** 2026-02-06
-**Aktueller Plan:** Hobby ($7/month)
-**Budget:** 200 CI-Minuten/Monat
+**Datum:** 2026-02-06 | **Aktualisiert:** 2026-02-23
+**Aktueller Plan:** Pro ($25/seat/month)
+**Budget:** 2000 CI-Minuten/Monat
 
 ---
 
@@ -10,9 +10,9 @@
 
 | Aspekt | Ergebnis |
 |--------|----------|
-| **Self-Hosted verfügbar für Hobby-Plan?** | **NEIN** |
+| **Self-Hosted verfügbar für Pro-Plan?** | **NEIN** |
 | **Grund** | Enterprise/On-Premise Option |
-| **Empfehlung** | Budget optimieren, kein Self-Hosted |
+| **Empfehlung** | 2000 min/Monat reichen für aktuelle CI-Anforderungen |
 
 ---
 
@@ -48,67 +48,51 @@ Ein Test mit dem Hobby-Plan Token wurde NICHT durchgeführt, da:
 | **Community** | $0 | 50 min | ❌ |
 | **Hobby** | $7/mo | 200 min | ❌ |
 | **Hobby+** | $12/mo | 200 min | ❌ |
-| **Pro** | $25/seat/mo | 2000 min | ❌ (Standard) |
+| **Pro** | $25/seat/mo | 2000 min | ❌ (Standard) | ← **AKTUELL** |
 | **Enterprise** | Kontakt | Custom | ✅ (On-Premise) |
 
 **Quelle:** [wokwi.com/pricing](https://wokwi.com/pricing), [docs.wokwi.com/wokwi-ci/getting-started](https://docs.wokwi.com/wokwi-ci/getting-started)
 
 ---
 
-## 3. Budget-Prognose (Hobby-Plan: 200 min/Monat)
+## 3. Budget-Prognose (Pro-Plan: 2000 min/Monat)
 
 | Phase | Szenarien | Geschätzte Zeit/Run | Runs/Monat |
 |-------|-----------|---------------------|------------|
-| Aktuell | ~32 | ~15-20 min | ~10-13 |
-| Nach Phase 1 | ~70 | ~25-30 min | ~6-8 |
-| Nach Phase 2 | ~142 | ~50-60 min | **~3-4** |
+| Aktuell | 173 | ~50-60 min (Full) | ~33-40 |
+| PR Core Only | 52 | ~15-20 min | ~100-133 |
+| Nightly (Full) | 173 | ~50-60 min | ~33-40 |
 
-**Kritischer Punkt:** Ab Phase 2 (~142 Szenarien) sind nur noch ~3-4 volle CI-Runs pro Monat möglich.
+**Status:** Mit dem Pro-Plan (2000 min/Monat) ist das Budget für die aktuelle CI-Strategie (52 Core bei PR + 173 Nightly) ausreichend. ~30 Daily Nightlies + ~50-80 PR-Runs pro Monat möglich.
 
 ---
 
-## 4. Empfehlungen für Hobby-Plan
+## 4. Aktuelle CI-Strategie (Pro-Plan)
 
-Da Self-Hosted keine Option ist, müssen wir das Budget optimieren:
+Mit dem Pro-Plan (2000 min/Monat) ist die Budget-Situation entspannt. Die aktuelle Strategie:
 
-### 4.1 Workflow-Trigger optimieren
+### 4.1 Tiered Triggering (implementiert)
 
-```yaml
-on:
-  push:
-    paths:
-      - 'El Trabajante/**'  # Nur bei Firmware-Änderungen
-  pull_request:
-    paths:
-      - 'El Trabajante/**'
-  workflow_dispatch:  # Manuelle Runs für volle Suite
-```
+| Trigger | Kategorien | Szenarien | Geschätzte Zeit |
+|---------|------------|-----------|-----------------|
+| Push/PR auf Feature-Branch | Core (52 Szenarien) | 16 Jobs parallel | ~15-20 min |
+| Nightly (03:00 UTC) | Full (173 Szenarien) | 22 Jobs (Core + Extended) | ~50-60 min |
+| Manuell (workflow_dispatch) | Full (173 Szenarien) | 22 Jobs | ~50-60 min |
 
-### 4.2 Kategorien-basierte Jobs
+### 4.2 Budget-Nutzung (geschätzt)
 
-Statt alle Szenarien bei jedem Push:
+| Posten | Min/Monat | Anteil |
+|--------|-----------|--------|
+| ~60 PR-Runs × 20 min | ~1200 | 60% |
+| ~30 Nightly-Runs × 55 min | ~1650 | -- |
+| **Limitierender Faktor** | **Nightly** | ~36 Nightlies/Monat |
 
-| Trigger | Kategorien |
-|---------|------------|
-| Push auf Feature-Branch | Nur 01-boot, 02-sensor (Quick-Check) |
-| PR auf master | Alle aktiven Kategorien |
-| Manuell (workflow_dispatch) | Volle Suite inkl. Extended |
+**Empfehlung:** Bei täglichen Nightlies (~30/Monat = ~1650 min) + ~20 PR-Runs (~400 min) = ~2050 min. Knapp am Limit. Workflow-Dispatch-Runs sparsam einsetzen.
 
-### 4.3 Parallelisierung reduzieren
-
-- `--parallel 2` statt `--parallel 4` in CI
-- Weniger gleichzeitige Wokwi-Instanzen = weniger Overhead
-
-### 4.4 Skip-Listen pflegen
-
-Szenarien die bekannt stabil sind, können bei Quick-Checks übersprungen werden:
-- `SKIP_SCENARIOS` im Python-Runner erweitern
-- Flaky Tests identifizieren und fixen statt dauerhaft laufen lassen
-
-### 4.5 Lokales Testen bevorzugen
+### 4.3 Lokales Testen weiterhin empfohlen
 
 ```bash
-# Lokal testen vor Push
+# Lokal testen vor Push (spart CI-Minuten)
 make wokwi-test-boot
 make wokwi-test-quick
 
@@ -122,8 +106,8 @@ git push
 
 | Option | Kosten | Vorteil |
 |--------|--------|---------|
-| **Upgrade auf Pro** | $25/mo | 2000 min/Monat (10x mehr) |
-| **Enterprise kontaktieren** | Custom | Self-Hosted, unlimited |
+| ~~Upgrade auf Pro~~ | ~~$25/mo~~ | ✅ **Aktiv** (2000 min/Monat) |
+| **Enterprise kontaktieren** | Custom | Self-Hosted, unlimited, On-Premise |
 | **GitHub Actions Cache** | $0 | Schnellere Builds, weniger Sim-Zeit |
 | **Matrix-Strategie** | $0 | Fehlgeschlagene schneller abbrechen |
 
@@ -131,15 +115,13 @@ git push
 
 ## 6. Fazit
 
-**Self-Hosted ist für den Hobby-Plan NICHT verfügbar.**
+**Self-Hosted ist auch für den Pro-Plan NICHT verfügbar** (nur Enterprise/On-Premise).
 
-Die beste Strategie für das aktuelle Budget:
-1. Workflow-Trigger auf Firmware-Pfade beschränken
-2. Quick-Check bei Push, volle Suite nur bei PR/manuell
-3. Python-Runner mit Skip-Listen optimieren
-4. Lokal testen vor Push
-
-Bei kontinuierlicher CI-Nutzung mit >100 Szenarien sollte ein **Upgrade auf Pro ($25/mo)** in Betracht gezogen werden, um 2000 min/Monat zu erhalten.
+**Aktueller Status (Pro-Plan, seit 2026-02-23):**
+1. 2000 CI-Minuten/Monat — ausreichend für 173 Szenarien (52 Core + 121 Nightly)
+2. Tiered Triggering implementiert: Core bei PR, Full bei Nightly/Manual
+3. Lokales Testen weiterhin empfohlen um CI-Budget zu schonen
+4. Enterprise-Kontakt nur nötig falls Self-Hosted/unlimited benötigt wird
 
 ---
 

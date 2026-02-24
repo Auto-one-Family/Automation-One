@@ -5,6 +5,9 @@
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "PIENH";
+
 // ============================================
 // GLOBAL PI ENHANCED PROCESSOR INSTANCE
 // ============================================
@@ -41,14 +44,14 @@ PiEnhancedProcessor::~PiEnhancedProcessor() {
 // LIFECYCLE: INITIALIZATION
 // ============================================
 bool PiEnhancedProcessor::begin() {
-    LOG_INFO("PiEnhancedProcessor: Initializing...");
+    LOG_I(TAG, "PiEnhancedProcessor: Initializing...");
     
     // Get HTTP client instance
     http_client_ = &HTTPClient::getInstance();
     
     if (!http_client_->isInitialized()) {
         if (!http_client_->begin()) {
-            LOG_ERROR("PiEnhancedProcessor: HTTPClient initialization failed");
+            LOG_E(TAG, "PiEnhancedProcessor: HTTPClient initialization failed");
             errorTracker.trackError(ERROR_HTTP_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "HTTPClient initialization failed");
             return false;
@@ -64,10 +67,10 @@ bool PiEnhancedProcessor::begin() {
     } else {
         // Fallback to default
         pi_server_address_ = "192.168.1.100";
-        LOG_WARNING("PiEnhancedProcessor: Using default server address: " + pi_server_address_);
+        LOG_W(TAG, "PiEnhancedProcessor: Using default server address: " + pi_server_address_);
     }
     
-    LOG_INFO("PiEnhancedProcessor: Initialized - Server: " + pi_server_address_ + 
+    LOG_I(TAG, "PiEnhancedProcessor: Initialized - Server: " + pi_server_address_ + 
              ":" + String(pi_server_port_));
     
     return true;
@@ -77,7 +80,7 @@ bool PiEnhancedProcessor::begin() {
 // LIFECYCLE: DEINITIALIZATION
 // ============================================
 void PiEnhancedProcessor::end() {
-    LOG_INFO("PiEnhancedProcessor: Deinitialized");
+    LOG_I(TAG, "PiEnhancedProcessor: Deinitialized");
 }
 
 // ============================================
@@ -96,8 +99,8 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     // CIRCUIT BREAKER CHECK (Phase 6+)
     // ============================================
     if (!circuit_breaker_.allowRequest()) {
-        LOG_WARNING("PiEnhancedProcessor: Circuit breaker blocked request (Service DOWN)");
-        LOG_DEBUG("  Circuit State: " + String(circuit_breaker_.isOpen() ? "OPEN" : "HALF_OPEN"));
+        LOG_W(TAG, "PiEnhancedProcessor: Circuit breaker blocked request (Service DOWN)");
+        LOG_D(TAG, "  Circuit State: " + String(circuit_breaker_.isOpen() ? "OPEN" : "HALF_OPEN"));
 
         // ═══════════════════════════════════════════════════
         // PHASE 2: HTTP-FALLBACK-MODE (Robustness)
@@ -109,11 +112,11 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
         processed_out.valid = true;
 
         if (converted) {
-            LOG_INFO("Using local fallback processing - converted " + data.sensor_type + 
+            LOG_I(TAG, "Using local fallback processing - converted " + data.sensor_type + 
                      " raw=" + String(data.raw_value) + " → " + String(processed_out.value) + " " + processed_out.unit);
             processed_out.error_message = "Local fallback (converted) - server unavailable";
         } else {
-            LOG_INFO("Using local fallback processing - returning raw values (unknown type: " + data.sensor_type + ")");
+            LOG_I(TAG, "Using local fallback processing - returning raw values (unknown type: " + data.sensor_type + ")");
             processed_out.error_message = "Local fallback (raw) - server unavailable, unknown sensor type";
         }
 
@@ -124,7 +127,7 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     // HTTP CLIENT CHECK
     // ============================================
     if (!http_client_ || !http_client_->isInitialized()) {
-        LOG_ERROR("PiEnhancedProcessor: HTTPClient not initialized");
+        LOG_E(TAG, "PiEnhancedProcessor: HTTPClient not initialized");
         processed_out.error_message = "HTTPClient not initialized";
         circuit_breaker_.recordFailure();  // ✅ Count as failure
         return false;
@@ -136,15 +139,15 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     String url = buildRequestUrl();
     String payload = buildRequestPayload(data);
 
-    LOG_INFO("PiEnhancedProcessor: HTTP POST START url=" + url);
-    LOG_INFO("PiEnhancedProcessor: HTTP POST payload=" + payload.substring(0, 100));
+    LOG_I(TAG, "PiEnhancedProcessor: HTTP POST START url=" + url);
+    LOG_I(TAG, "PiEnhancedProcessor: HTTP POST payload=" + payload.substring(0, 100));
 
     // FIX #3: Timeout 5000ms → 2500ms (LAN-realistisch, CB ist primärer Schutz)
     unsigned long http_start = millis();
     HTTPResponse response = http_client_->post(url.c_str(), payload.c_str(),
                                                "application/json", 2500);
     unsigned long http_duration = millis() - http_start;
-    LOG_INFO("PiEnhancedProcessor: HTTP POST END duration=" + String(http_duration) + "ms success=" + String(response.success ? "YES" : "NO"));
+    LOG_I(TAG, "PiEnhancedProcessor: HTTP POST END duration=" + String(http_duration) + "ms success=" + String(response.success ? "YES" : "NO"));
     
     // ============================================
     // HANDLE RESPONSE
@@ -152,13 +155,13 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     if (!response.success) {
         // ❌ HTTP REQUEST FAILED
         circuit_breaker_.recordFailure();
-        LOG_ERROR("PiEnhancedProcessor: HTTP request failed - " + String(response.error_message));
+        LOG_E(TAG, "PiEnhancedProcessor: HTTP request failed - " + String(response.error_message));
         processed_out.error_message = response.error_message;
         
         // Check if Circuit Breaker opened
         if (circuit_breaker_.isOpen()) {
-            LOG_WARNING("PiEnhancedProcessor: Circuit Breaker OPENED after failures");
-            LOG_WARNING("  Will retry in 60 seconds");
+            LOG_W(TAG, "PiEnhancedProcessor: Circuit Breaker OPENED after failures");
+            LOG_W(TAG, "  Will retry in 60 seconds");
         }
         
         return false;
@@ -170,8 +173,8 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     if (!parseResponse(response.body, processed_out)) {
         // ❌ PARSE FAILED
         circuit_breaker_.recordFailure();
-        LOG_ERROR("PiEnhancedProcessor: Failed to parse response");
-        LOG_DEBUG("  Response: " + response.body.substring(0, 100));
+        LOG_E(TAG, "PiEnhancedProcessor: Failed to parse response");
+        LOG_D(TAG, "  Response: " + response.body.substring(0, 100));
         processed_out.error_message = "JSON parse error";
         return false;
     }
@@ -180,7 +183,7 @@ bool PiEnhancedProcessor::sendRawData(const RawSensorData& data, ProcessedSensor
     circuit_breaker_.recordSuccess();
     last_response_time_ = millis();
     
-    LOG_DEBUG("PiEnhancedProcessor: Request successful - Value: " + 
+    LOG_D(TAG, "PiEnhancedProcessor: Request successful - Value: " + 
               String(processed_out.value) + " " + processed_out.unit);
     
     return true;
@@ -338,7 +341,7 @@ bool PiEnhancedProcessor::isCircuitOpen() const {
 
 void PiEnhancedProcessor::resetCircuitBreaker() {
     circuit_breaker_.reset();
-    LOG_INFO("PiEnhancedProcessor: Circuit breaker manually RESET");
+    LOG_I(TAG, "PiEnhancedProcessor: Circuit breaker manually RESET");
 }
 
 uint8_t PiEnhancedProcessor::getConsecutiveFailures() const {

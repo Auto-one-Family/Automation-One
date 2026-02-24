@@ -121,16 +121,28 @@ def setup_logging() -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    # File handler with rotation
-    file_handler = logging.handlers.RotatingFileHandler(
-        filename=settings.logging.file_path,
-        maxBytes=settings.logging.file_max_bytes,
-        backupCount=settings.logging.file_backup_count,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(getattr(logging, settings.logging.level))
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
+    # File handler with rotation (graceful fallback if log dir not writable)
+    try:
+        file_handler = logging.handlers.RotatingFileHandler(
+            filename=settings.logging.file_path,
+            maxBytes=settings.logging.file_max_bytes,
+            backupCount=settings.logging.file_backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(getattr(logging, settings.logging.level))
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+    except (PermissionError, OSError) as e:
+        # In CI/Docker the log directory may not be writable — fall back to stderr
+        fallback = logging.StreamHandler(sys.stderr)
+        fallback.setLevel(getattr(logging, settings.logging.level))
+        fallback.setFormatter(formatter)
+        root_logger.addHandler(fallback)
+        print(
+            f"WARNING: Could not create file handler for {settings.logging.file_path}: {e}. "
+            f"Logging to stderr instead.",
+            file=sys.stderr,
+        )
 
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
@@ -148,6 +160,9 @@ def setup_logging() -> None:
     logging.getLogger("paho.mqtt").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
 
     root_logger.info(
         f"Logging configured: level={settings.logging.level}, "

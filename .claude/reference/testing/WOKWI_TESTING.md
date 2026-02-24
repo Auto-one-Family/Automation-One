@@ -1,9 +1,9 @@
 # Wokwi ESP32 Testing Guide
 
-**Version:** 2.0 (Multi-Device Support)
-**Last Updated:** 2026-02-11
+**Version:** 2.1 (Nightly Extended Tests)
+**Last Updated:** 2026-02-23
 **Status:** ✅ Production-Ready
-**Test Coverage:** 42 scenarios in CI (163 total available, 26%)
+**Test Coverage:** 52 core (PR) + 122 extended (Nightly) = 173 total (100%)
 
 ---
 
@@ -30,10 +30,7 @@ make wokwi-build
 
 # Seed database with ESP_00000001 (status="approved")
 make wokwi-seed
-# HINWEIS: make wokwi-seed nutzt docker exec, aber das Script ist NICHT im Container gemountet!
-# Lokaler Workaround (PowerShell):
-#   cd "El Servador\god_kaiser_server"
-#   .venv\Scripts\python.exe scripts\seed_wokwi_esp.py
+# Runs locally via .venv/Scripts/python.exe (script not mounted in container)
 
 # Verify database entry
 make shell-db
@@ -46,7 +43,7 @@ make shell-db
 # Quick smoke test (3 scenarios, ~3 minutes)
 make wokwi-test-quick
 
-# All CI scenarios (23 tests, ~20 minutes)
+# All CI core scenarios (22 passive tests, ~20 minutes)
 make wokwi-test-full
 
 # Single scenario
@@ -159,7 +156,7 @@ make wokwi-seed
 
 ```bash
 make wokwi-list
-# Output: All 163 scenarios grouped by category
+# Output: All 173 scenarios grouped by category
 ```
 
 ### Run Tests
@@ -181,6 +178,12 @@ make wokwi-test-scenario SCENARIO=tests/wokwi/scenarios/01-boot/boot_full.yaml
 # Category Tests
 make wokwi-test-category CAT=01-boot
 # Runs all *.yaml in specified category folder
+
+# ALL 173 scenarios (nightly equivalent, requires Mosquitto)
+make wokwi-test-all
+
+# 10 Error-Injection scenarios (requires Mosquitto + mosquitto_pub)
+make wokwi-test-error-injection
 
 # Interactive Mode
 make wokwi-run
@@ -261,38 +264,43 @@ steps:
 
 **Structure:**
 - 1 Build Job (shared firmware artifact)
-- 16 Test Jobs (parallel)
+- 16 Core Test Jobs (PR/Push, parallel)
+- 6 Nightly Extended Test Jobs (schedule/workflow_dispatch only)
 - 1 Summary Job
 
-**Test Jobs:**
-1. `boot-tests` (2 scenarios)
-2. `sensor-tests` (5 scenarios)
-3. `mqtt-connection-test` (1 scenario, legacy)
-4. `actuator-tests` (7 scenarios)
-5. `zone-tests` (2 scenarios)
-6. `emergency-tests` (3 scenarios)
-7. `config-tests` (2 scenarios)
-8. `sensor-flow-tests` (3 scenarios)
-9. `actuator-flow-tests` (3 scenarios)
-10. `combined-flow-tests` (3 scenarios)
-11. `gpio-core-tests` (5 scenarios)
-12. `i2c-core-tests` (5 scenarios)
-13. `nvs-core-tests` (5 scenarios)
-14. `pwm-core-tests` (3 scenarios)
-15. `error-injection-tests` (10 scenarios, background pattern with `mosquitto_pub`)
-16. `test-summary`
+**Concurrency:** `wokwi-tests-${{ github.ref }}` with `cancel-in-progress: true`
 
-**Total CI Runtime:** ~20-25 minutes (parallel execution)
+**Core Test Jobs (52 scenarios, every PR/Push):**
+1. `boot-tests` (2 scenarios)
+2. `sensor-tests` (2 scenarios)
+3. `mqtt-connection-test` (1 scenario, legacy)
+4. `actuator-tests` (4 scenarios, MQTT injection)
+5. `zone-tests` (2 scenarios, MQTT injection)
+6. `emergency-tests` (2 scenarios, MQTT injection)
+7. `config-tests` (2 scenarios, MQTT injection)
+8. `sensor-flow-tests` (3 scenarios)
+9. `actuator-flow-tests` (3 scenarios, MQTT injection)
+10. `combined-flow-tests` (3 scenarios, MQTT injection)
+11. `gpio-core-tests` (5 scenarios, Mosquitto)
+12. `i2c-core-tests` (5 scenarios, Mosquitto + diagram_i2c.json)
+13. `nvs-core-tests` (5 scenarios, Mosquitto)
+14. `pwm-core-tests` (3 scenarios, Mosquitto + MQTT injection)
+15. `error-injection-tests` (10 scenarios, background pattern with `mosquitto_pub`)
+
+**Nightly Extended Jobs (122 additional scenarios):**
+17. `nightly-i2c-extended` (15 scenarios, I2C diagram)
+18. `nightly-onewire-extended` (29 scenarios)
+19. `nightly-hardware-extended` (9 scenarios)
+20. `nightly-pwm-extended` (15 scenarios)
+21. `nightly-nvs-extended` (35 scenarios)
+22. `nightly-gpio-extended` (19 scenarios)
+
+**Total:** 173 scenarios (52 core + 122 nightly)
+
+**Nightly Schedule:** 03:00 UTC daily, also available via `workflow_dispatch`
 
 **Error-Injection Pattern (Job 15):**
 Error-injection scenarios use a background pattern: `wokwi-cli` runs in background, then `mosquitto_pub` injects MQTT messages externally. YAML files contain only `wait-serial` + `delay` steps. See `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` for details.
-
-**Coverage Gap:** 121 scenarios NOT in CI
-- 08-onewire/ (29)
-- 09-hardware/ (9)
-- 09-pwm/ (15 remaining)
-- 10-nvs/ (35 remaining)
-- gpio/ (19 remaining)
 - 08-i2c/ (15 remaining)
 
 ---

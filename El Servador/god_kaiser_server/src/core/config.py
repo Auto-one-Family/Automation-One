@@ -36,9 +36,7 @@ class MQTTSettings(BaseSettings):
 
     broker_host: str = Field(default="localhost", alias="MQTT_BROKER_HOST")
     broker_port: int = Field(default=1883, alias="MQTT_BROKER_PORT", ge=1, le=65535)
-    websocket_port: int = Field(
-        default=9001, alias="MQTT_WEBSOCKET_PORT", ge=1, le=65535
-    )
+    websocket_port: int = Field(default=9001, alias="MQTT_WEBSOCKET_PORT", ge=1, le=65535)
     keepalive: int = Field(default=60, alias="MQTT_KEEPALIVE", ge=10)
     qos_sensor_data: int = Field(default=1, alias="MQTT_QOS_SENSOR_DATA", ge=0, le=2)
     qos_commands: int = Field(default=2, alias="MQTT_QOS_COMMANDS", ge=0, le=2)
@@ -51,7 +49,7 @@ class MQTTSettings(BaseSettings):
     ca_cert_path: Optional[str] = Field(default=None, alias="MQTT_CA_CERT_PATH")
     client_cert_path: Optional[str] = Field(default=None, alias="MQTT_CLIENT_CERT_PATH")
     client_key_path: Optional[str] = Field(default=None, alias="MQTT_CLIENT_KEY_PATH")
-    
+
     # Mosquitto Password File
     passwd_file_path: str = Field(
         default="/etc/mosquitto/passwd",
@@ -140,9 +138,7 @@ class PerformanceSettings(BaseSettings):
     """Performance and monitoring settings"""
 
     management_enabled: bool = Field(default=True, alias="PERFORMANCE_MANAGEMENT_ENABLED")
-    system_monitoring_enabled: bool = Field(
-        default=True, alias="SYSTEM_MONITORING_ENABLED"
-    )
+    system_monitoring_enabled: bool = Field(default=True, alias="SYSTEM_MONITORING_ENABLED")
     metrics_export_enabled: bool = Field(default=True, alias="METRICS_EXPORT_ENABLED")
     prometheus_port: int = Field(default=9090, alias="PROMETHEUS_PORT", ge=1, le=65535)
     logic_scheduler_interval_seconds: int = Field(
@@ -200,15 +196,9 @@ class ESP32Settings(BaseSettings):
 class SensorSettings(BaseSettings):
     """Sensor processing settings"""
 
-    pi_enhanced_enabled: bool = Field(
-        default=True, alias="PI_ENHANCED_PROCESSING_ENABLED"
-    )
-    processing_timeout: int = Field(
-        default=5000, alias="SENSOR_PROCESSING_TIMEOUT", ge=100
-    )
-    data_retention_days: int = Field(
-        default=90, alias="SENSOR_DATA_RETENTION_DAYS", ge=1, le=3650
-    )
+    pi_enhanced_enabled: bool = Field(default=True, alias="PI_ENHANCED_PROCESSING_ENABLED")
+    processing_timeout: int = Field(default=5000, alias="SENSOR_PROCESSING_TIMEOUT", ge=100)
+    data_retention_days: int = Field(default=90, alias="SENSOR_DATA_RETENTION_DAYS", ge=1, le=3650)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -217,9 +207,7 @@ class ActuatorSettings(BaseSettings):
     """Actuator control settings"""
 
     command_timeout: int = Field(default=10, alias="ACTUATOR_COMMAND_TIMEOUT", ge=1)
-    emergency_stop_enabled: bool = Field(
-        default=True, alias="EMERGENCY_STOP_ENABLED"
-    )
+    emergency_stop_enabled: bool = Field(default=True, alias="EMERGENCY_STOP_ENABLED")
     safety_checks_enabled: bool = Field(default=True, alias="SAFETY_CHECKS_ENABLED")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -228,15 +216,9 @@ class ActuatorSettings(BaseSettings):
 class WebSocketSettings(BaseSettings):
     """WebSocket configuration settings"""
 
-    max_connections: int = Field(
-        default=100, alias="WEBSOCKET_MAX_CONNECTIONS", ge=1, le=10000
-    )
-    heartbeat_interval: int = Field(
-        default=30, alias="WEBSOCKET_HEARTBEAT_INTERVAL", ge=5
-    )
-    connection_timeout: int = Field(
-        default=300, alias="WEBSOCKET_CONNECTION_TIMEOUT", ge=10
-    )
+    max_connections: int = Field(default=100, alias="WEBSOCKET_MAX_CONNECTIONS", ge=1, le=10000)
+    heartbeat_interval: int = Field(default=30, alias="WEBSOCKET_HEARTBEAT_INTERVAL", ge=5)
+    connection_timeout: int = Field(default=300, alias="WEBSOCKET_CONNECTION_TIMEOUT", ge=10)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -256,9 +238,7 @@ class RedisSettings(BaseSettings):
 class ExternalServicesSettings(BaseSettings):
     """External services configuration"""
 
-    god_layer_url: str = Field(
-        default="http://localhost:8001", alias="GOD_LAYER_URL"
-    )
+    god_layer_url: str = Field(default="http://localhost:8001", alias="GOD_LAYER_URL")
     god_layer_enabled: bool = Field(default=False, alias="GOD_LAYER_ENABLED")
     god_layer_timeout: int = Field(default=10, alias="GOD_LAYER_TIMEOUT", ge=1)
 
@@ -305,7 +285,7 @@ class DevelopmentSettings(BaseSettings):
 class MaintenanceSettings(BaseSettings):
     """
     Maintenance and cleanup settings (Data-Safe Version).
-    
+
     WICHTIG: Alle Cleanup-Jobs sind per Default DISABLED!
     User muss explizit aktivieren um Datenverlust zu verhindern.
     """
@@ -549,13 +529,11 @@ class MaintenanceSettings(BaseSettings):
     def validate_sensor_retention(cls, v: int, info) -> int:
         """Warne bei zu kurzer Retention-Period"""
         import logging
+
         logger = logging.getLogger(__name__)
 
         if v < 7 and info.data.get("sensor_data_retention_enabled"):
-            logger.warning(
-                f"SENSOR_DATA_RETENTION_DAYS={v} ist sehr kurz! "
-                "Empfohlen: >= 7 Tage"
-            )
+            logger.warning(f"SENSOR_DATA_RETENTION_DAYS={v} ist sehr kurz! " "Empfohlen: >= 7 Tage")
         return v
 
     @field_validator("command_history_retention_days")
@@ -563,12 +541,12 @@ class MaintenanceSettings(BaseSettings):
     def validate_command_retention(cls, v: int, info) -> int:
         """Warne bei zu kurzer Retention-Period"""
         import logging
+
         logger = logging.getLogger(__name__)
 
         if v < 7 and info.data.get("command_history_retention_enabled"):
             logger.warning(
-                f"COMMAND_HISTORY_RETENTION_DAYS={v} ist sehr kurz! "
-                "Empfohlen: >= 7 Tage"
+                f"COMMAND_HISTORY_RETENTION_DAYS={v} ist sehr kurz! " "Empfohlen: >= 7 Tage"
             )
         return v
 
@@ -578,7 +556,7 @@ class MaintenanceSettings(BaseSettings):
 class ResilienceSettings(BaseSettings):
     """
     Resilience Patterns Configuration (Circuit Breaker, Retry, Timeout)
-    
+
     Provides fault tolerance settings for:
     - Circuit Breakers (MQTT, Database, External APIs)
     - Retry mechanisms with exponential backoff
@@ -794,7 +772,7 @@ class Settings(BaseSettings):
     development: DevelopmentSettings = DevelopmentSettings()
     maintenance: MaintenanceSettings = MaintenanceSettings()
     resilience: ResilienceSettings = ResilienceSettings()
-    
+
     @property
     def cors_origins(self) -> list[str]:
         """Get CORS allowed origins from CORSSettings"""
@@ -808,7 +786,7 @@ class Settings(BaseSettings):
         if v.lower() not in allowed:
             raise ValueError(f"environment must be one of {allowed}")
         return v.lower()
-    
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level_global(cls, v: str) -> str:

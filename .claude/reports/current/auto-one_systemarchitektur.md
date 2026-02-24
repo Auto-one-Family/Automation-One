@@ -1,6 +1,6 @@
 # AutomationOne – System-Architektur
 
-> **Version:** 5.0 | **Stand:** 2026-02-14
+> **Version:** 5.1 | **Stand:** 2026-02-23
 > **Grundlage:** Vollständige Codebase-Analyse (ESP32 Firmware, FastAPI Server, Vue 3 Frontend)
 > **Referenzen:** COMMUNICATION_FLOWS, MQTT_TOPICS, REST_ENDPOINTS, ARCHITECTURE_DEPENDENCIES
 
@@ -42,7 +42,7 @@ AutomationOne ist ein dreischichtiges IoT-Framework. Jede Schicht hat eine klar 
 |-------------|------|
 | **Sprache** | C++ (Arduino Framework, PlatformIO) |
 | **Hardware** | ESP32-WROOM-32 (GPIO 0–39) oder XIAO ESP32-C3 (GPIO 0–10, 21) |
-| **Source-Dateien** | 75 (30 `.cpp` + 45 `.h`) |
+| **Source-Dateien** | 100 (42 `.cpp` + 58 `.h`) |
 | **Pattern** | Singleton für Manager-Klassen |
 | **Pfad** | `El Trabajante/src/` |
 
@@ -227,7 +227,7 @@ Aktoren werden per Factory-Pattern erstellt (`ActuatorManager::createDriver()`).
 | **Port** | 8000 (REST + WebSocket) |
 | **Datenbank** | PostgreSQL 16 (asyncpg, SQLAlchemy 2.0) |
 | **MQTT** | paho-mqtt (Client), Eclipse Mosquitto (Broker, Port 1883) |
-| **Source-Dateien** | ~120 Python-Dateien |
+| **Source-Dateien** | ~200 Python-Dateien |
 | **Pfad** | `El Servador/god_kaiser_server/src/` |
 
 ### 3.2 Modul-Architektur
@@ -266,7 +266,7 @@ El Servador/god_kaiser_server/src/
 │   ├── error_codes.py                # Error-Code-Definitionen 5000-5699
 │   └── constants.py                  # Systemkonstanten
 ├── db/
-│   ├── models/                       # 15 Model-Dateien → 19 Tabellen
+│   ├── models/                       # 16 Model-Dateien → 19 Tabellen
 │   ├── repositories/                 # 15 Repositories (BaseRepository-Pattern)
 │   ├── session.py                    # Async Session + DB Circuit Breaker
 │   └── base.py                       # SQLAlchemy Base
@@ -339,6 +339,10 @@ El Servador/god_kaiser_server/src/
 │   │       └── loop_detector.py      # Zirkuläre Dependencies erkennen
 │   ├── maintenance/                  # Cleanup-Jobs, Retention
 │   └── simulation/                   # Mock-ESP Simulation
+├── autoops/                         # AutoOps Agent Framework (v1.0.0)
+│   ├── core/                        # Agent, API Client, Plugin Registry, Reporter
+│   ├── plugins/                     # health_check, esp_configurator, debug_fix
+│   └── runner.py                    # CLI Runner
 ├── middleware/
 │   └── request_id.py                 # UUID pro Request (X-Request-ID)
 └── websocket/
@@ -512,16 +516,16 @@ Sensor-Daten (MQTT)
 
 ## 4. Schicht 3: El Frontend (Vue 3 Dashboard)
 
-### 4.1 Überblick
+### 4.1 Ueberblick
 
 | Eigenschaft | Wert |
 |-------------|------|
 | **Framework** | Vue 3 + TypeScript (strict) |
 | **Build** | Vite 6.2 |
-| **State** | Pinia (9 Stores: 5 + 4 shared) |
-| **Styling** | Tailwind CSS 3.4 |
+| **State** | Pinia (13 Stores: 1 esp + 12 shared) |
+| **Styling** | Tailwind CSS 3.4 + Design Tokens (`tokens.css`) |
 | **API** | Axios + WebSocket (native) |
-| **Port** | 5173 |
+| **Port** | 5173 (Dev-Proxy zu Server:8000) |
 | **Pfad** | `El Frontend/src/` |
 
 ### 4.2 Architektur
@@ -530,47 +534,112 @@ Sensor-Daten (MQTT)
 El Frontend/src/
 ├── main.ts                    # Entry-Point, Global Error Handler
 ├── App.vue                    # Root-Component, Auth-Init
-├── views/                     # 11 Views (Dashboard, Login, Setup, Logic, SystemMonitor, ...)
-├── components/                # 97 Komponenten
-│   ├── dashboard/             # ZonePlate, DeviceMiniCard, ZoomBreadcrumb, ...
-│   ├── esp/                   # PendingDevicesPanel, DeviceDetailView, ESPOrbitalLayout, ...
+├── router/index.ts            # Vue Router (16 Views, Nested unter AppShell)
+├── views/                     # 16 Views
+│   ├── HardwareView.vue       # ESP-Topologie: Zone → ESP → Sensor/Aktor (3-Level Zoom)
+│   ├── MonitorView.vue        # Sensor/Aktor-Daten nach Zonen (Default-Route /)
+│   ├── CustomDashboardView.vue # GridStack.js Widget-Builder (12-Column Grid)
+│   ├── DashboardView.vue      # Legacy (Route: /dashboard-legacy)
+│   ├── SensorsView.vue        # Sensor/Aktor-Tabellen mit Konfiguration
+│   ├── LogicView.vue          # Rule-Flow-Editor (Vue Flow)
+│   ├── CalibrationView.vue    # pH/EC Kalibrierungs-Wizard
+│   ├── SensorHistoryView.vue  # Chart.js Zeitreihen mit Threshold-Lines
+│   ├── SystemMonitorView.vue  # Logs, DB Explorer, MQTT, Events (Admin)
+│   ├── SystemConfigView.vue   # System-Konfiguration (Admin)
+│   ├── MaintenanceView.vue    # Wartungs-Tools (Admin)
+│   ├── UserManagementView.vue # Benutzerverwaltung (Admin)
+│   ├── LoadTestView.vue       # Last-Tests (Admin)
+│   ├── SettingsView.vue       # Benutzer-Einstellungen
+│   ├── LoginView.vue          # Login
+│   └── SetupView.vue          # Ersteinrichtung
+├── components/                # ~93 Komponenten in 15 Unterverzeichnissen
+│   ├── calibration/           # CalibrationWizard, CalibrationStep
+│   ├── charts/                # LiveLineChart, HistoricalChart, TimeRangeSelector, ...
+│   ├── common/                # GrafanaPanelEmbed
+│   ├── custom-dashboard/      # GridStackBoard, WidgetFactory, WidgetConfig, ...
+│   ├── database/              # TablesOverview, DataGrid, QueryEditor, SQLHighlighter
+│   ├── debug/                 # SchedulerDebugPanel, ESPLogViewer, ...
+│   ├── esp/                   # 24 Komponenten (SensorConfigPanel, ActuatorConfigPanel, ESPConfigPanel, ...)
+│   ├── log-viewer/            # LogFilter, LogEntry, ...
+│   ├── modals/                # CreateMockEsp, ConfirmAction, RejectDevice
+│   ├── mqtt/                  # MqttLogViewer, TopicFilter, ...
 │   ├── rules/                 # RuleFlowEditor, RuleNodePalette, RuleConfigPanel
-│   ├── zones/                 # ZoneDetailView, SubzoneArea, DeviceSummaryCard
-│   ├── common/                # LoadingState, EmptyState, ...
-│   ├── modals/                # CreateMockEsp, RejectDevice, ...
-│   └── shared/design/         # Design System (primitives/, layout/, patterns/)
-├── stores/                    # 5 Pinia Stores
-│   ├── esp.ts                 # ESP-Devices, Sensoren, Aktoren, WebSocket (~2500 Zeilen)
-│   ├── auth.ts                # Login, Token, Refresh
-│   ├── logic.ts               # Cross-ESP Rules
-│   ├── database.ts            # DB Explorer
-│   └── dragState.ts           # Drag & Drop, Safety-Timeout (30s)
-├── shared/stores/             # 4 Shared Stores
-│   ├── ui.store.ts            # UI State
+│   ├── sensors/               # SensorDetailPanel, SensorSettingsForm, ...
+│   ├── system-config/         # Config-Sections
+│   └── zones/                 # ZoneDetailView, SubzoneArea, DeviceSummaryCard
+├── shared/design/             # Design System
+│   ├── primitives/            # 12: BaseBadge, BaseButton, BaseCard, BaseInput, BaseModal,
+│   │                          #     BaseSelect, BaseSkeleton, BaseSpinner, BaseToggle,
+│   │                          #     SlideOver, QualityIndicator, RangeSlider
+│   ├── layout/                # 3: AppShell, Sidebar, TopBar
+│   └── patterns/              # 5: ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer
+├── stores/                    # 1 Store (nur esp.ts)
+│   └── esp.ts                 # ESP-Devices, Sensoren, Aktoren, WebSocket (~2500 Zeilen)
+├── shared/stores/             # 12 Shared Stores
+│   ├── auth.store.ts          # Login, Token, Refresh
 │   ├── logic.store.ts         # Logic UI State
-│   ├── dashboard.store.ts     # Dashboard-spezifisch
-│   └── index.ts
-├── api/                       # 16 API-Module (Axios)
-├── composables/               # 8 Composables (useWebSocket, useToast, useZoneDragDrop, ...)
+│   ├── dashboard.store.ts     # Custom Dashboard Layouts
+│   ├── ui.store.ts            # UI State, Theme, Sidebar
+│   ├── sensor.store.ts        # Sensor-Konfigurationen
+│   ├── actuator.store.ts      # Aktor-Steuerung
+│   ├── audit.store.ts         # Audit-Logs
+│   ├── zone.store.ts          # Zone-Management
+│   ├── maintenance.store.ts   # Wartungs-State
+│   ├── system-config.store.ts # System-Konfiguration
+│   ├── users.store.ts         # Benutzerverwaltung
+│   └── index.ts               # Re-Exports
+├── api/                       # 18 API-Module (Axios)
+├── composables/               # 16 Composables (useWebSocket, useToast, useCalibration, useScrollLock, ...)
 ├── services/websocket.ts      # WebSocket-Singleton (624 Zeilen)
 ├── types/                     # TypeScript-Definitionen
 ├── utils/                     # 14 Utility-Dateien
-└── styles/                    # 5 CSS-Dateien (Tailwind + Animations + Tokens)
+└── styles/                    # 5 CSS-Dateien (tokens.css, glass.css, animations.css, ...)
 ```
 
-### 4.3 Dashboard (3-Level-Zoom-Navigation)
+### 4.3 Routing-Architektur
 
-Das Dashboard bietet eine intuitive Drill-Down-Navigation:
+Alle geschuetzten Routes sind Kinder von `AppShell.vue` (Sidebar + TopBar Layout):
 
-| Level | Ansicht | Inhalt |
-|-------|---------|--------|
-| **1** | Zone Overview | Alle Zonen als ZonePlates (Gesamtübersicht) |
-| **2** | Zone Detail | Einzelne Zone mit DeviceSummaryCards pro ESP |
-| **3** | Device Detail | ESP-Orbital-Layout mit Sensor-/Aktor-Satelliten |
+| Route | View | Beschreibung |
+|-------|------|-------------|
+| `/` | → Redirect `/monitor` | Default-Einstieg |
+| `/monitor` | MonitorView | Sensor/Aktor-Daten nach Zonen (KPI-Tiles, Live-Cards) |
+| `/monitor/:zoneId` | MonitorView | Zone-Detail mit Sensor/Aktor-Cards |
+| `/hardware` | HardwareView | ESP-Topologie: Alle Zonen mit ESP-Karten |
+| `/hardware/:zoneId` | HardwareView | Zone-Detail: ESPs mit Sensor/Aktor-Satelliten |
+| `/hardware/:zoneId/:espId` | HardwareView | ESP-Detail: Orbital-Layout |
+| `/custom-dashboard` | CustomDashboardView | Widget-Builder (GridStack.js, 12-Column Grid) |
+| `/sensors` | SensorsView | Sensor/Aktor-Tabellen, Konfiguration |
+| `/logic` | LogicView | Rule-Flow-Editor (Vue Flow) |
+| `/calibration` | CalibrationView | pH/EC Kalibrierungs-Wizard (Admin) |
+| `/sensor-history` | SensorHistoryView | Chart.js Zeitreihen (1h, 6h, 24h, 7d, Custom) |
+| `/system-monitor` | SystemMonitorView | Logs, DB, MQTT, Events (Admin) |
+| `/system-config` | SystemConfigView | System-Konfiguration (Admin) |
+| `/maintenance` | MaintenanceView | Wartung (Admin) |
+| `/users` | UserManagementView | Benutzerverwaltung (Admin) |
+| `/settings` | SettingsView | Benutzer-Einstellungen |
 
-Alle drei Ebenen existieren gleichzeitig im DOM (`v-show`), verbunden durch CSS-Zoom-Transitions. Zurück-Navigation über Breadcrumb, Escape-Taste oder Swipe-Geste.
+### 4.4 Neue Design-Primitives
 
-### 4.4 WebSocket (Echtzeit-Events)
+| Primitiv | Funktion | Verwendet in |
+|----------|----------|-------------|
+| `SlideOver` | Slide-in Panel von rechts (sm/md/lg), ESC + Click-Outside | HardwareView, MonitorView (Config-Panels) |
+| `QualityIndicator` | Status-Dot mit Label (good/warning/alarm/offline), Pulsing | Sensor-Cards, ESP-Status |
+| `RangeSlider` | 4-Punkt Threshold-Slider (alarmLow-warnLow-warnHigh-alarmHigh) | SensorConfigPanel |
+
+### 4.5 Neue Dependencies
+
+| Package | Version | Funktion |
+|---------|---------|----------|
+| `chart.js` | ^4.5.0 | Chart-Rendering (SensorHistoryView, HistoricalChart) |
+| `vue-chartjs` | ^5.3.2 | Vue 3 Wrapper fuer Chart.js |
+| `chartjs-adapter-date-fns` | ^3.0.0 | TimeScale-Adapter fuer Chart.js |
+| `chartjs-plugin-annotation` | ^3.1.0 | Threshold-Lines in Charts |
+| `gridstack` | ^12.4.2 | Dashboard Widget-Grid (CustomDashboardView) |
+| `vue-draggable-plus` | ^0.6.0 | Drag & Drop fuer Widget-Palette |
+| `@vueuse/core` | ^10.11.1 | Vue Composition Utilities |
+
+### 4.6 WebSocket (Echtzeit-Events)
 
 28 Event-Typen verbinden Server und Frontend in Echtzeit:
 
@@ -586,11 +655,11 @@ Alle drei Ebenen existieren gleichzeitig im DOM (`v-show`), verbunden durch CSS-
 **Connection:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt}`
 **Reconnect:** Exponential Backoff (1s → 2s → 4s → 8s → 16s → max 30s, max 10 Versuche)
 **Rate Limit:** 10 msg/s (Client-seitig)
-**Token Refresh:** Automatisch vor Reconnect wenn Token < 60s gültig
+**Token Refresh:** Automatisch vor Reconnect wenn Token < 60s gueltig
 
-> Vollständige Event-Referenz: `.claude/reference/api/WEBSOCKET_EVENTS.md`
+> Vollstaendige Event-Referenz: `.claude/reference/api/WEBSOCKET_EVENTS.md`
 
-### 4.5 Auth-Flow
+### 4.7 Auth-Flow
 
 ```
 App-Start → authStore.checkAuthStatus()
@@ -601,7 +670,7 @@ App-Start → authStore.checkAuthStatus()
 ```
 
 **Token-Speicherung:** `localStorage` (`el_frontend_access_token`, `el_frontend_refresh_token`)
-**Infinite-Loop-Guard:** Skip Interceptor für `/auth/refresh`, `/auth/login`, `/auth/setup`, `/auth/status`
+**Infinite-Loop-Guard:** Skip Interceptor fuer `/auth/refresh`, `/auth/login`, `/auth/setup`, `/auth/status`
 
 ---
 
@@ -609,7 +678,7 @@ App-Start → authStore.checkAuthStatus()
 
 ### 5.1 Schema-Übersicht
 
-19 Tabellen in 15 Model-Dateien. Die wichtigsten:
+19 Tabellen in 16 Model-Dateien. Die wichtigsten:
 
 | Tabelle | Funktion | Retention |
 |---------|----------|-----------|
@@ -861,7 +930,7 @@ postgres + mqtt-broker  (parallel starten)
     el-frontend
 ```
 
-### 9.2 Monitoring-Stack (8 Container, Profil: monitoring)
+### 9.2 Monitoring-Stack (7 Container, Profil: monitoring)
 
 | Service | Container | Image | Port | Funktion |
 |---------|-----------|-------|------|----------|
@@ -872,9 +941,24 @@ postgres + mqtt-broker  (parallel starten)
 | cadvisor | automationone-cadvisor | gcr.io/cadvisor/cadvisor | 8080 | Container-Metriken |
 | postgres-exporter | automationone-postgres-exporter | prom/postgres-exporter | 9187 | DB-Metriken |
 | mosquitto-exporter | automationone-mosquitto-exporter | mosquitto-exporter | 9234 | MQTT-Metriken |
-| esp32-serial-logger | automationone-esp32-serial | Build: docker/esp32-serial-logger | – | Serial-Bridge (Profil: hardware) |
 
 **Start:** `docker compose --profile monitoring up -d`
+
+### 9.2a DevTools-Stack (1 Container, Profil: devtools)
+
+| Service | Container | Image | Port | Funktion |
+|---------|-----------|-------|------|----------|
+| adminer | automationone-adminer | adminer | 8081 | DB-Admin-UI |
+
+**Start:** `docker compose --profile devtools up -d`
+
+### 9.2b Hardware-Stack (1 Container, Profil: hardware)
+
+| Service | Container | Image | Port | Funktion |
+|---------|-----------|-------|------|----------|
+| esp32-serial-logger | automationone-esp32-serial | Build: docker/esp32-serial-logger | – | Serial-Bridge |
+
+**Start:** `docker compose --profile hardware up -d`
 
 ### 9.3 Compose-Varianten
 
@@ -906,16 +990,16 @@ postgres + mqtt-broker  (parallel starten)
 
 | Layer | Tool | Dateien | CI-Workflow |
 |-------|------|---------|-------------|
-| **Backend** | pytest | 105 Test-Dateien (unit, integration, esp32, e2e) | `server-tests.yml` |
+| **Backend** | pytest | 106 Test-Dateien (37 unit, 44 integration, 19 esp32, 6 e2e) | `server-tests.yml` |
 | **Frontend** | Vitest (Unit), Playwright (E2E) | 5 + 5 Test-Dateien | `frontend-tests.yml` |
-| **Firmware** | Wokwi CLI | 165 Szenarien in 13 Kategorien | `wokwi-tests.yml` |
-| **Gesamt** | | **278 Test-Dateien/Szenarien** | |
+| **Firmware** | Wokwi CLI | 163 Szenarien in 13 Kategorien | `wokwi-tests.yml` |
+| **Gesamt** | | **274 Test-Dateien/Szenarien** | |
 
 ### 10.2 Backend-Tests
 
 ```
 El Servador/god_kaiser_server/tests/
-├── unit/           # 36 Dateien: Circuit Breaker, Retry, Timeout, GPIO, Sensor, Logic, Calibration
+├── unit/           # 37 Dateien: Circuit Breaker, Retry, Timeout, GPIO, Sensor, Logic, Calibration, Diagnostics
 ├── integration/    # 44 Dateien: API Tests, MQTT Flow, Resilience, Emergency Stop, Logic Engine
 ├── esp32/          # 19 Dateien: GPIO, I2C, MQTT, Boot Loop, Multi-Device, Performance
 ├── e2e/            # 6 Dateien: Logic Engine, Sensor Workflow, WebSocket, Actuator
@@ -951,7 +1035,7 @@ El Servador/god_kaiser_server/tests/
 | ESP32 | Server | MQTT | 1883 | (Dev: anonym) | Sensor-Daten, Status, Heartbeat |
 | Server | ESP32 | MQTT | 1883 | – | Commands, Config, Emergency |
 | Frontend | Server | HTTP REST | 8000 | JWT | CRUD-Operationen |
-| Frontend | Server | WebSocket | 8000 | JWT | Echtzeit-Events (26 Typen) |
+| Frontend | Server | WebSocket | 8000 | JWT | Echtzeit-Events (28 Typen) |
 | Server | PostgreSQL | TCP | 5432 | User/Pass | Datenbank-Zugriff |
 | Prometheus | Server | HTTP | 8000 | – | `/health/metrics` Scraping |
 | Promtail | Loki | HTTP | 3100 | – | Log-Shipping |
@@ -1002,7 +1086,7 @@ Der God-Layer ist explizit als **separater Service** konzipiert – saubere Tren
 |-------|----------|------|
 | **MQTT-Topics** | MQTT Topic Referenz | `.claude/reference/api/MQTT_TOPICS.md` |
 | **REST-API** | REST Endpoint Referenz (~170 Endpoints) | `.claude/reference/api/REST_ENDPOINTS.md` |
-| **WebSocket** | WebSocket Event Referenz (26 Events) | `.claude/reference/api/WEBSOCKET_EVENTS.md` |
+| **WebSocket** | WebSocket Event Referenz (28 Events) | `.claude/reference/api/WEBSOCKET_EVENTS.md` |
 | **Datenflüsse** | Kommunikationsmuster mit Code-Referenzen | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` |
 | **Abhängigkeiten** | Modul-Dependency-Graph | `.claude/reference/patterns/ARCHITECTURE_DEPENDENCIES.md` |
 | **Error-Codes** | ESP32 (1000–4999) + Server (5000–5999) | `.claude/reference/errors/ERROR_CODES.md` |

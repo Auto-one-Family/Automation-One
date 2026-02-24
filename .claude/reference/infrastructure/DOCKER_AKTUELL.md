@@ -15,7 +15,7 @@ Auto-one/
 ├── .vscode/              # VS Code Settings
 ├── ARCHIV/               # Archived files
 ├── backups/              # Database backups
-├── docker/               # Docker configs (grafana, loki, prometheus, promtail, postgres, mosquitto)
+├── docker/               # Docker configs (grafana, loki, prometheus, alloy/promtail, postgres, mosquitto)
 ├── docs/                 # Project documentation
 ├── El Frontend/          # Layer 3: Vue 3 Dashboard (TypeScript + Tailwind)
 ├── El Servador/          # Layer 2: FastAPI Backend (Python 3.11+)
@@ -364,7 +364,7 @@ Located in `.claude/` directory:
 | 3 | **el-servador** | ./El Servador (build) | automationone-server | 8000:8000 | postgres (healthy), mqtt (healthy) | default | 512M limit, 256M reserved |
 | 4 | **el-frontend** | ./El Frontend (build) | automationone-frontend | 5173:5173 | el-servador (healthy) | default | 256M limit, 128M reserved |
 | 5 | **loki** | grafana/loki:3.4 | automationone-loki | 3100:3100 | - | monitoring | 512M limit, 256M reserved |
-| 6 | **promtail** | grafana/promtail:3.4 | automationone-promtail | - | loki (healthy) | monitoring | 128M limit, 64M reserved |
+| 6 | **alloy** | grafana/alloy:v1.13.1 | automationone-alloy | 12345:12345 | loki (healthy) | monitoring | 128M limit, 64M reserved |
 | 7 | **prometheus** | prom/prometheus:v3.2.1 | automationone-prometheus | 9090:9090 | el-servador (healthy) | monitoring | 512M limit, 256M reserved |
 | 8 | **grafana** | grafana/grafana:11.5.2 | automationone-grafana | 3000:3000 | prometheus (healthy), loki (healthy) | monitoring | 256M limit, 128M reserved |
 
@@ -384,7 +384,7 @@ Located in `.claude/` directory:
 - `./logs/mqtt` -> MQTT logs
 - `./logs/postgres` -> PostgreSQL logs
 - `./docker/loki/loki-config.yml` -> Loki config
-- `./docker/promtail/config.yml` -> Promtail config
+- `./docker/promtail/config.yml` -> Alloy config (read via --config.format=promtail)
 - `./docker/prometheus/prometheus.yml` -> Prometheus config
 - `./docker/grafana/provisioning/` -> Grafana provisioning
 
@@ -396,7 +396,7 @@ Located in `.claude/` directory:
 ### docker-compose.ci.yml (GitHub Actions)
 - postgres: tmpfs (RAM-based, 512M), hardcoded credentials
 - mqtt-broker: CI-specific config (.github/mosquitto/)
-- el-servador: ENVIRONMENT=test, LOG_LEVEL=WARNING, TESTING=true
+- el-servador: ENVIRONMENT=testing, LOG_LEVEL=WARNING, TESTING=true
 - el-frontend: profile=frontend (opt-in only)
 - **No monitoring services** (profiles not activated)
 - **Usage:** `docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait`
@@ -422,7 +422,7 @@ Located in `.claude/` directory:
 | Grafana | grafana/grafana:11.5.2 | 3000 | Dashboards & visualization |
 | Prometheus | prom/prometheus:v3.2.1 | 9090 | Metrics collection (scrapes el-servador:8000/api/v1/health/metrics, self:9090) |
 | Loki | grafana/loki:3.4 | 3100 | Log aggregation |
-| Promtail | grafana/promtail:3.4 | - | Log shipping (Docker socket) |
+| Alloy | grafana/alloy:v1.13.1 | 12345 | Log shipping (Docker socket, migrated from Promtail) |
 
 **Prometheus Config:**
 ```yaml
@@ -522,7 +522,7 @@ make test-fe-coverage- HTML coverage report
 make test-full       - Backend + Frontend tests
 ```
 
-**Wokwi Simulation (163 total scenarios, 13 categories):**
+**Wokwi Simulation (173 total scenarios, 14 categories):**
 ```
 make wokwi-build         - Build firmware
 make wokwi-test-boot     - Boot test
@@ -537,7 +537,7 @@ make wokwi-test-hardware - 9 scenarios
 make wokwi-test-nvs-all  - 40 scenarios (Makefile help says 35, actual count 40)
 make wokwi-test-gpio-all - 24 scenarios
 make wokwi-test-pwm-all  - 18 scenarios (Makefile help says 15, actual count 18)
-make wokwi-test-extended - Full ~163 scenarios (Makefile help says ~135, outdated)
+make wokwi-test-extended - Full ~173 scenarios (Makefile help says ~135, outdated)
 make wokwi-status        - Status check
 ```
 
@@ -567,8 +567,8 @@ make e2e-test-ui - Interactive UI mode
 | Backend (Python) | Unit + Integration + E2E + ESP32 | 105 test files | pytest ^8.0, pytest-asyncio |
 | Frontend (Vue) | Unit tests | 5 test files | vitest ^2.1.8 (jsdom) |
 | Frontend (Vue) | E2E (Playwright) | 5 spec files | @playwright/test ^1.50.0 |
-| ESP32 (Wokwi) | Simulation scenarios | 163 YAML files | wokwi-cli |
-| **Total** | | **278 test files/scenarios** | |
+| ESP32 (Wokwi) | Simulation scenarios | 173 YAML files | wokwi-cli |
+| **Total** | | **288 test files/scenarios** | |
 
 ### Backend Test Structure:
 ```
@@ -614,7 +614,8 @@ El Frontend/tests/
 | 09-pwm | 18 | PWM controller |
 | 10-nvs | 40 | NVS storage operations |
 | gpio | 24 | GPIO manager |
-| **Total** | **163** | |
+| 11-error-injection | 10 | Error injection scenarios |
+| **Total** | **173** | |
 
 ### Vitest Config:
 - Environment: jsdom
@@ -690,7 +691,7 @@ df3432c fix(esp32): resolve watchdog timeout for I2C sensors
 - `.github/workflows/` (backend-e2e, frontend-tests, playwright-tests, security-scan)
 - `El Frontend/` (coverage, docker, tests, playwright.config.ts, vitest.config.ts)
 - `El Servador/` (new E2E tests)
-- Docker configs (grafana, loki, prometheus, promtail)
+- Docker configs (grafana, loki, prometheus, alloy/promtail)
 - `docs/`
 
 ---

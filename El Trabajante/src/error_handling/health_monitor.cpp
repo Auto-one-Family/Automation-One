@@ -9,6 +9,9 @@
 #include "../models/error_codes.h"
 #include "../models/watchdog_types.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "HEALTH";
+
 // ============================================
 // EXTERNAL GLOBAL VARIABLES (from main.cpp)
 // ============================================
@@ -48,7 +51,7 @@ HealthMonitor::HealthMonitor()
 // ============================================
 bool HealthMonitor::begin() {
     if (initialized_) {
-        LOG_WARNING("HealthMonitor already initialized");
+        LOG_W(TAG, "HealthMonitor already initialized");
         return true;
     }
     
@@ -57,7 +60,7 @@ bool HealthMonitor::begin() {
     last_publish_time_ = 0;
     
     initialized_ = true;
-    LOG_INFO("HealthMonitor: Initialized");
+    LOG_I(TAG, "HealthMonitor: Initialized");
     
     return true;
 }
@@ -283,7 +286,7 @@ void HealthMonitor::publishSnapshot() {
     }
     
     if (!mqttClient.isConnected()) {
-        LOG_DEBUG("HealthMonitor: MQTT not connected, skipping publish");
+        LOG_D(TAG, "HealthMonitor: MQTT not connected, skipping publish");
         return;
     }
     
@@ -291,10 +294,10 @@ void HealthMonitor::publishSnapshot() {
     String payload = getSnapshotJSON();
     
     if (mqttClient.publish(topic, payload, 0)) {  // QoS 0
-        LOG_DEBUG("HealthMonitor: Published diagnostics snapshot");
+        LOG_D(TAG, "HealthMonitor: Published diagnostics snapshot");
         last_published_snapshot_ = getCurrentSnapshot();
     } else {
-        LOG_WARNING("HealthMonitor: Failed to publish diagnostics snapshot");
+        LOG_W(TAG, "HealthMonitor: Failed to publish diagnostics snapshot");
         errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_WARNING,
                                "HealthMonitor publish failed");
     }
@@ -334,11 +337,11 @@ void HealthMonitor::loop() {
 // ============================================
 void HealthMonitor::setPublishInterval(unsigned long interval_ms) {
     publish_interval_ms_ = interval_ms;
-    LOG_INFO("HealthMonitor: Publish interval set to " + String(interval_ms) + " ms");
+    LOG_I(TAG, "HealthMonitor: Publish interval set to " + String(interval_ms) + " ms");
 }
 
 void HealthMonitor::setChangeDetectionEnabled(bool enabled) {
     change_detection_enabled_ = enabled;
-    LOG_INFO("HealthMonitor: Change detection " + String(enabled ? "enabled" : "disabled"));
+    LOG_I(TAG, "HealthMonitor: Change detection " + String(enabled ? "enabled" : "disabled"));
 }
 

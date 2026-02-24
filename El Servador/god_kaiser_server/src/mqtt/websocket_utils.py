@@ -70,9 +70,7 @@ async def get_device_id_for_broadcast(
         return esp_device.device_id
 
     except Exception as e:
-        logger.error(
-            f"[websocket_utils] Error looking up device_id for UUID {esp_uuid}: {e}"
-        )
+        logger.error(f"[websocket_utils] Error looking up device_id for UUID {esp_uuid}: {e}")
         return None
 
 

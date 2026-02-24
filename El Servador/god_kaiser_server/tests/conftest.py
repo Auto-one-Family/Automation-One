@@ -26,16 +26,16 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-import pytest
-import pytest_asyncio
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from fastapi import Depends  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
-from src.api.deps import get_db
-from src.db.base import Base
-from src.db.models import (  # noqa: F401 - imports needed for SQLAlchemy model registration
+from src.api.deps import get_db  # noqa: E402
+from src.db.base import Base  # noqa: E402
+from src.db.models import (  # noqa: F401, E402 - imports needed for SQLAlchemy model registration
     actuator,
     ai,
     auth,
@@ -48,11 +48,11 @@ from src.db.models import (  # noqa: F401 - imports needed for SQLAlchemy model 
     system,
     user,
 )
-from src.db.repositories.actuator_repo import ActuatorRepository
-from src.db.repositories.esp_repo import ESPRepository
-from src.db.repositories.sensor_repo import SensorRepository
-from src.db.repositories.subzone_repo import SubzoneRepository
-from src.db.repositories.user_repo import UserRepository
+from src.db.repositories.actuator_repo import ActuatorRepository  # noqa: E402
+from src.db.repositories.esp_repo import ESPRepository  # noqa: E402
+from src.db.repositories.sensor_repo import SensorRepository  # noqa: E402
+from src.db.repositories.subzone_repo import SubzoneRepository  # noqa: E402
+from src.db.repositories.user_repo import UserRepository  # noqa: E402
 
 
 # =============================================================================
@@ -176,7 +176,7 @@ async def subzone_repo(db_session: AsyncSession) -> SubzoneRepository:
 @pytest_asyncio.fixture
 async def sample_esp_device(db_session: AsyncSession):
     """Create a sample ESP device for testing."""
-    from src.db.models.esp import ESPDevice
+    from src.db.models.esp import ESPDevice  # noqa: E402
 
     device = ESPDevice(
         device_id="ESP_TEST_001",
@@ -197,7 +197,7 @@ async def sample_esp_device(db_session: AsyncSession):
 @pytest_asyncio.fixture
 async def sample_user(db_session: AsyncSession):
     """Create a sample user for testing."""
-    from src.db.models.user import User
+    from src.db.models.user import User  # noqa: E402
 
     user = User(
         username="testuser",
@@ -215,7 +215,7 @@ async def sample_user(db_session: AsyncSession):
 @pytest_asyncio.fixture
 async def sample_esp_with_zone(db_session: AsyncSession):
     """Create a sample ESP device with zone assigned for subzone testing."""
-    from src.db.models.esp import ESPDevice
+    from src.db.models.esp import ESPDevice  # noqa: E402
 
     device = ESPDevice(
         device_id="ESP_WITH_ZONE",
@@ -238,7 +238,7 @@ async def sample_esp_with_zone(db_session: AsyncSession):
 @pytest_asyncio.fixture
 async def sample_esp_no_zone(db_session: AsyncSession):
     """Create a sample ESP device without zone assigned."""
-    from src.db.models.esp import ESPDevice
+    from src.db.models.esp import ESPDevice  # noqa: E402
 
     device = ESPDevice(
         device_id="ESP_NO_ZONE",
@@ -258,17 +258,18 @@ async def sample_esp_no_zone(db_session: AsyncSession):
 
 # ==================== Hardware Validation Test Fixtures ====================
 
+
 @pytest_asyncio.fixture
 async def sample_esp_c3(db_session: AsyncSession):
     """Create a sample ESP32-C3 device for testing.
-    
+
     ESP32-C3 (XIAO) has different hardware constraints than WROOM:
     - GPIO Range: 0-21 (not 0-39!)
     - I2C Pins: GPIO 4 (SDA), GPIO 5 (SCL) - not 21/22!
     - No Input-Only Pins (all bidirectional)
     """
-    from src.db.models.esp import ESPDevice
-    
+    from src.db.models.esp import ESPDevice  # noqa: E402
+
     device = ESPDevice(
         device_id="ESP_C3_TEST_001",
         name="Test ESP32-C3",
@@ -293,12 +294,12 @@ async def gpio_service(
     esp_repo: "ESPRepository",
 ):
     """Create real GpioValidationService instance.
-    
+
     This fixture creates a real service (not mocked) for testing
     hardware validation logic.
     """
-    from src.services.gpio_validation_service import GpioValidationService
-    
+    from src.services.gpio_validation_service import GpioValidationService  # noqa: E402
+
     service = GpioValidationService(
         session=db_session,
         sensor_repo=sensor_repo,
@@ -312,11 +313,11 @@ async def gpio_service(
 def mock_mqtt_publisher_for_subzone():
     """
     Create a mock MQTT publisher for subzone service tests.
-    
+
     Provides mock client with publish method for testing.
     """
-    from unittest.mock import MagicMock
-    
+    from unittest.mock import MagicMock  # noqa: E402
+
     mock_publisher = MagicMock()
     mock_publisher.client = MagicMock()
     mock_publisher.client.publish = MagicMock(return_value=MagicMock(rc=0))
@@ -328,6 +329,7 @@ def mock_mqtt_publisher_for_subzone():
 # This ensures ALL tests use the test database, not the production database
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def override_get_db(test_engine: AsyncEngine):
     """
@@ -336,8 +338,8 @@ async def override_get_db(test_engine: AsyncEngine):
     AUTOUSE=True: This fixture is automatically loaded for ALL tests.
     This ensures FastAPI always uses the test database.
     """
-    from src.main import app
-    from src.api.deps import get_db
+    from src.main import app  # noqa: E402
+    from src.api.deps import get_db  # noqa: E402
 
     # Create session maker for test engine
     test_session_maker = sessionmaker(
@@ -369,6 +371,7 @@ async def override_get_db(test_engine: AsyncEngine):
 # This prevents tests from hanging on MQTT connection attempts
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def override_mqtt_publisher(test_engine: AsyncEngine):
     """
@@ -377,10 +380,10 @@ async def override_mqtt_publisher(test_engine: AsyncEngine):
     AUTOUSE=True: This fixture is automatically loaded for ALL tests.
     This prevents tests from hanging on MQTT connection attempts.
     """
-    from unittest.mock import MagicMock
-    
-    from src.main import app
-    from src.api.deps import get_mqtt_publisher
+    from unittest.mock import MagicMock  # noqa: E402
+
+    from src.main import app  # noqa: E402
+    from src.api.deps import get_mqtt_publisher  # noqa: E402
 
     # Create mock publisher with all methods used across services
     mock_publisher = MagicMock()
@@ -414,44 +417,44 @@ async def override_actuator_service(test_engine: AsyncEngine):
     AUTOUSE=True: This fixture is automatically loaded for ALL tests.
     This ensures ActuatorService uses mocked Publisher in tests.
     """
-    from unittest.mock import MagicMock
-    
-    from src.main import app
-    from src.api.deps import get_actuator_service
-    from src.db.repositories import ActuatorRepository, ESPRepository
-    from src.services.actuator_service import ActuatorService
-    from src.services.safety_service import SafetyService
+    from unittest.mock import MagicMock  # noqa: E402
+
+    from src.main import app  # noqa: E402
+    from src.api.deps import get_actuator_service  # noqa: E402
+    from src.db.repositories import ActuatorRepository, ESPRepository  # noqa: E402
+    from src.services.actuator_service import ActuatorService  # noqa: E402
+    from src.services.safety_service import SafetyService  # noqa: E402
 
     def override_get_actuator_service_func(db: AsyncSession = Depends(get_db)):
         """
         Override function that receives db session from FastAPI dependency injection.
-        
+
         Args:
             db: Database session (injected by FastAPI from override_get_db)
         """
         # Create repositories with the injected session
         actuator_repo = ActuatorRepository(db)
         esp_repo = ESPRepository(db)
-        
+
         # Create safety service
         safety_service = SafetyService(actuator_repo, esp_repo)
-        
+
         # Create mocked publisher
         mock_publisher = MagicMock()
         mock_publisher.publish_actuator_command.return_value = True
         mock_publisher._publish_with_retry.return_value = True
-        
+
         # Create ActuatorService with mocked publisher
         actuator_service = ActuatorService(
             actuator_repo=actuator_repo,
             safety_service=safety_service,
             publisher=mock_publisher,
         )
-        
+
         return actuator_service
 
     # Apply override
     app.dependency_overrides[get_actuator_service] = override_get_actuator_service_func
 
-    yield    # Cleanup - remove override
+    yield  # Cleanup - remove override
     app.dependency_overrides.pop(get_actuator_service, None)

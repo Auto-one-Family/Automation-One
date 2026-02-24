@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .common import BaseResponse, IDMixin, PaginatedResponse, TimestampMixin
+from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
 
 # =============================================================================
@@ -55,12 +55,12 @@ ESP32_ACTUATOR_TYPES = ["pump", "valve", "pwm", "relay"]
 # Mapping from ESP32 types to server types
 # ESP32 uses specific device types, server uses generic electrical types
 ACTUATOR_TYPE_MAPPING = {
-    "pump": "digital",    # Pump is a digital on/off device
-    "valve": "digital",   # Valve is a digital on/off device
-    "relay": "digital",   # Relay is a digital on/off device
-    "pwm": "pwm",         # PWM maps directly
-    "digital": "digital", # Direct mapping
-    "servo": "servo",     # Servo maps directly
+    "pump": "digital",  # Pump is a digital on/off device
+    "valve": "digital",  # Valve is a digital on/off device
+    "relay": "digital",  # Relay is a digital on/off device
+    "pwm": "pwm",  # PWM maps directly
+    "digital": "digital",  # Direct mapping
+    "servo": "servo",  # Servo maps directly
 }
 
 # All valid types (server + ESP32)
@@ -72,10 +72,10 @@ ACTUATOR_COMMANDS = ["ON", "OFF", "PWM", "TOGGLE"]
 def normalize_actuator_type(esp_type: str) -> str:
     """
     Normalize ESP32 actuator type to server type.
-    
+
     Args:
         esp_type: Actuator type from ESP32 (pump, valve, relay, pwm)
-        
+
     Returns:
         Server-side type (digital, pwm, servo)
     """
@@ -89,7 +89,7 @@ def normalize_actuator_type(esp_type: str) -> str:
 
 class ActuatorConfigBase(BaseModel):
     """Base actuator configuration fields."""
-    
+
     gpio: int = Field(
         ...,
         ge=0,
@@ -106,13 +106,13 @@ class ActuatorConfigBase(BaseModel):
         description="Human-readable actuator name",
         examples=["Water Pump", "Grow Light", "Vent Fan"],
     )
-    
+
     @field_validator("actuator_type")
     @classmethod
     def validate_actuator_type(cls, v: str) -> str:
         """
         Validate and normalize actuator type.
-        
+
         Accepts both server types (digital, pwm, servo) and
         ESP32 types (pump, valve, relay, pwm) for compatibility.
         ESP32 types are normalized to server types.
@@ -128,7 +128,7 @@ class ActuatorConfigCreate(ActuatorConfigBase):
     """
     Actuator configuration create request.
     """
-    
+
     esp_id: str = Field(
         ...,
         pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
@@ -175,7 +175,7 @@ class ActuatorConfigCreate(ActuatorConfigBase):
         None,
         description="Custom metadata",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -185,7 +185,7 @@ class ActuatorConfigCreate(ActuatorConfigBase):
                 "name": "Water Pump",
                 "enabled": True,
                 "max_runtime_seconds": 1800,
-                "cooldown_seconds": 300
+                "cooldown_seconds": 300,
             }
         }
     )
@@ -194,10 +194,10 @@ class ActuatorConfigCreate(ActuatorConfigBase):
 class ActuatorConfigUpdate(BaseModel):
     """
     Actuator configuration update request.
-    
+
     All fields optional - only provided fields are updated.
     """
-    
+
     name: Optional[str] = Field(None, max_length=100)
     enabled: Optional[bool] = Field(None)
     max_runtime_seconds: Optional[int] = Field(None, ge=1, le=86400)
@@ -212,7 +212,7 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     """
     Actuator configuration response.
     """
-    
+
     id: uuid.UUID = Field(
         ...,
         description="Unique identifier (UUID)",
@@ -261,7 +261,7 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
         None,
         description="Last command timestamp",
     )
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -279,9 +279,9 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
                 "is_active": False,
                 "last_command_at": "2025-01-01T10:00:00Z",
                 "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-01T10:00:00Z"
+                "updated_at": "2025-01-01T10:00:00Z",
             }
-        }
+        },
     )
 
 
@@ -293,10 +293,10 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
 class ActuatorCommand(BaseModel):
     """
     Actuator command request.
-    
+
     Sent via REST API, validated by SafetyService, published to MQTT.
     """
-    
+
     command: str = Field(
         ...,
         description="Command type: ON, OFF, PWM, TOGGLE",
@@ -313,7 +313,7 @@ class ActuatorCommand(BaseModel):
         le=86400,
         description="Duration in seconds (0 = unlimited until OFF)",
     )
-    
+
     @field_validator("command")
     @classmethod
     def validate_command(cls, v: str) -> str:
@@ -322,7 +322,7 @@ class ActuatorCommand(BaseModel):
         if v not in ACTUATOR_COMMANDS:
             raise ValueError(f"command must be one of: {ACTUATOR_COMMANDS}")
         return v
-    
+
     @model_validator(mode="after")
     def validate_command_value(self) -> "ActuatorCommand":
         """Validate value based on command type."""
@@ -333,15 +333,9 @@ class ActuatorCommand(BaseModel):
             # For OFF command, value should be 0.0
             self.value = 0.0
         return self
-    
+
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "command": "PWM",
-                "value": 0.75,
-                "duration": 300
-            }
-        }
+        json_schema_extra={"example": {"command": "PWM", "value": 0.75, "duration": 300}}
     )
 
 
@@ -349,7 +343,7 @@ class ActuatorCommandResponse(BaseResponse):
     """
     Actuator command response.
     """
-    
+
     esp_id: str = Field(..., description="ESP device ID")
     gpio: int = Field(..., description="GPIO pin")
     command: str = Field(..., description="Command sent")
@@ -363,7 +357,7 @@ class ActuatorCommandResponse(BaseResponse):
         default_factory=list,
         description="Safety warnings (if any)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -374,7 +368,7 @@ class ActuatorCommandResponse(BaseResponse):
                 "value": 1.0,
                 "command_sent": True,
                 "acknowledged": False,
-                "safety_warnings": []
+                "safety_warnings": [],
             }
         }
     )
@@ -389,7 +383,7 @@ class ActuatorState(BaseModel):
     """
     Current actuator state.
     """
-    
+
     gpio: int = Field(..., description="GPIO pin")
     mode: str = Field(..., description="Actuator mode (digital, pwm, servo)")
     value: float = Field(
@@ -412,7 +406,7 @@ class ActuatorStatusResponse(BaseResponse):
     """
     Actuator status response.
     """
-    
+
     esp_id: str = Field(..., description="ESP device ID")
     gpio: int = Field(..., description="GPIO pin")
     state: ActuatorState = Field(..., description="Current actuator state")
@@ -420,7 +414,7 @@ class ActuatorStatusResponse(BaseResponse):
         None,
         description="Actuator configuration (if requested)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -434,8 +428,8 @@ class ActuatorStatusResponse(BaseResponse):
                     "is_active": True,
                     "last_command": "ON",
                     "last_command_at": "2025-01-01T10:00:00Z",
-                    "runtime_seconds": 300
-                }
+                    "runtime_seconds": 300,
+                },
             }
         }
     )
@@ -449,10 +443,10 @@ class ActuatorStatusResponse(BaseResponse):
 class EmergencyStopRequest(BaseModel):
     """
     Emergency stop request.
-    
+
     CRITICAL: Stops all actuators immediately, bypasses normal safety checks.
     """
-    
+
     esp_id: Optional[str] = Field(
         None,
         pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
@@ -471,13 +465,13 @@ class EmergencyStopRequest(BaseModel):
         description="Emergency stop reason (for audit log)",
         examples=["Manual safety override", "Sensor malfunction detected"],
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "esp_id": None,
                 "gpio": None,
-                "reason": "Manual safety override - immediate stop all actuators"
+                "reason": "Manual safety override - immediate stop all actuators",
             }
         }
     )
@@ -508,7 +502,7 @@ class EmergencyStopResponse(BaseResponse):
     """
     Emergency stop response.
     """
-    
+
     devices_stopped: int = Field(
         ...,
         description="Number of ESPs that received stop command",
@@ -525,7 +519,7 @@ class EmergencyStopResponse(BaseResponse):
         default_factory=list,
         description="Per-device actuator stop results",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -540,7 +534,12 @@ class EmergencyStopResponse(BaseResponse):
                         "esp_id": "ESP_12345678",
                         "actuators": [
                             {"esp_id": "ESP_12345678", "gpio": 5, "success": True},
-                            {"esp_id": "ESP_12345678", "gpio": 6, "success": False, "message": "MQTT publish failed"},
+                            {
+                                "esp_id": "ESP_12345678",
+                                "gpio": 6,
+                                "success": False,
+                                "message": "MQTT publish failed",
+                            },
                         ],
                     }
                 ],
@@ -558,7 +557,7 @@ class ActuatorHistoryEntry(BaseModel):
     """
     Actuator command history entry.
     """
-    
+
     id: int = Field(..., description="History entry ID")
     gpio: int = Field(..., description="GPIO pin")
     actuator_type: str = Field(..., description="Actuator type")
@@ -569,7 +568,7 @@ class ActuatorHistoryEntry(BaseModel):
     error_message: Optional[str] = Field(None, description="Error message if failed")
     metadata: Optional[Dict[str, Any]] = Field(None)
     timestamp: datetime = Field(..., description="Command timestamp")
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -577,7 +576,7 @@ class ActuatorHistoryResponse(BaseResponse):
     """
     Actuator history response.
     """
-    
+
     esp_id: str = Field(..., description="ESP device ID")
     gpio: Optional[int] = Field(None, description="GPIO filter (if applied)")
     entries: List[ActuatorHistoryEntry] = Field(
@@ -596,7 +595,7 @@ class ActuatorListFilter(BaseModel):
     """
     Filter parameters for actuator list endpoint.
     """
-    
+
     esp_id: Optional[str] = Field(
         None,
         pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
@@ -625,4 +624,5 @@ class ActuatorConfigListResponse(PaginatedResponse[ActuatorConfigResponse]):
     """
     Paginated list of actuator configurations.
     """
+
     pass

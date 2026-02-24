@@ -17,6 +17,23 @@
 # Note: Flash pins GPIO 6-11 are not in RESERVED_GPIO_PINS but are
 # also not in SAFE_GPIO_PINS, so they are implicitly blocked.
 #
+# MQTT-Injection (extern via CI):
+#   Test 1 - Boot Pin GPIO 0:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":0,"sensor_type":"digital_input","sensor_name":"BootPinSensor","active":true}]}'
+#   Test 2 - UART TX GPIO 1 (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":1,"actuator_type":"relay","actuator_name":"UARTRelay","active":true}]}'
+#   Test 3 - UART RX GPIO 3 (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":3,"sensor_type":"analog","sensor_name":"RXSensor","active":true}]}'
+#   Test 4 - Flash Strapping GPIO 12 (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":12,"actuator_type":"pump","actuator_name":"FlashPump","active":true}]}'
+#   Test 5 - Internal Flash SPI GPIO 6 (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":6,"sensor_type":"digital_input","sensor_name":"FlashSensor","active":true}]}'
+#
 # Firmware references:
 #   - esp32_dev.h lines 31-39: RESERVED_GPIO_PINS array
 #   - gpio_manager.cpp: Rejects reserved pins
@@ -30,23 +47,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # TEST 1: Boot Pin (GPIO 0)
-  # GPIO 0 is reserved for boot button
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 0,
-              "sensor_type": "digital_input",
-              "sensor_name": "BootPinSensor",
-              "active": true
-            }]
-          }
-        }
+  # TEST 1: External MQTT injection - boot pin GPIO 0 (CI helper script)
 
   # Verify boot pin is rejected
   - wait-serial: "reserved"
@@ -54,23 +55,7 @@ steps:
   # Wait before next test
   - delay: 500
 
-  # TEST 2: UART TX Pin (GPIO 1)
-  # GPIO 1 is UART0 TX - must never be used
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 1,
-              "actuator_type": "relay",
-              "actuator_name": "UARTRelay",
-              "active": true
-            }]
-          }
-        }
+  # TEST 2: External MQTT injection - UART TX pin GPIO 1 (CI helper script)
 
   # Verify UART pin is rejected
   - wait-serial: "reserved"
@@ -78,23 +63,7 @@ steps:
   # Wait before next test
   - delay: 500
 
-  # TEST 3: UART RX Pin (GPIO 3)
-  # GPIO 3 is UART0 RX - must never be used
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 3,
-              "sensor_type": "analog",
-              "sensor_name": "RXSensor",
-              "active": true
-            }]
-          }
-        }
+  # TEST 3: External MQTT injection - UART RX pin GPIO 3 (CI helper script)
 
   # Verify RX pin is rejected
   - wait-serial: "reserved"
@@ -102,22 +71,7 @@ steps:
   # Wait before next test
   - delay: 500
 
-  # TEST 4: Flash Strapping Pin (GPIO 12) - WROOM specific
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 12,
-              "actuator_type": "pump",
-              "actuator_name": "FlashPump",
-              "active": true
-            }]
-          }
-        }
+  # TEST 4: External MQTT injection - flash strapping pin GPIO 12 (CI helper script)
 
   # Verify flash strapping pin is rejected
   - wait-serial: "reserved"
@@ -125,23 +79,8 @@ steps:
   # Wait before next test
   - delay: 500
 
-  # TEST 5: Flash Pin (GPIO 6) - Internal Flash SPI
+  # TEST 5: External MQTT injection - internal flash SPI GPIO 6 (CI helper script)
   # Note: Not in RESERVED_GPIO_PINS but also not in SAFE_GPIO_PINS
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 6,
-              "sensor_type": "digital_input",
-              "sensor_name": "FlashSensor",
-              "active": true
-            }]
-          }
-        }
 
   # Verify internal flash pin is rejected (not in safe pins)
   - wait-serial: "not in safe pins"

@@ -92,7 +92,9 @@ class DiscoveryRateLimiter:
             if device_id in self._device_discoveries:
                 last_discovery = self._device_discoveries[device_id]
                 if now - last_discovery < self.per_device_cooldown:
-                    remaining = int((last_discovery + self.per_device_cooldown - now).total_seconds())
+                    remaining = int(
+                        (last_discovery + self.per_device_cooldown - now).total_seconds()
+                    )
                     return False, f"Device cooldown: {remaining}s remaining"
 
             # Check global limit
@@ -296,7 +298,9 @@ class ESPService:
         metadata["health"] = health_data
         device.device_metadata = metadata
 
-        logger.debug(f"Health updated for {device_id}: uptime={uptime}s, heap={heap_free}, rssi={wifi_rssi}")
+        logger.debug(
+            f"Health updated for {device_id}: uptime={uptime}s, heap={heap_free}, rssi={wifi_rssi}"
+        )
         return True
 
     async def check_device_status(
@@ -427,9 +431,7 @@ class ESPService:
                 return result
 
             elif offline_behavior == "skip":
-                logger.warning(
-                    f"Skipping config send to {device_id}: device is {device.status}"
-                )
+                logger.warning(f"Skipping config send to {device_id}: device is {device.status}")
                 result["success"] = True
                 result["sent"] = False
                 result["message"] = (
@@ -485,12 +487,16 @@ class ESPService:
             # WebSocket broadcast: config published
             try:
                 from ..websocket.manager import WebSocketManager
+
                 ws_manager = await WebSocketManager.get_instance()
-                await ws_manager.broadcast("config_published", {
-                    "esp_id": device_id,
-                    "config_keys": list(config.keys()),
-                    "correlation_id": correlation_id,
-                })
+                await ws_manager.broadcast(
+                    "config_published",
+                    {
+                        "esp_id": device_id,
+                        "config_keys": list(config.keys()),
+                        "correlation_id": correlation_id,
+                    },
+                )
             except Exception as e:
                 logger.warning(f"WebSocket broadcast config_published failed for {device_id}: {e}")
         else:
@@ -522,13 +528,17 @@ class ESPService:
             # WebSocket broadcast: config failed
             try:
                 from ..websocket.manager import WebSocketManager
+
                 ws_manager = await WebSocketManager.get_instance()
-                await ws_manager.broadcast("config_failed", {
-                    "esp_id": device_id,
-                    "config_keys": list(config.keys()) if config else [],
-                    "error": "MQTT publish failed",
-                    "correlation_id": correlation_id,
-                })
+                await ws_manager.broadcast(
+                    "config_failed",
+                    {
+                        "esp_id": device_id,
+                        "config_keys": list(config.keys()) if config else [],
+                        "error": "MQTT publish failed",
+                        "correlation_id": correlation_id,
+                    },
+                )
             except Exception as e:
                 logger.warning(f"WebSocket broadcast config_failed failed for {device_id}: {e}")
 
@@ -843,6 +853,7 @@ class ESPService:
         # WP2-Fix2: Set kaiser_id if not already set
         if not device.kaiser_id:
             from ..core import constants
+
             device.kaiser_id = constants.get_kaiser_id()
 
         logger.info(f"Device approved: {device_id} by {approved_by}")

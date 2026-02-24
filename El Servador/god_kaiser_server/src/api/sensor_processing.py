@@ -77,33 +77,33 @@ async def process_sensor_data(
 ) -> SensorProcessResponse:
     """
     Process raw sensor data in real-time.
-    
+
     Args:
         request: Sensor processing request (validated)
         api_key: Verified API key from header
         _rate_limit: Rate limit check (dependency)
-    
+
     Returns:
         Processed sensor data with value, unit, quality
-        
+
     Raises:
         HTTPException: 400/404/500 on various errors
     """
     start_time = time.perf_counter()
-    
+
     try:
         # Log incoming request
         logger.info(
             f"Sensor processing request: esp_id={request.esp_id}, "
             f"gpio={request.gpio}, type={request.sensor_type}, raw={request.raw_value}"
         )
-        
+
         # Step 1: Get library loader
         loader = get_library_loader()
-        
+
         # Step 2: Get processor for sensor type
         processor = loader.get_processor(request.sensor_type)
-        
+
         if not processor:
             logger.error(
                 f"No processor found for sensor type: {request.sensor_type}. "
@@ -112,9 +112,9 @@ async def process_sensor_data(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No processor found for sensor type '{request.sensor_type}'. "
-                       f"Available types: {', '.join(loader.get_available_sensors())}",
+                f"Available types: {', '.join(loader.get_available_sensors())}",
             )
-        
+
         # Step 3: Process raw value
         try:
             result = processor.process(
@@ -132,10 +132,10 @@ async def process_sensor_data(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Processing failed: {str(e)}",
             )
-        
+
         # Step 4: Calculate processing time
         processing_time_ms = (time.perf_counter() - start_time) * 1000
-        
+
         # Step 5: Build response
         response = SensorProcessResponse(
             success=True,
@@ -145,20 +145,20 @@ async def process_sensor_data(
             processing_time_ms=round(processing_time_ms, 2),
             metadata=result.metadata,
         )
-        
+
         # Log success
         logger.info(
             f"Sensor processing complete: esp_id={request.esp_id}, "
             f"gpio={request.gpio}, processed={result.value} {result.unit}, "
             f"quality={result.quality}, time={processing_time_ms:.2f}ms"
         )
-        
+
         return response
-    
+
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
-    
+
     except Exception as e:
         # Catch-all for unexpected errors
         logger.error(
@@ -181,16 +181,16 @@ async def list_sensor_types(
 ) -> dict:
     """
     List available sensor processor types.
-    
+
     Args:
         api_key: Verified API key
-        
+
     Returns:
         List of available sensor types
     """
     loader = get_library_loader()
     available_sensors = loader.get_available_sensors()
-    
+
     return {
         "sensor_types": available_sensors,
         "count": len(available_sensors),
@@ -205,14 +205,14 @@ async def list_sensor_types(
 async def health_check() -> dict:
     """
     Health check for sensor processing subsystem.
-    
+
     Returns:
         Health status and loaded processors
     """
     try:
         loader = get_library_loader()
         available_sensors = loader.get_available_sensors()
-        
+
         return {
             "status": "healthy",
             "processors_loaded": len(available_sensors),
@@ -263,11 +263,11 @@ async def calibrate_sensor(
 ) -> SensorCalibrateResponse:
     """
     Calibrate a sensor using reference points.
-    
+
     Args:
         request: Calibration request with points
         api_key: Verified API key
-    
+
     Returns:
         Calibration result with calculated parameters
     """
@@ -276,24 +276,23 @@ async def calibrate_sensor(
             f"Calibration request: esp_id={request.esp_id}, gpio={request.gpio}, "
             f"sensor_type={request.sensor_type}, points={len(request.calibration_points)}"
         )
-        
+
         # Step 1: Get library loader and processor
         loader = get_library_loader()
         processor = loader.get_processor(request.sensor_type)
-        
+
         if not processor:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No processor found for sensor type '{request.sensor_type}'. "
-                       f"Available: {', '.join(loader.get_available_sensors())}",
+                f"Available: {', '.join(loader.get_available_sensors())}",
             )
-        
+
         # Step 2: Convert calibration points to processor format
         calibration_points = [
-            {"raw": point.raw, "reference": point.reference}
-            for point in request.calibration_points
+            {"raw": point.raw, "reference": point.reference} for point in request.calibration_points
         ]
-        
+
         # Step 3: Determine calibration method
         method = request.method
         if not method:
@@ -302,7 +301,7 @@ async def calibrate_sensor(
                 method = "linear"
             else:
                 method = "offset"
-        
+
         # Step 4: Perform calibration
         try:
             calibration_result = processor.calibrate(
@@ -320,17 +319,17 @@ async def calibrate_sensor(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Calibration calculation failed: {str(e)}",
             )
-        
+
         # Step 5: Save to database (if requested)
         saved = False
         message = None
-        
+
         if request.save_to_config:
             try:
                 async for session in get_session():
                     esp_repo = ESPRepository(session)
                     sensor_repo = SensorRepository(session)
-                    
+
                     # Lookup ESP device
                     esp_device = await esp_repo.get_by_device_id(request.esp_id)
                     if not esp_device:
@@ -343,7 +342,7 @@ async def calibrate_sensor(
                             gpio=request.gpio,
                             calibration_data=calibration_result,
                         )
-                        
+
                         if updated_config:
                             await session.commit()
                             saved = True
@@ -362,7 +361,7 @@ async def calibrate_sensor(
                 message = f"Calibration calculated but failed to save: {str(e)}"
         else:
             message = "Calibration calculated (save_to_config=False)"
-        
+
         # Step 6: Build response
         response = SensorCalibrateResponse(
             success=True,
@@ -372,21 +371,20 @@ async def calibrate_sensor(
             saved=saved,
             message=message,
         )
-        
+
         logger.info(
             f"Calibration complete: sensor_type={request.sensor_type}, "
             f"method={method}, saved={saved}"
         )
-        
+
         return response
-    
+
     except HTTPException:
         raise
-    
+
     except Exception as e:
         logger.error(f"Unexpected calibration error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during calibration",
         )
-

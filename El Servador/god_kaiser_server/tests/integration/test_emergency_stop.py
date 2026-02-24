@@ -73,9 +73,7 @@ class TestESPEmergencyStopActivation:
         esp = esp_with_actuators
         esp.handle_command("emergency_stop", {"reason": "test"})
 
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 1.0, "mode": "pwm"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 1.0, "mode": "pwm"})
 
         assert result["status"] == "error"
         assert "emergency" in result["error"].lower()
@@ -148,9 +146,7 @@ class TestESPEmergencyRecovery:
         assert esp.get_actuator_state(26).emergency_stopped is True
 
         # Commands still blocked
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 0.5, "mode": "pwm"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 0.5, "mode": "pwm"})
         assert result["status"] == "error"
 
     def test_clear_emergency_removes_flags(self, stopped_esp):
@@ -188,9 +184,7 @@ class TestESPEmergencyRecovery:
 
         esp.handle_command("clear_emergency", {})
 
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 0.75, "mode": "pwm"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 0.75, "mode": "pwm"})
         assert result["status"] == "ok"
         assert esp.get_actuator_state(25).pwm_value == 0.75
 
@@ -218,9 +212,7 @@ class TestESPSafeModeEmergency:
         esp.configure_actuator(gpio=25, actuator_type="relay")
         esp.enter_safe_mode("test")
 
-        result = esp.handle_command("actuator_set", {
-            "gpio": 25, "value": 1, "mode": "digital"
-        })
+        result = esp.handle_command("actuator_set", {"gpio": 25, "value": 1, "mode": "digital"})
         assert result["status"] == "error"
         assert "SAFE_MODE" in result["error"]
 
@@ -374,3 +366,38 @@ class TestSafetyServiceEmergencyStop:
         # Should be in a consistent state (cleared)
         is_active = await safety_service.is_emergency_stop_active("ESP_CONC01")
         assert is_active is False
+
+    @pytest.mark.asyncio
+    async def test_emergency_reaction_time_under_100ms(self, safety_service):
+        """Emergency stop must complete within 100ms for safety compliance."""
+        import time
+
+        t0 = time.monotonic_ns()
+        await safety_service.emergency_stop_esp("ESP_TIMING01")
+        t1 = time.monotonic_ns()
+
+        elapsed_ms = (t1 - t0) / 1_000_000
+        assert elapsed_ms < 100, f"Emergency stop took {elapsed_ms:.1f}ms, must be < 100ms"
+
+        # Verify it actually worked
+        is_active = await safety_service.is_emergency_stop_active("ESP_TIMING01")
+        assert is_active is True
+
+    @pytest.mark.asyncio
+    async def test_multiple_clear_emergency_is_idempotent(self, safety_service):
+        """Multiple clear_emergency calls must not corrupt state."""
+        await safety_service.emergency_stop_esp("ESP_IDEM01")
+        assert await safety_service.is_emergency_stop_active("ESP_IDEM01") is True
+
+        # User panic-clicks clear 5 times
+        for _ in range(5):
+            await safety_service.clear_emergency_stop("ESP_IDEM01")
+
+        # State must be consistent
+        assert await safety_service.is_emergency_stop_active("ESP_IDEM01") is False
+
+        # Actuator commands must work again
+        result = await safety_service.validate_actuator_command(
+            esp_id="ESP_IDEM01", gpio=25, command="ON", value=1.0
+        )
+        assert result.valid is True

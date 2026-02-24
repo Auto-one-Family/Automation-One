@@ -15,10 +15,10 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 8.0
-**Letzte Aktualisierung:** 2026-02-11
+**Version:** 9.0
+**Letzte Aktualisierung:** 2026-02-23
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
-**Codebase:** `El Frontend/src/` (~8.000+ Zeilen TypeScript/Vue, 97 .vue Komponenten)
+**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 129 .vue Komponenten)
 
 > **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
 > **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
@@ -57,6 +57,9 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 | date-fns | ^4.1.0 | Datum-Utilities |
 | @vueuse/core | ^10.11.1 | Vue Composition Utilities |
 | vue-draggable-plus | ^0.6.0 | Drag & Drop |
+| gridstack | ^12.1.2 | Dashboard Grid Layout (Custom Dashboard Builder) |
+| chartjs-plugin-annotation | ^3.1.0 | Threshold-Linien in Charts |
+| @vue-flow/core | ^1.43.2 | Node-basierter Rule-Flow-Editor |
 | vite | ^6.2.4 | Build Tool |
 | tailwindcss | ^3.4.17 | CSS Framework |
 | typescript | ~5.7.2 | Type Safety |
@@ -138,14 +141,14 @@ El Frontend/src/
 │   │   ├── primitives/  # 9 Base-Komponenten (BaseBadge, BaseButton, BaseCard, etc.)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # EmptyState, ErrorState, ToastContainer (3 Dateien)
-│   └── stores/          # 4 Shared Stores (auth, database, dragState, logic)
+│   └── stores/          # 12 Shared Stores (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, sensor, ui, zone)
 ├── styles/        # CSS Design Tokens (NEU)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
 │   ├── animations.css   # Animationen
 │   ├── main.css         # Hauptstyles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 8 Composables
+├── composables/   # 16 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -153,16 +156,20 @@ El Frontend/src/
 │   ├── useGpioStatus.ts
 │   ├── useZoneDragDrop.ts
 │   ├── useSwipeNavigation.ts
-│   └── useConfigResponse.ts
+│   ├── useConfigResponse.ts
+│   ├── useCalibration.ts
+│   ├── useCommandPalette.ts
+│   ├── useContextMenu.ts
+│   ├── useDeviceActions.ts
+│   ├── useGrafana.ts
+│   ├── useKeyboardShortcuts.ts
+│   ├── useScrollLock.ts
+│   └── useZoomNavigation.ts
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
-├── stores/        # 5 Pinia Stores (Original)
-│   ├── auth.ts
-│   ├── esp.ts         # ~2500 Zeilen
-│   ├── logic.ts
-│   ├── dragState.ts   # ~464 Zeilen
-│   └── database.ts
+├── stores/        # 1 Pinia Store (Legacy, ESP-spezifisch)
+│   └── esp.ts         # ~2500 Zeilen
 ├── types/         # 4 Type-Dateien (~2106 Zeilen)
 │   ├── index.ts           # ~979 Zeilen
 │   ├── websocket-events.ts # ~748 Zeilen
@@ -175,7 +182,7 @@ El Frontend/src/
 │   ├── actuatorDefaults.ts
 │   ├── errorCodeTranslator.ts
 │   └── ...
-├── views/         # 11 View-Komponenten
+├── views/         # 16 View-Komponenten
 ├── main.ts        # Bootstrap
 ├── App.vue        # Root Component
 └── style.css      # CSS Variablen (~800 Zeilen)
@@ -890,8 +897,19 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 8.0
-**Letzte Aktualisierung:** 2026-02-11
+**Version:** 9.0
+**Letzte Aktualisierung:** 2026-02-23
+
+### Aenderungen in v9.0
+
+- Dashboard-Merge (cursor/dashboard-neue-struktur): 5 neue Views (CustomDashboard, Hardware, Monitor, Calibration, LoadTest)
+- Shared Stores Expansion: 4 → 12 (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, sensor, ui, zone)
+- Original stores/ konsolidiert: 5 → 1 (nur esp.ts verbleibt, Rest nach shared/stores/ migriert)
+- Composables Expansion: 8 → 16 (neu: useCalibration, useCommandPalette, useContextMenu, useDeviceActions, useGrafana, useKeyboardShortcuts, useScrollLock, useZoomNavigation)
+- Neue Pakete: gridstack (Dashboard Builder), chartjs-plugin-annotation (Threshold-Linien), @vue-flow/core (Rule Editor)
+- dashboard.store.ts: Exportierte Types WidgetType, DashboardWidget, DashboardLayout
+- Component Count: 97 → 129 .vue, Views: 11 → 16, Stores: 9 → 13, Composables: 8 → 16
+- 20 TypeScript-Fehler gefixt nach Merge (API-Type-Mismatches, ComputedRef-Calls, unused Imports)
 
 ### Aenderungen in v8.0
 

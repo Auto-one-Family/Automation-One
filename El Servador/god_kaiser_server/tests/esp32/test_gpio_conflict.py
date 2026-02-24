@@ -13,6 +13,7 @@ GPIO Conflict Scenarios:
 These tests complement the Wokwi firmware tests by validating
 the server's pre-flight checks before sending configs to ESPs.
 """
+
 import pytest
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, BrokerMode
 
@@ -42,12 +43,12 @@ class GPIOConflictValidator:
         self.reserved_pins[self.I2C_SDA_PIN] = {
             "owner": "system",
             "component": "I2C_SDA",
-            "mode": "INPUT"
+            "mode": "INPUT",
         }
         self.reserved_pins[self.I2C_SCL_PIN] = {
             "owner": "system",
             "component": "I2C_SCL",
-            "mode": "INPUT"
+            "mode": "INPUT",
         }
 
     def is_reserved_pin(self, gpio: int) -> bool:
@@ -119,11 +120,7 @@ class GPIOConflictValidator:
 
     def reserve_pin(self, gpio: int, owner: str, component: str, mode: str = "INPUT"):
         """Reserve a GPIO pin."""
-        self.reserved_pins[gpio] = {
-            "owner": owner,
-            "component": component,
-            "mode": mode
-        }
+        self.reserved_pins[gpio] = {"owner": owner, "component": component, "mode": mode}
 
     def release_pin(self, gpio: int) -> bool:
         """Release a GPIO pin."""
@@ -145,9 +142,7 @@ class TestGPIOConflictDetection:
     def mock_esp(self):
         """Create mock ESP32 with zone configured."""
         client = MockESP32Client(
-            esp_id="ESP_GPIO_CONFLICT",
-            kaiser_id="god",
-            broker_mode=BrokerMode.DIRECT
+            esp_id="ESP_GPIO_CONFLICT", kaiser_id="god", broker_mode=BrokerMode.DIRECT
         )
         client.configure_zone("test_zone", "main")
         return client
@@ -300,8 +295,7 @@ class TestGPIOConflictDetection:
 
         # Find actuator in gpio_status
         actuator_gpio = next(
-            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14),
-            None
+            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14), None
         )
         assert actuator_gpio is not None
         assert actuator_gpio["mode"] == 1  # OUTPUT
@@ -348,9 +342,7 @@ class TestGPIOConflictWithMQTT:
     def mock_esp(self):
         """Create mock ESP32."""
         client = MockESP32Client(
-            esp_id="ESP_MQTT_GPIO",
-            kaiser_id="god",
-            broker_mode=BrokerMode.DIRECT
+            esp_id="ESP_MQTT_GPIO", kaiser_id="god", broker_mode=BrokerMode.DIRECT
         )
         client.configure_zone("test_zone", "main")
         return client
@@ -358,14 +350,19 @@ class TestGPIOConflictWithMQTT:
     def test_config_sensor_success(self, mock_esp):
         """Sensor config via MQTT should allocate GPIO."""
         # Simulate receiving config message
-        mock_esp.handle_command("config", {
-            "sensors": [{
-                "gpio": 4,
-                "sensor_type": "temp_ds18b20",
-                "sensor_name": "TempSensor",
-                "active": True
-            }]
-        })
+        mock_esp.handle_command(
+            "config",
+            {
+                "sensors": [
+                    {
+                        "gpio": 4,
+                        "sensor_type": "temp_ds18b20",
+                        "sensor_name": "TempSensor",
+                        "active": True,
+                    }
+                ]
+            },
+        )
 
         # Sensor should be configured
         state = mock_esp.get_sensor_state(4)
@@ -373,14 +370,19 @@ class TestGPIOConflictWithMQTT:
 
     def test_config_actuator_success(self, mock_esp):
         """Actuator config via MQTT should allocate GPIO."""
-        mock_esp.handle_command("config", {
-            "actuators": [{
-                "gpio": 5,
-                "actuator_type": "pump",
-                "actuator_name": "WaterPump",
-                "active": True
-            }]
-        })
+        mock_esp.handle_command(
+            "config",
+            {
+                "actuators": [
+                    {
+                        "gpio": 5,
+                        "actuator_type": "pump",
+                        "actuator_name": "WaterPump",
+                        "active": True,
+                    }
+                ]
+            },
+        )
 
         # Actuator should be configured
         state = mock_esp.get_actuator_state(5)
@@ -389,26 +391,36 @@ class TestGPIOConflictWithMQTT:
     def test_config_conflict_response(self, mock_esp):
         """Config with GPIO conflict should return error response."""
         # First sensor
-        mock_esp.handle_command("config", {
-            "sensors": [{
-                "gpio": 4,
-                "sensor_type": "temp_ds18b20",
-                "sensor_name": "Sensor1",
-                "active": True
-            }]
-        })
+        mock_esp.handle_command(
+            "config",
+            {
+                "sensors": [
+                    {
+                        "gpio": 4,
+                        "sensor_type": "temp_ds18b20",
+                        "sensor_name": "Sensor1",
+                        "active": True,
+                    }
+                ]
+            },
+        )
 
         mock_esp.clear_published_messages()
 
         # Second sensor on same GPIO
-        mock_esp.handle_command("config", {
-            "sensors": [{
-                "gpio": 4,
-                "sensor_type": "ph_sensor",
-                "sensor_name": "ConflictSensor",
-                "active": True
-            }]
-        })
+        mock_esp.handle_command(
+            "config",
+            {
+                "sensors": [
+                    {
+                        "gpio": 4,
+                        "sensor_type": "ph_sensor",
+                        "sensor_name": "ConflictSensor",
+                        "active": True,
+                    }
+                ]
+            },
+        )
 
         # Should publish error in config_response
         responses = mock_esp.get_messages_by_topic_pattern("config_response")

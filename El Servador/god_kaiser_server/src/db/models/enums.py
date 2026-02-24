@@ -20,6 +20,7 @@ class DataSource(str, Enum):
         TEST: Temporary test data (auto-cleanup candidates)
         SIMULATION: Wokwi or other simulator generated data
     """
+
     PRODUCTION = "production"
     MOCK = "mock"
     TEST = "test"

@@ -12,7 +12,7 @@ Führe eine vollständige System-Diagnose durch:
 
 ### 1. Health Check
 ```bash
-cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
+cd "El Servador/god_kaiser_server" && python -c "
 import asyncio
 from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(mode='health'))
@@ -23,7 +23,7 @@ print(json.dumps(result.get('context', {}), indent=2))
 
 ### 2. Debug & Fix Scan
 ```bash
-cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe -c "
+cd "El Servador/god_kaiser_server" && python -c "
 import asyncio
 from src.autoops.runner import run_autoops
 result = asyncio.run(run_autoops(mode='debug'))

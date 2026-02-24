@@ -83,7 +83,7 @@ defineProps<Props>()
   text-transform: uppercase;
   letter-spacing: 0.03em;
   background: rgba(220, 38, 38, 0.15);
-  color: #f87171;
+  color: var(--color-error);
   border: 1px solid rgba(220, 38, 38, 0.25);
   margin-bottom: 0.75rem;
 }

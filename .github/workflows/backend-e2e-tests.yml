@@ -31,7 +31,7 @@ jobs:
   backend-e2e:
     name: Backend E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -60,36 +60,85 @@ jobs:
           # Use CI compose with E2E overrides for full stack
           # ci.yml: tmpfs PostgreSQL, fast healthchecks
           # e2e.yml: CORS, E2E JWT secret, DATABASE_AUTO_INIT
+          # NOTE: Do NOT use --wait here — it fails immediately on container exit
+          # without showing logs. The "Wait for healthy services" step handles
+          # health polling with proper diagnostics instead.
           docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml \
-            up -d --build --wait postgres mqtt-broker el-servador
+            up -d --build postgres mqtt-broker el-servador
         env:
           # BuildKit for faster cached builds
           DOCKER_BUILDKIT: 1
           COMPOSE_DOCKER_CLI_BUILD: 1
-          # CI-specific environment (merged from .env.ci and compose files)
+          # Shell env vars for docker-compose.yml base config variable substitution.
+          # NOTE: docker-compose.e2e.yml overrides postgres password and JWT to
+          # e2e_test_password / e2e_test_secret_key_not_for_production respectively.
+          # These values here suppress "variable is not set" warnings from the base config.
           POSTGRES_USER: god_kaiser
-          POSTGRES_PASSWORD: ci_password
+          POSTGRES_PASSWORD: e2e_test_password
           POSTGRES_DB: god_kaiser_db
+          JWT_SECRET_KEY: e2e_test_secret_key_not_for_production
 
       - name: Wait for healthy services
         run: |
           echo "Waiting for services to be healthy..."
-          max_attempts=30
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml"
+
+          # First wait for DB and MQTT (usually fast)
+          echo "--- Waiting for PostgreSQL ---"
+          for i in $(seq 1 20); do
+            if $COMPOSE exec -T postgres pg_isready -U god_kaiser -d god_kaiser_db 2>/dev/null; then
+              echo "✅ PostgreSQL ready (attempt $i)"
+              break
+            fi
+            [ $i -eq 20 ] && echo "⚠️ PostgreSQL not ready after 20 attempts"
+            sleep 1
+          done
+
+          echo "--- Waiting for MQTT ---"
+          for i in $(seq 1 20); do
+            if $COMPOSE exec -T mqtt-broker mosquitto_pub -h localhost -t healthcheck -m ok 2>/dev/null; then
+              echo "✅ MQTT ready (attempt $i)"
+              break
+            fi
+            [ $i -eq 20 ] && echo "⚠️ MQTT not ready after 20 attempts"
+            sleep 1
+          done
+
+          echo "--- Waiting for Server ---"
+          max_attempts=60
           for i in $(seq 1 $max_attempts); do
+            # Check if server container is still running
+            if ! docker ps --filter "name=automationone-server" --filter "status=running" -q | grep -q .; then
+              echo "❌ Server container is not running! Capturing logs..."
+              echo "=== Server Container Logs (last 200 lines) ==="
+              $COMPOSE logs el-servador --tail 200 || true
+              echo "=== PostgreSQL Logs ==="
+              $COMPOSE logs postgres --tail 50 || true
+              echo "=== MQTT Logs ==="
+              $COMPOSE logs mqtt-broker --tail 20 || true
+              echo "=== Container Status ==="
+              $COMPOSE ps -a
+              exit 1
+            fi
             # Check if server is responding
             if curl -sf http://localhost:8000/api/v1/health/live > /dev/null 2>&1; then
               echo "✅ Server healthy after ${i} attempts"
               break
             fi
             if [ $i -eq $max_attempts ]; then
-              echo "❌ Server not healthy after ${max_attempts} attempts"
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml logs el-servador
+              echo "❌ Server not healthy after ${max_attempts} attempts ($(( max_attempts * 3 ))s)"
+              $COMPOSE logs el-servador --tail 200 || true
               exit 1
             fi
-            sleep 2
+            sleep 3
           done
           # Show service status
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml ps
+          $COMPOSE ps
+        env:
+          POSTGRES_USER: god_kaiser
+          POSTGRES_PASSWORD: e2e_test_password
+          POSTGRES_DB: god_kaiser_db
+          JWT_SECRET_KEY: e2e_test_secret_key_not_for_production
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -120,6 +169,7 @@ jobs:
       - name: Run Backend E2E Tests
         working-directory: El Servador/god_kaiser_server
         env:
+          # CI-only test credentials - not real secrets, safe to commit
           E2E_TEST_USER: admin
           E2E_TEST_PASSWORD: Admin123#
         run: |

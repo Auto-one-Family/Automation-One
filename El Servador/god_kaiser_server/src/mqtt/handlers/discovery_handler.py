@@ -24,7 +24,6 @@ from ...core.logging_config import get_logger
 from ...db.models.esp import ESPDevice
 from ...db.repositories.esp_repo import ESPRepository
 from ...db.session import resilient_session
-from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
 
@@ -88,9 +87,7 @@ class DiscoveryHandler:
 
                 if existing_esp:
                     # ESP already registered → Update metadata
-                    logger.info(
-                        f"ESP {esp_id_str} already registered. Updating metadata."
-                    )
+                    logger.info(f"ESP {esp_id_str} already registered. Updating metadata.")
 
                     # Update device_metadata (IP, Firmware, etc.)
                     existing_esp.device_metadata = {
@@ -111,7 +108,9 @@ class DiscoveryHandler:
 
                     await session.commit()
 
-                    logger.info(f"Updated existing ESP: {esp_id_str} (status: {existing_esp.status})")
+                    logger.info(
+                        f"Updated existing ESP: {esp_id_str} (status: {existing_esp.status})"
+                    )
                     return True
 
                 # Step 4: Auto-register new ESP with pending_approval status

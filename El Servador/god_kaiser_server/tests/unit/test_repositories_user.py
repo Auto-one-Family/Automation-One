@@ -219,4 +219,3 @@ class TestUserRepositoryGetByRole:
         assert len(admins) == 2
         usernames = {u.username for u in admins}
         assert usernames == {"admin1", "admin2"}
-

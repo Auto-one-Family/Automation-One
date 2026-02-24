@@ -2,8 +2,10 @@
 
 > **Voraussetzung:** [Phase 2](./PHASE_2_PRODUKTIONSTESTFELD.md) Schritt 2.1-2.4 abgeschlossen (Sensordaten fliessen)
 > **Nutzt:** [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) Error-Taxonomie + Grafana-Alerts
-> **Nachfolger:** [Phase 4](./PHASE_4_INTEGRATION.md) (Integration)
-> **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 3"
+> **Nutzt (NEU):** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) Wokwi MCP fuer Anomalie-Validierung
+> **Nachfolger:** [Phase 4](./PHASE_4_INTEGRATION.md) (Integration + Closed-Loop)
+> **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 3" + "Agent-Driven Testing"
+> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Knowledge Graph RCA, MQTT-Trace-Analyse, Causal Graphs, 8 neue Papers)
 
 ---
 
@@ -17,7 +19,7 @@ Automatisierte Fehlererkennung die im Hintergrund mitlaeuft — in beiden Spuren
 
 ### Voraussetzung
 
-- [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) Schritt 0.3 abgeschlossen: 28+ Grafana-Alert-Regeln aktiv
+- [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) Schritt 0.3 abgeschlossen: **26 Grafana-Alert-Regeln aktiv** (verifiziert 2026-02-23)
 - Docker-Stack laeuft mit Monitoring-Profil
 
 ### Was Stufe 1 leistet
@@ -261,21 +263,136 @@ curl -s http://localhost:8000/api/v1/ai/predictions -H "Authorization: Bearer $T
 
 ---
 
-## Stufe 3: LLM-basierte Root-Cause-Analyse (spaeter)
+## Stufe 3: LLM-basierte Root-Cause-Analyse mit Knowledge Graphs (ERWEITERT 2026-02-23)
+
+> **Forschungs-Update:** Stufe 3 wurde von "einfachem LLM-Call" zu einer wissenschaftlich fundierten
+> Knowledge-Graph-gestuetzten Causal-Analysis-Pipeline erweitert. Basis: 5 neue Papers (2025-2026).
 
 ### Voraussetzung
 
 - Stufe 1 + 2 laufen stabil
 - Ausreichend Anomalie-Daten in `ai_predictions`
 - Claude API-Key vorhanden (Budget freigeben)
+- **NEU:** MQTT-Traces aus Phase 1 (Wokwi) oder Phase 2 (Produktion) verfuegbar
 
-### Konzept
+### Architektur: 3-Stufen Causal Analysis Pipeline
+
+```
+STUFE 3 — Erweiterte Architektur (wissenschaftlich fundiert)
+
+┌──────────────────────────────────────────────────────────────────┐
+│                    STUFE 3: LLM + KG RCA                         │
+│                                                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │  3a: TRACE       │  │  3b: CAUSAL      │  │  3c: LLM ROOT-  │  │
+│  │  ABSTRACTION     │→ │  GRAPH           │→ │  CAUSE ANALYSE   │  │
+│  │                  │  │  CONSTRUCTION    │  │                  │  │
+│  │  • MQTT-Traces   │  │  • Dynamische    │  │  • Claude API    │  │
+│  │  • Serial-Logs   │  │    Kausal-Kanten │  │  • Kontext aus   │  │
+│  │  • Audit-Logs    │  │  • Zeitliche     │  │    KG + Traces   │  │
+│  │  • Correlation   │  │    Korrelation   │  │  • Fix-Vorschlag │  │
+│  │    IDs           │  │  • ESP32 Fehler- │  │  • Confidence    │  │
+│  │                  │  │    Knowledge-    │  │    Score         │  │
+│  │  (TAAF-Ansatz)   │  │    Graph         │  │                  │  │
+│  │                  │  │  (LLMs-DCGRCA)   │  │  (auto-ops)      │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Stufe 3a: Trace-Abstraktion (MQTT + Serial + Audit)
+
+> **Wissenschaftliche Basis:** TAAF (2026) — Trace Abstraction with Knowledge Graphs, +31.2% kausales Reasoning
+
+**Was "Trace" in AutomationOne bedeutet:**
+
+| Trace-Typ | Quelle | Format | Beispiel |
+|-----------|--------|--------|----------|
+| MQTT-Trace | Mosquitto + MQTT-Handler | Topic → Payload → Timestamp | `kaiser/god/esp/ESP01/sensor/data → {"temp": 999}` |
+| Serial-Trace | ESP32 Serial-Output | `[TIMESTAMP] [LEVEL] Message` | `[E] SENSOR_READ_FAILED (1040) on GPIO 4` |
+| Audit-Trace | Server audit_log | JSON mit correlation_id | `{"event": "sensor_data_received", "correlation_id": "abc123"}` |
+| Wokwi-Trace | Wokwi MCP Serial-Output | Text (identisch zu Real-ESP) | Gleicher Output wie oben, via MCP |
+
+**Abstraktion:** Rohe Traces → strukturierte Ereignis-Sequenzen mit kausalen Beziehungen:
+
+```
+Beispiel: Sensor-Ausfall-Kette
+  T+0s:  [ESP32] SENSOR_READ_FAILED (1040) on GPIO 4
+  T+0.1s: [ESP32] mqtt_publish("kaiser/.../error", {code: 1040})
+  T+0.5s: [Server] MQTT error_handler received code 1040
+  T+0.6s: [Server] audit_log: {event: "error_received", code: 1040, severity: "warning"}
+  T+1.0s: [Grafana] Alert: "Sensor Value Out of Range" → FIRING
+  T+5.0s: [Server] ai_predictions: anomaly_score = -0.87 (Isolation Forest)
+
+→ Kausal-Kette: GPIO_FAIL → MQTT_ERROR → SERVER_HANDLER → ALERT → AI_PREDICTION
+```
+
+### Stufe 3b: Dynamische Kausal-Graphen (ESP32 Fehler-KG)
+
+> **Wissenschaftliche Basis:**
+> - LLMs-DCGRCA (2025, IEEE IoT Journal) — Dynamische Kausal-Graphen + LLMs, +14% HR@7
+> - FVDebug (2025) — For-and-Against Prompting fuer kausale Graphen, 61.2% F1
+
+**ESP32-spezifischer Fehler-Knowledge-Graph:**
+
+```
+KONZEPT: AutomationOne Fehler-KG (zu bauen)
+
+Knoten (Error-Codes als Entitaeten):
+├── Firmware-Errors: 1000-4999
+│   ├── sensor (1000-1099): GPIO_RESERVED, GPIO_CONFLICT, SENSOR_TYPE_UNKNOWN, ...
+│   ├── actuator (1100-1199): ACTUATOR_TIMEOUT, ACTUATOR_SET_FAILED, ...
+│   ├── mqtt (2000-2099): NVS_INIT_FAILED, MQTT_CONNECT_FAILED, ...
+│   ├── system (3000-3099): WIFI_INIT_FAILED, WIFI_CONNECT_TIMEOUT, ...
+│   ├── config (3100-3199): NVS_READ_FAILED, CONFIG_PARSE_ERROR, ...
+│   └── safety (4000-4099): WATCHDOG_TIMEOUT, MEMORY_FULL, EMERGENCY_STOP, ...
+├── Server-Errors: 5000-5699
+└── Test-Errors: 6000-6099
+
+Kanten (kausale Beziehungen):
+├── WIFI_INIT_FAILED (3001) → MQTT_CONNECT_FAILED (3011) [causes]
+├── SENSOR_READ_FAILED (1040) → CALIBRATION_INVALID (5201) [triggers]
+├── MEMORY_FULL (4040) → WATCHDOG_TIMEOUT (4070) [leads_to]
+├── GPIO_CONFLICT (1002) → SENSOR_READ_FAILED (1040) [causes]
+└── DB_CONNECTION_LOST (5001) → CALIBRATION_INVALID (5201) [prevents]
+```
+
+**Aufbau-Strategie:**
+1. **Statische Basis:** Error-Code-Referenz (`ERROR_CODES.md`) als Knoten importieren
+2. **Kausale Kanten:** Aus Audit-Log-Korrelationen und Wokwi Error-Injection-Ergebnissen ableiten
+3. **Dynamische Erweiterung:** LLM analysiert neue Fehler und schlaegt Kanten vor (LLMs-DCGRCA Ansatz)
+4. **Validierung:** Wokwi MCP fuer Kausal-Hypothesen-Tests (Error-Injection → beobachte Kaskade)
+
+### Stufe 3c: LLM Root-Cause-Analyse (mit KG-Kontext)
 
 | Komponente | Beschreibung | Aufwand |
 |-----------|-------------|--------|
-| Claude API Integration | Error-Context → Strukturierter Prompt → Root-Cause-Bericht | Mittel |
+| Claude API Integration | Error-Context + KG-Pfad → Strukturierter Root-Cause-Bericht | Mittel |
 | Timeline-Rekonstruktion | `correlation_id` aus Audit-Logs → Ereigniskette bauen | Gering |
-| Fix-Vorschlaege | Error-Code → ERROR_CODES.md Loesung → Kontext-spezifisch anpassen | Gering |
+| **KG-Kontext-Enrichment** | **Relevante Kausalketten aus Fehler-KG an LLM uebergeben** | Mittel |
+| **MQTT-Trace-Zusammenfassung** | **MQTT-Payload-Sequenzen als kontextueller Prompt** | Mittel |
+| Fix-Vorschlaege | Error-Code + KG-Pfad → kontext-spezifische Loesung | Gering |
+
+**Prompt-Strategie (For-and-Against, FVDebug-Ansatz):**
+
+```
+Prompt-Template fuer Root-Cause-Analyse:
+
+SYSTEM: Du bist ein IoT-Diagnose-Experte fuer AutomationOne (ESP32 + FastAPI + MQTT).
+
+KONTEXT:
+- Error-Code: {error_code} ({error_name})
+- Kausal-Graph-Pfad: {kg_path}  (z.B. GPIO_CONFLICT → SENSOR_READ_FAILED → CALIBRATION_INVALID)
+- Timeline: {trace_timeline}     (abstrahierte Ereigniskette)
+- MQTT-Traces: {mqtt_summary}    (letzte 10 relevante MQTT-Messages)
+- Isolation Forest Score: {anomaly_score}
+- Grafana Alert: {alert_name}
+
+AUFGABE:
+1. Analysiere die wahrscheinlichste Root-Cause
+2. Bewerte Confidence (0-1)
+3. Schlage einen Fix vor (Firmware / Server / Config)
+4. Identifiziere ob dies ein neues Pattern ist (→ KG-Erweiterung?)
+```
 
 ### Integration mit auto-ops
 
@@ -284,23 +401,40 @@ Das auto-ops Plugin hat bereits:
 - Cross-Layer-Korrelation (`auto-ops:cross-layer-correlation`)
 - Loki-Queries (`auto-ops:loki-queries`)
 
-**Erweiterung:** Claude API Call innerhalb auto-ops Agent fuer automatische Root-Cause-Analyse wenn:
-1. Grafana-Alert feuert (Stufe 1)
-2. Isolation Forest findet Anomalie (Stufe 2)
-3. Beide zusammen → Claude analysiert Kontext und gibt Empfehlung
+**Erweiterung fuer Stufe 3:**
+1. Grafana-Alert feuert (Stufe 1) → auto-ops sammelt Kontext
+2. Isolation Forest findet Anomalie (Stufe 2) → Score + betroffene Sensoren
+3. **NEU:** Trace-Abstraktion (Stufe 3a) → Kausal-Kette extrahieren
+4. **NEU:** KG-Lookup (Stufe 3b) → bekannte Kausalpfade abfragen
+5. Claude API analysiert alles zusammen (Stufe 3c) → Root-Cause + Fix
 
-### Implementierung (NICHT fuer ersten Testlauf)
+### MQTT-Trace-Analyse — Forschungsluecke (Pionier-Potential)
 
-**WICHTIG:** Stufe 3 ist ein Langfrist-Ziel. Fuer den ersten Testlauf reichen Stufe 1 (Rule-based) und Stufe 2 (Isolation Forest).
+> **KEIN Paper behandelt MQTT-Payload-Sequenz-Analyse mit LLMs.**
+> AutomationOne kann hier Pionierarbeit leisten.
 
-```
-Stufe 3 Roadmap:
-├── API-Key + Budget-Limit konfigurieren
-├── Prompt-Template fuer IoT-Error-Analyse erstellen
-├── Rate-Limiting (max N Calls/Stunde)
-├── Response in ai_predictions speichern (resolution: "llm_suggested")
-└── Dashboard-Widget fuer LLM-Analysen
-```
+**Was fehlt in der Forschung:**
+- Papers zu Log-Analyse (AetherLog, TAAF) behandeln HTTP/RPC/gRPC Traces
+- MQTT-spezifische Trace-Analyse (Topic-Hierarchie, QoS-Level, Retained Messages) ist unerforscht
+- AutomationOne's MQTT-Topic-Struktur (`kaiser/god/esp/{ESP_ID}/{type}/{action}`) ist ideal fuer Pattern-Matching
+
+**Ansatz fuer AutomationOne:**
+1. `mosquitto_sub -t 'kaiser/#' -v` mitschneiden (oder Wokwi MCP MQTT-Capture)
+2. Traces in strukturiertes Format umwandeln: `{timestamp, topic, payload, qos}`
+3. Anomale Sequenzen erkennen: fehlende Heartbeats, doppelte Sensor-Publishes, Error-Kaskaden
+4. LLM interpretiert anomale Sequenzen im Kontext des Fehler-KG
+
+### Implementierungsreihenfolge Stufe 3
+
+| Sub-Stufe | Was | Aufwand | Paper-Basis | Prioritaet |
+|-----------|-----|---------|-------------|-----------|
+| **3a** | MQTT/Serial/Audit Trace-Abstraktion | 1-2 Wochen | TAAF (2026), TRAIL (2025) | HOCH |
+| **3b-statisch** | Fehler-KG aus ERROR_CODES.md aufbauen | 1 Woche | LLMs-DCGRCA (2025) | MITTEL |
+| **3b-dynamisch** | KG automatisch erweitern via Audit-Logs | 2-3 Wochen | FVDebug (2025) | NIEDRIG |
+| **3c** | Claude API + KG-Kontext + Prompt-Template | 1-2 Wochen | AIOps-Forschung | HOCH |
+| **MQTT** | MQTT-Trace-Pipeline (Capture → Analyse) | 2-3 Wochen | **Eigenforschung** | MITTEL |
+
+**WICHTIG:** Stufe 3 ist weiterhin ein Langfrist-Ziel. Fuer den ersten Testlauf reichen Stufe 1 (Rule-based) und Stufe 2 (Isolation Forest). Aber die Architektur ist jetzt wissenschaftlich fundiert und kann inkrementell aufgebaut werden.
 
 ---
 
@@ -352,11 +486,31 @@ Phase 3 liefert:
 - Rule-based Alerts (Stufe 1) — laeuft in Grafana
 - Anomalie-Erkennung (Stufe 2) — laeuft als Server-Service
 - AI-Predictions in DB — abrufbar via API
+- **NEU: Trace-Abstraktions-Pipeline** (Stufe 3a) — MQTT/Serial/Audit vereinheitlicht
+- **NEU: ESP32 Fehler-Knowledge-Graph** (Stufe 3b) — kausale Beziehungen zwischen Error-Codes
+- **NEU: LLM-RCA mit KG-Kontext** (Stufe 3c) — Claude API fuer Root-Cause-Analyse
 
 Dies wird in **[Phase 4: Integration](./PHASE_4_INTEGRATION.md)** verwendet fuer:
-- Error-Analyse-Dashboard: Anomalien + Alerts in einem Dashboard
-- Feedback-Loop: Anomalie erkannt → Wokwi-Szenario erstellt (Phase 1 Rueckkopplung)
-- Cross-Layer-Korrelation: meta-analyst verbindet Alerts mit Anomalien
+- Error-Analyse-Dashboard: Anomalien + Alerts + **Kausal-Graphen** in einem Dashboard
+- Feedback-Loop: Anomalie erkannt → **Wokwi MCP validiert Hypothese** → Wokwi-Szenario erstellt
+- Cross-Layer-Korrelation: meta-analyst verbindet Alerts mit Anomalien **und KG-Pfaden**
+- **NEU: Closed-Loop Agent-Architektur** nutzt RCA-Ergebnisse fuer automatische Test-Verfeinerung
+
+---
+
+## Wissenschaftliche Fundierung Phase 3
+
+| Paper | Kernaussage | Anwendung in Phase 3 |
+|-------|-------------|---------------------|
+| Phan & Nguyen (2025) | Isolation Forest Score 0.464, 600x schneller als LSTM | **Stufe 2:** Algorithmus-Wahl bestaetigt |
+| Devi et al. (2024) | Isolation Forest → automatische Recovery | **Stufe 2:** Self-Healing-Erweiterung |
+| **LLMs-DCGRCA (2025)** | Dynamische Kausal-Graphen + LLMs, +14% HR@7 | **Stufe 3b:** Causal Graph Construction |
+| **TAAF (2026)** | Knowledge Graphs + LLMs fuer Traces, +31.2% | **Stufe 3a:** Trace-Abstraktion |
+| **TRAIL (2025)** | Formale Error-Taxonomie + Trace Reasoning | **Stufe 3a/3b:** Taxonomie-Integration |
+| **FVDebug (2025)** | For-and-Against Prompting, 61.2% F1 | **Stufe 3b:** Kausalgraph-Generierung |
+| **TraceCoder (2026)** | Multi-Agent Debugging, +34.43% Pass@1 | **Stufe 3c:** Multi-Agent-Analyse |
+| Fariha (2024) — AetherLog | KG-basierte Log-Analyse fuer Cloud-Systeme | **Stufe 3a:** Log-Abstraktion Referenz |
+| LEAT (2025) | LLM-Enhanced Anomaly Transformer | **Stufe 2/3:** Hybrid-Strategie |
 
 ---
 
@@ -368,7 +522,10 @@ Dies wird in **[Phase 4: Integration](./PHASE_4_INTEGRATION.md)** verwendet fuer
 | Stufe 2 | `server-dev` / `/server-development` | AI-Service + Repository + Router implementieren |
 | Stufe 2 | `db-inspector` | ai_predictions Schema pruefen |
 | Stufe 2 | `/auto-ops:ops` | Integration mit auto-ops |
-| Stufe 3 | (spaeter) | Claude API Integration |
+| **Stufe 3a** | `test-log-analyst` + `mqtt-debug` | **Trace-Abstraktion (MQTT + Serial + Audit)** |
+| **Stufe 3b** | `meta-analyst` | **Fehler-KG aufbauen und validieren** |
+| **Stufe 3c** | `/auto-ops:ops-diagnose` | **Claude API RCA mit KG-Kontext** |
+| **MQTT** | `mqtt-debug` | **MQTT-Trace-Pipeline** |
 | Ende | `/verify-plan` | Phase 3 gegen Codebase verifizieren |
 
 ---

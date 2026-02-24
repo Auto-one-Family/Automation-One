@@ -223,9 +223,7 @@ class TestActuatorCommandValidation:
         assert response.status_code in [200, 400, 500, 503]
 
     @pytest.mark.asyncio
-    async def test_command_on_nonexistent_actuator(
-        self, auth_headers: dict, test_esp: ESPDevice
-    ):
+    async def test_command_on_nonexistent_actuator(self, auth_headers: dict, test_esp: ESPDevice):
         """Command to non-existent GPIO is rejected."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -301,9 +299,7 @@ class TestESPRegistrationValidation:
         assert response.status_code in [200, 201]
 
     @pytest.mark.asyncio
-    async def test_reject_duplicate_device_id(
-        self, auth_headers: dict, test_esp: ESPDevice
-    ):
+    async def test_reject_duplicate_device_id(self, auth_headers: dict, test_esp: ESPDevice):
         """Duplicate device_id is rejected."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -346,9 +342,7 @@ class TestEmergencyStopValidation:
     """Validate emergency stop request inputs."""
 
     @pytest.mark.asyncio
-    async def test_emergency_stop_valid(
-        self, auth_headers: dict, test_esp: ESPDevice
-    ):
+    async def test_emergency_stop_valid(self, auth_headers: dict, test_esp: ESPDevice):
         """Valid emergency stop request."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(

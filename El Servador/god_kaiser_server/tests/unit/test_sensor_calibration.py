@@ -187,7 +187,7 @@ class TestSensorCalibrationFunctions:
         processor = MoistureSensorProcessor()
 
         calibration_points = [
-            {"raw": 3200, "reference": 0.0},    # Dry
+            {"raw": 3200, "reference": 0.0},  # Dry
             {"raw": 1500, "reference": 100.0},  # Wet
         ]
 
@@ -320,7 +320,7 @@ class TestCalibrationIntegration:
         # Calibrate with custom dry/wet points
         calibration = processor.calibrate(
             [
-                {"raw": 3500, "reference": 0.0},    # Different dry point
+                {"raw": 3500, "reference": 0.0},  # Different dry point
                 {"raw": 1200, "reference": 100.0},  # Different wet point
             ],
             method="linear",
@@ -362,4 +362,3 @@ class TestCalibrationIntegration:
 
         # Should be 1000.0 + 2.0 = 1002.0
         assert result.value == pytest.approx(1002.0, rel=0.01)
-

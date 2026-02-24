@@ -23,13 +23,13 @@ context: inline
 ### Layer-Uebersicht
 
 ```
-Entry: main.ts → App.vue → Router → Views (11 aktiv)
-State: 13 Pinia Stores (esp + 12 shared/stores/)
-API:   16 Module via Axios mit Interceptors
+Entry: main.ts → App.vue → Router → Views (16 aktiv)
+State: 13 Pinia Stores (1 esp + 12 shared/stores/)
+API:   17 Module via Axios mit Interceptors
 WS:    Singleton Service → useWebSocket Composable → Store-Handler (22 Handler im ESP Store)
-UI:    ~128 Components (layout/, common/, dashboard/, esp/, zones/, system-monitor/, rules/, shared/design/, ...)
+UI:    129 .vue Components (15 subdirs: layout/, common/, dashboard/, esp/, zones/, charts/, system-monitor/, rules/, shared/design/, ...)
 Design: shared/design/ (primitives/ 9, layout/ 3, patterns/ 5) + styles/ (5 CSS)
-Utils: 14 Dateien | Types: 5 Dateien | Composables: 12
+Utils: 14 Dateien | Types: 5 Dateien | Composables: 16
 ```
 
 ### Entry Point (`El Frontend/src/main.ts`)
@@ -280,13 +280,13 @@ Include: src/**/*.ts, src/**/*.tsx, src/**/*.vue
 
 | Quelle | Zugriff | Format |
 |--------|---------|--------|
-| Docker stdout/stderr | `docker compose logs el-frontend` | Text (Vite + console.*) |
+| Docker stdout/stderr | `docker compose logs el-frontend` | JSON structured (createLogger → Alloy Stage 3) + Text (Vite) |
 | **Loki** (Monitoring-Profil) | `curl` Loki API, Label `compose_service="el-frontend"` (ROADMAP §1.1) | JSON, 7 Tage Retention |
 | **Grafana** (Monitoring-Profil) | `http://localhost:3000` (Panel 5: Log Volume, Panel 6: Errors) | Dashboard |
 | Browser Console | Nur Browser DevTools (Blind Spot) | DOM-Events, User-Interaktionen |
 | `logs/current/frontend_container.log` | Nach `scripts/debug/start_session.sh` | Ephemer, Snapshot |
 
-Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend"`, `stream="stdout"/"stderr"` (Promtail: `reference/ROADMAP_KI_MONITORING.md` §1.1)
+Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend"`, `stream="stdout"/"stderr"` (Alloy: `reference/ROADMAP_KI_MONITORING.md` §1.1)
 
 ---
 

@@ -23,8 +23,6 @@ import SensorColumn from './SensorColumn.vue'
 import ActuatorColumn from './ActuatorColumn.vue'
 import AddSensorModal from './AddSensorModal.vue'
 import AddActuatorModal from './AddActuatorModal.vue'
-import EditSensorModal from './EditSensorModal.vue'
-import type { EditableSensor } from './EditSensorModal.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
 // GpioPicker, Badge used by extracted modal components
 import { Badge } from '@/shared/design/primitives'
@@ -109,28 +107,6 @@ function handleSensorDrop(sensor: ChartSensor) {
 const isDragOver = ref(false)
 const showAddSensorModal = ref(false)
 const showAddActuatorModal = ref(false)
-
-// =============================================================================
-// EDIT SENSOR STATE (Phase 2F) — delegated to EditSensorModal component
-// =============================================================================
-const showEditSensorModal = ref(false)
-const editSensorGpio = ref<number | null>(null)
-
-/** Payload for EditSensorModal — computed from current device sensors */
-const editSensorPayload = computed<EditableSensor | null>(() => {
-  if (editSensorGpio.value === null) return null
-  const sensor = sensors.value.find(s => s.gpio === editSensorGpio.value)
-  if (!sensor) return null
-  return {
-    gpio: sensor.gpio,
-    sensor_type: sensor.sensor_type,
-    name: sensor.name || null,
-    operating_mode: sensor.operating_mode || null,
-    timeout_seconds: sensor.timeout_seconds ?? null,
-    schedule_config: sensor.schedule_config as { type: string; expression: string } | null,
-  }
-})
-
 
 // =============================================================================
 // Debug Logger
@@ -266,20 +242,6 @@ function onDrop(event: DragEvent) {
 
 
 // =============================================================================
-// EDIT SENSOR HANDLERS (Phase 2F)
-// =============================================================================
-
-/**
- * Open edit modal for a sensor
- */
-function openEditSensorModal(gpio: number) {
-  editSensorGpio.value = gpio
-  showEditSensorModal.value = true
-}
-
-
-
-// =============================================================================
 // Refs
 // =============================================================================
 const containerRef = ref<HTMLElement | null>(null)
@@ -350,9 +312,7 @@ async function saveName() {
 // =============================================================================
 
 function handleSensorClick(gpio: number) {
-  // Phase 2F: Öffne Edit-Modal statt nur Selektion zu toggeln
-  openEditSensorModal(gpio)
-  // Auch Event emittieren für externe Handler
+  // Emit to parent → opens SensorConfigPanel in SlideOver
   emit('sensorClick', gpio)
 }
 
@@ -667,17 +627,7 @@ watch(
 
   <!-- Old inline sensor/actuator modals removed (see AddSensorModal.vue, AddActuatorModal.vue) -->
 
-  <!-- Edit Sensor Modal (extracted component) -->
-  <EditSensorModal
-    v-model="showEditSensorModal"
-    :esp-id="espId"
-    :sensor="editSensorPayload"
-    :is-mock="isMock"
-    @saved="() => espStore.fetchAll()"
-    @deleted="() => espStore.fetchAll()"
-  />
-
-  <!-- OLD INLINE EDIT MODAL REMOVED - replaced by EditSensorModal component -->
+  <!-- Sensor config now handled by SensorConfigPanel in SlideOver (parent view) -->
 </template>
 
 <style scoped src="./ESPOrbitalLayout.css"></style>

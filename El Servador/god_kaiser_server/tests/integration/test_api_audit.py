@@ -38,7 +38,9 @@ async def operator_user(db_session: AsyncSession):
 @pytest.fixture
 def auth_headers(operator_user: User):
     """Get authorization headers."""
-    token = create_access_token(user_id=operator_user.id, additional_claims={"role": operator_user.role})
+    token = create_access_token(
+        user_id=operator_user.id, additional_claims={"role": operator_user.role}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -113,7 +115,9 @@ class TestAuditList:
         assert all(log["severity"] == "critical" for log in data["data"])
 
     @pytest.mark.asyncio
-    async def test_list_audit_logs_filter_by_event_type(self, auth_headers: dict, sample_audit_logs):
+    async def test_list_audit_logs_filter_by_event_type(
+        self, auth_headers: dict, sample_audit_logs
+    ):
         """Test filtering audit logs by event type."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(

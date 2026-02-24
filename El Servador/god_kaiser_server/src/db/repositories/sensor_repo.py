@@ -28,7 +28,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
     async def create(self, sensor: Optional[SensorConfig] = None, **fields) -> SensorConfig:
         """
         Create a new sensor config.
-        
+
         Accepts either a SensorConfig instance or model field kwargs.
         """
         if sensor is None:
@@ -38,9 +38,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         await self.session.refresh(sensor)
         return sensor
 
-    async def get_by_esp_and_gpio(
-        self, esp_id: uuid.UUID, gpio: int
-    ) -> Optional[SensorConfig]:
+    async def get_by_esp_and_gpio(self, esp_id: uuid.UUID, gpio: int) -> Optional[SensorConfig]:
         """
         Get sensor by ESP ID and GPIO.
 
@@ -51,15 +49,11 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             SensorConfig or None if not found
         """
-        stmt = select(SensorConfig).where(
-            SensorConfig.esp_id == esp_id, SensorConfig.gpio == gpio
-        )
+        stmt = select(SensorConfig).where(SensorConfig.esp_id == esp_id, SensorConfig.gpio == gpio)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_all_by_esp_and_gpio(
-        self, esp_id: uuid.UUID, gpio: int
-    ) -> list[SensorConfig]:
+    async def get_all_by_esp_and_gpio(self, esp_id: uuid.UUID, gpio: int) -> list[SensorConfig]:
         """
         Get ALL sensors on a specific GPIO (Multi-Value Support).
 
@@ -73,9 +67,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             List of SensorConfig instances on this GPIO
         """
-        stmt = select(SensorConfig).where(
-            SensorConfig.esp_id == esp_id, SensorConfig.gpio == gpio
-        )
+        stmt = select(SensorConfig).where(SensorConfig.esp_id == esp_id, SensorConfig.gpio == gpio)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -99,7 +91,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
             SensorConfig.gpio == gpio,
-            SensorConfig.sensor_type == sensor_type
+            SensorConfig.sensor_type == sensor_type,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -128,9 +120,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Number of sensors
         """
-        stmt = select(func.count()).select_from(SensorConfig).where(
-            SensorConfig.esp_id == esp_id
-        )
+        stmt = select(func.count()).select_from(SensorConfig).where(SensorConfig.esp_id == esp_id)
         result = await self.session.execute(stmt)
         return result.scalar() or 0
 
@@ -201,15 +191,16 @@ class SensorRepository(BaseRepository[SensorConfig]):
         total_result = await self.session.execute(count_stmt)
         total = total_result.scalar() or 0
 
-        stmt = (
-            select(SensorConfig, ESPDevice.device_id)
-            .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
+        stmt = select(SensorConfig, ESPDevice.device_id).join(
+            ESPDevice, SensorConfig.esp_id == ESPDevice.id
         )
         if filters:
             stmt = stmt.where(and_(*filters))
-        stmt = stmt.order_by(
-            SensorConfig.created_at.desc(), SensorConfig.id.desc()
-        ).offset(offset).limit(limit)
+        stmt = (
+            stmt.order_by(SensorConfig.created_at.desc(), SensorConfig.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
 
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -273,8 +264,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         return sensor_data
 
     async def get_latest_data(
-        self, esp_id: uuid.UUID, gpio: int,
-        sensor_type: Optional[str] = None, limit: int = 1
+        self, esp_id: uuid.UUID, gpio: int, sensor_type: Optional[str] = None, limit: int = 1
     ) -> list[SensorData]:
         """
         Get latest sensor data.
@@ -293,18 +283,12 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if sensor_type:
             filters.append(SensorData.sensor_type == sensor_type)
 
-        stmt = (
-            select(SensorData)
-            .where(*filters)
-            .order_by(SensorData.timestamp.desc())
-            .limit(limit)
-        )
+        stmt = select(SensorData).where(*filters).order_by(SensorData.timestamp.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_latest_reading(
-        self, esp_id: uuid.UUID, gpio: int,
-        sensor_type: Optional[str] = None
+        self, esp_id: uuid.UUID, gpio: int, sensor_type: Optional[str] = None
     ) -> Optional[SensorData]:
         """
         Get latest sensor reading (single item).
@@ -360,24 +344,19 @@ class SensorRepository(BaseRepository[SensorConfig]):
                 SensorData.gpio,
                 func.max(SensorData.timestamp).label("max_ts"),
             )
-            .where(
-                tuple_(SensorData.esp_id, SensorData.gpio).in_(sensor_keys)
-            )
+            .where(tuple_(SensorData.esp_id, SensorData.gpio).in_(sensor_keys))
             .group_by(SensorData.esp_id, SensorData.gpio)
             .subquery()
         )
 
         # Main query: Join with subquery to get full SensorData rows
-        stmt = (
-            select(SensorData)
-            .join(
-                max_timestamp_subq,
-                and_(
-                    SensorData.esp_id == max_timestamp_subq.c.esp_id,
-                    SensorData.gpio == max_timestamp_subq.c.gpio,
-                    SensorData.timestamp == max_timestamp_subq.c.max_ts,
-                ),
-            )
+        stmt = select(SensorData).join(
+            max_timestamp_subq,
+            and_(
+                SensorData.esp_id == max_timestamp_subq.c.esp_id,
+                SensorData.gpio == max_timestamp_subq.c.gpio,
+                SensorData.timestamp == max_timestamp_subq.c.max_ts,
+            ),
         )
 
         result = await self.session.execute(stmt)
@@ -422,35 +401,28 @@ class SensorRepository(BaseRepository[SensorConfig]):
                 func.max(SensorData.timestamp).label("max_ts"),
             )
             .where(
-                tuple_(
-                    SensorData.esp_id, SensorData.gpio, SensorData.sensor_type
-                ).in_(sensor_keys)
+                tuple_(SensorData.esp_id, SensorData.gpio, SensorData.sensor_type).in_(sensor_keys)
             )
             .group_by(SensorData.esp_id, SensorData.gpio, SensorData.sensor_type)
             .subquery()
         )
 
         # Main query: Join with subquery to get full SensorData rows
-        stmt = (
-            select(SensorData)
-            .join(
-                max_timestamp_subq,
-                and_(
-                    SensorData.esp_id == max_timestamp_subq.c.esp_id,
-                    SensorData.gpio == max_timestamp_subq.c.gpio,
-                    SensorData.sensor_type == max_timestamp_subq.c.sensor_type,
-                    SensorData.timestamp == max_timestamp_subq.c.max_ts,
-                ),
-            )
+        stmt = select(SensorData).join(
+            max_timestamp_subq,
+            and_(
+                SensorData.esp_id == max_timestamp_subq.c.esp_id,
+                SensorData.gpio == max_timestamp_subq.c.gpio,
+                SensorData.sensor_type == max_timestamp_subq.c.sensor_type,
+                SensorData.timestamp == max_timestamp_subq.c.max_ts,
+            ),
         )
 
         result = await self.session.execute(stmt)
         data_list = result.scalars().all()
 
         # Build lookup dict: (esp_id, gpio, sensor_type) → SensorData
-        return {
-            (d.esp_id, d.gpio, d.sensor_type): d for d in data_list
-        }
+        return {(d.esp_id, d.gpio, d.sensor_type): d for d in data_list}
 
     async def query_data(
         self,
@@ -751,9 +723,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
             Dictionary mapping data source to count
             Example: {"production": 1000, "mock": 50, "test": 25}
         """
-        stmt = (
-            select(SensorData.data_source, func.count(SensorData.id))
-            .group_by(SensorData.data_source)
+        stmt = select(SensorData.data_source, func.count(SensorData.id)).group_by(
+            SensorData.data_source
         )
         result = await self.session.execute(stmt)
         return {source: count for source, count in result.all()}
@@ -780,15 +751,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
             SensorConfig.interface_type == "I2C",
-            SensorConfig.i2c_address == i2c_address
+            SensorConfig.i2c_address == i2c_address,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_onewire_address(
-        self,
-        esp_id: uuid.UUID,
-        onewire_address: str
+        self, esp_id: uuid.UUID, onewire_address: str
     ) -> Optional[SensorConfig]:
         """
         Get sensor by ESP ID and OneWire device address.
@@ -805,17 +774,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
             SensorConfig.interface_type == "ONEWIRE",
-            SensorConfig.onewire_address == onewire_address
+            SensorConfig.onewire_address == onewire_address,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_esp_gpio_type_and_onewire(
-        self,
-        esp_id: uuid.UUID,
-        gpio: int,
-        sensor_type: str,
-        onewire_address: str
+        self, esp_id: uuid.UUID, gpio: int, sensor_type: str, onewire_address: str
     ) -> Optional[SensorConfig]:
         """
         Get sensor by ESP ID, GPIO, sensor_type, AND OneWire address (4-way lookup).
@@ -849,17 +814,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
             SensorConfig.esp_id == esp_id,
             SensorConfig.gpio == gpio,
             SensorConfig.sensor_type == sensor_type,
-            SensorConfig.onewire_address == onewire_address
+            SensorConfig.onewire_address == onewire_address,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_esp_gpio_type_and_i2c(
-        self,
-        esp_id: uuid.UUID,
-        gpio: int,
-        sensor_type: str,
-        i2c_address: int
+        self, esp_id: uuid.UUID, gpio: int, sensor_type: str, i2c_address: int
     ) -> Optional[SensorConfig]:
         """
         Get sensor by ESP ID, GPIO, sensor_type, AND I2C address (4-way lookup).
@@ -893,15 +854,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
             SensorConfig.esp_id == esp_id,
             SensorConfig.gpio == gpio,
             SensorConfig.sensor_type == sensor_type,
-            SensorConfig.i2c_address == i2c_address
+            SensorConfig.i2c_address == i2c_address,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_all_by_interface(
-        self,
-        esp_id: uuid.UUID,
-        interface_type: str
+        self, esp_id: uuid.UUID, interface_type: str
     ) -> list[SensorConfig]:
         """
         Get all sensors of a specific interface type for an ESP.
@@ -918,8 +877,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             List of SensorConfig instances
         """
         stmt = select(SensorConfig).where(
-            SensorConfig.esp_id == esp_id,
-            SensorConfig.interface_type == interface_type
+            SensorConfig.esp_id == esp_id, SensorConfig.interface_type == interface_type
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

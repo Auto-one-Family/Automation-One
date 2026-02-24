@@ -105,9 +105,9 @@ function formatRelativeTime(isoString: string | null): string {
   border-radius: 50%;
 }
 
-.severity-info { background: #3b82f6; }
-.severity-warning { background: #fbbf24; }
-.severity-error { background: #ef4444; }
+.severity-info { background: var(--color-accent); }
+.severity-warning { background: var(--color-warning); }
+.severity-error { background: var(--color-error); }
 .severity-critical { background: #dc2626; }
 
 .event-info {

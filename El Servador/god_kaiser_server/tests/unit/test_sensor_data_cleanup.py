@@ -28,28 +28,23 @@ def maintenance_settings():
         sensor_data_cleanup_dry_run=True,  # ⚠️ Default: DRY-RUN
         sensor_data_cleanup_batch_size=1000,
         sensor_data_cleanup_max_batches=100,
-
         # Command History
         command_history_retention_enabled=False,
         command_history_retention_days=14,
         command_history_cleanup_dry_run=True,
         command_history_cleanup_batch_size=1000,
         command_history_cleanup_max_batches=50,
-
         # Orphaned Mocks
         orphaned_mock_cleanup_enabled=True,
         orphaned_mock_auto_delete=False,  # ⚠️ Default: WARN ONLY
         orphaned_mock_age_hours=24,
-
         # Health Checks
         heartbeat_timeout_seconds=180,
         mqtt_health_check_interval_seconds=30,
         esp_health_check_interval_seconds=60,
-
         # Stats
         stats_aggregation_enabled=True,
         stats_aggregation_interval_minutes=60,
-
         # Advanced Safety
         cleanup_alert_threshold_percent=10.0,
         cleanup_max_records_per_run=100000,
@@ -188,6 +183,7 @@ class TestSensorDataCleanup:
         - Cleanup läuft trotzdem (DRY-RUN)
         """
         import logging
+
         caplog.set_level(logging.WARNING)
 
         # Settings: 10% Alert-Threshold
@@ -267,12 +263,17 @@ class TestSensorDataCleanup:
 
         mock_session.execute.side_effect = [
             total_records_mock,  # Total count
-            to_delete_mock,      # To delete count
-            batch1, delete_result,  # Batch 1
-            batch2, delete_result,  # Batch 2
-            batch3, delete_result,  # Batch 3
-            batch4, delete_result,  # Batch 4
-            batch5, delete_result,  # Batch 5
+            to_delete_mock,  # To delete count
+            batch1,
+            delete_result,  # Batch 1
+            batch2,
+            delete_result,  # Batch 2
+            batch3,
+            delete_result,  # Batch 3
+            batch4,
+            delete_result,  # Batch 4
+            batch5,
+            delete_result,  # Batch 5
             empty_batch,  # No more records
         ]
 
@@ -323,9 +324,11 @@ class TestSensorDataCleanup:
 
         mock_session.execute.side_effect = [
             total_records_mock,  # Total count
-            to_delete_mock,      # To delete count
-            batch1, delete_result,  # Batch 1 OK
-            batch2, delete_result,  # Batch 2 OK
+            to_delete_mock,  # To delete count
+            batch1,
+            delete_result,  # Batch 1 OK
+            batch2,
+            delete_result,  # Batch 2 OK
             Exception("DB-Lock Error"),  # Batch 3 FEHLER
         ]
 
@@ -419,6 +422,7 @@ class TestSensorDataCleanup:
 # ================================================================
 # INTEGRATION TESTS (Optional)
 # ================================================================
+
 
 class TestSensorDataCleanupIntegration:
     """Integration Tests mit echter DB (optional)"""

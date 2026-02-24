@@ -4,9 +4,10 @@ AutoOps Agent - Main orchestrator for autonomous operations.
 The agent:
 1. Initializes context and discovers plugins
 2. Asks initial questions if needed (sensor types, preferences)
-3. Executes plugins in the correct order
-4. Documents everything
-5. Reports results
+3. Executes plugins in the correct order (capability-based)
+4. Handles rollback on critical failures
+5. Documents everything with structured logging
+6. Reports results
 
 Usage:
     agent = AutoOpsAgent(server_url="http://localhost:8000")
@@ -21,13 +22,27 @@ Usage:
     result = await agent.run_with_answers(answers={...})
 """
 
-from typing import Any, Optional
+import logging
+from typing import Any
 
 from .api_client import APIError, GodKaiserClient
-from .base_plugin import AutoOpsPlugin, PluginCapability, PluginResult
-from .context import AutoOpsContext, ESPSpec
+from .base_plugin import PluginCapability, PluginResult
+from .context import AutoOpsContext, DeviceMode, ESPSpec
 from .plugin_registry import PluginRegistry
 from .reporter import AutoOpsReporter
+
+
+def _get_logger(name: str) -> logging.Logger:
+    """Get a logger, preferring the server's logging_config if available."""
+    try:
+        from ...core.logging_config import get_logger
+
+        return get_logger(name)
+    except (ImportError, ValueError):
+        return logging.getLogger(name)
+
+
+logger = _get_logger("autoops.agent")
 
 
 class AutoOpsAgent:
@@ -42,9 +57,11 @@ class AutoOpsAgent:
         self,
         server_url: str = "http://localhost:8000",
         username: str = "admin",
-        password: str = "admin",
+        password: str = "TestAdmin123!",
         dry_run: bool = False,
         verbose: bool = True,
+        device_mode: str = "mock",
+        max_retries: int = 3,
     ):
         self.context = AutoOpsContext(
             server_url=server_url,
@@ -52,8 +69,13 @@ class AutoOpsAgent:
             password=password,
             dry_run=dry_run,
             verbose=verbose,
+            device_mode=DeviceMode(device_mode),
+            max_retries=max_retries,
         )
-        self.client = GodKaiserClient(base_url=server_url)
+        self.client = GodKaiserClient(
+            base_url=server_url,
+            max_retries=max_retries,
+        )
         self.registry = PluginRegistry()
         self.reporter = AutoOpsReporter()
         self._plugin_results: list[tuple[str, PluginResult]] = []
@@ -65,9 +87,12 @@ class AutoOpsAgent:
 
         Returns dict with initialization status and discovered plugins.
         """
+        logger.info("Initializing AutoOps session %s", self.context.session_id)
+
         # Discover plugins
         self.registry.reset()
         discovered = self.registry.discover_plugins()
+        logger.info("Discovered %d plugins", discovered)
 
         # Authenticate with server
         auth_status = "not_attempted"
@@ -75,6 +100,7 @@ class AutoOpsAgent:
             await self.client.authenticate(self.context.username, self.context.password)
             self.context.auth_token = self.client._token
             auth_status = "authenticated"
+            logger.info("Authentication successful for user '%s'", self.context.username)
         except APIError as e:
             auth_status = f"failed: {e.detail}"
             self.context.log_error(f"Authentication failed: {e.detail}")
@@ -88,8 +114,10 @@ class AutoOpsAgent:
             health = await self.client.check_health()
             health_status = health.get("status", "unknown")
             self.context.system_snapshot = None  # Will be populated on first scan
+            logger.info("Server health: %s", health_status)
         except Exception as e:
             health_status = f"unreachable: {str(e)}"
+            logger.error("Server unreachable: %s", e)
 
         self._initialized = True
 
@@ -100,6 +128,7 @@ class AutoOpsAgent:
             "auth_status": auth_status,
             "health_status": health_status,
             "server_url": self.context.server_url,
+            "device_mode": self.context.device_mode.value,
         }
 
     async def scan_system(self) -> dict[str, Any]:
@@ -116,14 +145,26 @@ class AutoOpsAgent:
             # Get all devices
             devices_response = await self.client.list_devices()
             devices = devices_response.get("devices", devices_response.get("data", []))
-            if isinstance(devices_response, dict) and "devices" not in devices_response and "data" not in devices_response:
+            if (
+                isinstance(devices_response, dict)
+                and "devices" not in devices_response
+                and "data" not in devices_response
+            ):
                 devices = devices_response.get("items", [])
             snapshot.esp_devices = devices if isinstance(devices, list) else []
             snapshot.online_devices = sum(
-                1 for d in snapshot.esp_devices
+                1
+                for d in snapshot.esp_devices
                 if isinstance(d, dict) and d.get("status") == "online"
             )
             snapshot.offline_devices = len(snapshot.esp_devices) - snapshot.online_devices
+            snapshot.mock_devices = sum(
+                1
+                for d in snapshot.esp_devices
+                if isinstance(d, dict)
+                and (d.get("device_id", "").startswith("MOCK_") or d.get("is_mock", False))
+            )
+            snapshot.real_devices = len(snapshot.esp_devices) - snapshot.mock_devices
 
             # Get zones
             try:
@@ -155,13 +196,26 @@ class AutoOpsAgent:
             self.context.log_error(f"System scan failed: {e.detail}")
 
         from datetime import datetime, timezone
+
         snapshot.timestamp = datetime.now(timezone.utc).isoformat()
         self.context.system_snapshot = snapshot
+
+        logger.info(
+            "System scan: %d devices (%d online, %d mock, %d real), %d sensors, %d actuators",
+            len(snapshot.esp_devices),
+            snapshot.online_devices,
+            snapshot.mock_devices,
+            snapshot.real_devices,
+            snapshot.total_sensors,
+            snapshot.total_actuators,
+        )
 
         return {
             "devices": len(snapshot.esp_devices),
             "online": snapshot.online_devices,
             "offline": snapshot.offline_devices,
+            "mock": snapshot.mock_devices,
+            "real": snapshot.real_devices,
             "sensors": snapshot.total_sensors,
             "actuators": snapshot.total_actuators,
             "zones": snapshot.zones,
@@ -179,8 +233,14 @@ class AutoOpsAgent:
                 "question": "Welche Sensoren soll der ESP haben?",
                 "header": "Sensoren",
                 "options": [
-                    {"label": "DS18B20 (Temperatur)", "description": "OneWire Temperatursensor, wasserdicht"},
-                    {"label": "SHT31 (Temp+Humidity)", "description": "I2C Temperatur- und Feuchtigkeitssensor"},
+                    {
+                        "label": "DS18B20 (Temperatur)",
+                        "description": "OneWire Temperatursensor, wasserdicht",
+                    },
+                    {
+                        "label": "SHT31 (Temp+Humidity)",
+                        "description": "I2C Temperatur- und Feuchtigkeitssensor",
+                    },
                     {"label": "PH Sensor", "description": "Analoger pH-Wert-Sensor"},
                     {"label": "EC Sensor", "description": "Analoger EC/Leitfähigkeitssensor"},
                 ],
@@ -190,8 +250,14 @@ class AutoOpsAgent:
                 "question": "Welche Aktoren soll der ESP haben?",
                 "header": "Aktoren",
                 "options": [
-                    {"label": "Relay (Pumpe)", "description": "Digitales Relay für Pumpensteuerung"},
-                    {"label": "Relay (Ventil)", "description": "Digitales Relay für Ventilsteuerung"},
+                    {
+                        "label": "Relay (Pumpe)",
+                        "description": "Digitales Relay für Pumpensteuerung",
+                    },
+                    {
+                        "label": "Relay (Ventil)",
+                        "description": "Digitales Relay für Ventilsteuerung",
+                    },
                     {"label": "PWM Fan", "description": "PWM-gesteuerter Lüfter"},
                     {"label": "Keine", "description": "Keine Aktoren konfigurieren"},
                 ],
@@ -225,24 +291,41 @@ class AutoOpsAgent:
         # Sensor type mapping with defaults
         sensor_map = {
             "DS18B20": SensorSpec(
-                sensor_type="temperature", name="Temperature Sensor",
-                interface_type="ONEWIRE", raw_value=22.0, unit="°C",
+                sensor_type="temperature",
+                name="Temperature Sensor",
+                interface_type="ONEWIRE",
+                raw_value=22.0,
+                unit="°C",
             ),
             "SHT31": SensorSpec(
-                sensor_type="temperature", name="SHT31 Temperature",
-                interface_type="I2C", i2c_address=0x44, raw_value=22.0, unit="°C",
+                sensor_type="temperature",
+                name="SHT31 Temperature",
+                interface_type="I2C",
+                i2c_address=0x44,
+                raw_value=22.0,
+                unit="°C",
             ),
             "SHT31_humidity": SensorSpec(
-                sensor_type="humidity", name="SHT31 Humidity",
-                interface_type="I2C", i2c_address=0x44, raw_value=55.0, unit="%",
+                sensor_type="humidity",
+                name="SHT31 Humidity",
+                interface_type="I2C",
+                i2c_address=0x44,
+                raw_value=55.0,
+                unit="%",
             ),
             "PH": SensorSpec(
-                sensor_type="ph", name="pH Sensor",
-                interface_type="ANALOG", raw_value=6.5, unit="pH",
+                sensor_type="ph",
+                name="pH Sensor",
+                interface_type="ANALOG",
+                raw_value=6.5,
+                unit="pH",
             ),
             "EC": SensorSpec(
-                sensor_type="ec", name="EC Sensor",
-                interface_type="ANALOG", raw_value=1.2, unit="mS/cm",
+                sensor_type="ec",
+                name="EC Sensor",
+                interface_type="ANALOG",
+                raw_value=1.2,
+                unit="mS/cm",
             ),
         }
 
@@ -290,7 +373,13 @@ class AutoOpsAgent:
         zone = answers.get("zone", "")
         if isinstance(zone, str) and zone and "keine" not in zone.lower():
             # Auto-generate zone_id from zone_name
-            zone_id = zone.lower().replace(" ", "_").replace("ä", "ae").replace("ö", "oe").replace("ü", "ue")
+            zone_id = (
+                zone.lower()
+                .replace(" ", "_")
+                .replace("ä", "ae")
+                .replace("ö", "oe")
+                .replace("ü", "ue")
+            )
             spec.zone_name = zone
         else:
             zone_id = None
@@ -363,19 +452,17 @@ class AutoOpsAgent:
         # Determine which plugins to run
         if plugins:
             plugins_to_run = [
-                self.registry.get(name)
-                for name in plugins
-                if self.registry.get(name)
+                self.registry.get(name) for name in plugins if self.registry.get(name)
             ]
         else:
             # Run all plugins in capability order
             order = [
-                PluginCapability.VALIDATE,    # First: check system health
-                PluginCapability.CONFIGURE,    # Then: configure devices
-                PluginCapability.DIAGNOSE,     # Then: diagnose issues
-                PluginCapability.FIX,          # Then: fix issues
-                PluginCapability.MONITOR,      # Then: verify
-                PluginCapability.DOCUMENT,     # Finally: document
+                PluginCapability.VALIDATE,  # First: check system health
+                PluginCapability.CONFIGURE,  # Then: configure devices
+                PluginCapability.DIAGNOSE,  # Then: diagnose issues
+                PluginCapability.FIX,  # Then: fix issues
+                PluginCapability.MONITOR,  # Then: verify
+                PluginCapability.DOCUMENT,  # Finally: document
             ]
             seen = set()
             plugins_to_run = []
@@ -386,18 +473,38 @@ class AutoOpsAgent:
                         plugins_to_run.append(p)
 
         # Execute plugins
+        logger.info("Executing %d plugins in order", len(plugins_to_run))
         for plugin in plugins_to_run:
             if plugin is None:
                 continue
-            result = await self.run_plugin(plugin.name)
 
-            # Stop on critical failure
-            if not result.success and any(
-                a.severity.value == "critical" for a in result.actions
-            ):
-                self.context.log_error(
-                    f"Critical failure in {plugin.name}, stopping execution"
-                )
+            logger.info("Running plugin: %s", plugin.name)
+            result = await self.run_plugin(plugin.name)
+            logger.info(
+                "Plugin %s: %s - %s",
+                plugin.name,
+                "PASS" if result.success else "FAIL",
+                result.summary,
+            )
+
+            # Stop on critical failure, attempt rollback
+            if not result.success and any(a.severity.value == "critical" for a in result.actions):
+                self.context.log_error(f"Critical failure in {plugin.name}, stopping execution")
+                # Attempt rollback for the failed plugin
+                try:
+                    rollback_result = await plugin.rollback(
+                        self.context,
+                        self.client,
+                        result.actions,
+                    )
+                    if rollback_result.success:
+                        logger.info("Rollback for %s completed", plugin.name)
+                    else:
+                        logger.warning(
+                            "Rollback for %s failed: %s", plugin.name, rollback_result.summary
+                        )
+                except Exception as e:
+                    logger.error("Rollback error for %s: %s", plugin.name, e)
                 break
 
         # Generate report
@@ -409,6 +516,15 @@ class AutoOpsAgent:
         )
 
         summary = self.reporter.generate_quick_summary(self._plugin_results)
+        all_passed = all(r.success for _, r in self._plugin_results)
+
+        logger.info(
+            "Session %s complete: %d plugins, %s, report: %s",
+            self.context.session_id,
+            len(self._plugin_results),
+            "ALL PASSED" if all_passed else "ISSUES FOUND",
+            report_path,
+        )
 
         return {
             "session_id": self.context.session_id,
@@ -416,7 +532,7 @@ class AutoOpsAgent:
             "summary": summary,
             "scan": scan_result,
             "plugins_run": len(self._plugin_results),
-            "all_passed": all(r.success for _, r in self._plugin_results),
+            "all_passed": all_passed,
             "context": self.context.get_summary(),
         }
 

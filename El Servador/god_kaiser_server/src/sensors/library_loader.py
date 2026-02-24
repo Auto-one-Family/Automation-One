@@ -12,7 +12,6 @@ Usage:
 
 import importlib
 import inspect
-import os
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -95,7 +94,7 @@ class LibraryLoader:
         """
         # Normalize sensor type (ESP32 → Server Processor)
         normalized_type = normalize_sensor_type(sensor_type)
-        
+
         processor = self.processors.get(normalized_type)
 
         if processor is None:
@@ -117,9 +116,7 @@ class LibraryLoader:
         logger.info("Reloading sensor libraries...")
         self.processors.clear()
         self._discover_libraries()
-        logger.info(
-            f"Libraries reloaded. {len(self.processors)} processors available."
-        )
+        logger.info(f"Libraries reloaded. {len(self.processors)} processors available.")
 
     def get_available_sensors(self) -> list[str]:
         """
@@ -153,8 +150,7 @@ class LibraryLoader:
             }
         """
         return {
-            sensor_type: instance.__class__
-            for sensor_type, instance in self.processors.items()
+            sensor_type: instance.__class__ for sensor_type, instance in self.processors.items()
         }
 
     def _discover_libraries(self):
@@ -166,8 +162,7 @@ class LibraryLoader:
         """
         if not self.library_path.exists():
             logger.error(
-                f"Sensor libraries path not found: {self.library_path}. "
-                "No processors loaded."
+                f"Sensor libraries path not found: {self.library_path}. " "No processors loaded."
             )
             return
 
@@ -221,10 +216,10 @@ class LibraryLoader:
                 f"sensors.sensor_libraries.active.{module_name}",
                 f"god_kaiser_server.src.sensors.sensor_libraries.active.{module_name}",
             ]
-            
+
             module = None
             last_error = None
-            
+
             for full_module_path in import_paths:
                 try:
                     module = importlib.import_module(full_module_path)
@@ -232,9 +227,11 @@ class LibraryLoader:
                 except ImportError as e:
                     last_error = e
                     continue
-            
+
             if module is None:
-                raise ImportError(f"Could not import {module_name} from any path. Last error: {last_error}")
+                raise ImportError(
+                    f"Could not import {module_name} from any path. Last error: {last_error}"
+                )
 
             # Find all classes in module that extend BaseSensorProcessor
             processor_classes = []
@@ -251,8 +248,7 @@ class LibraryLoader:
 
             if not processor_classes:
                 logger.warning(
-                    f"Module '{module_name}' has no BaseSensorProcessor subclass. "
-                    "Skipping."
+                    f"Module '{module_name}' has no BaseSensorProcessor subclass. " "Skipping."
                 )
                 return []
 
@@ -266,9 +262,7 @@ class LibraryLoader:
                         f"Successfully loaded: {processor_class.__name__} from {module_name}"
                     )
                 except Exception as e:
-                    logger.error(
-                        f"Failed to instantiate {processor_class.__name__}: {e}"
-                    )
+                    logger.error(f"Failed to instantiate {processor_class.__name__}: {e}")
 
             if len(processor_classes) > 1:
                 logger.info(

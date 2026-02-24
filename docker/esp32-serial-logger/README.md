@@ -209,13 +209,16 @@ socat TCP-LISTEN:3334,fork,reuseaddr,bind=0.0.0.0 /dev/ttyUSB1,raw,echo=0,b11520
 
 The logger parses **4 different ESP32 log formats**:
 
-### Format 1: Custom Logger (dominant, 1324 occurrences)
+### Format 1: Custom Logger with TAG (dominant, 1324+ occurrences)
 ```
-[      1234] [INFO    ] Logger system initialized
-[      5678] [WARNING ] SensorManager: Sensor timeout on GPIO 4
-[     12345] [ERROR   ] MQTTClient initialization failed!
+[      1234] [INFO    ] [BOOT    ] Logger system initialized
+[      5678] [WARNING ] [SENSOR  ] Sensor timeout on GPIO 4
+[     12345] [ERROR   ] [MQTT    ] MQTTClient initialization failed!
 ```
-**Pattern:** `[millis] [LEVEL] message`
+**Pattern:** `[millis] [LEVEL] [TAG] message`
+
+TAGs identify the source module (ESP-IDF convention):
+`BOOT`, `SENSOR`, `ACTUATOR`, `MQTT`, `WIFI`, `GPIO`, `CONFIG`, `NVS`, `SAFETY`, `I2C`, `ONEWIRE`, `PWM`, etc.
 
 **JSON Output:**
 ```json

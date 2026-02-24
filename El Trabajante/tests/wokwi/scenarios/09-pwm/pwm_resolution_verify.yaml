@@ -3,20 +3,20 @@
 # Validates PWM resolution configuration (12-bit for ESP32 WROOM)
 # Expected: 12-bit resolution = duty range 0-4095
 # Timeout: 120000ms
+#
+# NOTE: "Resolution=12 bits" is LOG_DEBUG, invisible at CORE_DEBUG_LEVEL=3.
+# Use LOG_INFO "Default Resolution: 12 bits" instead.
 
 name: PWM Resolution Verification
 version: 1
 steps:
-  # Wait for boot
-  - wait-serial: "Boot started"
+  # Wait for boot banner
+  - wait-serial: "ESP32 Sensor Network"
 
-  # Verify default resolution in initialization log
-  - wait-serial: "Resolution=12 bits"
-
-  # Wait for full initialization
+  # Wait for full initialization (LOG_INFO)
   - wait-serial: "PWM Controller initialized successfully"
 
-  # Verify resolution is logged
+  # Verify default resolution is logged (LOG_INFO)
   - wait-serial: "Default Resolution: 12 bits"
 
   # Wait for system ready

@@ -1,55 +1,47 @@
 # Debug-Logs
 
-Hier landen alle Log-Dateien während Debug-Sessions.
+Log-Verzeichnisstruktur fuer AutomationOne Debug-Sessions und persistente Logs.
 
-## Ordner
+## Verzeichnisse
 
-| Ordner | Beschreibung |
-|--------|--------------|
-| `current/` | Aktuelle Debug-Session - wird bei neuer Session geleert |
-| `archive/` | Archivierte Sessions - bleiben erhalten |
+| Verzeichnis | Beschreibung | Persistenz |
+|-------------|--------------|------------|
+| `server/` | Server JSON-Logs (Bind-Mount von Docker) | Persistent (RotatingFileHandler: 10MB x 10) |
+| `postgres/` | PostgreSQL Query/Connection Logs | Persistent (Daily Rotation) |
+| `current/` | Aktuelle Debug-Session Logs | Wird bei neuer Session geleert |
+| `archive/` | Archivierte Sessions | Permanent |
+| `wokwi/` | Wokwi Test-Logs (Serial, MQTT, Reports) | Permanent |
+| `backend/` | pytest/Coverage Output | Permanent |
+| `frontend/` | Vitest/Playwright Output | Permanent |
+| `mqtt/` | MQTT File-Logs (aktuell deaktiviert) | - |
 
-## Log-Dateien
+## Persistente Logs (immer verfuegbar)
 
-| Datei | Quelle | Erzeugt durch |
+| Datei | Format | Erzeugt durch |
 |-------|--------|---------------|
-| `esp32_serial.log` | ESP32 Serial Output | Wokwi CLI oder PlatformIO Monitor |
-| `server_console.log` | Server stdout/stderr | Uvicorn mit Umleitung |
-| `god_kaiser.log` | Server Structured Log | Automatisch (Symlink) |
-| `mqtt_traffic.log` | MQTT Messages | mosquitto_sub |
+| `server/god_kaiser.log` | JSON (1 Zeile pro Event) | Server RotatingFileHandler |
+| `postgres/postgresql-YYYY-MM-DD.log` | Text (SQL + Connection) | PostgreSQL logging_collector |
+
+## Session-Logs (nach start_session.sh)
+
+| Datei | Format | Erzeugt durch |
+|-------|--------|---------------|
+| `current/god_kaiser.log` | Symlink → server/god_kaiser.log | start_session.sh |
+| `current/mqtt_traffic.log` | Text mit Timestamps | start_session.sh (mosquitto_sub) |
+| `current/esp32_serial.log` | Text (Serial Output) | User manuell (Wokwi/PIO) |
+| `current/STATUS.md` | Markdown | start_session.sh |
 
 ## Session starten
 
 ```bash
-# Option 1: Script verwenden
 ./scripts/debug/start_session.sh mein-test
-
-# Option 2: Manuell
-# Terminal 1 - MQTT
-mosquitto_sub -h localhost -t "kaiser/#" -v > logs/current/mqtt_traffic.log &
-
-# Terminal 2 - Server (falls nicht schon läuft)
-cd "El Servador/god_kaiser_server"
-poetry run uvicorn src.main:app --reload > ../../logs/current/server_console.log 2>&1 &
-
-# Terminal 3 - ESP32 (Wokwi)
-cd "El Trabajante"
-wokwi-cli . --timeout 300000 --serial-log-file ../logs/current/esp32_serial.log
-```
-
-## Session beenden
-
-```bash
-# Option 1: Script
-./scripts/debug/stop_session.sh
-
-# Option 2: Manuell
-# Prozesse mit Ctrl+C beenden
-# Logs nach archive/ verschieben falls gewünscht
+# Dann ESP32 separat starten:
+cd "El Trabajante" && wokwi-cli . --timeout 300000 --serial-log-file ../logs/current/esp32_serial.log
 ```
 
 ## Hinweise
 
-- `current/` Logs werden bei neuer Session überschrieben
-- Wichtige Logs vor neuer Session sichern oder archivieren
-- `god_kaiser.log` liegt eigentlich in `El Servador/god_kaiser_server/logs/`
+- `current/` wird bei neuer Session archiviert und dann geleert
+- Server-Logs in `server/` existieren IMMER wenn der Server jemals lief
+- ESP32 Serial-Log erfordert MANUELLE Aktion (Wokwi oder PIO Monitor)
+- MQTT-Payload-Capture nur bei laufender Session (mosquitto_sub)

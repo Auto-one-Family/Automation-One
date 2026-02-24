@@ -229,6 +229,7 @@ class ESP32PendingFlowSimulator:
 
         # Step 3: Simulate publish (mqtt_client.cpp:498)
         import random
+
         if random.random() < self._publish_failure_rate:
             self.mqtt_cb.record_failure()
             self._add_to_offline_buffer(gpio)
@@ -279,10 +280,12 @@ class ESP32PendingFlowSimulator:
         """Add message to offline buffer."""
         if len(self._offline_buffer) >= self._max_buffer_size:
             return False
-        self._offline_buffer.append({
-            "gpio": gpio,
-            "timestamp": self._simulated_time,
-        })
+        self._offline_buffer.append(
+            {
+                "gpio": gpio,
+                "timestamp": self._simulated_time,
+            }
+        )
         return True
 
     # =========================================================================
@@ -354,9 +357,7 @@ class ESP32PendingFlowSimulator:
         self.mqtt_cb.record_failure()
 
         # Exponential backoff (mqtt_client.cpp:423)
-        self._reconnect_delay_ms = min(
-            self._reconnect_delay_ms * 2, 60000
-        )
+        self._reconnect_delay_ms = min(self._reconnect_delay_ms * 2, 60000)
 
         return {"attempted": True, "success": False}
 
@@ -406,9 +407,7 @@ class ESP32PendingFlowSimulator:
                 pi_quality = pi_result.get("quality", "fair")
             elif pi_result.get("pending"):
                 # HTTP request started, complete it
-                complete = self.complete_pi_enhanced_request(
-                    success=self._pi_server_available
-                )
+                complete = self.complete_pi_enhanced_request(success=self._pi_server_available)
                 if complete.get("success"):
                     pi_success = True
                     pi_quality = "good"
@@ -673,8 +672,7 @@ class TestScenario4_BlockingLoopDetection:
             "closed": lambda: sim.reset_all_circuit_breakers(),
             "mqtt_open": lambda: [sim.mqtt_cb.record_failure() for _ in range(5)],
             "both_open": lambda: [
-                (sim.mqtt_cb.record_failure(), sim.pi_cb.record_failure())
-                for _ in range(5)
+                (sim.mqtt_cb.record_failure(), sim.pi_cb.record_failure()) for _ in range(5)
             ],
             "disconnected": lambda: sim.simulate_mqtt_disconnect(),
         }
@@ -701,9 +699,7 @@ class TestScenario4_BlockingLoopDetection:
             if max_ms > 100:
                 blocking_states.append((state_name, max_ms))
 
-        assert len(blocking_states) == 0, (
-            f"Blocking states: {blocking_states}"
-        )
+        assert len(blocking_states) == 0, f"Blocking states: {blocking_states}"
 
     def test_publish_nonblocking_in_all_states(self, sim):
         """publish() returns quickly regardless of CB state."""
@@ -728,9 +724,7 @@ class TestScenario4_BlockingLoopDetection:
             sim.publish_sensor_reading(gpio=34)
             elapsed_ms = (time.perf_counter_ns() - start) / 1_000_000
 
-            assert elapsed_ms < 10, (
-                f"publish() blocked in state '{name}': {elapsed_ms:.1f}ms"
-            )
+            assert elapsed_ms < 10, f"publish() blocked in state '{name}': {elapsed_ms:.1f}ms"
 
     def test_safe_publish_exits_early_when_cb_opens(self, sim):
         """safePublish() stops retrying when CB opens mid-retry (FIX #4: max 2 attempts)."""
@@ -775,9 +769,7 @@ class TestScenario5_HTTPTimeoutInteraction:
         sim.simulate_mqtt_disconnect()
 
         # HTTP completes successfully
-        pi_result = sim.complete_pi_enhanced_request(
-            processed_value=7.2, unit="pH", quality="good"
-        )
+        pi_result = sim.complete_pi_enhanced_request(processed_value=7.2, unit="pH", quality="good")
         assert pi_result["success"] is True
 
         # Try to publish processed data → fails
@@ -863,9 +855,9 @@ class TestEdgeCases:
 
         # Without time advancement, backoff should block most attempts
         # Only the first attempt should go through
-        assert reconnect_count <= 2, (
-            f"Backoff not working: {reconnect_count}/10 reconnects without time advance"
-        )
+        assert (
+            reconnect_count <= 2
+        ), f"Backoff not working: {reconnect_count}/10 reconnects without time advance"
 
     def test_half_open_bypasses_backoff(self, sim):
         """
@@ -1026,9 +1018,7 @@ class TestFix1_WiFiCBOnlyRetryLogic:
 
     def test_wifi_no_permanent_failure_state(self):
         """WiFi recovers from CB OPEN → HALF_OPEN → CLOSED (full cycle)."""
-        cb = CircuitBreaker(
-            "wifi_recovery", failure_threshold=10, recovery_timeout=0.01
-        )
+        cb = CircuitBreaker("wifi_recovery", failure_threshold=10, recovery_timeout=0.01)
 
         # Trip CB
         for _ in range(10):

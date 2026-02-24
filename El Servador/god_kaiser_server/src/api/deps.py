@@ -59,10 +59,10 @@ http_bearer = HTTPBearer(auto_error=False)
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     Database session dependency.
-    
+
     Provides an async database session for request handlers.
     Session is automatically closed after request completes.
-    
+
     Usage:
         @router.get("/items")
         async def get_items(db: AsyncSession = Depends(get_db)):
@@ -90,16 +90,16 @@ async def get_current_user(
 ) -> User:
     """
     Get current authenticated user from JWT token.
-    
+
     Extracts user ID from token, validates, and returns User model.
-    
+
     Args:
         token: JWT token from Authorization header
         db: Database session
-        
+
     Returns:
         User model instance
-        
+
     Raises:
         HTTPException: 401 if token invalid or user not found
     """
@@ -108,7 +108,7 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     # Development mode bypass (SECURITY: Never in production!)
     if settings.development.debug_mode and settings.development.allow_auth_bypass and not token:
         # CRITICAL: Prevent auth bypass in production environment
@@ -130,11 +130,11 @@ async def get_current_user(
             return admin_user
         # No admin user exists, fail
         raise credentials_exception
-    
+
     if not token:
         logger.warning("No authentication token provided")
         raise credentials_exception
-    
+
     try:
         # Verify and decode token
         payload = verify_token(token, expected_type="access")
@@ -209,15 +209,15 @@ async def get_current_active_user(
 ) -> User:
     """
     Get current authenticated and active user.
-    
+
     Ensures user account is active (not disabled).
-    
+
     Args:
         current_user: Current user from get_current_user
-        
+
     Returns:
         User model instance
-        
+
     Raises:
         HTTPException: 403 if user is inactive
     """
@@ -244,15 +244,15 @@ async def require_admin(
 ) -> User:
     """
     Require admin role.
-    
+
     Ensures current user has admin role.
-    
+
     Args:
         current_user: Current active user
-        
+
     Returns:
         User model instance
-        
+
     Raises:
         HTTPException: 403 if user is not admin
     """
@@ -272,23 +272,21 @@ async def require_operator(
 ) -> User:
     """
     Require operator or admin role.
-    
+
     Ensures current user has operator or admin role.
     Viewers are denied access.
-    
+
     Args:
         current_user: Current active user
-        
+
     Returns:
         User model instance
-        
+
     Raises:
         HTTPException: 403 if user is viewer
     """
     if current_user.role not in ("admin", "operator"):
-        logger.warning(
-            f"Viewer attempted operator action: {current_user.username}"
-        )
+        logger.warning(f"Viewer attempted operator action: {current_user.username}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operator or admin privileges required",
@@ -311,15 +309,15 @@ async def verify_api_key(
 ) -> str:
     """
     Verify API key from request header.
-    
+
     Used for ESP32 device authentication.
-    
+
     Args:
         x_api_key: API key from X-API-Key header
-        
+
     Returns:
         API key if valid
-        
+
     Raises:
         HTTPException: 401 if invalid or missing
     """
@@ -338,7 +336,7 @@ async def verify_api_key(
             )
         logger.debug("API key verification DISABLED (debug mode - non-production only)")
         return "debug-mode"
-    
+
     if not x_api_key:
         logger.warning("API request without API key")
         raise HTTPException(
@@ -346,20 +344,20 @@ async def verify_api_key(
             detail="Missing API key. Include X-API-Key header.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-    
+
     # Check against configured API key
-    configured_key = getattr(settings.security, 'api_key', None)
+    configured_key = getattr(settings.security, "api_key", None)
     if configured_key and x_api_key == configured_key:
         return x_api_key
-    
+
     # Accept keys starting with "esp_" (ESP32 device keys)
     if x_api_key.startswith("esp_"):
         return x_api_key
-    
+
     # Accept keys starting with "god_" (God layer keys)
     if x_api_key.startswith("god_"):
         return x_api_key
-    
+
     logger.warning(f"Invalid API key attempted: {x_api_key[:10]}...")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -395,10 +393,10 @@ class RateLimitResult:
 class InMemoryRateLimiter:
     """
     In-memory rate limiter with TTL cleanup.
-    
+
     Used as fallback when Redis is unavailable/disabled.
     """
-    
+
     def __init__(
         self,
         max_requests: int = 100,
@@ -409,23 +407,20 @@ class InMemoryRateLimiter:
         self.window_seconds = window_seconds
         self.max_keys = max_keys
         self.requests: dict[str, list[float]] = defaultdict(list)
-    
+
     async def check(self, key: str) -> RateLimitResult:
         now = time.time()
         window_start = now - self.window_seconds
-        
+
         # Clean old timestamps
-        entries = [
-            req_time for req_time in self.requests[key]
-            if req_time > window_start
-        ]
+        entries = [req_time for req_time in self.requests[key] if req_time > window_start]
         self.requests[key] = entries
-        
+
         allowed = len(entries) < self.max_requests
         if allowed:
             entries.append(now)
             self.requests[key] = entries
-        
+
         # Compact dict if too many keys (drop oldest)
         if len(self.requests) > self.max_keys:
             # Drop keys with oldest activity first
@@ -436,14 +431,14 @@ class InMemoryRateLimiter:
             ranked.sort(key=lambda x: x[0])
             for _, k in ranked[: len(self.requests) - self.max_keys]:
                 self.requests.pop(k, None)
-        
+
         remaining = max(0, self.max_requests - len(self.requests[key]))
         reset_seconds = 0
         if self.requests[key]:
             oldest = min(self.requests[key])
             reset_at = oldest + self.window_seconds
             reset_seconds = max(0, int(reset_at - now))
-        
+
         return RateLimitResult(
             allowed=allowed,
             remaining=remaining,
@@ -455,7 +450,7 @@ class RedisRateLimiter:
     """
     Redis-backed sliding window rate limiter (shared across processes).
     """
-    
+
     def __init__(
         self,
         client,
@@ -467,12 +462,12 @@ class RedisRateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.prefix = prefix
-    
+
     async def check(self, key: str) -> RateLimitResult:
         now = int(time.time())
         window_start = now - self.window_seconds
         redis_key = f"{self.prefix}:{key}"
-        
+
         pipe = self.client.pipeline()
         pipe.zremrangebyscore(redis_key, 0, window_start)
         pipe.zadd(redis_key, {str(now): now})
@@ -484,14 +479,14 @@ class RedisRateLimiter:
         except Exception as exc:  # pragma: no cover - operational fallback
             logger.warning(f"Redis rate limit failed, falling back to allow: {exc}")
             return RateLimitResult(True, self.max_requests, 0)
-        
+
         remaining = max(0, self.max_requests - count)
         reset_seconds = 0
         if oldest_entry:
             # oldest_entry is list of (member, score)
             _, oldest_score = oldest_entry[0]
             reset_seconds = max(0, int(self.window_seconds - (now - int(oldest_score))))
-        
+
         allowed = count <= self.max_requests
         return RateLimitResult(
             allowed=allowed,
@@ -518,7 +513,7 @@ def _build_rate_limiter(max_requests: int, window_seconds: int, prefix: str):
             )
         except Exception as exc:  # pragma: no cover - fallback path
             logger.warning(f"Redis init failed, using in-memory rate limiter: {exc}")
-    
+
     return InMemoryRateLimiter(max_requests=max_requests, window_seconds=window_seconds)
 
 
@@ -534,12 +529,12 @@ async def check_rate_limit(
 ) -> None:
     """
     Check rate limit for API requests.
-    
+
     Uses API key or IP as rate limit key.
-    
+
     Args:
         x_api_key: API key from header (or use IP)
-        
+
     Raises:
         HTTPException: 429 if rate limit exceeded
     """
@@ -552,9 +547,9 @@ async def check_rate_limit(
             key = request.client.host
         else:
             key = "anonymous"
-    
+
     result = await _rate_limiter.check(key)
-    
+
     if not result.allowed:
         logger.warning(f"Rate limit exceeded for key: {key}")
         raise HTTPException(
@@ -576,7 +571,7 @@ async def check_auth_rate_limit(
 ) -> None:
     """
     Stricter rate limit for authentication endpoints.
-    
+
     Limits to 10 requests per minute to prevent brute force.
     """
     key = x_api_key[:20] if x_api_key else None
@@ -587,9 +582,9 @@ async def check_auth_rate_limit(
             key = request.client.host
         else:
             key = "anonymous"
-    
+
     result = await _auth_rate_limiter.check(key)
-    
+
     if not result.allowed:
         logger.warning(f"Auth rate limit exceeded for key: {key}")
         raise HTTPException(
@@ -612,20 +607,20 @@ async def get_optional_user(
 ) -> Optional[User]:
     """
     Get current user if authenticated, otherwise None.
-    
+
     For endpoints that work both authenticated and anonymously,
     but provide additional features when authenticated.
-    
+
     Args:
         token: JWT token (optional)
         db: Database session
-        
+
     Returns:
         User if authenticated, None otherwise
     """
     if not token:
         return None
-    
+
     try:
         return await get_current_user(token, db)
     except HTTPException:
@@ -643,13 +638,13 @@ OptionalUser = Annotated[Optional[User], Depends(get_optional_user)]
 def get_mqtt_publisher():
     """Get MQTT Publisher instance."""
     from ..mqtt.publisher import Publisher
-    
+
     global _publisher_singleton
     try:
         return _publisher_singleton
     except NameError:
         _publisher_singleton = None  # type: ignore
-    
+
     if _publisher_singleton is None:
         _publisher_singleton = Publisher()
     return _publisher_singleton
@@ -659,7 +654,7 @@ def get_safety_service(db: DBSession):
     """Get SafetyService instance."""
     from ..db.repositories import ActuatorRepository, ESPRepository
     from ..services.safety_service import SafetyService
-    
+
     actuator_repo = ActuatorRepository(db)
     esp_repo = ESPRepository(db)
     return SafetyService(actuator_repo, esp_repo)
@@ -706,11 +701,11 @@ def get_config_builder(db: DBSession):
     """Get ConfigPayloadBuilder instance."""
     from ..db.repositories import ActuatorRepository, ESPRepository, SensorRepository
     from ..services.config_builder import ConfigPayloadBuilder
-    
+
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
     esp_repo = ESPRepository(db)
-    
+
     return ConfigPayloadBuilder(
         sensor_repo=sensor_repo,
         actuator_repo=actuator_repo,
@@ -722,17 +717,17 @@ def get_esp_service(db: DBSession):
     """Get ESPService instance."""
     from ..db.repositories import ESPRepository
     from ..services.esp_service import ESPService
-    
+
     esp_repo = ESPRepository(db)
     publisher = get_mqtt_publisher()
-    
+
     return ESPService(esp_repo, publisher)
 
 
 def get_audit_log_repo(db: DBSession):
     """Get AuditLogRepository instance."""
     from ..db.repositories import AuditLogRepository
-    
+
     return AuditLogRepository(db)
 
 
@@ -763,17 +758,17 @@ async def get_audit_log_repo_dep(db: DBSession):
 def get_simulation_scheduler():
     """
     Get SimulationScheduler singleton instance.
-    
+
     Paket X: Code Consolidation - Unified dependency for mock ESP simulation.
-    
+
     Returns:
         SimulationScheduler instance
-        
+
     Raises:
         HTTPException: 503 if scheduler not initialized
     """
     from ..services.simulation import get_simulation_scheduler as _get_scheduler
-    
+
     try:
         scheduler = _get_scheduler()
         return scheduler
@@ -781,7 +776,7 @@ def get_simulation_scheduler():
         logger.error(f"SimulationScheduler not initialized: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Simulation service not initialized"
+            detail="Simulation service not initialized",
         )
 
 

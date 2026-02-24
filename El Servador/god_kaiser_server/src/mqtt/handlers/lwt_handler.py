@@ -86,9 +86,7 @@ class LWTHandler:
 
             # Step 2: Validate payload (minimal validation - LWT is broker-generated)
             if "status" not in payload:
-                logger.warning(
-                    f"LWT payload missing 'status' field, assuming offline: {payload}"
-                )
+                logger.warning(f"LWT payload missing 'status' field, assuming offline: {payload}")
 
             # Step 3: Update database
             async with resilient_session() as session:
@@ -133,7 +131,11 @@ class LWTHandler:
                             details={
                                 "reason": payload.get("reason", "unexpected_disconnect"),
                                 "lwt_timestamp": payload.get("timestamp"),
-                                "last_seen": esp_device.last_seen.isoformat() if esp_device.last_seen else None,
+                                "last_seen": (
+                                    esp_device.last_seen.isoformat()
+                                    if esp_device.last_seen
+                                    else None
+                                ),
                             },
                             severity=AuditSeverity.WARNING,
                         )
@@ -162,13 +164,9 @@ class LWTHandler:
                                 ),
                             },
                         )
-                        logger.debug(
-                            f"Broadcast esp_health offline event for {esp_id_str}"
-                        )
+                        logger.debug(f"Broadcast esp_health offline event for {esp_id_str}")
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to broadcast LWT event via WebSocket: {e}"
-                        )
+                        logger.warning(f"Failed to broadcast LWT event via WebSocket: {e}")
 
                 else:
                     logger.debug(f"Device {esp_id_str} already offline, LWT ignored")

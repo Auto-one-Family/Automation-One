@@ -374,7 +374,7 @@ Alle Queries via: `docker exec automationone-postgres psql -U god_kaiser -d god_
 
 - **Build:** `pio run -e wokwi_simulation`
 - **Config:** `El Trabajante/wokwi.toml`, Serial: `rfc2217://localhost:4000`
-- **Szenarien:** 163 YAML in 13 Kategorien (`El Trabajante/tests/wokwi/scenarios/`)
+- **Szenarien:** 173 YAML in 14 Kategorien (`El Trabajante/tests/wokwi/scenarios/`)
 
 ---
 

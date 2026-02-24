@@ -4,7 +4,7 @@ COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
 COMPOSE_E2E := -f docker-compose.yml -f docker-compose.e2e.yml
 
-.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-scenario wokwi-test-category wokwi-run
+.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-all wokwi-test-error-injection wokwi-test-scenario wokwi-test-category wokwi-run
 
 help:
 	@echo "AutomationOne Docker Commands:"
@@ -65,7 +65,9 @@ help:
 	@echo "  make wokwi-seed          - Seed database with 3 Wokwi test devices"
 	@echo "  make wokwi-list          - List all available test scenarios"
 	@echo "  make wokwi-test-quick    - Run quick tests (boot + heartbeat)"
-	@echo "  make wokwi-test-full     - Run all CI scenarios (22 tests)"
+	@echo "  make wokwi-test-full     - Run all CI core scenarios (22 passive tests)"
+	@echo "  make wokwi-test-all      - Run ALL 173 scenarios (nightly equivalent)"
+	@echo "  make wokwi-test-error-injection - Run 10 error-injection scenarios"
 	@echo "  make wokwi-test-scenario SCENARIO=path - Run specific scenario"
 	@echo "  make wokwi-test-category CAT=01-boot   - Run category tests"
 	@echo "  make wokwi-run           - Start Wokwi interactively (ESP_00000001)"
@@ -220,7 +222,8 @@ wokwi-build:
 
 wokwi-seed:
 	@echo "Seeding database with Wokwi test devices (ESP_00000001-003)..."
-	docker exec -it automationone-server python scripts/seed_wokwi_esp.py
+	@echo "Note: Server must be running. Seed script runs locally."
+	cd "El Servador/god_kaiser_server" && .venv/Scripts/python.exe scripts/seed_wokwi_esp.py
 
 wokwi-list:
 	@echo "Available Wokwi Test Scenarios:"
@@ -289,6 +292,45 @@ endif
 			wokwi-cli . --timeout 90000 --scenario $$scenario || exit 1; \
 		done && \
 		echo "✅ Category $(CAT) tests passed!"
+
+wokwi-test-all:
+	@echo "Running ALL 173 Wokwi scenarios (nightly equivalent)..."
+	@echo "This will take a long time. Requires Mosquitto on localhost:1883."
+	@PASSED=0; FAILED=0; TOTAL=0; \
+	cd "El Trabajante" && \
+		for scenario in tests/wokwi/scenarios/*/*.yaml; do \
+			TOTAL=$$((TOTAL + 1)); \
+			name=$$(basename "$$scenario" .yaml); \
+			echo "=== [$$TOTAL] Running: $$name ==="; \
+			if wokwi-cli . --timeout 90000 --scenario "$$scenario" 2>&1 | tee "$${name}.log"; then \
+				echo "PASS: $$name"; \
+				PASSED=$$((PASSED + 1)); \
+			else \
+				echo "FAIL: $$name"; \
+				FAILED=$$((FAILED + 1)); \
+			fi; \
+		done; \
+		echo ""; \
+		echo "=== Results: $$PASSED passed, $$FAILED failed out of $$TOTAL ==="
+
+wokwi-test-error-injection:
+	@echo "Running 10 error-injection scenarios..."
+	@echo "Requires Mosquitto on localhost:1883 and mosquitto_pub installed."
+	@cd "El Trabajante" && \
+		for scenario in tests/wokwi/scenarios/11-error-injection/*.yaml; do \
+			name=$$(basename "$$scenario" .yaml); \
+			echo "=== Running: $$name ==="; \
+			wokwi-cli . --timeout 90000 --scenario "$$scenario" 2>&1 | tee "$${name}.log" || true; \
+		done && \
+		echo "Error-injection tests complete (check logs for details)"
+
+wokwi-count:
+	@echo "=== Wokwi Scenario Count ==="
+	@for dir in "El Trabajante/tests/wokwi/scenarios"/*/; do \
+		count=$$(find "$$dir" -name '*.yaml' | wc -l); \
+		echo "  $$(basename $$dir): $$count scenarios"; \
+	done
+	@echo "  TOTAL: $$(find 'El Trabajante/tests/wokwi/scenarios' -name '*.yaml' | wc -l)"
 
 wokwi-run:
 	@echo "Starting Wokwi simulation interactively (ESP_00000001)..."

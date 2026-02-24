@@ -145,6 +145,8 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
+      VITE_API_TARGET: http://el-servador:8000
+      VITE_WS_TARGET: ws://el-servador:8000
       VITE_LOG_LEVEL: ${VITE_LOG_LEVEL:-debug}
     ports:
       - "5173:5173"
@@ -199,26 +201,36 @@ services:
         max-file: "3"
 
   # ============================================
-  # Promtail (Log Shipping) - Profile: monitoring
+  # Grafana Alloy (Log Shipping) - Profile: monitoring
+  # Migrated from Promtail to Alloy 2026-02-24 (Promtail EOL: 2026-03-02)
+  # Uses --config.format=promtail to read existing Promtail config directly
   # ============================================
-  promtail:
-    image: grafana/promtail:3.4
-    container_name: automationone-promtail
+  alloy:
+    image: grafana/alloy:v1.13.1
+    container_name: automationone-alloy
     profiles: ["monitoring"]
     volumes:
-      - ./docker/promtail/config.yml:/etc/promtail/config.yml:ro
+      - ./docker/promtail/config.yml:/etc/alloy/config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - automationone-promtail-positions:/promtail-positions
-    command: -config.file=/etc/promtail/config.yml
+      - automationone-alloy-data:/var/lib/alloy/data
+    command:
+      - run
+      - --config.format=promtail
+      - --config.bypass-conversion-errors
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.yml
+    ports:
+      - "12345:12345"   # Alloy UI (Debugging + Graph-Ansicht)
     depends_on:
       loki:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9080' || exit 1"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/12345' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
     networks:
       - automationone-net
     restart: unless-stopped
@@ -365,16 +377,18 @@ services:
     image: sapcc/mosquitto-exporter:0.8.0
     container_name: automationone-mosquitto-exporter
     profiles: ["monitoring"]
-    environment:
-      BROKER_ENDPOINT: "tcp://mqtt-broker:1883"
-    expose:
-      - "9234"
+    command:
+      - --endpoint=tcp://mqtt-broker:1883
+      - --bind-address=0.0.0.0:9234
+    ports:
+      - "9234:9234"
     depends_on:
       mqtt-broker:
         condition: service_healthy
     # Image is a scratch Go binary - no shell, wget, or curl available
+    # Healthcheck disabled: no shell in container; health verified via Prometheus target (mqtt-broker: up)
     healthcheck:
-      test: ["NONE"]
+      disable: true
     networks:
       - automationone-net
     restart: unless-stopped
@@ -453,7 +467,7 @@ services:
 #   docker run --rm -v auto-one_automationone-loki-data:/from -v automationone-loki-data:/to alpine cp -a /from/. /to/
 #   docker run --rm -v auto-one_automationone-prometheus-data:/from -v automationone-prometheus-data:/to alpine cp -a /from/. /to/
 #   docker run --rm -v auto-one_automationone-grafana-data:/from -v automationone-grafana-data:/to alpine cp -a /from/. /to/
-#   docker run --rm -v auto-one_automationone-promtail-positions:/from -v automationone-promtail-positions:/to alpine cp -a /from/. /to/
+#   docker run --rm -v auto-one_automationone-alloy-data:/from -v automationone-alloy-data:/to alpine cp -a /from/. /to/
 #   docker run --rm -v auto-one_automationone-pgadmin-data:/from -v automationone-pgadmin-data:/to alpine cp -a /from/. /to/
 volumes:
   automationone-postgres-data:
@@ -466,8 +480,8 @@ volumes:
     name: automationone-prometheus-data
   automationone-grafana-data:
     name: automationone-grafana-data
-  automationone-promtail-positions:
-    name: automationone-promtail-positions
+  automationone-alloy-data:
+    name: automationone-alloy-data
   automationone-pgadmin-data:
     name: automationone-pgadmin-data
 

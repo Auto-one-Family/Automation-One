@@ -18,6 +18,9 @@
 #include "actuator_drivers/pwm_actuator.h"
 #include "actuator_drivers/valve_actuator.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "ACTUATOR";
+
 ActuatorManager& actuatorManager = ActuatorManager::getInstance();
 
 namespace {
@@ -93,7 +96,7 @@ ActuatorManager::ActuatorManager()
 
 bool ActuatorManager::begin() {
   if (initialized_) {
-    LOG_WARNING("ActuatorManager already initialized");
+    LOG_W(TAG, "ActuatorManager already initialized");
     return true;
   }
 
@@ -103,7 +106,7 @@ bool ActuatorManager::begin() {
   }
 
   initialized_ = true;
-  LOG_INFO("ActuatorManager initialized");
+  LOG_I(TAG, "ActuatorManager initialized");
   return true;
 }
 
@@ -122,7 +125,7 @@ void ActuatorManager::end() {
 
   actuator_count_ = 0;
   initialized_ = false;
-  LOG_INFO("ActuatorManager shutdown complete");
+  LOG_I(TAG, "ActuatorManager shutdown complete");
 }
 
 ActuatorManager::RegisteredActuator* ActuatorManager::getFreeSlot() {
@@ -154,11 +157,11 @@ const ActuatorManager::RegisteredActuator* ActuatorManager::findActuator(uint8_t
 
 bool ActuatorManager::validateActuatorConfig(const ActuatorConfig& config) const {
   if (config.gpio == 255) {
-    LOG_ERROR("Actuator config missing GPIO");
+    LOG_E(TAG, "Actuator config missing GPIO");
     return false;
   }
   if (config.actuator_type.length() == 0) {
-    LOG_ERROR("Actuator config missing type");
+    LOG_E(TAG, "Actuator config missing type");
     return false;
   }
   return true;
@@ -177,7 +180,7 @@ std::unique_ptr<IActuatorDriver> ActuatorManager::createDriver(const String& act
   if (actuator_type == ActuatorTypeTokens::RELAY) {
     return std::unique_ptr<IActuatorDriver>(new PumpActuator());  // Relay handled like pump (binary)
   }
-  LOG_ERROR("Unknown actuator type: " + actuator_type);
+  LOG_E(TAG, "Unknown actuator type: " + actuator_type);
   return nullptr;
 }
 
@@ -193,7 +196,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
 
   // Phase 7: Handle deactivation/removal
   if (!config.active) {
-    LOG_INFO("Actuator config deactivating GPIO " + String(config.gpio));
+    LOG_I(TAG, "Actuator config deactivating GPIO " + String(config.gpio));
     removeActuator(config.gpio);
     return true;
   }
@@ -203,7 +206,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   // Server sollte primär GPIO-Allokation verwalten, dies ist nur Fallback.
   // Dokumentiert in: docs/ZZZ.md - "Server-Centric Pragmatic Deviations"
   if (sensorManager.hasSensorOnGPIO(config.gpio)) {
-    LOG_ERROR("GPIO " + String(config.gpio) + " already used by sensor");
+    LOG_E(TAG, "GPIO " + String(config.gpio) + " already used by sensor");
     errorTracker.trackError(ERROR_GPIO_CONFLICT,
                             ERROR_SEVERITY_ERROR,
                             "GPIO conflict sensor vs actuator");
@@ -215,12 +218,12 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   if (is_reconfiguration) {
     RegisteredActuator* existing = findActuator(config.gpio);
     if (existing) {
-      LOG_INFO("Actuator Manager: Runtime reconfiguration on GPIO " + String(config.gpio));
+      LOG_I(TAG, "Actuator Manager: Runtime reconfiguration on GPIO " + String(config.gpio));
       
       // Check if type changed
       bool type_changed = (existing->config.actuator_type != config.actuator_type);
       if (type_changed) {
-        LOG_INFO("  Actuator type changed: " + existing->config.actuator_type + 
+        LOG_I(TAG, "  Actuator type changed: " + existing->config.actuator_type + 
                  " → " + config.actuator_type);
         // Emergency stop before type change
         if (existing->driver) {
@@ -233,7 +236,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
 
   RegisteredActuator* slot = getFreeSlot();
   if (!slot) {
-    LOG_ERROR("No actuator slots available");
+    LOG_E(TAG, "No actuator slots available");
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "Actuator slots exhausted");
@@ -246,7 +249,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   }
 
   if (!driver->begin(config)) {
-    LOG_ERROR("Driver initialization failed for GPIO " + String(config.gpio));
+    LOG_E(TAG, "Driver initialization failed for GPIO " + String(config.gpio));
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "Driver init failed");
@@ -272,12 +275,12 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     }
   }
   if (!configManager.saveActuatorConfig(actuators, count)) {
-    LOG_ERROR("Actuator Manager: Failed to persist config to NVS");
+    LOG_E(TAG, "Actuator Manager: Failed to persist config to NVS");
   } else {
-    LOG_INFO("  ✅ Configuration persisted to NVS");
+    LOG_I(TAG, "  ✅ Configuration persisted to NVS");
   }
 
-  LOG_INFO("Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") + 
+  LOG_I(TAG, "Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") + 
            " on GPIO " + String(config.gpio) + " type: " + config.actuator_type);
   publishActuatorStatus(config.gpio);
   return true;
@@ -289,11 +292,11 @@ bool ActuatorManager::removeActuator(uint8_t gpio) {
     return false;
   }
 
-  LOG_INFO("Actuator Manager: Removing actuator on GPIO " + String(gpio));
+  LOG_I(TAG, "Actuator Manager: Removing actuator on GPIO " + String(gpio));
   
   // Phase 7: Safety - stop actuator before removal
   if (actuator->driver) {
-    LOG_INFO("  Stopping actuator before removal");
+    LOG_I(TAG, "  Stopping actuator before removal");
     actuator->driver->setBinary(false);
     actuator->driver->end();
     actuator->driver.reset();
@@ -314,12 +317,12 @@ bool ActuatorManager::removeActuator(uint8_t gpio) {
     }
   }
   if (!configManager.saveActuatorConfig(actuators, count)) {
-    LOG_ERROR("Actuator Manager: Failed to persist config to NVS");
+    LOG_E(TAG, "Actuator Manager: Failed to persist config to NVS");
   } else {
-    LOG_INFO("  ✅ Configuration persisted to NVS");
+    LOG_I(TAG, "  ✅ Configuration persisted to NVS");
   }
   
-  LOG_INFO("Actuator removed from GPIO " + String(gpio));
+  LOG_I(TAG, "Actuator removed from GPIO " + String(gpio));
   return true;
 }
 
@@ -338,7 +341,7 @@ ActuatorConfig ActuatorManager::getActuatorConfig(uint8_t gpio) const {
 bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
   RegisteredActuator* actuator = findActuator(gpio);
   if (!actuator || !actuator->driver) {
-    LOG_ERROR("controlActuator: actuator not found on GPIO " + String(gpio));
+    LOG_E(TAG, "controlActuator: actuator not found on GPIO " + String(gpio));
     errorTracker.trackError(ERROR_ACTUATOR_NOT_FOUND,
                             ERROR_SEVERITY_ERROR,
                             "Actuator missing");
@@ -346,7 +349,7 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
   }
 
   if (actuator->emergency_stopped) {
-    LOG_WARNING("Actuator GPIO " + String(gpio) + " is emergency stopped");
+    LOG_W(TAG, "Actuator GPIO " + String(gpio) + " is emergency stopped");
     return false;
   }
 
@@ -354,7 +357,7 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
   if (isPwmActuatorType(actuator->config.actuator_type)) {
     normalized_value = constrain(value, 0.0f, 1.0f);
   } else if (!validateActuatorValue(actuator->config.actuator_type, value)) {
-    LOG_ERROR("Actuator value out of range for GPIO " + String(gpio));
+    LOG_E(TAG, "Actuator value out of range for GPIO " + String(gpio));
     errorTracker.trackError(ERROR_COMMAND_INVALID,
                             ERROR_SEVERITY_ERROR,
                             "Actuator value invalid");
@@ -382,7 +385,7 @@ bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
 bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
   RegisteredActuator* actuator = findActuator(gpio);
   if (!actuator || !actuator->driver) {
-    LOG_ERROR("controlActuatorBinary: actuator not found on GPIO " + String(gpio));
+    LOG_E(TAG, "controlActuatorBinary: actuator not found on GPIO " + String(gpio));
     errorTracker.trackError(ERROR_ACTUATOR_NOT_FOUND,
                             ERROR_SEVERITY_ERROR,
                             "Actuator missing (binary control)");
@@ -390,7 +393,7 @@ bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
   }
 
   if (actuator->emergency_stopped) {
-    LOG_WARNING("Actuator GPIO " + String(gpio) + " is emergency stopped");
+    LOG_W(TAG, "Actuator GPIO " + String(gpio) + " is emergency stopped");
     return false;
   }
 
@@ -497,7 +500,7 @@ void ActuatorManager::processActuatorLoops() {
         unsigned long runtime = millis() - actuators_[i].config.runtime_protection.activation_start_ms;
 
         if (runtime > actuators_[i].config.runtime_protection.max_runtime_ms) {
-          LOG_WARNING("Actuator timeout: GPIO " + String(actuators_[i].config.gpio) +
+          LOG_W(TAG, "Actuator timeout: GPIO " + String(actuators_[i].config.gpio) +
                       " runtime " + String(runtime / 1000) + "s exceeded limit " +
                       String(actuators_[i].config.runtime_protection.max_runtime_ms / 1000) + "s");
 
@@ -541,7 +544,7 @@ uint8_t ActuatorManager::extractGPIOFromTopic(const String& topic) const {
 bool ActuatorManager::handleActuatorCommand(const String& topic, const String& payload) {
   uint8_t gpio = extractGPIOFromTopic(topic);
   if (gpio == 255) {
-    LOG_ERROR("Invalid actuator command topic: " + topic);
+    LOG_E(TAG, "Invalid actuator command topic: " + topic);
     return false;
   }
 
@@ -556,11 +559,11 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   // BUG-008 Fix: Check if actuator exists before processing command
   RegisteredActuator* actuator = findActuator(gpio);
   if (!actuator || !actuator->driver) {
-    LOG_ERROR("╔════════════════════════════════════════╗");
-    LOG_ERROR("║  ACTUATOR COMMAND FAILED               ║");
-    LOG_ERROR("╚════════════════════════════════════════╝");
-    LOG_ERROR("No actuator configured on GPIO " + String(gpio));
-    LOG_ERROR("Hint: Send config first via kaiser/{id}/esp/{esp_id}/config");
+    LOG_E(TAG, "╔════════════════════════════════════════╗");
+    LOG_E(TAG, "║  ACTUATOR COMMAND FAILED               ║");
+    LOG_E(TAG, "╚════════════════════════════════════════╝");
+    LOG_E(TAG, "No actuator configured on GPIO " + String(gpio));
+    LOG_E(TAG, "Hint: Send config first via kaiser/{id}/esp/{esp_id}/config");
 
     String errorMessage = "Actuator not configured on GPIO " + String(gpio) +
                           ". Configure via API first.";
@@ -573,7 +576,7 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
 
   // Check emergency stop state
   if (actuator->emergency_stopped) {
-    LOG_WARNING("Actuator GPIO " + String(gpio) + " is emergency stopped");
+    LOG_W(TAG, "Actuator GPIO " + String(gpio) + " is emergency stopped");
     publishActuatorResponse(command, false,
                             "Actuator in emergency stop state. Clear emergency first.");
     return false;
@@ -595,13 +598,13 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
     success = controlActuatorBinary(gpio, !actuator->config.current_state);
     if (!success) resultMessage = "Failed to toggle actuator";
   } else {
-    LOG_ERROR("Unknown actuator command: " + command.command);
+    LOG_E(TAG, "Unknown actuator command: " + command.command);
     resultMessage = "Unknown command: " + command.command;
   }
 
   publishActuatorResponse(command, success, resultMessage);
   if (success) {
-    LOG_INFO("Actuator command executed: GPIO " + String(gpio) +
+    LOG_I(TAG, "Actuator command executed: GPIO " + String(gpio) +
              " " + command.command + " = " + String(command.value));
     publishActuatorStatus(gpio);
   }
@@ -711,13 +714,13 @@ bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
 }
 
 bool ActuatorManager::handleActuatorConfig(const String& payload, const String& correlation_id) {
-  LOG_INFO("Handling actuator configuration from MQTT");
+  LOG_I(TAG, "Handling actuator configuration from MQTT");
 
   DynamicJsonDocument doc(4096);
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
     String message = "Failed to parse actuator config JSON: " + String(error.c_str());
-    LOG_ERROR(message);
+    LOG_E(TAG, message);
     ConfigResponseBuilder::publishError(
         ConfigType::ACTUATOR, ConfigErrorCode::JSON_PARSE_ERROR, message,
         JsonVariantConst(), correlation_id);
@@ -727,7 +730,7 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
   JsonArray actuators = doc["actuators"].as<JsonArray>();
   if (actuators.isNull()) {
     String message = "Actuator config missing 'actuators' array";
-    LOG_ERROR(message);
+    LOG_E(TAG, message);
     ConfigResponseBuilder::publishError(
         ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,
         JsonVariantConst(), correlation_id);
@@ -737,7 +740,7 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
   size_t total = actuators.size();
   if (total == 0) {
     String message = "Actuator config array is empty";
-    LOG_WARNING(message);
+    LOG_W(TAG, message);
     ConfigResponseBuilder::publishError(
         ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,
         JsonVariantConst(), correlation_id);
@@ -766,7 +769,7 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
 
     if (!configureActuator(config)) {
       String message = "Failed to configure actuator on GPIO " + String(config.gpio);
-      LOG_ERROR(message);
+      LOG_E(TAG, message);
       ConfigResponseBuilder::publishError(
           ConfigType::ACTUATOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant,
           correlation_id);

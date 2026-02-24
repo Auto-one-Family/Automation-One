@@ -40,17 +40,17 @@ class TestSmokeBackendHealth:
         """
         url = f"{e2e_config.api_base}/health/live"
         async with e2e_http_client.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-            assert response.status == 200, \
-                f"Health endpoint should return 200, got {response.status}"
+            assert (
+                response.status == 200
+            ), f"Health endpoint should return 200, got {response.status}"
             data = await response.json()
             # Server returns {"success": True, "alive": True} or {"status": "ok"}
             is_healthy = (
-                data.get("status") in ("ok", "healthy", "alive") or
-                data.get("alive") is True or
-                data.get("success") is True
+                data.get("status") in ("ok", "healthy", "alive")
+                or data.get("alive") is True
+                or data.get("success") is True
             )
-            assert is_healthy, \
-                f"Health status should indicate alive/healthy, got: {data}"
+            assert is_healthy, f"Health status should indicate alive/healthy, got: {data}"
 
             print(f"  Backend health: {data}")
 
@@ -125,9 +125,7 @@ class TestSmokeMQTTConnection:
         test_payload = {"test": True, "timestamp": 12345}
 
         try:
-            await mqtt_client._client.publish(
-                test_topic, json.dumps(test_payload), qos=0
-            )
+            await mqtt_client._client.publish(test_topic, json.dumps(test_payload), qos=0)
             print(f"  MQTT publish to {test_topic}: OK")
         except Exception as e:
             pytest.fail(f"MQTT publish failed: {type(e).__name__}: {e}")
@@ -149,6 +147,7 @@ class TestSmokeDatabaseAccessible:
         """
         # First authenticate
         from conftest import E2EAPIClient
+
         api = E2EAPIClient(e2e_config, e2e_http_client)
         auth_success = await api.authenticate()
 
@@ -161,8 +160,7 @@ class TestSmokeDatabaseAccessible:
 
         # Now query devices (this hits the DB)
         devices = await api.get_all_esp_devices()
-        assert isinstance(devices, list), \
-            f"Expected list of devices, got: {type(devices)}"
+        assert isinstance(devices, list), f"Expected list of devices, got: {type(devices)}"
 
         print(f"  Database accessible: {len(devices)} devices found")
 
@@ -185,14 +183,14 @@ class TestSmokeFrontendLoads:
         frontend_url = "http://localhost:5173"
         try:
             async with e2e_http_client.get(
-                frontend_url,
-                timeout=aiohttp.ClientTimeout(total=5)
+                frontend_url, timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
                 if response.status == 200:
                     text = await response.text()
                     # Vue 3 apps typically have <div id="app">
-                    assert "app" in text.lower() or "vue" in text.lower() or "<html" in text.lower(), \
-                        "Frontend should return HTML with app root"
+                    assert (
+                        "app" in text.lower() or "vue" in text.lower() or "<html" in text.lower()
+                    ), "Frontend should return HTML with app root"
                     print(f"  Frontend loaded: status={response.status}")
                 else:
                     pytest.skip(f"Frontend returned {response.status}")

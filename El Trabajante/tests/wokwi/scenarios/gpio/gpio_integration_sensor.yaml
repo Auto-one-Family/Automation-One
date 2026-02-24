@@ -14,6 +14,14 @@
 #   4. GPIO Manager reserves pin and updates tracking
 #   5. Sensor becomes operational
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure DS18B20 sensor:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"GreenhouseTemp","raw_mode":true,"active":true}]}'
+#   Step 2 - Configure I2C sensor SHT31 (after ~2.5s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":255,"sensor_type":"sht31","sensor_name":"HumiditySensor","i2c_address":68,"raw_mode":true,"active":true}]}'
+#
 # Firmware reference:
 #   - sensor_manager.cpp (configureSensor method)
 #   - gpio_manager.cpp (requestPin method)
@@ -30,23 +38,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure DS18B20 temperature sensor
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "GreenhouseTemp",
-              "raw_mode": true,
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure DS18B20 temperature sensor (CI helper script)
 
   # Verify GPIO Manager allocates pin
   - wait-serial: "Pin 4 allocated"
@@ -62,25 +54,8 @@ steps:
   # Verify config response is successful
   - wait-serial: "config_response"
 
-  # Configure I2C sensor (SHT31) to verify I2C integration
+  # External MQTT injection: configure I2C sensor SHT31 (CI helper script)
   - delay: 500
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 255,
-              "sensor_type": "sht31",
-              "sensor_name": "HumiditySensor",
-              "i2c_address": 68,
-              "raw_mode": true,
-              "active": true
-            }]
-          }
-        }
 
   # I2C sensor uses pre-reserved I2C pins (21, 22)
   # GPIO field is 255 (marker for I2C device)

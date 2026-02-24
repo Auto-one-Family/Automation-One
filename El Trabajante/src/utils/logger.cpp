@@ -22,6 +22,7 @@ Logger::Logger()
   for (size_t i = 0; i < MAX_LOG_ENTRIES; i++) {
     log_buffer_[i].timestamp = 0;
     log_buffer_[i].level = LOG_INFO;
+    log_buffer_[i].tag[0] = '\0';
     log_buffer_[i].message[0] = '\0';
   }
 }
@@ -44,7 +45,8 @@ void Logger::begin() {
 void Logger::setLogLevel(LogLevel level) {
   current_log_level_ = level;
   if (serial_enabled_) {
-    Serial.printf("Logger: Log level changed to %s\n", getLogLevelString(level));
+    Serial.printf("[%10lu] [INFO    ] [LOGGER  ] Log level changed to %s\n",
+                  millis(), getLogLevelString(level));
   }
 }
 
@@ -52,49 +54,39 @@ void Logger::setSerialEnabled(bool enabled) {
   serial_enabled_ = enabled;
 }
 
-void Logger::setMaxLogEntries(size_t max_entries) {
-  // Fixed-size buffer - log warning if requested size differs
-  if (max_entries != MAX_LOG_ENTRIES && serial_enabled_) {
-    Serial.printf("Logger: Max log entries is fixed at %d\n", MAX_LOG_ENTRIES);
-  }
-}
-
 // ============================================
-// PRIMARY API: const char* (Guide-konform)
+// PRIMARY API with TAG (ESP-IDF convention)
 // ============================================
-void Logger::log(LogLevel level, const char* message) {
-  // Check if this log level should be output
+void Logger::log(LogLevel level, const char* tag, const char* message) {
   if (!isLogLevelEnabled(level)) {
     return;
   }
-  
-  // Write to Serial if enabled
+
   if (serial_enabled_) {
-    writeToSerial(level, message);
+    writeToSerial(level, tag, message);
   }
-  
-  // Add to circular buffer
-  addToBuffer(level, message);
+
+  addToBuffer(level, tag, message);
 }
 
-void Logger::debug(const char* message) {
-  log(LOG_DEBUG, message);
+void Logger::debug(const char* tag, const char* message) {
+  log(LOG_DEBUG, tag, message);
 }
 
-void Logger::info(const char* message) {
-  log(LOG_INFO, message);
+void Logger::info(const char* tag, const char* message) {
+  log(LOG_INFO, tag, message);
 }
 
-void Logger::warning(const char* message) {
-  log(LOG_WARNING, message);
+void Logger::warning(const char* tag, const char* message) {
+  log(LOG_WARNING, tag, message);
 }
 
-void Logger::error(const char* message) {
-  log(LOG_ERROR, message);
+void Logger::error(const char* tag, const char* message) {
+  log(LOG_ERROR, tag, message);
 }
 
-void Logger::critical(const char* message) {
-  log(LOG_CRITICAL, message);
+void Logger::critical(const char* tag, const char* message) {
+  log(LOG_CRITICAL, tag, message);
 }
 
 // ============================================
@@ -104,30 +96,30 @@ void Logger::clearLogs() {
   log_buffer_index_ = 0;
   log_count_ = 0;
   if (serial_enabled_) {
-    Serial.println("Logger: Log buffer cleared");
+    Serial.println("[LOGGER  ] Log buffer cleared");
   }
 }
 
 String Logger::getLogs(LogLevel min_level, size_t max_entries) const {
   String result = "";
   size_t entries_added = 0;
-  
+
   // Start from oldest entry
   size_t start_index = (log_count_ < MAX_LOG_ENTRIES) ? 0 : log_buffer_index_;
-  
+
   for (size_t i = 0; i < log_count_ && entries_added < max_entries; i++) {
     size_t index = (start_index + i) % MAX_LOG_ENTRIES;
     const LogEntry& entry = log_buffer_[index];
-    
-    // Filter by log level
+
     if (entry.level >= min_level) {
       result += "[" + String(entry.timestamp) + "] ";
       result += "[" + String(getLogLevelString(entry.level)) + "] ";
+      result += "[" + String(entry.tag) + "] ";
       result += String(entry.message) + "\n";
       entries_added++;
     }
   }
-  
+
   return result;
 }
 
@@ -165,30 +157,27 @@ LogLevel Logger::getLogLevelFromString(const char* level_str) {
 // ============================================
 // HELPER METHODS
 // ============================================
-void Logger::writeToSerial(LogLevel level, const char* message) {
+void Logger::writeToSerial(LogLevel level, const char* tag, const char* message) {
   unsigned long timestamp = millis();
   const char* level_str = getLogLevelString(level);
-  
-  // Format: [timestamp] [LEVEL] message
-  Serial.printf("[%10lu] [%-8s] %s\n", timestamp, level_str, message);
+
+  // Format: [millis] [LEVEL   ] [TAG     ] message
+  Serial.printf("[%10lu] [%-8s] [%-8s] %s\n", timestamp, level_str, tag, message);
 }
 
-void Logger::addToBuffer(LogLevel level, const char* message) {
-  // Get next buffer position (circular)
+void Logger::addToBuffer(LogLevel level, const char* tag, const char* message) {
   size_t index = log_buffer_index_;
-  
-  // Store log entry
+
   log_buffer_[index].timestamp = millis();
   log_buffer_[index].level = level;
+  strncpy(log_buffer_[index].tag, tag, sizeof(log_buffer_[index].tag) - 1);
+  log_buffer_[index].tag[sizeof(log_buffer_[index].tag) - 1] = '\0';
   strncpy(log_buffer_[index].message, message, sizeof(log_buffer_[index].message) - 1);
   log_buffer_[index].message[sizeof(log_buffer_[index].message) - 1] = '\0';
-  
-  // Advance circular buffer index
+
   log_buffer_index_ = (log_buffer_index_ + 1) % MAX_LOG_ENTRIES;
-  
-  // Track total count (up to MAX_LOG_ENTRIES)
+
   if (log_count_ < MAX_LOG_ENTRIES) {
     log_count_++;
   }
 }
-

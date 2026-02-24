@@ -287,7 +287,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
 .latency--fast .timeline-track__latency,
 .latency--fast.timeline-mobile-latency {
   background: rgba(52, 211, 153, 0.2);
-  color: #34d399;
+  color: var(--color-success);
 }
 
 .latency--medium {
@@ -296,7 +296,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
 .latency--medium .timeline-track__latency,
 .latency--medium.timeline-mobile-latency {
   background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .latency--slow {
@@ -305,7 +305,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
 .latency--slow .timeline-track__latency,
 .latency--slow.timeline-mobile-latency {
   background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  color: var(--color-error);
 }
 
 /* ============================================================
@@ -363,13 +363,13 @@ function getEventCategoryClass(event: UnifiedEvent): string {
 }
 
 .timeline-node--current .timeline-node__dot {
-  border-color: #60a5fa;
+  border-color: var(--color-info);
   background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 /* Kategorie-Farben fuer Dot */
-.timeline-node--esp-status .timeline-node__dot { border-color: #3b82f6; color: #3b82f6; }
+.timeline-node--esp-status .timeline-node__dot { border-color: var(--color-accent); color: var(--color-accent); }
 .timeline-node--sensors .timeline-node__dot { border-color: #10b981; color: #10b981; }
 .timeline-node--actuators .timeline-node__dot { border-color: #f59e0b; color: #f59e0b; }
 .timeline-node--system .timeline-node__dot { border-color: #8b5cf6; color: #8b5cf6; }
@@ -445,7 +445,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   font-weight: 600;
   text-transform: uppercase;
   background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
+  color: var(--color-info);
   border-radius: 9999px;
 }
 

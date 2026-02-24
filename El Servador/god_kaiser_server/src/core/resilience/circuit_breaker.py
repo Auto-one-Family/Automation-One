@@ -16,18 +16,19 @@ Reference: ESP32 Circuit Breaker (mqtt_client.cpp):
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
 from ..logging_config import get_logger
-from .exceptions import CircuitBreakerOpenError, CircuitBreakerHalfOpenError
+from .exceptions import CircuitBreakerOpenError
 
 logger = get_logger(__name__)
 
 
 class CircuitState(Enum):
     """Circuit breaker states."""
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -36,6 +37,7 @@ class CircuitState(Enum):
 @dataclass
 class CircuitBreakerMetrics:
     """Metrics collected by the circuit breaker."""
+
     total_requests: int = 0
     successful_requests: int = 0
     failed_requests: int = 0
@@ -52,6 +54,7 @@ class CircuitBreakerMetrics:
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for circuit breaker behavior."""
+
     failure_threshold: int = 5
     recovery_timeout: float = 30.0  # seconds to wait in OPEN before HALF_OPEN
     half_open_timeout: float = 10.0  # seconds to wait in HALF_OPEN
@@ -62,17 +65,17 @@ class CircuitBreakerConfig:
 class CircuitBreaker:
     """
     Circuit Breaker implementation with async support.
-    
+
     Features:
     - Thread-safe state management with asyncio.Lock
     - Automatic state transitions based on thresholds
     - Metrics collection for monitoring
     - Manual reset capability
     - Force open for testing
-    
+
     Usage:
         breaker = CircuitBreaker("mqtt", failure_threshold=5, recovery_timeout=30)
-        
+
         if breaker.allow_request():
             try:
                 result = await some_operation()
@@ -84,7 +87,7 @@ class CircuitBreaker:
             # Request rejected - circuit is OPEN
             handle_rejection()
     """
-    
+
     def __init__(
         self,
         name: str,
@@ -96,7 +99,7 @@ class CircuitBreaker:
     ):
         """
         Initialize circuit breaker.
-        
+
         Args:
             name: Unique identifier for this circuit breaker
             failure_threshold: Number of failures before opening circuit
@@ -113,63 +116,63 @@ class CircuitBreaker:
             half_open_max_requests=half_open_max_requests,
             success_threshold=success_threshold,
         )
-        
+
         # State management
         self._state = CircuitState.CLOSED
         self._state_changed_at = time.time()
         self._failure_count = 0
         self._success_count_half_open = 0
         self._half_open_requests = 0
-        
+
         # Thread safety
         self._lock = asyncio.Lock()
-        
+
         # Metrics
         self._metrics = CircuitBreakerMetrics()
-        
+
         # Force open flag (for testing)
         self._forced_open = False
-        
+
         logger.info(
             f"[resilience] CircuitBreaker[{name}] initialized: "
             f"threshold={failure_threshold}, recovery={recovery_timeout}s, "
             f"half_open={half_open_timeout}s"
         )
-    
+
     @property
     def is_open(self) -> bool:
         """Check if circuit breaker is in OPEN state (quick check, not thread-safe)."""
         return self._state == CircuitState.OPEN or self._forced_open
-    
+
     @property
     def failure_count(self) -> int:
         """Get current failure count."""
         return self._failure_count
-    
+
     @property
     def last_failure_time(self) -> Optional[float]:
         """Get timestamp of last failure."""
         return self._metrics.last_failure_time
-    
+
     def allow_request(self) -> bool:
         """
         Check if a request should be allowed through the circuit breaker.
-        
+
         This is the synchronous version for quick checks.
         For async code with state transitions, use allow_request_async().
-        
+
         Returns:
             True if request should proceed, False if rejected
         """
         # Quick check without lock for performance
         if self._forced_open:
             return False
-        
+
         current_time = time.time()
-        
+
         if self._state == CircuitState.CLOSED:
             return True
-        
+
         if self._state == CircuitState.OPEN:
             # Check if recovery timeout has elapsed
             elapsed = current_time - self._state_changed_at
@@ -177,35 +180,35 @@ class CircuitBreaker:
                 # Transition to HALF_OPEN will happen in async version
                 return True
             return False
-        
+
         if self._state == CircuitState.HALF_OPEN:
             # Allow limited test requests
             return self._half_open_requests < self.config.half_open_max_requests
-        
+
         return True
-    
+
     async def allow_request_async(self) -> bool:
         """
         Check if a request should be allowed (async version with state transitions).
-        
+
         This method handles automatic state transitions:
         - OPEN → HALF_OPEN when recovery timeout elapses
-        
+
         Returns:
             True if request should proceed, False if rejected
         """
         async with self._lock:
             self._metrics.total_requests += 1
-            
+
             if self._forced_open:
                 self._metrics.rejected_requests += 1
                 return False
-            
+
             current_time = time.time()
-            
+
             if self._state == CircuitState.CLOSED:
                 return True
-            
+
             if self._state == CircuitState.OPEN:
                 # Check if recovery timeout has elapsed
                 elapsed = current_time - self._state_changed_at
@@ -217,7 +220,7 @@ class CircuitBreaker:
                 else:
                     self._metrics.rejected_requests += 1
                     return False
-            
+
             if self._state == CircuitState.HALF_OPEN:
                 # Allow limited test requests
                 if self._half_open_requests < self.config.half_open_max_requests:
@@ -226,13 +229,13 @@ class CircuitBreaker:
                 else:
                     self._metrics.rejected_requests += 1
                     return False
-            
+
             return True
-    
+
     def record_success(self) -> None:
         """
         Record a successful operation.
-        
+
         In HALF_OPEN state, may transition to CLOSED if success threshold is met.
         """
         # Use synchronous approach to avoid nested async
@@ -240,7 +243,7 @@ class CircuitBreaker:
         self._metrics.last_success_time = time.time()
         self._metrics.consecutive_successes += 1
         self._metrics.consecutive_failures = 0
-        
+
         if self._state == CircuitState.HALF_OPEN:
             self._success_count_half_open += 1
             if self._success_count_half_open >= self.config.success_threshold:
@@ -248,16 +251,16 @@ class CircuitBreaker:
         elif self._state == CircuitState.CLOSED:
             # Reset failure count on success
             self._failure_count = 0
-    
+
     async def record_success_async(self) -> None:
         """Record a successful operation (async version)."""
         async with self._lock:
             self.record_success()
-    
+
     def record_failure(self) -> None:
         """
         Record a failed operation.
-        
+
         May transition to OPEN if failure threshold is exceeded.
         """
         self._metrics.failed_requests += 1
@@ -265,7 +268,7 @@ class CircuitBreaker:
         self._metrics.consecutive_failures += 1
         self._metrics.consecutive_successes = 0
         self._failure_count += 1
-        
+
         if self._state == CircuitState.HALF_OPEN:
             # Any failure in HALF_OPEN goes back to OPEN
             self._transition_to(CircuitState.OPEN)
@@ -277,20 +280,20 @@ class CircuitBreaker:
                     f"[resilience] CircuitBreaker[{self.name}]: "
                     f"Failure recorded ({self._failure_count}/{self.config.failure_threshold})"
                 )
-    
+
     async def record_failure_async(self) -> None:
         """Record a failed operation (async version)."""
         async with self._lock:
             self.record_failure()
-    
+
     def get_state(self) -> CircuitState:
         """Get current circuit breaker state."""
         return self._state
-    
+
     def get_metrics(self) -> dict:
         """
         Get circuit breaker metrics.
-        
+
         Returns:
             Dictionary with all collected metrics
         """
@@ -319,11 +322,11 @@ class CircuitBreaker:
                 "success_threshold": self.config.success_threshold,
             },
         }
-    
+
     def reset(self) -> None:
         """
         Manually reset the circuit breaker to CLOSED state.
-        
+
         Clears failure count and forced_open flag.
         """
         previous_state = self._state
@@ -334,38 +337,35 @@ class CircuitBreaker:
         self._half_open_requests = 0
         self._forced_open = False
         self._metrics.state_transitions += 1
-        
+
         logger.info(
             f"[resilience] CircuitBreaker[{self.name}]: "
             f"Manual reset ({previous_state.value} → closed)"
         )
-    
+
     async def reset_async(self) -> None:
         """Manually reset the circuit breaker (async version)."""
         async with self._lock:
             self.reset()
-    
+
     def force_open(self) -> None:
         """
         Force the circuit breaker to OPEN state (for testing).
-        
+
         The circuit will remain open until reset() is called.
         """
         self._forced_open = True
-        logger.warning(
-            f"[resilience] CircuitBreaker[{self.name}]: "
-            f"Forced OPEN (for testing)"
-        )
-    
+        logger.warning(f"[resilience] CircuitBreaker[{self.name}]: " f"Forced OPEN (for testing)")
+
     async def force_open_async(self) -> None:
         """Force the circuit breaker to OPEN state (async version)."""
         async with self._lock:
             self.force_open()
-    
+
     def _transition_to(self, new_state: CircuitState) -> None:
         """
         Transition to a new state.
-        
+
         Handles logging and metric updates.
         """
         previous_state = self._state
@@ -373,7 +373,7 @@ class CircuitBreaker:
         self._state_changed_at = time.time()
         self._metrics.state_transitions += 1
         self._metrics.current_state = new_state
-        
+
         # Reset state-specific counters
         if new_state == CircuitState.CLOSED:
             self._failure_count = 0
@@ -382,12 +382,12 @@ class CircuitBreaker:
         elif new_state == CircuitState.HALF_OPEN:
             self._success_count_half_open = 0
             self._half_open_requests = 0
-        
+
         logger.warning(
             f"[resilience] CircuitBreaker[{self.name}]: "
             f"{previous_state.value.upper()} → {new_state.value.upper()}"
         )
-    
+
     def __repr__(self) -> str:
         return (
             f"CircuitBreaker(name='{self.name}', state={self._state.value}, "
@@ -398,30 +398,31 @@ class CircuitBreaker:
 def circuit_breaker_decorator(breaker_name: str):
     """
     Decorator to wrap async functions with circuit breaker protection.
-    
+
     Usage:
         @circuit_breaker_decorator("database")
         async def save_data(data):
             ...
-    
+
     Args:
         breaker_name: Name of the circuit breaker in the registry
-    
+
     Raises:
         CircuitBreakerOpenError: If circuit breaker is OPEN
     """
+
     def decorator(func):
         async def wrapper(*args, **kwargs):
             # Import here to avoid circular imports
             from .registry import ResilienceRegistry
-            
+
             registry = ResilienceRegistry.get_instance()
             breaker = registry.get_circuit_breaker(breaker_name)
-            
+
             if breaker is None:
                 # No breaker registered, just run the function
                 return await func(*args, **kwargs)
-            
+
             if not await breaker.allow_request_async():
                 raise CircuitBreakerOpenError(
                     breaker_name=breaker_name,
@@ -429,26 +430,17 @@ def circuit_breaker_decorator(breaker_name: str):
                     failure_count=breaker.failure_count,
                     details=f"Function: {func.__name__}",
                 )
-            
+
             try:
                 result = await func(*args, **kwargs)
                 await breaker.record_success_async()
                 return result
-            except Exception as e:
+            except Exception:
                 await breaker.record_failure_async()
                 raise
-        
+
         wrapper.__name__ = func.__name__
         wrapper.__doc__ = func.__doc__
         return wrapper
+
     return decorator
-
-
-
-
-
-
-
-
-
-

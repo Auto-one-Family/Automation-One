@@ -1,6 +1,6 @@
 # AutomationOne -- Server-Architektur (El Servador / God-Kaiser Server)
 
-> **Version:** 1.0 | **Stand:** 2026-02-14
+> **Version:** 1.1 | **Stand:** 2026-02-23
 > **Grundlage:** Vollstaendige Codebase-Analyse aller Dateien in `El Servador/god_kaiser_server/src/`
 > **Referenzen:** REST_ENDPOINTS, WEBSOCKET_EVENTS, MQTT_TOPICS, COMMUNICATION_FLOWS, ERROR_CODES
 
@@ -10,18 +10,18 @@
 
 | Eigenschaft | Wert |
 |-------------|------|
-| **Framework** | FastAPI (Python 3.11, async) |
+| **Framework** | FastAPI (Python 3.13, async) |
 | **Port** | 8000 (REST + WebSocket) |
 | **Datenbank** | PostgreSQL 16 (asyncpg, SQLAlchemy 2.0 ORM) |
 | **MQTT** | paho-mqtt (Client), Eclipse Mosquitto (Broker, Port 1883) |
-| **Source-Dateien** | ~190 Python-Dateien in `src/` |
+| **Source-Dateien** | ~200 Python-Dateien in `src/` |
 | **API-Router** | 14 REST-Router, ~170 Endpoints |
 | **MQTT-Handler** | 12 Handler-Module + 1 Inline-Handler |
 | **Services** | 23+ Services (davon 5 Stubs) |
-| **DB-Tabellen** | 19 Tabellen in 15 Model-Dateien |
+| **DB-Tabellen** | 19 Tabellen in 16 Model-Dateien |
 | **Repositories** | 15 (14 Domain + BaseRepository) |
 | **Schemas** | 20 Pydantic-Schema-Dateien |
-| **Test-Dateien** | ~119 Test-Module (unit, integration, esp32, e2e) |
+| **Test-Dateien** | 106 Test-Module (37 unit, 44 integration, 19 esp32, 6 e2e) + 5 conftest |
 | **Pfad** | `El Servador/god_kaiser_server/src/` |
 
 **Kernprinzip:** Der Server ist die zentrale Intelligenz des Systems. ESP32-Geraete sind "dumme Agenten" -- sie erfassen Rohdaten und fuehren Befehle aus. Alle Logik, Verarbeitung, Entscheidungen und Persistenz liegen auf dem Server. Dieses Prinzip garantiert, dass Firmware-Updates auf den ESP32s fast nie noetig sind: neue Sensoren, neue Regeln, neue Aktoren -- alles wird ueber den Server konfiguriert.
@@ -217,6 +217,21 @@ src/
 │   ├── mqtt_helpers.py                      # MQTT-Hilfs-Funktionen
 │   ├── data_helpers.py                      # Daten-Konvertierung
 │   └── time_helpers.py                      # Zeit-Utilities
+│
+├── autoops/                                     # AutoOps Agent Framework (v1.0.0)
+│   ├── __init__.py                              # Package (__version__ = "1.0.0")
+│   ├── runner.py                                # CLI Runner
+│   ├── core/
+│   │   ├── agent.py                             # Agent-Klasse
+│   │   ├── api_client.py                        # REST API Client
+│   │   ├── base_plugin.py                       # Plugin ABC
+│   │   ├── context.py                           # Agent-Context
+│   │   ├── plugin_registry.py                   # Plugin-Registry
+│   │   └── reporter.py                          # Report-Generator
+│   └── plugins/
+│       ├── health_check.py                      # Health-Check Plugin
+│       ├── esp_configurator.py                  # ESP-Konfigurations-Plugin
+│       └── debug_fix.py                         # Debug & Fix Plugin
 │
 ├── middleware/
 │   └── request_id.py                        # UUID pro Request (68 Zeilen)
@@ -537,7 +552,7 @@ BaseSensorProcessor (ABC)
 
 ### 9.1 Tabellen-Uebersicht
 
-19 Tabellen in 15 Model-Dateien (`db/models/`):
+19 Tabellen in 16 Model-Dateien (`db/models/`):
 
 | Tabelle | Model-Datei | Schluesselfelder | Retention |
 |---------|-------------|------------------|-----------|
@@ -981,7 +996,7 @@ Vollstaendige Referenz: `.claude/reference/errors/ERROR_CODES.md`
 
 ## 16. Test-Infrastruktur
 
-~119 Test-Module in `El Servador/god_kaiser_server/tests/`:
+106 Test-Module + 5 conftest in `El Servador/god_kaiser_server/tests/`:
 
 | Kategorie | Verzeichnis | Fokus |
 |-----------|-------------|-------|

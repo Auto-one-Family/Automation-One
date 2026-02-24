@@ -1,5 +1,8 @@
 #include "config_response.h"
 
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "CFGRESP";
+
 bool ConfigResponseBuilder::publishSuccess(ConfigType type,
                                            uint8_t count,
                                            const String& message,
@@ -42,10 +45,10 @@ bool ConfigResponseBuilder::publish(const ConfigResponsePayload& payload) {
 
   bool published = mqttClient.safePublish(topic, json_payload, 1);
   if (published) {
-    LOG_INFO("ConfigResponse published [" + String(configTypeToString(payload.type)) +
+    LOG_I(TAG, "ConfigResponse published [" + String(configTypeToString(payload.type)) +
              "] status=" + String(configStatusToString(payload.status)));
   } else {
-    LOG_ERROR("ConfigResponse publish failed for topic: " + topic);
+    LOG_E(TAG, "ConfigResponse publish failed for topic: " + topic);
   }
 
   return published;
@@ -78,7 +81,7 @@ String ConfigResponseBuilder::buildJsonPayload(const ConfigResponsePayload& payl
   String json;
   size_t written = serializeJson(doc, json);
   if (written == 0 || json.length() == 0) {
-    LOG_ERROR("JSON serialization failed in buildJsonPayload (type=" +
+    LOG_E(TAG, "JSON serialization failed in buildJsonPayload (type=" +
               String(configTypeToString(payload.type)) + ")");
     // Return minimal valid JSON with required type field
     return String("{\"status\":\"error\",\"type\":\"") +
@@ -114,12 +117,12 @@ bool ConfigResponseBuilder::publishWithFailures(
 
   bool published = mqttClient.safePublish(topic, json_payload, 1);
   if (published) {
-    LOG_INFO("ConfigResponse published [" + String(configTypeToString(type)) +
+    LOG_I(TAG, "ConfigResponse published [" + String(configTypeToString(type)) +
              "] status=" + String(configStatusToString(status)) +
              " success=" + String(success_count) +
              " failed=" + String(fail_count));
   } else {
-    LOG_ERROR("ConfigResponse publish failed for topic: " + topic);
+    LOG_E(TAG, "ConfigResponse publish failed for topic: " + topic);
   }
 
   return published;
@@ -189,7 +192,7 @@ String ConfigResponseBuilder::buildJsonPayloadWithFailures(
   String json;
   size_t written = serializeJson(doc, json);
   if (written == 0 || json.length() == 0) {
-    LOG_ERROR("JSON serialization failed in buildJsonPayloadWithFailures (type=" +
+    LOG_E(TAG, "JSON serialization failed in buildJsonPayloadWithFailures (type=" +
               String(configTypeToString(type)) + ", failures=" + String(failures.size()) + ")");
     // Return minimal valid JSON with required type field
     return String("{\"status\":\"error\",\"type\":\"") +

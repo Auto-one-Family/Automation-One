@@ -1,14 +1,15 @@
 # Phase 4: Integration — Beide Spuren verbinden
 
 > **Voraussetzung:** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) + [Phase 2](./PHASE_2_PRODUKTIONSTESTFELD.md) + [Phase 3](./PHASE_3_KI_ERROR_ANALYSE.md) abgeschlossen
-> **Nutzt:** Alle vorherigen Phasen
-> **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 4"
+> **Nutzt:** Alle vorherigen Phasen + **Wokwi MCP Server** (Phase 1) + **KG-RCA** (Phase 3)
+> **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 4" + "Agent-Driven Testing"
+> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Closed-Loop Agent-Architektur, Multi-Agent Feedback, 3 neue Papers)
 
 ---
 
 ## Ziel
 
-Wokwi-Regressionstests und Produktionstestfeld nutzen dieselben Error-Reports und Dashboards. Feedback-Loop zwischen beiden Spuren etabliert. Einheitlicher Blick auf den Systemzustand.
+Wokwi-Regressionstests und Produktionstestfeld nutzen dieselben Error-Reports und Dashboards. Feedback-Loop zwischen beiden Spuren etabliert. Einheitlicher Blick auf den Systemzustand. **NEU: Closed-Loop Agent-Architektur** fuer automatisierte Test-Verfeinerung via Wokwi MCP.
 
 ---
 
@@ -180,9 +181,9 @@ curl -s -u admin:Admin123# http://localhost:3000/api/search?query=sensor | pytho
 
 ---
 
-## Schritt 4.3: Feedback-Loop etablieren
+## Schritt 4.3: Feedback-Loop etablieren (ERWEITERT mit Wokwi MCP)
 
-### Produktionsfehler → Wokwi-Regressionsszenario
+### Produktionsfehler → Wokwi-Regressionsszenario (VORHER: manuell)
 
 ```
 1. Produktion: ESP32 meldet Error-Code 1040 (SENSOR_READ_FAILED)
@@ -203,6 +204,54 @@ curl -s -u admin:Admin123# http://localhost:3000/api/search?query=sensor | pytho
 8. Verifikation: Fix besteht Regression → Deploy in Produktion
 ```
 
+### NEU: Closed-Loop Agent-Feedback via Wokwi MCP (2026-02-23)
+
+> **Wissenschaftliche Basis:** Naqvi et al. (2026) — Agentic Testing Closed-Loop, TraceCoder (2026) — Multi-Agent Debugging
+
+**Erweiterter Feedback-Loop mit Agent-Automatisierung:**
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│              CLOSED-LOOP FEEDBACK (Agent-Driven)                  │
+│                                                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │  1. DETECT       │  │  2. REPRODUCE    │  │  3. ANALYSE      │  │
+│  │                  │→ │                  │→ │                  │  │
+│  │  Grafana Alert   │  │  Wokwi MCP:      │  │  Phase 3 RCA:    │  │
+│  │  + Isolation     │  │  Fehler in SIL   │  │  Trace-Abstrakt  │  │
+│  │    Forest        │  │  reproduzieren   │  │  + KG-Lookup     │  │
+│  │  + auto-ops      │  │  (gleicher       │  │  + LLM Root-     │  │
+│  │    sammelt       │  │   Error-Code)    │  │    Cause         │  │
+│  │    Kontext       │  │                  │  │                  │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
+│                                                      │           │
+│  ┌─────────────────┐  ┌─────────────────┐            │           │
+│  │  5. VERIFY       │  │  4. FIX          │            │           │
+│  │                  │← │                  │←───────────┘           │
+│  │  Wokwi MCP:      │  │  Dev-Agent       │                       │
+│  │  Fix in SIL      │  │  implementiert   │                       │
+│  │  verifizieren    │  │  Fix basierend   │                       │
+│  │  → CI/CD         │  │  auf RCA-        │                       │
+│  │    Regression    │  │  Empfehlung      │                       │
+│  └─────────────────┘  └─────────────────┘                       │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  6. LEARN: Neues Pattern → Fehler-KG erweitern              │ │
+│  │          + Regressions-Szenario dauerhaft in CI/CD          │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Unterschied zum manuellen Feedback-Loop:**
+
+| Aspekt | Manuell (aktuell) | Closed-Loop (Ziel) |
+|--------|-------------------|-------------------|
+| Fehler-Reproduktion | User erstellt YAML manuell | Agent nutzt Wokwi MCP direkt |
+| Root-Cause | Agent-Report, manuelle Interpretation | KG + LLM automatische Analyse |
+| Fix-Verifikation | CI/CD nach Push | Wokwi MCP sofort in Session |
+| Wissen sichern | Manuell dokumentieren | Automatisch in Fehler-KG |
+| Zeitaufwand | Stunden bis Tage | Minuten bis Stunden |
+
 ### Workflow-Integration
 
 **Naming-Konvention fuer Regressions-Szenarien:**
@@ -215,13 +264,14 @@ Beispiele:
 - regression_5301_db_connection_pool_exhaustion.yaml
 ```
 
-### Agent-Workflow fuer Feedback-Loop
+### Agent-Workflow fuer Feedback-Loop (erweitert)
 
-1. **Fehler erkannt:** `auto-ops` (Operations-Rolle) → Alert-Analyse
-2. **Root-Cause:** `meta-analyst` → Cross-Layer-Korrelation
-3. **Fix implementieren:** Passender Dev-Agent (esp32-dev / server-dev / frontend-dev)
-4. **Regression erstellen:** `esp32-dev` → Wokwi-Szenario
-5. **Verifizieren:** `test-log-analyst` → CI/CD-Ergebnis pruefen
+1. **Fehler erkannt:** `auto-ops` (Operations-Rolle) → Alert-Analyse + Kontext sammeln
+2. **Reproduzieren:** auto-ops → **Wokwi MCP: Simulation starten, Error-Injection, Serial beobachten**
+3. **Root-Cause:** `meta-analyst` → Cross-Layer-Korrelation + **Phase 3 KG-RCA**
+4. **Fix implementieren:** Passender Dev-Agent (esp32-dev / server-dev / frontend-dev)
+5. **Verifizieren:** auto-ops → **Wokwi MCP: Fix in Simulation testen** → dann CI/CD
+6. **Lernen:** `meta-analyst` → **Fehler-KG erweitern + Regression erstellen**
 
 ---
 
@@ -271,6 +321,8 @@ Erweiterte Diagnose umfasst:
 
 ## Akzeptanzkriterien Phase 4
 
+### Basis-Kriterien (wie bisher)
+
 | # | Kriterium | Verifikation |
 |---|-----------|-------------|
 | 1 | Error-Report-Format dokumentiert | `.claude/reference/testing/ERROR_REPORT_FORMAT.md` existiert |
@@ -281,6 +333,16 @@ Erweiterte Diagnose umfasst:
 | 6 | Feedback-Loop Konvention dokumentiert | Regression-Szenario Naming in README |
 | 7 | meta-analyst kann beide Quellen korrelieren | Cross-Report mit Wokwi + Produktion |
 | 8 | auto-ops zeigt konsolidierten Status | /ops-diagnose output enthaelt alle Spuren |
+
+### Erweiterte Kriterien (Closed-Loop, nach Basis)
+
+| # | Kriterium | Verifikation |
+|---|-----------|-------------|
+| 9 | Wokwi MCP in `.mcp.json` konfiguriert | `wokwi` Key in MCP-Config vorhanden |
+| 10 | Agent kann via MCP Simulation starten + Serial lesen | Manueller Test: Claude Code startet Wokwi via MCP |
+| 11 | Feedback-Loop: Fehler reproduzierbar via MCP | Error-Injection per MCP → erwarteter Error-Code in Serial |
+| 12 | Fehler-KG hat mindestens 20 Kausalkanten | KG-Datei oder DB hat 20+ Kanten |
+| 13 | LLM-RCA liefert Ergebnis mit Confidence > 0.7 | ai_predictions Eintrag mit resolution "llm_suggested" |
 
 ---
 
@@ -307,6 +369,17 @@ Phase 0: Error-Taxonomie (FUNDAMENT)
 
 ---
 
+## Wissenschaftliche Fundierung Phase 4
+
+| Paper | Kernaussage | Anwendung in Phase 4 |
+|-------|-------------|---------------------|
+| **Naqvi et al. (2026)** | Closed-Loop Agent-Architektur: generieren → ausfuehren → analysieren → verfeinern | **Schritt 4.3:** Closed-Loop Feedback |
+| **TraceCoder (2026)** | Multi-Agent trace-basiertes Debugging, +34.43% Pass@1 | **Schritt 4.1:** Multi-Agent Error-Report-Korrelation |
+| **Chan & Alalfi (2025)** | SmartTinkerer: RL + Multi-Agent Committee fuer IoT | **Schritt 4.3:** Multi-Agent Validierung |
+| **LLMs-DCGRCA (2025)** | Dynamische Kausal-Graphen + LLMs | **Schritt 4.3:** Kausal-Graph in Feedback-Loop |
+
+---
+
 ## Agents & Skills (Zusammenfassung)
 
 | Schritt | Agent/Skill | Aufgabe |
@@ -317,6 +390,8 @@ Phase 0: Error-Taxonomie (FUNDAMENT)
 | 4.2 | `system-control` | PostgreSQL Datasource konfigurieren |
 | 4.3 | `esp32-dev` | Regressions-Szenarien erstellen |
 | 4.3 | `test-log-analyst` | CI/CD-Ergebnis verifizieren |
+| **4.3 NEU** | `auto-ops` + **Wokwi MCP** | **Closed-Loop: Fehler reproduzieren + Fix verifizieren** |
+| **4.3 NEU** | `meta-analyst` | **Fehler-KG erweitern nach jedem Feedback-Zyklus** |
 | 4.4 | `/auto-ops:ops-diagnose` | Konsolidierter Status |
 | Ende | `/verify-plan` | Phase 4 gegen Codebase verifizieren |
 
@@ -371,8 +446,13 @@ Nach Phase 4 ist die Testinfrastruktur komplett:
 |-----------|--------|
 | Error-Taxonomie (1000-6099) | Vollstaendig, dokumentiert, in Grafana |
 | Wokwi-Simulation (SIL) | 173+ Szenarien, CI/CD automatisiert, Nightly |
+| **Wokwi MCP Server** | **Agent-Driven SIL-Testing, Echtzeit-Simulation via MCP** |
 | Produktionstestfeld | ESP32 + Sensoren, E2E verifiziert, Chaos-getestet |
 | KI-Error-Analyse | Stufe 1 (Rule-based) + Stufe 2 (Isolation Forest) aktiv |
+| **KI-Error-Analyse Stufe 3** | **LLM-RCA mit Knowledge Graph + Trace-Abstraktion** |
 | Dashboards | 4 Dashboards (Operations, Sensor, Error, Test) |
 | Feedback-Loop | Produktion → Regression → Fix → Deploy |
+| **Closed-Loop Agent** | **Automatisch: Detect → Reproduce (MCP) → Analyse (KG) → Fix → Verify** |
+| **ESP32 Fehler-KG** | **Kausale Beziehungen zwischen Error-Codes, dynamisch erweiterbar** |
 | Agent-System | 13 Agents orchestriert, Reports konsolidiert |
+| **Wissenschaftliche Basis** | **16 Papers, 4 Forschungsluecken identifiziert** |

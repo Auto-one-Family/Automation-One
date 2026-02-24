@@ -1,6 +1,6 @@
 # Test-Workflow für AutomationOne
 
-> **Version:** 4.1 | **Aktualisiert:** 2026-02-01
+> **Version:** 4.3 | **Aktualisiert:** 2026-02-23
 > **Zweck:** Vollständige Test-Infrastruktur Dokumentation
 > **Themengebiet:** Test-Workflows (Server pytest + Wokwi Simulation)
 
@@ -25,11 +25,11 @@ AutomationOne verfügt über zwei getrennte Test-Systeme:
 
 | Kategorie | Anzahl Dateien | Pfad |
 |-----------|----------------|------|
-| **Unit Tests** | 35 | `tests/unit/` |
+| **Unit Tests** | 38 | `tests/unit/` |
 | **Integration Tests** | 44 | `tests/integration/` |
 | **ESP32 Mock Tests** | 19 | `tests/esp32/` |
-| **E2E Tests** | 3 | `tests/e2e/` |
-| **GESAMT** | **101** | - |
+| **E2E Tests** | 9 | `tests/e2e/` |
+| **GESAMT** | **110** | - |
 
 ---
 
@@ -48,11 +48,11 @@ AutomationOne verfügt über zwei getrennte Test-Systeme:
 │    ├─ Mocked MQTT Publisher (kein Broker nötig)            │
 │    └─ Auto-use Fixtures für DB + MQTT                      │
 │                                                             │
-│  Tests: 101 Dateien (ohne echte Hardware lauffähig)        │
-│    ├─ Unit Tests (35) - Repositories, Services, Processors │
+│  Tests: 110 Dateien (ohne echte Hardware lauffähig)        │
+│    ├─ Unit Tests (38) - Repositories, Services, Processors │
 │    ├─ Integration Tests (44) - API, Handler, Logic Engine  │
 │    ├─ ESP32 Mock Tests (19) - MockESP32Client Szenarien    │
-│    └─ E2E Tests (3) - Full Server Scenarios                │
+│    └─ E2E Tests (9) - Full Server Scenarios                │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -61,10 +61,10 @@ AutomationOne verfügt über zwei getrennte Test-Systeme:
 
 | Kategorie | Pfad | Tests | Beschreibung |
 |-----------|------|-------|--------------|
-| **Unit** | `tests/unit/` | 35 | Isolierte Modul-Tests |
+| **Unit** | `tests/unit/` | 38 | Isolierte Modul-Tests |
 | **Integration** | `tests/integration/` | 44 | API-Endpoints, MQTT-Handler, Logic Engine |
 | **ESP32** | `tests/esp32/` | 19 | MockESP32Client Szenarien |
-| **E2E** | `tests/e2e/` | 3 | Full-Stack Server Scenarios |
+| **E2E** | `tests/e2e/` | 9 | Full-Stack Server Scenarios |
 
 ### 2.3 Pytest Marker (aus pyproject.toml + conftest.py)
 
@@ -102,31 +102,31 @@ cd "El Servador/god_kaiser_server"
 # ============================================
 # ALLE TESTS
 # ============================================
-poetry run pytest tests/ -v --no-cov             # Ohne Coverage
-poetry run pytest tests/ -v                       # Mit Coverage (default)
+.venv/Scripts/pytest.exe tests/ -v --no-cov             # Ohne Coverage
+.venv/Scripts/pytest.exe tests/ -v                       # Mit Coverage (default)
 
 # ============================================
 # NACH KATEGORIE
 # ============================================
-poetry run pytest tests/unit/ -v                  # Nur Unit Tests
-poetry run pytest tests/integration/ -v           # Nur Integration Tests
-poetry run pytest tests/esp32/ -v                 # Nur ESP32 Mock Tests
-poetry run pytest tests/e2e/ -v                   # Nur E2E Tests
+.venv/Scripts/pytest.exe tests/unit/ -v                  # Nur Unit Tests
+.venv/Scripts/pytest.exe tests/integration/ -v           # Nur Integration Tests
+.venv/Scripts/pytest.exe tests/esp32/ -v                 # Nur ESP32 Mock Tests
+.venv/Scripts/pytest.exe tests/e2e/ -v                   # Nur E2E Tests
 
 # ============================================
 # NACH MARKER
 # ============================================
-poetry run pytest -m "sensor" -v                  # Nur Sensor Tests
-poetry run pytest -m "critical" -v                # Nur kritische Tests
-poetry run pytest -m "not hardware" -v            # Ohne Hardware-Tests
-poetry run pytest -m "not slow" -v                # Ohne langsame Tests
+.venv/Scripts/pytest.exe -m "sensor" -v                  # Nur Sensor Tests
+.venv/Scripts/pytest.exe -m "critical" -v                # Nur kritische Tests
+.venv/Scripts/pytest.exe -m "not hardware" -v            # Ohne Hardware-Tests
+.venv/Scripts/pytest.exe -m "not slow" -v                # Ohne langsame Tests
 
 # ============================================
 # EINZELNE TESTS
 # ============================================
-poetry run pytest tests/unit/test_temperature_processor.py -v
-poetry run pytest tests/integration/test_logic_engine.py::TestLogicEngine -v
-poetry run pytest tests/esp32/test_actuator.py::test_pwm_control -xvs
+.venv/Scripts/pytest.exe tests/unit/test_temperature_processor.py -v
+.venv/Scripts/pytest.exe tests/integration/test_logic_engine.py::TestLogicEngine -v
+.venv/Scripts/pytest.exe tests/esp32/test_actuator.py::test_pwm_control -xvs
 
 # ============================================
 # OPTIONEN
@@ -544,9 +544,13 @@ async def db_session(test_engine):
 
 | Workflow | Datei | Trigger | Jobs |
 |----------|-------|---------|------|
-| **Server Tests** | `server-tests.yml` | Push/PR zu `El Servador/**` | lint, unit-tests, integration-tests |
-| **ESP32 Tests** | `esp32-tests.yml` | Push/PR zu `tests/esp32/**` | esp32-tests |
-| **Wokwi Tests** | `wokwi-tests.yml` | Push/PR zu `El Trabajante/**` | wokwi-simulation |
+| **Server Tests** | `server-tests.yml` | Push/PR zu `El Servador/**` | lint, unit, integration, summary |
+| **ESP32 Tests** | `esp32-tests.yml` | Push/PR zu `tests/esp32/**` | esp32-tests, summary |
+| **Frontend Tests** | `frontend-tests.yml` | Push/PR zu `El Frontend/**` | type-check, unit, build, summary |
+| **Wokwi Tests** | `wokwi-tests.yml` | Push/PR zu `El Trabajante/**` | build + 16 PR core + 6 nightly + summary |
+| **Backend E2E** | `backend-e2e-tests.yml` | Push/PR zu `El Servador/**` | e2e (Docker stack), summary |
+| **Playwright** | `playwright-tests.yml` | Push/PR zu `El Frontend/**` | e2e (Docker stack), summary |
+| **Security Scan** | `security-scan.yml` | Dockerfile/deps + weekly | trivy server, frontend, config |
 | **PR Checks** | `pr-checks.yml` | Pull Requests | label, large-file-check |
 
 ### 7.2 CI Umgebung
@@ -586,12 +590,25 @@ gh workflow run wokwi-tests.yml
 
 ### 7.4 Artifacts
 
-| Workflow | Artifact | Inhalt |
-|----------|----------|--------|
-| server-tests | `unit-test-results` | `junit-unit.xml`, `coverage-unit.xml` |
-| server-tests | `integration-test-results` | `junit-integration.xml`, `coverage-integration.xml` |
-| esp32-tests | `esp32-test-results` | `junit-esp32.xml` |
-| wokwi-tests | `wokwi-logs` | Serial output |
+| Workflow | Artifact | Inhalt | Retention |
+|----------|----------|--------|-----------|
+| server-tests | `unit-test-results` | `junit-unit.xml`, `coverage-unit.xml` | 7 Tage |
+| server-tests | `integration-test-results` | `junit-integration.xml`, `coverage-integration.xml` | 7 Tage |
+| esp32-tests | `esp32-test-results` | `junit-esp32.xml` | 7 Tage |
+| frontend-tests | `frontend-test-results` | `junit-results.xml`, Coverage | 7 Tage |
+| backend-e2e-tests | `backend-e2e-results` | `e2e-results.xml`, Server/DB/MQTT Logs | 7 Tage |
+| playwright-tests | `playwright-report` | JUnit XML, HTML Report, Traces | 7 Tage |
+| wokwi-tests | `wokwi-firmware` | Build Output | 1 Tag |
+| wokwi-tests | `*-test-logs` | Serial Logs per Kategorie | 7 Tage |
+
+### 7.5 Test-Reporting Pipeline
+
+Alle Workflows nutzen dasselbe Pattern: JUnit XML → upload-artifact → `EnricoMi/publish-unit-test-result-action@v2` → PR-Kommentar.
+
+**Wichtig für Docker-basierte E2E Tests:**
+- KEIN `--wait` Flag bei `docker compose up` (verbirgt Crash-Logs)
+- Health-Polling in separatem Step mit Diagnostik bei Failure
+- Server/DB/MQTT Logs werden bei Failure automatisch als Artifacts gespeichert
 
 ---
 
@@ -605,12 +622,12 @@ gh workflow run wokwi-tests.yml
 # ============================================
 cd "El Servador/god_kaiser_server"
 
-poetry run pytest tests/ -v --no-cov            # Alle Tests
-poetry run pytest tests/unit/ -v                 # Unit Tests
-poetry run pytest tests/integration/ -v          # Integration Tests
-poetry run pytest tests/esp32/ -v                # ESP32 Mock Tests
-poetry run pytest -m "critical" -v               # Kritische Tests
-poetry run pytest -m "not slow" -v               # Ohne langsame Tests
+.venv/Scripts/pytest.exe tests/ -v --no-cov            # Alle Tests
+.venv/Scripts/pytest.exe tests/unit/ -v                 # Unit Tests
+.venv/Scripts/pytest.exe tests/integration/ -v          # Integration Tests
+.venv/Scripts/pytest.exe tests/esp32/ -v                # ESP32 Mock Tests
+.venv/Scripts/pytest.exe -m "critical" -v               # Kritische Tests
+.venv/Scripts/pytest.exe -m "not slow" -v               # Ohne langsame Tests
 
 # ============================================
 # WOKWI TESTS
@@ -640,9 +657,12 @@ gh run view <id> --log-failed
 | `ModuleNotFoundError: No module named 'src'` | sys.path nicht gesetzt | `conftest.py` fügt Projekt-Root hinzu |
 | `asyncpg` import error | PostgreSQL Driver fehlt | Tests nutzen SQLite, kein asyncpg nötig |
 | Tests hängen bei MQTT | Kein Mock | `autouse=True` Fixtures mocken MQTT |
+| KI stoppt nach Test-Run | PostToolUse:Bash Hook (auto-ops) | `\|\| true` anhängen oder Hook deaktivieren |
+| `--timeout` unrecognized | pytest-timeout nicht installiert | Weglassen, ist kein Pflicht-Plugin |
 | Wokwi "token not set" | Environment Variable | `export WOKWI_CLI_TOKEN=...` |
 | Wokwi "wokwi.toml not found" | Falsches Verzeichnis | `.` als erstes Argument |
 | "Invalid scenario step: timeout" | Timeout im YAML | Nur CLI `--timeout` nutzen |
+| `poetry run` nutzt Python 3.14 | Poetry env Mapping kaputt | `.venv/Scripts/pytest.exe` direkt nutzen |
 
 ---
 
@@ -651,7 +671,7 @@ gh run view <id> --log-failed
 | Dokument | Zweck | Wann lesen? |
 |----------|-------|-------------|
 | **Dieses Dokument** | Test-Workflow Übersicht | Test-Ausführung |
-| `.claude/reference/debugging/LOG_SYSTEM.md` | Logs, Serial Capture, MQTT | Bei Log-Analyse |
+| `.claude/reference/debugging/LOG_LOCATIONS.md` | Logs, Serial Capture, MQTT | Bei Log-Analyse |
 | `.claude/reference/debugging/CI_PIPELINE.md` | GitHub Actions, Artifacts | Bei CI-Failures |
 | `.claude/reference/debugging/ACCESS_LIMITATIONS.md` | KI-Zugriffsgrenzen | Bei Zugriffsproblemen |
 | `El Servador/docs/ESP32_TESTING.md` | MockESP32Client Details | Mock-Tests schreiben |
@@ -663,5 +683,5 @@ gh run view <id> --log-failed
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-01
-**Version:** 4.0 (Vollständige Codebase-Analyse)
+**Letzte Aktualisierung:** 2026-02-23
+**Version:** 4.2 (Zahlen-Korrektur, CI-Workflows ergänzt, poetry→.venv Fix)

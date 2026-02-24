@@ -216,7 +216,7 @@ function severityLabel(severity: string): string {
   display: block;
   font-size: 1.125rem;
   font-weight: 600;
-  color: #fbbf24;
+  color: var(--color-warning);
   margin-bottom: 0.5rem;
 }
 
@@ -235,17 +235,17 @@ function severityLabel(severity: string): string {
 
 .severity-info {
   background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
+  color: var(--color-accent);
 }
 
 .severity-warning {
   background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .severity-error {
   background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 .severity-critical {

@@ -73,7 +73,9 @@ class TestFleetIsolation:
         # All others still active
         for i, esp in enumerate(fleet):
             if i != 5:
-                assert esp.get_actuator_state(25).pwm_value == 0.7, f"ESP {i} should still be at 0.7"
+                assert (
+                    esp.get_actuator_state(25).pwm_value == 0.7
+                ), f"ESP {i} should still be at 0.7"
                 assert esp.get_actuator_state(25).emergency_stopped is False
 
     def test_published_messages_isolated_per_device(self, fleet):

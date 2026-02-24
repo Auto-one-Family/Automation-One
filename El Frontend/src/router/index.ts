@@ -24,36 +24,88 @@ const router = createRouter({
       component: () => import('@/shared/design/layout/AppShell.vue'),
       meta: { requiresAuth: true },
       children: [
+        // Default redirect to /hardware (primary landing page)
         {
           path: '',
-          name: 'dashboard',
-          component: () => import('@/views/DashboardView.vue'),
+          redirect: '/hardware',
+        },
+
+        // ═══════════════════════════════════════════════════════════════════
+        // HARDWARE VIEW — ESP & Hardware Topology (/hardware)
+        // ═══════════════════════════════════════════════════════════════════
+        {
+          path: 'hardware',
+          name: 'hardware',
+          component: () => import('@/views/HardwareView.vue'),
+          meta: { title: 'Hardware' },
+        },
+        {
+          path: 'hardware/:zoneId',
+          name: 'hardware-zone',
+          component: () => import('@/views/HardwareView.vue'),
+          meta: { title: 'Hardware' },
+        },
+        {
+          path: 'hardware/:zoneId/:espId',
+          name: 'hardware-esp',
+          component: () => import('@/views/HardwareView.vue'),
+          meta: { title: 'Hardware' },
+        },
+
+        // ═══════════════════════════════════════════════════════════════════
+        // MONITOR VIEW — Sensor & Actuator Data (/monitor)
+        // ═══════════════════════════════════════════════════════════════════
+        {
+          path: 'monitor',
+          name: 'monitor',
+          component: () => import('@/views/MonitorView.vue'),
+          meta: { title: 'Monitor' },
+        },
+        {
+          path: 'monitor/:zoneId',
+          name: 'monitor-zone',
+          component: () => import('@/views/MonitorView.vue'),
+          meta: { title: 'Monitor' },
+        },
+
+        // ═══════════════════════════════════════════════════════════════════
+        // CUSTOM DASHBOARD — Widget Builder (/custom-dashboard)
+        // ═══════════════════════════════════════════════════════════════════
+        {
+          path: 'custom-dashboard',
+          name: 'custom-dashboard',
+          component: () => import('@/views/CustomDashboardView.vue'),
           meta: { title: 'Dashboard' },
         },
-        // DEPRECATED 2025-01-04: DevicesView → Dashboard redirect
+
+        // DEPRECATED 2026-02-23: DashboardView-Legacy → Hardware
+        {
+          path: 'dashboard-legacy',
+          redirect: '/hardware',
+        },
+
+        // DEPRECATED redirects (backward compatibility)
         {
           path: 'devices',
           name: 'devices',
-          redirect: '/',
+          redirect: '/hardware',
         },
-        // DEPRECATED 2025-01-04: DeviceDetailView → Dashboard with openSettings query
         {
           path: 'devices/:espId',
           name: 'device-detail',
           redirect: (to) => ({
-            path: '/',
+            path: '/hardware',
             query: { openSettings: to.params.espId as string },
           }),
         },
-        // Backward compatibility redirects (legacy mock-esp routes)
         {
           path: 'mock-esp',
-          redirect: '/',
+          redirect: '/hardware',
         },
         {
           path: 'mock-esp/:espId',
           redirect: (to) => ({
-            path: '/',
+            path: '/hardware',
             query: { openSettings: to.params.espId as string },
           }),
         },
@@ -154,7 +206,7 @@ const router = createRouter({
     // Catch-all redirect
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/',
+      redirect: '/hardware',
     },
   ],
 })
@@ -180,12 +232,12 @@ router.beforeEach(async (to, _from, next) => {
 
   // Check if route requires admin
   if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    return next({ name: 'dashboard' })
+    return next({ name: 'hardware' })
   }
 
   // Redirect authenticated users away from login/setup
   if (authStore.isAuthenticated && (to.name === 'login' || to.name === 'setup')) {
-    return next({ name: 'dashboard' })
+    return next({ name: 'hardware' })
   }
 
   next()

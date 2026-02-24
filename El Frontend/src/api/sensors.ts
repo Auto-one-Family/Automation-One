@@ -60,7 +60,7 @@ export const sensorsApi = {
       page: number
       page_size: number
       total_pages: number
-    }>('/sensors', { params })
+    }>('/sensors/', { params })
     return {
       data: response.data.data,
       total: response.data.total,

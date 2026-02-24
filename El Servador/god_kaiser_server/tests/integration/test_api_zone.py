@@ -96,7 +96,9 @@ async def operator_user(db_session: AsyncSession):
 @pytest.fixture
 def auth_headers(operator_user: User):
     """Get authorization headers."""
-    token = create_access_token(user_id=operator_user.id, additional_claims={"role": operator_user.role})
+    token = create_access_token(
+        user_id=operator_user.id, additional_claims={"role": operator_user.role}
+    )
     return {"Authorization": f"Bearer {token}"}
 
 

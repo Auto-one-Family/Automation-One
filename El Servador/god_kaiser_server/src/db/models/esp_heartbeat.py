@@ -59,11 +59,11 @@ class ESPHeartbeatLog(Base):
 
     # Time-Series Optimized Indices
     __table_args__ = (
-        Index('idx_heartbeat_esp_timestamp', 'esp_id', 'timestamp'),
-        Index('idx_heartbeat_device_timestamp', 'device_id', 'timestamp'),
-        Index('idx_heartbeat_timestamp_desc', 'timestamp', postgresql_using='btree'),
-        Index('idx_heartbeat_data_source_timestamp', 'data_source', 'timestamp'),
-        Index('idx_heartbeat_health_status', 'health_status', 'timestamp'),
+        Index("idx_heartbeat_esp_timestamp", "esp_id", "timestamp"),
+        Index("idx_heartbeat_device_timestamp", "device_id", "timestamp"),
+        Index("idx_heartbeat_timestamp_desc", "timestamp", postgresql_using="btree"),
+        Index("idx_heartbeat_data_source_timestamp", "data_source", "timestamp"),
+        Index("idx_heartbeat_health_status", "health_status", "timestamp"),
     )
 
     # Primary Key

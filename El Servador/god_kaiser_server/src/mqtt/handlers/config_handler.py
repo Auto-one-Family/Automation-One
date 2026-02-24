@@ -33,9 +33,7 @@ Audit Logging:
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from pydantic import ValidationError
 
-from ...core.error_codes import ConfigErrorCode, get_error_code_description
 from ...core.esp32_error_mapping import get_config_error_info
 from ...core.logging_config import get_logger
 from ...db.repositories.audit_log_repo import AuditLogRepository
@@ -43,7 +41,6 @@ from ...db.repositories.esp_repo import ESPRepository
 from ...db.repositories.sensor_repo import SensorRepository
 from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.session import resilient_session
-from ...schemas.esp import ConfigFailureItem, ConfigResponsePayload
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -144,8 +141,7 @@ class ConfigHandler:
                 # Full failure - Hole deutsche Übersetzung
                 error_info = get_config_error_info(error_code) if error_code else None
                 error_description = (
-                    error_info["message"] if error_info
-                    else f"Unbekannter Fehler: {error_code}"
+                    error_info["message"] if error_info else f"Unbekannter Fehler: {error_code}"
                 )
                 failed_item = payload.get("failed_item", {})
 
@@ -210,6 +206,7 @@ class ConfigHandler:
             # WebSocket Broadcast (Phase 4 extended) - Mit deutschen Übersetzungen
             try:
                 from ...websocket.manager import WebSocketManager
+
                 ws_manager = await WebSocketManager.get_instance()
 
                 # Hole deutsche Error-Info für WebSocket-Broadcast
@@ -223,7 +220,8 @@ class ConfigHandler:
                     "failed_count": failed_count,
                     # Deutsche Message verwenden wenn verfügbar
                     "message": (
-                        ws_error_info["message"] if ws_error_info and status != "success"
+                        ws_error_info["message"]
+                        if ws_error_info and status != "success"
                         else message
                     ),
                     "timestamp": int(datetime.now(timezone.utc).timestamp()),
@@ -234,25 +232,22 @@ class ConfigHandler:
                 if status != "success":
                     broadcast_payload["error_code"] = error_code
                     broadcast_payload["error_description"] = (
-                        ws_error_info["message"] if ws_error_info
+                        ws_error_info["message"]
+                        if ws_error_info
                         else f"Unbekannter Fehler: {error_code}"
                     )
                     broadcast_payload["severity"] = (
-                        ws_error_info["severity"].lower() if ws_error_info
-                        else "error"
+                        ws_error_info["severity"].lower() if ws_error_info else "error"
                     )
                     # Deutsche Troubleshooting-Schritte
                     broadcast_payload["troubleshooting"] = (
-                        ws_error_info["troubleshooting"] if ws_error_info
-                        else []
+                        ws_error_info["troubleshooting"] if ws_error_info else []
                     )
                     broadcast_payload["recoverable"] = (
-                        ws_error_info["recoverable"] if ws_error_info
-                        else True
+                        ws_error_info["recoverable"] if ws_error_info else True
                     )
                     broadcast_payload["user_action_required"] = (
-                        ws_error_info["user_action_required"] if ws_error_info
-                        else True
+                        ws_error_info["user_action_required"] if ws_error_info else True
                     )
                     # Phase 4: Include failures array
                     if failures:
@@ -327,10 +322,7 @@ class ConfigHandler:
             logger.error(f"Failed to mark config as applied: {e}", exc_info=True)
 
     async def _process_config_failures(
-        self,
-        esp_id: str,
-        config_type: str,
-        failures: List[dict]
+        self, esp_id: str, config_type: str, failures: List[dict]
     ) -> None:
         """
         Phase 4: Process configuration failures and update database.
@@ -377,7 +369,7 @@ class ConfigHandler:
                                 sensor.id,
                                 config_status="failed",
                                 config_error=error_name,
-                                config_error_detail=error_detail[:200] if error_detail else None
+                                config_error_detail=error_detail[:200] if error_detail else None,
                             )
                             logger.debug(f"Updated sensor config_status=failed for GPIO {gpio}")
                         else:
@@ -390,7 +382,7 @@ class ConfigHandler:
                                 actuator.id,
                                 config_status="failed",
                                 config_error=error_name,
-                                config_error_detail=error_detail[:200] if error_detail else None
+                                config_error_detail=error_detail[:200] if error_detail else None,
                             )
                             logger.debug(f"Updated actuator config_status=failed for GPIO {gpio}")
                         else:

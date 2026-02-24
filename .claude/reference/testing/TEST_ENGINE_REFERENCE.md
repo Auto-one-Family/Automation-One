@@ -1,6 +1,6 @@
 # Test-Engine Reference - AutomationOne
 
-> **Version:** 1.1 | **Aktualisiert:** 2026-02-11
+> **Version:** 1.5 | **Aktualisiert:** 2026-02-23
 > **Zweck:** Vollständige Referenz der Test-Infrastruktur
 > **Themengebiet:** Testing, CI/CD, Agents
 
@@ -21,12 +21,12 @@
                              │
     ┌────────────────────────┴────────────────────────┐
     │              Unit Tests                         │
-    │  Backend: 36 | Frontend: 4 | ESP32 Native: 22   │
+    │  Backend: 38 | Frontend: 43 | ESP32 Native: 22  │
     └────────────────────────┬────────────────────────┘
                              │
     ┌────────────────────────┴────────────────────────┐
     │           Firmware Simulation                    │
-    │      Wokwi: 163 Szenarien (42 in CI)             │
+    │  Wokwi: 173 Szenarien (52 PR Core + 121 Nightly) │
     └─────────────────────────────────────────────────┘
 ```
 
@@ -38,10 +38,10 @@
 
 ```
 El Servador/god_kaiser_server/tests/
-├── unit/           # 36 Dateien, 759 Tests (755 pass, 1 fail, 3 skip)
+├── unit/           # 38 Dateien, 759+ Tests
 ├── integration/    # 44 Dateien, ~600+ Tests
 ├── esp32/          # 19 Dateien, ~370+ Tests (Mock)
-├── e2e/            # 6 Dateien, ~60 Tests (--e2e flag required)
+├── e2e/            # 9 Dateien, ~60+ Tests (--e2e flag required)
 └── conftest.py     # 4 conftest files (root + unit/db + esp32 + e2e)
 ```
 
@@ -52,7 +52,7 @@ El Servador/god_kaiser_server/tests/
 | **Unit** | `tests/unit/` | Keine | ✅ server-tests.yml |
 | **Integration** | `tests/integration/` | PostgreSQL, MQTT | ✅ server-tests.yml |
 | **ESP32 Mock** | `tests/esp32/` | MQTT | ✅ esp32-tests.yml |
-| **E2E** | `tests/e2e/` | Alle Services | ❌ Manuell |
+| **E2E** | `tests/e2e/` | Alle Services | ✅ backend-e2e-tests.yml |
 
 ### 1.3 Befehle
 
@@ -82,12 +82,36 @@ docker compose up -d
 
 ### 1.4 Fixtures (conftest.py)
 
+**Auto-Use Fixtures (für ALLE Tests aktiv):**
+
 | Fixture | Scope | Beschreibung |
 |---------|-------|--------------|
-| `db_session` | function | Async SQLAlchemy Session |
-| `test_client` | function | FastAPI TestClient |
-| `mqtt_client` | function | Async MQTT Client |
-| `mock_esp_device` | function | Simuliertes ESP32 Device |
+| `override_get_db` | function | Ersetzt Production-DB durch In-Memory SQLite |
+| `override_mqtt_publisher` | function | Mockt MQTT Publisher (kein Broker nötig) |
+| `override_actuator_service` | function | Mockt ActuatorService mit Test-DB |
+
+**Datenbank & Repository Fixtures:**
+
+| Fixture | Scope | Beschreibung |
+|---------|-------|--------------|
+| `test_engine` | function | Async SQLAlchemy Engine (In-Memory SQLite, StaticPool) |
+| `db_session` | function | Async SQLAlchemy Session (Rollback nach Test) |
+| `esp_repo` | function | ESPRepository Instanz |
+| `sensor_repo` | function | SensorRepository Instanz |
+| `actuator_repo` | function | ActuatorRepository Instanz |
+| `user_repo` | function | UserRepository Instanz |
+| `subzone_repo` | function | SubzoneRepository Instanz |
+
+**Test-Daten Fixtures:**
+
+| Fixture | Scope | Beschreibung |
+|---------|-------|--------------|
+| `sample_esp_device` | function | ESP32 WROOM Test Device (ESP_TEST_001) |
+| `sample_esp_c3` | function | ESP32-C3 XIAO Test Device |
+| `sample_user` | function | Test User (testuser@example.com) |
+| `sample_esp_with_zone` | function | ESP mit Zone-Zuweisung |
+| `sample_esp_no_zone` | function | ESP ohne Zone |
+| `gpio_service` | function | GpioValidationService (nicht gemockt) |
 
 ---
 
@@ -98,10 +122,12 @@ docker compose up -d
 ```
 El Frontend/
 ├── tests/
-│   ├── unit/           # 4 Dateien (Vitest)
+│   ├── unit/           # 43 Dateien (Vitest)
 │   │   ├── stores/     # Pinia Store Tests
 │   │   └── components/ # Vue Component Tests
-│   └── e2e/            # 5 Szenarien (Playwright)
+│   └── e2e/            # 6 Szenarien + 15 CSS Specs (Playwright)
+│       ├── scenarios/  # 6 Scenario Specs
+│       └── css/        # 15 CSS/Visual Specs
 ├── vitest.config.ts
 └── playwright.config.ts
 ```
@@ -111,7 +137,7 @@ El Frontend/
 | Kategorie | Tool | Dependencies | CI-Status |
 |-----------|------|--------------|-----------|
 | **Unit** | Vitest | Keine (MSW Mocks) | ✅ frontend-tests.yml |
-| **E2E** | Playwright | Alle Services | ❌ Manuell |
+| **E2E** | Playwright | Alle Services | ✅ playwright-tests.yml |
 
 ### 2.3 Befehle
 
@@ -163,37 +189,38 @@ El Trabajante/tests/wokwi/scenarios/
 ├── 05-emergency/   # 3 Szenarien
 ├── 06-config/      # 2 Szenarien
 ├── 07-combined/    # 2 Szenarien
-├── 08-i2c/         # 20 Szenarien (nicht in CI)
-├── 08-onewire/     # 29 Szenarien
-├── 09-hardware/    # 9 Szenarien
-├── 09-pwm/         # 18 Szenarien
-├── 10-nvs/         # 40 Szenarien (5 skipped)
-├── 11-error-injection/ # 10 Szenarien (MQTT background pattern)
-└── gpio/           # 24 Szenarien
+├── 08-i2c/         # 20 Szenarien (Nightly CI)
+├── 08-onewire/     # 29 Szenarien (Nightly CI)
+├── 09-hardware/    # 9 Szenarien (Nightly CI)
+├── 09-pwm/         # 18 Szenarien (5 PR Core + 13 Nightly)
+├── 10-nvs/         # 40 Szenarien (5 PR Core + 35 Nightly)
+├── 11-error-injection/ # 10 Szenarien (PR Core, MQTT background pattern)
+└── gpio/           # 24 Szenarien (5 PR Core + 19 Nightly)
                     ────────────────
-                    173 Szenarien total (52 in CI)
+                    173 Szenarien total (ALL in CI: 52 PR Core + 121 Nightly)
 ```
 
 ### 3.2 CI-Coverage
 
-| Kategorie | Total | In CI | Coverage |
-|-----------|-------|-------|----------|
-| 01-boot | 2 | 2 | 100% |
-| 02-sensor | 5 | 5 | 100% |
-| 03-actuator | 7 | 7 | 100% |
-| 04-zone | 2 | 2 | 100% |
-| 05-emergency | 3 | 3 | 100% |
-| 06-config | 2 | 2 | 100% |
-| 07-combined | 2 | 2 | 100% |
-| 08-i2c | 20 | 5 | 25% |
-| 08-onewire | 29 | 0 | 0% |
-| 09-hardware | 9 | 0 | 0% |
-| 09-pwm | 18 | 3 | 17% |
-| 10-nvs | 40 | 5 | 13% |
-| 11-error-injection | 10 | 10 | 100% |
-| gpio | 24 | 5 | 21% |
-| mqtt_connection (legacy) | 1 | 1 | 100% |
-| **Gesamt** | **173** | **52** | **30%** |
+| Kategorie | Total | PR Core | Nightly | Coverage |
+|-----------|-------|---------|---------|----------|
+| 01-boot | 2 | 2 | - | 100% |
+| 02-sensor | 5 | 5 | - | 100% |
+| 03-actuator | 7 | 7 | - | 100% |
+| 04-zone | 2 | 2 | - | 100% |
+| 05-emergency | 3 | 3 | - | 100% |
+| 06-config | 2 | 2 | - | 100% |
+| 07-combined | 2 | 2 | - | 100% |
+| 08-i2c | 20 | 5 | 15 | 100% |
+| 08-onewire | 29 | - | 29 | 100% |
+| 09-hardware | 9 | - | 9 | 100% |
+| 09-pwm | 18 | 5 | 13 | 100% |
+| 10-nvs | 40 | 5 | 35 | 100% |
+| 11-error-injection | 10 | 10 | - | 100% |
+| gpio | 24 | 5 | 19 | 100% |
+| **Gesamt** | **173** | **52** | **121** | **100%** |
+
+> **Strategie:** 52 Core-Szenarien laufen bei jedem PR. 121 erweiterte Szenarien laufen Nightly (2 AM UTC) + workflow_dispatch.
 
 ### 3.3 Befehle
 
@@ -209,7 +236,7 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.y
 # Quick Test (Boot + Heartbeat)
 make wokwi-test-quick
 
-# Alle 138 CI-Szenarien (Python Runner: scripts/run-wokwi-tests.py --verbose)
+# Alle 173 Szenarien (Python Runner: scripts/run-wokwi-tests.py --verbose)
 make wokwi-test-full
 
 # Python Test Runner (mit JSON + JUnit XML Report)
@@ -311,14 +338,18 @@ pio test -e native -f test_managers
 | **Server Tests** | `server-tests.yml` | `El Servador/**` | lint, unit, integration, summary |
 | **ESP32 Tests** | `esp32-tests.yml` | `tests/esp32/**` | esp32-tests, summary |
 | **Frontend Tests** | `frontend-tests.yml` | `El Frontend/**` | type-check, unit, build, summary |
-| **Wokwi Tests** | `wokwi-tests.yml` | `El Trabajante/**` | build + 15 test jobs + summary |
+| **Wokwi Tests** | `wokwi-tests.yml` | `El Trabajante/**` | build + 16 PR core + 6 nightly + summary |
+| **Backend E2E** | `backend-e2e-tests.yml` | `El Servador/**` | e2e (Docker stack), summary |
+| **Playwright** | `playwright-tests.yml` | `El Frontend/**` | e2e (Docker stack), summary |
+| **Security Scan** | `security-scan.yml` | Dockerfile/deps + weekly | trivy server, frontend, config |
 | **PR Checks** | `pr-checks.yml` | Pull Requests | label, validation |
 
 ### 4.2 Docker in CI
 
 ```bash
 # CI verwendet docker-compose.ci.yml (tmpfs für Speed)
-docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait postgres mqtt-broker
+# KEIN --wait Flag! Health-Polling erfolgt in separatem Step mit Diagnostik.
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d postgres mqtt-broker
 ```
 
 | Service | CI-Konfiguration |
@@ -328,14 +359,40 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait postg
 
 ### 4.3 Artifacts
 
-| Workflow | Artifact | Retention |
-|----------|----------|-----------|
-| Server Tests | `unit-test-results`, `integration-test-results` | 90 Tage |
-| ESP32 Tests | `esp32-test-results` | 90 Tage |
-| Frontend Tests | `frontend-test-results` | 90 Tage |
-| Wokwi Tests | `wokwi-firmware` (1 Tag), `*-test-logs` + `junit_*.xml` (7 Tage) | Variabel |
+| Workflow | Artifact | Inhalt | Retention |
+|----------|----------|--------|-----------|
+| Server Tests | `unit-test-results` | JUnit XML + Coverage XML | 7 Tage |
+| Server Tests | `integration-test-results` | JUnit XML + Coverage XML | 7 Tage |
+| ESP32 Tests | `esp32-test-results` | JUnit XML | 7 Tage |
+| Frontend Tests | `frontend-test-results` | JUnit XML + Coverage | 7 Tage |
+| Backend E2E | `backend-e2e-results` | JUnit XML + Server/DB/MQTT Logs | 7 Tage |
+| Playwright | `playwright-report` | JUnit XML + HTML Report + Traces | 7 Tage |
+| Wokwi Tests | `wokwi-firmware` | Build Output | 1 Tag |
+| Wokwi Tests | `*-test-logs` | Serial Logs per Kategorie | 7 Tage |
 
-### 4.4 GitHub CLI Quick Reference
+### 4.4 Test-Reporting Pipeline
+
+Alle CI-Workflows nutzen dasselbe Reporting-Pattern:
+
+```
+pytest/vitest/playwright → JUnit XML → upload-artifact → test-summary Job
+                                                              ↓
+                                         EnricoMi/publish-unit-test-result-action@v2
+                                                              ↓
+                                         PR-Kommentar + GitHub Checks Tab
+```
+
+| Workflow | JUnit-Generierung | Report-Format |
+|----------|-------------------|---------------|
+| Server Unit | `--junitxml=junit-unit.xml` | JUnit XML + Coverage XML |
+| Server Integration | `--junitxml=junit-integration.xml` | JUnit XML + Coverage XML |
+| ESP32 Mock | `--junitxml=junit-esp32.xml` | JUnit XML |
+| Backend E2E | `--junitxml=../../logs/server/e2e-results.xml` | JUnit XML + tee Log |
+| Frontend Vitest | `--reporter=junit --outputFile.junit=junit-results.xml` | JUnit XML |
+| Playwright | `--reporter=list,junit` + `PLAYWRIGHT_JUNIT_OUTPUT_NAME` | JUnit XML + HTML |
+| Wokwi | `scripts/run-wokwi-tests.py` → `junit_{timestamp}.xml` | JUnit XML + JSON + Serial Logs |
+
+### 4.5 GitHub CLI Quick Reference
 
 ```bash
 # Fehlgeschlagene Runs
@@ -457,15 +514,42 @@ export WOKWI_CLI_TOKEN=your_token_here
 
 ## 8. Bekannte Einschränkungen
 
-### 8.1 Nicht in CI integriert
+### 8.1 CI-Integration Status
 
-| Test-Suite | Grund | Workaround |
-|------------|-------|------------|
-| Backend E2E | Benötigt laufenden Server | `make e2e-up` lokal |
-| Frontend E2E | Nicht integriert | `make e2e-test` lokal |
-| Wokwi 08-stress | Lange Laufzeit | Manuell testen |
+| Test-Suite | CI-Status | Workflow |
+|------------|-----------|----------|
+| Backend E2E | ✅ Integriert | `backend-e2e-tests.yml` (Docker stack) |
+| Frontend E2E | ✅ Integriert | `playwright-tests.yml` (Docker stack) |
+| Wokwi (alle 173) | ✅ Integriert | `wokwi-tests.yml` (52 PR Core + 121 Nightly) |
 
-### 8.2 Geplante Erweiterungen
+### 8.2 Hook-System und Test-Ausführung
+
+Das auto-ops Plugin enthält einen PostToolUse:Bash Hook der bei **jedem** Bash-Befehl mit non-zero Exit-Code eine Warnung auslöst:
+
+**Datei:** `.claude/local-marketplace/auto-ops/hooks/hooks.json`
+
+```
+PostToolUse:Bash → Exit-Code != 0 → "OPS-ALERT: Command failed..."
+```
+
+**Problem:** pytest gibt Exit-Code 1 bei Test-Failures zurück (erwartetes Verhalten). Der Hook interpretiert dies als Fehler und unterbricht die Arbeit.
+
+**Auswirkung:** KI-Agenten stoppen nach Test-Ausführung anstatt Ergebnisse zu analysieren.
+
+**Workaround:**
+- Tests mit `|| true` am Ende ausführen: `.venv/Scripts/pytest.exe tests/unit/ -v || true`
+- Oder: Hook temporär deaktivieren während Test-Sessions
+
+**Alle aktiven Hooks:**
+
+| Hook | Typ | Datei | Effekt |
+|------|-----|-------|--------|
+| PreToolUse:Bash | auto-ops | `hooks/hooks.json` | Blockt destruktive Befehle (DELETE FROM, docker down, etc.) |
+| PostToolUse:Bash | auto-ops | `hooks/hooks.json` | Warnt bei non-zero Exit-Code |
+| PreToolUse:Edit/Write | security-guidance | Plugin-Cache | Prüft auf Security-Issues |
+| SessionStart | superpowers | Plugin-Cache | Session-Init |
+
+### 8.3 Geplante Erweiterungen
 
 | Erweiterung | Status | Auftrag |
 |-------------|--------|---------|
@@ -473,7 +557,7 @@ export WOKWI_CLI_TOKEN=your_token_here
 | esp.ts Store Tests | ⏳ Geplant | Auftrag 2 |
 | useWebSocket Tests | ⏳ Geplant | Auftrag 3 |
 | Playwright Browser E2E | ⏳ Geplant | Auftrag 4 |
-| Wokwi CI-Expansion | ⏳ Geplant | Auftrag 5 |
+| Wokwi CI-Expansion | ✅ Erledigt | ALL 173 in CI (PR Core + Nightly) |
 
 ---
 
@@ -483,7 +567,7 @@ export WOKWI_CLI_TOKEN=your_token_here
 
 ```bash
 # Backend Unit Tests (schnell, keine Deps)
-cd "El Servador/god_kaiser_server" && poetry run pytest tests/unit/ -v
+cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/unit/ -v
 
 # Frontend Unit Tests (schnell, keine Deps)
 cd "El Frontend" && npm run test:unit
@@ -495,7 +579,7 @@ cd "El Trabajante" && pio test -e native -vvv
 make wokwi-test-quick
 
 # Vollständiger Stack-Test
-make up && cd "El Servador/god_kaiser_server" && poetry run pytest -v
+make up && cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe -v
 ```
 
 ### 9.2 CI Debugging
@@ -510,7 +594,7 @@ gh run view <run-id> --log-failed
 # Lokal reproduzieren
 make up
 cd "El Servador/god_kaiser_server"
-poetry run pytest tests/integration/ -x -v
+.venv/Scripts/pytest.exe tests/integration/ -x -v
 ```
 
 ---
@@ -526,9 +610,11 @@ poetry run pytest tests/integration/ -x -v
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-11
-**Version:** 1.3
+**Letzte Aktualisierung:** 2026-02-23
+**Version:** 1.5
 **Changelog:**
+- 1.5: Fixtures (1.4) komplett überarbeitet (tatsächliche conftest.py Fixtures), Test-Reporting Pipeline (4.4) hinzugefügt, Artifact-Tabelle erweitert, Playwright test-summary ergänzt, `--wait` aus Docker CI entfernt, Hook-System dokumentiert (8.2), Version-Bump
+- 1.4: Zahlen-Korrektur (Unit 36→38, Frontend 4→43, E2E 6→9), CI-Coverage ALL 173 Wokwi in CI (52 PR Core + 121 Nightly), Backend E2E + Playwright + Security Scan Workflows ergänzt, Artifact Retention vereinheitlicht (7 Tage), poetry run → .venv/Scripts/pytest.exe
 - 1.3: ESP32 Native Unit Tests Sektion (3.5): 22 Tests (TopicBuilder + GPIOManager), Toolchain-Fix, HAL-Architektur
 - 1.2: E2E ghost targets removed (e2e-report, e2e-debug, e2e-codegen), CI targets replaced with monitoring targets, ci-up references updated
 - 1.1: Python Wokwi-Runner Retry-Optionen (--retries, --no-retry), JUnit XML Output

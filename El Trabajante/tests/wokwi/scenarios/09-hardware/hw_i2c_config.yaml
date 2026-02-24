@@ -14,6 +14,11 @@
 #   ESP32-WROOM-32: SDA=21, SCL=22
 #   XIAO ESP32-C3:  SDA=4,  SCL=5
 #
+# MQTT-Injection (extern via CI):
+#   Test - Try to configure sensor on I2C SDA pin (GPIO 21, should fail):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":21,"sensor_type":"analog","sensor_name":"ConflictSensor","active":true}]}'
+#
 # Firmware references:
 #   - esp32_dev.h lines 68-70: I2C_SDA_PIN=21, I2C_SCL_PIN=22
 #   - xiao_esp32c3.h lines 54-56: I2C_SDA_PIN=4, I2C_SCL_PIN=5
@@ -48,23 +53,8 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # TEST: Try to configure a sensor on I2C SDA pin (GPIO 21)
+  # TEST: External MQTT injection - try to use I2C SDA pin GPIO 21 (CI helper script)
   # This should fail because I2C pins are auto-reserved
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 21,
-              "sensor_type": "analog",
-              "sensor_name": "ConflictSensor",
-              "active": true
-            }]
-          }
-        }
 
   # Verify conflict is detected (pin already reserved for I2C)
   - wait-serial: "already"

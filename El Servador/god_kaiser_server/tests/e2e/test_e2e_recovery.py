@@ -77,8 +77,7 @@ class TestRecoveryAfterEmergency:
 
         esp = ESPDeviceTestData(device_id=esp_id, name="Recovery Test Device")
         result = await api_client.register_esp(esp)
-        assert "device_id" in result or "id" in result, \
-            f"Device registration failed: {result}"
+        assert "device_id" in result or "id" in result, f"Device registration failed: {result}"
 
         await api_client.create_actuator_config(
             esp_id=esp_id, gpio=25, actuator_type="pump", name="Recovery Pump"
@@ -93,7 +92,7 @@ class TestRecoveryAfterEmergency:
             esp_id=esp_id,
             gpio=25,
             alert_type="emergency_stop",
-            message="E2E recovery test - triggering emergency"
+            message="E2E recovery test - triggering emergency",
         )
         await asyncio.sleep(2.0)
 
@@ -102,16 +101,13 @@ class TestRecoveryAfterEmergency:
         await mqtt_client.publish_heartbeat(
             esp_id=esp_id,
             heap_free=100000,  # Fresh boot = more heap
-            uptime=5  # Low uptime = fresh reboot
+            uptime=5,  # Low uptime = fresh reboot
         )
         await asyncio.sleep(2.0)
 
         # 2. ESP sends sensor data (proves it's operational)
         await mqtt_client.publish_sensor_data(
-            esp_id=esp_id,
-            gpio=4,
-            value=22.5,
-            sensor_type="temperature"
+            esp_id=esp_id, gpio=4, value=22.5, sensor_type="temperature"
         )
         await asyncio.sleep(1.0)
 
@@ -155,9 +151,7 @@ class TestRecoveryAfterEmergency:
 
         # Emergency stop
         await mqtt_client.publish_actuator_alert(
-            esp_id=esp_id, gpio=26,
-            alert_type="emergency_stop",
-            message="E2E test emergency"
+            esp_id=esp_id, gpio=26, alert_type="emergency_stop", message="E2E test emergency"
         )
         await asyncio.sleep(2.0)
 
@@ -173,9 +167,12 @@ class TestRecoveryAfterEmergency:
 
         # Simulate ESP response (successful execution)
         await mqtt_client.publish_actuator_response(
-            esp_id=esp_id, gpio=26,
-            command="ON", value=1.0,
-            success=True, message="Valve opened after recovery"
+            esp_id=esp_id,
+            gpio=26,
+            command="ON",
+            value=1.0,
+            success=True,
+            message="Valve opened after recovery",
         )
 
         await asyncio.sleep(2.0)
@@ -187,17 +184,14 @@ class TestRecoveryAfterEmergency:
             # Check that actuator is now ON
             current_value = state.get("current_value") or state.get("value")
             current_state = state.get("state")
-            is_on = (
-                current_value == 1.0 or
-                current_state in ("on", "ON", True)
-            )
+            is_on = current_value == 1.0 or current_state in ("on", "ON", True)
             if is_on:
-                print(f"  Actuator successfully controlled after recovery")
+                print("  Actuator successfully controlled after recovery")
             else:
                 print(f"  Note: Actuator state unclear - {state}")
         else:
             # Command was sent and response received - that's the core test
-            print(f"  Command flow verified (no state endpoint)")
+            print("  Command flow verified (no state endpoint)")
 
         print(f"  Recovery + actuator control test passed for {esp_id}")
 
@@ -221,9 +215,7 @@ class TestRecoveryAfterEmergency:
             esp_id = generate_unique_mock_id(f"RCMLT{i}")
             cleanup_test_devices(esp_id)
 
-            esp = ESPDeviceTestData(
-                device_id=esp_id, name=f"Multi-Recovery Device {i}"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name=f"Multi-Recovery Device {i}")
             await api_client.register_esp(esp)
             await mqtt_client.publish_heartbeat(esp_id)
             device_ids.append(esp_id)
@@ -233,9 +225,10 @@ class TestRecoveryAfterEmergency:
         # === EMERGENCY: All devices go into emergency ===
         for esp_id in device_ids:
             await mqtt_client.publish_actuator_alert(
-                esp_id=esp_id, gpio=255,
+                esp_id=esp_id,
+                gpio=255,
                 alert_type="emergency_stop",
-                message="Global emergency - E2E test"
+                message="Global emergency - E2E test",
             )
 
         await asyncio.sleep(2.0)
@@ -247,9 +240,7 @@ class TestRecoveryAfterEmergency:
             await asyncio.sleep(0.5)
 
             await mqtt_client.publish_heartbeat(
-                esp_id=esp_id,
-                heap_free=100000 + i * 1000,
-                uptime=i + 1  # Low uptime = fresh boot
+                esp_id=esp_id, heap_free=100000 + i * 1000, uptime=i + 1  # Low uptime = fresh boot
             )
             recovered.append(esp_id)
 
@@ -260,8 +251,7 @@ class TestRecoveryAfterEmergency:
         registered_ids = [d.get("device_id") for d in all_devices]
 
         for esp_id in device_ids:
-            assert esp_id in registered_ids, \
-                f"Device {esp_id} should be present after recovery"
+            assert esp_id in registered_ids, f"Device {esp_id} should be present after recovery"
 
         print(f"  {len(recovered)}/{len(device_ids)} devices recovered")
 
@@ -290,9 +280,7 @@ class TestRecoveryAfterEmergency:
 
         # Emergency
         await mqtt_client.publish_actuator_alert(
-            esp_id=esp_id, gpio=255,
-            alert_type="emergency_stop",
-            message="Test emergency"
+            esp_id=esp_id, gpio=255, alert_type="emergency_stop", message="Test emergency"
         )
         await asyncio.sleep(1.5)
 
@@ -304,18 +292,14 @@ class TestRecoveryAfterEmergency:
         test_values = [20.0, 20.5, 21.0, 21.5, 22.0]
         for temp in test_values:
             await mqtt_client.publish_sensor_data(
-                esp_id=esp_id, gpio=4, value=temp,
-                sensor_type="temperature"
+                esp_id=esp_id, gpio=4, value=temp, sensor_type="temperature"
             )
             await asyncio.sleep(0.3)
 
         await asyncio.sleep(2.0)
 
         # === VERIFY ===
-        sensor_data = await api_client.get_sensor_data(
-            esp_id, gpio=4, limit=10
-        )
-        assert sensor_data is not None, \
-            "Sensor data should be accepted after recovery"
+        sensor_data = await api_client.get_sensor_data(esp_id, gpio=4, limit=10)
+        assert sensor_data is not None, "Sensor data should be accepted after recovery"
 
         print(f"  Post-recovery sensor data accepted for {esp_id}")

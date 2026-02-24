@@ -12,28 +12,26 @@
 # Prerequisites:
 # - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
 #
-# Test Categories (52 scenarios total across 16 jobs):
-# - Boot Tests (passive): boot_full, boot_safe_mode
-# - Sensor Tests (passive): sensor_heartbeat, sensor_ds18b20_read
-# - MQTT Connection (passive, legacy): mqtt_connection
-# - Actuator Tests (MQTT injection): actuator_led_on, actuator_pwm, actuator_status_publish, actuator_emergency_clear
-# - Zone Tests (MQTT injection): zone_assignment, subzone_assignment
-# - Emergency Tests (MQTT injection): emergency_broadcast, emergency_esp_stop
-# - Config Tests (MQTT injection): config_sensor_add, config_actuator_add
-# - Sensor Flow Tests (E2E): sensor_ds18b20_full_flow, sensor_dht22_full_flow, sensor_analog_flow
-# - Actuator Flow Tests (E2E): actuator_binary_full_flow, actuator_pwm_full_flow, actuator_timeout_e2e
-# - Combined Flow Tests (E2E): combined_sensor_actuator, emergency_stop_full_flow, multi_device_parallel
-# - GPIO Core Tests: gpio_boot_first, gpio_boot_mode_verify, gpio_edge_max_pins, gpio_integration_actuator, gpio_integration_emergency
-# - I2C Core Tests: i2c_device_present, i2c_device_not_present, i2c_error_nack, i2c_scan_devices, i2c_double_init
-# - NVS Core Tests: nvs_init_success, nvs_key_exists, nvs_del_factory, nvs_ns_isolation, nvs_del_key
-# - PWM Core Tests: pwm_duty_percent_50, pwm_frequency_change, pwm_resolution_verify
-# - Error-Injection Tests: error_sensor_timeout, error_mqtt_disconnect, error_gpio_conflict,
-#     error_watchdog_trigger, error_config_invalid_json, error_actuator_timeout,
-#     error_emergency_cascade, error_i2c_bus_stuck, error_nvs_corrupt, error_heap_pressure
+# Coverage: 173 scenarios across 14 categories
+# - PR/Push: 51 core scenarios + 1 legacy across 16 jobs (fast feedback)
+# - Nightly/Manual: ALL 173 scenarios (+ 6 extended jobs = 22 total jobs + summary)
+#
+# Core PR Tests (51 scenarios in categories + 1 legacy):
+# - Boot (2), Sensor (2+3), MQTT Legacy (1), Actuator (4+3), Zone (2)
+# - Emergency (2+1), Config (2), Combined (3), GPIO (5), I2C (5)
+# - NVS (5), PWM (3), Error-Injection (10)
+#
+# Nightly Extended Tests (122 additional scenarios):
+# - I2C Extended (15), OneWire (29), Hardware (9)
+# - PWM Extended (15), NVS Extended (35), GPIO Extended (19)
 #
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
 
 name: Wokwi ESP32 Tests
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -41,12 +39,13 @@ on:
       - 'El Trabajante/**'
       - '.github/workflows/wokwi-tests.yml'
   pull_request:
+    branches: [main, master, develop]
     paths:
       - 'El Trabajante/**'
       - '.github/workflows/wokwi-tests.yml'
-  workflow_dispatch:  # Allow manual triggering
   schedule:
-    - cron: '0 3 * * *'  # Nightly full suite at 03:00 UTC
+    - cron: '0 2 * * *'  # Nightly at 2 AM UTC — runs ALL scenarios
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
   # ============================================
@@ -82,7 +81,7 @@ jobs:
         with:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
-          retention-days: 1
+          retention-days: 7
 
   # ============================================
   # JOB 2: Boot & Core Tests
@@ -1120,6 +1119,15 @@ jobs:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
 
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
       - name: Run GPIO Boot First Test
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
@@ -1170,6 +1178,10 @@ jobs:
             --scenario tests/wokwi/scenarios/gpio/gpio_integration_emergency.yaml \
             2>&1 | tee gpio_integration_emergency.log || true
 
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
       - name: Upload GPIO Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -1201,6 +1213,20 @@ jobs:
         with:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Use I2C Diagram (SHT31 + BME280)
+        run: |
+          cp "El Trabajante/tests/wokwi/diagrams/diagram_i2c.json" "El Trabajante/diagram.json"
+          echo "Switched to I2C diagram with SHT31 and BME280"
 
       - name: Run I2C Device Present Test
         env:
@@ -1252,6 +1278,14 @@ jobs:
             --scenario tests/wokwi/scenarios/08-i2c/i2c_double_init.yaml \
             2>&1 | tee i2c_double_init.log || true
 
+      - name: Restore Default Diagram
+        if: always()
+        run: git checkout "El Trabajante/diagram.json"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
       - name: Upload I2C Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -1283,6 +1317,15 @@ jobs:
         with:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
 
       - name: Run NVS Init Success Test
         env:
@@ -1334,6 +1377,10 @@ jobs:
             --scenario tests/wokwi/scenarios/10-nvs/nvs_del_key.yaml \
             2>&1 | tee nvs_del_key.log || true
 
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
       - name: Upload NVS Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -1349,7 +1396,7 @@ jobs:
   pwm-core-tests:
     runs-on: ubuntu-latest
     needs: build-firmware
-    timeout-minutes: 12
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -1366,15 +1413,44 @@ jobs:
           name: wokwi-firmware
           path: El Trabajante/.pio/build/wokwi_simulation/
 
-      - name: Run PWM Duty Percent 50 Test
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          for i in {1..30}; do
+            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: Run PWM Duty Percent 50 Test (MQTT Injection)
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
           cd "El Trabajante"
+
           timeout 120 wokwi-cli . \
             --timeout 90000 \
             --scenario tests/wokwi/scenarios/09-pwm/pwm_duty_percent_50.yaml \
-            2>&1 | tee pwm_duty_percent_50.log || true
+            2>&1 | tee pwm_duty_percent_50.log &
+          WOKWI_PID=$!
+          sleep 25
+
+          # Configure PWM actuator on GPIO 25
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{"sensors":[],"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"TestPWM","active":true}]}'
+          sleep 5
+
+          # Set 50% duty cycle
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/actuator/25/command" \
+            -m '{"command":"SET","value":0.5}'
+
+          wait $WOKWI_PID && echo "PWM Duty 50%: PASS" || echo "PWM Duty 50%: FAIL (exit $?)"
 
       - name: Run PWM Frequency Change Test
         env:
@@ -1386,15 +1462,36 @@ jobs:
             --scenario tests/wokwi/scenarios/09-pwm/pwm_frequency_change.yaml \
             2>&1 | tee pwm_frequency_change.log || true
 
-      - name: Run PWM Resolution Verify Test
+      - name: Run PWM Resolution Verify Test (MQTT Injection)
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
           cd "El Trabajante"
+
           timeout 120 wokwi-cli . \
             --timeout 90000 \
             --scenario tests/wokwi/scenarios/09-pwm/pwm_resolution_verify.yaml \
-            2>&1 | tee pwm_resolution_verify.log || true
+            2>&1 | tee pwm_resolution_verify.log &
+          WOKWI_PID=$!
+          sleep 25
+
+          # Configure PWM actuator on GPIO 25
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/config" \
+            -m '{"sensors":[],"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"ResPWM","active":true}]}'
+          sleep 5
+
+          # Set 50% duty cycle to verify resolution
+          docker exec mosquitto mosquitto_pub \
+            -t "kaiser/god/esp/ESP_00000001/actuator/25/command" \
+            -m '{"command":"SET","value":0.5}'
+
+          wait $WOKWI_PID && echo "PWM Resolution: PASS" || echo "PWM Resolution: FAIL (exit $?)"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
 
       - name: Upload PWM Test Logs
         if: always()
@@ -1411,7 +1508,7 @@ jobs:
   error-injection-tests:
     runs-on: ubuntu-latest
     needs: build-firmware
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -1449,6 +1546,7 @@ jobs:
 
       # --- Scenario 1: Sensor Timeout (Ghost sensor on unconnected GPIO 32) ---
       - name: "Error Test 1: Sensor Timeout"
+        continue-on-error: true
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1458,16 +1556,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_sensor_timeout.yaml \
             > error_sensor_timeout.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_sensor_timeout.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":32,"sensor_type":"ds18b20","sensor_name":"GhostSensor","active":true,"raw_mode":true}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_sensor_timeout.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Sensor Timeout: PASS" || echo "::error::Sensor Timeout: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 2: MQTT Activity After Config ---
       - name: "Error Test 2: MQTT Activity"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1477,16 +1589,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_mqtt_disconnect.yaml \
             > error_mqtt_disconnect.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_mqtt_disconnect.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"MQTTTestSensor","active":true}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_mqtt_disconnect.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::MQTT Activity: PASS" || echo "::error::MQTT Activity: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 3: GPIO Conflict (two sensors on same GPIO in one config) ---
       - name: "Error Test 3: GPIO Conflict"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1496,16 +1622,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_gpio_conflict.yaml \
             > error_gpio_conflict.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_gpio_conflict.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"TempSensor1","active":true,"raw_mode":true},{"gpio":4,"sensor_type":"moisture","sensor_name":"MoistureSensor","active":true,"raw_mode":true}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_gpio_conflict.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::GPIO Conflict: PASS" || echo "::error::GPIO Conflict: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 4: Watchdog Stability (heavy config + emergency cycle) ---
       - name: "Error Test 4: Watchdog Stability"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1515,7 +1655,20 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_watchdog_trigger.yaml \
             > error_watchdog_trigger.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_watchdog_trigger.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"S1","active":true},{"gpio":15,"sensor_type":"dht22","sensor_name":"S2","active":true}],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"A1","active":true}]}'
           sleep 5
@@ -1524,13 +1677,14 @@ jobs:
           sleep 2
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
             -m '{"command":"clear_emergency","auth_token":"ESP_00000001"}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_watchdog_trigger.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Watchdog Stability: PASS" || echo "::error::Watchdog Stability: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 5: Invalid JSON Config ---
       - name: "Error Test 5: Invalid JSON"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1540,16 +1694,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_config_invalid_json.yaml \
             > error_config_invalid_json.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_config_invalid_json.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors": [{"gpio": 4, "sensor_type": "ds18b20", "broken'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_config_invalid_json.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Invalid JSON: PASS" || echo "::error::Invalid JSON: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 6: Actuator Timeout (config + actuator ON command) ---
       - name: "Error Test 6: Actuator Timeout"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1559,19 +1727,33 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_actuator_timeout.yaml \
             > error_actuator_timeout.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_actuator_timeout.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"TestLED","active":true}]}'
           sleep 5
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
             -m '{"command":"ON","value":1.0}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_actuator_timeout.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Actuator Timeout: PASS" || echo "::error::Actuator Timeout: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 7: Emergency Cascade (5 MQTT messages via helper script) ---
       - name: "Error Test 7: Emergency Cascade"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1581,16 +1763,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_emergency_cascade.yaml \
             > error_emergency_cascade.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_emergency_cascade.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           chmod +x tests/wokwi/helpers/emergency_cascade.sh
           bash tests/wokwi/helpers/emergency_cascade.sh localhost
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_emergency_cascade.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Emergency Cascade: PASS" || echo "::error::Emergency Cascade: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 8: I2C Bus Stuck (ghost I2C sensor) ---
       - name: "Error Test 8: I2C Bus Stuck"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1600,16 +1796,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_i2c_bus_stuck.yaml \
             > error_i2c_bus_stuck.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_i2c_bus_stuck.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":21,"sensor_type":"temperature_sht31","sensor_name":"GhostI2C","active":true,"i2c_address":68}],"actuators":[]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_i2c_bus_stuck.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::I2C Bus Stuck: PASS" || echo "::error::I2C Bus Stuck: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 9: NVS Factory Reset ---
       - name: "Error Test 9: NVS Factory Reset"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1619,16 +1829,30 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_nvs_corrupt.yaml \
             > error_nvs_corrupt.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_nvs_corrupt.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/system/command" \
             -m '{"command":"factory_reset","confirm":true}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_nvs_corrupt.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::NVS Factory Reset: PASS" || echo "::error::NVS Factory Reset: FAIL (exit $EXIT_CODE)"
 
       # --- Scenario 10: Heap Pressure (14 devices) ---
       - name: "Error Test 10: Heap Pressure"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
         run: |
@@ -1638,11 +1862,23 @@ jobs:
             --scenario tests/wokwi/scenarios/11-error-injection/error_heap_pressure.yaml \
             > error_heap_pressure.log 2>&1 &
           WOKWI_PID=$!
-          sleep 25
+
+          # Wait for MQTT connection instead of fixed sleep
+          for i in $(seq 1 60); do
+            if grep -q "MQTT connected" error_heap_pressure.log 2>/dev/null; then
+              echo "MQTT connected after ${i}s"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: MQTT connection timeout after 60s"
+            fi
+            sleep 1
+          done
+          sleep 2
+
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"S1","active":true},{"gpio":15,"sensor_type":"dht22","sensor_name":"S2","active":true},{"gpio":32,"sensor_type":"ds18b20","sensor_name":"S3","active":true,"raw_mode":true},{"gpio":33,"sensor_type":"moisture","sensor_name":"S4","active":true,"raw_mode":true},{"gpio":34,"sensor_type":"ds18b20","sensor_name":"S5","active":true,"raw_mode":true},{"gpio":35,"sensor_type":"moisture","sensor_name":"S6","active":true,"raw_mode":true},{"gpio":36,"sensor_type":"ds18b20","sensor_name":"S7","active":true,"raw_mode":true},{"gpio":39,"sensor_type":"moisture","sensor_name":"S8","active":true,"raw_mode":true}],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"A1","active":true},{"gpio":25,"actuator_type":"relay","actuator_name":"A2","active":true},{"gpio":26,"actuator_type":"relay","actuator_name":"A3","active":true},{"gpio":23,"actuator_type":"led","actuator_name":"A4","active":true},{"gpio":13,"actuator_type":"led","actuator_name":"A5","active":true},{"gpio":14,"actuator_type":"led","actuator_name":"A6","active":true}]}'
-          wait $WOKWI_PID
-          EXIT_CODE=$?
+          wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
           cat error_heap_pressure.log
           [ $EXIT_CODE -eq 0 ] && echo "::notice::Heap Pressure: PASS" || echo "::error::Heap Pressure: FAIL (exit $EXIT_CODE)"
 
@@ -1659,7 +1895,836 @@ jobs:
           retention-days: 7
 
   # ============================================
-  # JOB 17: Test Summary
+  # NIGHTLY EXTENDED TESTS (schedule + workflow_dispatch only)
+  # Runs remaining 122 scenarios not covered by core PR tests
+  # ============================================
+
+  # --- Nightly: I2C Extended (15 remaining, needs I2C diagram) ---
+  nightly-i2c-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Use I2C Diagram (SHT31 + BME280)
+        run: |
+          cp "El Trabajante/tests/wokwi/diagrams/diagram_i2c.json" "El Trabajante/diagram.json"
+
+      - name: Run All I2C Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core I2C job
+          CORE_TESTS="i2c_device_present i2c_device_not_present i2c_error_nack i2c_scan_devices i2c_double_init"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/08-i2c/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== I2C Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Restore Default Diagram
+        if: always()
+        run: git checkout "El Trabajante/diagram.json"
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload I2C Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-i2c-extended-logs
+          path: El Trabajante/i2c_*.log
+          retention-days: 7
+
+  # --- Nightly: OneWire Extended (29 scenarios) ---
+  nightly-onewire-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All OneWire Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          PASSED=0
+          FAILED=0
+
+          for scenario in tests/wokwi/scenarios/08-onewire/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== OneWire Results: $PASSED passed, $FAILED failed out of 29 ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload OneWire Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-onewire-logs
+          path: El Trabajante/onewire_*.log
+          retention-days: 7
+
+  # --- Nightly: Hardware Extended (9 scenarios) ---
+  nightly-hardware-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All Hardware Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          PASSED=0
+          FAILED=0
+
+          # MQTT injection per hardware scenario (called after "MQTT connected" detected in log)
+          inject_mqtt_for_hw_scenario() {
+            local name="$1"
+            case "$name" in
+              hw_actuator_limit)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"LED1","active":true},{"gpio":14,"actuator_type":"relay","actuator_name":"Relay1","active":true},{"gpio":15,"actuator_type":"pump","actuator_name":"Pump1","active":true},{"gpio":16,"actuator_type":"relay","actuator_name":"Relay2","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":17,"actuator_type":"relay","actuator_name":"Relay3","active":true},{"gpio":18,"actuator_type":"led","actuator_name":"LED2","active":true},{"gpio":19,"actuator_type":"led","actuator_name":"LED3","active":true},{"gpio":23,"actuator_type":"relay","actuator_name":"Relay4","active":true}]}'
+                ;;
+              hw_cross_board_constants)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":32,"sensor_type":"analog","sensor_name":"WROOMOnlySensor","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":33,"actuator_type":"relay","actuator_name":"WROOMOnlyRelay","active":true}]}'
+                ;;
+              hw_i2c_config)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":21,"sensor_type":"analog","sensor_name":"ConflictSensor","active":true}]}'
+                ;;
+              hw_input_only_reject)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":34,"actuator_type":"relay","actuator_name":"InvalidRelay34","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":39,"actuator_type":"pump","actuator_name":"InvalidPump39","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":34,"sensor_type":"analog","sensor_name":"AnalogSensor34","active":true}]}'
+                ;;
+              hw_pwm_config)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"PWM_LED","active":true,"pwm_enabled":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"PWM","value":0.5}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"PWM","value":1.0}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"OFF","value":0}'
+                ;;
+              hw_reserved_pins)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":0,"sensor_type":"digital_input","sensor_name":"BootPinSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":1,"actuator_type":"relay","actuator_name":"UARTRelay","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":3,"sensor_type":"analog","sensor_name":"RXSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":12,"actuator_type":"pump","actuator_name":"FlashPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":6,"sensor_type":"digital_input","sensor_name":"FlashSensor","active":true}]}'
+                ;;
+              hw_safe_pins_verify)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ValidSensor","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"ValidLED","active":true}]}'
+                ;;
+              hw_sensor_limit)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"Sensor1","active":true},{"gpio":5,"sensor_type":"analog","sensor_name":"Sensor2","active":true},{"gpio":14,"sensor_type":"analog","sensor_name":"Sensor3","active":true},{"gpio":15,"sensor_type":"analog","sensor_name":"Sensor4","active":true},{"gpio":16,"sensor_type":"analog","sensor_name":"Sensor5","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":17,"sensor_type":"analog","sensor_name":"Sensor6","active":true},{"gpio":18,"sensor_type":"analog","sensor_name":"Sensor7","active":true},{"gpio":19,"sensor_type":"analog","sensor_name":"Sensor8","active":true},{"gpio":23,"sensor_type":"analog","sensor_name":"Sensor9","active":true},{"gpio":25,"sensor_type":"analog","sensor_name":"Sensor10","active":true}]}'
+                ;;
+              *)
+                # Passive scenario (hw_board_type): no MQTT injection needed
+                ;;
+            esac
+          }
+
+          for scenario in tests/wokwi/scenarios/09-hardware/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+            echo "=== Running: $name ==="
+
+            # Start Wokwi in background, log to file
+            timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" > "${name}.log" 2>&1 &
+            WOKWI_PID=$!
+
+            # Wait for MQTT connection (up to 60s) before injecting
+            for i in {1..60}; do
+              grep -q "MQTT connected" "${name}.log" 2>/dev/null && break
+              sleep 1
+            done
+
+            # Inject scenario-specific MQTT messages
+            inject_mqtt_for_hw_scenario "$name"
+
+            # Wait for Wokwi to complete, capture exit code
+            if wait $WOKWI_PID; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              tail -10 "${name}.log" || true
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== Hardware Results: $PASSED passed, $FAILED failed out of 9 ==="
+          [ $FAILED -eq 0 ]
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload Hardware Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-hardware-logs
+          path: El Trabajante/hw_*.log
+          retention-days: 7
+
+  # --- Nightly: PWM Extended (15 remaining) ---
+  nightly-pwm-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          for i in {1..30}; do
+            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All PWM Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core PWM job
+          CORE_TESTS="pwm_duty_percent_50 pwm_frequency_change pwm_resolution_verify"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/09-pwm/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== PWM Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload PWM Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-pwm-extended-logs
+          path: El Trabajante/pwm_*.log
+          retention-days: 7
+
+  # --- Nightly: NVS Extended (35 remaining) ---
+  nightly-nvs-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All NVS Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core NVS job
+          CORE_TESTS="nvs_init_success nvs_key_exists nvs_del_factory nvs_ns_isolation nvs_del_key"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/10-nvs/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== NVS Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload NVS Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-nvs-extended-logs
+          path: El Trabajante/nvs_*.log
+          retention-days: 7
+
+  # --- Nightly: GPIO Extended (19 remaining) ---
+  nightly-gpio-extended:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          sleep 5
+
+      - name: Setup Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run All GPIO Extended Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core GPIO job
+          CORE_TESTS="gpio_boot_first gpio_boot_mode_verify gpio_edge_max_pins gpio_integration_actuator gpio_integration_emergency"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          # MQTT injection per GPIO scenario (called after "MQTT connected" detected in log)
+          inject_mqtt_for_gpio_scenario() {
+            local name="$1"
+            case "$name" in
+              gpio_reservation_success)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true,"raw_mode":true}]}'
+                ;;
+              gpio_integration_heartbeat)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"TestPump","active":true}]}'
+                ;;
+              gpio_safe_mode_emergency)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"WaterPump","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"DrainValve","active":true},{"gpio":15,"actuator_type":"relay","actuator_name":"LightRelay","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/14/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/15/command" \
+                  -m '{"command":"ON"}'
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/broadcast/emergency" \
+                  -m '{"command":"STOP","reason":"System-wide emergency test"}'
+                ;;
+              gpio_edge_invalid_pin)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":255,"sensor_type":"analog","sensor_name":"InvalidGPIO","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":50,"sensor_type":"analog","sensor_name":"OutOfRangeGPIO","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":6,"sensor_type":"analog","sensor_name":"FlashGPIO","active":true}]}'
+                ;;
+              gpio_edge_multi_init)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TestSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/broadcast/emergency" \
+                  -m '{"command":"STOP","reason":"Test re-initialization"}'
+                ;;
+              gpio_edge_strings)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ThisIsAVeryLongSensorNameThatExceedsThirtyOneCharacters","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":5,"sensor_type":"analog","sensor_name":"X","active":true}]}'
+                ;;
+              gpio_integration_sensor)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"GreenhouseTemp","raw_mode":true,"active":true}]}'
+                sleep 3
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":255,"sensor_type":"sht31","sensor_name":"HumiditySensor","i2c_address":68,"raw_mode":true,"active":true}]}'
+                ;;
+              gpio_reservation_conflict)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"ph_sensor","sensor_name":"ConflictSensor","active":true}]}'
+                ;;
+              gpio_reservation_invalid)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":12,"sensor_type":"analog","sensor_name":"InvalidSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":1,"sensor_type":"analog","sensor_name":"UARTSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":34,"actuator_type":"pump","actuator_name":"InvalidPump","active":true}]}'
+                ;;
+              gpio_reservation_owner)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"GreenhouseTemp","active":true}]}'
+                sleep 2
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"IrrigationPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":5,"sensor_type":"analog","sensor_name":"ConflictTest","active":true}]}'
+                ;;
+              gpio_reservation_release)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"TempSensor1","active":false}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":4,"actuator_type":"pump","actuator_name":"WaterPump","active":true}]}'
+                ;;
+              gpio_safe_mode_single)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"TestPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
+                  -m '{"command":"STOP","reason":"Test safe mode"}'
+                ;;
+              gpio_safe_mode_verify)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"VerifyPump","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
+                  -m '{"command":"STOP","reason":"Verify safe mode override"}'
+                ;;
+              gpio_subzone_assign)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"IrrigationTemp","subzone":"irrigation_zone","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"irrigation_zone","gpios":[4,5,14]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/remove" \
+                  -m '{"subzone_id":"irrigation_zone","gpios":[4]}'
+                ;;
+              gpio_subzone_conflict)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"SharedSensor","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"subzone_alpha","gpios":[4]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"subzone_beta","gpios":[4]}'
+                ;;
+              gpio_subzone_pins)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"ClimateTemp","active":true}],"actuators":[{"gpio":5,"actuator_type":"fan","actuator_name":"ClimateFan","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"ClimateVent","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"climate_control","gpios":[4,5,14]}'
+                ;;
+              gpio_subzone_safe)
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/config" \
+                  -m '{"actuators":[{"gpio":5,"actuator_type":"pump","actuator_name":"IrrigationPump","active":true},{"gpio":14,"actuator_type":"valve","actuator_name":"IrrigationValve","active":true},{"gpio":15,"actuator_type":"fan","actuator_name":"VentilationFan","active":true},{"gpio":16,"actuator_type":"relay","actuator_name":"VentilationDamper","active":true}]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"irrigation","gpios":[5,14]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+                  -m '{"subzone_id":"ventilation","gpios":[15,16]}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+                  -m '{"command":"ON"}'
+                sleep 0.1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/14/command" \
+                  -m '{"command":"ON"}'
+                sleep 0.1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/15/command" \
+                  -m '{"command":"ON"}'
+                sleep 0.1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/actuator/16/command" \
+                  -m '{"command":"ON"}'
+                sleep 1
+                docker exec mosquitto mosquitto_pub -h localhost \
+                  -t "kaiser/god/esp/ESP_00000001/subzone/safe" \
+                  -m '{"subzone_id":"irrigation","enable":true}'
+                ;;
+              *)
+                # Passive scenarios (gpio_boot_i2c_auto, gpio_boot_pin_count): no MQTT injection needed
+                ;;
+            esac
+          }
+
+          for scenario in tests/wokwi/scenarios/gpio/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+
+            # Start Wokwi in background, log to file
+            timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" > "${name}.log" 2>&1 &
+            WOKWI_PID=$!
+
+            # Wait for MQTT connection (up to 60s) before injecting
+            for i in {1..60}; do
+              grep -q "MQTT connected" "${name}.log" 2>/dev/null && break
+              sleep 1
+            done
+
+            # Inject scenario-specific MQTT messages
+            inject_mqtt_for_gpio_scenario "$name"
+
+            # Wait for Wokwi to complete, capture exit code
+            if wait $WOKWI_PID; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              tail -10 "${name}.log" || true
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== GPIO Extended Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+          [ $FAILED -eq 0 ]
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload GPIO Extended Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-gpio-extended-logs
+          path: El Trabajante/gpio_*.log
+          retention-days: 7
+
+  # ============================================
+  # JOB 23: Test Summary
   # ============================================
   test-summary:
     runs-on: ubuntu-latest

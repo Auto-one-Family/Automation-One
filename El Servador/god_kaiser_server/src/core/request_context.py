@@ -4,11 +4,12 @@ Request-Context for request_id tracking.
 Uses contextvars to pass request_id through all layers
 without explicit parameter passing.
 """
+
 from contextvars import ContextVar
 from typing import Optional
 import uuid
 
-_request_id_ctx: ContextVar[Optional[str]] = ContextVar('request_id', default=None)
+_request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
 
 
 def get_request_id() -> Optional[str]:

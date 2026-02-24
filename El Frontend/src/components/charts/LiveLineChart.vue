@@ -18,7 +18,9 @@ import {
   Filler,
   TimeScale,
 } from 'chart.js'
+import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
+import { tokens } from '@/utils/cssTokens'
 
 ChartJS.register(
   CategoryScale,
@@ -27,13 +29,21 @@ ChartJS.register(
   LineElement,
   Tooltip,
   Filler,
-  TimeScale
+  TimeScale,
+  annotationPlugin
 )
 
 export interface ChartDataPoint {
   timestamp: string | Date
   value: number
   label?: string
+}
+
+interface ThresholdConfig {
+  alarmLow?: number
+  warnLow?: number
+  warnHigh?: number
+  alarmHigh?: number
 }
 
 interface Props {
@@ -51,16 +61,25 @@ interface Props {
   unit?: string
   /** Show area fill under line */
   fill?: boolean
+  /** Threshold lines for annotation overlay */
+  thresholds?: ThresholdConfig
+  /** Whether to show threshold lines */
+  showThresholds?: boolean
+  /** Compact/sparkline mode: hides axes, tooltips, grid for minimal inline display */
+  compact?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   data: () => [],
   maxDataPoints: 50,
-  color: '#3b82f6',
+  color: tokens.accent,
   showGrid: true,
   height: '200px',
   unit: '',
   fill: true,
+  thresholds: undefined,
+  showThresholds: false,
+  compact: false,
 })
 
 // Internal data buffer
@@ -81,68 +100,128 @@ const chartData = computed(() => ({
     backgroundColor: props.fill
       ? `${props.color}1a`  // 10% opacity
       : 'transparent',
-    borderWidth: 2,
+    borderWidth: props.compact ? 1.5 : 2,
     pointRadius: 0,
-    pointHitRadius: 8,
+    pointHitRadius: props.compact ? 0 : 8,
     tension: 0.3,
     fill: props.fill,
   }],
 }))
 
-const chartOptions = computed(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: 300 },
-  interaction: {
-    mode: 'index' as const,
-    intersect: false,
-  },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      backgroundColor: 'rgba(7, 7, 13, 0.9)',
-      borderColor: 'rgba(133, 133, 160, 0.3)',
+/** Build annotation config for threshold lines */
+const thresholdAnnotations = computed(() => {
+  if (!props.showThresholds || !props.thresholds) return {}
+
+  const annotations: Record<string, any> = {}
+  const t = props.thresholds
+
+  if (t.alarmLow != null) {
+    annotations.alarmLow = {
+      type: 'line',
+      yMin: t.alarmLow,
+      yMax: t.alarmLow,
+      borderColor: 'rgba(239, 68, 68, 0.5)',
       borderWidth: 1,
-      titleFont: { family: 'JetBrains Mono', size: 11 },
-      bodyFont: { family: 'JetBrains Mono', size: 12 },
-      titleColor: '#8585a0',
-      bodyColor: '#eaeaf2',
-      padding: 8,
-      callbacks: {
-        label: (ctx: any) => `${ctx.parsed.y}${props.unit ? ' ' + props.unit : ''}`,
+      borderDash: [4, 4],
+    }
+  }
+  if (t.warnLow != null) {
+    annotations.warnLow = {
+      type: 'line',
+      yMin: t.warnLow,
+      yMax: t.warnLow,
+      borderColor: 'rgba(234, 179, 8, 0.4)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+  if (t.warnHigh != null) {
+    annotations.warnHigh = {
+      type: 'line',
+      yMin: t.warnHigh,
+      yMax: t.warnHigh,
+      borderColor: 'rgba(234, 179, 8, 0.4)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+  if (t.alarmHigh != null) {
+    annotations.alarmHigh = {
+      type: 'line',
+      yMin: t.alarmHigh,
+      yMax: t.alarmHigh,
+      borderColor: 'rgba(239, 68, 68, 0.5)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+    }
+  }
+
+  return annotations
+})
+
+const chartOptions = computed(() => {
+  const isCompact = props.compact
+
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: isCompact ? 0 : 300 },
+    interaction: {
+      mode: 'index' as const,
+      intersect: false,
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: isCompact
+        ? { enabled: false }
+        : {
+            backgroundColor: 'rgba(7, 7, 13, 0.9)',
+            borderColor: 'rgba(133, 133, 160, 0.3)',
+            borderWidth: 1,
+            titleFont: { family: 'JetBrains Mono', size: 11 },
+            bodyFont: { family: 'JetBrains Mono', size: 12 },
+            titleColor: tokens.textSecondary,
+            bodyColor: tokens.textPrimary,
+            padding: 8,
+            callbacks: {
+              label: (ctx: any) => `${ctx.parsed.y}${props.unit ? ' ' + props.unit : ''}`,
+            },
+          },
+      annotation: isCompact
+        ? { annotations: {} }
+        : { annotations: thresholdAnnotations.value },
+    },
+    scales: {
+      x: {
+        type: 'time' as const,
+        display: !isCompact,
+        grid: {
+          display: !isCompact && props.showGrid,
+          color: 'rgba(29, 29, 42, 0.8)',
+        },
+        ticks: {
+          color: tokens.textMuted,
+          font: { family: 'JetBrains Mono', size: 10 },
+          maxTicksLimit: 6,
+        },
+        border: { display: false },
+      },
+      y: {
+        display: !isCompact,
+        grid: {
+          display: !isCompact && props.showGrid,
+          color: 'rgba(29, 29, 42, 0.8)',
+        },
+        ticks: {
+          color: tokens.textMuted,
+          font: { family: 'JetBrains Mono', size: 10 },
+          callback: (val: any) => `${val}${props.unit ? ' ' + props.unit : ''}`,
+        },
+        border: { display: false },
       },
     },
-  },
-  scales: {
-    x: {
-      type: 'time' as const,
-      display: true,
-      grid: {
-        display: props.showGrid,
-        color: 'rgba(29, 29, 42, 0.8)',
-      },
-      ticks: {
-        color: '#484860',
-        font: { family: 'JetBrains Mono', size: 10 },
-        maxTicksLimit: 6,
-      },
-      border: { display: false },
-    },
-    y: {
-      display: true,
-      grid: {
-        display: props.showGrid,
-        color: 'rgba(29, 29, 42, 0.8)',
-      },
-      ticks: {
-        color: '#484860',
-        font: { family: 'JetBrains Mono', size: 10 },
-        callback: (val: any) => `${val}${props.unit ? ' ' + props.unit : ''}`,
-      },
-      border: { display: false },
-    },
-  },
-}))
+  }
+})
 
 /**
  * Add a single data point (for live updates).

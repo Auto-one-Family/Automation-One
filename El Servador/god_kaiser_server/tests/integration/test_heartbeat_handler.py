@@ -6,6 +6,7 @@ Benötigt: DB-Session, Repositories, Event Loop
 
 Phase 3 Test-Suite: Heartbeat Processing, Auto-Discovery, Status Transitions.
 """
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -338,7 +339,7 @@ class TestDeviceDiscovery:
                             mock_ack.assert_called_once_with(
                                 esp_id="ESP_NEW_DEVICE",
                                 status="pending_approval",
-                                config_available=False
+                                config_available=False,
                             )
 
 
@@ -425,9 +426,7 @@ class TestRejectedDeviceHandling:
 
                         assert result is True
                         mock_ack.assert_called_once_with(
-                            esp_id="ESP_REJECTED",
-                            status="rejected",
-                            config_available=False
+                            esp_id="ESP_REJECTED", status="rejected", config_available=False
                         )
 
 
@@ -478,13 +477,19 @@ class TestOnlineDeviceHeartbeat:
                 with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"):
                     with patch.object(handler, "_update_esp_metadata", new_callable=AsyncMock):
                         with patch.object(handler, "_log_health_metrics"):
-                            with patch.object(handler, "_send_heartbeat_ack", new_callable=AsyncMock):
-                                with patch.object(handler, "_has_pending_config", new_callable=AsyncMock) as mock_config:
+                            with patch.object(
+                                handler, "_send_heartbeat_ack", new_callable=AsyncMock
+                            ):
+                                with patch.object(
+                                    handler, "_has_pending_config", new_callable=AsyncMock
+                                ) as mock_config:
                                     mock_config.return_value = False
                                     with patch("src.websocket.manager.WebSocketManager") as mock_ws:
                                         mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
 
-                                        result = await handler.handle_heartbeat(topic, valid_payload)
+                                        result = await handler.handle_heartbeat(
+                                            topic, valid_payload
+                                        )
 
                                         assert result is True
                                         mock_repo.update_status.assert_called_once()
@@ -546,7 +551,7 @@ class TestZoneMismatchDetection:
 
         payload = {
             "zone_id": "greenhouse",  # Stale value from previous session
-            "zone_assigned": False,   # But flag says NOT assigned
+            "zone_assigned": False,  # But flag says NOT assigned
         }
 
         heartbeat_zone_id = payload.get("zone_id", "")

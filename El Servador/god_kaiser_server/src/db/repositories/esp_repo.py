@@ -5,11 +5,10 @@ Extended with Mock-ESP CRUD operations for Database as Single Source of Truth.
 """
 
 import re
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -166,9 +165,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         await self.session.refresh(device)
         return device
 
-    async def update_capabilities(
-        self, device_id: str, capabilities: dict
-    ) -> Optional[ESPDevice]:
+    async def update_capabilities(self, device_id: str, capabilities: dict) -> Optional[ESPDevice]:
         """
         Update device capabilities.
 
@@ -241,8 +238,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
             List of online Mock ESPDevice instances
         """
         stmt = select(ESPDevice).where(
-            ESPDevice.hardware_type == "MOCK_ESP32",
-            ESPDevice.status == "online"
+            ESPDevice.hardware_type == "MOCK_ESP32", ESPDevice.status == "online"
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -259,14 +255,13 @@ class ESPRepository(BaseRepository[ESPDevice]):
         """
         all_mocks = await self.get_mock_devices()
         return [
-            device for device in all_mocks
+            device
+            for device in all_mocks
             if device.device_metadata
             and device.device_metadata.get("simulation_state") == "running"
         ]
 
-    async def update_simulation_state(
-        self, device_id: str, state: str
-    ) -> Optional[ESPDevice]:
+    async def update_simulation_state(self, device_id: str, state: str) -> Optional[ESPDevice]:
         """
         Update simulation state in device metadata.
 
@@ -302,9 +297,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         await self.session.refresh(device)
         return device
 
-    async def update_simulation_config(
-        self, device_id: str, config: dict
-    ) -> Optional[ESPDevice]:
+    async def update_simulation_config(self, device_id: str, config: dict) -> Optional[ESPDevice]:
         """
         Update simulation configuration in device metadata.
 
@@ -341,7 +334,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
         # Update simulation config
         device.device_metadata["simulation_config"] = config
-        device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
+        device.device_metadata["simulation_config_updated_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
 
         # Mark as modified for SQLAlchemy to track changes
         flag_modified(device, "device_metadata")
@@ -392,8 +387,10 @@ class ESPRepository(BaseRepository[ESPDevice]):
         # Auto-generate zone_id from zone_name if needed
         if zone_name and not zone_id:
             zone_id = zone_name.lower()
-            zone_id = zone_id.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
-            zone_id = re.sub(r'[^a-z0-9]+', '_', zone_id).strip('_')
+            zone_id = (
+                zone_id.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+            )
+            zone_id = re.sub(r"[^a-z0-9]+", "_", zone_id).strip("_")
 
         # Generate unique MAC address from device_id
         esp_suffix = device_id.replace("ESP_MOCK_", "").replace("ESP_", "").upper()
@@ -448,8 +445,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
             ESPDevice or None if not found or not a mock
         """
         stmt = select(ESPDevice).where(
-            ESPDevice.device_id == device_id,
-            ESPDevice.hardware_type == "MOCK_ESP32"
+            ESPDevice.device_id == device_id, ESPDevice.hardware_type == "MOCK_ESP32"
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -470,10 +466,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         return list(result.scalars().all())
 
     async def add_sensor_to_mock(
-        self,
-        device_id: str,
-        gpio: int,
-        sensor_config: Dict[str, Any]
+        self, device_id: str, gpio: int, sensor_config: Dict[str, Any]
     ) -> bool:
         """
         Add sensor to simulation_config.
@@ -498,7 +491,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
             device.device_metadata = {}
 
         # Get or create simulation_config
-        sim_config = device.device_metadata.get("simulation_config", {"sensors": {}, "actuators": {}})
+        sim_config = device.device_metadata.get(
+            "simulation_config", {"sensors": {}, "actuators": {}}
+        )
         if "sensors" not in sim_config:
             sim_config["sensors"] = {}
 
@@ -512,17 +507,16 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
         sim_config["sensors"][sensor_key] = sensor_config
         device.device_metadata["simulation_config"] = sim_config
-        device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
+        device.device_metadata["simulation_config_updated_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
 
         flag_modified(device, "device_metadata")
         await self.session.flush()
         return True
 
     async def remove_sensor_from_mock(
-        self,
-        device_id: str,
-        gpio: int,
-        sensor_type: Optional[str] = None
+        self, device_id: str, gpio: int, sensor_type: Optional[str] = None
     ) -> bool:
         """
         Remove sensor from simulation_config.
@@ -557,27 +551,23 @@ class ESPRepository(BaseRepository[ESPDevice]):
         else:
             # BACKWARDS COMPAT: Remove all sensors on this GPIO
             # Check both old format (gpio only) and new format (gpio_type)
-            keys_to_remove = [
-                k for k in sensors
-                if k == str(gpio) or k.startswith(f"{gpio}_")
-            ]
+            keys_to_remove = [k for k in sensors if k == str(gpio) or k.startswith(f"{gpio}_")]
             for key in keys_to_remove:
                 del sensors[key]
                 removed = True
 
         if removed:
             device.device_metadata["simulation_config"]["sensors"] = sensors
-            device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
+            device.device_metadata["simulation_config_updated_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
             flag_modified(device, "device_metadata")
             await self.session.flush()
 
         return removed
 
     async def add_actuator_to_mock(
-        self,
-        device_id: str,
-        gpio: int,
-        actuator_config: Dict[str, Any]
+        self, device_id: str, gpio: int, actuator_config: Dict[str, Any]
     ) -> bool:
         """
         Add actuator to simulation_config.
@@ -599,24 +589,24 @@ class ESPRepository(BaseRepository[ESPDevice]):
             device.device_metadata = {}
 
         # Get or create simulation_config
-        sim_config = device.device_metadata.get("simulation_config", {"sensors": {}, "actuators": {}})
+        sim_config = device.device_metadata.get(
+            "simulation_config", {"sensors": {}, "actuators": {}}
+        )
         if "actuators" not in sim_config:
             sim_config["actuators"] = {}
 
         # Add actuator
         sim_config["actuators"][str(gpio)] = actuator_config
         device.device_metadata["simulation_config"] = sim_config
-        device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
+        device.device_metadata["simulation_config_updated_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
 
         flag_modified(device, "device_metadata")
         await self.session.flush()
         return True
 
-    async def remove_actuator_from_mock(
-        self,
-        device_id: str,
-        gpio: int
-    ) -> bool:
+    async def remove_actuator_from_mock(self, device_id: str, gpio: int) -> bool:
         """
         Remove actuator from simulation_config.
 
@@ -637,19 +627,16 @@ class ESPRepository(BaseRepository[ESPDevice]):
         if str(gpio) in actuators:
             del actuators[str(gpio)]
             device.device_metadata["simulation_config"]["actuators"] = actuators
-            device.device_metadata["simulation_config_updated_at"] = datetime.now(timezone.utc).isoformat()
+            device.device_metadata["simulation_config_updated_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
             flag_modified(device, "device_metadata")
             await self.session.flush()
             return True
 
         return False
 
-    async def set_manual_sensor_override(
-        self,
-        device_id: str,
-        gpio: int,
-        value: float
-    ) -> bool:
+    async def set_manual_sensor_override(self, device_id: str, gpio: int, value: float) -> bool:
         """
         Set manual override value for sensor.
 
@@ -679,11 +666,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         await self.session.flush()
         return True
 
-    async def clear_manual_sensor_override(
-        self,
-        device_id: str,
-        gpio: int
-    ) -> bool:
+    async def clear_manual_sensor_override(self, device_id: str, gpio: int) -> bool:
         """
         Clear manual override value for sensor.
 

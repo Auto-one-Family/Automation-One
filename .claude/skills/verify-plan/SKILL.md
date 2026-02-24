@@ -125,7 +125,7 @@ Häufige TM-Fehler bei Docker:
 
 **Docker-Erweiterung (DOCKER_REFERENCE.md):**
 - **Compose-Overlays:** base, dev, test, ci, e2e
-- **Profile:** `monitoring` (loki, promtail, prometheus, grafana)
+- **Profile:** `monitoring` (loki, alloy, prometheus, grafana)
 - **Bind-Mounts:** `logs/server/`, `logs/mqtt/`, `logs/postgres/`
 - **Makefile-Targets:** `make e2e-up`, `make monitor-up`, `make status`, `make health`
 
@@ -410,7 +410,7 @@ Für jeden erwarteten Output:
 | Service-Name | Container-Name | Port(s) |
 |-------------|----------------|---------|
 | `loki` | `automationone-loki` | 3100 |
-| `promtail` | `automationone-promtail` | - |
+| `alloy` | `automationone-alloy` | 12345 |
 | `prometheus` | `automationone-prometheus` | 9090 |
 | `grafana` | `automationone-grafana` | 3000 |
 

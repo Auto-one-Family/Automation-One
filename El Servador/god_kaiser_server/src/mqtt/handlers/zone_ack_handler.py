@@ -29,7 +29,7 @@ Error Codes:
 - Uses ConfigErrorCode for ESP device lookup errors
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -134,7 +134,10 @@ class ZoneAckHandler:
                     device.master_zone_id = master_zone_id if master_zone_id else None
 
                     # Clear pending assignment from metadata
-                    if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
+                    if (
+                        device.device_metadata
+                        and "pending_zone_assignment" in device.device_metadata
+                    ):
                         del device.device_metadata["pending_zone_assignment"]
                         # SQLAlchemy doesn't detect in-place JSON dict mutations
                         flag_modified(device, "device_metadata")
@@ -152,7 +155,10 @@ class ZoneAckHandler:
                     # device.kaiser_id remains unchanged (by design, F24)
 
                     # Clear pending assignment from metadata
-                    if device.device_metadata and "pending_zone_assignment" in device.device_metadata:
+                    if (
+                        device.device_metadata
+                        and "pending_zone_assignment" in device.device_metadata
+                    ):
                         del device.device_metadata["pending_zone_assignment"]
                         # SQLAlchemy doesn't detect in-place JSON dict mutations
                         flag_modified(device, "device_metadata")
@@ -160,15 +166,11 @@ class ZoneAckHandler:
                     logger.info(f"Zone removal confirmed for {esp_id_str}")
 
                 elif status == "error":
-                    logger.error(
-                        f"Zone assignment failed for {esp_id_str}: {error_message}"
-                    )
+                    logger.error(f"Zone assignment failed for {esp_id_str}: {error_message}")
                     # Keep pending assignment for retry
 
                 else:
-                    logger.warning(
-                        f"Unknown zone ACK status from {esp_id_str}: {status}"
-                    )
+                    logger.warning(f"Unknown zone ACK status from {esp_id_str}: {status}")
 
                 await session.commit()
 

@@ -25,6 +25,9 @@ static unsigned long i2c_last_recovery_time = 0;
     #include "../config/hardware/xiao_esp32c3.h"
 #else
     #include "../config/hardware/esp32_dev.h"
+
+// ESP-IDF TAG convention for structured logging
+static const char* TAG = "I2C";
 #endif
 
 // ============================================
@@ -38,18 +41,18 @@ I2CBusManager& i2cBusManager = I2CBusManager::getInstance();
 bool I2CBusManager::begin() {
     // Prevent double initialization
     if (initialized_) {
-        LOG_WARNING("I2C bus already initialized");
+        LOG_W(TAG, "I2C bus already initialized");
         return true;
     }
 
-    LOG_INFO("I2C Bus Manager initialization started");
+    LOG_I(TAG, "I2C Bus Manager initialization started");
     
     // Load hardware-specific configuration
     sda_pin_ = HardwareConfig::I2C_SDA_PIN;
     scl_pin_ = HardwareConfig::I2C_SCL_PIN;
     frequency_ = HardwareConfig::I2C_FREQUENCY;
     
-    LOG_DEBUG("I2C Config: SDA=" + String(sda_pin_) + 
+    LOG_D(TAG, "I2C Config: SDA=" + String(sda_pin_) + 
               ", SCL=" + String(scl_pin_) + 
               ", Freq=" + String(frequency_) + "Hz");
     
@@ -57,7 +60,7 @@ bool I2CBusManager::begin() {
         GPIOPinInfo info = gpioManager.getPinInfo(pin);
         if (info.pin == 255) {
             String msg = "GPIO " + String(pin) + " not tracked by GPIOManager";
-            LOG_ERROR("I2C pin verification failed: " + msg);
+            LOG_E(TAG, "I2C pin verification failed: " + msg);
             errorTracker.trackError(ERROR_I2C_INIT_FAILED,
                                     ERROR_SEVERITY_CRITICAL,
                                     msg.c_str());
@@ -72,7 +75,7 @@ bool I2CBusManager::begin() {
             if (info.owner[0] == '\0') {
                 if (!gpioManager.requestPin(pin, "system", component_label)) {
                     String msg = "GPIO " + String(pin) + " reservation failed";
-                    LOG_ERROR("I2C pin reservation failed: " + msg);
+                    LOG_E(TAG, "I2C pin reservation failed: " + msg);
                     errorTracker.trackError(ERROR_I2C_INIT_FAILED,
                                             ERROR_SEVERITY_CRITICAL,
                                             msg.c_str());
@@ -81,7 +84,7 @@ bool I2CBusManager::begin() {
             } else {
                 String msg = "GPIO " + String(pin) + " owned by " +
                              String(info.owner) + "/" + String(info.component_name);
-                LOG_ERROR("I2C pin conflict: " + msg);
+                LOG_E(TAG, "I2C pin conflict: " + msg);
                 errorTracker.trackError(ERROR_I2C_INIT_FAILED,
                                         ERROR_SEVERITY_CRITICAL,
                                         msg.c_str());
@@ -100,7 +103,7 @@ bool I2CBusManager::begin() {
     bool wire_init = Wire.begin(sda_pin_, scl_pin_, frequency_);
     
     if (!wire_init) {
-        LOG_ERROR("I2C Wire.begin() failed");
+        LOG_E(TAG, "I2C Wire.begin() failed");
         errorTracker.trackError(ERROR_I2C_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,
                                "Wire.begin() returned false");
@@ -117,7 +120,7 @@ bool I2CBusManager::begin() {
     // Error code 2 is expected (NACK on general call) - bus is functional
     // Error code 4 would indicate bus failure
     if (error == 4) {
-        LOG_ERROR("I2C bus error: Bus not functional");
+        LOG_E(TAG, "I2C bus error: Bus not functional");
         errorTracker.trackError(ERROR_I2C_BUS_ERROR, 
                                ERROR_SEVERITY_CRITICAL,
                                "I2C bus verification failed");
@@ -127,11 +130,11 @@ bool I2CBusManager::begin() {
     
     initialized_ = true;
     
-    LOG_INFO("I2C Bus Manager initialized successfully");
-    LOG_INFO("  Board: " + String(BOARD_TYPE));
-    LOG_INFO("  SDA: GPIO " + String(sda_pin_));
-    LOG_INFO("  SCL: GPIO " + String(scl_pin_));
-    LOG_INFO("  Frequency: " + String(frequency_ / 1000) + " kHz");
+    LOG_I(TAG, "I2C Bus Manager initialized successfully");
+    LOG_I(TAG, "  Board: " + String(BOARD_TYPE));
+    LOG_I(TAG, "  SDA: GPIO " + String(sda_pin_));
+    LOG_I(TAG, "  SCL: GPIO " + String(scl_pin_));
+    LOG_I(TAG, "  Frequency: " + String(frequency_ / 1000) + " kHz");
     
     return true;
 }
@@ -141,11 +144,11 @@ bool I2CBusManager::begin() {
 // ============================================
 void I2CBusManager::end() {
     if (!initialized_) {
-        LOG_WARNING("I2C bus not initialized, nothing to end");
+        LOG_W(TAG, "I2C bus not initialized, nothing to end");
         return;
     }
     
-    LOG_INFO("I2C Bus Manager shutdown initiated");
+    LOG_I(TAG, "I2C Bus Manager shutdown initiated");
     
     // Deinitialize Wire library
     Wire.end();
@@ -156,7 +159,7 @@ void I2CBusManager::end() {
     
     initialized_ = false;
     
-    LOG_INFO("I2C Bus Manager shutdown complete");
+    LOG_I(TAG, "I2C Bus Manager shutdown complete");
 }
 
 // ============================================
@@ -164,21 +167,21 @@ void I2CBusManager::end() {
 // ============================================
 bool I2CBusManager::scanBus(uint8_t addresses[], uint8_t max_addresses, uint8_t& found_count) {
     if (!initialized_) {
-        LOG_ERROR("I2C bus not initialized");
+        LOG_E(TAG, "I2C bus not initialized");
         return false;
     }
 
     if (addresses == nullptr) {
-        LOG_ERROR("I2C bus scan requires a valid address buffer");
+        LOG_E(TAG, "I2C bus scan requires a valid address buffer");
         return false;
     }
 
     if (max_addresses == 0) {
-        LOG_ERROR("I2C bus scan called with max_addresses = 0");
+        LOG_E(TAG, "I2C bus scan called with max_addresses = 0");
         return false;
     }
 
-    LOG_INFO("I2C bus scan started (0x08-0x77)");
+    LOG_I(TAG, "I2C bus scan started (0x08-0x77)");
     
     found_count = 0;
     uint8_t detected = 0;
@@ -194,22 +197,22 @@ bool I2CBusManager::scanBus(uint8_t addresses[], uint8_t max_addresses, uint8_t&
             detected++;
             if (found_count < max_addresses) {
                 addresses[found_count++] = addr;
-                LOG_INFO("  Found device at 0x" + String(addr, HEX));
+                LOG_I(TAG, "  Found device at 0x" + String(addr, HEX));
             } else {
-                LOG_WARNING("  Device at 0x" + String(addr, HEX) + " ignored (buffer full)");
+                LOG_W(TAG, "  Device at 0x" + String(addr, HEX) + " ignored (buffer full)");
             }
         } else if (error == 4 || error == 5) {
-            LOG_WARNING("  Bus error while probing 0x" + String(addr, HEX) + " (code " + String(error) + ")");
+            LOG_W(TAG, "  Bus error while probing 0x" + String(addr, HEX) + " (code " + String(error) + ")");
         }
         
         delay(1);  // Small delay between scans
     }
     
     if (detected > found_count) {
-        LOG_WARNING("I2C bus scan truncated results (" + String(detected) + " detected, " +
+        LOG_W(TAG, "I2C bus scan truncated results (" + String(detected) + " detected, " +
                     String(found_count) + " stored)");
     } else {
-        LOG_INFO("I2C bus scan complete: " + String(found_count) + " devices found");
+        LOG_I(TAG, "I2C bus scan complete: " + String(found_count) + " devices found");
     }
     
     return true;
@@ -220,12 +223,12 @@ bool I2CBusManager::scanBus(uint8_t addresses[], uint8_t max_addresses, uint8_t&
 // ============================================
 bool I2CBusManager::isDevicePresent(uint8_t address) {
     if (!initialized_) {
-        LOG_ERROR("I2C bus not initialized");
+        LOG_E(TAG, "I2C bus not initialized");
         return false;
     }
     
     if (address < 0x08 || address > 0x77) {
-        LOG_ERROR("Invalid I2C address: 0x" + String(address, HEX));
+        LOG_E(TAG, "Invalid I2C address: 0x" + String(address, HEX));
         return false;
     }
     
@@ -241,7 +244,7 @@ bool I2CBusManager::isDevicePresent(uint8_t address) {
 bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
                             uint8_t* buffer, size_t length) {
     if (!initialized_) {
-        LOG_ERROR("I2C bus not initialized");
+        LOG_E(TAG, "I2C bus not initialized");
         errorTracker.trackError(ERROR_I2C_READ_FAILED, 
                                ERROR_SEVERITY_ERROR,
                                "Read failed: bus not initialized");
@@ -249,12 +252,12 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
     }
     
     if (buffer == nullptr || length == 0) {
-        LOG_ERROR("I2C read: Invalid buffer or length");
+        LOG_E(TAG, "I2C read: Invalid buffer or length");
         return false;
     }
 
     if (device_address < 0x08 || device_address > 0x77) {
-        LOG_ERROR("I2C read: Invalid address 0x" + String(device_address, HEX));
+        LOG_E(TAG, "I2C read: Invalid address 0x" + String(device_address, HEX));
         return false;
     }
     
@@ -265,36 +268,36 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
 
     // Handle bus errors with recovery
     if (error == 4 || error == 5) {
-        LOG_WARNING("I2C bus error detected (code " + String(error) +
+        LOG_W(TAG, "I2C bus error detected (code " + String(error) +
                     ") while addressing device 0x" + String(device_address, HEX));
 
         // Attempt recovery
         if (attemptRecoveryIfNeeded(error)) {
             // Recovery successful - retry the read ONCE
-            LOG_DEBUG("I2C: Retrying read after recovery...");
+            LOG_D(TAG, "I2C: Retrying read after recovery...");
 
             Wire.beginTransmission(device_address);
             Wire.write(register_address);
             error = Wire.endTransmission(false);
 
             if (error == 0) {
-                LOG_DEBUG("I2C: Retry successful after recovery");
+                LOG_D(TAG, "I2C: Retry successful after recovery");
                 // Fall through to read data
             } else {
-                LOG_ERROR("I2C: Retry failed after recovery (error " + String(error) + ")");
+                LOG_E(TAG, "I2C: Retry failed after recovery (error " + String(error) + ")");
                 errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
                                        ("I2C retry failed: device 0x" + String(device_address, HEX)).c_str());
                 return false;
             }
         } else {
-            LOG_ERROR("I2C: Recovery not possible or failed");
+            LOG_E(TAG, "I2C: Recovery not possible or failed");
             errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
                                    ("I2C bus error: device 0x" + String(device_address, HEX)).c_str());
             return false;
         }
     } else if (error != 0) {
         // Other errors (NACK, etc.) - not a bus issue
-        LOG_ERROR("I2C write register failed: device 0x" + String(device_address, HEX) +
+        LOG_E(TAG, "I2C write register failed: device 0x" + String(device_address, HEX) +
                   ", error " + String(error));
         errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_WARNING,
                                ("Device 0x" + String(device_address, HEX) + " not responding").c_str());
@@ -302,12 +305,12 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
     }
     
     // Read data
-    LOG_DEBUG("I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
+    LOG_D(TAG, "I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
     size_t received = Wire.requestFrom(device_address, (uint8_t)length);
-    LOG_DEBUG("I2C: requestFrom END received=" + String(received));
+    LOG_D(TAG, "I2C: requestFrom END received=" + String(received));
 
     if (received != length) {
-        LOG_ERROR("I2C read: Expected " + String(length) + " bytes, got " + String(received));
+        LOG_E(TAG, "I2C read: Expected " + String(length) + " bytes, got " + String(received));
         String msg = "Incomplete read from 0x" + String(device_address, HEX);
         errorTracker.trackError(ERROR_I2C_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
@@ -320,7 +323,7 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
         buffer[i] = Wire.read();
     }
     
-    LOG_DEBUG("I2C read: " + String(length) + " bytes from 0x" + 
+    LOG_D(TAG, "I2C read: " + String(length) + " bytes from 0x" + 
               String(device_address, HEX) + " reg 0x" + String(register_address, HEX));
     
     return true;
@@ -332,7 +335,7 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
 bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
                              const uint8_t* data, size_t length) {
     if (!initialized_) {
-        LOG_ERROR("I2C bus not initialized");
+        LOG_E(TAG, "I2C bus not initialized");
         errorTracker.trackError(ERROR_I2C_WRITE_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Write failed: bus not initialized");
@@ -340,12 +343,12 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
     }
     
     if (data == nullptr || length == 0) {
-        LOG_ERROR("I2C write: Invalid data or length");
+        LOG_E(TAG, "I2C write: Invalid data or length");
         return false;
     }
 
     if (device_address < 0x08 || device_address > 0x77) {
-        LOG_ERROR("I2C write: Invalid address 0x" + String(device_address, HEX));
+        LOG_E(TAG, "I2C write: Invalid address 0x" + String(device_address, HEX));
         return false;
     }
     
@@ -359,7 +362,7 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
     size_t written = Wire.write(data, length);
     
     if (written != length) {
-        LOG_ERROR("I2C write: Expected to write " + String(length) + " bytes, wrote " + String(written));
+        LOG_E(TAG, "I2C write: Expected to write " + String(length) + " bytes, wrote " + String(written));
         String msg = "Incomplete write to 0x" + String(device_address, HEX);
         errorTracker.trackError(ERROR_I2C_WRITE_FAILED,
                                ERROR_SEVERITY_ERROR,
@@ -372,7 +375,7 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
     uint8_t error = Wire.endTransmission();
     
     if (error != 0) {
-        LOG_ERROR("I2C write failed: device 0x" + String(device_address, HEX) + 
+        LOG_E(TAG, "I2C write failed: device 0x" + String(device_address, HEX) + 
                   ", error " + String(error));
         uint16_t code = (error == 2 || error == 3) ? ERROR_I2C_DEVICE_NOT_FOUND :
                          (error == 4 || error == 5) ? ERROR_I2C_BUS_ERROR : ERROR_I2C_WRITE_FAILED;
@@ -383,7 +386,7 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
         return false;
     }
     
-    LOG_DEBUG("I2C write: " + String(length) + " bytes to 0x" + 
+    LOG_D(TAG, "I2C write: " + String(length) + " bytes to 0x" + 
               String(device_address, HEX) + " reg 0x" + String(register_address, HEX));
     
     return true;
@@ -393,7 +396,7 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
 // I2C BUS RECOVERY
 // ============================================
 bool I2CBusManager::recoverBus() {
-    LOG_WARNING("I2C: Bus recovery initiated (attempt " +
+    LOG_W(TAG, "I2C: Bus recovery initiated (attempt " +
                 String(i2c_recovery_attempt_count + 1) + "/" +
                 String(I2C_MAX_RECOVERY_ATTEMPTS) + ")");
 
@@ -421,7 +424,7 @@ bool I2CBusManager::recoverBus() {
 
         // Check if SDA is released
         if (digitalRead(sda_pin_) == HIGH) {
-            LOG_DEBUG("I2C: SDA released after " + String(i + 1) + " clock pulses");
+            LOG_D(TAG, "I2C: SDA released after " + String(i + 1) + " clock pulses");
             break;
         }
     }
@@ -438,7 +441,7 @@ bool I2CBusManager::recoverBus() {
 
     // Step 4: Re-initialize I2C
     if (!Wire.begin(sda_pin_, scl_pin_, frequency_)) {
-        LOG_ERROR("I2C: Bus recovery failed - could not reinitialize");
+        LOG_E(TAG, "I2C: Bus recovery failed - could not reinitialize");
         errorTracker.trackError(
             ERROR_I2C_BUS_RECOVERY_FAILED,
             ERROR_SEVERITY_ERROR,
@@ -453,7 +456,7 @@ bool I2CBusManager::recoverBus() {
 
     // Error 2 (NACK) is expected, Error 4 means bus still broken
     if (error == 4) {
-        LOG_ERROR("I2C: Bus still stuck after recovery attempt");
+        LOG_E(TAG, "I2C: Bus still stuck after recovery attempt");
         errorTracker.trackError(
             ERROR_I2C_BUS_RECOVERY_FAILED,
             ERROR_SEVERITY_ERROR,
@@ -462,7 +465,7 @@ bool I2CBusManager::recoverBus() {
         return false;
     }
 
-    LOG_INFO("I2C: Bus recovery successful");
+    LOG_I(TAG, "I2C: Bus recovery successful");
     errorTracker.trackError(
         ERROR_I2C_BUS_RECOVERED,
         ERROR_SEVERITY_WARNING,  // Warning level for visibility in logs
@@ -478,18 +481,18 @@ bool I2CBusManager::attemptRecoveryIfNeeded(uint8_t error_code) {
         return false;  // Not a recoverable error
     }
 
-    LOG_WARNING("I2C: Bus error detected (code " + String(error_code) + "), checking recovery eligibility");
+    LOG_W(TAG, "I2C: Bus error detected (code " + String(error_code) + "), checking recovery eligibility");
 
     // Check cooldown period - reset counter after 1 minute of no errors
     unsigned long now = millis();
     if (now - i2c_last_recovery_time > I2C_RECOVERY_COOLDOWN_MS) {
         i2c_recovery_attempt_count = 0;  // Reset counter
-        LOG_DEBUG("I2C: Recovery counter reset (cooldown expired)");
+        LOG_D(TAG, "I2C: Recovery counter reset (cooldown expired)");
     }
 
     // Check if we've exceeded max attempts
     if (i2c_recovery_attempt_count >= I2C_MAX_RECOVERY_ATTEMPTS) {
-        LOG_ERROR("I2C: Max recovery attempts (" + String(I2C_MAX_RECOVERY_ATTEMPTS) +
+        LOG_E(TAG, "I2C: Max recovery attempts (" + String(I2C_MAX_RECOVERY_ATTEMPTS) +
                   ") reached - bus disabled until cooldown");
         errorTracker.trackError(
             ERROR_I2C_BUS_ERROR,
@@ -630,7 +633,7 @@ bool I2CBusManager::validateInterleavedCRC(const I2CSensorProtocol* protocol,
         if (!validateCRC8(&buffer[ve->byte_offset], ve->byte_count,
                           expected_crc, protocol->crc.polynomial,
                           protocol->crc.init_value)) {
-            LOG_ERROR("I2C: CRC validation failed for " + String(ve->value_type));
+            LOG_E(TAG, "I2C: CRC validation failed for " + String(ve->value_type));
             errorTracker.trackError(ERROR_I2C_CRC_FAILED, ERROR_SEVERITY_ERROR,
                                    ("CRC failed: " + String(ve->value_type)).c_str());
             return false;
@@ -650,7 +653,7 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
 
     // Validation: Bus initialized
     if (!initialized_) {
-        LOG_ERROR("I2C: Bus not initialized for sensor read");
+        LOG_E(TAG, "I2C: Bus not initialized for sensor read");
         errorTracker.trackError(ERROR_I2C_READ_FAILED, ERROR_SEVERITY_ERROR,
                                "Bus not initialized for sensor read");
         return false;
@@ -658,14 +661,14 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
 
     // Validation: Buffer
     if (buffer == nullptr || buffer_size == 0) {
-        LOG_ERROR("I2C: Invalid buffer for sensor read");
+        LOG_E(TAG, "I2C: Invalid buffer for sensor read");
         return false;
     }
 
     // Find protocol
     const I2CSensorProtocol* protocol = findI2CSensorProtocol(sensor_type);
     if (protocol == nullptr) {
-        LOG_ERROR("I2C: Unsupported sensor type: " + sensor_type);
+        LOG_E(TAG, "I2C: Unsupported sensor type: " + sensor_type);
         errorTracker.trackError(ERROR_I2C_PROTOCOL_UNSUPPORTED, ERROR_SEVERITY_ERROR,
                                ("Unsupported sensor: " + sensor_type).c_str());
         return false;
@@ -676,7 +679,7 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
 
     // Validate address range
     if (addr < 0x08 || addr > 0x77) {
-        LOG_ERROR("I2C: Invalid address 0x" + String(addr, HEX) + " for " + sensor_type);
+        LOG_E(TAG, "I2C: Invalid address 0x" + String(addr, HEX) + " for " + sensor_type);
         errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_ERROR,
                                ("Invalid address 0x" + String(addr, HEX)).c_str());
         return false;
@@ -684,20 +687,20 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
 
     // Log if non-default address
     if (addr != protocol->default_i2c_address) {
-        LOG_DEBUG("I2C: Using non-default address 0x" + String(addr, HEX) +
+        LOG_D(TAG, "I2C: Using non-default address 0x" + String(addr, HEX) +
                   " for " + sensor_type + " (default: 0x" +
                   String(protocol->default_i2c_address, HEX) + ")");
     }
 
     // Check buffer size
     if (buffer_size < protocol->expected_bytes) {
-        LOG_ERROR("I2C: Buffer too small for " + sensor_type +
+        LOG_E(TAG, "I2C: Buffer too small for " + sensor_type +
                   " (need " + String(protocol->expected_bytes) +
                   ", have " + String(buffer_size) + ")");
         return false;
     }
 
-    LOG_DEBUG("I2C: Reading " + sensor_type + " at 0x" + String(addr, HEX) +
+    LOG_D(TAG, "I2C: Reading " + sensor_type + " at 0x" + String(addr, HEX) +
               " (protocol: " + String((uint8_t)protocol->protocol_type) + ")");
 
     // Execute protocol based on type
@@ -724,7 +727,7 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
                     bytes_read = received;
                     success = true;
                 } else {
-                    LOG_ERROR("I2C: Burst read failed for " + sensor_type);
+                    LOG_E(TAG, "I2C: Burst read failed for " + sensor_type);
                     errorTracker.trackError(ERROR_I2C_READ_FAILED, ERROR_SEVERITY_ERROR,
                                            ("Burst read failed: " + sensor_type).c_str());
                 }
@@ -732,7 +735,7 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
             break;
 
         default:
-            LOG_ERROR("I2C: Unknown protocol type for " + sensor_type);
+            LOG_E(TAG, "I2C: Unknown protocol type for " + sensor_type);
             errorTracker.trackError(ERROR_I2C_PROTOCOL_UNSUPPORTED, ERROR_SEVERITY_ERROR,
                                    "Unknown protocol type");
             return false;
@@ -747,7 +750,7 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
     }
 
     if (success) {
-        LOG_DEBUG("I2C: " + sensor_type + " read successful (" +
+        LOG_D(TAG, "I2C: " + sensor_type + " read successful (" +
                   String(bytes_read) + " bytes)");
     }
 
@@ -776,7 +779,7 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
         if (error == 4 || error == 5) {
             if (attemptRecoveryIfNeeded(error)) {
                 // Retry command after recovery
-                LOG_DEBUG("I2C: Retrying command after recovery...");
+                LOG_D(TAG, "I2C: Retrying command after recovery...");
                 Wire.beginTransmission(i2c_address);
                 for (uint8_t i = 0; i < protocol->command_length; i++) {
                     Wire.write(protocol->command_bytes[i]);
@@ -784,19 +787,19 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
                 error = Wire.endTransmission();
 
                 if (error != 0) {
-                    LOG_ERROR("I2C: Command retry failed for " + String(protocol->sensor_type));
+                    LOG_E(TAG, "I2C: Command retry failed for " + String(protocol->sensor_type));
                     errorTracker.trackError(ERROR_I2C_WRITE_FAILED, ERROR_SEVERITY_ERROR,
                                            ("Command retry failed: " + String(protocol->sensor_type)).c_str());
                     return false;
                 }
             } else {
-                LOG_ERROR("I2C: Bus error sending command to " + String(protocol->sensor_type));
+                LOG_E(TAG, "I2C: Bus error sending command to " + String(protocol->sensor_type));
                 errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
                                        ("Bus error: " + String(protocol->sensor_type)).c_str());
                 return false;
             }
         } else {
-            LOG_ERROR("I2C: Command failed for " + String(protocol->sensor_type) +
+            LOG_E(TAG, "I2C: Command failed for " + String(protocol->sensor_type) +
                       " (error " + String(error) + ")");
             errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_WARNING,
                                    (String(protocol->sensor_type) + " not responding").c_str());
@@ -812,16 +815,16 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
 
     // Step 3: Read data directly (no register address)
     size_t requested = protocol->expected_bytes;
-    LOG_DEBUG("I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(requested));
+    LOG_D(TAG, "I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(requested));
     size_t received = Wire.requestFrom(i2c_address, (uint8_t)requested);
-    LOG_DEBUG("I2C CMD: requestFrom END received=" + String(received));
+    LOG_D(TAG, "I2C CMD: requestFrom END received=" + String(received));
 
     // Timeout handling for slow sensors
     unsigned long start = millis();
-    LOG_DEBUG("I2C CMD: Waiting for Wire.available()...");
+    LOG_D(TAG, "I2C CMD: Waiting for Wire.available()...");
     while (Wire.available() < (int)requested) {
         if (millis() - start > I2C_READ_TIMEOUT_MS) {
-            LOG_ERROR("I2C: Read timeout for " + String(protocol->sensor_type));
+            LOG_E(TAG, "I2C: Read timeout for " + String(protocol->sensor_type));
             errorTracker.trackError(ERROR_I2C_TIMEOUT, ERROR_SEVERITY_ERROR,
                                    (String(protocol->sensor_type) + " read timeout").c_str());
             return false;
@@ -829,10 +832,10 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
         yield();  // Feed watchdog
     }
 
-    LOG_DEBUG("I2C CMD: Wire.available() ready");
+    LOG_D(TAG, "I2C CMD: Wire.available() ready");
 
     if (received != requested) {
-        LOG_ERROR("I2C: Incomplete read from " + String(protocol->sensor_type) +
+        LOG_E(TAG, "I2C: Incomplete read from " + String(protocol->sensor_type) +
                   " (expected " + String(requested) + ", got " + String(received) + ")");
         errorTracker.trackError(ERROR_I2C_READ_FAILED, ERROR_SEVERITY_ERROR,
                                ("Incomplete read: " + String(protocol->sensor_type)).c_str());
@@ -840,12 +843,12 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
     }
 
     // Read bytes into buffer
-    LOG_DEBUG("I2C CMD: Reading " + String(received) + " bytes from buffer...");
+    LOG_D(TAG, "I2C CMD: Reading " + String(received) + " bytes from buffer...");
     for (size_t i = 0; i < received; i++) {
         buffer[i] = Wire.read();
     }
     bytes_read = received;
-    LOG_DEBUG("I2C CMD: Read complete, bytes_read=" + String(bytes_read));
+    LOG_D(TAG, "I2C CMD: Read complete, bytes_read=" + String(bytes_read));
 
     return true;
 }

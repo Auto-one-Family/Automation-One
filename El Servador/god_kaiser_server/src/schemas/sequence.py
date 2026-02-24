@@ -6,6 +6,7 @@ Pydantic Schemas für Sequenz-Validierung und API-Responses.
 Phase: 3 - Sequence Action Executor
 Status: IMPLEMENTED
 """
+
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -88,9 +89,7 @@ class SequenceActionSchema(BaseModel):
             raise ValueError("Sequence must have at least one step")
         for i, step in enumerate(v):
             if "action" not in step and "delay_seconds" not in step:
-                raise ValueError(
-                    f"Step {i} must have either 'action' or 'delay_seconds'"
-                )
+                raise ValueError(f"Step {i} must have either 'action' or 'delay_seconds'")
         return v
 
 

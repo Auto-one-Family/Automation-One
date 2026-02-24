@@ -14,6 +14,20 @@
 #   ESP32-WROOM-32: PWM_CHANNELS=16, PWM_RESOLUTION=12, PWM_FREQUENCY=1000
 #   XIAO ESP32-C3:  PWM_CHANNELS=6,  PWM_RESOLUTION=12, PWM_FREQUENCY=1000
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure PWM actuator (LED):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"PWM_LED","active":true,"pwm_enabled":true}]}'
+#   Step 2 - PWM 50% duty cycle (after ~1.5s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+#       -m '{"command":"PWM","value":0.5}'
+#   Step 3 - PWM 100% (after ~1s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+#       -m '{"command":"PWM","value":1.0}'
+#   Step 4 - OFF (after ~1s):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
+#       -m '{"command":"OFF","value":0}'
+#
 # Firmware references:
 #   - esp32_dev.h lines 84-86: PWM constants
 #   - pwm_controller.cpp: PWM channel management
@@ -28,23 +42,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # Configure a PWM-capable actuator (LED with dimming)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "actuators": [{
-              "gpio": 5,
-              "actuator_type": "led",
-              "actuator_name": "PWM_LED",
-              "active": true,
-              "pwm_enabled": true
-            }]
-          }
-        }
+  # External MQTT injection: configure PWM-capable actuator (CI helper script)
 
   # Verify actuator is configured
   - wait-serial: "Actuator"
@@ -52,19 +50,7 @@ steps:
   # Wait for config to be applied
   - delay: 1500
 
-  # Send PWM command at 50% duty cycle
-  # Value 0.5 maps to ~2048 on 12-bit resolution
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
-          "payload": {
-            "command": "PWM",
-            "value": 0.5
-          }
-        }
+  # External MQTT injection: send PWM command at 50% duty cycle (CI helper script)
 
   # Verify PWM command is processed
   - wait-serial: "PWM"
@@ -75,34 +61,12 @@ steps:
   # Verify actuator status is published
   - wait-serial: "actuator"
 
-  # Send PWM command at 100% (full ON)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
-          "payload": {
-            "command": "PWM",
-            "value": 1.0
-          }
-        }
+  # External MQTT injection: send PWM 100% command (CI helper script)
 
   # Verify command processed
   - wait-serial: "PWM"
 
-  # Send PWM command at 0% (OFF)
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/actuator/5/command",
-          "payload": {
-            "command": "OFF",
-            "value": 0
-          }
-        }
+  # External MQTT injection: send OFF command (CI helper script)
 
   # Verify OFF command processed
   - wait-serial: "OFF"

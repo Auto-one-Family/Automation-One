@@ -15,6 +15,17 @@
 #   - Emergency stop can target specific subzones
 #   - Sensors and actuators can be grouped by subzone
 #
+# MQTT-Injection (extern via CI):
+#   Step 1 - Configure sensor on GPIO 4:
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
+#       -m '{"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"IrrigationTemp","subzone":"irrigation_zone","active":true}]}'
+#   Step 2 - Assign pins to subzone (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/subzone/assign" \
+#       -m '{"subzone_id":"irrigation_zone","gpios":[4,5,14]}'
+#   Step 3 - Remove pin from subzone (after ~500ms):
+#     mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/subzone/remove" \
+#       -m '{"subzone_id":"irrigation_zone","gpios":[4]}'
+#
 # Firmware reference: gpio_manager.cpp lines 479-564
 
 name: Subzone Pin Assignment and Removal
@@ -26,23 +37,7 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
-  # First, configure sensor on GPIO 4
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/config",
-          "payload": {
-            "sensors": [{
-              "gpio": 4,
-              "sensor_type": "temp_ds18b20",
-              "sensor_name": "IrrigationTemp",
-              "subzone": "irrigation_zone",
-              "active": true
-            }]
-          }
-        }
+  # External MQTT injection: configure sensor on GPIO 4 (CI helper script)
 
   # Verify sensor is configured
   - wait-serial: "Pin 4 allocated"
@@ -50,18 +45,7 @@ steps:
   # Wait for configuration
   - delay: 500
 
-  # GPIO-SUB-001: Assign pin to subzone via subzone assignment
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/subzone/assign",
-          "payload": {
-            "subzone_id": "irrigation_zone",
-            "gpios": [4, 5, 14]
-          }
-        }
+  # GPIO-SUB-001: External MQTT injection - assign pins to subzone (CI helper script)
 
   # Verify subzone assignment
   - wait-serial: "assigned to subzone"
@@ -70,18 +54,7 @@ steps:
   # Wait for assignment to complete
   - delay: 500
 
-  # GPIO-SUB-002: Remove pin from subzone
-  - set-control:
-      part-id: "mqtt"
-      control: "inject"
-      value: |
-        {
-          "topic": "kaiser/god/esp/ESP_00000001/subzone/remove",
-          "payload": {
-            "subzone_id": "irrigation_zone",
-            "gpios": [4]
-          }
-        }
+  # GPIO-SUB-002: External MQTT injection - remove pin from subzone (CI helper script)
 
   # Verify pin removal
   - wait-serial: "removed from subzone"

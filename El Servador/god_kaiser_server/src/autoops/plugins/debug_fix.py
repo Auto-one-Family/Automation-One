@@ -16,7 +16,7 @@ Issue Categories:
 - System Issues: MQTT disconnect, high error rate, memory issues
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from ..core.api_client import APIError, GodKaiserClient
 from ..core.base_plugin import (
@@ -80,9 +80,7 @@ class DebugFixPlugin(AutoOpsPlugin):
             PluginCapability.DOCUMENT,
         ]
 
-    async def execute(
-        self, context: AutoOpsContext, client: GodKaiserClient
-    ) -> PluginResult:
+    async def execute(self, context: AutoOpsContext, client: GodKaiserClient) -> PluginResult:
         """Run full diagnostic scan, fix issues, verify."""
         actions: list[PluginAction] = []
         all_issues: list[DiagnosticIssue] = []
@@ -93,13 +91,15 @@ class DebugFixPlugin(AutoOpsPlugin):
         # =============================================
         # Phase 1: DIAGNOSE - Scan everything
         # =============================================
-        actions.append(PluginAction.create(
-            action="Start Diagnostic Scan",
-            target="system",
-            details={},
-            result="Scanning...",
-            severity=ActionSeverity.INFO,
-        ))
+        actions.append(
+            PluginAction.create(
+                action="Start Diagnostic Scan",
+                target="system",
+                details={},
+                result="Scanning...",
+                severity=ActionSeverity.INFO,
+            )
+        )
 
         # Scan devices
         device_issues = await self._scan_devices(client)
@@ -117,41 +117,47 @@ class DebugFixPlugin(AutoOpsPlugin):
         zone_issues = await self._scan_zones(client)
         all_issues.extend(zone_issues)
 
-        actions.append(PluginAction.create(
-            action="Diagnostic Scan Complete",
-            target="system",
-            details={
-                "total_issues": len(all_issues),
-                "by_category": self._count_by_category(all_issues),
-                "by_severity": self._count_by_severity(all_issues),
-            },
-            result=f"Found {len(all_issues)} issue(s)",
-            severity=ActionSeverity.INFO if not all_issues else ActionSeverity.WARNING,
-        ))
+        actions.append(
+            PluginAction.create(
+                action="Diagnostic Scan Complete",
+                target="system",
+                details={
+                    "total_issues": len(all_issues),
+                    "by_category": self._count_by_category(all_issues),
+                    "by_severity": self._count_by_severity(all_issues),
+                },
+                result=f"Found {len(all_issues)} issue(s)",
+                severity=ActionSeverity.INFO if not all_issues else ActionSeverity.WARNING,
+            )
+        )
 
         # Record all issues
         for issue in all_issues:
-            context.diagnosed_issues.append({
-                "category": issue.category,
-                "severity": issue.severity,
-                "target": issue.target,
-                "description": issue.description,
-                "auto_fixable": issue.auto_fixable,
-                "suggested_fix": issue.suggested_fix,
-            })
+            context.diagnosed_issues.append(
+                {
+                    "category": issue.category,
+                    "severity": issue.severity,
+                    "target": issue.target,
+                    "description": issue.description,
+                    "auto_fixable": issue.auto_fixable,
+                    "suggested_fix": issue.suggested_fix,
+                }
+            )
 
         # =============================================
         # Phase 2: FIX - Auto-fix what's safe
         # =============================================
         auto_fixable = [i for i in all_issues if i.auto_fixable]
         if auto_fixable:
-            actions.append(PluginAction.create(
-                action="Start Auto-Fix",
-                target="system",
-                details={"fixable_count": len(auto_fixable)},
-                result=f"Attempting {len(auto_fixable)} auto-fix(es)",
-                severity=ActionSeverity.INFO,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Start Auto-Fix",
+                    target="system",
+                    details={"fixable_count": len(auto_fixable)},
+                    result=f"Attempting {len(auto_fixable)} auto-fix(es)",
+                    severity=ActionSeverity.INFO,
+                )
+            )
 
             for issue in auto_fixable:
                 fix_result = await self._apply_fix(issue, client, context)
@@ -159,31 +165,37 @@ class DebugFixPlugin(AutoOpsPlugin):
                     fixed_issues.append(
                         f"[{issue.category}] {issue.target}: {issue.description} -> FIXED"
                     )
-                    context.fixed_issues.append({
-                        "category": issue.category,
-                        "target": issue.target,
-                        "description": issue.description,
-                        "fix_applied": issue.fix_action,
-                    })
-                    actions.append(PluginAction.create(
-                        action=f"Fix: {issue.fix_action}",
-                        target=issue.target,
-                        details=issue.details,
-                        result="Fixed",
-                        severity=ActionSeverity.SUCCESS,
-                    ))
+                    context.fixed_issues.append(
+                        {
+                            "category": issue.category,
+                            "target": issue.target,
+                            "description": issue.description,
+                            "fix_applied": issue.fix_action,
+                        }
+                    )
+                    actions.append(
+                        PluginAction.create(
+                            action=f"Fix: {issue.fix_action}",
+                            target=issue.target,
+                            details=issue.details,
+                            result="Fixed",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
                 else:
                     errors.append(
                         f"Auto-fix failed for [{issue.category}] {issue.target}: "
                         f"{issue.description}"
                     )
-                    actions.append(PluginAction.create(
-                        action=f"Fix Failed: {issue.fix_action}",
-                        target=issue.target,
-                        details=issue.details,
-                        result="Fix failed",
-                        severity=ActionSeverity.ERROR,
-                    ))
+                    actions.append(
+                        PluginAction.create(
+                            action=f"Fix Failed: {issue.fix_action}",
+                            target=issue.target,
+                            details=issue.details,
+                            result="Fix failed",
+                            severity=ActionSeverity.ERROR,
+                        )
+                    )
 
         # Manual-fix issues become warnings
         manual_fixes = [i for i in all_issues if not i.auto_fixable]
@@ -247,67 +259,77 @@ class DebugFixPlugin(AutoOpsPlugin):
                 # Check offline devices
                 if status == "offline":
                     last_hb = device.get("last_heartbeat", "never")
-                    issues.append(DiagnosticIssue(
-                        category="device",
-                        severity="warning",
-                        target=device_id,
-                        description=f"Device is offline (last heartbeat: {last_hb})",
-                        suggested_fix="Trigger heartbeat or check device connectivity",
-                        auto_fixable=self._is_mock_device(device),
-                        fix_action="trigger_heartbeat",
-                        details={"device_id": device_id, "last_heartbeat": last_hb},
-                    ))
+                    issues.append(
+                        DiagnosticIssue(
+                            category="device",
+                            severity="warning",
+                            target=device_id,
+                            description=f"Device is offline (last heartbeat: {last_hb})",
+                            suggested_fix="Trigger heartbeat or check device connectivity",
+                            auto_fixable=self._is_mock_device(device),
+                            fix_action="trigger_heartbeat",
+                            details={"device_id": device_id, "last_heartbeat": last_hb},
+                        )
+                    )
 
                 # Check error state
                 if system_state == "ERROR":
-                    issues.append(DiagnosticIssue(
-                        category="device",
-                        severity="error",
-                        target=device_id,
-                        description=f"Device is in ERROR state",
-                        suggested_fix="Check device logs, consider restart",
-                        auto_fixable=self._is_mock_device(device),
-                        fix_action="reset_state_to_operational",
-                        details={"device_id": device_id, "system_state": system_state},
-                    ))
+                    issues.append(
+                        DiagnosticIssue(
+                            category="device",
+                            severity="error",
+                            target=device_id,
+                            description=f"Device is in ERROR state",
+                            suggested_fix="Check device logs, consider restart",
+                            auto_fixable=self._is_mock_device(device),
+                            fix_action="reset_state_to_operational",
+                            details={"device_id": device_id, "system_state": system_state},
+                        )
+                    )
 
                 # Check no sensors and no actuators
                 sensors = device.get("sensors", [])
                 actuators = device.get("actuators", [])
                 if not sensors and not actuators:
-                    issues.append(DiagnosticIssue(
-                        category="device",
-                        severity="info",
-                        target=device_id,
-                        description="Device has no sensors or actuators configured",
-                        suggested_fix="Add sensors/actuators via ESP config",
-                    ))
+                    issues.append(
+                        DiagnosticIssue(
+                            category="device",
+                            severity="info",
+                            target=device_id,
+                            description="Device has no sensors or actuators configured",
+                            suggested_fix="Add sensors/actuators via ESP config",
+                        )
+                    )
 
                 # Check memory
                 heap_free = device.get("heap_free")
                 if heap_free is not None and heap_free < 20000:
-                    issues.append(DiagnosticIssue(
-                        category="device",
-                        severity="warning",
-                        target=device_id,
-                        description=f"Low memory: {heap_free} bytes free",
-                        suggested_fix="Reduce sensor count or increase heap allocation",
-                    ))
+                    issues.append(
+                        DiagnosticIssue(
+                            category="device",
+                            severity="warning",
+                            target=device_id,
+                            description=f"Low memory: {heap_free} bytes free",
+                            suggested_fix="Reduce sensor count or increase heap allocation",
+                        )
+                    )
 
         except APIError as e:
-            issues.append(DiagnosticIssue(
-                category="system",
-                severity="error",
-                target="device_scan",
-                description=f"Failed to scan devices: {e.detail}",
-            ))
+            issues.append(
+                DiagnosticIssue(
+                    category="system",
+                    severity="error",
+                    target="device_scan",
+                    description=f"Failed to scan devices: {e.detail}",
+                )
+            )
 
         return issues
 
     async def _scan_sensors(
         self, client: GodKaiserClient, context: AutoOpsContext
     ) -> list[DiagnosticIssue]:
-        """Scan all sensors for issues."""
+        """Scan all sensors for issues including data freshness."""
         issues: list[DiagnosticIssue] = []
 
         try:
@@ -325,22 +347,72 @@ class DebugFixPlugin(AutoOpsPlugin):
 
                 # Check if sensor is disabled
                 if not sensor.get("enabled", True):
-                    issues.append(DiagnosticIssue(
-                        category="sensor",
-                        severity="info",
-                        target=target,
-                        description=f"Sensor {sensor_type} is disabled",
-                        suggested_fix="Enable sensor if it should be active",
-                        auto_fixable=False,
-                    ))
+                    issues.append(
+                        DiagnosticIssue(
+                            category="sensor",
+                            severity="info",
+                            target=target,
+                            description=f"Sensor {sensor_type} is disabled",
+                            suggested_fix="Enable sensor if it should be active",
+                            auto_fixable=False,
+                        )
+                    )
+
+                # Check for missing calibration (sensors that need it)
+                if sensor_type in ("ph", "ec") and not sensor.get("calibration_data"):
+                    issues.append(
+                        DiagnosticIssue(
+                            category="sensor",
+                            severity="info",
+                            target=target,
+                            description=f"Sensor {sensor_type} has no calibration data",
+                            suggested_fix="Calibrate sensor for accurate readings",
+                        )
+                    )
+
+            # Check sensor data freshness
+            try:
+                data_response = await client.list_sensor_data(limit=20)
+                data_items = data_response.get("data", data_response.get("items", []))
+                if isinstance(data_items, list):
+                    # Group by esp_id to check which devices have recent data
+                    devices_with_data = set()
+                    for item in data_items:
+                        if isinstance(item, dict):
+                            devices_with_data.add(item.get("esp_id", ""))
+
+                    # Check if any configured sensors have no data at all
+                    configured_devices = set()
+                    for s in sensors:
+                        if isinstance(s, dict) and s.get("enabled", True):
+                            configured_devices.add(s.get("esp_id", ""))
+
+                    devices_without_data = configured_devices - devices_with_data
+                    if devices_without_data:
+                        issues.append(
+                            DiagnosticIssue(
+                                category="sensor",
+                                severity="warning",
+                                target="sensor_data",
+                                description=(
+                                    f"{len(devices_without_data)} device(s) with sensors "
+                                    f"but no recent data: {list(devices_without_data)[:5]}"
+                                ),
+                                suggested_fix="Check device connectivity and sensor configuration",
+                            )
+                        )
+            except APIError:
+                pass  # Data endpoint may not be accessible
 
         except APIError as e:
-            issues.append(DiagnosticIssue(
-                category="system",
-                severity="warning",
-                target="sensor_scan",
-                description=f"Failed to scan sensors: {e.detail}",
-            ))
+            issues.append(
+                DiagnosticIssue(
+                    category="system",
+                    severity="warning",
+                    target="sensor_scan",
+                    description=f"Failed to scan sensors: {e.detail}",
+                )
+            )
 
         return issues
 
@@ -364,22 +436,26 @@ class DebugFixPlugin(AutoOpsPlugin):
 
                 # Check emergency-stopped actuators
                 if actuator.get("emergency_stopped", False):
-                    issues.append(DiagnosticIssue(
-                        category="actuator",
-                        severity="warning",
-                        target=target,
-                        description="Actuator is emergency-stopped",
-                        suggested_fix="Review emergency condition and clear E-stop if safe",
-                        auto_fixable=False,  # E-stop clearing requires manual approval
-                    ))
+                    issues.append(
+                        DiagnosticIssue(
+                            category="actuator",
+                            severity="warning",
+                            target=target,
+                            description="Actuator is emergency-stopped",
+                            suggested_fix="Review emergency condition and clear E-stop if safe",
+                            auto_fixable=False,  # E-stop clearing requires manual approval
+                        )
+                    )
 
         except APIError as e:
-            issues.append(DiagnosticIssue(
-                category="system",
-                severity="warning",
-                target="actuator_scan",
-                description=f"Failed to scan actuators: {e.detail}",
-            ))
+            issues.append(
+                DiagnosticIssue(
+                    category="system",
+                    severity="warning",
+                    target="actuator_scan",
+                    description=f"Failed to scan actuators: {e.detail}",
+                )
+            )
 
         return issues
 
@@ -392,19 +468,18 @@ class DebugFixPlugin(AutoOpsPlugin):
             devices = self._extract_list(response, "devices")
 
             # Check for unassigned devices
-            unassigned = [
-                d for d in devices
-                if isinstance(d, dict) and not d.get("zone_id")
-            ]
+            unassigned = [d for d in devices if isinstance(d, dict) and not d.get("zone_id")]
             if unassigned:
                 device_ids = [d.get("device_id", "?") for d in unassigned]
-                issues.append(DiagnosticIssue(
-                    category="zone",
-                    severity="info",
-                    target="unassigned_devices",
-                    description=f"{len(unassigned)} device(s) without zone: {device_ids}",
-                    suggested_fix="Assign devices to zones for better organization",
-                ))
+                issues.append(
+                    DiagnosticIssue(
+                        category="zone",
+                        severity="info",
+                        target="unassigned_devices",
+                        description=f"{len(unassigned)} device(s) without zone: {device_ids}",
+                        suggested_fix="Assign devices to zones for better organization",
+                    )
+                )
 
         except APIError:
             pass
