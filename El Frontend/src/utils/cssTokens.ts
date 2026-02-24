@@ -9,17 +9,8 @@
  * so they respect runtime theme changes.
  */
 
-/** Cache for computed style to avoid repeated lookups within the same frame */
-let cachedStyle: CSSStyleDeclaration | null = null
-let cacheFrame: number | null = null
-
 function getStyle(): CSSStyleDeclaration {
-  const frame = typeof requestAnimationFrame !== 'undefined' ? 0 : 0
-  if (!cachedStyle || cacheFrame !== frame) {
-    cachedStyle = getComputedStyle(document.documentElement)
-    cacheFrame = frame
-  }
-  return cachedStyle
+  return getComputedStyle(document.documentElement)
 }
 
 /**

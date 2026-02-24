@@ -13,7 +13,7 @@
  */
 
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
-import { GridStack, type GridItemHTMLElement } from 'gridstack'
+import { GridStack, type GridItemHTMLElement, type GridStackNode } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import {
   LayoutGrid, Plus, Trash2, Download, Upload,
@@ -118,7 +118,17 @@ onMounted(() => {
       autoSave()
     })
 
-    grid.on('removed', () => {
+    grid.on('removed', (_event: Event, items: GridStackNode[]) => {
+      // Unmount Vue components of removed widgets to prevent memory leaks
+      for (const item of items) {
+        if (item.id) {
+          const mountEl = mountedWidgets.get(item.id)
+          if (mountEl) {
+            render(null, mountEl)
+            mountedWidgets.delete(item.id)
+          }
+        }
+      }
       autoSave()
     })
   })
@@ -157,7 +167,7 @@ function loadWidgetsToGrid(widgets: any[]) {
       widgetConfigs.value.set(w.id, w.config)
     }
     const widgetDef = widgetTypes.find(t => t.type === w.type)
-    grid.addWidget({
+    const itemEl = grid.addWidget({
       x: w.x,
       y: w.y,
       w: w.w,
@@ -165,34 +175,63 @@ function loadWidgetsToGrid(widgets: any[]) {
       minW: widgetDef?.minW,
       minH: widgetDef?.minH,
       id: w.id,
-      content: createWidgetContent(w.type, w.config?.title || w.type, w.id, mountId),
     })
 
-    // Mount Vue component after DOM insertion
+    // Inject widget DOM and mount Vue component after GridStack has created the cell
     nextTick(() => {
+      const contentDiv = itemEl.querySelector('.grid-stack-item-content')
+      contentDiv?.appendChild(createWidgetElement(w.type, w.config?.title || w.type, w.id, mountId))
       mountWidgetComponent(w.id, mountId, w.type, w.config || {})
     })
   }
 }
 
-function createWidgetContent(type: string, title: string, widgetId: string, mountId: string): string {
+/**
+ * Build widget DOM element using the DOM API (no innerHTML) so user-controlled
+ * strings such as `title` are set via textContent and cannot carry XSS payloads.
+ * GridStack.renderCB no longer needs to be overridden — we inject the element
+ * directly into `.grid-stack-item-content` after addWidget() returns.
+ */
+function createWidgetElement(type: string, title: string, widgetId: string, mountId: string): HTMLElement {
   const widgetDef = widgetTypes.find(w => w.type === type)
   const label = widgetDef?.label || type
   const hasVueComponent = type in widgetComponentMap
-  return `
-    <div class="dashboard-widget" data-type="${type}" data-widget-id="${widgetId}">
-      <div class="dashboard-widget__header">
-        <span class="dashboard-widget__title">${title || label}</span>
-        <span class="dashboard-widget__type">${type}</span>
-      </div>
-      ${hasVueComponent
-        ? `<div id="${mountId}" class="dashboard-widget__vue-mount"></div>`
-        : `<div class="dashboard-widget__body">
-            <div class="dashboard-widget__placeholder">${label}</div>
-          </div>`
-      }
-    </div>
-  `
+
+  const container = document.createElement('div')
+  container.className = 'dashboard-widget'
+  container.dataset.type = type
+  container.dataset.widgetId = widgetId
+
+  const header = document.createElement('div')
+  header.className = 'dashboard-widget__header'
+
+  const titleEl = document.createElement('span')
+  titleEl.className = 'dashboard-widget__title'
+  titleEl.textContent = title || label        // textContent — safe for user input
+
+  const typeEl = document.createElement('span')
+  typeEl.className = 'dashboard-widget__type'
+  typeEl.textContent = type
+
+  header.append(titleEl, typeEl)
+  container.appendChild(header)
+
+  if (hasVueComponent) {
+    const mountDiv = document.createElement('div')
+    mountDiv.id = mountId
+    mountDiv.className = 'dashboard-widget__vue-mount'
+    container.appendChild(mountDiv)
+  } else {
+    const body = document.createElement('div')
+    body.className = 'dashboard-widget__body'
+    const placeholder = document.createElement('div')
+    placeholder.className = 'dashboard-widget__placeholder'
+    placeholder.textContent = label
+    body.appendChild(placeholder)
+    container.appendChild(body)
+  }
+
+  return container
 }
 
 // Get current Vue instance for app context sharing
@@ -253,17 +292,18 @@ function addWidget(type: string) {
   const config = { title: widgetDef.label }
   widgetConfigs.value.set(id, config)
 
-  grid.addWidget({
+  const itemEl = grid.addWidget({
     w: widgetDef.w,
     h: widgetDef.h,
     minW: widgetDef.minW,
     minH: widgetDef.minH,
     id,
-    content: createWidgetContent(type, widgetDef.label, id, mountId),
   })
 
-  // Mount Vue component
+  // Inject widget DOM and mount Vue component after GridStack has created the cell
   nextTick(() => {
+    const contentDiv = itemEl.querySelector('.grid-stack-item-content')
+    contentDiv?.appendChild(createWidgetElement(type, widgetDef.label, id, mountId))
     mountWidgetComponent(id, mountId, type, config)
   })
 
