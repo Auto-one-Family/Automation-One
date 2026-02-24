@@ -195,5 +195,5 @@
      SIDEBAR DIMENSIONS
      ═══════════════════════════════════════════════════════════════════════════ */
   --sidebar-width: 15rem;  /* 240px */
-  --header-height: 3rem;   /* 48px — consolidated command strip */
+  --header-height: 3.5rem;   /* 56px — consolidated command strip */
 }

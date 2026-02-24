@@ -30,6 +30,9 @@ function ensureScreenshotDir() {
 test.use({ storageState: { cookies: [], origins: [] } })
 
 test.describe('ESP Registrierungs-Flow (User-Simulation)', () => {
+  // Requires live ESP32/MQTT data — will be linked to Wokwi SIL testing
+  test.skip(!!process.env.CI, 'Requires live IoT data — use Wokwi integration for CI')
+
   test('Vollständiger Flow: Login -> Pending öffnen -> ESP genehmigen', async ({
     page,
   }) => {

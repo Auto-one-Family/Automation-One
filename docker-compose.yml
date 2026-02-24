@@ -135,6 +135,7 @@ services:
     build:
       context: ./El Frontend
       dockerfile: Dockerfile
+      target: development  # Use dev server (Vite, port 5173) not nginx (port 80)
     container_name: automationone-frontend
     logging:
       driver: json-file

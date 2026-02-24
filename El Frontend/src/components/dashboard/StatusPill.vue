@@ -87,7 +87,7 @@ const emit = defineEmits<{
 /* ── Label ── */
 .status-pill__label {
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   transition: color var(--transition-fast);
 }
 

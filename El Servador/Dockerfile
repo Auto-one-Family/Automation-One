@@ -8,7 +8,7 @@
 # ============================================
 # Stage 1: Builder
 # ============================================
-FROM python:3.11-slim as builder
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -29,18 +29,20 @@ RUN curl -sSL https://install.python-poetry.org | python3 - && \
 COPY god_kaiser_server/pyproject.toml god_kaiser_server/poetry.lock* ./
 
 # Configure Poetry: no virtual env, install only main deps
+# --no-root: Don't install the project package itself (only dependencies)
+# This avoids errors about missing README.md in the Docker build context
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --only main
+    poetry install --no-interaction --no-ansi --only main --no-root
 
 # ============================================
 # Stage 2: Runtime
 # ============================================
-FROM python:3.11-slim as runtime
+FROM python:3.11-slim-bookworm AS runtime
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies and apply security patches
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -48,6 +50,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Upgrade pip/setuptools and fix known CVEs in transitive/lock-pinned packages:
+# python-multipart CVE-2024-24762, CVE-2024-53981, CVE-2026-24486 → >=0.0.22
+# starlette CVE-2024-47874 → >=0.40.0 (via FastAPI >=0.115.0)
+# jaraco.context CVE-2026-23949 (path traversal) → >=6.1.0
+# wheel CVE-2026-24049 (privilege escalation) → >=0.46.2
+RUN pip install --no-cache-dir --upgrade pip setuptools && \
+    pip install --no-cache-dir --upgrade \
+        "python-multipart>=0.0.22" \
+        "fastapi>=0.115.0" \
+        "starlette>=0.40.0" \
+        "jaraco.context>=6.1.0" \
+        "wheel>=0.46.2"
 
 # Copy application code
 COPY god_kaiser_server/src ./src

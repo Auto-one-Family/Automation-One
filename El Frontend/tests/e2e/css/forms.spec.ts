@@ -136,10 +136,10 @@ test.describe('Form Styles', () => {
     }
   })
 
-  test('labels have font-weight 500', async ({ page }) => {
+  test('labels have font-weight 600', async ({ page }) => {
     const label = page.locator('label').first()
     if (await label.count() > 0) {
-      await expect(label).toHaveCSS('font-weight', '500')
+      await expect(label).toHaveCSS('font-weight', '600')
     }
   })
 

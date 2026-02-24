@@ -1,11 +1,23 @@
 # El Frontend - Dockerfile
 # =========================
-# Vue 3 Development Server
+# Multi-stage build for Vue 3 application
 #
-# Build: docker build -t el-frontend .
-# Run:   docker run -p 5173:5173 el-frontend
+# Stages:
+#   development - Dev server with hot reload (used by docker-compose, security-scan)
+#   build       - Production build step
+#   production  - Nginx serving static files
+#
+# Build:
+#   docker build -t el-frontend .                           # Production (default)
+#   docker build -t el-frontend:dev --target development .  # Development
+# Run:
+#   docker run -p 5173:5173 el-frontend:dev   # Dev server
+#   docker run -p 80:80 el-frontend           # Production
 
-FROM node:20-alpine
+# ============================================
+# Stage 1: Development
+# ============================================
+FROM node:20-alpine AS development
 
 WORKDIR /app
 
@@ -44,3 +56,35 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Run Vite dev server with host binding
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+# ============================================
+# Stage 2: Build
+# ============================================
+FROM development AS build
+
+# Switch to root for build (need write access)
+USER root
+
+# Build production bundle
+RUN npm run build
+
+# ============================================
+# Stage 3: Production
+# ============================================
+FROM nginx:alpine AS production
+
+# Copy built assets from build stage
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -S appuser -u 1001 -G appgroup
+
+# Expose HTTP port
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget -q --spider http://localhost:80 || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

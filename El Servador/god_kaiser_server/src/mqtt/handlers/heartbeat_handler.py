@@ -788,12 +788,26 @@ class HeartbeatHandler:
                     )
 
             esp_device.device_metadata = current_metadata
-            
-        except Exception as e:
+
+        except (AttributeError, TypeError, KeyError) as e:
+            # Structured data errors: log and roll back the in-progress metadata
+            # changes so we never commit a partially-updated device_metadata blob.
             logger.error(
                 f"Failed to update ESP metadata for {esp_device.device_id}: {e}",
-                exc_info=True
+                exc_info=True,
             )
+            # Restore original metadata to avoid partial state commit
+            esp_device.device_metadata = esp_device.device_metadata or {}
+        except Exception as e:
+            # Unexpected errors: same defensive rollback, re-raise so the caller
+            # (handle_heartbeat) can decide whether the whole transaction should
+            # be aborted.
+            logger.error(
+                f"Unexpected error updating ESP metadata for {esp_device.device_id}: {e}",
+                exc_info=True,
+            )
+            esp_device.device_metadata = esp_device.device_metadata or {}
+            raise
 
     def _validate_payload(self, payload: dict) -> dict:
         """
@@ -992,12 +1006,13 @@ class HeartbeatHandler:
             }
 
         except ImportError as e:
-            logger.error(f"Failed to import GPIO schemas: {e}")
-            # Fallback: return raw data without validation (for backward compatibility)
-            return {
-                "gpio_status": gpio_status,
-                "gpio_reserved_count": gpio_reserved_count
-            }
+            logger.error(
+                f"Failed to import GPIO schemas for {device_id}: {e}. "
+                f"GPIO status will be skipped to avoid storing unvalidated data."
+            )
+            # Return None (not raw data) so the caller skips the metadata update
+            # rather than persisting unvalidated GPIO status into the database.
+            return None
         except Exception as e:
             logger.error(
                 f"Unexpected error validating GPIO status for {device_id}: {e}",

@@ -10,6 +10,9 @@ import { createWebSocketHelper, WS_MESSAGE_TYPES } from '../helpers/websocket'
 import { publishHeartbeat, generateMockId } from '../helpers/mqtt'
 
 test.describe('Device Discovery', () => {
+  // Requires live MQTT/IoT data — will be linked to Wokwi SIL testing
+  test.skip(!!process.env.CI, 'Requires live IoT data — use Wokwi integration for CI')
+
   test('should discover new device via heartbeat', async ({ page }) => {
     // Setup WebSocket listener
     const wsHelper = await createWebSocketHelper(page)

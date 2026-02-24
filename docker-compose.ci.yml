@@ -17,6 +17,8 @@ services:
   # ============================================
   postgres:
     # Real PostgreSQL for integration tests (not SQLite)
+    # Override command: base config references postgresql.conf which is removed by volumes: !reset
+    command: postgres
     environment:
       POSTGRES_USER: god_kaiser
       POSTGRES_PASSWORD: ci_password
@@ -57,10 +59,16 @@ services:
         condition: service_healthy
       mqtt-broker:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     environment:
       DATABASE_URL: postgresql+asyncpg://god_kaiser:ci_password@postgres:5432/god_kaiser_db
       DATABASE_AUTO_INIT: "true"
-      ENVIRONMENT: test
+      ENVIRONMENT: testing
       LOG_LEVEL: WARNING
       TESTING: "true"
       # MQTT points to service name
@@ -69,6 +77,8 @@ services:
       # JWT for test environment
       JWT_SECRET_KEY: ci_test_secret_key_not_for_production
     restart: "no"
+    # No host volume mounts in CI (avoids PermissionError on /app/logs)
+    volumes: !reset []
     # No watch/develop section in CI
     develop: !reset null
 
@@ -78,11 +88,16 @@ services:
   el-frontend:
     profiles:
       - frontend  # Only start when explicitly requested
+    environment:
+      # Vite server-side proxy targets (Node.js proxy inside the container)
+      # Must use Docker service name — localhost resolves to the frontend container itself
+      VITE_API_TARGET: http://el-servador:8000
+      VITE_WS_TARGET: ws://el-servador:8000
     restart: "no"
     develop: !reset null
 
 # ============================================
 # Override: No monitoring services in CI
 # ============================================
-# pgadmin, loki, promtail, prometheus, grafana are excluded
+# pgadmin, loki, alloy, prometheus, grafana are excluded
 # via their profiles (devtools, monitoring) which are not activated in CI

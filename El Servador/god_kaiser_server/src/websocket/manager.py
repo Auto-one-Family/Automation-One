@@ -293,23 +293,48 @@ class WebSocketManager:
         rate_queue.append(now)
         return True
 
+    async def _close_websocket(self, client_id: str, websocket: WebSocket) -> None:
+        """
+        Close a single WebSocket connection without acquiring the lock.
+
+        Internal helper for use within already-locked contexts (e.g. shutdown).
+        Callers must hold self._lock before calling this method.
+
+        Args:
+            client_id: Client identifier (for logging only)
+            websocket: WebSocket connection to close
+        """
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
+        except RuntimeError as e:
+            if "after sending 'websocket.close'" in str(e) or "already completed" in str(e):
+                logger.debug(f"WebSocket {client_id} already closed by client")
+            else:
+                logger.warning(f"RuntimeError closing WebSocket for {client_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Error closing WebSocket for {client_id}: {e}")
+
     async def shutdown(self) -> None:
         """
         Shutdown WebSocket Manager.
-        
+
         Closes all connections and cleans up resources.
+
+        Note: Uses _close_websocket() directly (not disconnect()) to avoid a
+        deadlock — disconnect() acquires self._lock, but shutdown() already
+        holds it when iterating over connections.
         """
         async with self._lock:
             logger.info("Shutting down WebSocket Manager...")
-            
-            # Close all connections
-            client_ids = list(self._connections.keys())
-            for client_id in client_ids:
-                await self.disconnect(client_id)
-            
+
+            # Close all connections directly (no re-entrant lock via disconnect())
+            for client_id, websocket in list(self._connections.items()):
+                await self._close_websocket(client_id, websocket)
+
             self._connections.clear()
             self._subscriptions.clear()
             self._rate_limiter.clear()
             self._loop = None
-            
+
             logger.info("WebSocket Manager shutdown complete")
