@@ -106,9 +106,7 @@ class SubzoneAckHandler:
                 logger.warning(f"Subzone ACK processing failed for {esp_id}")
                 return False
 
-    def _validate_payload(
-        self, payload_data: Dict[str, Any]
-    ) -> Optional[SubzoneAckPayload]:
+    def _validate_payload(self, payload_data: Dict[str, Any]) -> Optional[SubzoneAckPayload]:
         """
         Validate payload against schema.
 
@@ -170,4 +168,3 @@ async def handle_subzone_ack(topic: str, payload: dict) -> bool:
         True if processed successfully
     """
     return await _handler.handle(topic, payload)
-

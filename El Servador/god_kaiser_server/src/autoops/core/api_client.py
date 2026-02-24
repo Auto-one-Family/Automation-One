@@ -31,6 +31,7 @@ def _get_logger(name: str) -> logging.Logger:
     """Get a logger, preferring the server's logging_config if available."""
     try:
         from ...core.logging_config import get_logger
+
         return get_logger(name)
     except (ImportError, ValueError):
         return logging.getLogger(name)
@@ -129,28 +130,39 @@ class GodKaiserClient:
                 )
 
                 # Log the action
-                severity = ActionSeverity.SUCCESS if response.status_code < 400 else ActionSeverity.ERROR
-                self._action_log.append(PluginAction.create(
-                    action=action_name or f"{method} {endpoint}",
-                    target=target or endpoint,
-                    details={
-                        "request_body": json_data if json_data else {},
-                        "params": params if params else {},
-                        "attempt": attempt + 1 if attempt > 0 else None,
-                    },
-                    result=f"HTTP {response.status_code}",
-                    severity=severity,
-                    api_endpoint=url,
-                    api_method=method,
-                    api_response_code=response.status_code,
-                ))
+                severity = (
+                    ActionSeverity.SUCCESS if response.status_code < 400 else ActionSeverity.ERROR
+                )
+                self._action_log.append(
+                    PluginAction.create(
+                        action=action_name or f"{method} {endpoint}",
+                        target=target or endpoint,
+                        details={
+                            "request_body": json_data if json_data else {},
+                            "params": params if params else {},
+                            "attempt": attempt + 1 if attempt > 0 else None,
+                        },
+                        result=f"HTTP {response.status_code}",
+                        severity=severity,
+                        api_endpoint=url,
+                        api_method=method,
+                        api_response_code=response.status_code,
+                    )
+                )
 
                 # Retry on transient server errors
-                if response.status_code in self.RETRYABLE_STATUS_CODES and attempt < self.max_retries:
-                    delay = self.retry_delay * (2 ** attempt)
+                if (
+                    response.status_code in self.RETRYABLE_STATUS_CODES
+                    and attempt < self.max_retries
+                ):
+                    delay = self.retry_delay * (2**attempt)
                     logger.warning(
                         "Retryable HTTP %d at %s, attempt %d/%d, waiting %.1fs",
-                        response.status_code, url, attempt + 1, self.max_retries, delay,
+                        response.status_code,
+                        url,
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
                     )
                     await asyncio.sleep(delay)
                     continue
@@ -171,23 +183,29 @@ class GodKaiserClient:
             except httpx.RequestError as e:
                 last_error = e
                 if attempt < self.max_retries:
-                    delay = self.retry_delay * (2 ** attempt)
+                    delay = self.retry_delay * (2**attempt)
                     logger.warning(
                         "Connection error at %s: %s, attempt %d/%d, waiting %.1fs",
-                        url, e, attempt + 1, self.max_retries, delay,
+                        url,
+                        e,
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
                     )
                     await asyncio.sleep(delay)
                     continue
 
-                self._action_log.append(PluginAction.create(
-                    action=action_name or f"{method} {endpoint}",
-                    target=target or endpoint,
-                    details={"error": str(e), "attempts": attempt + 1},
-                    result=f"Connection error after {attempt + 1} attempts: {e}",
-                    severity=ActionSeverity.ERROR,
-                    api_endpoint=url,
-                    api_method=method,
-                ))
+                self._action_log.append(
+                    PluginAction.create(
+                        action=action_name or f"{method} {endpoint}",
+                        target=target or endpoint,
+                        details={"error": str(e), "attempts": attempt + 1},
+                        result=f"Connection error after {attempt + 1} attempts: {e}",
+                        severity=ActionSeverity.ERROR,
+                        api_endpoint=url,
+                        api_method=method,
+                    )
+                )
                 raise APIError(0, f"Connection error after {attempt + 1} attempts: {e}", url) from e
 
         # Should not reach here, but safety fallback
@@ -212,7 +230,8 @@ class GodKaiserClient:
     async def check_health(self) -> dict[str, Any]:
         """Check server health (no auth required)."""
         return await self._request(
-            "GET", "/v1/health",
+            "GET",
+            "/v1/health",
             action_name="Health Check",
             target="server",
         )
@@ -224,7 +243,8 @@ class GodKaiserClient:
     async def list_devices(self, include_offline: bool = True) -> dict[str, Any]:
         """List all ESP devices."""
         return await self._request(
-            "GET", "/v1/esp/devices",
+            "GET",
+            "/v1/esp/devices",
             params={"include_offline": include_offline},
             action_name="List ESP Devices",
             target="all_devices",
@@ -233,7 +253,8 @@ class GodKaiserClient:
     async def get_device(self, esp_id: str) -> dict[str, Any]:
         """Get details of a specific ESP device."""
         return await self._request(
-            "GET", f"/v1/esp/devices/{esp_id}",
+            "GET",
+            f"/v1/esp/devices/{esp_id}",
             action_name="Get ESP Device",
             target=esp_id,
         )
@@ -241,7 +262,8 @@ class GodKaiserClient:
     async def create_device(self, device_data: dict[str, Any]) -> dict[str, Any]:
         """Register a new ESP device."""
         return await self._request(
-            "POST", "/v1/esp/devices",
+            "POST",
+            "/v1/esp/devices",
             json_data=device_data,
             action_name="Create ESP Device",
             target=device_data.get("device_id", "new_device"),
@@ -250,7 +272,8 @@ class GodKaiserClient:
     async def update_device(self, esp_id: str, update_data: dict[str, Any]) -> dict[str, Any]:
         """Update an ESP device."""
         return await self._request(
-            "PATCH", f"/v1/esp/devices/{esp_id}",
+            "PATCH",
+            f"/v1/esp/devices/{esp_id}",
             json_data=update_data,
             action_name="Update ESP Device",
             target=esp_id,
@@ -259,7 +282,8 @@ class GodKaiserClient:
     async def delete_device(self, esp_id: str) -> dict[str, Any]:
         """Delete an ESP device."""
         return await self._request(
-            "DELETE", f"/v1/esp/devices/{esp_id}",
+            "DELETE",
+            f"/v1/esp/devices/{esp_id}",
             action_name="Delete ESP Device",
             target=esp_id,
         )
@@ -267,7 +291,8 @@ class GodKaiserClient:
     async def get_gpio_status(self, esp_id: str) -> dict[str, Any]:
         """Get GPIO pin availability for a device."""
         return await self._request(
-            "GET", f"/v1/esp/devices/{esp_id}/gpio-status",
+            "GET",
+            f"/v1/esp/devices/{esp_id}/gpio-status",
             action_name="Get GPIO Status",
             target=esp_id,
         )
@@ -293,7 +318,8 @@ class GodKaiserClient:
         if zone_name:
             data["zone_name"] = zone_name
         return await self._request(
-            "POST", "/v1/debug/mock-esp",
+            "POST",
+            "/v1/debug/mock-esp",
             json_data=data,
             action_name="Create Mock ESP",
             target=device_id or name,
@@ -302,7 +328,8 @@ class GodKaiserClient:
     async def list_mock_esps(self) -> dict[str, Any]:
         """List all mock ESPs."""
         return await self._request(
-            "GET", "/v1/debug/mock-esp",
+            "GET",
+            "/v1/debug/mock-esp",
             action_name="List Mock ESPs",
             target="all_mocks",
         )
@@ -310,7 +337,8 @@ class GodKaiserClient:
     async def delete_mock_esp(self, esp_id: str) -> dict[str, Any]:
         """Delete a mock ESP."""
         return await self._request(
-            "DELETE", f"/v1/debug/mock-esp/{esp_id}",
+            "DELETE",
+            f"/v1/debug/mock-esp/{esp_id}",
             action_name="Delete Mock ESP",
             target=esp_id,
         )
@@ -318,7 +346,8 @@ class GodKaiserClient:
     async def trigger_heartbeat(self, esp_id: str) -> dict[str, Any]:
         """Trigger a heartbeat for a mock ESP."""
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/heartbeat",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/heartbeat",
             action_name="Trigger Heartbeat",
             target=esp_id,
         )
@@ -328,7 +357,8 @@ class GodKaiserClient:
     ) -> dict[str, Any]:
         """Configure auto-heartbeat for a mock ESP."""
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/auto-heartbeat",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/auto-heartbeat",
             json_data={"enabled": enabled, "interval_seconds": interval_seconds},
             action_name="Set Auto-Heartbeat",
             target=esp_id,
@@ -371,7 +401,8 @@ class GodKaiserClient:
             data["onewire_address"] = onewire_address
 
         return await self._request(
-            "POST", f"/v1/sensors/{esp_id}/{gpio}",
+            "POST",
+            f"/v1/sensors/{esp_id}/{gpio}",
             json_data=data,
             action_name=f"Add Sensor ({sensor_type})",
             target=f"{esp_id}/gpio:{gpio}",
@@ -380,7 +411,8 @@ class GodKaiserClient:
     async def get_sensor(self, esp_id: str, gpio: int) -> dict[str, Any]:
         """Get sensor configuration."""
         return await self._request(
-            "GET", f"/v1/sensors/{esp_id}/{gpio}",
+            "GET",
+            f"/v1/sensors/{esp_id}/{gpio}",
             action_name="Get Sensor Config",
             target=f"{esp_id}/gpio:{gpio}",
         )
@@ -391,7 +423,8 @@ class GodKaiserClient:
         if esp_id:
             params["esp_id"] = esp_id
         return await self._request(
-            "GET", "/v1/sensors/",
+            "GET",
+            "/v1/sensors/",
             params=params,
             action_name="List Sensors",
             target=esp_id or "all",
@@ -400,7 +433,8 @@ class GodKaiserClient:
     async def delete_sensor(self, esp_id: str, gpio: int) -> dict[str, Any]:
         """Delete a sensor configuration."""
         return await self._request(
-            "DELETE", f"/v1/sensors/{esp_id}/{gpio}",
+            "DELETE",
+            f"/v1/sensors/{esp_id}/{gpio}",
             action_name="Delete Sensor",
             target=f"{esp_id}/gpio:{gpio}",
         )
@@ -410,7 +444,8 @@ class GodKaiserClient:
     ) -> dict[str, Any]:
         """Set a mock sensor's value (simulates real sensor reading)."""
         return await self._request(
-            "PUT", f"/v1/debug/mock-esp/{esp_id}/sensors/{gpio}/value",
+            "PUT",
+            f"/v1/debug/mock-esp/{esp_id}/sensors/{gpio}/value",
             json_data={"raw_value": raw_value, "publish": publish},
             action_name="Set Sensor Value",
             target=f"{esp_id}/gpio:{gpio}",
@@ -456,7 +491,8 @@ class GodKaiserClient:
             data["onewire_address"] = onewire_address
 
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/sensors",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/sensors",
             json_data=data,
             action_name=f"Add Mock Sensor ({sensor_type})",
             target=f"{esp_id}/gpio:{gpio}",
@@ -484,7 +520,8 @@ class GodKaiserClient:
         if name:
             data["name"] = name
         return await self._request(
-            "POST", f"/v1/actuators/{esp_id}/{gpio}",
+            "POST",
+            f"/v1/actuators/{esp_id}/{gpio}",
             json_data=data,
             action_name=f"Add Actuator ({actuator_type})",
             target=f"{esp_id}/gpio:{gpio}",
@@ -505,7 +542,8 @@ class GodKaiserClient:
         if duration is not None:
             data["duration"] = duration
         return await self._request(
-            "POST", f"/v1/actuators/{esp_id}/{gpio}/command",
+            "POST",
+            f"/v1/actuators/{esp_id}/{gpio}/command",
             json_data=data,
             action_name=f"Actuator Command ({command})",
             target=f"{esp_id}/gpio:{gpio}",
@@ -517,7 +555,8 @@ class GodKaiserClient:
         if esp_id:
             params["esp_id"] = esp_id
         return await self._request(
-            "GET", "/v1/actuators/",
+            "GET",
+            "/v1/actuators/",
             params=params,
             action_name="List Actuators",
             target=esp_id or "all",
@@ -526,7 +565,8 @@ class GodKaiserClient:
     async def delete_actuator(self, esp_id: str, gpio: int) -> dict[str, Any]:
         """Delete an actuator configuration."""
         return await self._request(
-            "DELETE", f"/v1/actuators/{esp_id}/{gpio}",
+            "DELETE",
+            f"/v1/actuators/{esp_id}/{gpio}",
             action_name="Delete Actuator",
             target=f"{esp_id}/gpio:{gpio}",
         )
@@ -550,7 +590,8 @@ class GodKaiserClient:
         if name:
             data["name"] = name
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/actuators",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/actuators",
             json_data=data,
             action_name=f"Add Mock Actuator ({actuator_type})",
             target=f"{esp_id}/gpio:{gpio}",
@@ -568,7 +609,8 @@ class GodKaiserClient:
         if zone_name:
             data["zone_name"] = zone_name
         return await self._request(
-            "POST", f"/v1/zone/devices/{esp_id}/assign",
+            "POST",
+            f"/v1/zone/devices/{esp_id}/assign",
             json_data=data,
             action_name="Assign Zone",
             target=f"{esp_id} -> {zone_id}",
@@ -577,7 +619,8 @@ class GodKaiserClient:
     async def list_zones(self) -> dict[str, Any]:
         """List all zones."""
         return await self._request(
-            "GET", "/v1/zone/zones",
+            "GET",
+            "/v1/zone/zones",
             action_name="List Zones",
             target="all_zones",
         )
@@ -589,7 +632,8 @@ class GodKaiserClient:
     async def get_server_health(self) -> dict[str, Any]:
         """Get comprehensive server health."""
         return await self._request(
-            "GET", "/v1/health/detailed",
+            "GET",
+            "/v1/health/detailed",
             action_name="Server Health Check",
             target="server",
         )
@@ -607,7 +651,8 @@ class GodKaiserClient:
         if gpio is not None:
             params["gpio"] = gpio
         return await self._request(
-            "GET", "/v1/sensors/data",
+            "GET",
+            "/v1/sensors/data",
             params=params,
             action_name="Query Sensor Data",
             target=f"{esp_id or 'all'}/gpio:{gpio or 'all'}",
@@ -620,7 +665,8 @@ class GodKaiserClient:
     async def set_mock_state(self, esp_id: str, state: str) -> dict[str, Any]:
         """Set mock ESP system state."""
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/state",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/state",
             json_data={"new_state": state},
             action_name=f"Set State ({state})",
             target=esp_id,
@@ -629,7 +675,8 @@ class GodKaiserClient:
     async def start_simulation(self, esp_id: str) -> dict[str, Any]:
         """Start sensor simulation for a mock ESP."""
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/simulation/start",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/simulation/start",
             action_name="Start Simulation",
             target=esp_id,
         )
@@ -637,7 +684,8 @@ class GodKaiserClient:
     async def stop_simulation(self, esp_id: str) -> dict[str, Any]:
         """Stop sensor simulation for a mock ESP."""
         return await self._request(
-            "POST", f"/v1/debug/mock-esp/{esp_id}/simulation/stop",
+            "POST",
+            f"/v1/debug/mock-esp/{esp_id}/simulation/stop",
             action_name="Stop Simulation",
             target=esp_id,
         )
@@ -649,7 +697,8 @@ class GodKaiserClient:
     async def list_tables(self) -> dict[str, Any]:
         """List available database tables."""
         return await self._request(
-            "GET", "/v1/debug/database/tables",
+            "GET",
+            "/v1/debug/database/tables",
             action_name="List DB Tables",
             target="database",
         )
@@ -659,7 +708,8 @@ class GodKaiserClient:
     ) -> dict[str, Any]:
         """Query a database table."""
         return await self._request(
-            "GET", f"/v1/debug/database/tables/{table_name}",
+            "GET",
+            f"/v1/debug/database/tables/{table_name}",
             params={"limit": limit, "offset": offset},
             action_name=f"Query Table ({table_name})",
             target=f"db:{table_name}",
@@ -675,7 +725,8 @@ class GodKaiserClient:
         if zone_id:
             params["zone_id"] = zone_id
         return await self._request(
-            "GET", "/v1/subzone/",
+            "GET",
+            "/v1/subzone/",
             params=params,
             action_name="List Subzones",
             target=zone_id or "all_subzones",
@@ -686,7 +737,8 @@ class GodKaiserClient:
     ) -> dict[str, Any]:
         """Create a subzone within a zone."""
         return await self._request(
-            "POST", "/v1/subzone/",
+            "POST",
+            "/v1/subzone/",
             json_data={"zone_id": zone_id, "name": name, "subzone_type": subzone_type},
             action_name="Create Subzone",
             target=f"{zone_id}/{name}",
@@ -697,7 +749,9 @@ class GodKaiserClient:
     # =========================================================================
 
     async def create_zone(
-        self, name: str, zone_type: str = "greenhouse",
+        self,
+        name: str,
+        zone_type: str = "greenhouse",
         description: str = "",
     ) -> dict[str, Any]:
         """Create a new zone."""
@@ -705,7 +759,8 @@ class GodKaiserClient:
         if description:
             data["description"] = description
         return await self._request(
-            "POST", "/v1/zone/zones",
+            "POST",
+            "/v1/zone/zones",
             json_data=data,
             action_name="Create Zone",
             target=name,
@@ -718,7 +773,8 @@ class GodKaiserClient:
     async def list_sensor_type_defaults(self) -> dict[str, Any]:
         """Get all sensor type default configurations."""
         return await self._request(
-            "GET", "/v1/sensor_type_defaults/",
+            "GET",
+            "/v1/sensor_type_defaults/",
             action_name="List Sensor Type Defaults",
             target="sensor_type_defaults",
         )
@@ -730,7 +786,8 @@ class GodKaiserClient:
     async def get_health_metrics(self) -> dict[str, Any]:
         """Get server performance metrics."""
         return await self._request(
-            "GET", "/v1/health/metrics",
+            "GET",
+            "/v1/health/metrics",
             action_name="Health Metrics",
             target="server_metrics",
         )
@@ -738,7 +795,8 @@ class GodKaiserClient:
     async def get_liveness(self) -> dict[str, Any]:
         """Kubernetes-style liveness probe."""
         return await self._request(
-            "GET", "/v1/health/live",
+            "GET",
+            "/v1/health/live",
             action_name="Liveness Probe",
             target="server",
         )
@@ -746,7 +804,8 @@ class GodKaiserClient:
     async def get_readiness(self) -> dict[str, Any]:
         """Kubernetes-style readiness probe."""
         return await self._request(
-            "GET", "/v1/health/ready",
+            "GET",
+            "/v1/health/ready",
             action_name="Readiness Probe",
             target="server",
         )
@@ -755,12 +814,11 @@ class GodKaiserClient:
     # Audit Log
     # =========================================================================
 
-    async def list_audit_logs(
-        self, limit: int = 50, offset: int = 0
-    ) -> dict[str, Any]:
+    async def list_audit_logs(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         """Query the audit log."""
         return await self._request(
-            "GET", "/v1/audit/",
+            "GET",
+            "/v1/audit/",
             params={"limit": limit, "offset": offset},
             action_name="List Audit Logs",
             target="audit_log",
@@ -773,7 +831,8 @@ class GodKaiserClient:
     async def scan_onewire(self, esp_id: str) -> dict[str, Any]:
         """Trigger a OneWire bus scan on an ESP."""
         return await self._request(
-            "POST", f"/v1/sensors/esp/{esp_id}/onewire/scan",
+            "POST",
+            f"/v1/sensors/esp/{esp_id}/onewire/scan",
             action_name="OneWire Scan",
             target=esp_id,
         )
@@ -781,7 +840,8 @@ class GodKaiserClient:
     async def get_onewire_devices(self, esp_id: str) -> dict[str, Any]:
         """Get discovered OneWire devices on an ESP."""
         return await self._request(
-            "GET", f"/v1/sensors/esp/{esp_id}/onewire",
+            "GET",
+            f"/v1/sensors/esp/{esp_id}/onewire",
             action_name="Get OneWire Devices",
             target=esp_id,
         )
@@ -793,7 +853,8 @@ class GodKaiserClient:
     async def list_logic_rules(self) -> dict[str, Any]:
         """List all automation logic rules."""
         return await self._request(
-            "GET", "/v1/logic/",
+            "GET",
+            "/v1/logic/",
             action_name="List Logic Rules",
             target="logic_engine",
         )
@@ -818,7 +879,8 @@ class GodKaiserClient:
         if firmware_version:
             data["firmware_version"] = firmware_version
         return await self._request(
-            "POST", "/v1/esp/devices",
+            "POST",
+            "/v1/esp/devices",
             json_data=data,
             action_name="Register Real Device",
             target=device_id,

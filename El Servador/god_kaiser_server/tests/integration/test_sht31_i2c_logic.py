@@ -23,7 +23,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import fixtures
-from tests.integration.conftest_logic import (
+from tests.integration.conftest_logic import (  # noqa: F401
     mock_esp32_sht31,
     mock_esp32_sht31_high_humidity,
     cross_esp_logic_setup,
@@ -38,7 +38,7 @@ from tests.integration.conftest_logic import (
     create_notification_action,
 )
 
-from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
+from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState  # noqa: F401
 
 
 pytestmark = [pytest.mark.logic, pytest.mark.sht31]
@@ -48,9 +48,7 @@ class TestSHT31DualSensorComparison:
     """Tests for dual SHT31 sensor zone comparison."""
 
     @pytest.mark.asyncio
-    async def test_dual_address_zone_comparison(
-        self, mock_esp32_sht31, logic_engine
-    ):
+    async def test_dual_address_zone_comparison(self, mock_esp32_sht31, logic_engine):
         """
         SZENARIO: Vergleich zwischen zwei Zonen via 2 SHT31
 
@@ -111,10 +109,7 @@ class TestSHT31DualSensorComparison:
 
         # === TRIGGER ===
         await logic_engine.evaluate_sensor_data(
-            esp_id="ESP_SHT31",
-            gpio=21,
-            sensor_type="SHT31",
-            value=28.0
+            esp_id="ESP_SHT31", gpio=21, sensor_type="SHT31", value=28.0
         )
 
         # === VERIFY ===
@@ -282,12 +277,18 @@ class TestSHT31I2CErrorHandling:
 
         # Add first two SHT31 (valid)
         mock.set_multi_value_sensor(
-            gpio=21, sensor_type="SHT31", primary_value=22.0,
-            secondary_values={"humidity": 50.0}, name="SHT31_0x44"
+            gpio=21,
+            sensor_type="SHT31",
+            primary_value=22.0,
+            secondary_values={"humidity": 50.0},
+            name="SHT31_0x44",
         )
         mock.set_multi_value_sensor(
-            gpio=22, sensor_type="SHT31", primary_value=23.0,
-            secondary_values={"humidity": 55.0}, name="SHT31_0x45"
+            gpio=22,
+            sensor_type="SHT31",
+            primary_value=23.0,
+            secondary_values={"humidity": 55.0},
+            name="SHT31_0x45",
         )
 
         # === VERIFY ===
@@ -326,7 +327,7 @@ class TestSHT31HumidityHysteresis:
             gpio=21,
             activate_above=70.0,
             deactivate_below=60.0,
-            sensor_type="SHT31"
+            sensor_type="SHT31",
         )
 
         # === TEST SEQUENCE ===

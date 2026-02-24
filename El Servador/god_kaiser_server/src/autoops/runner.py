@@ -28,7 +28,7 @@ import sys
 from typing import Any
 
 from .core.agent import AutoOpsAgent
-from .core.context import ActuatorSpec, DeviceMode, ESPSpec, SensorSpec, SimulationPattern
+from .core.context import ActuatorSpec, DeviceMode, ESPSpec, SensorSpec
 
 
 # Sensor type presets with intelligent defaults
@@ -118,11 +118,13 @@ def parse_sensors(sensor_str: str) -> list[SensorSpec]:
                 specs.append(SensorSpec(**SENSOR_PRESETS["SHT31_HUMIDITY"]))
         else:
             # Unknown sensor - create generic
-            specs.append(SensorSpec(
-                sensor_type=name.lower(),
-                name=f"{name} Sensor",
-                raw_value=0.0,
-            ))
+            specs.append(
+                SensorSpec(
+                    sensor_type=name.lower(),
+                    name=f"{name} Sensor",
+                    raw_value=0.0,
+                )
+            )
 
     return specs
 
@@ -139,10 +141,12 @@ def parse_actuators(actuator_str: str) -> list[ActuatorSpec]:
         if preset:
             specs.append(ActuatorSpec(**preset))
         else:
-            specs.append(ActuatorSpec(
-                actuator_type=name.lower(),
-                name=f"{name} Actuator",
-            ))
+            specs.append(
+                ActuatorSpec(
+                    actuator_type=name.lower(),
+                    name=f"{name} Actuator",
+                )
+            )
 
     return specs
 
@@ -238,8 +242,11 @@ async def run_autoops(
             sensors = parse_sensors(sensors_str) if sensors_str else []
             actuators = parse_actuators(actuators_str) if actuators_str else []
             spec = build_esp_spec(
-                sensors, actuators,
-                name=esp_name, zone=zone, hardware=hardware,
+                sensors,
+                actuators,
+                name=esp_name,
+                zone=zone,
+                hardware=hardware,
                 device_mode=DeviceMode(device_mode),
                 device_id=device_id,
             )
@@ -287,48 +294,47 @@ def main():
         description="AutoOps - Autonomous Operations Agent for AutomationOne"
     )
     parser.add_argument(
-        "--mode", choices=["full", "health", "configure", "debug"],
-        default="full", help="Operation mode"
+        "--mode",
+        choices=["full", "health", "configure", "debug"],
+        default="full",
+        help="Operation mode",
     )
     parser.add_argument(
-        "--server", default=None,
-        help="God-Kaiser server URL (env: AUTOOPS_SERVER, default: http://localhost:8000)"
+        "--server",
+        default=None,
+        help="God-Kaiser server URL (env: AUTOOPS_SERVER, default: http://localhost:8000)",
     )
     parser.add_argument(
-        "--username", default=None,
-        help="Auth username (env: AUTOOPS_USER, default: admin)"
+        "--username", default=None, help="Auth username (env: AUTOOPS_USER, default: admin)"
+    )
+    parser.add_argument("--password", default=None, help="Auth password (env: AUTOOPS_PASSWORD)")
+    parser.add_argument(
+        "--sensors",
+        default="",
+        help="Comma-separated sensor types (DS18B20,SHT31,PH,EC,MOISTURE,CO2,LIGHT)",
     )
     parser.add_argument(
-        "--password", default=None,
-        help="Auth password (env: AUTOOPS_PASSWORD)"
-    )
-    parser.add_argument(
-        "--sensors", default="",
-        help="Comma-separated sensor types (DS18B20,SHT31,PH,EC,MOISTURE,CO2,LIGHT)"
-    )
-    parser.add_argument(
-        "--actuators", default="",
-        help="Comma-separated actuator types (RELAY,PUMP,VALVE,FAN,PWM)"
+        "--actuators", default="", help="Comma-separated actuator types (RELAY,PUMP,VALVE,FAN,PWM)"
     )
     parser.add_argument("--zone", default=None, help="Zone name")
     parser.add_argument("--esp-name", default="AutoOps ESP", help="ESP device name")
     parser.add_argument(
-        "--hardware", default="ESP32_WROOM",
+        "--hardware",
+        default="ESP32_WROOM",
         choices=["ESP32_WROOM", "XIAO_ESP32_C3"],
-        help="Hardware type"
+        help="Hardware type",
     )
     parser.add_argument(
-        "--device-mode", default="mock",
+        "--device-mode",
+        default="mock",
         choices=["mock", "real", "hybrid"],
-        help="Device mode: mock (default), real (hardware), hybrid (mix)"
+        help="Device mode: mock (default), real (hardware), hybrid (mix)",
     )
     parser.add_argument(
-        "--device-id", default=None,
-        help="Specific device ID (for real mode, e.g. ESP_AABBCCDD)"
+        "--device-id", default=None, help="Specific device ID (for real mode, e.g. ESP_AABBCCDD)"
     )
     parser.add_argument(
-        "--max-retries", type=int, default=3,
-        help="Max API retry attempts (default: 3)"
+        "--max-retries", type=int, default=3, help="Max API retry attempts (default: 3)"
     )
     parser.add_argument("--dry-run", action="store_true", help="Plan only, no execution")
     parser.add_argument("--quiet", action="store_true", help="Minimal output")
@@ -336,29 +342,28 @@ def main():
 
     args = parser.parse_args()
 
-    result = asyncio.run(run_autoops(
-        mode=args.mode,
-        server_url=args.server,
-        username=args.username,
-        password=args.password,
-        sensors_str=args.sensors,
-        actuators_str=args.actuators,
-        zone=args.zone,
-        esp_name=args.esp_name,
-        hardware=args.hardware,
-        dry_run=args.dry_run,
-        verbose=not args.quiet,
-        device_mode=args.device_mode,
-        device_id=args.device_id,
-        max_retries=args.max_retries,
-    ))
+    result = asyncio.run(
+        run_autoops(
+            mode=args.mode,
+            server_url=args.server,
+            username=args.username,
+            password=args.password,
+            sensors_str=args.sensors,
+            actuators_str=args.actuators,
+            zone=args.zone,
+            esp_name=args.esp_name,
+            hardware=args.hardware,
+            dry_run=args.dry_run,
+            verbose=not args.quiet,
+            device_mode=args.device_mode,
+            device_id=args.device_id,
+            max_retries=args.max_retries,
+        )
+    )
 
     if args.json:
         # Clean result for JSON output (remove non-serializable items)
-        clean = {
-            k: v for k, v in result.items()
-            if k != "summary"  # summary is already printed
-        }
+        clean = {k: v for k, v in result.items() if k != "summary"}  # summary is already printed
         print(json.dumps(clean, indent=2, default=str))
 
     sys.exit(0 if result.get("all_passed", False) else 1)

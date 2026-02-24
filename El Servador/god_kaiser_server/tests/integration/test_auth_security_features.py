@@ -91,37 +91,38 @@ class TestTokenRotation:
     ):
         """
         Test that refreshing a token blacklists the old refresh token.
-        
+
         This is a critical security feature - old refresh tokens must be invalidated
         to prevent token reuse attacks.
         """
         # Create initial refresh token
         old_refresh_token = create_refresh_token(user_id=test_user.id)
-        
+
         # Verify old token is valid
         from src.core.security import verify_token
+
         payload = verify_token(old_refresh_token, expected_type="refresh")
         assert payload.get("sub") == str(test_user.id)
-        
+
         # Refresh token - should blacklist old one
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/refresh",
                 json={"refresh_token": old_refresh_token},
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert "tokens" in data
         new_access_token = data["tokens"]["access_token"]
         new_refresh_token = data["tokens"]["refresh_token"]
-        
+
         # Verify old refresh token is blacklisted
         # Note: We need to use the same db session that the endpoint uses
         # The endpoint uses override_get_db, so we check via the endpoint's session
         # by trying to use the old token again (which should fail)
-        
+
         # Verify old refresh token cannot be used again
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -129,7 +130,7 @@ class TestTokenRotation:
                 json={"refresh_token": old_refresh_token},
             )
         assert response.status_code == 401, "Old refresh token should be rejected"
-        
+
         # Verify new refresh token works
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -139,28 +140,27 @@ class TestTokenRotation:
         assert response.status_code == 200, "New refresh token should work"
 
     @pytest.mark.asyncio
-    async def test_refresh_includes_token_version(
-        self, test_user: User, override_get_db
-    ):
+    async def test_refresh_includes_token_version(self, test_user: User, override_get_db):
         """
         Test that refreshed tokens include token_version claim.
-        
+
         This ensures token versioning works correctly after refresh.
         """
         refresh_token = create_refresh_token(user_id=test_user.id)
-        
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/refresh",
                 json={"refresh_token": refresh_token},
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         new_access_token = data["tokens"]["access_token"]
-        
+
         # Verify new token includes token_version
         from src.core.security import verify_token
+
         payload = verify_token(new_access_token, expected_type="access")
         assert "token_version" in payload, "New token should include token_version"
         assert payload["token_version"] == test_user.token_version
@@ -175,11 +175,11 @@ class TestLogoutAllDevices:
     ):
         """
         Test that logout all devices increments token_version.
-        
+
         This invalidates all existing tokens across all devices.
         """
         initial_version = test_user.token_version
-        
+
         # Create a token with current version
         token = create_access_token(
             user_id=test_user.id,
@@ -189,12 +189,12 @@ class TestLogoutAllDevices:
             },
         )
         headers = {"Authorization": f"Bearer {token}"}
-        
+
         # Verify token works
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/auth/me", headers=headers)
         assert response.status_code == 200
-        
+
         # Logout all devices
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -202,22 +202,24 @@ class TestLogoutAllDevices:
                 json={"all_devices": True},
                 headers=headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        
+
         # Verify token_version was incremented
         await db_session.refresh(test_user)
         assert test_user.token_version == initial_version + 1, "Token version should be incremented"
-        
+
         # Verify old token is now invalid (version mismatch)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/auth/me", headers=headers)
         assert response.status_code == 401, "Old token should be rejected due to version mismatch"
         detail_lower = response.json()["detail"].lower()
-        assert any(keyword in detail_lower for keyword in ["invalidated", "unauthorized", "revoked", "invalid"]), \
-            f"Error message should indicate token invalidation, got: {response.json()['detail']}"
+        assert any(
+            keyword in detail_lower
+            for keyword in ["invalidated", "unauthorized", "revoked", "invalid"]
+        ), f"Error message should indicate token invalidation, got: {response.json()['detail']}"
 
     @pytest.mark.asyncio
     async def test_logout_all_prevents_token_reuse(
@@ -225,7 +227,7 @@ class TestLogoutAllDevices:
     ):
         """
         Test that after logout all, old tokens cannot be used even if not blacklisted.
-        
+
         This tests the token versioning mechanism - tokens with old versions
         are rejected even if they're not in the blacklist.
         """
@@ -244,17 +246,17 @@ class TestLogoutAllDevices:
                 "token_version": test_user.token_version,
             },
         )
-        
+
         # Verify both tokens work
         headers1 = {"Authorization": f"Bearer {token1}"}
         headers2 = {"Authorization": f"Bearer {token2}"}
-        
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/auth/me", headers=headers1)
             assert response.status_code == 200
             response = await client.get("/api/v1/auth/me", headers=headers2)
             assert response.status_code == 200
-        
+
         # Logout all devices (using token1)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -263,12 +265,12 @@ class TestLogoutAllDevices:
                 headers=headers1,
             )
         assert response.status_code == 200
-        
+
         # Verify both tokens are now invalid
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/auth/me", headers=headers1)
             assert response.status_code == 401, "Token1 should be invalid"
-            
+
             response = await client.get("/api/v1/auth/me", headers=headers2)
             assert response.status_code == 401, "Token2 should be invalid (version mismatch)"
 
@@ -278,7 +280,7 @@ class TestLogoutAllDevices:
     ):
         """
         Test that logout single device does NOT increment token_version.
-        
+
         Only logout all devices should increment version.
         """
         initial_version = test_user.token_version
@@ -290,7 +292,7 @@ class TestLogoutAllDevices:
             },
         )
         headers = {"Authorization": f"Bearer {token}"}
-        
+
         # Logout single device
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -298,12 +300,14 @@ class TestLogoutAllDevices:
                 json={"all_devices": False},
                 headers=headers,
             )
-        
+
         assert response.status_code == 200
-        
+
         # Verify token_version was NOT incremented
         await db_session.refresh(test_user)
-        assert test_user.token_version == initial_version, "Token version should NOT be incremented for single logout"
+        assert (
+            test_user.token_version == initial_version
+        ), "Token version should NOT be incremented for single logout"
 
 
 class TestMQTTAuthService:
@@ -313,17 +317,17 @@ class TestMQTTAuthService:
     async def test_hash_mosquitto_password_format(self):
         """
         Test that password hashing produces correct Mosquitto format.
-        
+
         Format: $6$salt$hash (6 = SHA-512)
         """
         service = MQTTAuthService(
             system_config_repo=MagicMock(),
             esp_repo=None,
         )
-        
+
         password = "TestPassword123"
         hashed = service.hash_mosquitto_password(password)
-        
+
         # Verify format
         assert hashed.startswith("$6$"), "Hash should start with $6$ (SHA-512)"
         parts = hashed.split("$")
@@ -332,28 +336,30 @@ class TestMQTTAuthService:
         assert len(parts[3]) == 128, "SHA-512 hash should be 64 bytes = 128 hex chars"
 
     @pytest.mark.asyncio
-    async def test_configure_credentials_persists_to_db(
-        self, db_session: AsyncSession
-    ):
+    async def test_configure_credentials_persists_to_db(self, db_session: AsyncSession):
         """
         Test that MQTT credentials are persisted to database.
-        
+
         This ensures configuration survives server restarts.
         """
         system_config_repo = SystemConfigRepository(db_session)
         service = MQTTAuthService(system_config_repo, None)
-        
+
         # Mock file operations
-        with patch("src.services.mqtt_auth_service.MQTTAuthService._update_passwd_file"), \
-             patch("src.services.mqtt_auth_service.MQTTAuthService.reload_mosquitto", return_value=True):
-            
+        with (
+            patch("src.services.mqtt_auth_service.MQTTAuthService._update_passwd_file"),
+            patch(
+                "src.services.mqtt_auth_service.MQTTAuthService.reload_mosquitto", return_value=True
+            ),
+        ):
+
             await service.configure_credentials(
                 username="test_mqtt_user",
                 password="TestMqttP@ss123",
                 enabled=True,
             )
             await db_session.commit()
-        
+
         # Verify config in database
         config = await system_config_repo.get_mqtt_auth_config()
         assert config["enabled"] is True
@@ -362,46 +368,43 @@ class TestMQTTAuthService:
         assert config["last_configured"] is not None
 
     @pytest.mark.asyncio
-    async def test_broadcast_auth_update_requires_tls(
-        self, db_session: AsyncSession
-    ):
+    async def test_broadcast_auth_update_requires_tls(self, db_session: AsyncSession):
         """
         Test that auth_update broadcast is refused without TLS.
-        
+
         This is a critical security check - credentials must not be sent in plain text.
         """
         system_config_repo = SystemConfigRepository(db_session)
         esp_repo = ESPRepository(db_session)
         service = MQTTAuthService(system_config_repo, esp_repo)
-        
+
         # Mock settings to disable TLS
         with patch("src.services.mqtt_auth_service.settings") as mock_settings:
             mock_settings.mqtt.use_tls = False
-            
+
             # Attempt to broadcast - should raise RuntimeError
             with pytest.raises(RuntimeError) as exc_info:
                 await service.broadcast_auth_update(
                     username="test_user",
                     password="test_password",
                 )
-            
+
             assert "TLS" in str(exc_info.value), "Error should mention TLS requirement"
 
     @pytest.mark.asyncio
-    async def test_broadcast_auth_update_with_tls(
-        self, db_session: AsyncSession
-    ):
+    async def test_broadcast_auth_update_with_tls(self, db_session: AsyncSession):
         """
         Test that auth_update broadcast works when TLS is enabled.
-        
+
         This tests the happy path for credential distribution.
         """
         system_config_repo = SystemConfigRepository(db_session)
         esp_repo = ESPRepository(db_session)
         service = MQTTAuthService(system_config_repo, esp_repo)
-        
+
         # Create test ESP device
         from src.db.models.esp import ESPDevice
+
         esp_device = ESPDevice(
             device_id="ESP_TEST_001",
             name="Test ESP",
@@ -411,23 +414,25 @@ class TestMQTTAuthService:
         )
         db_session.add(esp_device)
         await db_session.commit()
-        
+
         # Mock settings to enable TLS
-        with patch("src.services.mqtt_auth_service.settings") as mock_settings, \
-             patch("src.services.mqtt_auth_service.Publisher") as mock_publisher_class:
-            
+        with (
+            patch("src.services.mqtt_auth_service.settings") as mock_settings,
+            patch("src.services.mqtt_auth_service.Publisher") as mock_publisher_class,
+        ):
+
             mock_settings.mqtt.use_tls = True
             mock_publisher = MagicMock()
             mock_publisher._publish_with_retry = AsyncMock(return_value=True)
             mock_publisher_class.return_value = mock_publisher
             service.publisher = mock_publisher
-            
+
             # Broadcast should succeed
             count = await service.broadcast_auth_update(
                 username="test_user",
                 password="test_password",
             )
-            
+
             assert count == 1, "Should broadcast to 1 ESP device"
             # Verify the async method was called
             mock_publisher._publish_with_retry.assert_called()
@@ -437,12 +442,10 @@ class TestMQTTConfigureEndpoint:
     """Test MQTT configuration API endpoints."""
 
     @pytest.mark.asyncio
-    async def test_configure_mqtt_auth_requires_admin(
-        self, test_user: User, override_get_db
-    ):
+    async def test_configure_mqtt_auth_requires_admin(self, test_user: User, override_get_db):
         """
         Test that MQTT auth configuration requires admin privileges.
-        
+
         This is a security check - only admins should configure MQTT authentication.
         """
         # Create token for non-admin user
@@ -454,7 +457,7 @@ class TestMQTTConfigureEndpoint:
             },
         )
         headers = {"Authorization": f"Bearer {token}"}
-        
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/mqtt/configure",
@@ -465,7 +468,7 @@ class TestMQTTConfigureEndpoint:
                 },
                 headers=headers,
             )
-        
+
         assert response.status_code == 403, "Non-admin should be forbidden"
         assert "admin" in response.json()["detail"].lower()
 
@@ -475,17 +478,26 @@ class TestMQTTConfigureEndpoint:
     ):
         """
         Test successful MQTT auth configuration.
-        
+
         This tests the full flow: password hashing, file update, broker reload, DB persistence.
         """
         # Mock file and broker operations
-        with patch("src.services.mqtt_auth_service.MQTTAuthService._update_passwd_file"), \
-             patch("src.services.mqtt_auth_service.MQTTAuthService.reload_mosquitto", return_value=True), \
-             patch("src.services.mqtt_auth_service.MQTTAuthService.broadcast_auth_update", new_callable=AsyncMock) as mock_broadcast:
-            
+        with (
+            patch("src.services.mqtt_auth_service.MQTTAuthService._update_passwd_file"),
+            patch(
+                "src.services.mqtt_auth_service.MQTTAuthService.reload_mosquitto", return_value=True
+            ),
+            patch(
+                "src.services.mqtt_auth_service.MQTTAuthService.broadcast_auth_update",
+                new_callable=AsyncMock,
+            ) as mock_broadcast,
+        ):
+
             mock_broadcast.side_effect = RuntimeError("TLS not enabled")  # Simulate TLS disabled
-            
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
                 response = await client.post(
                     "/api/v1/auth/mqtt/configure",
                     json={
@@ -495,14 +507,14 @@ class TestMQTTConfigureEndpoint:
                     },
                     headers=admin_headers,
                 )
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
             assert data["username"] == "mqtt_user"
             assert data["enabled"] is True
             assert data["broker_reloaded"] is True
-        
+
         # Verify config persisted to database
         system_config_repo = SystemConfigRepository(db_session)
         config = await system_config_repo.get_mqtt_auth_config()
@@ -515,7 +527,7 @@ class TestMQTTConfigureEndpoint:
     ):
         """
         Test getting MQTT auth status.
-        
+
         This tests the status endpoint returns correct configuration state.
         """
         # Configure MQTT auth first
@@ -526,19 +538,21 @@ class TestMQTTConfigureEndpoint:
             password_hash="$6$salt$hash",
         )
         await db_session.commit()
-        
+
         # Mock MQTT client
         with patch("src.mqtt.client.MQTTClient") as mock_mqtt_client_class:
             mock_client = MagicMock()
             mock_client.is_connected.return_value = True
             mock_mqtt_client_class.get_instance.return_value = mock_client
-            
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
                 response = await client.get(
                     "/api/v1/auth/mqtt/status",
                     headers=admin_headers,
                 )
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
@@ -551,12 +565,10 @@ class TestTokenVersioningEdgeCases:
     """Test edge cases for token versioning."""
 
     @pytest.mark.asyncio
-    async def test_old_token_without_version_still_works(
-        self, test_user: User, override_get_db
-    ):
+    async def test_old_token_without_version_still_works(self, test_user: User, override_get_db):
         """
         Test that tokens without token_version claim still work (backward compatibility).
-        
+
         This ensures old tokens (created before versioning) continue to work.
         """
         # Create token without token_version (old format)
@@ -566,11 +578,11 @@ class TestTokenVersioningEdgeCases:
             # No token_version claim
         )
         headers = {"Authorization": f"Bearer {old_token}"}
-        
+
         # Token should still work (backward compatibility)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/auth/me", headers=headers)
-        
+
         # Should work if user.token_version is 0, or fail gracefully if > 0
         # The implementation allows old tokens if user.token_version is 0
         if test_user.token_version == 0:
@@ -585,11 +597,11 @@ class TestTokenVersioningEdgeCases:
     ):
         """
         Test that token_version increments correctly after multiple logout_all calls.
-        
+
         This tests that versioning works correctly across multiple operations.
         """
         initial_version = test_user.token_version
-        
+
         # First logout all
         token1 = create_access_token(
             user_id=test_user.id,
@@ -599,7 +611,7 @@ class TestTokenVersioningEdgeCases:
             },
         )
         headers1 = {"Authorization": f"Bearer {token1}"}
-        
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/logout",
@@ -607,10 +619,10 @@ class TestTokenVersioningEdgeCases:
                 headers=headers1,
             )
         assert response.status_code == 200
-        
+
         await db_session.refresh(test_user)
         assert test_user.token_version == initial_version + 1
-        
+
         # Second logout all
         token2 = create_access_token(
             user_id=test_user.id,
@@ -620,7 +632,7 @@ class TestTokenVersioningEdgeCases:
             },
         )
         headers2 = {"Authorization": f"Bearer {token2}"}
-        
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/logout",
@@ -628,7 +640,6 @@ class TestTokenVersioningEdgeCases:
                 headers=headers2,
             )
         assert response.status_code == 200
-        
+
         await db_session.refresh(test_user)
         assert test_user.token_version == initial_version + 2, "Version should increment again"
-

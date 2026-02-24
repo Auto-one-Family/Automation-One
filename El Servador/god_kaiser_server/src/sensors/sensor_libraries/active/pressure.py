@@ -211,8 +211,7 @@ class BMP280PressureProcessor(BaseSensorProcessor):
             )
         elif raw_value > self.PRESSURE_TYPICAL_MAX:
             warnings.append(
-                f"Pressure {raw_value} hPa above typical range "
-                f"(very high pressure system)"
+                f"Pressure {raw_value} hPa above typical range " f"(very high pressure system)"
             )
 
         return ValidationResult(valid=True, warnings=warnings if warnings else None)
@@ -337,7 +336,7 @@ class BMP280PressureProcessor(BaseSensorProcessor):
             return pressure  # Return uncorrected (extreme altitude)
 
         # Apply barometric formula
-        pressure_sealevel = pressure / (factor ** EXPONENT)
+        pressure_sealevel = pressure / (factor**EXPONENT)
 
         # Clamp to sensor physical range
         # Important: Very high altitudes + correction can exceed sensor max

@@ -6,6 +6,7 @@ Keine DB-Abhängigkeit - reine Logik.
 
 Phase 3 Test-Suite: Topic Building, Parsing und Pattern Matching.
 """
+
 import pytest
 
 from src.mqtt.topics import TopicBuilder
@@ -91,9 +92,7 @@ class TestTopicBuilderParse:
 
     def test_parse_sensor_data_topic(self):
         """Parse sensor data topic extracts all components."""
-        result = TopicBuilder.parse_sensor_data_topic(
-            "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
-        )
+        result = TopicBuilder.parse_sensor_data_topic("kaiser/god/esp/ESP_12AB34CD/sensor/34/data")
         assert result is not None
         assert result["kaiser_id"] == "god"
         assert result["esp_id"] == "ESP_12AB34CD"
@@ -102,41 +101,31 @@ class TestTopicBuilderParse:
 
     def test_parse_sensor_data_topic_different_gpio(self):
         """Parse sensor data topic with different GPIO pins."""
-        result = TopicBuilder.parse_sensor_data_topic(
-            "kaiser/god/esp/ESP_AABBCC/sensor/0/data"
-        )
+        result = TopicBuilder.parse_sensor_data_topic("kaiser/god/esp/ESP_AABBCC/sensor/0/data")
         assert result is not None
         assert result["gpio"] == 0
 
-        result = TopicBuilder.parse_sensor_data_topic(
-            "kaiser/god/esp/ESP_AABBCC/sensor/39/data"
-        )
+        result = TopicBuilder.parse_sensor_data_topic("kaiser/god/esp/ESP_AABBCC/sensor/39/data")
         assert result is not None
         assert result["gpio"] == 39
 
     def test_parse_heartbeat_topic(self):
         """Parse heartbeat topic."""
-        result = TopicBuilder.parse_heartbeat_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat"
-        )
+        result = TopicBuilder.parse_heartbeat_topic("kaiser/god/esp/ESP_12AB34CD/system/heartbeat")
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "heartbeat"
 
     def test_parse_heartbeat_topic_legacy_format(self):
         """Parse legacy heartbeat topic (without /system/)."""
-        result = TopicBuilder.parse_heartbeat_topic(
-            "kaiser/god/esp/ESP_12AB34CD/heartbeat"
-        )
+        result = TopicBuilder.parse_heartbeat_topic("kaiser/god/esp/ESP_12AB34CD/heartbeat")
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "heartbeat"
 
     def test_parse_lwt_topic(self):
         """Parse LWT topic."""
-        result = TopicBuilder.parse_lwt_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/will"
-        )
+        result = TopicBuilder.parse_lwt_topic("kaiser/god/esp/ESP_12AB34CD/system/will")
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "lwt"
@@ -182,27 +171,21 @@ class TestTopicBuilderParse:
 
     def test_parse_zone_ack_topic(self):
         """Parse zone ACK topic."""
-        result = TopicBuilder.parse_zone_ack_topic(
-            "kaiser/god/esp/ESP_12AB34CD/zone/ack"
-        )
+        result = TopicBuilder.parse_zone_ack_topic("kaiser/god/esp/ESP_12AB34CD/zone/ack")
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "zone_ack"
 
     def test_parse_subzone_ack_topic(self):
         """Parse subzone ACK topic."""
-        result = TopicBuilder.parse_subzone_ack_topic(
-            "kaiser/god/esp/ESP_12AB34CD/subzone/ack"
-        )
+        result = TopicBuilder.parse_subzone_ack_topic("kaiser/god/esp/ESP_12AB34CD/subzone/ack")
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "subzone_ack"
 
     def test_parse_system_error_topic(self):
         """Parse system error topic."""
-        result = TopicBuilder.parse_system_error_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/error"
-        )
+        result = TopicBuilder.parse_system_error_topic("kaiser/god/esp/ESP_12AB34CD/system/error")
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "system_error"
@@ -217,23 +200,17 @@ class TestTopicBuilderParse:
     def test_parse_topic_generic_method(self):
         """Generic parse_topic tries all parsers."""
         # Sensor data
-        result = TopicBuilder.parse_topic(
-            "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
-        )
+        result = TopicBuilder.parse_topic("kaiser/god/esp/ESP_12AB34CD/sensor/34/data")
         assert result is not None
         assert result["type"] == "sensor_data"
 
         # Heartbeat
-        result = TopicBuilder.parse_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat"
-        )
+        result = TopicBuilder.parse_topic("kaiser/god/esp/ESP_12AB34CD/system/heartbeat")
         assert result is not None
         assert result["type"] == "heartbeat"
 
         # LWT
-        result = TopicBuilder.parse_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/will"
-        )
+        result = TopicBuilder.parse_topic("kaiser/god/esp/ESP_12AB34CD/system/will")
         assert result is not None
         assert result["type"] == "lwt"
 
@@ -244,78 +221,109 @@ class TestTopicPatternMatching:
     def test_matches_single_level_wildcard(self):
         """Single-level wildcard (+) matches one segment."""
         pattern = "kaiser/god/esp/+/sensor/+/data"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/sensor/34/data", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_OTHER/sensor/99/data", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/MOCK_TEST/sensor/0/data", pattern
-        ) is True
+        assert (
+            TopicBuilder.matches_subscription("kaiser/god/esp/ESP_12AB34CD/sensor/34/data", pattern)
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription("kaiser/god/esp/ESP_OTHER/sensor/99/data", pattern)
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription("kaiser/god/esp/MOCK_TEST/sensor/0/data", pattern)
+            is True
+        )
 
     def test_matches_multi_level_wildcard(self):
         """Multi-level wildcard (#) matches multiple segments."""
         pattern = "kaiser/god/esp/+/actuator/#"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/actuator/5/status", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/actuator/5/response", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/actuator/5/alert", pattern
-        ) is True
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/actuator/5/status", pattern
+            )
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/actuator/5/response", pattern
+            )
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/actuator/5/alert", pattern
+            )
+            is True
+        )
 
     def test_no_match_different_prefix(self):
         """Non-matching prefix fails."""
         pattern = "kaiser/god/esp/+/sensor/+/data"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/other/esp/ESP_12AB34CD/sensor/34/data", pattern
-        ) is False
-        assert TopicBuilder.matches_subscription(
-            "something/else/entirely", pattern
-        ) is False
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/other/esp/ESP_12AB34CD/sensor/34/data", pattern
+            )
+            is False
+        )
+        assert TopicBuilder.matches_subscription("something/else/entirely", pattern) is False
 
     def test_no_match_different_suffix(self):
         """Non-matching suffix fails."""
         pattern = "kaiser/god/esp/+/sensor/+/data"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/sensor/34/status", pattern
-        ) is False
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/sensor/34/response", pattern
-        ) is False
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/sensor/34/status", pattern
+            )
+            is False
+        )
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/sensor/34/response", pattern
+            )
+            is False
+        )
 
     def test_exact_match_without_wildcard(self):
         """Exact pattern matches only exact topic."""
         pattern = "kaiser/god/esp/ESP_SPECIFIC/sensor/34/data"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_SPECIFIC/sensor/34/data", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_OTHER/sensor/34/data", pattern
-        ) is False
+        assert (
+            TopicBuilder.matches_subscription("kaiser/god/esp/ESP_SPECIFIC/sensor/34/data", pattern)
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription("kaiser/god/esp/ESP_OTHER/sensor/34/data", pattern)
+            is False
+        )
 
     def test_heartbeat_subscription_pattern(self):
         """Heartbeat subscription pattern matches correctly."""
         pattern = "kaiser/god/esp/+/system/heartbeat"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/MOCK_ESP_001/system/heartbeat", pattern
-        ) is True
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/system/heartbeat", pattern
+            )
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/MOCK_ESP_001/system/heartbeat", pattern
+            )
+            is True
+        )
 
     def test_config_response_subscription_pattern(self):
         """Config response subscription pattern matches correctly."""
         pattern = "kaiser/god/esp/+/config_response"
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_12AB34CD/config_response", pattern
-        ) is True
-        assert TopicBuilder.matches_subscription(
-            "kaiser/god/esp/ESP_AABBCC/config_response", pattern
-        ) is True
+        assert (
+            TopicBuilder.matches_subscription(
+                "kaiser/god/esp/ESP_12AB34CD/config_response", pattern
+            )
+            is True
+        )
+        assert (
+            TopicBuilder.matches_subscription("kaiser/god/esp/ESP_AABBCC/config_response", pattern)
+            is True
+        )
 
 
 class TestValidators:

@@ -8,7 +8,17 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -224,7 +234,14 @@ class SensorConfig(Base, TimestampMixin):
     # I2C SUPPORT: Erlaubt mehrere I2C-Sensoren auf verschiedenen Adressen
     # onewire_address und i2c_address sind nullable → NULL != NULL in UNIQUE (PostgreSQL + SQLite)
     __table_args__ = (
-        UniqueConstraint("esp_id", "gpio", "sensor_type", "onewire_address", "i2c_address", name="unique_esp_gpio_sensor_interface"),
+        UniqueConstraint(
+            "esp_id",
+            "gpio",
+            "sensor_type",
+            "onewire_address",
+            "i2c_address",
+            name="unique_esp_gpio_sensor_interface",
+        ),
         Index("idx_sensor_type_enabled", "sensor_type", "enabled"),
     )
 

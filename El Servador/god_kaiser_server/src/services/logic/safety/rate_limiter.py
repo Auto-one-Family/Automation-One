@@ -7,10 +7,10 @@ Nutzt BESTEHENDES max_executions_per_hour Feld aus CrossESPLogic.
 INTEGRATION: Via LogicEngine._evaluate_rule()
 PATTERN: Token Bucket Algorithmus für Global/ESP-Level, DB-Query für Rule-Level
 """
+
 import asyncio
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 import logging
 
@@ -20,15 +20,17 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RateLimitConfig:
     """Konfiguration für Rate-Limiting."""
-    max_per_second: int = 100       # Max Executions pro Sekunde (global)
-    max_per_esp_second: int = 20    # Max Executions pro ESP pro Sekunde
+
+    max_per_second: int = 100  # Max Executions pro Sekunde (global)
+    max_per_esp_second: int = 20  # Max Executions pro ESP pro Sekunde
     # max_per_rule_hour: Wird aus DB-Feld gelesen!
-    burst_allowance: float = 1.5    # Burst-Faktor (50% über Limit kurzzeitig OK)
+    burst_allowance: float = 1.5  # Burst-Faktor (50% über Limit kurzzeitig OK)
 
 
 @dataclass
 class RateLimitResult:
     """Ergebnis einer Rate-Limit-Prüfung."""
+
     allowed: bool
     wait_seconds: float = 0.0
     reason: str = ""
@@ -112,7 +114,7 @@ class RateLimiter:
         # Global Bucket
         self._global_bucket = TokenBucket(
             rate=self.config.max_per_second,
-            capacity=self.config.max_per_second * self.config.burst_allowance
+            capacity=self.config.max_per_second * self.config.burst_allowance,
         )
 
         # Per-ESP Buckets
@@ -123,15 +125,12 @@ class RateLimiter:
         if esp_id not in self._esp_buckets:
             self._esp_buckets[esp_id] = TokenBucket(
                 rate=self.config.max_per_esp_second,
-                capacity=self.config.max_per_esp_second * self.config.burst_allowance
+                capacity=self.config.max_per_esp_second * self.config.burst_allowance,
             )
         return self._esp_buckets[esp_id]
 
     async def check_rate_limit(
-        self,
-        rule_id: str,
-        rule_max_per_hour: Optional[int],
-        esp_ids: list
+        self, rule_id: str, rule_max_per_hour: Optional[int], esp_ids: list
     ) -> dict:
         """
         Prüft ob eine Rule ausgeführt werden darf.
@@ -153,7 +152,7 @@ class RateLimiter:
                 "reason": "Global rate limit exceeded",
                 "wait_seconds": wait,
                 "current_rate": self.config.max_per_second,
-                "limit": self.config.max_per_second
+                "limit": self.config.max_per_second,
             }
 
         # 2. Per-ESP Limit
@@ -167,7 +166,7 @@ class RateLimiter:
                     "reason": f"ESP {esp_id} rate limit exceeded",
                     "wait_seconds": wait,
                     "current_rate": self.config.max_per_esp_second,
-                    "limit": self.config.max_per_esp_second
+                    "limit": self.config.max_per_esp_second,
                 }
 
         # 3. Per-Rule Hourly Limit (DB-basiert!)
@@ -175,6 +174,7 @@ class RateLimiter:
             try:
                 # Import uuid hier um circular imports zu vermeiden
                 import uuid
+
                 rule_uuid = uuid.UUID(rule_id) if isinstance(rule_id, str) else rule_id
 
                 hourly_count = await self.logic_repo.get_execution_count_last_hour(rule_uuid)
@@ -189,7 +189,7 @@ class RateLimiter:
                         "reason": f"Rule exceeded {rule_max_per_hour} executions per hour",
                         "wait_seconds": 3600,  # Muss eine Stunde warten
                         "current_rate": hourly_count,
-                        "limit": rule_max_per_hour
+                        "limit": rule_max_per_hour,
                     }
             except Exception as e:
                 logger.error(f"Error checking hourly limit for rule {rule_id}: {e}")
@@ -206,6 +206,6 @@ class RateLimiter:
             "config": {
                 "max_per_second": self.config.max_per_second,
                 "max_per_esp_second": self.config.max_per_esp_second,
-                "burst_allowance": self.config.burst_allowance
-            }
+                "burst_allowance": self.config.burst_allowance,
+            },
         }

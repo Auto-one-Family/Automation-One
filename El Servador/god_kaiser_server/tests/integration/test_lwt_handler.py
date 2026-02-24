@@ -6,6 +6,7 @@ Benötigt: DB-Session, Repositories
 
 Phase 3 Test-Suite: Instant Offline Detection, Idempotency, Unknown Device Handling.
 """
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -365,7 +366,9 @@ class TestLWTPayloadHandling:
 
                         assert result is True
                         # Custom reason should be preserved
-                        assert mock_device.device_metadata["last_disconnect"]["reason"] == "power_loss"
+                        assert (
+                            mock_device.device_metadata["last_disconnect"]["reason"] == "power_loss"
+                        )
 
 
 class TestLWTGlobalHandler:

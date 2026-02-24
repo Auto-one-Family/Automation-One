@@ -18,10 +18,7 @@ from ..schemas.logic import (
     RuleTestResponse,
 )
 from .logic.actions import (
-    ActuatorActionExecutor,
     BaseActionExecutor,
-    DelayActionExecutor,
-    NotificationActionExecutor,
 )
 from .logic.conditions import (
     BaseConditionEvaluator,
@@ -29,7 +26,7 @@ from .logic.conditions import (
     SensorConditionEvaluator,
     TimeConditionEvaluator,
 )
-from .logic.validator import DuplicateResult, LogicValidator, ValidationResult
+from .logic.validator import LogicValidator, ValidationResult
 
 logger = get_logger(__name__)
 
@@ -37,7 +34,7 @@ logger = get_logger(__name__)
 class LogicService:
     """
     Logic Rules Management Service.
-    
+
     Provides business logic for:
     - Rule CRUD operations with validation
     - Rule testing/simulation
@@ -53,7 +50,7 @@ class LogicService:
     ):
         """
         Initialize Logic Service.
-        
+
         Args:
             logic_repo: LogicRepository instance
             validator: Optional LogicValidator instance (creates default if None)
@@ -62,7 +59,7 @@ class LogicService:
         """
         self.logic_repo = logic_repo
         self.validator = validator or LogicValidator()
-        
+
         # Setup default condition evaluators
         if condition_evaluators is None:
             sensor_eval = SensorConditionEvaluator()
@@ -71,7 +68,7 @@ class LogicService:
             self.condition_evaluators = [sensor_eval, time_eval, compound_eval]
         else:
             self.condition_evaluators = condition_evaluators
-        
+
         # Setup default action executors (will need dependencies)
         # Note: These should be injected by the caller
         self.action_executors = action_executors or []
@@ -79,19 +76,19 @@ class LogicService:
     async def create_rule(self, rule_data: LogicRuleCreate) -> CrossESPLogic:
         """
         Create a new logic rule with validation.
-        
+
         Args:
             rule_data: Rule creation data
-            
+
         Returns:
             Created CrossESPLogic instance
-            
+
         Raises:
             ValueError: If validation fails
         """
         # Convert to dict for validation
         rule_dict = rule_data.model_dump()
-        
+
         # Get existing rules for conflict checking
         existing_rules = await self.logic_repo.get_all()
         existing_dicts = [
@@ -102,19 +99,19 @@ class LogicService:
             }
             for r in existing_rules
         ]
-        
+
         # Validate rule
         validation_result = self.validator.validate(rule_dict, existing_dicts)
-        
+
         if not validation_result.valid:
             errors = "; ".join(validation_result.errors)
             raise ValueError(f"Rule validation failed: {errors}")
-        
+
         # Log warnings if any
         if validation_result.warnings:
             for warning in validation_result.warnings:
                 logger.warning(f"Rule validation warning: {warning}")
-        
+
         # Create rule
         rule = CrossESPLogic(
             rule_name=rule_data.name,
@@ -127,12 +124,12 @@ class LogicService:
             cooldown_seconds=rule_data.cooldown_seconds,
             max_executions_per_hour=rule_data.max_executions_per_hour,
         )
-        
+
         created = await self.logic_repo.create(rule)
         await self.logic_repo.session.commit()
-        
+
         logger.info(f"Logic rule created: '{created.name}' (ID: {created.id})")
-        
+
         return created
 
     async def update_rule(
@@ -140,14 +137,14 @@ class LogicService:
     ) -> Optional[CrossESPLogic]:
         """
         Update an existing logic rule with validation.
-        
+
         Args:
             rule_id: Rule ID
             updates: Update data
-            
+
         Returns:
             Updated CrossESPLogic instance, or None if not found
-            
+
         Raises:
             ValueError: If validation fails
         """
@@ -155,10 +152,10 @@ class LogicService:
         rule = await self.logic_repo.get_by_id(rule_id)
         if not rule:
             return None
-        
+
         # Get update data (only provided fields)
         update_dict = updates.model_dump(exclude_unset=True)
-        
+
         # Merge with existing rule for validation
         rule_dict = {
             "name": update_dict.get("name", rule.name),
@@ -168,14 +165,12 @@ class LogicService:
             "logic_operator": update_dict.get("logic_operator", rule.logic_operator),
             "enabled": update_dict.get("enabled", rule.enabled),
             "priority": update_dict.get("priority", rule.priority),
-            "cooldown_seconds": update_dict.get(
-                "cooldown_seconds", rule.cooldown_seconds
-            ),
+            "cooldown_seconds": update_dict.get("cooldown_seconds", rule.cooldown_seconds),
             "max_executions_per_hour": update_dict.get(
                 "max_executions_per_hour", rule.max_executions_per_hour
             ),
         }
-        
+
         # Get existing rules (excluding current rule) for conflict checking
         existing_rules = await self.logic_repo.get_all()
         existing_dicts = [
@@ -187,19 +182,19 @@ class LogicService:
             for r in existing_rules
             if r.id != rule_id
         ]
-        
+
         # Validate updated rule
         validation_result = self.validator.validate(rule_dict, existing_dicts)
-        
+
         if not validation_result.valid:
             errors = "; ".join(validation_result.errors)
             raise ValueError(f"Rule validation failed: {errors}")
-        
+
         # Log warnings if any
         if validation_result.warnings:
             for warning in validation_result.warnings:
                 logger.warning(f"Rule update validation warning: {warning}")
-        
+
         # Apply updates
         for field, value in update_dict.items():
             if field == "name":
@@ -208,12 +203,12 @@ class LogicService:
                 rule.trigger_conditions = value
             else:
                 setattr(rule, field, value)
-        
+
         await self.logic_repo.session.flush()
         await self.logic_repo.session.commit()
-        
+
         logger.info(f"Logic rule updated: '{rule.name}' (ID: {rule.id})")
-        
+
         return rule
 
     async def validate_rule(
@@ -221,11 +216,11 @@ class LogicService:
     ) -> ValidationResult:
         """
         Validate a rule without creating/updating it.
-        
+
         Args:
             rule_data: Rule data dictionary
             existing_rules: Optional list of existing rules for conflict checking
-            
+
         Returns:
             ValidationResult with validation status
         """
@@ -239,7 +234,7 @@ class LogicService:
                 }
                 for r in existing_rules
             ]
-        
+
         return self.validator.validate(rule_data, existing_dicts)
 
     async def test_rule(
@@ -247,18 +242,18 @@ class LogicService:
     ) -> RuleTestResponse:
         """
         Test/simulate rule execution with mock data.
-        
+
         Args:
             rule: Rule to test
             test_request: Test parameters with mock data
-            
+
         Returns:
             RuleTestResponse with test results
         """
         # Evaluate conditions with mock data
         condition_results = []
         all_conditions_met = True
-        
+
         conditions = rule.conditions
         if isinstance(conditions, dict) and conditions.get("logic"):
             # Compound condition
@@ -267,34 +262,31 @@ class LogicService:
             conditions_list = conditions
         else:
             conditions_list = [conditions]
-        
+
         for idx, condition in enumerate(conditions_list):
             cond_type = condition.get("type", "unknown")
             result = False
             details = ""
             actual_value = None
-            
+
             # Find appropriate evaluator
             evaluator = None
             for eval_obj in self.condition_evaluators:
                 if eval_obj.supports(cond_type):
                     evaluator = eval_obj
                     break
-            
+
             if cond_type in ("sensor_threshold", "sensor"):
                 esp_id = condition.get("esp_id", "")
                 gpio = condition.get("gpio", 0)
-                
+
                 # Get mock value or default
                 mock_key = f"{esp_id}:{gpio}"
-                if (
-                    test_request.mock_sensor_values
-                    and mock_key in test_request.mock_sensor_values
-                ):
+                if test_request.mock_sensor_values and mock_key in test_request.mock_sensor_values:
                     actual_value = test_request.mock_sensor_values[mock_key]
                 else:
                     actual_value = 0.0
-                
+
                 # Create context
                 context = {
                     "sensor_data": {
@@ -304,14 +296,14 @@ class LogicService:
                         "sensor_type": condition.get("sensor_type"),
                     }
                 }
-                
+
                 if evaluator:
                     result = await evaluator.evaluate(condition, context)
-                
+
                 operator = condition.get("operator", "==")
                 threshold = condition.get("value", 0)
                 details = f"{esp_id}:{gpio} ({actual_value}) {operator} {threshold}"
-            
+
             elif cond_type in ("time_window", "time"):
                 # Create context with mock time
                 current_time = None
@@ -320,27 +312,27 @@ class LogicService:
                     try:
                         parts = test_request.mock_time.split(":")
                         from datetime import time
+
                         current_time = time(int(parts[0]), int(parts[1]))
                         # Convert to datetime for evaluation
                         from datetime import datetime
-                        current_time = datetime.combine(
-                            datetime.now().date(), current_time
-                        )
+
+                        current_time = datetime.combine(datetime.now().date(), current_time)
                     except (ValueError, IndexError):
                         pass
-                
+
                 context = {"current_time": current_time}
-                
+
                 if evaluator:
                     result = await evaluator.evaluate(condition, context)
-                
+
                 start_time = condition.get("start_time") or condition.get("start_hour", 0)
                 end_time = condition.get("end_time") or condition.get("end_hour", 24)
                 details = f"Time {test_request.mock_time or 'now'} in [{start_time}, {end_time}]"
-            
+
             if not result:
                 all_conditions_met = False
-            
+
             condition_results.append(
                 ConditionResult(
                     condition_index=idx,
@@ -350,21 +342,21 @@ class LogicService:
                     actual_value=actual_value,
                 )
             )
-        
+
         # Check logic operator
         logic_op = rule.logic_operator or "AND"
         if logic_op == "OR":
             would_trigger = any(c.result for c in condition_results)
         else:  # AND
             would_trigger = all_conditions_met and len(condition_results) > 0
-        
+
         # Evaluate actions (dry run)
         action_results = []
         if would_trigger and not test_request.dry_run:
             # Would execute actions (but don't actually execute in test mode)
             # This is handled by the test endpoint in logic.py
             pass
-        
+
         return RuleTestResponse(
             success=True,
             rule_id=rule.id,
@@ -380,12 +372,12 @@ class LogicService:
     ) -> List[CrossESPLogic]:
         """
         Get rules that trigger on a specific sensor.
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
             sensor_type: Sensor type
-            
+
         Returns:
             List of matching rules
         """
@@ -396,16 +388,16 @@ class LogicService:
     async def get_rules_with_timer(self) -> List[CrossESPLogic]:
         """
         Get all enabled rules that have time_window conditions.
-        
+
         Returns:
             List of rules with timer conditions
         """
         all_rules = await self.logic_repo.get_enabled_rules()
-        
+
         timer_rules = []
         for rule in all_rules:
             conditions = rule.conditions
-            
+
             # Check if rule has time_window condition
             if isinstance(conditions, dict):
                 if conditions.get("type") in ("time_window", "time"):
@@ -422,5 +414,5 @@ class LogicService:
                     if cond.get("type") in ("time_window", "time"):
                         timer_rules.append(rule)
                         break
-        
+
         return timer_rules

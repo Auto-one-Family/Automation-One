@@ -79,9 +79,7 @@ class ActuatorAlertHandler:
             # Step 1: Validate payload
             validation_result = self._validate_payload(payload)
             if not validation_result["valid"]:
-                logger.error(
-                    f"Invalid actuator alert payload: {validation_result['error']}"
-                )
+                logger.error(f"Invalid actuator alert payload: {validation_result['error']}")
                 return False
 
             esp_id_str = payload["esp_id"]
@@ -175,6 +173,7 @@ class ActuatorAlertHandler:
                 # Mit deutschen Übersetzungen für das Frontend
                 try:
                     from ...websocket.manager import WebSocketManager
+
                     ws_manager = await WebSocketManager.get_instance()
 
                     # Hole deutsche Alert-Informationen
@@ -184,23 +183,30 @@ class ActuatorAlertHandler:
                     german_message = alert_info["message"] if alert_info else message
                     # Falls ESP eine spezifische Message hat, diese anhängen
                     if message and message != alert_type:
-                        german_message = f"{alert_info['message']} - {message}" if alert_info else message
+                        german_message = (
+                            f"{alert_info['message']} - {message}" if alert_info else message
+                        )
 
-                    await ws_manager.broadcast("actuator_alert", {
-                        "esp_id": esp_id_str,
-                        "gpio": gpio,
-                        "alert_type": alert_type,
-                        "severity": alert_info["severity"].lower() if alert_info else severity,
-                        "category": alert_info["category"] if alert_info else "SYSTEM",
-                        # Deutsche Meldung
-                        "message": german_message,
-                        # Deutsche Troubleshooting-Schritte
-                        "troubleshooting": alert_info["troubleshooting"] if alert_info else [],
-                        "recoverable": alert_info["recoverable"] if alert_info else True,
-                        "user_action_required": alert_info["user_action_required"] if alert_info else False,
-                        "zone_id": zone_id,
-                        "timestamp": payload.get("ts", 0)
-                    })
+                    await ws_manager.broadcast(
+                        "actuator_alert",
+                        {
+                            "esp_id": esp_id_str,
+                            "gpio": gpio,
+                            "alert_type": alert_type,
+                            "severity": alert_info["severity"].lower() if alert_info else severity,
+                            "category": alert_info["category"] if alert_info else "SYSTEM",
+                            # Deutsche Meldung
+                            "message": german_message,
+                            # Deutsche Troubleshooting-Schritte
+                            "troubleshooting": alert_info["troubleshooting"] if alert_info else [],
+                            "recoverable": alert_info["recoverable"] if alert_info else True,
+                            "user_action_required": (
+                                alert_info["user_action_required"] if alert_info else False
+                            ),
+                            "zone_id": zone_id,
+                            "timestamp": payload.get("ts", 0),
+                        },
+                    )
                     logger.debug(f"Alert broadcast via WebSocket: {alert_type}")
                 except Exception as e:
                     logger.debug(f"WebSocket broadcast skipped: {e}")
@@ -281,9 +287,7 @@ class ActuatorAlertHandler:
         if MIN_VALID_TIMESTAMP <= ts_seconds <= MAX_VALID_TIMESTAMP:
             return datetime.fromtimestamp(ts_seconds, tz=timezone.utc)
         else:
-            logger.warning(
-                f"Invalid timestamp {ts_raw} (out of range), using server time"
-            )
+            logger.warning(f"Invalid timestamp {ts_raw} (out of range), using server time")
             return datetime.now(timezone.utc)
 
 
@@ -317,4 +321,3 @@ async def handle_actuator_alert(topic: str, payload: dict) -> bool:
     """
     handler = get_actuator_alert_handler()
     return await handler.handle_actuator_alert(topic, payload)
-

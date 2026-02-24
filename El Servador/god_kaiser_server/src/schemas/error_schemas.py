@@ -26,10 +26,10 @@ from .common import BaseResponse, PaginationMeta
 class ErrorLogResponse(BaseModel):
     """
     Error log entry response.
-    
+
     Maps AuditLog entries for ESP32 error events to a frontend-friendly format.
     """
-    
+
     id: UUID = Field(
         ...,
         description="Unique error log identifier",
@@ -86,7 +86,7 @@ class ErrorLogResponse(BaseModel):
         ...,
         description="When the error occurred",
     )
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -101,16 +101,16 @@ class ErrorLogResponse(BaseModel):
                 "troubleshooting": [
                     "1. Physische Kabelverbindung prüfen",
                     "2. Sensor-Stromversorgung prüfen",
-                    "3. Pull-up Widerstand (4.7k Ohm) am Bus prüfen"
+                    "3. Pull-up Widerstand (4.7k Ohm) am Bus prüfen",
                 ],
                 "docs_link": "/docs/sensors/ds18b20#troubleshooting",
                 "user_action_required": True,
                 "recoverable": True,
                 "context": {"gpio": 4, "sensor_type": "ds18b20"},
                 "esp_raw_message": "OneWire device not found on bus",
-                "timestamp": "2024-01-15T14:30:00Z"
+                "timestamp": "2024-01-15T14:30:00Z",
             }
-        }
+        },
     )
 
 
@@ -118,7 +118,7 @@ class ErrorLogListResponse(BaseResponse):
     """
     Paginated error log list response.
     """
-    
+
     errors: List[ErrorLogResponse] = Field(
         default_factory=list,
         description="List of error log entries",
@@ -137,7 +137,7 @@ class ErrorLogListResponse(BaseResponse):
         ...,
         description="Pagination metadata",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -152,8 +152,8 @@ class ErrorLogListResponse(BaseResponse):
                     "total_items": 42,
                     "total_pages": 3,
                     "has_next": True,
-                    "has_prev": False
-                }
+                    "has_prev": False,
+                },
             }
         }
     )
@@ -166,7 +166,7 @@ class ErrorLogListResponse(BaseResponse):
 
 class ErrorCodeCount(BaseModel):
     """Count of errors by error code."""
-    
+
     error_code: int = Field(
         ...,
         description="Error code",
@@ -180,13 +180,13 @@ class ErrorCodeCount(BaseModel):
         ...,
         description="Error message description",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "error_code": 1026,
                 "count": 15,
-                "message": "OneWire Device nicht am Bus gefunden"
+                "message": "OneWire Device nicht am Bus gefunden",
             }
         }
     )
@@ -195,10 +195,10 @@ class ErrorCodeCount(BaseModel):
 class ErrorSummaryResponse(BaseResponse):
     """
     Error summary statistics.
-    
+
     Provides aggregated error statistics for monitoring dashboards.
     """
-    
+
     period_hours: int = Field(
         24,
         description="Time period in hours for the statistics",
@@ -230,7 +230,7 @@ class ErrorSummaryResponse(BaseResponse):
         description="Errors requiring user action",
         ge=0,
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -238,24 +238,18 @@ class ErrorSummaryResponse(BaseResponse):
                 "message": None,
                 "period_hours": 24,
                 "total_errors": 42,
-                "errors_by_severity": {
-                    "error": 25,
-                    "warning": 15,
-                    "critical": 2
-                },
-                "errors_by_category": {
-                    "HARDWARE": 30,
-                    "CONFIG": 12
-                },
-                "errors_by_esp": {
-                    "ESP_12AB34CD": 20,
-                    "ESP_56EF78GH": 22
-                },
+                "errors_by_severity": {"error": 25, "warning": 15, "critical": 2},
+                "errors_by_category": {"HARDWARE": 30, "CONFIG": 12},
+                "errors_by_esp": {"ESP_12AB34CD": 20, "ESP_56EF78GH": 22},
                 "top_error_codes": [
-                    {"error_code": 1026, "count": 15, "message": "OneWire Device nicht am Bus gefunden"},
-                    {"error_code": 1028, "count": 10, "message": "DS18B20 Lese-Timeout"}
+                    {
+                        "error_code": 1026,
+                        "count": 15,
+                        "message": "OneWire Device nicht am Bus gefunden",
+                    },
+                    {"error_code": 1028, "count": 10, "message": "DS18B20 Lese-Timeout"},
                 ],
-                "action_required_count": 30
+                "action_required_count": 30,
             }
         }
     )
@@ -309,7 +303,7 @@ class ErrorCodeInfoResponse(BaseModel):
         False,
         description="Whether user action is required",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -319,11 +313,11 @@ class ErrorCodeInfoResponse(BaseModel):
                 "message": "Hardware-Fehler: Sensor antwortet nicht am OneWire-Bus",
                 "troubleshooting": [
                     "1. Physische Kabelverbindung prüfen",
-                    "2. Sensor-Stromversorgung prüfen"
+                    "2. Sensor-Stromversorgung prüfen",
                 ],
                 "docs_link": "/docs/sensors/ds18b20#troubleshooting",
                 "recoverable": True,
-                "user_action_required": True
+                "user_action_required": True,
             }
         }
     )
@@ -333,7 +327,7 @@ class ErrorCodeListResponse(BaseResponse):
     """
     List of all known error codes.
     """
-    
+
     error_codes: List[ErrorCodeInfoResponse] = Field(
         default_factory=list,
         description="List of error code information",
@@ -343,14 +337,9 @@ class ErrorCodeListResponse(BaseResponse):
         description="Total number of error codes",
         ge=0,
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "success": True,
-                "message": None,
-                "error_codes": [],
-                "total_count": 7
-            }
+            "example": {"success": True, "message": None, "error_codes": [], "total_count": 7}
         }
     )

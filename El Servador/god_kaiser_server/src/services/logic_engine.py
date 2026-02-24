@@ -7,7 +7,7 @@ Evaluates logic rules in background, triggers actuator actions based on sensor c
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from ..core.logging_config import get_logger
@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 class LogicEngine:
     """
     Cross-ESP Automation Engine (Background Task).
-    
+
     Evaluates logic rules when sensor data arrives,
     triggers actuator actions based on conditions.
     """
@@ -89,12 +89,14 @@ class LogicEngine:
         # Setup safety components
         if conflict_manager is None:
             from .logic.safety.conflict_manager import ConflictManager
+
             self.conflict_manager = ConflictManager()
         else:
             self.conflict_manager = conflict_manager
 
         if rate_limiter is None:
             from .logic.safety.rate_limiter import RateLimiter
+
             self.rate_limiter = RateLimiter(logic_repo=logic_repo)
         else:
             self.rate_limiter = rate_limiter
@@ -102,13 +104,13 @@ class LogicEngine:
     async def start(self) -> None:
         """
         Start background evaluation task.
-        
+
         Should be called on application startup.
         """
         if self._running:
             logger.warning("Logic Engine is already running")
             return
-        
+
         self._running = True
         self._task = asyncio.create_task(self._evaluation_loop())
         logger.info("Logic Engine started")
@@ -116,21 +118,21 @@ class LogicEngine:
     async def stop(self) -> None:
         """
         Stop background task.
-        
+
         Should be called on application shutdown.
         """
         if not self._running:
             return
-        
+
         self._running = False
-        
+
         if self._task:
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        
+
         logger.info("Logic Engine stopped")
 
     async def evaluate_sensor_data(
@@ -138,10 +140,10 @@ class LogicEngine:
     ) -> None:
         """
         Evaluate rules triggered by sensor data.
-        
+
         Called by sensor_handler after sensor data is saved.
         This method is non-blocking and should be called via asyncio.create_task().
-        
+
         Args:
             esp_id: ESP device ID
             gpio: GPIO pin number
@@ -152,21 +154,21 @@ class LogicEngine:
             # Get database session for this evaluation
             async for session in get_session():
                 logic_repo = LogicRepository(session)
-                
+
                 # Find matching rules
                 matching_rules = await logic_repo.get_rules_by_trigger_sensor(
                     esp_id=esp_id,
                     gpio=gpio,
                     sensor_type=sensor_type,
                 )
-                
+
                 if not matching_rules:
                     logger.debug(
                         f"No matching rules for sensor: esp_id={esp_id}, "
                         f"gpio={gpio}, sensor_type={sensor_type}"
                     )
                     return
-                
+
                 # Prepare trigger data
                 trigger_data = {
                     "esp_id": esp_id,
@@ -175,39 +177,39 @@ class LogicEngine:
                     "value": value,
                     "timestamp": int(time.time()),
                 }
-                
+
                 # Evaluate each matching rule
                 for rule in matching_rules:
                     await self._evaluate_rule(rule, trigger_data, logic_repo)
-                
+
                 break  # Exit after first session
-        
+
         except Exception as e:
             logger.error(
                 f"Error evaluating sensor data: {e}",
                 exc_info=True,
             )
-    
+
     async def evaluate_timer_triggered_rules(self) -> None:
         """
         Evaluate rules triggered by timer (time_window conditions).
-        
+
         Should be called periodically by LogicScheduler.
         """
         try:
             # Get database session
             async for session in get_session():
                 logic_repo = LogicRepository(session)
-                
+
                 # Get all enabled rules
                 all_rules = await logic_repo.get_enabled_rules()
-                
+
                 # Filter rules with time_window conditions
                 timer_rules = []
                 for rule in all_rules:
                     conditions = rule.conditions
                     has_time_condition = False
-                    
+
                     # Check if rule has time_window condition
                     if isinstance(conditions, dict):
                         if conditions.get("type") in ("time_window", "time"):
@@ -224,27 +226,27 @@ class LogicEngine:
                             if cond.get("type") in ("time_window", "time"):
                                 has_time_condition = True
                                 break
-                    
+
                     if has_time_condition:
                         timer_rules.append(rule)
-                
+
                 if not timer_rules:
                     logger.debug("No timer-triggered rules to evaluate")
                     return
-                
+
                 # Prepare context for time-based evaluation
                 context = {
                     "current_time": datetime.now(),
                 }
-                
+
                 # Evaluate each timer rule
                 for rule in timer_rules:
                     # Check if time conditions are met
                     conditions = rule.trigger_conditions
-                    
+
                     # Use modular evaluators to check time conditions
                     conditions_met = await self._check_conditions(conditions, context)
-                    
+
                     if conditions_met:
                         # Prepare trigger data for timer-based execution
                         trigger_data = {
@@ -252,30 +254,28 @@ class LogicEngine:
                             "timestamp": int(time.time()),
                             "rule_id": str(rule.id),
                         }
-                        
+
                         await self._evaluate_rule(rule, trigger_data, logic_repo)
-                
+
                 break  # Exit after first session
-        
+
         except Exception as e:
             logger.error(
                 f"Error evaluating timer-triggered rules: {e}",
                 exc_info=True,
             )
 
-    async def _evaluate_rule(
-        self, rule, trigger_data: dict, logic_repo: LogicRepository
-    ) -> None:
+    async def _evaluate_rule(self, rule, trigger_data: dict, logic_repo: LogicRepository) -> None:
         """
         Evaluate a single rule.
-        
+
         Args:
             rule: CrossESPLogic instance
             trigger_data: Sensor data that triggered the rule
             logic_repo: LogicRepository instance
         """
         start_time = time.time()
-        
+
         try:
             # Check cooldown
             if rule.cooldown_seconds:
@@ -294,14 +294,12 @@ class LogicEngine:
             rate_result = await self.rate_limiter.check_rate_limit(
                 rule_id=str(rule.id),
                 rule_max_per_hour=rule.max_executions_per_hour,
-                esp_ids=target_esp_ids
+                esp_ids=target_esp_ids,
             )
 
             if not rate_result["allowed"]:
                 increment_safety_trigger()
-                logger.warning(
-                    f"Rule {rule.rule_name} rate limited: {rate_result['reason']}"
-                )
+                logger.warning(f"Rule {rule.rule_name} rate limited: {rate_result['reason']}")
                 return
 
             # Evaluate conditions
@@ -312,28 +310,24 @@ class LogicEngine:
                 "rule_id": str(rule.id),  # For hysteresis state management
                 "condition_index": 0,  # For hysteresis state management
             }
-            conditions_met = await self._check_conditions(
-                rule.trigger_conditions, context
-            )
-            
+            conditions_met = await self._check_conditions(rule.trigger_conditions, context)
+
             if not conditions_met:
                 logger.debug(
                     f"Rule {rule.rule_name} conditions not met for trigger: {trigger_data}"
                 )
                 return
-            
+
             # Execute actions
-            logger.info(
-                f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions"
-            )
+            logger.info(f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions")
 
             await self._execute_actions(
                 rule.actions, trigger_data, rule.id, rule.rule_name, rule.priority
             )
-            
+
             # Update last_triggered timestamp
             rule.last_triggered = datetime.now(timezone.utc)
-            
+
             # Log successful execution
             execution_time_ms = int((time.time() - start_time) * 1000)
             await logic_repo.log_execution(
@@ -344,14 +338,14 @@ class LogicEngine:
                 execution_ms=execution_time_ms,
             )
             await logic_repo.session.commit()
-            
+
         except Exception as e:
             increment_logic_error()
             logger.error(
                 f"Error evaluating rule {rule.rule_name}: {e}",
                 exc_info=True,
             )
-            
+
             # Log failed execution
             execution_time_ms = int((time.time() - start_time) * 1000)
             await logic_repo.log_execution(
@@ -364,75 +358,67 @@ class LogicEngine:
             )
             await logic_repo.session.commit()
 
-    async def _check_conditions(
-        self, conditions: dict, sensor_data: dict
-    ) -> bool:
+    async def _check_conditions(self, conditions: dict, sensor_data: dict) -> bool:
         """
         Check if conditions are met using modular evaluators.
-        
+
         Supports:
         - Single condition: {'type': 'sensor_threshold', ...}
         - Compound conditions: {'logic': 'AND', 'conditions': [...]}
-        
+
         Args:
             conditions: Condition dictionary
             sensor_data: Sensor data to check against (or context dict)
-            
+
         Returns:
             True if conditions are met, False otherwise
         """
         # Use modular evaluators if available
         if self.condition_evaluators:
             return await self._check_conditions_modular(conditions, sensor_data)
-        
+
         # Fallback to legacy implementation
         return await self._check_conditions_legacy(conditions, sensor_data)
-    
-    async def _check_conditions_modular(
-        self, conditions: dict, context: dict
-    ) -> bool:
+
+    async def _check_conditions_modular(self, conditions: dict, context: dict) -> bool:
         """Check conditions using modular evaluators."""
         # Handle compound conditions (AND/OR logic)
         if "logic" in conditions and "conditions" in conditions:
-            logic = conditions.get("logic", "AND").upper()
-            
             # Find compound evaluator
             compound_eval = None
             for evaluator in self.condition_evaluators:
                 if isinstance(evaluator, CompoundConditionEvaluator):
                     compound_eval = evaluator
                     break
-            
+
             if compound_eval:
                 return await compound_eval.evaluate(conditions, context)
             else:
                 # Fallback to manual evaluation
                 return await self._check_conditions_legacy(conditions, context)
-        
+
         # Handle single condition - find appropriate evaluator
         cond_type = conditions.get("type", "unknown")
-        
+
         for evaluator in self.condition_evaluators:
             if evaluator.supports(cond_type):
                 return await evaluator.evaluate(conditions, context)
-        
+
         # No evaluator found - use legacy
         logger.warning(f"No evaluator found for condition type: {cond_type}, using legacy")
         return await self._check_conditions_legacy(conditions, context)
-    
-    async def _check_conditions_legacy(
-        self, conditions: dict, sensor_data: dict
-    ) -> bool:
+
+    async def _check_conditions_legacy(self, conditions: dict, sensor_data: dict) -> bool:
         """
         Legacy condition checking (backward compatibility).
-        
+
         Original implementation maintained for compatibility.
         """
         # Handle compound conditions (AND/OR logic)
         if "logic" in conditions and "conditions" in conditions:
             logic = conditions.get("logic", "AND").upper()
             sub_conditions = conditions.get("conditions", [])
-            
+
             if logic == "AND":
                 # All conditions must be met
                 for condition in sub_conditions:
@@ -448,25 +434,23 @@ class LogicEngine:
             else:
                 logger.warning(f"Unknown logic operator: {logic}")
                 return False
-        
+
         # Handle single condition
         return await self._check_single_condition(conditions, sensor_data)
 
-    async def _check_single_condition(
-        self, condition: dict, sensor_data: dict
-    ) -> bool:
+    async def _check_single_condition(self, condition: dict, sensor_data: dict) -> bool:
         """
         Check a single condition.
-        
+
         Args:
             condition: Single condition dictionary
             sensor_data: Sensor data to check against
-            
+
         Returns:
             True if condition is met, False otherwise
         """
         cond_type = condition.get("type")
-        
+
         # Accept both "sensor_threshold" and "sensor" as valid condition types
         if cond_type in ("sensor_threshold", "sensor"):
             # Match on ESP + GPIO + optionally Sensor Type
@@ -475,13 +459,15 @@ class LogicEngine:
             if condition.get("gpio") != sensor_data.get("gpio"):
                 return False
             # sensor_type is optional for "sensor" shorthand
-            if condition.get("sensor_type") and condition.get("sensor_type") != sensor_data.get("sensor_type"):
+            if condition.get("sensor_type") and condition.get("sensor_type") != sensor_data.get(
+                "sensor_type"
+            ):
                 return False
-            
+
             operator = condition.get("operator")
             threshold = condition.get("value")
             actual = sensor_data.get("value")
-            
+
             if operator == ">":
                 return actual > threshold
             elif operator == ">=":
@@ -501,23 +487,23 @@ class LogicEngine:
             else:
                 logger.warning(f"Unknown operator: {operator}")
                 return False
-        
+
         elif cond_type == "time_window":
             # Time window condition
             now = datetime.now()
             start_hour = condition.get("start_hour", 0)
             end_hour = condition.get("end_hour", 24)
             days = condition.get("days_of_week")  # Optional: [0,1,2,3,4] = Mon-Fri
-            
+
             # Check day of week if specified
             if days is not None:
                 if now.weekday() not in days:
                     return False
-            
+
             # Check time window
             current_hour = now.hour
             return start_hour <= current_hour < end_hour
-        
+
         else:
             logger.warning(f"Unknown condition type: {cond_type}")
             return False
@@ -542,8 +528,7 @@ class LogicEngine:
         """
         # Extract actuator actions for conflict management
         actuator_actions = [
-            action for action in actions
-            if action.get("type") in ("actuator_command", "actuator")
+            action for action in actions if action.get("type") in ("actuator_command", "actuator")
         ]
 
         # Acquire locks for all actuator actions
@@ -556,7 +541,7 @@ class LogicEngine:
                 rule_id=str(rule_id),
                 priority=rule_priority,
                 command=action.get("command", "ON"),
-                is_safety_critical=action.get("is_safety_critical", False)
+                is_safety_critical=action.get("is_safety_critical", False),
             )
 
             if not can_execute:
@@ -567,17 +552,17 @@ class LogicEngine:
                 # Rollback already acquired locks
                 for lock in acquired_locks:
                     await self.conflict_manager.release_actuator(
-                        esp_id=lock["esp_id"],
-                        gpio=lock["gpio"],
-                        rule_id=lock["rule_id"]
+                        esp_id=lock["esp_id"], gpio=lock["gpio"], rule_id=lock["rule_id"]
                     )
                 return
 
-            acquired_locks.append({
-                "esp_id": action.get("esp_id"),
-                "gpio": action.get("gpio"),
-                "rule_id": str(rule_id)
-            })
+            acquired_locks.append(
+                {
+                    "esp_id": action.get("esp_id"),
+                    "gpio": action.get("gpio"),
+                    "rule_id": str(rule_id),
+                }
+            )
 
         # Create execution context
         context = {
@@ -600,15 +585,18 @@ class LogicEngine:
                                 result = await executor.execute(action, context)
 
                                 # WebSocket broadcast
-                                await self.websocket_manager.broadcast("logic_execution", {
-                                    "rule_id": str(rule_id),
-                                    "rule_name": rule_name,
-                                    "trigger": trigger_data,
-                                    "action": action,
-                                    "success": result.success,
-                                    "message": result.message,
-                                    "timestamp": trigger_data.get("timestamp"),
-                                })
+                                await self.websocket_manager.broadcast(
+                                    "logic_execution",
+                                    {
+                                        "rule_id": str(rule_id),
+                                        "rule_name": rule_name,
+                                        "trigger": trigger_data,
+                                        "action": action,
+                                        "success": result.success,
+                                        "message": result.message,
+                                        "timestamp": trigger_data.get("timestamp"),
+                                    },
+                                )
 
                                 if result.success:
                                     logger.info(
@@ -629,18 +617,14 @@ class LogicEngine:
 
                 # Fallback to legacy implementation for backward compatibility
                 if not executor_found:
-                    await self._execute_action_legacy(
-                        action, trigger_data, rule_id, rule_name
-                    )
+                    await self._execute_action_legacy(action, trigger_data, rule_id, rule_name)
         finally:
             # Release all acquired locks
             for lock in acquired_locks:
                 await self.conflict_manager.release_actuator(
-                    esp_id=lock["esp_id"],
-                    gpio=lock["gpio"],
-                    rule_id=lock["rule_id"]
+                    esp_id=lock["esp_id"], gpio=lock["gpio"], rule_id=lock["rule_id"]
                 )
-    
+
     async def _execute_action_legacy(
         self,
         action: dict,
@@ -650,11 +634,11 @@ class LogicEngine:
     ) -> None:
         """
         Legacy action execution (backward compatibility).
-        
+
         Original implementation maintained for compatibility.
         """
         action_type = action.get("type")
-        
+
         # Support both "actuator_command" and "actuator" for backward compatibility
         if action_type in ("actuator_command", "actuator"):
             # Execute actuator command
@@ -664,8 +648,12 @@ class LogicEngine:
             value = action.get("value", 1.0)
             # Support both "duration_seconds" and "duration" for backward compatibility
             # Use explicit None check to allow duration_seconds=0 as valid value
-            duration = action.get("duration_seconds") if "duration_seconds" in action else action.get("duration", 0)
-            
+            duration = (
+                action.get("duration_seconds")
+                if "duration_seconds" in action
+                else action.get("duration", 0)
+            )
+
             success = await self.actuator_service.send_command(
                 esp_id=esp_id,
                 gpio=gpio,
@@ -674,34 +662,36 @@ class LogicEngine:
                 duration=duration,
                 issued_by=f"logic:{rule_id}",
             )
-            
+
             # WebSocket broadcast
-            await self.websocket_manager.broadcast("logic_execution", {
-                "rule_id": str(rule_id),
-                "rule_name": rule_name,
-                "trigger": trigger_data,
-                "action": {
-                    "esp_id": esp_id,
-                    "gpio": gpio,
-                    "command": command,
-                    "value": value,
-                    "duration": duration,
+            await self.websocket_manager.broadcast(
+                "logic_execution",
+                {
+                    "rule_id": str(rule_id),
+                    "rule_name": rule_name,
+                    "trigger": trigger_data,
+                    "action": {
+                        "esp_id": esp_id,
+                        "gpio": gpio,
+                        "command": command,
+                        "value": value,
+                        "duration": duration,
+                    },
+                    "success": success,
+                    "timestamp": trigger_data.get("timestamp"),
                 },
-                "success": success,
-                "timestamp": trigger_data.get("timestamp"),
-            })
-            
+            )
+
             if success:
                 logger.info(
-                    f"Rule {rule_name} executed action: {command} on "
-                    f"ESP {esp_id} GPIO {gpio}"
+                    f"Rule {rule_name} executed action: {command} on " f"ESP {esp_id} GPIO {gpio}"
                 )
             else:
                 logger.error(
                     f"Rule {rule_name} failed to execute action: {command} on "
                     f"ESP {esp_id} GPIO {gpio}"
                 )
-        
+
         else:
             logger.warning(f"Unknown action type: {action_type}")
 
@@ -735,26 +725,26 @@ class LogicEngine:
     async def _evaluation_loop(self) -> None:
         """
         Background evaluation loop.
-        
+
         Currently runs periodically to check for any pending evaluations.
         In the future, this could be enhanced to handle queued evaluations.
         """
         logger.info("Logic Engine evaluation loop started")
-        
+
         while self._running:
             try:
                 # Sleep for a short interval
                 await asyncio.sleep(1.0)
-                
+
                 # Future: Could process queued evaluations here
                 # For now, evaluation is triggered directly by sensor_handler
-                
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in evaluation loop: {e}", exc_info=True)
                 await asyncio.sleep(5.0)  # Wait before retrying
-        
+
         logger.info("Logic Engine evaluation loop stopped")
 
 
@@ -765,7 +755,7 @@ _logic_engine_instance: Optional[LogicEngine] = None
 def get_logic_engine() -> Optional[LogicEngine]:
     """
     Get global Logic Engine instance.
-    
+
     Returns:
         LogicEngine instance if initialized, None otherwise
     """
@@ -775,9 +765,9 @@ def get_logic_engine() -> Optional[LogicEngine]:
 def set_logic_engine(instance: LogicEngine) -> None:
     """
     Set global Logic Engine instance.
-    
+
     Should be called by main.py on startup.
-    
+
     Args:
         instance: LogicEngine instance
     """

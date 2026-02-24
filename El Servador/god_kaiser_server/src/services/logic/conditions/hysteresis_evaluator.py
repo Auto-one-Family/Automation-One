@@ -32,6 +32,7 @@ class HysteresisState:
         last_deactivation: Zeitpunkt der letzten Deaktivierung
         last_value: Letzter verarbeiteter Sensor-Wert
     """
+
     is_active: bool = False
     last_activation: Optional[datetime] = None
     last_deactivation: Optional[datetime] = None
@@ -278,7 +279,9 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         """
         return self._states.copy()
 
-    def get_state_for_rule(self, rule_id: str, condition_index: int = 0) -> Optional[HysteresisState]:
+    def get_state_for_rule(
+        self, rule_id: str, condition_index: int = 0
+    ) -> Optional[HysteresisState]:
         """
         Gibt State für eine spezifische Rule+Condition zurück.
 

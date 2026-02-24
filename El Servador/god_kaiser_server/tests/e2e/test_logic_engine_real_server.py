@@ -74,7 +74,11 @@ async def wait_for_condition(condition_fn, timeout: float = 10, interval: float 
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            result = await condition_fn() if asyncio.iscoroutinefunction(condition_fn) else condition_fn()
+            result = (
+                await condition_fn()
+                if asyncio.iscoroutinefunction(condition_fn)
+                else condition_fn()
+            )
             if result:
                 return True
         except Exception:
@@ -198,8 +202,9 @@ class TestLogicEngineE2ELatency:
                 name="Latency Test Sensor ESP",
             )
             sensor_result = await api_client.register_esp(sensor_esp)
-            assert "device_id" in sensor_result or "id" in sensor_result, \
-                f"Sensor ESP registration failed: {sensor_result}"
+            assert (
+                "device_id" in sensor_result or "id" in sensor_result
+            ), f"Sensor ESP registration failed: {sensor_result}"
 
             # Register Actuator ESP
             actuator_esp = ESPDeviceTestData(
@@ -207,8 +212,9 @@ class TestLogicEngineE2ELatency:
                 name="Latency Test Actuator ESP",
             )
             actuator_result = await api_client.register_esp(actuator_esp)
-            assert "device_id" in actuator_result or "id" in actuator_result, \
-                f"Actuator ESP registration failed: {actuator_result}"
+            assert (
+                "device_id" in actuator_result or "id" in actuator_result
+            ), f"Actuator ESP registration failed: {actuator_result}"
 
             # Send heartbeats to mark devices online
             await mqtt_client.publish_heartbeat(sensor_esp_id)
@@ -256,10 +262,8 @@ class TestLogicEngineE2ELatency:
             latency = end_time - start_time
 
             # === VERIFY ===
-            assert execution_found, \
-                f"Rule execution not found in history after {latency:.2f}s"
-            assert latency < 5.0, \
-                f"Latency {latency:.2f}s exceeds 5s acceptance threshold"
+            assert execution_found, f"Rule execution not found in history after {latency:.2f}s"
+            assert latency < 5.0, f"Latency {latency:.2f}s exceeds 5s acceptance threshold"
 
             # Verify execution details
             history = await api_client.get_execution_history(rule_id=rule_id, limit=1)
@@ -508,8 +512,9 @@ class TestLogicEngineRateLimiting:
             count_2 = len(history_2.get("entries", []))
 
             # Should still be only 1 execution (cooldown blocked second)
-            assert count_2 == count_1, \
-                f"Cooldown should block second execution: had {count_1}, now have {count_2}"
+            assert (
+                count_2 == count_1
+            ), f"Cooldown should block second execution: had {count_1}, now have {count_2}"
 
             print(f"✓ Cooldown enforced: {count_2} execution(s) (expected: {count_1})")
 
@@ -581,8 +586,9 @@ class TestLogicEngineRateLimiting:
             count_2 = len(history_2.get("entries", []))
 
             # Should have one more execution
-            assert count_2 > count_1, \
-                f"Second trigger after cooldown should execute: had {count_1}, now have {count_2}"
+            assert (
+                count_2 > count_1
+            ), f"Second trigger after cooldown should execute: had {count_1}, now have {count_2}"
 
             print(f"✓ Cooldown expiry verified: {count_1} → {count_2} executions")
 
@@ -654,13 +660,13 @@ class TestLogicEngineHistory:
 
             # Check execution details
             latest_entry = entries[0]
-            assert latest_entry.get("rule_id") or latest_entry.get("rule_name"), \
-                "Execution should have rule identifier"
+            assert latest_entry.get("rule_id") or latest_entry.get(
+                "rule_name"
+            ), "Execution should have rule identifier"
 
             # Success can be True or the entry exists
             has_success_indicator = (
-                latest_entry.get("success") is not None or
-                "success" in str(latest_entry).lower()
+                latest_entry.get("success") is not None or "success" in str(latest_entry).lower()
             )
 
             print(f"✓ Execution logged with details: {list(latest_entry.keys())}")
@@ -726,8 +732,9 @@ class TestLogicEngineToggle:
             entries = history.get("entries", [])
 
             # Disabled rule should have NO executions
-            assert len(entries) == 0, \
-                f"Disabled rule should not execute, but found {len(entries)} execution(s)"
+            assert (
+                len(entries) == 0
+            ), f"Disabled rule should not execute, but found {len(entries)} execution(s)"
 
             print("✓ Disabled rule correctly did not execute")
 
@@ -788,14 +795,13 @@ class TestLogicEngineToggle:
 
             # === TOGGLE TO ENABLED ===
             toggle_result = await api_client.toggle_logic_rule(
-                rule_id=rule_id,
-                enabled=True,
-                reason="E2E Test - enabling rule"
+                rule_id=rule_id, enabled=True, reason="E2E Test - enabling rule"
             )
 
             # Verify toggle succeeded
-            assert toggle_result.get("enabled") is True or "success" in str(toggle_result).lower(), \
-                f"Toggle failed: {toggle_result}"
+            assert (
+                toggle_result.get("enabled") is True or "success" in str(toggle_result).lower()
+            ), f"Toggle failed: {toggle_result}"
 
             await asyncio.sleep(0.5)  # Let toggle propagate
 
@@ -807,8 +813,9 @@ class TestLogicEngineToggle:
             history_after = await api_client.get_execution_history(rule_id=rule_id, limit=10)
             count_after = len(history_after.get("entries", []))
 
-            assert count_after > count_before, \
-                f"Enabled rule should execute: {count_before} → {count_after}"
+            assert (
+                count_after > count_before
+            ), f"Enabled rule should execute: {count_before} → {count_after}"
 
             print(f"✓ Toggle verified: {count_before} → {count_after} executions")
 
@@ -873,7 +880,7 @@ class TestLogicEngineRuleLifecycle:
 
             # === DELETE RULE ===
             delete_success = await api_client.delete_logic_rule(rule_id)
-            assert delete_success, f"Rule deletion failed"
+            assert delete_success, "Rule deletion failed"
             rule_id = None  # Mark as deleted (don't cleanup again)
 
             await asyncio.sleep(0.5)  # Let deletion propagate
@@ -983,8 +990,9 @@ class TestLogicEngineRuleLifecycle:
             count_2 = len(history_2.get("entries", []))
 
             # Should NOT have a new execution (30 < 35)
-            assert count_2 == count_1, \
-                f"Modified threshold should prevent trigger: {count_1} → {count_2}"
+            assert (
+                count_2 == count_1
+            ), f"Modified threshold should prevent trigger: {count_1} → {count_2}"
 
             # === TRIGGER WITH 40°C (should trigger: 40 > 35) ===
             await mqtt_client.publish_sensor_data(esp_id=esp_id, gpio=sensor_gpio, value=40.0)
@@ -993,8 +1001,9 @@ class TestLogicEngineRuleLifecycle:
             history_3 = await api_client.get_execution_history(rule_id=rule_id, limit=10)
             count_3 = len(history_3.get("entries", []))
 
-            assert count_3 > count_2, \
-                f"Rule should trigger at 40°C with new threshold 35: {count_2} → {count_3}"
+            assert (
+                count_3 > count_2
+            ), f"Rule should trigger at 40°C with new threshold 35: {count_2} → {count_3}"
 
             print(f"✓ Modification verified: {count_1} → {count_2} → {count_3}")
 

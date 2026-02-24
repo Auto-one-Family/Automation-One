@@ -39,9 +39,9 @@ class TestCompleteSensorActuatorFlow:
         # If moisture (GPIO 34) is low (< 2000), turn pump ON
         pump_value = 1 if raw_value < 2000 else 0
 
-        actuator_response = mock_esp32_with_sensors.handle_command("actuator_set", {
-            "gpio": 5, "value": pump_value, "mode": "digital"
-        })
+        actuator_response = mock_esp32_with_sensors.handle_command(
+            "actuator_set", {"gpio": 5, "value": pump_value, "mode": "digital"}
+        )
         assert actuator_response["status"] == "ok"
 
         # Verify actuator state matches decision
@@ -58,9 +58,15 @@ class TestCompleteSensorActuatorFlow:
         flow = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 36})
 
         # Control multiple actuators
-        mock_esp32_with_sensors.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})  # Pump
-        mock_esp32_with_sensors.handle_command("actuator_set", {"gpio": 6, "value": 1, "mode": "digital"})  # Valve
-        mock_esp32_with_sensors.handle_command("actuator_set", {"gpio": 7, "value": 0.5, "mode": "pwm"})   # Motor
+        mock_esp32_with_sensors.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )  # Pump
+        mock_esp32_with_sensors.handle_command(
+            "actuator_set", {"gpio": 6, "value": 1, "mode": "digital"}
+        )  # Valve
+        mock_esp32_with_sensors.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.5, "mode": "pwm"}
+        )  # Motor
 
         # Verify all commands succeeded
         actuator_response = mock_esp32_with_sensors.handle_command("actuator_get", {})
@@ -68,11 +74,11 @@ class TestCompleteSensorActuatorFlow:
 
         # Verify MQTT messages published for both sensors and actuators
         messages = mock_esp32_with_sensors.get_published_messages()
-        
+
         # Count by type (sensors have zone topics, actuators have status + response)
         sensor_msgs = [m for m in messages if "/sensor/" in m["topic"]]
         actuator_msgs = [m for m in messages if "/actuator/" in m["topic"]]
-        
+
         # 3 sensors × 2 (normal + zone topic) = 6 sensor messages
         # 3 actuators × 2 (status + response) = 6 actuator messages
         assert len(sensor_msgs) >= 3  # At least 3 (6 with zone)
@@ -87,9 +93,9 @@ class TestMQTTOrchestration:
         mock_esp32.clear_published_messages()
 
         # Send command
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         # Verify response received
         assert response["status"] == "ok"
@@ -99,7 +105,7 @@ class TestMQTTOrchestration:
         messages = mock_esp32.get_published_messages()
         status_msgs = [m for m in messages if "/status" in m["topic"]]
         response_msgs = [m for m in messages if "/response" in m["topic"]]
-        
+
         assert len(status_msgs) == 1
         assert len(response_msgs) == 1
         assert "actuator/5/status" in status_msgs[0]["topic"]
@@ -121,12 +127,12 @@ class TestMQTTOrchestration:
 
         # Verify messages in order (actuators publish status + response = 4, sensor = 2 with zone)
         messages = mock_esp32.get_published_messages()
-        
+
         # Filter by type
         actuator_5_msgs = [m for m in messages if "actuator/5" in m["topic"]]
         actuator_6_msgs = [m for m in messages if "actuator/6" in m["topic"]]
         sensor_msgs = [m for m in messages if "sensor/34" in m["topic"]]
-        
+
         # Each actuator should have status + response
         assert len(actuator_5_msgs) == 2
         assert len(actuator_6_msgs) == 2
@@ -140,12 +146,12 @@ class TestEmergencyScenarios:
         """Test emergency stop affects entire system."""
         # Turn all actuators ON
         for gpio in [5, 6]:
-            mock_esp32_with_actuators.handle_command("actuator_set", {
-                "gpio": gpio, "value": 1, "mode": "digital"
-            })
-        mock_esp32_with_actuators.handle_command("actuator_set", {
-            "gpio": 7, "value": 0.75, "mode": "pwm"
-        })
+            mock_esp32_with_actuators.handle_command(
+                "actuator_set", {"gpio": gpio, "value": 1, "mode": "digital"}
+            )
+        mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.75, "mode": "pwm"}
+        )
 
         # Trigger emergency stop
         emergency_response = mock_esp32_with_actuators.handle_command("emergency_stop", {})
@@ -162,20 +168,20 @@ class TestEmergencyScenarios:
         mock_esp32_with_actuators.handle_command("emergency_stop", {})
 
         # Attempt to restart actuators - should fail (emergency stopped)
-        response = mock_esp32_with_actuators.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        response = mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert response["status"] == "error"
         assert "emergency stopped" in response["error"]
-        
+
         # Clear emergency first
         clear_response = mock_esp32_with_actuators.handle_command("clear_emergency", {})
         assert clear_response["status"] == "ok"
-        
+
         # Now restart should work
-        response = mock_esp32_with_actuators.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        response = mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert response["status"] == "ok"
 
 
@@ -259,7 +265,7 @@ class TestSystemReset:
         sensor_count_before = len(mock_esp32_with_actuators.sensors)
 
         assert actuator_count_before == 3  # Pre-configured
-        assert sensor_count_before == 1    # Just added
+        assert sensor_count_before == 1  # Just added
 
         # Reset
         reset_response = mock_esp32_with_actuators.handle_command("reset", {})
@@ -323,6 +329,7 @@ class TestSystemHealth:
         uptime1 = response1["uptime"]
 
         import time
+
         time.sleep(0.01)
 
         response2 = mock_esp32.handle_command("ping", {})
@@ -360,9 +367,9 @@ class TestErrorRecovery:
         assert error_response["status"] == "error"
 
         # Verify system still works
-        ok_response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        ok_response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert ok_response["status"] == "ok"
 
 
@@ -382,22 +389,22 @@ class TestFullSystemWorkflow:
         # 3. Control irrigation based on moisture (simple logic)
         if moisture < 2000:
             # Turn pump ON
-            pump_response = mock_esp32_with_sensors.handle_command("actuator_set", {
-                "gpio": 5, "value": 1, "mode": "digital"
-            })
+            pump_response = mock_esp32_with_sensors.handle_command(
+                "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+            )
             assert pump_response["status"] == "ok"
         else:
             # Turn pump OFF
-            pump_response = mock_esp32_with_sensors.handle_command("actuator_set", {
-                "gpio": 5, "value": 0, "mode": "digital"
-            })
+            pump_response = mock_esp32_with_sensors.handle_command(
+                "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}
+            )
             assert pump_response["status"] == "ok"
 
         # 4. Control ventilation based on temperature (PWM)
         fan_speed = min(1.0, temp / 3000.0)  # Scale to 0-1
-        fan_response = mock_esp32_with_sensors.handle_command("actuator_set", {
-            "gpio": 7, "value": fan_speed, "mode": "pwm"
-        })
+        fan_response = mock_esp32_with_sensors.handle_command(
+            "actuator_set", {"gpio": 7, "value": fan_speed, "mode": "pwm"}
+        )
         assert fan_response["status"] == "ok"
 
         # Verify final state

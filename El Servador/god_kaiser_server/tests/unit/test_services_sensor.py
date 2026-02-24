@@ -36,8 +36,7 @@ class TestSensorServiceConfigManagement:
         result = await service.get_config("ESP_UNKNOWN", gpio=4)
 
         # ASSERT
-        assert result is None, \
-            "get_config should return None when ESP device not found"
+        assert result is None, "get_config should return None when ESP device not found"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -60,8 +59,7 @@ class TestSensorServiceConfigManagement:
         result = await service.get_config("ESP_TEST001", gpio=4)
 
         # ASSERT
-        assert result is None, \
-            "get_config should return None when sensor config not found"
+        assert result is None, "get_config should return None when sensor config not found"
         mock_sensor_repo.get_by_esp_and_gpio.assert_called_once_with(1, 4)
 
     @pytest.mark.sensor
@@ -93,10 +91,10 @@ class TestSensorServiceConfigManagement:
 
         # ASSERT
         assert result is not None, "get_config should return SensorConfig when found"
-        assert result.sensor_type == "ds18b20", \
-            f"Expected sensor_type='ds18b20', got '{result.sensor_type}'"
-        assert result.gpio == 4, \
-            f"Expected gpio=4, got {result.gpio}"
+        assert (
+            result.sensor_type == "ds18b20"
+        ), f"Expected sensor_type='ds18b20', got '{result.sensor_type}'"
+        assert result.gpio == 4, f"Expected gpio=4, got {result.gpio}"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -140,7 +138,7 @@ class TestSensorServiceConfigManagement:
         )
 
         # Patch SensorConfig to avoid actual SQLAlchemy model instantiation
-        with patch('src.services.sensor_service.SensorConfig') as MockSensorConfig:
+        with patch("src.services.sensor_service.SensorConfig") as MockSensorConfig:
             mock_config = MagicMock(
                 sensor_type="ds18b20",
                 gpio=4,
@@ -197,10 +195,12 @@ class TestSensorServiceConfigManagement:
         )
 
         # ASSERT
-        assert result.sensor_type == "sht31", \
-            f"sensor_type should be updated to 'sht31', got '{result.sensor_type}'"
-        assert result.name == "New Name", \
-            f"name should be updated to 'New Name', got '{result.name}'"
+        assert (
+            result.sensor_type == "sht31"
+        ), f"sensor_type should be updated to 'sht31', got '{result.sensor_type}'"
+        assert (
+            result.name == "New Name"
+        ), f"name should be updated to 'New Name', got '{result.name}'"
         mock_sensor_repo.create.assert_not_called()  # Should NOT create new
 
 
@@ -223,12 +223,14 @@ class TestSensorServiceProcessing:
         # Mock processor that returns dict (as service expects)
         # Note: Real processors return ProcessingResult dataclass, but service uses .get()
         mock_processor = MagicMock()
-        mock_processor.process = MagicMock(return_value={
-            "value": 25.0,
-            "unit": "°C",
-            "quality": "good",
-            "metadata": {"raw_mode": True, "original_raw_value": 400},
-        })
+        mock_processor.process = MagicMock(
+            return_value={
+                "value": 25.0,
+                "unit": "°C",
+                "quality": "good",
+                "metadata": {"raw_mode": True, "original_raw_value": 400},
+            }
+        )
 
         mock_loader = MagicMock()
         mock_loader.get_processor = MagicMock(return_value=mock_processor)
@@ -249,12 +251,13 @@ class TestSensorServiceProcessing:
         )
 
         # ASSERT
-        assert result["success"] is True, \
-            f"Processing should succeed, got error: {result.get('error')}"
-        assert result["processed_value"] == 25.0, \
-            f"RAW 400 should process to 25.0°C, got {result['processed_value']}"
-        assert result["quality"] == "good", \
-            f"Expected quality='good', got '{result['quality']}'"
+        assert (
+            result["success"] is True
+        ), f"Processing should succeed, got error: {result.get('error')}"
+        assert (
+            result["processed_value"] == 25.0
+        ), f"RAW 400 should process to 25.0°C, got {result['processed_value']}"
+        assert result["quality"] == "good", f"Expected quality='good', got '{result['quality']}'"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -271,12 +274,14 @@ class TestSensorServiceProcessing:
 
         # Mock processor that simulates calibration applied
         mock_processor = MagicMock()
-        mock_processor.process = MagicMock(return_value={
-            "value": 25.5,  # 25.0°C + 0.5 offset
-            "unit": "°C",
-            "quality": "good",
-            "metadata": {"raw_mode": True, "original_raw_value": 400, "offset_applied": 0.5},
-        })
+        mock_processor.process = MagicMock(
+            return_value={
+                "value": 25.5,  # 25.0°C + 0.5 offset
+                "unit": "°C",
+                "quality": "good",
+                "metadata": {"raw_mode": True, "original_raw_value": 400, "offset_applied": 0.5},
+            }
+        )
 
         mock_loader = MagicMock()
         mock_loader.get_processor = MagicMock(return_value=mock_processor)
@@ -298,10 +303,12 @@ class TestSensorServiceProcessing:
         )
 
         # ASSERT
-        assert result["success"] is True, \
-            f"Processing should succeed, got error: {result.get('error')}"
-        assert result["processed_value"] == 25.5, \
-            f"25.0°C + 0.5 offset should be 25.5°C, got {result['processed_value']}"
+        assert (
+            result["success"] is True
+        ), f"Processing should succeed, got error: {result.get('error')}"
+        assert (
+            result["processed_value"] == 25.5
+        ), f"25.0°C + 0.5 offset should be 25.5°C, got {result['processed_value']}"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -333,10 +340,10 @@ class TestSensorServiceProcessing:
         )
 
         # ASSERT
-        assert result["success"] is False, \
-            "Processing should fail for unknown sensor type"
-        assert "No processor" in result.get("error", ""), \
-            f"Error should mention missing processor, got: {result.get('error')}"
+        assert result["success"] is False, "Processing should fail for unknown sensor type"
+        assert "No processor" in result.get(
+            "error", ""
+        ), f"Error should mention missing processor, got: {result.get('error')}"
 
 
 class TestSensorServiceDelete:
@@ -361,8 +368,7 @@ class TestSensorServiceDelete:
         result = await service.delete_config("ESP_UNKNOWN", gpio=4)
 
         # ASSERT
-        assert result is False, \
-            "delete_config should return False when ESP not found"
+        assert result is False, "delete_config should return False when ESP not found"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -385,8 +391,7 @@ class TestSensorServiceDelete:
         result = await service.delete_config("ESP_TEST001", gpio=4)
 
         # ASSERT
-        assert result is False, \
-            "delete_config should return False when sensor not found"
+        assert result is False, "delete_config should return False when sensor not found"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -411,8 +416,7 @@ class TestSensorServiceDelete:
         result = await service.delete_config("ESP_TEST001", gpio=4)
 
         # ASSERT
-        assert result is True, \
-            "delete_config should return True when sensor deleted"
+        assert result is True, "delete_config should return True when sensor deleted"
         mock_sensor_repo.delete.assert_called_once_with(100)
 
 
@@ -440,18 +444,16 @@ class TestSensorServiceCalibration:
             esp_id="ESP_TEST001",
             gpio=4,
             sensor_type="ds18b20",
-            calibration_points=[
-                {"raw": 25.0, "reference": 25.5}  # Actual 25°C, reference 25.5°C
-            ],
+            calibration_points=[{"raw": 25.0, "reference": 25.5}],  # Actual 25°C, reference 25.5°C
             method="offset",
             save_to_config=False,
         )
 
         # ASSERT
-        assert result["success"] is True, \
-            f"Calibration should succeed, got: {result}"
-        assert result["calibration"]["offset"] == 0.5, \
-            f"Offset should be 0.5 (25.5 - 25.0), got {result['calibration']['offset']}"
+        assert result["success"] is True, f"Calibration should succeed, got: {result}"
+        assert (
+            result["calibration"]["offset"] == 0.5
+        ), f"Offset should be 0.5 (25.5 - 25.0), got {result['calibration']['offset']}"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -474,7 +476,7 @@ class TestSensorServiceCalibration:
             gpio=4,
             sensor_type="ds18b20",
             calibration_points=[
-                {"raw": 0.0, "reference": 0.0},   # 0°C → 0°C
+                {"raw": 0.0, "reference": 0.0},  # 0°C → 0°C
                 {"raw": 100.0, "reference": 100.0},  # 100°C → 100°C
             ],
             method="linear",
@@ -482,12 +484,13 @@ class TestSensorServiceCalibration:
         )
 
         # ASSERT
-        assert result["success"] is True, \
-            f"Calibration should succeed, got: {result}"
-        assert result["calibration"]["slope"] == 1.0, \
-            f"Slope should be 1.0, got {result['calibration']['slope']}"
-        assert result["calibration"]["offset"] == 0.0, \
-            f"Offset should be 0.0, got {result['calibration']['offset']}"
+        assert result["success"] is True, f"Calibration should succeed, got: {result}"
+        assert (
+            result["calibration"]["slope"] == 1.0
+        ), f"Slope should be 1.0, got {result['calibration']['slope']}"
+        assert (
+            result["calibration"]["offset"] == 0.0
+        ), f"Offset should be 0.0, got {result['calibration']['offset']}"
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -512,10 +515,10 @@ class TestSensorServiceCalibration:
         )
 
         # ASSERT
-        assert result["success"] is False, \
-            "Calibration should fail with no points"
-        assert "at least 1" in result.get("error", "").lower(), \
-            f"Error should mention minimum points, got: {result.get('error')}"
+        assert result["success"] is False, "Calibration should fail with no points"
+        assert (
+            "at least 1" in result.get("error", "").lower()
+        ), f"Error should mention minimum points, got: {result.get('error')}"
 
 
 class TestSensorServiceEdgeCases:
@@ -537,17 +540,19 @@ class TestSensorServiceEdgeCases:
 
         # Mock processor that simulates sensor fault detection
         mock_processor = MagicMock()
-        mock_processor.process = MagicMock(return_value={
-            "value": 0.0,  # Fault returns 0.0 value
-            "unit": "°C",
-            "quality": "error",  # Sensor fault = error quality
-            "metadata": {
-                "raw_mode": True,
-                "original_raw_value": -2032,
-                "error_code": 1060,
-                "error": "DS18B20 sensor fault: -127°C indicates disconnected sensor",
-            },
-        })
+        mock_processor.process = MagicMock(
+            return_value={
+                "value": 0.0,  # Fault returns 0.0 value
+                "unit": "°C",
+                "quality": "error",  # Sensor fault = error quality
+                "metadata": {
+                    "raw_mode": True,
+                    "original_raw_value": -2032,
+                    "error_code": 1060,
+                    "error": "DS18B20 sensor fault: -127°C indicates disconnected sensor",
+                },
+            }
+        )
 
         mock_loader = MagicMock()
         mock_loader.get_processor = MagicMock(return_value=mock_processor)
@@ -568,10 +573,12 @@ class TestSensorServiceEdgeCases:
         )
 
         # ASSERT
-        assert result["success"] is True, \
-            f"Processing should succeed even for error, got: {result.get('error')}"
-        assert result["quality"] == "error", \
-            f"DS18B20 -127°C should return quality='error', got '{result['quality']}'"
+        assert (
+            result["success"] is True
+        ), f"Processing should succeed even for error, got: {result.get('error')}"
+        assert (
+            result["quality"] == "error"
+        ), f"DS18B20 -127°C should return quality='error', got '{result['quality']}'"
 
     @pytest.mark.sensor
     @pytest.mark.edge_case
@@ -593,5 +600,4 @@ class TestSensorServiceEdgeCases:
         result = await service.get_latest_reading("ESP_UNKNOWN", gpio=4)
 
         # ASSERT
-        assert result is None, \
-            "get_latest_reading should return None for unknown ESP"
+        assert result is None, "get_latest_reading should return None for unknown ESP"

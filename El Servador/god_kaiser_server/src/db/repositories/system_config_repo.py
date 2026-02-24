@@ -16,14 +16,14 @@ from ..models.system import SystemConfig
 class SystemConfigRepository:
     """
     System Configuration Repository.
-    
+
     Manages system-wide configuration stored in SystemConfig model.
     """
 
     def __init__(self, session: AsyncSession):
         """
         Initialize repository.
-        
+
         Args:
             session: Async database session
         """
@@ -32,10 +32,10 @@ class SystemConfigRepository:
     async def get_by_key(self, config_key: str) -> Optional[SystemConfig]:
         """
         Get configuration entry by key.
-        
+
         Args:
             config_key: Configuration key (e.g., "mqtt_auth_enabled")
-            
+
         Returns:
             SystemConfig entry or None if not found
         """
@@ -53,19 +53,19 @@ class SystemConfigRepository:
     ) -> SystemConfig:
         """
         Set or update configuration entry.
-        
+
         Args:
             config_key: Configuration key
             config_value: Configuration value (any JSON-serializable type)
             config_type: Configuration type (default: "mqtt")
             description: Human-readable description
             is_secret: Whether this contains sensitive data
-            
+
         Returns:
             Created or updated SystemConfig entry
         """
         existing = await self.get_by_key(config_key)
-        
+
         # SystemConfig.config_value is JSON field, can store any JSON-serializable value
         # For simple values, wrap in dict with "value" key for consistency
         if isinstance(config_value, dict):
@@ -73,7 +73,7 @@ class SystemConfigRepository:
         else:
             # Store simple values as-is (JSON field handles it)
             config_value_dict = config_value
-        
+
         if existing:
             # Update existing entry
             existing.config_value = config_value_dict
@@ -101,7 +101,7 @@ class SystemConfigRepository:
     async def get_mqtt_auth_config(self) -> dict:
         """
         Get MQTT authentication configuration.
-        
+
         Returns:
             Dict with keys: enabled, username, password_hash, last_configured
         """
@@ -109,7 +109,7 @@ class SystemConfigRepository:
         username_entry = await self.get_by_key("mqtt_auth_username")
         password_hash_entry = await self.get_by_key("mqtt_auth_password_hash")
         last_configured_entry = await self.get_by_key("mqtt_auth_last_configured")
-        
+
         # Extract values from config_value (may be direct value or dict)
         def extract_value(entry):
             if not entry:
@@ -119,12 +119,12 @@ class SystemConfigRepository:
             if isinstance(val, dict) and "value" in val:
                 return val["value"]
             return val
-        
+
         enabled_val = extract_value(enabled_entry)
         username_val = extract_value(username_entry)
         password_hash_val = extract_value(password_hash_entry)
         last_configured_val = extract_value(last_configured_entry)
-        
+
         # Parse last_configured datetime
         last_configured_dt = None
         if last_configured_val:
@@ -135,7 +135,7 @@ class SystemConfigRepository:
                     pass
             elif isinstance(last_configured_val, datetime):
                 last_configured_dt = last_configured_val
-        
+
         return {
             "enabled": bool(enabled_val) if enabled_val is not None else False,
             "username": username_val if username_val else None,
@@ -151,7 +151,7 @@ class SystemConfigRepository:
     ) -> None:
         """
         Set MQTT authentication configuration.
-        
+
         Args:
             enabled: Whether MQTT auth is enabled
             username: MQTT username (if enabled)
@@ -165,7 +165,7 @@ class SystemConfigRepository:
             description="MQTT authentication enabled flag",
             is_secret=False,
         )
-        
+
         if enabled and username:
             await self.set_config(
                 "mqtt_auth_username",
@@ -179,7 +179,7 @@ class SystemConfigRepository:
             existing = await self.get_by_key("mqtt_auth_username")
             if existing:
                 await self.session.delete(existing)
-        
+
         if enabled and password_hash:
             await self.set_config(
                 "mqtt_auth_password_hash",
@@ -193,7 +193,7 @@ class SystemConfigRepository:
             existing = await self.get_by_key("mqtt_auth_password_hash")
             if existing:
                 await self.session.delete(existing)
-        
+
         # Update last_configured timestamp
         await self.set_config(
             "mqtt_auth_last_configured",

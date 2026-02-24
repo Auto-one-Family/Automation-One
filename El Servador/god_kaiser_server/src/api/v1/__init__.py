@@ -64,7 +64,3 @@ __all__ = [
     "users_router",
     "zone_router",
 ]
-
-
-
-

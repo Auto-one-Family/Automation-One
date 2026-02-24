@@ -25,24 +25,19 @@ def maintenance_settings():
         sensor_data_cleanup_dry_run=True,
         sensor_data_cleanup_batch_size=1000,
         sensor_data_cleanup_max_batches=100,
-
         command_history_retention_enabled=False,
         command_history_retention_days=14,
         command_history_cleanup_dry_run=True,
         command_history_cleanup_batch_size=1000,
         command_history_cleanup_max_batches=50,
-
         orphaned_mock_cleanup_enabled=True,
         orphaned_mock_auto_delete=False,  # ⚠️ Default: WARN ONLY
         orphaned_mock_age_hours=24,
-
         heartbeat_timeout_seconds=180,
         mqtt_health_check_interval_seconds=30,
         esp_health_check_interval_seconds=60,
-
         stats_aggregation_enabled=True,
         stats_aggregation_interval_minutes=60,
-
         cleanup_alert_threshold_percent=10.0,
         cleanup_max_records_per_run=100000,
     )
@@ -98,6 +93,7 @@ class TestOrphanedMocksCleanup:
         - Nur Warnings geloggt
         """
         import logging
+
         caplog.set_level(logging.WARNING)
 
         settings = maintenance_settings
@@ -178,7 +174,9 @@ class TestOrphanedMocksCleanup:
     # ================================================================
 
     @pytest.mark.asyncio
-    async def test_running_state_mismatch_detection(self, mock_session, mock_scheduler, maintenance_settings):
+    async def test_running_state_mismatch_detection(
+        self, mock_session, mock_scheduler, maintenance_settings
+    ):
         """
         Test: Running-State aber kein Job im Scheduler
 
@@ -219,7 +217,9 @@ class TestOrphanedMocksCleanup:
                 mock_repo.update_simulation_state.assert_called_once_with("MOCK_RUNNING", "stopped")
 
     @pytest.mark.asyncio
-    async def test_old_stopped_mock_detection(self, mock_session, mock_scheduler, maintenance_settings):
+    async def test_old_stopped_mock_detection(
+        self, mock_session, mock_scheduler, maintenance_settings
+    ):
         """
         Test: Alte Stopped Mocks Detection
 
@@ -255,7 +255,9 @@ class TestOrphanedMocksCleanup:
                 assert result["deleted"] == 0
 
     @pytest.mark.asyncio
-    async def test_recent_stopped_mock_not_detected(self, mock_session, mock_scheduler, maintenance_settings):
+    async def test_recent_stopped_mock_not_detected(
+        self, mock_session, mock_scheduler, maintenance_settings
+    ):
         """
         Test: Kürzlich gestoppte Mocks werden NICHT als orphaned erkannt
 

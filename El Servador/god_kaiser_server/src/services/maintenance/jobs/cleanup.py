@@ -9,9 +9,8 @@ Provides cleanup jobs with comprehensive safety features:
 - Rollback on errors
 """
 
-import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,7 +71,7 @@ class SensorDataCleanup:
                 "batches_processed": 0,
                 "cutoff_date": None,
                 "duration_seconds": 0,
-                "status": "disabled"
+                "status": "disabled",
             }
 
         start_time = datetime.now(timezone.utc)
@@ -83,21 +82,17 @@ class SensorDataCleanup:
         # ────────────────────────────────────────────────────
         # PHASE 1: Zähle zu löschende Records
         # ────────────────────────────────────────────────────
-        total_records_result = await self.session.execute(
-            select(func.count(SensorData.id))
-        )
+        total_records_result = await self.session.execute(select(func.count(SensorData.id)))
         total_records = total_records_result.scalar() or 0
 
         records_to_delete_result = await self.session.execute(
-            select(func.count(SensorData.id))
-            .where(SensorData.timestamp < cutoff_date)
+            select(func.count(SensorData.id)).where(SensorData.timestamp < cutoff_date)
         )
         records_to_delete = records_to_delete_result.scalar() or 0
 
         if records_to_delete == 0:
             self.logger.info(
-                f"No sensor data older than {cutoff_date.date()} found. "
-                "Cleanup not needed."
+                f"No sensor data older than {cutoff_date.date()} found. " "Cleanup not needed."
             )
             return {
                 "dry_run": dry_run,
@@ -106,7 +101,7 @@ class SensorDataCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": 0,
-                "status": "nothing_to_delete"
+                "status": "nothing_to_delete",
             }
 
         # ────────────────────────────────────────────────────
@@ -133,7 +128,7 @@ class SensorDataCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": 0,
-                "status": "aborted_safety_limit"
+                "status": "aborted_safety_limit",
             }
 
         # ────────────────────────────────────────────────────
@@ -153,7 +148,7 @@ class SensorDataCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": duration,
-                "status": "dry_run"
+                "status": "dry_run",
             }
 
         # ────────────────────────────────────────────────────
@@ -202,10 +197,7 @@ class SensorDataCleanup:
                     break  # Letzter Batch
 
             except Exception as e:
-                self.logger.error(
-                    f"Error in batch {batches_processed}: {e}",
-                    exc_info=True
-                )
+                self.logger.error(f"Error in batch {batches_processed}: {e}", exc_info=True)
                 await self.session.rollback()
                 break
 
@@ -223,7 +215,7 @@ class SensorDataCleanup:
             "batches_processed": batches_processed,
             "cutoff_date": cutoff_date.isoformat(),
             "duration_seconds": duration,
-            "status": "success"
+            "status": "success",
         }
 
 
@@ -254,7 +246,7 @@ class CommandHistoryCleanup:
                 "batches_processed": 0,
                 "cutoff_date": None,
                 "duration_seconds": 0,
-                "status": "disabled"
+                "status": "disabled",
             }
 
         start_time = datetime.now(timezone.utc)
@@ -263,21 +255,17 @@ class CommandHistoryCleanup:
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
         # Count total and records to delete
-        total_records_result = await self.session.execute(
-            select(func.count(ActuatorHistory.id))
-        )
+        total_records_result = await self.session.execute(select(func.count(ActuatorHistory.id)))
         total_records = total_records_result.scalar() or 0
 
         records_to_delete_result = await self.session.execute(
-            select(func.count(ActuatorHistory.id))
-            .where(ActuatorHistory.timestamp < cutoff_date)
+            select(func.count(ActuatorHistory.id)).where(ActuatorHistory.timestamp < cutoff_date)
         )
         records_to_delete = records_to_delete_result.scalar() or 0
 
         if records_to_delete == 0:
             self.logger.info(
-                f"No command history older than {cutoff_date.date()} found. "
-                "Cleanup not needed."
+                f"No command history older than {cutoff_date.date()} found. " "Cleanup not needed."
             )
             return {
                 "dry_run": dry_run,
@@ -286,7 +274,7 @@ class CommandHistoryCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": 0,
-                "status": "nothing_to_delete"
+                "status": "nothing_to_delete",
             }
 
         # Safety checks
@@ -310,7 +298,7 @@ class CommandHistoryCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": 0,
-                "status": "aborted_safety_limit"
+                "status": "aborted_safety_limit",
             }
 
         # Dry-Run check
@@ -328,7 +316,7 @@ class CommandHistoryCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": duration,
-                "status": "dry_run"
+                "status": "dry_run",
             }
 
         # Batch deletion
@@ -373,10 +361,7 @@ class CommandHistoryCleanup:
                     break
 
             except Exception as e:
-                self.logger.error(
-                    f"Error in batch {batches_processed}: {e}",
-                    exc_info=True
-                )
+                self.logger.error(f"Error in batch {batches_processed}: {e}", exc_info=True)
                 await self.session.rollback()
                 break
 
@@ -394,7 +379,7 @@ class CommandHistoryCleanup:
             "batches_processed": batches_processed,
             "cutoff_date": cutoff_date.isoformat(),
             "duration_seconds": duration,
-            "status": "success"
+            "status": "success",
         }
 
 
@@ -410,7 +395,7 @@ class OrphanedMocksCleanup:
         self,
         session: AsyncSession,
         scheduler: Any,  # CentralScheduler
-        settings: MaintenanceSettings
+        settings: MaintenanceSettings,
     ):
         self.session = session
         self.scheduler = scheduler
@@ -432,7 +417,6 @@ class OrphanedMocksCleanup:
         if not self.settings.orphaned_mock_cleanup_enabled:
             return {"status": "disabled", "orphaned_found": 0, "deleted": 0, "warned": 0}
 
-        from src.db.models.esp import ESPDevice
         from src.db.repositories import ESPRepository
 
         orphaned_count = 0
@@ -449,6 +433,7 @@ class OrphanedMocksCleanup:
         # Get SimulationScheduler to check active mocks
         try:
             from src.services.simulation import get_simulation_scheduler
+
             sim_scheduler = get_simulation_scheduler()
         except RuntimeError:
             sim_scheduler = None
@@ -518,7 +503,7 @@ class OrphanedMocksCleanup:
             "status": "success",
             "orphaned_found": orphaned_count + old_stopped_count,
             "deleted": deleted_count,
-            "warned": warned_count
+            "warned": warned_count,
         }
 
 
@@ -574,7 +559,7 @@ class HeartbeatLogCleanup:
                 "batches_processed": 0,
                 "cutoff_date": None,
                 "duration_seconds": 0,
-                "status": "disabled"
+                "status": "disabled",
             }
 
         start_time = datetime.now(timezone.utc)
@@ -585,21 +570,17 @@ class HeartbeatLogCleanup:
         # ────────────────────────────────────────────────────
         # PHASE 1: Zähle zu löschende Records
         # ────────────────────────────────────────────────────
-        total_records_result = await self.session.execute(
-            select(func.count(ESPHeartbeatLog.id))
-        )
+        total_records_result = await self.session.execute(select(func.count(ESPHeartbeatLog.id)))
         total_records = total_records_result.scalar() or 0
 
         records_to_delete_result = await self.session.execute(
-            select(func.count(ESPHeartbeatLog.id))
-            .where(ESPHeartbeatLog.timestamp < cutoff_date)
+            select(func.count(ESPHeartbeatLog.id)).where(ESPHeartbeatLog.timestamp < cutoff_date)
         )
         records_to_delete = records_to_delete_result.scalar() or 0
 
         if records_to_delete == 0:
             self.logger.info(
-                f"No heartbeat logs older than {cutoff_date.date()} found. "
-                "Cleanup not needed."
+                f"No heartbeat logs older than {cutoff_date.date()} found. " "Cleanup not needed."
             )
             return {
                 "dry_run": dry_run,
@@ -608,7 +589,7 @@ class HeartbeatLogCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": 0,
-                "status": "nothing_to_delete"
+                "status": "nothing_to_delete",
             }
 
         # ────────────────────────────────────────────────────
@@ -628,7 +609,7 @@ class HeartbeatLogCleanup:
                 "batches_processed": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "duration_seconds": duration,
-                "status": "dry_run"
+                "status": "dry_run",
             }
 
         # ────────────────────────────────────────────────────
@@ -677,10 +658,7 @@ class HeartbeatLogCleanup:
                     break  # Letzter Batch
 
             except Exception as e:
-                self.logger.error(
-                    f"Error in batch {batches_processed}: {e}",
-                    exc_info=True
-                )
+                self.logger.error(f"Error in batch {batches_processed}: {e}", exc_info=True)
                 await self.session.rollback()
                 break
 
@@ -698,6 +676,5 @@ class HeartbeatLogCleanup:
             "batches_processed": batches_processed,
             "cutoff_date": cutoff_date.isoformat(),
             "duration_seconds": duration,
-            "status": "success"
+            "status": "success",
         }
-

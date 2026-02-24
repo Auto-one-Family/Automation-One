@@ -23,6 +23,7 @@ PATTERN: Folgt BaseActionExecutor (siehe actuator_executor.py)
 Phase: 3 - Sequence Action Executor
 Status: IMPLEMENTED
 """
+
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -61,18 +62,14 @@ class StepResult:
     duration_ms: int = 0
     retries: int = 0
 
-    def complete(
-        self, success: bool, message: str, error_code: Optional[int] = None
-    ):
+    def complete(self, success: bool, message: str, error_code: Optional[int] = None):
         """Markiert Step als abgeschlossen."""
         self.completed_at = datetime.now(timezone.utc)
         self.success = success
         self.message = message
         self.error_code = error_code
         if self.started_at:
-            self.duration_ms = int(
-                (self.completed_at - self.started_at).total_seconds() * 1000
-            )
+            self.duration_ms = int((self.completed_at - self.started_at).total_seconds() * 1000)
 
 
 @dataclass
@@ -150,9 +147,7 @@ class SequenceProgress:
             "progress_percent": self.progress_percent,
             "current_step_name": self.current_step_name,
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": (
-                self.completed_at.isoformat() if self.completed_at else None
-            ),
+            "completed_at": (self.completed_at.isoformat() if self.completed_at else None),
             "duration_seconds": self.duration_seconds,
             "step_results": [
                 {
@@ -449,11 +444,7 @@ class SequenceActionExecutor(BaseActionExecutor):
             ]:
                 delay = step.get(delay_key)
                 if delay is not None:
-                    if (
-                        not isinstance(delay, (int, float))
-                        or delay < 0
-                        or delay > 3600
-                    ):
+                    if not isinstance(delay, (int, float)) or delay < 0 or delay > 3600:
                         return ActionResult(
                             success=False,
                             message=f"Step {i}: {delay_key} must be 0-3600 seconds",
@@ -465,9 +456,7 @@ class SequenceActionExecutor(BaseActionExecutor):
 
         return None
 
-    async def _run_sequence(
-        self, sequence_id: str, steps: List[dict], context: dict
-    ) -> None:
+    async def _run_sequence(self, sequence_id: str, steps: List[dict], context: dict) -> None:
         """
         Führt Sequenz aus (Background-Task).
 
@@ -543,9 +532,7 @@ class SequenceActionExecutor(BaseActionExecutor):
                             for attempt in range(retry_count + 1):
                                 try:
                                     async with asyncio.timeout(timeout):
-                                        result = await self._execute_sub_action(
-                                            action, context
-                                        )
+                                        result = await self._execute_sub_action(action, context)
 
                                     if result.success:
                                         success = True
@@ -557,9 +544,7 @@ class SequenceActionExecutor(BaseActionExecutor):
 
                                 except asyncio.TimeoutError:
                                     last_error = f"Step timeout after {timeout}s"
-                                    logger.warning(
-                                        f"Step {i} timeout (attempt {attempt+1})"
-                                    )
+                                    logger.warning(f"Step {i} timeout (attempt {attempt+1})")
 
                                 # Retry-Delay (außer beim letzten Versuch)
                                 if attempt < retry_count:
@@ -606,17 +591,13 @@ class SequenceActionExecutor(BaseActionExecutor):
                                 break
 
                     except asyncio.CancelledError:
-                        step_result.complete(
-                            False, "Cancelled", SequenceErrorCode.SEQ_CANCELLED
-                        )
+                        step_result.complete(False, "Cancelled", SequenceErrorCode.SEQ_CANCELLED)
                         progress.status = SequenceStatus.CANCELLED
                         raise
 
                     except Exception as e:
                         logger.error(f"Step {i} error: {e}", exc_info=True)
-                        step_result.complete(
-                            False, str(e), SequenceErrorCode.SEQ_INTERNAL_ERROR
-                        )
+                        step_result.complete(False, str(e), SequenceErrorCode.SEQ_INTERNAL_ERROR)
 
                         if progress.abort_on_failure:
                             progress.status = SequenceStatus.FAILED
@@ -634,9 +615,7 @@ class SequenceActionExecutor(BaseActionExecutor):
 
         except asyncio.TimeoutError:
             progress.status = SequenceStatus.TIMEOUT
-            progress.error = (
-                f"Sequence exceeded max duration ({progress.max_duration_seconds}s)"
-            )
+            progress.error = f"Sequence exceeded max duration ({progress.max_duration_seconds}s)"
             progress.error_code = SequenceErrorCode.SEQ_MAX_DURATION_EXCEEDED
             logger.warning(f"Sequence {sequence_id} timed out")
 
@@ -687,12 +666,8 @@ class SequenceActionExecutor(BaseActionExecutor):
                     "status": progress.status.value,
                     "success": progress.status == SequenceStatus.COMPLETED,
                     "duration_seconds": progress.duration_seconds,
-                    "steps_completed": len(
-                        [r for r in progress.step_results if r.success]
-                    ),
-                    "steps_failed": len(
-                        [r for r in progress.step_results if not r.success]
-                    ),
+                    "steps_completed": len([r for r in progress.step_results if r.success]),
+                    "steps_failed": len([r for r in progress.step_results if not r.success]),
                     "error": progress.error,
                     "error_code": progress.error_code,
                 },
@@ -823,17 +798,9 @@ class SequenceActionExecutor(BaseActionExecutor):
 
         # Letzte Stunde
         one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-        recent = [
-            s
-            for s in all_sequences
-            if s.completed_at and s.completed_at >= one_hour_ago
-        ]
+        recent = [s for s in all_sequences if s.completed_at and s.completed_at >= one_hour_ago]
         completed = [s for s in recent if s.status == SequenceStatus.COMPLETED]
-        failed = [
-            s
-            for s in recent
-            if s.status in (SequenceStatus.FAILED, SequenceStatus.TIMEOUT)
-        ]
+        failed = [s for s in recent if s.status in (SequenceStatus.FAILED, SequenceStatus.TIMEOUT)]
 
         # Durchschnittliche Dauer
         durations = [s.duration_seconds for s in completed if s.duration_seconds > 0]
@@ -870,9 +837,7 @@ class SequenceActionExecutor(BaseActionExecutor):
 
     async def _cleanup_old_sequences(self) -> None:
         """Entfernt alte abgeschlossene Sequenzen aus dem Speicher."""
-        cutoff = datetime.now(timezone.utc) - timedelta(
-            seconds=self.PROGRESS_RETENTION_SECONDS
-        )
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.PROGRESS_RETENTION_SECONDS)
 
         to_remove = []
         async with self._lock:

@@ -127,9 +127,7 @@ class SubzoneConfig(Base, TimestampMixin):
     )
 
     # Unique constraint: one subzone_id per ESP
-    __table_args__ = (
-        UniqueConstraint("esp_id", "subzone_id", name="uq_esp_subzone"),
-    )
+    __table_args__ = (UniqueConstraint("esp_id", "subzone_id", name="uq_esp_subzone"),)
 
     def __repr__(self) -> str:
         return (
@@ -142,4 +140,3 @@ class SubzoneConfig(Base, TimestampMixin):
     def gpio_count(self) -> int:
         """Get number of assigned GPIOs."""
         return len(self.assigned_gpios) if self.assigned_gpios else 0
-

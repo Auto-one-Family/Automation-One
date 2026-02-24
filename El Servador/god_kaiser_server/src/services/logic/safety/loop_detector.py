@@ -7,6 +7,7 @@ Verwendet gerichteten Graphen: Nodes = Rules, Edges = Trigger-Beziehungen.
 INTEGRATION: Wird von LogicValidator.validate() aufgerufen
 PATTERN: Kein Singleton - wird als Instanz-Variable genutzt
 """
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional, Tuple
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LoopDetectionResult:
     """Ergebnis der Loop-Detection."""
+
     has_loop: bool
     cycle_path: List[str] = field(default_factory=list)  # Rule-IDs im Cycle
     depth: int = 0
@@ -66,7 +68,7 @@ class LoopDetector:
 
         # Schritt 1: Extrahiere alle Trigger und Actions
         rule_triggers = {}  # rule_id → Set of (esp_id, gpio, type)
-        rule_actions = {}   # rule_id → Set of (esp_id, gpio)
+        rule_actions = {}  # rule_id → Set of (esp_id, gpio)
 
         for rule in rules:
             rule_id = str(rule.get("id", ""))
@@ -206,14 +208,10 @@ class LoopDetector:
                 has_loop=True,
                 cycle_path=cycle,
                 depth=len(cycle),
-                message=f"Loop detected: {' → '.join(cycle)}"
+                message=f"Loop detected: {' → '.join(cycle)}",
             )
 
-        return LoopDetectionResult(
-            has_loop=False,
-            depth=len(visited),
-            message="No loop detected"
-        )
+        return LoopDetectionResult(has_loop=False, depth=len(visited), message="No loop detected")
 
     def check_new_rule(self, new_rule: dict, existing_rules: List[dict]) -> LoopDetectionResult:
         """

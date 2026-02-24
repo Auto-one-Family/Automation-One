@@ -6,7 +6,7 @@ Real-time Data Streaming für Frontend
 import asyncio
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Set
+from typing import Dict, Optional
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 class WebSocketManager:
     """
     WebSocket Manager (Singleton).
-    
+
     Manages WebSocket connections, broadcasts real-time updates.
     Thread-safe for MQTT callback invocations.
     """
@@ -43,7 +43,7 @@ class WebSocketManager:
     async def get_instance(cls) -> "WebSocketManager":
         """
         Get singleton instance.
-        
+
         Returns:
             WebSocketManager instance
         """
@@ -71,7 +71,7 @@ class WebSocketManager:
     def connection_count(self) -> int:
         """
         Get number of active WebSocket connections.
-        
+
         Returns:
             Number of active connections
         """
@@ -80,7 +80,7 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket, client_id: str) -> None:
         """
         Accept WebSocket connection.
-        
+
         Args:
             websocket: WebSocket connection
             client_id: Unique client identifier
@@ -133,7 +133,7 @@ class WebSocketManager:
     async def subscribe(self, client_id: str, filters: dict) -> None:
         """
         Subscribe client to specific message types/filters.
-        
+
         Args:
             client_id: Client identifier
             filters: Filter dictionary with keys:
@@ -145,14 +145,14 @@ class WebSocketManager:
             if client_id not in self._connections:
                 logger.warning(f"Cannot subscribe: client {client_id} not connected")
                 return
-            
+
             self._subscriptions[client_id] = filters
             logger.debug(f"Client {client_id} subscribed with filters: {filters}")
 
     async def unsubscribe(self, client_id: str, filters: Optional[dict] = None) -> None:
         """
         Unsubscribe client from filters.
-        
+
         Args:
             client_id: Client identifier
             filters: Optional filters to remove. If None, clears all subscriptions.
@@ -160,7 +160,7 @@ class WebSocketManager:
         async with self._lock:
             if client_id not in self._connections:
                 return
-            
+
             if filters is None:
                 self._subscriptions[client_id] = {}
             else:
@@ -175,7 +175,7 @@ class WebSocketManager:
                             # Remove key entirely
                             current.pop(key, None)
                 self._subscriptions[client_id] = current
-            
+
             logger.debug(f"Client {client_id} unsubscribed")
 
     async def broadcast(
@@ -183,7 +183,7 @@ class WebSocketManager:
     ) -> None:
         """
         Broadcast message to all subscribed clients.
-        
+
         Args:
             message_type: Message type (sensor_data, actuator_status, etc.)
             data: Message payload
@@ -196,32 +196,35 @@ class WebSocketManager:
                 "timestamp": timestamp,
                 "data": data,
             }
-            
+
             # Filter clients based on subscriptions
             clients_to_send = []
             for client_id, client_filters in self._subscriptions.items():
                 if client_id not in self._connections:
                     continue
-                
+
                 # Check if client is subscribed to this message type
                 subscribed_types = client_filters.get("types", [])
                 if subscribed_types and message_type not in subscribed_types:
                     continue
-                
+
                 # Check ESP ID filter
                 if "esp_id" in data:
                     subscribed_esp_ids = client_filters.get("esp_ids", [])
                     if subscribed_esp_ids and data["esp_id"] not in subscribed_esp_ids:
                         continue
-                
+
                 # Check sensor type filter
                 if "sensor_type" in data:
                     subscribed_sensor_types = client_filters.get("sensor_types", [])
-                    if subscribed_sensor_types and data["sensor_type"] not in subscribed_sensor_types:
+                    if (
+                        subscribed_sensor_types
+                        and data["sensor_type"] not in subscribed_sensor_types
+                    ):
                         continue
-                
+
                 clients_to_send.append(client_id)
-            
+
             # Send to all matching clients
             disconnected_clients = []
             for client_id in clients_to_send:
@@ -229,14 +232,14 @@ class WebSocketManager:
                 if not self._check_rate_limit(client_id):
                     logger.debug(f"Rate limit exceeded for client {client_id}, skipping message")
                     continue
-                
+
                 websocket = self._connections[client_id]
                 try:
                     await websocket.send_json(message)
                 except Exception as e:
                     logger.warning(f"Error sending message to {client_id}: {e}")
                     disconnected_clients.append(client_id)
-            
+
             # Clean up disconnected clients
             for client_id in disconnected_clients:
                 await self.disconnect(client_id)
@@ -246,9 +249,9 @@ class WebSocketManager:
     ) -> None:
         """
         Thread-safe broadcast for MQTT callback invocations.
-        
+
         Can be called from non-asyncio threads (e.g., MQTT callbacks).
-        
+
         Args:
             message_type: Message type
             data: Message payload
@@ -256,8 +259,7 @@ class WebSocketManager:
         """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self.broadcast(message_type, data, filters),
-                self._loop
+                self.broadcast(message_type, data, filters), self._loop
             )
         else:
             logger.warning("Cannot broadcast: event loop not available")
@@ -265,30 +267,30 @@ class WebSocketManager:
     def _check_rate_limit(self, client_id: str) -> bool:
         """
         Check if client exceeds rate limit (10 msg/sec).
-        
+
         Uses sliding window algorithm with deque.
-        
+
         Args:
             client_id: Client identifier
-            
+
         Returns:
             True if within rate limit, False if exceeded
         """
         if client_id not in self._rate_limiter:
             self._rate_limiter[client_id] = deque()
-        
+
         now = datetime.now()
         window_start = now - self._rate_limit_window
-        
+
         # Remove old timestamps outside window
         rate_queue = self._rate_limiter[client_id]
         while rate_queue and rate_queue[0] < window_start:
             rate_queue.popleft()
-        
+
         # Check if limit exceeded
         if len(rate_queue) >= self._rate_limit_max:
             return False
-        
+
         # Add current timestamp
         rate_queue.append(now)
         return True
@@ -296,20 +298,20 @@ class WebSocketManager:
     async def shutdown(self) -> None:
         """
         Shutdown WebSocket Manager.
-        
+
         Closes all connections and cleans up resources.
         """
         async with self._lock:
             logger.info("Shutting down WebSocket Manager...")
-            
+
             # Close all connections
             client_ids = list(self._connections.keys())
             for client_id in client_ids:
                 await self.disconnect(client_id)
-            
+
             self._connections.clear()
             self._subscriptions.clear()
             self._rate_limiter.clear()
             self._loop = None
-            
+
             logger.info("WebSocket Manager shutdown complete")

@@ -233,9 +233,7 @@ class TestMultiActionExecution:
         assert "ESP_TARGET01" in esp_ids
 
     @pytest.mark.asyncio
-    async def test_action_with_duration(
-        self, logic_engine: LogicEngine, mock_actuator_service
-    ):
+    async def test_action_with_duration(self, logic_engine: LogicEngine, mock_actuator_service):
         """Action with duration_seconds passes duration to send_command."""
         actions = [
             {
@@ -361,9 +359,7 @@ class TestCrossESPMockScenario:
         """Source ESP publishes sensor data that would trigger a rule."""
         source = MockESP32Client(esp_id="ESP_XSRC001")
         source.configure_zone("greenhouse", "main_zone")
-        source.set_sensor_value(
-            gpio=34, raw_value=30.0, sensor_type="DS18B20", raw_mode=True
-        )
+        source.set_sensor_value(gpio=34, raw_value=30.0, sensor_type="DS18B20", raw_mode=True)
 
         source.handle_command("sensor_read", {"gpio": 34})
 
@@ -380,9 +376,7 @@ class TestCrossESPMockScenario:
         target.configure_zone("greenhouse", "main_zone")
         target.configure_actuator(gpio=25, actuator_type="fan")
 
-        result = target.handle_command("actuator_set", {
-            "gpio": 25, "value": 0.8, "mode": "pwm"
-        })
+        result = target.handle_command("actuator_set", {"gpio": 25, "value": 0.8, "mode": "pwm"})
 
         assert result["status"] == "ok"
         assert target.get_actuator_state(25).pwm_value == 0.8
@@ -404,8 +398,8 @@ class TestCrossESPMockScenario:
 
         # Server logic engine would evaluate and send command to target
         # We simulate the command arriving at target
-        actuator_result = target.handle_command("actuator_set", {
-            "gpio": 25, "value": 1, "mode": "digital"
-        })
+        actuator_result = target.handle_command(
+            "actuator_set", {"gpio": 25, "value": 1, "mode": "digital"}
+        )
         assert actuator_result["status"] == "ok"
         assert target.get_actuator_state(25).state is True

@@ -116,9 +116,7 @@ class SensorTypeDefaultsRepository:
             SensorTypeDefaults or None if not found
         """
         result = await self.session.execute(
-            select(SensorTypeDefaults).where(
-                SensorTypeDefaults.sensor_type == sensor_type.lower()
-            )
+            select(SensorTypeDefaults).where(SensorTypeDefaults.sensor_type == sensor_type.lower())
         )
         return result.scalar_one_or_none()
 
@@ -142,9 +140,7 @@ class SensorTypeDefaultsRepository:
             List of SensorTypeDefaults with operating_mode='on_demand'
         """
         result = await self.session.execute(
-            select(SensorTypeDefaults).where(
-                SensorTypeDefaults.operating_mode == "on_demand"
-            )
+            select(SensorTypeDefaults).where(SensorTypeDefaults.operating_mode == "on_demand")
         )
         return list(result.scalars().all())
 
@@ -156,9 +152,7 @@ class SensorTypeDefaultsRepository:
             List of SensorTypeDefaults with operating_mode='continuous'
         """
         result = await self.session.execute(
-            select(SensorTypeDefaults).where(
-                SensorTypeDefaults.operating_mode == "continuous"
-            )
+            select(SensorTypeDefaults).where(SensorTypeDefaults.operating_mode == "continuous")
         )
         return list(result.scalars().all())
 

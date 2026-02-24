@@ -202,11 +202,7 @@ class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
         if after:
             conditions.append(ESPHeartbeatLog.timestamp >= after)
 
-        stmt = (
-            select(func.count())
-            .select_from(ESPHeartbeatLog)
-            .where(and_(*conditions))
-        )
+        stmt = select(func.count()).select_from(ESPHeartbeatLog).where(and_(*conditions))
         result = await self.session.execute(stmt)
         return result.scalar_one()
 
@@ -261,17 +257,13 @@ class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
             .limit(batch_size)
         )
 
-        delete_stmt = (
-            delete(ESPHeartbeatLog)
-            .where(ESPHeartbeatLog.id.in_(subquery))
-        )
+        delete_stmt = delete(ESPHeartbeatLog).where(ESPHeartbeatLog.id.in_(subquery))
 
         result = await self.session.execute(delete_stmt)
         deleted_count = result.rowcount
 
         logger.info(
-            f"Deleted {deleted_count}/{total_to_delete} heartbeat logs "
-            f"older than {cutoff_date}"
+            f"Deleted {deleted_count}/{total_to_delete} heartbeat logs " f"older than {cutoff_date}"
         )
 
         return {
@@ -298,22 +290,19 @@ class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
         """
         after = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        stmt = (
-            select(
-                func.count().label("count"),
-                func.min(ESPHeartbeatLog.heap_free).label("min_heap"),
-                func.max(ESPHeartbeatLog.heap_free).label("max_heap"),
-                func.avg(ESPHeartbeatLog.heap_free).label("avg_heap"),
-                func.min(ESPHeartbeatLog.wifi_rssi).label("min_rssi"),
-                func.max(ESPHeartbeatLog.wifi_rssi).label("max_rssi"),
-                func.avg(ESPHeartbeatLog.wifi_rssi).label("avg_rssi"),
-                func.max(ESPHeartbeatLog.uptime).label("max_uptime"),
-            )
-            .where(
-                and_(
-                    ESPHeartbeatLog.device_id == device_id,
-                    ESPHeartbeatLog.timestamp >= after,
-                )
+        stmt = select(
+            func.count().label("count"),
+            func.min(ESPHeartbeatLog.heap_free).label("min_heap"),
+            func.max(ESPHeartbeatLog.heap_free).label("max_heap"),
+            func.avg(ESPHeartbeatLog.heap_free).label("avg_heap"),
+            func.min(ESPHeartbeatLog.wifi_rssi).label("min_rssi"),
+            func.max(ESPHeartbeatLog.wifi_rssi).label("max_rssi"),
+            func.avg(ESPHeartbeatLog.wifi_rssi).label("avg_rssi"),
+            func.max(ESPHeartbeatLog.uptime).label("max_uptime"),
+        ).where(
+            and_(
+                ESPHeartbeatLog.device_id == device_id,
+                ESPHeartbeatLog.timestamp >= after,
             )
         )
 

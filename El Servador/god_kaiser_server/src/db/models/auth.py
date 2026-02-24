@@ -9,7 +9,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, String
+from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, TimestampMixin
@@ -104,9 +104,7 @@ class TokenBlacklist(Base, TimestampMixin):
     )
 
     # Composite Index for cleanup queries
-    __table_args__ = (
-        Index("idx_blacklist_expires_at_user", "expires_at", "user_id"),
-    )
+    __table_args__ = (Index("idx_blacklist_expires_at_user", "expires_at", "user_id"),)
 
     def __repr__(self) -> str:
         return (

@@ -114,9 +114,7 @@ class TestSHT31HumidityProcessor:
         # Should not have condensation warning from process step
         # (validation warnings still present)
         condensation_warnings = [
-            w
-            for w in (result.metadata.get("warnings") or [])
-            if "Consider activating heater" in w
+            w for w in (result.metadata.get("warnings") or []) if "Consider activating heater" in w
         ]
         assert len(condensation_warnings) == 0
 
@@ -227,9 +225,7 @@ class TestSHT31HumidityProcessor:
         calibration = {"offset": -1.0}
         params = {"decimal_places": 0, "condensation_warning": False}
 
-        result = processor.process(
-            raw_value=75.5, calibration=calibration, params=params
-        )
+        result = processor.process(raw_value=75.5, calibration=calibration, params=params)
 
         # 75.5 - 1.0 = 74.5, rounded to 0 decimal places = 74 (banker's rounding)
         assert result.value == 74

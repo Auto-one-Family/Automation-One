@@ -30,7 +30,9 @@ MQTT_TOPIC_ESP_CONFIG_ACTUATOR = "kaiser/{kaiser_id}/esp/{esp_id}/config/actuato
 MQTT_TOPIC_ESP_CONFIG = "kaiser/{kaiser_id}/esp/{esp_id}/config"  # Combined sensor/actuator config
 MQTT_TOPIC_ESP_SYSTEM_COMMAND = "kaiser/{kaiser_id}/esp/{esp_id}/system/command"
 MQTT_TOPIC_ESP_PI_ENHANCED_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/response"
-MQTT_TOPIC_ESP_HEARTBEAT_ACK = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack"  # Phase 2: Heartbeat-ACK
+MQTT_TOPIC_ESP_HEARTBEAT_ACK = (
+    "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack"  # Phase 2: Heartbeat-ACK
+)
 
 # Zone Assignment (Phase 7 - Hierarchical Zones)
 MQTT_TOPIC_ESP_ZONE_ASSIGN = "kaiser/{kaiser_id}/esp/{esp_id}/zone/assign"  # God-Kaiser → ESP
@@ -78,6 +80,7 @@ def get_kaiser_id() -> str:
     """Get KAISER_ID from config or return default."""
     try:
         from .config import get_settings
+
         return get_settings().hierarchy.kaiser_id
     except Exception:
         return DEFAULT_KAISER_ID
@@ -86,16 +89,17 @@ def get_kaiser_id() -> str:
 def get_topic_with_kaiser_id(topic_template: str, **kwargs) -> str:
     """
     Replace {kaiser_id} placeholder in topic template with actual value.
-    
+
     Args:
         topic_template: Topic template with {kaiser_id} and other placeholders
         **kwargs: Additional placeholders to replace (esp_id, gpio, etc.)
-    
+
     Returns:
         Topic string with all placeholders replaced
     """
     kaiser_id = get_kaiser_id()
     return topic_template.format(kaiser_id=kaiser_id, **kwargs)
+
 
 # =============================================================================
 # GPIO RANGES (Board-Specific)
@@ -104,7 +108,19 @@ def get_topic_with_kaiser_id(topic_template: str, **kwargs) -> str:
 # ESP32 WROOM
 # Canonical source: SYSTEM_RESERVED_PINS in services/gpio_validation_service.py
 GPIO_RANGE_ESP32_WROOM = range(0, 40)
-GPIO_RESERVED_ESP32_WROOM = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12}  # Boot, UART, Flash, MTDI Strapping
+GPIO_RESERVED_ESP32_WROOM = {
+    0,
+    1,
+    2,
+    3,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+}  # Boot, UART, Flash, MTDI Strapping
 
 # XIAO ESP32-C3
 GPIO_RANGE_XIAO_ESP32C3 = range(0, 22)

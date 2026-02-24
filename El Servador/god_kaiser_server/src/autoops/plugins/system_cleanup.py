@@ -11,7 +11,6 @@ Handles:
 This plugin runs last (CLEANUP capability) and is safe to auto-execute.
 """
 
-from datetime import datetime, timezone
 from typing import Any
 
 from ..core.api_client import APIError, GodKaiserClient
@@ -48,9 +47,7 @@ class SystemCleanupPlugin(AutoOpsPlugin):
     def capabilities(self) -> list[PluginCapability]:
         return [PluginCapability.CLEANUP, PluginCapability.VALIDATE]
 
-    async def execute(
-        self, context: AutoOpsContext, client: GodKaiserClient
-    ) -> PluginResult:
+    async def execute(self, context: AutoOpsContext, client: GodKaiserClient) -> PluginResult:
         """Run cleanup operations."""
         actions: list[PluginAction] = []
         errors: list[str] = []
@@ -85,16 +82,18 @@ class SystemCleanupPlugin(AutoOpsPlugin):
                 if is_mock and status == "offline":
                     stale_devices.append(device)
 
-            actions.append(PluginAction.create(
-                action="Scan for Stale Devices",
-                target="all_devices",
-                details={
-                    "total_devices": len(devices),
-                    "stale_mocks": len(stale_devices),
-                },
-                result=f"Found {len(stale_devices)} stale mock device(s)",
-                severity=ActionSeverity.INFO,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Scan for Stale Devices",
+                    target="all_devices",
+                    details={
+                        "total_devices": len(devices),
+                        "stale_mocks": len(stale_devices),
+                    },
+                    result=f"Found {len(stale_devices)} stale mock device(s)",
+                    severity=ActionSeverity.INFO,
+                )
+            )
 
         except APIError as e:
             errors.append(f"Device scan failed: {e.detail}")
@@ -108,18 +107,22 @@ class SystemCleanupPlugin(AutoOpsPlugin):
                 try:
                     await client.delete_mock_esp(device_id)
                     cleanup_data["stale_devices_removed"] += 1
-                    context.cleaned_resources.append({
-                        "type": "mock_device",
-                        "device_id": device_id,
-                        "action": "deleted",
-                    })
-                    actions.append(PluginAction.create(
-                        action="Remove Stale Mock Device",
-                        target=device_id,
-                        details={"status": device.get("status")},
-                        result="Removed",
-                        severity=ActionSeverity.SUCCESS,
-                    ))
+                    context.cleaned_resources.append(
+                        {
+                            "type": "mock_device",
+                            "device_id": device_id,
+                            "action": "deleted",
+                        }
+                    )
+                    actions.append(
+                        PluginAction.create(
+                            action="Remove Stale Mock Device",
+                            target=device_id,
+                            details={"status": device.get("status")},
+                            result="Removed",
+                            severity=ActionSeverity.SUCCESS,
+                        )
+                    )
                 except APIError as e:
                     warnings.append(f"Failed to remove stale device {device_id}: {e.detail}")
         elif stale_devices:
@@ -159,21 +162,25 @@ class SystemCleanupPlugin(AutoOpsPlugin):
                     f"{len(orphaned_sensors)} orphaned sensor config(s) found "
                     f"(device no longer exists)"
                 )
-                actions.append(PluginAction.create(
-                    action="Orphaned Sensor Config Check",
-                    target="sensor_configs",
-                    details={"orphaned": len(orphaned_sensors)},
-                    result=f"{len(orphaned_sensors)} orphaned config(s)",
-                    severity=ActionSeverity.WARNING,
-                ))
+                actions.append(
+                    PluginAction.create(
+                        action="Orphaned Sensor Config Check",
+                        target="sensor_configs",
+                        details={"orphaned": len(orphaned_sensors)},
+                        result=f"{len(orphaned_sensors)} orphaned config(s)",
+                        severity=ActionSeverity.WARNING,
+                    )
+                )
             else:
-                actions.append(PluginAction.create(
-                    action="Orphaned Sensor Config Check",
-                    target="sensor_configs",
-                    details={},
-                    result="No orphaned configs",
-                    severity=ActionSeverity.SUCCESS,
-                ))
+                actions.append(
+                    PluginAction.create(
+                        action="Orphaned Sensor Config Check",
+                        target="sensor_configs",
+                        details={},
+                        result="No orphaned configs",
+                        severity=ActionSeverity.SUCCESS,
+                    )
+                )
 
         except APIError as e:
             warnings.append(f"Sensor config check failed: {e.detail}")
@@ -197,16 +204,18 @@ class SystemCleanupPlugin(AutoOpsPlugin):
                 except APIError:
                     pass
 
-            actions.append(PluginAction.create(
-                action="Database Table Health",
-                target="database",
-                details={
-                    "total_tables": len(tables),
-                    "empty_tables": empty_tables,
-                },
-                result=f"{len(tables)} tables, {len(empty_tables)} empty",
-                severity=ActionSeverity.SUCCESS,
-            ))
+            actions.append(
+                PluginAction.create(
+                    action="Database Table Health",
+                    target="database",
+                    details={
+                        "total_tables": len(tables),
+                        "empty_tables": empty_tables,
+                    },
+                    result=f"{len(tables)} tables, {len(empty_tables)} empty",
+                    severity=ActionSeverity.SUCCESS,
+                )
+            )
 
         except APIError as e:
             warnings.append(f"Database health check failed: {e.detail}")

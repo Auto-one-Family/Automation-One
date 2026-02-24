@@ -21,7 +21,6 @@ Domain-Expert Perspektive:
 
 import asyncio
 import json
-import os
 import random
 import string
 import sys
@@ -32,9 +31,10 @@ from typing import AsyncGenerator, Optional
 
 # CRITICAL: Set Windows SelectorEventLoop policy for Python 3.14 compatibility
 # The ProactorEventLoop doesn't support add_reader/add_writer which aiomqtt needs
-if sys.platform == 'win32':
-    warnings.filterwarnings('ignore', category=DeprecationWarning,
-                            message='.*WindowsSelectorEventLoopPolicy.*')
+if sys.platform == "win32":
+    warnings.filterwarnings(
+        "ignore", category=DeprecationWarning, message=".*WindowsSelectorEventLoopPolicy.*"
+    )
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import aiohttp
@@ -67,7 +67,7 @@ def generate_valid_mock_id(prefix: str = "") -> str:
 
     # Generate random suffix (alphanumeric only)
     suffix_len = 8 - len(clean_prefix) if len(clean_prefix) < 8 else 4
-    suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=suffix_len))
+    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=suffix_len))
 
     return f"MOCK_{clean_prefix}{suffix}"
 
@@ -80,7 +80,7 @@ def generate_valid_esp_id() -> str:
         Valid ESP device ID like "ESP_A1B2C3D4"
     """
     # 6-8 Hex characters (uppercase)
-    suffix = ''.join(random.choices('ABCDEF0123456789', k=8))
+    suffix = "".join(random.choices("ABCDEF0123456789", k=8))
     return f"ESP_{suffix}"
 
 
@@ -97,7 +97,7 @@ def generate_unique_mock_id(prefix: str = "") -> str:
     clean_prefix = prefix.upper().replace("_", "")[:4]  # Max 4 chars
     # Use timestamp hex + random for uniqueness
     ts_hex = f"{int(time.time()) % 0xFFFF:04X}"
-    random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    random_part = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"MOCK_{clean_prefix}{ts_hex}{random_part}"
 
 
@@ -107,12 +107,10 @@ def generate_unique_mock_id(prefix: str = "") -> str:
 def pytest_configure(config):
     """Register custom markers for E2E tests."""
     config.addinivalue_line(
-        "markers",
-        "e2e: End-to-End tests requiring a running server (skip without --e2e flag)"
+        "markers", "e2e: End-to-End tests requiring a running server (skip without --e2e flag)"
     )
     config.addinivalue_line(
-        "markers",
-        "slow_e2e: Slow E2E tests (>30s) - use --slow-e2e to include"
+        "markers", "slow_e2e: Slow E2E tests (>30s) - use --slow-e2e to include"
     )
 
 
@@ -122,49 +120,38 @@ def pytest_addoption(parser):
         "--e2e",
         action="store_true",
         default=False,
-        help="Run E2E tests that require a running server"
+        help="Run E2E tests that require a running server",
     )
     parser.addoption(
         "--slow-e2e",
         action="store_true",
         default=False,
-        help="Include slow E2E tests (>30 seconds)"
+        help="Include slow E2E tests (>30 seconds)",
     )
     parser.addoption(
         "--server-url",
         action="store",
         default="http://localhost:8000",
-        help="URL of the running server for E2E tests"
+        help="URL of the running server for E2E tests",
     )
     parser.addoption(
-        "--mqtt-host",
-        action="store",
-        default="localhost",
-        help="MQTT broker host for E2E tests"
+        "--mqtt-host", action="store", default="localhost", help="MQTT broker host for E2E tests"
     )
     parser.addoption(
-        "--mqtt-port",
-        action="store",
-        default=1883,
-        type=int,
-        help="MQTT broker port for E2E tests"
+        "--mqtt-port", action="store", default=1883, type=int, help="MQTT broker port for E2E tests"
     )
 
 
 def pytest_collection_modifyitems(config, items):
     """Skip E2E tests unless explicitly requested."""
     if not config.getoption("--e2e"):
-        skip_e2e = pytest.mark.skip(
-            reason="E2E tests require --e2e flag and running server"
-        )
+        skip_e2e = pytest.mark.skip(reason="E2E tests require --e2e flag and running server")
         for item in items:
             if "e2e" in item.keywords:
                 item.add_marker(skip_e2e)
 
     if not config.getoption("--slow-e2e"):
-        skip_slow = pytest.mark.skip(
-            reason="Slow E2E tests require --slow-e2e flag"
-        )
+        skip_slow = pytest.mark.skip(reason="Slow E2E tests require --slow-e2e flag")
         for item in items:
             if "slow_e2e" in item.keywords:
                 item.add_marker(skip_slow)
@@ -176,6 +163,7 @@ def pytest_collection_modifyitems(config, items):
 @dataclass
 class E2EConfig:
     """Configuration for E2E tests."""
+
     server_url: str
     mqtt_host: str
     mqtt_port: int
@@ -198,13 +186,14 @@ class E2EConfig:
             mqtt_host=config.getoption("--mqtt-host"),
             mqtt_port=config.getoption("--mqtt-port"),
             api_base=f"{server_url}/api/v1",
-            ws_url=server_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+            ws_url=server_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws",
         )
 
 
 @dataclass
 class ESPDeviceTestData:
     """Represents an ESP device for E2E testing."""
+
     device_id: str
     name: str
     zone_id: Optional[str] = None
@@ -322,7 +311,7 @@ class E2EAPIClient:
         try:
             async with self.session.post(
                 f"{self.config.api_base}/auth/login",
-                json={"username": username, "password": password}
+                json={"username": username, "password": password},
             ) as response:
                 response_text = await response.text()
                 if response.status == 200:
@@ -337,9 +326,13 @@ class E2EAPIClient:
                         print(f"[E2E Auth] Login successful for user: {username}")
                         return True
                     else:
-                        self._last_auth_error = f"Login returned 200 but no token in response: {response_text[:200]}"
+                        self._last_auth_error = (
+                            f"Login returned 200 but no token in response: {response_text[:200]}"
+                        )
                 else:
-                    self._last_auth_error = f"Login failed with status {response.status}: {response_text[:200]}"
+                    self._last_auth_error = (
+                        f"Login failed with status {response.status}: {response_text[:200]}"
+                    )
         except Exception as e:
             self._last_auth_error = f"Login request failed: {type(e).__name__}: {e}"
 
@@ -348,12 +341,11 @@ class E2EAPIClient:
             "username": username,
             "email": f"{username}@e2e-test.dev",
             "password": password,
-            "full_name": "E2E Test Admin"
+            "full_name": "E2E Test Admin",
         }
         try:
             async with self.session.post(
-                f"{self.config.api_base}/auth/setup",
-                json=setup_payload
+                f"{self.config.api_base}/auth/setup", json=setup_payload
             ) as response:
                 response_text = await response.text()
                 if response.status in (200, 201):
@@ -367,10 +359,14 @@ class E2EAPIClient:
                         print(f"[E2E Auth] Setup successful for user: {username}")
                         return True
                     else:
-                        self._last_auth_error = f"Setup returned {response.status} but no token: {response_text[:200]}"
+                        self._last_auth_error = (
+                            f"Setup returned {response.status} but no token: {response_text[:200]}"
+                        )
                 else:
                     # Setup might fail if users already exist (403) - try login again
-                    setup_error = f"Setup failed with status {response.status}: {response_text[:200]}"
+                    setup_error = (
+                        f"Setup failed with status {response.status}: {response_text[:200]}"
+                    )
                     result = await self._try_login(username, password)
                     if not result:
                         self._last_auth_error = f"{setup_error}; Retry login also failed"
@@ -384,8 +380,7 @@ class E2EAPIClient:
     async def _try_login(self, username: str, password: str) -> bool:
         """Helper to try login without setup fallback."""
         async with self.session.post(
-            f"{self.config.api_base}/auth/login",
-            json={"username": username, "password": password}
+            f"{self.config.api_base}/auth/login", json={"username": username, "password": password}
         ) as response:
             if response.status == 200:
                 data = await response.json()
@@ -431,9 +426,7 @@ class E2EAPIClient:
         for attempt in range(max_retries):
             try:
                 async with self.session.post(
-                    f"{self.config.api_base}/esp/devices",
-                    json=payload,
-                    headers=self.headers
+                    f"{self.config.api_base}/esp/devices", json=payload, headers=self.headers
                 ) as response:
                     result = await response.json()
 
@@ -446,7 +439,7 @@ class E2EAPIClient:
                 last_error = e
                 if attempt < max_retries - 1:
                     # Exponential backoff: 0.5s, 1.0s, 2.0s
-                    backoff = 0.5 * (2 ** attempt)
+                    backoff = 0.5 * (2**attempt)
                     await asyncio.sleep(backoff)
                     continue
                 raise
@@ -457,17 +450,14 @@ class E2EAPIClient:
     async def approve_esp(self, device_id: str) -> dict:
         """Approve a pending ESP device for normal operation."""
         async with self.session.post(
-            f"{self.config.api_base}/esp/devices/{device_id}/approve",
-            json={},
-            headers=self.headers
+            f"{self.config.api_base}/esp/devices/{device_id}/approve", json={}, headers=self.headers
         ) as response:
             return await response.json()
 
     async def get_esp_status(self, device_id: str) -> dict:
         """Get ESP device status."""
         async with self.session.get(
-            f"{self.config.api_base}/esp/devices/{device_id}",
-            headers=self.headers
+            f"{self.config.api_base}/esp/devices/{device_id}", headers=self.headers
         ) as response:
             if response.status == 200:
                 return await response.json()
@@ -476,8 +466,7 @@ class E2EAPIClient:
     async def get_all_esp_devices(self) -> list:
         """Get all registered ESP devices."""
         async with self.session.get(
-            f"{self.config.api_base}/esp/devices",
-            headers=self.headers
+            f"{self.config.api_base}/esp/devices", headers=self.headers
         ) as response:
             if response.status == 200:
                 result = await response.json()
@@ -485,22 +474,11 @@ class E2EAPIClient:
                 return result.get("data", [])
             return []
 
-    async def send_actuator_command(
-        self,
-        device_id: str,
-        gpio: int,
-        value: float
-    ) -> dict:
+    async def send_actuator_command(self, device_id: str, gpio: int, value: float) -> dict:
         """Send actuator command."""
-        payload = {
-            "device_id": device_id,
-            "gpio": gpio,
-            "value": value
-        }
+        payload = {"device_id": device_id, "gpio": gpio, "value": value}
         async with self.session.post(
-            f"{self.config.api_base}/actuators/command",
-            json=payload,
-            headers=self.headers
+            f"{self.config.api_base}/actuators/command", json=payload, headers=self.headers
         ) as response:
             return await response.json()
 
@@ -518,9 +496,7 @@ class E2EAPIClient:
         if sensor_type is not None:
             params["sensor_type"] = sensor_type
         async with self.session.get(
-            f"{self.config.api_base}/sensors/data",
-            params=params,
-            headers=self.headers
+            f"{self.config.api_base}/sensors/data", params=params, headers=self.headers
         ) as response:
             if response.status == 200:
                 result = await response.json()
@@ -530,17 +506,14 @@ class E2EAPIClient:
     async def create_logic_rule(self, rule: dict) -> dict:
         """Create a cross-ESP logic rule."""
         async with self.session.post(
-            f"{self.config.api_base}/logic/rules",
-            json=rule,
-            headers=self.headers
+            f"{self.config.api_base}/logic/rules", json=rule, headers=self.headers
         ) as response:
             return await response.json()
 
     async def delete_esp(self, device_id: str) -> bool:
         """Delete an ESP device (cleanup)."""
         async with self.session.delete(
-            f"{self.config.api_base}/esp/devices/{device_id}",
-            headers=self.headers
+            f"{self.config.api_base}/esp/devices/{device_id}", headers=self.headers
         ) as response:
             return response.status in (200, 204)
 
@@ -550,8 +523,7 @@ class E2EAPIClient:
     async def get_logic_rule(self, rule_id: str) -> dict:
         """Get a specific logic rule by ID."""
         async with self.session.get(
-            f"{self.config.api_base}/logic/rules/{rule_id}",
-            headers=self.headers
+            f"{self.config.api_base}/logic/rules/{rule_id}", headers=self.headers
         ) as response:
             if response.status == 200:
                 return await response.json()
@@ -563,9 +535,7 @@ class E2EAPIClient:
         if enabled is not None:
             params["enabled"] = str(enabled).lower()
         async with self.session.get(
-            f"{self.config.api_base}/logic/rules",
-            params=params,
-            headers=self.headers
+            f"{self.config.api_base}/logic/rules", params=params, headers=self.headers
         ) as response:
             if response.status == 200:
                 result = await response.json()
@@ -578,17 +548,14 @@ class E2EAPIClient:
     async def update_logic_rule(self, rule_id: str, rule_data: dict) -> dict:
         """Update an existing logic rule."""
         async with self.session.put(
-            f"{self.config.api_base}/logic/rules/{rule_id}",
-            json=rule_data,
-            headers=self.headers
+            f"{self.config.api_base}/logic/rules/{rule_id}", json=rule_data, headers=self.headers
         ) as response:
             return await response.json()
 
     async def delete_logic_rule(self, rule_id: str) -> bool:
         """Delete a logic rule (cleanup)."""
         async with self.session.delete(
-            f"{self.config.api_base}/logic/rules/{rule_id}",
-            headers=self.headers
+            f"{self.config.api_base}/logic/rules/{rule_id}", headers=self.headers
         ) as response:
             return response.status in (200, 204)
 
@@ -600,7 +567,7 @@ class E2EAPIClient:
         async with self.session.post(
             f"{self.config.api_base}/logic/rules/{rule_id}/toggle",
             json=payload,
-            headers=self.headers
+            headers=self.headers,
         ) as response:
             return await response.json()
 
@@ -609,7 +576,7 @@ class E2EAPIClient:
         rule_id: str,
         mock_sensor_values: dict = None,
         mock_time: str = None,
-        dry_run: bool = True
+        dry_run: bool = True,
     ) -> dict:
         """Test/simulate a logic rule execution."""
         payload = {"dry_run": dry_run}
@@ -618,17 +585,12 @@ class E2EAPIClient:
         if mock_time:
             payload["mock_time"] = mock_time
         async with self.session.post(
-            f"{self.config.api_base}/logic/rules/{rule_id}/test",
-            json=payload,
-            headers=self.headers
+            f"{self.config.api_base}/logic/rules/{rule_id}/test", json=payload, headers=self.headers
         ) as response:
             return await response.json()
 
     async def get_execution_history(
-        self,
-        rule_id: str = None,
-        success: bool = None,
-        limit: int = 50
+        self, rule_id: str = None, success: bool = None, limit: int = 50
     ) -> dict:
         """Get logic rule execution history."""
         params = {"limit": limit}
@@ -637,9 +599,7 @@ class E2EAPIClient:
         if success is not None:
             params["success"] = str(success).lower()
         async with self.session.get(
-            f"{self.config.api_base}/logic/execution_history",
-            params=params,
-            headers=self.headers
+            f"{self.config.api_base}/logic/execution_history", params=params, headers=self.headers
         ) as response:
             if response.status == 200:
                 return await response.json()
@@ -649,11 +609,7 @@ class E2EAPIClient:
     # Sensor & Actuator Config API Methods
     # =========================================================================
     async def create_sensor_config(
-        self,
-        esp_id: str,
-        gpio: int,
-        sensor_type: str,
-        name: str = None
+        self, esp_id: str, gpio: int, sensor_type: str, name: str = None
     ) -> dict:
         """Create a sensor configuration on an ESP."""
         payload = {
@@ -663,21 +619,15 @@ class E2EAPIClient:
             "name": name or f"{sensor_type}_gpio{gpio}",
             "enabled": True,
             "pi_enhanced": False,
-            "read_interval": 30
+            "read_interval": 30,
         }
         async with self.session.post(
-            f"{self.config.api_base}/sensors",
-            json=payload,
-            headers=self.headers
+            f"{self.config.api_base}/sensors", json=payload, headers=self.headers
         ) as response:
             return await response.json()
 
     async def create_actuator_config(
-        self,
-        esp_id: str,
-        gpio: int,
-        actuator_type: str,
-        name: str = None
+        self, esp_id: str, gpio: int, actuator_type: str, name: str = None
     ) -> dict:
         """Create an actuator configuration on an ESP."""
         payload = {
@@ -686,20 +636,17 @@ class E2EAPIClient:
             "actuator_type": actuator_type,
             "name": name or f"{actuator_type}_gpio{gpio}",
             "enabled": True,
-            "default_state": 0
+            "default_state": 0,
         }
         async with self.session.post(
-            f"{self.config.api_base}/actuators",
-            json=payload,
-            headers=self.headers
+            f"{self.config.api_base}/actuators", json=payload, headers=self.headers
         ) as response:
             return await response.json()
 
     async def get_actuator_state(self, esp_id: str, gpio: int) -> dict:
         """Get current state of an actuator."""
         async with self.session.get(
-            f"{self.config.api_base}/actuators/{esp_id}/{gpio}/state",
-            headers=self.headers
+            f"{self.config.api_base}/actuators/{esp_id}/{gpio}/state", headers=self.headers
         ) as response:
             if response.status == 200:
                 return await response.json()
@@ -708,25 +655,21 @@ class E2EAPIClient:
     async def delete_sensor_config(self, sensor_id: str) -> bool:
         """Delete a sensor configuration."""
         async with self.session.delete(
-            f"{self.config.api_base}/sensors/{sensor_id}",
-            headers=self.headers
+            f"{self.config.api_base}/sensors/{sensor_id}", headers=self.headers
         ) as response:
             return response.status in (200, 204)
 
     async def delete_actuator_config(self, actuator_id: str) -> bool:
         """Delete an actuator configuration."""
         async with self.session.delete(
-            f"{self.config.api_base}/actuators/{actuator_id}",
-            headers=self.headers
+            f"{self.config.api_base}/actuators/{actuator_id}", headers=self.headers
         ) as response:
             return response.status in (200, 204)
 
 
 @pytest_asyncio.fixture
 async def api_client(
-    e2e_config: E2EConfig,
-    e2e_http_client: aiohttp.ClientSession,
-    server_health_check
+    e2e_config: E2EConfig, e2e_http_client: aiohttp.ClientSession, server_health_check
 ) -> E2EAPIClient:
     """
     Create an API client for E2E tests with authentication.
@@ -748,19 +691,20 @@ async def api_client(
         if auth_success and client._auth_token:
             return client
         # Capture error for debugging
-        if hasattr(client, '_last_auth_error') and client._last_auth_error:
+        if hasattr(client, "_last_auth_error") and client._last_auth_error:
             auth_errors.append(f"{username}: {client._last_auth_error}")
 
     # All authentication attempts failed - warn but continue
     # (Some E2E tests may not need auth, but protected endpoints will fail)
     import warnings
+
     error_details = "; ".join(auth_errors) if auth_errors else "No error details captured"
     warnings.warn(
         "E2E API client could not authenticate. "
         "Protected API endpoints will return 401. "
         f"Tried credentials: {[c[0] for c in credentials_to_try]}. "
         f"Last errors: {error_details}",
-        UserWarning
+        UserWarning,
     )
     return client
 
@@ -792,10 +736,11 @@ class E2EMQTTClient:
 
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"[E2E MQTT] Connecting to {self.config.mqtt_host}:{self.config.mqtt_port} (attempt {attempt}/{max_retries})...")
+                print(
+                    f"[E2E MQTT] Connecting to {self.config.mqtt_host}:{self.config.mqtt_port} (attempt {attempt}/{max_retries})..."
+                )
                 self._client = aiomqtt.Client(
-                    hostname=self.config.mqtt_host,
-                    port=self.config.mqtt_port
+                    hostname=self.config.mqtt_host, port=self.config.mqtt_port
                 )
                 await self._client.__aenter__()
                 self._connected = True
@@ -804,11 +749,16 @@ class E2EMQTTClient:
             except Exception as e:
                 if attempt < max_retries:
                     wait = retry_delay * attempt
-                    print(f"[E2E MQTT] Connection failed (attempt {attempt}): {type(e).__name__}: {e}. Retrying in {wait:.0f}s...")
+                    print(
+                        f"[E2E MQTT] Connection failed (attempt {attempt}): {type(e).__name__}: {e}. Retrying in {wait:.0f}s..."
+                    )
                     import asyncio
+
                     await asyncio.sleep(wait)
                 else:
-                    print(f"[E2E MQTT] Connection failed after {max_retries} attempts: {type(e).__name__}: {e}")
+                    print(
+                        f"[E2E MQTT] Connection failed after {max_retries} attempts: {type(e).__name__}: {e}"
+                    )
                     raise
 
     async def disconnect(self):
@@ -824,7 +774,7 @@ class E2EMQTTClient:
         value: float,
         sensor_type: str = "temperature",
         raw_mode: bool = True,
-        kaiser_id: str = "god"
+        kaiser_id: str = "god",
     ):
         """
         Publish sensor data like a real ESP32 would.
@@ -851,11 +801,11 @@ class E2EMQTTClient:
         # All required fields per sensor_handler._validate_payload()
         payload = {
             "ts": int(time.time()),
-            "esp_id": esp_id,              # REQUIRED - was missing!
+            "esp_id": esp_id,  # REQUIRED - was missing!
             "gpio": gpio,
-            "sensor_type": sensor_type,    # REQUIRED - was missing!
-            "raw": int(value * 100),       # REQUIRED - raw ADC-like value
-            "value": value,                # Processed value
+            "sensor_type": sensor_type,  # REQUIRED - was missing!
+            "raw": int(value * 100),  # REQUIRED - raw ADC-like value
+            "value": value,  # Processed value
             "unit": "°C" if sensor_type == "temperature" else "",
             "raw_mode": raw_mode,
             "quality": "good",
@@ -873,11 +823,7 @@ class E2EMQTTClient:
         await asyncio.sleep(0.1)
 
     async def publish_heartbeat(
-        self,
-        esp_id: str,
-        heap_free: int = 98304,
-        uptime: int = 3600,
-        kaiser_id: str = "god"
+        self, esp_id: str, heap_free: int = 98304, uptime: int = 3600, kaiser_id: str = "god"
     ):
         """Publish heartbeat like a real ESP32 would."""
         import json
@@ -890,7 +836,7 @@ class E2EMQTTClient:
             "heap_free": heap_free,
             "uptime_seconds": uptime,
             "wifi_rssi": -45,
-            "system_state": "OPERATIONAL"
+            "system_state": "OPERATIONAL",
         }
         await self._client.publish(topic, json.dumps(payload))
 
@@ -903,7 +849,7 @@ class E2EMQTTClient:
         success: bool,
         message: str,
         correlation_id: str = None,
-        kaiser_id: str = "god"
+        kaiser_id: str = "god",
     ):
         """
         Publish actuator command response like a real ESP32 would.
@@ -928,7 +874,7 @@ class E2EMQTTClient:
             "value": value,
             "command_id": correlation_id or f"cmd_{int(time.time())}",
             "success": success,
-            "message": message
+            "message": message,
         }
 
         try:
@@ -947,7 +893,7 @@ class E2EMQTTClient:
         alert_type: str,
         message: str,
         zone_id: str = None,
-        kaiser_id: str = "god"
+        kaiser_id: str = "god",
     ):
         """
         Publish actuator alert like a real ESP32 would.
@@ -974,7 +920,7 @@ class E2EMQTTClient:
             "gpio": gpio,
             "alert_type": alert_type,
             "message": message,
-            "severity": severity
+            "severity": severity,
         }
 
         if zone_id:
@@ -982,7 +928,9 @@ class E2EMQTTClient:
 
         try:
             await self._client.publish(topic, json.dumps(payload), qos=1)
-            print(f"[E2E MQTT] Published actuator alert to {topic}: type={alert_type}, severity={severity}")
+            print(
+                f"[E2E MQTT] Published actuator alert to {topic}: type={alert_type}, severity={severity}"
+            )
         except Exception as e:
             print(f"[E2E MQTT] ERROR publishing actuator alert: {type(e).__name__}: {e}")
             raise
@@ -994,7 +942,7 @@ class E2EMQTTClient:
         esp_id: str,
         reason: str = "manual",
         stopped_actuators: list = None,
-        kaiser_id: str = "god"
+        kaiser_id: str = "god",
     ):
         """
         Publish emergency stop broadcast like a real ESP32 would.
@@ -1006,7 +954,7 @@ class E2EMQTTClient:
         import time
 
         if not self._connected or not self._client:
-            print(f"[E2E MQTT] ERROR: Not connected! Cannot publish emergency broadcast")
+            print("[E2E MQTT] ERROR: Not connected! Cannot publish emergency broadcast")
             return
 
         topic = "kaiser/broadcast/emergency"
@@ -1016,7 +964,7 @@ class E2EMQTTClient:
             "command_id": f"emg_{int(time.time())}",
             "stopped_actuators": stopped_actuators or [],
             "timestamp": int(time.time()),
-            "reason": reason
+            "reason": reason,
         }
 
         try:
@@ -1054,6 +1002,7 @@ class E2EWebSocketClient:
     async def connect(self, token: str = None):
         """Connect to WebSocket endpoint at /api/v1/ws/realtime/{client_id}."""
         import uuid
+
         client_id = f"e2e-test-{uuid.uuid4().hex[:8]}"
         ws_base = self.config.server_url.replace("http://", "ws://").replace("https://", "wss://")
         ws_url = f"{ws_base}/api/v1/ws/realtime/{client_id}"
@@ -1063,8 +1012,8 @@ class E2EWebSocketClient:
             self._session = aiohttp.ClientSession()
             self._ws = await self._session.ws_connect(ws_url)
             self._connected = True
-        except Exception as e:
-            if hasattr(self, '_session'):
+        except Exception:
+            if hasattr(self, "_session"):
                 await self._session.close()
             raise
 
@@ -1072,7 +1021,7 @@ class E2EWebSocketClient:
         """Disconnect from WebSocket."""
         if self._ws:
             await self._ws.close()
-        if hasattr(self, '_session') and self._session:
+        if hasattr(self, "_session") and self._session:
             await self._session.close()
         self._connected = False
 
@@ -1082,10 +1031,7 @@ class E2EWebSocketClient:
         Server expects: {"action": "subscribe", "filters": {"types": [...], ...}}
         """
         if self._ws and self._connected:
-            await self._ws.send_json({
-                "action": "subscribe",
-                "filters": subscription
-            })
+            await self._ws.send_json({"action": "subscribe", "filters": subscription})
 
     async def wait_for_message(self, timeout: float = 10.0) -> Optional[dict]:
         """Wait for a WebSocket message with timeout."""
@@ -1136,7 +1082,7 @@ async def ws_client(
     """Create a WebSocket client for E2E tests."""
     client = E2EWebSocketClient(e2e_config)
     try:
-        token = api_client._auth_token if hasattr(api_client, '_auth_token') else None
+        token = api_client._auth_token if hasattr(api_client, "_auth_token") else None
         await client.connect(token=token)
         yield client
     except Exception:
@@ -1198,7 +1144,7 @@ class GreenhouseTestFactory:
                 {"gpio": 4, "type": "DS18B20", "name": "Air Temp"},
                 {"gpio": 5, "type": "DS18B20", "name": "Soil Temp"},
             ],
-            actuators=[]
+            actuators=[],
         )
 
     @classmethod
@@ -1214,7 +1160,7 @@ class GreenhouseTestFactory:
             actuators=[
                 {"gpio": 25, "type": "VALVE", "name": "Water Valve"},
                 {"gpio": 26, "type": "PUMP", "name": "Water Pump"},
-            ]
+            ],
         )
 
     @classmethod
@@ -1230,7 +1176,7 @@ class GreenhouseTestFactory:
             actuators=[
                 {"gpio": 27, "type": "FAN", "name": "Ventilation Fan"},
                 {"gpio": 32, "type": "HEATER", "name": "Heater"},
-            ]
+            ],
         )
 
 

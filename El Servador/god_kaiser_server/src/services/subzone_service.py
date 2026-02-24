@@ -123,9 +123,7 @@ class SubzoneService:
 
         # 2. Validate zone is assigned (CRITICAL - Subzone requires Zone)
         if not device.zone_id:
-            logger.warning(
-                f"Subzone assignment failed: ESP {device_id} has no zone assigned"
-            )
+            logger.warning(f"Subzone assignment failed: ESP {device_id} has no zone assigned")
             raise ValueError(
                 f"ESP device '{device_id}' has no zone assigned. "
                 "Assign a zone before creating subzones."
@@ -183,11 +181,7 @@ class SubzoneService:
 
         return SubzoneAssignResponse(
             success=mqtt_sent,
-            message=(
-                "Subzone assignment sent to ESP"
-                if mqtt_sent
-                else "MQTT publish failed"
-            ),
+            message=("Subzone assignment sent to ESP" if mqtt_sent else "MQTT publish failed"),
             device_id=device_id,
             subzone_id=subzone_id,
             assigned_gpios=assigned_gpios,
@@ -364,17 +358,13 @@ class SubzoneService:
         if status == "subzone_assigned":
             # Update subzone record to confirm assignment
             await self._confirm_subzone_assignment(device_id, subzone_id)
-            logger.info(
-                f"Subzone assignment confirmed for {device_id}: subzone_id={subzone_id}"
-            )
+            logger.info(f"Subzone assignment confirmed for {device_id}: subzone_id={subzone_id}")
             return True
 
         elif status == "subzone_removed":
             # Delete subzone record
             await self._delete_subzone_config(device_id, subzone_id)
-            logger.info(
-                f"Subzone removal confirmed for {device_id}: subzone_id={subzone_id}"
-            )
+            logger.info(f"Subzone removal confirmed for {device_id}: subzone_id={subzone_id}")
             return True
 
         elif status == "error":
@@ -436,9 +426,7 @@ class SubzoneService:
             total_count=len(subzones),
         )
 
-    async def get_subzone(
-        self, device_id: str, subzone_id: str
-    ) -> Optional[SubzoneInfo]:
+    async def get_subzone(self, device_id: str, subzone_id: str) -> Optional[SubzoneInfo]:
         """
         Get a specific subzone.
 
@@ -553,9 +541,7 @@ class SubzoneService:
         # Flush to make changes visible for subsequent queries
         await self.session.flush()
 
-    async def _confirm_subzone_assignment(
-        self, device_id: str, subzone_id: str
-    ) -> None:
+    async def _confirm_subzone_assignment(self, device_id: str, subzone_id: str) -> None:
         """
         Confirm subzone assignment (update last_ack_at).
 
@@ -592,4 +578,3 @@ class SubzoneService:
         if config:
             await self.session.delete(config)
             await self.session.flush()
-

@@ -18,13 +18,15 @@ from typing import Any, Optional
 
 class DeviceMode(str, Enum):
     """How devices are created and managed."""
-    MOCK = "mock"        # Mock ESP via debug API (default, safe)
-    REAL = "real"        # Real ESP via device registration API
-    HYBRID = "hybrid"    # Use existing real devices, fill gaps with mocks
+
+    MOCK = "mock"  # Mock ESP via debug API (default, safe)
+    REAL = "real"  # Real ESP via device registration API
+    HYBRID = "hybrid"  # Use existing real devices, fill gaps with mocks
 
 
 class SimulationPattern(str, Enum):
     """Sensor value simulation patterns for mock devices."""
+
     CONSTANT = "constant"
     SINE = "sine"
     RANDOM = "random"
@@ -37,6 +39,7 @@ def _get_logger(name: str) -> logging.Logger:
     """Get a logger, preferring the server's logging_config if available."""
     try:
         from ...core.logging_config import get_logger
+
         return get_logger(name)
     except (ImportError, ValueError):
         return logging.getLogger(name)
@@ -45,24 +48,26 @@ def _get_logger(name: str) -> logging.Logger:
 @dataclass
 class SensorSpec:
     """User-specified sensor to configure."""
-    sensor_type: str            # DS18B20, SHT31, PH, etc.
+
+    sensor_type: str  # DS18B20, SHT31, PH, etc.
     name: Optional[str] = None  # Human-readable name
     gpio: Optional[int] = None  # Specific GPIO (None = auto-assign)
-    count: int = 1              # How many of this type
+    count: int = 1  # How many of this type
     interface_type: Optional[str] = None  # I2C, ONEWIRE, ANALOG, DIGITAL
     i2c_address: Optional[int] = None
     onewire_address: Optional[str] = None
-    raw_value: float = 0.0      # Initial value for mock sensors
-    unit: str = ""              # Unit of measurement
+    raw_value: float = 0.0  # Initial value for mock sensors
+    unit: str = ""  # Unit of measurement
     interval_seconds: float = 30.0  # Reading interval
     variation_pattern: SimulationPattern = SimulationPattern.CONSTANT
-    variation_range: float = 0.0    # +/- range for simulation
+    variation_range: float = 0.0  # +/- range for simulation
 
 
 @dataclass
 class ActuatorSpec:
     """User-specified actuator to configure."""
-    actuator_type: str          # relay, pump, valve, pwm_fan, etc.
+
+    actuator_type: str  # relay, pump, valve, pwm_fan, etc.
     name: Optional[str] = None
     gpio: Optional[int] = None
     count: int = 1
@@ -73,6 +78,7 @@ class ActuatorSpec:
 @dataclass
 class ESPSpec:
     """Full specification for an ESP to configure."""
+
     name: Optional[str] = None
     device_id: Optional[str] = None  # Auto-generated if None
     hardware_type: str = "ESP32_WROOM"  # ESP32_WROOM, XIAO_ESP32_C3
@@ -88,6 +94,7 @@ class ESPSpec:
 @dataclass
 class SystemSnapshot:
     """Snapshot of the current system state."""
+
     timestamp: str = ""
     esp_devices: list[dict[str, Any]] = field(default_factory=list)
     total_sensors: int = 0
@@ -137,8 +144,8 @@ class AutoOpsContext:
     dry_run: bool = False
     verbose: bool = True
     auto_approve: bool = False  # Skip confirmation for destructive actions
-    max_retries: int = 3        # API retry attempts
-    retry_delay: float = 1.0    # Base delay between retries (exponential backoff)
+    max_retries: int = 3  # API retry attempts
+    retry_delay: float = 1.0  # Base delay between retries (exponential backoff)
 
     # Results from previous plugin runs (shared between plugins)
     created_devices: list[dict[str, Any]] = field(default_factory=list)
@@ -154,6 +161,7 @@ class AutoOpsContext:
     def __post_init__(self):
         if not self.session_id:
             import uuid
+
             self.session_id = str(uuid.uuid4())[:8]
         if not self.started_at:
             self.started_at = datetime.now(timezone.utc).isoformat()

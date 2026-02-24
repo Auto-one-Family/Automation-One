@@ -57,8 +57,9 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 class BrokerMode(str, Enum):
     """Mode for MQTT message handling."""
+
     DIRECT = "direct"  # Default: In-memory storage only (fast, no broker needed)
-    MQTT = "mqtt"      # Publish to real MQTT broker (for end-to-end tests)
+    MQTT = "mqtt"  # Publish to real MQTT broker (for end-to-end tests)
 
 
 # =============================================================================
@@ -66,6 +67,7 @@ class BrokerMode(str, Enum):
 # =============================================================================
 class SystemState(Enum):
     """ESP32 System States - matches El Trabajante implementation."""
+
     BOOT = 0
     WIFI_SETUP = 1
     WIFI_CONNECTED = 2
@@ -82,6 +84,7 @@ class SystemState(Enum):
 
 class QualityLevel(Enum):
     """Sensor quality levels."""
+
     EXCELLENT = "excellent"
     GOOD = "good"
     FAIR = "fair"
@@ -96,6 +99,7 @@ class QualityLevel(Enum):
 @dataclass
 class ActuatorState:
     """State of a single actuator - matches El Trabajante ActuatorStatus."""
+
     gpio: int
     actuator_type: str  # "pump", "valve", "fan", "relay", "pwm_motor"
     state: bool  # on/off
@@ -116,6 +120,7 @@ class ActuatorState:
 @dataclass
 class SensorState:
     """State of a single sensor - matches El Trabajante SensorReading."""
+
     gpio: int
     sensor_type: str  # "DS18B20", "SHT31", "analog", "digital", "pH", etc.
     raw_value: float = 0.0
@@ -138,6 +143,7 @@ class SensorState:
 @dataclass
 class ZoneConfig:
     """Zone configuration."""
+
     zone_id: str
     zone_name: str
     master_zone_id: str
@@ -148,6 +154,7 @@ class ZoneConfig:
 @dataclass
 class LibraryInfo:
     """Sensor library information."""
+
     name: str
     version: str
     sensor_type: str
@@ -161,10 +168,10 @@ class LibraryInfo:
 class MockESP32Client:
     """
     Mock ESP32 Client that FULLY simulates ESP32 behavior from El Trabajante.
-    
+
     This implementation matches the MQTT protocol specification exactly,
     enabling tests to validate against both mock and real hardware.
-    
+
     Usage:
         mock = MockESP32Client(esp_id="ESP_12AB34CD")
         mock.configure_zone("greenhouse", "main-zone", "zone-a")
@@ -225,10 +232,10 @@ class MockESP32Client:
                 "version": "1.0.0-mock",
                 "firmware": "el-trabajante-v1.0.0",
                 "uptime": 0,
-                "chip_id": esp_id
+                "chip_id": esp_id,
             },
             "sensors": {},
-            "actuators": {}
+            "actuators": {},
         }
 
         # Communication state
@@ -276,10 +283,7 @@ class MockESP32Client:
 
             # Set credentials if provided
             if config.get("username"):
-                self._mqtt_client.username_pw_set(
-                    config["username"],
-                    config.get("password", "")
-                )
+                self._mqtt_client.username_pw_set(config["username"], config.get("password", ""))
 
             # Connection callbacks
             def on_connect(client, userdata, flags, rc):
@@ -298,9 +302,7 @@ class MockESP32Client:
 
             # Connect
             self._mqtt_client.connect(
-                config.get("host", "localhost"),
-                config.get("port", 1883),
-                keepalive=60
+                config.get("host", "localhost"), config.get("port", 1883), keepalive=60
             )
             self._mqtt_client.loop_start()
 
@@ -312,7 +314,9 @@ class MockESP32Client:
             logger.error(f"MockESP32Client {self.esp_id} MQTT connection failed: {e}")
             return False
 
-    def _publish_to_broker(self, topic: str, payload: Dict[str, Any], qos: int = 1, retain: bool = False):
+    def _publish_to_broker(
+        self, topic: str, payload: Dict[str, Any], qos: int = 1, retain: bool = False
+    ):
         """
         Publish message to real MQTT broker if connected.
 
@@ -328,10 +332,7 @@ class MockESP32Client:
         if self.broker_mode == BrokerMode.MQTT and self._mqtt_client and self._mqtt_connected:
             try:
                 result = self._mqtt_client.publish(
-                    topic,
-                    json.dumps(payload),
-                    qos=qos,
-                    retain=retain
+                    topic, json.dumps(payload), qos=qos, retain=retain
                 )
                 if result.rc != 0:
                     logger.warning(f"MQTT publish to {topic} failed: rc={result.rc}")
@@ -354,7 +355,9 @@ class MockESP32Client:
         """Check if connected to MQTT broker."""
         return self._mqtt_connected
 
-    def _store_and_publish(self, topic: str, payload: Dict[str, Any], qos: int = 1, retain: bool = False):
+    def _store_and_publish(
+        self, topic: str, payload: Dict[str, Any], qos: int = 1, retain: bool = False
+    ):
         """
         Store message locally and publish to broker if connected.
 
@@ -368,12 +371,7 @@ class MockESP32Client:
             qos: Quality of Service (0, 1, 2)
             retain: Retain flag
         """
-        message = {
-            "topic": topic,
-            "payload": payload,
-            "qos": qos,
-            "retain": retain
-        }
+        message = {"topic": topic, "payload": payload, "qos": qos, "retain": retain}
         self.published_messages.append(message)
         self._publish_to_broker(topic, payload, qos, retain)
 
@@ -386,12 +384,12 @@ class MockESP32Client:
     # Zone Management
     # =========================================================================
     def configure_zone(
-        self, 
-        zone_id: str, 
-        master_zone_id: str, 
+        self,
+        zone_id: str,
+        master_zone_id: str,
         subzone_id: Optional[str] = None,
         zone_name: str = "",
-        subzone_name: str = ""
+        subzone_name: str = "",
     ):
         """Configure zone assignment for this ESP32."""
         self.zone = ZoneConfig(
@@ -399,18 +397,18 @@ class MockESP32Client:
             zone_name=zone_name or zone_id,
             master_zone_id=master_zone_id,
             subzone_id=subzone_id,
-            subzone_name=subzone_name or subzone_id
+            subzone_name=subzone_name or subzone_id,
         )
-        
+
         # Update config
         self.config["zone"] = {
             "id": zone_id,
             "name": zone_name or zone_id,
             "master_zone_id": master_zone_id,
             "subzone_id": subzone_id,
-            "subzone_name": subzone_name
+            "subzone_name": subzone_name,
         }
-        
+
         # Transition state
         if self.system_state == SystemState.AWAITING_USER_CONFIG:
             self._transition_state(SystemState.ZONE_CONFIGURED)
@@ -428,27 +426,29 @@ class MockESP32Client:
         """Transition to new system state."""
         self.previous_state = self.system_state
         self.system_state = new_state
-        
+
         # Publish state change
-        self._publish_system_diagnostics({
-            "event": "state_change",
-            "from_state": self.previous_state.name,
-            "to_state": new_state.name
-        })
-        
+        self._publish_system_diagnostics(
+            {
+                "event": "state_change",
+                "from_state": self.previous_state.name,
+                "to_state": new_state.name,
+            }
+        )
+
         if self.on_state_change:
             self.on_state_change(self.previous_state, new_state)
 
     def enter_safe_mode(self, reason: str = "manual"):
         """Enter safe mode - all actuators de-energized."""
         self._transition_state(SystemState.SAFE_MODE)
-        
+
         # Stop all actuators
         for gpio in self.actuators:
             self.actuators[gpio].state = False
             self.actuators[gpio].pwm_value = 0.0
             self.actuators[gpio].emergency_stopped = True
-        
+
         self._publish_safe_mode_status(reason)
 
     def exit_safe_mode(self):
@@ -457,7 +457,7 @@ class MockESP32Client:
             # Clear emergency stops
             for gpio in self.actuators:
                 self.actuators[gpio].emergency_stopped = False
-            
+
             self._transition_state(SystemState.OPERATIONAL)
 
     # =========================================================================
@@ -484,7 +484,7 @@ class MockESP32Client:
         """
         self.command_counter += 1
         command_id = f"cmd_{self.command_counter:06d}"
-        
+
         if self.on_command:
             result = self.on_command(command, params)
             if result:
@@ -527,7 +527,7 @@ class MockESP32Client:
             "error": error,
             "command_id": command_id,
             "esp_id": self.esp_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     # =========================================================================
@@ -537,7 +537,7 @@ class MockESP32Client:
         """Handle ping command - returns full heartbeat data."""
         self.last_heartbeat = time.time()
         uptime = int(time.time() - self.boot_time)
-        
+
         response = {
             "status": "ok",
             "command": "pong",
@@ -553,12 +553,12 @@ class MockESP32Client:
             "sensor_count": len(self.sensors),
             "actuator_count": len(self.actuators),
             "state": self.system_state.name,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
-        
+
         # Publish heartbeat
         self._publish_heartbeat()
-        
+
         return response
 
     def _handle_actuator_set(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -578,35 +578,37 @@ class MockESP32Client:
         if self.zone is None:
             response = self._error_response(
                 "Zone not configured. Configure zone via MQTT or web interface before controlling actuators.",
-                command_id
+                command_id,
             )
-            self._publish_actuator_alert(gpio, "zone_not_configured", "Actuator command rejected - zone not configured")
+            self._publish_actuator_alert(
+                gpio, "zone_not_configured", "Actuator command rejected - zone not configured"
+            )
             return response
 
         # Check safe mode
         if self.system_state == SystemState.SAFE_MODE:
             response = self._error_response("System in SAFE_MODE - actuators disabled", command_id)
-            self._publish_actuator_alert(gpio, "safe_mode", "Actuator command rejected - SAFE_MODE active")
+            self._publish_actuator_alert(
+                gpio, "safe_mode", "Actuator command rejected - SAFE_MODE active"
+            )
             return response
 
         # Create or update actuator state
         if gpio not in self.actuators:
             self.actuators[gpio] = ActuatorState(
-                gpio=gpio,
-                actuator_type=actuator_type,
-                state=False,
-                pwm_value=0.0,
-                name=name
+                gpio=gpio, actuator_type=actuator_type, state=False, pwm_value=0.0, name=name
             )
 
         actuator = self.actuators[gpio]
         min_value = actuator.min_value if actuator.min_value is not None else 0.0
         max_value = actuator.max_value if actuator.max_value is not None else 1.0
-        
+
         # Check emergency stop
         if actuator.emergency_stopped:
             response = self._error_response(f"Actuator {gpio} is emergency stopped", command_id)
-            self._publish_actuator_alert(gpio, "emergency_stopped", "Command rejected - clear emergency first")
+            self._publish_actuator_alert(
+                gpio, "emergency_stopped", "Command rejected - clear emergency first"
+            )
             return response
 
         # Apply value
@@ -642,9 +644,9 @@ class MockESP32Client:
                 "state": actuator.state,
                 "pwm_value": actuator.pwm_value,
                 "target_value": actuator.target_value,
-                "mode": mode
+                "mode": mode,
             },
-            "timestamp": actuator.timestamp
+            "timestamp": actuator.timestamp,
         }
 
     def _handle_actuator_get(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -668,12 +670,12 @@ class MockESP32Client:
                             "target_value": act.target_value,
                             "emergency_stopped": act.emergency_stopped,
                             "last_command": act.last_command,
-                            "timestamp": act.timestamp
+                            "timestamp": act.timestamp,
                         }
                         for gpio, act in self.actuators.items()
                     }
                 },
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
 
         if gpio not in self.actuators:
@@ -693,9 +695,9 @@ class MockESP32Client:
                 "pwm_value": actuator.pwm_value,
                 "target_value": actuator.target_value,
                 "emergency_stopped": actuator.emergency_stopped,
-                "last_command": actuator.last_command
+                "last_command": actuator.last_command,
             },
-            "timestamp": actuator.timestamp
+            "timestamp": actuator.timestamp,
         }
 
     def _handle_sensor_read(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -708,11 +710,7 @@ class MockESP32Client:
         if gpio not in self.sensors:
             # Create mock sensor with default value
             self.sensors[gpio] = SensorState(
-                gpio=gpio,
-                sensor_type="analog",
-                raw_value=0.0,
-                unit="raw",
-                name=f"sensor_{gpio}"
+                gpio=gpio, sensor_type="analog", raw_value=0.0, unit="raw", name=f"sensor_{gpio}"
             )
 
         sensor = self.sensors[gpio]
@@ -720,7 +718,7 @@ class MockESP32Client:
 
         # Publish sensor data (single and optionally zone-based)
         self._publish_sensor_data(gpio)
-        
+
         # If multi-value sensor, also publish secondary values
         if sensor.is_multi_value and sensor.secondary_values:
             for value_name, value in sensor.secondary_values.items():
@@ -734,38 +732,35 @@ class MockESP32Client:
             "command_id": command_id,
             "gpio": gpio,
             "data": response_data,
-            "timestamp": sensor.last_read
+            "timestamp": sensor.last_read,
         }
 
     def _handle_sensor_batch(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
         """Handle batch sensor read - all sensors at once."""
         readings = []
-        
+
         for gpio, sensor in self.sensors.items():
             sensor.last_read = time.time()
             reading = self._build_sensor_response_data(sensor)
             readings.append(reading)
-            
+
             # Also publish individual sensor data (including zone topics)
             self._publish_sensor_data(gpio)
-            
+
             # If multi-value sensor, also publish secondary values
             if sensor.is_multi_value and sensor.secondary_values:
                 for value_name in sensor.secondary_values.keys():
                     self._publish_sensor_data(gpio, secondary_value_name=value_name)
-        
+
         # Publish batch message
         self._publish_sensor_batch(readings)
-        
+
         return {
             "status": "ok",
             "command": "sensor_batch",
             "command_id": command_id,
-            "data": {
-                "sensors": readings,
-                "count": len(readings)
-            },
-            "timestamp": time.time()
+            "data": {"sensors": readings, "count": len(readings)},
+            "timestamp": time.time(),
         }
 
     def _handle_config(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -798,7 +793,7 @@ class MockESP32Client:
                     sensor_type=sensor_type,
                     raw_value=0.0,
                     name=sensor_name or f"{sensor_type}_{gpio}",
-                    quality="good"
+                    quality="good",
                 )
                 configured_sensors.append(gpio)
 
@@ -821,7 +816,7 @@ class MockESP32Client:
                     actuator_type=actuator_type,
                     state=False,
                     pwm_value=0.0,
-                    name=actuator_name or f"{actuator_type}_{gpio}"
+                    name=actuator_name or f"{actuator_type}_{gpio}",
                 )
                 configured_actuators.append(gpio)
 
@@ -834,15 +829,17 @@ class MockESP32Client:
             "configured_sensors": configured_sensors,
             "configured_actuators": configured_actuators,
             "failures": failures,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
-        self.published_messages.append({
-            "topic": TopicBuilder.build_config_response_topic(self.esp_id, self.kaiser_id),
-            "payload": response_payload,
-            "qos": 1,
-            "retain": False
-        })
+        self.published_messages.append(
+            {
+                "topic": TopicBuilder.build_config_response_topic(self.esp_id, self.kaiser_id),
+                "payload": response_payload,
+                "qos": 1,
+                "retain": False,
+            }
+        )
 
         return {
             "status": status,
@@ -851,9 +848,9 @@ class MockESP32Client:
             "data": {
                 "configured_sensors": configured_sensors,
                 "configured_actuators": configured_actuators,
-                "failures": failures
+                "failures": failures,
             },
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     def _handle_config_get(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -866,11 +863,8 @@ class MockESP32Client:
                 "status": "ok",
                 "command": "config_get",
                 "command_id": command_id,
-                "data": {
-                    "key": key,
-                    "value": value
-                },
-                "timestamp": time.time()
+                "data": {"key": key, "value": value},
+                "timestamp": time.time(),
             }
 
         # Return all config
@@ -878,10 +872,8 @@ class MockESP32Client:
             "status": "ok",
             "command": "config_get",
             "command_id": command_id,
-            "data": {
-                "config": self.config
-            },
-            "timestamp": time.time()
+            "data": {"config": self.config},
+            "timestamp": time.time(),
         }
 
     def _handle_config_set(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -893,7 +885,7 @@ class MockESP32Client:
             return self._error_response("Missing key or value parameter", command_id)
 
         self.config[key] = value
-        
+
         # Publish config update to config topic
         self._publish_config_update(key, value)
 
@@ -901,18 +893,15 @@ class MockESP32Client:
             "status": "ok",
             "command": "config_set",
             "command_id": command_id,
-            "data": {
-                "key": key,
-                "value": value
-            },
-            "timestamp": time.time()
+            "data": {"key": key, "value": value},
+            "timestamp": time.time(),
         }
 
     def _handle_emergency_stop(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
         """Handle emergency stop command."""
         stopped_actuators = []
         timestamp = time.time()
-        
+
         for gpio, actuator in self.actuators.items():
             actuator.state = False
             actuator.pwm_value = 0.0
@@ -925,55 +914,59 @@ class MockESP32Client:
             stopped_actuators.append(gpio)
 
         # Publish to device-specific emergency topic
-        self.published_messages.append({
-            "topic": TopicBuilder.build_actuator_emergency_topic(self.esp_id, self.kaiser_id),
-            "payload": {
-                "esp_id": self.esp_id,
-                "command_id": command_id,
-                "stopped_actuators": stopped_actuators,
-                "timestamp": timestamp,
-                "reason": params.get("reason", "manual")
-            },
-            "qos": 1,
-            "retain": False
-        })
-        
+        self.published_messages.append(
+            {
+                "topic": TopicBuilder.build_actuator_emergency_topic(self.esp_id, self.kaiser_id),
+                "payload": {
+                    "esp_id": self.esp_id,
+                    "command_id": command_id,
+                    "stopped_actuators": stopped_actuators,
+                    "timestamp": timestamp,
+                    "reason": params.get("reason", "manual"),
+                },
+                "qos": 1,
+                "retain": False,
+            }
+        )
+
         # Publish to broadcast topic
-        self.published_messages.append({
-            "topic": "kaiser/broadcast/emergency",
-            "payload": {
-                "esp_id": self.esp_id,
-                "command_id": command_id,
-                "stopped_actuators": stopped_actuators,
-                "timestamp": timestamp,
-                "reason": params.get("reason", "manual")
-            },
-            "qos": 1,
-            "retain": False
-        })
+        self.published_messages.append(
+            {
+                "topic": "kaiser/broadcast/emergency",
+                "payload": {
+                    "esp_id": self.esp_id,
+                    "command_id": command_id,
+                    "stopped_actuators": stopped_actuators,
+                    "timestamp": timestamp,
+                    "reason": params.get("reason", "manual"),
+                },
+                "qos": 1,
+                "retain": False,
+            }
+        )
 
         return {
             "status": "ok",
             "command": "emergency_stop",
             "command_id": command_id,
             "stopped_actuators": stopped_actuators,
-            "timestamp": timestamp
+            "timestamp": timestamp,
         }
 
     def _handle_clear_emergency(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
         """
         Handle clear emergency command - allows recovery after emergency stop.
-        
+
         Params:
             gpio: Optional - clear specific actuator. If not provided, clears all.
-            
+
         This command MUST be called before actuators can be controlled again
         after an emergency stop.
         """
         gpio = params.get("gpio")
         timestamp = time.time()
         cleared_actuators = []
-        
+
         if gpio is not None:
             # Clear specific actuator
             if gpio in self.actuators:
@@ -989,16 +982,16 @@ class MockESP32Client:
                     actuator.emergency_stopped = False
                     cleared_actuators.append(act_gpio)
                     self._publish_actuator_status(act_gpio)
-        
+
         # Publish system response
         self._publish_system_response(command_id, "clear_emergency", True)
-        
+
         return {
             "status": "ok",
             "command": "clear_emergency",
             "command_id": command_id,
             "cleared_actuators": cleared_actuators,
-            "timestamp": timestamp
+            "timestamp": timestamp,
         }
 
     def _handle_reset(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -1008,15 +1001,15 @@ class MockESP32Client:
         self.published_messages.clear()
         self.pending_commands.clear()
         self.boot_time = time.time()
-        
+
         # Reset state machine
         self.system_state = SystemState.OPERATIONAL
-        
+
         return {
             "status": "ok",
             "command": "reset",
             "command_id": command_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     def _handle_library_install(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -1024,39 +1017,35 @@ class MockESP32Client:
         library_name = params.get("name")
         library_version = params.get("version", "latest")
         sensor_type = params.get("sensor_type")
-        
+
         if not library_name:
             return self._error_response("Missing library name", command_id)
-        
+
         # Simulate library installation
         self.libraries[library_name] = LibraryInfo(
             name=library_name,
             version=library_version,
             sensor_type=sensor_type or "unknown",
-            installed=True
+            installed=True,
         )
-        
+
         # Transition state during download
         old_state = self.system_state
         self._transition_state(SystemState.LIBRARY_DOWNLOADING)
-        
+
         # Publish library events
         self._publish_library_event("ready", library_name, library_version)
         self._publish_library_event("installed", library_name, library_version)
-        
+
         # Return to previous state
         self._transition_state(old_state)
-        
+
         return {
             "status": "ok",
             "command": "library_install",
             "command_id": command_id,
-            "data": {
-                "name": library_name,
-                "version": library_version,
-                "installed": True
-            },
-            "timestamp": time.time()
+            "data": {"name": library_name, "version": library_version, "installed": True},
+            "timestamp": time.time(),
         }
 
     def _handle_library_list(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -1071,18 +1060,18 @@ class MockESP32Client:
                         "name": lib.name,
                         "version": lib.version,
                         "sensor_type": lib.sensor_type,
-                        "installed": lib.installed
+                        "installed": lib.installed,
                     }
                     for name, lib in self.libraries.items()
                 }
             },
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     def _handle_system_command(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
         """Handle system-level commands."""
         action = params.get("action")
-        
+
         actions = {
             "reboot": self._system_reboot,
             "factory_reset": self._system_factory_reset,
@@ -1090,22 +1079,22 @@ class MockESP32Client:
             "exit_safe_mode": self.exit_safe_mode,
             "update_firmware": self._system_update_firmware,
         }
-        
+
         handler = actions.get(action)
         if not handler:
             return self._error_response(f"Unknown system action: {action}", command_id)
-        
+
         handler()
-        
+
         # Publish response
         self._publish_system_response(command_id, action, True)
-        
+
         return {
             "status": "ok",
             "command": "system_command",
             "command_id": command_id,
             "action": action,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     def _handle_diagnostics(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -1126,17 +1115,17 @@ class MockESP32Client:
             "safe_mode": self.system_state == SystemState.SAFE_MODE,
             "error_count": 0,
             "last_error": None,
-            "firmware_version": self.config["system"]["firmware"]
+            "firmware_version": self.config["system"]["firmware"],
         }
-        
+
         self._publish_system_diagnostics(diagnostics)
-        
+
         return {
             "status": "ok",
             "command": "diagnostics",
             "command_id": command_id,
             "data": diagnostics,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     def _handle_heartbeat(self, params: Dict[str, Any], command_id: str) -> Dict[str, Any]:
@@ -1168,7 +1157,7 @@ class MockESP32Client:
         self.zone = None
         self.config = {
             "wifi": {"ssid": "", "connected": False},
-            "system": {"version": "1.0.0", "firmware": "el-trabajante-v1.0.0"}
+            "system": {"version": "1.0.0", "firmware": "el-trabajante-v1.0.0"},
         }
         self._transition_state(SystemState.WIFI_SETUP)
 
@@ -1183,7 +1172,7 @@ class MockESP32Client:
     def _publish_sensor_data(self, gpio: int, secondary_value_name: Optional[str] = None):
         """
         Publish sensor data to MQTT with full payload structure.
-        
+
         Topics:
         - kaiser/god/esp/{esp_id}/sensor/{gpio}/data
         - kaiser/god/zone/{master_zone_id}/esp/{esp_id}/subzone/{subzone_id}/sensor/{gpio}/data (if zone configured)
@@ -1192,7 +1181,7 @@ class MockESP32Client:
             return
 
         sensor = self.sensors[gpio]
-        
+
         # Determine value to publish
         if secondary_value_name and sensor.secondary_values:
             value = sensor.secondary_values.get(secondary_value_name, sensor.raw_value)
@@ -1214,7 +1203,7 @@ class MockESP32Client:
             "sensor_name": sensor.name or f"sensor_{gpio}",
             "raw_mode": sensor.raw_mode,
         }
-        
+
         # Optional fields
         if sensor.subzone_id:
             payload["subzone_id"] = sensor.subzone_id
@@ -1239,11 +1228,7 @@ class MockESP32Client:
 
     def _publish_sensor_batch(self, readings: List[Dict[str, Any]]):
         """Publish batch sensor data."""
-        payload = {
-            "ts": int(time.time()),
-            "esp_id": self.esp_id,
-            "sensors": readings
-        }
+        payload = {"ts": int(time.time()), "esp_id": self.esp_id, "sensors": readings}
 
         topic = TopicBuilder.build_sensor_batch_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
@@ -1265,7 +1250,7 @@ class MockESP32Client:
             "target_value": actuator.target_value,
             "emergency_stopped": actuator.emergency_stopped,
             "last_command": actuator.last_command,
-            "timestamp": actuator.timestamp
+            "timestamp": actuator.timestamp,
         }
 
         topic = TopicBuilder.build_actuator_status_topic(self.esp_id, gpio, self.kaiser_id)
@@ -1281,7 +1266,7 @@ class MockESP32Client:
             "gpio": gpio,
             "command_id": command_id,
             "success": success,
-            "message": message
+            "message": message,
         }
 
         topic = TopicBuilder.build_actuator_response_topic(self.esp_id, gpio, self.kaiser_id)
@@ -1295,7 +1280,7 @@ class MockESP32Client:
             "gpio": gpio,
             "alert_type": alert_type,
             "message": message,
-            "severity": "warning" if alert_type != "emergency_stop" else "critical"
+            "severity": "warning" if alert_type != "emergency_stop" else "critical",
         }
 
         topic = TopicBuilder.build_actuator_alert_topic(self.esp_id, gpio, self.kaiser_id)
@@ -1322,7 +1307,7 @@ class MockESP32Client:
             "safe_mode": self.system_state == SystemState.SAFE_MODE,
             # GPIO-Status (Phase 1) - matches ESP32 mqtt_client.cpp:638-656
             "gpio_status": gpio_status,
-            "gpio_reserved_count": len(gpio_status)
+            "gpio_reserved_count": len(gpio_status),
         }
 
         topic = TopicBuilder.build_heartbeat_topic(self.esp_id, self.kaiser_id)
@@ -1335,7 +1320,7 @@ class MockESP32Client:
             "esp_id": self.esp_id,
             "command_id": command_id,
             "action": action,
-            "success": success
+            "success": success,
         }
 
         topic = TopicBuilder.build_system_response_topic(self.esp_id, self.kaiser_id)
@@ -1343,11 +1328,7 @@ class MockESP32Client:
 
     def _publish_system_diagnostics(self, diagnostics: Dict[str, Any]):
         """Publish system diagnostics."""
-        payload = {
-            "ts": int(time.time()),
-            "esp_id": self.esp_id,
-            **diagnostics
-        }
+        payload = {"ts": int(time.time()), "esp_id": self.esp_id, **diagnostics}
 
         topic = TopicBuilder.build_system_diagnostics_topic(self.esp_id, self.kaiser_id)
         self._store_and_publish(topic, payload, qos=1, retain=False)
@@ -1359,7 +1340,7 @@ class MockESP32Client:
             "esp_id": self.esp_id,
             "key": key,
             "value": value,
-            "action": "updated"
+            "action": "updated",
         }
 
         topic = TopicBuilder.build_config_topic(self.esp_id)
@@ -1371,7 +1352,7 @@ class MockESP32Client:
             "ts": int(time.time()),
             "esp_id": self.esp_id,
             "library_name": library_name,
-            "version": version
+            "version": version,
         }
 
         topic = TopicBuilder.build_library_event_topic(self.esp_id, event, self.kaiser_id)
@@ -1384,7 +1365,7 @@ class MockESP32Client:
             "esp_id": self.esp_id,
             "safe_mode": True,
             "reason": reason,
-            "actuators_disabled": list(self.actuators.keys())
+            "actuators_disabled": list(self.actuators.keys()),
         }
 
         topic = TopicBuilder.build_safe_mode_topic(self.esp_id, self.kaiser_id)
@@ -1412,33 +1393,51 @@ class MockESP32Client:
 
         # Sensoren hinzufügen (owner="sensor", mode=0 INPUT)
         for gpio, sensor in self.sensors.items():
-            gpio_status.append({
-                "gpio": gpio,
-                "owner": "sensor",
-                "component": sensor.sensor_type,
-                "mode": 0,  # INPUT mode for sensors
-                "safe": False  # Active sensors are not in safe mode
-            })
+            gpio_status.append(
+                {
+                    "gpio": gpio,
+                    "owner": "sensor",
+                    "component": sensor.sensor_type,
+                    "mode": 0,  # INPUT mode for sensors
+                    "safe": False,  # Active sensors are not in safe mode
+                }
+            )
 
         # Aktoren hinzufügen (owner="actuator", mode=1 OUTPUT)
         for gpio, actuator in self.actuators.items():
-            gpio_status.append({
-                "gpio": gpio,
-                "owner": "actuator",
-                "component": actuator.actuator_type,
-                "mode": 1,  # OUTPUT mode for actuators
-                "safe": actuator.emergency_stopped  # Emergency-stopped = safe mode
-            })
+            gpio_status.append(
+                {
+                    "gpio": gpio,
+                    "owner": "actuator",
+                    "component": actuator.actuator_type,
+                    "mode": 1,  # OUTPUT mode for actuators
+                    "safe": actuator.emergency_stopped,  # Emergency-stopped = safe mode
+                }
+            )
 
         # System-Pins (I2C) - NUR wenn I2C-Sensoren vorhanden sind
         i2c_sensor_types = {"SHT31", "BME280", "BH1750", "ADS1115", "CCS811", "TSL2561"}
         has_i2c = any(s.sensor_type in i2c_sensor_types for s in self.sensors.values())
 
         if has_i2c:
-            gpio_status.extend([
-                {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False},
-                {"gpio": 22, "owner": "system", "component": "I2C_SCL", "mode": 1, "safe": False}
-            ])
+            gpio_status.extend(
+                [
+                    {
+                        "gpio": 21,
+                        "owner": "system",
+                        "component": "I2C_SDA",
+                        "mode": 1,
+                        "safe": False,
+                    },
+                    {
+                        "gpio": 22,
+                        "owner": "system",
+                        "component": "I2C_SCL",
+                        "mode": 1,
+                        "safe": False,
+                    },
+                ]
+            )
 
         return gpio_status
 
@@ -1449,27 +1448,29 @@ class MockESP32Client:
             "type": sensor.sensor_type,
             "name": sensor.name,
             "raw_value": sensor.raw_value,
-            "value": sensor.processed_value if sensor.processed_value is not None else sensor.raw_value,
+            "value": (
+                sensor.processed_value if sensor.processed_value is not None else sensor.raw_value
+            ),
             "unit": sensor.unit or self._get_default_unit(sensor.sensor_type),
             "quality": sensor.quality,
             "timestamp": sensor.last_read,
-            "raw_mode": sensor.raw_mode
+            "raw_mode": sensor.raw_mode,
         }
-        
+
         if sensor.library_name:
             data["library_name"] = sensor.library_name
             data["library_version"] = sensor.library_version
-        
+
         if sensor.subzone_id:
             data["subzone_id"] = sensor.subzone_id
-        
+
         if sensor.calibration:
             data["calibration"] = sensor.calibration
-        
+
         # Multi-value sensors
         if sensor.is_multi_value and sensor.secondary_values:
             data["secondary_values"] = sensor.secondary_values
-        
+
         return data
 
     def _get_default_unit(self, sensor_type: str) -> str:
@@ -1485,7 +1486,7 @@ class MockESP32Client:
             "EC": "mS/cm",
             "moisture": "raw",
             "light": "lux",
-            "pressure": "hPa"
+            "pressure": "hPa",
         }
         return units.get(sensor_type, "raw")
 
@@ -1522,7 +1523,7 @@ class MockESP32Client:
         processed_value: Optional[float] = None,
         is_multi_value: bool = False,
         secondary_values: Optional[Dict[str, float]] = None,
-        raw_mode: bool = False
+        raw_mode: bool = False,
     ):
         """Set sensor value for testing with full configuration."""
         if gpio not in self.sensors:
@@ -1539,7 +1540,7 @@ class MockESP32Client:
                 processed_value=processed_value,
                 is_multi_value=is_multi_value,
                 secondary_values=secondary_values,
-                raw_mode=raw_mode
+                raw_mode=raw_mode,
             )
         else:
             sensor = self.sensors[gpio]
@@ -1569,11 +1570,11 @@ class MockESP32Client:
         primary_value: float,
         secondary_values: Dict[str, float],
         name: str = "",
-        quality: str = "good"
+        quality: str = "good",
     ):
         """
         Set a multi-value sensor (e.g., SHT31 with temp + humidity).
-        
+
         Usage:
             mock.set_multi_value_sensor(
                 gpio=21,
@@ -1589,7 +1590,7 @@ class MockESP32Client:
             name=name or f"{sensor_type}_{gpio}",
             quality=quality,
             is_multi_value=True,
-            secondary_values=secondary_values
+            secondary_values=secondary_values,
         )
 
     def configure_actuator(
@@ -1600,7 +1601,7 @@ class MockESP32Client:
         min_value: float = 0.0,
         max_value: float = 1.0,
         safety_timeout_ms: int = 0,
-        inverted: bool = False
+        inverted: bool = False,
     ):
         """Pre-configure an actuator."""
         self.actuators[gpio] = ActuatorState(
@@ -1612,7 +1613,7 @@ class MockESP32Client:
             min_value=min_value,
             max_value=max_value,
             safety_timeout_ms=safety_timeout_ms,
-            inverted=inverted
+            inverted=inverted,
         )
 
     def get_last_response(self) -> Optional[Dict[str, Any]]:
@@ -1684,7 +1685,7 @@ class MockESP32Client:
         gpio: int,
         initial_ph: float = 7.0,
         calibrated: bool = False,
-        drift_rate: float = 0.0  # pH/hour
+        drift_rate: float = 0.0,  # pH/hour
     ) -> None:
         """
         Add pH sensor with calibration state and drift simulation.
@@ -1709,7 +1710,9 @@ class MockESP32Client:
         # Validate ADC1 pin (required for WiFi coexistence)
         adc1_pins = [32, 33, 34, 35, 36, 39]
         if gpio not in adc1_pins:
-            logger.warning(f"GPIO {gpio} is not an ADC1 pin. pH sensors should use GPIO 32-39 for WiFi compatibility.")
+            logger.warning(
+                f"GPIO {gpio} is not an ADC1 pin. pH sensors should use GPIO 32-39 for WiFi compatibility."
+            )
 
         self.sensors[gpio] = SensorState(
             gpio=gpio,
@@ -1727,7 +1730,7 @@ class MockESP32Client:
                 "cal_point_4": 3.0 if calibrated else None,  # Voltage at pH 4.0
                 "cal_point_7": 2.5 if calibrated else None,  # Voltage at pH 7.0
             },
-            raw_mode=True  # Server processes pH conversion
+            raw_mode=True,  # Server processes pH conversion
         )
 
     def get_ph_with_drift(self, gpio: int) -> float:
@@ -1765,7 +1768,7 @@ class MockESP32Client:
         gpio: int,
         count: int = 3,
         initial_temps: Optional[List[float]] = None,
-        rom_addresses: Optional[List[str]] = None
+        rom_addresses: Optional[List[str]] = None,
     ) -> None:
         """
         Add multiple DS18B20 sensors on same OneWire bus.
@@ -1792,7 +1795,7 @@ class MockESP32Client:
             )
         """
         # Initialize DS18B20 bus storage if not exists
-        if not hasattr(self, '_ds18b20_buses'):
+        if not hasattr(self, "_ds18b20_buses"):
             self._ds18b20_buses: Dict[int, Dict[str, SensorState]] = {}
 
         # Generate default temperatures if not provided
@@ -1827,7 +1830,7 @@ class MockESP32Client:
                     "resolution": 12,  # 12-bit = 0.0625°C resolution
                     "conversion_time_ms": 750,
                 },
-                raw_mode=False  # DS18B20 provides calibrated temperature
+                raw_mode=False,  # DS18B20 provides calibrated temperature
             )
             self._ds18b20_buses[gpio][rom] = sensor_state
 
@@ -1848,17 +1851,13 @@ class MockESP32Client:
         Returns:
             SensorState for specific sensor, or None if not found
         """
-        if not hasattr(self, '_ds18b20_buses'):
+        if not hasattr(self, "_ds18b20_buses"):
             return None
         bus = self._ds18b20_buses.get(gpio, {})
         return bus.get(rom_address)
 
     def set_ds18b20_value(
-        self,
-        gpio: int,
-        rom_address: str,
-        temperature: float,
-        quality: str = "good"
+        self, gpio: int, rom_address: str, temperature: float, quality: str = "good"
     ) -> bool:
         """
         Set temperature value for specific DS18B20 sensor.
@@ -1891,7 +1890,7 @@ class MockESP32Client:
         Returns:
             Average temperature, or None if no sensors
         """
-        if not hasattr(self, '_ds18b20_buses'):
+        if not hasattr(self, "_ds18b20_buses"):
             return None
 
         bus = self._ds18b20_buses.get(gpio, {})
@@ -1899,20 +1898,16 @@ class MockESP32Client:
             return None
 
         # Filter out fault values (-127°C)
-        valid_temps = [s.raw_value for s in bus.values()
-                       if s.raw_value > -100 and s.quality != "bad"]
+        valid_temps = [
+            s.raw_value for s in bus.values() if s.raw_value > -100 and s.quality != "bad"
+        ]
 
         if not valid_temps:
             return None
 
         return sum(valid_temps) / len(valid_temps)
 
-    def set_relay_state(
-        self,
-        gpio: int,
-        state: bool,
-        trigger_type: str = "active_low"
-    ) -> None:
+    def set_relay_state(self, gpio: int, state: bool, trigger_type: str = "active_low") -> None:
         """
         Set relay state accounting for trigger type.
 
@@ -1980,14 +1975,9 @@ class MockESP32Client:
         actuator = self.actuators.get(gpio)
         if actuator is None:
             return None
-        return getattr(actuator, '_gpio_level', actuator.state)
+        return getattr(actuator, "_gpio_level", actuator.state)
 
-    def set_pwm_duty(
-        self,
-        gpio: int,
-        duty_cycle: int,
-        frequency: int = 25000
-    ) -> None:
+    def set_pwm_duty(self, gpio: int, duty_cycle: int, frequency: int = 25000) -> None:
         """
         Set PWM duty cycle for actuator.
 
@@ -2022,7 +2012,7 @@ class MockESP32Client:
             actuator.state = duty_cycle > 0
             actuator.timestamp = time.time()
             # Store frequency
-            if not hasattr(actuator, '_pwm_frequency'):
+            if not hasattr(actuator, "_pwm_frequency"):
                 actuator._pwm_frequency = frequency
             else:
                 actuator._pwm_frequency = frequency
@@ -2071,7 +2061,7 @@ class MockESP32Client:
         actuator = self.actuators.get(gpio)
         if actuator is None:
             return None
-        return getattr(actuator, '_pwm_frequency', 25000)
+        return getattr(actuator, "_pwm_frequency", 25000)
 
     def simulate_boot_sequence(self) -> Dict[str, Any]:
         """
@@ -2134,14 +2124,10 @@ class MockESP32Client:
             "safe_pins_unchanged": safe_pins_verified if safe_pin_states_before else safe_pins,
             "final_state": self.system_state,
             "boot_states": [s.name for s in boot_states],
-            "boot_time_ms": int((time.time() - self.boot_time) * 1000)
+            "boot_time_ms": int((time.time() - self.boot_time) * 1000),
         }
 
-    def simulate_sensor_fault(
-        self,
-        gpio: int,
-        fault_type: str
-    ) -> None:
+    def simulate_sensor_fault(self, gpio: int, fault_type: str) -> None:
         """
         Simulate sensor fault conditions.
 
@@ -2225,7 +2211,7 @@ class MockESP32Client:
         sensor.last_read = time.time()
 
         # Also update DS18B20 bus if applicable
-        if hasattr(self, '_ds18b20_buses') and gpio in self._ds18b20_buses:
+        if hasattr(self, "_ds18b20_buses") and gpio in self._ds18b20_buses:
             for rom, bus_sensor in self._ds18b20_buses[gpio].items():
                 bus_sensor.raw_value = sensor.raw_value
                 bus_sensor.quality = sensor.quality
@@ -2256,4 +2242,3 @@ class MockESP32Client:
 
         sensor.quality = "good"
         sensor.last_read = time.time()
-

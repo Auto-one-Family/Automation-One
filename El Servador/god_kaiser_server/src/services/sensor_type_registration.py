@@ -18,7 +18,7 @@ Features:
 - Non-blocking: Errors don't prevent server startup
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,9 +100,7 @@ class SensorTypeRegistrationService:
             logger.warning("No sensor processors found in LibraryLoader")
             return results
 
-        logger.info(
-            f"Scanning {len(processor_classes)} sensor processors for auto-registration"
-        )
+        logger.info(f"Scanning {len(processor_classes)} sensor processors for auto-registration")
 
         # Process each sensor type
         for sensor_type, processor_class in processor_classes.items():

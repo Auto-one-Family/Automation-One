@@ -16,9 +16,8 @@ Architektur:
 - Graceful Shutdown mit DB-Status-Update
 """
 
-import asyncio
 from typing import Dict, Optional, Callable, Any, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -42,16 +41,18 @@ logger = get_logger(__name__)
 
 class JobCategory(str, Enum):
     """Kategorien für Jobs - bestimmt Prefix der Job-ID."""
-    MOCK_ESP = "mock"           # Mock-ESP Simulationen
+
+    MOCK_ESP = "mock"  # Mock-ESP Simulationen
     MAINTENANCE = "maintenance"  # Cleanup, Reports
-    MONITOR = "monitor"         # Timeout-Checks, Health
-    CUSTOM = "custom"           # User-definierte Jobs
+    MONITOR = "monitor"  # Timeout-Checks, Health
+    CUSTOM = "custom"  # User-definierte Jobs
     SENSOR_SCHEDULE = "sensor_schedule"  # Scheduled sensor measurements (Phase 2H)
 
 
 @dataclass
 class JobStats:
     """Statistiken für einen Job."""
+
     job_id: str
     category: JobCategory
     executions: int = 0
@@ -95,16 +96,12 @@ class CentralScheduler:
         self._is_running: bool = False
 
         # APScheduler Konfiguration
-        jobstores = {
-            'default': MemoryJobStore()
-        }
-        executors = {
-            'default': AsyncIOExecutor()
-        }
+        jobstores = {"default": MemoryJobStore()}
+        executors = {"default": AsyncIOExecutor()}
         job_defaults = {
-            'coalesce': True,           # Verpasste Jobs zusammenfassen
-            'max_instances': 1,         # Max 1 Instanz pro Job gleichzeitig
-            'misfire_grace_time': 30    # 30s Toleranz für verpasste Jobs
+            "coalesce": True,  # Verpasste Jobs zusammenfassen
+            "max_instances": 1,  # Max 1 Instanz pro Job gleichzeitig
+            "misfire_grace_time": 30,  # 30s Toleranz für verpasste Jobs
         }
 
         self._scheduler = AsyncIOScheduler(
@@ -114,18 +111,9 @@ class CentralScheduler:
         )
 
         # Event Listener für Statistiken
-        self._scheduler.add_listener(
-            self._on_job_executed,
-            EVENT_JOB_EXECUTED
-        )
-        self._scheduler.add_listener(
-            self._on_job_error,
-            EVENT_JOB_ERROR
-        )
-        self._scheduler.add_listener(
-            self._on_job_missed,
-            EVENT_JOB_MISSED
-        )
+        self._scheduler.add_listener(self._on_job_executed, EVENT_JOB_EXECUTED)
+        self._scheduler.add_listener(self._on_job_error, EVENT_JOB_ERROR)
+        self._scheduler.add_listener(self._on_job_missed, EVENT_JOB_MISSED)
 
         logger.debug("CentralScheduler initialized")
 
@@ -171,10 +159,10 @@ class CentralScheduler:
                 job_id: {
                     "executions": stat.executions,
                     "errors": stat.errors,
-                    "last_run": stat.last_run.isoformat() if stat.last_run else None
+                    "last_run": stat.last_run.isoformat() if stat.last_run else None,
                 }
                 for job_id, stat in self._job_stats.items()
-            }
+            },
         }
 
         logger.info(f"CentralScheduler shutdown complete: {jobs_before} jobs removed")
@@ -197,7 +185,7 @@ class CentralScheduler:
         args: Optional[List] = None,
         kwargs: Optional[Dict] = None,
         category: JobCategory = JobCategory.CUSTOM,
-        start_immediately: bool = True
+        start_immediately: bool = True,
     ) -> bool:
         """
         Fügt einen Interval-Job hinzu.
@@ -229,14 +217,11 @@ class CentralScheduler:
             args=args or [],
             kwargs=kwargs or {},
             replace_existing=True,
-            next_run_time=datetime.now() if start_immediately else None
+            next_run_time=datetime.now() if start_immediately else None,
         )
 
         # Stats initialisieren
-        self._job_stats[full_job_id] = JobStats(
-            job_id=full_job_id,
-            category=category
-        )
+        self._job_stats[full_job_id] = JobStats(job_id=full_job_id, category=category)
 
         logger.debug(f"Added interval job: {full_job_id} (every {seconds}s)")
         return True
@@ -248,7 +233,7 @@ class CentralScheduler:
         cron_expression: Dict[str, Any],
         args: Optional[List] = None,
         kwargs: Optional[Dict] = None,
-        category: JobCategory = JobCategory.MAINTENANCE
+        category: JobCategory = JobCategory.MAINTENANCE,
     ) -> bool:
         """
         Fügt einen Cron-Job hinzu.
@@ -284,13 +269,10 @@ class CentralScheduler:
             id=full_job_id,
             args=args or [],
             kwargs=kwargs or {},
-            replace_existing=True
+            replace_existing=True,
         )
 
-        self._job_stats[full_job_id] = JobStats(
-            job_id=full_job_id,
-            category=category
-        )
+        self._job_stats[full_job_id] = JobStats(job_id=full_job_id, category=category)
 
         logger.debug(f"Added cron job: {full_job_id}")
         return True
@@ -302,7 +284,7 @@ class CentralScheduler:
         run_at: datetime,
         args: Optional[List] = None,
         kwargs: Optional[Dict] = None,
-        category: JobCategory = JobCategory.CUSTOM
+        category: JobCategory = JobCategory.CUSTOM,
     ) -> bool:
         """
         Fügt einen einmaligen Job hinzu.
@@ -328,10 +310,7 @@ class CentralScheduler:
             kwargs=kwargs or {},
         )
 
-        self._job_stats[full_job_id] = JobStats(
-            job_id=full_job_id,
-            category=category
-        )
+        self._job_stats[full_job_id] = JobStats(job_id=full_job_id, category=category)
 
         logger.debug(f"Added onetime job: {full_job_id} at {run_at}")
         return True
@@ -431,10 +410,7 @@ class CentralScheduler:
         if not job:
             return False
 
-        self._scheduler.reschedule_job(
-            job_id,
-            trigger=IntervalTrigger(seconds=seconds)
-        )
+        self._scheduler.reschedule_job(job_id, trigger=IntervalTrigger(seconds=seconds))
         logger.debug(f"Rescheduled job {job_id} to {seconds}s")
         return True
 
@@ -462,10 +438,7 @@ class CentralScheduler:
     def get_jobs_by_category(self, category: JobCategory) -> List[Dict[str, Any]]:
         """Gibt alle Jobs einer Kategorie zurück."""
         prefix = f"{category.value}_"
-        return [
-            job for job in self.get_all_jobs()
-            if job["id"].startswith(prefix)
-        ]
+        return [job for job in self.get_all_jobs() if job["id"].startswith(prefix)]
 
     def get_job_stats(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Gibt Statistiken für einen Job zurück."""

@@ -20,9 +20,7 @@ from ..core.config import get_settings
 from ..core.logging_config import get_logger
 from ..core.resilience import (
     CircuitBreaker,
-    CircuitState,
     ResilienceRegistry,
-    CircuitBreakerOpenError,
     ServiceUnavailableError,
 )
 
@@ -95,6 +93,7 @@ def _attach_query_duration_events(sync_engine) -> None:
         total = _time.perf_counter() - conn.info["query_start_time"].pop(-1)
         try:
             from ..core.metrics import DB_QUERY_DURATION
+
             DB_QUERY_DURATION.observe(total)
         except ImportError:
             pass  # Metrics module not yet importable during early startup
@@ -205,9 +204,7 @@ async def init_db(max_retries: int = 5, retry_delay: float = 2.0) -> None:
                 )
                 await _asyncio.sleep(wait)
             else:
-                logger.error(
-                    f"Database initialization failed after {max_retries} attempts: {e}"
-                )
+                logger.error(f"Database initialization failed after {max_retries} attempts: {e}")
                 raise
 
 
@@ -229,46 +226,47 @@ async def dispose_engine() -> None:
 # RESILIENCE: Database Circuit Breaker
 # =============================================================================
 
+
 def init_db_circuit_breaker() -> CircuitBreaker:
     """
     Initialize and register the database circuit breaker.
-    
+
     Called during application startup to set up resilience patterns.
-    
+
     Returns:
         CircuitBreaker instance for database operations
     """
     global _db_circuit_breaker
-    
+
     if _db_circuit_breaker is not None:
         return _db_circuit_breaker
-    
+
     settings = get_settings()
-    
+
     _db_circuit_breaker = CircuitBreaker(
         name="database",
         failure_threshold=settings.resilience.circuit_breaker_db_failure_threshold,
         recovery_timeout=float(settings.resilience.circuit_breaker_db_recovery_timeout),
         half_open_timeout=float(settings.resilience.circuit_breaker_db_half_open_timeout),
     )
-    
+
     # Register in global registry
     registry = ResilienceRegistry.get_instance()
     registry.register_circuit_breaker("database", _db_circuit_breaker)
-    
+
     logger.info(
         f"[resilience] Database CircuitBreaker registered: "
         f"threshold={settings.resilience.circuit_breaker_db_failure_threshold}, "
         f"recovery={settings.resilience.circuit_breaker_db_recovery_timeout}s"
     )
-    
+
     return _db_circuit_breaker
 
 
 def get_db_circuit_breaker() -> Optional[CircuitBreaker]:
     """
     Get the database circuit breaker instance.
-    
+
     Returns:
         CircuitBreaker instance or None if not initialized
     """
@@ -280,26 +278,26 @@ def get_db_circuit_breaker() -> Optional[CircuitBreaker]:
 async def resilient_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Get a resilient database session with circuit breaker protection.
-    
+
     This context manager provides:
     - Circuit breaker check before acquiring session
     - Automatic failure/success recording
     - Proper error handling and circuit state updates
-    
+
     Usage:
         async with resilient_session() as session:
             result = await session.execute(query)
-    
+
     Raises:
         ServiceUnavailableError: If circuit breaker is OPEN
         OperationalError: If database operation fails
     """
     global _db_circuit_breaker
-    
+
     # Initialize circuit breaker if not done yet
     if _db_circuit_breaker is None:
         init_db_circuit_breaker()
-    
+
     # Circuit breaker check
     if _db_circuit_breaker and not _db_circuit_breaker.allow_request():
         logger.warning("[resilience] Database operation blocked by Circuit Breaker")
@@ -309,9 +307,9 @@ async def resilient_session() -> AsyncGenerator[AsyncSession, None]:
             details={
                 "state": _db_circuit_breaker.get_state().value,
                 "failure_count": _db_circuit_breaker.failure_count,
-            }
+            },
         )
-    
+
     session_maker = get_session_maker()
     async with session_maker() as session:
         try:
@@ -326,7 +324,7 @@ async def resilient_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             logger.error(f"[resilience] Database operation failed: {e}")
             raise
-        except Exception as e:
+        except Exception:
             # Other errors - rollback but don't record as circuit breaker failure
             # (could be application logic errors, not infrastructure)
             await session.rollback()
@@ -339,7 +337,7 @@ async def resilient_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_session_with_resilience() -> AsyncGenerator[AsyncSession, None]:
     """
     Alias for resilient_session() for backward compatibility.
-    
+
     Prefer using resilient_session() in new code.
     """
     async with resilient_session() as session:

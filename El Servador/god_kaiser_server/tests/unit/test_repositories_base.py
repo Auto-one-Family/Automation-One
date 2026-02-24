@@ -254,4 +254,3 @@ class TestBaseRepositoryExists:
         fake_id = uuid.uuid4()
         exists = await base_repo.exists(fake_id)
         assert exists is False
-

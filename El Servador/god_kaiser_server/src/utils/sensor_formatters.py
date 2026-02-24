@@ -16,75 +16,75 @@ from typing import Optional
 # Sensor-Type -> Deutscher Display-Name
 SENSOR_DISPLAY_NAMES = {
     # DS18B20 (1-Wire Temperature)
-    'ds18b20': 'Temperatur',
-    'ds18b20_temp': 'Temperatur',
+    "ds18b20": "Temperatur",
+    "ds18b20_temp": "Temperatur",
     # DHT22 (Temp + Humidity)
-    'dht22': 'Temp./Luftfeuchtigkeit',
-    'dht22_temp': 'Temperatur',
-    'dht22_humidity': 'Luftfeuchtigkeit',
+    "dht22": "Temp./Luftfeuchtigkeit",
+    "dht22_temp": "Temperatur",
+    "dht22_humidity": "Luftfeuchtigkeit",
     # SHT31 (Temp + Humidity)
-    'sht31': 'Temp./Luftfeuchtigkeit',
-    'sht31_temp': 'Temperatur',
-    'sht31_humidity': 'Luftfeuchtigkeit',
+    "sht31": "Temp./Luftfeuchtigkeit",
+    "sht31_temp": "Temperatur",
+    "sht31_humidity": "Luftfeuchtigkeit",
     # BME280 (Temp + Humidity + Pressure)
-    'bme280': 'Umweltsensor',
-    'bme280_temp': 'Temperatur',
-    'bme280_humidity': 'Luftfeuchtigkeit',
-    'bme280_pressure': 'Luftdruck',
+    "bme280": "Umweltsensor",
+    "bme280_temp": "Temperatur",
+    "bme280_humidity": "Luftfeuchtigkeit",
+    "bme280_pressure": "Luftdruck",
     # Soil sensors
-    'capacitive_soil': 'Bodenfeuchtigkeit',
-    'soil_moisture': 'Bodenfeuchtigkeit',
+    "capacitive_soil": "Bodenfeuchtigkeit",
+    "soil_moisture": "Bodenfeuchtigkeit",
     # pH sensor
-    'ph_sensor': 'pH-Wert',
-    'ph': 'pH-Wert',
+    "ph_sensor": "pH-Wert",
+    "ph": "pH-Wert",
     # Light sensor
-    'bh1750': 'Lichtintensitat',
-    'light': 'Lichtintensitat',
+    "bh1750": "Lichtintensitat",
+    "light": "Lichtintensitat",
     # Generic
-    'analog': 'Analoger Sensor',
-    'digital': 'Digitaler Sensor',
-    'unknown': 'Sensor',
+    "analog": "Analoger Sensor",
+    "digital": "Digitaler Sensor",
+    "unknown": "Sensor",
 }
 
 # Sensor-Type -> Technischer Name (fur Details/Debugging)
 SENSOR_TECHNICAL_NAMES = {
-    'ds18b20': 'DS18B20',
-    'ds18b20_temp': 'DS18B20',
-    'dht22': 'DHT22',
-    'dht22_temp': 'DHT22',
-    'dht22_humidity': 'DHT22',
-    'sht31': 'SHT31',
-    'sht31_temp': 'SHT31',
-    'sht31_humidity': 'SHT31',
-    'bme280': 'BME280',
-    'bme280_temp': 'BME280',
-    'bme280_humidity': 'BME280',
-    'bme280_pressure': 'BME280',
-    'capacitive_soil': 'Capacitive',
-    'soil_moisture': 'Soil Sensor',
-    'ph_sensor': 'pH-4502C',
-    'ph': 'pH-4502C',
-    'bh1750': 'BH1750',
-    'light': 'Light Sensor',
+    "ds18b20": "DS18B20",
+    "ds18b20_temp": "DS18B20",
+    "dht22": "DHT22",
+    "dht22_temp": "DHT22",
+    "dht22_humidity": "DHT22",
+    "sht31": "SHT31",
+    "sht31_temp": "SHT31",
+    "sht31_humidity": "SHT31",
+    "bme280": "BME280",
+    "bme280_temp": "BME280",
+    "bme280_humidity": "BME280",
+    "bme280_pressure": "BME280",
+    "capacitive_soil": "Capacitive",
+    "soil_moisture": "Soil Sensor",
+    "ph_sensor": "pH-4502C",
+    "ph": "pH-4502C",
+    "bh1750": "BH1750",
+    "light": "Light Sensor",
 }
 
 # Default Decimal Places pro Sensor-Type
 SENSOR_DECIMAL_PLACES = {
-    'ds18b20': 1,
-    'ds18b20_temp': 1,
-    'dht22_temp': 1,
-    'dht22_humidity': 0,
-    'sht31_temp': 1,
-    'sht31_humidity': 0,
-    'bme280_temp': 1,
-    'bme280_humidity': 0,
-    'bme280_pressure': 0,
-    'capacitive_soil': 0,
-    'soil_moisture': 0,
-    'ph_sensor': 2,
-    'ph': 2,
-    'bh1750': 0,
-    'light': 0,
+    "ds18b20": 1,
+    "ds18b20_temp": 1,
+    "dht22_temp": 1,
+    "dht22_humidity": 0,
+    "sht31_temp": 1,
+    "sht31_humidity": 0,
+    "bme280_temp": 1,
+    "bme280_humidity": 0,
+    "bme280_pressure": 0,
+    "capacitive_soil": 0,
+    "soil_moisture": 0,
+    "ph_sensor": 2,
+    "ph": 2,
+    "bh1750": 0,
+    "light": 0,
 }
 
 
@@ -121,10 +121,9 @@ def format_sensor_message(
         "pH-Wert GPIO 33: 6.85 pH"
     """
     # Deutscher Display-Name
-    sensor_key = sensor_type.lower() if sensor_type else 'unknown'
+    sensor_key = sensor_type.lower() if sensor_type else "unknown"
     display_name = SENSOR_DISPLAY_NAMES.get(
-        sensor_key,
-        sensor_type.replace('_', ' ').title() if sensor_type else 'Sensor'
+        sensor_key, sensor_type.replace("_", " ").title() if sensor_type else "Sensor"
     )
 
     # Nachkommastellen
@@ -144,7 +143,9 @@ def format_sensor_message(
 
     # Message zusammenbauen
     if include_technical_name:
-        tech_name = SENSOR_TECHNICAL_NAMES.get(sensor_key, sensor_type.upper() if sensor_type else 'UNKNOWN')
+        tech_name = SENSOR_TECHNICAL_NAMES.get(
+            sensor_key, sensor_type.upper() if sensor_type else "UNKNOWN"
+        )
         message = f"{display_name} ({tech_name}) GPIO {gpio}: {value_with_unit}"
     else:
         message = f"{display_name} GPIO {gpio}: {value_with_unit}"
@@ -167,7 +168,7 @@ def _format_value_with_unit(value: str, unit: Optional[str]) -> str:
         return value
 
     # Einheiten die direkt angehangt werden (kein Leerzeichen)
-    no_space_units = {'%', '°C', '°F', 'degC', 'degF'}
+    no_space_units = {"%", "°C", "°F", "degC", "degF"}
 
     if unit in no_space_units:
         return f"{value}{unit}"
@@ -201,10 +202,9 @@ def get_sensor_display_name(sensor_type: str) -> str:
     Returns:
         "Temperatur", "pH-Wert", etc.
     """
-    sensor_key = sensor_type.lower() if sensor_type else 'unknown'
+    sensor_key = sensor_type.lower() if sensor_type else "unknown"
     return SENSOR_DISPLAY_NAMES.get(
-        sensor_key,
-        sensor_type.replace('_', ' ').title() if sensor_type else 'Sensor'
+        sensor_key, sensor_type.replace("_", " ").title() if sensor_type else "Sensor"
     )
 
 
@@ -218,7 +218,7 @@ def get_sensor_decimal_places(sensor_type: str) -> int:
     Returns:
         Nachkommastellen (Default: 1)
     """
-    sensor_key = sensor_type.lower() if sensor_type else 'unknown'
+    sensor_key = sensor_type.lower() if sensor_type else "unknown"
     return SENSOR_DECIMAL_PLACES.get(sensor_key, 1)
 
 
@@ -250,60 +250,60 @@ def determine_sensor_severity(
 
     # Standard-Schwellwerte (konnen uber thresholds uberschrieben werden)
     default_thresholds = {
-        'ds18b20': {  # Temperatur
-            'critical_low': 0,
-            'warning_low': 10,
-            'warning_high': 35,
-            'critical_high': 45,
+        "ds18b20": {  # Temperatur
+            "critical_low": 0,
+            "warning_low": 10,
+            "warning_high": 35,
+            "critical_high": 45,
         },
-        'ds18b20_temp': {
-            'critical_low': 0,
-            'warning_low': 10,
-            'warning_high': 35,
-            'critical_high': 45,
+        "ds18b20_temp": {
+            "critical_low": 0,
+            "warning_low": 10,
+            "warning_high": 35,
+            "critical_high": 45,
         },
-        'dht22_humidity': {
-            'warning_low': 30,
-            'warning_high': 80,
-            'critical_high': 95,
+        "dht22_humidity": {
+            "warning_low": 30,
+            "warning_high": 80,
+            "critical_high": 95,
         },
-        'sht31_humidity': {
-            'warning_low': 30,
-            'warning_high': 80,
-            'critical_high': 95,
+        "sht31_humidity": {
+            "warning_low": 30,
+            "warning_high": 80,
+            "critical_high": 95,
         },
-        'ph_sensor': {
-            'critical_low': 4.0,
-            'warning_low': 5.5,
-            'warning_high': 7.5,
-            'critical_high': 9.0,
+        "ph_sensor": {
+            "critical_low": 4.0,
+            "warning_low": 5.5,
+            "warning_high": 7.5,
+            "critical_high": 9.0,
         },
-        'ph': {
-            'critical_low': 4.0,
-            'warning_low': 5.5,
-            'warning_high': 7.5,
-            'critical_high': 9.0,
+        "ph": {
+            "critical_low": 4.0,
+            "warning_low": 5.5,
+            "warning_high": 7.5,
+            "critical_high": 9.0,
         },
-        'capacitive_soil': {
-            'critical_low': 10,
-            'warning_low': 30,
+        "capacitive_soil": {
+            "critical_low": 10,
+            "warning_low": 30,
         },
     }
 
-    sensor_key = sensor_type.lower() if sensor_type else 'unknown'
+    sensor_key = sensor_type.lower() if sensor_type else "unknown"
     config = thresholds or default_thresholds.get(sensor_key, {})
 
     # Critical-Checks
-    if 'critical_low' in config and value < config['critical_low']:
-        return 'critical'
-    if 'critical_high' in config and value > config['critical_high']:
-        return 'critical'
+    if "critical_low" in config and value < config["critical_low"]:
+        return "critical"
+    if "critical_high" in config and value > config["critical_high"]:
+        return "critical"
 
     # Warning-Checks
-    if 'warning_low' in config and value < config['warning_low']:
-        return 'warning'
-    if 'warning_high' in config and value > config['warning_high']:
-        return 'warning'
+    if "warning_low" in config and value < config["warning_low"]:
+        return "warning"
+    if "warning_high" in config and value > config["warning_high"]:
+        return "warning"
 
     # Normal
-    return 'info'
+    return "info"

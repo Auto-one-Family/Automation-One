@@ -43,9 +43,7 @@ class TestActuatorRepositoryConfig:
         result = await actuator_repo.get_by_esp_and_gpio(sample_esp_device.id, 99)
         assert result is None
 
-    async def test_get_by_esp_success(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_get_by_esp_success(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test retrieval of all actuators for an ESP."""
         await actuator_repo.create(
             esp_id=sample_esp_device.id,
@@ -69,9 +67,7 @@ class TestActuatorRepositoryConfig:
         gpios = {a.gpio for a in actuators}
         assert gpios == {5, 6}
 
-    async def test_get_enabled(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_get_enabled(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test retrieval of enabled actuators."""
         await actuator_repo.create(
             esp_id=sample_esp_device.id,
@@ -99,9 +95,7 @@ class TestActuatorRepositoryConfig:
 class TestActuatorRepositoryState:
     """Test ActuatorRepository state operations"""
 
-    async def test_get_state_success(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_get_state_success(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test retrieval of actuator state."""
         from src.db.models.actuator import ActuatorState
 
@@ -123,9 +117,7 @@ class TestActuatorRepositoryState:
         assert retrieved.current_value == 1.0
         assert retrieved.state == "on"
 
-    async def test_get_state_not_found(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_get_state_not_found(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test retrieval with non-existent state."""
         result = await actuator_repo.get_state(sample_esp_device.id, 99)
         assert result is None
@@ -196,9 +188,7 @@ class TestActuatorRepositoryState:
 class TestActuatorRepositoryHistory:
     """Test ActuatorRepository history operations"""
 
-    async def test_log_command_success(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_log_command_success(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test logging actuator command."""
         history = await actuator_repo.log_command(
             esp_id=sample_esp_device.id,
@@ -216,9 +206,7 @@ class TestActuatorRepositoryHistory:
         assert history.success is True
         assert history.issued_by == "test_user"
 
-    async def test_log_command_failure(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_log_command_failure(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test logging failed command."""
         history = await actuator_repo.log_command(
             esp_id=sample_esp_device.id,
@@ -233,9 +221,7 @@ class TestActuatorRepositoryHistory:
         assert history.success is False
         assert history.error_message == "Safety constraint violated"
 
-    async def test_get_history_success(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_get_history_success(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test retrieval of history for specific actuator."""
         # Log commands for GPIO 5
         await actuator_repo.log_command(
@@ -271,9 +257,7 @@ class TestActuatorRepositoryHistory:
         assert len(history) == 2
         assert all(h.gpio == 5 for h in history)
 
-    async def test_get_history_empty(
-        self, actuator_repo: ActuatorRepository, sample_esp_device
-    ):
+    async def test_get_history_empty(self, actuator_repo: ActuatorRepository, sample_esp_device):
         """Test retrieval with no history."""
         history = await actuator_repo.get_history(sample_esp_device.id, 99)
         assert len(history) == 0
@@ -293,13 +277,10 @@ class TestActuatorRepositoryHistory:
                 success=True,
             )
 
-        history = await actuator_repo.get_history(
-            sample_esp_device.id, 5, limit=3
-        )
+        history = await actuator_repo.get_history(sample_esp_device.id, 5, limit=3)
 
         assert len(history) == 3
         # Should be ordered by timestamp desc (newest first)
         assert history[0].value == 4.0
         assert history[1].value == 3.0
         assert history[2].value == 2.0
-

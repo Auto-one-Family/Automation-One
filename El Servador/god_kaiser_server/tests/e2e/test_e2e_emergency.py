@@ -76,20 +76,18 @@ class TestEmergencyStopBroadcast:
             esp_id = generate_unique_mock_id(f"EMG{i}")
             cleanup_test_devices(esp_id)
 
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name=f"Emergency Test Device {i}"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name=f"Emergency Test Device {i}")
             result = await api_client.register_esp(esp)
-            assert "device_id" in result or "id" in result, \
-                f"Device {i} registration failed: {result}"
+            assert (
+                "device_id" in result or "id" in result
+            ), f"Device {i} registration failed: {result}"
 
             # Create actuator on each device
             await api_client.create_actuator_config(
                 esp_id=esp_id,
                 gpio=25 + i,
                 actuator_type="pump" if i == 0 else ("valve" if i == 1 else "fan"),
-                name=f"Emergency Test Actuator {i}"
+                name=f"Emergency Test Actuator {i}",
             )
 
             # Send heartbeat to mark online
@@ -102,8 +100,9 @@ class TestEmergencyStopBroadcast:
         all_devices = await api_client.get_all_esp_devices()
         registered_ids = [d.get("device_id") for d in all_devices]
         for device in devices:
-            assert device["esp_id"] in registered_ids, \
-                f"Device {device['esp_id']} should be registered"
+            assert (
+                device["esp_id"] in registered_ids
+            ), f"Device {device['esp_id']} should be registered"
 
         # === EXECUTE: Trigger emergency stop ===
         # Each device sends its own emergency alert
@@ -112,32 +111,35 @@ class TestEmergencyStopBroadcast:
                 esp_id=device["esp_id"],
                 gpio=device["gpio"],
                 alert_type="emergency_stop",
-                message="Emergency stop - E2E test"
+                message="Emergency stop - E2E test",
             )
 
         # Also publish broadcast emergency
         await mqtt_client.publish_emergency_broadcast(
             esp_id=devices[0]["esp_id"],
             reason="e2e_test_emergency",
-            stopped_actuators=[d["gpio"] for d in devices]
+            stopped_actuators=[d["gpio"] for d in devices],
         )
 
         await asyncio.sleep(3.0)
 
         # === VERIFY: All actuators should be stopped ===
         for device in devices:
-            state = await api_client.get_actuator_state(
-                device["esp_id"], device["gpio"]
-            )
+            state = await api_client.get_actuator_state(device["esp_id"], device["gpio"])
             if state:
                 current_value = state.get("current_value") or state.get("value", -1)
                 current_state = state.get("state")
-                is_stopped = (
-                    current_value == 0.0 or
-                    current_state in ("off", "OFF", False, None, "emergency_stopped")
+                is_stopped = current_value == 0.0 or current_state in (
+                    "off",
+                    "OFF",
+                    False,
+                    None,
+                    "emergency_stopped",
                 )
-                print(f"  {device['esp_id']} GPIO {device['gpio']}: "
-                      f"state={current_state}, value={current_value}, stopped={is_stopped}")
+                print(
+                    f"  {device['esp_id']} GPIO {device['gpio']}: "
+                    f"state={current_state}, value={current_value}, stopped={is_stopped}"
+                )
             else:
                 print(f"  {device['esp_id']} GPIO {device['gpio']}: no state endpoint")
 
@@ -172,10 +174,7 @@ class TestEmergencyStopBroadcast:
         ]
         for act in actuators:
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=act["gpio"],
-                actuator_type=act["type"],
-                name=act["name"]
+                esp_id=esp_id, gpio=act["gpio"], actuator_type=act["type"], name=act["name"]
             )
 
         await mqtt_client.publish_heartbeat(esp_id)
@@ -186,7 +185,7 @@ class TestEmergencyStopBroadcast:
             esp_id=esp_id,
             gpio=255,  # System-wide
             alert_type="emergency_stop",
-            message="Critical temperature detected - all actuators emergency stopped"
+            message="Critical temperature detected - all actuators emergency stopped",
         )
 
         await asyncio.sleep(3.0)
@@ -231,17 +230,15 @@ class TestEmergencyStopBroadcast:
         start_time = time.time()
 
         await mqtt_client.publish_actuator_alert(
-            esp_id=esp_id,
-            gpio=25,
-            alert_type="emergency_stop",
-            message="Timing test emergency"
+            esp_id=esp_id, gpio=25, alert_type="emergency_stop", message="Timing test emergency"
         )
 
         publish_elapsed = time.time() - start_time
 
         # MQTT publish should be near-instant (< 1s)
-        assert publish_elapsed < 1.0, \
-            f"MQTT emergency publish took {publish_elapsed:.2f}s - should be < 1s"
+        assert (
+            publish_elapsed < 1.0
+        ), f"MQTT emergency publish took {publish_elapsed:.2f}s - should be < 1s"
 
         # Wait for server to process the alert
         await asyncio.sleep(2.0)
@@ -251,8 +248,9 @@ class TestEmergencyStopBroadcast:
         status = await api_client.get_esp_status(esp_id)
         total_elapsed = time.time() - start_time
 
-        assert total_elapsed < 5.0, \
-            f"Emergency stop flow took {total_elapsed:.2f}s - exceeds 5s SLA"
+        assert (
+            total_elapsed < 5.0
+        ), f"Emergency stop flow took {total_elapsed:.2f}s - exceeds 5s SLA"
 
         print(f"  MQTT publish: {publish_elapsed:.3f}s")
         print(f"  Total E2E flow: {total_elapsed:.3f}s (SLA: 5s)")

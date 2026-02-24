@@ -25,9 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.logging_config import get_logger
 from ..core.constants import (
     HARDWARE_TYPE_ESP32_WROOM,
-    HARDWARE_TYPE_XIAO_ESP32C3,
-    GPIO_RANGE_ESP32_WROOM,
-    GPIO_RANGE_XIAO_ESP32C3,
 )
 from ..db.repositories.sensor_repo import SensorRepository
 from ..db.repositories.actuator_repo import ActuatorRepository
@@ -38,28 +35,31 @@ logger = get_logger(__name__)
 
 class GpioConflictType(str, Enum):
     """Art des GPIO-Konflikts"""
+
     NONE = "none"
-    SYSTEM = "system"           # I2C, SPI, Flash, Boot-Pins
-    SENSOR = "sensor"           # Bereits von Sensor belegt
-    ACTUATOR = "actuator"       # Bereits von Actuator belegt
+    SYSTEM = "system"  # I2C, SPI, Flash, Boot-Pins
+    SENSOR = "sensor"  # Bereits von Sensor belegt
+    ACTUATOR = "actuator"  # Bereits von Actuator belegt
     ESP_RESERVED = "esp_reserved"  # ESP meldet als belegt (unbekannter Owner)
 
 
 @dataclass
 class GpioValidationResult:
     """Ergebnis der GPIO-Validierung"""
+
     available: bool
     conflict_type: Optional[GpioConflictType] = None
     conflict_component: Optional[str] = None  # z.B. "DS18B20", "pump_1", "I2C_SDA"
-    conflict_id: Optional[int] = None         # DB-ID der konfliktierenden Komponente
+    conflict_id: Optional[int] = None  # DB-ID der konfliktierenden Komponente
     esp_reported_owner: Optional[str] = None  # Was der ESP für diesen GPIO meldet
-    message: Optional[str] = None             # Menschenlesbare Fehlermeldung
-    warning: Optional[str] = None             # Soft-Warnung (Pin nutzbar, aber suboptimal)
+    message: Optional[str] = None  # Menschenlesbare Fehlermeldung
+    warning: Optional[str] = None  # Soft-Warnung (Pin nutzbar, aber suboptimal)
 
 
 @dataclass
 class BoardConstraints:
     """Board-spezifische GPIO-Constraints"""
+
     input_only_pins: Set[int]
     i2c_bus_pins: Set[int]
     system_reserved_pins: Set[int]
@@ -71,14 +71,14 @@ class BoardConstraints:
 # Diese Pins dürfen NIEMALS für Sensoren/Aktoren verwendet werden
 # =============================================================================
 SYSTEM_RESERVED_PINS_WROOM: Set[int] = {
-    0,   # Boot-Strapping (muss HIGH sein beim Boot)
-    1,   # TX0 (UART)
-    2,   # Boot-Strapping (muss LOW sein beim Boot für Flash)
-    3,   # RX0 (UART)
-    6,   # Flash SPI CLK
-    7,   # Flash SPI D0
-    8,   # Flash SPI D1
-    9,   # Flash SPI D2
+    0,  # Boot-Strapping (muss HIGH sein beim Boot)
+    1,  # TX0 (UART)
+    2,  # Boot-Strapping (muss LOW sein beim Boot für Flash)
+    3,  # RX0 (UART)
+    6,  # Flash SPI CLK
+    7,  # Flash SPI D0
+    8,  # Flash SPI D1
+    9,  # Flash SPI D2
     10,  # Flash SPI D3
     11,  # Flash SPI CMD
     12,  # MTDI Strapping (Flash-Spannung, muss LOW beim Boot)
@@ -183,7 +183,7 @@ class GpioValidationService:
                 input_only_pins={34, 35, 36, 39},
                 i2c_bus_pins={21, 22},
                 system_reserved_pins=SYSTEM_RESERVED_PINS_WROOM,
-                gpio_max=39
+                gpio_max=39,
             )
 
         # XIAO ESP32-C3 variants
@@ -192,7 +192,7 @@ class GpioValidationService:
                 input_only_pins=set(),  # XIAO has no input-only pins
                 i2c_bus_pins={4, 5},
                 system_reserved_pins=SYSTEM_RESERVED_PINS_C3,
-                gpio_max=21
+                gpio_max=21,
             )
 
         # Default to WROOM if unknown
@@ -203,7 +203,7 @@ class GpioValidationService:
             input_only_pins={34, 35, 36, 39},
             i2c_bus_pins={21, 22},
             system_reserved_pins=SYSTEM_RESERVED_PINS_WROOM,
-            gpio_max=39
+            gpio_max=39,
         )
 
     async def validate_gpio_available(
@@ -236,13 +236,9 @@ class GpioValidationService:
         esp_device = await self.esp_repo.get_by_id(esp_db_id)
         if not esp_device:
             rejection_reason = f"ESP device {esp_db_id} not found"
-            logger.error(
-                f"Rejected GPIO config: ESP {esp_db_id} not found, GPIO {gpio}"
-            )
+            logger.error(f"Rejected GPIO config: ESP {esp_db_id} not found, GPIO {gpio}")
             return GpioValidationResult(
-                available=False,
-                conflict_type=GpioConflictType.SYSTEM,
-                message=rejection_reason
+                available=False, conflict_type=GpioConflictType.SYSTEM, message=rejection_reason
             )
 
         hardware_type = esp_device.hardware_type
@@ -264,7 +260,7 @@ class GpioValidationService:
                 available=False,
                 conflict_type=GpioConflictType.SYSTEM,
                 conflict_component="GPIO_RANGE",
-                message=rejection_reason
+                message=rejection_reason,
             )
 
         # =====================================================================
@@ -272,7 +268,9 @@ class GpioValidationService:
         # =====================================================================
         if gpio in board_constraints.system_reserved_pins:
             pin_name = self._get_system_pin_name(gpio)
-            rejection_reason = f"GPIO {gpio} ist ein System-Pin ({pin_name}) und kann nicht verwendet werden"
+            rejection_reason = (
+                f"GPIO {gpio} ist ein System-Pin ({pin_name}) und kann nicht verwendet werden"
+            )
             logger.info(
                 f"Rejected GPIO config: ESP {esp_db_id} ({hardware_type}), GPIO {gpio}, "
                 f"purpose={purpose}, interface={interface_type} (reason: {rejection_reason})"
@@ -281,7 +279,7 @@ class GpioValidationService:
                 available=False,
                 conflict_type=GpioConflictType.SYSTEM,
                 conflict_component=pin_name,
-                message=rejection_reason
+                message=rejection_reason,
             )
 
         # =====================================================================
@@ -301,7 +299,7 @@ class GpioValidationService:
                 available=False,
                 conflict_type=GpioConflictType.SYSTEM,
                 conflict_component="INPUT_ONLY_PIN",
-                message=rejection_reason
+                message=rejection_reason,
             )
 
         # I2C Pin Check: ANALOG/DIGITAL sensors cannot use I2C bus pins
@@ -319,7 +317,7 @@ class GpioValidationService:
                 available=False,
                 conflict_type=GpioConflictType.SYSTEM,
                 conflict_component="I2C_BUS_PIN",
-                message=rejection_reason
+                message=rejection_reason,
             )
 
         # =====================================================================
@@ -338,7 +336,7 @@ class GpioValidationService:
                 conflict_type=GpioConflictType.SENSOR,
                 conflict_component=existing_sensor.sensor_type,
                 conflict_id=existing_sensor.id,
-                message=rejection_reason
+                message=rejection_reason,
             )
 
         # =====================================================================
@@ -357,7 +355,7 @@ class GpioValidationService:
                 conflict_type=GpioConflictType.ACTUATOR,
                 conflict_component=existing_actuator.actuator_type,
                 conflict_id=existing_actuator.id,
-                message=rejection_reason
+                message=rejection_reason,
             )
 
         # =====================================================================
@@ -375,7 +373,7 @@ class GpioValidationService:
                     conflict_type=GpioConflictType.SYSTEM,
                     conflict_component=component,
                     esp_reported_owner=owner,
-                    message=f"GPIO {gpio} wird vom ESP als System-Pin gemeldet ({component})"
+                    message=f"GPIO {gpio} wird vom ESP als System-Pin gemeldet ({component})",
                 )
 
             # ESP meldet belegt, aber nicht in DB
@@ -408,7 +406,7 @@ class GpioValidationService:
         return GpioValidationResult(
             available=True,
             esp_reported_owner=esp_gpio_status.get("owner") if esp_gpio_status else None,
-            warning=adc_warning
+            warning=adc_warning,
         )
 
     async def get_all_used_gpios(self, esp_db_id: uuid.UUID) -> List[Dict[str, Any]]:
@@ -427,26 +425,30 @@ class GpioValidationService:
         # Sensoren aus DB
         sensors = await self.sensor_repo.get_by_esp(esp_db_id)
         for sensor in sensors:
-            used_gpios.append({
-                "gpio": sensor.gpio,
-                "owner": "sensor",
-                "component": sensor.sensor_type,
-                "name": sensor.sensor_name,
-                "id": str(sensor.id),
-                "source": "database"
-            })
+            used_gpios.append(
+                {
+                    "gpio": sensor.gpio,
+                    "owner": "sensor",
+                    "component": sensor.sensor_type,
+                    "name": sensor.sensor_name,
+                    "id": str(sensor.id),
+                    "source": "database",
+                }
+            )
 
         # Aktoren aus DB
         actuators = await self.actuator_repo.get_by_esp(esp_db_id)
         for actuator in actuators:
-            used_gpios.append({
-                "gpio": actuator.gpio,
-                "owner": "actuator",
-                "component": actuator.actuator_type,
-                "name": actuator.actuator_name,
-                "id": str(actuator.id),
-                "source": "database"
-            })
+            used_gpios.append(
+                {
+                    "gpio": actuator.gpio,
+                    "owner": "actuator",
+                    "component": actuator.actuator_type,
+                    "name": actuator.actuator_name,
+                    "id": str(actuator.id),
+                    "source": "database",
+                }
+            )
 
         # System-Pins aus ESP-Status (Phase 1 Daten)
         esp_status = await self._get_all_esp_gpio_status(esp_db_id)
@@ -455,26 +457,30 @@ class GpioValidationService:
                 gpio_num = status.get("gpio")
                 # System-Pins nur aus ESP-Status, nicht aus DB
                 if not any(g["gpio"] == gpio_num for g in used_gpios):
-                    used_gpios.append({
-                        "gpio": gpio_num,
-                        "owner": "system",
-                        "component": status.get("component", "unknown"),
-                        "name": None,
-                        "id": None,
-                        "source": "esp_reported"
-                    })
+                    used_gpios.append(
+                        {
+                            "gpio": gpio_num,
+                            "owner": "system",
+                            "component": status.get("component", "unknown"),
+                            "name": None,
+                            "id": None,
+                            "source": "esp_reported",
+                        }
+                    )
 
         # Statische System-Pins hinzufügen (falls nicht bereits vorhanden)
         for gpio_num in SYSTEM_RESERVED_PINS:
             if not any(g["gpio"] == gpio_num for g in used_gpios):
-                used_gpios.append({
-                    "gpio": gpio_num,
-                    "owner": "system",
-                    "component": self._get_system_pin_name(gpio_num),
-                    "name": None,
-                    "id": None,
-                    "source": "static"
-                })
+                used_gpios.append(
+                    {
+                        "gpio": gpio_num,
+                        "owner": "system",
+                        "component": self._get_system_pin_name(gpio_num),
+                        "name": None,
+                        "id": None,
+                        "source": "static",
+                    }
+                )
 
         return sorted(used_gpios, key=lambda x: x["gpio"])
 
@@ -502,9 +508,7 @@ class GpioValidationService:
 
         return None
 
-    async def _get_all_esp_gpio_status(
-        self, esp_db_id: uuid.UUID
-    ) -> List[Dict[str, Any]]:
+    async def _get_all_esp_gpio_status(self, esp_db_id: uuid.UUID) -> List[Dict[str, Any]]:
         """
         Holt alle GPIO-Status aus ESP device_metadata.
 
@@ -531,4 +535,3 @@ class GpioValidationService:
             Menschenlesbarer Name oder Fallback
         """
         return SYSTEM_PIN_NAMES.get(gpio, f"System GPIO {gpio}")
-

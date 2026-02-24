@@ -80,11 +80,9 @@ class TestCommandResponseCycle:
     def test_actuator_command_response(self, mock_esp32):
         """Test actuator command generates correct response."""
         # Send actuator_set command
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         # Verify response
         assert response["status"] == "ok"
@@ -95,9 +93,7 @@ class TestCommandResponseCycle:
     def test_sensor_read_command_response(self, mock_esp32_with_sensors):
         """Test sensor read command generates correct response."""
         # Send sensor_read command
-        response = mock_esp32_with_sensors.handle_command("sensor_read", {
-            "gpio": 34
-        })
+        response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
 
         # Verify response
         assert response["status"] == "ok"
@@ -109,7 +105,7 @@ class TestCommandResponseCycle:
         """Test config get command generates correct response."""
         # Configure zone first (production ESP32s have zone configured)
         mock_esp32.configure_zone("test-zone", "test-master", "test-subzone")
-        
+
         # Send config_get command (no key = get all)
         response = mock_esp32.handle_command("config_get", {})
 
@@ -123,9 +119,7 @@ class TestCommandResponseCycle:
     def test_config_get_specific_key(self, mock_esp32):
         """Test config get with specific key."""
         # Send config_get command with key
-        response = mock_esp32.handle_command("config_get", {
-            "key": "wifi"
-        })
+        response = mock_esp32.handle_command("config_get", {"key": "wifi"})
 
         # Verify response
         assert response["status"] == "ok"
@@ -147,19 +141,20 @@ class TestErrorHandling:
     def test_missing_required_parameter(self, mock_esp32):
         """Test error when required parameter is missing."""
         # actuator_set requires gpio and value
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5
-            # Missing "value"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set",
+            {
+                "gpio": 5
+                # Missing "value"
+            },
+        )
 
         assert response["status"] == "error"
         assert "Missing" in response["error"] or "required" in response["error"].lower()
 
     def test_invalid_gpio(self, mock_esp32):
         """Test actuator_get on non-existent GPIO."""
-        response = mock_esp32.handle_command("actuator_get", {
-            "gpio": 99  # Non-existent actuator
-        })
+        response = mock_esp32.handle_command("actuator_get", {"gpio": 99})  # Non-existent actuator
 
         assert response["status"] == "error"
         assert "not found" in response["error"].lower()
@@ -174,11 +169,9 @@ class TestMQTTPublishing:
         mock_esp32.clear_published_messages()
 
         # Send actuator_set command
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         # Verify status message was published (now includes status + response)
         messages = mock_esp32.get_published_messages()
@@ -196,9 +189,7 @@ class TestMQTTPublishing:
         mock_esp32_with_sensors.clear_published_messages()
 
         # Send sensor_read command
-        response = mock_esp32_with_sensors.handle_command("sensor_read", {
-            "gpio": 34
-        })
+        response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
 
         # Verify sensor data was published (may have zone topic too)
         messages = mock_esp32_with_sensors.get_published_messages()
@@ -209,7 +200,9 @@ class TestMQTTPublishing:
         assert f"kaiser/god/esp/{mock_esp32_with_sensors.esp_id}/sensor/34/data" in message["topic"]
         assert message["payload"]["gpio"] == 34
         # Production uses "raw" field per Mqtt_Protocoll.md
-        assert "raw" in message["payload"], "Payload should have 'raw' field (per Mqtt_Protocoll.md)"
+        assert (
+            "raw" in message["payload"]
+        ), "Payload should have 'raw' field (per Mqtt_Protocoll.md)"
 
     def test_emergency_stop_publishes_multiple_statuses(self, mock_esp32_with_actuators):
         """Test that emergency_stop publishes status for all actuators."""
@@ -221,7 +214,7 @@ class TestMQTTPublishing:
 
         # Verify messages were published (includes actuator statuses + emergency broadcasts)
         messages = mock_esp32_with_actuators.get_published_messages()
-        
+
         # Filter only actuator status messages (not emergency broadcasts)
         status_messages = [m for m in messages if "status" in m["topic"]]
         assert len(status_messages) == 3, "Expected status for all 3 actuators"
@@ -292,9 +285,9 @@ class TestConcurrentCommands:
     def test_command_state_persistence(self, mock_esp32):
         """Test that command effects persist across multiple commands."""
         # Set actuator ON
-        response1 = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        response1 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert response1["status"] == "ok"
 
         # Verify actuator is still ON
@@ -303,9 +296,9 @@ class TestConcurrentCommands:
         assert response2["data"]["state"] is True
 
         # Set actuator OFF
-        response3 = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 0, "mode": "digital"
-        })
+        response3 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}
+        )
         assert response3["status"] == "ok"
 
         # Verify actuator is now OFF

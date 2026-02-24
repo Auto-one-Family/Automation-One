@@ -10,19 +10,13 @@ Uses CentralScheduler for job management.
 """
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.config import Settings, get_settings
+from ...core.config import Settings
 from ...core.logging_config import get_logger
-from ...core.scheduler import CentralScheduler, JobCategory, get_central_scheduler
-from ...db.models.actuator import ActuatorHistory
-from ...db.models.esp import ESPDevice
-from ...db.models.sensor import SensorData
-from ...db.session import get_session
+from ...core.scheduler import CentralScheduler, JobCategory
 from ...mqtt.client import MQTTClient
 
 logger = get_logger(__name__)
@@ -96,9 +90,7 @@ class MaintenanceService:
                 f"(retain {self._maintenance_settings.sensor_data_retention_days} days)"
             )
         else:
-            logger.info(
-                "Skipped cleanup_sensor_data job (DISABLED - unlimited retention)"
-            )
+            logger.info("Skipped cleanup_sensor_data job (DISABLED - unlimited retention)")
 
         if self._maintenance_settings.command_history_retention_enabled:
             self._scheduler.add_cron_job(
@@ -107,15 +99,15 @@ class MaintenanceService:
                 cron_expression={"hour": 3, "minute": 30},  # Daily at 03:30
                 category=JobCategory.MAINTENANCE,
             )
-            dry_run = " (DRY-RUN)" if self._maintenance_settings.command_history_cleanup_dry_run else ""
+            dry_run = (
+                " (DRY-RUN)" if self._maintenance_settings.command_history_cleanup_dry_run else ""
+            )
             logger.info(
                 f"Registered cleanup_command_history job (daily 03:30){dry_run} "
                 f"(retain {self._maintenance_settings.command_history_retention_days} days)"
             )
         else:
-            logger.info(
-                "Skipped cleanup_command_history job (DISABLED - unlimited retention)"
-            )
+            logger.info("Skipped cleanup_command_history job (DISABLED - unlimited retention)")
 
         if self._maintenance_settings.orphaned_mock_cleanup_enabled:
             self._scheduler.add_interval_job(
@@ -124,7 +116,11 @@ class MaintenanceService:
                 seconds=3600,  # Hourly
                 category=JobCategory.MAINTENANCE,
             )
-            mode = "AUTO-DELETE" if self._maintenance_settings.orphaned_mock_auto_delete else "WARN ONLY"
+            mode = (
+                "AUTO-DELETE"
+                if self._maintenance_settings.orphaned_mock_auto_delete
+                else "WARN ONLY"
+            )
             logger.info(f"Registered cleanup_orphaned_mocks job (hourly, {mode})")
         else:
             logger.info("Skipped cleanup_orphaned_mocks job (DISABLED)")
@@ -191,7 +187,9 @@ class MaintenanceService:
             cleanup_status.append("  - Sensor Data Cleanup: DISABLED (unlimited retention)")
 
         if self._maintenance_settings.command_history_retention_enabled:
-            dry_run = " (DRY-RUN)" if self._maintenance_settings.command_history_cleanup_dry_run else ""
+            dry_run = (
+                " (DRY-RUN)" if self._maintenance_settings.command_history_cleanup_dry_run else ""
+            )
             cleanup_status.append(
                 f"  - Command History Cleanup: ENABLED{dry_run} "
                 f"(retain {self._maintenance_settings.command_history_retention_days} days)"
@@ -204,18 +202,14 @@ class MaintenanceService:
         else:
             cleanup_status.append("  - Orphaned Mocks Cleanup: WARN ONLY (no deletion)")
 
-        logger.info(
-            "Maintenance Cleanup Status:\n" + "\n".join(cleanup_status)
-        )
+        logger.info("Maintenance Cleanup Status:\n" + "\n".join(cleanup_status))
 
     def stop(self) -> None:
         """Remove all maintenance jobs from the scheduler."""
         logger.info("Stopping MaintenanceService - removing jobs...")
 
         # Remove all maintenance and monitor jobs
-        removed_maintenance = self._scheduler.remove_jobs_by_category(
-            JobCategory.MAINTENANCE
-        )
+        removed_maintenance = self._scheduler.remove_jobs_by_category(JobCategory.MAINTENANCE)
         removed_monitor = self._scheduler.remove_jobs_by_category(JobCategory.MONITOR)
 
         logger.info(
@@ -239,7 +233,9 @@ class MaintenanceService:
                     "job_id": job_id,
                     "next_run": job.get("next_run"),
                     "last_run": job_stats.get("last_run") if job_stats else None,
-                    "last_result": "success" if job_stats and job_stats.get("errors", 0) == 0 else "error",
+                    "last_result": (
+                        "success" if job_stats and job_stats.get("errors", 0) == 0 else "error"
+                    ),
                 }
 
                 # Add job-specific results
@@ -256,7 +252,7 @@ class MaintenanceService:
                 "sensor_data_retention_enabled": self._maintenance_settings.sensor_data_retention_enabled,
                 "command_history_retention_enabled": self._maintenance_settings.command_history_retention_enabled,
                 "orphaned_mock_auto_delete": self._maintenance_settings.orphaned_mock_auto_delete,
-            }
+            },
         }
 
     # ================================================================
@@ -294,9 +290,7 @@ class MaintenanceService:
                 break  # Exit after first session
 
         except Exception as e:
-            logger.error(
-                f"[maintenance] ERROR cleanup_command_history: {e}", exc_info=True
-            )
+            logger.error(f"[maintenance] ERROR cleanup_command_history: {e}", exc_info=True)
             self._job_results[job_id] = {"error": str(e), "status": "error"}
 
     async def _cleanup_orphaned_mocks(self) -> None:
@@ -307,17 +301,13 @@ class MaintenanceService:
             async for session in self._session_factory():
                 from .jobs.cleanup import OrphanedMocksCleanup
 
-                cleanup = OrphanedMocksCleanup(
-                    session, self._scheduler, self._maintenance_settings
-                )
+                cleanup = OrphanedMocksCleanup(session, self._scheduler, self._maintenance_settings)
                 result = await cleanup.execute()
                 self._job_results[job_id] = result
                 break  # Exit after first session
 
         except Exception as e:
-            logger.error(
-                f"[maintenance] ERROR cleanup_orphaned_mocks: {e}", exc_info=True
-            )
+            logger.error(f"[maintenance] ERROR cleanup_orphaned_mocks: {e}", exc_info=True)
             self._job_results[job_id] = {"error": str(e), "status": "error"}
 
     # ================================================================
@@ -494,24 +484,18 @@ class MaintenanceService:
                 from ...db.models.actuator import ActuatorConfig
 
                 # Sensors by type
-                sensor_type_stmt = (
-                    select(SensorConfig.sensor_type, func.count())
-                    .group_by(SensorConfig.sensor_type)
+                sensor_type_stmt = select(SensorConfig.sensor_type, func.count()).group_by(
+                    SensorConfig.sensor_type
                 )
                 sensor_type_result = await session.execute(sensor_type_stmt)
-                sensors_by_type = {
-                    row[0]: row[1] for row in sensor_type_result.fetchall()
-                }
+                sensors_by_type = {row[0]: row[1] for row in sensor_type_result.fetchall()}
 
                 # Actuators by type
-                actuator_type_stmt = (
-                    select(ActuatorConfig.actuator_type, func.count())
-                    .group_by(ActuatorConfig.actuator_type)
+                actuator_type_stmt = select(ActuatorConfig.actuator_type, func.count()).group_by(
+                    ActuatorConfig.actuator_type
                 )
                 actuator_type_result = await session.execute(actuator_type_stmt)
-                actuators_by_type = {
-                    row[0]: row[1] for row in actuator_type_result.fetchall()
-                }
+                actuators_by_type = {row[0]: row[1] for row in actuator_type_result.fetchall()}
 
                 # Update cache
                 self._stats_cache = {
@@ -563,7 +547,9 @@ def get_maintenance_service() -> MaintenanceService:
     """
     global _maintenance_service
     if _maintenance_service is None:
-        raise RuntimeError("MaintenanceService not initialized. Call init_maintenance_service() first.")
+        raise RuntimeError(
+            "MaintenanceService not initialized. Call init_maintenance_service() first."
+        )
     return _maintenance_service
 
 
@@ -601,4 +587,3 @@ def init_maintenance_service(
     )
 
     return _maintenance_service
-

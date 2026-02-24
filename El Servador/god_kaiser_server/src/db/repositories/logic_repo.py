@@ -18,7 +18,7 @@ from .base_repo import BaseRepository
 class LogicRepository(BaseRepository[CrossESPLogic]):
     """
     Logic Rules Repository with CrossESPLogic-specific queries.
-    
+
     Provides methods for querying automation rules and logging execution history.
     """
 
@@ -28,10 +28,10 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     async def create(self, rule: CrossESPLogic) -> CrossESPLogic:
         """
         Create a new rule from an instance.
-        
+
         Args:
             rule: CrossESPLogic instance to create
-            
+
         Returns:
             Created CrossESPLogic instance
         """
@@ -43,7 +43,7 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     async def get_enabled_rules(self) -> list[CrossESPLogic]:
         """
         Get all enabled rules, sorted by priority (ASC - lower priority number = higher priority).
-        
+
         Returns:
             List of enabled CrossESPLogic rules sorted by priority
         """
@@ -60,23 +60,23 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     ) -> list[CrossESPLogic]:
         """
         Find rules that trigger on a specific sensor.
-        
+
         Matches rules where trigger_conditions contains:
         - esp_id matching the provided esp_id
         - gpio matching the provided gpio
         - sensor_type matching the provided sensor_type
-        
+
         Args:
             esp_id: ESP device ID (e.g., "ESP_12AB34CD")
             gpio: GPIO pin number
             sensor_type: Sensor type (e.g., "temperature", "humidity")
-            
+
         Returns:
             List of matching CrossESPLogic rules
         """
         # Get all enabled rules first
         all_rules = await self.get_enabled_rules()
-        
+
         # Filter rules that match the trigger sensor
         matching_rules = []
         for rule in all_rules:
@@ -110,16 +110,16 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
                     ):
                         matching_rules.append(rule)
                         break  # Found match, no need to check other conditions for this rule
-        
+
         return matching_rules
 
     async def get_last_execution(self, rule_id: uuid.UUID) -> Optional[LogicExecutionHistory]:
         """
         Get the last execution record for a rule.
-        
+
         Args:
             rule_id: UUID of the logic rule
-            
+
         Returns:
             LogicExecutionHistory instance or None if rule has never been executed
         """
@@ -135,16 +135,15 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     async def get_last_execution_timestamp(self, rule_id: uuid.UUID) -> Optional[datetime]:
         """
         Get timestamp of the last execution for a rule (for cooldown check).
-        
+
         Args:
             rule_id: UUID of the logic rule
-            
+
         Returns:
             Timestamp of last execution, or None if rule has never been executed
         """
-        stmt = (
-            select(func.max(LogicExecutionHistory.timestamp))
-            .where(LogicExecutionHistory.logic_rule_id == rule_id)
+        stmt = select(func.max(LogicExecutionHistory.timestamp)).where(
+            LogicExecutionHistory.logic_rule_id == rule_id
         )
         result = await self.session.execute(stmt)
         max_timestamp = result.scalar_one_or_none()
@@ -153,10 +152,10 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     async def get_execution_count(self, rule_id: uuid.UUID) -> int:
         """
         Get total execution count for a rule.
-        
+
         Args:
             rule_id: UUID of the logic rule
-            
+
         Returns:
             Total number of executions
         """
@@ -178,19 +177,19 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     ) -> list[LogicExecutionHistory]:
         """
         Get execution history with filters.
-        
+
         Args:
             rule_id: Optional filter by rule ID
             success: Optional filter by success status
             start_time: Start of time range
             end_time: End of time range
             limit: Maximum number of records
-            
+
         Returns:
             List of LogicExecutionHistory records
         """
         conditions = []
-        
+
         if rule_id is not None:
             conditions.append(LogicExecutionHistory.logic_rule_id == rule_id)
         if success is not None:
@@ -199,7 +198,7 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
             conditions.append(LogicExecutionHistory.timestamp >= start_time)
         if end_time is not None:
             conditions.append(LogicExecutionHistory.timestamp <= end_time)
-        
+
         stmt = (
             select(LogicExecutionHistory)
             .where(and_(*conditions) if conditions else True)
@@ -221,7 +220,7 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
     ) -> LogicExecutionHistory:
         """
         Log rule execution to history.
-        
+
         Args:
             rule_id: UUID of the logic rule that was executed
             trigger_data: Snapshot of sensor data that triggered the rule
@@ -230,7 +229,7 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
             execution_ms: Execution duration in milliseconds
             error_message: Optional error message if execution failed
             metadata: Optional additional execution metadata
-            
+
         Returns:
             Created LogicExecutionHistory instance
         """
@@ -273,19 +272,16 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         Returns:
             Count of successful executions in the last hour
         """
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
         from sqlalchemy import func, select
         from ..models.logic import LogicExecutionHistory
 
         one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
 
-        stmt = (
-            select(func.count(LogicExecutionHistory.id))
-            .where(
-                LogicExecutionHistory.logic_rule_id == rule_id,
-                LogicExecutionHistory.timestamp >= one_hour_ago,
-                LogicExecutionHistory.success == True
-            )
+        stmt = select(func.count(LogicExecutionHistory.id)).where(
+            LogicExecutionHistory.logic_rule_id == rule_id,
+            LogicExecutionHistory.timestamp >= one_hour_ago,
+            LogicExecutionHistory.success == True,
         )
 
         result = await self.session.execute(stmt)

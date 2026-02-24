@@ -301,6 +301,7 @@ def update_esp_heartbeat_metrics(
 # Phase 0 metric update helpers
 # =========================================================================
 
+
 def update_sensor_value(esp_id: str, sensor_type: str, value: float) -> None:
     """Update sensor reading gauge. Call from sensor MQTT handler."""
     SENSOR_VALUE_GAUGE.labels(sensor_type=sensor_type, esp_id=esp_id).set(value)
@@ -373,12 +374,14 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
 
         # MQTT status
         from ..mqtt.client import MQTTClient
+
         mqtt_client = MQTTClient.get_instance()
         update_mqtt_metrics(mqtt_client.is_connected())
 
         # WebSocket connections
         try:
             from ..websocket.manager import WebSocketManager
+
             ws_manager = await WebSocketManager.get_instance()
             if ws_manager:
                 update_websocket_metrics(ws_manager.connection_count)
@@ -389,6 +392,7 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
 
         # ESP counts + heartbeat aggregates (needs DB)
         from ..db.repositories import ESPRepository
+
         async for session in get_session_func():
             esp_repo = ESPRepository(session)
             devices = await esp_repo.get_all()
@@ -417,7 +421,11 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
                 last_seen = getattr(d, "last_seen", None)
                 if last_seen is not None:
                     try:
-                        ts = last_seen.timestamp() if hasattr(last_seen, "timestamp") else float(last_seen)
+                        ts = (
+                            last_seen.timestamp()
+                            if hasattr(last_seen, "timestamp")
+                            else float(last_seen)
+                        )
                         ESP_LAST_HEARTBEAT_GAUGE.labels(esp_id=esp_id).set(ts)
                     except (TypeError, ValueError):
                         pass

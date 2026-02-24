@@ -88,15 +88,16 @@ class LogicValidator:
     def __init__(self):
         """Initialize validator with Loop Detector."""
         from .safety.loop_detector import LoopDetector
+
         self.loop_detector = LoopDetector()
 
     def validate_schema(self, rule_data: Dict[str, Any]) -> ValidationResult:
         """
         Validate rule schema.
-        
+
         Args:
             rule_data: Rule data dictionary
-            
+
         Returns:
             ValidationResult with validation status
         """
@@ -151,38 +152,31 @@ class LogicValidator:
     def validate_safety(self, rule_data: Dict[str, Any]) -> SafetyResult:
         """
         Validate safety constraints.
-        
+
         Checks for potentially dangerous configurations:
         - Pump without moisture sensor (flood risk)
         - Heater without temperature sensor (overheating risk)
-        
+
         Args:
             rule_data: Rule data dictionary
-            
+
         Returns:
             SafetyResult with safety status
         """
         result = SafetyResult(safe=True)
 
         # Extract actuator type from actions
-        actuator_types = set()
-        for action in rule_data.get("actions", []):
-            if action.get("type") in ("actuator_command", "actuator"):
-                # Try to infer actuator type from action metadata or config
-                # For now, we'll check conditions for sensor types
-                pass
-
         # Extract sensor types from conditions
         sensor_types = set()
         conditions = rule_data.get("conditions", [])
-        
+
         # Handle both list and dict conditions
         if isinstance(conditions, dict):
             if conditions.get("logic") in ("AND", "OR"):
                 conditions = conditions.get("conditions", [])
             else:
                 conditions = [conditions]
-        
+
         for condition in conditions:
             cond_type = condition.get("type")
             if cond_type in ("sensor_threshold", "sensor"):
@@ -192,26 +186,16 @@ class LogicValidator:
 
         # Safety checks based on common patterns
         # Note: This is a basic implementation - can be extended
-        
+
         # Check for pump actions without moisture sensors
-        has_moisture_sensor = any(
-            st in ("moisture", "soil_moisture", "water_level")
-            for st in sensor_types
-        )
-        
-        # If we detect pump actions and no moisture sensor, warn
-        # (We can't reliably detect actuator type from actions alone yet,
-        #  so this is a placeholder for future enhancement)
-        
-        # Check for heater actions without temperature sensors
-        has_temp_sensor = any(
-            st in ("temperature", "temp", "thermal")
-            for st in sensor_types
-        )
+        # Note: Sensor type checks (moisture, temperature) are placeholders
+        # for future enhancement when actuator type information is available
+        # in rule_data. Currently we can't reliably detect actuator type
+        # from actions alone.
 
         # Note: These checks are basic - full implementation would require
         # actuator type information which may not be in rule_data
-        
+
         return result
 
     def check_conflicts(
@@ -219,16 +203,16 @@ class LogicValidator:
     ) -> ConflictResult:
         """
         Check for conflicts with existing rules.
-        
+
         Args:
             rule_data: New rule data
             existing_rules: List of existing rule dictionaries
-            
+
         Returns:
             ConflictResult with conflict status
         """
         conflicts = []
-        
+
         # Basic conflict checking - can be extended
         # Check for rules with same name
         rule_name = rule_data.get("name")
@@ -236,7 +220,7 @@ class LogicValidator:
             if existing.get("name") == rule_name:
                 conflicts.append(f"Rule with name '{rule_name}' already exists")
                 break
-        
+
         return ConflictResult(has_conflicts=len(conflicts) > 0, conflicts=conflicts)
 
     def check_duplicates(
@@ -244,28 +228,27 @@ class LogicValidator:
     ) -> DuplicateResult:
         """
         Check for duplicate rules.
-        
+
         Args:
             rule_data: New rule data
             existing_rules: List of existing rule dictionaries
-            
+
         Returns:
             DuplicateResult with duplicate status
         """
         duplicates = []
-        
+
         # Compare conditions and actions
         new_conditions = rule_data.get("conditions", [])
         new_actions = rule_data.get("actions", [])
-        
+
         for existing in existing_rules:
             existing_conditions = existing.get("conditions", [])
             existing_actions = existing.get("actions", [])
-            
+
             # Simple comparison (can be enhanced)
-            if (
-                str(new_conditions) == str(existing_conditions)
-                and str(new_actions) == str(existing_actions)
+            if str(new_conditions) == str(existing_conditions) and str(new_actions) == str(
+                existing_actions
             ):
                 duplicates.append(
                     {
@@ -273,15 +256,11 @@ class LogicValidator:
                         "similarity": 100.0,
                     }
                 )
-        
-        return DuplicateResult(
-            has_duplicates=len(duplicates) > 0, duplicates=duplicates
-        )
+
+        return DuplicateResult(has_duplicates=len(duplicates) > 0, duplicates=duplicates)
 
     def validate(
-        self,
-        rule_data: Dict[str, Any],
-        existing_rules: Optional[List[Dict[str, Any]]] = None
+        self, rule_data: Dict[str, Any], existing_rules: Optional[List[Dict[str, Any]]] = None
     ) -> ValidationResult:
         """
         Umfassende Rule-Validierung inkl. Loop-Detection.
@@ -341,23 +320,3 @@ class LogicValidator:
                 )
 
         return result
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

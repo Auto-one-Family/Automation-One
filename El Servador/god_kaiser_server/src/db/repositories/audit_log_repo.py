@@ -11,7 +11,6 @@ Priority: MEDIUM
 Status: IMPLEMENTED
 """
 
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -31,23 +30,23 @@ from .base_repo import BaseRepository
 class AuditLogRepository(BaseRepository[AuditLog]):
     """
     Repository for Audit Log operations.
-    
+
     Extends BaseRepository with audit-specific methods for recording
     and querying system events.
-    
+
     Note: Audit logs are immutable - update and delete operations
     are intentionally restricted for compliance.
     """
-    
+
     def __init__(self, session: AsyncSession):
         """
         Initialize repository.
-        
+
         Args:
             session: Async database session
         """
         super().__init__(AuditLog, session)
-    
+
     async def create(self, **data: Any) -> AuditLog:
         """Override to auto-inject request_id from context."""
         if "request_id" not in data or data["request_id"] is None:
@@ -57,7 +56,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     # =========================================================================
     # Event Recording Methods
     # =========================================================================
-    
+
     async def log_config_response(
         self,
         esp_id: str,
@@ -72,7 +71,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> AuditLog:
         """
         Log a configuration response from ESP32.
-        
+
         Args:
             esp_id: ESP device ID
             config_type: Type of config (sensor, actuator, zone, system)
@@ -88,7 +87,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             Created AuditLog entry
         """
         severity = AuditSeverity.INFO if status == "success" else AuditSeverity.ERROR
-        
+
         details = {
             "config_type": config_type,
             "count": count,
@@ -97,7 +96,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             details["message"] = message
         if failed_item:
             details["failed_item"] = failed_item
-        
+
         return await self.create(
             event_type=AuditEventType.CONFIG_RESPONSE,
             severity=severity,
@@ -110,7 +109,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             error_description=error_description,
             correlation_id=correlation_id,
         )
-    
+
     async def get_by_correlation_id(
         self,
         correlation_id: str,
@@ -163,13 +162,13 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> AuditLog:
         """
         Log an MQTT-related error.
-        
+
         Args:
             source_id: Source identifier (esp_id, topic, etc.)
             error_code: Error code string
             error_description: Human-readable description
             details: Additional error details
-            
+
         Returns:
             Created AuditLog entry
         """
@@ -184,7 +183,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             error_code=error_code,
             error_description=error_description,
         )
-    
+
     async def log_validation_error(
         self,
         source_type: str,
@@ -195,14 +194,14 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> AuditLog:
         """
         Log a validation error.
-        
+
         Args:
             source_type: Type of source (esp32, api, mqtt)
             source_id: Source identifier
             error_code: Error code string
             error_description: Human-readable description
             details: Validation details (field, value, etc.)
-            
+
         Returns:
             Created AuditLog entry
         """
@@ -217,7 +216,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             error_code=error_code,
             error_description=error_description,
         )
-    
+
     async def log_emergency_stop(
         self,
         user_id: str,
@@ -229,7 +228,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> AuditLog:
         """
         Log an emergency stop event.
-        
+
         Args:
             user_id: User ID who triggered the stop
             username: Username who triggered the stop
@@ -237,7 +236,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             devices_stopped: Number of devices stopped
             actuators_stopped: Number of actuators stopped
             details: Additional stop details
-            
+
         Returns:
             Created AuditLog entry
         """
@@ -256,7 +255,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
                 **(details or {}),
             },
         )
-    
+
     async def log_device_event(
         self,
         esp_id: str,
@@ -268,7 +267,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> AuditLog:
         """
         Log a device-related event.
-        
+
         Args:
             esp_id: ESP device ID
             event_type: Event type (device_registered, device_offline, etc.)
@@ -276,7 +275,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             message: Human-readable message
             details: Additional event details
             severity: Event severity level
-            
+
         Returns:
             Created AuditLog entry
         """
@@ -289,7 +288,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             message=message,
             details=details or {},
         )
-    
+
     async def log_actuator_command(
         self,
         esp_id: str,
@@ -320,8 +319,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             Created AuditLog entry
         """
         event_type = (
-            AuditEventType.ACTUATOR_COMMAND if success
-            else AuditEventType.ACTUATOR_COMMAND_FAILED
+            AuditEventType.ACTUATOR_COMMAND if success else AuditEventType.ACTUATOR_COMMAND_FAILED
         )
         severity = AuditSeverity.INFO if success else AuditSeverity.ERROR
 
@@ -361,7 +359,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     # =========================================================================
     # Query Methods
     # =========================================================================
-    
+
     async def get_by_source(
         self,
         source_type: str,
@@ -371,13 +369,13 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> list[AuditLog]:
         """
         Get audit logs by source.
-        
+
         Args:
             source_type: Type of source (esp32, user, system)
             source_id: Source identifier
             limit: Maximum results
             offset: Results offset
-            
+
         Returns:
             List of AuditLog entries
         """
@@ -395,7 +393,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def get_by_event_type(
         self,
         event_type: str,
@@ -406,24 +404,24 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> list[AuditLog]:
         """
         Get audit logs by event type.
-        
+
         Args:
             event_type: Event type to filter by
             start_time: Start of time range
             end_time: End of time range
             limit: Maximum results
             offset: Results offset
-            
+
         Returns:
             List of AuditLog entries
         """
         conditions = [AuditLog.event_type == event_type]
-        
+
         if start_time:
             conditions.append(AuditLog.created_at >= start_time)
         if end_time:
             conditions.append(AuditLog.created_at <= end_time)
-        
+
         stmt = (
             select(AuditLog)
             .where(and_(*conditions))
@@ -433,7 +431,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def get_errors(
         self,
         start_time: Optional[datetime] = None,
@@ -442,24 +440,22 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> list[AuditLog]:
         """
         Get error and critical events.
-        
+
         Args:
             start_time: Start of time range
             end_time: End of time range
             limit: Maximum results
-            
+
         Returns:
             List of error AuditLog entries
         """
-        conditions = [
-            AuditLog.severity.in_([AuditSeverity.ERROR, AuditSeverity.CRITICAL])
-        ]
-        
+        conditions = [AuditLog.severity.in_([AuditSeverity.ERROR, AuditSeverity.CRITICAL])]
+
         if start_time:
             conditions.append(AuditLog.created_at >= start_time)
         if end_time:
             conditions.append(AuditLog.created_at <= end_time)
-        
+
         stmt = (
             select(AuditLog)
             .where(and_(*conditions))
@@ -468,7 +464,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def get_esp_config_history(
         self,
         esp_id: str,
@@ -476,11 +472,11 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> list[AuditLog]:
         """
         Get config response history for an ESP device.
-        
+
         Args:
             esp_id: ESP device ID
             limit: Maximum results
-            
+
         Returns:
             List of config response AuditLog entries
         """
@@ -498,11 +494,11 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-    
+
     # =========================================================================
     # Statistics Methods
     # =========================================================================
-    
+
     async def get_event_counts(
         self,
         start_time: Optional[datetime] = None,
@@ -510,11 +506,11 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     ) -> dict[str, int]:
         """
         Get event counts by type.
-        
+
         Args:
             start_time: Start of time range
             end_time: End of time range
-            
+
         Returns:
             Dict mapping event_type to count
         """
@@ -523,40 +519,38 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             conditions.append(AuditLog.created_at >= start_time)
         if end_time:
             conditions.append(AuditLog.created_at <= end_time)
-        
+
         stmt = select(
             AuditLog.event_type,
             func.count(AuditLog.id).label("count"),
         ).group_by(AuditLog.event_type)
-        
+
         if conditions:
             stmt = stmt.where(and_(*conditions))
-        
+
         result = await self.session.execute(stmt)
         return {row.event_type: row.count for row in result.all()}
-    
+
     async def get_error_rate(
         self,
         hours: int = 24,
     ) -> dict[str, Any]:
         """
         Get error rate statistics for the last N hours.
-        
+
         Args:
             hours: Number of hours to analyze
-            
+
         Returns:
             Dict with error rate statistics
         """
         start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-        
+
         # Total events
-        total_stmt = select(func.count(AuditLog.id)).where(
-            AuditLog.created_at >= start_time
-        )
+        total_stmt = select(func.count(AuditLog.id)).where(AuditLog.created_at >= start_time)
         total_result = await self.session.execute(total_stmt)
         total_count = total_result.scalar_one()
-        
+
         # Error events
         error_stmt = select(func.count(AuditLog.id)).where(
             and_(
@@ -566,30 +560,12 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         )
         error_result = await self.session.execute(error_stmt)
         error_count = error_result.scalar_one()
-        
+
         error_rate = (error_count / total_count * 100) if total_count > 0 else 0.0
-        
+
         return {
             "period_hours": hours,
             "total_events": total_count,
             "error_events": error_count,
             "error_rate_percent": round(error_rate, 2),
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

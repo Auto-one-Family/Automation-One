@@ -40,10 +40,12 @@ class TestOneWireRomCodeFormat:
         config.onewire_address = valid_rom_code
 
         # ASSERT
-        assert len(config.onewire_address) == 16, \
-            f"ROM code should be 16 chars, got {len(config.onewire_address)}"
-        assert all(c in "0123456789ABCDEFabcdef" for c in config.onewire_address), \
-            "ROM code should only contain hex characters"
+        assert (
+            len(config.onewire_address) == 16
+        ), f"ROM code should be 16 chars, got {len(config.onewire_address)}"
+        assert all(
+            c in "0123456789ABCDEFabcdef" for c in config.onewire_address
+        ), "ROM code should only contain hex characters"
 
     @pytest.mark.onewire
     @pytest.mark.sensor
@@ -57,10 +59,10 @@ class TestOneWireRomCodeFormat:
         config.onewire_address = lowercase_rom
 
         # ASSERT
-        assert len(config.onewire_address) == 16, \
-            "Lowercase ROM code should be 16 chars"
-        assert all(c in "0123456789ABCDEFabcdef" for c in config.onewire_address), \
-            "Lowercase hex should be valid"
+        assert len(config.onewire_address) == 16, "Lowercase ROM code should be 16 chars"
+        assert all(
+            c in "0123456789ABCDEFabcdef" for c in config.onewire_address
+        ), "Lowercase hex should be valid"
 
     @pytest.mark.onewire
     @pytest.mark.sensor
@@ -75,8 +77,7 @@ class TestOneWireRomCodeFormat:
 
         for rom in valid_roms:
             # ASSERT
-            assert rom[:2] == "28", \
-                f"DS18B20 ROM should start with '28', got '{rom[:2]}'"
+            assert rom[:2] == "28", f"DS18B20 ROM should start with '28', got '{rom[:2]}'"
 
     @pytest.mark.onewire
     @pytest.mark.sensor
@@ -89,8 +90,9 @@ class TestOneWireRomCodeFormat:
         config.onewire_address = None
 
         # ASSERT
-        assert config.onewire_address is None, \
-            "onewire_address should be nullable for non-OneWire sensors"
+        assert (
+            config.onewire_address is None
+        ), "onewire_address should be nullable for non-OneWire sensors"
 
 
 class TestOneWireFourWayLookup:
@@ -138,9 +140,7 @@ class TestOneWireFourWayLookup:
                     return s
             return None
 
-        mock_sensor_repo.get_by_esp_gpio_type_and_onewire = AsyncMock(
-            side_effect=mock_4way_lookup
-        )
+        mock_sensor_repo.get_by_esp_gpio_type_and_onewire = AsyncMock(side_effect=mock_4way_lookup)
 
         # ACT - Lookup sensor2 by its unique ROM code
         result = await mock_sensor_repo.get_by_esp_gpio_type_and_onewire(
@@ -151,12 +151,13 @@ class TestOneWireFourWayLookup:
         )
 
         # ASSERT
-        assert result is not None, \
-            "4-way lookup should find sensor with matching ROM code"
-        assert result.sensor_name == "Air Temperature", \
-            f"Should find 'Air Temperature' sensor, got '{result.sensor_name}'"
-        assert result.onewire_address == "28A1B2C3D4E5F611", \
-            f"ROM code should match, got '{result.onewire_address}'"
+        assert result is not None, "4-way lookup should find sensor with matching ROM code"
+        assert (
+            result.sensor_name == "Air Temperature"
+        ), f"Should find 'Air Temperature' sensor, got '{result.sensor_name}'"
+        assert (
+            result.onewire_address == "28A1B2C3D4E5F611"
+        ), f"ROM code should match, got '{result.onewire_address}'"
 
     @pytest.mark.onewire
     @pytest.mark.sensor
@@ -176,8 +177,7 @@ class TestOneWireFourWayLookup:
         )
 
         # ASSERT
-        assert result is None, \
-            "4-way lookup should return None for unknown ROM code"
+        assert result is None, "4-way lookup should return None for unknown ROM code"
 
     @pytest.mark.onewire
     @pytest.mark.sensor
@@ -211,9 +211,7 @@ class TestOneWireFourWayLookup:
                 return sensor_esp2
             return None
 
-        mock_sensor_repo.get_by_esp_gpio_type_and_onewire = AsyncMock(
-            side_effect=mock_lookup
-        )
+        mock_sensor_repo.get_by_esp_gpio_type_and_onewire = AsyncMock(side_effect=mock_lookup)
 
         # ACT
         result1 = await mock_sensor_repo.get_by_esp_gpio_type_and_onewire(
@@ -230,12 +228,11 @@ class TestOneWireFourWayLookup:
         )
 
         # ASSERT
-        assert result1.sensor_name == "ESP1 Sensor", \
-            "Should find ESP1's sensor"
-        assert result2.sensor_name == "ESP2 Sensor", \
-            "Should find ESP2's sensor"
-        assert result1.id != result2.id, \
-            "Same ROM on different ESPs should be different sensor records"
+        assert result1.sensor_name == "ESP1 Sensor", "Should find ESP1's sensor"
+        assert result2.sensor_name == "ESP2 Sensor", "Should find ESP2's sensor"
+        assert (
+            result1.id != result2.id
+        ), "Same ROM on different ESPs should be different sensor records"
 
 
 class TestOneWirePayloadValidation:
@@ -259,10 +256,10 @@ class TestOneWirePayloadValidation:
         onewire_address = payload.get("onewire_address")
 
         # ASSERT
-        assert onewire_address == "28FF641E8D3C0C79", \
-            "onewire_address should be extracted from payload"
-        assert len(onewire_address) == 16, \
-            "ROM code should be 16 characters"
+        assert (
+            onewire_address == "28FF641E8D3C0C79"
+        ), "onewire_address should be extracted from payload"
+        assert len(onewire_address) == 16, "ROM code should be 16 characters"
 
     @pytest.mark.onewire
     @pytest.mark.sensor
@@ -282,5 +279,4 @@ class TestOneWirePayloadValidation:
         onewire_address = payload.get("onewire_address")
 
         # ASSERT
-        assert onewire_address is None, \
-            "onewire_address should be None for non-OneWire sensors"
+        assert onewire_address is None, "onewire_address should be None for non-OneWire sensors"

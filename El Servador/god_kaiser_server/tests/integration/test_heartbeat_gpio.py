@@ -6,6 +6,7 @@ Tests the complete flow from MQTT heartbeat to database storage.
 Phase 2 (2026-01-15): Added tests for Arduino pinMode normalization.
 ESP32 sends raw Arduino values (1, 2, 5), server normalizes to protocol (0, 1, 2).
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.mqtt.handlers.heartbeat_handler import get_heartbeat_handler
@@ -36,9 +37,9 @@ def sample_heartbeat_with_gpio():
             {"gpio": 5, "owner": "sensor", "component": "SHT31", "mode": 0, "safe": False},
             {"gpio": 14, "owner": "actuator", "component": "pump_1", "mode": 1, "safe": False},
             {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False},
-            {"gpio": 22, "owner": "system", "component": "I2C_SCL", "mode": 1, "safe": False}
+            {"gpio": 22, "owner": "system", "component": "I2C_SCL", "mode": 1, "safe": False},
         ],
-        "gpio_reserved_count": 5
+        "gpio_reserved_count": 5,
     }
 
 
@@ -46,7 +47,7 @@ def sample_heartbeat_with_gpio():
 def sample_heartbeat_with_arduino_modes():
     """
     Sample heartbeat payload with Arduino pinMode values (real ESP32 format).
-    
+
     Arduino Core definitions:
         INPUT           = 0x01 (1)
         OUTPUT          = 0x02 (2)
@@ -72,9 +73,9 @@ def sample_heartbeat_with_arduino_modes():
             # Relay - OUTPUT (Arduino: 2)
             {"gpio": 14, "owner": "actuator", "component": "pump_main", "mode": 2, "safe": False},
             # ADC sensor - INPUT (Arduino: 1)
-            {"gpio": 32, "owner": "sensor", "component": "EC_Probe", "mode": 1, "safe": False}
+            {"gpio": 32, "owner": "sensor", "component": "EC_Probe", "mode": 1, "safe": False},
         ],
-        "gpio_reserved_count": 5
+        "gpio_reserved_count": 5,
     }
 
 
@@ -90,7 +91,7 @@ def sample_heartbeat_without_gpio():
         "heap_free": 200000,
         "wifi_rssi": -65,
         "sensor_count": 1,
-        "actuator_count": 0
+        "actuator_count": 0,
     }
 
 
@@ -102,7 +103,7 @@ class TestHeartbeatGpioValidation:
         result = heartbeat_handler._validate_gpio_status(
             sample_heartbeat_with_gpio["gpio_status"],
             sample_heartbeat_with_gpio["gpio_reserved_count"],
-            "ESP_TEST123"
+            "ESP_TEST123",
         )
 
         assert result is not None
@@ -113,8 +114,14 @@ class TestHeartbeatGpioValidation:
         """Test that invalid GPIO items are skipped, not rejected."""
         gpio_status = [
             {"gpio": 4, "owner": "sensor", "component": "DS18B20", "mode": 0, "safe": False},
-            {"gpio": 99, "owner": "invalid", "component": "bad", "mode": 99, "safe": "wrong"},  # Invalid
-            {"gpio": 5, "owner": "actuator", "component": "pump", "mode": 1, "safe": False}
+            {
+                "gpio": 99,
+                "owner": "invalid",
+                "component": "bad",
+                "mode": 99,
+                "safe": "wrong",
+            },  # Invalid
+            {"gpio": 5, "owner": "actuator", "component": "pump", "mode": 1, "safe": False},
         ]
 
         result = heartbeat_handler._validate_gpio_status(gpio_status, 3, "ESP_TEST123")
@@ -186,12 +193,12 @@ class TestHeartbeatGpioIntegration:
 class TestHeartbeatArduinoModeNormalization:
     """
     Integration tests for Arduino pinMode normalization (Phase 2).
-    
+
     ESP32 sends raw Arduino Core pinMode values:
         INPUT           = 0x01 (1)
         OUTPUT          = 0x02 (2)
         INPUT_PULLUP    = 0x05 (5)
-    
+
     Server normalizes to protocol values:
         0 = INPUT
         1 = OUTPUT
@@ -199,30 +206,26 @@ class TestHeartbeatArduinoModeNormalization:
     """
 
     def test_validate_arduino_modes_accepted(
-        self, 
-        heartbeat_handler, 
-        sample_heartbeat_with_arduino_modes
+        self, heartbeat_handler, sample_heartbeat_with_arduino_modes
     ):
         """Heartbeat with Arduino pinMode values should be accepted (not rejected)."""
         result = heartbeat_handler._validate_gpio_status(
             sample_heartbeat_with_arduino_modes["gpio_status"],
             sample_heartbeat_with_arduino_modes["gpio_reserved_count"],
-            "ESP_00000001"
+            "ESP_00000001",
         )
 
         assert result is not None, "Arduino mode values should not cause validation failure"
         assert len(result["gpio_status"]) == 5, "All 5 GPIO items should be validated"
 
     def test_arduino_modes_normalized_in_validation(
-        self, 
-        heartbeat_handler, 
-        sample_heartbeat_with_arduino_modes
+        self, heartbeat_handler, sample_heartbeat_with_arduino_modes
     ):
         """Arduino modes should be normalized to protocol values during validation."""
         result = heartbeat_handler._validate_gpio_status(
             sample_heartbeat_with_arduino_modes["gpio_status"],
             sample_heartbeat_with_arduino_modes["gpio_reserved_count"],
-            "ESP_00000001"
+            "ESP_00000001",
         )
 
         assert result is not None
@@ -233,26 +236,26 @@ class TestHeartbeatArduinoModeNormalization:
         # Verify normalization:
         # GPIO 4: Arduino INPUT_PULLUP (5) → Protocol 2
         assert gpio_modes[4] == 2, "INPUT_PULLUP (5) should normalize to 2"
-        
+
         # GPIO 21, 22: Arduino INPUT (1) → Protocol 0
         assert gpio_modes[21] == 0, "INPUT (1) should normalize to 0"
         assert gpio_modes[22] == 0, "INPUT (1) should normalize to 0"
-        
+
         # GPIO 14: Arduino OUTPUT (2) → Protocol 1
         assert gpio_modes[14] == 1, "OUTPUT (2) should normalize to 1"
-        
+
         # GPIO 32: Arduino INPUT (1) → Protocol 0
         assert gpio_modes[32] == 0, "INPUT (1) should normalize to 0"
 
     def test_all_values_normalized_as_arduino(self, heartbeat_handler):
         """
         Test that all values 1, 2, 5 are treated as Arduino values.
-        
+
         IMPORTANT: Values 1 and 2 are ALWAYS treated as Arduino values
         because we cannot distinguish between "already normalized" and
         "Arduino raw". ESP32 always sends Arduino values, so this is
         the correct behavior.
-        
+
         If a system needs to send already-normalized data, it should
         not re-validate through this model.
         """
@@ -262,7 +265,13 @@ class TestHeartbeatArduinoModeNormalization:
             # Arduino INPUT (1) → Protocol INPUT (0)
             {"gpio": 5, "owner": "sensor", "component": "arduino_input", "mode": 1, "safe": False},
             # Arduino OUTPUT (2) → Protocol OUTPUT (1)
-            {"gpio": 14, "owner": "actuator", "component": "arduino_output", "mode": 2, "safe": False},
+            {
+                "gpio": 14,
+                "owner": "actuator",
+                "component": "arduino_output",
+                "mode": 2,
+                "safe": False,
+            },
             # Arduino INPUT_PULLUP (5) → Protocol INPUT_PULLUP (2)
             {"gpio": 15, "owner": "sensor", "component": "arduino_pullup", "mode": 5, "safe": True},
         ]
@@ -284,7 +293,7 @@ class TestHeartbeatArduinoModeNormalization:
     def test_wokwi_simulation_heartbeat_format(self, heartbeat_handler):
         """
         Test exact Wokwi simulation heartbeat format.
-        
+
         This matches the actual payload from El Trabajante/src/services/communication/mqtt_client.cpp
         where pin.mode is the raw Arduino Core value.
         """
@@ -292,32 +301,31 @@ class TestHeartbeatArduinoModeNormalization:
             "gpio_status": [
                 {"gpio": 21, "owner": "system", "component": "I2C_SDA", "mode": 1, "safe": False},
                 {"gpio": 22, "owner": "system", "component": "I2C_SCL", "mode": 1, "safe": False},
-                {"gpio": 4, "owner": "system", "component": "OneWireBus", "mode": 5, "safe": True}
+                {"gpio": 4, "owner": "system", "component": "OneWireBus", "mode": 5, "safe": True},
             ],
-            "gpio_reserved_count": 3
+            "gpio_reserved_count": 3,
         }
 
         result = heartbeat_handler._validate_gpio_status(
-            wokwi_heartbeat["gpio_status"],
-            wokwi_heartbeat["gpio_reserved_count"],
-            "ESP_00000001"
+            wokwi_heartbeat["gpio_status"], wokwi_heartbeat["gpio_reserved_count"], "ESP_00000001"
         )
 
         assert result is not None
         assert len(result["gpio_status"]) == 3
 
         gpio_modes = {item["gpio"]: item["mode"] for item in result["gpio_status"]}
-        
+
         # I2C pins: Arduino INPUT (1) → Protocol INPUT (0)
         assert gpio_modes[21] == 0
         assert gpio_modes[22] == 0
-        
+
         # OneWire: Arduino INPUT_PULLUP (5) → Protocol INPUT_PULLUP (2)
         assert gpio_modes[4] == 2
 
     def test_unknown_arduino_mode_passes_through(self, heartbeat_handler, caplog):
         """Unknown Arduino mode values should pass through with warning."""
         import logging
+
         caplog.set_level(logging.WARNING)
 
         gpio_status = [

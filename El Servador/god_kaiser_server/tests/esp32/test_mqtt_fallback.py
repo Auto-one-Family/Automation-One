@@ -65,7 +65,12 @@ class MQTTFallbackSimulator:
         # Both failed
         self.connected_port = None
         self._consecutive_failures += 1
-        self.log_messages.append(("ERROR", f"Both ports failed ({self._consecutive_failures}/{self.CIRCUIT_BREAKER_THRESHOLD})"))
+        self.log_messages.append(
+            (
+                "ERROR",
+                f"Both ports failed ({self._consecutive_failures}/{self.CIRCUIT_BREAKER_THRESHOLD})",
+            )
+        )
 
         if self._consecutive_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
             self.circuit_breaker_open = True
@@ -76,10 +81,9 @@ class MQTTFallbackSimulator:
     def reconnect(self, server: str = "localhost") -> bool:
         """Simulate reconnect (uses last successful port if available)."""
         if self.connected_port and self._port_availability.get(self.connected_port, False):
-            self.connection_attempts.append({
-                "server": server, "port": self.connected_port,
-                "tls": self.connected_port == 8883
-            })
+            self.connection_attempts.append(
+                {"server": server, "port": self.connected_port, "tls": self.connected_port == 8883}
+            )
             return True
         return self.attempt_connection(server)
 

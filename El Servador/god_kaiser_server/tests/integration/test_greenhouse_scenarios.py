@@ -40,7 +40,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 # Wir nutzen die bestehenden esp32 fixtures
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'esp32'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "esp32"))
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
 
@@ -49,6 +50,7 @@ from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
 # Realistic Greenhouse Values (from practice!)
 # =============================================================================
 
+
 class GreenhouseValues:
     """
     Realistische Werte aus der Praxis.
@@ -56,43 +58,45 @@ class GreenhouseValues:
     Diese Werte basieren auf tatsächlichen Gewächshaus-Erfahrungen,
     nicht auf willkürlichen Test-Werten.
     """
+
     # Temperatur (°C als RAW * 100 für DS18B20-Stil)
-    TEMP_FROST_CRITICAL = 200      # 2.0°C - Frostgefahr!
-    TEMP_FROST_WARNING = 500       # 5.0°C - Vorwarnung
-    TEMP_NIGHT_TARGET = 1500       # 15.0°C - Nacht-Sollwert
-    TEMP_DAY_OPTIMAL = 2200        # 22.0°C - Optimal tagsüber
-    TEMP_DAY_WARM = 2600           # 26.0°C - Warm, Lüftung nötig
-    TEMP_HOT_WARNING = 3000        # 30.0°C - Zu heiß
-    TEMP_HOT_CRITICAL = 3500       # 35.0°C - Kritisch heiß!
+    TEMP_FROST_CRITICAL = 200  # 2.0°C - Frostgefahr!
+    TEMP_FROST_WARNING = 500  # 5.0°C - Vorwarnung
+    TEMP_NIGHT_TARGET = 1500  # 15.0°C - Nacht-Sollwert
+    TEMP_DAY_OPTIMAL = 2200  # 22.0°C - Optimal tagsüber
+    TEMP_DAY_WARM = 2600  # 26.0°C - Warm, Lüftung nötig
+    TEMP_HOT_WARNING = 3000  # 30.0°C - Zu heiß
+    TEMP_HOT_CRITICAL = 3500  # 35.0°C - Kritisch heiß!
 
     # Luftfeuchtigkeit (% RH * 10)
-    HUMIDITY_LOW = 400             # 40% - Zu trocken
-    HUMIDITY_OPTIMAL = 650         # 65% - Optimal
-    HUMIDITY_HIGH = 800            # 80% - Obergrenze
-    HUMIDITY_CONDENSATION = 950    # 95% - Kondensation am Sensor!
+    HUMIDITY_LOW = 400  # 40% - Zu trocken
+    HUMIDITY_OPTIMAL = 650  # 65% - Optimal
+    HUMIDITY_HIGH = 800  # 80% - Obergrenze
+    HUMIDITY_CONDENSATION = 950  # 95% - Kondensation am Sensor!
 
     # Bodenfeuchte (ADC Werte 0-4095)
-    SOIL_DRY = 1200                # Bewässerung nötig
-    SOIL_OPTIMAL = 2000            # Guter Bereich
-    SOIL_WET = 3000                # Genug Wasser
-    SOIL_SATURATED = 3800          # Übersättigt - Stop!
+    SOIL_DRY = 1200  # Bewässerung nötig
+    SOIL_OPTIMAL = 2000  # Guter Bereich
+    SOIL_WET = 3000  # Genug Wasser
+    SOIL_SATURATED = 3800  # Übersättigt - Stop!
 
     # pH (RAW * 100)
-    PH_ACID = 550                  # 5.5 - Sauer
-    PH_OPTIMAL = 650               # 6.5 - Optimal
-    PH_NEUTRAL = 700               # 7.0 - Neutral
-    PH_ALKALINE = 800              # 8.0 - Zu basisch
+    PH_ACID = 550  # 5.5 - Sauer
+    PH_OPTIMAL = 650  # 6.5 - Optimal
+    PH_NEUTRAL = 700  # 7.0 - Neutral
+    PH_ALKALINE = 800  # 8.0 - Zu basisch
 
     # Zeitkonstanten (Sekunden)
-    IRRIGATION_MAX_DURATION = 1800   # 30 min max Bewässerung
-    VENTILATION_RAMP_TIME = 300      # 5 min für volle Öffnung
-    TEMP_RESPONSE_TIME = 30          # 30s max für Temp-Reaktion
-    FROST_RESPONSE_TIME = 10         # 10s für Frost-Notfall!
+    IRRIGATION_MAX_DURATION = 1800  # 30 min max Bewässerung
+    VENTILATION_RAMP_TIME = 300  # 5 min für volle Öffnung
+    TEMP_RESPONSE_TIME = 30  # 30s max für Temp-Reaktion
+    FROST_RESPONSE_TIME = 10  # 10s für Frost-Notfall!
 
 
 # =============================================================================
 # Custom Greenhouse Test Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def greenhouse_esp_with_temp_sensors():
@@ -114,7 +118,7 @@ def greenhouse_esp_with_temp_sensors():
         sensor_type="DS18B20",
         name="Bodentemperatur Primär",
         unit="°C",
-        quality="good"
+        quality="good",
     )
 
     # Backup + Feuchte
@@ -124,7 +128,7 @@ def greenhouse_esp_with_temp_sensors():
         primary_value=GreenhouseValues.TEMP_DAY_OPTIMAL,
         secondary_values={"humidity": GreenhouseValues.HUMIDITY_OPTIMAL},
         name="Luft Temp/Feuchte",
-        quality="good"
+        quality="good",
     )
 
     # Außentemperatur
@@ -134,13 +138,15 @@ def greenhouse_esp_with_temp_sensors():
         sensor_type="analog",
         name="Außentemperatur",
         unit="raw",
-        quality="good"
+        quality="good",
     )
 
     # Heizung und Lüftung
     mock.configure_actuator(gpio=5, actuator_type="relay", name="Heizung")
     mock.configure_actuator(gpio=6, actuator_type="valve", name="Lüftungsklappe")
-    mock.configure_actuator(gpio=7, actuator_type="fan", name="Lüftungsmotor", min_value=0.2, max_value=1.0)
+    mock.configure_actuator(
+        gpio=7, actuator_type="fan", name="Lüftungsmotor", min_value=0.2, max_value=1.0
+    )
 
     mock.clear_published_messages()
     yield mock
@@ -172,7 +178,7 @@ def greenhouse_esp_with_irrigation():
         sensor_type="moisture",
         name="Bodenfeuchte Zone A",
         unit="raw",
-        quality="good"
+        quality="good",
     )
 
     # Durchflusssensor
@@ -182,7 +188,7 @@ def greenhouse_esp_with_irrigation():
         sensor_type="digital",
         name="Durchflusssensor",
         unit="pulse",
-        quality="good"
+        quality="good",
     )
 
     # Drucksensor (ca. 2 bar = 2000 raw)
@@ -192,11 +198,13 @@ def greenhouse_esp_with_irrigation():
         sensor_type="pressure",
         name="Wasserdruck",
         unit="raw",
-        quality="good"
+        quality="good",
     )
 
     # Pumpe und Ventile
-    mock.configure_actuator(gpio=5, actuator_type="pump", name="Hauptpumpe", safety_timeout_ms=1800000)
+    mock.configure_actuator(
+        gpio=5, actuator_type="pump", name="Hauptpumpe", safety_timeout_ms=1800000
+    )
     mock.configure_actuator(gpio=6, actuator_type="valve", name="Ventil Zone A")
     mock.configure_actuator(gpio=18, actuator_type="valve", name="Ventil Zone B")
 
@@ -255,6 +263,7 @@ def multi_zone_greenhouse():
 # Test Category 1: Temperature Management
 # =============================================================================
 
+
 class TestTemperatureManagement:
     """
     Temperatur-Management Tests aus der Praxis.
@@ -300,7 +309,7 @@ class TestTemperatureManagement:
             gpio=4,
             raw_value=GreenhouseValues.TEMP_FROST_CRITICAL,
             sensor_type="DS18B20",
-            quality="good"  # Sensor funktioniert - das ist ECHT!
+            quality="good",  # Sensor funktioniert - das ist ECHT!
         )
 
         # Sensor-Lesung simulieren
@@ -318,17 +327,17 @@ class TestTemperatureManagement:
 
         # 3. Server würde jetzt Heizung aktivieren
         # (In diesem Test simulieren wir die Server-Reaktion)
-        heater_response = mock.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        heater_response = mock.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         assert heater_response["status"] == "ok", "Heizung muss aktivierbar sein"
         assert heater_response["state"] is True, "Heizung muss AN sein"
 
         # 4. Prüfe dass Heizungs-Status via MQTT gesendet wurde
-        heater_msgs = [m for m in mock.get_published_messages() if "/actuator/5/status" in m["topic"]]
+        heater_msgs = [
+            m for m in mock.get_published_messages() if "/actuator/5/status" in m["topic"]
+        ]
         assert len(heater_msgs) >= 1, "Heizungs-Status muss via MQTT gesendet werden"
         assert heater_msgs[-1]["payload"]["state"] is True
 
@@ -356,7 +365,7 @@ class TestTemperatureManagement:
         # Hysterese-Band
         SETPOINT = 2000  # 20°C Sollwert
         HYSTERESIS = 200  # ±2°C
-        SWITCH_ON_BELOW = SETPOINT - HYSTERESIS   # 18°C
+        SWITCH_ON_BELOW = SETPOINT - HYSTERESIS  # 18°C
         SWITCH_OFF_ABOVE = SETPOINT + HYSTERESIS  # 22°C
 
         heater_switches = 0
@@ -364,9 +373,21 @@ class TestTemperatureManagement:
 
         # Simuliere Temperatur-Schwankungen im Hysterese-Band
         temp_sequence = [
-            1900, 1950, 2000, 2050, 2100,  # Steigende Temp im Band
-            2050, 2000, 1950, 1900, 1850,  # Fallende Temp im Band
-            1900, 2000, 2100, 2000, 1900   # Oszillation im Band
+            1900,
+            1950,
+            2000,
+            2050,
+            2100,  # Steigende Temp im Band
+            2050,
+            2000,
+            1950,
+            1900,
+            1850,  # Fallende Temp im Band
+            1900,
+            2000,
+            2100,
+            2000,
+            1900,  # Oszillation im Band
         ]
 
         for temp in temp_sequence:
@@ -386,7 +407,9 @@ class TestTemperatureManagement:
                 last_heater_state = False
 
         # Im Band sollte KEINE Schaltung passieren
-        assert heater_switches == 0, f"Heizung sollte im Hysterese-Band nicht schalten, aber {heater_switches}x geschaltet"
+        assert (
+            heater_switches == 0
+        ), f"Heizung sollte im Hysterese-Band nicht schalten, aber {heater_switches}x geschaltet"
 
     @pytest.mark.critical
     @pytest.mark.temperature
@@ -415,7 +438,7 @@ class TestTemperatureManagement:
             sensor_type="SHT31",
             primary_value=2200,
             secondary_values={"humidity": 650},
-            quality="good"
+            quality="good",
         )
 
         # === TRIGGER: Primärsensor fällt aus ===
@@ -423,7 +446,7 @@ class TestTemperatureManagement:
             gpio=4,
             raw_value=0,  # Ungültiger Wert
             sensor_type="DS18B20",
-            quality="error"  # FEHLER!
+            quality="error",  # FEHLER!
         )
 
         # Lese beide Sensoren
@@ -440,18 +463,17 @@ class TestTemperatureManagement:
 
         # 3. System kann weiter gesteuert werden (Heizung reagiert auf Backup)
         # Server würde jetzt Backup-Wert verwenden
-        heater_response = mock.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 0,  # Temperatur OK, Heizung aus
-            "mode": "digital"
-        })
+        heater_response = mock.handle_command(
+            "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}  # Temperatur OK, Heizung aus
+        )
         assert heater_response["status"] == "ok"
 
         # 4. MQTT-Messages enthalten Qualitäts-Info
         messages = mock.get_published_messages()
         error_msgs = [m for m in messages if "/sensor/4/data" in m["topic"]]
-        assert any(m["payload"].get("quality") == "error" for m in error_msgs), \
-            "Sensor-Fehler muss via MQTT gemeldet werden"
+        assert any(
+            m["payload"].get("quality") == "error" for m in error_msgs
+        ), "Sensor-Fehler muss via MQTT gemeldet werden"
 
     @pytest.mark.critical
     @pytest.mark.temperature
@@ -504,18 +526,24 @@ class TestTemperatureManagement:
         for gpio in [5, 6, 7]:
             actuator = mock.get_actuator_state(gpio)
             assert actuator.state is False, f"Aktor GPIO {gpio} sollte AUS sein"
-            assert actuator.emergency_stopped is True, f"Aktor GPIO {gpio} sollte emergency_stopped sein"
+            assert (
+                actuator.emergency_stopped is True
+            ), f"Aktor GPIO {gpio} sollte emergency_stopped sein"
 
         # 3. Safe-Mode-Message wurde gesendet
         messages = mock.get_published_messages()
-        safe_mode_msgs = [m for m in messages if "safe_mode" in m["topic"].lower() or
-                          m.get("payload", {}).get("safe_mode") is True]
+        safe_mode_msgs = [
+            m
+            for m in messages
+            if "safe_mode" in m["topic"].lower() or m.get("payload", {}).get("safe_mode") is True
+        ]
         assert len(safe_mode_msgs) >= 1, "Safe-Mode-Status muss via MQTT gemeldet werden"
 
 
 # =============================================================================
 # Test Category 2: Irrigation Safety
 # =============================================================================
+
 
 class TestIrrigationSafety:
     """
@@ -553,26 +581,19 @@ class TestIrrigationSafety:
         mock.clear_published_messages()
 
         # Pumpe AN
-        pump_start = mock.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        pump_start = mock.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
         assert pump_start["status"] == "ok"
         assert pump_start["state"] is True
 
         # Ventil A öffnen
-        valve_response = mock.handle_command("actuator_set", {
-            "gpio": 6,
-            "value": 1,
-            "mode": "digital"
-        })
+        valve_response = mock.handle_command(
+            "actuator_set", {"gpio": 6, "value": 1, "mode": "digital"}
+        )
         assert valve_response["status"] == "ok"
 
         # === VERIFY: Sicherheits-Timeout ist konfiguriert ===
         pump_state = mock.get_actuator_state(5)
-        assert pump_state.safety_timeout_ms == 1800000, \
-            "Pumpe muss 30min Timeout haben (1800000ms)"
+        assert pump_state.safety_timeout_ms == 1800000, "Pumpe muss 30min Timeout haben (1800000ms)"
 
         # === SIMULATE: Timeout-Logik (normalerweise Server-seitig) ===
         # Nach 30 Minuten sollte der Server automatisch abschalten
@@ -580,9 +601,9 @@ class TestIrrigationSafety:
         # dass Emergency-Stop funktioniert
 
         # Simuliere Timeout durch Emergency-Stop
-        emergency_response = mock.handle_command("emergency_stop", {
-            "reason": "irrigation_max_duration_exceeded"
-        })
+        emergency_response = mock.handle_command(
+            "emergency_stop", {"reason": "irrigation_max_duration_exceeded"}
+        )
 
         assert emergency_response["status"] == "ok"
 
@@ -625,10 +646,7 @@ class TestIrrigationSafety:
 
         # === TRIGGER: Druckabfall ===
         mock.set_sensor_value(
-            gpio=39,
-            raw_value=500,  # 0.5 bar - zu niedrig!
-            sensor_type="pressure",
-            quality="good"
+            gpio=39, raw_value=500, sensor_type="pressure", quality="good"  # 0.5 bar - zu niedrig!
         )
 
         # Server würde Drucksensor lesen
@@ -638,11 +656,9 @@ class TestIrrigationSafety:
         # === VERIFY: Server reagiert (simuliert) ===
         # Niedriger Druck → Pumpe stoppen
         if pressure_response["data"]["raw_value"] < 1000:  # < 1 bar
-            stop_response = mock.handle_command("actuator_set", {
-                "gpio": 5,
-                "value": 0,
-                "mode": "digital"
-            })
+            stop_response = mock.handle_command(
+                "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}
+            )
             assert stop_response["status"] == "ok"
 
         # Pumpe muss aus sein
@@ -653,8 +669,9 @@ class TestIrrigationSafety:
         messages = mock.get_published_messages()
         # Status-Änderung sollte gesendet worden sein
         pump_status_msgs = [m for m in messages if "/actuator/5/status" in m["topic"]]
-        assert any(m["payload"]["state"] is False for m in pump_status_msgs), \
-            "Pumpen-Stop muss via MQTT gemeldet werden"
+        assert any(
+            m["payload"]["state"] is False for m in pump_status_msgs
+        ), "Pumpen-Stop muss via MQTT gemeldet werden"
 
     @pytest.mark.irrigation
     def test_multiple_zones_sequential(self, multi_zone_greenhouse):
@@ -684,8 +701,9 @@ class TestIrrigationSafety:
 
         # Zone B muss geschlossen sein
         zone_b_valve = zone_b.get_actuator_state(6)
-        assert zone_b_valve is None or zone_b_valve.state is False, \
-            "Zone B Ventil muss während Zone A Bewässerung geschlossen sein"
+        assert (
+            zone_b_valve is None or zone_b_valve.state is False
+        ), "Zone B Ventil muss während Zone A Bewässerung geschlossen sein"
 
         # Zone A Ventil ist offen
         zone_a_valve = zone_a.get_actuator_state(6)
@@ -713,6 +731,7 @@ class TestIrrigationSafety:
 # =============================================================================
 # Test Category 3: Ventilation Logic
 # =============================================================================
+
 
 class TestVentilationLogic:
     """
@@ -748,14 +767,14 @@ class TestVentilationLogic:
             gpio=35,
             raw_value=GreenhouseValues.TEMP_FROST_CRITICAL,  # 2°C außen
             sensor_type="analog",
-            name="Außentemperatur"
+            name="Außentemperatur",
         )
 
         # Innentemperatur zu heiß
         mock.set_sensor_value(
             gpio=4,
             raw_value=GreenhouseValues.TEMP_HOT_WARNING,  # 30°C innen!
-            sensor_type="DS18B20"
+            sensor_type="DS18B20",
         )
 
         # === VERIFY: Frost-Lock Logik ===
@@ -773,11 +792,9 @@ class TestVentilationLogic:
         if frost_detected:
             # Lüftung versuchen zu öffnen sollte abgelehnt werden
             # In echtem System: Command wird akzeptiert aber nicht ausgeführt
-            vent_response = mock.handle_command("actuator_set", {
-                "gpio": 6,
-                "value": 1,
-                "mode": "digital"
-            })
+            vent_response = mock.handle_command(
+                "actuator_set", {"gpio": 6, "value": 1, "mode": "digital"}
+            )
 
             # Command geht durch, aber Server würde warnen
             assert vent_response["status"] == "ok"
@@ -787,11 +804,9 @@ class TestVentilationLogic:
             mock.handle_command("actuator_set", {"gpio": 6, "value": 0, "mode": "digital"})
 
         # Umluftventilator (GPIO 7) DARF laufen (interne Umwälzung)
-        fan_response = mock.handle_command("actuator_set", {
-            "gpio": 7,
-            "value": 0.5,  # 50% Umluft
-            "mode": "pwm"
-        })
+        fan_response = mock.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.5, "mode": "pwm"}  # 50% Umluft
+        )
         assert fan_response["status"] == "ok"
         assert fan_response["state"] is True, "Umluftventilator sollte erlaubt sein"
 
@@ -825,14 +840,13 @@ class TestVentilationLogic:
 
         while current_value < target_value:
             current_value = min(current_value + step, target_value)
-            response = mock.handle_command("actuator_set", {
-                "gpio": 7,
-                "value": current_value,
-                "mode": "pwm"
-            })
+            response = mock.handle_command(
+                "actuator_set", {"gpio": 7, "value": current_value, "mode": "pwm"}
+            )
             assert response["status"] == "ok"
-            assert abs(response["pwm_value"] - current_value) < 0.01, \
-                f"PWM sollte {current_value} sein"
+            assert (
+                abs(response["pwm_value"] - current_value) < 0.01
+            ), f"PWM sollte {current_value} sein"
             steps_taken += 1
 
         # === VERIFY ===
@@ -847,6 +861,7 @@ class TestVentilationLogic:
 # =============================================================================
 # Test Category 4: Night Mode & Unattended Operation
 # =============================================================================
+
 
 class TestNightModeOperation:
     """
@@ -925,9 +940,7 @@ class TestNightModeOperation:
 
         # === TRIGGER: Kritische Temperatur ===
         mock.set_sensor_value(
-            gpio=4,
-            raw_value=GreenhouseValues.TEMP_HOT_CRITICAL,  # 35°C!
-            sensor_type="DS18B20"
+            gpio=4, raw_value=GreenhouseValues.TEMP_HOT_CRITICAL, sensor_type="DS18B20"  # 35°C!
         )
 
         mock.clear_published_messages()
@@ -958,13 +971,15 @@ class TestNightModeOperation:
         # Alle Aktoren gestoppt
         for gpio in [5, 6, 7]:
             actuator = mock.get_actuator_state(gpio)
-            assert actuator.emergency_stopped is True, \
-                f"Aktor GPIO {gpio} sollte nach Eskalation gestoppt sein"
+            assert (
+                actuator.emergency_stopped is True
+            ), f"Aktor GPIO {gpio} sollte nach Eskalation gestoppt sein"
 
 
 # =============================================================================
 # Test Category 5: Cross-ESP Coordination (Basic)
 # =============================================================================
+
 
 class TestCrossESPCoordination:
     """
@@ -999,11 +1014,9 @@ class TestCrossESPCoordination:
 
         # === KORREKTE REIHENFOLGE ===
         # 1. Ventil zuerst öffnen
-        valve_response = zone_a.handle_command("actuator_set", {
-            "gpio": 6,
-            "value": 1,
-            "mode": "digital"
-        })
+        valve_response = zone_a.handle_command(
+            "actuator_set", {"gpio": 6, "value": 1, "mode": "digital"}
+        )
         assert valve_response["status"] == "ok"
         assert valve_response["state"] is True
 
@@ -1011,11 +1024,9 @@ class TestCrossESPCoordination:
         # time.sleep(0.1)  # In echtem Test: 1-2 Sekunden
 
         # 2. DANN Pumpe starten
-        pump_response = zone_c.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        pump_response = zone_c.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert pump_response["status"] == "ok"
         assert pump_response["state"] is True
 
@@ -1037,6 +1048,7 @@ class TestCrossESPCoordination:
 # =============================================================================
 # Pytest Configuration
 # =============================================================================
+
 
 def pytest_configure(config):
     """Register custom markers for greenhouse tests."""

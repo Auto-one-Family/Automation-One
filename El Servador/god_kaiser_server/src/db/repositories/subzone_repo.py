@@ -8,7 +8,6 @@ Provides CRUD operations and specialized queries for SubzoneConfig model.
 Follows the same patterns as ESPRepository for consistency.
 """
 
-import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -34,9 +33,7 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
     # Query Methods
     # =========================================================================
 
-    async def get_by_esp_and_subzone(
-        self, esp_id: str, subzone_id: str
-    ) -> Optional[SubzoneConfig]:
+    async def get_by_esp_and_subzone(self, esp_id: str, subzone_id: str) -> Optional[SubzoneConfig]:
         """
         Get subzone by ESP device ID and subzone ID.
 
@@ -128,9 +125,7 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
 
         return None
 
-    async def get_subzone_by_gpio(
-        self, esp_id: str, gpio: int
-    ) -> Optional[SubzoneConfig]:
+    async def get_subzone_by_gpio(self, esp_id: str, gpio: int) -> Optional[SubzoneConfig]:
         """
         Find which subzone a GPIO belongs to.
 
@@ -212,9 +207,7 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
         await self.session.refresh(subzone)
         return subzone
 
-    async def update_last_ack(
-        self, esp_id: str, subzone_id: str
-    ) -> Optional[SubzoneConfig]:
+    async def update_last_ack(self, esp_id: str, subzone_id: str) -> Optional[SubzoneConfig]:
         """
         Update last ACK timestamp for a subzone.
 
@@ -225,17 +218,13 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
         Returns:
             Updated SubzoneConfig or None if not found
         """
-        return await self.update_subzone(
-            esp_id, subzone_id, last_ack_at=datetime.now(timezone.utc)
-        )
+        return await self.update_subzone(esp_id, subzone_id, last_ack_at=datetime.now(timezone.utc))
 
     # =========================================================================
     # Safe-Mode Methods
     # =========================================================================
 
-    async def enable_safe_mode(
-        self, esp_id: str, subzone_id: str
-    ) -> Optional[SubzoneConfig]:
+    async def enable_safe_mode(self, esp_id: str, subzone_id: str) -> Optional[SubzoneConfig]:
         """
         Enable safe-mode for a subzone.
 
@@ -248,9 +237,7 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
         """
         return await self.update_subzone(esp_id, subzone_id, safe_mode_active=True)
 
-    async def disable_safe_mode(
-        self, esp_id: str, subzone_id: str
-    ) -> Optional[SubzoneConfig]:
+    async def disable_safe_mode(self, esp_id: str, subzone_id: str) -> Optional[SubzoneConfig]:
         """
         Disable safe-mode for a subzone.
 
@@ -269,9 +256,7 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
     # Delete Methods
     # =========================================================================
 
-    async def delete_by_esp_and_subzone(
-        self, esp_id: str, subzone_id: str
-    ) -> bool:
+    async def delete_by_esp_and_subzone(self, esp_id: str, subzone_id: str) -> bool:
         """
         Delete a subzone by ESP and subzone ID.
 
@@ -364,21 +349,3 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
             if subzone.assigned_gpios:
                 total += len(subzone.assigned_gpios)
         return total
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

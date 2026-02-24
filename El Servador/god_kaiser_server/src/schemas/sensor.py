@@ -29,7 +29,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .common import (
     BaseResponse,
-    IDMixin,
     PaginatedResponse,
     PaginationMeta,
     TimestampMixin,
@@ -42,8 +41,17 @@ from .common import (
 
 
 SENSOR_TYPES = [
-    "ph", "temperature", "humidity", "ec", "moisture",
-    "pressure", "co2", "light", "flow", "analog", "digital"
+    "ph",
+    "temperature",
+    "humidity",
+    "ec",
+    "moisture",
+    "pressure",
+    "co2",
+    "light",
+    "flow",
+    "analog",
+    "digital",
 ]
 
 QUALITY_LEVELS = ["excellent", "good", "fair", "poor", "bad", "stale", "error"]
@@ -56,7 +64,7 @@ QUALITY_LEVELS = ["excellent", "good", "fair", "poor", "bad", "stale", "error"]
 
 class SensorConfigBase(BaseModel):
     """Base sensor configuration fields."""
-    
+
     gpio: int = Field(
         ...,
         ge=0,
@@ -73,7 +81,7 @@ class SensorConfigBase(BaseModel):
         description="Human-readable sensor name",
         examples=["Tank pH Sensor", "Ambient Temperature"],
     )
-    
+
     @field_validator("sensor_type")
     @classmethod
     def validate_sensor_type(cls, v: str) -> str:
@@ -179,7 +187,7 @@ class SensorConfigCreate(SensorConfigBase):
     operating_mode: Optional[str] = Field(
         None,
         description="Operating mode override: continuous, on_demand, scheduled, paused. "
-                    "NULL = use SensorTypeDefaults",
+        "NULL = use SensorTypeDefaults",
         pattern=r"^(continuous|on_demand|scheduled|paused)$",
     )
     timeout_seconds: Optional[int] = Field(
@@ -207,16 +215,13 @@ class SensorConfigCreate(SensorConfigBase):
                 "enabled": True,
                 "interval_ms": 30000,
                 "processing_mode": "pi_enhanced",
-                "calibration": {
-                    "slope": -3.5,
-                    "offset": 21.34
-                },
+                "calibration": {"slope": -3.5, "offset": 21.34},
                 "threshold_min": 0.0,
                 "threshold_max": 14.0,
                 "warning_min": 5.5,
                 "warning_max": 7.5,
                 "operating_mode": "continuous",
-                "timeout_seconds": 180
+                "timeout_seconds": 180,
             }
         }
     )
@@ -248,7 +253,7 @@ class SensorConfigUpdate(BaseModel):
     operating_mode: Optional[str] = Field(
         None,
         description="Operating mode override: continuous, on_demand, scheduled, paused. "
-                    "NULL = use SensorTypeDefaults",
+        "NULL = use SensorTypeDefaults",
         pattern=r"^(continuous|on_demand|scheduled|paused)$",
     )
     timeout_seconds: Optional[int] = Field(
@@ -353,7 +358,7 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
         None,
         description="Latest reading timestamp",
     )
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -374,9 +379,9 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
                 "latest_quality": "good",
                 "latest_timestamp": "2025-01-01T12:00:00Z",
                 "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-01T12:00:00Z"
+                "updated_at": "2025-01-01T12:00:00Z",
             }
-        }
+        },
     )
 
 
@@ -389,7 +394,7 @@ class SensorReading(BaseModel):
     """
     Single sensor reading.
     """
-    
+
     timestamp: datetime = Field(..., description="Reading timestamp")
     raw_value: float = Field(..., description="Raw sensor value")
     processed_value: Optional[float] = Field(
@@ -407,9 +412,9 @@ class SensorReading(BaseModel):
     sensor_type: Optional[str] = Field(
         None,
         description="Sensor type (e.g. 'sht31_temp', 'sht31_humidity', 'ds18b20'). "
-                    "Allows frontend to distinguish readings from multi-value sensors.",
+        "Allows frontend to distinguish readings from multi-value sensors.",
     )
-    
+
     @field_validator("quality")
     @classmethod
     def validate_quality(cls, v: str) -> str:
@@ -418,7 +423,7 @@ class SensorReading(BaseModel):
         if v not in QUALITY_LEVELS:
             v = "good"  # Default to good if unknown
         return v
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -428,9 +433,9 @@ class SensorReading(BaseModel):
                 "processed_value": 6.8,
                 "unit": "pH",
                 "quality": "good",
-                "sensor_type": "ph"
+                "sensor_type": "ph",
             }
-        }
+        },
     )
 
 
@@ -438,7 +443,7 @@ class SensorDataQuery(BaseModel):
     """
     Sensor data query parameters.
     """
-    
+
     esp_id: Optional[str] = Field(
         None,
         pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
@@ -471,7 +476,7 @@ class SensorDataQuery(BaseModel):
         pattern=r"^(none|minute|hour|day)$",
         description="Time aggregation (none, minute, hour, day)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -479,7 +484,7 @@ class SensorDataQuery(BaseModel):
                 "gpio": 34,
                 "start_time": "2025-01-01T00:00:00Z",
                 "end_time": "2025-01-01T23:59:59Z",
-                "aggregation": "hour"
+                "aggregation": "hour",
             }
         }
     )
@@ -489,7 +494,7 @@ class SensorDataResponse(BaseResponse):
     """
     Sensor data query response.
     """
-    
+
     esp_id: Optional[str] = Field(None, description="ESP device ID filter")
     gpio: Optional[int] = Field(None, description="GPIO filter")
     sensor_type: Optional[str] = Field(None, description="Sensor type")
@@ -503,7 +508,7 @@ class SensorDataResponse(BaseResponse):
         None,
         description="Actual time range of data",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -517,15 +522,12 @@ class SensorDataResponse(BaseResponse):
                         "raw_value": 2150,
                         "processed_value": 6.8,
                         "unit": "pH",
-                        "quality": "good"
+                        "quality": "good",
                     }
                 ],
                 "count": 1,
                 "aggregation": None,
-                "time_range": {
-                    "start": "2025-01-01T00:00:00Z",
-                    "end": "2025-01-01T23:59:59Z"
-                }
+                "time_range": {"start": "2025-01-01T00:00:00Z", "end": "2025-01-01T23:59:59Z"},
             }
         }
     )
@@ -535,7 +537,7 @@ class SensorDataPaginatedResponse(BaseResponse):
     """
     Paginated sensor data response.
     """
-    
+
     esp_id: Optional[str] = Field(None)
     gpio: Optional[int] = Field(None)
     readings: List[SensorReading] = Field(default_factory=list)
@@ -551,7 +553,7 @@ class SensorStats(BaseModel):
     """
     Statistical summary for sensor data.
     """
-    
+
     min_value: Optional[float] = Field(None, description="Minimum value")
     max_value: Optional[float] = Field(None, description="Maximum value")
     avg_value: Optional[float] = Field(None, description="Average value")
@@ -561,7 +563,7 @@ class SensorStats(BaseModel):
         default_factory=dict,
         description="Count per quality level",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -570,11 +572,7 @@ class SensorStats(BaseModel):
                 "avg_value": 6.8,
                 "std_dev": 0.3,
                 "reading_count": 100,
-                "quality_distribution": {
-                    "excellent": 50,
-                    "good": 40,
-                    "fair": 10
-                }
+                "quality_distribution": {"excellent": 50, "good": 40, "fair": 10},
             }
         }
     )
@@ -584,7 +582,7 @@ class SensorStatsResponse(BaseResponse):
     """
     Sensor statistics response.
     """
-    
+
     esp_id: str = Field(..., description="ESP device ID")
     gpio: int = Field(..., description="GPIO pin")
     sensor_type: str = Field(..., description="Sensor type")
@@ -601,7 +599,7 @@ class SensorListFilter(BaseModel):
     """
     Filter parameters for sensor list endpoint.
     """
-    
+
     esp_id: Optional[str] = Field(
         None,
         pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
@@ -631,6 +629,7 @@ class SensorConfigListResponse(PaginatedResponse[SensorConfigResponse]):
     """
     Paginated list of sensor configurations.
     """
+
     pass
 
 
@@ -642,10 +641,10 @@ class SensorConfigListResponse(PaginatedResponse[SensorConfigResponse]):
 class SensorProcessRequest(BaseModel):
     """
     Request model for sensor processing endpoint.
-    
+
     ESP32 sends raw sensor data for server-side processing.
     """
-    
+
     esp_id: str = Field(
         ...,
         description="ESP device ID (format: ESP_XXXXXXXX)",
@@ -683,13 +682,13 @@ class SensorProcessRequest(BaseModel):
         None,
         description="Unix timestamp (seconds)",
     )
-    
+
     @field_validator("sensor_type")
     @classmethod
     def validate_sensor_type(cls, v: str) -> str:
         """Validate sensor type format."""
         return v.lower().strip()
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -698,7 +697,7 @@ class SensorProcessRequest(BaseModel):
                 "sensor_type": "ph",
                 "raw_value": 2150,
                 "calibration": {"slope": -3.5, "offset": 21.34},
-                "timestamp": 1735818000
+                "timestamp": 1735818000,
             }
         }
     )
@@ -708,7 +707,7 @@ class SensorProcessResponse(BaseResponse):
     """
     Response model for sensor processing endpoint.
     """
-    
+
     processed_value: Optional[float] = Field(
         None,
         description="Processed sensor value",
@@ -733,7 +732,7 @@ class SensorProcessResponse(BaseResponse):
         None,
         description="Additional processing metadata",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -742,7 +741,7 @@ class SensorProcessResponse(BaseResponse):
                 "unit": "pH",
                 "quality": "good",
                 "processing_time_ms": 5.2,
-                "metadata": {"voltage": 1.75, "calibrated": True}
+                "metadata": {"voltage": 1.75, "calibrated": True},
             }
         }
     )
@@ -755,7 +754,7 @@ class SensorProcessResponse(BaseResponse):
 
 class CalibrationPoint(BaseModel):
     """Single calibration point."""
-    
+
     raw: float = Field(
         ...,
         description="Raw sensor value",
@@ -772,7 +771,7 @@ class SensorCalibrateRequest(BaseModel):
     """
     Sensor calibration request.
     """
-    
+
     esp_id: str = Field(
         ...,
         pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
@@ -803,7 +802,7 @@ class SensorCalibrateRequest(BaseModel):
         True,
         description="Save calibration to database",
     )
-    
+
     @field_validator("sensor_type")
     @classmethod
     def validate_sensor_type(cls, v: str) -> str:
@@ -833,10 +832,10 @@ class SensorCalibrateResponse(BaseResponse):
 class OneWireDevice(BaseModel):
     """
     OneWire device found during bus scan.
-    
+
     Used for DS18B20 and other 1-Wire sensors.
     Each device has a unique 64-bit ROM address.
-    
+
     OneWire Multi-Device Support:
     - Multiple DS18B20 sensors can share the same GPIO pin (bus topology)
     - Each device is uniquely identified by its 64-bit ROM code
@@ -881,7 +880,7 @@ class OneWireDevice(BaseModel):
                 "device_type": "ds18b20",
                 "pin": 4,
                 "already_configured": False,
-                "sensor_name": None
+                "sensor_name": None,
             }
         }
     )
@@ -891,7 +890,7 @@ class OneWireScanRequest(BaseModel):
     """
     OneWire scan request parameters.
     """
-    
+
     pin: int = Field(
         4,
         ge=0,
@@ -899,21 +898,15 @@ class OneWireScanRequest(BaseModel):
         description="GPIO pin for OneWire bus (default: 4)",
     )
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "pin": 4
-            }
-        }
-    )
+    model_config = ConfigDict(json_schema_extra={"example": {"pin": 4}})
 
 
 class OneWireScanResponse(BaseResponse):
     """
     Response from OneWire bus scan.
-    
+
     Contains list of discovered devices with their ROM codes and types.
-    
+
     OneWire Multi-Device Support:
     - Devices are enriched with already_configured flag
     - new_count indicates how many devices are NOT yet in database
@@ -961,28 +954,28 @@ class OneWireScanResponse(BaseResponse):
                         "device_type": "ds18b20",
                         "pin": 4,
                         "already_configured": True,
-                        "sensor_name": "Gewächshaus Temp"
+                        "sensor_name": "Gewächshaus Temp",
                     },
                     {
                         "rom_code": "28FF123456789ABC",
                         "device_type": "ds18b20",
                         "pin": 4,
                         "already_configured": False,
-                        "sensor_name": None
+                        "sensor_name": None,
                     },
                     {
                         "rom_code": "28FF987654321DEF",
                         "device_type": "ds18b20",
                         "pin": 4,
                         "already_configured": False,
-                        "sensor_name": None
-                    }
+                        "sensor_name": None,
+                    },
                 ],
                 "found_count": 3,
                 "new_count": 2,
                 "pin": 4,
                 "esp_id": "ESP_12AB34CD",
-                "scan_duration_ms": 250
+                "scan_duration_ms": 250,
             }
         }
     )

@@ -32,7 +32,7 @@ class ComponentHealth(BaseModel):
     """
     Health status of a single component.
     """
-    
+
     name: str = Field(..., description="Component name")
     status: str = Field(
         ...,
@@ -47,7 +47,7 @@ class ComponentHealth(BaseModel):
     )
     last_check: Optional[datetime] = Field(None, description="Last check timestamp")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional info")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -55,7 +55,7 @@ class ComponentHealth(BaseModel):
                 "status": "healthy",
                 "message": "PostgreSQL connection OK",
                 "latency_ms": 5.2,
-                "last_check": "2025-01-01T12:00:00Z"
+                "last_check": "2025-01-01T12:00:00Z",
             }
         }
     )
@@ -69,10 +69,10 @@ class ComponentHealth(BaseModel):
 class HealthResponse(BaseResponse):
     """
     Basic health check response.
-    
+
     Used by load balancers and monitoring systems.
     """
-    
+
     status: str = Field(
         ...,
         pattern=r"^(healthy|degraded|unhealthy)$",
@@ -95,7 +95,7 @@ class HealthResponse(BaseResponse):
         ...,
         description="Current server timestamp",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -104,7 +104,7 @@ class HealthResponse(BaseResponse):
                 "version": "2.0.0",
                 "environment": "production",
                 "uptime_seconds": 86400,
-                "timestamp": "2025-01-01T12:00:00Z"
+                "timestamp": "2025-01-01T12:00:00Z",
             }
         }
     )
@@ -117,7 +117,7 @@ class HealthResponse(BaseResponse):
 
 class DatabaseHealth(BaseModel):
     """Database health details."""
-    
+
     connected: bool = Field(..., description="Connection status")
     pool_size: int = Field(..., description="Connection pool size", ge=0)
     pool_available: int = Field(..., description="Available connections", ge=0)
@@ -127,7 +127,7 @@ class DatabaseHealth(BaseModel):
 
 class MQTTHealth(BaseModel):
     """MQTT broker health details."""
-    
+
     connected: bool = Field(..., description="Connection status")
     broker_host: str = Field(..., description="Broker hostname")
     broker_port: int = Field(..., description="Broker port")
@@ -139,14 +139,14 @@ class MQTTHealth(BaseModel):
 
 class WebSocketHealth(BaseModel):
     """WebSocket health details."""
-    
+
     active_connections: int = Field(..., description="Active connections", ge=0)
     total_messages_sent: int = Field(..., description="Total messages sent", ge=0)
 
 
 class SystemResourceHealth(BaseModel):
     """System resource health details."""
-    
+
     cpu_percent: float = Field(
         ...,
         description="CPU usage percentage",
@@ -185,10 +185,10 @@ class SystemResourceHealth(BaseModel):
 class DetailedHealthResponse(BaseResponse):
     """
     Detailed health check response.
-    
+
     Includes component-level health information.
     """
-    
+
     status: str = Field(
         ...,
         pattern=r"^(healthy|degraded|unhealthy)$",
@@ -202,25 +202,25 @@ class DetailedHealthResponse(BaseResponse):
         description="Human-readable uptime (e.g., '1d 2h 30m')",
     )
     timestamp: datetime = Field(..., description="Current timestamp")
-    
+
     # Component health
     database: DatabaseHealth = Field(..., description="Database health")
     mqtt: MQTTHealth = Field(..., description="MQTT broker health")
     websocket: WebSocketHealth = Field(..., description="WebSocket health")
     system: SystemResourceHealth = Field(..., description="System resources")
-    
+
     # Additional components
     components: List[ComponentHealth] = Field(
         default_factory=list,
         description="Additional component health",
     )
-    
+
     # Warnings/Issues
     warnings: List[str] = Field(
         default_factory=list,
         description="System warnings",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -236,7 +236,7 @@ class DetailedHealthResponse(BaseResponse):
                     "pool_size": 20,
                     "pool_available": 18,
                     "latency_ms": 5.2,
-                    "database_type": "PostgreSQL"
+                    "database_type": "PostgreSQL",
                 },
                 "mqtt": {
                     "connected": True,
@@ -245,22 +245,19 @@ class DetailedHealthResponse(BaseResponse):
                     "subscriptions": 5,
                     "messages_received": 10000,
                     "messages_published": 500,
-                    "last_message_at": "2025-01-01T12:00:00Z"
+                    "last_message_at": "2025-01-01T12:00:00Z",
                 },
-                "websocket": {
-                    "active_connections": 3,
-                    "total_messages_sent": 5000
-                },
+                "websocket": {"active_connections": 3, "total_messages_sent": 5000},
                 "system": {
                     "cpu_percent": 25.5,
                     "memory_percent": 45.0,
                     "memory_used_mb": 1800,
                     "memory_total_mb": 4000,
                     "disk_percent": 60.0,
-                    "disk_free_gb": 40.0
+                    "disk_free_gb": 40.0,
                 },
                 "components": [],
-                "warnings": []
+                "warnings": [],
             }
         }
     )
@@ -308,13 +305,13 @@ class ESPHealthSummaryResponse(BaseResponse):
     """
     Summary of all ESP device health.
     """
-    
+
     total_devices: int = Field(..., description="Total registered devices", ge=0)
     online_count: int = Field(..., description="Online devices", ge=0)
     offline_count: int = Field(..., description="Offline devices", ge=0)
     error_count: int = Field(..., description="Devices with errors", ge=0)
     unknown_count: int = Field(..., description="Unknown status devices", ge=0)
-    
+
     # Aggregate stats
     total_sensors: int = Field(..., description="Total active sensors", ge=0)
     total_actuators: int = Field(..., description="Total active actuators", ge=0)
@@ -326,13 +323,13 @@ class ESPHealthSummaryResponse(BaseResponse):
         None,
         description="Average WiFi RSSI across online devices",
     )
-    
+
     # Per-device list
     devices: List[ESPHealthItem] = Field(
         default_factory=list,
         description="Per-device health",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -356,9 +353,9 @@ class ESPHealthSummaryResponse(BaseResponse):
                         "heap_free": 200000,
                         "wifi_rssi": -55,
                         "sensor_count": 3,
-                        "actuator_count": 2
+                        "actuator_count": 2,
                     }
-                ]
+                ],
             }
         }
     )
@@ -372,10 +369,10 @@ class ESPHealthSummaryResponse(BaseResponse):
 class MetricsResponse(BaseModel):
     """
     Prometheus-style metrics response.
-    
+
     Text format compatible with Prometheus scraper.
     """
-    
+
     content_type: str = Field(
         "text/plain; version=0.0.4",
         description="Content type for Prometheus",
@@ -384,7 +381,7 @@ class MetricsResponse(BaseModel):
         ...,
         description="Prometheus metrics in text format",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -401,7 +398,7 @@ god_kaiser_esp_online_total 8
 # TYPE god_kaiser_mqtt_messages_total counter
 god_kaiser_mqtt_messages_total{direction="received"} 10000
 god_kaiser_mqtt_messages_total{direction="published"} 500
-"""
+""",
             }
         }
     )
@@ -415,10 +412,10 @@ god_kaiser_mqtt_messages_total{direction="published"} 500
 class LivenessResponse(BaseResponse):
     """
     Kubernetes liveness probe response.
-    
+
     Simple check that server is running.
     """
-    
+
     alive: bool = Field(
         True,
         description="Server is alive",
@@ -428,10 +425,10 @@ class LivenessResponse(BaseResponse):
 class ReadinessResponse(BaseResponse):
     """
     Kubernetes readiness probe response.
-    
+
     Checks if server is ready to accept traffic.
     """
-    
+
     ready: bool = Field(
         ...,
         description="Server is ready to accept traffic",
@@ -440,17 +437,13 @@ class ReadinessResponse(BaseResponse):
         ...,
         description="Individual readiness checks",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "success": True,
                 "ready": True,
-                "checks": {
-                    "database": True,
-                    "mqtt": True,
-                    "disk_space": True
-                }
+                "checks": {"database": True, "mqtt": True, "disk_space": True},
             }
         }
     )

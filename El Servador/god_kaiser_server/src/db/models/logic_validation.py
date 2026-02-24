@@ -81,9 +81,7 @@ class TimeWindowCondition(BaseModel):
         }
     """
 
-    type: Literal["time_window"] = Field(
-        ..., description="Condition type (must be 'time_window')"
-    )
+    type: Literal["time_window"] = Field(..., description="Condition type (must be 'time_window')")
     start_hour: int = Field(..., description="Start hour (0-23)", ge=0, le=23)
     end_hour: int = Field(..., description="End hour (0-24)", ge=0, le=24)
     days_of_week: Optional[List[int]] = Field(
@@ -164,9 +162,7 @@ class ActuatorCommandAction(BaseModel):
         None, description="Actuator type (e.g., 'pump'). Used with 'actuator' shorthand."
     )
     value: float = Field(..., description="Command value (0.0-1.0)", ge=0.0, le=1.0)
-    duration_seconds: int = Field(
-        0, description="Duration in seconds (0 = unlimited)", ge=0
-    )
+    duration_seconds: int = Field(0, description="Duration in seconds (0 = unlimited)", ge=0)
 
 
 # Union type for all action types
@@ -203,10 +199,7 @@ def validate_condition(condition: dict) -> ConditionType:
         validated_sub_conditions = [
             validate_condition(sub_cond) for sub_cond in condition["conditions"]
         ]
-        return CompoundCondition(
-            logic=condition["logic"],
-            conditions=validated_sub_conditions
-        )
+        return CompoundCondition(logic=condition["logic"], conditions=validated_sub_conditions)
     else:
         raise ValueError(f"Unknown condition type: {cond_type}")
 

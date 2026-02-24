@@ -143,7 +143,7 @@ class CrossESPLogic(Base, TimestampMixin):
     def name(self) -> str:
         """Alias for rule_name (API compatibility)."""
         return self.rule_name
-    
+
     @name.setter
     def name(self, value: str) -> None:
         """Setter for name alias."""
@@ -156,7 +156,7 @@ class CrossESPLogic(Base, TimestampMixin):
             return self.trigger_conditions
         # Single condition dict -> wrap in list
         return [self.trigger_conditions]
-    
+
     @conditions.setter
     def conditions(self, value: list) -> None:
         """Setter for conditions - stores as trigger_conditions."""

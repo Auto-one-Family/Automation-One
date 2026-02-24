@@ -37,7 +37,7 @@ class FlowProcessor(BaseSensorProcessor):
     YFS201_PULSES_PER_LITER = 450  # Typical calibration factor
     GENERIC_MIN_FLOW = 0.0  # L/min
     GENERIC_MAX_FLOW = 30.0  # L/min (typical max for small pumps)
-    
+
     # Typical ranges
     TYPICAL_MIN_FLOW = 0.0  # L/min (no flow)
     TYPICAL_MAX_FLOW = 20.0  # L/min (typical max for irrigation)
@@ -54,7 +54,7 @@ class FlowProcessor(BaseSensorProcessor):
     ) -> ProcessingResult:
         """
         Process flow sensor raw value.
-        
+
         Args:
             raw_value: Raw pulse count or frequency (Hz) or flow rate (L/min)
             calibration: Optional calibration data
@@ -66,7 +66,7 @@ class FlowProcessor(BaseSensorProcessor):
                 - "input_type": str - "pulses", "frequency", or "flow_rate" (default: "pulses")
                 - "time_window": float - Time window in seconds for pulse counting (default: 1.0)
                 - "decimal_places": int - Decimal places for rounding (default: 2)
-        
+
         Returns:
             ProcessingResult with flow value in L/min, quality assessment
         """
@@ -76,18 +76,18 @@ class FlowProcessor(BaseSensorProcessor):
             sensor_model = params.get("sensor_model", "").lower()
         if calibration and not sensor_model:
             sensor_model = calibration.get("sensor_model", "").lower()
-        
+
         # Get calibration factor
         calibration_factor = self.YFS201_PULSES_PER_LITER  # Default
         if calibration and "calibration_factor" in calibration:
             calibration_factor = calibration.get("calibration_factor", calibration_factor)
         if params and "calibration_factor" in params:
             calibration_factor = params.get("calibration_factor", calibration_factor)
-        
+
         # Determine input type
         input_type = params.get("input_type", "pulses") if params else "pulses"
         time_window = params.get("time_window", 1.0) if params else 1.0
-        
+
         # Convert raw value to flow rate (L/min)
         if input_type == "pulses":
             # Raw value is pulse count over time_window seconds
@@ -111,16 +111,16 @@ class FlowProcessor(BaseSensorProcessor):
                 quality="error",
                 metadata={"error": f"Unknown input_type: {input_type}"},
             )
-        
+
         # Ensure value is non-negative
         flow_rate = max(0.0, flow_rate)
-        
+
         # Round if specified
         decimal_places = 2
         if params and "decimal_places" in params:
             decimal_places = params.get("decimal_places", 2)
         flow_rate = round(flow_rate, decimal_places)
-        
+
         # Validate
         validation = self.validate(flow_rate)
         if not validation.valid:
@@ -130,10 +130,10 @@ class FlowProcessor(BaseSensorProcessor):
                 quality="error",
                 metadata={"error": validation.error},
             )
-        
+
         # Determine quality
         quality = self._assess_quality(flow_rate)
-        
+
         return ProcessingResult(
             value=flow_rate,
             unit="L/min",
@@ -149,10 +149,10 @@ class FlowProcessor(BaseSensorProcessor):
     def validate(self, raw_value: float) -> ValidationResult:
         """
         Validate flow sensor value.
-        
+
         Args:
             raw_value: Flow rate in L/min
-            
+
         Returns:
             ValidationResult indicating validity
         """
@@ -162,21 +162,21 @@ class FlowProcessor(BaseSensorProcessor):
                 valid=False,
                 error=f"Flow value cannot be negative: {raw_value} L/min",
             )
-        
+
         # Check reasonable upper limit (100 L/min is very high for typical applications)
         if raw_value > 100:
             return ValidationResult(
                 valid=False,
                 error=f"Flow value exceeds maximum: {raw_value} L/min > 100 L/min",
             )
-        
+
         # Check typical range and provide warnings
         warnings = []
         if raw_value > self.TYPICAL_MAX_FLOW:
             warnings.append(
                 f"Flow value above typical maximum: {raw_value} L/min > {self.TYPICAL_MAX_FLOW} L/min"
             )
-        
+
         return ValidationResult(
             valid=True,
             warnings=warnings if warnings else None,
@@ -185,10 +185,10 @@ class FlowProcessor(BaseSensorProcessor):
     def _assess_quality(self, value: float) -> str:
         """
         Assess flow reading quality.
-        
+
         Args:
             value: Flow value in L/min
-            
+
         Returns:
             Quality indicator ("excellent", "good", "fair", "poor", "bad")
         """

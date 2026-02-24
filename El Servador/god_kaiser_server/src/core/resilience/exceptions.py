@@ -40,7 +40,7 @@ class CircuitBreakerError(ResilienceException):
 class CircuitBreakerOpenError(CircuitBreakerError):
     """
     Raised when a request is rejected because the circuit breaker is OPEN.
-    
+
     This indicates that the service has exceeded its failure threshold
     and is currently not accepting requests (fail-fast mode).
     """
@@ -70,7 +70,7 @@ class CircuitBreakerOpenError(CircuitBreakerError):
 class CircuitBreakerHalfOpenError(CircuitBreakerError):
     """
     Raised when a request is rejected during HALF_OPEN state.
-    
+
     In HALF_OPEN state, only a limited number of test requests are allowed.
     Additional requests are rejected until the test request completes.
     """
@@ -97,7 +97,7 @@ class CircuitBreakerHalfOpenError(CircuitBreakerError):
 class RetryExhaustedError(ResilienceException):
     """
     Raised when all retry attempts have been exhausted.
-    
+
     Contains information about the number of attempts made and the last error.
     """
 
@@ -127,7 +127,7 @@ class RetryExhaustedError(ResilienceException):
 class OperationTimeoutError(ResilienceException):
     """
     Raised when an operation exceeds its timeout limit.
-    
+
     Custom timeout error with additional context about the operation.
     """
 
@@ -153,7 +153,7 @@ class OperationTimeoutError(ResilienceException):
 class ServiceUnavailableError(ResilienceException):
     """
     Raised when a service is unavailable due to resilience patterns.
-    
+
     Generic error for when a service cannot be reached due to
     circuit breaker, too many failures, or other resilience mechanisms.
     """
@@ -199,13 +199,3 @@ class OfflineBufferFullError(ResilienceException):
         )
         self.buffer_name = buffer_name
         self.max_size = max_size
-
-
-
-
-
-
-
-
-
-

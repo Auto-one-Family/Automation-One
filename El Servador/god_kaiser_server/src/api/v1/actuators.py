@@ -52,7 +52,15 @@ from ...services.actuator_service import ActuatorService
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ...services.gpio_validation_service import GpioValidationService
-from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service, get_config_builder, get_esp_service, get_mqtt_publisher
+from ..deps import (
+    ActiveUser,
+    DBSession,
+    OperatorUser,
+    get_actuator_service,
+    get_config_builder,
+    get_esp_service,
+    get_mqtt_publisher,
+)
 
 logger = get_logger(__name__)
 
@@ -123,7 +131,9 @@ def _schema_to_model_fields(
     Convert request schema into model field names.
     """
     # Start with existing for partial updates to avoid dropping data
-    safety_constraints = dict(existing.safety_constraints) if existing and existing.safety_constraints else {}
+    safety_constraints = (
+        dict(existing.safety_constraints) if existing and existing.safety_constraints else {}
+    )
     metadata = dict(existing.actuator_metadata) if existing and existing.actuator_metadata else {}
 
     if request.max_runtime_seconds is not None:
@@ -178,7 +188,7 @@ async def list_actuators(
 ) -> ActuatorConfigListResponse:
     """
     List actuator configurations.
-    
+
     Args:
         db: Database session
         current_user: Authenticated user
@@ -187,7 +197,7 @@ async def list_actuators(
         enabled: Optional enabled filter
         page: Page number
         page_size: Items per page
-        
+
     Returns:
         Paginated list of actuator configs
     """
@@ -203,8 +213,7 @@ async def list_actuators(
     )
 
     responses = [
-        _model_to_schema_response(actuator, device_id, state)
-        for actuator, device_id, state in rows
+        _model_to_schema_response(actuator, device_id, state) for actuator, device_id, state in rows
     ]
 
     return ActuatorConfigListResponse(
@@ -237,35 +246,35 @@ async def get_actuator(
 ) -> ActuatorConfigResponse:
     """
     Get actuator configuration.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         db: Database session
         current_user: Authenticated user
-        
+
     Returns:
         Actuator configuration
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
         )
-    
+
     state = await actuator_repo.get_state(esp_device.id, gpio)
-    
+
     return _model_to_schema_response(actuator, esp_id, state)
 
 
@@ -293,14 +302,14 @@ async def create_or_update_actuator(
 ) -> ActuatorConfigResponse:
     """
     Create or update actuator configuration.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         request: Actuator configuration
         db: Database session
         current_user: Operator or admin user
-        
+
     Returns:
         Created/updated actuator config
     """
@@ -326,7 +335,7 @@ async def create_or_update_actuator(
                 "device_id": esp_id,
                 "current_status": esp_device.status,
                 "message": f"Device '{esp_id}' must be approved before configuration "
-                           f"(current status: {esp_device.status})",
+                f"(current status: {esp_device.status})",
             },
         )
 
@@ -338,10 +347,7 @@ async def create_or_update_actuator(
     # Prüft: System-Pins, DB-Sensoren, DB-Aktoren, ESP-gemeldeten Status
     # =========================================================================
     gpio_validator = GpioValidationService(
-        session=db,
-        sensor_repo=sensor_repo,
-        actuator_repo=actuator_repo,
-        esp_repo=esp_repo
+        session=db, sensor_repo=sensor_repo, actuator_repo=actuator_repo, esp_repo=esp_repo
     )
 
     validation_result = await gpio_validator.validate_gpio_available(
@@ -349,7 +355,7 @@ async def create_or_update_actuator(
         gpio=gpio,
         exclude_actuator_id=existing.id if existing else None,
         purpose="actuator",
-        interface_type="DIGITAL"
+        interface_type="DIGITAL",
     )
 
     if not validation_result.available:
@@ -364,9 +370,11 @@ async def create_or_update_actuator(
                 "gpio": gpio,
                 "conflict_type": validation_result.conflict_type.value,
                 "conflict_component": validation_result.conflict_component,
-                "conflict_id": str(validation_result.conflict_id) if validation_result.conflict_id else None,
-                "message": validation_result.message
-            }
+                "conflict_id": (
+                    str(validation_result.conflict_id) if validation_result.conflict_id else None
+                ),
+                "message": validation_result.message,
+            },
         )
     # =========================================================================
 
@@ -384,7 +392,9 @@ async def create_or_update_actuator(
         existing.config_error = None
         existing.config_error_detail = None
         actuator = existing
-        logger.info(f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
+        logger.info(
+            f"Actuator updated: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
+        )
     else:
         # Create new (config_status defaults to "pending" in model)
         model_fields = _schema_to_model_fields(request)
@@ -394,18 +404,20 @@ async def create_or_update_actuator(
             **model_fields,
         )
         await actuator_repo.create(actuator)
-        logger.info(f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)")
-    
+        logger.info(
+            f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
+        )
+
     await db.commit()
-    
+
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
-        
+
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
-        
+
         if config_sent:
             logger.info(f"Config published to ESP {esp_id} after actuator create/update")
         else:
@@ -413,7 +425,7 @@ async def create_or_update_actuator(
     except Exception as e:
         # Log error but don't fail the request (DB save was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
-    
+
     return _model_to_schema_response(actuator, esp_id, None)
 
 
@@ -443,9 +455,9 @@ async def send_command(
 ) -> ActuatorCommandResponse:
     """
     Send actuator command.
-    
+
     CRITICAL: All commands are validated by SafetyService before execution.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
@@ -453,7 +465,7 @@ async def send_command(
         db: Database session
         current_user: Operator or admin user
         actuator_service: ActuatorService instance (dependency injected)
-        
+
     Returns:
         Command response
     """
@@ -476,9 +488,7 @@ async def send_command(
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
         # BUG-006 Fix: Detailed error message with hint
-        logger.warning(
-            f"Actuator command failed: No actuator on GPIO {gpio} for ESP '{esp_id}'"
-        )
+        logger.warning(f"Actuator command failed: No actuator on GPIO {gpio} for ESP '{esp_id}'")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -507,19 +517,19 @@ async def send_command(
         duration=command.duration,
         issued_by=f"user:{current_user.username}",
     )
-    
+
     if not success:
         # Get last error from safety check
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Command rejected by safety validation or MQTT publish failed",
         )
-    
+
     logger.info(
         f"Actuator command sent: {esp_id} GPIO {gpio} {command.command} "
         f"value={command.value} by {current_user.username}"
     )
-    
+
     return ActuatorCommandResponse(
         success=True,
         esp_id=esp_id,
@@ -556,36 +566,36 @@ async def get_status(
 ) -> ActuatorStatusResponse:
     """
     Get actuator status.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         db: Database session
         current_user: Authenticated user
         include_config: Include full configuration
-        
+
     Returns:
         Actuator status
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
         )
-    
+
     state = await actuator_repo.get_state(esp_device.id, gpio)
-    
+
     # Build state response
     # NOTE: ActuatorState model uses: current_value, state (str), last_command_timestamp
     state_response = ActuatorState(
@@ -597,12 +607,12 @@ async def get_status(
         last_command_at=state.last_command_timestamp if state else None,
         runtime_seconds=None,  # Would calculate from last_command_timestamp
     )
-    
+
     # Optionally include config
     config = None
     if include_config:
         config = _model_to_schema_response(actuator, esp_id, state)
-    
+
     return ActuatorStatusResponse(
         success=True,
         esp_id=esp_id,
@@ -634,25 +644,25 @@ async def emergency_stop(
 ) -> EmergencyStopResponse:
     """
     Emergency stop all actuators.
-    
+
     CRITICAL: This stops all actuators immediately.
-    
+
     Args:
         request: Emergency stop request
         db: Database session
         current_user: Operator or admin user
         publisher: MQTT publisher (dependency injected)
-        
+
     Returns:
         Emergency stop response
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     devices_stopped = 0
     actuators_stopped = 0
     details = []
-    
+
     # Get target devices
     if request.esp_id:
         esp_device = await esp_repo.get_by_device_id(request.esp_id)
@@ -664,20 +674,20 @@ async def emergency_stop(
         devices = [esp_device]
     else:
         devices = await esp_repo.get_all()
-    
+
     # Stop actuators on each device
     for device in devices:
         device_actuators_stopped = 0
         device_result = {"esp_id": device.device_id, "actuators": []}
-        
+
         # Get actuators for this device
         actuators = await actuator_repo.get_by_esp(device.id)
-        
+
         for actuator in actuators:
             # Skip if specific GPIO requested and doesn't match
             if request.gpio is not None and actuator.gpio != request.gpio:
                 continue
-            
+
             # Send OFF command
             try:
                 success = publisher.publish_actuator_command(
@@ -694,7 +704,7 @@ async def emergency_stop(
                     exc_info=True,
                 )
                 success = False
-            
+
             if success:
                 device_actuators_stopped += 1
                 device_result["actuators"].append(
@@ -705,7 +715,7 @@ async def emergency_stop(
                         "message": None,
                     }
                 )
-                
+
                 # Log command
                 await actuator_repo.log_command(
                     esp_id=device.id,
@@ -726,14 +736,14 @@ async def emergency_stop(
                         "message": "MQTT publish failed",
                     }
                 )
-        
+
         if device_actuators_stopped > 0:
             devices_stopped += 1
             actuators_stopped += device_actuators_stopped
-        
+
         if device_result["actuators"]:
             details.append(device_result)
-    
+
     await db.commit()
 
     # ───────────────────────────────────────────────────────────
@@ -751,7 +761,7 @@ async def emergency_stop(
                 "esp_id": request.esp_id,
                 "gpio": request.gpio,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+            },
         )
     except Exception as audit_error:
         logger.warning(f"Failed to audit log emergency_stop: {audit_error}")
@@ -760,14 +770,16 @@ async def emergency_stop(
     # MQTT BROADCAST: Emergency Stop for late-joining ESPs
     # ───────────────────────────────────────────────────────────
     try:
-        broadcast_payload = json.dumps({
-            "command": "EMERGENCY_STOP",
-            "reason": request.reason,
-            "issued_by": current_user.username,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "devices_stopped": devices_stopped,
-            "actuators_stopped": actuators_stopped,
-        })
+        broadcast_payload = json.dumps(
+            {
+                "command": "EMERGENCY_STOP",
+                "reason": request.reason,
+                "issued_by": current_user.username,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "devices_stopped": devices_stopped,
+                "actuators_stopped": actuators_stopped,
+            }
+        )
         publisher.client.publish(
             topic="kaiser/broadcast/emergency",
             payload=broadcast_payload,
@@ -783,6 +795,7 @@ async def emergency_stop(
     # ───────────────────────────────────────────────────────────
     try:
         from ...websocket.manager import WebSocketManager
+
         ws_manager = await WebSocketManager.get_instance()
         ws_payload: dict = {
             "esp_id": request.esp_id or "ALL",
@@ -840,34 +853,34 @@ async def delete_actuator(
 ) -> ActuatorConfigResponse:
     """
     Delete actuator configuration.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         db: Database session
         current_user: Operator or admin user
         publisher: MQTT publisher (dependency injected)
-        
+
     Returns:
         Deleted actuator config
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
         )
-    
+
     # Send OFF command before deleting
     publisher.publish_actuator_command(
         esp_id=esp_id,
@@ -877,21 +890,21 @@ async def delete_actuator(
         duration=0,
         retry=True,
     )
-    
+
     # Delete actuator
     await actuator_repo.delete(actuator.id)
     await db.commit()
-    
+
     logger.info(f"Actuator deleted: {esp_id} GPIO {gpio} by {current_user.username}")
-    
+
     # Publish updated config to ESP32 via MQTT (actuator removed from payload)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
-        
+
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
-        
+
         if config_sent:
             logger.info(f"Config published to ESP {esp_id} after actuator delete")
         else:
@@ -899,7 +912,7 @@ async def delete_actuator(
     except Exception as e:
         # Log error but don't fail the request (DB delete was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
-    
+
     return _model_to_schema_response(actuator, esp_id, None)
 
 
@@ -923,32 +936,32 @@ async def get_history(
 ) -> ActuatorHistoryResponse:
     """
     Get actuator command history.
-    
+
     Args:
         esp_id: ESP device ID
         gpio: GPIO pin number
         db: Database session
         current_user: Authenticated user
         limit: Max entries to return
-        
+
     Returns:
         Command history
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
-    
+
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ESP device '{esp_id}' not found",
         )
-    
+
     # Get history entries
     history = await actuator_repo.get_history(esp_device.id, gpio, limit=limit)
-    
+
     from ...schemas import ActuatorHistoryEntry
-    
+
     entries = [
         ActuatorHistoryEntry(
             id=entry.id,
@@ -964,7 +977,7 @@ async def get_history(
         )
         for entry in history
     ]
-    
+
     return ActuatorHistoryResponse(
         success=True,
         esp_id=esp_id,

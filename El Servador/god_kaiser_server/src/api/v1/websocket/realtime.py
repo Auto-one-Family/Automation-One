@@ -23,19 +23,19 @@ router = APIRouter()
 async def websocket_realtime(websocket: WebSocket, client_id: str):
     """
     WebSocket endpoint for real-time updates.
-    
+
     Clients can subscribe to specific message types and filters:
     - sensor_data: Sensor readings
     - actuator_status: Actuator state updates
     - logic_execution: Logic rule executions
     - esp_health: ESP device health updates
     - system_event: System events
-    
+
     Authentication:
     - Token must be provided as query parameter: ?token=<jwt_token>
     - Token is validated before connection is accepted
     - User must be active to connect
-    
+
     Example subscribe message:
     {
         "action": "subscribe",
@@ -45,7 +45,7 @@ async def websocket_realtime(websocket: WebSocket, client_id: str):
             "sensor_types": ["temperature", "humidity"]
         }
     }
-    
+
     Args:
         websocket: WebSocket connection
         client_id: Unique client identifier
@@ -53,91 +53,104 @@ async def websocket_realtime(websocket: WebSocket, client_id: str):
     # Extract token from query parameters
     query_params = dict(websocket.query_params)
     token = query_params.get("token")
-    
+
     if not token:
         logger.warning(f"WebSocket connection rejected: Missing token (client_id={client_id})")
         await websocket.close(code=4001, reason="Missing token")
         return
-    
+
     # Verify token
     try:
         payload = verify_token(token, expected_type="access")
         user_id_str = payload.get("sub")
-        
+
         if user_id_str is None:
-            logger.warning(f"WebSocket connection rejected: Token missing 'sub' claim (client_id={client_id})")
+            logger.warning(
+                f"WebSocket connection rejected: Token missing 'sub' claim (client_id={client_id})"
+            )
             await websocket.close(code=4001, reason="Invalid token")
             return
-        
+
         try:
             user_id = int(user_id_str)
         except ValueError:
-            logger.warning(f"WebSocket connection rejected: Invalid user_id in token (client_id={client_id})")
+            logger.warning(
+                f"WebSocket connection rejected: Invalid user_id in token (client_id={client_id})"
+            )
             await websocket.close(code=4001, reason="Invalid token")
             return
-            
+
     except JWTError as e:
-        logger.warning(f"WebSocket connection rejected: JWT verification failed (client_id={client_id}): {e}")
+        logger.warning(
+            f"WebSocket connection rejected: JWT verification failed (client_id={client_id}): {e}"
+        )
         await websocket.close(code=4001, reason="Authentication failed")
         return
     except ValueError as e:
-        logger.warning(f"WebSocket connection rejected: Token validation error (client_id={client_id}): {e}")
+        logger.warning(
+            f"WebSocket connection rejected: Token validation error (client_id={client_id}): {e}"
+        )
         await websocket.close(code=4001, reason="Invalid token")
         return
-    
+
     # Check if token is blacklisted and validate user
     # Note: Session cleanup is handled automatically by the async generator
     async for session in get_session():
         blacklist_repo = TokenBlacklistRepository(session)
         if await blacklist_repo.is_blacklisted(token):
-            logger.warning(f"WebSocket connection rejected: Blacklisted token (client_id={client_id}, user_id={user_id})")
+            logger.warning(
+                f"WebSocket connection rejected: Blacklisted token (client_id={client_id}, user_id={user_id})"
+            )
             await websocket.close(code=4001, reason="Token has been revoked")
             return
-        
+
         # Get user from database and check if active
         user_repo = UserRepository(session)
         user = await user_repo.get_by_id(user_id)
-        
+
         if user is None:
-            logger.warning(f"WebSocket connection rejected: User not found (client_id={client_id}, user_id={user_id})")
+            logger.warning(
+                f"WebSocket connection rejected: User not found (client_id={client_id}, user_id={user_id})"
+            )
             await websocket.close(code=4001, reason="Invalid user")
             return
-        
+
         if not user.is_active:
-            logger.warning(f"WebSocket connection rejected: User inactive (client_id={client_id}, user_id={user_id})")
+            logger.warning(
+                f"WebSocket connection rejected: User inactive (client_id={client_id}, user_id={user_id})"
+            )
             await websocket.close(code=4001, reason="User account is disabled")
             return
-        
+
         # Authentication successful - proceed with connection
         # Break out of session context (session will be cleaned up automatically)
         break
-    
+
     manager = await WebSocketManager.get_instance()
     await manager.connect(websocket, client_id)
-    
+
     try:
         while True:
             # Receive client messages (subscribe/unsubscribe)
             data = await websocket.receive_json()
             action = data.get("action")
-            
+
             if action == "subscribe":
                 filters = data.get("filters", {})
                 await manager.subscribe(client_id, filters)
                 logger.debug(f"Client {client_id} subscribed with filters: {filters}")
-            
+
             elif action == "unsubscribe":
                 filters = data.get("filters", None)
                 await manager.unsubscribe(client_id, filters)
                 logger.debug(f"Client {client_id} unsubscribed")
-            
+
             else:
                 logger.warning(f"Unknown action from client {client_id}: {action}")
-    
+
     except WebSocketDisconnect:
         logger.info(f"WebSocket client {client_id} disconnected")
     except Exception as e:
         logger.error(f"Error in WebSocket connection for {client_id}: {e}", exc_info=True)
     finally:
         await manager.disconnect(client_id)
-

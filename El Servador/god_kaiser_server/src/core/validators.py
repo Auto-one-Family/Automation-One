@@ -219,7 +219,10 @@ def validate_device_status(status: str) -> tuple[bool, Optional[str]]:
         tuple: (is_valid, error_message)
     """
     if status not in constants.DEVICE_STATUSES:
-        return False, f"Invalid device status. Must be one of: {', '.join(constants.DEVICE_STATUSES)}"
+        return (
+            False,
+            f"Invalid device status. Must be one of: {', '.join(constants.DEVICE_STATUSES)}",
+        )
 
     return True, None
 
@@ -235,7 +238,10 @@ def validate_system_command(command: str) -> tuple[bool, Optional[str]]:
         tuple: (is_valid, error_message)
     """
     if command not in constants.SYSTEM_COMMANDS:
-        return False, f"Invalid system command. Must be one of: {', '.join(constants.SYSTEM_COMMANDS)}"
+        return (
+            False,
+            f"Invalid system command. Must be one of: {', '.join(constants.SYSTEM_COMMANDS)}",
+        )
 
     return True, None
 
@@ -270,6 +276,9 @@ def validate_hardware_type(hardware_type: str) -> tuple[bool, Optional[str]]:
         tuple: (is_valid, error_message)
     """
     if hardware_type not in constants.HARDWARE_TYPES:
-        return False, f"Invalid hardware type. Must be one of: {', '.join(constants.HARDWARE_TYPES)}"
+        return (
+            False,
+            f"Invalid hardware type. Must be one of: {', '.join(constants.HARDWARE_TYPES)}",
+        )
 
     return True, None

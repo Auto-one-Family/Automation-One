@@ -26,10 +26,10 @@ class TestPasswordHashing:
             system_config_repo=MagicMock(),
             esp_repo=None,
         )
-        
+
         password = "TestPassword123!@#"
         hashed = service.hash_mosquitto_password(password)
-        
+
         # Verify format: $6$salt$hash
         assert hashed.startswith("$6$"), "Should start with $6$ (SHA-512)"
         parts = hashed.split("$")
@@ -45,11 +45,11 @@ class TestPasswordHashing:
             system_config_repo=MagicMock(),
             esp_repo=None,
         )
-        
+
         password = "SamePassword123"
         hash1 = service.hash_mosquitto_password(password)
         hash2 = service.hash_mosquitto_password(password)
-        
+
         # Hashes should be different due to random salt
         assert hash1 != hash2, "Hashes should differ due to random salt"
 
@@ -59,10 +59,10 @@ class TestPasswordHashing:
             system_config_repo=MagicMock(),
             esp_repo=None,
         )
-        
+
         passwords = ["Short1!", "VeryLongPassword123!@#$%^&*()", "NormalP@ss123"]
         hashes = [service.hash_mosquitto_password(pwd) for pwd in passwords]
-        
+
         # All hashes should have same length (format is fixed)
         lengths = [len(h) for h in hashes]
         assert len(set(lengths)) == 1, f"All hashes should have same length, got: {lengths}"
@@ -75,21 +75,21 @@ class TestPasswdFileOperations:
         """Test that passwd file is created if it doesn't exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
             passwd_file = os.path.join(tmpdir, "passwd")
-            
+
             service = MQTTAuthService(
                 system_config_repo=MagicMock(),
                 esp_repo=None,
             )
             service.passwd_file_path = passwd_file
-            
+
             # Update file
             service._update_passwd_file("testuser", "$6$salt$hash")
-            
+
             # Verify file exists
             assert os.path.exists(passwd_file), "Passwd file should be created"
-            
+
             # Verify content
-            with open(passwd_file, 'r') as f:
+            with open(passwd_file, "r") as f:
                 content = f.read()
                 assert "testuser:$6$salt$hash" in content
 
@@ -97,42 +97,48 @@ class TestPasswdFileOperations:
         """Test that existing entries are updated correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             passwd_file = os.path.join(tmpdir, "passwd")
-            
+
             # Create initial file
-            with open(passwd_file, 'w') as f:
+            with open(passwd_file, "w") as f:
                 f.write("olduser:$6$oldsalt$oldhash\n")
                 f.write("otheruser:$6$othersalt$otherhash\n")
-            
+
             service = MQTTAuthService(
                 system_config_repo=MagicMock(),
                 esp_repo=None,
             )
             service.passwd_file_path = passwd_file
-            
+
             # Update existing user
             service._update_passwd_file("olduser", "$6$newsalt$newhash")
-            
+
             # Verify content
-            with open(passwd_file, 'r') as f:
+            with open(passwd_file, "r") as f:
                 lines = f.readlines()
                 assert len(lines) == 2, "Should have 2 entries"
-                assert "olduser:$6$newsalt$newhash" in lines[0] or "olduser:$6$newsalt$newhash" in lines[1]
-                assert "otheruser:$6$othersalt$otherhash" in lines[0] or "otheruser:$6$othersalt$otherhash" in lines[1]
+                assert (
+                    "olduser:$6$newsalt$newhash" in lines[0]
+                    or "olduser:$6$newsalt$newhash" in lines[1]
+                )
+                assert (
+                    "otheruser:$6$othersalt$otherhash" in lines[0]
+                    or "otheruser:$6$othersalt$otherhash" in lines[1]
+                )
 
     @pytest.mark.skipif(sys.platform == "win32", reason="Unix permissions not supported on Windows")
     def test_update_passwd_file_sets_permissions(self):
         """Test that passwd file has correct permissions (600)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             passwd_file = os.path.join(tmpdir, "passwd")
-            
+
             service = MQTTAuthService(
                 system_config_repo=MagicMock(),
                 esp_repo=None,
             )
             service.passwd_file_path = passwd_file
-            
+
             service._update_passwd_file("testuser", "$6$salt$hash")
-            
+
             # Verify permissions (600 = rw-------)
             stat_info = os.stat(passwd_file)
             mode = stat_info.st_mode & 0o777
@@ -143,20 +149,20 @@ class TestPasswdFileOperations:
         """Test that permission errors are raised correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             passwd_file = os.path.join(tmpdir, "passwd")
-            
+
             # Create read-only directory (simulate permission issue)
             os.chmod(tmpdir, 0o555)  # Read and execute only
-            
+
             service = MQTTAuthService(
                 system_config_repo=MagicMock(),
                 esp_repo=None,
             )
             service.passwd_file_path = passwd_file
-            
+
             # Should raise PermissionError
             with pytest.raises(PermissionError):
                 service._update_passwd_file("testuser", "$6$salt$hash")
-            
+
             # Restore permissions for cleanup
             os.chmod(tmpdir, 0o755)
 
@@ -170,7 +176,7 @@ class TestMosquittoReload:
             system_config_repo=MagicMock(),
             esp_repo=None,
         )
-        
+
         # Mock all methods to fail except the last one
         with patch("subprocess.run") as mock_run:
             # First call (mosquitto_ctrl) - FileNotFoundError
@@ -181,7 +187,7 @@ class TestMosquittoReload:
                 FileNotFoundError(),  # pgrep not found
                 MagicMock(returncode=0),  # docker succeeds
             ]
-            
+
             result = service.reload_mosquitto()
             assert result is True, "Should succeed with Docker method"
             assert mock_run.call_count == 3, "Should try all 3 methods"
@@ -192,7 +198,7 @@ class TestMosquittoReload:
             system_config_repo=MagicMock(),
             esp_repo=None,
         )
-        
+
         with patch("subprocess.run") as mock_run:
             # All methods fail
             mock_run.side_effect = [
@@ -200,7 +206,7 @@ class TestMosquittoReload:
                 FileNotFoundError(),  # pgrep
                 FileNotFoundError(),  # docker
             ]
-            
+
             result = service.reload_mosquitto()
             assert result is False, "Should return False if all methods fail"
 
@@ -213,34 +219,34 @@ class TestConfigureCredentials:
         """Test that configure_credentials performs all required steps."""
         system_config_repo = SystemConfigRepository(db_session)
         service = MQTTAuthService(system_config_repo, None)
-        
+
         # Track method calls
         update_file_called = False
         reload_called = False
-        
+
         def mock_update_file(*args, **kwargs):
             nonlocal update_file_called
             update_file_called = True
-        
+
         def mock_reload():
             nonlocal reload_called
             reload_called = True
             return True
-        
+
         service._update_passwd_file = mock_update_file
         service.reload_mosquitto = mock_reload
-        
+
         # Configure credentials
         result = await service.configure_credentials(
             username="testuser",
             password="TestP@ss123",
             enabled=True,
         )
-        
+
         assert result is True
         assert update_file_called, "Should update passwd file"
         assert reload_called, "Should reload Mosquitto"
-        
+
         # Verify DB persistence
         config = await system_config_repo.get_mqtt_auth_config()
         assert config["enabled"] is True
@@ -283,24 +289,24 @@ class TestBroadcastAuthUpdate:
         system_config_repo = SystemConfigRepository(db_session)
         esp_repo = ESPRepository(db_session)
         service = MQTTAuthService(system_config_repo, esp_repo)
-        
+
         # Mock settings to disable TLS
         with patch("src.services.mqtt_auth_service.settings") as mock_settings:
             mock_settings.mqtt.use_tls = False
-            
+
             with pytest.raises(RuntimeError) as exc_info:
                 await service.broadcast_auth_update(
                     username="testuser",
                     password="testpass",
                 )
-            
+
             assert "TLS" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_broadcast_to_specific_esps(self, db_session):
         """Test broadcasting to specific ESP devices."""
         from src.db.models.esp import ESPDevice
-        
+
         # Create test ESP devices
         esp1 = ESPDevice(
             device_id="ESP_001",
@@ -317,26 +323,26 @@ class TestBroadcastAuthUpdate:
         db_session.add(esp1)
         db_session.add(esp2)
         await db_session.commit()
-        
+
         system_config_repo = SystemConfigRepository(db_session)
         esp_repo = ESPRepository(db_session)
         service = MQTTAuthService(system_config_repo, esp_repo)
-        
+
         # Mock publisher
         mock_publisher = MagicMock()
         mock_publisher._publish_with_retry = AsyncMock(return_value=True)
         service.publisher = mock_publisher
-        
+
         # Mock TLS enabled
         with patch("src.services.mqtt_auth_service.settings") as mock_settings:
             mock_settings.mqtt.use_tls = True
-            
+
             count = await service.broadcast_auth_update(
                 username="testuser",
                 password="testpass",
                 esp_ids=["ESP_001"],  # Only broadcast to ESP_001
             )
-            
+
             assert count == 1
             assert mock_publisher._publish_with_retry.call_count == 1
 
@@ -344,7 +350,7 @@ class TestBroadcastAuthUpdate:
     async def test_broadcast_to_all_esps(self, db_session):
         """Test broadcasting to all ESP devices."""
         from src.db.models.esp import ESPDevice
-        
+
         # Create multiple ESP devices
         for i in range(3):
             esp = ESPDevice(
@@ -355,47 +361,25 @@ class TestBroadcastAuthUpdate:
             )
             db_session.add(esp)
         await db_session.commit()
-        
+
         system_config_repo = SystemConfigRepository(db_session)
         esp_repo = ESPRepository(db_session)
         service = MQTTAuthService(system_config_repo, esp_repo)
-        
+
         # Mock publisher
         mock_publisher = MagicMock()
         mock_publisher._publish_with_retry = AsyncMock(return_value=True)
         service.publisher = mock_publisher
-        
+
         # Mock TLS enabled
         with patch("src.services.mqtt_auth_service.settings") as mock_settings:
             mock_settings.mqtt.use_tls = True
-            
+
             count = await service.broadcast_auth_update(
                 username="testuser",
                 password="testpass",
                 esp_ids=None,  # Broadcast to all
             )
-            
+
             assert count == 3, "Should broadcast to all 3 ESPs"
             assert mock_publisher._publish_with_retry.call_count == 3
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -16,9 +16,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 
-from ..core import constants
 from ..core.logging_config import get_logger
-from ..core.request_context import set_request_id, clear_request_id
+from ..core.request_context import set_request_id
 from .client import MQTTClient
 from .topics import TopicBuilder
 
@@ -58,8 +57,7 @@ class Subscriber:
         # Thread pool for handler dispatch (not execution of async handlers)
         # Used to prevent blocking MQTT network loop
         self.executor = ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="mqtt_handler_"
+            max_workers=max_workers, thread_name_prefix="mqtt_handler_"
         )
 
         # Performance metrics
@@ -114,7 +112,7 @@ class Subscriber:
             True if all subscriptions successful
         """
         success = True
-        
+
         # Subscribe to all registered handler patterns
         for pattern in self.handlers.keys():
             # Determine QoS based on topic type
@@ -124,7 +122,7 @@ class Subscriber:
                 qos = 2  # Config: QoS 2 (exactly once)
             else:
                 qos = 1  # Default: QoS 1 (at least once)
-            
+
             if not self.client.subscribe(pattern, qos):
                 logger.error(f"Failed to subscribe to: {pattern}")
                 success = False
@@ -149,7 +147,7 @@ class Subscriber:
     def _route_message(self, topic: str, payload_str: str) -> None:
         """
         Route incoming message to appropriate handler.
-        
+
         Uses thread pool to execute async handlers without blocking MQTT loop.
         Each message is processed in isolation - handler failures don't affect others.
 
@@ -177,7 +175,11 @@ class Subscriber:
             seq = payload.get("seq", "")
             topic_suffix = topic.rsplit("/", 1)[-1] if "/" in topic else topic
             ts_ms = int(time.time() * 1000)
-            correlation_id = f"{esp_id}:{topic_suffix}:{seq}:{ts_ms}" if seq else f"{esp_id}:{topic_suffix}:{ts_ms}"
+            correlation_id = (
+                f"{esp_id}:{topic_suffix}:{seq}:{ts_ms}"
+                if seq
+                else f"{esp_id}:{topic_suffix}:{ts_ms}"
+            )
             set_request_id(correlation_id)
 
             # Find matching handler
@@ -191,12 +193,9 @@ class Subscriber:
                 logger.warning(f"No handler registered for topic: {topic}")
 
         except Exception as e:
-            logger.error(
-                f"Error routing message from {topic}: {e}",
-                exc_info=True
-            )
+            logger.error(f"Error routing message from {topic}: {e}", exc_info=True)
             self.messages_failed += 1
-    
+
     def _get_valid_main_loop(self) -> asyncio.AbstractEventLoop:
         """
         Get a valid main event loop for async handler execution.
@@ -226,8 +225,9 @@ class Subscriber:
             "Call set_main_loop() to set a valid event loop."
         )
 
-    def _execute_handler(self, handler: Callable, topic: str, payload: dict,
-                         correlation_id: str = "") -> None:
+    def _execute_handler(
+        self, handler: Callable, topic: str, payload: dict, correlation_id: str = ""
+    ) -> None:
         """
         Execute handler in thread pool.
 
@@ -259,17 +259,12 @@ class Subscriber:
                 try:
                     main_loop = self._get_valid_main_loop()
                 except RuntimeError as e:
-                    logger.error(
-                        f"[Bug O] {e} - Handler for {topic} will not be executed."
-                    )
+                    logger.error(f"[Bug O] {e} - Handler for {topic} will not be executed.")
                     self.messages_failed += 1
                     return
 
                 # Schedule coroutine in main event loop (thread-safe)
-                future = asyncio.run_coroutine_threadsafe(
-                    handler(topic, payload),
-                    main_loop
-                )
+                future = asyncio.run_coroutine_threadsafe(handler(topic, payload), main_loop)
 
                 try:
                     # Wait for completion with timeout (30 seconds)
@@ -301,10 +296,7 @@ class Subscriber:
                     )
 
         except Exception as e:
-            logger.error(
-                f"Handler execution failed for topic {topic}: {e}",
-                exc_info=True
-            )
+            logger.error(f"Handler execution failed for topic {topic}: {e}", exc_info=True)
             self.messages_failed += 1
 
     def _find_handler(self, topic: str) -> Optional[Callable]:
@@ -346,11 +338,11 @@ class Subscriber:
             List of topic patterns
         """
         return list(self.handlers.keys())
-    
+
     def get_stats(self) -> dict:
         """
         Get subscriber performance statistics.
-        
+
         Returns:
             {
                 "messages_processed": int,
@@ -360,17 +352,17 @@ class Subscriber:
         """
         total = self.messages_processed + self.messages_failed
         success_rate = (self.messages_processed / total * 100) if total > 0 else 0.0
-        
+
         return {
             "messages_processed": self.messages_processed,
             "messages_failed": self.messages_failed,
-            "success_rate": round(success_rate, 2)
+            "success_rate": round(success_rate, 2),
         }
-    
+
     def shutdown(self, wait: bool = True, timeout: float = 30.0):
         """
         Shutdown subscriber and thread pool.
-        
+
         Args:
             wait: Wait for pending tasks to complete
             timeout: Max wait time in seconds (ignored in Python 3.14+)

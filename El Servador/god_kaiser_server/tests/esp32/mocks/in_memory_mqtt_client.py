@@ -22,7 +22,9 @@ class InMemoryMQTTTestClient:
 
     def __init__(self):
         self._messages: List[Dict[str, Any]] = []
-        self._subscribers: defaultdict[str, List[Callable[[Dict[str, Any]], None]]] = defaultdict(list)
+        self._subscribers: defaultdict[str, List[Callable[[Dict[str, Any]], None]]] = defaultdict(
+            list
+        )
 
     async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False) -> None:
         """Store message and notify subscribers (async-compatible)."""
@@ -38,7 +40,9 @@ class InMemoryMQTTTestClient:
         for callback in self._subscribers.get(topic, []):
             callback(message)
 
-    def subscribe(self, topic: str, callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
+    def subscribe(
+        self, topic: str, callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> None:
         """Register a callback for a topic."""
         cb = callback or (lambda _msg: None)
         self._subscribers[topic].append(cb)
@@ -73,27 +77,3 @@ class InMemoryMQTTTestClient:
         if topic is None:
             return len(self._messages)
         return sum(1 for msg in self._messages if msg["topic"] == topic)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

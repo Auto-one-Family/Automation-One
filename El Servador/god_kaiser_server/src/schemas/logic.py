@@ -24,9 +24,9 @@ References:
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from .common import BaseResponse, IDMixin, PaginatedResponse, TimestampMixin
+from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
 
 # =============================================================================
@@ -37,10 +37,10 @@ from .common import BaseResponse, IDMixin, PaginatedResponse, TimestampMixin
 class SensorCondition(BaseModel):
     """
     Sensor-based trigger condition.
-    
+
     Example: IF ESP_12AB34CD.GPIO34 (pH) > 7.5
     """
-    
+
     type: str = Field(
         "sensor",
         description="Condition type (always 'sensor' for this model)",
@@ -69,7 +69,7 @@ class SensorCondition(BaseModel):
         None,
         description="Expected sensor type (for validation)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -78,7 +78,7 @@ class SensorCondition(BaseModel):
                 "gpio": 34,
                 "operator": ">",
                 "value": 7.5,
-                "sensor_type": "ph"
+                "sensor_type": "ph",
             }
         }
     )
@@ -87,10 +87,10 @@ class SensorCondition(BaseModel):
 class TimeCondition(BaseModel):
     """
     Time-based condition.
-    
+
     Example: Only between 08:00 and 18:00
     """
-    
+
     type: str = Field(
         "time",
         description="Condition type (always 'time' for this model)",
@@ -111,14 +111,14 @@ class TimeCondition(BaseModel):
         None,
         description="Days of week (0=Monday, 6=Sunday), None=all days",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "type": "time",
                 "start_time": "08:00",
                 "end_time": "18:00",
-                "days_of_week": [0, 1, 2, 3, 4]
+                "days_of_week": [0, 1, 2, 3, 4],
             }
         }
     )
@@ -128,7 +128,7 @@ class CooldownCondition(BaseModel):
     """
     Cooldown condition to prevent rapid triggering.
     """
-    
+
     type: str = Field(
         "cooldown",
         description="Condition type",
@@ -149,10 +149,10 @@ class CooldownCondition(BaseModel):
 class ActuatorAction(BaseModel):
     """
     Actuator control action.
-    
+
     Example: THEN ESP_AABBCCDD.GPIO5 (pump) = ON
     """
-    
+
     type: str = Field(
         "actuator",
         description="Action type (always 'actuator' for this model)",
@@ -185,7 +185,7 @@ class ActuatorAction(BaseModel):
         le=86400,
         description="Duration in seconds (0=until explicitly stopped)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -194,7 +194,7 @@ class ActuatorAction(BaseModel):
                 "gpio": 5,
                 "command": "ON",
                 "value": 1.0,
-                "duration": 300
+                "duration": 300,
             }
         }
     )
@@ -204,7 +204,7 @@ class NotificationAction(BaseModel):
     """
     Notification action (email, webhook, etc.).
     """
-    
+
     type: str = Field(
         "notification",
         description="Action type",
@@ -229,7 +229,7 @@ class DelayAction(BaseModel):
     """
     Delay action for sequencing.
     """
-    
+
     type: str = Field(
         "delay",
         description="Action type",
@@ -249,7 +249,7 @@ class DelayAction(BaseModel):
 
 class LogicRuleBase(BaseModel):
     """Base logic rule fields."""
-    
+
     name: str = Field(
         ...,
         min_length=3,
@@ -268,7 +268,7 @@ class LogicRuleCreate(LogicRuleBase):
     """
     Logic rule creation request.
     """
-    
+
     conditions: List[Dict[str, Any]] = Field(
         ...,
         min_length=1,
@@ -308,7 +308,7 @@ class LogicRuleCreate(LogicRuleBase):
         le=60,
         description="Maximum executions per hour (None=unlimited)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -320,13 +320,9 @@ class LogicRuleCreate(LogicRuleBase):
                         "esp_id": "ESP_12AB34CD",
                         "gpio": 34,
                         "operator": ">",
-                        "value": 7.5
+                        "value": 7.5,
                     },
-                    {
-                        "type": "time",
-                        "start_time": "06:00",
-                        "end_time": "22:00"
-                    }
+                    {"type": "time", "start_time": "06:00", "end_time": "22:00"},
                 ],
                 "actions": [
                     {
@@ -334,13 +330,13 @@ class LogicRuleCreate(LogicRuleBase):
                         "esp_id": "ESP_AABBCCDD",
                         "gpio": 5,
                         "command": "OFF",
-                        "value": 0.0
+                        "value": 0.0,
                     }
                 ],
                 "logic_operator": "AND",
                 "enabled": True,
                 "priority": 80,
-                "cooldown_seconds": 300
+                "cooldown_seconds": 300,
             }
         }
     )
@@ -349,10 +345,10 @@ class LogicRuleCreate(LogicRuleBase):
 class LogicRuleUpdate(BaseModel):
     """
     Logic rule update request.
-    
+
     All fields optional - only provided fields are updated.
     """
-    
+
     name: Optional[str] = Field(None, min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     conditions: Optional[List[Dict[str, Any]]] = Field(None, min_length=1, max_length=10)
@@ -368,7 +364,7 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
     """
     Logic rule response.
     """
-    
+
     id: Any = Field(..., description="Rule ID (UUID)")
     conditions: List[Dict[str, Any]] = Field(
         ...,
@@ -409,7 +405,7 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
         None,
         description="Whether last execution succeeded",
     )
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -417,8 +413,18 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
                 "id": 1,
                 "name": "High pH Alert",
                 "description": "Stop dosing pump when pH exceeds 7.5",
-                "conditions": [{"type": "sensor", "esp_id": "ESP_12AB34CD", "gpio": 34, "operator": ">", "value": 7.5}],
-                "actions": [{"type": "actuator", "esp_id": "ESP_AABBCCDD", "gpio": 5, "command": "OFF"}],
+                "conditions": [
+                    {
+                        "type": "sensor",
+                        "esp_id": "ESP_12AB34CD",
+                        "gpio": 34,
+                        "operator": ">",
+                        "value": 7.5,
+                    }
+                ],
+                "actions": [
+                    {"type": "actuator", "esp_id": "ESP_AABBCCDD", "gpio": 5, "command": "OFF"}
+                ],
                 "logic_operator": "AND",
                 "enabled": True,
                 "priority": 80,
@@ -427,9 +433,9 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
                 "execution_count": 15,
                 "last_execution_success": True,
                 "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-01T12:00:00Z"
+                "updated_at": "2025-01-01T12:00:00Z",
             }
-        }
+        },
     )
 
 
@@ -442,7 +448,7 @@ class RuleToggleRequest(BaseModel):
     """
     Rule enable/disable request.
     """
-    
+
     enabled: bool = Field(
         ...,
         description="New enabled state",
@@ -458,7 +464,7 @@ class RuleToggleResponse(BaseResponse):
     """
     Rule toggle response.
     """
-    
+
     rule_id: Any = Field(..., description="Rule ID (UUID)")
     rule_name: str = Field(..., description="Rule name")
     enabled: bool = Field(..., description="New enabled state")
@@ -473,10 +479,10 @@ class RuleToggleResponse(BaseResponse):
 class RuleTestRequest(BaseModel):
     """
     Rule test/simulation request.
-    
+
     Simulates rule execution without actually triggering actions.
     """
-    
+
     mock_sensor_values: Optional[Dict[str, float]] = Field(
         None,
         description="Mock sensor values for testing (key: 'ESP_ID:GPIO')",
@@ -491,15 +497,13 @@ class RuleTestRequest(BaseModel):
         True,
         description="If False, actually execute actions (use with caution)",
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "mock_sensor_values": {
-                    "ESP_12AB34CD:34": 7.8
-                },
+                "mock_sensor_values": {"ESP_12AB34CD:34": 7.8},
                 "mock_time": "14:30",
-                "dry_run": True
+                "dry_run": True,
             }
         }
     )
@@ -509,7 +513,7 @@ class ConditionResult(BaseModel):
     """
     Individual condition evaluation result.
     """
-    
+
     condition_index: int = Field(..., description="Condition index in array")
     condition_type: str = Field(..., description="Condition type")
     result: bool = Field(..., description="Evaluation result")
@@ -521,7 +525,7 @@ class ActionResult(BaseModel):
     """
     Individual action execution result.
     """
-    
+
     action_index: int = Field(..., description="Action index in array")
     action_type: str = Field(..., description="Action type")
     would_execute: bool = Field(..., description="Whether action would execute")
@@ -533,7 +537,7 @@ class RuleTestResponse(BaseResponse):
     """
     Rule test response.
     """
-    
+
     rule_id: Any = Field(..., description="Rule ID (UUID)")
     rule_name: str = Field(..., description="Rule name")
     would_trigger: bool = Field(..., description="Whether rule would trigger")
@@ -546,7 +550,7 @@ class RuleTestResponse(BaseResponse):
         description="Individual action results (if would_trigger)",
     )
     dry_run: bool = Field(..., description="Whether this was a dry run")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -560,7 +564,7 @@ class RuleTestResponse(BaseResponse):
                         "condition_type": "sensor",
                         "result": True,
                         "details": "ESP_12AB34CD:34 (7.8) > 7.5",
-                        "actual_value": 7.8
+                        "actual_value": 7.8,
                     }
                 ],
                 "action_results": [
@@ -569,10 +573,10 @@ class RuleTestResponse(BaseResponse):
                         "action_type": "actuator",
                         "would_execute": True,
                         "details": "ESP_AABBCCDD:5 OFF",
-                        "dry_run": True
+                        "dry_run": True,
                     }
                 ],
-                "dry_run": True
+                "dry_run": True,
             }
         }
     )
@@ -587,7 +591,7 @@ class ExecutionHistoryEntry(BaseModel):
     """
     Rule execution history entry.
     """
-    
+
     id: Any = Field(..., description="Entry ID (UUID)")
     rule_id: Any = Field(..., description="Rule ID (UUID)")
     rule_name: str = Field(..., description="Rule name at execution time")
@@ -600,7 +604,7 @@ class ExecutionHistoryEntry(BaseModel):
     success: bool = Field(..., description="Overall execution success")
     error_message: Optional[str] = Field(None, description="Error if failed")
     execution_time_ms: float = Field(..., description="Execution time (ms)")
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -615,9 +619,9 @@ class ExecutionHistoryEntry(BaseModel):
                 ],
                 "success": True,
                 "error_message": None,
-                "execution_time_ms": 45.2
+                "execution_time_ms": 45.2,
             }
-        }
+        },
     )
 
 
@@ -625,7 +629,7 @@ class ExecutionHistoryQuery(BaseModel):
     """
     Execution history query parameters.
     """
-    
+
     rule_id: Optional[Any] = Field(None, description="Filter by rule ID (UUID)")
     success: Optional[bool] = Field(None, description="Filter by success status")
     start_time: Optional[datetime] = Field(None, description="Start of time range")
@@ -636,7 +640,7 @@ class ExecutionHistoryResponse(BaseResponse):
     """
     Execution history response.
     """
-    
+
     entries: List[ExecutionHistoryEntry] = Field(
         default_factory=list,
         description="History entries",
@@ -659,6 +663,7 @@ class LogicRuleListResponse(PaginatedResponse[LogicRuleResponse]):
     """
     Paginated list of logic rules.
     """
+
     pass
 
 
@@ -666,4 +671,5 @@ class ExecutionHistoryPaginatedResponse(PaginatedResponse[ExecutionHistoryEntry]
     """
     Paginated execution history.
     """
+
     pass

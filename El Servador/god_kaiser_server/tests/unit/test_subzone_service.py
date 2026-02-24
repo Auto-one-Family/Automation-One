@@ -90,9 +90,7 @@ async def mock_mqtt_publisher():
 
 
 @pytest_asyncio.fixture
-async def subzone_service(
-    db_session: AsyncSession, mock_mqtt_publisher
-) -> SubzoneService:
+async def subzone_service(db_session: AsyncSession, mock_mqtt_publisher) -> SubzoneService:
     """Create SubzoneService with mocked publisher."""
     esp_repo = ESPRepository(db_session)
     return SubzoneService(
@@ -117,9 +115,7 @@ class TestSubzoneAssignmentValidation:
     """Test subzone assignment validation logic."""
 
     @pytest.mark.asyncio
-    async def test_assign_subzone_esp_not_found(
-        self, subzone_service: SubzoneService
-    ):
+    async def test_assign_subzone_esp_not_found(self, subzone_service: SubzoneService):
         """Test assignment fails when ESP not found."""
         with pytest.raises(ValueError, match="not found"):
             await subzone_service.assign_subzone(
@@ -192,9 +188,7 @@ class TestSubzoneAssignmentValidation:
 
         assert response.success is True
         # Verify it was stored with ESP's zone_id
-        subzone = await subzone_service.get_subzone(
-            esp_with_zone.device_id, "climate_control"
-        )
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "climate_control")
         assert subzone is not None
         assert subzone.parent_zone_id == esp_with_zone.zone_id
 
@@ -233,9 +227,7 @@ class TestSubzoneAckHandling:
         assert success is True
 
         # Verify last_ack_at was updated
-        subzone = await subzone_service.get_subzone(
-            esp_with_zone.device_id, "test_ack_subzone"
-        )
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "test_ack_subzone")
         assert subzone is not None
         # Note: In actual implementation, last_ack_at should be set
 
@@ -255,9 +247,7 @@ class TestSubzoneAckHandling:
         )
 
         # Verify subzone exists
-        subzone = await subzone_service.get_subzone(
-            esp_with_zone.device_id, "to_be_removed"
-        )
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "to_be_removed")
         assert subzone is not None
 
         # Simulate ESP removal ACK
@@ -271,9 +261,7 @@ class TestSubzoneAckHandling:
         assert success is True
 
         # Verify subzone was deleted
-        subzone = await subzone_service.get_subzone(
-            esp_with_zone.device_id, "to_be_removed"
-        )
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "to_be_removed")
         assert subzone is None
 
     @pytest.mark.asyncio
@@ -362,9 +350,7 @@ class TestSubzoneQueries:
         self, subzone_service: SubzoneService, esp_with_zone: ESPDevice
     ):
         """Test getting non-existent subzone."""
-        subzone = await subzone_service.get_subzone(
-            esp_with_zone.device_id, "non_existent"
-        )
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "non_existent")
 
         assert subzone is None
 
@@ -381,9 +367,7 @@ class TestSubzoneQueries:
             safe_mode_active=False,
         )
 
-        subzone = await subzone_service.get_subzone(
-            esp_with_zone.device_id, "test_query"
-        )
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "test_query")
 
         assert subzone is not None
         assert subzone.subzone_id == "test_query"
@@ -610,17 +594,13 @@ class TestSubzoneRepository:
         )
 
         # Find subzone for GPIO 5
-        subzone = await subzone_repo.get_subzone_by_gpio(
-            esp_with_zone.device_id, gpio=5
-        )
+        subzone = await subzone_repo.get_subzone_by_gpio(esp_with_zone.device_id, gpio=5)
 
         assert subzone is not None
         assert subzone.subzone_id == "gpio_lookup"
 
         # GPIO 18 not assigned
-        not_found = await subzone_repo.get_subzone_by_gpio(
-            esp_with_zone.device_id, gpio=18
-        )
+        not_found = await subzone_repo.get_subzone_by_gpio(esp_with_zone.device_id, gpio=18)
 
         assert not_found is None
 
@@ -647,21 +627,3 @@ class TestSubzoneRepository:
         total = await subzone_repo.count_gpios_by_esp(esp_with_zone.device_id)
 
         assert total == 5
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

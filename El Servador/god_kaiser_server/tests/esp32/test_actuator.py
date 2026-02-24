@@ -34,11 +34,9 @@ class TestDigitalActuatorControl:
 
     def test_actuator_set_on(self, mock_esp32):
         """Test turning actuator ON."""
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5,
-            "value": 1,
-            "mode": "digital"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         assert response["status"] == "ok"
         assert response["state"] is True
@@ -57,7 +55,9 @@ class TestDigitalActuatorControl:
         mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
 
         # Then turn OFF
-        response = mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}
+        )
 
         assert response["status"] == "ok"
         assert response["state"] is False
@@ -73,11 +73,15 @@ class TestDigitalActuatorControl:
         mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})
 
         # Toggle ON
-        response1 = mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
+        response1 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert response1["state"] is True
 
         # Toggle OFF
-        response2 = mock_esp32.handle_command("actuator_set", {"gpio": 5, "value": 0, "mode": "digital"})
+        response2 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 0, "mode": "digital"}
+        )
         assert response2["state"] is False
 
     def test_actuator_get_state(self, mock_esp32_with_actuators):
@@ -113,11 +117,9 @@ class TestPWMActuatorControl:
         test_values = [0.0, 0.25, 0.5, 0.75, 1.0]
 
         for value in test_values:
-            response = mock_esp32.handle_command("actuator_set", {
-                "gpio": 7,
-                "value": value,
-                "mode": "pwm"
-            })
+            response = mock_esp32.handle_command(
+                "actuator_set", {"gpio": 7, "value": value, "mode": "pwm"}
+            )
 
             assert response["status"] == "ok"
             assert response["pwm_value"] == value
@@ -126,41 +128,39 @@ class TestPWMActuatorControl:
     def test_pwm_range_clamping(self, mock_esp32):
         """Test PWM values are clamped to 0.0-1.0."""
         # Test over max (should clamp to 1.0)
-        response1 = mock_esp32.handle_command("actuator_set", {
-            "gpio": 7,
-            "value": 1.5,
-            "mode": "pwm"
-        })
+        response1 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 7, "value": 1.5, "mode": "pwm"}
+        )
         assert response1["pwm_value"] == 1.0  # Clamped to max
         assert response1["state"] is True
 
         # Test under min (should clamp to 0.0)
-        response2 = mock_esp32.handle_command("actuator_set", {
-            "gpio": 7,
-            "value": -0.5,
-            "mode": "pwm"
-        })
+        response2 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 7, "value": -0.5, "mode": "pwm"}
+        )
         assert response2["pwm_value"] == 0.0
         assert response2["state"] is False
 
     def test_pwm_state_consistency(self, mock_esp32):
         """Test PWM state is consistent with value."""
         # PWM = 0.0 → state = False
-        response1 = mock_esp32.handle_command("actuator_set", {
-            "gpio": 7, "value": 0.0, "mode": "pwm"
-        })
+        response1 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.0, "mode": "pwm"}
+        )
         assert response1["state"] is False
 
         # PWM > 0.0 → state = True
-        response2 = mock_esp32.handle_command("actuator_set", {
-            "gpio": 7, "value": 0.1, "mode": "pwm"
-        })
+        response2 = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.1, "mode": "pwm"}
+        )
         assert response2["state"] is True
 
     def test_pwm_respects_configured_limits(self, mock_esp32):
         """Test PWM limits from actuator configuration are enforced."""
         mock_esp32.configure_actuator(gpio=8, actuator_type="fan", min_value=0.2, max_value=0.8)
-        response = mock_esp32.handle_command("actuator_set", {"gpio": 8, "value": 1.0, "mode": "pwm"})
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 8, "value": 1.0, "mode": "pwm"}
+        )
 
         assert response["pwm_value"] == 0.8
         assert response["state"] is True
@@ -183,9 +183,15 @@ class TestEmergencyStop:
     def test_emergency_stop_all_actuators(self, mock_esp32_with_actuators):
         """Test emergency stop turns OFF all actuators."""
         # Turn all actuators ON
-        mock_esp32_with_actuators.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
-        mock_esp32_with_actuators.handle_command("actuator_set", {"gpio": 6, "value": 1, "mode": "digital"})
-        mock_esp32_with_actuators.handle_command("actuator_set", {"gpio": 7, "value": 0.5, "mode": "pwm"})
+        mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
+        mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 6, "value": 1, "mode": "digital"}
+        )
+        mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.5, "mode": "pwm"}
+        )
 
         # Trigger emergency stop
         response = mock_esp32_with_actuators.handle_command("emergency_stop", {})
@@ -219,7 +225,9 @@ class TestEmergencyStop:
 
         # Verify actuator status messages
         status_messages = [m for m in messages if "/status" in m["topic"]]
-        assert len(status_messages) == 3, f"Should have 3 actuator status messages, got {len(status_messages)}"
+        assert (
+            len(status_messages) == 3
+        ), f"Should have 3 actuator status messages, got {len(status_messages)}"
 
         for message in status_messages:
             assert "actuator" in message["topic"]
@@ -240,7 +248,10 @@ class TestEmergencyStop:
         # Find device-specific emergency topic
         device_emergency = [m for m in messages if "actuator/emergency" in m["topic"]]
         assert len(device_emergency) == 1, "Should have 1 device-specific emergency message"
-        assert device_emergency[0]["topic"] == f"kaiser/god/esp/{mock_esp32_with_actuators.esp_id}/actuator/emergency"
+        assert (
+            device_emergency[0]["topic"]
+            == f"kaiser/god/esp/{mock_esp32_with_actuators.esp_id}/actuator/emergency"
+        )
         assert device_emergency[0]["payload"]["esp_id"] == mock_esp32_with_actuators.esp_id
 
         # Find broadcast emergency topic
@@ -264,7 +275,9 @@ class TestEmergencyStop:
         # Verify timestamps updated
         for gpio in [5, 6, 7]:
             actuator = mock_esp32_with_actuators.get_actuator_state(gpio)
-            assert actuator.timestamp > initial_times[gpio], f"Timestamp not updated for GPIO {gpio}"
+            assert (
+                actuator.timestamp > initial_times[gpio]
+            ), f"Timestamp not updated for GPIO {gpio}"
 
 
 class TestActuatorStatePersistence:
@@ -317,9 +330,9 @@ class TestMQTTStatusPublishing:
         """Test actuator_set publishes status message."""
         mock_esp32.clear_published_messages()
 
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         messages = mock_esp32.get_published_messages()
         # Now publishes both status and response (2 messages)
@@ -337,9 +350,9 @@ class TestMQTTStatusPublishing:
         """Test PWM actuator_set includes PWM value in status."""
         mock_esp32.clear_published_messages()
 
-        response = mock_esp32.handle_command("actuator_set", {
-            "gpio": 7, "value": 0.75, "mode": "pwm"
-        })
+        response = mock_esp32.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.75, "mode": "pwm"}
+        )
 
         messages = mock_esp32.get_published_messages()
         message = messages[0]
@@ -374,9 +387,9 @@ class TestActuatorTypes:
         assert response["data"]["type"] == "pump"
 
         # Test control
-        set_response = mock_esp32_with_actuators.handle_command("actuator_set", {
-            "gpio": 5, "value": 1, "mode": "digital"
-        })
+        set_response = mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
         assert set_response["state"] is True
 
     def test_valve_actuator(self, mock_esp32_with_actuators):
@@ -394,9 +407,9 @@ class TestActuatorTypes:
         assert response["data"]["type"] in ["pwm", "pwm_motor", "fan", "motor"]
 
         # Test PWM control
-        set_response = mock_esp32_with_actuators.handle_command("actuator_set", {
-            "gpio": 7, "value": 0.5, "mode": "pwm"
-        })
+        set_response = mock_esp32_with_actuators.handle_command(
+            "actuator_set", {"gpio": 7, "value": 0.5, "mode": "pwm"}
+        )
         assert set_response["pwm_value"] == 0.5
 
 
@@ -430,7 +443,9 @@ class TestActuatorProvisioningSafety:
 
     def test_actuator_rejected_without_zone(self, mock_esp32_unconfigured):
         """Actuator commands should be rejected when no zone is configured."""
-        response = mock_esp32_unconfigured.handle_command("actuator_set", {"gpio": 5, "value": 1, "mode": "digital"})
+        response = mock_esp32_unconfigured.handle_command(
+            "actuator_set", {"gpio": 5, "value": 1, "mode": "digital"}
+        )
 
         assert response["status"] == "error"
         assert "zone not configured" in response["error"].lower()
@@ -458,9 +473,9 @@ class TestActuatorConcurrency:
         """Test rapid actuator state changes."""
         for i in range(10):
             value = i % 2  # Alternate 0 and 1
-            response = mock_esp32.handle_command("actuator_set", {
-                "gpio": 5, "value": value, "mode": "digital"
-            })
+            response = mock_esp32.handle_command(
+                "actuator_set", {"gpio": 5, "value": value, "mode": "digital"}
+            )
             assert response["status"] == "ok"
 
         # Final state should be 1 (last iteration i=9, value=1)

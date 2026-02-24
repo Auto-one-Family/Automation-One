@@ -92,20 +92,13 @@ class TestActuatorDirectControlE2E:
 
         try:
             # Register ESP with actuator
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Actuator Direct Control E2E Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Actuator Direct Control E2E Test")
             result = await api_client.register_esp(esp)
-            assert "device_id" in result or "id" in result, \
-                f"ESP registration failed: {result}"
+            assert "device_id" in result or "id" in result, f"ESP registration failed: {result}"
 
             # Create actuator configuration
             actuator_config = await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="relay",
-                name="Test Relay E2E"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="relay", name="Test Relay E2E"
             )
             print(f"  Actuator config created: {actuator_config.get('id', 'N/A')}")
 
@@ -116,9 +109,7 @@ class TestActuatorDirectControlE2E:
             # === EXECUTE ===
             # Send actuator command via API
             command_result = await api_client.send_actuator_command(
-                device_id=esp_id,
-                gpio=actuator_gpio,
-                value=1.0  # ON
+                device_id=esp_id, gpio=actuator_gpio, value=1.0  # ON
             )
             print(f"  Command sent: {command_result}")
 
@@ -129,7 +120,7 @@ class TestActuatorDirectControlE2E:
                 command="ON",
                 value=1.0,
                 success=True,
-                message="Command executed successfully"
+                message="Command executed successfully",
             )
 
             # Wait for server to process response
@@ -147,9 +138,9 @@ class TestActuatorDirectControlE2E:
                 current_value = state.get("current_value") or state.get("value")
                 current_state = state.get("state")
                 assert (
-                    current_value == 1.0 or
-                    current_state in ("on", "ON", True) or
-                    state  # At minimum, state should be retrievable
+                    current_value == 1.0
+                    or current_state in ("on", "ON", True)
+                    or state  # At minimum, state should be retrievable
                 ), f"Actuator should be ON, got: {state}"
             else:
                 # State endpoint may not exist - verify command was processed
@@ -180,18 +171,12 @@ class TestActuatorDirectControlE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Actuator OFF Control E2E Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Actuator OFF Control E2E Test")
             await api_client.register_esp(esp)
 
             # Create actuator configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="pump",
-                name="Test Pump E2E"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="pump", name="Test Pump E2E"
             )
 
             # Send heartbeat
@@ -201,9 +186,7 @@ class TestActuatorDirectControlE2E:
             # === EXECUTE ===
             # Send OFF command
             command_result = await api_client.send_actuator_command(
-                device_id=esp_id,
-                gpio=actuator_gpio,
-                value=0.0  # OFF
+                device_id=esp_id, gpio=actuator_gpio, value=0.0  # OFF
             )
             print(f"  OFF command sent: {command_result}")
 
@@ -214,7 +197,7 @@ class TestActuatorDirectControlE2E:
                 command="OFF",
                 value=0.0,
                 success=True,
-                message="Pump stopped"
+                message="Pump stopped",
             )
 
             await asyncio.sleep(2.0)
@@ -249,18 +232,12 @@ class TestActuatorDirectControlE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Actuator Failure E2E Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Actuator Failure E2E Test")
             await api_client.register_esp(esp)
 
             # Create actuator configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="valve",
-                name="Test Valve E2E"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="valve", name="Test Valve E2E"
             )
 
             # Send heartbeat
@@ -269,11 +246,7 @@ class TestActuatorDirectControlE2E:
 
             # === EXECUTE ===
             # Send command
-            await api_client.send_actuator_command(
-                device_id=esp_id,
-                gpio=actuator_gpio,
-                value=1.0
-            )
+            await api_client.send_actuator_command(device_id=esp_id, gpio=actuator_gpio, value=1.0)
 
             # Simulate ESP32 failure response
             await mqtt_client.publish_actuator_response(
@@ -282,7 +255,7 @@ class TestActuatorDirectControlE2E:
                 command="ON",
                 value=1.0,
                 success=False,
-                message="Valve blocked - mechanical obstruction"
+                message="Valve blocked - mechanical obstruction",
             )
 
             await asyncio.sleep(2.0)
@@ -320,18 +293,12 @@ class TestActuatorDirectControlE2E:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="PWM Actuator E2E Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="PWM Actuator E2E Test")
             await api_client.register_esp(esp)
 
             # Create PWM actuator configuration
             await api_client.create_actuator_config(
-                esp_id=esp_id,
-                gpio=actuator_gpio,
-                actuator_type="fan",
-                name="Test Fan E2E"
+                esp_id=esp_id, gpio=actuator_gpio, actuator_type="fan", name="Test Fan E2E"
             )
 
             # Send heartbeat
@@ -341,9 +308,7 @@ class TestActuatorDirectControlE2E:
             # === EXECUTE ===
             # Send PWM command
             command_result = await api_client.send_actuator_command(
-                device_id=esp_id,
-                gpio=actuator_gpio,
-                value=pwm_value
+                device_id=esp_id, gpio=actuator_gpio, value=pwm_value
             )
             print(f"  PWM command sent: value={pwm_value}")
 
@@ -354,7 +319,7 @@ class TestActuatorDirectControlE2E:
                 command="PWM",
                 value=pwm_value,
                 success=True,
-                message=f"Fan speed set to {int(pwm_value * 100)}%"
+                message=f"Fan speed set to {int(pwm_value * 100)}%",
             )
 
             await asyncio.sleep(2.0)
@@ -407,10 +372,7 @@ class TestActuatorCommandCorrelation:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Correlation Test E2E"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Correlation Test E2E")
             await api_client.register_esp(esp)
 
             # Create actuator configuration
@@ -418,7 +380,7 @@ class TestActuatorCommandCorrelation:
                 esp_id=esp_id,
                 gpio=actuator_gpio,
                 actuator_type="relay",
-                name="Correlation Test Relay"
+                name="Correlation Test Relay",
             )
 
             # Send heartbeat
@@ -427,11 +389,7 @@ class TestActuatorCommandCorrelation:
 
             # === EXECUTE ===
             # Send command (correlation_id would be in the MQTT payload)
-            await api_client.send_actuator_command(
-                device_id=esp_id,
-                gpio=actuator_gpio,
-                value=1.0
-            )
+            await api_client.send_actuator_command(device_id=esp_id, gpio=actuator_gpio, value=1.0)
 
             # Simulate ESP32 response WITH correlation_id
             await mqtt_client.publish_actuator_response(
@@ -441,7 +399,7 @@ class TestActuatorCommandCorrelation:
                 value=1.0,
                 success=True,
                 message="Command executed",
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
             )
 
             await asyncio.sleep(2.0)
@@ -494,10 +452,7 @@ class TestMultipleActuatorControl:
 
         try:
             # Register ESP
-            esp = ESPDeviceTestData(
-                device_id=esp_id,
-                name="Multi-Actuator E2E Test"
-            )
+            esp = ESPDeviceTestData(device_id=esp_id, name="Multi-Actuator E2E Test")
             await api_client.register_esp(esp)
 
             # Create all actuator configurations
@@ -506,7 +461,7 @@ class TestMultipleActuatorControl:
                     esp_id=esp_id,
                     gpio=actuator["gpio"],
                     actuator_type=actuator["type"],
-                    name=actuator["name"]
+                    name=actuator["name"],
                 )
 
             # Send heartbeat
@@ -518,9 +473,7 @@ class TestMultipleActuatorControl:
             for actuator in actuators:
                 # Send command
                 await api_client.send_actuator_command(
-                    device_id=esp_id,
-                    gpio=actuator["gpio"],
-                    value=1.0
+                    device_id=esp_id, gpio=actuator["gpio"], value=1.0
                 )
 
                 # Simulate ESP32 response
@@ -530,7 +483,7 @@ class TestMultipleActuatorControl:
                     command="ON",
                     value=1.0,
                     success=True,
-                    message=f"{actuator['name']} activated"
+                    message=f"{actuator['name']} activated",
                 )
 
                 await asyncio.sleep(0.5)

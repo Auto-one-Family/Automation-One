@@ -38,7 +38,7 @@ class LightProcessor(BaseSensorProcessor):
     TSL2561_MAX = 40000.0  # lux
     BH1750_MIN = 1.0  # lux
     BH1750_MAX = 65535.0  # lux
-    
+
     # Typical ranges (indoor/outdoor)
     TYPICAL_INDOOR_MIN = 50.0  # lux (dim indoor)
     TYPICAL_INDOOR_MAX = 1000.0  # lux (bright indoor)
@@ -57,7 +57,7 @@ class LightProcessor(BaseSensorProcessor):
     ) -> ProcessingResult:
         """
         Process light sensor raw value.
-        
+
         Args:
             raw_value: Raw lux reading
             calibration: Optional calibration data
@@ -66,7 +66,7 @@ class LightProcessor(BaseSensorProcessor):
             params: Optional processing parameters
                 - "sensor_model": str - Sensor model ("tsl2561" or "bh1750")
                 - "decimal_places": int - Decimal places for rounding (default: 0)
-        
+
         Returns:
             ProcessingResult with light value in lux, quality assessment
         """
@@ -76,7 +76,7 @@ class LightProcessor(BaseSensorProcessor):
             sensor_model = params.get("sensor_model", "").lower()
         if calibration and not sensor_model:
             sensor_model = calibration.get("sensor_model", "").lower()
-        
+
         # Validate raw value
         validation = self.validate(raw_value)
         if not validation.valid:
@@ -86,25 +86,25 @@ class LightProcessor(BaseSensorProcessor):
                 quality="error",
                 metadata={"error": validation.error},
             )
-        
+
         # Apply calibration offset if provided
         value = raw_value
         if calibration and "offset" in calibration:
             offset = calibration.get("offset", 0.0)
             value = raw_value + offset
-        
+
         # Ensure value is non-negative
         value = max(0.0, value)
-        
+
         # Round if specified
         decimal_places = 0
         if params and "decimal_places" in params:
             decimal_places = params.get("decimal_places", 0)
         value = round(value, decimal_places)
-        
+
         # Determine quality
         quality = self._assess_quality(value)
-        
+
         return ProcessingResult(
             value=value,
             unit="lux",
@@ -118,10 +118,10 @@ class LightProcessor(BaseSensorProcessor):
     def validate(self, raw_value: float) -> ValidationResult:
         """
         Validate light sensor raw value.
-        
+
         Args:
             raw_value: Raw light reading in lux
-            
+
         Returns:
             ValidationResult indicating validity
         """
@@ -131,14 +131,14 @@ class LightProcessor(BaseSensorProcessor):
                 valid=False,
                 error=f"Light value cannot be negative: {raw_value} lux",
             )
-        
+
         # Check reasonable upper limit (100,000 lux is very bright sunlight)
         if raw_value > 100000:
             return ValidationResult(
                 valid=False,
                 error=f"Light value exceeds maximum: {raw_value} lux > 100000 lux",
             )
-        
+
         # Check typical range and provide warnings
         warnings = []
         if raw_value < self.TYPICAL_INDOOR_MIN:
@@ -149,7 +149,7 @@ class LightProcessor(BaseSensorProcessor):
             warnings.append(
                 f"Light value very high (bright): {raw_value} lux > {self.TYPICAL_OUTDOOR_MAX} lux"
             )
-        
+
         return ValidationResult(
             valid=True,
             warnings=warnings if warnings else None,
@@ -158,10 +158,10 @@ class LightProcessor(BaseSensorProcessor):
     def _assess_quality(self, value: float) -> str:
         """
         Assess light reading quality.
-        
+
         Args:
             value: Light value in lux
-            
+
         Returns:
             Quality indicator ("excellent", "good", "fair", "poor", "bad")
         """

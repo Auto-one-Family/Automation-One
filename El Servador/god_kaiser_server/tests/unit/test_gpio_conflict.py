@@ -59,10 +59,10 @@ class TestSystemPinProtection:
                 purpose="sensor",
             )
 
-            assert result.available is False, \
-                f"GPIO {gpio} (system pin) should be rejected"
-            assert result.conflict_type == GpioConflictType.SYSTEM, \
-                f"GPIO {gpio} conflict type should be SYSTEM"
+            assert result.available is False, f"GPIO {gpio} (system pin) should be rejected"
+            assert (
+                result.conflict_type == GpioConflictType.SYSTEM
+            ), f"GPIO {gpio} conflict type should be SYSTEM"
 
     @pytest.mark.critical
     @pytest.mark.gpio
@@ -96,10 +96,10 @@ class TestSystemPinProtection:
         )
 
         # ASSERT
-        assert result.available is False, \
-            "GPIO 0 (boot-strapping) should be rejected"
-        assert "system" in result.message.lower() or "boot" in result.message.lower(), \
-            f"Error message should explain why GPIO 0 is reserved, got: {result.message}"
+        assert result.available is False, "GPIO 0 (boot-strapping) should be rejected"
+        assert (
+            "system" in result.message.lower() or "boot" in result.message.lower()
+        ), f"Error message should explain why GPIO 0 is reserved, got: {result.message}"
 
 
 class TestInputOnlyPins:
@@ -140,10 +140,12 @@ class TestInputOnlyPins:
             )
 
             # ASSERT
-            assert result.available is False, \
-                f"GPIO {gpio} (input-only) should be rejected for actuator"
-            assert "input" in result.message.lower(), \
-                f"Error should mention input-only, got: {result.message}"
+            assert (
+                result.available is False
+            ), f"GPIO {gpio} (input-only) should be rejected for actuator"
+            assert (
+                "input" in result.message.lower()
+            ), f"Error should mention input-only, got: {result.message}"
 
     @pytest.mark.gpio
     @pytest.mark.asyncio
@@ -180,8 +182,9 @@ class TestInputOnlyPins:
         )
 
         # ASSERT
-        assert result.available is True, \
-            f"GPIO 34 (input-only) should be allowed for sensor, got: {result.message}"
+        assert (
+            result.available is True
+        ), f"GPIO 34 (input-only) should be allowed for sensor, got: {result.message}"
 
 
 class TestSensorActuatorConflict:
@@ -229,10 +232,12 @@ class TestSensorActuatorConflict:
         )
 
         # ASSERT
-        assert result.available is False, \
-            "Actuator should not be allowed on GPIO already used by sensor"
-        assert result.conflict_type == GpioConflictType.SENSOR, \
-            f"Conflict type should be SENSOR, got {result.conflict_type}"
+        assert (
+            result.available is False
+        ), "Actuator should not be allowed on GPIO already used by sensor"
+        assert (
+            result.conflict_type == GpioConflictType.SENSOR
+        ), f"Conflict type should be SENSOR, got {result.conflict_type}"
 
     @pytest.mark.gpio
     @pytest.mark.asyncio
@@ -278,10 +283,12 @@ class TestSensorActuatorConflict:
         )
 
         # ASSERT
-        assert result.available is False, \
-            "Sensor should not be allowed on GPIO already used by actuator"
-        assert result.conflict_type == GpioConflictType.ACTUATOR, \
-            f"Conflict type should be ACTUATOR, got {result.conflict_type}"
+        assert (
+            result.available is False
+        ), "Sensor should not be allowed on GPIO already used by actuator"
+        assert (
+            result.conflict_type == GpioConflictType.ACTUATOR
+        ), f"Conflict type should be ACTUATOR, got {result.conflict_type}"
 
 
 class TestCrossESPIsolation:
@@ -326,8 +333,9 @@ class TestCrossESPIsolation:
         )
 
         # ASSERT
-        assert result.available is True, \
-            f"GPIO 25 on ESP2 should be allowed even if ESP1 uses it, got: {result.message}"
+        assert (
+            result.available is True
+        ), f"GPIO 25 on ESP2 should be allowed even if ESP1 uses it, got: {result.message}"
 
 
 class TestBoardSpecificConstraints:
@@ -364,10 +372,12 @@ class TestBoardSpecificConstraints:
         )
 
         # ASSERT
-        assert result.available is False, \
-            f"GPIO 22 should be rejected on XIAO ESP32-C3 (max 21), got: {result.message}"
-        assert "range" in result.message.lower(), \
-            f"Error should mention GPIO range, got: {result.message}"
+        assert (
+            result.available is False
+        ), f"GPIO 22 should be rejected on XIAO ESP32-C3 (max 21), got: {result.message}"
+        assert (
+            "range" in result.message.lower()
+        ), f"Error should mention GPIO range, got: {result.message}"
 
     @pytest.mark.gpio
     @pytest.mark.asyncio
@@ -413,5 +423,6 @@ class TestBoardSpecificConstraints:
         )
 
         # ASSERT
-        assert result.available is True, \
-            f"GPIO 20 as actuator on XIAO C3 should be allowed (no input-only pins), got: {result.message}"
+        assert (
+            result.available is True
+        ), f"GPIO 20 as actuator on XIAO C3 should be allowed (no input-only pins), got: {result.message}"

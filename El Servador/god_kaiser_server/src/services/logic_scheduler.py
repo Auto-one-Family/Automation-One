@@ -16,14 +16,14 @@ logger = get_logger(__name__)
 class LogicScheduler:
     """
     Logic Scheduler for timer-based rule evaluation.
-    
+
     Periodically checks and evaluates rules with time_window conditions.
     """
 
     def __init__(self, logic_engine: LogicEngine, interval_seconds: int = 60):
         """
         Initialize Logic Scheduler.
-        
+
         Args:
             logic_engine: LogicEngine instance
             interval_seconds: Evaluation interval in seconds (default: 60)
@@ -36,7 +36,7 @@ class LogicScheduler:
     async def start(self) -> None:
         """
         Start scheduler background task.
-        
+
         Should be called on application startup.
         """
         if self._running:
@@ -50,7 +50,7 @@ class LogicScheduler:
     async def stop(self) -> None:
         """
         Stop scheduler background task.
-        
+
         Should be called on application shutdown.
         """
         if not self._running:
@@ -70,7 +70,7 @@ class LogicScheduler:
     async def _scheduler_loop(self) -> None:
         """
         Main scheduler loop.
-        
+
         Runs periodically to evaluate timer-triggered rules.
         """
         logger.info("Logic Scheduler loop started")
@@ -95,7 +95,7 @@ class LogicScheduler:
     async def _evaluate_timer_rules(self) -> None:
         """
         Evaluate all timer-triggered rules.
-        
+
         Delegates to LogicEngine.evaluate_timer_triggered_rules().
         """
         try:
@@ -105,27 +105,3 @@ class LogicScheduler:
                 f"Error evaluating timer-triggered rules: {e}",
                 exc_info=True,
             )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

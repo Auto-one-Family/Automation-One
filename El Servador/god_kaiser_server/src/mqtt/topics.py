@@ -42,8 +42,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/command
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_ACTUATOR_COMMAND,
-            esp_id=esp_id, gpio=gpio
+            constants.MQTT_TOPIC_ESP_ACTUATOR_COMMAND, esp_id=esp_id, gpio=gpio
         )
 
     @staticmethod
@@ -61,8 +60,7 @@ class TopicBuilder:
             Full MQTT topic string
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_SENSOR_COMMAND,
-            esp_id=esp_id, gpio=gpio
+            constants.MQTT_TOPIC_ESP_SENSOR_COMMAND, esp_id=esp_id, gpio=gpio
         )
 
     @staticmethod
@@ -80,8 +78,7 @@ class TopicBuilder:
             Full MQTT topic string
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_SENSOR_RESPONSE,
-            esp_id=esp_id, gpio=gpio
+            constants.MQTT_TOPIC_ESP_SENSOR_RESPONSE, esp_id=esp_id, gpio=gpio
         )
 
     @staticmethod
@@ -97,8 +94,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/config/sensor/{gpio}
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_CONFIG_SENSOR,
-            esp_id=esp_id, gpio=gpio
+            constants.MQTT_TOPIC_ESP_CONFIG_SENSOR, esp_id=esp_id, gpio=gpio
         )
 
     @staticmethod
@@ -114,8 +110,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/config/actuator/{gpio}
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_CONFIG_ACTUATOR,
-            esp_id=esp_id, gpio=gpio
+            constants.MQTT_TOPIC_ESP_CONFIG_ACTUATOR, esp_id=esp_id, gpio=gpio
         )
 
     @staticmethod
@@ -129,10 +124,7 @@ class TopicBuilder:
         Returns:
             kaiser/{kaiser_id}/esp/{esp_id}/config
         """
-        return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_CONFIG,
-            esp_id=esp_id
-        )
+        return constants.get_topic_with_kaiser_id(constants.MQTT_TOPIC_ESP_CONFIG, esp_id=esp_id)
 
     @staticmethod
     def build_system_command_topic(esp_id: str) -> str:
@@ -146,8 +138,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/system/command
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_SYSTEM_COMMAND,
-            esp_id=esp_id
+            constants.MQTT_TOPIC_ESP_SYSTEM_COMMAND, esp_id=esp_id
         )
 
     @staticmethod
@@ -166,8 +157,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_HEARTBEAT_ACK,
-            esp_id=esp_id
+            constants.MQTT_TOPIC_ESP_HEARTBEAT_ACK, esp_id=esp_id
         )
 
     @staticmethod
@@ -184,10 +174,7 @@ class TopicBuilder:
         Returns:
             kaiser/{kaiser_id}/esp/{esp_id}/system/will
         """
-        return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_LWT,
-            esp_id=esp_id
-        )
+        return constants.get_topic_with_kaiser_id(constants.MQTT_TOPIC_ESP_LWT, esp_id=esp_id)
 
     @staticmethod
     def build_pi_enhanced_response_topic(esp_id: str, gpio: int) -> str:
@@ -216,8 +203,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/mqtt/auth_update
         """
         return constants.get_topic_with_kaiser_id(
-            "kaiser/{kaiser_id}/esp/{esp_id}/mqtt/auth_update",
-            esp_id=esp_id
+            "kaiser/{kaiser_id}/esp/{esp_id}/mqtt/auth_update", esp_id=esp_id
         )
 
     @staticmethod
@@ -232,8 +218,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/zone/assign
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_ESP_ZONE_ASSIGN,
-            esp_id=esp_id
+            constants.MQTT_TOPIC_ESP_ZONE_ASSIGN, esp_id=esp_id
         )
 
     @staticmethod
@@ -244,9 +229,7 @@ class TopicBuilder:
         Returns:
             kaiser/{kaiser_id}/esp/+/zone/ack
         """
-        return constants.get_topic_with_kaiser_id(
-            constants.MQTT_SUBSCRIBE_ESP_ZONE_ACK
-        )
+        return constants.get_topic_with_kaiser_id(constants.MQTT_SUBSCRIBE_ESP_ZONE_ACK)
 
     # ====================================================================
     # BUILD METHODS (ESP → God-Kaiser - used by Mock ESPs)
@@ -715,8 +698,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/subzone/assign
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_SUBZONE_ASSIGN,
-            esp_id=esp_id
+            constants.MQTT_TOPIC_SUBZONE_ASSIGN, esp_id=esp_id
         )
 
     @staticmethod
@@ -731,8 +713,7 @@ class TopicBuilder:
             kaiser/{kaiser_id}/esp/{esp_id}/subzone/remove
         """
         return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_SUBZONE_REMOVE,
-            esp_id=esp_id
+            constants.MQTT_TOPIC_SUBZONE_REMOVE, esp_id=esp_id
         )
 
     @staticmethod
@@ -746,10 +727,7 @@ class TopicBuilder:
         Returns:
             kaiser/{kaiser_id}/esp/{esp_id}/subzone/safe
         """
-        return constants.get_topic_with_kaiser_id(
-            constants.MQTT_TOPIC_SUBZONE_SAFE,
-            esp_id=esp_id
-        )
+        return constants.get_topic_with_kaiser_id(constants.MQTT_TOPIC_SUBZONE_SAFE, esp_id=esp_id)
 
     @staticmethod
     def get_subzone_ack_subscription_pattern() -> str:
@@ -759,9 +737,7 @@ class TopicBuilder:
         Returns:
             kaiser/{kaiser_id}/esp/+/subzone/ack
         """
-        return constants.get_topic_with_kaiser_id(
-            constants.MQTT_SUBSCRIBE_SUBZONE_ACK
-        )
+        return constants.get_topic_with_kaiser_id(constants.MQTT_SUBSCRIBE_SUBZONE_ACK)
 
     @staticmethod
     def parse_subzone_ack_topic(topic: str) -> Optional[Dict[str, any]]:
@@ -912,11 +888,7 @@ class TopicBuilder:
 
     @staticmethod
     def build_subzone_sensor_data_topic(
-        esp_id: str,
-        gpio: int,
-        master_zone_id: str,
-        subzone_id: str,
-        kaiser_id: str = "god"
+        esp_id: str, gpio: int, master_zone_id: str, subzone_id: str, kaiser_id: str = "god"
     ) -> str:
         """
         Build subzone sensor data topic.
@@ -1010,9 +982,15 @@ class TopicBuilder:
             True if valid GPIO for hardware
         """
         if hardware_type == constants.HARDWARE_TYPE_ESP32_WROOM:
-            return gpio in constants.GPIO_RANGE_ESP32_WROOM and gpio not in constants.GPIO_RESERVED_ESP32_WROOM
+            return (
+                gpio in constants.GPIO_RANGE_ESP32_WROOM
+                and gpio not in constants.GPIO_RESERVED_ESP32_WROOM
+            )
         elif hardware_type == constants.HARDWARE_TYPE_XIAO_ESP32C3:
-            return gpio in constants.GPIO_RANGE_XIAO_ESP32C3 and gpio not in constants.GPIO_RESERVED_XIAO_ESP32C3
+            return (
+                gpio in constants.GPIO_RANGE_XIAO_ESP32C3
+                and gpio not in constants.GPIO_RESERVED_XIAO_ESP32C3
+            )
         else:
             logger.error(f"Unknown hardware type: {hardware_type}")
             return False

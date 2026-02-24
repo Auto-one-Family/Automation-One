@@ -6,6 +6,7 @@ Benötigt: DB-Session für Failure Processing
 
 Phase 3 Test-Suite: Config ACK Processing, Partial Success, Legacy Format.
 """
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch

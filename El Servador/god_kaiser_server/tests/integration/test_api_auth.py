@@ -78,7 +78,7 @@ def admin_headers(admin_user: User):
 
 class TestLogin:
     """Test login endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_login_success(self, test_user: User):
         """Test successful login."""
@@ -91,7 +91,7 @@ class TestLogin:
                     "remember_me": False,
                 },
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -101,7 +101,7 @@ class TestLogin:
         assert data["tokens"]["token_type"] == "bearer"
         assert "user" in data
         assert data["user"]["username"] == "testuser"
-    
+
     @pytest.mark.asyncio
     async def test_login_invalid_password(self, test_user: User):
         """Test login with wrong password."""
@@ -113,11 +113,11 @@ class TestLogin:
                     "password": "WrongPassword",
                 },
             )
-        
+
         assert response.status_code == 401
         data = response.json()
         assert "Invalid" in data["detail"]
-    
+
     @pytest.mark.asyncio
     async def test_login_invalid_username(self):
         """Test login with non-existent user."""
@@ -129,13 +129,13 @@ class TestLogin:
                     "password": "SomePassword123",
                 },
             )
-        
+
         assert response.status_code == 401
 
 
 class TestRegister:
     """Test registration endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_register_success(self, admin_headers: dict):
         """Test successful user registration by admin."""
@@ -151,13 +151,13 @@ class TestRegister:
                 },
                 headers=admin_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert data["user"]["username"] == "newuser"
         assert data["user"]["role"] == "operator"
-    
+
     @pytest.mark.asyncio
     async def test_register_non_admin_forbidden(self, auth_headers: dict):
         """Test that non-admin cannot register users."""
@@ -172,9 +172,9 @@ class TestRegister:
                 },
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 403
-    
+
     @pytest.mark.asyncio
     async def test_register_duplicate_username(self, admin_headers: dict, test_user: User):
         """Test registration with existing username."""
@@ -189,33 +189,33 @@ class TestRegister:
                 },
                 headers=admin_headers,
             )
-        
+
         assert response.status_code == 400
         assert "already exists" in response.json()["detail"]
 
 
 class TestTokenRefresh:
     """Test token refresh endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_refresh_success(self, test_user: User):
         """Test successful token refresh."""
         from src.core.security import create_refresh_token
-        
+
         refresh_token = create_refresh_token(user_id=test_user.id)
-        
+
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/refresh",
                 json={"refresh_token": refresh_token},
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert "tokens" in data
         assert "access_token" in data["tokens"]
-    
+
     @pytest.mark.asyncio
     async def test_refresh_invalid_token(self):
         """Test refresh with invalid token."""
@@ -224,13 +224,13 @@ class TestTokenRefresh:
                 "/api/v1/auth/refresh",
                 json={"refresh_token": "invalid_token"},
             )
-        
+
         assert response.status_code == 401
 
 
 class TestCurrentUser:
     """Test current user endpoint."""
-    
+
     @pytest.mark.asyncio
     async def test_get_current_user(self, auth_headers: dict, test_user: User):
         """Test getting current user info."""
@@ -239,13 +239,13 @@ class TestCurrentUser:
                 "/api/v1/auth/me",
                 headers=auth_headers,
             )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["username"] == "testuser"
         assert data["email"] == "test@example.com"
         assert data["role"] == "operator"
-    
+
     @pytest.mark.asyncio
     async def test_get_current_user_unauthenticated(self):
         """Test getting current user without token."""
@@ -351,7 +351,9 @@ class TestLoginFormTokenVersion:
         assert payload["token_version"] == test_user.token_version
 
     @pytest.mark.asyncio
-    async def test_login_form_tokens_rejected_after_logout_all(self, test_user: User, db_session: AsyncSession):
+    async def test_login_form_tokens_rejected_after_logout_all(
+        self, test_user: User, db_session: AsyncSession
+    ):
         """Test that login/form tokens are invalidated after logout all devices."""
         from jose import jwt
 
@@ -374,6 +376,6 @@ class TestLoginFormTokenVersion:
             me_response = await client.get(
                 "/api/v1/auth/me",
                 headers={"Authorization": f"Bearer {token}"},
-            )        # Should be rejected because token_version is outdated
+            )  # Should be rejected because token_version is outdated
         assert me_response.status_code == 401
         assert "invalidated" in me_response.json()["detail"].lower()

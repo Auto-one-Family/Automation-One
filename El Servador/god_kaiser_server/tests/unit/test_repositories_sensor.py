@@ -43,9 +43,7 @@ class TestSensorRepositoryConfig:
         result = await sensor_repo.get_by_esp_and_gpio(sample_esp_device.id, 99)
         assert result is None
 
-    async def test_get_by_esp_success(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_by_esp_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of all sensors for an ESP."""
         await sensor_repo.create(
             esp_id=sample_esp_device.id,
@@ -96,9 +94,7 @@ class TestSensorRepositoryConfig:
         assert len(enabled_sensors) == 1
         assert enabled_sensors[0].gpio == 34
 
-    async def test_get_pi_enhanced(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_pi_enhanced(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of Pi-Enhanced sensors."""
         await sensor_repo.create(
             esp_id=sample_esp_device.id,
@@ -125,9 +121,7 @@ class TestSensorRepositoryConfig:
         assert len(pi_enhanced) == 1
         assert pi_enhanced[0].gpio == 34
 
-    async def test_get_by_sensor_type(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_by_sensor_type(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval by sensor type."""
         await sensor_repo.create(
             esp_id=sample_esp_device.id,
@@ -243,9 +237,7 @@ class TestSensorRepositoryOneWire:
             assert retrieved is not None
             assert retrieved.onewire_address == rom
 
-    async def test_get_by_onewire_address(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_by_onewire_address(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test lookup by OneWire address only."""
         await sensor_repo.create(
             esp_id=sample_esp_device.id,
@@ -299,9 +291,7 @@ class TestSensorRepositoryOneWire:
         )
 
         # Get all OneWire sensors
-        onewire_sensors = await sensor_repo.get_all_by_interface(
-            sample_esp_device.id, "ONEWIRE"
-        )
+        onewire_sensors = await sensor_repo.get_all_by_interface(sample_esp_device.id, "ONEWIRE")
 
         assert len(onewire_sensors) == 2
         assert all(s.interface_type == "ONEWIRE" for s in onewire_sensors)
@@ -311,9 +301,7 @@ class TestSensorRepositoryOneWire:
 class TestSensorRepositoryData:
     """Test SensorRepository data operations"""
 
-    async def test_save_data_success(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_save_data_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test saving sensor data."""
         sensor_data = await sensor_repo.save_data(
             esp_id=sample_esp_device.id,
@@ -333,9 +321,7 @@ class TestSensorRepositoryData:
         assert sensor_data.processing_mode == "pi_enhanced"
         assert sensor_data.quality == "good"
 
-    async def test_save_data_minimal(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_save_data_minimal(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test saving sensor data with minimal fields."""
         sensor_data = await sensor_repo.save_data(
             esp_id=sample_esp_device.id,
@@ -349,9 +335,7 @@ class TestSensorRepositoryData:
         assert sensor_data.processed_value is None
         assert sensor_data.processing_mode == "raw"
 
-    async def test_get_latest_data_success(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_latest_data_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of latest sensor data."""
         # Save multiple data points
         for i in range(5):
@@ -371,16 +355,12 @@ class TestSensorRepositoryData:
         assert latest[1].raw_value == 2430.0
         assert latest[2].raw_value == 2420.0
 
-    async def test_get_latest_data_empty(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_latest_data_empty(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval with no data."""
         latest = await sensor_repo.get_latest_data(sample_esp_device.id, 34)
         assert len(latest) == 0
 
-    async def test_get_data_range_success(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_data_range_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of data within time range."""
         now = datetime.utcnow()
 
@@ -408,9 +388,7 @@ class TestSensorRepositoryData:
         # Should get last 3 data points (within 6 minutes)
         assert len(data_range) >= 0  # Depends on timing, but should be ordered
 
-    async def test_get_data_range_empty(
-        self, sensor_repo: SensorRepository, sample_esp_device
-    ):
+    async def test_get_data_range_empty(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval with no data in range."""
         now = datetime.utcnow()
         start_time = now - timedelta(hours=1)
@@ -421,4 +399,3 @@ class TestSensorRepositoryData:
         )
 
         assert len(data_range) == 0
-

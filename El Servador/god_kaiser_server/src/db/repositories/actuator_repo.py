@@ -24,7 +24,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
     async def create(self, actuator: Optional[ActuatorConfig] = None, **fields) -> ActuatorConfig:
         """
         Create a new actuator config.
-        
+
         Accepts either an ActuatorConfig instance or model field kwargs.
         """
         if actuator is None:
@@ -34,9 +34,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         await self.session.refresh(actuator)
         return actuator
 
-    async def get_by_esp_and_gpio(
-        self, esp_id: uuid.UUID, gpio: int
-    ) -> Optional[ActuatorConfig]:
+    async def get_by_esp_and_gpio(self, esp_id: uuid.UUID, gpio: int) -> Optional[ActuatorConfig]:
         """Get actuator by ESP ID and GPIO."""
         stmt = select(ActuatorConfig).where(
             ActuatorConfig.esp_id == esp_id, ActuatorConfig.gpio == gpio
@@ -91,9 +89,11 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         )
         if base_filters:
             stmt = stmt.where(and_(*base_filters))
-        stmt = stmt.order_by(
-            ActuatorConfig.created_at.desc(), ActuatorConfig.id.desc()
-        ).offset(offset).limit(limit)
+        stmt = (
+            stmt.order_by(ActuatorConfig.created_at.desc(), ActuatorConfig.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
 
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -107,8 +107,8 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
 
     async def count_by_esp(self, esp_id: uuid.UUID) -> int:
         """Count actuators for an ESP device."""
-        stmt = select(func.count()).select_from(ActuatorConfig).where(
-            ActuatorConfig.esp_id == esp_id
+        stmt = (
+            select(func.count()).select_from(ActuatorConfig).where(ActuatorConfig.esp_id == esp_id)
         )
         result = await self.session.execute(stmt)
         return result.scalar() or 0
@@ -120,9 +120,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         return list(result.scalars().all())
 
     # State operations
-    async def get_state(
-        self, esp_id: uuid.UUID, gpio: int
-    ) -> Optional[ActuatorState]:
+    async def get_state(self, esp_id: uuid.UUID, gpio: int) -> Optional[ActuatorState]:
         """Get current actuator state."""
         stmt = select(ActuatorState).where(
             ActuatorState.esp_id == esp_id, ActuatorState.gpio == gpio
@@ -261,9 +259,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         Returns:
             List of ActuatorHistory instances
         """
-        stmt = select(ActuatorHistory).where(
-            ActuatorHistory.data_source == source.value
-        )
+        stmt = select(ActuatorHistory).where(ActuatorHistory.data_source == source.value)
         if esp_id:
             stmt = stmt.where(ActuatorHistory.esp_id == esp_id)
         stmt = stmt.order_by(ActuatorHistory.timestamp.desc()).limit(limit)
@@ -300,9 +296,8 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             Dictionary mapping data source to count
             Example: {"production": 1000, "mock": 50, "test": 25}
         """
-        stmt = (
-            select(ActuatorHistory.data_source, func.count(ActuatorHistory.id))
-            .group_by(ActuatorHistory.data_source)
+        stmt = select(ActuatorHistory.data_source, func.count(ActuatorHistory.id)).group_by(
+            ActuatorHistory.data_source
         )
         result = await self.session.execute(stmt)
         return {source: count for source, count in result.all()}

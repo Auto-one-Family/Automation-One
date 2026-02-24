@@ -29,7 +29,8 @@ from datetime import datetime, timedelta
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'esp32'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "esp32"))
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
 
@@ -37,6 +38,7 @@ from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
 # =============================================================================
 # Anomaly Detection Helper Class
 # =============================================================================
+
 
 class SensorAnomalyDetector:
     """
@@ -84,7 +86,9 @@ class SensorAnomalyDetector:
         return delta > max_delta
 
     @staticmethod
-    def detect_drift(readings: List[float], max_drift_per_hour: float, interval_seconds: int) -> bool:
+    def detect_drift(
+        readings: List[float], max_drift_per_hour: float, interval_seconds: int
+    ) -> bool:
         """
         Erkennt langsame Drift über Zeit (Kalibrierungsproblem).
 
@@ -129,42 +133,44 @@ class SensorAnomalyDetector:
 # Sensor-spezifische Grenzwerte (aus Praxis!)
 # =============================================================================
 
+
 class SensorLimits:
     """Realistische Grenzwerte für verschiedene Sensor-Typen."""
 
     # Temperatur (DS18B20, SHT31)
-    TEMP_MIN_VALID = -4000       # -40°C (Sensor-Minimum)
-    TEMP_MAX_VALID = 12500       # 125°C (DS18B20 Maximum)
-    TEMP_MAX_SPIKE = 500         # Max 5°C Sprung pro Messung (30s)
-    TEMP_STUCK_VARIATION = 10   # Min 0.1°C Variation erwartet
+    TEMP_MIN_VALID = -4000  # -40°C (Sensor-Minimum)
+    TEMP_MAX_VALID = 12500  # 125°C (DS18B20 Maximum)
+    TEMP_MAX_SPIKE = 500  # Max 5°C Sprung pro Messung (30s)
+    TEMP_STUCK_VARIATION = 10  # Min 0.1°C Variation erwartet
 
     # Luftfeuchtigkeit (SHT31)
-    HUMIDITY_MIN_VALID = 0      # 0%
-    HUMIDITY_MAX_VALID = 1000   # 100%
-    HUMIDITY_MAX_SPIKE = 150    # Max 15% Sprung
-    HUMIDITY_CONDENSATION = 980 # >98% = Sensor nass!
+    HUMIDITY_MIN_VALID = 0  # 0%
+    HUMIDITY_MAX_VALID = 1000  # 100%
+    HUMIDITY_MAX_SPIKE = 150  # Max 15% Sprung
+    HUMIDITY_CONDENSATION = 980  # >98% = Sensor nass!
 
     # Bodenfeuchte (Analog)
-    SOIL_MIN_VALID = 0          # Trocken
-    SOIL_MAX_VALID = 4095       # 12-bit ADC Max
-    SOIL_MAX_SPIKE = 500        # Max Sprung
+    SOIL_MIN_VALID = 0  # Trocken
+    SOIL_MAX_VALID = 4095  # 12-bit ADC Max
+    SOIL_MAX_SPIKE = 500  # Max Sprung
 
     # pH (Analog mit Kalibrierung)
-    PH_MIN_VALID = 0            # 0 pH (unmöglich in Praxis)
-    PH_MAX_VALID = 1400         # 14 pH (unmöglich in Praxis)
-    PH_REALISTIC_MIN = 400      # 4 pH (stark sauer)
-    PH_REALISTIC_MAX = 1000     # 10 pH (stark basisch)
+    PH_MIN_VALID = 0  # 0 pH (unmöglich in Praxis)
+    PH_MAX_VALID = 1400  # 14 pH (unmöglich in Praxis)
+    PH_REALISTIC_MIN = 400  # 4 pH (stark sauer)
+    PH_REALISTIC_MAX = 1000  # 10 pH (stark basisch)
     PH_MAX_DRIFT_PER_HOUR = 50  # Max 0.5 pH Drift pro Stunde
 
     # EC (Leitfähigkeit)
-    EC_MIN_VALID = 0            # Destilliertes Wasser
-    EC_MAX_VALID = 1000         # 10 mS/cm (sehr hoch)
-    EC_REALISTIC_MAX = 500      # 5 mS/cm (normal für Hydroponik)
+    EC_MIN_VALID = 0  # Destilliertes Wasser
+    EC_MAX_VALID = 1000  # 10 mS/cm (sehr hoch)
+    EC_REALISTIC_MAX = 500  # 5 mS/cm (normal für Hydroponik)
 
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def sensor_test_esp():
@@ -174,11 +180,7 @@ def sensor_test_esp():
 
     # Temperatur-Sensor
     mock.set_sensor_value(
-        gpio=4,
-        raw_value=2200,
-        sensor_type="DS18B20",
-        name="Temperatur",
-        quality="good"
+        gpio=4, raw_value=2200, sensor_type="DS18B20", name="Temperatur", quality="good"
     )
 
     # Feuchte-Sensor (Multi-Value)
@@ -188,34 +190,22 @@ def sensor_test_esp():
         primary_value=2200,
         secondary_values={"humidity": 650},
         name="Luft Klima",
-        quality="good"
+        quality="good",
     )
 
     # Bodenfeuchte
     mock.set_sensor_value(
-        gpio=34,
-        raw_value=2000,
-        sensor_type="moisture",
-        name="Bodenfeuchte",
-        quality="good"
+        gpio=34, raw_value=2000, sensor_type="moisture", name="Bodenfeuchte", quality="good"
     )
 
     # pH-Sensor
     mock.set_sensor_value(
-        gpio=35,
-        raw_value=700,  # pH 7.0
-        sensor_type="ph",
-        name="pH Wasser",
-        quality="good"
+        gpio=35, raw_value=700, sensor_type="ph", name="pH Wasser", quality="good"  # pH 7.0
     )
 
     # EC-Sensor
     mock.set_sensor_value(
-        gpio=36,
-        raw_value=180,  # 1.8 mS/cm
-        sensor_type="ec",
-        name="EC Wasser",
-        quality="good"
+        gpio=36, raw_value=180, sensor_type="ec", name="EC Wasser", quality="good"  # 1.8 mS/cm
     )
 
     mock.clear_published_messages()
@@ -226,6 +216,7 @@ def sensor_test_esp():
 # =============================================================================
 # Test: Stuck Values (Sensor zeigt konstanten Wert)
 # =============================================================================
+
 
 class TestStuckValues:
     """
@@ -270,12 +261,10 @@ class TestStuckValues:
 
         # === VERIFY: Stuck-Detection ===
         is_stuck = detector.detect_stuck_value(
-            readings,
-            min_variation=SensorLimits.TEMP_STUCK_VARIATION
+            readings, min_variation=SensorLimits.TEMP_STUCK_VARIATION
         )
 
-        assert is_stuck is True, \
-            "System sollte erkennen dass Temperatur-Sensor stuck ist"
+        assert is_stuck is True, "System sollte erkennen dass Temperatur-Sensor stuck ist"
 
         # In Praxis: Sensor-Qualität auf "stale" setzen
         # Server würde Warnung generieren
@@ -303,7 +292,7 @@ class TestStuckValues:
             sensor_type="SHT31",
             primary_value=2500,  # Temperatur
             secondary_values={"humidity": SensorLimits.HUMIDITY_CONDENSATION},
-            quality="good"  # Sensor funktioniert, aber Wert ist suspekt
+            quality="good",  # Sensor funktioniert, aber Wert ist suspekt
         )
 
         # Mehrere Lesungen mit 100%
@@ -330,6 +319,7 @@ class TestStuckValues:
 # =============================================================================
 # Test: Sudden Spikes (Unrealistische Sprünge)
 # =============================================================================
+
 
 class TestSuddenSpikes:
     """
@@ -375,13 +365,12 @@ class TestSuddenSpikes:
 
         # === VERIFY: Spike-Detection ===
         is_spike = detector.detect_sudden_spike(
-            current=spike_value,
-            previous=previous_value,
-            max_delta=SensorLimits.TEMP_MAX_SPIKE
+            current=spike_value, previous=previous_value, max_delta=SensorLimits.TEMP_MAX_SPIKE
         )
 
-        assert is_spike is True, \
-            f"Sprung von {previous_value/100}°C auf {spike_value/100}°C muss als Spike erkannt werden"
+        assert (
+            is_spike is True
+        ), f"Sprung von {previous_value/100}°C auf {spike_value/100}°C muss als Spike erkannt werden"
 
         # In Praxis: Server würde previous_value behalten
         # und quality="spike_filtered" setzen
@@ -397,21 +386,21 @@ class TestSuddenSpikes:
         detector = SensorAnomalyDetector()
 
         previous_humidity = 650  # 65%
-        spike_humidity = 300     # 30%
+        spike_humidity = 300  # 30%
 
         is_spike = detector.detect_sudden_spike(
             current=spike_humidity,
             previous=previous_humidity,
-            max_delta=SensorLimits.HUMIDITY_MAX_SPIKE
+            max_delta=SensorLimits.HUMIDITY_MAX_SPIKE,
         )
 
-        assert is_spike is True, \
-            "35% Feuchte-Sprung muss als Spike erkannt werden"
+        assert is_spike is True, "35% Feuchte-Sprung muss als Spike erkannt werden"
 
 
 # =============================================================================
 # Test: Sensor Drift (Langsame Abweichung)
 # =============================================================================
+
 
 class TestSensorDrift:
     """
@@ -460,7 +449,7 @@ class TestSensorDrift:
         is_drifting = detector.detect_drift(
             readings=readings,
             max_drift_per_hour=SensorLimits.PH_MAX_DRIFT_PER_HOUR,
-            interval_seconds=3600  # 1 Stunde
+            interval_seconds=3600,  # 1 Stunde
         )
 
         # Drift: 1.5 pH über 24h = 0.0625 pH/h = 6.25 raw/h
@@ -480,7 +469,7 @@ class TestSensorDrift:
         is_aggressive_drift = detector.detect_drift(
             readings=aggressive_readings,
             max_drift_per_hour=SensorLimits.PH_MAX_DRIFT_PER_HOUR,
-            interval_seconds=3600
+            interval_seconds=3600,
         )
 
         # 10 raw/h ist unter 50 raw/h, also auch kein Alarm
@@ -492,16 +481,16 @@ class TestSensorDrift:
         is_extreme_drift = detector.detect_drift(
             readings=extreme_readings,
             max_drift_per_hour=SensorLimits.PH_MAX_DRIFT_PER_HOUR,
-            interval_seconds=3600
+            interval_seconds=3600,
         )
 
-        assert is_extreme_drift is True, \
-            "Extremer Drift (0.6 pH/h) muss erkannt werden"
+        assert is_extreme_drift is True, "Extremer Drift (0.6 pH/h) muss erkannt werden"
 
 
 # =============================================================================
 # Test: Out-of-Range (Unmögliche Werte)
 # =============================================================================
+
 
 class TestOutOfRange:
     """
@@ -540,13 +529,10 @@ class TestOutOfRange:
 
         # === VERIFY ===
         is_out_of_range = detector.detect_out_of_range(
-            value=value,
-            min_valid=SensorLimits.EC_MIN_VALID,
-            max_valid=SensorLimits.EC_MAX_VALID
+            value=value, min_valid=SensorLimits.EC_MIN_VALID, max_valid=SensorLimits.EC_MAX_VALID
         )
 
-        assert is_out_of_range is True, \
-            f"EC {value/100} mS/cm muss als out_of_range erkannt werden"
+        assert is_out_of_range is True, f"EC {value/100} mS/cm muss als out_of_range erkannt werden"
 
     @pytest.mark.critical
     def test_ph_negative_value(self, sensor_test_esp):
@@ -571,13 +557,10 @@ class TestOutOfRange:
         value = response["data"]["raw_value"]
 
         is_out_of_range = detector.detect_out_of_range(
-            value=value,
-            min_valid=SensorLimits.PH_MIN_VALID,
-            max_valid=SensorLimits.PH_MAX_VALID
+            value=value, min_valid=SensorLimits.PH_MIN_VALID, max_valid=SensorLimits.PH_MAX_VALID
         )
 
-        assert is_out_of_range is True, \
-            "Negativer pH muss als out_of_range erkannt werden"
+        assert is_out_of_range is True, "Negativer pH muss als out_of_range erkannt werden"
 
     def test_temperature_extreme_low(self, sensor_test_esp):
         """
@@ -606,13 +589,15 @@ class TestOutOfRange:
         GREENHOUSE_MIN_TEMP = -1000  # -10°C absolute Untergrenze
         is_unrealistic = value < GREENHOUSE_MIN_TEMP
 
-        assert is_unrealistic is True, \
-            "-50°C ist technisch valide, aber für Gewächshaus unrealistisch"
+        assert (
+            is_unrealistic is True
+        ), "-50°C ist technisch valide, aber für Gewächshaus unrealistisch"
 
 
 # =============================================================================
 # Test: Noise/Flicker (Schnelle Schwankungen)
 # =============================================================================
+
 
 class TestSensorNoise:
     """
@@ -648,7 +633,7 @@ class TestSensorNoise:
         # Berechne Standardabweichung
         mean = sum(noisy_values) / len(noisy_values)
         variance = sum((x - mean) ** 2 for x in noisy_values) / len(noisy_values)
-        std_dev = variance ** 0.5
+        std_dev = variance**0.5
 
         # Normale Temp-Schwankung: std_dev < 50 raw (0.5°C)
         # Hier: std_dev sollte > 200 sein (2°C)
@@ -694,6 +679,7 @@ class TestSensorNoise:
 # Test: Quality Degradation Over Time
 # =============================================================================
 
+
 class TestQualityDegradation:
     """
     Tests für langfristige Sensor-Degradation.
@@ -721,12 +707,12 @@ class TestQualityDegradation:
         """
         # Simulierte historische Noise-Levels (std_dev in raw)
         noise_history = [
-            ("day_1", 20),   # 0.2°C - gut
-            ("day_7", 25),   # 0.25°C - gut
+            ("day_1", 20),  # 0.2°C - gut
+            ("day_7", 25),  # 0.25°C - gut
             ("day_14", 35),  # 0.35°C - OK
             ("day_21", 50),  # 0.5°C - Grenzwertig
             ("day_28", 80),  # 0.8°C - Problematisch
-            ("day_35", 120), # 1.2°C - Schlecht!
+            ("day_35", 120),  # 1.2°C - Schlecht!
         ]
 
         # Berechne Trend
@@ -736,8 +722,9 @@ class TestQualityDegradation:
         degradation_factor = last_week_avg / first_week_avg
 
         # === VERIFY ===
-        assert degradation_factor > 3, \
-            f"Noise ist um Faktor {degradation_factor:.1f}x gestiegen - Degradation!"
+        assert (
+            degradation_factor > 3
+        ), f"Noise ist um Faktor {degradation_factor:.1f}x gestiegen - Degradation!"
 
         # In Praxis: Automatische Wartungsmeldung an Betreiber
 
@@ -794,17 +781,14 @@ class TestFalsePositivePrevention:
         """Humidity at exactly 98% (condensation risk) must be detected."""
         # Raw value 980 = 98.0% (sensor reports in 0.1% units)
         condensation_threshold = 980
-        assert 980 >= condensation_threshold, (
-            "Boundary value must trigger condensation warning"
-        )
-        assert 979 < condensation_threshold, (
-            "Below boundary must NOT trigger condensation"
-        )
+        assert 980 >= condensation_threshold, "Boundary value must trigger condensation warning"
+        assert 979 < condensation_threshold, "Below boundary must NOT trigger condensation"
 
 
 # =============================================================================
 # Pytest Configuration
 # =============================================================================
+
 
 def pytest_configure(config):
     """Register custom markers for sensor anomaly tests."""

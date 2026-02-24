@@ -12,7 +12,6 @@ Architecture:
 """
 
 import re
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, select
@@ -235,7 +234,7 @@ class SensorSchedulerService:
         # Remove category prefix if present
         prefix = f"{JobCategory.SENSOR_SCHEDULE.value}_"
         if job_id.startswith(prefix):
-            job_id = job_id[len(prefix):]
+            job_id = job_id[len(prefix) :]
 
         # Pattern: ESP_XXXXXX_NN (ESP ID with 6-8 hex chars, underscore, GPIO)
         # ESP ID format: ESP_ followed by 6-8 uppercase hex characters
@@ -305,8 +304,7 @@ class SensorSchedulerService:
             if success:
                 self._active_jobs[full_job_id] = f"{esp_id}:{gpio}"
                 logger.info(
-                    f"Scheduled measurement job created: {full_job_id} "
-                    f"(cron: {expression})"
+                    f"Scheduled measurement job created: {full_job_id} " f"(cron: {expression})"
                 )
                 return True
             else:
@@ -413,9 +411,7 @@ class SensorSchedulerService:
                     f"(request_id: {request_id})"
                 )
             else:
-                logger.error(
-                    f"Failed to trigger scheduled measurement: {esp_id}/GPIO {gpio}"
-                )
+                logger.error(f"Failed to trigger scheduled measurement: {esp_id}/GPIO {gpio}")
 
         except Exception as e:
             logger.exception(f"Error executing scheduled measurement {full_job_id}: {e}")
@@ -502,13 +498,15 @@ class SensorSchedulerService:
             job = self.scheduler._scheduler.get_job(full_job_id)
             next_run = job.next_run_time if job else None
 
-            jobs.append({
-                "job_id": full_job_id,
-                "esp_id": esp_id,
-                "gpio": gpio,
-                "next_run": next_run.isoformat() if next_run else None,
-                "status": "active" if job else "missing",
-            })
+            jobs.append(
+                {
+                    "job_id": full_job_id,
+                    "esp_id": esp_id,
+                    "gpio": gpio,
+                    "next_run": next_run.isoformat() if next_run else None,
+                    "status": "active" if job else "missing",
+                }
+            )
 
         return jobs
 

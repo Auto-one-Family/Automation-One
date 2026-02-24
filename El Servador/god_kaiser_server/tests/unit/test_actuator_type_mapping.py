@@ -144,18 +144,16 @@ class TestMapActuatorTypeForESP32:
         """All ESP32 types must be valid outputs when passed as input."""
         for esp32_type in ESP32_ACTUATOR_TYPES:
             result = map_actuator_type_for_esp32(esp32_type)
-            assert result in ESP32_ACTUATOR_TYPES, (
-                f"Output '{result}' is not a valid ESP32 type"
-            )
+            assert result in ESP32_ACTUATOR_TYPES, f"Output '{result}' is not a valid ESP32 type"
 
     def test_all_mappings_produce_valid_esp32_types(self):
         """All mappings must produce ESP32-compatible types."""
         for server_type, expected_esp32_type in SERVER_TO_ESP32_ACTUATOR_TYPE.items():
             result = map_actuator_type_for_esp32(server_type)
             assert result == expected_esp32_type
-            assert result in ESP32_ACTUATOR_TYPES, (
-                f"Mapping '{server_type}' → '{result}' is not a valid ESP32 type"
-            )
+            assert (
+                result in ESP32_ACTUATOR_TYPES
+            ), f"Mapping '{server_type}' → '{result}' is not a valid ESP32 type"
 
     def test_esp32_actuator_types_constant_is_frozen(self):
         """ESP32_ACTUATOR_TYPES should be immutable (frozenset)."""
@@ -190,12 +188,12 @@ class TestConfigMappingEngineIntegration:
                 actuator_type_mapping = mapping
                 break
 
-        assert actuator_type_mapping is not None, (
-            "actuator_type mapping not found in DEFAULT_ACTUATOR_MAPPINGS"
-        )
-        assert actuator_type_mapping.get("transform") == "actuator_type_to_esp32", (
-            "actuator_type mapping should use 'actuator_type_to_esp32' transform"
-        )
+        assert (
+            actuator_type_mapping is not None
+        ), "actuator_type mapping not found in DEFAULT_ACTUATOR_MAPPINGS"
+        assert (
+            actuator_type_mapping.get("transform") == "actuator_type_to_esp32"
+        ), "actuator_type mapping should use 'actuator_type_to_esp32' transform"
 
     def test_engine_applies_transform_to_actuator(self):
         """ConfigMappingEngine applies the transform when building actuator payload."""
@@ -212,9 +210,9 @@ class TestConfigMappingEngineIntegration:
         payload = engine.apply_actuator_mapping(mock_actuator)
 
         # The payload should have "relay" not "digital"
-        assert payload["actuator_type"] == "relay", (
-            f"Expected 'relay' but got '{payload['actuator_type']}'"
-        )
+        assert (
+            payload["actuator_type"] == "relay"
+        ), f"Expected 'relay' but got '{payload['actuator_type']}'"
         assert payload["gpio"] == 5
         assert payload["actuator_name"] == "Test Relay"
         assert payload["active"] is True
@@ -233,9 +231,9 @@ class TestConfigMappingEngineIntegration:
 
             payload = engine.apply_actuator_mapping(mock_actuator)
 
-            assert payload["actuator_type"] == esp32_type, (
-                f"Type '{esp32_type}' should be preserved but got '{payload['actuator_type']}'"
-            )
+            assert (
+                payload["actuator_type"] == esp32_type
+            ), f"Type '{esp32_type}' should be preserved but got '{payload['actuator_type']}'"
 
 
 class TestEdgeCases:

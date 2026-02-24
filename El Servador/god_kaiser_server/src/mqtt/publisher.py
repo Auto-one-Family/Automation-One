@@ -17,7 +17,6 @@ from ..core import constants
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
 from ..core.resilience import (
-    ResilienceRegistry,
     calculate_backoff_delay,
 )
 from .client import MQTTClient
@@ -32,7 +31,7 @@ class Publisher:
 
     Provides convenience methods for publishing common message types
     with appropriate QoS levels and retry logic.
-    
+
     Includes resilience patterns:
     - Uses MQTTClient's circuit breaker
     - Exponential backoff retry with configurable parameters
@@ -47,7 +46,7 @@ class Publisher:
             mqtt_client: MQTT client instance (uses singleton if None)
         """
         self.client = mqtt_client or MQTTClient.get_instance()
-        
+
         # Load resilience settings
         settings = get_settings()
         self.max_retries = settings.resilience.retry_max_attempts
@@ -55,7 +54,7 @@ class Publisher:
         self.max_delay = settings.resilience.retry_max_delay
         self.exponential_base = settings.resilience.retry_exponential_base
         self.jitter_enabled = settings.resilience.retry_jitter_enabled
-        
+
         # Metrics
         self._publish_attempts = 0
         self._publish_successes = 0
@@ -98,7 +97,9 @@ class Publisher:
 
         qos = constants.QOS_ACTUATOR_COMMAND  # QoS 2 (Exactly once)
 
-        logger.info(f"Publishing actuator command to {esp_id} GPIO {gpio}: {command} (value={value})")
+        logger.info(
+            f"Publishing actuator command to {esp_id} GPIO {gpio}: {command} (value={value})"
+        )
         return self._publish_with_retry(topic, payload, qos, retry)
 
     def publish_sensor_command(
@@ -142,9 +143,7 @@ class Publisher:
                 f"(request_id: {request_id})"
             )
         else:
-            logger.error(
-                f"Failed to publish sensor command to {esp_id}/sensor/{gpio}"
-            )
+            logger.error(f"Failed to publish sensor command to {esp_id}/sensor/{gpio}")
 
         return success, request_id
 
@@ -237,7 +236,7 @@ class Publisher:
             This is the topic ESP32 expects (not individual GPIO topics).
         """
         topic = TopicBuilder.build_config_topic(esp_id)
-        
+
         # Build payload with timestamp
         payload = {
             **config,
@@ -249,14 +248,14 @@ class Publisher:
         # Extract counts for logging
         sensor_count = len(config.get("sensors", []))
         actuator_count = len(config.get("actuators", []))
-        
+
         logger.info(
             f"Publishing config to {esp_id}: "
             f"{sensor_count} sensor(s), {actuator_count} actuator(s)"
         )
-        
+
         success = self._publish_with_retry(topic, payload, qos, retry)
-        
+
         if success:
             logger.info(
                 f"✅ Config published successfully to {esp_id}: "
@@ -267,7 +266,7 @@ class Publisher:
                 f"❌ Config publish failed for {esp_id}: "
                 f"{sensor_count} sensor(s), {actuator_count} actuator(s)"
             )
-        
+
         return success
 
     def publish_system_command(
@@ -288,14 +287,14 @@ class Publisher:
 
         Returns:
             True if publish successful
-        
+
         Note:
-            Most commands are uppercased (REBOOT, OTA_UPDATE, etc.) but some 
+            Most commands are uppercased (REBOOT, OTA_UPDATE, etc.) but some
             path-like commands (onewire/scan) are preserved as-is because
             ESP32 expects lowercase for these.
         """
         topic = TopicBuilder.build_system_command_topic(esp_id)
-        
+
         # Preserve case for path-like commands (ESP32 expects lowercase)
         # Examples: "onewire/scan", "sensor/measure"
         CASE_SENSITIVE_COMMANDS = ["onewire/scan", "sensor/measure"]
@@ -303,7 +302,7 @@ class Publisher:
             normalized_command = command.lower()
         else:
             normalized_command = command.upper()
-        
+
         payload = {
             "command": normalized_command,
             "params": params or {},
@@ -348,7 +347,9 @@ class Publisher:
 
         qos = constants.QOS_SENSOR_DATA  # QoS 1 (At least once)
 
-        logger.debug(f"Publishing Pi-Enhanced response to {esp_id} GPIO {gpio}: {processed_value} {unit}")
+        logger.debug(
+            f"Publishing Pi-Enhanced response to {esp_id} GPIO {gpio}: {processed_value} {unit}"
+        )
         return self._publish_with_retry(topic, payload, qos, retry)
 
     def _publish_with_retry(
@@ -369,7 +370,7 @@ class Publisher:
 
         Returns:
             True if publish successful
-        
+
         Note:
             Uses exponential backoff with optional jitter to prevent thundering herd.
             Circuit breaker protection is handled by MQTTClient.publish()
@@ -416,11 +417,11 @@ class Publisher:
 
         self._publish_failures += 1
         return False
-    
+
     def get_metrics(self) -> Dict[str, Any]:
         """
         Get publisher metrics.
-        
+
         Returns:
             Dictionary with publish statistics
         """
@@ -430,7 +431,8 @@ class Publisher:
             "publish_failures": self._publish_failures,
             "success_rate": (
                 self._publish_successes / self._publish_attempts * 100
-                if self._publish_attempts > 0 else 0.0
+                if self._publish_attempts > 0
+                else 0.0
             ),
             "config": {
                 "max_retries": self.max_retries,

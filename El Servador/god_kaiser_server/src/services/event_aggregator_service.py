@@ -34,7 +34,8 @@ def ensure_utc_isoformat(dt: datetime) -> str:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
 
-from sqlalchemy import and_, desc, func, select
+
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.logging_config import get_logger
@@ -47,17 +48,19 @@ from ..utils.sensor_formatters import format_sensor_message, format_sensor_title
 
 logger = get_logger(__name__)
 
-DataSource = Literal['audit_log', 'sensor_data', 'esp_health', 'actuators']
+DataSource = Literal["audit_log", "sensor_data", "esp_health", "actuators"]
 
 
 class SourceCounts(TypedDict):
     """Count information for a single data source."""
+
     loaded: int
     available: int
 
 
 class AggregationResult(TypedDict):
     """Result of event aggregation with counts."""
+
     events: List[Dict[str, Any]]
     total_loaded: int
     total_available: int
@@ -85,7 +88,7 @@ class EventAggregatorService:
         limit_per_source: int = 500,
         severity_filter: Optional[List[str]] = None,
         esp_id_filter: Optional[List[str]] = None,
-        before: Optional[datetime] = None
+        before: Optional[datetime] = None,
     ) -> AggregationResult:
         """
         Haupt-Aggregations-Methode.
@@ -119,10 +122,7 @@ class EventAggregatorService:
 
         # Ensure 'after' is timezone-aware (UTC) if provided
         if after is not None and after.tzinfo is None:
-            logger.warning(
-                f"aggregate_events received naive datetime: {after}. "
-                f"Assuming UTC."
-            )
+            logger.warning(f"aggregate_events received naive datetime: {after}. " f"Assuming UTC.")
             after = after.replace(tzinfo=tz.utc)
 
         # Ensure 'before' is timezone-aware (UTC) if provided
@@ -138,7 +138,7 @@ class EventAggregatorService:
         total_available = 0
 
         # Query jede Quelle (wenn ausgewählt)
-        if 'audit_log' in sources:
+        if "audit_log" in sources:
             try:
                 # audit_log supports both severity_filter and esp_id_filter
                 audit_events = await self._get_audit_events(
@@ -147,19 +147,14 @@ class EventAggregatorService:
                 all_events.extend(audit_events)
 
                 # Count verfügbare Events (with same filters)
-                audit_count = await self._count_audit_events(
-                    after, severity_filter, esp_id_filter
-                )
-                source_counts['audit_log'] = {
-                    'loaded': len(audit_events),
-                    'available': audit_count
-                }
+                audit_count = await self._count_audit_events(after, severity_filter, esp_id_filter)
+                source_counts["audit_log"] = {"loaded": len(audit_events), "available": audit_count}
                 total_available += audit_count
             except Exception as e:
                 logger.error(f"Failed to get audit events: {e}")
-                source_counts['audit_log'] = {'loaded': 0, 'available': 0}
+                source_counts["audit_log"] = {"loaded": 0, "available": 0}
 
-        if 'sensor_data' in sources:
+        if "sensor_data" in sources:
             try:
                 # sensor_data only supports esp_id_filter (no severity column)
                 sensor_events = await self._get_sensor_events(
@@ -168,16 +163,16 @@ class EventAggregatorService:
                 all_events.extend(sensor_events)
 
                 sensor_count = await self._count_sensor_events(after, esp_id_filter)
-                source_counts['sensor_data'] = {
-                    'loaded': len(sensor_events),
-                    'available': sensor_count
+                source_counts["sensor_data"] = {
+                    "loaded": len(sensor_events),
+                    "available": sensor_count,
                 }
                 total_available += sensor_count
             except Exception as e:
                 logger.error(f"Failed to get sensor events: {e}")
-                source_counts['sensor_data'] = {'loaded': 0, 'available': 0}
+                source_counts["sensor_data"] = {"loaded": 0, "available": 0}
 
-        if 'esp_health' in sources:
+        if "esp_health" in sources:
             try:
                 # esp_health only supports esp_id_filter (no severity column)
                 health_events = await self._get_health_events(
@@ -186,16 +181,16 @@ class EventAggregatorService:
                 all_events.extend(health_events)
 
                 health_count = await self._count_health_events(after, esp_id_filter)
-                source_counts['esp_health'] = {
-                    'loaded': len(health_events),
-                    'available': health_count
+                source_counts["esp_health"] = {
+                    "loaded": len(health_events),
+                    "available": health_count,
                 }
                 total_available += health_count
             except Exception as e:
                 logger.error(f"Failed to get health events: {e}")
-                source_counts['esp_health'] = {'loaded': 0, 'available': 0}
+                source_counts["esp_health"] = {"loaded": 0, "available": 0}
 
-        if 'actuators' in sources:
+        if "actuators" in sources:
             try:
                 # actuators only supports esp_id_filter (no severity column)
                 actuator_events = await self._get_actuator_events(
@@ -204,23 +199,23 @@ class EventAggregatorService:
                 all_events.extend(actuator_events)
 
                 actuator_count = await self._count_actuator_events(after, esp_id_filter)
-                source_counts['actuators'] = {
-                    'loaded': len(actuator_events),
-                    'available': actuator_count
+                source_counts["actuators"] = {
+                    "loaded": len(actuator_events),
+                    "available": actuator_count,
                 }
                 total_available += actuator_count
             except Exception as e:
                 logger.error(f"Failed to get actuator events: {e}")
-                source_counts['actuators'] = {'loaded': 0, 'available': 0}
+                source_counts["actuators"] = {"loaded": 0, "available": 0}
 
         # Sortiere chronologisch (neueste zuerst)
-        all_events.sort(key=lambda e: e['timestamp'], reverse=True)
+        all_events.sort(key=lambda e: e["timestamp"], reverse=True)
 
         return {
-            'events': all_events,
-            'total_loaded': len(all_events),
-            'total_available': total_available,
-            'source_counts': source_counts
+            "events": all_events,
+            "total_loaded": len(all_events),
+            "total_available": total_available,
+            "source_counts": source_counts,
         }
 
     # =====================================================================
@@ -233,7 +228,7 @@ class EventAggregatorService:
         limit: int,
         severity_filter: Optional[List[str]] = None,
         esp_id_filter: Optional[List[str]] = None,
-        before: Optional[datetime] = None
+        before: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """
         Lädt und transformiert Audit-Log Events.
@@ -281,52 +276,52 @@ class EventAggregatorService:
         """
         # Kategorisierung (menschenverständlich)
         category_map = {
-            'config_response': 'Konfiguration',
-            'config_published': 'Konfiguration',
-            'config_failed': 'Konfiguration',
-            'emergency_stop': 'Notfall',
-            'device_offline': 'Geräte-Status',
-            'device_online': 'Geräte-Status',
-            'device_discovered': 'Geräte-Status',
-            'device_approved': 'Geräte-Status',
-            'device_rejected': 'Geräte-Status',
-            'device_rediscovered': 'Geräte-Status',
-            'lwt_received': 'Geräte-Status',
-            'mqtt_error': 'Kommunikation',
-            'validation_error': 'Validierung',
-            'database_error': 'System',
-            'login_success': 'Authentifizierung',
-            'login_failed': 'Authentifizierung',
-            'logout': 'Authentifizierung',
-            'service_start': 'System',
-            'service_stop': 'System',
+            "config_response": "Konfiguration",
+            "config_published": "Konfiguration",
+            "config_failed": "Konfiguration",
+            "emergency_stop": "Notfall",
+            "device_offline": "Geräte-Status",
+            "device_online": "Geräte-Status",
+            "device_discovered": "Geräte-Status",
+            "device_approved": "Geräte-Status",
+            "device_rejected": "Geräte-Status",
+            "device_rediscovered": "Geräte-Status",
+            "lwt_received": "Geräte-Status",
+            "mqtt_error": "Kommunikation",
+            "validation_error": "Validierung",
+            "database_error": "System",
+            "login_success": "Authentifizierung",
+            "login_failed": "Authentifizierung",
+            "logout": "Authentifizierung",
+            "service_start": "System",
+            "service_stop": "System",
         }
 
         # Titel-Generierung (prägnant, deutsch)
         title_map = {
-            'config_response': 'Konfiguration empfangen',
-            'config_published': 'Konfiguration gesendet',
-            'config_failed': 'Konfigurationsfehler',
-            'emergency_stop': 'Notfall-Stopp ausgelöst',
-            'device_offline': 'Gerät offline',
-            'device_online': 'Gerät online',
-            'device_discovered': 'Neues Gerät entdeckt',
-            'device_approved': 'Gerät genehmigt',
-            'device_rejected': 'Gerät abgelehnt',
-            'device_rediscovered': 'Gerät wieder online',
-            'lwt_received': 'Unerwarteter Verbindungsabbruch',
-            'mqtt_error': 'MQTT-Fehler',
-            'validation_error': 'Validierungsfehler',
-            'database_error': 'Datenbankfehler',
-            'login_success': 'Anmeldung erfolgreich',
-            'login_failed': 'Anmeldung fehlgeschlagen',
-            'logout': 'Abmeldung',
-            'service_start': 'Dienst gestartet',
-            'service_stop': 'Dienst gestoppt',
+            "config_response": "Konfiguration empfangen",
+            "config_published": "Konfiguration gesendet",
+            "config_failed": "Konfigurationsfehler",
+            "emergency_stop": "Notfall-Stopp ausgelöst",
+            "device_offline": "Gerät offline",
+            "device_online": "Gerät online",
+            "device_discovered": "Neues Gerät entdeckt",
+            "device_approved": "Gerät genehmigt",
+            "device_rejected": "Gerät abgelehnt",
+            "device_rediscovered": "Gerät wieder online",
+            "lwt_received": "Unerwarteter Verbindungsabbruch",
+            "mqtt_error": "MQTT-Fehler",
+            "validation_error": "Validierungsfehler",
+            "database_error": "Datenbankfehler",
+            "login_success": "Anmeldung erfolgreich",
+            "login_failed": "Anmeldung fehlgeschlagen",
+            "logout": "Abmeldung",
+            "service_start": "Dienst gestartet",
+            "service_stop": "Dienst gestoppt",
         }
 
-        category = category_map.get(log.event_type, 'System')
-        base_title = title_map.get(log.event_type, log.event_type.replace('_', ' ').title())
+        category = category_map.get(log.event_type, "System")
+        base_title = title_map.get(log.event_type, log.event_type.replace("_", " ").title())
 
         # Titel mit Device-ID anreichern
         device_id = None
@@ -353,8 +348,8 @@ class EventAggregatorService:
                 "error_description": log.error_description,
                 "request_id": log.request_id,
                 "correlation_id": log.correlation_id,
-                **(log.details or {})
-            }
+                **(log.details or {}),
+            },
         }
 
     async def _get_sensor_events(
@@ -362,7 +357,7 @@ class EventAggregatorService:
         after: Optional[datetime],
         limit: int,
         esp_id_filter: Optional[List[str]] = None,
-        before: Optional[datetime] = None
+        before: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """
         Lädt und transformiert Sensor-Daten.
@@ -400,11 +395,7 @@ class EventAggregatorService:
             for sensor_data, device_id in rows
         ]
 
-    def _transform_sensor_to_unified(
-        self,
-        data: SensorData,
-        device_id: str
-    ) -> Dict[str, Any]:
+    def _transform_sensor_to_unified(self, data: SensorData, device_id: str) -> Dict[str, Any]:
         """
         Sensor-Data -> Unified Event Format.
 
@@ -446,7 +437,7 @@ class EventAggregatorService:
                 "processing_mode": data.processing_mode,
                 "quality": data.quality,
                 "data_source": data.data_source,
-            }
+            },
         }
 
     async def _get_health_events(
@@ -454,7 +445,7 @@ class EventAggregatorService:
         after: Optional[datetime],
         limit: int,
         esp_id_filter: Optional[List[str]] = None,
-        before: Optional[datetime] = None
+        before: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """
         Lädt ESP-Health Events aus esp_heartbeat_logs Tabelle.
@@ -547,7 +538,7 @@ class EventAggregatorService:
                 "gpio_reserved_count": heartbeat.gpio_reserved_count,
                 "health_status": heartbeat.health_status,
                 "data_source": heartbeat.data_source,
-            }
+            },
         }
 
     async def _get_actuator_events(
@@ -555,7 +546,7 @@ class EventAggregatorService:
         after: Optional[datetime],
         limit: int,
         esp_id_filter: Optional[List[str]] = None,
-        before: Optional[datetime] = None
+        before: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """
         Lädt und transformiert Aktor-History.
@@ -589,36 +580,33 @@ class EventAggregatorService:
         rows = result.all()
 
         return [
-            self._transform_actuator_to_unified(history, device_id)
-            for history, device_id in rows
+            self._transform_actuator_to_unified(history, device_id) for history, device_id in rows
         ]
 
     def _transform_actuator_to_unified(
-        self,
-        history: ActuatorHistory,
-        device_id: str
+        self, history: ActuatorHistory, device_id: str
     ) -> Dict[str, Any]:
         """
         Actuator-History → Unified Event Format.
         """
         # Aktor-Typen (deutsch)
         actuator_type_names = {
-            'pump': 'Pumpe',
-            'valve': 'Ventil',
-            'relay': 'Relais',
-            'pwm': 'PWM-Ausgang',
-            'light': 'Beleuchtung',
-            'fan': 'Lüfter',
-            'heater': 'Heizung',
+            "pump": "Pumpe",
+            "valve": "Ventil",
+            "relay": "Relais",
+            "pwm": "PWM-Ausgang",
+            "light": "Beleuchtung",
+            "fan": "Lüfter",
+            "heater": "Heizung",
         }
 
         # Command-Typen (deutsch)
         command_names = {
-            'set': 'gesetzt',
-            'stop': 'gestoppt',
-            'emergency_stop': 'Notfall-Stopp',
-            'on': 'eingeschaltet',
-            'off': 'ausgeschaltet',
+            "set": "gesetzt",
+            "stop": "gestoppt",
+            "emergency_stop": "Notfall-Stopp",
+            "on": "eingeschaltet",
+            "off": "ausgeschaltet",
         }
 
         actuator_name = actuator_type_names.get(history.actuator_type, history.actuator_type)
@@ -627,7 +615,7 @@ class EventAggregatorService:
         # Message formatieren
         parts = [f"GPIO {history.gpio}"]
         if history.value is not None:
-            if history.actuator_type == 'pwm':
+            if history.actuator_type == "pwm":
                 parts.append(f"PWM: {int(history.value * 100)}%")
             else:
                 parts.append(f"Wert: {history.value}")
@@ -648,7 +636,9 @@ class EventAggregatorService:
             "source": "actuators",
             "category": "Aktoren",
             "title": title,
-            "message": message if history.success else (history.error_message or "Unbekannter Fehler"),
+            "message": (
+                message if history.success else (history.error_message or "Unbekannter Fehler")
+            ),
             "severity": severity,
             "device_id": device_id,
             "metadata": {
@@ -660,8 +650,8 @@ class EventAggregatorService:
                 "error_message": history.error_message,
                 "issued_by": history.issued_by,
                 "data_source": history.data_source,
-                **(history.command_metadata or {})
-            }
+                **(history.command_metadata or {}),
+            },
         }
 
     # =====================================================================
@@ -672,7 +662,7 @@ class EventAggregatorService:
         self,
         after: Optional[datetime],
         severity_filter: Optional[List[str]] = None,
-        esp_id_filter: Optional[List[str]] = None
+        esp_id_filter: Optional[List[str]] = None,
     ) -> int:
         """Zählt verfügbare Audit-Log Events (mit denselben Filtern wie _get_audit_events)."""
         query = select(func.count(AuditLog.id))
@@ -686,9 +676,7 @@ class EventAggregatorService:
         return result.scalar() or 0
 
     async def _count_sensor_events(
-        self,
-        after: Optional[datetime],
-        esp_id_filter: Optional[List[str]] = None
+        self, after: Optional[datetime], esp_id_filter: Optional[List[str]] = None
     ) -> int:
         """Zählt verfügbare Sensor-Data Events (mit denselben Filtern wie _get_sensor_events)."""
         # Need to join with ESPDevice if filtering by esp_id
@@ -706,9 +694,7 @@ class EventAggregatorService:
         return result.scalar() or 0
 
     async def _count_health_events(
-        self,
-        after: Optional[datetime],
-        esp_id_filter: Optional[List[str]] = None
+        self, after: Optional[datetime], esp_id_filter: Optional[List[str]] = None
     ) -> int:
         """Zählt verfügbare ESP-Heartbeat Events (mit denselben Filtern wie _get_health_events)."""
         query = select(func.count(ESPHeartbeatLog.id))
@@ -720,9 +706,7 @@ class EventAggregatorService:
         return result.scalar() or 0
 
     async def _count_actuator_events(
-        self,
-        after: Optional[datetime],
-        esp_id_filter: Optional[List[str]] = None
+        self, after: Optional[datetime], esp_id_filter: Optional[List[str]] = None
     ) -> int:
         """Zählt verfügbare Actuator-History Events (mit denselben Filtern wie _get_actuator_events)."""
         # Need to join with ESPDevice if filtering by esp_id

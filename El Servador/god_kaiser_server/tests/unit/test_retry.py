@@ -41,10 +41,7 @@ class TestBackoffCalculation:
 
     def test_jitter_adds_randomness(self):
         """Test jitter adds randomness to delay."""
-        delays = [
-            calculate_backoff_delay(3, base_delay=1.0, jitter=True)
-            for _ in range(10)
-        ]
+        delays = [calculate_backoff_delay(3, base_delay=1.0, jitter=True) for _ in range(10)]
 
         # Should have some variation
         assert len(set(delays)) > 1
@@ -109,11 +106,7 @@ class TestRetryDecorator:
         """Test retry only retries specified exception types."""
         attempts = []
 
-        @retry(
-            max_attempts=3,
-            base_delay=0.01,
-            retryable_exceptions=(ConnectionError,)
-        )
+        @retry(max_attempts=3, base_delay=0.01, retryable_exceptions=(ConnectionError,))
         async def wrong_exception():
             attempts.append(1)
             raise ValueError("Non-retryable")
@@ -144,7 +137,7 @@ class TestRetryDecorator:
         # Attempt 1 → 2: ~0.1s
         # Attempt 2 → 3: ~0.2s
         # Attempt 3 → 4: ~0.4s
-        delays = [attempt_times[i+1] - attempt_times[i] for i in range(len(attempt_times)-1)]
+        delays = [attempt_times[i + 1] - attempt_times[i] for i in range(len(attempt_times) - 1)]
 
         assert delays[0] >= 0.09  # ~0.1s
         assert delays[1] >= 0.18  # ~0.2s
@@ -156,11 +149,9 @@ class TestRetryDecorator:
         callback_calls = []
 
         def on_retry_callback(attempt, exception, delay):
-            callback_calls.append({
-                "attempt": attempt,
-                "exception": type(exception).__name__,
-                "delay": delay
-            })
+            callback_calls.append(
+                {"attempt": attempt, "exception": type(exception).__name__, "delay": delay}
+            )
 
         @retry(max_attempts=3, base_delay=0.01, on_retry=on_retry_callback)
         async def fails_twice():
