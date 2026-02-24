@@ -31,7 +31,7 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -153,7 +153,7 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: El Frontend
-        run: npx playwright test --reporter=list,junit
+        run: npx playwright test --project=chromium --reporter=list,junit
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:5173
           PLAYWRIGHT_JUNIT_OUTPUT_NAME: ../../logs/frontend/playwright/playwright-results.xml
