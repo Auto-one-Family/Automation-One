@@ -190,7 +190,11 @@ class WebSocketManager:
             logger.debug(f"Client {client_id} unsubscribed")
 
     async def broadcast(
-        self, message_type: str, data: dict, filters: Optional[dict] = None
+        self,
+        message_type: str,
+        data: dict,
+        filters: Optional[dict] = None,
+        correlation_id: Optional[str] = None,
     ) -> None:
         """
         Broadcast message to all subscribed clients.
@@ -199,14 +203,26 @@ class WebSocketManager:
             message_type: Message type (sensor_data, actuator_status, etc.)
             data: Message payload
             filters: Optional broadcast-level filters (for filtering before sending)
+            correlation_id: Optional explicit correlation ID. If None, reads from
+                current async context (ContextVar). Pass explicitly when calling
+                from broadcast_threadsafe() since ContextVars don't cross threads.
         """
         async with self._lock:
             timestamp = unix_timestamp_s()
-            message = {
+
+            # Resolve correlation_id: explicit param > ContextVar > omit
+            if correlation_id is None:
+                from ..core.request_context import get_request_id
+
+                correlation_id = get_request_id()
+
+            message: dict = {
                 "type": message_type,
                 "timestamp": timestamp,
                 "data": data,
             }
+            if correlation_id:
+                message["correlation_id"] = correlation_id
 
             # Filter clients based on subscriptions
             clients_to_send = []
@@ -256,21 +272,31 @@ class WebSocketManager:
                 await self._disconnect_unlocked(client_id)
 
     def broadcast_threadsafe(
-        self, message_type: str, data: dict, filters: Optional[dict] = None
+        self,
+        message_type: str,
+        data: dict,
+        filters: Optional[dict] = None,
+        correlation_id: Optional[str] = None,
     ) -> None:
         """
         Thread-safe broadcast for MQTT callback invocations.
 
         Can be called from non-asyncio threads (e.g., MQTT callbacks).
+        ContextVars do NOT propagate across thread boundaries, so pass
+        correlation_id explicitly when calling from thread pool workers.
 
         Args:
             message_type: Message type
             data: Message payload
             filters: Optional filters
+            correlation_id: Correlation ID from MQTT handler context
         """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self.broadcast(message_type, data, filters), self._loop
+                self.broadcast(
+                    message_type, data, filters, correlation_id=correlation_id
+                ),
+                self._loop,
             )
         else:
             logger.warning("Cannot broadcast: event loop not available")

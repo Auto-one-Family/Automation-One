@@ -12,12 +12,12 @@ Features:
 
 import asyncio
 import json
-import time
+
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 
 from ..core.logging_config import get_logger
-from ..core.request_context import set_request_id
+from ..core.request_context import generate_mqtt_correlation_id, set_request_id
 from .client import MQTTClient
 from .topics import TopicBuilder
 
@@ -170,16 +170,10 @@ class Subscriber:
                 return
 
             # Generate correlation ID from MQTT payload for cross-layer tracing
-            # Format: {esp_id}:{topic_suffix}:{seq}:{timestamp_ms}
             esp_id = payload.get("esp_id", "unknown")
-            seq = payload.get("seq", "")
+            seq = payload.get("seq")
             topic_suffix = topic.rsplit("/", 1)[-1] if "/" in topic else topic
-            ts_ms = int(time.time() * 1000)
-            correlation_id = (
-                f"{esp_id}:{topic_suffix}:{seq}:{ts_ms}"
-                if seq
-                else f"{esp_id}:{topic_suffix}:{ts_ms}"
-            )
+            correlation_id = generate_mqtt_correlation_id(esp_id, topic_suffix, seq)
             set_request_id(correlation_id)
 
             # Find matching handler

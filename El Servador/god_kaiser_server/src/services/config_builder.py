@@ -197,11 +197,17 @@ class ConfigPayloadBuilder:
 
         # =====================================================================
         # GPIO-Konflikt-Check (Phase 2)
-        # Prüft ob mehrere Sensoren/Aktoren auf dem gleichen GPIO konfiguriert sind
+        # Prüft ob mehrere Sensoren/Aktoren auf dem gleichen GPIO konfiguriert sind.
+        # I2C and OneWire sensors are EXCLUDED — they share a bus and GPIO is valid
+        # to be reused (e.g., two SHT31 configs on GPIO 0 for I2C SDA/SCL).
         # =====================================================================
         used_gpios: dict[int, str] = {}
 
         for sensor in active_sensors:
+            # I2C/OneWire sensors share bus pins — no GPIO conflict possible
+            iface = getattr(sensor, "interface_type", None)
+            if iface and iface.upper() in ("I2C", "ONEWIRE"):
+                continue
             if sensor.gpio in used_gpios:
                 sensor_name = sensor.sensor_name or sensor.sensor_type
                 raise ConfigConflictError(

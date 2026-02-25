@@ -885,3 +885,20 @@ class GodKaiserClient:
             action_name="Register Real Device",
             target=device_id,
         )
+
+    async def approve_device(
+        self,
+        device_id: str,
+        zone_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Approve a pending device for operation."""
+        data: dict[str, Any] = {}
+        if zone_name:
+            data["zone_name"] = zone_name
+        return await self._request(
+            "POST",
+            f"/v1/esp/devices/{device_id}/approve",
+            json_data=data,
+            action_name="Approve Device",
+            target=device_id,
+        )

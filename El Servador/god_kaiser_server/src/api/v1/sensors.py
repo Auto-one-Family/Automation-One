@@ -24,9 +24,10 @@ References:
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig
@@ -44,6 +45,7 @@ from ...schemas import (
     TriggerMeasurementResponse,
 )
 from ...schemas.common import PaginationMeta
+from ...sensors.sensor_type_registry import is_multi_value_sensor, get_all_value_types_for_device
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ..deps import (
@@ -398,7 +400,80 @@ async def create_or_update_sensor(
         )
 
     # =========================================================================
-    # MULTI-VALUE SENSOR SUPPORT
+    # MULTI-VALUE SENSOR SPLITTING
+    # =========================================================================
+    # Base device types (e.g., "sht31") are split into individual value types
+    # (e.g., "sht31_temp" + "sht31_humidity"). Each gets its own sensor_config.
+    # The first created config is returned; frontend reloads all via fetchDevice().
+    if is_multi_value_sensor(request.sensor_type):
+        value_types = get_all_value_types_for_device(request.sensor_type)
+        logger.info(
+            f"Multi-value sensor '{request.sensor_type}' for ESP {esp_id}: "
+            f"splitting into {value_types}"
+        )
+        first_response = None
+
+        for value_type in value_types:
+            # Check if this sub-type already exists
+            existing_vt = await sensor_repo.get_by_esp_gpio_and_type(
+                esp_device.id, gpio, value_type
+            )
+
+            # Infer interface_type
+            interface_type = request.interface_type or _infer_interface_type(value_type)
+
+            # Build model fields from request, but override sensor_type
+            model_fields = _schema_to_model_fields(request)
+            model_fields["sensor_type"] = value_type
+
+            if existing_vt:
+                # Update existing sub-type config
+                existing_vt.sensor_type = value_type
+                existing_vt.config_status = "pending"
+                existing_vt.config_error = None
+                existing_vt.config_error_detail = None
+                if request.name is not None:
+                    existing_vt.sensor_name = model_fields["sensor_name"]
+                existing_vt.enabled = model_fields["enabled"]
+                sensor = existing_vt
+                logger.info(
+                    f"Multi-value '{value_type}': updated existing config (config_status=pending)"
+                )
+            else:
+                # Create new sub-type config
+                sensor = SensorConfig(
+                    esp_id=esp_device.id,
+                    gpio=gpio,
+                    **model_fields,
+                )
+                await sensor_repo.create(sensor)
+                logger.info(
+                    f"Multi-value '{value_type}': created new config (config_status=pending)"
+                )
+
+            await db.commit()
+            await db.refresh(sensor)
+
+            if first_response is None:
+                first_response = _model_to_response(sensor, esp_id)
+
+        # Publish combined config to ESP32 via MQTT (once for all sub-types)
+        try:
+            config_builder: ConfigPayloadBuilder = get_config_builder(db)
+            combined_config = await config_builder.build_combined_config(esp_id, db)
+            esp_service: ESPService = get_esp_service(db)
+            config_sent = await esp_service.send_config(esp_id, combined_config)
+            if config_sent:
+                logger.info(f"Config published to ESP {esp_id} after multi-value sensor create")
+            else:
+                logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
+        except Exception as e:
+            logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+
+        return first_response
+
+    # =========================================================================
+    # SINGLE-VALUE SENSOR (existing logic unchanged)
     # =========================================================================
     # Check if sensor already exists (include sensor_type!)
     existing = await sensor_repo.get_by_esp_gpio_and_type(
