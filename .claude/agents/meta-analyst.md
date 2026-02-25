@@ -34,7 +34,7 @@ description: |
   </example>
 model: sonnet
 color: magenta
-tools: ["Read", "Grep", "Glob"]
+tools: ["Read", "Write", "Grep", "Glob"]
 ---
 
 # Meta-Analyst
@@ -212,6 +212,7 @@ grep -rn "Erstellt\|Timestamp\|Zeit" .claude/reports/current/
 
 **Erlaubt:**
 - Alle Reports in `.claude/reports/current/` lesen
+- Eigenen Report nach `.claude/reports/current/META_ANALYSIS.md` oder `HW_TEST_META_ANALYSIS.md` schreiben
 - Grep in Reports und Referenz-Dokumenten
 - Glob für Report-Auflistung
 

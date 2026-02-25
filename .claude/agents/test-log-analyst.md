@@ -11,7 +11,7 @@ description: |
   Robin signalisiert Fertigstellung; Agent analysiert Logs und aktualisiert .claude/reports/Testrunner/test.md fortlaufend.
 model: sonnet
 color: cyan
-tools: ["Read", "Grep", "Glob", "Bash"]
+tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---
 
 ## Kontext: Wann werde ich aktiviert?

@@ -384,7 +384,7 @@ Located in `.claude/` directory:
 - `./logs/mqtt` -> MQTT logs
 - `./logs/postgres` -> PostgreSQL logs
 - `./docker/loki/loki-config.yml` -> Loki config
-- `./docker/promtail/config.yml` -> Alloy config (read via --config.format=promtail)
+- `./docker/alloy/config.alloy` -> Alloy config (native River syntax)
 - `./docker/prometheus/prometheus.yml` -> Prometheus config
 - `./docker/grafana/provisioning/` -> Grafana provisioning
 

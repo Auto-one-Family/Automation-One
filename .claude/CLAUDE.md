@@ -35,6 +35,7 @@ El Frontend (Vue 3) ←HTTP/WS→ El Servador (FastAPI) ←MQTT→ El Trabajante
 | /do, Plan ausführen, Implementierung starten | `do` |
 | /updatedocs, Docs aktualisieren, Doku-Update nach Änderungen | `updatedocs` |
 | /test, Test-Failures, CI rot, pytest/Vitest/Playwright | `test-log-analyst` |
+| /hardware-test, hw-test, Sensor testen, Hardware pruefen, Hardware-Test | `hardware-test` |
 | Agent-Flow prüfen, IST-SOLL, Agent-Korrektur | `agent-manager` |
 | Git-Commit vorbereiten, Changes analysieren | `git-commit` |
 | /verify-plan, TM-Plan Reality-Check | `verify-plan` |
@@ -145,6 +146,24 @@ Screens:    3xl(1600px), 4xl(1920px)
 
 ---
 
+## Loki-Debug (Agent-Nutzung)
+
+Agents koennen Loki-Logs per CLI oder API abfragen:
+
+| Befehl | Was | Wann |
+|--------|-----|------|
+| `make loki-errors` | Fehler der letzten 5 Minuten | Erster Schritt bei jedem Debug |
+| `make loki-trace CID=<id>` | Correlation-ID verfolgen | Datenfluss-Analyse ESP→Server→Frontend |
+| `make loki-esp ESP=<id>` | Alle Logs eines ESPs | ESP-spezifisches Debugging |
+| `make loki-health` | Loki-Status pruefen | Stack-Check, aktive Streams |
+| `scripts/loki-query.sh` | Direkter Script-Aufruf | Fuer erweiterte Queries |
+
+**Queries-Referenz:** `docs/debugging/logql-queries.md` (10 Queries fuer die haeufigsten Debug-Situationen)
+**Debug-Workflow:** `docs/debugging/debug-workflow.md` (10 Szenarien mit Root-Cause-Matrix)
+**Grafana Dashboard:** "Debug Console" (Error-Rate, Log-Streams, Correlation-Trace)
+
+---
+
 ## Referenzen
 
 | Pfad | Inhalt |
@@ -155,6 +174,7 @@ Screens:    3xl(1600px), 4xl(1920px)
 | `reference/debugging/` | LOG_LOCATIONS, CI_PIPELINE, ACCESS_LIMITATIONS |
 | `reference/testing/` | agent_profiles, flow_reference, TEST_WORKFLOW, SYSTEM_OPERATIONS_REFERENCE |
 | `reference/security/` | PRODUCTION_CHECKLIST |
+| `docs/debugging/` | logql-queries, debug-workflow |
 | `El Frontend/src/styles/` | tokens.css (Design Tokens), glass.css, animations.css |
 | `El Frontend/src/shared/design/` | Primitives (9), Layout (3), Patterns (5) |
 | `El Frontend/tailwind.config.js` | Tailwind Theme Extension |

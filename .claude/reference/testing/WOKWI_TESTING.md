@@ -351,7 +351,7 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.y
 
 # 5. Monitor logs
 docker compose logs -f --tail=100 el-servador
-docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v
+docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v -C 10 -W 30
 
 # 6. Clean up
 docker compose down

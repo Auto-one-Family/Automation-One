@@ -1,6 +1,6 @@
 # AutomationOne — Flow-Referenz
 
-> **Version:** 1.1 | **Stand:** 2026-02-10
+> **Version:** 1.2 | **Stand:** 2026-02-24
 > **Zweck:** Definiert ALLE Arbeitsabläufe im AutomationOne Agent-System
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 > **Erweiterung:** Neue Flows werden als neue FLOW-Sektion am Ende angehängt
@@ -14,6 +14,7 @@
 | F1 | Test-Flow | Robin startet Session | META_ANALYSIS.md beim TM |
 | F2 | Dev-Flow | TM entscheidet nach Test-Flow | Implementierung verifiziert |
 | F3 | Docker-Monitoring Setup | Robin: "Monitoring aufsetzen" | Monitoring-Stack läuft |
+| F4 | Hardware-Test-Flow | `/hardware-test` oder `hw-test --profile` | HW_TEST_FINAL_REPORT.md mit Scorecard |
 
 ---
 
@@ -305,6 +306,111 @@ Block 1 → Block 2 → Block 3 → Block 4
 | 5 | `curl http://localhost:8000/metrics` | Prometheus-Format |
 | 6 | Prometheus UI → Targets | el-servador = "UP" |
 | 8 | Grafana :3000 → Datasources | Loki + Prometheus grün |
+
+---
+
+## F4: HARDWARE-TEST-FLOW (Universelle Hardware-Verifikation)
+
+### F4.1 Ueberblick
+
+**Ziel:** Universeller Hardware-Test fuer jeden Sensor/Aktor. Agent-orchestriert mit minimaler Robin-Interaktion.
+**Trigger:** Robin startet `/hardware-test` oder `hw-test --profile {name}`.
+**Ergebnis:** HW_TEST_FINAL_REPORT.md mit Scorecard (PASS/FAIL pro Check).
+
+### F4.2 Schritte
+
+```
+PHASE 0: PROFIL & PRE-CHECK
+├── Wer: Skill hardware-test (Main-Thread)
+├── Aktion: Profil laden, validieren, Stack pruefen
+├── Robin: Bestaetigt Voraussetzungen (ESP geflasht, Captive Portal fertig)
+└── Naechste Phase: → PHASE 1
+
+PHASE 1: SESSION START + BRIEFING
+├── Wer: start_session.sh + system-control
+├── Aktion: Session starten, STATUS.md + SESSION_BRIEFING.md erstellen
+├── Robin: Keine Interaktion
+└── Naechste Phase: → PHASE 2
+
+PHASE 2: DEVICE SETUP (AUTOMATISCH)
+├── Wer: auto-ops (Rolle 5, via Task)
+├── Aktion: Device registrieren, genehmigen, Sensoren/Aktoren anlegen, Config-Push
+├── Erzeugt: HW_TEST_PHASE_SETUP.md
+├── Robin: Keine Interaktion
+└── Naechste Phase: → PHASE 3
+
+PHASE 3: HARDWARE VERBINDEN (ROBIN)
+├── Wer: Robin (physisch)
+├── Aktion: Sensoren/Aktoren nach Wiring-Guide verkabeln
+├── Robin: Bestaetigt "fertig"
+└── Naechste Phase: → PHASE 4
+
+PHASE 4: LIVE-VERIFIKATION (AUTOMATISCH)
+├── Wer: auto-ops (Rolle 5, via Task)
+├── Aktion: Heartbeat, Sensor-Daten, Actuator, DB, Grafana pruefen
+├── Optional: Debug-Agents delegieren bei Problemen
+├── Erzeugt: HW_TEST_PHASE_VERIFY.md
+├── Robin: Keine Interaktion
+└── Naechste Phase: → PHASE 5
+
+PHASE 5: STABILITAETSTEST (AUTOMATISCH, 30 MIN)
+├── Wer: auto-ops (Rolle 5, via Task)
+├── Aktion: 6x Polling (5-Min-Takt), Statistik, Drift-Erkennung
+├── Erzeugt: HW_TEST_PHASE_STABILITY.md
+├── Robin: Keine Interaktion
+└── Naechste Phase: → PHASE 6
+
+PHASE 6: META-ANALYSE + REPORT
+├── Wer: auto-ops → Task(meta-analyst)
+├── Aktion: Cross-Report-Analyse, Final Report + Scorecard
+├── Erzeugt: HW_TEST_META_ANALYSIS.md + HW_TEST_FINAL_REPORT.md
+├── Robin: Ergebnis pruefen
+└── Ende
+```
+
+### F4.3 Datenflussdiagramm
+
+```
+Profil (.yaml)
+    │
+    ▼
+Skill (hardware-test) ──→ Pre-Check
+    │
+    ├──→ start_session.sh ──→ STATUS.md
+    │
+    ├──→ Task(system-control) ──→ SESSION_BRIEFING.md
+    │
+    ├──→ Task(auto-ops Phase 2) ──→ HW_TEST_PHASE_SETUP.md
+    │
+    ├──→ Robin: Hardware verkabeln
+    │
+    ├──→ Task(auto-ops Phase 4) ──→ HW_TEST_PHASE_VERIFY.md
+    │         │
+    │         ├──→ Task(esp32-debug) ──→ HW_TEST_ESP32_DEBUG.md
+    │         ├──→ Task(server-debug) ──→ HW_TEST_SERVER_DEBUG.md
+    │         ├──→ Task(mqtt-debug) ──→ HW_TEST_MQTT_DEBUG.md
+    │         └──→ Task(frontend-debug) ──→ HW_TEST_FRONTEND_DEBUG.md
+    │
+    ├──→ Task(auto-ops Phase 5) ──→ HW_TEST_PHASE_STABILITY.md
+    │
+    └──→ Task(meta-analyst) ──→ HW_TEST_META_ANALYSIS.md
+                                    │
+                                    ▼
+                          HW_TEST_FINAL_REPORT.md
+```
+
+### F4.4 Validierungskriterien
+
+| Phase | Agent/Skill | Muss lesen | Muss erzeugen |
+|-------|-------------|------------|---------------|
+| 0 | hardware-test Skill | Profil YAML | Validiertes Profil |
+| 1 | system-control | STATUS.md, Profil | SESSION_BRIEFING.md |
+| 2 | auto-ops | Profil, Server API | HW_TEST_PHASE_SETUP.md |
+| 3 | Robin | Wiring-Guide | Bestaetigung |
+| 4 | auto-ops | Phase 2 Report, MQTT, DB | HW_TEST_PHASE_VERIFY.md |
+| 5 | auto-ops | Phase 4 Report, API, MQTT | HW_TEST_PHASE_STABILITY.md |
+| 6 | meta-analyst | Alle HW_TEST_*.md | HW_TEST_META_ANALYSIS.md |
+| 6 | auto-ops | HW_TEST_META_ANALYSIS.md | HW_TEST_FINAL_REPORT.md |
 
 ---
 
