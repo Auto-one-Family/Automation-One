@@ -26,8 +26,7 @@
 
 | Username | Password | Rolle | Verwendung |
 |----------|----------|-------|------------|
-| admin | Admin123# | Admin | Production-Login, Health-Endpoints |
-| Robin | Robin123! | Admin | Development & Testing |
+| admin | Admin123# | Admin | Production, Development & Testing |
 
 ### 0.2 Login (Bash)
 
@@ -35,7 +34,7 @@
 # Login und Token holen
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "Robin", "password": "Robin123!"}'
+  -d '{"username": "admin", "password": "Admin123#"}'
 
 # Token aus Response extrahieren (verschachtelt unter "tokens"):
 TOKEN="<response.tokens.access_token>"
@@ -50,10 +49,10 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/...
 # Variante 1: JSON-Escaping
 curl -X POST http://localhost:8000/api/v1/auth/login `
   -H "Content-Type: application/json" `
-  -d '{\"username\": \"Robin\", \"password\": \"Robin123!\"}'
+  -d '{\"username\": \"admin\", \"password\": \"Admin123#\"}'
 
 # Variante 2: Here-String (empfohlen)
-$body = @{username="Robin"; password="Robin123!"} | ConvertTo-Json
+$body = @{username="admin"; password="Admin123#"} | ConvertTo-Json
 curl -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" -d $body
 
 # Token speichern
@@ -70,7 +69,7 @@ $TOKEN = $response.tokens.access_token
 # C:\Program Files\mosquitto\mosquitto_pub.exe
 
 # Beispiel mit vollständigem Pfad:
-& "C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/#" -v
+& "C:\Program Files\mosquitto\mosquitto_sub.exe" -h localhost -t "kaiser/#" -v -C 10 -W 30
 ```
 
 ---
@@ -928,10 +927,10 @@ curl http://localhost:8000/api/v1/auth/status
 
 ```bash
 # Alle Topics beobachten (via Docker)
-docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v
+docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v -C 10 -W 30
 
 # Mit Timestamps (wie in session.sh)
-docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v | while IFS= read -r line; do
+docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v -C 10 -W 30 | while IFS= read -r line; do
     echo "[$(date -Iseconds)] $line"
 done
 
@@ -943,28 +942,28 @@ docker compose logs -f mqtt-broker
 
 ```bash
 # Alle Topics beobachten
-mosquitto_sub -h localhost -t "kaiser/#" -v
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
 
 # Nur Heartbeats
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v -C 1 -W 60
 
 # Nur Sensor-Daten
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 3 -W 90
 
 # Nur Actuator-Status
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/status" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/status" -v -C 3 -W 90
 
 # Nur Alerts
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/alert" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/alert" -v -C 3 -W 90
 
 # Nur Fehler
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/error" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/error" -v -C 3 -W 90
 
 # Bestimmtes ESP
-mosquitto_sub -h localhost -t "kaiser/god/esp/ESP_XXXXX/#" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/ESP_XXXXX/#" -v -C 10 -W 30
 
 # Broadcasts
-mosquitto_sub -h localhost -t "kaiser/broadcast/#" -v
+mosquitto_sub -h localhost -t "kaiser/broadcast/#" -v -C 10 -W 30
 ```
 
 ---
@@ -1322,7 +1321,7 @@ pio run -e esp32_dev -t upload
 pio device monitor -b 115200
 
 # 4. Warten auf Heartbeat (ESP sendet automatisch nach WiFi+MQTT Verbindung)
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v -C 1 -W 60
 
 # 5. ESP sollte als "pending" erscheinen (Auth erforderlich)
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/esp/devices/pending
@@ -1438,7 +1437,7 @@ pio run -e esp32_dev -t upload
 docker compose logs -f el-servador
 
 # Terminal 2: MQTT-Traffic (via Docker)
-docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v | while read line; do
+docker compose exec -T mqtt-broker mosquitto_sub -t "kaiser/#" -v -C 10 -W 30 | while read line; do
     echo "[$(date -Iseconds)] $line"
 done
 
@@ -1472,7 +1471,7 @@ curl -X POST http://localhost:8000/api/v1/debug/mock-esp \
 curl -X POST http://localhost:8000/api/v1/debug/mock-esp/MOCK_ID/start
 
 # 3. MQTT beobachten
-mosquitto_sub -h localhost -t "kaiser/god/esp/MOCK_ID/#" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/MOCK_ID/#" -v -C 10 -W 30
 
 # 4. Sensor-Wert manuell setzen
 curl -X POST http://localhost:8000/api/v1/debug/mock-esp/MOCK_ID/sensor/temp_0/value \
@@ -1494,7 +1493,7 @@ curl -X DELETE http://localhost:8000/api/v1/debug/mock-esp/MOCK_ID
 
 ```bash
 # Terminal 1: MQTT Traffic beobachten (ERST starten!)
-mosquitto_sub -h localhost -t "kaiser/#" -v
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
 
 # Terminal 2: Operation ausführen
 curl -X POST http://localhost:8000/api/v1/actuators/ESP_XXXXX/5/command \
@@ -1522,7 +1521,7 @@ cd "El Servador/god_kaiser_server"
 .venv/Scripts/python.exe ../../scripts/test_e2e_sensor_publish.py
 
 # MQTT beobachten
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 3 -W 90
 
 # Erwarteter Flow (alle 30s bei aktivem Sensor):
 # kaiser/god/esp/ESP_XXX/sensor/4/data {"ts":...,"gpio":4,"raw":2048,"raw_mode":true}
@@ -1539,7 +1538,7 @@ mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
 
 ```bash
 # Terminal 1: Config-Topics beobachten
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/config*" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/config*" -v -C 1 -W 30
 
 # Terminal 2: Config pushen (z.B. Sensor hinzufügen)
 curl -X POST http://localhost:8000/api/v1/sensors/ESP_XXX/4 \
@@ -1606,7 +1605,7 @@ mosquitto_pub -h localhost -t "test" -m "ping" && echo "OK"
 sqlite3 "El Servador/god_kaiser_server/god_kaiser_dev.db" "SELECT 1;"
 
 # ESP32 sendet?
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -C 1
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -C 1 -W 60
 
 # Letzte Fehler
 grep "ERROR" "El Servador/god_kaiser_server/logs/god_kaiser.log" | tail -10

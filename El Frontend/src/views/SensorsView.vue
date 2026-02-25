@@ -19,7 +19,14 @@ import {
   ChevronUp,
   ChevronRight,
   Power,
+  Plus,
+  Pencil,
+  Trash2,
+  Check,
 } from 'lucide-vue-next'
+import LiveLineChart from '@/components/charts/LiveLineChart.vue'
+import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
+import { subzonesApi } from '@/api/subzones'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
@@ -88,6 +95,133 @@ function isSubzoneExpanded(subzoneKey: string): boolean {
 }
 
 // =============================================================================
+// Subzone Management
+// =============================================================================
+const creatingSubzoneForZone = ref<string | null>(null)
+const newSubzoneName = ref('')
+const editingSubzoneId = ref<string | null>(null)
+const editingSubzoneName = ref('')
+const subzoneActionLoading = ref(false)
+
+function startCreateSubzone(zoneId: string | null) {
+  creatingSubzoneForZone.value = zoneId ?? ZONE_UNASSIGNED
+  newSubzoneName.value = ''
+}
+
+function cancelCreateSubzone() {
+  creatingSubzoneForZone.value = null
+  newSubzoneName.value = ''
+}
+
+async function confirmCreateSubzone(zoneId: string | null) {
+  if (!newSubzoneName.value.trim()) return
+  subzoneActionLoading.value = true
+  try {
+    // Find an ESP in this zone to assign the subzone to
+    const espInZone = espStore.devices.find(d => (d.zone_id || null) === zoneId)
+    if (!espInZone) return
+    const espId = espStore.getDeviceId(espInZone)
+    const subzoneId = newSubzoneName.value.trim().toLowerCase().replace(/\s+/g, '_')
+    await subzonesApi.assignSubzone(espId, {
+      subzone_id: subzoneId,
+      subzone_name: newSubzoneName.value.trim(),
+      parent_zone_id: zoneId || undefined,
+      assigned_gpios: [],
+    })
+    await espStore.fetchAll()
+    cancelCreateSubzone()
+  } catch {
+    // Error handled by API interceptor
+  } finally {
+    subzoneActionLoading.value = false
+  }
+}
+
+function startRenameSubzone(subzoneId: string, currentName: string) {
+  editingSubzoneId.value = subzoneId
+  editingSubzoneName.value = currentName
+}
+
+function cancelRenameSubzone() {
+  editingSubzoneId.value = null
+  editingSubzoneName.value = ''
+}
+
+async function saveSubzoneName(subzoneId: string, zoneId: string | null) {
+  if (!editingSubzoneName.value.trim()) return
+  subzoneActionLoading.value = true
+  try {
+    // Find an ESP that has this subzone
+    const espWithSubzone = espStore.devices.find(d => d.subzone_id === subzoneId)
+    if (!espWithSubzone) { cancelRenameSubzone(); return }
+    const espId = espStore.getDeviceId(espWithSubzone)
+    await subzonesApi.assignSubzone(espId, {
+      subzone_id: subzoneId,
+      subzone_name: editingSubzoneName.value.trim(),
+      parent_zone_id: zoneId || undefined,
+      assigned_gpios: [],
+    })
+    await espStore.fetchAll()
+    cancelRenameSubzone()
+  } catch {
+    // Error handled by API interceptor
+  } finally {
+    subzoneActionLoading.value = false
+  }
+}
+
+async function deleteSubzone(subzoneId: string) {
+  if (!confirm(`Subzone "${subzoneId}" wirklich löschen?`)) return
+  subzoneActionLoading.value = true
+  try {
+    // Find an ESP that has this subzone
+    const espWithSubzone = espStore.devices.find(d => d.subzone_id === subzoneId)
+    if (!espWithSubzone) return
+    const espId = espStore.getDeviceId(espWithSubzone)
+    await subzonesApi.removeSubzone(espId, subzoneId)
+    await espStore.fetchAll()
+  } catch {
+    // Error handled by API interceptor
+  } finally {
+    subzoneActionLoading.value = false
+  }
+}
+
+// =============================================================================
+// Sparkline Data Cache (pattern from MonitorView)
+// =============================================================================
+const sparklineCache = ref<Map<string, ChartDataPoint[]>>(new Map())
+const SPARKLINE_MAX_POINTS = 20
+
+function getSensorSparklineKey(espId: string, gpio: number): string {
+  return `${espId}-${gpio}`
+}
+
+watch(
+  () => espStore.devices,
+  () => {
+    for (const device of espStore.devices) {
+      const deviceId = espStore.getDeviceId(device)
+      const sensors = (device.sensors as { gpio: number; raw_value: number }[]) || []
+      for (const s of sensors) {
+        if (typeof s.raw_value !== 'number') continue
+        const key = getSensorSparklineKey(deviceId, s.gpio)
+        const existing = sparklineCache.value.get(key) || []
+        const lastPoint = existing[existing.length - 1]
+        const now = new Date()
+        if (!lastPoint || s.raw_value !== lastPoint.value ||
+            (now.getTime() - new Date(lastPoint.timestamp).getTime()) > 5000) {
+          const updated = [...existing, { timestamp: now, value: s.raw_value }]
+          if (updated.length > SPARKLINE_MAX_POINTS) updated.shift()
+          sparklineCache.value.set(key, updated)
+        }
+      }
+    }
+  },
+  { deep: true }
+)
+
+// =============================================================================
 // SlideOver Config Panels
 // =============================================================================
 const showSensorPanel = ref(false)
@@ -142,9 +276,9 @@ const qualityLevels: QualityLevel[] = ['excellent', 'good', 'fair', 'poor', 'bad
 const filterActuatorType = ref<string[]>([])
 const filterState = ref<ActuatorStateFilter[]>([])
 const stateFilters: { value: ActuatorStateFilter; label: string }[] = [
-  { value: 'on', label: 'ON' },
-  { value: 'off', label: 'OFF' },
-  { value: 'emergency', label: 'E-STOP' },
+  { value: 'on', label: 'Ein' },
+  { value: 'off', label: 'Aus' },
+  { value: 'emergency', label: 'Not-Stopp' },
 ]
 
 // =============================================================================
@@ -747,16 +881,54 @@ function getQualityColor(quality: string): string {
           class="sensors-zone-section"
         >
           <!-- Zone Header (accordion) -->
-          <button
-            :class="['sensors-zone-header', { 'sensors-zone-header--collapsed': !isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
-            @click="toggleZone(zone.zoneId ?? '__unassigned__')"
+          <div class="sensors-zone-header-row">
+            <button
+              :class="['sensors-zone-header', { 'sensors-zone-header--collapsed': !isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+              @click="toggleZone(zone.zoneId ?? '__unassigned__')"
+            >
+              <ChevronRight
+                :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+              />
+              <span class="sensors-zone-name">{{ zone.zoneName }}</span>
+              <span class="sensors-zone-count">{{ zone.sensorCount }} {{ zone.sensorCount === 1 ? 'Sensor' : 'Sensoren' }}</span>
+            </button>
+            <button
+              v-if="zone.zoneId"
+              class="sensors-subzone-add-btn"
+              title="Subzone hinzufügen"
+              @click.stop="startCreateSubzone(zone.zoneId)"
+            >
+              <Plus class="w-3.5 h-3.5" />
+              <span>Subzone</span>
+            </button>
+          </div>
+
+          <!-- Inline create subzone -->
+          <div
+            v-if="creatingSubzoneForZone === (zone.zoneId ?? '__unassigned__')"
+            class="sensors-subzone-create"
           >
-            <ChevronRight
-              :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+            <input
+              v-model="newSubzoneName"
+              class="sensors-subzone-create__input"
+              placeholder="Name der neuen Subzone"
+              @keydown.enter="confirmCreateSubzone(zone.zoneId)"
+              @keydown.escape="cancelCreateSubzone"
             />
-            <span class="sensors-zone-name">{{ zone.zoneName }}</span>
-            <span class="sensors-zone-count">{{ zone.sensorCount }} {{ zone.sensorCount === 1 ? 'Sensor' : 'Sensoren' }}</span>
-          </button>
+            <button
+              class="sensors-subzone-create__confirm"
+              :disabled="!newSubzoneName.trim() || subzoneActionLoading"
+              @click="confirmCreateSubzone(zone.zoneId)"
+            >
+              <Check class="w-3.5 h-3.5" />
+            </button>
+            <button
+              class="sensors-subzone-create__cancel"
+              @click="cancelCreateSubzone"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           <!-- Subzones (nested accordion) -->
           <Transition name="accordion">
@@ -766,17 +938,65 @@ function getQualityColor(quality: string): string {
                 :key="subzone.subzoneId ?? '__none__'"
                 class="sensors-subzone"
               >
-                <button
+                <div
                   v-if="zone.subzones.length > 1 || subzone.subzoneName"
-                  :class="['sensors-subzone-header', { 'sensors-subzone-header--collapsed': !isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
-                  @click="toggleSubzone(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                  class="sensors-subzone-header-row"
                 >
-                  <ChevronRight
-                    :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
-                  />
-                  <span class="sensors-subzone-name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
-                  <span class="sensors-zone-count">{{ subzone.sensors.length }} {{ subzone.sensors.length === 1 ? 'Sensor' : 'Sensoren' }}</span>
-                </button>
+                  <!-- Inline rename mode -->
+                  <template v-if="editingSubzoneId === subzone.subzoneId && subzone.subzoneId">
+                    <div class="sensors-subzone-rename">
+                      <input
+                        v-model="editingSubzoneName"
+                        class="sensors-subzone-rename__input"
+                        @keydown.enter="saveSubzoneName(subzone.subzoneId!, zone.zoneId)"
+                        @keydown.escape="cancelRenameSubzone"
+                      />
+                      <button
+                        class="sensors-subzone-create__confirm"
+                        :disabled="!editingSubzoneName.trim() || subzoneActionLoading"
+                        @click="saveSubzoneName(subzone.subzoneId!, zone.zoneId)"
+                      >
+                        <Check class="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        class="sensors-subzone-create__cancel"
+                        @click="cancelRenameSubzone"
+                      >
+                        <X class="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </template>
+
+                  <!-- Normal subzone header -->
+                  <template v-else>
+                    <button
+                      :class="['sensors-subzone-header', { 'sensors-subzone-header--collapsed': !isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                      @click="toggleSubzone(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                    >
+                      <ChevronRight
+                        :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                      />
+                      <span class="sensors-subzone-name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
+                      <span class="sensors-zone-count">{{ subzone.sensors.length }} {{ subzone.sensors.length === 1 ? 'Sensor' : 'Sensoren' }}</span>
+                    </button>
+                    <div v-if="subzone.subzoneId" class="sensors-subzone-actions">
+                      <button
+                        class="sensors-subzone-action-btn"
+                        title="Umbenennen"
+                        @click.stop="startRenameSubzone(subzone.subzoneId!, subzone.subzoneName)"
+                      >
+                        <Pencil class="w-3 h-3" />
+                      </button>
+                      <button
+                        class="sensors-subzone-action-btn sensors-subzone-action-btn--danger"
+                        title="Löschen"
+                        @click.stop="deleteSubzone(subzone.subzoneId!)"
+                      >
+                        <Trash2 class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </template>
+                </div>
                 <Transition name="accordion">
                   <div
                     v-show="zone.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
@@ -811,6 +1031,20 @@ function getQualityColor(quality: string): string {
                           <span :class="['badge flex-shrink-0', getQualityColor(sensor.quality)]">
                             {{ getQualityLabel(sensor.quality) }}
                           </span>
+                        </div>
+                        <!-- Mini Sparkline -->
+                        <div
+                          v-if="sparklineCache.get(getSensorSparklineKey(sensor.esp_id, sensor.gpio))?.length"
+                          class="sensors-sparkline"
+                        >
+                          <LiveLineChart
+                            :data="sparklineCache.get(getSensorSparklineKey(sensor.esp_id, sensor.gpio)) || []"
+                            :compact="true"
+                            height="30px"
+                            :fill="true"
+                            :show-grid="false"
+                            :max-data-points="20"
+                          />
                         </div>
                       </div>
                     </div>
@@ -854,16 +1088,54 @@ function getQualityColor(quality: string): string {
           class="sensors-zone-section"
         >
           <!-- Zone Header (accordion) -->
-          <button
-            :class="['sensors-zone-header', { 'sensors-zone-header--collapsed': !isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
-            @click="toggleZone(zone.zoneId ?? '__unassigned__')"
+          <div class="sensors-zone-header-row">
+            <button
+              :class="['sensors-zone-header', { 'sensors-zone-header--collapsed': !isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+              @click="toggleZone(zone.zoneId ?? '__unassigned__')"
+            >
+              <ChevronRight
+                :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+              />
+              <span class="sensors-zone-name">{{ zone.zoneName }}</span>
+              <span class="sensors-zone-count">{{ zone.actuatorCount }} {{ zone.actuatorCount === 1 ? 'Aktor' : 'Aktoren' }}</span>
+            </button>
+            <button
+              v-if="zone.zoneId"
+              class="sensors-subzone-add-btn"
+              title="Subzone hinzufügen"
+              @click.stop="startCreateSubzone(zone.zoneId)"
+            >
+              <Plus class="w-3.5 h-3.5" />
+              <span>Subzone</span>
+            </button>
+          </div>
+
+          <!-- Inline create subzone -->
+          <div
+            v-if="creatingSubzoneForZone === (zone.zoneId ?? '__unassigned__')"
+            class="sensors-subzone-create"
           >
-            <ChevronRight
-              :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isZoneExpanded(zone.zoneId ?? '__unassigned__') }]"
+            <input
+              v-model="newSubzoneName"
+              class="sensors-subzone-create__input"
+              placeholder="Name der neuen Subzone"
+              @keydown.enter="confirmCreateSubzone(zone.zoneId)"
+              @keydown.escape="cancelCreateSubzone"
             />
-            <span class="sensors-zone-name">{{ zone.zoneName }}</span>
-            <span class="sensors-zone-count">{{ zone.actuatorCount }} {{ zone.actuatorCount === 1 ? 'Aktor' : 'Aktoren' }}</span>
-          </button>
+            <button
+              class="sensors-subzone-create__confirm"
+              :disabled="!newSubzoneName.trim() || subzoneActionLoading"
+              @click="confirmCreateSubzone(zone.zoneId)"
+            >
+              <Check class="w-3.5 h-3.5" />
+            </button>
+            <button
+              class="sensors-subzone-create__cancel"
+              @click="cancelCreateSubzone"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           <!-- Subzones (nested accordion) -->
           <Transition name="accordion">
@@ -873,17 +1145,65 @@ function getQualityColor(quality: string): string {
                 :key="subzone.subzoneId ?? '__none__'"
                 class="sensors-subzone"
               >
-                <button
+                <div
                   v-if="zone.subzones.length > 1 || subzone.subzoneName"
-                  :class="['sensors-subzone-header', { 'sensors-subzone-header--collapsed': !isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
-                  @click="toggleSubzone(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                  class="sensors-subzone-header-row"
                 >
-                  <ChevronRight
-                    :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
-                  />
-                  <span class="sensors-subzone-name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
-                  <span class="sensors-zone-count">{{ subzone.actuators.length }} {{ subzone.actuators.length === 1 ? 'Aktor' : 'Aktoren' }}</span>
-                </button>
+                  <!-- Inline rename mode -->
+                  <template v-if="editingSubzoneId === subzone.subzoneId && subzone.subzoneId">
+                    <div class="sensors-subzone-rename">
+                      <input
+                        v-model="editingSubzoneName"
+                        class="sensors-subzone-rename__input"
+                        @keydown.enter="saveSubzoneName(subzone.subzoneId!, zone.zoneId)"
+                        @keydown.escape="cancelRenameSubzone"
+                      />
+                      <button
+                        class="sensors-subzone-create__confirm"
+                        :disabled="!editingSubzoneName.trim() || subzoneActionLoading"
+                        @click="saveSubzoneName(subzone.subzoneId!, zone.zoneId)"
+                      >
+                        <Check class="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        class="sensors-subzone-create__cancel"
+                        @click="cancelRenameSubzone"
+                      >
+                        <X class="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </template>
+
+                  <!-- Normal subzone header -->
+                  <template v-else>
+                    <button
+                      :class="['sensors-subzone-header', { 'sensors-subzone-header--collapsed': !isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                      @click="toggleSubzone(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
+                    >
+                      <ChevronRight
+                        :class="['sensors-zone-chevron', { 'sensors-zone-chevron--expanded': isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`) }]"
+                      />
+                      <span class="sensors-subzone-name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
+                      <span class="sensors-zone-count">{{ subzone.actuators.length }} {{ subzone.actuators.length === 1 ? 'Aktor' : 'Aktoren' }}</span>
+                    </button>
+                    <div v-if="subzone.subzoneId" class="sensors-subzone-actions">
+                      <button
+                        class="sensors-subzone-action-btn"
+                        title="Umbenennen"
+                        @click.stop="startRenameSubzone(subzone.subzoneId!, subzone.subzoneName)"
+                      >
+                        <Pencil class="w-3 h-3" />
+                      </button>
+                      <button
+                        class="sensors-subzone-action-btn sensors-subzone-action-btn--danger"
+                        title="Löschen"
+                        @click.stop="deleteSubzone(subzone.subzoneId!)"
+                      >
+                        <Trash2 class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </template>
+                </div>
                 <Transition name="accordion">
                   <div
                     v-show="zone.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
@@ -914,10 +1234,10 @@ function getQualityColor(quality: string): string {
                         <div class="flex items-center justify-between gap-2">
                           <div class="flex items-center gap-2 flex-wrap">
                             <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
-                              {{ actuator.state ? 'ON' : 'OFF' }}
+                              {{ actuator.state ? 'Ein' : 'Aus' }}
                             </span>
                             <span v-if="actuator.emergency_stopped" class="badge badge-danger">
-                              E-STOP
+                              Not-Stopp
                             </span>
                           </div>
                           <button
@@ -1167,5 +1487,152 @@ function getQualityColor(quality: string): string {
 .accordion-enter-to,
 .accordion-leave-from {
   max-height: 2000px;
+}
+
+/* Zone header row with add button */
+.sensors-zone-header-row {
+  display: flex;
+  align-items: center;
+}
+
+.sensors-zone-header-row .sensors-zone-header {
+  flex: 1;
+}
+
+.sensors-subzone-add-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  margin-right: var(--space-2);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sensors-subzone-add-btn:hover {
+  color: var(--color-accent-bright);
+  border-color: var(--color-accent);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+/* Subzone header row with actions */
+.sensors-subzone-header-row {
+  display: flex;
+  align-items: center;
+}
+
+.sensors-subzone-header-row .sensors-subzone-header {
+  flex: 1;
+}
+
+.sensors-subzone-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-right: var(--space-2);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.sensors-subzone-header-row:hover .sensors-subzone-actions {
+  opacity: 1;
+}
+
+.sensors-subzone-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sensors-subzone-action-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+.sensors-subzone-action-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+}
+
+/* Create / Rename inline forms */
+.sensors-subzone-create,
+.sensors-subzone-rename {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  padding-left: var(--space-8);
+}
+
+.sensors-subzone-create__input,
+.sensors-subzone-rename__input {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-quaternary);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.sensors-subzone-create__confirm,
+.sensors-subzone-create__cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sensors-subzone-create__confirm {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--color-success);
+}
+
+.sensors-subzone-create__confirm:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.25);
+}
+
+.sensors-subzone-create__confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sensors-subzone-create__cancel {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-text-muted);
+}
+
+.sensors-subzone-create__cancel:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--color-error);
+}
+
+/* Sparkline on sensor cards */
+.sensors-sparkline {
+  margin-top: var(--space-2);
+  height: 30px;
+  opacity: 0.7;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 </style>

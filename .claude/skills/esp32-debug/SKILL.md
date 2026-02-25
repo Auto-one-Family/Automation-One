@@ -347,11 +347,11 @@ grep "ESP_XXX" logs/server/god_kaiser.log | tail -20              # Cross-Layer
 
 | Tabelle | Wichtige Felder | Beispiel-Query |
 |---------|----------------|----------------|
-| `esp_devices` | device_id, status, last_seen, ip_address | `SELECT device_id, status, last_seen FROM esp_devices ORDER BY last_seen DESC LIMIT 5` |
-| `sensor_configs` | id, esp_device_id, gpio_pin, sensor_type | `SELECT * FROM sensor_configs WHERE esp_device_id = 'ESP_XXX'` |
-| `sensor_data` | id, esp_device_id, gpio_pin, value, created_at | `SELECT COUNT(*) FROM sensor_data WHERE esp_device_id = 'ESP_XXX' AND created_at > NOW() - INTERVAL '5 minutes'` |
-| `actuator_configs` | id, esp_device_id, gpio_pin, actuator_type | `SELECT * FROM actuator_configs WHERE esp_device_id = 'ESP_XXX'` |
-| `esp_heartbeats` | id, esp_device_id, heap_free, wifi_rssi, created_at | `SELECT * FROM esp_heartbeats WHERE esp_device_id = 'ESP_XXX' ORDER BY created_at DESC LIMIT 5` |
+| `esp_devices` | id (UUID), device_id (string), status, last_seen | `SELECT device_id, status, last_seen FROM esp_devices ORDER BY last_seen DESC LIMIT 5` |
+| `sensor_configs` | id, esp_id (UUID FK), gpio, sensor_type | `SELECT sc.* FROM sensor_configs sc JOIN esp_devices e ON sc.esp_id = e.id WHERE e.device_id = 'ESP_XXX'` |
+| `sensor_data` | id, esp_id (UUID FK), gpio, raw_value, timestamp | `SELECT COUNT(*) FROM sensor_data sd JOIN esp_devices e ON sd.esp_id = e.id WHERE e.device_id = 'ESP_XXX' AND sd.timestamp > NOW() - INTERVAL '5 minutes'` |
+| `actuator_configs` | id, esp_id (UUID FK), gpio, actuator_type | `SELECT ac.* FROM actuator_configs ac JOIN esp_devices e ON ac.esp_id = e.id WHERE e.device_id = 'ESP_XXX'` |
+| `esp_heartbeat_logs` | id, esp_id (UUID FK), device_id (string), heap_free, wifi_rssi, timestamp | `SELECT * FROM esp_heartbeat_logs WHERE device_id = 'ESP_XXX' ORDER BY timestamp DESC LIMIT 5` |
 
 Alle Queries via: `docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "..."`
 

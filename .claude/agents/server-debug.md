@@ -39,7 +39,7 @@ description: |
   </example>
 model: sonnet
 color: cyan
-tools: ["Read", "Grep", "Glob", "Bash"]
+tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---
 
 # Server Debug Agent
@@ -79,27 +79,41 @@ Du bist der **Server-Log Analyst** für das AutomationOne Framework. Du analysie
    # Prüfe: el-servador, automationone-postgres, mqtt-broker
    ```
 
-3. **Server-Log parsen (Priorität: CRITICAL > ERROR > WARNING):**
+3. **Loki-first Log-Analyse (PRIMÄRE Quelle):**
+   ```bash
+   # Loki verfügbar?
+   curl -sf http://localhost:3100/ready
+   # Server-Errors via Loki
+   curl -sG http://localhost:3100/loki/api/v1/query_range \
+     --data-urlencode 'query={compose_service="el-servador"} |~ "ERROR|CRITICAL"' \
+     --data-urlencode 'limit=50'
+   # Handler-Logs via Loki
+   curl -sG http://localhost:3100/loki/api/v1/query_range \
+     --data-urlencode 'query={compose_service="el-servador"} |~ "handler|Handler"' \
+     --data-urlencode 'limit=30'
+   ```
+
+4. **Fallback: Lokale Log-Datei (wenn Loki nicht verfügbar):**
    ```bash
    grep '"level": "CRITICAL"' logs/server/god_kaiser.log
    grep '"level": "ERROR"' logs/server/god_kaiser.log
    grep -i "circuit\|resilience" logs/server/god_kaiser.log
    ```
 
-4. **Startup-Sequenz verifizieren (20+ Steps, Details im Skill Section 2):**
+5. **Startup-Sequenz verifizieren (20+ Steps, Details im Skill Section 2):**
    ```bash
    grep "God-Kaiser Server" logs/server/god_kaiser.log
    grep "Registered.*MQTT handlers" logs/server/god_kaiser.log
    grep "Services initialized successfully" logs/server/god_kaiser.log
    ```
 
-5. **Handler-Statistiken:**
+6. **Handler-Statistiken:**
    ```bash
    grep "sensor_handler\|heartbeat_handler\|actuator_handler" logs/server/god_kaiser.log | wc -l
    grep '"level": "ERROR"' logs/server/god_kaiser.log | grep "handler" | head -20
    ```
 
-6. **Error-Kategorien (nach Code-Range, Details im Skill Section 5):**
+7. **Error-Kategorien (nach Code-Range, Details im Skill Section 5):**
    ```bash
    grep -E "\[50[0-9]{2}\]" logs/server/god_kaiser.log  # CONFIG
    grep -E "\[51[0-9]{2}\]" logs/server/god_kaiser.log  # MQTT
@@ -107,7 +121,7 @@ Du bist der **Server-Log Analyst** für das AutomationOne Framework. Du analysie
    grep -E "\[54[0-9]{2}\]" logs/server/god_kaiser.log  # SERVICE
    ```
 
-7. **Erweiterte Prüfungen bei Auffälligkeiten** → Section 4 (Cross-Layer)
+8. **Erweiterte Prüfungen bei Auffälligkeiten** → Section 4 (Cross-Layer)
 
 ---
 
@@ -269,7 +283,8 @@ docker compose logs --tail=20 el-servador mqtt-broker automationone-postgres
 | Wann | Datei | Zweck |
 |------|-------|-------|
 | Wenn vorhanden | `logs/current/STATUS.md` | Session-Kontext (optional) |
-| **IMMER** | `logs/server/god_kaiser.log` | Analyse-Quelle |
+| **PRIMÄR** | Loki API (`{compose_service="el-servador"}`) | Loki-first Analyse-Quelle |
+| **FALLBACK** | `logs/server/god_kaiser.log` | Lokale Log-Datei (wenn Loki nicht verfügbar) |
 | Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Code-Interpretation |
 | Bei Handler-Details | `.claude/skills/server-development/SKILL.md` | Code-Locations |
 | Bei MQTT-Fragen | `.claude/reference/api/MQTT_TOPICS.md` | Topic-Schema |

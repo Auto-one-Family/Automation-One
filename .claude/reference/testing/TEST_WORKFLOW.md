@@ -436,8 +436,8 @@ tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
 tail -100 "El Servador/god_kaiser_server/logs/god_kaiser.log" | grep -i error
 
 # MQTT Traffic
-mosquitto_sub -h localhost -t "kaiser/#" -v
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/diagnostics" -v
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/diagnostics" -v -C 1 -W 30
 
 # ESP32 Serial Monitor
 cd "El Trabajante" && pio device monitor
@@ -641,7 +641,7 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/boot_test.yaml
 # LOGS
 # ============================================
 tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
-mosquitto_sub -h localhost -t "kaiser/#" -v
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
 
 # ============================================
 # CI/CD

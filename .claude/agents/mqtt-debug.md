@@ -36,7 +36,7 @@ description: |
   </example>
 model: sonnet
 color: cyan
-tools: ["Read", "Grep", "Glob", "Bash"]
+tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---
 
 # MQTT Debug Agent
@@ -111,24 +111,37 @@ Bei Auffaelligkeiten im MQTT-Traffic pruefst du eigenstaendig weiter – keine D
 ### Modus A – Allgemeine Analyse
 
 1. **Optional:** `logs/current/STATUS.md` lesen (wenn vorhanden → Session-Kontext)
-2. **Primaer:** `logs/mqtt/mqtt_traffic.log` vollstaendig analysieren
+2. **Loki-first (PRIMAERE Quelle wenn verfuegbar):**
+   ```bash
+   # Loki verfuegbar?
+   curl -sf http://localhost:3100/ready
+   # Broker-Errors via Loki
+   curl -sG http://localhost:3100/loki/api/v1/query_range \
+     --data-urlencode 'query={compose_service="mqtt-broker"} |~ "(?i)(error|warning|reject|refused)"' \
+     --data-urlencode 'limit=50'
+   # Server MQTT-Handler via Loki
+   curl -sG http://localhost:3100/loki/api/v1/query_range \
+     --data-urlencode 'query={compose_service="el-servador"} |~ "(?i)(mqtt|handler|heartbeat|sensor_handler|actuator_handler)"' \
+     --data-urlencode 'limit=50'
+   ```
+3. **Fallback / Detail-Analyse:** `logs/mqtt/mqtt_traffic.log` vollstaendig analysieren
    - Traffic nach ESP-ID gruppieren
    - Request-Response-Paare matchen (Heartbeat→ACK, Command→Response, Config→config_response)
    - Timing-Gaps identifizieren (>90s Heartbeat, >2s Response, >45s Sensor-Daten)
    - Payload-Pflichtfelder validieren (→ Skill Sektion 9)
    - LWT Messages dokumentieren
    - Retained Messages pruefen (nur LWT `system/will` sollte retained sein)
-3. **Live-Traffic falls Log fehlt:**
+4. **Live-Traffic falls Log fehlt:**
    ```bash
    mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 15
    # Oder via Docker:
    docker compose exec mqtt-broker mosquitto_sub -t 'kaiser/#' -v -C 10 -W 15
    ```
-4. **Server-Handler-Logs pruefen:**
+5. **Server-Handler-Logs pruefen (Fallback wenn Loki nicht verfuegbar):**
    ```bash
    grep -iE "sensor_handler|heartbeat_handler|actuator_handler" logs/server/god_kaiser.log | tail -30
    ```
-5. **Erweiterungsentscheidung:**
+6. **Erweiterungsentscheidung:**
 
    | Finding | Erweiterung |
    |---------|-------------|
@@ -279,6 +292,26 @@ grep -iE "sensor_handler|heartbeat_handler|actuator_handler" logs/server/god_kai
 
 # Device in DB pruefen
 docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT device_id, status, last_seen FROM esp_devices WHERE device_id = 'ESP_XXX'"
+
+# --- Loki (wenn Monitoring-Stack aktiv) ---
+
+# Loki-Verfuegbarkeit pruefen
+curl -sf http://localhost:3100/ready && echo "Loki OK" || echo "Loki nicht verfuegbar"
+
+# Broker-Errors (Label: compose_service, ROADMAP §1.1)
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="mqtt-broker"} |~ "(?i)(error|warning|reject|refused)"' \
+  --data-urlencode 'limit=50'
+
+# Server MQTT-Handler-Logs
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="el-servador"} |~ "(?i)(mqtt|handler|heartbeat|sensor_handler|actuator_handler)"' \
+  --data-urlencode 'limit=50'
+
+# Broker Connection-Events
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="mqtt-broker"} |~ "(?i)(connect|disconnect|socket)"' \
+  --data-urlencode 'limit=30'
 ```
 
 ---
@@ -319,7 +352,8 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELEC
 | Wann | Datei | Zweck |
 |------|-------|-------|
 | Wenn vorhanden | `logs/current/STATUS.md` | Session-Kontext (optional) |
-| **IMMER** | `logs/mqtt/mqtt_traffic.log` | Analyse-Quelle |
+| **PRIMAER** | Loki API (`{compose_service="mqtt-broker"}`, `{compose_service="el-servador"}`) | Loki-first Analyse-Quelle |
+| **FALLBACK** | `logs/mqtt/mqtt_traffic.log` | Lokale Log-Datei (wenn Loki nicht verfuegbar) |
 | Bei Topic-Fragen | `.claude/reference/api/MQTT_TOPICS.md` | Vollstaendige Topic-Referenz |
 | Bei Payload-Details | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Sequenz-Diagramme |
 | Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Code-Interpretation |

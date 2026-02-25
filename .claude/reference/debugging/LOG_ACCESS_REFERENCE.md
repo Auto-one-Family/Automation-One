@@ -1,6 +1,6 @@
 # Log-Zugriff -- Agent-Referenz
 
-> **Version:** 3.0 | **Stand:** 2026-02-23
+> **Version:** 3.1 | **Stand:** 2026-02-25
 > **Zweck:** Zentrale Referenz fuer Log-Dateien, Prioritaeten, Correlation-IDs und Erstellung
 > **Verknuepfung:** [LOG_LOCATIONS.md](LOG_LOCATIONS.md) fuer Pfade und Capture-Methoden
 
@@ -60,13 +60,23 @@ Output-Format: `[2026-02-23T12:00:00Z] topic payload`
 
 ### Wie Correlation-IDs funktionieren
 
+**MQTT-Pipeline (ESP32 → Server → Frontend):**
 1. **ESP32** sendet `"seq"` in MQTT-Payloads (monoton steigend pro ESP)
 2. **Server** generiert Correlation-ID: `{esp_id}:{topic_suffix}:{seq}:{timestamp_ms}`
 3. **Alle Server-Log-Eintraege** enthalten die Correlation-ID im `request_id` Feld
+4. **WebSocket-Broadcasts** enthalten `correlation_id` auf Message-Root-Level (automatisch aus ContextVar)
+5. **Frontend** loggt `correlation_id` aus empfangenen WebSocket-Messages
+
+**REST-Pipeline (Frontend → Server):**
+1. **Frontend** generiert `X-Request-ID` Header (UUID v4 via `crypto.randomUUID()`) bei jedem REST-Call
+2. **Server** akzeptiert `X-Request-ID` oder generiert eigene UUID (`RequestIdMiddleware`)
+3. **Server** gibt `X-Request-ID` im Response-Header zurueck
+4. **Frontend** loggt Server-CID aus Response-Header
 
 ### Cross-Layer Debugging mit Correlation-IDs
 
 ```bash
+# MQTT-Pipeline: ESP → Server → WebSocket
 # Schritt 1: Finde ESP-ID und Seq in MQTT-Capture
 grep "ESP_12AB34CD" logs/current/mqtt_capture_*.log
 
@@ -75,13 +85,20 @@ grep "ESP_12AB34CD:data:42" logs/server/god_kaiser.log
 
 # Schritt 3: Loki-Query (wenn Monitoring laeuft)
 # {compose_service="el-servador"} |= "ESP_12AB34CD:data:42"
+
+# REST-Pipeline: Frontend → Server
+# Schritt 1: Browser DevTools → Network → Request Headers → X-Request-ID
+# Schritt 2: Suche UUID im Server-Log
+grep "abc12345-1234-1234-1234-123456789abc" logs/server/god_kaiser.log
 ```
 
-### Beispiel
+### Beispiel (MQTT-Pipeline)
 
 ```
 ESP32 sendet:   {"esp_id":"ESP_12AB34CD","seq":42,"gpio":34,"raw":2048,...}
 Server loggt:   2026-02-23 12:00:00 - sensor_handler - INFO - [ESP_12AB34CD:data:42:1708704000000] - Processing sensor data
+WebSocket:      {"type":"sensor_data","timestamp":1708704000,"correlation_id":"ESP_12AB34CD:data:42:1708704000000","data":{...}}
+Frontend loggt: Received message { type: "sensor_data", correlationId: "ESP_12AB34CD:data:42:1708704000000" }
 ```
 
 ---

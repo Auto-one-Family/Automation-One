@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.0 | **Aktualisiert:** 2026-02-01
+> **Version:** 2.1 | **Aktualisiert:** 2026-02-25
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -141,6 +141,7 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 {
   "type": "sensor_data",
   "timestamp": 1735818000,
+  "correlation_id": "ESP_12AB34CD:data:42:1735818000000",
   "data": {
     "esp_id": "ESP_12AB34CD",
     "gpio": 4,
@@ -587,6 +588,7 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 {
   "type": "esp_health",
   "timestamp": 1735818000,
+  "correlation_id": "ESP_12AB34CD:heartbeat:99:1735818000000",
   "data": {
     "esp_id": "ESP_12AB34CD",
     "status": "online",

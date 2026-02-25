@@ -91,7 +91,7 @@ const actuatorIcon = computed(() => {
 // Status display
 const statusDisplay = computed(() => {
   if (props.emergencyStopped) {
-    return { text: 'E-STOP', variant: 'danger' as const }
+    return { text: 'Not-Stopp', variant: 'danger' as const }
   }
   
   if (props.actuatorType === 'pwm' || props.actuatorType === 'fan') {

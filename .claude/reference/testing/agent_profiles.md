@@ -1,6 +1,6 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.2 | **Stand:** 2026-02-10
+> **Version:** 1.3 | **Stand:** 2026-02-24
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
@@ -52,7 +52,8 @@
 
 ## 1.7 meta-analyst
 - **Datei:** `.claude/agents/meta-analyst.md`
-- **Rolle:** Cross-Report-Analyse. Vergleicht alle Reports, findet Widersprüche und Kausalität.
+- **Rolle:** Cross-Report-Analyse. Vergleicht alle Reports, findet Widersprüche und Kausalität. Schreibt eigene Reports (Write-Tool).
+- **Tools:** Read, Write, Grep, Glob (KEIN Bash — liest nur Reports, führt keine Befehle aus)
 - **Skills:** meta-analyst (implizit)
 - **Referenzen:** STATUS.md, Reports in `.claude/reports/current/`, CONSOLIDATED_REPORT.md
 - **Andere Agenten:** esp32-debug, server-debug, mqtt-debug, collect-reports
@@ -164,13 +165,15 @@
 name: system-control
 description: |
   System-Steuerung für AutomationOne Server und MQTT.
-  MUST BE USED when: starting/stopping server, observing MQTT traffic,
-  registering/configuring ESP devices, managing sensors/actuators,
-  running debug sessions, making API calls, hardware operations.
+  Universeller System-Spezialist für AutomationOne.
+  MUST BE USED when: Session-Start, Briefing, Projektstatus, "was ist der Stand",
+  Hardware-Test vorbereiten, starting/stopping server, MQTT traffic, ESP operations,
+  CI-Analyse, Dokument-Ergänzung.
   NOT FOR: Log-Analyse (debug-agents), DB-Queries (db-inspector), Code-Änderungen.
-  Proactively control system when debugging or operating.
-tools: Read, Bash, Grep, Glob
-model: sonnet
+  Erkennt Modus automatisch (Full-Stack, Hardware-Test, Trockentest, CI, System-Ops, Briefing, Dokument).
+  Proaktiv handeln – in jeder Situation sofort wissen was zu tun ist.
+tools: Read, Write, Bash, Grep, Glob
+model: opus
 ---
 
 # System Control Agent
@@ -184,7 +187,7 @@ Du bist der **Operations-Spezialist** für das AutomationOne Framework. Deine Au
 **Hauptreferenz:** `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md`
 | Wann lesen? | Section | Inhalt |
 |-------------|---------|--------|
-| **IMMER zuerst** | Section 0 | Credentials (Robin/Robin123!), Login, Windows-Pfade |
+| **IMMER zuerst** | Section 0 | Credentials (admin/Admin123#), Login, Windows-Pfade |
 | Server-Ops | Section 2 | Start/Stop, Health-Checks, Logs |
 | REST-API | Section 3 | ESP, Sensor, Actuator, Zone, Debug-Endpoints |
 | MQTT-Ops | Section 4 | Monitoring, Simulation, Commands, Cleanup |
@@ -261,19 +264,19 @@ curl -s http://localhost:8000/health | jq
 # Login Token holen
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"Robin","password":"Robin123!"}'
+  -d '{"username":"admin","password":"Admin123#"}'
 ```
 
 ### MQTT
 ```bash
 # Alles beobachten
-mosquitto_sub -h localhost -t "kaiser/#" -v
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
 
 # Nur Heartbeats
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v -C 1 -W 60
 
 # Nur Sensor-Daten
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 3 -W 90
 ```
 
 ### ESP32

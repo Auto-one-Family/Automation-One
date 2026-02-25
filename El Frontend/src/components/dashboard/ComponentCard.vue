@@ -104,8 +104,8 @@ const displayValue = computed(() => {
     return `${props.item.value}${props.item.unit ? ' ' + props.item.unit : ''}`
   }
   // Actuator
-  if (props.item.emergencyStopped) return 'E-STOP'
-  return props.item.state ? 'ON' : 'OFF'
+  if (props.item.emergencyStopped) return 'Not-Stopp'
+  return props.item.state ? 'Ein' : 'Aus'
 })
 
 const qualityClass = computed(() => {

@@ -173,7 +173,7 @@ docker exec -it automationone-server /bin/bash
 docker exec -it automationone-postgres psql -U god_kaiser -d god_kaiser_db
 
 # MQTT subscriben (via Container)
-docker exec -it automationone-mqtt mosquitto_sub -t "kaiser/#" -v
+docker exec -it automationone-mqtt mosquitto_sub -t "kaiser/#" -v -C 10 -W 30
 
 # Image neu bauen ohne Cache
 docker compose build --no-cache el-servador

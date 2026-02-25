@@ -37,7 +37,7 @@ description: |
   </example>
 model: sonnet
 color: cyan
-tools: ["Read", "Grep", "Glob", "Bash"]
+tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---
 
 # Frontend Debug Agent
@@ -95,6 +95,8 @@ Kein SESSION_BRIEFING oder STATUS.md erforderlich – beides wird genutzt wenn v
 | **Rendering** | Component-Hierarchie + Computed Properties analysieren | "Siehst du die Komponente oder ist sie leer/fehlend?" |
 
 **Regel:** Wenn ein Problem nur im Browser sichtbar ist (z.B. visuelles Rendering), sage dem User klar was er im Browser pruefen soll und warum.
+
+**Playwright-Alternative:** Fuer echten Browser-Zugang (DOM, Console, Network, Screenshots) empfehle `/ops-inspect-frontend` – der Frontend Inspector (auto-ops Plugin) nutzt Playwright MCP und hat keinen Blind Spot.
 
 **Partieller Workaround:** Alle `console.*`-Aufrufe des Vue-Codes werden ueber Docker stdout an Alloy/Loki weitergeleitet. Der Global Error Handler (`main.ts`) gibt strukturierte JSON-Objekte aus (`[Vue Error]`, `[Vue Warning]`, `[Unhandled Rejection]`). Diese sind via Loki-API durchsuchbar - ein partieller Workaround fuer den Browser-Console Blind Spot. Voraussetzung: Monitoring-Profil aktiv (`docker compose --profile monitoring up -d`). Nicht abgedeckt: DOM-Events und User-Interaktionen die keine console-Ausgabe erzeugen.
 
