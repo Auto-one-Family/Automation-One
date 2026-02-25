@@ -1,6 +1,6 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.3 | **Stand:** 2026-02-24
+> **Version:** 1.4 | **Stand:** 2026-02-25
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
@@ -100,6 +100,23 @@
 - **Referenzen:** LOG_LOCATIONS.md, CI_PIPELINE.md, TEST_ENGINE_REFERENCE.md, TEST_WORKFLOW.md, flow_reference.md
 - **Andere Agenten:** Keine; eigenständiger Flow (F4)
 
+## 1.14 auto-ops (Plugin-Agent)
+- **Datei:** `.claude/local-marketplace/auto-ops/agents/auto-ops.md`
+- **Rolle:** Autonomous Operations Agent (v2.0). 5 Rollen: Operations, Backend Inspector Delegation, Frontend Inspector Delegation, Driver, Hardware-Test Orchestrator (F4).
+- **Skills:** system-health, docker-operations, esp32-operations, database-operations, loki-queries, error-codes, mqtt-analysis, boot-sequences, frontend-patterns, cross-layer-correlation
+- **MCP Tools:** Playwright (10 Tools), Sequential Thinking (`mcp__MCP_DOCKER__sequentialthinking`)
+- **Andere Agenten:** Delegiert an backend-inspector, frontend-inspector, esp32-debug, server-debug, mqtt-debug, frontend-debug, meta-analyst
+
+## 1.15 backend-inspector (Plugin-Agent)
+- **Datei:** `.claude/local-marketplace/auto-ops/agents/backend-inspector.md`
+- **Rolle:** Cross-Layer Backend-Diagnose (ESP → MQTT → Server → DB). Loki-first, debug-status.ps1 als Einstieg.
+- **MCP Tools:** Sequential Thinking (`mcp__MCP_DOCKER__sequentialthinking`), KEIN Playwright
+
+## 1.16 frontend-inspector (Plugin-Agent)
+- **Datei:** `.claude/local-marketplace/auto-ops/agents/frontend-inspector.md`
+- **Rolle:** Cross-Layer Frontend-Diagnose (Browser → Vue → Pinia → API → Server → DB). Playwright MCP fuer echten Browser-Zugang.
+- **MCP Tools:** Playwright (10 Tools), Sequential Thinking (`mcp__MCP_DOCKER__sequentialthinking`)
+
 ---
 
 # 2. SKILLS (.claude/skills/)
@@ -127,6 +144,7 @@
 | updatedocs | Docs nach Code-Änderungen aktualisieren | Robin (/updatedocs) |
 | verify-plan | TM-Pläne gegen Codebase prüfen | Robin (/verify-plan) |
 | ki-audit | Bereich auf KI-Fehler prüfen, Report/Fix | Robin (/ki-audit) |
+| hardware-test | F4 Hardware-Test-Flow, Profil-basiert, auto-ops Orchestrierung | Robin (/hardware-test) |
 
 ---
 
@@ -280,12 +298,20 @@ mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 3 -W 90
 ```
 
 ### ESP32
-```bash
-# Build & Flash
-cd "El Trabajante" && pio run -e esp32_dev -t upload
 
-# Serial Monitor
-cd "El Trabajante" && pio device monitor
+**Wichtig:** PlatformIO muessen aus `El Trabajante/` ausgefuehrt werden. Flash/Monitor NUR in PowerShell (COM-Port).
+
+```bash
+# Build (Git Bash / Agent)
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+```
+
+```powershell
+# Flash + Monitor (PowerShell, User-Befehl)
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ### API (häufigste)

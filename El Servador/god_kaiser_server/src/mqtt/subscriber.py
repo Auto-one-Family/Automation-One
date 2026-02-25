@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 
 from ..core.logging_config import get_logger
-from ..core.request_context import generate_mqtt_correlation_id, set_request_id
+from ..core.request_context import clear_request_id, generate_mqtt_correlation_id, set_request_id
 from .client import MQTTClient
 from .topics import TopicBuilder
 
@@ -174,7 +174,6 @@ class Subscriber:
             seq = payload.get("seq")
             topic_suffix = topic.rsplit("/", 1)[-1] if "/" in topic else topic
             correlation_id = generate_mqtt_correlation_id(esp_id, topic_suffix, seq)
-            set_request_id(correlation_id)
 
             # Find matching handler
             handler = self._find_handler(topic)
@@ -219,6 +218,29 @@ class Subscriber:
             "Call set_main_loop() to set a valid event loop."
         )
 
+    @staticmethod
+    async def _run_handler_with_cid(
+        handler: Callable, topic: str, payload: dict, correlation_id: str
+    ):
+        """Run MQTT handler with correlation ID set in event loop context.
+
+        This wrapper ensures the ContextVar is set in the CORRECT context
+        (the main event loop), not in the ThreadPool worker thread where
+        run_coroutine_threadsafe() is called from. ContextVars do NOT
+        propagate across thread boundaries automatically (PEP 567).
+
+        Args:
+            handler: Async handler function
+            topic: MQTT topic
+            payload: Parsed payload dict
+            correlation_id: Cross-layer correlation ID (esp_id:topic:seq:ts)
+        """
+        token = set_request_id(correlation_id)
+        try:
+            return await handler(topic, payload)
+        finally:
+            clear_request_id(token)
+
     def _execute_handler(
         self, handler: Callable, topic: str, payload: dict, correlation_id: str = ""
     ) -> None:
@@ -236,6 +258,11 @@ class Subscriber:
         Added robust loop validation to prevent "Queue bound to different event loop" errors
         in Python 3.12+ which is stricter about event loop binding.
 
+        CID FIX (2026-02-25):
+        Correlation ID is now passed explicitly to a wrapper coroutine that sets the
+        ContextVar in the event loop context. Previously, set_request_id() was called
+        in the ThreadPool worker, but ContextVars don't propagate across thread boundaries.
+
         Args:
             handler: Handler function (sync or async)
             topic: MQTT topic
@@ -243,9 +270,6 @@ class Subscriber:
             correlation_id: Cross-layer correlation ID (esp_id:topic:seq:ts)
         """
         try:
-            # Set correlation ID in thread-local context for all log entries
-            if correlation_id:
-                set_request_id(correlation_id)
             # Check if handler is async (coroutine function)
             if asyncio.iscoroutinefunction(handler):
                 # CRITICAL: Run async handler in MAIN event loop
@@ -258,7 +282,12 @@ class Subscriber:
                     return
 
                 # Schedule coroutine in main event loop (thread-safe)
-                future = asyncio.run_coroutine_threadsafe(handler(topic, payload), main_loop)
+                # CID is passed as parameter to the wrapper, NOT via ContextVar
+                # (ContextVars don't propagate across thread boundaries)
+                future = asyncio.run_coroutine_threadsafe(
+                    self._run_handler_with_cid(handler, topic, payload, correlation_id),
+                    main_loop,
+                )
 
                 try:
                     # Wait for completion with timeout (30 seconds)
@@ -283,11 +312,16 @@ class Subscriber:
                     self.messages_failed += 1
             else:
                 # Sync handler - call directly in thread pool
-                result = handler(topic, payload)
-                if result is False:
-                    logger.warning(
-                        f"Handler returned False for topic {topic} - processing may have failed"
-                    )
+                # Set CID in thread context for sync handler logging
+                token = set_request_id(correlation_id) if correlation_id else None
+                try:
+                    result = handler(topic, payload)
+                    if result is False:
+                        logger.warning(
+                            f"Handler returned False for topic {topic} - processing may have failed"
+                        )
+                finally:
+                    clear_request_id(token)
 
         except Exception as e:
             logger.error(f"Handler execution failed for topic {topic}: {e}", exc_info=True)

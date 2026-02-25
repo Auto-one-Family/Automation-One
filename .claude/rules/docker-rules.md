@@ -53,13 +53,13 @@ Every new service MUST have:
 
 ## Log Bind-Mounts
 
-Server, PostgreSQL und Session-Logs nutzen Bind-Mounts; MQTT-Broker nur stdout (kein Bind-Mount):
+Server-Logs nutzen Bind-Mounts; MQTT-Broker, PostgreSQL und ESP32 nur stdout (kein Bind-Mount):
 
 | Service | Host Path | Container Path |
 |---------|-----------|----------------|
 | Server | `./logs/server/` | `/app/logs` |
 | MQTT | – (stdout only, Bind-Mount in docker-compose auskommentiert) | – |
-| PostgreSQL | `./logs/postgres/` | `/var/log/postgresql` |
+| PostgreSQL | – (stderr → Docker → Alloy → Loki; `logging_collector=off`) | – |
 | ESP32 Serial Logger | N/A (stdout only) | N/A |
 
 **Config Files:**

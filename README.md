@@ -618,15 +618,19 @@ sudo systemctl restart mosquitto
 ```
 
 ### 4. Flash ESP32 Firmware
-```bash
-cd "El Trabajante"
-# Edit platformio.ini (Board: esp32dev / seeed_xiao_esp32c3)
+
+**PowerShell** (Flash/Monitor erfordern COM-Port, `&&` geht nicht in PS 5.x):
+```powershell
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
 
 # Build & Upload
-pio run -t upload
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
 
-# Monitor Serial
-pio device monitor
+# Monitor Serial (Ctrl+C zum Beenden)
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
+
+# Upload + Monitor nacheinander
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ### 5. ESP32 Provisioning

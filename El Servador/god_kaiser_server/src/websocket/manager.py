@@ -13,6 +13,7 @@ from starlette.websockets import WebSocketState
 
 from ..core.logging_config import get_logger
 from ..core.metrics import increment_ws_disconnect
+from ..core.request_context import get_request_id
 from ..utils.time_helpers import unix_timestamp_s
 
 logger = get_logger(__name__)
@@ -212,8 +213,6 @@ class WebSocketManager:
 
             # Resolve correlation_id: explicit param > ContextVar > omit
             if correlation_id is None:
-                from ..core.request_context import get_request_id
-
                 correlation_id = get_request_id()
 
             message: dict = {
@@ -292,14 +291,23 @@ class WebSocketManager:
             correlation_id: Correlation ID from MQTT handler context
         """
         if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
+            future = asyncio.run_coroutine_threadsafe(
                 self.broadcast(
                     message_type, data, filters, correlation_id=correlation_id
                 ),
                 self._loop,
             )
+            future.add_done_callback(self._handle_broadcast_result)
         else:
             logger.warning("Cannot broadcast: event loop not available")
+
+    @staticmethod
+    def _handle_broadcast_result(future) -> None:
+        """Handle result of broadcast scheduled via run_coroutine_threadsafe."""
+        try:
+            future.result()
+        except Exception as e:
+            logger.error(f"Broadcast failed in event loop: {e}", exc_info=True)
 
     def _check_rate_limit(self, client_id: str) -> bool:
         """

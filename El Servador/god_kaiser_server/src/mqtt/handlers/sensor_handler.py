@@ -30,7 +30,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
-from ...core.metrics import update_sensor_value
+from ...core.metrics import increment_sensor_implausible, update_sensor_value
 from ...utils.sensor_formatters import format_sensor_message
 from ...core.resilience import (
     ServiceUnavailableError,
@@ -53,14 +53,39 @@ class SensorDataHandler:
     2. Validate payload structure
     3. Lookup ESP device and sensor config (with resilience)
     4. Check Pi-Enhanced mode
-    5. Save data to database (with resilience)
-    6. Trigger Pi-Enhanced processing if needed
+    5. Physical range validation (post-processing)
+    6. Save data to database (with resilience)
+    7. Trigger Pi-Enhanced processing if needed
 
     Resilience:
     - Uses resilient_session() for database operations (circuit breaker)
     - Timeout protection for overall handler operation
     - Best-effort WebSocket broadcast (no retry)
     """
+
+    # Physical sensor limits from datasheets.
+    # Values outside these ranges are DEFINITELY sensor errors.
+    # Organized by sensor_type as used in MQTT payloads.
+    SENSOR_PHYSICAL_LIMITS: dict[str, dict[str, float]] = {
+        # Temperature sensors
+        "sht31": {"min": -40.0, "max": 125.0},
+        "sht31_temp": {"min": -40.0, "max": 125.0},
+        "sht31_humidity": {"min": 0.0, "max": 100.0},
+        "ds18b20": {"min": -55.0, "max": 125.0},
+        "bmp280_temp": {"min": -40.0, "max": 85.0},
+        "bmp280_pressure": {"min": 300.0, "max": 1100.0},
+        "bme280_temp": {"min": -40.0, "max": 85.0},
+        "bme280_pressure": {"min": 300.0, "max": 1100.0},
+        "bme280_humidity": {"min": 0.0, "max": 100.0},
+        # Analytical sensors
+        "ph": {"min": 0.0, "max": 14.0},
+        "ec": {"min": 0.0, "max": 20000.0},
+        # Environmental sensors
+        "moisture": {"min": 0.0, "max": 100.0},
+        "co2": {"min": 0.0, "max": 10000.0},
+        "light": {"min": 0.0, "max": 200000.0},
+        "flow": {"min": 0.0, "max": 1000.0},
+    }
 
     def __init__(self, publisher: Optional[Publisher] = None):
         """
@@ -258,7 +283,26 @@ class SensorDataHandler:
                         processing_mode = "local"
                         processed_value = value
 
-                    # Step 8: Detect data source (mock/test/production)
+                    # Step 8b: Physical range validation (post-processing)
+                    # Check the display value against sensor physical limits.
+                    # Values outside datasheet range get quality="critical" but are
+                    # still saved (never discarded) for diagnostic purposes.
+                    display_val = processed_value if processed_value is not None else value
+                    if display_val is not None and quality not in ("error",):
+                        range_result = self._check_physical_range(
+                            sensor_type, float(display_val)
+                        )
+                        if range_result == "implausible":
+                            logger.warning(
+                                f"Implausible sensor value: esp_id={esp_id_str}, "
+                                f"gpio={gpio}, sensor_type={sensor_type}, "
+                                f"value={display_val}, "
+                                f"limits={self.SENSOR_PHYSICAL_LIMITS.get(sensor_type)}"
+                            )
+                            quality = "critical"
+                            increment_sensor_implausible(sensor_type, esp_id_str)
+
+                    # Step 8c: Detect data source (mock/test/production)
                     data_source = self._detect_data_source(esp_device, payload)
 
                     # Step 9: Save data to database
@@ -393,6 +437,23 @@ class SensorDataHandler:
                 exc_info=True,
             )
             return False
+
+    @classmethod
+    def _check_physical_range(cls, sensor_type: str, value: float) -> str | None:
+        """
+        Check if a sensor value is within physical datasheet limits.
+
+        Args:
+            sensor_type: Sensor type identifier (e.g. "sht31", "ds18b20")
+            value: Processed or raw sensor value in physical units
+
+        Returns:
+            "implausible" if value is outside physical limits, None otherwise
+        """
+        limits = cls.SENSOR_PHYSICAL_LIMITS.get(sensor_type)
+        if limits is not None and (value < limits["min"] or value > limits["max"]):
+            return "implausible"
+        return None
 
     def _validate_payload(self, payload: dict) -> dict:
         """

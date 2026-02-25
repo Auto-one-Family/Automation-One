@@ -85,15 +85,18 @@ Der Profil-Name kommt aus dem User-Input:
 Hardware-Test Orchestrator — Phase Setup.
 Profil: {vollstaendiger YAML-Inhalt hier einfuegen}
 Device-ID des ESP: {device_id falls bekannt, sonst "wird bei Registration vergeben"}
+State-Datei: .claude/reports/current/HW_TEST_STATE.json (lesen bei Start, aktualisieren nach Abschluss)
 
 Ausfuehren:
-1. Pre-Check: Server Health, MQTT Broker, DB
-2. Device registrieren (device_mode=real)
-3. Device genehmigen (POST /api/v1/esp/devices/{esp_id}/approve)
-4. Sensoren aus Profil anlegen
-5. Aktoren aus Profil anlegen (wenn vorhanden)
-6. Zone/Subzone zuweisen
-7. Config-Push abwarten (config_response via MQTT, 30s Timeout)
+1. HW_TEST_STATE.json lesen (falls vorhanden: Phase-Status pruefen, ggf. resumieren)
+2. Pre-Check: Server Health, MQTT Broker, DB
+3. Device registrieren (device_mode=real)
+4. Device genehmigen (POST /api/v1/esp/devices/{esp_id}/approve)
+5. Sensoren aus Profil anlegen
+6. Aktoren aus Profil anlegen (wenn vorhanden)
+7. Zone/Subzone zuweisen
+8. Config-Push abwarten (config_response via MQTT, 30s Timeout)
+9. HW_TEST_STATE.json aktualisieren: phase=setup, status=completed, device_id, sensor_ids
 
 Ergebnis nach .claude/reports/current/HW_TEST_PHASE_SETUP.md schreiben.
 Enthaelt: Device-ID, Sensor-IDs, GPIO-Mapping, Config-Status.
@@ -156,14 +159,17 @@ Hardware-Test Orchestrator — Phase Verifikation.
 Profil: {name}
 Device-ID: {device_id aus Phase 2 Report}
 Sensoren: {liste aus Phase 2 Report}
+State-Datei: .claude/reports/current/HW_TEST_STATE.json (lesen bei Start, aktualisieren nach Abschluss)
 
 Ausfuehren:
-1. Heartbeat-Check (60s Timeout)
-2. Sensor-Daten-Check (3 Messages, 90s Timeout)
-3. Actuator-Test (wenn Profil Aktoren hat): ON -> 2s -> OFF
-4. DB-Persistenz (sensor_data Tabelle)
-5. Grafana-Alert-Status (keine firing Alerts erwartet)
-6. Bei Problemen: Debug-Agents delegieren (esp32-debug, server-debug, mqtt-debug)
+1. HW_TEST_STATE.json lesen (Phase-Status pruefen, device_id und sensor_ids uebernehmen)
+2. Heartbeat-Check (60s Timeout)
+3. Sensor-Daten-Check (3 Messages, 90s Timeout)
+4. Actuator-Test (wenn Profil Aktoren hat): ON -> 2s -> OFF
+5. DB-Persistenz (sensor_data Tabelle)
+6. Grafana-Alert-Status (keine firing Alerts erwartet)
+7. Bei Problemen: Debug-Agents delegieren (esp32-debug, server-debug, mqtt-debug)
+8. HW_TEST_STATE.json aktualisieren: phase=verify, status=completed/failed
 
 Ergebnis nach .claude/reports/current/HW_TEST_PHASE_VERIFY.md schreiben.
 Enthaelt: Check-Tabelle (PASS/FAIL pro Check), Sensor-Werte, Aktor-Response.
@@ -179,17 +185,19 @@ Device-ID: {device_id}
 Dauer: {stability_test.duration_minutes} Minuten
 Polling-Intervall: {stability_test.polling_interval_minutes} Minuten
 Expected Ranges: {stability_test.expected_ranges}
+State-Datei: .claude/reports/current/HW_TEST_STATE.json (lesen bei Start, aktualisieren nach Abschluss)
 
 Ausfuehren:
-Bash Polling-Loop mit {iterationen} Iterationen:
-Pro Iteration:
-  1. Server Health Check
-  2. Sensor-Daten der letzten {intervall} Minuten aus DB
-  3. Heartbeat-Check (einmalig, -C 1 -W 10)
-  4. Werte gegen Expected Ranges pruefen
-  5. Zwischen-Ergebnis loggen
-
-Nach Loop: Statistik berechnen (Min/Max/Avg/StdDev pro Sensor).
+1. HW_TEST_STATE.json lesen (Phase-Status pruefen, device_id uebernehmen)
+2. Bash Polling-Loop mit {iterationen} Iterationen:
+   Pro Iteration:
+     a. Server Health Check
+     b. Sensor-Daten der letzten {intervall} Minuten aus DB
+     c. Heartbeat-Check (einmalig, -C 1 -W 10)
+     d. Werte gegen Expected Ranges pruefen
+     e. Zwischen-Ergebnis loggen
+3. Nach Loop: Statistik berechnen (Min/Max/Avg/StdDev pro Sensor).
+4. HW_TEST_STATE.json aktualisieren: phase=stability, status=completed/failed
 
 Ergebnis nach .claude/reports/current/HW_TEST_PHASE_STABILITY.md schreiben.
 Enthaelt: Iteration-Tabelle, Statistik, Out-of-Range Events, Heartbeat-Luecken.

@@ -101,7 +101,7 @@ Bei Aufgaben außerhalb deiner Domäne gib eine **Strategie-Empfehlung**: welche
 | `make logs-mqtt` | Logs nur `mqtt-broker` | Mosquitto-Broker-Logs |
 | `make logs-frontend` | Logs nur `el-frontend` | Frontend-Container-Logs |
 | `make logs-db` | Logs nur `postgres` | PostgreSQL-Logs |
-| `make mqtt-sub` | `mosquitto_sub -t "kaiser/#" -v` | MQTT Kaiser-Traffic live beobachten |
+| `make mqtt-sub` | `mosquitto_sub -t "kaiser/#" -v -C 10 -W 30` | MQTT Kaiser-Traffic beobachten (10 Messages, 30s Timeout) |
 
 ### Shell-Zugriff
 
@@ -148,7 +148,7 @@ Bei Aufgaben außerhalb deiner Domäne gib eine **Strategie-Empfehlung**: welche
 | `make logs-mqtt` | `docker compose logs -f --tail=100 mqtt-broker` |
 | `make logs-frontend` | `docker compose logs -f --tail=100 el-frontend` |
 | `make logs-db` | `docker compose logs -f --tail=100 postgres` |
-| `make mqtt-sub` | `docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v` |
+| `make mqtt-sub` | `docker compose exec mqtt-broker mosquitto_sub -t "kaiser/#" -v -C 10 -W 30` |
 | `make health` | `docker exec automationone-server curl -s http://localhost:8000/api/v1/health/live` |
 | `make e2e-up` | `docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --wait` |
 | `make e2e-down` | `docker compose -f docker-compose.yml -f docker-compose.e2e.yml down` |

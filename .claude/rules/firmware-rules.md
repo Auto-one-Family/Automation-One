@@ -215,7 +215,9 @@ LOG_ERROR("SensorManager: Failed to initialize - %s", errorMsg);
 ### Vor jedem Commit
 
 ```bash
-cd "El Trabajante" && pio run -e esp32_dev
+# Git Bash (Agent) — platformio.ini liegt in El Trabajante/
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
 ```
 
 ### Erwartetes Ergebnis

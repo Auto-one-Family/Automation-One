@@ -54,7 +54,10 @@ SENSOR_TYPES = [
     "digital",
 ]
 
-QUALITY_LEVELS = ["excellent", "good", "fair", "poor", "bad", "stale", "error"]
+QUALITY_LEVELS = [
+    "excellent", "good", "fair", "poor", "bad", "stale",
+    "suspect", "critical", "error", "unknown",
+]
 
 
 # =============================================================================

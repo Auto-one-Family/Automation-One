@@ -328,9 +328,10 @@ async def lifespan(app: FastAPI):
         # Gauges are in the default prometheus_client registry and automatically
         # exposed by the Instrumentator at /api/v1/health/metrics.
         logger.info("Registering Prometheus metrics update job...")
-        from .core.metrics import set_server_start_time, update_all_metrics_async
+        from .core.metrics import init_metrics, set_server_start_time, update_all_metrics_async
 
         set_server_start_time(time.time())
+        init_metrics()
 
         async def _metrics_update_job() -> None:
             await update_all_metrics_async(get_session)
@@ -760,5 +761,6 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.environment == "development",
         log_level=settings.log_level.lower(),
+        access_log=False,  # Redundant with RequestIdMiddleware request logging
     )
 # Reload trigger Fr, 30. Jan 2026 04:31:31

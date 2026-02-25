@@ -279,7 +279,7 @@ Topic: `kaiser/{kaiser_id}/esp/{esp_id}/system/error` (QoS 1)
 | Quelle | Pfad | Wann nutzen |
 |--------|------|-------------|
 | Server-Log | `logs/server/god_kaiser.log` | ESP-bezogene Server-Errors greppen |
-| MQTT-Traffic | `mosquitto_sub` live | Wenn Serial MQTT-Probleme zeigt |
+| MQTT-Traffic | `mosquitto_sub -C 5 -W 15` live | Wenn Serial MQTT-Probleme zeigt |
 | Docker-Status | `docker compose ps` | Container-Verfuegbarkeit pruefen |
 
 ### Grep-Patterns
@@ -362,7 +362,7 @@ Alle Queries via: `docker exec automationone-postgres psql -U god_kaiser -d god_
 | Service | Container | Port | Health |
 |---------|-----------|------|--------|
 | `postgres` | automationone-postgres | 5432 | pg_isready |
-| `mqtt-broker` | automationone-mqtt | 1883, 9001 | mosquitto_sub $SYS |
+| `mqtt-broker` | automationone-mqtt | 1883, 9001 | mosquitto_sub $SYS -C 1 -W 5 |
 | `el-servador` | automationone-server | 8000 | curl /api/v1/health/live |
 | `el-frontend` | automationone-frontend | 5173 | node fetch |
 

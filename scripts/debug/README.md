@@ -1,7 +1,7 @@
 # Debug Scripts
 
 > **Zweck:** Helper-Scripts für Debug-Sessions
-> **Version:** 4.0 | **Aktualisiert:** 2026-02-06
+> **Version:** 4.1 | **Aktualisiert:** 2026-02-25
 
 ## start_session.sh (v4.0)
 
@@ -65,13 +65,53 @@ Stops the debug session and archives all logs.
 4. Archives reports → `.claude/reports/archive/{session_id}/`
 5. Clears `logs/current/` and `reports/current/`
 
+## debug-status.ps1
+
+Aggregated system health check. Returns JSON with status of all core services.
+
+### Usage
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/debug/debug-status.ps1
+```
+
+### Checks
+
+| Service | What | Endpoint |
+|---------|------|----------|
+| Docker | Container running | `docker compose ps` |
+| Server | HTTP reachable | `http://localhost:8000/api/v1/health/live` |
+| MQTT | Broker port open | `localhost:1883` |
+| PostgreSQL | Accepts connections | `docker exec pg_isready` |
+| Loki | Ready state | `http://localhost:3100/ready` |
+| Grafana | API health | `http://localhost:3000/api/health` (Basic auth) |
+
+### Output
+
+```json
+{
+  "timestamp": "2026-02-25T10:00:00",
+  "overall": "ok",
+  "services": { "docker": {...}, "server": {...}, ... },
+  "issues": []
+}
+```
+
+`overall` is `"ok"` when all services are green, `"degraded"` or `"critical"` otherwise.
+
+### Notes
+
+- Uses `System.Net.WebClient` fallback for localhost HTTP (bypasses WinHTTP proxy issues)
+- Grafana check includes Basic auth (`admin:admin`)
+- Recommended as first step in any debug session
+
 ## Log Directories
 
 | Directory | Content |
 |-----------|---------|
 | `logs/server/` | Server JSON-Logs (Docker bind-mount) |
-| `logs/mqtt/` | Mosquitto Broker-Logs (Docker bind-mount) |
-| `logs/postgres/` | PostgreSQL Query-Logs (Docker bind-mount) |
+| `logs/mqtt/` | Deaktiviert (stdout-only); Broker-Logs via Loki `compose_service=mqtt-broker` |
+| (kein Bind-Mount) | PostgreSQL: `docker compose logs postgres` oder Loki `{compose_service="postgres"}` |
 | `logs/esp32/` | ESP32 Serial-Logs (manual) |
 | `logs/current/` | Session-Logs (via start_session.sh) |
 | `logs/archive/` | Archived session logs |

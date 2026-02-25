@@ -160,11 +160,12 @@ class AuditLog(Base, TimestampMixin):
     )
 
     # Request-ID (for server-log correlation)
+    # VARCHAR(255) to support MQTT-generated IDs like "unknown:heartbeat:no-seq:{timestamp}"
     request_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
+        String(255),
         nullable=True,
         index=True,
-        doc="HTTP request ID for server-log correlation",
+        doc="HTTP or MQTT request ID for server-log correlation",
     )
 
     def __repr__(self) -> str:

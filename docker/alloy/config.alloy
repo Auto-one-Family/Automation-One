@@ -178,14 +178,18 @@ loki.process "pipeline" {
   }
 
   // ==========================================================================
-  // esp32-serial-logger — Parse ESP32 serial output (JSON-structured)
+  // esp32-serial-logger — Parse ESP32 serial output (JSON + plain text)
   // ==========================================================================
-  // Serial logger outputs structured JSON from TCP-based serial bridge:
-  //   {"level": "info", "device_id": "esp32-xiao-01", "component": "mqtt", ...}
-  // Parses 4 ESP32 log formats: Custom Logger, Boot Banner, MQTT Debug JSON, ESP-IDF SDK
+  // Two possible formats:
+  //   1. JSON (from TCP serial bridge):
+  //      {"level": "info", "device_id": "esp32-xiao-01", "component": "mqtt", ...}
+  //   2. Plain text (from direct serial monitor / pio device monitor):
+  //      [12345] [INFO    ] [MQTT    ] Connected to broker [E:3001]
+  // JSON parsing runs first; regex fallback catches plain text lines.
   stage.match {
     selector = "{compose_service=\"esp32-serial-logger\"}"
 
+    // Attempt 1: JSON parsing (serial-logger may output structured JSON)
     stage.json {
       expressions = {
         "level"      = "",
@@ -193,6 +197,18 @@ loki.process "pipeline" {
         "component"  = "",
         "error_code" = "",
       }
+    }
+
+    // Attempt 2: Regex fallback for ESP32 plain text serial output
+    // Format: [millis] [LEVEL   ] [TAG     ] message [E:code]
+    stage.regex {
+      expression = "\\[\\s*\\d+\\]\\s*\\[(?P<level>\\w+)\\s*\\]\\s*\\[(?P<component>\\w+)\\s*\\]\\s*(?P<message>.+?)(?:\\s*\\[E:(?P<error_code>\\d+)\\])?"
+    }
+
+    // Normalize ESP32 levels to standard level values
+    stage.template {
+      source   = "level"
+      template = "{{ if eq .level \"CRITICAL\" }}CRITICAL{{ else if eq .level \"WARNING\" }}WARNING{{ else if eq .level \"ERROR\" }}ERROR{{ else if eq .level \"INFO\" }}INFO{{ else if eq .level \"DEBUG\" }}DEBUG{{ else }}{{ .level }}{{ end }}"
     }
 
     // Promote level to label
@@ -275,11 +291,32 @@ loki.process "pipeline" {
   }
 
   // ==========================================================================
-  // postgres — Drop checkpoint noise
+  // postgres — Level extraction, checkpoint noise drop, slow query metadata
   // ==========================================================================
+  // PostgreSQL logs to stderr (logging_collector=off), captured by Docker.
+  // Log format: "%t [%p] %u@%d LOG/WARNING/ERROR/FATAL/PANIC:  statement"
   stage.match {
     selector = "{compose_service=\"postgres\"}"
 
+    // Extract PostgreSQL log level (LOG, WARNING, ERROR, FATAL, PANIC)
+    stage.regex {
+      expression = "(?P<pg_level>LOG|WARNING|ERROR|FATAL|PANIC)"
+    }
+
+    // Map PostgreSQL levels to standard levels
+    // LOG -> INFO, FATAL/PANIC -> CRITICAL
+    stage.template {
+      source   = "level"
+      template = "{{ if eq .pg_level \"FATAL\" }}CRITICAL{{ else if eq .pg_level \"PANIC\" }}CRITICAL{{ else if eq .pg_level \"LOG\" }}INFO{{ else }}{{ .pg_level }}{{ end }}"
+    }
+
+    stage.labels {
+      values = {
+        "level" = "",
+      }
+    }
+
+    // Drop checkpoint noise
     stage.drop {
       expression          = ".*checkpoint starting.*"
       drop_counter_reason = "postgres_checkpoint_noise"
@@ -287,6 +324,16 @@ loki.process "pipeline" {
     stage.drop {
       expression          = ".*checkpoint complete.*"
       drop_counter_reason = "postgres_checkpoint_noise"
+    }
+
+    // Extract slow query duration as structured metadata
+    stage.regex {
+      expression = "duration: (?P<query_duration_ms>[\\d.]+) ms"
+    }
+    stage.structured_metadata {
+      values = {
+        "query_duration_ms" = "",
+      }
     }
   }
 

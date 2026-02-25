@@ -573,13 +573,16 @@ cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/unit/ -v
 cd "El Frontend" && npm run test:unit
 
 # ESP32 Native Unit Tests (22 Tests, keine Hardware)
-cd "El Trabajante" && pio test -e native -vvv
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe test -e native -vvv
 
 # Wokwi Quick Test
 make wokwi-test-quick
 
-# Vollständiger Stack-Test
-make up && cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe -v
+# Vollstaendiger Stack-Test (Git Bash, Befehle einzeln)
+make up
+cd "El Servador/god_kaiser_server"
+.venv/Scripts/pytest.exe -v
 ```
 
 ### 9.2 CI Debugging

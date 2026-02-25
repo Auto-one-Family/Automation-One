@@ -9,12 +9,14 @@ Two ID types coexist:
 - MQTT messages: Human-readable format {esp_id}:{topic_suffix}:{seq}:{timestamp_ms}
 """
 
+import contextvars
 import time
-from contextvars import ContextVar
 from typing import Optional, Union
 import uuid
 
-_request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+_request_id_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "request_id", default=None
+)
 
 
 def get_request_id() -> Optional[str]:
@@ -22,9 +24,13 @@ def get_request_id() -> Optional[str]:
     return _request_id_ctx.get()
 
 
-def set_request_id(request_id: str) -> None:
-    """Set the request_id for the current context."""
-    _request_id_ctx.set(request_id)
+def set_request_id(request_id: str) -> contextvars.Token:
+    """Set the request_id for the current context.
+
+    Returns token for proper cleanup via clear_request_id(token).
+    Backwards-compatible: callers that ignore the return value still work.
+    """
+    return _request_id_ctx.set(request_id)
 
 
 def generate_request_id() -> str:
@@ -53,6 +59,14 @@ def generate_mqtt_correlation_id(
     return f"{esp_id}:{topic_suffix}:{seq_part}:{ts_ms}"
 
 
-def clear_request_id() -> None:
-    """Clear the request_id from context."""
-    _request_id_ctx.set(None)
+def clear_request_id(token: Optional[contextvars.Token] = None) -> None:
+    """Clear the request_id from context.
+
+    Args:
+        token: If provided, resets ContextVar to the state before set_request_id().
+               If None, sets the value to None (backwards-compatible fallback).
+    """
+    if token is not None:
+        _request_id_ctx.reset(token)
+    else:
+        _request_id_ctx.set(None)

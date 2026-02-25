@@ -462,7 +462,29 @@ Scenario-to-agent mapping:
 |-----------|-----|---------|
 | Debug Console | `/d/debug-console` | Error rates, log streams, correlation tracing |
 | System Health | `/d/system-health` | Metrics: CPU, memory, response times, ESP status |
-| Alerting | `/alerting/list` | 28 Prometheus + 5 Loki alert rules |
+| Alerting | `/alerting/list` | 33 Prometheus + 6 Loki alert rules (39 total, 34 active in Grafana) |
+
+---
+
+## Frontend Logs: Where They Land
+
+Frontend logging has multiple paths depending on log type and environment:
+
+| Log Type | Where Visible | How to Access |
+|----------|--------------|---------------|
+| Vue Runtime Errors | Server log (via `/api/v1/logs/frontend`) | Loki: `{compose_service="el-servador"} \|= "[FRONTEND]"` |
+| Console.log/warn/error | Browser DevTools only | F12 → Console Tab |
+| Unhandled Promise Rejections | Server log (via `/api/v1/logs/frontend`) | Loki: `{compose_service="el-servador"} \|= "[FRONTEND]"` |
+| Vite Build Errors | Docker stdout | `docker compose logs el-frontend --tail=30` |
+| Network Errors (API) | Browser Network Tab + Axios Error Log | F12 → Network Tab |
+
+**Key architecture decision:** Client-side `createLogger()` outputs JSON to the browser console, NOT to Docker stdout. This is by design:
+- In production, Nginx serves static files — no Node.js process to capture console output
+- In development, the browser console is the correct place for client-side logs
+- Critical errors are forwarded to the server via `POST /api/v1/logs/frontend` (rate-limited, sanitized, unauthenticated)
+- Vue Error Handler + Window Error Handlers are configured for automatic forwarding
+
+**For agents:** Frontend errors are searchable in Loki under `[FRONTEND]`. Browser console logs are NOT in Loki — use Playwright MCP (`/ops-inspect-frontend`) for browser-level debugging.
 
 ---
 
@@ -478,8 +500,11 @@ The Alloy pipeline extracts these fields as structured metadata (queryable with 
 | esp32-serial-logger | `device` | `esp32-xiao-01` | ESP device identifier |
 | esp32-serial-logger | `component` | `mqtt` | Firmware component |
 | esp32-serial-logger | `error_code` | `3001` | Error code from taxonomy |
+| postgres | `query_duration_ms` | `245.123` | Slow query duration (>100ms) |
 
 **Labels** (indexed, fast stream selection):
 - `compose_service`: Docker Compose service name
 - `level`: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `container`, `stream`, `compose_project`: Docker metadata
+
+**PostgreSQL levels:** Alloy maps PG levels to standard: LOG→INFO, WARNING→WARNING, ERROR→ERROR, FATAL/PANIC→CRITICAL

@@ -1,6 +1,6 @@
 # AutomationOne — Flow-Referenz
 
-> **Version:** 1.2 | **Stand:** 2026-02-24
+> **Version:** 1.4 | **Stand:** 2026-02-25
 > **Zweck:** Definiert ALLE Arbeitsabläufe im AutomationOne Agent-System
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 > **Erweiterung:** Neue Flows werden als neue FLOW-Sektion am Ende angehängt
@@ -381,17 +381,19 @@ Skill (hardware-test) ──→ Pre-Check
     ├──→ Task(system-control) ──→ SESSION_BRIEFING.md
     │
     ├──→ Task(auto-ops Phase 2) ──→ HW_TEST_PHASE_SETUP.md
+    │         └──→ R/W HW_TEST_STATE.json (phase, status, timestamp)
     │
     ├──→ Robin: Hardware verkabeln
     │
     ├──→ Task(auto-ops Phase 4) ──→ HW_TEST_PHASE_VERIFY.md
-    │         │
+    │         ├──→ R/W HW_TEST_STATE.json
     │         ├──→ Task(esp32-debug) ──→ HW_TEST_ESP32_DEBUG.md
     │         ├──→ Task(server-debug) ──→ HW_TEST_SERVER_DEBUG.md
     │         ├──→ Task(mqtt-debug) ──→ HW_TEST_MQTT_DEBUG.md
     │         └──→ Task(frontend-debug) ──→ HW_TEST_FRONTEND_DEBUG.md
     │
     ├──→ Task(auto-ops Phase 5) ──→ HW_TEST_PHASE_STABILITY.md
+    │         └──→ R/W HW_TEST_STATE.json
     │
     └──→ Task(meta-analyst) ──→ HW_TEST_META_ANALYSIS.md
                                     │
@@ -399,18 +401,61 @@ Skill (hardware-test) ──→ Pre-Check
                           HW_TEST_FINAL_REPORT.md
 ```
 
+### F4.3.1 State-Persistence (Crash-Recovery)
+
+**Datei:** `.claude/reports/current/HW_TEST_STATE.json`
+
+auto-ops ist stateless zwischen Task()-Aufrufen. STATE.json speichert den aktuellen Zustand persistent:
+
+```json
+{
+  "phase": "verify",
+  "status": "in_progress",
+  "started_at": "2026-02-25T10:00:00Z",
+  "last_updated": "2026-02-25T10:15:00Z",
+  "profile": "sht31",
+  "errors": [],
+  "results": {}
+}
+```
+
+Jeder Task(auto-ops)-Aufruf liest STATE.json bei Start und aktualisiert es nach Abschluss.
+
 ### F4.4 Validierungskriterien
 
 | Phase | Agent/Skill | Muss lesen | Muss erzeugen |
 |-------|-------------|------------|---------------|
 | 0 | hardware-test Skill | Profil YAML | Validiertes Profil |
 | 1 | system-control | STATUS.md, Profil | SESSION_BRIEFING.md |
-| 2 | auto-ops | Profil, Server API | HW_TEST_PHASE_SETUP.md |
+| 2 | auto-ops | Profil, Server API, STATE.json | HW_TEST_PHASE_SETUP.md, STATE.json |
 | 3 | Robin | Wiring-Guide | Bestaetigung |
-| 4 | auto-ops | Phase 2 Report, MQTT, DB | HW_TEST_PHASE_VERIFY.md |
-| 5 | auto-ops | Phase 4 Report, API, MQTT | HW_TEST_PHASE_STABILITY.md |
+| 4 | auto-ops | Phase 2 Report, MQTT, DB, STATE.json | HW_TEST_PHASE_VERIFY.md, STATE.json |
+| 5 | auto-ops | Phase 4 Report, API, MQTT, STATE.json | HW_TEST_PHASE_STABILITY.md, STATE.json |
 | 6 | meta-analyst | Alle HW_TEST_*.md | HW_TEST_META_ANALYSIS.md |
 | 6 | auto-ops | HW_TEST_META_ANALYSIS.md | HW_TEST_FINAL_REPORT.md |
+
+### F4.5 Known Issues (Trockentest 2026-02-25)
+
+Erkenntnisse aus dem F4-Trockentest (Mock-Server End-to-End ohne Hardware):
+
+| # | Issue | Severity | Phase | Workaround |
+|---|-------|----------|-------|------------|
+| 1 | ~~`audit_logs.request_id` VARCHAR(36) zu klein~~ | ~~CRITICAL~~ | Phase 2 | **FIXED** (Branch: fix/trockentest-bugs) — VARCHAR(255) + Alembic Migration |
+| 2 | ~~`GET /api/v1/sensors/data` 500 Error~~ | ~~MEDIUM~~ | Phase 4 | **FIXED** — timezone-naive datetimes fuer TIMESTAMP WITHOUT TIME ZONE |
+| 3 | ~~Out-of-Range-Werte ohne Validierung~~ | ~~LOW~~ | Phase 5 | **FIXED** — Physical range check mit quality="critical" + Prometheus Metrik |
+| 4 | ~~Grafana Dashboard Metric-Prefix~~ | ~~LOW~~ | Phase 4 | **NOT REPRODUCIBLE** — Dashboard verwendet korrekt `god_kaiser_*` |
+
+**Verifizierte Korrekte Werte:**
+- MQTT Topics: `kaiser/{zone}/esp/{esp_id}/system/heartbeat`, `kaiser/{zone}/esp/{esp_id}/sensor/{gpio}/data`
+- Heartbeat Payload: `ts` (int), `uptime` (int), `heap_free` (int), `wifi_rssi` (int)
+- Sensor Payload: `ts` (int), `esp_id` (str), `gpio` (int), `sensor_type` (str), `raw` (numeric), `raw_mode` (boolean)
+- Prometheus Metriken: Prefix `god_kaiser_*` (NICHT `automationone_*`)
+- Auth Token: Nested `tokens.access_token` (NICHT top-level `access_token`)
+- Login: admin / Admin123#
+- Device-ID Pattern: `^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$`
+- Approve Endpoint: `POST /api/v1/esp/devices/{esp_id}/approve` mit leerem JSON Body `{}`
+
+**Trockentest-Report:** `.claude/reports/current/mock-trockentest-2026-02-25.md`
 
 ---
 

@@ -72,7 +72,7 @@ Häufige TM-Fehler bei Pfaden:
 | Reports Archiv | `.claude/reports/archive/` |
 | Referenz-Docs | `.claude/reference/` (api/, errors/, patterns/, testing/, debugging/, infrastructure/) |
 | Logs aktuell | `logs/current/` |
-| Logs Server/MQTT/Postgres | `logs/server/`, `logs/mqtt/`, `logs/postgres/` |
+| Logs Server | `logs/server/` (MQTT/Postgres: kein Bind-Mount, nur Docker/Loki) |
 | Session-Script | `scripts/debug/start_session.sh` |
 | Docker Config | `docker-compose.yml`, `docker/` |
 | Wokwi Reports | `logs/wokwi/reports/` |
@@ -126,7 +126,7 @@ Häufige TM-Fehler bei Docker:
 **Docker-Erweiterung (DOCKER_REFERENCE.md):**
 - **Compose-Overlays:** base, dev, test, ci, e2e
 - **Profile:** `monitoring` (loki, alloy, prometheus, grafana)
-- **Bind-Mounts:** `logs/server/`, `logs/mqtt/`, `logs/postgres/`
+- **Bind-Mounts:** `logs/server/` (MQTT/Postgres: kein Bind-Mount, nur Docker/Loki)
 - **Makefile-Targets:** `make e2e-up`, `make monitor-up`, `make status`, `make health`
 
 #### 2d: Config-Validierung
@@ -436,8 +436,8 @@ Für jeden erwarteten Output:
 | Host-Pfad | Service | Container-Pfad |
 |-----------|---------|----------------|
 | `./logs/server/` | el-servador | `/app/logs` |
-| `./logs/mqtt/` | mqtt-broker | `/mosquitto/log` |
-| `./logs/postgres/` | postgres | `/var/log/postgresql` |
+| (kein Bind-Mount) | mqtt-broker | stdout → Docker → Alloy → Loki |
+| (kein Bind-Mount) | postgres | stderr → Docker → Alloy → Loki |
 
 ---
 

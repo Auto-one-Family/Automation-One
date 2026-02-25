@@ -182,7 +182,7 @@ El Servador/god_kaiser_server/src/
 │   ├── repositories/         # 15 repos: base, esp, esp_heartbeat, sensor, actuator, logic, subzone, user, ai, kaiser, library, token_blacklist, sensor_type_defaults, audit_log, system_config
 │   └── session.py            # Engine + async session
 ├── middleware/
-│   └── request_id.py         # X-Request-ID middleware
+│   └── request_id.py         # X-Request-ID Pure ASGI middleware (ContextVar propagation)
 ├── mqtt/
 │   ├── client.py             # MQTT client (singleton)
 │   ├── handlers/             # 11 registered + base + kaiser (sensor, actuator, heartbeat, discovery, config, zone_ack, subzone_ack, lwt, error, actuator_response, actuator_alert, kaiser [not registered])
@@ -381,8 +381,7 @@ Located in `.claude/` directory:
 - `./docker/postgres/postgresql.conf` -> postgres config
 - `./docker/mosquitto/mosquitto.conf` -> MQTT broker config
 - `./logs/server` -> server logs
-- `./logs/mqtt` -> MQTT logs
-- `./logs/postgres` -> PostgreSQL logs
+- `./logs/mqtt` -> MQTT logs (auskommentiert, stdout-only)
 - `./docker/loki/loki-config.yml` -> Loki config
 - `./docker/alloy/config.alloy` -> Alloy config (native River syntax)
 - `./docker/prometheus/prometheus.yml` -> Prometheus config

@@ -235,7 +235,7 @@ Vollstaendige Referenz: `.claude/reference/errors/ERROR_CODES.md`
 
 | Umgebung | Methode | Interval |
 |----------|---------|----------|
-| Dev | `mosquitto_sub -t $SYS/#` | 30s |
+| Dev | `mosquitto_sub -t $SYS/# -C 1 -W 5` | 30s |
 | CI | `mosquitto_pub -t health/check` | 5s |
 | E2E | `mosquitto_pub -t health/check` | 3s |
 
@@ -324,7 +324,7 @@ Vollstaendige Referenz: `.claude/reference/errors/ERROR_CODES.md`
 ### F: Stale-LWT nach Reconnect
 
 - ESP online, aber alte "offline" LWT retained im Broker
-- Pruefe: `mosquitto_sub --retained-only` auf `system/will`
+- Pruefe: `mosquitto_sub --retained-only -C 10 -W 5` auf `system/will`
 - Loesung: Retained-Cleanup (mit User-Bestaetigung)
 
 ### G: Mock-ESP Routing
@@ -339,7 +339,7 @@ Vollstaendige Referenz: `.claude/reference/errors/ERROR_CODES.md`
 
 | Service | Container | Port(s) | Healthcheck |
 |---------|-----------|---------|-------------|
-| mqtt-broker | automationone-mqtt | 1883, 9001 | `mosquitto_sub -t $SYS/#` |
+| mqtt-broker | automationone-mqtt | 1883, 9001 | `mosquitto_sub -t $SYS/# -C 1 -W 5` |
 | el-servador | automationone-server | 8000 | `curl /api/v1/health/live` |
 | postgres | automationone-postgres | 5432 | `pg_isready` |
 

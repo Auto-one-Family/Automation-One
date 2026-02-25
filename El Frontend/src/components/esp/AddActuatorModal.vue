@@ -32,6 +32,8 @@ const logger = createLogger('AddActuatorModal')
 interface Props {
   modelValue: boolean
   espId: string
+  /** Pre-selected actuator type from drag-and-drop (optional) */
+  initialActuatorType?: string | null
 }
 
 const props = defineProps<Props>()
@@ -79,6 +81,18 @@ watch(() => newActuator.value.actuator_type, (newType) => {
   newActuator.value.cooldown_seconds = defaults.cooldown
   if (!supportsAuxGpio(newType)) newActuator.value.aux_gpio = 255
   if (!supportsInvertedLogic(newType)) newActuator.value.inverted_logic = false
+})
+
+// Pre-select actuator type when dropped from sidebar
+watch(() => props.initialActuatorType, (newType) => {
+  if (newType) {
+    const match = actuatorTypeOptions.find(
+      opt => opt.value.toLowerCase() === newType.toLowerCase()
+    )
+    if (match) {
+      newActuator.value.actuator_type = match.value
+    }
+  }
 })
 
 // ── Actions ──────────────────────────────────────────────────────────

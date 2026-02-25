@@ -1,9 +1,9 @@
 # AutomationOne - KI & Monitoring Roadmap
 
-**Version:** 1.1
-**Datum:** 2026-02-13
-**Status:** Living Document (verify-plan Full-Stack 2026-02-13)
-**Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings; Full-Stack-Abgleich gegen echte Configs (docker-compose, Alloy/Promtail, Prometheus, metrics.py, Alert Rules)
+**Version:** 1.3
+**Datum:** 2026-02-25
+**Status:** Living Document (Alert-Quality Fix 2026-02-25)
+**Quelle:** TM-Plan, korrigiert mit 8 verify-plan Findings; Full-Stack-Abgleich gegen echte Configs (docker-compose, Alloy/Promtail, Prometheus, metrics.py, Alert Rules); Alert-Quality Nachbesserung (6 Bloecke, cAdvisor-Limitierung Docker Desktop)
 
 ---
 
@@ -171,30 +171,27 @@ El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die 
 
 ### 2.1 Grafana Alert Rules
 
-> **STATUS: TEILWEISE DONE**
+> **STATUS: DONE (38 Alerts laden fehlerfrei)**
 
-**DONE** (`docker/grafana/provisioning/alerting/alert-rules.yml`):
+**Zwei Dateien:**
+- `docker/grafana/provisioning/alerting/alert-rules.yml` — 32 Prometheus-basierte Rules
+- `docker/grafana/provisioning/alerting/loki-alert-rules.yml` — 6 Loki-basierte Rules
 
-7 Rules mit korrekter 3-Stage Pipeline (A: PromQL -> B: Reduce:last -> C: Threshold):
+**Pipeline:** A (PromQL/LogQL) -> B (Reduce:last) -> C (Threshold). Evaluation Interval Vielfaches von 10s.
 
-| Rule | UID | Severity | Condition | For |
-|------|-----|----------|-----------|-----|
-| Server Down | ao-server-down | critical | up{job="el-servador"} < 1 | 1m |
-| MQTT Disconnected | ao-mqtt-disconnected | critical | god_kaiser_mqtt_connected < 1 | 1m |
-| Database Down | ao-database-down | critical | pg_up < 1 | 1m |
-| Loki Down | ao-loki-down | critical | up{job="loki"} < 1 | 2m |
-| Alloy Down | ao-alloy-down | critical | up{job="alloy"} < 1 | 2m |
-| High Memory | ao-high-memory | warning | god_kaiser_memory_percent > 85 | 5m |
-| ESP Offline | ao-esp-offline | warning | (esp_offline/esp_total) > 0.5 AND esp_online > 0 | 3m |
-| High MQTT Error Rate | ao-high-mqtt-error-rate | warning | increase(god_kaiser_mqtt_errors_total[5m]) > 10 | 2m |
+**Prometheus-Alerts (32):** 8 Gruppen:
+- **Critical (10s, 6 Rules):** server-down, mqtt-disconnected, database-down, loki-down, alloy-down, prometheus-down
+- **Warning (1m, 3 Rules):** high-memory, esp-devices-offline, high-mqtt-error-rate
+- **Infrastructure (1m, 6 Rules):** db-query-slow, db-connections-high, cadvisor-down, container-restart-loop, database-size-high, loki-ingestion-failure
+- **Sensor (30s, 5 Rules):** sensor-temp/ph/humidity/ec-range, sensor-stale (nutzen `avg_over_time([2m])`, initialisiert via `init_metrics()` in `src/core/metrics.py`)
+- **Device (30s, 4 Rules):** heartbeat-gap, esp-boot-loop, esp-error-cascade, esp-safe-mode
+- **Application (1m, 6 Rules):** ws-disconnects, mqtt-message-backlog, api-errors-high, logic-engine-errors, actuator-timeout, safety-triggered
+- **MQTT Broker (30s, 2 Rules):** mqtt-broker-no-clients, mqtt-broker-messages-stored
 
-**TODO - Fehlende Alert Rules:**
+**Loki-Alerts (6):** 1 Gruppe:
+- Error Storm, ESP Disconnect Wave, DB Connection Errors, ESP Boot Loop, Critical Error Burst, Frontend Down (Loki-basiert, da kein /metrics Endpoint am Frontend)
 
-| Rule | Bedingung | Severity |
-|------|-----------|----------|
-| Frontend WebSocket Lost | god_kaiser_websocket_connections = 0 (wenn zuvor > 0) | warning |
-| Container Restart | Container restart_count > threshold (cAdvisor-Metriken) | warning |
-| MQTT Reconnect Loop | disconnect -> connect -> disconnect in < 60s | warning |
+**cAdvisor-Hinweis:** Docker Desktop cAdvisor exportiert keine `name`-Labels. Container-Restart nutzt `changes(container_start_time_seconds{id=~"/docker/[0-9a-f]+"})`. Disk-Usage-Alert wurde zu Database-Size-Alert (`pg_database_size_bytes`) umgebaut. Legacy `ao-promtail-down` wurde via `deleteRules` entfernt (Alloy-Migration 2026-02-24).
 
 **TODO - Alert Contact Point:**
 - Webhook an El Servador (neuer REST-Endpoint `/api/v1/alerts/webhook`)
@@ -269,9 +266,9 @@ Definiert Labels fuer spaeteres ML-Training. Bestehende Alloy-Labels (Promtail-F
 
 ### Ergebnis Phase 2
 
-**DONE:** 5 Alert Rules mit 3-Stage Pipeline, provisioniert via YAML.
+**DONE:** 38 Alert Rules (32 Prometheus + 6 Loki) mit 3-Stage Pipeline, provisioniert via YAML. Alle laden fehlerfrei in Grafana (verifiziert 2026-02-25). 8+1 Gruppen: Critical (6), Warning (3), Infrastructure (6), Sensor (5), Device (4), Application (6), MQTT Broker (2), Loki (6). Sensor-Alerts nutzen `avg_over_time([2m])` mit `init_metrics()` (labeled Counters/Gauges) in `src/core/metrics.py`. cAdvisor-Limitierung (kein `name`-Label auf Docker Desktop) durch alternative Metriken (`changes(container_start_time_seconds)`, `pg_database_size_bytes`) geloest.
 
-**TODO:** Fehlermuster-Katalog, LogQL Recording Rules, Label-Taxonomie, Alert Contact Point (Webhook -> Frontend), fehlende Alert Rules.
+**TODO:** Fehlermuster-Katalog, LogQL Recording Rules, Label-Taxonomie, Alert Contact Point (Webhook -> Frontend).
 
 ---
 
@@ -503,13 +500,18 @@ Jetson laeuft 24/7 als intelligenter Debug-Assistent. Erkennt bekannte Fehler, w
 - Log-Panel Dashboard + Korrelations-View in Grafana
 - (Bereits erledigt: cAdvisor, esp32-serial-logger, MQTT/WS/DB-Metriken in `metrics.py`; ser2net/socat auf Host bleibt Voraussetzung fuer ESP→Loki)
 
-### Phase 2 (TODO)
+### Phase 2 (TEILWEISE DONE)
 
-- Fehlermuster-Katalog (`.claude/reference/errors/PATTERNS.yaml`)
-- Grafana Recording Rules (LogQL-Metriken)
-- Label-Taxonomie-Dokument
-- Fehlende Alert Rules (WS Lost, Container Restart, Reconnect Loop)
-- Alert Contact Point (Webhook -> Frontend)
+- **DONE:** 38 Alert Rules (32 Prometheus + 6 Loki), alle laden fehlerfrei (2026-02-25)
+- **DONE:** Container-Restart-Alert: `changes(container_start_time_seconds)` statt nicht-existierender `container_restart_count`
+- **DONE:** Disk-Usage-Alert: Ersetzt durch `pg_database_size_bytes` (cAdvisor name-Label fehlt auf Docker Desktop)
+- **DONE:** Frontend-Down-Alert via Loki (kein /metrics Endpoint am Frontend)
+- **DONE:** Promtail-Down-Alert entfernt (Alloy-Migration)
+- **DONE:** Loki-Ingestion-Failure-Alert: `loki_ingester_wal_disk_full_failures_total` (Prometheus scrapt Loki)
+- TODO: Fehlermuster-Katalog (`.claude/reference/errors/PATTERNS.yaml`)
+- TODO: Grafana Recording Rules (LogQL-Metriken)
+- TODO: Label-Taxonomie-Dokument
+- TODO: Alert Contact Point (Webhook -> Frontend)
 
 ### Phase 2.5 (TODO)
 

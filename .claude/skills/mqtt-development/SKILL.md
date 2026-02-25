@@ -659,7 +659,7 @@ persistence_location /mosquitto/data/
 ```bash
 # MQTT-Traffic beobachten (alle kaiser Topics)
 make mqtt-sub
-# → docker exec -it automationone-mqtt mosquitto_sub -h localhost -t "kaiser/#" -v
+# → docker exec -it automationone-mqtt mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
 
 # Broker-Logs anzeigen
 make logs-mqtt

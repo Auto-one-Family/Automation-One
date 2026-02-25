@@ -18,7 +18,7 @@ import { createLogger } from '@/utils/logger'
 import type {
   MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType,
   MockESPCreate, OfflineInfo, OfflineReason,
-  StatusSource, SensorConfigCreate, MockSensor,
+  StatusSource, SensorConfigCreate, ActuatorConfigCreate, MockSensor,
   HeartbeatGpioItem,
   PendingESPDevice, ESPApprovalRequest, ESPApprovalResponse,
   DeviceDiscoveredPayload, DeviceApprovedPayload, DeviceRejectedPayload
@@ -33,6 +33,7 @@ import {
   inferInterfaceType,
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
+import { isPwmActuator } from '@/utils/actuatorDefaults'
 
 /**
  * Extract error message from Axios error response.
@@ -879,15 +880,37 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   async function addActuator(deviceId: string, config: MockActuatorConfig): Promise<void> {
-    if (!isMock(deviceId)) {
-      throw new Error('Add actuator is only available for Mock ESPs')
-    }
-
     error.value = null
 
     try {
-      await debugApi.addActuator(deviceId, config)
-      // Refresh device data
+      if (isMock(deviceId)) {
+        // =========================================================================
+        // MOCK-ESP: Debug-API verwenden (bestehende Logik)
+        // =========================================================================
+        await debugApi.addActuator(deviceId, config)
+      } else {
+        // =========================================================================
+        // REAL-ESP: Actuator-API verwenden (analog zu addSensor Phase 2B)
+        // =========================================================================
+        const realConfig: ActuatorConfigCreate = {
+          esp_id: deviceId,
+          gpio: config.gpio,
+          actuator_type: config.actuator_type,
+          name: config.name || null,
+          enabled: true,
+          aux_gpio: config.aux_gpio !== 255 ? config.aux_gpio : null,
+          inverted_logic: config.inverted_logic ?? false,
+          max_runtime_seconds: config.max_runtime_seconds ?? 0,
+          cooldown_seconds: config.cooldown_seconds ?? 0,
+          pwm_frequency: isPwmActuator(config.actuator_type) ? 1000 : null,
+          metadata: {
+            created_via: 'dashboard_drag_drop'
+          }
+        }
+        await actuatorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
+      }
+
+      // UI aktualisieren
       await fetchDevice(deviceId)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to add actuator')
