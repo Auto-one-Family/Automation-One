@@ -173,7 +173,7 @@ docker exec -it automationone-server /bin/bash
 docker exec -it automationone-postgres psql -U god_kaiser -d god_kaiser_db
 
 # MQTT subscriben (via Container)
-docker exec -it automationone-mqtt mosquitto_sub -t "kaiser/#" -v
+docker exec -it automationone-mqtt mosquitto_sub -t "kaiser/#" -v -C 10 -W 30
 
 # Image neu bauen ohne Cache
 docker compose build --no-cache el-servador
@@ -317,13 +317,13 @@ services:
 |-------------|------|
 | Image | grafana/alloy:v1.13.1 |
 | Port | 12345 (UI + Metrics) |
-| Config | docker/promtail/config.yml (read via --config.format=promtail) |
+| Config | docker/alloy/config.alloy (native River syntax) |
 | Target | Docker Container Logs |
 | Label | com.docker.compose.project=auto-one |
 | UI | http://localhost:12345 (Graph-Ansicht, Komponenten-Status) |
 
 **Docker Socket Mount:** `/var/run/docker.sock` (read-only)
-**Migration:** Ersetzt Promtail (EOL 2026-03-02). Backup: `docker/promtail/config.yml.backup`
+**Migration:** Ersetzt Promtail (EOL 2026-03-02). Native River-Config seit 2026-02-25. Archived: `docker/promtail/config.yml`
 
 ### 5.3 Prometheus (Metriken)
 

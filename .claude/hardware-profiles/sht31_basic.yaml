@@ -1,0 +1,33 @@
+name: "SHT31 Basic"
+description: "I2C Temperature + Humidity Sensor (Single Sensor Test)"
+version: "1.0"
+
+esp:
+  board: ESP32_WROOM
+  device_name: "HW-Test-SHT31"
+  zone: "Test-Zone"
+  subzone: "Sensor-Test"
+
+sensors:
+  - type: sht31
+    name: "Klima-Sensor"
+    gpio: 21
+    interface: I2C
+    i2c_address: "0x44"
+    sample_interval_ms: 30000
+    operating_mode: continuous
+
+actuators: []
+
+stability_test:
+  duration_minutes: 30
+  polling_interval_minutes: 5
+  expected_ranges:
+    sht31_temp:
+      min: 10.0
+      max: 50.0
+      unit: "°C"
+    sht31_humidity:
+      min: 20.0
+      max: 95.0
+      unit: "% RH"

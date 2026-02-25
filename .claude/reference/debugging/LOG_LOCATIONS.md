@@ -160,8 +160,8 @@ cd "El Trabajante" && pio device monitor | tee serial.log                      #
 # ============================================
 # MQTT
 # ============================================
-mosquitto_sub -h localhost -t "kaiser/#" -v                                    # Live
-mosquitto_sub -h localhost -t "kaiser/#" -v | tee mqtt.log                     # Mit Capture
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30                        # Live
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | tee mqtt.log         # Mit Capture
 
 # ============================================
 # CI/CD
@@ -619,33 +619,33 @@ brew install mosquitto         # Mac
 
 ```bash
 # Alle Topics
-mosquitto_sub -h localhost -t "kaiser/#" -v | tee mqtt.log
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | tee mqtt.log
 
 # Mit Timestamps
-mosquitto_sub -h localhost -t "kaiser/#" -v | ts '[%Y-%m-%d %H:%M:%S]' | tee mqtt_ts.log
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | ts '[%Y-%m-%d %H:%M:%S]' | tee mqtt_ts.log
 
 # Hintergrund
-mosquitto_sub -h localhost -t "kaiser/#" -v > mqtt.log 2>&1 &
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 > mqtt.log 2>&1 &
 ```
 
 ### 6.3 Topic-Filter
 
 ```bash
 # Sensor-Daten
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 3 -W 90
 
 # Actuator
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/command" -v
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/status" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/command" -v -C 3 -W 90
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/actuator/+/status" -v -C 3 -W 90
 
 # Heartbeats
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v -C 1 -W 60
 
 # Spezifisches ESP
-mosquitto_sub -h localhost -t "kaiser/god/esp/ESP_12AB34CD/#" -v
+mosquitto_sub -h localhost -t "kaiser/god/esp/ESP_12AB34CD/#" -v -C 10 -W 30
 
 # Emergency
-mosquitto_sub -h localhost -t "kaiser/broadcast/emergency" -v
+mosquitto_sub -h localhost -t "kaiser/broadcast/emergency" -v -C 1 -W 60
 ```
 
 ### 6.4 Test-Messages senden
@@ -716,7 +716,7 @@ tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"
 
 **Terminal 2: MQTT**
 ```bash
-mosquitto_sub -h localhost -t "kaiser/#" -v | tee mqtt.log
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | tee mqtt.log
 ```
 
 **Terminal 3: Serial**
@@ -738,7 +738,7 @@ LOGDIR="logs_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$LOGDIR"
 
 # MQTT
-mosquitto_sub -h localhost -t "kaiser/#" -v > "$LOGDIR/mqtt.log" 2>&1 &
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 > "$LOGDIR/mqtt.log" 2>&1 &
 MQTT_PID=$!
 
 # Server
@@ -798,7 +798,7 @@ command | Tee-Object -FilePath "output.log"
 
 ```bash
 wsl
-mosquitto_sub -h localhost -t "kaiser/#" -v | ts '[%Y-%m-%d %H:%M:%S]' | tee mqtt.log
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | ts '[%Y-%m-%d %H:%M:%S]' | tee mqtt.log
 ```
 
 ---
@@ -948,10 +948,11 @@ curl -s http://localhost:9090/api/v1/targets
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-23
-**Version:** 4.0
+**Letzte Aktualisierung:** 2026-02-25
+**Version:** 4.2
 **Changelog:**
-- 4.1: Promtail → Grafana Alloy Migration (EOL 2026-03-02). Alle Promtail-Referenzen aktualisiert. Pipeline identisch (6 Stages via --config.format=promtail)
+- 4.2: Alloy native River-Config (docker/alloy/config.alloy). Structured Metadata (logger, request_id, component, device, error_code). 5 Loki-Alerts + Debug-Console Dashboard. 4 Makefile-Targets (loki-errors, loki-trace, loki-esp, loki-health)
+- 4.1: Promtail → Grafana Alloy Migration (EOL 2026-03-02). Alle Promtail-Referenzen aktualisiert
 - 4.0: Frontend Logger jetzt JSON-strukturiert (Stage 3 funktioniert), Stage 5 Mosquitto healthcheck drop, `logs/esp32/` Verzeichnis erstellt, Server apscheduler noise reduziert
 - 3.9: Error-Injection Wokwi-Logs (`11-error-injection/`), Verweis auf `WOKWI_ERROR_MAPPING.md`
 - 3.7: §12.0 Erreichbarkeit aller Ebenen (Tabelle KI-Optimalität); Loki-Beispiele für postgres + esp32-serial-logger

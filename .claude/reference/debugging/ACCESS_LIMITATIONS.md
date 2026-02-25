@@ -161,6 +161,7 @@ cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/ -v --no-co
 | **Poetry** | - | Via Python |
 | **Git** | - | Standard |
 | **Node.js** | - | `/c/Program Files/nodejs/` |
+| **jq** | 1.8.1 | `~/bin/jq.exe` (winget, PATH via `~/.bashrc`) |
 
 ### 5.2 NICHT installiert oder nicht im PATH
 
@@ -169,7 +170,6 @@ cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/ -v --no-co
 | **mosquitto_sub** | ❌ Nicht im PATH | `choco install mosquitto` |
 | **mosquitto_pub** | ❌ Nicht im PATH | `choco install mosquitto` |
 | **ts (timestamps)** | ❌ Nicht verfügbar | WSL oder manuell |
-| **jq** | ❓ Unbekannt | `choco install jq` |
 
 ---
 

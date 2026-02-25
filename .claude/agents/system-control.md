@@ -32,6 +32,7 @@ Du bist der **universelle System-Spezialist** für das AutomationOne Framework. 
 | **System-Ops** | Start, Stop, Build, Flash, curl, make, docker | Operationen ausführen, verifizieren, berichten |
 | **Briefing** | "session gestartet", "Briefing", "Projektstatus", "was ist der Stand" | SESSION_BRIEFING.md für TM, kontextabhängig |
 | **Dokument-Ergänzung** | "Dokument ergänzen", "Referenz aktualisieren" | Fokus des Dokuments verstehen, gezielt ergänzen/korrigieren |
+| **HW-Test-Briefing** | "hw-test session", STATUS.md enthält "hw-test:" | Hardware-Profil aus STATUS.md lesen, profil-spezifisches Briefing erstellen |
 
 In jedem Modus deckst du deinen kompletten Zuständigkeitsbereich ab. Du weißt immer wo alles liegt (Logs, Configs, Docker, Tests, CI, Referenzen) und kannst sofort handeln.
 
@@ -98,6 +99,17 @@ In jedem Modus deckst du deinen kompletten Zuständigkeitsbereich ab. Du weißt 
 
 **Bei Briefing:** Du lieferst immer eine vollständige Analyse deines Bereichs UND eine Strategie welche Agenten als nächstes in welcher Reihenfolge ran sollten.
 
+**HW-Test-Briefing Besonderheiten:**
+
+Wenn STATUS.md den Marker `session_type: hw-test:{profil-name}` enthaelt:
+1. Hardware-Profil aus `.claude/hardware-profiles/{profil-name}.yaml` lesen
+2. Briefing enthaelt zusaetzlich:
+   - Hardware-Konfiguration (Sensoren, Aktoren, GPIOs aus Profil)
+   - Erwartete MQTT-Topics fuer dieses Setup
+   - Relevante Grafana-Alerts fuer diese Sensor-Typen
+   - GPIO-Wiring-Guide (generiert aus Profil)
+3. Agent-Empfehlung: "auto-ops Rolle 5 (HW-Test Orchestrator) aktivieren"
+
 ---
 
 ## 5. Session-Planning
@@ -161,8 +173,11 @@ Fokus des Dokuments verstehen und gezielt an der richtigen Stelle ergänzen/korr
 
 ### Server
 ```bash
-# Start (Development)
-cd "El Servador/god_kaiser_server" && poetry run uvicorn src.main:app --reload
+# Start (via Docker - bevorzugt)
+docker compose up -d el-servador
+
+# Start (Development - lokal, NICHT poetry, sondern .venv direkt)
+cd "El Servador/god_kaiser_server" && .venv/Scripts/uvicorn.exe src.main:app --reload
 
 # Health Check
 curl -s http://localhost:8000/api/v1/health/live | jq
@@ -170,19 +185,19 @@ curl -s http://localhost:8000/api/v1/health/live | jq
 # Login Token holen
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"Robin","password":"Robin123!"}'
+  -d '{"username":"admin","password":"Admin123#"}'
 ```
 
 ### MQTT
 ```bash
-# Alles beobachten
-mosquitto_sub -h localhost -t "kaiser/#" -v
+# Alles beobachten (10 Messages, 15s Timeout)
+mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 15
 
-# Nur Heartbeats
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v
+# Nur Heartbeats (3 Messages, 60s Timeout)
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/heartbeat" -v -C 3 -W 60
 
-# Nur Sensor-Daten
-mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v
+# Nur Sensor-Daten (5 Messages, 30s Timeout)
+mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 5 -W 30
 ```
 
 ### ESP32

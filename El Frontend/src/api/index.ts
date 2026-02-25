@@ -23,7 +23,11 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
 
-    logger.debug(`${config.method?.toUpperCase()} ${config.url}`)
+    // Correlation: Generate unique request ID for cross-layer tracing
+    const requestId = crypto.randomUUID()
+    config.headers['X-Request-ID'] = requestId
+
+    logger.debug(`${config.method?.toUpperCase()} ${config.url}`, { requestId })
     return config
   },
   (error: AxiosError) => {
@@ -34,7 +38,10 @@ api.interceptors.request.use(
 // Response interceptor - handle token refresh
 api.interceptors.response.use(
   (response) => {
-    logger.debug(`${response.config.method?.toUpperCase()} ${response.config.url} → ${response.status}`)
+    const serverRequestId = response.headers['x-request-id']
+    logger.debug(`${response.config.method?.toUpperCase()} ${response.config.url} → ${response.status}`, {
+      requestId: serverRequestId,
+    })
     return response
   },
   async (error: AxiosError) => {
@@ -73,7 +80,11 @@ api.interceptors.response.use(
       }
     }
 
-    logger.error(`${error.config?.method?.toUpperCase()} ${error.config?.url} → ${error.response?.status || 'NETWORK_ERROR'}`, { message: error.message })
+    const errorRequestId = error.response?.headers?.['x-request-id'] || error.config?.headers?.['X-Request-ID']
+    logger.error(`${error.config?.method?.toUpperCase()} ${error.config?.url} → ${error.response?.status || 'NETWORK_ERROR'}`, {
+      message: error.message,
+      requestId: errorRequestId,
+    })
     return Promise.reject(error)
   }
 )

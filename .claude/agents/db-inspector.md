@@ -9,7 +9,7 @@ description: |
   Proactively inspect database when debugging data issues.
 model: sonnet
 color: yellow
-tools: ["Read", "Bash", "Grep", "Glob"]
+tools: ["Read", "Write", "Bash", "Grep", "Glob"]
 ---
 
 # DB Inspector Agent

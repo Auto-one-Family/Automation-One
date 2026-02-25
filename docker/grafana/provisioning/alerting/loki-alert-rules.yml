@@ -1,0 +1,264 @@
+# Grafana Alerting Provisioning - AutomationOne Loki Alerts
+# SUPPLEMENTS the 28 Prometheus-based alerts in alert-rules.yml
+#
+# 5 Loki-based rules detecting log PATTERNS that metrics cannot:
+#   Error Storm:         Repeated errors indicating an error loop
+#   ESP Disconnect Wave: Multiple ESPs going offline simultaneously
+#   DB Connection Errors: Database connectivity issues in logs
+#   ESP Boot Loop:       ESP32 repeatedly rebooting
+#   Critical Error Burst: Multiple CRITICAL-level events
+#
+# Pipeline per rule: A (LogQL query) -> B (Reduce to last) -> C (Threshold)
+# Evaluation interval: 1m (multiple of 10s, Grafana scheduler requirement)
+# Loki datasource UID: loki (verified against datasources.yml)
+
+apiVersion: 1
+
+groups:
+  # ============================================
+  # Loki Log-Pattern Alerts (1m evaluation)
+  # ============================================
+  - orgId: 1
+    name: automationone-loki-alerts
+    folder: AutomationOne Alerts
+    interval: 1m
+    rules:
+      # Rule 1: Error Storm
+      # Detects repeated errors that may indicate an error loop or cascading failure
+      - uid: ao-loki-error-storm
+        title: "Loki: Error Storm Detected"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: "sum(count_over_time({compose_service=\"el-servador\"} | level=\"ERROR\" [5m]))"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [10]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Error Storm — More than 10 errors in 5 minutes"
+          description: "El Servador has logged >10 ERROR-level entries in 5 minutes. Possible error loop or cascading failure."
+        labels:
+          severity: warning
+          component: server
+          source: loki
+
+      # Rule 2: ESP Disconnect Wave
+      # Detects multiple ESP32 disconnections in a short timeframe (network or broker issue)
+      - uid: ao-loki-esp-disconnect-wave
+        title: "Loki: ESP Disconnect Wave"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: "sum(count_over_time({compose_service=\"mqtt-broker\"} |~ \"(?i)disconnect\" [2m]))"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "ESP Disconnect Wave — 3+ disconnects in 2 minutes"
+          description: "MQTT broker logged 3+ disconnect events in 2 minutes. Possible network or broker issue affecting multiple ESPs."
+        labels:
+          severity: warning
+          component: mqtt
+          source: loki
+
+      # Rule 3: Database Connection Errors
+      # Detects database connectivity issues that may not surface as Prometheus metrics
+      - uid: ao-loki-db-connection-errors
+        title: "Loki: Database Connection Errors"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: "sum(count_over_time({compose_service=\"el-servador\"} |~ \"(?i)(connection refused|database.*error|deadlock)\" [5m]))"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "Database connection errors detected in server logs"
+          description: "El Servador logged database connection errors (refused, deadlock, or general DB error) in the last 5 minutes."
+        labels:
+          severity: warning
+          component: database
+          source: loki
+
+      # Rule 4: ESP Boot Loop
+      # Detects an ESP32 repeatedly rebooting (3+ times in 10 minutes)
+      - uid: ao-loki-esp-boot-loop
+        title: "Loki: ESP Boot Loop Detected"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: "sum(count_over_time({compose_service=\"esp32-serial-logger\"} |~ \"(?i)(boot|reboot|restart|reset)\" [10m]))"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "ESP Boot Loop — 3+ boot events in 10 minutes"
+          description: "ESP32 serial logger detected 3+ boot/restart events in 10 minutes. Possible boot loop, watchdog reset, or power issue."
+        labels:
+          severity: warning
+          component: esp32
+          source: loki
+
+      # Rule 5: Critical Error Burst
+      # Detects multiple CRITICAL-level log entries indicating severe system issues
+      - uid: ao-loki-critical-burst
+        title: "Loki: Critical Error Burst"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: "sum(count_over_time({compose_service=~\".+\"} | level=\"CRITICAL\" [5m]))"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "Critical errors detected across services"
+          description: "CRITICAL-level log entries detected in the last 5 minutes. Immediate investigation required."
+        labels:
+          severity: critical
+          component: system
+          source: loki

@@ -23,6 +23,17 @@ static const SensorCapability SHT31_HUMIDITY_CAP = {
     .is_i2c = true,
 };
 
+// SHT31 Base type — resolves "sht31" from server config to a valid capability
+// Server may send base device type; firmware uses isMultiValueDevice() + getMultiValueTypes()
+// to resolve sub-types (sht31_temp, sht31_humidity)
+static const SensorCapability SHT31_BASE_CAP = {
+    .server_sensor_type = "sht31",
+    .device_type = "sht31",
+    .i2c_address = 0x44,
+    .is_multi_value = true,
+    .is_i2c = true,
+};
+
 // DS18B20 Sensor (OneWire, Single-Value: Temperature)
 static const SensorCapability DS18B20_CAP = {
     .server_sensor_type = "ds18b20",
@@ -49,6 +60,15 @@ static const SensorCapability BMP280_TEMP_CAP = {
     .is_i2c = true,
 };
 
+// BMP280 Base type — resolves "bmp280" from server config
+static const SensorCapability BMP280_BASE_CAP = {
+    .server_sensor_type = "bmp280",
+    .device_type = "bmp280",
+    .i2c_address = 0x76,
+    .is_multi_value = true,
+    .is_i2c = true,
+};
+
 // BME280 Sensor (I2C, Multi-Value: Pressure + Temperature + Humidity)
 static const SensorCapability BME280_PRESSURE_CAP = {
     .server_sensor_type = "bme280_pressure",
@@ -68,6 +88,15 @@ static const SensorCapability BME280_TEMP_CAP = {
 
 static const SensorCapability BME280_HUMIDITY_CAP = {
     .server_sensor_type = "bme280_humidity",
+    .device_type = "bme280",
+    .i2c_address = 0x76,
+    .is_multi_value = true,
+    .is_i2c = true,
+};
+
+// BME280 Base type — resolves "bme280" from server config
+static const SensorCapability BME280_BASE_CAP = {
+    .server_sensor_type = "bme280",
     .device_type = "bme280",
     .i2c_address = 0x76,
     .is_multi_value = true,
@@ -116,6 +145,7 @@ static const SensorTypeMapping SENSOR_TYPE_MAP[] = {
     {"humidity_sht31", &SHT31_HUMIDITY_CAP},
     {"sht31_temp", &SHT31_TEMP_CAP},  // Already normalized
     {"sht31_humidity", &SHT31_HUMIDITY_CAP},  // Already normalized
+    {"sht31", &SHT31_BASE_CAP},  // Base device type (multi-value)
     
     // DS18B20 variants
     {"temperature_ds18b20", &DS18B20_CAP},
@@ -126,6 +156,7 @@ static const SensorTypeMapping SENSOR_TYPE_MAP[] = {
     {"temperature_bmp280", &BMP280_TEMP_CAP},
     {"bmp280_pressure", &BMP280_PRESSURE_CAP},  // Already normalized
     {"bmp280_temp", &BMP280_TEMP_CAP},  // Already normalized
+    {"bmp280", &BMP280_BASE_CAP},  // Base device type (multi-value)
 
     // BME280 variants
     {"pressure_bme280", &BME280_PRESSURE_CAP},
@@ -134,6 +165,7 @@ static const SensorTypeMapping SENSOR_TYPE_MAP[] = {
     {"bme280_pressure", &BME280_PRESSURE_CAP},  // Already normalized
     {"bme280_temp", &BME280_TEMP_CAP},  // Already normalized
     {"bme280_humidity", &BME280_HUMIDITY_CAP},  // Already normalized
+    {"bme280", &BME280_BASE_CAP},  // Base device type (multi-value)
 
     // pH sensor
     {"ph_sensor", &PH_SENSOR_CAP},

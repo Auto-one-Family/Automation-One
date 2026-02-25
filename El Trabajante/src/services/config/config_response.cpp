@@ -56,6 +56,7 @@ bool ConfigResponseBuilder::publish(const ConfigResponsePayload& payload) {
 
 String ConfigResponseBuilder::buildJsonPayload(const ConfigResponsePayload& payload) {
   DynamicJsonDocument doc(512);
+  doc["seq"] = mqttClient.getNextSeq();
   doc["status"] = configStatusToString(payload.status);
   doc["type"] = configTypeToString(payload.type);
   doc["count"] = payload.count;
@@ -142,6 +143,7 @@ String ConfigResponseBuilder::buildJsonPayloadWithFailures(
   if (doc_size > 2048) doc_size = 2048;  // Cap at 2KB
 
   DynamicJsonDocument doc(doc_size);
+  doc["seq"] = mqttClient.getNextSeq();
 
   // Status
   doc["status"] = configStatusToString(status);

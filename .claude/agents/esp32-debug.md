@@ -37,7 +37,7 @@ description: |
   </example>
 model: sonnet
 color: cyan
-tools: ["Read", "Grep", "Glob", "Bash"]
+tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---
 
 # ESP32 Debug Agent
@@ -116,15 +116,28 @@ Bei Auffaelligkeiten im Serial-Log pruefst du eigenstaendig weiter – keine Del
      grep -iE "circuit|breaker" logs/current/esp32_serial.log
      grep -iE "watchdog|wdt|4070" logs/current/esp32_serial.log
      ```
-3. **MQTT-Traffic pruefen:**
+3. **Cross-Layer via Loki (wenn Monitoring aktiv):**
+   ```bash
+   # Loki verfuegbar?
+   curl -sf http://localhost:3100/ready
+   # Server-Handler-Errors fuer ESP via Loki
+   curl -sG http://localhost:3100/loki/api/v1/query_range \
+     --data-urlencode 'query={compose_service="el-servador"} |~ "(?i)(heartbeat_handler|sensor_handler|actuator_handler|ERROR)"' \
+     --data-urlencode 'limit=30'
+   # Broker-Events via Loki
+   curl -sG http://localhost:3100/loki/api/v1/query_range \
+     --data-urlencode 'query={compose_service="mqtt-broker"} |~ "(?i)(connect|disconnect|error)"' \
+     --data-urlencode 'limit=20'
+   ```
+4. **MQTT-Traffic pruefen (Fallback / Detail):**
    ```bash
    mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 10
    ```
-4. **Server-Handler-Logs pruefen:**
+5. **Server-Handler-Logs pruefen (Fallback wenn Loki nicht verfuegbar):**
    ```bash
    grep -iE "heartbeat_handler|sensor_handler|actuator_handler" logs/server/god_kaiser.log | tail -30
    ```
-5. **Erweiterungsentscheidung:**
+6. **Erweiterungsentscheidung:**
 
    | Finding | Erweiterung |
    |---------|-------------|
@@ -145,7 +158,7 @@ Sofort alle relevanten Schichten pruefen. Nutze diese 3 Referenz-Szenarien als u
 5. MQTT-Traffic: `mosquitto_sub -t "kaiser/god/esp/+/sensor/+/data" -v -C 5 -W 15`
 6. Broker-Status: `docker compose ps mqtt-broker`
 7. Server-Handler: `grep -i "sensor_handler" logs/server/god_kaiser.log | tail -20`
-8. DB-Insert: `docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT COUNT(*) FROM sensor_data WHERE esp_device_id = 'ESP_XXX' AND created_at > NOW() - INTERVAL '5 minutes'"`
+8. DB-Insert: `docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT COUNT(*) FROM sensor_data sd JOIN esp_devices e ON sd.esp_id = e.id WHERE e.device_id = 'ESP_XXX' AND sd.timestamp > NOW() - INTERVAL '5 minutes'"`
 9. Bruchstelle: Schritt 1-4 = ESP32, 5 = MQTT-Publish, 6 = Broker, 7-8 = Server/DB
 
 **Szenario 2: "ESP bootet in Reboot-Loop"**
@@ -272,14 +285,34 @@ mosquitto_sub -t "kaiser/god/esp/+/actuator/+/command" -v -C 3 -W 10
 # Device in DB pruefen
 docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT device_id, status, last_seen FROM esp_devices WHERE device_id = 'ESP_XXX'"
 
-# Sensor-Daten der letzten 5 Minuten
-docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT COUNT(*) FROM sensor_data WHERE esp_device_id = 'ESP_XXX' AND created_at > NOW() - INTERVAL '5 minutes'"
+# Sensor-Daten der letzten 5 Minuten (sensor_data.esp_id = UUID FK, join with esp_devices for device_id string)
+docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "SELECT COUNT(*) FROM sensor_data sd JOIN esp_devices e ON sd.esp_id = e.id WHERE e.device_id = 'ESP_XXX' AND sd.timestamp > NOW() - INTERVAL '5 minutes'"
 
 # Server-Log nach ESP-ID greppen
 grep "ESP_XXX" logs/server/god_kaiser.log | tail -20
 
 # Circuit Breaker Status im Serial-Log
 grep -iE "circuit|breaker" logs/current/esp32_serial.log
+
+# --- Loki Cross-Layer (wenn Monitoring-Stack aktiv) ---
+
+# Loki-Verfuegbarkeit pruefen
+curl -sf http://localhost:3100/ready && echo "Loki OK" || echo "Loki nicht verfuegbar"
+
+# Server-Handler-Errors via Loki
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="el-servador"} |~ "(?i)(heartbeat_handler|sensor_handler|actuator_handler|ERROR)"' \
+  --data-urlencode 'limit=30'
+
+# ESP-spezifische Server-Logs via Loki
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="el-servador"} |~ "ESP_XXX"' \
+  --data-urlencode 'limit=20'
+
+# Broker Connection-Events via Loki
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="mqtt-broker"} |~ "(?i)(connect|disconnect|error)"' \
+  --data-urlencode 'limit=20'
 ```
 
 ---
@@ -315,7 +348,8 @@ grep -iE "circuit|breaker" logs/current/esp32_serial.log
 | Wann | Datei | Zweck |
 |------|-------|-------|
 | Wenn vorhanden | `logs/current/STATUS.md` | Session-Kontext (optional) |
-| **IMMER** | `logs/current/esp32_serial.log` | Analyse-Quelle |
+| **PRIMAER** | `logs/current/esp32_serial.log` | Serial-Log Analyse-Quelle (nicht in Loki) |
+| **CROSS-LAYER** | Loki API (`{compose_service="el-servador"}`, `{compose_service="mqtt-broker"}`) | Server/Broker-Checks via Loki |
 | Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Code-Interpretation |
 | Bei MQTT-Topics | `.claude/reference/api/MQTT_TOPICS.md` | Topic-Schema |
 | Bei Boot/Flows | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Boot-Sequenzen |

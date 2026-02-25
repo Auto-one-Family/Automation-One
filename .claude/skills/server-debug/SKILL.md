@@ -94,7 +94,7 @@ El Servador/god_kaiser_server/src/
 }
 ```
 
-**request_id:** UUID via `RequestIdMiddleware` für HTTP. MQTT-Handler: `request_id = "-"`.
+**request_id:** UUID via `RequestIdMiddleware` für HTTP. MQTT-Handler: `{esp_id}:{topic}:{seq}:{ts_ms}` via `generate_mqtt_correlation_id()`.
 **Noise-Reduction:** paho.mqtt, urllib3, asyncio, apscheduler (+ executors.default, scheduler) auf WARNING.
 **Rotation:** 10 MB, 10 Backups (`LOG_FILE_MAX_BYTES`, `LOG_FILE_BACKUP_COUNT`).
 
@@ -259,11 +259,17 @@ Bei unbekanntem Code → `.claude/reference/errors/ERROR_CODES.md` konsultieren.
 
 ## 9. Request-Tracing
 
+**REST-Pipeline:**
 1. Client sendet Request (mit/ohne `X-Request-ID` Header)
 2. `RequestIdMiddleware` generiert UUID falls fehlend
 3. UUID in ContextVar → alle Logs enthalten `request_id`
 4. Response erhält `X-Request-ID` Header
-5. MQTT-Handler: `request_id = "-"`, Korrelation über `esp_id`/`topic`
+
+**MQTT-Pipeline:**
+1. MQTT-Message empfangen → `subscriber.py` extrahiert `esp_id`, `topic_suffix`, `seq`
+2. `generate_mqtt_correlation_id()` erzeugt `{esp_id}:{topic}:{seq}:{ts_ms}`
+3. CID in ContextVar → alle Handler-Logs enthalten `request_id`
+4. WebSocket-Broadcasts enthalten `correlation_id` auf Message-Root-Level
 
 ---
 
@@ -322,19 +328,19 @@ grep "duration=" logs/server/god_kaiser.log
 
 ## 11. DB-Tabellen Quick-Reference
 
-| Tabelle | Model | Schlüsselfelder |
-|---------|-------|-----------------|
-| `esp_devices` | ESPDevice | device_id, status, last_seen |
-| `sensor_configs` | SensorConfig | esp_device_id, gpio_pin, sensor_type |
-| `sensor_data` | SensorData | sensor_config_id, value, timestamp |
-| `sensor_type_defaults` | SensorTypeDefaults | sensor_type, unit, min/max |
-| `actuator_configs` | ActuatorConfig | esp_device_id, gpio_pin, actuator_type |
+| Tabelle | Model | DB-Spalten (Schluessel) |
+|---------|-------|------------------------|
+| `esp_devices` | ESPDevice | id (UUID PK), device_id (string), status, last_seen |
+| `sensor_configs` | SensorConfig | esp_id (UUID FK), gpio, sensor_type |
+| `sensor_data` | SensorData | esp_id (UUID FK), gpio, raw_value, timestamp |
+| `sensor_type_defaults` | SensorTypeDefaults | sensor_type, unit, min_value, max_value |
+| `actuator_configs` | ActuatorConfig | esp_id (UUID FK), gpio, actuator_type |
 | `actuator_states` | ActuatorState | actuator_config_id, current_state |
-| `actuator_history` | ActuatorHistory | actuator_config_id, action, timestamp |
+| `actuator_history` | ActuatorHistory | esp_id (UUID FK), gpio, command_type, timestamp |
 | `cross_esp_logic` | CrossESPLogic | name, conditions, actions, enabled |
 | `logic_execution_history` | LogicExecutionHistory | logic_id, result, timestamp |
-| `audit_logs` | AuditLog | action, entity_type, user_id |
-| `esp_heartbeat_logs` | ESPHeartbeatLog | esp_device_id, timestamp |
+| `audit_logs` | AuditLog | event_type, severity, source_type, created_at |
+| `esp_heartbeat_logs` | ESPHeartbeatLog | esp_id (UUID FK), device_id (string), timestamp |
 | `user_accounts` | User | username, email, role |
 | `token_blacklist` | TokenBlacklist | token, expires_at |
 | `system_config` | SystemConfig | key, value |

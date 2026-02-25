@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.1 | **Aktualisiert:** 2026-02-10
+> **Version:** 2.2 | **Aktualisiert:** 2026-02-25
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 28 verschiedene Event-Typen (esp_diagnostics hinzugefügt)
@@ -140,6 +140,7 @@ Alle WebSocket-Nachrichten haben folgendes Format:
 {
   "type": "event_name",
   "timestamp": 1706787600,
+  "correlation_id": "ESP_12AB34CD:data:42:1708704000000",
   "data": {
     ...
   }
@@ -150,6 +151,7 @@ Alle WebSocket-Nachrichten haben folgendes Format:
 |------|-----|--------------|
 | `type` | string | Event-Typ-Identifier |
 | `timestamp` | number | Unix Timestamp (Sekunden) |
+| `correlation_id` | string? | Optional. MQTT-Pipeline: `{esp_id}:{topic}:{seq}:{ts_ms}`. REST-Pipeline: UUID. Nur vorhanden wenn aus MQTT-Handler oder REST-Context gesendet |
 | `data` | object | Event-spezifische Payload |
 
 ---

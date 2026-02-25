@@ -42,17 +42,20 @@ Vier Monitoring-Services in `docker-compose.yml` unter `profiles: ["monitoring"]
 
 **Alloy-Config (DONE, migrated from Promtail 2026-02-24):** Docker Service Discovery mit folgenden Labels:
 
-| Label | Quelle | Beschreibung |
-|-------|--------|-------------|
-| `compose_service` | Docker SD | Service-Name (el-servador, mqtt-broker, etc.) |
-| `container` | Docker SD | Container-Name (automationone-server, etc.) |
-| `stream` | Docker SD | stdout/stderr |
-| `compose_project` | Docker SD | auto-one |
-| `level` | Parser | Log-Level (el-servador: regex, el-frontend: JSON) |
-| `logger` | Regex Parser | Python module path (el-servador only) |
-| `component` | JSON Parser | Vue component name (el-frontend only) |
+| Feld | Typ | Quelle | Beschreibung |
+|------|-----|--------|-------------|
+| `compose_service` | Label | Docker SD | Service-Name (el-servador, mqtt-broker, etc.) |
+| `container` | Label | Docker SD | Container-Name (automationone-server, etc.) |
+| `stream` | Label | Docker SD | stdout/stderr |
+| `compose_project` | Label | Docker SD | auto-one |
+| `level` | Label | Parser | Log-Level (el-servador: regex, el-frontend: JSON) |
+| `logger` | Structured Metadata | Regex Parser | Python module path (el-servador only) |
+| `request_id` | Structured Metadata | Regex Parser | Request-Correlation-ID (el-servador only) |
+| `component` | Structured Metadata | JSON Parser | Vue/ESP32 component name |
+| `device` | Structured Metadata | JSON Parser | ESP32 device_id (esp32-serial-logger only) |
+| `error_code` | Structured Metadata | Regex Parser | Error-Code E\d{4} (el-servador only) |
 
-**Alloy Pipeline (DONE, 6 Stages via --config.format=promtail):**
+**Alloy Pipeline (DONE, native River-Config `docker/alloy/config.alloy`):**
 - Health-Endpoint-Logs werden gedroppt (noise reduction)
 - Multiline-Aggregation fuer Python Tracebacks
 - Structured regex parsing fuer el-servador Text-Logs
@@ -90,7 +93,7 @@ El Servador empfaengt diese und schreibt sie als strukturierte Logs (JSON), die 
 
 > **STATUS: TEILWEISE DONE**
 
-- **DONE:** Container `esp32-serial-logger` (Profile: `hardware`) in `docker-compose.yml`. Verbindet sich per TCP mit einem Serial-Bridge auf dem Host (`SERIAL_HOST`/`SERIAL_PORT`, Default: `host.docker.internal:3333`). Liest Zeilen, gibt strukturiertes JSON auf stdout aus. Alloy scraped den Container und sendet nach Loki (Pipeline Stage 4 in `docker/promtail/config.yml`). **ESP32-Logs landen also bereits in Loki**, wenn: (1) ser2net oder socat auf dem Host auf Port 3333 laeuft, (2) `make monitor-up` und Hardware-Profil gestartet werden (`docker compose --profile monitoring --profile hardware up -d`).
+- **DONE:** Container `esp32-serial-logger` (Profile: `hardware`) in `docker-compose.yml`. Verbindet sich per TCP mit einem Serial-Bridge auf dem Host (`SERIAL_HOST`/`SERIAL_PORT`, Default: `host.docker.internal:3333`). Liest Zeilen, gibt strukturiertes JSON auf stdout aus. Alloy scraped den Container und sendet nach Loki (Pipeline Stage 4 in `docker/alloy/config.alloy`). **ESP32-Logs landen also bereits in Loki**, wenn: (1) ser2net oder socat auf dem Host auf Port 3333 laeuft, (2) `make monitor-up` und Hardware-Profil gestartet werden (`docker compose --profile monitoring --profile hardware up -d`).
 - **Voraussetzung:** Auf dem Host muss eine Serial-Bridge laufen (z. B. ser2net oder `socat TCP-LISTEN:3333,reuseaddr,fork FILE:/dev/ttyUSB0,raw,echo=0`). WSL2: USB-Passthrough via `usbipd-win` fuer `/dev/ttyUSB0`.
 - **Hinweis:** Der Plan nannte zuerst "ser2net-Container"; im Stack heisst der Service `esp32-serial-logger` (Build: `docker/esp32-serial-logger`, Image nutzt ser2net/socat **auf dem Host**, nicht im Container).
 
@@ -552,7 +555,7 @@ Jetson laeuft 24/7 als intelligenter Debug-Assistent. Erkennt bekannte Fehler, w
 
 ## verify-plan Full-Stack (2026-02-13) – echte Configs
 
-Abgleich gegen `docker-compose.yml`, `docker/promtail/config.yml` (read by Alloy via --config.format=promtail), `docker/prometheus/prometheus.yml`, `El Servador/.../core/metrics.py`, `docker/grafana/provisioning/alerting/alert-rules.yml`.
+Abgleich gegen `docker-compose.yml`, `docker/alloy/config.alloy` (native River syntax), `docker/prometheus/prometheus.yml`, `El Servador/.../core/metrics.py`, `docker/grafana/provisioning/alerting/alert-rules.yml`.
 
 | # | Im Plan / Doku | Im System | Aenderung im Dokument |
 |---|----------------|-----------|------------------------|
