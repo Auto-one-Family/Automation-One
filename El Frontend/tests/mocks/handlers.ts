@@ -369,6 +369,23 @@ const sensorHandlers = [
 // =============================================================================
 
 const actuatorHandlers = [
+  // POST /v1/actuators/:espId/:gpio - Create or update actuator config (Real-ESP)
+  http.post('/api/v1/actuators/:espId/:gpio', async ({ params, request }) => {
+    const { espId, gpio } = params
+    const body = await request.json() as Record<string, unknown>
+
+    return HttpResponse.json({
+      id: 1,
+      esp_id: espId,
+      gpio: Number(gpio),
+      actuator_type: body.actuator_type || 'relay',
+      name: body.name || null,
+      enabled: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+  }),
+
   // POST /v1/actuators/:espId/:gpio/command - Send actuator command
   http.post('/api/v1/actuators/:espId/:gpio/command', async ({ params, request }) => {
     const { espId, gpio } = params

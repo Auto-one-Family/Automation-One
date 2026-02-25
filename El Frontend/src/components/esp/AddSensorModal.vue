@@ -36,6 +36,8 @@ interface Props {
   modelValue: boolean
   /** ESP device ID to add sensor to */
   espId: string
+  /** Pre-selected sensor type from drag-and-drop (optional) */
+  initialSensorType?: string | null
 }
 
 const props = defineProps<Props>()
@@ -103,6 +105,18 @@ watch(() => props.modelValue, (isOpen) => {
   if (!isOpen) {
     espStore.clearOneWireScan(props.espId)
     oneWireScanPin.value = 4
+  }
+})
+
+// Pre-select sensor type when dropped from sidebar
+watch(() => props.initialSensorType, (newType) => {
+  if (newType) {
+    const match = sensorTypeOptions.find(
+      opt => opt.value.toLowerCase() === newType.toLowerCase()
+    )
+    if (match) {
+      newSensor.value.sensor_type = match.value
+    }
   }
 })
 

@@ -107,6 +107,8 @@ function handleSensorDrop(sensor: ChartSensor) {
 const isDragOver = ref(false)
 const showAddSensorModal = ref(false)
 const showAddActuatorModal = ref(false)
+const droppedSensorType = ref<string | null>(null)
+const droppedActuatorType = ref<string | null>(null)
 
 // =============================================================================
 // Debug Logger
@@ -123,14 +125,12 @@ function onDragEnter(event: DragEvent) {
   // Prüfe ob das ein VueDraggable-Event ist (ESP-Card-Reordering)
   // VueDraggable setzt keine dataTransfer-Typen, native Drags schon
   const types = event.dataTransfer?.types || []
-  const isVueDraggable = types.length === 0 || types.includes('text/plain')
 
   log('dragenter', {
     isDraggingSensorType: dragStore.isDraggingSensorType,
     isDraggingSensor: dragStore.isDraggingSensor,
     isDraggingActuatorType: dragStore.isDraggingActuatorType,
     types: Array.from(types),
-    isVueDraggable,
     target: (event.target as Element)?.className?.slice?.(0, 50) || (event.target as Element)?.tagName,
   })
 
@@ -222,12 +222,12 @@ function onDrop(event: DragEvent) {
     log('DROP payload parsed', payload)
 
     if (payload.action === 'add-sensor') {
-      log('DROP - add-sensor action, opening modal')
-      // Modal handles its own form state and defaults
+      log('DROP - add-sensor action, opening modal', { sensorType: payload.sensorType })
+      droppedSensorType.value = payload.sensorType || null
       showAddSensorModal.value = true
     } else if (payload.action === 'add-actuator') {
-      log('DROP - add-actuator action, opening modal')
-      // Modal handles its own form state and defaults
+      log('DROP - add-actuator action, opening modal', { actuatorType: payload.actuatorType })
+      droppedActuatorType.value = payload.actuatorType || null
       showAddActuatorModal.value = true
     } else if (payload.type === 'sensor') {
       log('DROP - sensor for chart, should be handled by AnalysisDropZone')
@@ -605,7 +605,7 @@ watch(
     <!-- Drop Indicator Overlay (Phase 2B: für alle ESPs) -->
     <Transition name="fade">
       <div v-if="isDragOver" class="esp-horizontal-layout__drop-indicator">
-        <span class="esp-horizontal-layout__drop-text">Sensor hinzufügen</span>
+        <span class="esp-horizontal-layout__drop-text">{{ dragStore.isDraggingActuatorType ? 'Aktor hinzufügen' : 'Sensor hinzufügen' }}</span>
       </div>
     </Transition>
   </div>
@@ -614,7 +614,8 @@ watch(
   <AddSensorModal
     v-model="showAddSensorModal"
     :esp-id="espId"
-    @added="() => { espStore.fetchDevice(espId); espStore.fetchGpioStatus(espId) }"
+    :initial-sensor-type="droppedSensorType"
+    @added="() => { droppedSensorType = null; espStore.fetchDevice(espId); espStore.fetchGpioStatus(espId) }"
   />
 
   <!-- LEGACY: Old inline Add Sensor Modal removed — now uses AddSensorModal component -->
@@ -622,7 +623,8 @@ watch(
   <AddActuatorModal
     v-model="showAddActuatorModal"
     :esp-id="espId"
-    @added="() => { espStore.fetchDevice(espId); espStore.fetchGpioStatus(espId) }"
+    :initial-actuator-type="droppedActuatorType"
+    @added="() => { droppedActuatorType = null; espStore.fetchDevice(espId); espStore.fetchGpioStatus(espId) }"
   />
 
   <!-- Old inline sensor/actuator modals removed (see AddSensorModal.vue, AddActuatorModal.vue) -->

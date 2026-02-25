@@ -804,13 +804,18 @@ describe('ESP Store - Mock ESP Actions', () => {
       expect(store.error).toBeNull()
     })
 
-    it('should throw error for real ESP', async () => {
+    it('should call actuatorsApi for real ESP', async () => {
       const store = useEspStore()
+      store.devices = [{ ...mockESPDevice, device_id: 'ESP_TEST_001', esp_id: 'ESP_TEST_001' }]
 
-      await expect(store.addActuator('ESP_12345678', {
+      await store.addActuator('ESP_TEST_001', {
         gpio: 18,
-        actuator_type: 'relay'
-      })).rejects.toThrow()
+        actuator_type: 'relay',
+        name: 'Real Relay'
+      })
+
+      // Should not throw - dual routing sends to actuatorsApi
+      expect(store.error).toBeNull()
     })
   })
 })
