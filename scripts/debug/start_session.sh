@@ -13,7 +13,7 @@
 #
 # Flags:
 #   --with-server    Server automatisch starten (im Hintergrund)
-#   --mode MODE      Test-Modus: boot, config, sensor, actuator, e2e (default: boot)
+#   --mode MODE      Test-Modus: boot, config, sensor, actuator, e2e, hw-test (default: boot)
 #
 # Diese Session erstellt:
 #   - logs/current/mqtt_traffic.log    (MQTT-Messages)
@@ -103,12 +103,47 @@ case $TEST_MODE in
         TEST_MODE="E2E"
         MODE_DESCRIPTION="End-to-End Hardware Test (Boot → Sensor → Actuator → Commands)"
         ;;
+    hw-test|HW-TEST|hwtest)
+        TEST_MODE="HW_TEST"
+        MODE_DESCRIPTION="F4 Hardware-Test-Flow (Profil-basiert, Agent-orchestriert)"
+        ;;
     *)
         echo "Unbekannter Modus: $TEST_MODE"
-        echo "Verfügbare Modi: boot, config, sensor, actuator, e2e"
+        echo "Verfügbare Modi: boot, config, sensor, actuator, e2e, hw-test"
         exit 1
         ;;
 esac
+
+# HW-Test Profil-Handling
+PROFILE_NAME=""
+PROFILE_PATH=""
+if [ "$TEST_MODE" = "HW_TEST" ]; then
+    # Profile name can come from session name or --profile flag
+    # Convention: session name IS the profile name for hw-test mode
+    if [ "$SESSION_NAME" = "debug" ]; then
+        echo ""
+        echo "Available hardware profiles:"
+        ls -1 "$PROJECT_ROOT/.claude/hardware-profiles/"*.yaml 2>/dev/null | while read -r f; do
+            basename "$f" .yaml | sed 's/^/  /'
+        done
+        echo ""
+        echo "Usage: $0 <profile-name> --mode hw-test"
+        echo "   or: $0 --mode hw-test   (then enter profile name as session name)"
+        exit 1
+    fi
+    PROFILE_NAME="$SESSION_NAME"
+    PROFILE_PATH="$PROJECT_ROOT/.claude/hardware-profiles/${PROFILE_NAME}.yaml"
+    if [ ! -f "$PROFILE_PATH" ]; then
+        echo "ERROR: Hardware profile not found: $PROFILE_PATH"
+        echo ""
+        echo "Available profiles:"
+        ls -1 "$PROJECT_ROOT/.claude/hardware-profiles/"*.yaml 2>/dev/null | while read -r f; do
+            basename "$f" .yaml | sed 's/^/  /'
+        done
+        exit 1
+    fi
+    echo "Hardware-Test Session with profile: $PROFILE_NAME"
+fi
 
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
 SESSION_ID="${TIMESTAMP}_${SESSION_NAME}"
@@ -500,6 +535,22 @@ cat >> "$LOGS_DIR/STATUS.md" << 'HARDWAREEOF'
 | 26 | Olimex PWR-SWITCH | Actuator | Digital | angeschlossen |
 
 HARDWAREEOF
+
+# HW-Test Profil in STATUS.md einbetten
+if [ "$TEST_MODE" = "HW_TEST" ] && [ -n "$PROFILE_PATH" ] && [ -f "$PROFILE_PATH" ]; then
+cat >> "$LOGS_DIR/STATUS.md" << HWTESTEOF
+
+## Hardware-Test Profil
+
+**session_type:** hw-test:${PROFILE_NAME}
+**Profil-Datei:** .claude/hardware-profiles/${PROFILE_NAME}.yaml
+
+\`\`\`yaml
+$(cat "$PROFILE_PATH")
+\`\`\`
+
+HWTESTEOF
+fi
 
 cat >> "$LOGS_DIR/STATUS.md" << 'STATICEOF'
 
