@@ -16,6 +16,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Save, Power, AlertOctagon, Zap, Clock, Shield } from 'lucide-vue-next'
 import { actuatorsApi } from '@/api/actuators'
+import { subzonesApi } from '@/api/subzones'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import type { MockActuator } from '@/types'
@@ -42,6 +43,10 @@ const commandLoading = ref(false)
 const name = ref('')
 const description = ref('')
 const enabled = ref(true)
+
+// Subzone
+const subzoneId = ref<string | null>(null)
+const availableSubzones = ref<{ id: string; name: string }[]>([])
 
 // Type-specific fields
 const maxRuntime = ref(3600) // seconds
@@ -87,11 +92,35 @@ onMounted(async () => {
       pwmFrequency.value = (config as any).frequency || 5000
       powerLimit.value = (config as any).duty_max || 100
       switchDelay.value = (config as any).switch_delay_ms || 50
+
+      // Subzone
+      if ((config as any).subzone_id) {
+        subzoneId.value = (config as any).subzone_id
+      }
     }
   } catch {
     // No existing config
   } finally {
     loading.value = false
+  }
+
+  // Load existing subzone from device store (more reliable than config)
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
+  if (device?.subzone_id && !subzoneId.value) {
+    subzoneId.value = device.subzone_id
+  }
+
+  // Load available subzones for this ESP
+  try {
+    const result = await subzonesApi.getSubzones(props.espId)
+    if (result && Array.isArray(result)) {
+      availableSubzones.value = result.map((sz: any) => ({
+        id: sz.subzone_id || sz.id,
+        name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
+      }))
+    }
+  } catch {
+    // No subzones available — that's fine
   }
 })
 
@@ -158,6 +187,7 @@ async function handleSave() {
       name: name.value || null,
       description: description.value || null,
       enabled: enabled.value,
+      subzone_id: subzoneId.value,
     }
 
     if (isPump.value) {
@@ -269,6 +299,21 @@ function formatDuration(seconds: number): string {
           >
             <span class="actuator-config__toggle-dot" />
           </button>
+        </div>
+
+        <!-- Subzone assignment -->
+        <div class="actuator-config__field">
+          <label class="actuator-config__label">Subzone</label>
+          <select v-model="subzoneId" class="actuator-config__select">
+            <option :value="null">Keine Subzone</option>
+            <option
+              v-for="sz in availableSubzones"
+              :key="sz.id"
+              :value="sz.id"
+            >
+              {{ sz.name }}
+            </option>
+          </select>
         </div>
       </section>
 

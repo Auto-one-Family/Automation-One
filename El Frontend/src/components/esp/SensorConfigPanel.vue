@@ -17,6 +17,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Save, RotateCcw, ChevronDown, ChevronRight, Beaker } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
+import { subzonesApi } from '@/api/subzones'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { useCalibration } from '@/composables/useCalibration'
@@ -51,6 +52,10 @@ const name = ref('')
 const description = ref('')
 const unitValue = ref('')
 const enabled = ref(true)
+
+// Subzone
+const subzoneId = ref<string | null>(null)
+const availableSubzones = ref<{ id: string; name: string }[]>([])
 
 // Interface-specific
 const interfaceType = computed(() => inferInterfaceType(props.sensorType))
@@ -114,6 +119,11 @@ onMounted(async () => {
       i2cAddress.value = (config as any).i2c_address || '0x44'
       i2cBus.value = (config as any).i2c_bus || 0
 
+      // Subzone
+      if ((config as any).subzone_id) {
+        subzoneId.value = (config as any).subzone_id
+      }
+
       // Thresholds
       if ((config as any).threshold_min != null) alarmLow.value = (config as any).threshold_min
       if ((config as any).warning_min != null) warnLow.value = (config as any).warning_min
@@ -131,6 +141,25 @@ onMounted(async () => {
     }
   } finally {
     loading.value = false
+  }
+
+  // Load existing subzone from device store (more reliable than config)
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
+  if (device?.subzone_id && !subzoneId.value) {
+    subzoneId.value = device.subzone_id
+  }
+
+  // Load available subzones for this ESP
+  try {
+    const result = await subzonesApi.getSubzones(props.espId)
+    if (result && Array.isArray(result)) {
+      availableSubzones.value = result.map((sz: any) => ({
+        id: sz.subzone_id || sz.id,
+        name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
+      }))
+    }
+  } catch {
+    // No subzones available — that's fine
   }
 })
 
@@ -183,6 +212,9 @@ async function handleSave() {
       config.measure_range_min = measureRangeMin.value
       config.measure_range_max = measureRangeMax.value
     }
+
+    // Subzone assignment
+    config.subzone_id = subzoneId.value
 
     // Calibration data
     const calData = calibration.getCalibrationData()
@@ -249,6 +281,21 @@ async function handleSave() {
           >
             <span class="sensor-config__toggle-dot" />
           </button>
+        </div>
+
+        <!-- Subzone assignment -->
+        <div class="sensor-config__field">
+          <label class="sensor-config__label">Subzone</label>
+          <select v-model="subzoneId" class="sensor-config__select">
+            <option :value="null">Keine Subzone</option>
+            <option
+              v-for="sz in availableSubzones"
+              :key="sz.id"
+              :value="sz.id"
+            >
+              {{ sz.name }}
+            </option>
+          </select>
         </div>
       </section>
 

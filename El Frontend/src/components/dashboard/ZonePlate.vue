@@ -20,6 +20,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
+import { getQualityInfo } from '@/utils/labels'
 import DeviceMiniCard from './DeviceMiniCard.vue'
 
 
@@ -159,6 +160,43 @@ const subzoneGroups = computed((): SubzoneGroup[] => {
   return result
 })
 
+// ── Top Sensor Summary (alarm-first, max 3) ─────────────────────────────
+interface SensorSummary {
+  name: string
+  value: number
+  unit: string
+  quality: string
+}
+
+const QUALITY_PRIORITY: Record<string, number> = {
+  bad: 0, error: 0, poor: 1, stale: 2, fair: 3, degraded: 3, good: 4, excellent: 4,
+}
+
+const topSensors = computed((): SensorSummary[] => {
+  const all: SensorSummary[] = []
+  for (const device of props.devices) {
+    const sensors = device.sensors as any[] | undefined
+    if (!sensors) continue
+    for (const s of sensors) {
+      if (s.raw_value == null) continue
+      all.push({
+        name: s.name || s.sensor_type || `GPIO ${s.gpio}`,
+        value: Number(s.raw_value),
+        unit: s.unit || '',
+        quality: s.quality || 'unknown',
+      })
+    }
+  }
+  all.sort((a, b) => (QUALITY_PRIORITY[a.quality] ?? 5) - (QUALITY_PRIORITY[b.quality] ?? 5))
+  return all.slice(0, 3)
+})
+
+function formatSensorValue(val: number): string {
+  if (Math.abs(val) >= 100) return val.toFixed(0)
+  if (Math.abs(val) >= 10) return val.toFixed(1)
+  return val.toFixed(2)
+}
+
 // ── Click Handler ────────────────────────────────────────────────────────
 function handlePlateClick(event: Event) {
   // Don't zoom if click came from a mini card or drag
@@ -233,7 +271,7 @@ function handleDragEnd() {
           class="zone-plate__warning"
           :title="`${stats.warnings} Gerät${stats.warnings > 1 ? 'e' : ''} mit Warnung/Fehler`"
         >
-          · {{ stats.warnings }} Warning{{ stats.warnings > 1 ? 's' : '' }}
+          · {{ stats.warnings }} Warnung{{ stats.warnings > 1 ? 'en' : '' }}
         </span>
       </div>
     </div>
@@ -248,6 +286,33 @@ function handleDragEnd() {
       </span>
       <span v-if="zoneMetrics.activeActuators > 0" class="zone-plate__metric zone-plate__metric--active">
         {{ zoneMetrics.activeActuators }} Aktor{{ zoneMetrics.activeActuators > 1 ? 'en' : '' }} aktiv
+      </span>
+    </div>
+
+    <!-- Top Sensor Summary (alarm-first preview) -->
+    <div v-if="topSensors.length > 0" class="zone-plate__sensor-preview">
+      <div
+        v-for="(s, idx) in topSensors"
+        :key="idx"
+        class="zone-plate__sensor-row"
+      >
+        <span
+          class="zone-plate__sensor-dot"
+          :class="`zone-plate__sensor-dot--${getQualityInfo(s.quality).colorClass}`"
+        />
+        <span class="zone-plate__sensor-name">{{ s.name }}</span>
+        <span class="zone-plate__sensor-value">{{ formatSensorValue(s.value) }} {{ s.unit }}</span>
+      </div>
+    </div>
+
+    <!-- Subzone chips -->
+    <div v-if="subzoneGroups.length > 1" class="zone-plate__subzone-chips">
+      <span
+        v-for="g in subzoneGroups.filter(sg => sg.subzoneId)"
+        :key="g.subzoneId"
+        class="zone-plate__chip"
+      >
+        {{ g.subzoneName }}
       </span>
     </div>
 
@@ -438,6 +503,71 @@ function handleDragEnd() {
 
 .zone-plate__metric--active {
   color: var(--color-accent-bright);
+}
+
+/* ── Sensor preview rows ── */
+.zone-plate__sensor-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+}
+
+.zone-plate__sensor-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.zone-plate__sensor-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-muted);
+}
+
+.zone-plate__sensor-dot--text-success { background: var(--color-status-good, #22c55e); }
+.zone-plate__sensor-dot--text-warning { background: var(--color-status-warning, #eab308); }
+.zone-plate__sensor-dot--text-error { background: var(--color-status-alarm, #ef4444); }
+.zone-plate__sensor-dot--text-muted { background: var(--color-text-muted, #6b7280); }
+
+.zone-plate__sensor-name {
+  flex: 1;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zone-plate__sensor-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* ── Subzone chips ── */
+.zone-plate__subzone-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.zone-plate__chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 /* Subzone hint below header */
