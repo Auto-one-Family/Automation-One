@@ -22,6 +22,7 @@ export interface WebSocketMessage {
   type: MessageType | string
   timestamp: number
   data: Record<string, unknown>
+  correlation_id?: string
 }
 
 export interface WebSocketFilters {
@@ -358,8 +359,12 @@ class WebSocketService {
     try {
       const message: WebSocketMessage = JSON.parse(data)
 
-      // DEBUG: Log all incoming WebSocket messages
-      logger.debug('Received message', { type: message.type, data: message.data })
+      // DEBUG: Log all incoming WebSocket messages with correlation ID for cross-layer tracing
+      logger.debug('Received message', {
+        type: message.type,
+        correlationId: message.correlation_id,
+        data: message.data,
+      })
 
       // Rate limiting check (10 msg/sec)
       this.checkRateLimit()

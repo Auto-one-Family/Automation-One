@@ -18,6 +18,7 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import {
   SENSOR_TYPE_CONFIG,
+  MULTI_VALUE_DEVICES,
   getSensorUnit,
   getSensorDefault,
   getSensorTypeOptions,
@@ -166,7 +167,15 @@ async function addSensor() {
       sensorData.gpio = 0
     }
     await espStore.addSensor(props.espId, sensorData)
-    toast.success('Sensor erfolgreich hinzugefügt')
+
+    // Multi-value sensors create multiple configs on the server
+    const mvDevice = MULTI_VALUE_DEVICES[sensorData.sensor_type.toLowerCase()]
+    if (mvDevice) {
+      toast.success(`${mvDevice.label}: ${mvDevice.values.length} Messwerte erstellt`)
+    } else {
+      toast.success('Sensor erfolgreich hinzugefügt')
+    }
+
     close()
     resetForm()
     espStore.fetchGpioStatus(props.espId)
