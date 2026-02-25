@@ -1,7 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 3.9 | **Aktualisiert:** 2026-02-22
-> **Änderungen 3.9:** Error-Injection Wokwi-Logs (11-error-injection/), Verweis auf WOKWI_ERROR_MAPPING.md
+> **Version:** 4.6 | **Aktualisiert:** 2026-02-25
+> **Änderungen 4.6:** PostgreSQL logging_collector=off (kein Bind-Mount mehr), Level-Extraktion + Slow-Query Metadata in Alloy, ESP32 Regex-Fallback
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
 
@@ -32,7 +32,7 @@
 |-------------|-----------|--------------|
 | `logs/server/` | el-servador | FastAPI Server JSON-Logs |
 | `logs/mqtt/` | mqtt-broker | Deaktiviert (Mosquitto stdout-only seit v3.1); Broker-Logs via Loki `compose_service=mqtt-broker` |
-| `logs/postgres/` | postgres | PostgreSQL Query/Connection Logs |
+| (kein Bind-Mount) | postgres | PostgreSQL Logs via stderr → Docker → Alloy → Loki `compose_service=postgres` (level, query_duration_ms) |
 | `logs/esp32/` | - | ESP32 Serial Logs (manuell via PlatformIO) |
 | `logs/wokwi/` | - | Wokwi Serial/MQTT/Report Logs (via make wokwi-test-*) |
 | `logs/current/` | - | Session-Logs (via start_session.sh) |
@@ -55,10 +55,9 @@ el-servador:
 # MQTT-Logs (in docker-compose auskommentiert: Mosquitto stdout-only)
 # mqtt-broker: kein Bind-Mount; Logs via Alloy → Loki (compose_service=mqtt-broker)
 
-# PostgreSQL-Logs
+# PostgreSQL-Logs (kein Bind-Mount; logging_collector=off → stderr → Docker → Alloy → Loki)
 postgres:
   volumes:
-    - ./logs/postgres:/var/log/postgresql
     - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
   command: postgres -c config_file=/etc/postgresql/postgresql.conf
 
@@ -82,8 +81,8 @@ el-frontend:
 | `log_connections` | `on` | Verbindungen loggen |
 | `log_disconnections` | `on` | Trennungen loggen |
 | `log_lock_waits` | `on` | Lock-Waits loggen |
-| `log_rotation_age` | `1d` | Tägliche Rotation |
-| `log_rotation_size` | `50MB` | Max 50MB pro Log |
+| `logging_collector` | `off` | Logs via stderr → Docker → Alloy → Loki (kein File-Logging) |
+| `log_destination` | `stderr` | Docker json-file Driver übernimmt Persistenz und Rotation |
 
 ### Frontend Structured Logger
 
@@ -130,6 +129,11 @@ Alle Secrets wurden aus `docker-compose.yml` in `.env` ausgelagert:
 
 ```bash
 # ============================================
+# SYSTEM HEALTH (Erster Schritt bei jedem Debug)
+# ============================================
+powershell -ExecutionPolicy Bypass -File scripts/debug/debug-status.ps1   # JSON Health-Report
+
+# ============================================
 # SERVER LOGS
 # ============================================
 tail -f "El Servador/god_kaiser_server/logs/god_kaiser.log"           # Live
@@ -150,12 +154,13 @@ cd "El Trabajante" && wokwi-cli . --timeout 90000 --serial-log-file wokwi.log   
 cd "El Trabajante" && wokwi-cli . --timeout 90000 2>&1 | tee wokwi.log          # Pipe Alternative        # Mit Capture
 
 # ============================================
-# ESP32 SERIAL (PowerShell/PlatformIO Terminal empfohlen - Git Bash kann COM-Port nicht öffnen)
+# ESP32 SERIAL (NUR PowerShell - Git Bash kann COM-Port nicht oeffnen, && geht nicht in PS 5.x)
 # ============================================
-cd "El Trabajante" && pio device monitor                                       # Live
-cd "El Trabajante" && pio device monitor > serial.log 2>&1                     # Direkte Umleitung (EMPFOHLEN)
-cd "El Trabajante" && pio device monitor | tee serial.log                      # Mit tee
-# Hinweis: pio ist in Git Bash nicht im PATH → ~/.platformio/penv/Scripts/pio.exe
+# PowerShell (voller Pfad, Befehle einzeln statt &&):
+# cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+# C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
+# C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev 2>&1 | Tee-Object serial.log
+# Git Bash (NUR Build, kein Monitor): cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
 
 # ============================================
 # MQTT
@@ -480,9 +485,9 @@ monitor_speed = 115200
 ### 5.2 Port identifizieren
 
 ```bash
-# PlatformIO (Git Bash: vollständiger Pfad nötig)
-cd "El Trabajante" && pio device list
-# Git Bash: ~/.platformio/penv/Scripts/pio.exe device list
+# PlatformIO (Git Bash: vollstaendiger Pfad noetig, kein COM-Port-Zugriff)
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe device list
 
 # Windows PowerShell (NICHT aus Git Bash aufrufen - $_ Escaping-Probleme)
 Get-WmiObject Win32_SerialPort | Select-Object Caption, DeviceID
@@ -867,7 +872,7 @@ mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | ts '[%Y-%m-%d %H:%M:%S
 | **Server** (el-servador) | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=el-servador` + level, logger | Ja (Regex-Parser, level/logger) | Zusätzlich Datei: `logs/server/god_kaiser.log` |
 | **Frontend** (el-frontend) | Ja | Ja (docker logs / Loki) | Ja, `compose_service=el-frontend` + level, component | Ja (JSON-Parser) | Nur stdout, kein Bind-Mount |
 | **MQTT-Broker** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=mqtt-broker` | Teilweise (kein level-Extract) | Broker-Events; **MQTT-Payload** (kaiser/#) nicht in Loki, nur live z. B. `mosquitto_sub` / session.sh |
-| **PostgreSQL** | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=postgres` | Teilweise (Container-stdout; Hauptlog in `logs/postgres/`) | DB-Log primär in `logs/postgres/postgresql.log` |
+| **PostgreSQL** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=postgres` + level, query_duration_ms | Ja (Level-Extraktion, Slow-Query Metadata) | `logging_collector=off` → stderr → Docker → Alloy → Loki |
 | **ESP32 Serial** | Bedingt | Ja, wenn Pfad aktiv | Ja, wenn Profile `hardware` + Host-Bridge (ser2net/socat); `compose_service=esp32-serial-logger` + level, device_id, component | Ja (JSON-Parser) | Ohne Hardware-Bridge nur manuell: `logs/current/esp32_serial.log` |
 
 **Zusammenfassung:** Alle Container-Logs sind erreichbar und bei laufendem Monitoring in Loki durchsuchbar (LogQL, Zeitfenster, Labels). Live-Zugriff immer über `docker compose logs -f <service>`. KI-optimal: Server, Frontend und (wenn aktiv) ESP32 haben strukturierte Labels; MQTT-Payload-Stream (Nachrichteninhalt) ist nicht in Loki. Einstieg Gesamtzustand: `debug-status.ps1`.
@@ -899,7 +904,7 @@ curl -s "http://localhost:3100/loki/api/v1/query_range" \
   --data-urlencode 'query={compose_service="el-frontend"}' \
   --data-urlencode 'limit=50'
 
-# PostgreSQL-Container-Logs (stdout/stderr; Hauptlog siehe logs/postgres/)
+# PostgreSQL-Logs (stderr → Docker → Alloy; level + query_duration_ms als Metadata)
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
   --data-urlencode 'query={compose_service="postgres"}' \
   --data-urlencode 'limit=30'
@@ -949,9 +954,13 @@ curl -s http://localhost:9090/api/v1/targets
 ---
 
 **Letzte Aktualisierung:** 2026-02-25
-**Version:** 4.2
+**Version:** 4.5
 **Changelog:**
-- 4.2: Alloy native River-Config (docker/alloy/config.alloy). Structured Metadata (logger, request_id, component, device, error_code). 5 Loki-Alerts + Debug-Console Dashboard. 4 Makefile-Targets (loki-errors, loki-trace, loki-esp, loki-health)
+- 4.6: Multi-Layer Logging Fix: PostgreSQL `logging_collector=off` (kein Bind-Mount `logs/postgres/` mehr, Logs via stderr → Docker → Alloy → Loki). Alloy-Pipeline: PG Level-Extraktion (LOG→INFO, FATAL/PANIC→CRITICAL), `query_duration_ms` Structured Metadata, ESP32 Regex-Fallback für Plain-Text-Logs. Pure ASGI RequestIdMiddleware (ContextVar-Fix). MQTT CID Thread-Propagation
+- 4.5: Alert-Quality Fix: Container Restart Loop nutzt `changes(container_start_time_seconds)` (cAdvisor hat kein `container_restart_count`). Container Disk Usage ersetzt durch Database Size High (`pg_database_size_bytes`). cAdvisor auf Docker Desktop hat kein `name`-Label — nur `id`-Pfade. 38/38 Alerts laden fehlerfrei
+- 4.4: Alerting erweitert auf 38 Rules (32 Prometheus + 6 Loki). Neue: Frontend Down (Loki), Container Restart Loop, Database Size High, Loki Ingestion Failure
+- 4.3: debug-status.ps1 in Quick Reference (System Health erster Schritt). WebClient-Fallback, Grafana-Auth dokumentiert in scripts/debug/README.md
+- 4.2: Alloy native River-Config (docker/alloy/config.alloy). Structured Metadata (logger, request_id, component, device, error_code). 6 Loki-Alerts + Debug-Console Dashboard. 4 Makefile-Targets (loki-errors, loki-trace, loki-esp, loki-health)
 - 4.1: Promtail → Grafana Alloy Migration (EOL 2026-03-02). Alle Promtail-Referenzen aktualisiert
 - 4.0: Frontend Logger jetzt JSON-strukturiert (Stage 3 funktioniert), Stage 5 Mosquitto healthcheck drop, `logs/esp32/` Verzeichnis erstellt, Server apscheduler noise reduziert
 - 3.9: Error-Injection Wokwi-Logs (`11-error-injection/`), Verweis auf `WOKWI_ERROR_MAPPING.md`

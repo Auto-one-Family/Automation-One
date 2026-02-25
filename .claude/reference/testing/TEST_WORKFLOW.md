@@ -439,8 +439,9 @@ tail -100 "El Servador/god_kaiser_server/logs/god_kaiser.log" | grep -i error
 mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30
 mosquitto_sub -h localhost -t "kaiser/god/esp/+/system/diagnostics" -v -C 1 -W 30
 
-# ESP32 Serial Monitor
-cd "El Trabajante" && pio device monitor
+# ESP32 Serial Monitor (PowerShell, NICHT Git Bash - COM-Port)
+# cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+# C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ---

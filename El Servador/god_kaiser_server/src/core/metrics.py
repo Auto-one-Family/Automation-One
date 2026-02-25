@@ -229,14 +229,48 @@ SAFETY_TRIGGERS_TOTAL = Counter(
     "Total safety system trigger events (emergency stops, rate limits, conflict blocks)",
 )
 
+SENSOR_IMPLAUSIBLE_TOTAL = Counter(
+    "god_kaiser_sensor_implausible_total",
+    "Total implausible sensor values received (outside physical datasheet limits)",
+    ["sensor_type", "esp_id"],
+)
+
 # Track server start time
 _server_start_time: float = time.time()
+_metrics_initialized: bool = False
 
 
 def set_server_start_time(start_time: float) -> None:
     """Set server start time (called once during startup)."""
     global _server_start_time
     _server_start_time = start_time
+
+
+def init_metrics() -> None:
+    """Initialize all labeled metrics so they appear in Prometheus at startup.
+
+    Counters and Gauges with labels are invisible in Prometheus until their
+    first increment/set. This causes alerts referencing them to evaluate
+    to NoData. Initializing with 0 makes them visible immediately.
+    """
+    global _metrics_initialized
+    if _metrics_initialized:
+        return
+    _metrics_initialized = True
+
+    # MQTT error counters (referenced by ao-high-mqtt-error-rate alert)
+    MQTT_ERRORS_TOTAL.labels(direction="received")
+    MQTT_ERRORS_TOTAL.labels(direction="published")
+
+    # MQTT message counters
+    MQTT_MESSAGES_TOTAL.labels(direction="received")
+    MQTT_MESSAGES_TOTAL.labels(direction="published")
+
+    # HTTP error counters
+    HTTP_ERRORS_TOTAL.labels(status_class="4xx")
+    HTTP_ERRORS_TOTAL.labels(status_class="5xx")
+
+    logger.info("Prometheus metrics initialized (all label combinations visible)")
 
 
 def update_system_metrics() -> None:
@@ -354,6 +388,11 @@ def increment_logic_error() -> None:
 def increment_actuator_timeout() -> None:
     """Increment actuator timeout counter."""
     ACTUATOR_TIMEOUTS_TOTAL.inc()
+
+
+def increment_sensor_implausible(sensor_type: str, esp_id: str) -> None:
+    """Increment implausible sensor value counter."""
+    SENSOR_IMPLAUSIBLE_TOTAL.labels(sensor_type=sensor_type, esp_id=esp_id).inc()
 
 
 def increment_safety_trigger() -> None:

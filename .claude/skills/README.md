@@ -9,7 +9,7 @@ allowed-tools: Read
 
 # AutomationOne Skills - Index
 
-> **Version:** 3.4 | **Aktualisiert:** 2026-02-22 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
+> **Version:** 3.5 | **Aktualisiert:** 2026-02-25 | **Format:** Offizielles Claude Code Skill-Format (Ordner + SKILL.md)
 
 ## Skill-Auswahl
 
@@ -36,6 +36,7 @@ allowed-tools: Read
 | **Git-Health** (Repo-Analyse, CI, Branch-Protection) | git-health | `.claude/skills/git-health/` |
 | **Verify-Plan** (TM-Pläne gegen Codebase prüfen) | verify-plan | `.claude/skills/verify-plan/` |
 | **KI-Audit** (Bereich auf KI-Fehler prüfen, Report/Fix auf Anfrage) | ki-audit | `.claude/skills/ki-audit/` |
+| **Hardware-Test** (F4 Flow, Sensor/Aktor testen, Profil-basiert, auto-ops Orchestrierung) | hardware-test | `.claude/skills/hardware-test/` |
 
 ## Skill-Ordner-Struktur
 
@@ -83,8 +84,10 @@ allowed-tools: Read
 │   └── SKILL.md                # Git-/Repo-Analyse
 ├── verify-plan/
 │   └── SKILL.md                # TM-Plan Reality-Check
-└── ki-audit/
-    └── SKILL.md                # KI-Fehler-Audit (Report/Fix auf Anfrage)
+├── ki-audit/
+│   └── SKILL.md                # KI-Fehler-Audit (Report/Fix auf Anfrage)
+└── hardware-test/
+    └── SKILL.md                # Hardware-Test F4 Flow (Profil-basiert)
 ```
 
 ## Session-Briefing & Planning

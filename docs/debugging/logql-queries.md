@@ -121,7 +121,7 @@ Replace `$CORRELATION_ID` with the request_id from server logs or a known identi
 **Situation:** An alert, the frontend, or a log shows a numeric error code from the taxonomy.
 
 ```logql
-{compose_service=~".+"} |~ "E:\\d{4}" | level=~"ERROR|WARNING"
+{compose_service=~".+"} |~ "E:[0-9]{4}" | level=~"ERROR|WARNING"
 ```
 
 For a specific error code (e.g., 3001):

@@ -201,12 +201,20 @@ mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 5 -W 30
 ```
 
 ### ESP32
-```bash
-# Build & Flash
-cd "El Trabajante" && pio run -e esp32_dev -t upload
 
-# Serial Monitor
-cd "El Trabajante" && pio device monitor
+**Wichtig:** PlatformIO-Befehle muessen aus `El Trabajante/` ausgefuehrt werden. Flash/Monitor erfordern COM-Port → NUR in PowerShell (nicht Git Bash).
+
+```bash
+# Build (Git Bash / Agent)
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+```
+
+```powershell
+# Flash + Monitor (PowerShell, User-Befehl)
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ### API (häufigste)

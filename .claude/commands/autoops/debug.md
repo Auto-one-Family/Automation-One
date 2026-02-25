@@ -64,4 +64,4 @@ print('Passed:', result.get('all_passed', False))
 - **Debug Plugin:** `El Servador/god_kaiser_server/src/autoops/plugins/debug_fix.py`
 - **Health Plugin:** `El Servador/god_kaiser_server/src/autoops/plugins/health_check.py`
 - **Server Logs:** `El Servador/god_kaiser_server/logs/god_kaiser.log`
-- **MQTT Debug:** `mosquitto_sub -h localhost -t "kaiser/#" -v`
+- **MQTT Debug:** `mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30`

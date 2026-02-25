@@ -121,7 +121,7 @@
       "id": 3,
       "targets": [
         {
-          "expr": "automationone_esp_last_heartbeat_seconds",
+          "expr": "god_kaiser_esp_last_heartbeat",
           "format": "table",
           "instant": true,
           "refId": "A"

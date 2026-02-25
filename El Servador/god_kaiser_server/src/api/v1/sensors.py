@@ -24,10 +24,9 @@ References:
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, List, Optional, Union
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse
 
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig
@@ -407,53 +406,94 @@ async def create_or_update_sensor(
     # The first created config is returned; frontend reloads all via fetchDevice().
     if is_multi_value_sensor(request.sensor_type):
         value_types = get_all_value_types_for_device(request.sensor_type)
+
+        # Guard: empty value_types means registry misconfiguration
+        if not value_types:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Sensor type '{request.sensor_type}' is registered as multi-value "
+                "but has no defined sub-types. Contact system administrator.",
+            )
+
         logger.info(
             f"Multi-value sensor '{request.sensor_type}' for ESP {esp_id}: "
             f"splitting into {value_types}"
         )
-        first_response = None
+        created_sensors = []
 
-        for value_type in value_types:
-            # Check if this sub-type already exists
-            existing_vt = await sensor_repo.get_by_esp_gpio_and_type(
-                esp_device.id, gpio, value_type
+        # Atomic transaction: all sub-types succeed or all rollback
+        try:
+            for value_type in value_types:
+                # Check if this sub-type already exists
+                existing_vt = await sensor_repo.get_by_esp_gpio_and_type(
+                    esp_device.id, gpio, value_type
+                )
+
+                # Build model fields, override sensor_type + interface_type per sub-type
+                model_fields = _schema_to_model_fields(request)
+                model_fields["sensor_type"] = value_type
+                model_fields["interface_type"] = (
+                    request.interface_type or _infer_interface_type(value_type)
+                )
+
+                if existing_vt:
+                    # Update existing sub-type (same field set as single-value path)
+                    existing_vt.sensor_type = model_fields["sensor_type"]
+                    if request.name is not None:
+                        existing_vt.sensor_name = model_fields["sensor_name"]
+                    existing_vt.enabled = model_fields["enabled"]
+                    existing_vt.sample_interval_ms = model_fields["sample_interval_ms"]
+                    existing_vt.pi_enhanced = model_fields["pi_enhanced"]
+                    if request.calibration is not None:
+                        existing_vt.calibration_data = model_fields["calibration_data"]
+                    if model_fields["thresholds"]:
+                        existing_vt.thresholds = model_fields["thresholds"]
+                    if request.metadata is not None:
+                        existing_vt.sensor_metadata = model_fields["sensor_metadata"]
+                    existing_vt.interface_type = model_fields["interface_type"]
+                    existing_vt.operating_mode = model_fields["operating_mode"]
+                    existing_vt.timeout_seconds = model_fields["timeout_seconds"]
+                    existing_vt.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
+                    existing_vt.schedule_config = model_fields["schedule_config"]
+                    existing_vt.config_status = "pending"
+                    existing_vt.config_error = None
+                    existing_vt.config_error_detail = None
+                    sensor = existing_vt
+                    logger.info(
+                        f"Multi-value '{value_type}': updated existing config (config_status=pending)"
+                    )
+                else:
+                    # Create new sub-type config
+                    sensor = SensorConfig(
+                        esp_id=esp_device.id,
+                        gpio=gpio,
+                        **model_fields,
+                    )
+                    await sensor_repo.create(sensor)
+                    logger.info(
+                        f"Multi-value '{value_type}': created new config (config_status=pending)"
+                    )
+
+                created_sensors.append(sensor)
+
+            # Single atomic commit for all sub-types
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.error(
+                f"Failed to create multi-value sensor '{request.sensor_type}' for ESP {esp_id}: "
+                f"rolling back all sub-types. Error: {e}",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Multi-value sensor creation failed for '{request.sensor_type}': {str(e)}",
             )
 
-            # Infer interface_type
-            interface_type = request.interface_type or _infer_interface_type(value_type)
-
-            # Build model fields from request, but override sensor_type
-            model_fields = _schema_to_model_fields(request)
-            model_fields["sensor_type"] = value_type
-
-            if existing_vt:
-                # Update existing sub-type config
-                existing_vt.sensor_type = value_type
-                existing_vt.config_status = "pending"
-                existing_vt.config_error = None
-                existing_vt.config_error_detail = None
-                if request.name is not None:
-                    existing_vt.sensor_name = model_fields["sensor_name"]
-                existing_vt.enabled = model_fields["enabled"]
-                sensor = existing_vt
-                logger.info(
-                    f"Multi-value '{value_type}': updated existing config (config_status=pending)"
-                )
-            else:
-                # Create new sub-type config
-                sensor = SensorConfig(
-                    esp_id=esp_device.id,
-                    gpio=gpio,
-                    **model_fields,
-                )
-                await sensor_repo.create(sensor)
-                logger.info(
-                    f"Multi-value '{value_type}': created new config (config_status=pending)"
-                )
-
-            await db.commit()
+        # Refresh all sensors and build response from first
+        first_response = None
+        for sensor in created_sensors:
             await db.refresh(sensor)
-
             if first_response is None:
                 first_response = _model_to_response(sensor, esp_id)
 
@@ -468,6 +508,7 @@ async def create_or_update_sensor(
             else:
                 logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
         except Exception as e:
+            # Log error but don't fail the request (DB save was successful)
             logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
         return first_response
@@ -777,10 +818,15 @@ async def query_sensor_data(
     sensor_repo = SensorRepository(db)
 
     # Default time range to last 24 hours
+    # Use naive datetimes (no tzinfo) to match PostgreSQL TIMESTAMP WITHOUT TIME ZONE
     if not start_time:
-        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
+        start_time = datetime.utcnow() - timedelta(hours=24)
+    else:
+        start_time = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
     if not end_time:
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.utcnow()
+    else:
+        end_time = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
 
     # Get ESP device ID if specified
     esp_db_id = None
@@ -988,11 +1034,15 @@ async def get_sensor_stats(
             detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'",
         )
 
-    # Default time range
+    # Default time range (naive datetimes for TIMESTAMP WITHOUT TIME ZONE)
     if not start_time:
-        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
+        start_time = datetime.utcnow() - timedelta(hours=24)
+    else:
+        start_time = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
     if not end_time:
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.utcnow()
+    else:
+        end_time = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
 
     # Get statistics
     stats = await sensor_repo.get_stats(

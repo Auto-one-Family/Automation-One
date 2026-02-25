@@ -130,21 +130,27 @@ El Servador/god_kaiser_server/logs/
 
 ### 4.4 Build-Befehle
 
-```bash
-# Funktioniert ✅ (Git Bash)
-cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
-cd "El Servador/god_kaiser_server" && .venv/Scripts/pytest.exe tests/ -v --no-cov
+**Wichtig:** `platformio.ini` liegt in `El Trabajante/` — alle `pio`-Befehle muessen aus diesem Verzeichnis ausgefuehrt werden.
 
-# ACHTUNG: Upload/Flash funktioniert NICHT aus Git Bash (COM-Port nicht erreichbar)
-# → Upload aus PowerShell oder VS Code PlatformIO Terminal ausführen
+```bash
+# Funktioniert ✅ (Git Bash) — NUR Build, kein Flash/Monitor (COM-Port nicht erreichbar)
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+
+cd "El Servador/god_kaiser_server"
+.venv/Scripts/pytest.exe tests/ -v --no-cov
 ```
 
 ```powershell
-# Funktioniert ✅ (PowerShell)
-# HINWEIS: && geht NICHT in PowerShell, Befehle einzeln oder mit ; trennen
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32_dev
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32_dev -t upload  # Flash
-# Oder im PlatformIO Terminal (hat pio im PATH): pio run -e esp32_dev
+# Funktioniert ✅ (PowerShell) — Build, Flash UND Monitor
+# HINWEIS: && geht NICHT in PowerShell 5.x → Befehle einzeln oder mit ; trennen
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev           # Build
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload # Flash
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev # Monitor
+
+# Flash + Monitor nacheinander (mit ; statt &&):
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ---
@@ -244,11 +250,12 @@ poetry run pytest tests/ -v --no-cov
 ```
 Ich benötige Serial Output vom ESP32.
 
-Bitte führe folgendes aus und teile die Ausgabe:
+Bitte führe folgendes in PowerShell aus und teile die Ausgabe:
 1. Verbinde den ESP32 via USB
-2. `cd "El Trabajante" && pio device monitor`
-3. Warte auf die relevanten Log-Zeilen
-4. Kopiere die Ausgabe hier
+2. cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+3. C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
+4. Warte auf die relevanten Log-Zeilen
+5. Kopiere die Ausgabe hier (Ctrl+C beendet den Monitor)
 ```
 
 ### 7.2 Wenn Token/Secrets nötig

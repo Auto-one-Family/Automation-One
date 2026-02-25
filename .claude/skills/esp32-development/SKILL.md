@@ -74,28 +74,39 @@ El Trabajante/
 
 ## Build Commands
 
-**Hinweis:** `pio` ist in Git Bash nicht im PATH → `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Upload/Monitor erfordern COM-Port → PowerShell oder PlatformIO Terminal nutzen (Git Bash kann COM-Ports nicht öffnen).
+**Wichtig:** PlatformIO-Befehle muessen aus `El Trabajante/` ausgefuehrt werden (dort liegt `platformio.ini`).
+
+- **Git Bash (Agent):** `pio` nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`. Build funktioniert, aber Upload/Monitor NICHT (COM-Port nicht erreichbar)
+- **PowerShell (User):** `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen
+
+### Git Bash (Agent-Befehle, nur Build/Test)
 
 ```bash
-# Build ESP32 Dev Board
-cd "El Trabajante" && pio run -e esp32_dev
+cd "El Trabajante"
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+~/.platformio/penv/Scripts/pio.exe run -e seeed_xiao_esp32c3
+~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp01   # ESP_00000001
+~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp02   # ESP_00000002
+~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp03   # ESP_00000003
+~/.platformio/penv/Scripts/pio.exe test -e native -vvv   # 22 Native Unit Tests
+```
 
-# Build XIAO ESP32-C3
-cd "El Trabajante" && pio run -e seeed_xiao_esp32c3
+### PowerShell (User-Befehle, Flash + Monitor)
 
-# Build Wokwi Simulation (Multi-Device)
-cd "El Trabajante" && pio run -e wokwi_esp01  # ESP_00000001
-cd "El Trabajante" && pio run -e wokwi_esp02  # ESP_00000002
-cd "El Trabajante" && pio run -e wokwi_esp03  # ESP_00000003
+```powershell
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
 
-# Flash (PowerShell/PlatformIO Terminal, NICHT Git Bash)
-cd "El Trabajante" && pio run -e esp32_dev -t upload
+# Build
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev
 
-# Serial Monitor (PowerShell/PlatformIO Terminal, NICHT Git Bash)
-cd "El Trabajante" && pio device monitor
+# Flash
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
 
-# Native Unit Tests (22 Tests, laeuft auf Host-PC ohne Hardware)
-cd "El Trabajante" && pio test -e native -vvv
+# Serial Monitor
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
+
+# Flash + Monitor (nacheinander, ; statt &&)
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
 ---

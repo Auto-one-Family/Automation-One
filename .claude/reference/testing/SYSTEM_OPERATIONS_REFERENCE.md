@@ -141,7 +141,7 @@ docker stats --no-stream
 |-------------|--------|
 | `logs/server/` | Server JSON-Logs (Bind-Mount) |
 | `logs/mqtt/` | Deaktiviert (Mosquitto stdout-only); Broker-Logs via Loki `compose_service=mqtt-broker` |
-| `logs/postgres/` | PostgreSQL Query-Logs (Bind-Mount) |
+| (kein Bind-Mount) postgres | PostgreSQL stderr → Docker → Alloy → Loki `compose_service=postgres` (level, query_duration_ms) |
 | `logs/esp32/` | ESP32 Serial-Logs (manuell via PlatformIO) |
 | `logs/current/` | Session-Logs (via start_session.sh) |
 | `logs/archive/` | Archivierte Session-Logs |
@@ -587,7 +587,7 @@ curl http://localhost:8000/api/v1/health/metrics
 |------|--------|----------|
 | `logs/server/god_kaiser.log` | Server JSON-Logs | 10 Backups × 10MB |
 | `logs/mqtt/mosquitto.log` | – (Bind-Mount in docker-compose auskommentiert; MQTT-Logs: `docker compose logs mqtt-broker` oder Loki) | – |
-| `logs/postgres/postgresql.log` | PostgreSQL Queries | 50MB/Tag |
+| (kein Bind-Mount) | PostgreSQL: `docker compose logs postgres` oder Loki `{compose_service="postgres"}` | Docker json-file Rotation |
 
 #### Via Docker (EMPFOHLEN)
 
@@ -624,8 +624,8 @@ grep "mqtt" logs/server/god_kaiser.log
 # Heartbeats filtern (oft zu viel Output)
 tail -f logs/server/god_kaiser.log | grep -v "heartbeat"
 
-# PostgreSQL Slow Queries (>100ms)
-grep "duration:" logs/postgres/postgresql.log
+# PostgreSQL Slow Queries (>100ms) — via Docker oder Loki
+docker compose logs postgres | grep "duration:"
 
 # MQTT Broker-Logs (Bind-Mount deaktiviert: docker compose logs -f mqtt-broker oder Loki compose_service=mqtt-broker)
 docker compose logs -f mqtt-broker
@@ -1135,18 +1135,22 @@ pio run -e esp32_dev -t upload
 
 ### 5.2 Monitoring
 
-```bash
+**Wichtig:** Flash/Monitor erfordern COM-Port → NUR in PowerShell (nicht Git Bash). `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen.
+
+```powershell
+# Zuerst ins PlatformIO-Projektverzeichnis wechseln
+cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
+
 # Serial Monitor
-cd "El Trabajante"
-pio device monitor -b 115200 -e esp32_dev
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -b 115200 -e esp32_dev
 
 # Mit Filter
-pio device monitor -b 115200 -e esp32_dev --filter time
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -b 115200 -e esp32_dev --filter time
 
-# Alle in einem: Erase + Flash + Monitor
-pio run -e esp32_dev -t erase && \
-pio run -e esp32_dev -t upload && \
-pio device monitor -b 115200 -e esp32_dev
+# Alle in einem: Erase + Flash + Monitor (PowerShell, Befehle einzeln)
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t erase
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
+C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -b 115200 -e esp32_dev
 ```
 
 ### 5.3 Wokwi-Simulation
@@ -1394,7 +1398,7 @@ cd "El Servador/god_kaiser_server"
 .venv/Scripts/python.exe ../../scripts/cleanup_for_real_esp.py
 
 # 3. Logs löschen (optional)
-rm -rf logs/server/* logs/postgres/*
+rm -rf logs/server/*
 
 # 4. Mosquitto Retained Messages löschen (alle)
 mosquitto_pub -h localhost -t "kaiser/#" -r -n
@@ -1713,7 +1717,7 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **Server Logs** | `logs/server/god_kaiser.log` (Docker Bind-Mount) |
 | **MQTT Logs** | `docker compose logs mqtt-broker` oder Loki `compose_service=mqtt-broker` (kein Bind-Mount) |
 | **Frontend Logs** | Loki `compose_service=el-frontend` / `docker compose logs el-frontend` (stdout only, kein Bind-Mount) |
-| **PostgreSQL Logs** | `logs/postgres/postgresql.log` (Docker Bind-Mount) |
+| **PostgreSQL Logs** | `docker compose logs postgres` oder Loki `compose_service=postgres` (kein Bind-Mount; logging_collector=off) |
 | **ESP32 Logs** | `logs/esp32/` (manuell) |
 | **Session Logs** | `logs/current/` (via session.sh) |
 | **ESP32 Main** | `El Trabajante/src/main.cpp` |

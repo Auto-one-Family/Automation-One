@@ -222,8 +222,8 @@ Bei unbekanntem Code → `.claude/reference/errors/ERROR_CODES.md` konsultieren.
 
 | Position | Middleware | Funktion |
 |----------|-----------|----------|
-| 1 (zuerst) | `CORSMiddleware` | CORS-Validierung |
-| 2 | `RequestIdMiddleware` | UUID-Tracking pro Request |
+| 1 (äußerste) | `RequestIdMiddleware` | UUID-Tracking pro Request (Pure ASGI, ContextVar-safe) |
+| 2 | `CORSMiddleware` | CORS-Validierung |
 | 3 | Auth Dependencies | JWT-Token pro Endpoint |
 
 ---
@@ -268,8 +268,8 @@ Bei unbekanntem Code → `.claude/reference/errors/ERROR_CODES.md` konsultieren.
 **MQTT-Pipeline:**
 1. MQTT-Message empfangen → `subscriber.py` extrahiert `esp_id`, `topic_suffix`, `seq`
 2. `generate_mqtt_correlation_id()` erzeugt `{esp_id}:{topic}:{seq}:{ts_ms}`
-3. CID in ContextVar → alle Handler-Logs enthalten `request_id`
-4. WebSocket-Broadcasts enthalten `correlation_id` auf Message-Root-Level
+3. `_run_handler_with_cid()` setzt CID als ContextVar im Event-Loop-Context (Token-basiert)
+4. Alle Handler-Logs enthalten `request_id`, WebSocket-Broadcasts `correlation_id`
 
 ---
 
@@ -363,7 +363,7 @@ grep "duration=" logs/server/god_kaiser.log
 | `postgres` | `automationone-postgres` | 5432 |
 | `el-frontend` | `automationone-frontend` | 5173 |
 
-**Log Bind-Mounts:** `./logs/server/` → el-servador `/app/logs`, `./logs/mqtt/` → mqtt-broker, `./logs/postgres/` → postgres
+**Log Bind-Mounts:** `./logs/server/` → el-servador `/app/logs`. MQTT und PostgreSQL: kein Bind-Mount (stdout/stderr → Docker → Alloy → Loki)
 
 ---
 

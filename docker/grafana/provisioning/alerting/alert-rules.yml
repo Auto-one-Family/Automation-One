@@ -1,10 +1,11 @@
 # Grafana Alerting Provisioning - AutomationOne
 # Phase 2: Expanded Alerting (UI-only, no webhook yet)
 #
-# 28 Rules across 6 groups:
-#   Critical (10s): server-down, mqtt-disconnected, database-down, loki-down, alloy-down
+# 32 Rules across 7 groups:
+#   Critical (10s): server-down, mqtt-disconnected, database-down, loki-down, alloy-down, prometheus-down
 #   Warning (1m):   high-memory, esp-devices-offline, high-mqtt-error-rate
-#   Infrastructure (1m): db-query-slow, db-connections-high, cadvisor-down
+#   Infrastructure (1m): db-query-slow, db-connections-high, cadvisor-down,
+#                        container-restart-loop (changes on start_time), database-size-high, loki-ingestion-failure
 #   Sensor/ESP (1m): sensor-temp/ph/humidity/ec-range, sensor-stale, heartbeat-gap,
 #                    esp-boot-loop, esp-error-cascade, esp-safe-mode
 #   Application (1m): ws-disconnects, mqtt-message-backlog, api-errors-high,
@@ -15,6 +16,9 @@
 # Pipeline per rule: A (PromQL query) -> B (Reduce to last value) -> C (Threshold)
 # All datasource UIDs verified against datasources.yml (2026-02-09)
 # Evaluation intervals must be multiples of 10s (Grafana scheduler interval)
+# Note: cAdvisor on Docker Desktop exports no "name" label — container alerts use
+#       id-path matching or alternative metrics (pg_database_size_bytes)
+# Last updated: 2026-02-25 (Alert Quality Fix — Blocks B+C)
 
 apiVersion: 1
 
@@ -268,6 +272,57 @@ groups:
         annotations:
           summary: "Alloy Log-Shipping nicht erreichbar"
           description: "Prometheus kann Alloy :12345/metrics nicht scrapen seit >2m. Container-Logs werden nicht nach Loki geschickt."
+        labels:
+          severity: critical
+          component: monitoring
+
+      # Rule 6: Prometheus Down (self-monitoring)
+      # Fires when Prometheus cannot scrape itself — if Prometheus is down,
+      # Grafana gets NoData for ALL Prometheus-based alerts. noDataState: Alerting
+      # ensures this fires even when Prometheus is completely unreachable.
+      - uid: ao-prometheus-down
+        title: "Prometheus Down"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "up{job=\"prometheus\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Prometheus nicht erreichbar"
+          description: "Prometheus Self-Scrape fehlgeschlagen seit >2m. Wenn Prometheus down ist, funktionieren KEINE Prometheus-basierten Alerts mehr."
         labels:
           severity: critical
           component: monitoring
@@ -586,6 +641,161 @@ groups:
           severity: critical
           component: monitoring
 
+      # Rule 30: Container Restart Loop
+      # Fires when any Docker container restarts more than 2 times in 30 minutes
+      # Uses changes() on container_start_time_seconds — works with cAdvisor on Docker Desktop
+      # (Docker Desktop cAdvisor exports no "name" label; uses id=~/docker/ path filter)
+      # container_restart_count does NOT exist in cAdvisor — this is the correct alternative
+      - uid: ao-container-restart-loop
+        title: "Container Restart Loop"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "changes(container_start_time_seconds{id=~\"/docker/[0-9a-f]+\"}[30m])"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: "Container-Restart-Loop erkannt"
+          description: "Ein Docker-Container wurde >2x in 30 Minuten neu gestartet. Moeglicherweise Crash-Loop oder OOM-Kill. Container-Logs pruefen: docker compose logs --tail 50"
+        labels:
+          severity: warning
+          component: infrastructure
+
+      # Rule 31: Database Size High
+      # Fires when the god_kaiser_db database exceeds 500MB
+      # Replaces container_fs_usage_bytes alert — cAdvisor on Docker Desktop exports no
+      # "name" label, making per-container FS filtering impossible.
+      # pg_database_size_bytes is exported by postgres-exporter with datname label.
+      # 500MB threshold is generous for dev; adjust for production.
+      - uid: ao-container-disk-usage
+        title: "Database Size High"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "pg_database_size_bytes{datname=\"god_kaiser_db\"}"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [524288000]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "PostgreSQL-Datenbank god_kaiser_db ueberschreitet 500MB"
+          description: "Die Datenbank god_kaiser_db ist >500MB gross. sensor_data-Tabelle pruefen, ggf. alte Daten bereinigen: DELETE FROM sensor_data WHERE timestamp < NOW() - INTERVAL '30 days'"
+        labels:
+          severity: warning
+          component: database
+
+      # Rule 32: Loki Ingestion Failure
+      # Fires when Loki WAL disk full failures increase
+      # Detects Loki ingestion backlog before logs are lost
+      - uid: ao-loki-ingestion-failure
+        title: "Loki Ingestion Failure"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "increase(loki_ingester_wal_disk_full_failures_total[5m])"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Loki Ingestion-Fehler — WAL Disk voll"
+          description: "Loki WAL (Write-Ahead-Log) Disk-Full-Failures in den letzten 5 Minuten. Log-Ingestion ist beeintraechtigt. Disk-Space oder Loki-Retention pruefen."
+        labels:
+          severity: warning
+          component: monitoring
+
   # ============================================
   # Sensor Alerts (30s evaluation)
   # Phase 0 Phase C: Alerts requiring new metrics from metrics.py
@@ -606,7 +816,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: "god_kaiser_sensor_value{sensor_type=\"temperature\"} > 85 or god_kaiser_sensor_value{sensor_type=\"temperature\"} < -40"
+              expr: "avg_over_time(god_kaiser_sensor_value{sensor_type=\"temperature\"}[2m]) > 85 or avg_over_time(god_kaiser_sensor_value{sensor_type=\"temperature\"}[2m]) < -40"
               intervalMs: 15000
               maxDataPoints: 43200
               refId: A
@@ -654,7 +864,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: "god_kaiser_sensor_value{sensor_type=\"ph\"} > 14 or god_kaiser_sensor_value{sensor_type=\"ph\"} < 0"
+              expr: "avg_over_time(god_kaiser_sensor_value{sensor_type=\"ph\"}[2m]) > 14 or avg_over_time(god_kaiser_sensor_value{sensor_type=\"ph\"}[2m]) < 0"
               intervalMs: 15000
               maxDataPoints: 43200
               refId: A
@@ -702,7 +912,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: "god_kaiser_sensor_value{sensor_type=\"humidity\"} > 100 or god_kaiser_sensor_value{sensor_type=\"humidity\"} < 0"
+              expr: "avg_over_time(god_kaiser_sensor_value{sensor_type=\"humidity\"}[2m]) > 100 or avg_over_time(god_kaiser_sensor_value{sensor_type=\"humidity\"}[2m]) < 0"
               intervalMs: 15000
               maxDataPoints: 43200
               refId: A
@@ -750,7 +960,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: "god_kaiser_sensor_value{sensor_type=\"ec\"} > 10000"
+              expr: "avg_over_time(god_kaiser_sensor_value{sensor_type=\"ec\"}[2m]) > 10000"
               intervalMs: 15000
               maxDataPoints: 43200
               refId: A
@@ -979,7 +1189,7 @@ groups:
               refId: C
         noDataState: OK
         execErrState: Alerting
-        for: 30s
+        for: 1m
         annotations:
           summary: "ESP32 Error-Kaskade"
           description: "Mehr als 3 Fehler in 60 Sekunden. Systemisches Problem moeglich: Hardware, MQTT, Firmware."
@@ -1027,7 +1237,7 @@ groups:
               refId: C
         noDataState: OK
         execErrState: Alerting
-        for: 1m
+        for: 2m
         annotations:
           summary: "ESP32 im Safe-Mode"
           description: "Ein ESP32-Geraet ist in den Safe-Mode gewechselt. Fehlerursache analysieren, ggf. Reset."

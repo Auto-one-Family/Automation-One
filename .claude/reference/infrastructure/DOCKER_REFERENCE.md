@@ -79,7 +79,7 @@
 |-----------|---------|----------------|--------|
 | `./logs/server/` | el-servador | `/app/logs` | Aktiv |
 | `./logs/mqtt/` | mqtt-broker | `/mosquitto/log` | Deaktiviert (kommentiert seit v3.1, Mosquitto nutzt stdout-only) |
-| `./logs/postgres/` | postgres | `/var/log/postgresql` | Aktiv |
+| (kein Bind-Mount) | postgres | stderr → Docker → Alloy → Loki | `logging_collector=off` seit v4.6 |
 
 ---
 

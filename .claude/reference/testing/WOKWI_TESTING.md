@@ -418,7 +418,7 @@ build_flags = ${env:wokwi_simulation.build_flags} -D WOKWI_ESP_ID=\"ESP_00000003
 **Makefile:**
 ```makefile
 wokwi-build-multi:
-	cd "El Trabajante" && pio run -e wokwi_esp01 -e wokwi_esp02 -e wokwi_esp03
+	cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp01 -e wokwi_esp02 -e wokwi_esp03
 
 wokwi-seed-multi:
 	docker exec -it automationone-server python scripts/seed_wokwi_multi_esp.py

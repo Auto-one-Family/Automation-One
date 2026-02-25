@@ -1,12 +1,13 @@
 # Grafana Alerting Provisioning - AutomationOne Loki Alerts
-# SUPPLEMENTS the 28 Prometheus-based alerts in alert-rules.yml
+# SUPPLEMENTS the 32 Prometheus-based alerts in alert-rules.yml
 #
-# 5 Loki-based rules detecting log PATTERNS that metrics cannot:
+# 6 Loki-based rules detecting log PATTERNS that metrics cannot:
 #   Error Storm:         Repeated errors indicating an error loop
 #   ESP Disconnect Wave: Multiple ESPs going offline simultaneously
 #   DB Connection Errors: Database connectivity issues in logs
 #   ESP Boot Loop:       ESP32 repeatedly rebooting
 #   Critical Error Burst: Multiple CRITICAL-level events
+#   Frontend Down:       No frontend container logs (container stopped/crashed)
 #
 # Pipeline per rule: A (LogQL query) -> B (Reduce to last) -> C (Threshold)
 # Evaluation interval: 1m (multiple of 10s, Grafana scheduler requirement)
@@ -35,7 +36,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: "sum(count_over_time({compose_service=\"el-servador\"} | level=\"ERROR\" [5m]))"
+              expr: "sum(count_over_time({compose_service=\"el-servador\"} |~ \"(level=\\\"ERROR\\\"|Traceback|Exception|HTTP/1.1\\\" 5)\" [5m]))"
               refId: A
           - refId: B
             relativeTimeRange:
@@ -65,7 +66,7 @@ groups:
         for: 2m
         annotations:
           summary: "Error Storm — More than 10 errors in 5 minutes"
-          description: "El Servador has logged >10 ERROR-level entries in 5 minutes. Possible error loop or cascading failure."
+          description: "El Servador has logged >10 error entries (ERROR-level, exceptions, or HTTP 5xx) in 5 minutes. Possible error loop or cascading failure."
         labels:
           severity: warning
           component: server
@@ -110,7 +111,7 @@ groups:
               refId: C
         noDataState: OK
         execErrState: Alerting
-        for: 1m
+        for: 2m
         annotations:
           summary: "ESP Disconnect Wave — 3+ disconnects in 2 minutes"
           description: "MQTT broker logged 3+ disconnect events in 2 minutes. Possible network or broker issue affecting multiple ESPs."
@@ -121,6 +122,7 @@ groups:
 
       # Rule 3: Database Connection Errors
       # Detects database connectivity issues that may not surface as Prometheus metrics
+      # Threshold >2 tolerates transient reconnects (e.g. during migrations, container restarts)
       - uid: ao-loki-db-connection-errors
         title: "Loki: Database Connection Errors"
         condition: C
@@ -154,14 +156,14 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0]
+                    params: [2]
               refId: C
         noDataState: OK
         execErrState: Alerting
-        for: 1m
+        for: 2m
         annotations:
-          summary: "Database connection errors detected in server logs"
-          description: "El Servador logged database connection errors (refused, deadlock, or general DB error) in the last 5 minutes."
+          summary: "Database connection errors detected in server logs (>2 in 5min)"
+          description: "El Servador logged >2 database connection errors (refused, deadlock, or general DB error) in 5 minutes. Single transient reconnects are tolerated."
         labels:
           severity: warning
           component: database
@@ -261,4 +263,55 @@ groups:
         labels:
           severity: critical
           component: system
+          source: loki
+
+      # Rule 6: Frontend Down
+      # Detects when the Vue frontend container has stopped producing logs.
+      # The frontend (nginx/node) normally emits access logs and health check responses.
+      # If no logs appear for 5 minutes, the container is likely stopped or crashed.
+      # This solves the "no /metrics endpoint" problem without adding a new service.
+      - uid: ao-loki-frontend-down
+        title: "Loki: Frontend Down"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: "sum(count_over_time({compose_service=\"el-frontend\"} [5m]))"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Frontend-Container nicht erreichbar — keine Logs seit 5 Minuten"
+          description: "El Frontend (Vue 3) hat seit 5 Minuten keine Container-Logs produziert. Container ist wahrscheinlich gestoppt oder abgestuerzt. Docker-Status pruefen: docker compose ps el-frontend."
+        labels:
+          severity: warning
+          component: frontend
           source: loki

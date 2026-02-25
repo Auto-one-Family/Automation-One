@@ -43,23 +43,59 @@ function Test-TcpPort {
 
 function Invoke-HttpCheck {
     param([string]$Uri, [int]$TimeoutSec = 3)
+    # Try Invoke-WebRequest first, fall back to System.Net.WebClient
+    # PowerShell 5.1 Invoke-WebRequest can fail on plain-text responses or proxy issues
     try {
         $resp = Invoke-WebRequest -Uri $Uri -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
-        return @{ ok = $true; code = [int]$resp.StatusCode; body = $resp.Content }
+        return @{ ok = $true; code = [int]$resp.StatusCode; body = [string]$resp.Content }
     }
     catch {
-        return @{ ok = $false; error = $_.Exception.Message }
+        # Fallback: System.Net.WebClient (no proxy interference, handles plain-text)
+        try {
+            $wc = New-Object System.Net.WebClient
+            $body = $wc.DownloadString($Uri)
+            $wc.Dispose()
+            return @{ ok = $true; code = 200; body = [string]$body }
+        }
+        catch {
+            return @{ ok = $false; error = $_.Exception.Message }
+        }
     }
 }
 
 function Invoke-JsonEndpoint {
-    param([string]$Uri, [int]$TimeoutSec = 3)
+    param([string]$Uri, [int]$TimeoutSec = 3, [hashtable]$Headers = @{})
+    # Try Invoke-RestMethod first, fall back to System.Net.WebClient
+    # PowerShell 5.1 can timeout via WinHTTP proxy on localhost endpoints
     try {
-        $data = Invoke-RestMethod -Uri $Uri -TimeoutSec $TimeoutSec -ErrorAction Stop
+        $params = @{
+            Uri = $Uri
+            TimeoutSec = $TimeoutSec
+            ErrorAction = "Stop"
+        }
+        if ($Headers.Count -gt 0) {
+            $params.Headers = $Headers
+        }
+        $data = Invoke-RestMethod @params
         return @{ ok = $true; data = $data }
     }
     catch {
-        return @{ ok = $false; error = $_.Exception.Message }
+        # Fallback: System.Net.WebClient (bypasses WinHTTP proxy)
+        try {
+            $wc = New-Object System.Net.WebClient
+            if ($Headers.Count -gt 0) {
+                foreach ($entry in $Headers.GetEnumerator()) {
+                    $wc.Headers.Add($entry.Key, $entry.Value)
+                }
+            }
+            $body = $wc.DownloadString($Uri)
+            $wc.Dispose()
+            $data = $body | ConvertFrom-Json
+            return @{ ok = $true; data = $data }
+        }
+        catch {
+            return @{ ok = $false; error = $_.Exception.Message }
+        }
     }
 }
 
@@ -216,7 +252,7 @@ if (-not $frontendPort) {
 # ---------------------------------------------------------------------------
 
 $lokiReady = Invoke-HttpCheck "http://localhost:3100/ready"
-$lokiOk = ($lokiReady.ok -and $lokiReady.body -match "ready")
+$lokiOk = ($lokiReady.ok -and ([string]$lokiReady.body) -match "ready")
 $lokiLastAge = -1
 if ($lokiOk) {
     # Promtail labels: container, compose_service (ROADMAP §1.1) – not container_name
@@ -265,7 +301,9 @@ if (-not $promReady.ok) {
 # 9. Grafana
 # ---------------------------------------------------------------------------
 
-$grafana = Invoke-JsonEndpoint "http://localhost:3000/api/health"
+# Grafana requires auth for API endpoints (anonymous access disabled)
+$grafanaAuthHeader = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin")) }
+$grafana = Invoke-JsonEndpoint "http://localhost:3000/api/health" -Headers $grafanaAuthHeader
 
 $result.services.grafana = [ordered]@{
     status  = if ($grafana.ok) { "ok" } else { "error" }
