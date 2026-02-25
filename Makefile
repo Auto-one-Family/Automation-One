@@ -4,7 +4,7 @@ COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
 COMPOSE_E2E := -f docker-compose.yml -f docker-compose.e2e.yml
 
-.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-all wokwi-test-error-injection wokwi-test-scenario wokwi-test-category wokwi-run
+.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status loki-errors loki-trace loki-esp loki-health devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-all wokwi-test-error-injection wokwi-test-scenario wokwi-test-category wokwi-run
 
 help:
 	@echo "AutomationOne Docker Commands:"
@@ -48,10 +48,16 @@ help:
 	@echo "  make db-restore    - Restore database (FILE=path)"
 	@echo ""
 	@echo "Monitoring Stack:"
-	@echo "  make monitor-up     - Start monitoring (Loki, Promtail, Prometheus, Grafana)"
+	@echo "  make monitor-up     - Start monitoring (Loki, Alloy, Prometheus, Grafana)"
 	@echo "  make monitor-down   - Stop monitoring stack"
 	@echo "  make monitor-logs   - Follow monitoring logs"
 	@echo "  make monitor-status - Monitoring container status"
+	@echo ""
+	@echo "Loki Debug Queries:"
+	@echo "  make loki-errors    - Recent errors from Loki (last 5 min)"
+	@echo "  make loki-trace CID=<id> - Trace Correlation-ID across services"
+	@echo "  make loki-esp ESP=<id>   - All logs for a specific ESP32"
+	@echo "  make loki-health    - Loki health, active streams, error count"
 	@echo ""
 	@echo "DevTools Stack:"
 	@echo "  make devtools-up     - Start devtools (pgAdmin)"
@@ -183,6 +189,21 @@ monitor-logs:
 
 monitor-status:
 	$(COMPOSE) --profile monitoring ps
+
+# ============================================
+# Loki Debug Queries
+# ============================================
+loki-errors:
+	@bash scripts/loki-query.sh errors 5
+
+loki-trace:
+	@bash scripts/loki-query.sh trace $(CID)
+
+loki-esp:
+	@bash scripts/loki-query.sh esp $(ESP)
+
+loki-health:
+	@bash scripts/loki-query.sh health
 
 # ============================================
 # DevTools Stack (Profile: devtools)
