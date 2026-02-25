@@ -202,24 +202,22 @@ services:
 
   # ============================================
   # Grafana Alloy (Log Shipping) - Profile: monitoring
-  # Migrated from Promtail to Alloy 2026-02-24 (Promtail EOL: 2026-03-02)
-  # Uses --config.format=promtail to read existing Promtail config directly
+  # Migrated from Promtail to native Alloy River config 2026-02-24
+  # Native config: docker/alloy/config.alloy (no --config.format=promtail)
   # ============================================
   alloy:
     image: grafana/alloy:v1.13.1
     container_name: automationone-alloy
     profiles: ["monitoring"]
     volumes:
-      - ./docker/promtail/config.yml:/etc/alloy/config.yml:ro
+      - ./docker/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - automationone-alloy-data:/var/lib/alloy/data
     command:
       - run
-      - --config.format=promtail
-      - --config.bypass-conversion-errors
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.yml
+      - /etc/alloy/config.alloy
     ports:
       - "12345:12345"   # Alloy UI (Debugging + Graph-Ansicht)
     depends_on:
