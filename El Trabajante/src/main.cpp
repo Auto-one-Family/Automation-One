@@ -112,6 +112,8 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
     ack_doc["message"] = error_message;
   }
 
+  ack_doc["seq"] = mqttClient.getNextSeq();
+
   String ack_payload;
   size_t written = serializeJson(ack_doc, ack_payload);
   if (written == 0 || ack_payload.length() == 0) {
@@ -875,7 +877,7 @@ void setup() {
             LOG_E(TAG, "╚════════════════════════════════════════╝");
             LOG_E(TAG, "Invalid auth_token for emergency command");
             mqttClient.publish(esp_emergency_topic + "/error",
-                              "{\"error\":\"unauthorized\",\"message\":\"Invalid auth_token\"}");
+                              "{\"error\":\"unauthorized\",\"message\":\"Invalid auth_token\",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
             return;
           }
 
@@ -892,10 +894,10 @@ void setup() {
             if (success) {
               safetyController.resumeOperation();
               mqttClient.publish(esp_emergency_topic + "/response",
-                                "{\"status\":\"emergency_cleared\",\"timestamp\":" + String(millis()) + "}");
+                                "{\"status\":\"emergency_cleared\",\"timestamp\":" + String(millis()) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
             } else {
               mqttClient.publish(esp_emergency_topic + "/error",
-                                "{\"error\":\"clear_failed\",\"message\":\"Safety verification failed\"}");
+                                "{\"error\":\"clear_failed\",\"message\":\"Safety verification failed\",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
             }
           }
         } else {
@@ -957,7 +959,7 @@ void setup() {
 
           // Acknowledge command
           String response = "{\"status\":\"factory_reset_initiated\",\"esp_id\":\"" +
-                          configManager.getESPId() + "\"}";
+                          configManager.getESPId() + "\",\"seq\":" + String(mqttClient.getNextSeq()) + "}";
           mqttClient.publish(system_command_topic + "/response", response);
 
           // Clear configs
@@ -987,7 +989,7 @@ void setup() {
             if (!oneWireBusManager.begin(pin)) {
               LOG_E(TAG, "Failed to initialize OneWire bus on GPIO " + String(pin));
               String error_response = "{\"error\":\"Failed to initialize OneWire bus\",\"pin\":" +
-                                     String(pin) + "}";
+                                     String(pin) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}";
               mqttClient.publish(system_command_topic + "/response", error_response);
               return;
             }
@@ -997,7 +999,7 @@ void setup() {
               LOG_W(TAG, "OneWire bus active on GPIO " + String(current_pin) +
                          ", ignoring scan request for GPIO " + String(pin));
               String error_response = "{\"error\":\"OneWire bus already on different pin\",\"requested_pin\":" +
-                                     String(pin) + ",\"active_pin\":" + String(current_pin) + "}";
+                                     String(pin) + ",\"active_pin\":" + String(current_pin) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}";
               mqttClient.publish(system_command_topic + "/response", error_response);
               return;
             }
@@ -1009,7 +1011,7 @@ void setup() {
           LOG_I(TAG, "Scanning OneWire bus...");
           if (!oneWireBusManager.scanDevices(rom_codes, 10, found_count)) {
             LOG_E(TAG, "OneWire bus scan failed");
-            String error_response = "{\"error\":\"OneWire scan failed\",\"pin\":" + String(pin) + "}";
+            String error_response = "{\"error\":\"OneWire scan failed\",\"pin\":" + String(pin) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}";
             mqttClient.publish(system_command_topic + "/response", error_response);
             return;
           }
@@ -1032,6 +1034,8 @@ void setup() {
           }
           response += "],\"found_count\":";
           response += String(found_count);
+          response += ",\"seq\":";
+          response += String(mqttClient.getNextSeq());
           response += "}";
 
           String scan_result_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/onewire/scan_result";
@@ -1042,6 +1046,8 @@ void setup() {
           ack_response += String(found_count);
           ack_response += ",\"pin\":";
           ack_response += String(pin);
+          ack_response += ",\"seq\":";
+          ack_response += String(mqttClient.getNextSeq());
           ack_response += "}";
           mqttClient.publish(system_command_topic + "/response", ack_response);
 
@@ -1071,6 +1077,7 @@ void setup() {
           response_doc["zone_id"] = g_kaiser.zone_id;
           response_doc["zone_assigned"] = g_kaiser.zone_assigned;
           response_doc["ts"] = (unsigned long)unix_timestamp;
+          response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;
           serializeJson(response_doc, response);
@@ -1126,6 +1133,7 @@ void setup() {
           response_doc["config_status"] = serialized(configManager.getDiagnosticsJSON());
 
           response_doc["ts"] = (unsigned long)unix_timestamp;
+          response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;
           serializeJson(response_doc, response);
@@ -1167,6 +1175,7 @@ void setup() {
           response_doc["actuator_count"] = actuator_count;
 
           response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+          response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;
           serializeJson(response_doc, response);
@@ -1190,6 +1199,7 @@ void setup() {
           response_doc["esp_id"] = g_system_config.esp_id;
           response_doc["message"] = "Safe mode activated - all actuators stopped";
           response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+          response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;
           serializeJson(response_doc, response);
@@ -1213,6 +1223,7 @@ void setup() {
           response_doc["esp_id"] = g_system_config.esp_id;
           response_doc["message"] = "Safe mode deactivated - actuators can be controlled";
           response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+          response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;
           serializeJson(response_doc, response);
@@ -1277,6 +1288,8 @@ void setup() {
             LOG_E(TAG, "❌ Invalid log level: " + level);
           }
 
+          response_doc["seq"] = mqttClient.getNextSeq();
+
           String response;
           serializeJson(response_doc, response);
           mqttClient.publish(system_command_topic + "/response", response);
@@ -1292,6 +1305,7 @@ void setup() {
           response_doc["esp_id"] = g_system_config.esp_id;
           response_doc["error"] = "Unknown command";
           response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+          response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;
           serializeJson(response_doc, response);
@@ -1360,6 +1374,7 @@ void setup() {
               ack_doc["zone_id"] = "";
               ack_doc["master_zone_id"] = "";
               ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+              ack_doc["seq"] = mqttClient.getNextSeq();
 
               String ack_payload;
               size_t written = serializeJson(ack_doc, ack_payload);
@@ -1385,6 +1400,7 @@ void setup() {
               String ack_topic = TopicBuilder::buildZoneAckTopic();
               String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
                                      "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
+                                     ",\"seq\":" + String(mqttClient.getNextSeq()) +
                                      ",\"message\":\"Failed to remove zone config\"}";
               mqttClient.publish(ack_topic, error_response);
             }
@@ -1418,6 +1434,7 @@ void setup() {
             String ack_topic = TopicBuilder::buildZoneAckTopic();
             String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
                                    "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
+                                   ",\"seq\":" + String(mqttClient.getNextSeq()) +
                                    ",\"message\":\"Zone validation failed\"}";
             mqttClient.publish(ack_topic, error_response);
             return;
@@ -1492,6 +1509,7 @@ void setup() {
             ack_doc["zone_id"] = zone_id;
             ack_doc["master_zone_id"] = master_zone_id;
             ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+            ack_doc["seq"] = mqttClient.getNextSeq();
 
             String ack_payload;
             size_t written = serializeJson(ack_doc, ack_payload);
@@ -1519,6 +1537,7 @@ void setup() {
             String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
             String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
                                    "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
+                                   ",\"seq\":" + String(mqttClient.getNextSeq()) +
                                    ",\"message\":\"Failed to save zone config\"}";
             mqttClient.publish(ack_topic, error_response);
           }
@@ -2618,6 +2637,7 @@ void handleSensorCommand(const String& topic, const String& payload) {
       response["command"] = "measure";
       response["success"] = success;
       response["ts"] = timeManager.getUnixTimestamp();
+      response["seq"] = mqttClient.getNextSeq();
 
       String response_payload;
       serializeJson(response, response_payload);

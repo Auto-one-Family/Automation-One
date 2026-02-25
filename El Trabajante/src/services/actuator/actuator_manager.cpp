@@ -799,6 +799,7 @@ String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const A
   
   String payload = "{";
   payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"seq\":" + String(mqttClient.getNextSeq()) + ",";
   payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
   payload += "\"subzone_id\":\"" + config.subzone_id + "\",";
   payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
@@ -845,6 +846,7 @@ String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,
   
   String payload = "{";
   payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"seq\":" + String(mqttClient.getNextSeq()) + ",";
   payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
   payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
   payload += "\"gpio\":" + String(command.gpio) + ",";
@@ -881,6 +883,7 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   const char* topic = TopicBuilder::buildActuatorAlertTopic(gpio);
   String payload = "{";
   payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"seq\":" + String(mqttClient.getNextSeq()) + ",";
   payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
   payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
   payload += "\"gpio\":" + String(gpio) + ",";
