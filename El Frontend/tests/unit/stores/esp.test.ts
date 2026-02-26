@@ -546,31 +546,33 @@ describe('ESP Store - Getters', () => {
   })
 
   describe('onlineDevices', () => {
-    it('should filter by status=online', () => {
+    const OLD_TS = new Date(Date.now() - 600000).toISOString() // 10 min ago
+
+    it('should filter by heartbeat timing (recent = online)', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', connected: false },
-        { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', connected: false }
+        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', last_heartbeat: new Date().toISOString(), last_seen: new Date().toISOString() },
+        { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', last_heartbeat: OLD_TS, last_seen: OLD_TS }
       ]
 
       expect(store.onlineDevices.length).toBe(1)
       expect(store.onlineDevices[0].device_id).toBe('ESP_001')
     })
 
-    it('should filter by connected=true', () => {
+    it('should include devices with recent heartbeat (connected=true)', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: undefined, connected: true },
-        { ...mockESPDevice, device_id: 'ESP_002', status: undefined, connected: false }
+        { ...mockESPDevice, device_id: 'ESP_001', status: undefined, connected: true, last_heartbeat: new Date().toISOString() },
+        { ...mockESPDevice, device_id: 'ESP_002', status: undefined, connected: false, last_heartbeat: OLD_TS, last_seen: OLD_TS }
       ]
 
       expect(store.onlineDevices.length).toBe(1)
     })
 
-    it('should return empty array when no online devices', () => {
+    it('should return empty array when all devices have stale heartbeat', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: 'offline', connected: false }
+        { ...mockESPDevice, device_id: 'ESP_001', status: 'offline', connected: false, last_heartbeat: OLD_TS, last_seen: OLD_TS }
       ]
 
       expect(store.onlineDevices).toEqual([])
@@ -578,11 +580,13 @@ describe('ESP Store - Getters', () => {
   })
 
   describe('offlineDevices', () => {
-    it('should filter by status=offline', () => {
+    const OLD_TS = new Date(Date.now() - 600000).toISOString()
+
+    it('should filter by heartbeat timing (stale = offline)', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', connected: true },
-        { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', connected: false }
+        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', last_heartbeat: new Date().toISOString(), last_seen: new Date().toISOString() },
+        { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', last_heartbeat: OLD_TS, last_seen: OLD_TS }
       ]
 
       expect(store.offlineDevices.length).toBe(1)

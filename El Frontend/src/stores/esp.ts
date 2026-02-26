@@ -34,6 +34,7 @@ import {
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
 import { isPwmActuator } from '@/utils/actuatorDefaults'
+import { getESPStatus } from '@/composables/useESPStatus'
 
 /**
  * Extract error message from Axios error response.
@@ -153,15 +154,11 @@ export const useEspStore = defineStore('esp', () => {
   const deviceCount = computed(() => devices.value.length)
 
   const onlineDevices = computed(() =>
-    devices.value.filter(device => 
-      device.status === 'online' || device.connected === true
-    )
+    devices.value.filter(device => getESPStatus(device).isReachable)
   )
 
   const offlineDevices = computed(() =>
-    devices.value.filter(device => 
-      !(device.status === 'online' || device.connected === true)
-    )
+    devices.value.filter(device => !getESPStatus(device).isReachable)
   )
 
   const mockDevices = computed(() =>

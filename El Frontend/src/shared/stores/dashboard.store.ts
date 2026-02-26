@@ -5,11 +5,14 @@
  * HardwareView writes counts, breadcrumb, and reads filter state.
  * TopBar reads counts/breadcrumb and writes filter changes.
  *
+ * deviceCounts and pendingCount are computed from espStore (server-centric).
+ *
  * Extended with Custom Dashboard Layout management (Phase 2).
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useEspStore } from '@/stores/esp'
 
 export type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
 export type TypeFilter = 'all' | 'mock' | 'real'
@@ -53,13 +56,19 @@ export interface DashboardLayout {
 }
 
 export const useDashboardStore = defineStore('dashboard', () => {
+  const espStore = useEspStore()
+
   /* ── Visibility ── */
   const showControls = ref(false)
 
-  /* ── Counts (written by DashboardView) ── */
+  /* ── Counts: statusCounts written by HardwareView; deviceCounts/pendingCount from espStore ── */
   const statusCounts = ref({ online: 0, offline: 0, warning: 0, safeMode: 0 })
-  const deviceCounts = ref({ all: 0, mock: 0, real: 0 })
-  const pendingCount = ref(0)
+  const deviceCounts = computed(() => ({
+    all: espStore.devices.length,
+    mock: espStore.mockDevices.length,
+    real: espStore.realDevices.length,
+  }))
+  const pendingCount = computed(() => espStore.pendingCount)
 
   /* ── Filters (bidirectional: TopBar writes, DashboardView reads) ── */
   const activeStatusFilters = ref<Set<StatusFilter>>(new Set())

@@ -13,6 +13,7 @@
 import type { ESPDevice } from '@/api/esp'
 import { computed, ref } from 'vue'
 import { Settings2 } from 'lucide-vue-next'
+import { getESPStatus } from '@/composables/useESPStatus'
 
 interface Props {
   device: ESPDevice
@@ -34,17 +35,16 @@ const displayName = computed(() =>
   props.device.name || deviceId.value
 )
 
+/** Status info from useESPStatus (server-centric) */
+const statusInfo = computed(() => getESPStatus(props.device))
+
 /** Status dot color */
 const statusColor = computed(() => {
-  if (props.device.status === 'online' || props.device.connected === true) {
-    return 'var(--color-success)'
-  }
-  if (props.device.status === 'error') {
-    return 'var(--color-error)'
-  }
-  if (props.isMock && (props.device as any).system_state === 'SAFE_MODE') {
-    return 'var(--color-warning)'
-  }
+  const s = statusInfo.value.status
+  if (s === 'online') return 'var(--color-success)'
+  if (s === 'stale') return 'var(--color-warning)'
+  if (s === 'error') return 'var(--color-error)'
+  if (s === 'safe_mode') return 'var(--color-warning)'
   return 'var(--color-text-muted)'
 })
 
@@ -92,6 +92,7 @@ const sensorDisplays = computed((): SensorDisplay[] => {
   const sensors = props.device.sensors as any[] | undefined
   if (!sensors || sensors.length === 0) return []
 
+  const stale = statusInfo.value.isStale
   const result: SensorDisplay[] = []
   for (const sensor of sensors) {
     if (result.length >= 2) break
@@ -105,7 +106,7 @@ const sensorDisplays = computed((): SensorDisplay[] => {
         value: String(sensor.raw_value),
         unit: sensor.unit || '',
         percent: Math.round(percent),
-        qualityColor: qualityToColor(sensor.quality),
+        qualityColor: stale ? 'var(--color-text-muted)' : qualityToColor(sensor.quality),
       })
     }
   }
@@ -153,9 +154,10 @@ function handleSettings(event: MouseEvent) {
   <div
     ref="cardRef"
     class="device-mini-card"
+    :class="{ 'device-mini-card--stale': statusInfo.isStale }"
     :style="{ borderLeftColor: borderColor }"
     role="button"
-    :aria-label="`${displayName}, Status: ${device.status || 'unbekannt'}`"
+    :aria-label="`${displayName}, Status: ${statusInfo.label}`"
     tabindex="0"
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
@@ -165,7 +167,7 @@ function handleSettings(event: MouseEvent) {
       <span
         class="device-mini-card__status-dot"
         :style="{ backgroundColor: statusColor, color: statusColor }"
-        :title="device.status === 'online' || device.connected === true ? 'Online: Gerät verbunden' : device.status === 'error' ? 'Fehler: Gerät meldet Fehler' : 'Offline: Keine Verbindung'"
+        :title="statusInfo.label"
       />
       <span class="device-mini-card__name">{{ displayName }}</span>
       <span
@@ -185,6 +187,11 @@ function handleSettings(event: MouseEvent) {
     <!-- Subzone indicator -->
     <div v-if="subzoneName" class="device-mini-card__subzone">
       {{ subzoneName }}
+    </div>
+
+    <!-- Stale/offline timestamp -->
+    <div v-if="statusInfo.isStale && statusInfo.lastSeenLabel" class="device-mini-card__stale-label">
+      {{ statusInfo.lastSeenLabel }}
     </div>
 
     <!-- Sensor values with spark-bars -->
@@ -383,6 +390,22 @@ function handleSettings(event: MouseEvent) {
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.7;
+}
+
+/* ── Stale/offline label ── */
+.device-mini-card__stale-label {
+  font-size: 9px;
+  color: var(--color-warning);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stale card: dimmed appearance */
+.device-mini-card--stale {
+  opacity: 0.85;
+}
+
+.device-mini-card--stale .device-mini-card__sensor-value {
+  color: var(--color-text-secondary);
 }
 
 /* ── Component count pills ── */
