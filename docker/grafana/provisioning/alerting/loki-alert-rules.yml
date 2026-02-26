@@ -218,7 +218,10 @@ groups:
           source: loki
 
       # Rule 5: Critical Error Burst
-      # Detects multiple CRITICAL-level log entries indicating severe system issues
+      # Detects multiple CRITICAL-level log entries indicating severe system issues.
+      # Excludes postgres: Alloy maps PostgreSQL FATAL (auth failures, connection resets)
+      # to level=CRITICAL, but those are covered by dedicated Prometheus alerts
+      # (database-down, db-connections-high). Including postgres causes false positives.
       - uid: ao-loki-critical-burst
         title: "Loki: Critical Error Burst"
         condition: C
@@ -229,7 +232,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: "sum(count_over_time({compose_service=~\".+\"} | level=\"CRITICAL\" [5m]))"
+              expr: "sum(count_over_time({compose_service=~\".+\", compose_service!=\"postgres\"} | level=\"CRITICAL\" [5m]))"
               refId: A
           - refId: B
             relativeTimeRange:
