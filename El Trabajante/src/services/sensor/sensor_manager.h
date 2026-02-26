@@ -7,14 +7,12 @@
 // ============================================
 // Sensor Manager - Phase 4 Foundation
 // ============================================
-// Phase 3: Preparatory skeleton for raw data reading
-// Phase 4: Full sensor management implementation
-// Architecture: Server-Centric (Pi-Enhanced Mode)
+// Architecture: Server-Centric (MQTT Raw-Mode)
 //
-// Purpose: Raw sensor data acquisition for Pi-Enhanced processing
+// Purpose: Raw sensor data acquisition with local preview conversion
 // - Coordinate I2C and OneWire sensor readings
-// - Provide raw data to PiEnhancedProcessor
-// - NO local sensor processing (Server-Centric!)
+// - Apply local conversion formulas for human-readable MQTT payloads
+// - Server is Single Source of Truth (raw_mode=true, server re-processes)
 
 // ============================================
 // SENSOR MANAGER CLASS
@@ -142,7 +140,6 @@ private:
     bool initialized_;
     
     // Component references
-    class PiEnhancedProcessor* pi_processor_;
     class MQTTClient* mqtt_client_;
     class I2CBusManager* i2c_bus_;
     class OneWireBusManager* onewire_bus_;

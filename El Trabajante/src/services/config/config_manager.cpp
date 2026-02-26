@@ -1602,7 +1602,10 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   }
   int8_t existing_index = -1;
 
-  // Check if sensor already exists (check both new and old keys for robustness)
+  // Check if sensor already exists (match by GPIO + sensor_type for multi-value support)
+  // Multi-value sensors (SHT31, BMP280, BME280) share the same GPIO/I2C address
+  // but have different sensor_types (e.g. sht31_temp + sht31_humidity).
+  // GPIO-only dedup would overwrite the first config with the second.
   char key[16];
   for (uint8_t i = 0; i < sensor_count; i++) {
     // Try new key first
@@ -1614,7 +1617,17 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
       snprintf(old_key, sizeof(old_key), NVS_SEN_GPIO_OLD, i);
       stored_gpio = storageManager.getUInt8(old_key, 255);
     }
-    if (stored_gpio == config.gpio) {
+
+    // Also check sensor_type to distinguish multi-value sensors on same GPIO
+    snprintf(key, sizeof(key), NVS_SEN_TYPE, i);
+    String stored_type = storageManager.getString(key, "");
+    if (stored_type.isEmpty()) {
+      char old_key[32];
+      snprintf(old_key, sizeof(old_key), NVS_SEN_TYPE_OLD, i);
+      stored_type = storageManager.getString(old_key, "");
+    }
+
+    if (stored_gpio == config.gpio && stored_type == config.sensor_type) {
       existing_index = i;
       break;
     }

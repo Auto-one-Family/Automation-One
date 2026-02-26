@@ -1,5 +1,4 @@
 #include "sensor_manager.h"
-#include "pi_enhanced_processor.h"
 #include "../communication/mqtt_client.h"
 #include "../config/config_manager.h"
 #include "../../drivers/gpio_manager.h"
@@ -34,6 +33,54 @@ constexpr int16_t DS18B20_RAW_MAX_VALID = 2000;       // +125°C: Datasheet maxi
 static std::map<String, uint32_t> ds18b20_reading_counts;
 
 // ============================================
+// SENSOR CIRCUIT BREAKER CONSTANTS
+// ============================================
+static constexpr uint8_t  CB_MAX_CONSECUTIVE_FAILURES = 10;
+static constexpr uint32_t CB_PROBE_INTERVAL_MS = 300000;  // 5 minutes
+
+// ============================================
+// LOCAL PREVIEW CONVERSION (Direct MQTT Flow)
+// ============================================
+// Standard conversion formulas for known sensor types.
+// Provides human-readable preview values in the MQTT payload.
+// The server re-processes the raw value with its full sensor library
+// (calibration, quality assessment, range validation) — this is only a preview.
+struct LocalConversion {
+    float value;
+    const char* unit;
+    bool converted;  // true if known type, false if raw passthrough
+};
+
+static LocalConversion applyLocalConversion(const String& sensor_type, uint32_t raw_value) {
+    // SHT31 Temperature: T(°C) = -45 + 175 × (raw / 65535)
+    if (sensor_type == "sht31_temp") {
+        return { -45.0f + 175.0f * ((float)raw_value / 65535.0f), "°C", true };
+    }
+    // SHT31 Humidity: H(%) = 100 × (raw / 65535)
+    if (sensor_type == "sht31_humidity") {
+        return { 100.0f * ((float)raw_value / 65535.0f), "%", true };
+    }
+    // DS18B20 Temperature: T(°C) = raw × 0.0625 (12-bit resolution)
+    if (sensor_type == "ds18b20") {
+        return { (float)((int32_t)raw_value) * 0.0625f, "°C", true };
+    }
+    // BMP280/BME280 Temperature: raw is centidegrees
+    if (sensor_type == "bmp280_temp" || sensor_type == "bme280_temp") {
+        return { (float)raw_value / 100.0f, "°C", true };
+    }
+    // BMP280/BME280 Pressure: raw is centipascals
+    if (sensor_type == "bmp280_pressure" || sensor_type == "bme280_pressure") {
+        return { (float)raw_value / 100.0f, "hPa", true };
+    }
+    // BME280 Humidity: raw is 1024ths of percent
+    if (sensor_type == "bme280_humidity") {
+        return { (float)raw_value / 1024.0f, "%", true };
+    }
+    // Unknown → raw passthrough (server handles conversion)
+    return { (float)raw_value, "raw", false };
+}
+
+// ============================================
 // GLOBAL INSTANCE
 // ============================================
 SensorManager& sensorManager = SensorManager::getInstance();
@@ -44,7 +91,6 @@ SensorManager& sensorManager = SensorManager::getInstance();
 SensorManager::SensorManager()
     : sensor_count_(0),
       initialized_(false),
-      pi_processor_(nullptr),
       mqtt_client_(nullptr),
       i2c_bus_(nullptr),
       onewire_bus_(nullptr),
@@ -68,19 +114,10 @@ bool SensorManager::begin() {
     LOG_I(TAG, "Sensor Manager initialization started (Phase 4)");
     
     // Get component references
-    pi_processor_ = &PiEnhancedProcessor::getInstance();
     mqtt_client_ = &MQTTClient::getInstance();
     i2c_bus_ = &I2CBusManager::getInstance();
     onewire_bus_ = &OneWireBusManager::getInstance();
     gpio_manager_ = &GPIOManager::getInstance();
-    
-    // Initialize PiEnhancedProcessor
-    if (!pi_processor_->begin()) {
-        LOG_E(TAG, "Sensor Manager: PiEnhancedProcessor initialization failed");
-        errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
-                               "PiEnhancedProcessor initialization failed");
-        return false;
-    }
     
     // Reset sensor registry
     sensor_count_ = 0;
@@ -222,9 +259,18 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
             LOG_I(TAG, "  Sensor type changed: " + existing->sensor_type + " → " + config.sensor_type);
         }
 
+        // F7: Log Circuit Breaker reset on config push
+        if (existing->cb_state != SensorCBState::CLOSED) {
+            LOG_I(TAG, "Sensor " + existing->sensor_type +
+                       ": Circuit Breaker reset by config push");
+        }
+
         // Update configuration
         *existing = config;
         existing->active = true;
+        // F7: Explicit CB reset (config push = fresh start)
+        existing->cb_state = SensorCBState::CLOSED;
+        existing->consecutive_failures = 0;
 
         // Phase 7: Persist to NVS immediately
         if (!configManager.saveSensorConfig(config)) {
@@ -845,36 +891,32 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
     
     // Normalize sensor type for server (ESP32 → Server Processor)
     String server_sensor_type = getServerSensorType(config->sensor_type);
-    
-    // Send raw data to Pi for processing
-    RawSensorData raw_data;
-    raw_data.gpio = gpio;
-    raw_data.sensor_type = server_sensor_type;  // Use normalized type
-    raw_data.raw_value = raw_value;
-    raw_data.timestamp = millis();
-    raw_data.metadata = "{}";
-    
-    ProcessedSensorData processed;
-    bool success = pi_processor_->sendRawData(raw_data, processed);
-    
+
+    // Apply local conversion for human-readable MQTT payload preview
+    // Server re-processes the raw value with its full sensor library
+    LocalConversion conv = applyLocalConversion(server_sensor_type, raw_value);
+
+    LOG_D(TAG, "Local conversion: " + server_sensor_type + " raw=" +
+              String(raw_value) + " → " + String(conv.value) + " " + conv.unit);
+
     // Fill reading output (use normalized sensor type)
     reading_out.gpio = gpio;
-    reading_out.sensor_type = server_sensor_type;  // Use normalized type
+    reading_out.sensor_type = server_sensor_type;
     reading_out.subzone_id = config->subzone_id;
     reading_out.raw_value = raw_value;
-    reading_out.processed_value = processed.value;
-    reading_out.unit = processed.unit;
-    reading_out.quality = processed.quality;
+    reading_out.processed_value = conv.value;
+    reading_out.unit = conv.unit;
+    reading_out.quality = "good";
     reading_out.timestamp = millis();
-    reading_out.valid = processed.valid;
-    reading_out.error_message = processed.error_message;
-    reading_out.i2c_address = config->i2c_address;  // Copy I2C address for MQTT payload
-    
+    reading_out.valid = true;
+    reading_out.error_message = "";
+    reading_out.i2c_address = config->i2c_address;
+
     // Update config
     config->last_raw_value = raw_value;
     config->last_reading = millis();
-    
-    return success;
+
+    return true;
 }
 
 // ============================================
@@ -925,12 +967,12 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     uint8_t device_addr = capability->i2c_address;
     size_t bytes_read = 0;
 
-    LOG_I(TAG, "SensorManager: I2C READ START for " + device_type + " addr=0x" + String(device_addr, HEX));
+    LOG_D(TAG, "SensorManager: I2C READ START for " + device_type + " addr=0x" + String(device_addr, HEX));
     if (!i2c_bus_->readSensorRaw(device_type, device_addr, buffer, sizeof(buffer), bytes_read)) {
         LOG_E(TAG, "Sensor Manager: I2C read failed for " + device_type);
         return 0;
     }
-    LOG_I(TAG, "SensorManager: I2C READ COMPLETE, bytes=" + String(bytes_read));
+    LOG_D(TAG, "SensorManager: I2C READ COMPLETE, bytes=" + String(bytes_read));
 
     LOG_D(TAG, "Sensor Manager: " + device_type + " raw data (" + String(bytes_read) + " bytes): " +
               String(buffer[0], HEX) + " " + String(buffer[1], HEX) + " " +
@@ -951,42 +993,35 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
         
         // Normalize sensor type
         String server_sensor_type = getServerSensorType(value_type);
-        
-        // Send raw data to Pi for processing
-        RawSensorData raw_data;
-        raw_data.gpio = gpio;
-        raw_data.sensor_type = server_sensor_type;
-        raw_data.raw_value = raw_value;
-        raw_data.timestamp = millis();
-        raw_data.metadata = "{}";
 
-        LOG_I(TAG, "SensorManager: PiEnhancedProcessor START for " + server_sensor_type + " raw=" + String(raw_value));
-        ProcessedSensorData processed;
-        bool success = pi_processor_->sendRawData(raw_data, processed);
-        LOG_I(TAG, "SensorManager: PiEnhancedProcessor END success=" + String(success ? "YES" : "NO"));
-        
+        // Apply local conversion for human-readable MQTT payload preview
+        LocalConversion conv = applyLocalConversion(server_sensor_type, raw_value);
+
+        LOG_D(TAG, "Local conversion: " + server_sensor_type + " raw=" +
+                  String(raw_value) + " → " + String(conv.value) + " " + conv.unit);
+
         // Fill reading output
         reading.gpio = gpio;
         reading.sensor_type = server_sensor_type;
         reading.subzone_id = config->subzone_id;
         reading.raw_value = raw_value;
-        reading.processed_value = processed.value;
-        reading.unit = processed.unit;
-        reading.quality = processed.quality;
+        reading.processed_value = conv.value;
+        reading.unit = conv.unit;
+        reading.quality = "good";
         reading.timestamp = millis();
-        reading.valid = processed.valid;
-        reading.error_message = processed.error_message;
-        reading.i2c_address = config->i2c_address;  // Copy I2C address for MQTT payload
-        
-        if (success && processed.valid) {
+        reading.valid = true;
+        reading.error_message = "";
+        reading.i2c_address = config->i2c_address;
+
+        bool success = true;
+        if (success) {
             created_count++;
 
             // Publish reading via MQTT
-            LOG_I(TAG, "SensorManager: MQTT PUBLISH START for " + server_sensor_type);
+            LOG_D(TAG, "SensorManager: MQTT PUBLISH for " + server_sensor_type);
             publishSensorReading(reading);
-            LOG_I(TAG, "SensorManager: MQTT PUBLISH END for " + server_sensor_type);
         } else {
-            LOG_I(TAG, "SensorManager: Skipping publish - success=" + String(success ? "YES" : "NO") + " valid=" + String(processed.valid ? "YES" : "NO"));
+            LOG_W(TAG, "SensorManager: Skipping publish for " + server_sensor_type);
         }
     }
 
@@ -994,7 +1029,7 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     config->last_raw_value = readings_out[0].raw_value;  // Use first reading
     config->last_reading = millis();
 
-    LOG_I(TAG, "SensorManager: MULTI-VALUE COMPLETE, created " + String(created_count) + " readings");
+    LOG_D(TAG, "SensorManager: MULTI-VALUE COMPLETE, created " + String(created_count) + " readings");
 
     return created_count;
 }
@@ -1016,6 +1051,14 @@ void SensorManager::performAllMeasurements() {
     LOG_D(TAG, "SensorManager::performAllMeasurements() ENTER, sensor_count=" + String(sensor_count_));
 
     unsigned long now = millis();
+
+    // I2C multi-value dedup: Track already-measured I2C addresses per cycle.
+    // Multi-value sensors (SHT31, BMP280, BME280) are stored as separate configs
+    // (e.g. sht31_temp + sht31_humidity) but share one I2C address. Without dedup,
+    // performMultiValueMeasurement() would be called once per config, causing
+    // duplicate I2C reads and duplicate MQTT publishes.
+    uint8_t measured_i2c_addrs[MAX_SENSORS];
+    uint8_t measured_i2c_count = 0;
 
     // ✅ Phase 2C: Pro-Sensor Iteration with Mode-Check
     // (Removed global interval check - each sensor has its own interval)
@@ -1044,6 +1087,18 @@ void SensorManager::performAllMeasurements() {
             continue;
         }
 
+        // ✅ F7: Circuit Breaker Guard — skip disabled sensors
+        if (sensors_[i].cb_state == SensorCBState::OPEN) {
+            uint32_t elapsed = now - sensors_[i].cb_open_since_ms;
+            if (elapsed < CB_PROBE_INTERVAL_MS) {
+                continue;  // Sensor disabled — skip
+            }
+            // Probe interval elapsed — transition to HALF_OPEN
+            sensors_[i].cb_state = SensorCBState::HALF_OPEN;
+            LOG_I(TAG, "Sensor " + sensors_[i].sensor_type +
+                       ": Circuit Breaker HALF_OPEN — probing");
+        }
+
         // ✅ Phase 2C: Check 3: Pro-Sensor Interval
         uint32_t sensor_interval = sensors_[i].measurement_interval_ms;
         if (sensor_interval == 0) {
@@ -1060,18 +1115,46 @@ void SensorManager::performAllMeasurements() {
         const SensorCapability* capability = findSensorCapability(sensors_[i].sensor_type);
         LOG_D(TAG, "SensorManager: sensor[" + String(i) + "] is_multi_value=" + String(capability && capability->is_multi_value ? "YES" : "NO"));
 
+        // B1 FIX: Update last_reading BEFORE measurement attempt.
+        // On failure, this prevents immediate retry (flood). The sensor
+        // waits its full interval before the next attempt (backoff).
+        sensors_[i].last_reading = now;
+
+        bool measurement_ok = false;
+
         if (capability && capability->is_multi_value) {
+            // I2C dedup: Skip if this I2C address was already measured this cycle.
+            // performMultiValueMeasurement() reads ALL values (temp+humidity) in one
+            // I2C transaction and publishes all of them. The second config entry for
+            // the same physical sensor would trigger an identical read+publish.
+            uint8_t addr = capability->i2c_address;
+            bool already_measured = false;
+            for (uint8_t j = 0; j < measured_i2c_count; j++) {
+                if (measured_i2c_addrs[j] == addr) {
+                    already_measured = true;
+                    break;
+                }
+            }
+
+            if (already_measured) {
+                LOG_D(TAG, "SensorManager: Skipping duplicate I2C 0x" +
+                      String(addr, HEX) + " for " + sensors_[i].sensor_type +
+                      " (already measured this cycle)");
+                continue;  // last_reading already updated above
+            }
+
             // Multi-value sensor - create multiple readings
             LOG_D(TAG, "SensorManager: MULTI-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading readings[4];  // Max 4 values per sensor
             uint8_t count = performMultiValueMeasurement(sensors_[i].gpio, readings, 4);
             LOG_D(TAG, "SensorManager: MULTI-VALUE measurement END count=" + String(count));
 
-            // Readings are already published by performMultiValueMeasurement
-            if (count == 0) {
+            // Track this I2C address as measured
+            measured_i2c_addrs[measured_i2c_count++] = addr;
+
+            measurement_ok = (count > 0);
+            if (!measurement_ok) {
                 LOG_W(TAG, "Sensor Manager: Multi-value measurement failed for GPIO " + String(sensors_[i].gpio));
-            } else {
-                sensors_[i].last_reading = now;  // Update timestamp
             }
         } else {
             // Single-value sensor - standard measurement
@@ -1079,11 +1162,40 @@ void SensorManager::performAllMeasurements() {
             SensorReading reading;
             if (performMeasurement(sensors_[i].gpio, reading)) {
                 LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement OK, publishing");
-                // Publish via MQTT
                 publishSensorReading(reading);
-                sensors_[i].last_reading = now;  // Update timestamp
+                measurement_ok = true;
             } else {
                 LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement FAILED");
+            }
+        }
+
+        // ✅ F7: Circuit Breaker State Transitions
+        if (measurement_ok) {
+            if (sensors_[i].cb_state != SensorCBState::CLOSED) {
+                LOG_I(TAG, "Sensor " + sensors_[i].sensor_type +
+                           ": Circuit Breaker CLOSED — sensor recovered");
+                sensors_[i].cb_state = SensorCBState::CLOSED;
+            }
+            sensors_[i].consecutive_failures = 0;
+        } else {
+            sensors_[i].consecutive_failures++;
+
+            if (sensors_[i].cb_state == SensorCBState::HALF_OPEN) {
+                // Probe failed — back to OPEN
+                sensors_[i].cb_state = SensorCBState::OPEN;
+                sensors_[i].cb_open_since_ms = now;
+                LOG_W(TAG, "Sensor " + sensors_[i].sensor_type +
+                           ": Circuit Breaker OPEN — probe failed, retry in " +
+                           String(CB_PROBE_INTERVAL_MS / 1000) + "s");
+            } else if (sensors_[i].consecutive_failures >= CB_MAX_CONSECUTIVE_FAILURES) {
+                // Threshold exceeded — transition to OPEN
+                sensors_[i].cb_state = SensorCBState::OPEN;
+                sensors_[i].cb_open_since_ms = now;
+                LOG_W(TAG, "Sensor " + sensors_[i].sensor_type +
+                           ": Circuit Breaker OPEN — " +
+                           String(sensors_[i].consecutive_failures) +
+                           " consecutive failures, retry in " +
+                           String(CB_PROBE_INTERVAL_MS / 1000) + "s");
             }
         }
 

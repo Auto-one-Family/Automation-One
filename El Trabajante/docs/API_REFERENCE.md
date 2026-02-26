@@ -893,11 +893,24 @@ if (errorTracker.getErrorCountByCategory(ERROR_COMMUNICATION) > 5) {
 errorTracker.clearErrors();
 ```
 
+### MQTT Error Publishing
+
+```cpp
+// Enable MQTT error publishing (called after MQTT connection)
+errorTracker.setMqttPublishCallback(callback, esp_id);
+
+// Disable MQTT error publishing
+errorTracker.clearMqttPublishCallback();
+```
+
+**Rate-Limiting:** MQTT error publishing is throttled to max 1 publish per error code per 60 seconds. Serial logging and the internal ring buffer are not affected by rate-limiting. Suppressed error counts are logged to serial when the throttle window expires.
+
 ### Design Notes
 
 - **Circular buffer:** Automatically overwrites oldest errors when full (max 50)
 - **Occurrence counting:** Duplicate errors increment occurrence counter instead of creating new entries
 - **Logger integration:** All tracked errors are also logged to Logger
+- **MQTT rate-limiting:** Max 1 MQTT publish per error code per 60s (32 hash slots, static allocation)
 - **Categorization:** Error codes automatically map to categories based on numeric range
 - **Severity tracking:** Critical errors can trigger emergency procedures
 

@@ -1864,15 +1864,10 @@ void setup() {
     LOG_I(TAG, "I2C Bus Manager initialized");
   }
 
-  // OneWire Bus Manager
-  if (!oneWireBusManager.begin()) {
-    LOG_E(TAG, "OneWire Bus Manager initialization failed!");
-    errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
-                           ERROR_SEVERITY_CRITICAL,
-                           "OneWire begin() failed");
-  } else {
-    LOG_I(TAG, "OneWire Bus Manager initialized");
-  }
+  // OneWire Bus Manager — lazy init (on-demand when DS18B20 sensor is configured)
+  // SensorManager.configureSensor() calls oneWireBusManager.begin(gpio) when needed.
+  // Skipping unconditional init avoids reserving GPIO 4 on non-OneWire ESPs.
+  LOG_I(TAG, "OneWire Bus Manager: deferred (on-demand init)");
 
   // PWM Controller
   if (!pwmController.begin()) {
@@ -1889,7 +1884,7 @@ void setup() {
   LOG_I(TAG, "╚════════════════════════════════════════╝");
   LOG_I(TAG, "Modules Initialized:");
   LOG_I(TAG, "  ✅ I2C Bus Manager");
-  LOG_I(TAG, "  ✅ OneWire Bus Manager");
+  LOG_I(TAG, "  ⏳ OneWire Bus Manager (on-demand)");
   LOG_I(TAG, "  ✅ PWM Controller");
   LOG_I(TAG, "");
 

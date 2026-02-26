@@ -739,12 +739,12 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
 
   size_t total = actuators.size();
   if (total == 0) {
-    String message = "Actuator config array is empty";
-    LOG_W(TAG, message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,
-        JsonVariantConst(), correlation_id);
-    return false;
+    // Empty actuator array is valid for sensor-only ESPs
+    LOG_I(TAG, "No actuators configured (sensor-only device)");
+    ConfigResponseBuilder::publishSuccess(ConfigType::ACTUATOR, 0,
+                                          "No actuators configured",
+                                          correlation_id);
+    return true;
   }
   uint8_t configured = 0;
   for (JsonObject actuatorObj : actuators) {

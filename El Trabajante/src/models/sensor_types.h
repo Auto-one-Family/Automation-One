@@ -9,6 +9,18 @@
 // Beispiele: "ph_sensor", "temperature_ds18b20", "ec_sensor", etc.
 
 // ============================================
+// SENSOR CIRCUIT BREAKER STATE (per-sensor)
+// ============================================
+// Lightweight inline state for sensor-level circuit breaker.
+// Consistent with CircuitState in error_handling/circuit_breaker.h
+// but avoids heap allocation per sensor.
+enum class SensorCBState : uint8_t {
+    CLOSED = 0,     // Normal — sensor is measured
+    OPEN = 1,       // Disabled — sensor is skipped
+    HALF_OPEN = 2   // Probing — one attempt allowed
+};
+
+// ============================================
 // SENSOR CONFIGURATION - Server-Centric
 // ============================================
 // Migration aus: main.cpp:415-430 (SensorConfig Struct)
@@ -44,6 +56,16 @@ struct SensorConfig {
   // I2C address for device identification (7-bit address, 0x00-0x7F)
   // 0 for non-I2C sensors (OneWire, Analog, Digital)
   uint8_t i2c_address = 0;
+
+  // ============================================
+  // CIRCUIT BREAKER STATE (per-sensor runtime)
+  // ============================================
+  // Prevents endless retries on defective/disconnected sensors.
+  // OPEN after CB_MAX_CONSECUTIVE_FAILURES, probes every CB_PROBE_INTERVAL_MS.
+  // Config-push from server resets to CLOSED.
+  SensorCBState cb_state = SensorCBState::CLOSED;
+  uint32_t cb_open_since_ms = 0;       // millis() when entering OPEN
+  uint8_t consecutive_failures = 0;    // Consecutive measurement failures
 
   // ❌ NICHT NÖTIG in Server-Centric Architektur:
   // - float last_value (Server verarbeitet)

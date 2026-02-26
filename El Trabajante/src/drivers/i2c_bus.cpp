@@ -564,9 +564,6 @@ static const uint8_t CRC8_POLY31_TABLE[256] PROGMEM = {
     0x3B, 0x0A, 0x59, 0x68, 0xFF, 0xCE, 0x9D, 0xAC
 };
 
-// I2C Read Timeout (ms)
-constexpr uint16_t I2C_READ_TIMEOUT_MS = 100;
-
 // ============================================
 // CRC-8 CALCULATION
 // ============================================
@@ -630,10 +627,17 @@ bool I2CBusManager::validateInterleavedCRC(const I2CSensorProtocol* protocol,
 
         uint8_t expected_crc = buffer[ve->crc_offset];
 
-        if (!validateCRC8(&buffer[ve->byte_offset], ve->byte_count,
-                          expected_crc, protocol->crc.polynomial,
-                          protocol->crc.init_value)) {
-            LOG_E(TAG, "I2C: CRC validation failed for " + String(ve->value_type));
+        uint8_t calculated_crc = calculateCRC8(
+            &buffer[ve->byte_offset], ve->byte_count,
+            protocol->crc.polynomial, protocol->crc.init_value);
+
+        if (calculated_crc != expected_crc) {
+            char err[96];
+            snprintf(err, sizeof(err),
+                "I2C: CRC failed for %s (calc=0x%02X exp=0x%02X data=[%02X,%02X])",
+                ve->value_type, calculated_crc, expected_crc,
+                buffer[ve->byte_offset], buffer[ve->byte_offset + 1]);
+            LOG_E(TAG, err);
             errorTracker.trackError(ERROR_I2C_CRC_FAILED, ERROR_SEVERITY_ERROR,
                                    ("CRC failed: " + String(ve->value_type)).c_str());
             return false;
@@ -814,37 +818,25 @@ bool I2CBusManager::executeCommandBasedProtocol(const I2CSensorProtocol* protoco
     }
 
     // Step 3: Read data directly (no register address)
-    size_t requested = protocol->expected_bytes;
-    LOG_D(TAG, "I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(requested));
-    size_t received = Wire.requestFrom(i2c_address, (uint8_t)requested);
+    // requestFrom() is blocking on ESP32 (ESP-IDF I2C driver) —
+    // bytes are either in buffer after return or the transaction failed.
+    // No Wire.available() polling needed (bytes don't arrive "later").
+    uint8_t expected = protocol->expected_bytes;
+    LOG_D(TAG, "I2C CMD: requestFrom START addr=0x" + String(i2c_address, HEX) + " bytes=" + String(expected));
+    uint8_t received = Wire.requestFrom(i2c_address, expected);
     LOG_D(TAG, "I2C CMD: requestFrom END received=" + String(received));
 
-    // Timeout handling for slow sensors
-    unsigned long start = millis();
-    LOG_D(TAG, "I2C CMD: Waiting for Wire.available()...");
-    while (Wire.available() < (int)requested) {
-        if (millis() - start > I2C_READ_TIMEOUT_MS) {
-            LOG_E(TAG, "I2C: Read timeout for " + String(protocol->sensor_type));
-            errorTracker.trackError(ERROR_I2C_TIMEOUT, ERROR_SEVERITY_ERROR,
-                                   (String(protocol->sensor_type) + " read timeout").c_str());
-            return false;
-        }
-        yield();  // Feed watchdog
-    }
-
-    LOG_D(TAG, "I2C CMD: Wire.available() ready");
-
-    if (received != requested) {
-        LOG_E(TAG, "I2C: Incomplete read from " + String(protocol->sensor_type) +
-                  " (expected " + String(requested) + ", got " + String(received) + ")");
-        errorTracker.trackError(ERROR_I2C_READ_FAILED, ERROR_SEVERITY_ERROR,
-                               ("Incomplete read: " + String(protocol->sensor_type)).c_str());
+    if (received != expected) {
+        LOG_E(TAG, "I2C: requestFrom(0x" + String(i2c_address, HEX) + ", " +
+                  String(expected) + ") returned " + String(received) + " bytes");
+        errorTracker.trackError(ERROR_I2C_TIMEOUT, ERROR_SEVERITY_ERROR,
+                               (String(protocol->sensor_type) + " read timeout").c_str());
         return false;
     }
 
-    // Read bytes into buffer
+    // Bytes are immediately available — read into buffer
     LOG_D(TAG, "I2C CMD: Reading " + String(received) + " bytes from buffer...");
-    for (size_t i = 0; i < received; i++) {
+    for (uint8_t i = 0; i < received; i++) {
         buffer[i] = Wire.read();
     }
     bytes_read = received;

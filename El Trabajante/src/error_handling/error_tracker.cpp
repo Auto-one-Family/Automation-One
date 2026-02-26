@@ -7,6 +7,42 @@
 static const char* TAG = "ERRTRAK";
 
 // ============================================
+// ERROR RATE LIMITING (F8 — MQTT Flood Prevention)
+// ============================================
+// Per error_code max 1 MQTT publish per time window.
+// Suppressed errors are counted and logged on next publish.
+struct ErrorThrottle {
+  uint32_t last_publish_ms = 0;
+  uint16_t suppressed_count = 0;
+};
+
+static constexpr uint8_t  THROTTLE_SLOTS = 32;
+static constexpr uint32_t THROTTLE_WINDOW_MS = 60000;  // 60s per error code
+
+static ErrorThrottle throttle_table_[THROTTLE_SLOTS];
+
+static bool shouldPublishError(uint16_t error_code) {
+  uint32_t now = millis();
+  uint8_t slot = error_code % THROTTLE_SLOTS;
+  ErrorThrottle& t = throttle_table_[slot];
+
+  if (now - t.last_publish_ms >= THROTTLE_WINDOW_MS) {
+    if (t.suppressed_count > 0) {
+      String msg = "Error " + String(error_code) + ": " +
+                   String(t.suppressed_count) + " occurrences suppressed in last " +
+                   String(THROTTLE_WINDOW_MS / 1000) + "s";
+      logger.warning(TAG, msg.c_str());
+    }
+    t.last_publish_ms = now;
+    t.suppressed_count = 0;
+    return true;
+  }
+
+  t.suppressed_count++;
+  return false;
+}
+
+// ============================================
 // GLOBAL ERROR TRACKER INSTANCE
 // ============================================
 ErrorTracker& errorTracker = ErrorTracker::getInstance();
@@ -290,6 +326,11 @@ void ErrorTracker::publishErrorToMqtt(uint16_t error_code, ErrorSeverity severit
 
   // Guard: Must have callback
   if (mqtt_callback_ == nullptr) {
+    return;
+  }
+
+  // Rate-Limiting: max 1 MQTT publish per error code per 60s (F8)
+  if (!shouldPublishError(error_code)) {
     return;
   }
 

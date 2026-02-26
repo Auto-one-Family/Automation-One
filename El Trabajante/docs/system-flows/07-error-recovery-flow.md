@@ -65,11 +65,14 @@ struct ErrorEntry {
 
 ```cpp
 void ErrorTracker::trackError(uint16_t error_code, ErrorSeverity severity, const char* message) {
-  // Log to Logger
+  // Log to Logger (always, not throttled)
   logErrorToLogger(error_code, severity, message);
-  
-  // Add to circular buffer
+
+  // Add to circular buffer (always, not throttled)
   addToBuffer(error_code, severity, message);
+
+  // Publish to MQTT (rate-limited: max 1 per error code per 60s)
+  publishErrorToMqtt(error_code, severity, message);
 }
 ```
 
