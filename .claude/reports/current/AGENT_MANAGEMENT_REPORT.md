@@ -1,165 +1,191 @@
-# Agent-Management Report
+# Agent Management Report
 
-**Erstellt:** 2026-02-21
-**Modus:** 1 (Dokument-Analyse / Frage beantworten)
-**Auftrag:** Pruefen ob die 4 Dev-Agents Serena MCP-Tools in ihrem Frontmatter/Toolset erwaehnen koennen oder sollten.
+**Erstellt:** 2026-02-26
+**Auftrag:** Capability-Test Ergebnisse in Agent-Definitionen einarbeiten + Konsistenzpruefung
+**Auftragstyp:** Agent-Check (nach Capability-Test + updatedocs)
+**Trigger:** Capability-Test hat COM-Port-Zugriff, Flash, Serial-Monitor und DB-Cleanup-Workaround verifiziert
 
 ---
 
 ## 1. Zusammenfassung
 
-Alle 4 Dev-Agents wurden auf ihre `tools:` Felder und Relevanz von Serena MCP-Tools geprueft.
-**Ergebnis:** Subagenten haben KEINEN direkten Zugriff auf MCP-Tools - Serena-Tools erscheinen im Frontmatter nicht als nutzbare Tools. Eine Erwaehnung in den Agent-Dateien als Hinweis an den Hauptkontext-Nutzer waere moeglich, ist aber nach aktueller Bewertung nicht notwendig - die bestehenden Grep/Glob/Read-Workflows decken die gleichen Anwendungsfaelle ab.
+4 Agent-Dateien und 1 Referenz-Dokument korrigiert. Hauptbefund: `agent_profiles.md` hatte **9 von 13 falsche Dateipfade** (referenzierten alte Subdirectory-Struktur die nicht mehr existiert). Zusaetzlich fehlten in 3 Agents die neuen Capabilities (PlatformIO full path, Serial-Capture, SQL-file Workaround).
+
+**Schwere:** Hoch (falsche Pfade in der SOLL-Referenz verhindern korrekte IST-SOLL-Vergleiche)
 
 ---
 
-## 2. Analysierte Agents
+## 2. Gepruefte Agents (7-Prinzipien-Check)
 
-| Agent | Datei | tools: Feld |
-|-------|-------|-------------|
-| esp32-dev | `.claude/agents/esp32-dev.md` | `["Read", "Grep", "Glob", "Bash", "Write", "Edit"]` |
-| server-dev | `.claude/agents/server-dev.md` | `["Read", "Grep", "Glob", "Bash", "Write", "Edit"]` |
-| frontend-dev | `.claude/agents/frontend-dev.md` | `["Read", "Write", "Edit", "Bash", "Grep", "Glob"]` |
-| mqtt-dev | `.claude/agents/mqtt-dev.md` | `["Read", "Grep", "Glob", "Bash", "Write", "Edit"]` |
+### 2.1 system-control
 
-**Befund:** Keiner der 4 Agents erwaehnt MCP-Tools irgendeiner Art im Frontmatter oder im Agent-Body.
+| Prinzip | Status | Bemerkung |
+|---------|--------|-----------|
+| P1 Kontexterkennung | OK | 7 Modi (Full-Stack, HW-Test, Trockentest, CI, Ops, Briefing, Dokument) |
+| P2 Eigenstaendigkeit | OK | Funktioniert ohne SESSION_BRIEFING |
+| P3 Erweitern statt delegieren | OK | Extended Checks mit Docker, MQTT, API |
+| P4 Erst verstehen dann handeln | OK | Reference-First Workflow |
+| P5 Fokussiert aber vollstaendig | OK | Klare Domaene + Delegation |
+| P6 Nachvollziehbare Ergebnisse | OK | Report-Format definiert |
+| P7 Querreferenzen | OK | Section 6: Delegation-Tabelle |
 
----
+**Aenderung:** Bereits durch `/updatedocs` aktualisiert (ESP32 Git Bash Capabilities).
 
-## 3. Technische Grundlage: MCP in Subagenten
+### 2.2 esp32-dev
 
-### Kernfakt (aus Auftrags-Kontext)
+| Prinzip | Status | Bemerkung |
+|---------|--------|-----------|
+| P1 Kontexterkennung | OK | 2 Modi (Analyse, Implementierung) |
+| P2 Eigenstaendigkeit | OK | Kein SESSION_BRIEFING noetig |
+| P3 Erweitern statt delegieren | WARN | Cross-Layer Checks vorhanden, aber keine Shell-Commands |
+| P4 Erst verstehen dann handeln | OK | Codebase-Analyse als PFLICHT |
+| P5 Fokussiert aber vollstaendig | OK | 8-Dimensionen-Checkliste |
+| P6 Nachvollziehbare Ergebnisse | OK | ESP32_DEV_REPORT.md |
+| P7 Querreferenzen | OK | Section 10: Andere Agenten |
 
-**Subagenten haben KEINEN direkten Zugriff auf MCP-Tools.** MCP-Tools sind ausschliesslich im Hauptkontext (der primaeeren Claude Code Session) verfuegbar.
+**Korrekturen durchgefuehrt:**
+- Build-Verifikation: `pio run -e seeed_xiao_esp32c3` → `cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev`
+- 6 grep-Befehle: `El\ Trabajante/` → `"El Trabajante/"` (korrekte Quoting)
+- PlatformIO-Hinweis am Ende ergaenzt (Full Path, COM5/CH340 verifiziert)
+- Version: 2.0 → 2.1
 
-### Was das bedeutet
+### 2.3 esp32-debug
 
-| Kontext | MCP-Tool-Zugriff | Serena verfuegbar? |
-|---------|-----------------|-------------------|
-| Hauptkontext (direkte Claude Code Session) | Ja | Ja (`mcp__plugin_serena_serena__*`) |
-| Subagent (via Task-Aufruf) | Nein | Nein |
+| Prinzip | Status | Bemerkung |
+|---------|--------|-----------|
+| P1 Kontexterkennung | OK | 2 Modi (Allgemein, Spezifisch) |
+| P2 Eigenstaendigkeit | OK | STATUS.md optional |
+| P3 Erweitern statt delegieren | OK | Section 3 mit Extended Checks + Commands |
+| P4 Erst verstehen dann handeln | OK | Serial-Log zuerst |
+| P5 Fokussiert aber vollstaendig | OK | 3 Referenz-Szenarien |
+| P6 Nachvollziehbare Ergebnisse | OK | ESP32_DEBUG_REPORT.md |
+| P7 Querreferenzen | OK | Implizit in References Section |
 
-Das `tools:` Feld im Agent-Frontmatter akzeptiert nur die Standard Claude Code Tools:
-`Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, `WebFetch`, `Task`, `TodoRead`, `TodoWrite`.
+**Korrekturen durchgefuehrt:**
+- Extended Checks: Wokwi-Befehl mit vollem pio-Pfad
+- Neue Capability: Live Serial-Capture (`timeout 30 pio device monitor`) in Extended Checks + Quick-Commands
+- COM5/CH340 Referenz ergaenzt
 
-MCP-Tool-Namen wie `mcp__plugin_serena_serena__find_symbol` sind im Frontmatter nicht eintragbar und wuerden ignoriert werden, selbst wenn sie eingetragen waeren.
+### 2.4 db-inspector
 
----
+| Prinzip | Status | Bemerkung |
+|---------|--------|-----------|
+| P1 Kontexterkennung | OK | 2 Modi (Allgemein, Spezifisch) |
+| P2 Eigenstaendigkeit | OK | STATUS.md optional |
+| P3 Erweitern statt delegieren | OK | Section 3 mit Extended Checks |
+| P4 Erst verstehen dann handeln | OK | SELECT vor DELETE |
+| P5 Fokussiert aber vollstaendig | OK | Umfassende DB-Analyse |
+| P6 Nachvollziehbare Ergebnisse | OK | DB_INSPECTOR_REPORT.md |
+| P7 Querreferenzen | WARN | Keine explizite Querreferenz-Section |
 
-## 4. Relevanz-Bewertung pro Agent
+**Korrekturen durchgefuehrt:**
+- SQL-file-in-container Workaround in Sicherheitsregeln ergaenzt
+- `psql -f` Warnung (Docker Desktop Pfad-Konvertierung) ergaenzt
+- 3-Schritt-Anleitung: Write SQL → docker cp → bash -c "psql < file"
 
-### 4.1 esp32-dev
+### 2.5 auto-ops (Plugin-Agent)
 
-**Serena-Use-Cases die theoretisch relevant waeren:**
+| Prinzip | Status | Bemerkung |
+|---------|--------|-----------|
+| P1 Kontexterkennung | OK | 5 Rollen mit automatischer Erkennung |
+| P2 Eigenstaendigkeit | OK | debug-status.ps1 als universeller Einstieg |
+| P3 Erweitern statt delegieren | OK | Delegiert strategisch an Inspectors + Debug-Agents |
+| P4 Erst verstehen dann handeln | OK | Autonomy Rules klar definiert |
+| P5 Fokussiert aber vollstaendig | OK | 7 Playbooks |
+| P6 Nachvollziehbare Ergebnisse | OK | OPS_LOG.md + Phase-Reports |
+| P7 Querreferenzen | OK | Skills-Referenz + Integration Section |
 
-| Serena-Tool | Anwendungsfall | Aktueller Ersatz |
-|-------------|---------------|-----------------|
-| `find_symbol` | C++ Klasse/Methode direkt finden ohne Dateipfad zu kennen | `grep -rn "class XManager"` |
-| `find_referencing_symbols` | Impact-Analyse: Wer nutzt `IActuatorDriver`? | `grep -rn "IActuatorDriver"` |
-| `get_symbols_overview` | Schneller Ueberblick ueber alle Symbole in `El Trabajante/src/` | `grep -rn "class\|struct" --include="*.h"` |
-| `rename_symbol` | Klasse/Methode projektweit umbenennen ohne manuelle Grep-Kette | Manuell: Grep + Edit |
-| `replace_symbol_body` | Methoden-Implementation ersetzen ohne Offset zu kennen | Read + Edit |
+**Aenderung:** Bereits durch `/updatedocs` aktualisiert (ESP32 Ops + DB Ops Playbooks).
 
-**Bewertung:** Grep-basierte Patterns im Pattern-Katalog (P1-P6) sind ausreichend fuer regulaere Entwicklung. Bei grossem Refactoring (z.B. Rename eines Core-Interfaces) waere `rename_symbol` im Hauptkontext nuetzlich - aber der Subagent selbst hat keinen Zugriff.
+### 2.6 backend-inspector (Plugin-Agent)
 
-**Handlungsbedarf:** Keiner.
+| Prinzip | Status | Bemerkung |
+|---------|--------|-----------|
+| P1-P7 | OK | Gut strukturiert, Loki-first Ansatz |
 
----
-
-### 4.2 server-dev
-
-**Serena-Use-Cases die theoretisch relevant waeren:**
-
-| Serena-Tool | Anwendungsfall | Aktueller Ersatz |
-|-------------|---------------|-----------------|
-| `find_referencing_symbols` | Impact-Analyse: Wer importiert `BaseRepository`? | `grep -rn "from.*base_repo import"` |
-| `get_symbols_overview` | Alle Services/Repositories auf einen Blick | `grep -rn "class.*Service\|class.*Repository"` |
-| `rename_symbol` | Python-Klasse oder Methode projektweit umbenennen | Manuell: Grep + Edit |
-| `insert_after_symbol` | Methode direkt nach einer bestimmten Methode einfuegen | Read + Edit mit Offset |
-| `find_symbol` | Schnell `BaseMQTTHandler` lokalisieren | `grep -rn "class BaseMQTTHandler"` |
-
-**Besonderheit server-dev:** Der Server hat die groesste Codebase (~60.604 Zeilen). Bei umfangreichen Refactorings (z.B. Umbenennung von Service-Methoden die in 20+ Dateien genutzt werden) waere `find_referencing_symbols` + `rename_symbol` im Hauptkontext eine erhebliche Zeitersparnis. Der server-dev Subagent kann das jedoch nicht direkt nutzen.
-
-**Handlungsbedarf:** Keiner im Agent selbst. Aber: Bei komplexen Refactoring-Auftraegen sollte der User Serena im Hauptkontext nutzen, bevor er server-dev startet.
-
----
-
-### 4.3 frontend-dev
-
-**Serena-Use-Cases die theoretisch relevant waeren:**
-
-| Serena-Tool | Anwendungsfall | Aktueller Ersatz |
-|-------------|---------------|-----------------|
-| `find_referencing_symbols` | Impact-Analyse: Welche Komponenten nutzen `useWebSocket()`? | `grep -rn "useWebSocket"` |
-| `get_symbols_overview` | TypeScript-Interface-Uebersicht in `types/index.ts` (~979 Zeilen) | Read ganzer Datei |
-| `rename_symbol` | TypeScript Interface oder Composable umbenennen | Manuell |
-| `find_symbol` | Store-Action direkt finden | `grep -rn "function fetchAll"` |
-
-**Besonderheit frontend-dev:** `types/index.ts` hat ~979 Zeilen und ist als "kritisch" markiert (Breaking Changes ueberall). `get_symbols_overview` waere hier beim Navigieren in grossen Type-Dateien hilfreich. `find_referencing_symbols` waere nuetzlich vor dem Aendern eines zentralen Types.
-
-**Handlungsbedarf:** Keiner im Agent selbst. Der Hinweis in der kritischen Datei-Tabelle (Sektion 5) koennte um Serena-Empfehlung ergaenzt werden - aber da Subagenten keinen Zugriff haben, waere das eine Empfehlung an den menschlichen User, nicht an den Agenten.
-
----
-
-### 4.4 mqtt-dev
-
-**Serena-Use-Cases die theoretisch relevant waeren:**
-
-| Serena-Tool | Anwendungsfall | Aktueller Ersatz |
-|-------------|---------------|-----------------|
-| `find_referencing_symbols` | Wer nutzt `TopicBuilder.build_sensor_topic()`? | `grep -rn "build_sensor_topic"` |
-| `get_symbols_overview` | Alle `build_*` / `parse_*` Methoden in `topics.py` (~992 Zeilen) | Read + grep |
-| `rename_symbol` | Topic-Methode umbenennen (Server + ESP32 synchron) | Manuell auf beiden Seiten |
-
-**Besonderheit mqtt-dev:** Dieser Agent prueft BEIDE Seiten (Server + ESP32). `find_referencing_symbols` koennte bei der Synchronisations-Verifikation helfen: "Wird dieses Topic nirgendwo anders noch referenziert?" Das Grep-basierte Vorgehen reicht aber aus.
-
-**Handlungsbedarf:** Keiner.
+**Keine Korrekturen noetig.** Loki-Queries nutzen `query_range` (korrekt). DB-Cleanup ist nicht Backend-Inspector-Domaene.
 
 ---
 
-## 5. Gesamtbewertung: Soll Serena erwaehnt werden?
+## 3. Referenz-Dokument Korrekturen
 
-### Option A: Serena NICHT erwaehnen (empfohlen)
+### agent_profiles.md (v1.4 → v1.5)
 
-**Begruendung:**
-1. Subagenten haben keinen MCP-Zugriff - jede Erwaehnung im Frontmatter ist technisch wirkungslos
-2. Die bestehenden Grep/Glob/Read-Workflows decken alle Use-Cases ab (moeglicherweise langsamer, aber funktional)
-3. Eine Erwaehnung wuerde falsche Erwartungen wecken: Der Agent kann Serena nicht aufrufen
-4. Alle 4 Agents sind auf Version 2.0 und ihre Pattern-Kataloge sind vollstaendig
+**9 falsche Dateipfade korrigiert:**
 
-### Option B: Serena als Hinweis im Agent-Body erwaehnen
+| Agent | Alter Pfad (FALSCH) | Neuer Pfad (KORREKT) |
+|-------|---------------------|---------------------|
+| agent-manager | `.claude/agents/agent-manager/agent-manager.md` | `.claude/agents/agent-manager.md` |
+| esp32-dev | `.claude/agents/esp32/esp32-dev-agent.md` | `.claude/agents/esp32-dev.md` |
+| frontend-dev | `.claude/agents/frontend/frontend_dev_agent.md` | `.claude/agents/frontend-dev.md` |
+| frontend-debug | `.claude/agents/frontend/frontend-debug-agent.md` | `.claude/agents/frontend-debug.md` |
+| mqtt-dev | `.claude/agents/mqtt/mqtt_dev_agent.md` | `.claude/agents/mqtt-dev.md` |
+| mqtt-debug | `.claude/agents/mqtt/mqtt-debug-agent.md` | `.claude/agents/mqtt-debug.md` |
+| server-dev | `.claude/agents/server/server_dev_agent.md` | `.claude/agents/server-dev.md` |
+| server-debug | `.claude/agents/server/server-debug-agent.md` | `.claude/agents/server-debug.md` |
+| test-log-analyst | `.claude/agents/testing/test-log-analyst.md` | `.claude/agents/test-log-analyst.md` |
 
-**Wo es stehen koennte:** In Sektion 9 (Referenzen) oder Sektion 10 (Querreferenzen) als Hinweis:
-"Bei grossem Refactoring: Im Hauptkontext `mcp__plugin_serena_serena__find_referencing_symbols` nutzen vor Agent-Aufruf"
-
-**Gegenargument:** Das waere ein Hinweis an den menschlichen User, nicht an den Agenten - besser in einem separaten Onboarding-Dokument oder dem SKILL.md des jeweiligen Entwicklungs-Skills aufgehoben.
-
-### Option C: Serena in den SKILL.md Dateien erwaehnen
-
-**Bewertung:** Die SKILL.md Dateien der Dev-Skills (esp32-development, server-development, etc.) werden im Hauptkontext gelesen. Dort waere ein Serena-Hinweis technisch sinnvoller, da der Hauptkontext-User tatsaechlich Zugriff auf Serena hat. Das faellt aber ausserhalb dieses Auftrags.
-
----
-
-## 6. Fazit
-
-**Antwort auf die Kernfrage:** Nein, die 4 Dev-Agents sollten Serena MCP-Tools weder im Frontmatter noch als erwaehnte nutzbare Tools aufnehmen, weil:
-
-1. **Technisch unmoeglich:** `tools:` Frontmatter akzeptiert keine MCP-Tool-Namen
-2. **Subagenten-Einschraenkung:** MCP-Tools sind nur im Hauptkontext verfuegbar
-3. **Kein funktionaler Mehrwert:** Bestehende Grep/Glob/Read-Workflows erreichen dasselbe
-4. **Kein Handlungsbedarf:** Alle 4 Agents sind auf Version 2.0 und voll funktional
-
-**Wo Serena sinnvoll waere (ausserhalb des Auftrags-Scope):**
-- In den SKILL.md Dateien als optionaler Beschleuniger fuer Refactoring-Szenarien im Hauptkontext
-- Als expliziter Hinweis an den User bei komplexen Rename-/Impact-Analyse-Aufgaben
+**Bereits korrekt (4):** db-inspector, esp32-debug, meta-analyst, system-control
 
 ---
 
-## 7. Offene Punkte
+## 4. Best Practices Check (vs_claude_best_practice.md)
 
-- Keine. Die Frage ist klar beantwortet: keine Aenderungen an den 4 Agent-Dateien notwendig oder sinnvoll.
+| Aspekt | Status | Bemerkung |
+|--------|--------|-----------|
+| Section 3: Agent Descriptions | OK | Alle haben MUST BE USED / NOT FOR |
+| Section 3: Tool-Einschraenkung | OK | Debug = Read-Only + Bash, Dev = + Write/Edit |
+| Section 3: Model-Wahl | OK | sonnet Default, opus nur fuer system-control + auto-ops |
+| Section 4: Skill < 15K Zeichen | OK | Auto-ops Agent ist gross aber Agent, kein Skill |
+| Section 2: CLAUDE.md Router | OK | Agent-Tabellen aktuell |
 
-## 8. Empfehlungen
+---
 
-- Falls Robin Serena-Hints fuer Entwickler dokumentieren moechte: In `.claude/skills/*/SKILL.md` als optionalen "Hauptkontext-Tipp"-Abschnitt ergaenzen (getrennt von den Subagenten-Workflows)
-- Kein Aenderungsauftrag an den 4 Dev-Agents notwendig
+## 5. Geaenderte Dateien (Gesamt: updatedocs + agent-manager)
+
+### Durch /updatedocs (9 Dateien)
+
+| Datei | Aenderungen |
+|-------|-------------|
+| `.claude/reference/debugging/ACCESS_LIMITATIONS.md` | COM-Port Limitation entfernt, SQL-file Workaround, v1.3→1.4 |
+| `.claude/skills/esp32-development/SKILL.md` | Git Bash Capabilities erweitert |
+| `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` | 5 Stellen korrigiert, v2.13→2.14 |
+| `.claude/agents/system-control.md` | ESP32 Section aktualisiert |
+| `.claude/reference/testing/agent_profiles.md` | ESP32 Section aktualisiert |
+| `.claude/reference/testing/TEST_WORKFLOW.md` | Serial Monitor Kommentar |
+| `.claude/local-marketplace/auto-ops/agents/auto-ops.md` | ESP32 + DB Playbooks |
+| `.claude/local-marketplace/auto-ops/skills/esp32-operations/SKILL.md` | pio Pfade, Monitor |
+| `.claude/local-marketplace/auto-ops/skills/database-operations/SKILL.md` | Hook-Workaround |
+
+### Durch /agent-manager (5 Dateien)
+
+| Datei | Aenderungen |
+|-------|-------------|
+| `.claude/reference/testing/agent_profiles.md` | 9 Dateipfade korrigiert, v1.5 |
+| `.claude/agents/esp32-dev.md` | pio full path, grep Quoting, PIO-Hinweis, v2.1 |
+| `.claude/agents/esp32-debug.md` | pio full path, Live Serial-Capture, Quick-Commands |
+| `.claude/agents/db-inspector.md` | SQL-file Workaround, psql -f Warnung |
+| `.claude/reports/current/AGENT_MANAGEMENT_REPORT.md` | Dieser Report |
+
+---
+
+## 6. Nicht korrigierte Punkte (Bewusste Entscheidung)
+
+| Punkt | Grund |
+|-------|-------|
+| esp32-dev P3 (keine Shell-Commands in Cross-Layer) | Dev-Agent soll Code schreiben, nicht diagnostizieren |
+| db-inspector P7 (keine Querreferenz-Section) | Agent arbeitet primaer allein. Delegation in Regeln erwaehnt |
+| backend-inspector Loki start/end params | `query_range` ohne explizite start/end nutzt 1h Default — akzeptabel |
+| YAML Frontmatter IDE-Warnings | Pre-existing `description: |` multiline Syntax — VS Code YAML-Extension |
+
+---
+
+## 7. Empfehlungen
+
+1. **Dev-Agents (mqtt-dev, server-dev, frontend-dev) pruefen** — Nicht im Detail gecheckt, da Capability-Test nur ESP32/DB betraf
+2. **Plugin-Cache Sync** — Nach auto-ops Agent-Aenderungen: Plugin-Version bumpen oder Cache manuell aktualisieren
+3. **Agents Readme.md** — Pfade dort ebenfalls pruefen (niedrige Prio)
+
+---
+
+**Gesamtbewertung:** System konsistent. Alle Capability-Test-Erkenntnisse in 14 Dateien (9 updatedocs + 5 agent-manager) eingearbeitet. Kritischer Pfad-Fehler in agent_profiles.md behoben.

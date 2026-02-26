@@ -1,83 +1,107 @@
 # Auto-Ops Operations Log
 
-## Session: 2026-02-25 13:07 — Post-Reboot System Analysis
+## Session: 2026-02-26 — Sensor Cleanup for ESP_472204
 
-Branch: fix/trockentest-bugs
+Branch: fix/sht31-crc-humidity
 
-### [13:07:00] [INFO] [Docker] Full container status check
-- Command: `docker compose ps -a`
-- Result: 13/14 containers running, 1 restart-looping (pgadmin)
-- Status: NEEDS_ATTENTION (pgAdmin)
+---
 
-### [13:07:01] [INFO] [Server] Health check
-- Command: `curl http://localhost:8000/api/v1/health/live`
-- Result: `{"success":true,"alive":true}` — MQTT connected, v2.0.0
+### Auftrag
+
+Delete all configured sensors for ESP_472204 while preserving the device registration.
+Requirements:
+1. ESP stays registered (DO NOT delete)
+2. All sensor configs removed from DB
+3. All sensor data removed from DB
+4. NVS on ESP should have no sensors stored
+
+---
+
+### [13:00:00] [INFO] [System] Pre-state assessment
+- Command: `curl -sf http://localhost:8000/api/v1/esp/devices`
+- Result: 1 ESP device found: ESP_472204 (UUID: 3c4c4130-95a7-44c6-b0e7-9069bd4e9d31), status=online
+- Sensors: 2 (sht31_temp, sht31_humidity on GPIO 0, I2C)
 - Status: OK
 
-### [13:07:02] [INFO] [PostgreSQL] Health check
-- Command: `pg_isready -U god_kaiser -d god_kaiser_db`
-- Result: accepting connections, 12 MB size
+### [13:00:05] [INFO] [Database] Pre-state record counts
+- Command: `SELECT COUNT(*) FROM sensor_configs / sensor_data WHERE esp_id = '...'`
+- Result: sensor_configs=2, sensor_data=520
 - Status: OK
 
-### [13:07:03] [INFO] [MQTT] Broker status
-- Command: `mosquitto_sub -t '$SYS/broker/clients/connected'`
-- Result: 3 connected clients, 4 total
-- Status: OK
+### [13:00:10] [WARN] [API] DELETE endpoint bug discovered
+- Command: `curl -X DELETE http://localhost:8000/api/v1/sensors/ESP_472204/0`
+- Result: HTTP 500 — `sqlalchemy.exc.MultipleResultsFound`
+- Root Cause: `SensorRepository.get_by_esp_and_gpio()` uses `scalar_one_or_none()` which fails when 2 sensors share GPIO 0 (SHT31 multi-value: temp + humidity)
+- Impact: REST API DELETE endpoint broken for multi-value sensors
+- Workaround: Direct DB cleanup via Python asyncpg script
+- Status: NEEDS_ATTENTION (API bug to fix later)
 
-### [13:07:04] [INFO] [Monitoring] Loki/Prometheus/Grafana
-- Loki: ready
-- Prometheus: ready
-- Grafana: ok (v11.5.2)
-- Status: OK
+### [13:00:30] [DESTRUCTIVE] [Database] Delete sensor_configs
+- **Pre-State:** 2 rows in sensor_configs for ESP_472204
+- **Command:** `scripts/cleanup_sensors.py` → `DELETE FROM sensor_configs WHERE esp_id = '3c4c4130-...'`
+- **Post-State:** 0 rows in sensor_configs
+- **Result:** DELETE 2
+- **Reversible:** Yes (re-add sensors via API)
+- **Rollback:** POST /api/v1/sensors/ESP_472204/0 with SHT31 config
 
-### [13:07:10] [INFO] [Database] ESP device inventory
-- 7 devices total: 1 online (MOCK), 1 offline (real ESP), 2 approved, 1 pending, 2 offline mocks
-- Real ESP32: ESP_472204, status=offline, last_seen 6min ago, zone=Echt
-- Status: OK (ESP offline expected after reboot)
+### [13:00:31] [DESTRUCTIVE] [Database] Delete sensor_data
+- **Pre-State:** 524 rows in sensor_data for ESP_472204
+- **Command:** `scripts/cleanup_sensors.py` → `DELETE FROM sensor_data WHERE esp_id = '3c4c4130-...'`
+- **Post-State:** 0 rows in sensor_data
+- **Result:** DELETE 524
+- **Reversible:** No (historical data lost)
+- **Rollback:** N/A
 
-### [13:07:12] [INFO] [Database] Sensor configurations
-- 1 sensor config: SHT31 on ESP_472204, GPIO 0, I2C addr 68 (0x44), 30s interval
-- 0 actuator configs
-- Status: OK
+### [13:01:00] [ACTION] [MQTT] Config push attempt (empty config)
+- Command: `mosquitto_pub -t "kaiser/god/esp/ESP_472204/config" -m '{"sensors":[],"actuators":[],...}'`
+- Result: Published, but ESP firmware rejects empty sensors array (handleSensorConfig line 2346: "Sensor config array is empty")
+- Status: EXPECTED — ESP firmware does not process empty sensor arrays
 
-### [13:07:15] [INFO] [Database] Sensor data
-- 4 total readings (2x sht31, 2x temperature)
-- Last reading: 2026-02-25 11:34:45 (sht31, quality=critical, value=999.9 — likely error reading)
-- Status: OK (minimal data)
+### [13:01:30] [ACTION] [API] Restart command sent
+- Command: `POST /api/v1/esp/devices/ESP_472204/restart`
+- Result: HTTP 200, command_sent=true
+- Issue: ESP firmware has NO handler for "REBOOT" command. Server sends `command: "REBOOT"` but ESP only handles `factory_reset`, `onewire/scan`, `status`, `diagnostics`, `get_config`, `safe_mode`, etc.
+- Status: FAILED — ESP did not reboot (uptime continued at 2343s, boot_count=1)
 
-### [13:07:20] [INFO] [MQTT] Traffic check
-- 3 messages captured on kaiser/#:
-  - ESP_472204/zone/ack (zone assigned)
-  - ESP_472204/config_response (actuator config error: empty array)
-  - MOCK_0954B2B1/system/heartbeat (operational)
-- Status: OK (mock active, real ESP offline)
+### [13:03:00] [DESTRUCTIVE] [Database] Delete remaining sensor_data (accumulated during verification)
+- **Pre-State:** 24 rows (new data from ESP still sending)
+- **Command:** `scripts/cleanup_sensors_data.py` → `DELETE FROM sensor_data WHERE esp_id = '3c4c4130-...'`
+- **Post-State:** 0 rows
+- **Result:** DELETE 24
+- **Reversible:** No
+- **Rollback:** N/A
 
-### [13:07:25] [INFO] [ESP32] USB detection
-- USB-SERIAL CH340 (COM5): OK
-- ESP32 dev board connected and detected
-- Status: OK
+### [13:04:00] [INFO] [System] Final verification
+- DB sensor_configs: **0** (clean)
+- DB sensor_data: **0** (clean)
+- DB esp_devices: ESP_472204 still registered, status=online (preserved)
+- API sensor_count: **0**, actuator_count: **0**
+- Zone: Echt (preserved)
 
-### [13:07:30] [INFO] [ESP32] Heartbeat check ESP_472204
-- No heartbeat in 15s timeout
-- Last seen in DB: 6 min ago, status: offline
-- Status: EXPECTED (ESP powered but not sending after reboot — needs power cycle or is disconnected from WiFi)
+---
 
-### [13:07:35] [WARN] [Docker] pgAdmin restart loop
-- Cause: `admin@automationone.local` rejected as invalid email by pgadmin4:9.12
-- Not critical for HW test
-- Status: NON-BLOCKING
+### Summary
 
-### Session Summary
-| Component | Status | Details |
-|-----------|--------|---------|
-| Docker Stack | OK (12/13 healthy) | pgAdmin restart-looping (email validation bug) |
-| FastAPI Server | HEALTHY | v2.0.0, MQTT connected |
-| PostgreSQL | HEALTHY | 12 MB, 20 tables, accepting connections |
-| MQTT Broker | HEALTHY | 3 clients connected |
-| Loki | HEALTHY | Ready |
-| Prometheus | HEALTHY | Ready |
-| Grafana | HEALTHY | v11.5.2 |
-| ESP32 USB | DETECTED | COM5 (CH340) |
-| ESP32 WiFi/MQTT | OFFLINE | No heartbeat — needs power cycle |
-| Sensor Config | EXISTS | SHT31 on ESP_472204, I2C 0x44 |
-| Sensor Data | MINIMAL | 4 readings total |
+| Component | Status | Detail |
+|-----------|--------|--------|
+| DB sensor_configs | CLEAN | 2 rows deleted |
+| DB sensor_data | CLEAN | 548 rows deleted total (524 + 24 accumulated) |
+| ESP registration | PRESERVED | ESP_472204, online, zone=Echt |
+| ESP NVS sensors | STILL PRESENT | ESP has 2 sensors in NVS (sensor_count=2 in heartbeat) |
+| Data accumulation | ONGOING | Server saves data even without sensor_config ("Saving data without config") |
+
+### Open Issues
+
+1. **ESP NVS not cleared:** The ESP still has 2 sensors in NVS. Options to resolve:
+   - Physical reset button on ESP (simplest)
+   - Add `REBOOT` command handler to ESP firmware (missing feature)
+   - Next config push (when adding new sensors) will overwrite NVS
+   - `factory_reset` command works but also clears WiFi (too aggressive)
+
+2. **API DELETE bug for multi-value sensors:** `DELETE /api/v1/sensors/{esp_id}/{gpio}` fails with HTTP 500 when multiple sensors share the same GPIO (SHT31 temp+humidity). Root cause: `get_by_esp_and_gpio()` returns multiple rows but `scalar_one_or_none()` expects one.
+
+3. **Server saves data without config:** `sensor_handler.py` line 222 logs "Saving data without config" and still persists data. This means sensor_data will accumulate again until ESP stops sending.
+
+### Cleanup Scripts Created
+- `scripts/cleanup_sensors.py` — Deletes sensor_configs + sensor_data for a given ESP UUID
+- `scripts/cleanup_sensors_data.py` — Deletes only sensor_data for a given ESP UUID
