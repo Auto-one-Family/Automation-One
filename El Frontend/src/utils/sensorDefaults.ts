@@ -88,7 +88,7 @@ export const SENSOR_CATEGORIES: Record<SensorCategoryId, SensorCategory> = {
  */
 export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   'DS18B20': {
-    label: 'Temperatur (DS18B20)',
+    label: 'Temperatur',
     unit: '°C',
     min: -55,
     max: 125,
@@ -110,7 +110,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
 
   // Lowercase variant for consistency (ESP32 may send lowercase)
   'ds18b20': {
-    label: 'Temperatur (DS18B20)',
+    label: 'Temperatur',
     unit: '°C',
     min: -55,
     max: 125,
@@ -145,7 +145,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
   
   'EC': {
-    label: 'Leitfähigkeit (EC)',
+    label: 'Leitfähigkeit',
     unit: 'µS/cm',
     min: 0,
     max: 5000,
@@ -195,7 +195,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'sht31_temp': {
-    label: 'Temperatur (SHT31)',
+    label: 'Temperatur',
     unit: '°C',
     min: -40,
     max: 125,
@@ -210,8 +210,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'sht31_humidity': {
-    label: 'Luftfeuchtigkeit (SHT31)',
-    unit: '% RH',
+    label: 'Luftfeuchte',
+    unit: '%RH',
     min: 0,
     max: 100,
     decimals: 1,
@@ -225,8 +225,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'SHT31_humidity': {
-    label: 'Luftfeuchtigkeit (SHT31)',
-    unit: '% RH',
+    label: 'Luftfeuchte',
+    unit: '%RH',
     min: 0,
     max: 100,
     decimals: 1,
@@ -241,7 +241,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'BME280': {
-    label: 'Temperatur (BME280)',
+    label: 'Temperatur',
     unit: '°C',
     min: -40,
     max: 85,
@@ -258,8 +258,8 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'BME280_humidity': {
-    label: 'Luftfeuchtigkeit (BME280)',
-    unit: '% RH',
+    label: 'Luftfeuchte',
+    unit: '%RH',
     min: 0,
     max: 100,
     decimals: 1,
@@ -274,7 +274,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'BME280_pressure': {
-    label: 'Luftdruck (BME280)',
+    label: 'Luftdruck',
     unit: 'hPa',
     min: 300,
     max: 1100,
@@ -322,7 +322,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'flow': {
-    label: 'Durchflusssensor',
+    label: 'Durchfluss',
     unit: 'L/min',
     min: 0,
     max: 100,
@@ -354,7 +354,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'light': {
-    label: 'Lichtsensor',
+    label: 'Licht',
     unit: 'lux',
     min: 0,
     max: 100000,
@@ -370,7 +370,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
   },
 
   'co2': {
-    label: 'CO2-Sensor',
+    label: 'CO2',
     unit: 'ppm',
     min: 400,
     max: 5000,
@@ -577,7 +577,7 @@ export const MULTI_VALUE_DEVICES: Record<string, MultiValueDeviceConfig> = {
     sensorTypes: ['sht31_temp', 'sht31_humidity'],
     values: [
       { key: 'temp', sensorType: 'sht31_temp', label: 'Temperatur', unit: '°C', order: 1, icon: 'Thermometer' },
-      { key: 'humidity', sensorType: 'sht31_humidity', label: 'Luftfeuchtigkeit', unit: '% RH', order: 2, icon: 'Droplets' }
+      { key: 'humidity', sensorType: 'sht31_humidity', label: 'Luftfeuchte', unit: '%RH', order: 2, icon: 'Droplets' }
     ],
     icon: 'Thermometer',
     interface: 'i2c',
@@ -633,7 +633,7 @@ const BME280_CONFIG: MultiValueDeviceConfig = {
   sensorTypes: ['bme280_temp', 'bme280_humidity', 'bme280_pressure', 'BME280'],
   values: [
     { key: 'temp', sensorType: 'bme280_temp', label: 'Temperatur', unit: '°C', order: 1, icon: 'Thermometer' },
-    { key: 'humidity', sensorType: 'bme280_humidity', label: 'Feuchtigkeit', unit: '% RH', order: 2, icon: 'Droplets' },
+    { key: 'humidity', sensorType: 'bme280_humidity', label: 'Luftfeuchte', unit: '%RH', order: 2, icon: 'Droplets' },
     { key: 'pressure', sensorType: 'bme280_pressure', label: 'Druck', unit: 'hPa', order: 3, icon: 'Gauge' }
   ],
   icon: 'Thermometer',
@@ -824,6 +824,359 @@ export function getI2CAddressOptions(sensorType: string): Array<{ value: number;
   }
 
   return []
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SENSOR GROUPING & ZONE AGGREGATION (Dashboard Helpers)
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Minimal sensor shape from props.device.sensors (unknown[])
+ */
+export interface RawSensor {
+  sensor_type: string
+  raw_value: number | null
+  name: string
+  unit?: string
+  gpio?: number
+  quality?: string
+}
+
+/**
+ * Grouped sensor output for DeviceMiniCard display
+ */
+export interface GroupedSensor {
+  baseType: string
+  label: string
+  values: {
+    type: string
+    label: string
+    value: number | null
+    unit: string
+    icon: string
+    quality: 'normal' | 'warning' | 'stale' | 'unknown'
+  }[]
+}
+
+/**
+ * Determine value quality for display coloring.
+ *
+ * - normal: within plausible range
+ * - warning: outside plausible range
+ * - stale: value is 0 for a sensor that should never be 0 (e.g., humidity)
+ * - unknown: null/missing value
+ */
+function assessValueQuality(
+  value: number | null,
+  sensorType: string,
+): 'normal' | 'warning' | 'stale' | 'unknown' {
+  if (value === null || value === undefined) return 'unknown'
+
+  const config = SENSOR_TYPE_CONFIG[sensorType]
+  if (!config) return 'normal'
+
+  // Value outside plausible range
+  if (value < config.min || value > config.max) return 'warning'
+
+  // Value is 0 for sensors that should never be 0
+  if (value === 0) {
+    const lower = sensorType.toLowerCase()
+    if (lower.includes('humid') || lower.includes('pressure')) return 'stale'
+  }
+
+  return 'normal'
+}
+
+/**
+ * Groups sensors of a device by their base type.
+ *
+ * Multi-value sensors (SHT31, BME280) are resolved into individual value rows.
+ * Single-value sensors (DS18B20, pH) become a group with one value.
+ *
+ * @example
+ * Input:  [{sensor_type: 'sht31_temp', raw_value: 22}, {sensor_type: 'sht31_humidity', raw_value: 45}]
+ * Output: [{baseType: 'sht31', label: 'SHT31', values: [{type: 'sht31_temp', label: 'Temperatur', ...}, ...]}]
+ */
+export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[] {
+  if (!sensors || sensors.length === 0) return []
+
+  const groups = new Map<string, GroupedSensor>()
+
+  for (const sensor of sensors) {
+    const sType = sensor.sensor_type || ''
+    if (!sType) continue
+
+    // Check if this sensor belongs to a multi-value device
+    const deviceType = getDeviceTypeFromSensorType(sType)
+    const mvDevice = deviceType ? MULTI_VALUE_DEVICES[deviceType] : null
+
+    if (mvDevice) {
+      // Multi-value: group under device type
+      if (!groups.has(deviceType!)) {
+        groups.set(deviceType!, {
+          baseType: deviceType!,
+          label: mvDevice.label.split(' (')[0], // "SHT31" from "SHT31 (Temp + Humidity)"
+          values: [],
+        })
+      }
+      const group = groups.get(deviceType!)!
+
+      // Find the specific value config for this sensor_type
+      const valueConfig = mvDevice.values.find(v => v.sensorType === sType)
+
+      // Check if this is a base type (e.g., "SHT31" instead of "sht31_temp")
+      // If so, we need to expand it to all value types
+      const isBaseType = sType.toLowerCase() === deviceType
+        || sType.toUpperCase() === deviceType?.toUpperCase()
+      const isAlreadyValueType = mvDevice.values.some(v => v.sensorType === sType)
+
+      if (isBaseType && !isAlreadyValueType) {
+        // This is a base type like "SHT31" — expand to all value types
+        // but only if no individual value types exist yet
+        const hasIndividualValues = sensors.some(s =>
+          s.sensor_type !== sType && mvDevice.values.some(v => v.sensorType === s.sensor_type)
+        )
+        if (!hasIndividualValues) {
+          // Show the base type as a single entry with its primary value config
+          const primaryConfig = mvDevice.values[0]
+          group.values.push({
+            type: sType,
+            label: primaryConfig?.label || getSensorLabel(sType),
+            value: sensor.raw_value,
+            unit: primaryConfig?.unit || sensor.unit || getSensorUnit(sType),
+            icon: primaryConfig?.icon || SENSOR_TYPE_CONFIG[sType]?.icon || 'Activity',
+            quality: assessValueQuality(sensor.raw_value, sType),
+          })
+        }
+        // If individual values exist, skip the base type entry
+      } else if (valueConfig) {
+        // Already-resolved value type — avoid duplicates
+        const exists = group.values.some(v => v.type === sType)
+        if (!exists) {
+          group.values.push({
+            type: sType,
+            label: valueConfig.label,
+            value: sensor.raw_value,
+            unit: valueConfig.unit,
+            icon: valueConfig.icon || mvDevice.icon,
+            quality: assessValueQuality(sensor.raw_value, sType),
+          })
+        }
+      } else {
+        // Unknown value type within the device — fallback
+        const config = SENSOR_TYPE_CONFIG[sType]
+        group.values.push({
+          type: sType,
+          label: config?.label || sType,
+          value: sensor.raw_value,
+          unit: config?.unit || sensor.unit || '',
+          icon: config?.icon || 'Activity',
+          quality: assessValueQuality(sensor.raw_value, sType),
+        })
+      }
+    } else {
+      // Single-value sensor (DS18B20, pH, etc.)
+      const config = SENSOR_TYPE_CONFIG[sType]
+      groups.set(sType, {
+        baseType: sType,
+        label: config?.label || sType,
+        values: [{
+          type: sType,
+          label: config?.label || sType,
+          value: sensor.raw_value,
+          unit: config?.unit || sensor.unit || '',
+          icon: config?.icon || 'Activity',
+          quality: assessValueQuality(sensor.raw_value, sType),
+        }],
+      })
+    }
+  }
+
+  // Sort multi-value groups by order
+  for (const group of groups.values()) {
+    if (group.values.length > 1) {
+      const deviceType = getDeviceTypeFromSensorType(group.values[0]?.type || '')
+      const mvDevice = deviceType ? MULTI_VALUE_DEVICES[deviceType] : null
+      if (mvDevice) {
+        group.values.sort((a, b) => {
+          const orderA = mvDevice.values.find(v => v.sensorType === a.type)?.order ?? 99
+          const orderB = mvDevice.values.find(v => v.sensorType === b.type)?.order ?? 99
+          return orderA - orderB
+        })
+      }
+    }
+  }
+
+  return Array.from(groups.values())
+}
+
+/**
+ * Abstract sensor category for zone aggregation (device-independent)
+ */
+type AggCategory = 'temperature' | 'humidity' | 'pressure' | 'light' | 'co2' | 'moisture' | 'ph' | 'ec' | 'flow' | 'other'
+
+/**
+ * Map a sensor_type to an abstract category for aggregation
+ */
+function getSensorAggCategory(sensorType: string): AggCategory {
+  const lower = sensorType.toLowerCase()
+  if (lower.includes('temp') || lower === 'ds18b20') return 'temperature'
+  if (lower.includes('humid')) return 'humidity'
+  if (lower.includes('pressure')) return 'pressure'
+  if (lower.includes('light') || lower.includes('lux')) return 'light'
+  if (lower.includes('co2')) return 'co2'
+  if (lower.includes('moisture') || lower.includes('soil')) return 'moisture'
+  if (lower === 'ph') return 'ph'
+  if (lower === 'ec') return 'ec'
+  if (lower.includes('flow')) return 'flow'
+  return 'other'
+}
+
+/** Priority for category display order (lower = first) */
+const CATEGORY_PRIORITY: Record<AggCategory, number> = {
+  temperature: 1,
+  humidity: 2,
+  pressure: 3,
+  moisture: 4,
+  light: 5,
+  co2: 6,
+  ph: 7,
+  ec: 8,
+  flow: 9,
+  other: 99,
+}
+
+/** Category display labels */
+const CATEGORY_LABELS: Record<AggCategory, string> = {
+  temperature: 'Temperatur',
+  humidity: 'Luftfeuchte',
+  pressure: 'Luftdruck',
+  moisture: 'Bodenfeuchte',
+  light: 'Licht',
+  co2: 'CO2',
+  ph: 'pH',
+  ec: 'Leitfähigkeit',
+  flow: 'Durchfluss',
+  other: 'Sonstige',
+}
+
+/** Category default units */
+const CATEGORY_UNITS: Record<AggCategory, string> = {
+  temperature: '°C',
+  humidity: '%RH',
+  pressure: 'hPa',
+  moisture: '%',
+  light: 'lux',
+  co2: 'ppm',
+  ph: 'pH',
+  ec: 'µS/cm',
+  flow: 'L/min',
+  other: '',
+}
+
+/**
+ * Zone-level sensor aggregation result
+ */
+export interface ZoneAggregation {
+  sensorTypes: {
+    type: AggCategory
+    label: string
+    avg: number
+    min: number
+    max: number
+    count: number
+    unit: string
+  }[]
+  deviceCount: number
+  onlineCount: number
+}
+
+/**
+ * Aggregates sensor data across all devices in a zone.
+ *
+ * Groups by abstract sensor category (all temperature sensors together,
+ * regardless of whether SHT31, DS18B20, or BME280).
+ *
+ * Returns max 3 sensor types, sorted by priority (temperature > humidity > rest).
+ */
+export function aggregateZoneSensors(devices: any[]): ZoneAggregation {
+  const deviceCount = devices.length
+  const onlineCount = devices.filter(d =>
+    d.status === 'online' || d.connected === true
+  ).length
+
+  if (deviceCount === 0) {
+    return { sensorTypes: [], deviceCount: 0, onlineCount: 0 }
+  }
+
+  // Collect all sensor values grouped by category
+  const categoryValues = new Map<AggCategory, number[]>()
+
+  for (const device of devices) {
+    const sensors = (device.sensors as RawSensor[] | undefined) || []
+    const grouped = groupSensorsByBaseType(sensors)
+
+    for (const group of grouped) {
+      for (const val of group.values) {
+        if (val.value === null || val.value === undefined) continue
+        if (val.quality === 'stale') continue // Skip stale data
+
+        const category = getSensorAggCategory(val.type)
+        if (category === 'other') continue // Skip uncategorized
+
+        if (!categoryValues.has(category)) {
+          categoryValues.set(category, [])
+        }
+        categoryValues.get(category)!.push(val.value)
+      }
+    }
+  }
+
+  // Build aggregation per category
+  const sensorTypes: ZoneAggregation['sensorTypes'] = []
+
+  for (const [category, values] of categoryValues) {
+    if (values.length === 0) continue
+
+    const sum = values.reduce((a, b) => a + b, 0)
+    sensorTypes.push({
+      type: category,
+      label: CATEGORY_LABELS[category],
+      avg: sum / values.length,
+      min: Math.min(...values),
+      max: Math.max(...values),
+      count: values.length,
+      unit: CATEGORY_UNITS[category],
+    })
+  }
+
+  // Sort by priority and limit to 3
+  sensorTypes.sort((a, b) => CATEGORY_PRIORITY[a.type] - CATEGORY_PRIORITY[b.type])
+  sensorTypes.splice(3)
+
+  return { sensorTypes, deviceCount, onlineCount }
+}
+
+/**
+ * Formats an aggregated sensor value for the zone header.
+ *
+ * 1 device:   "22.0°C"
+ * 2-5:        "Ø 21.5°C"
+ * 6+:         "Ø 22°C"
+ */
+export function formatAggregatedValue(
+  agg: ZoneAggregation['sensorTypes'][0],
+  deviceCount: number,
+): string {
+  if (agg.count === 0) return ''
+
+  const decimals = deviceCount >= 6 ? 0 : 1
+  const value = agg.avg.toFixed(decimals)
+
+  if (deviceCount <= 1) {
+    return `${value}${agg.unit}`
+  }
+  return `Ø ${value}${agg.unit}`
 }
 
 
