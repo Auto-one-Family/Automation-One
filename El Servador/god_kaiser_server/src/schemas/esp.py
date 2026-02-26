@@ -288,8 +288,8 @@ class GpioStatusItem(BaseModel):
     )
     owner: str = Field(
         ...,
-        pattern=r"^(sensor|actuator|system)$",
-        description="Owner category: sensor, actuator, or system",
+        pattern=r"^(sensor|actuator|system|bus/.+)$",
+        description="Owner category: sensor, actuator, system, or bus/<type>/<pin>",
     )
     component: str = Field(
         ...,
@@ -459,8 +459,8 @@ class GpioUsageItem(BaseModel):
     )
     owner: str = Field(
         ...,
-        description="Owner type: sensor, actuator, or system",
-        pattern=r"^(sensor|actuator|system)$",
+        description="Owner type: sensor, actuator, system, or bus/<type>/<pin>",
+        pattern=r"^(sensor|actuator|system|bus/.+)$",
     )
     component: str = Field(
         ...,

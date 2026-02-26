@@ -989,11 +989,26 @@ class HeartbeatHandler:
                     continue
 
             # Log count mismatch but don't reject
-            if gpio_reserved_count != len(validated_items):
-                logger.warning(
-                    f"GPIO count mismatch for {device_id}: "
-                    f"reported={gpio_reserved_count}, actual={len(validated_items)}"
+            # Bus-GPIOs (I2C SDA/SCL, OneWire) may cause validation mismatches —
+            # only warn if mismatch exceeds the number of bus-GPIOs in the raw input
+            mismatch = abs(gpio_reserved_count - len(validated_items))
+            if mismatch > 0:
+                bus_gpio_count = sum(
+                    1 for g in gpio_status
+                    if isinstance(g, dict) and str(g.get("owner", "")).startswith("bus/")
                 )
+                if mismatch > bus_gpio_count:
+                    logger.warning(
+                        f"GPIO count mismatch for {device_id}: "
+                        f"reported={gpio_reserved_count}, validated={len(validated_items)}, "
+                        f"bus_gpios={bus_gpio_count}"
+                    )
+                else:
+                    logger.debug(
+                        f"GPIO count minor mismatch for {device_id}: "
+                        f"reported={gpio_reserved_count}, validated={len(validated_items)}, "
+                        f"bus_gpios={bus_gpio_count}"
+                    )
 
             # Return validated items as dicts (already converted via model_dump)
             return {"gpio_status": validated_items, "gpio_reserved_count": len(validated_items)}
