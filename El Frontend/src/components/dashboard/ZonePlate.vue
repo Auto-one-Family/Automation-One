@@ -22,8 +22,12 @@ import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { ChevronDown, MoreVertical, Pencil, Trash2 } from 'lucide-vue-next'
+import { PackageOpen } from 'lucide-vue-next'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
+import { EmptyState } from '@/shared/design/patterns'
 import DeviceMiniCard from './DeviceMiniCard.vue'
+import { aggregateZoneSensors, formatAggregatedValue } from '@/utils/sensorDefaults'
+import { getESPStatus } from '@/composables/useESPStatus'
 
 
 interface Props {
@@ -54,19 +58,20 @@ const dragStore = useDragStateStore()
 const uiStore = useUiStore()
 const plateRef = ref<HTMLElement | null>(null)
 
-// Local copy of ALL devices for VueDraggable v-model.
-// Shallow watch on props.devices to sync (store replaces array reference on update).
+// Local copy of devices for VueDraggable v-model.
+// Syncs with filteredDevices (respects subzone filter).
 const localDevices = ref<ESPDevice[]>([...props.devices])
-watch(() => props.devices, (newDevices) => {
-  localDevices.value = [...newDevices]
+watch([() => props.devices, () => activeSubzoneFilter.value], () => {
+  localDevices.value = [...filteredDevices.value]
 })
 
 // ── Status Aggregation ───────────────────────────────────────────────────
 const stats = computed(() => {
   const total = props.devices.length
-  const online = props.devices.filter(d =>
-    d.status === 'online' || d.connected === true
-  ).length
+  const online = props.devices.filter(d => {
+    const status = getESPStatus(d)
+    return status === 'online' || status === 'stale'
+  }).length
   const warnings = props.devices.filter(d => {
     const id = espStore.getDeviceId(d)
     if (espStore.isMock(id)) {
@@ -84,6 +89,65 @@ const statusVariant = computed(() => {
   if (stats.value.total > 0 && stats.value.online === stats.value.total) return 'zone-plate--healthy'
   if (props.devices.some(d => d.status === 'error')) return 'zone-plate--error'
   return ''
+})
+
+// ── B1: Zone Sensor Aggregation ──────────────────────────────────────────
+const zoneAggregation = computed(() => aggregateZoneSensors(props.devices))
+
+const aggregatedValues = computed(() => {
+  return zoneAggregation.value.sensorTypes.map(agg =>
+    formatAggregatedValue(agg, stats.value.total)
+  )
+})
+
+// ── B2: Status Dot Color ─────────────────────────────────────────────────
+const statusDotColor = computed(() => {
+  if (stats.value.total === 0) return 'var(--color-text-muted)'
+  if (stats.value.online === 0) return 'var(--color-error)'
+  if (stats.value.online < stats.value.total) return 'var(--color-warning)'
+  return 'var(--color-success)'
+})
+
+const statusLabel = computed(() => {
+  if (stats.value.total === 0) return '- Leer'
+  if (stats.value.online === 0) return `0/${stats.value.total} Offline`
+  return `${stats.value.online}/${stats.value.total} Online`
+})
+
+// ── B3: Subzone Chips ────────────────────────────────────────────────────
+/** Active subzone filter (null = show all) */
+const activeSubzoneFilter = ref<string | null>(null)
+
+function toggleSubzoneFilter(subzoneId: string | null) {
+  if (activeSubzoneFilter.value === subzoneId) {
+    activeSubzoneFilter.value = null // Deselect
+  } else {
+    activeSubzoneFilter.value = subzoneId
+  }
+}
+
+/** Distinct subzones with at least one device */
+const distinctSubzones = computed(() => {
+  return subzoneGroups.value.filter(g => g.subzoneId !== null)
+})
+
+/** Subzone status dot color */
+function getSubzoneStatusColor(group: SubzoneGroup): string {
+  const online = group.devices.filter(d => {
+    const s = getESPStatus(d)
+    return s === 'online' || s === 'stale'
+  }).length
+  if (online === 0) return 'var(--color-error)'
+  if (online < group.devices.length) return 'var(--color-warning)'
+  return 'var(--color-success)'
+}
+
+/** Filtered devices for VueDraggable based on subzone filter */
+const filteredDevices = computed(() => {
+  if (!activeSubzoneFilter.value) return props.devices
+  return props.devices.filter(d =>
+    (d.subzone_id || null) === activeSubzoneFilter.value
+  )
 })
 
 // ── Subzone Grouping ─────────────────────────────────────────────────────
@@ -284,10 +348,20 @@ function handleDragEnd() {
             </button>
           </template>
 
+          <!-- B1: Aggregated sensor values -->
+          <span v-if="aggregatedValues.length > 0" class="zone-plate__agg-values">
+            {{ aggregatedValues.join('  ') }}
+          </span>
+
+          <!-- B2: Status with colored dot -->
           <span class="zone-plate__stats">
             {{ stats.total }} ESP{{ stats.total !== 1 ? 's' : '' }}
             <span class="zone-plate__stats-sep">·</span>
-            {{ stats.online }}/{{ stats.total }} Online
+            <span
+              class="zone-plate__status-dot"
+              :style="{ backgroundColor: statusDotColor }"
+            />
+            {{ statusLabel }}
           </span>
 
           <span
@@ -304,6 +378,23 @@ function handleDragEnd() {
             @click.stop="openOverflowMenu($event)"
           >
             <MoreVertical class="zone-plate__menu-icon" />
+          </button>
+        </div>
+
+        <!-- B3: Subzone chips (only if subzones exist) -->
+        <div v-if="distinctSubzones.length > 0" class="zone-plate__subzone-chips" @click.stop>
+          <button
+            v-for="sz in distinctSubzones"
+            :key="sz.subzoneId ?? '__none'"
+            class="zone-plate__subzone-chip"
+            :class="{ 'zone-plate__subzone-chip--active': activeSubzoneFilter === sz.subzoneId }"
+            @click.stop="toggleSubzoneFilter(sz.subzoneId)"
+          >
+            <span
+              class="zone-plate__subzone-chip-dot"
+              :style="{ backgroundColor: getSubzoneStatusColor(sz) }"
+            />
+            {{ sz.subzoneName }}
           </button>
         </div>
       </template>
@@ -348,10 +439,15 @@ function handleDragEnd() {
         </template>
       </VueDraggable>
 
-      <!-- Empty state -->
-      <div v-if="devices.length === 0" class="zone-plate__empty">
-        Keine Geräte — ziehe ESPs hierher
-      </div>
+      <!-- Empty state with drop target hint -->
+      <EmptyState
+        v-if="devices.length === 0"
+        :icon="PackageOpen"
+        title="Keine Geräte zugewiesen"
+        description="Ziehe Geräte aus der Leiste unten in diese Zone"
+        :show-action="false"
+        class="zone-plate__empty"
+      />
     </AccordionSection>
   </section>
 </template>
@@ -519,8 +615,23 @@ function handleDragEnd() {
   height: 12px;
 }
 
+/* Aggregated sensor values */
+.zone-plate__agg-values {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 /* Stats label */
 .zone-plate__stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   white-space: nowrap;
@@ -532,6 +643,56 @@ function handleDragEnd() {
   color: var(--color-text-muted);
   opacity: 0.5;
   margin: 0 1px;
+}
+
+/* Status dot in header */
+.zone-plate__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* Subzone chips */
+.zone-plate__subzone-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0 0 22px; /* Indent to align with title (past chevron) */
+}
+
+.zone-plate__subzone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.zone-plate__subzone-chip:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-secondary);
+}
+
+.zone-plate__subzone-chip--active {
+  border-color: var(--color-iridescent-1);
+  color: var(--color-iridescent-1);
+  background: rgba(96, 165, 250, 0.06);
+}
+
+.zone-plate__subzone-chip-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
 }
 
 /* Alert badge */
@@ -600,13 +761,41 @@ function handleDragEnd() {
 
 /* Empty state */
 .zone-plate__empty {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  text-align: center;
-  padding: var(--space-4);
-  background: var(--glass-bg);
   border: 1px dashed var(--glass-border);
   border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-3);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.zone-plate__empty :deep(.empty-state) {
+  padding: var(--space-3) var(--space-2);
+}
+
+.zone-plate__empty :deep(.empty-state__icon-wrapper) {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.zone-plate__empty :deep(.empty-state__icon) {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.zone-plate__empty :deep(.empty-state__title) {
+  font-size: var(--text-sm);
+  margin-bottom: 0.25rem;
+}
+
+.zone-plate__empty :deep(.empty-state__description) {
+  font-size: var(--text-xs);
+  margin-bottom: 0;
+}
+
+/* Drop target highlight for empty zones */
+.zone-plate--drop-target .zone-plate__empty {
+  border-color: var(--color-iridescent-1);
+  background: rgba(96, 165, 250, 0.04);
 }
 
 @media (max-width: 640px) {
