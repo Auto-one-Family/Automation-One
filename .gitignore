@@ -110,6 +110,7 @@ backups/*.sql
 debug_output.txt
 El\ Frontend/coverage/
 El\ Frontend/.playwright/
+.playwright-mcp/
 El\ Frontend/vite.config.d.ts
 
 # ========== PYTHON CACHE ==========
