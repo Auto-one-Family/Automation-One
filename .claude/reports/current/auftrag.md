@@ -5,11 +5,13 @@
 > **Aktualisiert:** 2026-02-26 (IST-Analyse: P11 ist KEIN Bug, deviceCounts Root Cause bestaetigt, ESPCardBase+useESPStatus existieren, Dead Code bereits geloescht)
 > **Aktualisiert:** 2026-02-26 (Block 0 deviceCounts ERLEDIGT, Voraussetzung Block A ERLEDIGT)
 > **Aktualisiert:** 2026-02-26 (Alle Voraussetzungen ERLEDIGT: Block A+B+C CSS/Settings + Orbital-Split. NUR Zone-CRUD Backend-API BLOCKER verbleibt)
-> **Aktualisiert:** 2026-02-26 (Zone-Architektur-Analyse: "Zone-CRUD BLOCKER" ist PHANTOM-BLOCKER. Zonen sind String-Felder auf esp_devices, implizites System ist vollstaendig funktional. 0h Backend-Arbeit noetig. Siehe `analyse-zone-subzone-architektur.md`)
+> **Aktualisiert:** 2026-02-26 (Zone-Architektur-Analyse: "Zone-CRUD BLOCKER" ist PHANTOM-BLOCKER. Zonen sind String-Felder auf esp_devices, implizites System ist vollstaendig funktional. 0h Backend-Arbeit noetig. Siehe `auftrag-zone-subzone-architektur-analyse.md`)
+> **Aktualisiert:** 2026-02-26 (Block 1 ERLEDIGT: Status-System-Fix — P1 Online/Offline Counts, P2 deviceCounts verifiziert, P3/P4 Stale-Visualisierung)
+> **Aktualisiert:** 2026-02-26 (Block 2 ERLEDIGT: Zone-Layout-Redesign — ZonePlate 755→622 Z., DeviceMiniCard 447→645 Z., Zone-CRUD in HardwareView, AccordionSection modelValue+#header Slot)
 > **Prioritaet:** P1 (Kernfunktionalitaet)
 > **Aufwand:** ~~~30-40 Stunden (8 Bloecke)~~ **~24-30 Stunden** (8 Bloecke, Backend-BLOCKER entfaellt: -4-6h)
 > **Voraussetzung:** `auftrag-hardware-tab-css-settings-ux.md` Block A (CSS-Extraktion) MUSS erledigt sein — **ERLEDIGT (2026-02-26)**
-> **Voraussetzung:** ~~Zone-CRUD Backend-API (POST/PUT/DELETE /v1/zones) MUSS implementiert sein~~ — **KEIN BLOCKER:** Zone-Architektur-Analyse zeigt: Zonen sind String-Felder auf `esp_devices`. Bestehende Assignment-API (assign/remove/info/devices/unassigned) reicht vollstaendig. Siehe `analyse-zone-subzone-architektur.md`
+> **Voraussetzung:** ~~Zone-CRUD Backend-API (POST/PUT/DELETE /v1/zones) MUSS implementiert sein~~ — **KEIN BLOCKER:** Zone-Architektur-Analyse zeigt: Zonen sind String-Felder auf `esp_devices`. Bestehende Assignment-API (assign/remove/info/devices/unassigned) reicht vollstaendig. Siehe `auftrag-zone-subzone-architektur-analyse.md`
 > **Abhaengigkeit:** `auftrag-dashboard-umbenennung-erstanalyse.md` Block D (Vision: 2-Ebenen-Architektur) ist die verbindliche Grundlage
 > **Abhaengigkeit:** `useESPStatus.ts` und `ESPCardBase.vue` EXISTIEREN BEREITS — Block C aus hardware-tab-css Auftrag ist "Adoption", nicht "Erstellung"
 > **Agent:** Frontend-Dev Agent (auto-one)
@@ -99,9 +101,9 @@ Robin hat den aktuellen Uebersicht-Tab live getestet und folgende Situation doku
 
 | Komponente | Pfad (im auto-one Repo) | Zeilen | Rolle im Screenshot |
 |-----------|------------------------|--------|---------------------|
-| `HardwareView.vue` | `src/views/HardwareView.vue` | 720 | Haupt-View, rendert Level 1-2 basierend auf Route (BEREITS 2-Level-System) |
-| `ZonePlate.vue` | `src/components/dashboard/ZonePlate.vue` | **755** | Zone-Accordion ("Echt 0/1 Online"), enthaelt ESP-Cards. **KORREKTUR:** War faelschlich unter `zones/` mit ~400 Z. angegeben — tatsaechlich unter `dashboard/`, fast doppelte Komplexitaet |
-| `DeviceMiniCard.vue` | `src/components/dashboard/DeviceMiniCard.vue` | **402** | Die kleine ESP-Card (ESP_472204, Werte, Sparkbars). **KORREKTUR:** War mit ~150 Z. angegeben — tatsaechlich 2.7x groesser. [verify-plan: 469→402 Z. per wc -l] |
+| `HardwareView.vue` | `src/views/HardwareView.vue` | **975** | Haupt-View, rendert Level 1-2 basierend auf Route (BEREITS 2-Level-System). [verify-plan 2026-02-26: 720→975 Z., +255 Z. durch Block 2 Arbeit] |
+| `ZonePlate.vue` | `src/components/dashboard/ZonePlate.vue` | **622** | Zone-Accordion mit AccordionSection + custom #header. **Block 2:** 755→622 Z. (ZoneMetrics, Sensor-Preview, Meta-Pills entfernt, Inline-Rename + Overflow-Menu hinzugefuegt) |
+| `DeviceMiniCard.vue` | `src/components/dashboard/DeviceMiniCard.vue` | **645** | ESP-Card mit Status-Zeile, Sensor-Icons, Spark-Bars, Action-Row. **Block 1+2:** 402→645 Z. (Stale-Visualisierung + Sensor-Detail + Overflow-Menu hinzugefuegt) |
 | `UnassignedDropBar.vue` | `src/components/dashboard/UnassignedDropBar.vue` | **568** | "NICHT ZUGEWIESEN" Bar am unteren Rand. **KORREKTUR:** War faelschlich unter `zones/` mit ~120 Z. angegeben — tatsaechlich unter `dashboard/`, 4.7x groesser |
 | `StatusPill.vue` (TopBar) | `src/components/dashboard/StatusPill.vue` | — | "0 Online • 1 Offline • Alle 0 • Mock 0 • Real 0". **KORREKTUR:** Name ist Singular (StatusPill), nicht Plural (StatusPills) |
 | `ViewTabBar.vue` | `src/components/common/ViewTabBar.vue` | **127** | Tab-Leiste [Uebersicht] [Monitor] [Editor]. **KORREKTUR:** War faelschlich unter `shared/design/layout/` mit ~80 Z. angegeben |
@@ -112,8 +114,8 @@ Robin hat den aktuellen Uebersicht-Tab live getestet und folgende Situation doku
 |-----------|------|--------|-------|
 | `ZoneDetailView.vue` | `src/components/zones/ZoneDetailView.vue` | 347 | Level 2 (Zone-Detail mit ESP-Liste) — wird ENTFALLEN nach D2-Vision |
 | `ZoneGroup.vue` | `src/components/zones/ZoneGroup.vue` | **951** | **FEHLTE IM INVENTAR.** Implementiert bereits VueDraggable-DnD, Zone-Header-Rendering und Device-Gruppierung. Wird von ZonePlate genutzt. Block 4 MUSS darauf aufbauen |
-| `ESPSettingsSheet.vue` | `src/components/esp/ESPSettingsSheet.vue` | **1419** | Das Modal/Sheet das sich bei "Geraete"-Klick oeffnen SOLLTE — P11. **KORREKTUR:** War mit ~300 Z. angegeben — tatsaechlich 4.7x groesser. Block 3 Aufwand betroffen. [verify-plan: 1413→1419 Z. per wc -l] |
-| `PendingDevicesPanel.vue` | `src/components/esp/PendingDevicesPanel.vue` | **897** | Panel fuer discovered-but-not-approved ESPs. Wird von TopBar-Button `dashStore.showPendingPanel` gesteuert. **KORREKTUR:** War mit ~200 Z. angegeben — tatsaechlich 4.5x groesser |
+| `ESPSettingsSheet.vue` | `src/components/esp/ESPSettingsSheet.vue` | **1419** | Das Modal/Sheet das sich bei "Geraete"-Klick oeffnen SOLLTE — P11. **KORREKTUR:** War mit ~300 Z. angegeben — tatsaechlich 4.7x groesser. Block 3 Aufwand betroffen. [verify-plan 1419 Z.] |
+| `PendingDevicesPanel.vue` | `src/components/esp/PendingDevicesPanel.vue` | **996** | Panel fuer discovered-but-not-approved ESPs. Wird von TopBar-Button `dashStore.showPendingPanel` gesteuert. **KORREKTUR:** War mit ~200 Z. angegeben — tatsaechlich 5x groesser. [verify-plan 2026-02-26: 897→996 Z., +99 Z. seit letzter Zaehlung] |
 | `ComponentSidebar.vue` | `src/components/dashboard/ComponentSidebar.vue` | ~350 | Sidebar fuer Sensor/Aktor-DnD im Orbital-Layout |
 | `CreateMockEspModal.vue` | `src/components/modals/CreateMockEspModal.vue` | **318** | Modal hinter "+ Mock" Button. **KORREKTUR:** War faelschlich unter `esp/` mit ~150 Z. angegeben — tatsaechlich unter `modals/`, doppelte Groesse |
 
@@ -121,16 +123,16 @@ Robin hat den aktuellen Uebersicht-Tab live getestet und folgende Situation doku
 
 | Store | Pfad | Relevanz |
 |-------|------|----------|
-| `useEspStore` | `src/stores/esp.ts` | 1668 Z. — Zentraler Device-State, WebSocket-Dispatcher, Pending-Devices. **Hinweis:** `unassignedDevices` ist KEIN Store-Getter — nur lokales computed in UnassignedDropBar.vue:45 |
+| `useEspStore` | `src/stores/esp.ts` | **1671 Z.** — Zentraler Device-State, WebSocket-Dispatcher, Pending-Devices. **Hinweis:** `unassignedDevices` ist KEIN Store-Getter — lokales computed in UnassignedDropBar.vue:45 UND HardwareView.vue:255. [verify-plan 2026-02-26: 1668→1671 Z.] |
 | `useDragStateStore` | `src/shared/stores/dragState.store.ts` | 447 Z. — DnD-State (isDragging, Payloads, Drop-Targets) |
-| `useDashboardStore` | `src/shared/stores/dashboard.store.ts` | **259 Z.** — Filter-State (statusCounts, deviceCounts), showControls, showPendingPanel, Breadcrumb. **KORREKTUR:** War mit 107 Z. angegeben — tatsaechlich 2.4x groesser. **ACHTUNG:** `deviceCounts` wird auf `{ all: 0, mock: 0, real: 0 }` initialisiert aber NIRGENDS aktualisiert — das ist Root Cause fuer P2 |
+| `useDashboardStore` | `src/shared/stores/dashboard.store.ts` | **268 Z.** — Filter-State (statusCounts, deviceCounts), showControls, showPendingPanel (Z.86), Breadcrumb. **KORREKTUR:** War mit 107 Z. angegeben — tatsaechlich 2.5x groesser. **ACHTUNG:** `deviceCounts` ~~wird auf `{ all: 0, mock: 0, real: 0 }` initialisiert aber NIRGENDS aktualisiert~~ ist jetzt computed() (Block 0 ERLEDIGT). [verify-plan 268 Z.] |
 | `useUiStore` | `src/shared/stores/ui.store.ts` | 235 Z. — Sidebar, CommandPalette, ContextMenu |
 
 ### Composables (Logik)
 
 | Composable | Pfad | Relevanz |
 |-----------|------|----------|
-| `useZoneDragDrop` | `src/composables/useZoneDragDrop.ts` | Zone-Assignment DnD-Logik |
+| `useZoneDragDrop` | `src/composables/useZoneDragDrop.ts` | Zone-Assignment DnD-Logik (Zone-Level). **[verify-plan] Achtung:** `useOrbitalDragDrop.ts` existiert separat fuer Orbital-Layout-DnD. Block 4 nutzt NUR `useZoneDragDrop` |
 | `useKeyboardShortcuts` | `src/composables/useKeyboardShortcuts.ts` | Ctrl+K, Escape, etc. |
 | `useSwipeNavigation` | `src/composables/useSwipeNavigation.ts` | Touch-Navigation |
 | `useContextMenu` | (via uiStore) | Rechtsklick-Menues — existiert, wird NICHT genutzt auf ESP-Cards |
@@ -188,66 +190,55 @@ Diese Ref wurde NIRGENDS beschrieben → zeigte IMMER "Alle 0 / Mock 0 / Real 0"
 
 ---
 
-## Block 1: Status-System-Fix (P0, ~2-3h)
+## Block 1: Status-System-Fix — ERLEDIGT (2026-02-26)
 
-### Ziel
-Alle Status-Anzeigen muessen konsistent und korrekt sein — vom TopBar-Counter bis zum einzelnen ESP-Dot.
+> **KOMPLETT ERLEDIGT (2026-02-26):**
+> - **P1 Fix — Online/Offline Counts:** `esp.ts` importiert jetzt `getESPStatus()` aus useESPStatus. `onlineDevices` zaehlt Devices mit Status `online` ODER `stale` (= erreichbar, Heartbeat <5min). `offlineDevices` zaehlt alles andere (offline, unknown, error, safemode). **Root Cause P1:** Der alte Check (`device.status === 'online' || device.connected === true`) ignorierte den Heartbeat-Timing-Fallback. Real-ESPs mit `last_seen < 90s` aber ohne expliziten `status: 'online'` wurden als offline gezaehlt.
+> - **P2 Verifikation — deviceCounts:** Block 0 Fix bestaetigt — `deviceCounts` ist jetzt `computed()` aus `espStore.devices/mockDevices/realDevices` (`dashboard.store.ts:66-70`)
+> - **P3/P4 Fix — Stale-Daten-Visualisierung:** `DeviceMiniCard.vue` integriert jetzt `getESPStatus()`. Offline/Stale-ESPs: Sparkbar-Farbe → `var(--color-text-muted)` (grau statt gruen). "Zuletzt vor X Min." Label bei nicht-online Devices (Farbe: `var(--color-warning)`). Card-Opacity 0.75 + gedaempfte Sensor-Wert-Farbe im Stale-Zustand. CSS-Klasse `device-mini-card--stale` fuer visuellen Zustand.
+> - **Verifikation:** `vue-tsc --noEmit` 0 TypeScript-Fehler, `npm run build` erfolgreich (26s)
+>
+> **Commit:** `fix(status): correct device counts, stale data visualization`
 
-### 1.1: Status-Zaehl-Bug fixen (P1, P2)
+### 1.1: Status-Zaehl-Bug fixen (P1, P2) — ERLEDIGT
 
-**Analyse-Auftrag an den Agent:**
-1. Oeffne `TopBar.vue` und finde die StatusPills-Logik (wahrscheinlich computed property die `espStore.devices` durchzaehlt)
-2. Oeffne `dashboardStore` und pruefe `statusCounts` — werden die richtig berechnet?
-3. Pruefe ob `espStore.fetchAll()` korrekt aufgerufen wird und ob die Devices im Store landen
-4. Pruefe Filter-Logik fuer "Alle", "Mock", "Real" — zaehlt sie `device.isMock` korrekt?
+**Root Cause P1 (GELOEST):** `esp.ts:156-166` — `onlineDevices` nutzt jetzt `getESPStatus()` aus `useESPStatus.ts`. Alter Check ignorierte Heartbeat-Timing-Fallback.
 
-**Erwartetes Ergebnis:** Die Counts muessen exakt den Store-Daten entsprechen. "0 Online" darf NICHT angezeigt werden wenn ein ESP Daten sendet.
+**Root Cause P2 (Block 0, BESTAETIGT):** `dashboard.store.ts:66-70` — `deviceCounts` ist jetzt `computed()`.
 
-**Verifizierte Root Cause fuer P2:**
+### 1.2: Stale-Daten-Visualisierung (P3, P4) — ERLEDIGT
 
-> **KORREKTUR (Verifikation 2026-02-26):** `dashStore.deviceCounts` ist auf `{ all: 0, mock: 0, real: 0 }` initialisiert und wird **NIRGENDS aktualisiert**. Im Gegensatz dazu wird `statusCounts` in HardwareView.vue:208 korrekt per Watch gesetzt. Das ist die echte Root Cause fuer P2 ("Alle 0 • Mock 0 • Real 0"). Fix: `deviceCounts`-Watch analog zu `statusCounts` in HardwareView.vue hinzufuegen.
+**Implementation in `DeviceMiniCard.vue`:**
+- `getESPStatus()` importiert und integriert
+- Offline/Stale: Sparkbar → `var(--color-text-muted)`, "Zuletzt vor X Min." in `var(--color-warning)`
+- Card-Opacity 0.75 + CSS-Klasse `device-mini-card--stale`
+- **[verify-plan] Bestaetigt:** DeviceMiniCard nutzte useESPStatus zuvor NICHT — wurde in diesem Block integriert
 
-**Weitere moegliche Root Causes fuer P1:**
-- `statusCounts` wird initial berechnet, reagiert aber nicht auf WebSocket-Updates
-- `device.status` wird nicht aktualisiert wenn Heartbeat empfangen wird
+### 1.3: Verifikation — BESTANDEN (2026-02-26)
 
-### 1.2: Stale-Daten-Visualisierung (P3, P4)
-
-**Grundprinzip:** Wenn ein ESP offline ist, muessen seine Werte als "letzte bekannte Werte" markiert sein.
-
-```
-┌────────────────────────────────────┐
-│ Online-ESP:                        │
-│   23.5°C  ██████████  (Live)       │  ← Gruene Sparkbar
-│                                    │
-│ Offline-ESP:                       │
-│   23.5°C  ░░░░░░░░░░  (Zuletzt)   │  ← Graue Sparkbar + "Zuletzt" Label
-│   ↳ Offline seit 5 Minuten        │
-└────────────────────────────────────┘
-```
-
-**Implementation:**
-- `useESPStatus.ts` EXISTIERT BEREITS (185 Z., `composables/useESPStatus.ts`) — IST-Analyse bestaetigt [verify-plan: 176→185 Z. per wc -l]
-- DeviceMiniCard nutzt useESPStatus NOCH NICHT — [verify-plan: grep zeigt 0 Treffer in DeviceMiniCard.vue. Nur ESPCardBase.vue, ESPCard.vue und ESPHealthWidget.vue importieren useESPStatus. DeviceMiniCard muss erst auf useESPStatus umgestellt werden]
-- DeviceMiniCard bekommt computed `isStale` basierend auf `useESPStatus` (Integration noetig, nicht nur Erweiterung)
-- Bei `status === 'stale' || status === 'offline'`: Sparkbar-Farbe → grau, "Zuletzt um HH:MM" Untertitel
-- Sensor-Dots: gruen nur wenn Live-Daten <90s alt, sonst grau mit Orange-Rand
-
-### 1.3: Verifikation
-
-- [ ] TopBar zeigt korrekte Online/Offline-Counts
-- [ ] Filter "Alle", "Mock", "Real" zaehlen korrekt
-- [ ] Offline-ESP zeigt graue Sparkbars + "Zuletzt" Timestamp
-- [ ] Online-ESP zeigt gruene Sparkbars + Live-Werte
-- [ ] Toast bei Status-Wechsel (Online→Offline, Offline→Online) — bestehende WebSocket-Events nutzen
+- [x] TopBar zeigt korrekte Online/Offline-Counts (getESPStatus-basiert)
+- [x] Filter "Alle", "Mock", "Real" zaehlen korrekt (Block 0 deviceCounts computed)
+- [x] Offline-ESP zeigt graue Sparkbars + "Zuletzt vor X Min." Timestamp
+- [x] Online-ESP zeigt gruene Sparkbars + Live-Werte
+- [ ] Toast bei Status-Wechsel (Online→Offline, Offline→Online) — offen, nicht in Block 1 Scope
+- [x] `vue-tsc --noEmit` — 0 TypeScript-Fehler
+- [x] `npm run build` — erfolgreich (26s)
 
 **Commit:** `fix(status): correct device counts, stale data visualization`
 
 ---
 
-## Block 2: Zone-Layout Redesign (P1, ~5-7h)
+## Block 2: Zone-Layout Redesign — ERLEDIGT (2026-02-26)
 
-> **KORREKTUR (Verifikation 2026-02-26):** Aufwand von ~4-5h auf ~5-7h erhoeht weil ZonePlate.vue 755 Z. (nicht ~400) und DeviceMiniCard.vue 469 Z. (nicht ~150) hat. Refactoring statt Ersetzen empfohlen.
+> **KOMPLETT ERLEDIGT (2026-02-26):**
+> - **2.1a AccordionSection.vue erweitert:** `modelValue?: boolean` Prop fuer externe Steuerung (v-model), `#header` Slot mit `{isOpen, toggle}` Scope fuer custom Headers. Volle Rueckwaertskompatibilitaet (SensorConfigPanel, ActuatorConfigPanel, ESPSettingsSheet)
+> - **2.1b ZonePlate.vue refactored (755→622 Z.):** Nutzt AccordionSection mit modelValue + custom `#header` Slot. Schlanker Header: Zone-Name + Pencil-Edit + "X ESPs · X/Y Online" + Alert-Badge + Overflow-Menu (⋮). ENTFERNT: ZoneMetrics, Sensor-Preview, Meta-Pills ("3S"/"1A"), collapsed-summary, cross-esp badge. Inline-Rename (Pencil→Input, Enter/Escape/Blur). Overflow: Umbenennen + Loeschen (ConfirmDialog). Neue Emits: `rename`, `delete`, `device-delete`
+> - **2.2 DeviceMiniCard.vue redesigned (447→645 Z.):** Wickelt ESPCardBase variant="mini" mit Custom-Slots. Status-Zeile: Dot + Text + "vor X Min." + Sensor-Count. Bis 4 Sensor-Zeilen: Typ-Icon + Name + Wert + Einheit + Spark-Bar. "+X weitere" bei >4. Action-Row: "Oeffnen" + Overflow (Konfigurieren, Zone aendern, Loeschen). Grip-Handle via CSS Pseudo-Element auf `.esp-drag-handle`. Stale-Styles beibehalten
+> - **2.3 Zone-Verwaltung in HardwareView.vue:** <5 Zonen → alle expanded, sonst collapsed. "Zone erstellen" Button + Inline-Form. Umbenennen (loop ESPs → POST assign). Loeschen (ConfirmDialog → loop DELETE). Toast-Feedback via useToast()
+> - **2.4 ZonePlate.test.ts aktualisiert:** Meta-Pills → Header-Stats
+> - **Verifikation:** `vue-tsc --noEmit` 0 Fehler, `npm run build` OK (33.5s), 1345/1353 Tests (8 pre-existing, keine neuen Failures)
+>
+> **Commit:** `feat(overview): zone accordion layout with ESP overview cards`
 
 ### Ziel
 Zonen werden als aufklappbare Accordion-Sektionen angezeigt mit ESP-Cards direkt sichtbar (Vision D2: Level 1+2 zusammenfuehren zu einer Ebene).
@@ -303,7 +294,7 @@ v Echt  0/1 Online                                              (25)
 
 ### 2.2: ESP-Card Redesign (DeviceMiniCard → ESPOverviewCard)
 
-**IST-Zustand (DeviceMiniCard.vue 402 Zeilen [verify-plan: korrigiert von 469] — 2.7x groesser als angenommen, schrittweises Refactoring statt Ersetzen empfohlen):**
+**IST-Zustand (DeviceMiniCard.vue 402 Zeilen [verify-plan] — ~2.7x groesser als angenommen, schrittweises Refactoring statt Ersetzen empfohlen):**
 ```
 • ESP_472204  [REAL]
 46.3  ████████
@@ -365,15 +356,15 @@ const SENSOR_ICONS: Record<string, string> = {
 ```
 
 **Technische Umsetzung:**
-- `ESPCardBase.vue` EXISTIERT BEREITS (270 Z., 4 Varianten: mini/summary/detail/widget) — IST-Analyse bestaetigt [verify-plan: 274→270 Z.]
+- `ESPCardBase.vue` EXISTIERT BEREITS (270 Z. [verify-plan], 4 Varianten: mini/summary/detail/widget) — IST-Analyse bestaetigt
 - `variant="overview"` als 5. Variante hinzufuegen ODER `variant="summary"` nutzen und per Slot-Content anpassen
-- `useESPStatus.ts` EXISTIERT BEREITS (176 Z.) — Status-Logik ist zentral verfuegbar
+- `useESPStatus.ts` EXISTIERT BEREITS (185 Z. [verify-plan]) — Status-Logik ist zentral verfuegbar
 - Sensor-Daten kommen aus `espStore.devices[espId].sensors` — sind bereits reaktiv via WebSocket
 - Sparkline: Bestehende Mini-Sparkline-Logik aus DeviceMiniCard wiederverwenden, aber mit Zeitachse (letzte 15min)
 
 ### 2.3: Zone-Verwaltungs-Aktionen
 
-> **BLOCKER AUFGELOEST (2026-02-26):** Zone-Architektur-Analyse (`analyse-zone-subzone-architektur.md`) zeigt: Zonen sind String-Felder auf `esp_devices`, KEINE eigenstaendigen DB-Entitaeten. Das bestehende implizite System ist **designbedingt** und **vollstaendig funktional**:
+> **BLOCKER AUFGELOEST (2026-02-26):** Zone-Architektur-Analyse (`auftrag-zone-subzone-architektur-analyse.md`) zeigt: Zonen sind String-Felder auf `esp_devices`, KEINE eigenstaendigen DB-Entitaeten. Das bestehende implizite System ist **designbedingt** und **vollstaendig funktional**:
 > - "Zone erstellen" = Ersten ESP mit neuem `zone_id` zuweisen → `POST /v1/zone/devices/{id}/assign`
 > - "Zone umbenennen" = Alle ESPs in Zone mit neuem `zone_name` neu zuweisen → Loop ueber `GET /zone/{id}/devices` + `POST /zone/devices/{id}/assign`
 > - "Zone loeschen" = Alle ESPs aus Zone entfernen → `DELETE /v1/zone/devices/{id}/zone` fuer jeden ESP (Subzones werden automatisch cascade-geloescht)
@@ -396,16 +387,19 @@ const SENSOR_ICONS: Record<string, string> = {
 - Fehler: "Zone konnte nicht geloescht werden: [Fehlertext]"
 - Bestehende `useToast` Composable nutzen (`toast.show({ message, type, persistent })` via `notification.store.ts`). **KORREKTUR:** Die korrekte API ist `useToast`, nicht `uiStore.addToast`
 
-### 2.4: Verifikation
+### 2.4: Verifikation — BESTANDEN (2026-02-26)
 
-- [ ] Zonen werden als Accordion-Sektionen angezeigt
-- [ ] Zone-Header zeigt Name + ESP-Count + Online-Count + Alert-Count
-- [ ] ESP-Cards sind direkt in der Zone sichtbar (kein Zwischenklick noetig)
-- [ ] ESP-Cards zeigen: Name, Status, Sensor-Daten mit Einheiten, Sparklines
-- [ ] Klick auf "Oeffnen" navigiert zum Orbital-Layout
-- [ ] Zone-Overflow-Menu mit Umbenennen/Loeschen funktioniert
-- [ ] Toasts werden bei Zone-Aktionen angezeigt
-- [ ] Bei 0 ESPs in Zone: EmptyState-Komponente ("Keine Geraete. ESPs hierher ziehen oder entdecken lassen.")
+- [x] Zonen werden als Accordion-Sektionen angezeigt (AccordionSection mit modelValue + #header Slot)
+- [x] Zone-Header zeigt Name + ESP-Count + Online-Count + Alert-Badge + Overflow-Menu
+- [x] ESP-Cards sind direkt in der Zone sichtbar (kein Zwischenklick noetig)
+- [x] ESP-Cards zeigen: Name, Status (Dot+Text), Sensor-Daten mit Einheiten + Icons, Spark-Bars
+- [x] Klick auf "Oeffnen" navigiert zum Orbital-Layout
+- [x] Zone-Overflow-Menu mit Umbenennen/Loeschen funktioniert (ConfirmDialog)
+- [x] Toasts werden bei Zone-Aktionen angezeigt (useToast)
+- [x] Zone-Erstellung mit Inline-Form (Name + ESP-Auswahl)
+- [x] `vue-tsc --noEmit` — 0 TypeScript-Fehler
+- [x] `npm run build` — erfolgreich (33.5s)
+- [x] Tests: 1345/1353 (8 pre-existing, keine neuen Failures)
 
 **Commit:** `feat(overview): zone accordion layout with ESP overview cards`
 
@@ -413,7 +407,7 @@ const SENSOR_ICONS: Record<string, string> = {
 
 ## Block 3: Konfigurationspanel-Fix und Redesign (P0/P1, ~4-6h)
 
-> **KORREKTUR (Verifikation 2026-02-26):** Aufwand von ~3-4h auf ~4-6h erhoeht weil ESPSettingsSheet.vue 1413 Z. (nicht ~300) und PendingDevicesPanel.vue 897 Z. (nicht ~200) hat.
+> **KORREKTUR (Verifikation 2026-02-26):** Aufwand von ~3-4h auf ~4-6h erhoeht weil ESPSettingsSheet.vue 1419 Z. (nicht ~300) und PendingDevicesPanel.vue **996 Z.** (nicht ~200) hat. [verify-plan 2026-02-26: PendingDevicesPanel ist nochmal 99 Z. groesser als letzte Zaehlung]
 
 ### Ziel
 Der "Geraete"-Button muss funktionieren. Das Konfigurationspanel muss klar strukturiert sein fuer ESP-spezifische Einstellungen.
@@ -591,24 +585,25 @@ DnD fuer Zone-Zuweisung mit korrektem visuellem Feedback, Click-to-Place-Alterna
 **Beim Drag-Start muessen ALLE Zonen als Drop-Targets hervorgehoben werden:**
 
 ```css
+/* [verify-plan] Nur --color-accent, --color-accent-bright, --color-accent-dim
+   existieren in tokens.css. --color-accent-bg/hover/glow NICHT vorhanden.
+   Loesung: color-mix() fuer abgeleitete Farben. */
+
 /* Zone-Accordion im Normal-Zustand */
 .zone-section { border: 2px solid transparent; }
 
 /* Zone als Drop-Target waehrend Drag */
-/* [verify-plan: --color-accent-bg, --color-accent-bg-hover, --color-accent-glow existieren NICHT in tokens.css.
-   Verfuegbar: --color-accent (#3b82f6), --color-accent-bright (#60a5fa), --color-accent-dim (#1e3a5f).
-   Entweder neue Tokens in tokens.css definieren ODER rgba/color-mix() verwenden] */
 .zone-section--drop-target {
   border: 2px dashed var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent-dim) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   transition: border 100ms ease-in, background 100ms ease-in;
 }
 
 /* Zone als aktives Drop-Ziel (Hover waehrend Drag) */
 .zone-section--drop-active {
   border: 2px solid var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent-dim) 50%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 ```
 
@@ -816,6 +811,11 @@ Konsistente Status-Anzeige ueberall + korrekte Toast-Nutzung bei allen Aktionen.
 
 **Pruefung:** Agent muss verifizieren dass die WebSocket-Handler in den Stores (esp.store.ts, zone.store.ts, config.store.ts) Toasts aufrufen. Falls nicht → hinzufuegen.
 
+> **[verify-plan 2026-02-26] IST-Zustand Toast-Integration:**
+> - `esp.ts`: ✅ Toasts fuer device_discovered (Z.1233), device_approved (Z.1265), device_rejected (Z.1289), device_rediscovered (Z.1401), esp_health Status-Wechsel (Z.1075), config_failed (Z.1462)
+> - `config.store.ts`: ✅ Toasts fuer config_response (Z.49/56/66/83), config_published (Z.138), config_failed (Z.157)
+> - `zone.store.ts`: ⚠️ Toasts NUR fuer **subzone_assignment** (Z.176/184/187). **KEINE Toasts fuer zone_assignment** — handleZoneAssignment (Z.80-127) nutzt nur logger, keine Toast-Aufrufe. Block 6 MUSS hier Toasts hinzufuegen fuer zone_assigned/zone_removed/error.
+
 ### 6.3: Verifikation
 
 - [ ] Status-Dot + Text auf ESP-Cards (Uebersicht)
@@ -849,7 +849,7 @@ Der Agent muss `router/index.ts` komplett lesen und folgende Fragen beantworten:
 | `/monitor` | Existiert als eigene Route? | Ja, Monitor-Tab |
 | `/custom-dashboard` | Existiert als eigenstaendige Route? | Ja, zeigt `CustomDashboardView.vue`. **KORREKTUR:** `/dashboards` existiert NICHT als Route. `/custom-dashboard` ist eigenstaendig, kein Redirect noetig solange Editor-Tab darauf zeigt |
 | `/dashboard-legacy` | Existiert? Redirect auf `/hardware`? | Muss redirecten (sollte bereits existieren) |
-| Deprecated Redirects (8) | Alle noch aktiv? | Pruefen ob alle 8 Redirects funktionieren: `/devices`, `/devices/:espId`, `/mock-esp`, `/mock-esp/:espId`, `/database`, `/logs`, `/audit`, `/dashboard-legacy`. **KORREKTUR:** Waren faelschlich 9, sind tatsaechlich 7 deprecated + dashboard-legacy = 8 |
+| Deprecated Redirects (**10**) | Alle noch aktiv? | Pruefen ob alle 10 Redirects funktionieren: `/dashboard-legacy`, `/devices`, `/devices/:espId`, `/mock-esp`, `/mock-esp/:espId`, `/database`, `/logs`, `/audit`, `/mqtt-log`, `/actuators`. [verify-plan 2026-02-26: Plan sagte 8, tatsaechlich 10 deprecated Redirects in router/index.ts] |
 
 ### 7.2: Navigation innerhalb des Uebersicht-Tabs
 
@@ -875,7 +875,7 @@ Ebene 2 (Orbital-Layout nach Klick auf ESP):
 
 > **KORREKTUR (Verifikation 2026-02-26):** HardwareView.vue:60 hat BEREITS `computed<1 | 2>` mit Kommentar "Two-level navigation". Das 2-Ebenen-System ist bereits implementiert. Route `/hardware/:zoneId` funktioniert bereits als Scroll-Anchor (Zeile 5). **Dieser Abschnitt kann uebersprungen werden.**
 
-**AKTUELLER Stand (HardwareView.vue 720 Zeilen):**
+**AKTUELLER Stand (HardwareView.vue **975** Zeilen) [verify-plan 2026-02-26: 720→975 Z.]:**
 ```typescript
 // HardwareView.vue:60 — BEREITS 2-Level-System
 const currentLevel = computed<1 | 2>(() => {
@@ -953,15 +953,15 @@ Der Agent oeffnet die Anwendung und prueft:
 
 | Auftrag | Beziehung | Status |
 |---------|-----------|--------|
-| ~~**Zone-CRUD Backend-API**~~ | ~~**BLOCKER**~~ → **KEIN BLOCKER.** Zone-Architektur-Analyse (2026-02-26): Zonen sind String-Felder, implizites Assignment-System vollstaendig funktional. 0h Backend noetig. Siehe `analyse-zone-subzone-architektur.md` | **AUFGELOEST** |
+| ~~**Zone-CRUD Backend-API**~~ | ~~**BLOCKER**~~ → **KEIN BLOCKER.** Zone-Architektur-Analyse (2026-02-26): Zonen sind String-Felder, implizites Assignment-System vollstaendig funktional. 0h Backend noetig. Siehe `auftrag-zone-subzone-architektur-analyse.md` | **AUFGELOEST** |
 | `auftrag-hardware-tab-css-settings-ux.md` Block A | **MUSS VORHER erledigt sein** — CSS-Extraktion fuer Modal/Form-Styles | **ERLEDIGT (2026-02-26)** |
 | `auftrag-hardware-tab-css-settings-ux.md` Block B | **SYNERGIEN** — AccordionSection.vue (151 Z.) dort erstellt, hier wiederverwendbar | **ERLEDIGT (2026-02-26)** |
 | `auftrag-hardware-tab-css-settings-ux.md` Block C | **MUSS VORHER erledigt sein** — `useESPStatus.ts` wird hier ueberall genutzt | **ERLEDIGT (2026-02-26)** |
 | `auftrag-dashboard-umbenennung-erstanalyse.md` Block D | **GRUNDLAGE** — 2-Ebenen-Vision ist verbindlich. Block 7.3 ist BEREITS ERLEDIGT | FREIGEGEBEN |
 | `auftrag-orbital-split.md` | **PARALLEL MOEGLICH** — Orbital-Layout bleibt unveraendert. Path-Import-Aenderung bei Split beachten | **ERLEDIGT (2026-02-26)** |
-| `auftrag-dnd-system-analyse.md` | **SYNERGIEN** — DnD-Analyse liefert Input fuer Block 4. **Hinweis:** ZoneGroup.vue (951 Z.) hat bereits DnD — Analyse muss darauf aufbauen | Noch nicht gestartet |
-| `auftrag-dnd-konsolidierung-interaktion.md` | **DANACH** — Zentralisierte DnD-Architektur profitiert von den hier gemachten Aenderungen | Noch nicht gestartet |
-| `auftrag-unified-monitoring-ux.md` | **SYNERGIEN** — Alert-System integriert in Zone-Header Alerts. StatusBar nutzt gleiche Status-Logik | Noch nicht gestartet |
+| `auftrag-dnd-system-analyse.md` | **SYNERGIEN** — DnD-Analyse liefert Input fuer Block 4. **Hinweis:** ZoneGroup.vue (951 Z.) hat bereits DnD — Analyse muss darauf aufbauen | Noch nicht gestartet. **[verify-plan] Datei existiert nicht im Dateisystem** |
+| `auftrag-dnd-konsolidierung-interaktion.md` | **DANACH** — Zentralisierte DnD-Architektur profitiert von den hier gemachten Aenderungen | Noch nicht gestartet. **[verify-plan] Datei existiert nicht im Dateisystem** |
+| `auftrag-unified-monitoring-ux.md` | **SYNERGIEN** — Alert-System integriert in Zone-Header Alerts. StatusBar nutzt gleiche Status-Logik | Noch nicht gestartet. **[verify-plan] Datei existiert nicht im Dateisystem** |
 
 ---
 
@@ -982,7 +982,7 @@ Der Agent oeffnet die Anwendung und prueft:
 
 **Gesamt-Aufwand: ~24-30h** (rein Frontend, 0h Backend). **Korrigiert** von ~30-40h wegen:
 - ~~Fehlende Backend-API (Zone-CRUD)~~ → **ENTFAELLT** (-4-6h): Zone-Architektur-Analyse zeigt implizites System ist vollstaendig funktional
-- 6 massiv unterschaetzte Komponentengroessen (ESPSettingsSheet 4.7x, PendingDevicesPanel 4.5x, UnassignedDropBar 4.7x, DeviceMiniCard 2.7x [verify-plan: 402 Z., nicht 469], ZonePlate 1.9x, dashboard.store 2.4x)
+- 6 massiv unterschaetzte Komponentengroessen (ESPSettingsSheet 4.7x, PendingDevicesPanel 4.5x, UnassignedDropBar 4.7x, DeviceMiniCard 3x, ZonePlate 1.9x, dashboard.store 2.4x)
 - Block 7.3 war bereits erledigt (spart ~1h)
 
 ---
@@ -1020,13 +1020,14 @@ Der Agent oeffnet die Anwendung und prueft:
 | Mobile-Responsive Optimierung | Nachgelagert | Eigener Auftrag |
 | Neue Sensoren hinzufuegen UI | Bleibt im Orbital-Layout | Nicht betroffen |
 | Sensor-Typ-Aenderungen | Loeschen + Neu | Nicht betroffen |
-| ~~Zone-CRUD Backend-API~~ | ~~Backend-Scope, BLOCKER~~ **ENTFAELLT** | Zone-Architektur-Analyse: Implizites System reicht. Siehe `analyse-zone-subzone-architektur.md` |
+| ~~Zone-CRUD Backend-API~~ | ~~Backend-Scope, BLOCKER~~ **ENTFAELLT** | Zone-Architektur-Analyse: Implizites System reicht. Siehe `auftrag-zone-subzone-architektur-analyse.md` |
 
 ---
 
 ## Verifikations-Protokoll (2026-02-26)
 
 > Dieses Protokoll dokumentiert alle Korrekturen die nach systematischer Verifikation gegen den echten Codestand vorgenommen wurden. Geprueft: 25 Pfade, 1 Agent, 5 Stores, 6 Routes, 5 WebSocket-Events, 1 API-Endpunkt, 2 Abhaengigkeits-Auftraege.
+> **2. Verifikation [verify-plan]:** Zone-Architektur-Analyse (BLOCKER aufgeloest), 5 Zeilenzahlen nachkorrigiert, 3 CSS-Variablen ersetzt, useESPStatus-Falschaussage korrigiert.
 
 ### Pfad-Korrekturen (4)
 
@@ -1041,10 +1042,10 @@ Der Agent oeffnet die Anwendung und prueft:
 
 | Komponente | Plan | Realitaet | Faktor | Status |
 |-----------|------|-----------|--------|--------|
-| DeviceMiniCard.vue | ~150 Z. | **469 Z.** | 3.1x | KORRIGIERT |
-| ESPSettingsSheet.vue | ~300 Z. | **1413 Z.** | 4.7x | KORRIGIERT |
+| DeviceMiniCard.vue | ~150 Z. | **402 Z.** | 2.7x | KORRIGIERT [verify-plan] |
+| ESPSettingsSheet.vue | ~300 Z. | **1419 Z.** | 4.7x | KORRIGIERT [verify-plan] |
 | PendingDevicesPanel.vue | ~200 Z. | **897 Z.** | 4.5x | KORRIGIERT |
-| dashboard.store.ts | 107 Z. | **259 Z.** | 2.4x | KORRIGIERT |
+| dashboard.store.ts | 107 Z. | **268 Z.** | 2.5x | KORRIGIERT [verify-plan] |
 | StatusPill~~s~~.vue | Plural (falsch) | **StatusPill.vue** (Singular) | — | KORRIGIERT |
 | HardwareView.vue | ~689 Z. | **720 Z.** | 1.04x | KORRIGIERT |
 
@@ -1059,7 +1060,7 @@ Der Agent oeffnet die Anwendung und prueft:
 | Korrektur | Block | Details |
 |-----------|-------|---------|
 | 2-Level-System BEREITS implementiert | Block 7.3 | HardwareView.vue:60 hat `computed<1 \| 2>` mit "Two-level navigation" Kommentar. Block 7.3 als ERLEDIGT markiert |
-| Zone-CRUD Backend FEHLT | Block 2.3 + 5 | **BLOCKER.** Backend hat NUR assign/remove/info/devices/unassigned. KEINE POST/PUT/DELETE /v1/zones Endpoints |
+| ~~Zone-CRUD Backend FEHLT~~ | Block 2.3 + 5 | ~~**BLOCKER.**~~ **AUFGELOEST.** Zone-Architektur-Analyse zeigt: Implizites System (String-Feld auf esp_devices) reicht. 5 Zone-Endpoints + 6 Subzone-Endpoints existieren. Siehe `auftrag-zone-subzone-architektur-analyse.md` |
 | P11 Root Cause verifiziert | Block 3.1 | "Geraete"-Button setzt `dashStore.showPendingPanel = true` → oeffnet PendingDevicesPanel (NICHT ESPSettingsSheet). Funktioniert NUR wenn `dashStore.showControls === true` |
 | P2 Root Cause identifiziert | Block 1.1 | `dashStore.deviceCounts` wird NIRGENDS aktualisiert (initialisiert auf all:0, mock:0, real:0). Fix: Watch analog zu `statusCounts` |
 | `espStore.unassignedDevices` existiert nicht | Block 5.3 | Ist lokales computed in UnassignedDropBar.vue:45, KEIN Store-Getter. Migration empfohlen |
@@ -1067,12 +1068,21 @@ Der Agent oeffnet die Anwendung und prueft:
 | Redirect-Anzahl korrigiert | Block 7.1 | 8 Redirects (nicht 9): devices, devices/:espId, mock-esp, mock-esp/:espId, database, logs, audit + dashboard-legacy |
 | `/dashboards` Route existiert nicht | Block 7.1 | `/custom-dashboard` ist eigenstaendige Route mit CustomDashboardView.vue. `/dashboards` muesste erst erstellt werden |
 
+### Korrekturen aus 2. Verifikation [verify-plan] (2026-02-26)
+
+| Korrektur | Block | Details |
+|-----------|-------|---------|
+| DeviceMiniCard nutzt NICHT useESPStatus | Block 1.2 | Falschaussage im Plan korrigiert. Nur ESPCardBase, ESPCard, ESPHealthWidget nutzen useESPStatus. DeviceMiniCard braucht Integration (~30min Zusatz-Aufwand) |
+| CSS-Variablen existieren nicht | Block 4.2 | `--color-accent-bg`, `--color-accent-bg-hover`, `--color-accent-glow` NICHT in tokens.css. Ersetzt durch `color-mix(in srgb, var(--color-accent) N%, transparent)` |
+| useOrbitalDragDrop ≠ useZoneDragDrop | Block 4 | Zwei separate Composables. useOrbitalDragDrop.ts (250 Z., Orbital-Layout DnD) vs useZoneDragDrop.ts (NEU, Zone-Level DnD). Block 4 nutzt NUR useZoneDragDrop |
+| 5 Zeilenzahlen aktualisiert | Diverse | DeviceMiniCard 469→402, ESPSettingsSheet 1413→1419, useESPStatus 176→185, ESPCardBase 274→270, dashboard.store 259→268 |
+
 ### Aufwandskorrektur
 
 | | Original | Korrigiert | Grund |
 |-|----------|-----------|-------|
-| Block 2 | ~4-5h | ~5-7h | ZonePlate 755 Z. (nicht 400), DeviceMiniCard 469 Z. (nicht 150) |
-| Block 3 | ~3-4h | ~4-6h | ESPSettingsSheet 1413 Z. (nicht 300), PendingDevicesPanel 897 Z. (nicht 200) |
+| Block 2 | ~4-5h | ~5-7h | ZonePlate 755 Z. (nicht 400), DeviceMiniCard 402 Z. (nicht 150) [verify-plan] |
+| Block 3 | ~3-4h | ~4-6h | ESPSettingsSheet 1419 Z. (nicht 300), PendingDevicesPanel 897 Z. (nicht 200) [verify-plan] |
 | Block 7 | ~1-2h | ~0.5-1h | Block 7.3 bereits erledigt |
-| Backend (NEU) | — | ~4-6h | Zone-CRUD API muss erst implementiert werden |
-| **Gesamt** | **~20-28h** | **~30-40h** | +10-12h durch Komponentenkomplexitaet + Backend |
+| ~~Backend (NEU)~~ | ~~—~~ | ~~~4-6h~~ **ENTFAELLT** | Zone-CRUD AUFGELOEST — implizites System reicht (Zone-Architektur-Analyse) |
+| **Gesamt** | **~20-28h** | **~24-30h** | Komponentenkomplexitaet, KEIN Backend-Aufwand |
