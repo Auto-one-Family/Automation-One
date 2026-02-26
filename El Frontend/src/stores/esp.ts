@@ -881,9 +881,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   async function addActuator(deviceId: string, config: MockActuatorConfig): Promise<void> {
     error.value = null
+    const mock = isMock(deviceId)
+    logger.info('[DnD] addActuator called', { deviceId, actuatorType: config.actuator_type, gpio: config.gpio, isMock: mock })
 
     try {
-      if (isMock(deviceId)) {
+      if (mock) {
         // =========================================================================
         // MOCK-ESP: Debug-API verwenden (bestehende Logik)
         // =========================================================================

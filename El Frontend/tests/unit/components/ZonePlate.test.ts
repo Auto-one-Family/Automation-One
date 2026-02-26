@@ -18,6 +18,12 @@ vi.mock('@/stores/esp', () => ({
   }),
 }))
 
+vi.mock('@/shared/stores/logic.store', () => ({
+  useLogicStore: () => ({
+    crossEspConnections: [],
+  }),
+}))
+
 vi.mock('@/utils/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
@@ -57,17 +63,10 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('1/2')
   })
 
-  it('shows sensor count per device', () => {
+  it('shows total sensor/actuator counts in header', () => {
     const w = mountPlate()
-    // ZonePlate delegates per-device rendering to DeviceMiniCard
-    // ESP 1 has 1 sensor, ESP 2 has 2 sensors
-    expect(w.text()).toContain('1 Sensoren')
-    expect(w.text()).toContain('2 Sensoren')
-  })
-
-  it('shows actuator indicator per device', () => {
-    const w = mountPlate()
-    // ESP 1 has 1 actuator, shown as compact "1S·1A" in DeviceMiniCard
+    // Total: 3 sensors (1 + 2), 1 actuator — shown as meta pills
+    expect(w.text()).toContain('3S')
     expect(w.text()).toContain('1A')
   })
 
@@ -82,13 +81,11 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('Bewässerung')
   })
 
-  it('emits click with zoneId and originRect', async () => {
-    const w = mountPlate()
-    await w.find('.zone-plate').trigger('click')
-    expect(w.emitted('click')).toBeTruthy()
-    const payload = w.emitted('click')![0][0] as { zoneId: string; originRect: DOMRect }
-    expect(payload.zoneId).toBe('zone_1')
-    expect(payload.originRect).toBeDefined()
+  it('emits update:isExpanded on header click', async () => {
+    const w = mountPlate({ isExpanded: true })
+    await w.find('.zone-plate__header').trigger('click')
+    expect(w.emitted('update:isExpanded')).toBeTruthy()
+    expect(w.emitted('update:isExpanded')![0][0]).toBe(false)
   })
 
   it('has healthy class when all online', () => {

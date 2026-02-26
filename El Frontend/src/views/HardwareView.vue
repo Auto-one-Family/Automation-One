@@ -1,19 +1,19 @@
 <script setup lang="ts">
 /**
- * HardwareView — ESP & Hardware Topology
+ * HardwareView — ESP & Hardware Topology (Übersicht)
  *
- * Route: /hardware, /hardware/:zoneId, /hardware/:zoneId/:espId
+ * Route: /hardware, /hardware/:zoneId (scroll-anchor), /hardware/:zoneId/:espId
  *
- * Three-level zoom navigation showing hardware topology:
- * Level 1 (Ebene 1A): Zone Overview — all zones as tiles
- * Level 2 (Ebene 1B): ESP Overview — all ESPs of a zone
- * Level 3 (Ebene 1C): ESP Detail — single ESP with sensors/actuators
+ * Two-level navigation:
+ * Level 1: Zone Accordion — all zones as expandable sections with ESP cards
+ * Level 2: ESP Detail — single ESP with sensors/actuators (Orbital Layout)
  *
- * Extracted from the original DashboardView.vue to support
- * the new multi-route navigation structure.
+ * Zones are default-expanded, showing DeviceMiniCards directly.
+ * Click on ESP card navigates to Orbital Layout (Level 2).
+ * /hardware/:zoneId auto-expands and scrolls to that zone.
  */
 
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
@@ -41,9 +41,8 @@ import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
 import { EmptyState } from '@/shared/design/patterns'
 
-// Zoom components
+// Level components
 import ZonePlate from '@/components/dashboard/ZonePlate.vue'
-import ZoneDetailView from '@/components/zones/ZoneDetailView.vue'
 import DeviceDetailView from '@/components/esp/DeviceDetailView.vue'
 
 const router = useRouter()
@@ -56,11 +55,10 @@ const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
 const { register } = useKeyboardShortcuts()
 
 // =============================================================================
-// Zoom State (route-param-based instead of useZoomNavigation composable)
+// Navigation State (route-param based, 2 levels)
 // =============================================================================
-const currentLevel = computed<1 | 2 | 3>(() => {
-  if (route.params.espId) return 3
-  if (route.params.zoneId) return 2
+const currentLevel = computed<1 | 2>(() => {
+  if (route.params.espId) return 2
   return 1
 })
 
@@ -74,6 +72,69 @@ useSwipeNavigation(zoomContainerRef, {
     if (currentLevel.value > 1) zoomOut()
   },
 })
+
+// =============================================================================
+// Accordion State — per-zone expand/collapse
+// =============================================================================
+const expandedZones = ref<Set<string>>(new Set())
+const allZonesInitialized = ref(false)
+
+/** Initialize all zones as expanded when data first arrives */
+watch(
+  () => espStore.devices.length,
+  () => {
+    if (!allZonesInitialized.value && espStore.devices.length > 0) {
+      const allZoneIds = new Set(
+        espStore.devices
+          .filter(d => d.zone_id)
+          .map(d => d.zone_id!)
+      )
+      expandedZones.value = allZoneIds
+      allZonesInitialized.value = true
+    }
+  },
+  { immediate: true }
+)
+
+function isZoneExpanded(zoneId: string): boolean {
+  return expandedZones.value.has(zoneId)
+}
+
+function setZoneExpanded(zoneId: string, expanded: boolean) {
+  const next = new Set(expandedZones.value)
+  if (expanded) {
+    next.add(zoneId)
+  } else {
+    next.delete(zoneId)
+  }
+  expandedZones.value = next
+}
+
+/**
+ * When /hardware/:zoneId is navigated to (without espId),
+ * auto-expand that zone and scroll to it.
+ */
+watch(
+  () => [selectedZoneId.value, currentLevel.value] as const,
+  async ([zoneId, level]) => {
+    if (level === 1 && zoneId) {
+      // Expand the targeted zone
+      setZoneExpanded(zoneId, true)
+
+      // Scroll to the zone element
+      await nextTick()
+      const el = document.getElementById(`zone-${zoneId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+
+      // Replace route to clean /hardware/:zoneId → /hardware
+      // (keeps the zone expanded, removes the intermediate route from history)
+      router.replace({ name: 'hardware' })
+    }
+  },
+  { immediate: true }
+)
 
 // Modal states
 const settingsDevice = ref<ESPDevice | null>(null)
@@ -110,7 +171,7 @@ const unregisterEscape = register({
   handler: () => {
     if (currentLevel.value > 1) zoomOut()
   },
-  description: 'Zoom zurück zur Übersicht',
+  description: 'Zurück zur Übersicht',
   scope: 'global',
 })
 onUnmounted(() => unregisterEscape())
@@ -188,13 +249,8 @@ const zoneGroups = computed(() => {
 })
 
 // =============================================================================
-// Level 2 + Level 3 computed
+// Level 2 (Orbital) computed
 // =============================================================================
-
-const zoneDevices = computed(() => {
-  if (!selectedZoneId.value) return []
-  return filteredEsps.value.filter(d => d.zone_id === selectedZoneId.value)
-})
 
 const selectedDevice = computed(() => {
   if (!selectedEspId.value) return null
@@ -203,8 +259,8 @@ const selectedDevice = computed(() => {
 
 const selectedZoneName = computed(() => {
   if (!selectedZoneId.value) return ''
-  const first = zoneDevices.value[0]
-  return first?.zone_name || selectedZoneId.value
+  const device = espStore.devices.find(d => d.zone_id === selectedZoneId.value)
+  return device?.zone_name || selectedZoneId.value
 })
 
 const selectedDeviceName = computed(() => {
@@ -218,7 +274,14 @@ const selectedDeviceName = computed(() => {
 watch(
   [currentLevel, selectedZoneName, selectedDeviceName],
   ([level, zone, device]) => {
-    dashStore.breadcrumb = { level: level as 1 | 2 | 3, zoneName: zone, deviceName: device }
+    // Map new 2-level to dashStore's 3-level breadcrumb format
+    // Level 2 (Orbital) maps to old Level 3 for TopBar
+    const breadcrumbLevel = level === 2 ? 3 : 1
+    dashStore.breadcrumb = {
+      level: breadcrumbLevel as 1 | 2 | 3,
+      zoneName: zone,
+      deviceName: device,
+    }
   },
   { immediate: true }
 )
@@ -226,20 +289,14 @@ watch(
 // =============================================================================
 // Navigation helpers
 // =============================================================================
-function zoomToZone(zoneId: string) {
-  router.push({ name: 'hardware-zone', params: { zoneId } })
-}
-
 function zoomToDevice(deviceId: string) {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === deviceId)
-  const zoneId = device?.zone_id || selectedZoneId.value || 'unknown'
+  const zoneId = device?.zone_id || 'unknown'
   router.push({ name: 'hardware-esp', params: { zoneId, espId: deviceId } })
 }
 
 function zoomOut() {
-  if (currentLevel.value === 3) {
-    router.push({ name: 'hardware-zone', params: { zoneId: selectedZoneId.value || '' } })
-  } else if (currentLevel.value === 2) {
+  if (currentLevel.value === 2) {
     router.push({ name: 'hardware' })
   }
 }
@@ -247,10 +304,6 @@ function zoomOut() {
 // =============================================================================
 // Event Handlers
 // =============================================================================
-
-function onZonePlateClick(payload: { zoneId: string; originRect: DOMRect }) {
-  zoomToZone(payload.zoneId)
-}
 
 function onDeviceCardClick(payload: { deviceId: string; originRect: DOMRect }) {
   zoomToDevice(payload.deviceId)
@@ -363,8 +416,8 @@ function formatTimeAgo(timestamp: number): string {
 </script>
 
 <template>
-  <div :class="['hardware-view', 'hardware-view--level-' + currentLevel]">
-    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
+  <div :class="['hardware-view', currentLevel === 2 ? 'hardware-view--detail' : '']">
+    <!-- View Tab Bar (Übersicht / Monitor / Editor) -->
     <ViewTabBar />
 
     <!-- Rules Activity Ribbon -->
@@ -407,25 +460,27 @@ function formatTimeAgo(timestamp: number): string {
       <button class="btn-secondary" @click="resetFilters">Filter zurücksetzen</button>
     </div>
 
-    <!-- Three-Level Hardware View -->
+    <!-- Two-Level Hardware View -->
     <template v-else>
       <div class="hardware-main-layout">
         <div ref="zoomContainerRef" class="zoom-container">
 
-          <!-- LEVEL 1: Zone Overview -->
+          <!-- LEVEL 1: Zone Accordion Overview -->
           <div v-if="currentLevel === 1" class="zoom-level--active">
-            <div class="zone-plates-grid">
+            <div class="zone-accordion-list">
               <div v-if="zoneGroups.length === 0" class="no-zones-hint">
                 <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
                 <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
               </div>
               <ZonePlate
                 v-for="group in zoneGroups"
+                :id="`zone-${group.zoneId}`"
                 :key="group.zoneId"
                 :zone-id="group.zoneId"
                 :zone-name="group.zoneName"
                 :devices="group.devices"
-                @click="onZonePlateClick"
+                :is-expanded="isZoneExpanded(group.zoneId)"
+                @update:is-expanded="setZoneExpanded(group.zoneId, $event)"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"
               />
@@ -442,23 +497,8 @@ function formatTimeAgo(timestamp: number): string {
             </button>
           </div>
 
-          <!-- LEVEL 2: Zone Detail -->
+          <!-- LEVEL 2: Device Detail (Orbital Layout) -->
           <div v-else-if="currentLevel === 2" class="zoom-level--active">
-            <ZoneDetailView
-              v-if="selectedZoneId"
-              :zone-id="selectedZoneId"
-              :zone-name="selectedZoneName"
-              :devices="zoneDevices"
-              @device-click="onDeviceCardClick"
-              @back="zoomOut()"
-              @heartbeat="handleHeartbeat"
-              @delete="handleDelete"
-              @settings="handleSettings"
-            />
-          </div>
-
-          <!-- LEVEL 3: Device Detail -->
-          <div v-else-if="currentLevel === 3" class="zoom-level--active">
             <DeviceDetailView
               v-if="selectedDevice"
               :device="selectedDevice"
@@ -476,8 +516,8 @@ function formatTimeAgo(timestamp: number): string {
 
         </div>
 
-        <!-- Component Sidebar (Level 3 only) -->
-        <ComponentSidebar v-show="currentLevel === 3" />
+        <!-- Component Sidebar (Level 2 / Orbital only) -->
+        <ComponentSidebar v-show="currentLevel === 2" />
       </div>
     </template>
 
@@ -551,7 +591,7 @@ function formatTimeAgo(timestamp: number): string {
 
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════════════════
-   HARDWARE VIEW — Reuses DashboardView styling
+   HARDWARE VIEW — Two-level zone accordion + orbital detail
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .hardware-view {
@@ -565,8 +605,7 @@ function formatTimeAgo(timestamp: number): string {
   transition: background-color var(--transition-slow);
 }
 
-.hardware-view--level-2 { background-color: var(--color-bg-level-2); }
-.hardware-view--level-3 { background-color: var(--color-bg-level-3); }
+.hardware-view--detail { background-color: var(--color-bg-level-3); }
 
 .hardware-main-layout {
   display: flex;
@@ -590,22 +629,14 @@ function formatTimeAgo(timestamp: number): string {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Zone Plates Grid */
-.zone-plates-grid {
-  display: grid;
+/* Zone Accordion List — vertical stack */
+.zone-accordion-list {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-}
-
-@media (min-width: 1600px) {
-  .zone-plates-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
-    gap: var(--space-6);
-  }
 }
 
 .no-zones-hint {
-  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -683,7 +714,7 @@ function formatTimeAgo(timestamp: number): string {
 
 @media (max-width: 640px) {
   .hardware-view { padding-bottom: 80px; }
-  .zone-plates-grid { grid-template-columns: 1fr; gap: var(--space-3); }
+  .zone-accordion-list { gap: var(--space-3); }
   .hardware-main-layout { flex-direction: column; }
 }
 </style>

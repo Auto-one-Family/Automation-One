@@ -13,8 +13,9 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+// Icons not needed - BaseModal provides close button
 import GpioPicker from './GpioPicker.vue'
+import { BaseModal } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import {
@@ -83,13 +84,33 @@ watch(() => newActuator.value.actuator_type, (newType) => {
   if (!supportsInvertedLogic(newType)) newActuator.value.inverted_logic = false
 })
 
-// Pre-select actuator type when dropped from sidebar
+// Reset form and apply initial type when modal opens
+watch(() => props.modelValue, (isOpen) => {
+  if (isOpen) {
+    resetForm()
+    // Apply drag-provided actuator type (if any)
+    if (props.initialActuatorType) {
+      const match = actuatorTypeOptions.find(
+        opt => opt.value.toLowerCase() === props.initialActuatorType!.toLowerCase()
+      )
+      if (match) {
+        logger.info('[DnD] Pre-selecting actuator type from drag', { type: match.value })
+        newActuator.value.actuator_type = match.value
+      } else {
+        logger.warn('[DnD] Actuator type from drag not found in options', { type: props.initialActuatorType })
+      }
+    }
+  }
+})
+
+// Pre-select actuator type when dropped from sidebar (safety net for mid-open prop changes)
 watch(() => props.initialActuatorType, (newType) => {
   if (newType) {
     const match = actuatorTypeOptions.find(
       opt => opt.value.toLowerCase() === newType.toLowerCase()
     )
     if (match) {
+      logger.info('[DnD] initialActuatorType watcher fired', { type: match.value })
       newActuator.value.actuator_type = match.value
     }
   }
@@ -143,78 +164,158 @@ function onActuatorAuxGpioValidation(valid: boolean): void {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="modelValue" class="modal-overlay" @click.self="close">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3 class="modal-title">Aktor hinzufügen</h3>
-          <button class="modal-close" @click="close"><X :size="20" /></button>
-        </div>
+  <BaseModal
+    :open="modelValue"
+    title="Aktor hinzufügen"
+    max-width="max-w-md"
+    @update:open="(v: boolean) => emit('update:modelValue', v)"
+    @close="close"
+  >
+    <div class="modal-form">
+      <!-- GPIO -->
+      <div class="form-group">
+        <label class="form-label">GPIO Pin</label>
+        <GpioPicker v-model="newActuator.gpio" :esp-id="espId" component-category="actuator" :show-recommendations="true" @validation="onActuatorGpioValidation" />
+      </div>
 
-        <div class="modal-body">
-          <!-- GPIO -->
-          <div class="form-group">
-            <label class="form-label">GPIO Pin</label>
-            <GpioPicker v-model="newActuator.gpio" :esp-id="espId" component-category="actuator" :show-recommendations="true" @validation="onActuatorGpioValidation" />
-          </div>
+      <!-- Actuator Type -->
+      <div class="form-group">
+        <label class="form-label">Aktor-Typ</label>
+        <select v-model="newActuator.actuator_type" class="form-select">
+          <option v-for="opt in actuatorTypeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
+      </div>
 
-          <!-- Actuator Type -->
-          <div class="form-group">
-            <label class="form-label">Aktor-Typ</label>
-            <select v-model="newActuator.actuator_type" class="form-select">
-              <option v-for="opt in actuatorTypeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-            </select>
-          </div>
+      <!-- Name -->
+      <div class="form-group">
+        <label class="form-label">Name (optional)</label>
+        <input v-model="newActuator.name" type="text" class="form-input" placeholder="z.B. Wasserpumpe 1" maxlength="100" />
+      </div>
 
-          <!-- Name -->
-          <div class="form-group">
-            <label class="form-label">Name (optional)</label>
-            <input v-model="newActuator.name" type="text" class="form-input" placeholder="z.B. Wasserpumpe 1" maxlength="100" />
-          </div>
+      <!-- Aux GPIO -->
+      <div v-if="supportsAuxGpio(newActuator.actuator_type)" class="form-group">
+        <label class="form-label">Aux-GPIO (Direction-Pin) <span class="form-label-hint">Optional</span></label>
+        <GpioPicker v-model="actuatorAuxGpio" :esp-id="espId" component-category="actuator" :show-recommendations="true" :allow-empty="true" empty-value="255" empty-label="Nicht verwendet" @validation="onActuatorAuxGpioValidation" />
+      </div>
 
-          <!-- Aux GPIO -->
-          <div v-if="supportsAuxGpio(newActuator.actuator_type)" class="form-group">
-            <label class="form-label">Aux-GPIO (Direction-Pin) <span class="form-label-hint">Optional</span></label>
-            <GpioPicker v-model="actuatorAuxGpio" :esp-id="espId" component-category="actuator" :show-recommendations="true" :allow-empty="true" empty-value="255" empty-label="Nicht verwendet" @validation="onActuatorAuxGpioValidation" />
-          </div>
+      <!-- PWM -->
+      <div v-if="isPwmActuator(newActuator.actuator_type)" class="form-group">
+        <label class="form-label">PWM-Wert <span class="form-label-hint">{{ Math.round((newActuator.pwm_value || 0) * 100) }}%</span></label>
+        <input v-model.number="newActuator.pwm_value" type="range" min="0" max="1" step="0.01" class="form-range" />
+      </div>
 
-          <!-- PWM -->
-          <div v-if="isPwmActuator(newActuator.actuator_type)" class="form-group">
-            <label class="form-label">PWM-Wert <span class="form-label-hint">{{ Math.round((newActuator.pwm_value || 0) * 100) }}%</span></label>
-            <input v-model.number="newActuator.pwm_value" type="range" min="0" max="1" step="0.01" class="form-range" />
-          </div>
+      <!-- Max Runtime -->
+      <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
+        <label class="form-label">Max. Laufzeit <span class="form-label-hint">Sekunden (0 = kein Limit)</span></label>
+        <input v-model.number="newActuator.max_runtime_seconds" type="number" min="0" max="86400" class="form-input" placeholder="3600" />
+      </div>
 
-          <!-- Max Runtime -->
-          <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
-            <label class="form-label">Max. Laufzeit <span class="form-label-hint">Sekunden (0 = kein Limit)</span></label>
-            <input v-model.number="newActuator.max_runtime_seconds" type="number" min="0" max="86400" class="form-input" placeholder="3600" />
-          </div>
+      <!-- Cooldown -->
+      <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
+        <label class="form-label">Cooldown <span class="form-label-hint">Sekunden</span></label>
+        <input v-model.number="newActuator.cooldown_seconds" type="number" min="0" max="3600" class="form-input" placeholder="30" />
+      </div>
 
-          <!-- Cooldown -->
-          <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
-            <label class="form-label">Cooldown <span class="form-label-hint">Sekunden</span></label>
-            <input v-model.number="newActuator.cooldown_seconds" type="number" min="0" max="3600" class="form-input" placeholder="30" />
-          </div>
-
-          <!-- Inverted Logic -->
-          <div v-if="supportsInvertedLogic(newActuator.actuator_type)" class="form-group form-group--checkbox">
-            <label class="form-checkbox">
-              <input v-model="newActuator.inverted_logic" type="checkbox" />
-              <span class="form-checkbox-label">Invertierte Logik (LOW = ON)</span>
-            </label>
-            <p class="form-hint">Für Relais-Module die bei LOW schalten</p>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button class="btn btn--secondary" @click="close">Abbrechen</button>
-          <button class="btn btn--primary" :disabled="!actuatorGpioValid || (supportsAuxGpio(newActuator.actuator_type) && !actuatorAuxGpioValid)" @click="addActuator">Hinzufügen</button>
-        </div>
+      <!-- Inverted Logic -->
+      <div v-if="supportsInvertedLogic(newActuator.actuator_type)" class="form-group">
+        <label class="form-checkbox">
+          <input v-model="newActuator.inverted_logic" type="checkbox" />
+          <span class="form-checkbox-label">Invertierte Logik (LOW = ON)</span>
+        </label>
+        <p class="form-hint">Für Relais-Module die bei LOW schalten</p>
       </div>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" @click="close">Abbrechen</button>
+        <button class="btn btn-primary" :disabled="!actuatorGpioValid || (supportsAuxGpio(newActuator.actuator_type) && !actuatorAuxGpioValid)" @click="addActuator">Hinzufügen</button>
+      </div>
+    </template>
+  </BaseModal>
 </template>
 
 <style scoped>
-/* Modal styles are inherited from global/parent scope */
+/* ── Modal Form Layout ─────────────────────────────────────────────── */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+/* ── Form Elements ─────────────────────────────────────────────────── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.form-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.form-label-hint {
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 0.25rem;
+}
+
+.form-input,
+.form-select {
+  padding: 0.625rem 0.75rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  transition: border-color 0.15s ease;
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--color-iridescent-1);
+}
+
+.form-range {
+  width: 100%;
+  height: 0.375rem;
+  border-radius: 0.25rem;
+  background: var(--color-bg-tertiary);
+  accent-color: var(--color-iridescent-1);
+  cursor: pointer;
+}
+
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.form-checkbox input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-iridescent-1);
+  cursor: pointer;
+}
+
+.form-checkbox-label {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+.form-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
 </style>

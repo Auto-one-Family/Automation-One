@@ -31,25 +31,25 @@ const router = createRouter({
         },
 
         // ═══════════════════════════════════════════════════════════════════
-        // HARDWARE VIEW — ESP & Hardware Topology (/hardware)
+        // HARDWARE VIEW — Übersicht: Zone Accordion + ESP Orbital (/hardware)
         // ═══════════════════════════════════════════════════════════════════
         {
           path: 'hardware',
           name: 'hardware',
           component: () => import('@/views/HardwareView.vue'),
-          meta: { title: 'Hardware' },
+          meta: { title: 'Übersicht' },
         },
         {
           path: 'hardware/:zoneId',
           name: 'hardware-zone',
           component: () => import('@/views/HardwareView.vue'),
-          meta: { title: 'Hardware' },
+          meta: { title: 'Übersicht' },
         },
         {
           path: 'hardware/:zoneId/:espId',
           name: 'hardware-esp',
           component: () => import('@/views/HardwareView.vue'),
-          meta: { title: 'Hardware' },
+          meta: { title: 'Übersicht' },
         },
 
         // ═══════════════════════════════════════════════════════════════════

@@ -148,7 +148,11 @@ function onDragEnter(event: DragEvent) {
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy'
     }
-    log('isDragOver = true (sensor/actuator type from sidebar)')
+    logger.info('[DnD] Drag ENTER on ESP', {
+      espId: espId.value,
+      isSensor: dragStore.isDraggingSensorType,
+      isActuator: dragStore.isDraggingActuatorType,
+    })
   }
   // Sensor-Satellite-Drags (für Chart) werden durchgelassen zur AnalysisDropZone
 }
@@ -203,9 +207,10 @@ function onDrop(event: DragEvent) {
     return
   }
 
-  log('DROP on ESPLayout', {
+  logger.info('[DnD] DROP on ESP', {
+    espId: espId.value,
     hasJsonData: !!event.dataTransfer?.getData('application/json'),
-    types: event.dataTransfer?.types,
+    types: event.dataTransfer?.types ? Array.from(event.dataTransfer.types) : [],
   })
 
   event.preventDefault()
@@ -222,11 +227,11 @@ function onDrop(event: DragEvent) {
     log('DROP payload parsed', payload)
 
     if (payload.action === 'add-sensor') {
-      log('DROP - add-sensor action, opening modal', { sensorType: payload.sensorType })
+      logger.info('[DnD] Opening AddSensorModal', { sensorType: payload.sensorType, espId: espId.value })
       droppedSensorType.value = payload.sensorType || null
       showAddSensorModal.value = true
     } else if (payload.action === 'add-actuator') {
-      log('DROP - add-actuator action, opening modal', { actuatorType: payload.actuatorType })
+      logger.info('[DnD] Opening AddActuatorModal', { actuatorType: payload.actuatorType, espId: espId.value })
       droppedActuatorType.value = payload.actuatorType || null
       showAddActuatorModal.value = true
     } else if (payload.type === 'sensor') {
@@ -400,6 +405,21 @@ watch(
     }
   }
 )
+
+// Reset dropped types when modals close → ensures watcher fires on next drag
+// (Prevents stale state when user closes modal without adding, then drags same type again)
+watch(showAddSensorModal, (isOpen) => {
+  if (!isOpen) {
+    droppedSensorType.value = null
+    logger.info('[DnD] Sensor modal closed, droppedSensorType reset')
+  }
+})
+watch(showAddActuatorModal, (isOpen) => {
+  if (!isOpen) {
+    droppedActuatorType.value = null
+    logger.info('[DnD] Actuator modal closed, droppedActuatorType reset')
+  }
+})
 </script>
 
 <template>

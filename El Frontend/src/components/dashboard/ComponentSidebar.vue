@@ -43,7 +43,9 @@ import {
   type ActuatorTypeConfig,
 } from '@/utils/actuatorDefaults'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
+import { createLogger } from '@/utils/logger'
 
+const logger = createLogger('ComponentSidebar')
 const dragStore = useDragStateStore()
 
 // Sidebar collapsed state
@@ -170,6 +172,7 @@ function onDragStart(event: DragEvent, item: SidebarItem) {
     event.dataTransfer.setData('application/json', JSON.stringify(dragData))
     event.dataTransfer.setData('text/plain', sensorType)
     event.dataTransfer.effectAllowed = 'copy'
+    logger.info('[DnD] Drag START sensor', { sensorType, label: sensorConfig.label })
     dragStore.startSensorTypeDrag(dragData)
   } else {
     const actuatorConfig = item.config as ActuatorTypeConfig
@@ -184,6 +187,7 @@ function onDragStart(event: DragEvent, item: SidebarItem) {
     event.dataTransfer.setData('application/json', JSON.stringify(dragData))
     event.dataTransfer.setData('text/plain', actuatorType)
     event.dataTransfer.effectAllowed = 'copy'
+    logger.info('[DnD] Drag START actuator', { actuatorType, label: actuatorConfig.label })
     dragStore.startActuatorTypeDrag(dragData)
   }
 
@@ -191,6 +195,7 @@ function onDragStart(event: DragEvent, item: SidebarItem) {
 }
 
 function onDragEnd() {
+  logger.info('[DnD] Drag END')
   dragStore.endDrag()
   draggingItem.value = null
 }
