@@ -31,6 +31,14 @@ vi.mock('@/shared/stores', () => ({
   }),
 }))
 
+vi.mock('@/shared/stores/ui.store', () => ({
+  useUiStore: () => ({
+    showConfirmDialog: vi.fn(),
+    showContextMenu: vi.fn(),
+    hideContextMenu: vi.fn(),
+  }),
+}))
+
 vi.mock('@/utils/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
@@ -110,6 +118,6 @@ describe('ZonePlate', () => {
   it('handles empty devices', () => {
     const w = mountPlate({ devices: [] })
     expect(w.text()).toContain('0 ESPs')
-    expect(w.text()).toContain('0/0 Online')
+    expect(w.text()).toContain('- Leer')
   })
 })

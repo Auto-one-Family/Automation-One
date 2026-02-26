@@ -106,8 +106,8 @@ describe('getSensorUnit', () => {
     expect(getSensorUnit('EC')).toBe('µS/cm')
   })
 
-  it('returns % RH for humidity', () => {
-    expect(getSensorUnit('sht31_humidity')).toBe('% RH')
+  it('returns %RH for humidity', () => {
+    expect(getSensorUnit('sht31_humidity')).toBe('%RH')
   })
 })
 
@@ -145,7 +145,7 @@ describe('getSensorConfig', () => {
   it('returns full config object for DS18B20', () => {
     const config = getSensorConfig('DS18B20')
     expect(config).toBeDefined()
-    expect(config?.label).toBe('Temperatur (DS18B20)')
+    expect(config?.label).toBe('Temperatur')
     expect(config?.unit).toBe('°C')
     expect(config?.min).toBe(-55)
     expect(config?.max).toBe(125)
@@ -172,7 +172,7 @@ describe('getSensorConfig', () => {
 
 describe('getSensorLabel', () => {
   it('returns label for DS18B20', () => {
-    expect(getSensorLabel('DS18B20')).toBe('Temperatur (DS18B20)')
+    expect(getSensorLabel('DS18B20')).toBe('Temperatur')
   })
 
   it('returns label for pH', () => {
@@ -184,7 +184,7 @@ describe('getSensorLabel', () => {
   })
 
   it('returns label for multi-value sensor', () => {
-    expect(getSensorLabel('sht31_temp')).toBe('Temperatur (SHT31)')
+    expect(getSensorLabel('sht31_temp')).toBe('Temperatur')
   })
 })
 
@@ -251,7 +251,7 @@ describe('getSensorTypeOptions', () => {
     const options = getSensorTypeOptions()
     const ds18b20 = options.find(opt => opt.value === 'DS18B20')
     expect(ds18b20).toBeDefined()
-    expect(ds18b20?.label).toBe('Temperatur (DS18B20)')
+    expect(ds18b20?.label).toBe('Temperatur')
   })
 
   it('contains pH option', () => {
@@ -284,7 +284,7 @@ describe('formatSensorValueWithUnit', () => {
   })
 
   it('formats humidity value', () => {
-    expect(formatSensorValueWithUnit(65.5, 'sht31_humidity')).toBe('65.5 % RH')
+    expect(formatSensorValueWithUnit(65.5, 'sht31_humidity')).toBe('65.5 %RH')
   })
 
   it('formats EC value', () => {

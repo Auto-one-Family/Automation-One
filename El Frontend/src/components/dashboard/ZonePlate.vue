@@ -58,13 +58,6 @@ const dragStore = useDragStateStore()
 const uiStore = useUiStore()
 const plateRef = ref<HTMLElement | null>(null)
 
-// Local copy of devices for VueDraggable v-model.
-// Syncs with filteredDevices (respects subzone filter).
-const localDevices = ref<ESPDevice[]>([...props.devices])
-watch([() => props.devices, () => activeSubzoneFilter.value], () => {
-  localDevices.value = [...filteredDevices.value]
-})
-
 // ── Status Aggregation ───────────────────────────────────────────────────
 const stats = computed(() => {
   const total = props.devices.length
@@ -148,6 +141,11 @@ const filteredDevices = computed(() => {
   return props.devices.filter(d =>
     (d.subzone_id || null) === activeSubzoneFilter.value
   )
+})
+
+const localDevices = ref<ESPDevice[]>([...props.devices])
+watch([() => props.devices, () => activeSubzoneFilter.value], () => {
+  localDevices.value = [...filteredDevices.value]
 })
 
 // ── Subzone Grouping ─────────────────────────────────────────────────────
