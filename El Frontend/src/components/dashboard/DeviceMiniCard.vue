@@ -17,13 +17,13 @@ import type { ESPDevice } from '@/api/esp'
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
 import {
-  Settings2, MoreVertical, Trash2, ArrowRightLeft,
-  Thermometer, Droplets, Droplet, Zap, Sun, Gauge, Wind, Activity,
+  Settings2, MoreVertical, Trash2, ArrowRightLeft, ChevronRight,
+  Thermometer, Droplets, Droplet, Zap, Sun, Gauge, Wind, Activity, Waves, Cloud, ToggleLeft, Layers,
 } from 'lucide-vue-next'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import { getESPStatus, getESPStatusDisplay, type ESPStatus } from '@/composables/useESPStatus'
 import { useUiStore } from '@/shared/stores/ui.store'
-import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
 
 interface Props {
   device: ESPDevice
@@ -72,93 +72,72 @@ const lastSeenText = computed(() => {
 
 // ── Sensor Icon Map ──────────────────────────────────────────────────────
 const SENSOR_ICON_MAP: Record<string, Component> = {
-  Thermometer,
-  Droplet,
-  Droplets,
-  Zap,
-  Sun,
-  Gauge,
-  Wind,
-  Activity,
+  Thermometer, Droplet, Droplets, Zap, Sun, Gauge, Wind, Activity,
+  Waves, Cloud, ToggleLeft, Layers,
 }
 
-function getSensorIcon(sensorType: string): Component {
-  const config = SENSOR_TYPE_CONFIG[sensorType]
-  if (config?.icon && SENSOR_ICON_MAP[config.icon]) {
-    return SENSOR_ICON_MAP[config.icon]
-  }
-  return Activity
+function resolveIcon(iconName: string): Component {
+  return SENSOR_ICON_MAP[iconName] || Activity
 }
 
-// ── Sensor Display ───────────────────────────────────────────────────────
+// ── Sensor Display (via groupSensorsByBaseType) ──────────────────────────
 interface SensorDisplay {
-  name: string
+  label: string
   value: string
   unit: string
-  percent: number
-  qualityColor: string
+  valueColor: string
   icon: Component
 }
 
 const MAX_VISIBLE_SENSORS = 4
 
-/** Map quality string to CSS color variable */
-function qualityToColor(quality: string | undefined): string {
-  if (!quality) return 'var(--color-accent)'
-  const q = quality.toLowerCase()
-  if (q === 'good' || q === 'excellent') return 'var(--color-success)'
-  if (q === 'suspect' || q === 'warning' || q === 'degraded') return 'var(--color-warning)'
-  if (q === 'bad' || q === 'error' || q === 'critical') return 'var(--color-error)'
-  return 'var(--color-accent)'
+/** Map quality to CSS color for value text */
+function qualityToValueColor(quality: 'normal' | 'warning' | 'stale' | 'unknown', isOnline: boolean): string {
+  if (!isOnline) return 'var(--color-text-muted)'
+  if (quality === 'warning') return 'var(--color-warning)'
+  if (quality === 'stale') return 'var(--color-text-muted)'
+  if (quality === 'unknown') return 'var(--color-text-muted)'
+  return 'var(--color-text-primary)'
 }
 
-/** Fallback range for unknown sensor types */
-function getFallbackRange(sensor: any): { min: number; max: number } {
-  const type = (sensor.sensor_type || sensor.type || '').toLowerCase()
-  if (type.includes('temp') || type.includes('ds18b20')) return { min: -10, max: 50 }
-  if (type.includes('humid') || type.includes('sht3')) return { min: 0, max: 100 }
-  if (type.includes('ph')) return { min: 0, max: 14 }
-  if (type.includes('light') || type.includes('lux')) return { min: 0, max: 10000 }
-  if (type.includes('moisture') || type.includes('soil')) return { min: 0, max: 100 }
-  return { min: 0, max: 100 }
+/** Format a sensor value with decimals from config */
+function formatValue(value: number | null, quality: 'normal' | 'warning' | 'stale' | 'unknown'): string {
+  if (value === null || value === undefined) return '--'
+  if (quality === 'stale') return `${value}?`
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
 const sensorDisplays = computed((): SensorDisplay[] => {
-  const sensors = props.device.sensors as any[] | undefined
+  const sensors = props.device.sensors as RawSensor[] | undefined
   if (!sensors || sensors.length === 0) return []
 
+  const grouped = groupSensorsByBaseType(sensors)
   const result: SensorDisplay[] = []
-  for (const sensor of sensors) {
-    if (result.length >= MAX_VISIBLE_SENSORS) break
-    if (sensor.raw_value != null) {
-      const sType = sensor.sensor_type || sensor.type || ''
-      const config = SENSOR_TYPE_CONFIG[sType]
-      const range = config
-        ? { min: config.min, max: config.max }
-        : getFallbackRange(sensor)
-      const val = Number(sensor.raw_value)
-      const clamped = Math.max(range.min, Math.min(range.max, val))
-      const percent = ((clamped - range.min) / (range.max - range.min)) * 100
 
+  for (const group of grouped) {
+    for (const val of group.values) {
+      if (result.length >= MAX_VISIBLE_SENSORS) break
       result.push({
-        name: sensor.name || config?.label || sType || `GPIO ${sensor.gpio}`,
-        value: String(sensor.raw_value),
-        unit: sensor.unit || config?.unit || '',
-        percent: Math.round(percent),
-        qualityColor: isDeviceOnline.value ? qualityToColor(sensor.quality) : 'var(--color-text-muted)',
-        icon: getSensorIcon(sType),
+        label: val.label,
+        value: formatValue(val.value, val.quality),
+        unit: val.unit,
+        valueColor: qualityToValueColor(val.quality, isDeviceOnline.value),
+        icon: resolveIcon(val.icon),
       })
     }
+    if (result.length >= MAX_VISIBLE_SENSORS) break
   }
+
   return result
 })
 
-/** Number of sensors with values beyond the visible limit */
+/** Number of sensor value rows beyond the visible limit */
 const extraSensorsCount = computed(() => {
-  const sensors = props.device.sensors as any[] | undefined
+  const sensors = props.device.sensors as RawSensor[] | undefined
   if (!sensors) return 0
-  const withValue = sensors.filter(s => s.raw_value != null).length
-  return Math.max(0, withValue - MAX_VISIBLE_SENSORS)
+  const grouped = groupSensorsByBaseType(sensors)
+  const totalValues = grouped.reduce((sum, g) => sum + g.values.length, 0)
+  return Math.max(0, totalValues - MAX_VISIBLE_SENSORS)
 })
 
 /** Fallback text when no sensor data */
@@ -260,7 +239,7 @@ function openCardMenu(event: MouseEvent) {
         {{ subzoneName }}
       </div>
 
-      <!-- Sensor values with type icons and spark-bars (max 4) -->
+      <!-- Sensor values with type icons (max 4, no spark-bars) -->
       <div v-if="sensorDisplays.length > 0" class="device-mini-card__sensors">
         <div
           v-for="(sensor, idx) in sensorDisplays"
@@ -268,18 +247,9 @@ function openCardMenu(event: MouseEvent) {
           class="device-mini-card__sensor"
         >
           <component :is="sensor.icon" class="device-mini-card__sensor-icon" />
-          <span class="device-mini-card__sensor-name">{{ sensor.name }}</span>
-          <span class="device-mini-card__sensor-value">{{ sensor.value }}</span>
+          <span class="device-mini-card__sensor-name">{{ sensor.label }}</span>
+          <span class="device-mini-card__sensor-value" :style="{ color: sensor.valueColor }">{{ sensor.value }}</span>
           <span class="device-mini-card__sensor-unit">{{ sensor.unit }}</span>
-          <div class="device-mini-card__spark-bar">
-            <div
-              class="device-mini-card__spark-fill"
-              :style="{
-                width: sensor.percent + '%',
-                backgroundColor: sensor.qualityColor,
-              }"
-            />
-          </div>
         </div>
         <div v-if="extraSensorsCount > 0" class="device-mini-card__sensors-overflow">
           +{{ extraSensorsCount }} weitere
@@ -290,17 +260,9 @@ function openCardMenu(event: MouseEvent) {
       <div v-else-if="sensorFallback" class="device-mini-card__values">
         {{ sensorFallback }}
       </div>
-    </template>
 
-    <!-- Action row: Öffnen + overflow menu -->
-    <template #footer>
-      <div class="device-mini-card__actions">
-        <button
-          class="device-mini-card__open-btn"
-          @click.stop="handleClick"
-        >
-          Öffnen
-        </button>
+      <!-- Drill-down chevron hint -->
+      <div class="device-mini-card__drill-down">
         <button
           class="device-mini-card__overflow-btn"
           title="Weitere Aktionen"
@@ -308,6 +270,7 @@ function openCardMenu(event: MouseEvent) {
         >
           <MoreVertical class="device-mini-card__overflow-icon" />
         </button>
+        <ChevronRight class="device-mini-card__chevron-hint" />
       </div>
     </template>
   </ESPCardBase>
@@ -355,7 +318,7 @@ function openCardMenu(event: MouseEvent) {
 .device-mini-card:hover {
   background: var(--color-bg-quaternary);
   border-color: var(--glass-border-hover);
-  transform: translateY(-2px);
+  transform: translateY(-2px) scale(1.01);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   filter: brightness(1.05);
 }
@@ -535,20 +498,6 @@ function openCardMenu(event: MouseEvent) {
   flex-shrink: 0;
 }
 
-.device-mini-card__spark-bar {
-  flex: 0 0 28px;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.device-mini-card__spark-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width var(--transition-base);
-}
-
 .device-mini-card__sensors-overflow {
   font-size: 10px;
   color: var(--color-text-muted);
@@ -564,10 +513,6 @@ function openCardMenu(event: MouseEvent) {
   color: var(--color-text-secondary);
 }
 
-.device-mini-card--stale .device-mini-card__spark-fill {
-  opacity: 0.4;
-}
-
 /* Fallback text */
 .device-mini-card__values {
   font-size: var(--text-xs);
@@ -578,30 +523,30 @@ function openCardMenu(event: MouseEvent) {
   white-space: nowrap;
 }
 
-/* ── Action row ── */
-.device-mini-card__actions {
+/* ── Drill-down row (chevron + overflow) ── */
+.device-mini-card__drill-down {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-1);
   padding-top: 2px;
 }
 
-.device-mini-card__open-btn {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--color-accent-bright);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  transition: color var(--transition-fast), background var(--transition-fast);
+.device-mini-card__chevron-hint {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  flex-shrink: 0;
 }
 
-.device-mini-card__open-btn:hover {
-  color: var(--color-iridescent-2);
-  background: rgba(96, 165, 250, 0.08);
+.device-mini-card:hover .device-mini-card__chevron-hint {
+  opacity: 0.6;
+}
+
+.device-mini-card:hover .device-mini-card__chevron-hint:hover {
+  transform: translateX(2px);
 }
 
 .device-mini-card__overflow-btn {
