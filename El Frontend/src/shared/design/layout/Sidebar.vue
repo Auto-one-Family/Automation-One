@@ -10,7 +10,7 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import {
   X,
-  Cpu,
+  LayoutDashboard,
   Workflow,
   Monitor,
   Users,
@@ -78,8 +78,8 @@ function handleNavClick() {
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
-        <Cpu class="sidebar__link-icon" />
-        <span>Hardware</span>
+        <LayoutDashboard class="sidebar__link-icon" />
+        <span>Dashboard</span>
       </RouterLink>
 
       <RouterLink

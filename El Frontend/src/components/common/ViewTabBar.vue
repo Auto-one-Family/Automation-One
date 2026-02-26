@@ -10,14 +10,14 @@
  */
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Cpu, Activity, LayoutGrid } from 'lucide-vue-next'
+import { LayoutDashboard, Activity, PenTool } from 'lucide-vue-next'
 
 const route = useRoute()
 
 const tabs = [
-  { path: '/hardware', label: 'Hardware', icon: Cpu },
+  { path: '/hardware', label: 'Übersicht', icon: LayoutDashboard },
   { path: '/monitor', label: 'Monitor', icon: Activity },
-  { path: '/custom-dashboard', label: 'Dashboard', icon: LayoutGrid },
+  { path: '/custom-dashboard', label: 'Editor', icon: PenTool },
 ] as const
 
 const activeTab = computed(() => {
