@@ -20,11 +20,13 @@ let mockIsPendingLoading = false
 
 vi.mock('@/stores/esp', () => ({
   useEspStore: () => ({
+    devices: [],
     pendingDevices: mockPendingDevices,
     isPendingLoading: mockIsPendingLoading,
     fetchPendingDevices: mockFetchPendingDevices,
     approveDevice: mockApproveDevice,
     rejectDevice: mockRejectDevice,
+    getDeviceId: (d: any) => d?.device_id || d?.esp_id || '',
   }),
 }))
 
@@ -140,28 +142,26 @@ describe('PendingDevicesPanel', () => {
   })
 
   describe('tab switching', () => {
-    it('starts on the pending tab', () => {
+    it('starts on the devices tab', () => {
       const w = mountPanel({ isOpen: true })
       const tabs = w.findAll('.pending-panel__tab')
       expect(tabs[0].classes()).toContain('active')
-      expect(tabs[1].classes()).not.toContain('active')
+      expect(tabs[0].text()).toContain('Geräte')
     })
 
     it('switches to info tab on click', async () => {
       const w = mountPanel({ isOpen: true })
       const tabs = w.findAll('.pending-panel__tab')
-      await tabs[1].trigger('click')
+      await tabs[2].trigger('click')
 
-      // After clicking, info tab should be active
       const updatedTabs = w.findAll('.pending-panel__tab')
-      expect(updatedTabs[1].classes()).toContain('active')
-      expect(updatedTabs[0].classes()).not.toContain('active')
+      expect(updatedTabs[2].classes()).toContain('active')
     })
 
     it('info tab shows connection guide content', async () => {
       const w = mountPanel({ isOpen: true })
       const tabs = w.findAll('.pending-panel__tab')
-      await tabs[1].trigger('click')
+      await tabs[2].trigger('click')
 
       expect(w.text()).toContain('ESP32 verbinden')
       expect(w.text()).toContain('Firmware flashen')
@@ -169,40 +169,52 @@ describe('PendingDevicesPanel', () => {
   })
 
   describe('empty state', () => {
-    it('shows empty state when no pending devices and not loading', () => {
+    it('shows devices empty state when no zones (default tab)', () => {
       mockPendingDevices = []
       mockIsPendingLoading = false
       const w = mountPanel({ isOpen: true })
       expect(w.find('.pending-panel__empty').exists()).toBe(true)
+      expect(w.text()).toContain('Keine Geräte in Zonen')
+    })
+
+    it('shows pending empty state when on pending tab and no pending devices', async () => {
+      mockPendingDevices = []
+      mockIsPendingLoading = false
+      const w = mountPanel({ isOpen: true })
+      await w.findAll('.pending-panel__tab')[1].trigger('click')
       expect(w.text()).toContain('Keine neuen Geräte')
     })
   })
 
   describe('device list', () => {
-    it('renders device cards when pending devices exist', () => {
+    it('renders device cards when pending devices exist', async () => {
       mockPendingDevices = samplePendingDevices
       const w = mountPanel({ isOpen: true })
+      await w.findAll('.pending-panel__tab')[1].trigger('click')
       const devices = w.findAll('.pending-device')
       expect(devices).toHaveLength(2)
     })
 
-    it('displays device IDs', () => {
+    it('displays device IDs', async () => {
       mockPendingDevices = samplePendingDevices
       const w = mountPanel({ isOpen: true })
+      await w.findAll('.pending-panel__tab')[1].trigger('click')
       expect(w.text()).toContain('ESP_NEW_001')
       expect(w.text()).toContain('ESP_NEW_002')
     })
 
-    it('displays IP addresses', () => {
+    it('displays IP addresses', async () => {
       mockPendingDevices = samplePendingDevices
       const w = mountPanel({ isOpen: true })
+      await w.findAll('.pending-panel__tab')[1].trigger('click')
       expect(w.text()).toContain('192.168.1.50')
       expect(w.text()).toContain('192.168.1.51')
     })
 
-    it('shows approve and reject buttons for each device', () => {
+    it('shows approve and reject buttons for each device', async () => {
       mockPendingDevices = [samplePendingDevices[0]]
       const w = mountPanel({ isOpen: true })
+      await w.findAll('.pending-panel__tab')[1].trigger('click')
       const approveBtn = w.find('.pending-device__btn--approve')
       const rejectBtn = w.find('.pending-device__btn--reject')
       expect(approveBtn.exists()).toBe(true)

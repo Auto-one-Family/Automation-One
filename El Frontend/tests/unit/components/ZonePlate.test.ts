@@ -24,20 +24,32 @@ vi.mock('@/shared/stores/logic.store', () => ({
   }),
 }))
 
+vi.mock('@/shared/stores', () => ({
+  useDragStateStore: () => ({
+    isDraggingEspCard: false,
+    isAnyDragActive: false,
+  }),
+}))
+
 vi.mock('@/utils/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
   }),
 }))
 
+const now = new Date().toISOString()
+const oldTs = new Date(Date.now() - 600000).toISOString() // 10 min ago
+
 const mockDevices = [
   {
     device_id: 'ESP_001', name: 'ESP 1', status: 'online', connected: true,
+    last_heartbeat: now, last_seen: now,
     sensors: [{ gpio: 4, sensor_type: 'DS18B20' }], actuators: [{ gpio: 16, actuator_type: 'relay' }],
     sensor_count: 1, actuator_count: 1, subzone_id: 'sub_1', subzone_name: 'Bewässerung',
   },
   {
     device_id: 'ESP_002', name: 'ESP 2', status: 'offline', connected: false,
+    last_heartbeat: oldTs, last_seen: oldTs,
     sensors: [{ gpio: 5, sensor_type: 'DHT22' }, { gpio: 6, sensor_type: 'BH1750' }], actuators: [],
     sensor_count: 2, actuator_count: 0, subzone_id: null, subzone_name: null,
   },
@@ -58,9 +70,10 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('Gewächshaus A')
   })
 
-  it('shows online/total count', () => {
+  it('shows ESP count and online/total', () => {
     const w = mountPlate()
-    expect(w.text()).toContain('1/2')
+    expect(w.text()).toContain('2 ESPs')
+    expect(w.text()).toContain('1/2 Online')
   })
 
   it('shows total sensor/actuator counts in header', () => {
@@ -96,6 +109,7 @@ describe('ZonePlate', () => {
 
   it('handles empty devices', () => {
     const w = mountPlate({ devices: [] })
-    expect(w.text()).toContain('0/0')
+    expect(w.text()).toContain('0 ESPs')
+    expect(w.text()).toContain('0/0 Online')
   })
 })

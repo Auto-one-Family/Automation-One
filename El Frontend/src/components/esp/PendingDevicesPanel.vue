@@ -16,11 +16,14 @@
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useScrollLock } from '@/composables/useScrollLock'
-import { X, Check, Ban, Wifi, Clock, MapPin, Info, Loader2, Radio } from 'lucide-vue-next'
+import { X, Check, Ban, Wifi, Clock, MapPin, Info, Loader2, Radio, Settings2 } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
+import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables/useZoneDragDrop'
+import { getESPStatus } from '@/composables/useESPStatus'
 import { getWifiStrength } from '@/utils/wifiStrength'
 import RejectDeviceModal from '@/components/modals/RejectDeviceModal.vue'
 import type { PendingESPDevice } from '@/types'
+import type { ESPDevice } from '@/api/esp'
 
 interface Props {
   isOpen: boolean
@@ -34,14 +37,23 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:isOpen': [value: boolean]
   close: []
+  'open-esp-config': [device: ESPDevice]
 }>()
 
 const espStore = useEspStore()
+const { groupDevicesByZone } = useZoneDragDrop()
 const panelRef = ref<HTMLElement | null>(null)
 
 // Tab state
-type TabType = 'pending' | 'info'
-const activeTab = ref<TabType>('pending')
+type TabType = 'pending' | 'devices' | 'info'
+const activeTab = ref<TabType>('devices')
+
+// Configured ESPs grouped by zone (for "Geräte" tab)
+const zoneGroups = computed(() => {
+  const devices = espStore.devices ?? []
+  const groups = groupDevicesByZone(devices)
+  return groups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
+})
 
 // Loading states for individual devices
 const approvingDevices = ref<Set<string>>(new Set())
@@ -226,6 +238,11 @@ function handleClose() {
   emit('close')
 }
 
+function handleOpenConfig(device: ESPDevice) {
+  emit('open-esp-config', device)
+  handleClose()
+}
+
 // Check if device is being processed
 function isProcessing(deviceId: string): boolean {
   return approvingDevices.value.has(deviceId) || rejectingDevices.value.has(deviceId)
@@ -254,6 +271,13 @@ function isProcessing(deviceId: string): boolean {
         <div class="pending-panel__header">
           <div class="pending-panel__tabs">
             <button
+              :class="['pending-panel__tab', { active: activeTab === 'devices' }]"
+              @click="activeTab = 'devices'"
+            >
+              <Settings2 class="w-4 h-4" />
+              <span>Geräte</span>
+            </button>
+            <button
               :class="['pending-panel__tab', { active: activeTab === 'pending' }]"
               @click="activeTab = 'pending'"
             >
@@ -278,6 +302,44 @@ function isProcessing(deviceId: string): boolean {
           >
             <X class="w-5 h-5" />
           </button>
+        </div>
+
+        <!-- Tab Content: Configured Devices (Variante A) -->
+        <div v-if="activeTab === 'devices'" class="pending-panel__content">
+          <div v-if="zoneGroups.length === 0" class="pending-panel__empty">
+            <Settings2 class="pending-panel__empty-icon" />
+            <p class="pending-panel__empty-text">Keine Geräte in Zonen.</p>
+            <p class="pending-panel__empty-hint">Ziehe Geräte aus „Nicht zugewiesen“ in eine Zone.</p>
+          </div>
+          <div v-else class="pending-panel__list">
+            <div v-for="group in zoneGroups" :key="group.zoneId" class="pending-panel__zone-group">
+              <div class="pending-panel__zone-title">{{ group.zoneName }}</div>
+              <div
+                v-for="device in group.devices"
+                :key="espStore.getDeviceId(device)"
+                class="pending-device pending-device--config"
+              >
+                <div class="pending-device__info">
+                  <div class="pending-device__name">{{ device.name || espStore.getDeviceId(device) }}</div>
+                  <div class="pending-device__meta">
+                    <span class="pending-device__meta-item">{{ getESPStatus(device).label }}</span>
+                    <span class="pending-device__meta-item">{{ (device.sensors?.length ?? device.sensor_count ?? 0) }} Sensoren</span>
+                  </div>
+                </div>
+                <button
+                  class="pending-device__btn pending-device__btn--config"
+                  title="Konfigurieren"
+                  @click="handleOpenConfig(device)"
+                >
+                  <Settings2 class="w-4 h-4" />
+                  <span class="hidden sm:inline">Konfig.</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="pending-panel__footer">
+            Pending: {{ pendingDevices.length }} Gerät(e) warten auf Genehmigung
+          </div>
         </div>
 
         <!-- Tab Content: Pending Devices -->
@@ -619,6 +681,43 @@ function isProcessing(deviceId: string): boolean {
 .pending-panel__empty-hint {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+}
+
+.pending-panel__zone-group {
+  margin-bottom: var(--space-3);
+}
+
+.pending-panel__zone-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  margin-bottom: var(--space-1);
+  padding: 0 var(--space-2);
+}
+
+.pending-panel__footer {
+  margin-top: auto;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--glass-border);
+}
+
+.pending-device--config {
+  border-color: var(--glass-border);
+}
+
+.pending-device__btn--config {
+  background-color: rgba(96, 165, 250, 0.12);
+  color: var(--color-accent-bright);
+  border-color: rgba(96, 165, 250, 0.25);
+}
+
+.pending-device__btn--config:hover {
+  background-color: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.4);
 }
 
 .pending-panel__info-link {

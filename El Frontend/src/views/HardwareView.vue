@@ -483,6 +483,7 @@ function formatTimeAgo(timestamp: number): string {
                 @update:is-expanded="setZoneExpanded(group.zoneId, $event)"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"
+                @settings="handleSettings"
               />
             </div>
 
@@ -527,8 +528,13 @@ function formatTimeAgo(timestamp: number): string {
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
 
-    <!-- Pending Devices Panel -->
-    <PendingDevicesPanel v-model:is-open="dashStore.showPendingPanel" :anchor-el="null" @close="dashStore.showPendingPanel = false" />
+    <!-- Pending Devices Panel (Geräte + Wartend + Anleitung) -->
+    <PendingDevicesPanel
+      v-model:is-open="dashStore.showPendingPanel"
+      :anchor-el="null"
+      @close="dashStore.showPendingPanel = false"
+      @open-esp-config="(d) => { dashStore.showPendingPanel = false; handleSettings(d) }"
+    />
 
     <!-- ESP Settings Sheet -->
     <ESPSettingsSheet

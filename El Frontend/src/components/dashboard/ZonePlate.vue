@@ -8,7 +8,7 @@
  * Features:
  * - Glassmorphism styling with noise texture
  * - Iridescent top border for healthy zones
- * - Aggregated zone metrics (temp range, humidity range, active actuators)
+ * - Zone header: ESP count, online/total, alerts (data on cards)
  * - Sensor/Actuator/Cross-ESP counts in header
  * - Subzone grouping by device.subzone_id
  * - VueDraggable for cross-zone device drag-drop
@@ -22,7 +22,7 @@ import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useDragStateStore } from '@/shared/stores'
-import { getQualityInfo } from '@/utils/labels'
+import { getESPStatus } from '@/composables/useESPStatus'
 import { ChevronDown, GitBranch } from 'lucide-vue-next'
 import DeviceMiniCard from './DeviceMiniCard.vue'
 
@@ -59,12 +59,10 @@ watch(() => props.devices, (newDevices) => {
   localDevices.value = [...newDevices]
 })
 
-// ── Status Aggregation ───────────────────────────────────────────────────
+// ── Status Aggregation (server-centric via getESPStatus) ───────────────────
 const stats = computed(() => {
   const total = props.devices.length
-  const online = props.devices.filter(d =>
-    d.status === 'online' || d.connected === true
-  ).length
+  const online = props.devices.filter(d => getESPStatus(d).isReachable).length
   const warnings = props.devices.filter(d => {
     const id = espStore.getDeviceId(d)
     if (espStore.isMock(id)) {
@@ -107,56 +105,6 @@ const crossEspCount = computed(() => {
   }).length
 })
 
-// ── Aggregated Zone Metrics ──────────────────────────────────────────────
-interface ZoneMetrics {
-  tempMin: number | null
-  tempMax: number | null
-  humMin: number | null
-  humMax: number | null
-  activeActuators: number
-}
-
-const zoneMetrics = computed((): ZoneMetrics => {
-  let tempMin: number | null = null
-  let tempMax: number | null = null
-  let humMin: number | null = null
-  let humMax: number | null = null
-  let activeActuators = 0
-
-  for (const device of props.devices) {
-    const sensors = device.sensors as any[] | undefined
-    if (sensors) {
-      for (const s of sensors) {
-        if (s.raw_value == null) continue
-        const val = Number(s.raw_value)
-        const type = (s.sensor_type || s.type || '').toLowerCase()
-
-        if (type.includes('temp') || type.includes('ds18b20')) {
-          if (tempMin === null || val < tempMin) tempMin = val
-          if (tempMax === null || val > tempMax) tempMax = val
-        }
-        if (type.includes('humid') || type.includes('sht3')) {
-          if (humMin === null || val < humMin) humMin = val
-          if (humMax === null || val > humMax) humMax = val
-        }
-      }
-    }
-
-    const actuators = device.actuators as any[] | undefined
-    if (actuators) {
-      activeActuators += actuators.filter((a: any) => a.state === 'on' || a.active === true).length
-    }
-  }
-
-  return { tempMin, tempMax, humMin, humMax, activeActuators }
-})
-
-const hasMetrics = computed(() =>
-  zoneMetrics.value.tempMin !== null ||
-  zoneMetrics.value.humMin !== null ||
-  zoneMetrics.value.activeActuators > 0
-)
-
 // ── Subzone Grouping ─────────────────────────────────────────────────────
 interface SubzoneGroup {
   subzoneId: string | null
@@ -188,43 +136,6 @@ const subzoneGroups = computed((): SubzoneGroup[] => {
   })
   return result
 })
-
-// ── Top Sensor Summary (alarm-first, max 3) ─────────────────────────────
-interface SensorSummary {
-  name: string
-  value: number
-  unit: string
-  quality: string
-}
-
-const QUALITY_PRIORITY: Record<string, number> = {
-  bad: 0, error: 0, poor: 1, stale: 2, fair: 3, degraded: 3, good: 4, excellent: 4,
-}
-
-const topSensors = computed((): SensorSummary[] => {
-  const all: SensorSummary[] = []
-  for (const device of props.devices) {
-    const sensors = device.sensors as any[] | undefined
-    if (!sensors) continue
-    for (const s of sensors) {
-      if (s.raw_value == null) continue
-      all.push({
-        name: s.name || s.sensor_type || `GPIO ${s.gpio}`,
-        value: Number(s.raw_value),
-        unit: s.unit || '',
-        quality: s.quality || 'unknown',
-      })
-    }
-  }
-  all.sort((a, b) => (QUALITY_PRIORITY[a.quality] ?? 5) - (QUALITY_PRIORITY[b.quality] ?? 5))
-  return all.slice(0, 3)
-})
-
-function formatSensorValue(val: number): string {
-  if (Math.abs(val) >= 100) return val.toFixed(0)
-  if (Math.abs(val) >= 10) return val.toFixed(1)
-  return val.toFixed(2)
-}
 
 // ── Toggle Handler ────────────────────────────────────────────────────────
 function toggleExpanded() {
@@ -295,12 +206,12 @@ function handleDragEnd() {
         />
         <h3 class="zone-plate__title">{{ zoneName }}</h3>
         <span class="zone-plate__stats">
-          <span class="zone-plate__count">{{ stats.online }}/{{ stats.total }} Online</span>
+          <span class="zone-plate__count">{{ stats.total }} ESP{{ stats.total !== 1 ? 's' : '' }} · {{ stats.online }}/{{ stats.total }} Online</span>
           <span
             v-if="stats.warnings > 0"
             class="zone-plate__warning"
           >
-            · {{ stats.warnings }} Warnung{{ stats.warnings > 1 ? 'en' : '' }}
+            · ⚠ {{ stats.warnings }}
           </span>
         </span>
       </div>
@@ -319,48 +230,8 @@ function handleDragEnd() {
       </div>
     </div>
 
-    <!-- Collapsed summary: metrics + top sensors -->
-    <div v-if="!isExpanded" class="zone-plate__collapsed-summary">
-      <span v-if="hasMetrics" class="zone-plate__metrics-inline">
-        <span v-if="zoneMetrics.tempMin !== null">{{ zoneMetrics.tempMin }}–{{ zoneMetrics.tempMax }}°C</span>
-        <span v-if="zoneMetrics.humMin !== null">{{ zoneMetrics.humMin }}–{{ zoneMetrics.humMax }}%</span>
-        <span v-if="zoneMetrics.activeActuators > 0" class="zone-plate__metric--active">
-          {{ zoneMetrics.activeActuators }} Aktoren aktiv
-        </span>
-      </span>
-    </div>
-
-    <!-- Expanded: full zone content -->
+    <!-- Expanded: full zone content (metrics/sensor-preview removed; data on ESP cards) -->
     <div v-show="isExpanded" class="zone-plate__body">
-      <!-- Aggregated zone metrics (compact one-liner) -->
-      <div v-if="hasMetrics" class="zone-plate__metrics">
-        <span v-if="zoneMetrics.tempMin !== null" class="zone-plate__metric">
-          {{ zoneMetrics.tempMin }}–{{ zoneMetrics.tempMax }}°C
-        </span>
-        <span v-if="zoneMetrics.humMin !== null" class="zone-plate__metric">
-          {{ zoneMetrics.humMin }}–{{ zoneMetrics.humMax }}%
-        </span>
-        <span v-if="zoneMetrics.activeActuators > 0" class="zone-plate__metric zone-plate__metric--active">
-          {{ zoneMetrics.activeActuators }} Aktor{{ zoneMetrics.activeActuators > 1 ? 'en' : '' }} aktiv
-        </span>
-      </div>
-
-      <!-- Top Sensor Summary (alarm-first preview) -->
-      <div v-if="topSensors.length > 0" class="zone-plate__sensor-preview">
-        <div
-          v-for="(s, idx) in topSensors"
-          :key="idx"
-          class="zone-plate__sensor-row"
-        >
-          <span
-            class="zone-plate__sensor-dot"
-            :class="`zone-plate__sensor-dot--${getQualityInfo(s.quality).colorClass}`"
-          />
-          <span class="zone-plate__sensor-name">{{ s.name }}</span>
-          <span class="zone-plate__sensor-value">{{ formatSensorValue(s.value) }} {{ s.unit }}</span>
-        </div>
-      </div>
-
       <!-- Subzone chips -->
       <div v-if="subzoneGroups.length > 1" class="zone-plate__subzone-chips">
         <span
@@ -596,91 +467,9 @@ function handleDragEnd() {
   height: 10px;
 }
 
-/* ═══════ Collapsed summary ═══════ */
-.zone-plate__collapsed-summary {
-  padding: var(--space-1) 0 0 calc(16px + var(--space-2));
-}
-
-.zone-plate__metrics-inline {
-  display: flex;
-  gap: var(--space-3);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-}
-
 /* ═══════ Body (expanded content) ═══════ */
 .zone-plate__body {
   padding-top: var(--space-1);
-}
-
-/* ── Aggregated metrics row ── */
-.zone-plate__metrics {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-2);
-  padding: 2px 0;
-}
-
-.zone-plate__metric {
-  white-space: nowrap;
-}
-
-.zone-plate__metric--active {
-  color: var(--color-accent-bright);
-}
-
-/* ── Sensor preview rows ── */
-.zone-plate__sensor-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: var(--radius-sm);
-}
-
-.zone-plate__sensor-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  line-height: 1.4;
-}
-
-.zone-plate__sensor-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--color-text-muted);
-}
-
-.zone-plate__sensor-dot--text-success { background: var(--color-status-good, #22c55e); }
-.zone-plate__sensor-dot--text-warning { background: var(--color-status-warning, #eab308); }
-.zone-plate__sensor-dot--text-error { background: var(--color-status-alarm, #ef4444); }
-.zone-plate__sensor-dot--text-muted { background: var(--color-text-muted, #6b7280); }
-
-.zone-plate__sensor-name {
-  flex: 1;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.zone-plate__sensor-value {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-primary);
-  white-space: nowrap;
 }
 
 /* ── Subzone chips ── */
