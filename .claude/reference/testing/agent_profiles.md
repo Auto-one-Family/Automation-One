@@ -1,6 +1,6 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.4 | **Stand:** 2026-02-25
+> **Version:** 1.5 | **Stand:** 2026-02-26
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
@@ -9,7 +9,7 @@
 # 1. AGENTEN (.claude/agents/)
 
 ## 1.1 agent-manager
-- **Datei:** `.claude/agents/agent-manager/agent-manager.md`
+- **Datei:** `.claude/agents/agent-manager.md`
 - **Rolle:** Analysiert und korrigiert das AutomationOne Agent-System. Vergleicht Flow vs. Implementierung, behebt Inkonsistenzen.
 - **Skills:** agent-manager
 - **Referenzen:** flow_reference.md, agent_profiles.md, vs_claude_best_practice.md
@@ -23,7 +23,7 @@
 - **Andere Agenten:** Delegiert an server-debug, mqtt-debug, esp32-debug; bei Code-Änderungen an Entwickler.
 
 ## 1.3 esp32-dev
-- **Datei:** `.claude/agents/esp32/esp32-dev-agent.md`
+- **Datei:** `.claude/agents/esp32-dev.md`
 - **Rolle:** Pattern-konformer Implementierer für ESP32 C++/PlatformIO. Findet bestehende Patterns und erweitert sie.
 - **Skills:** esp32-development (via SKILL.md / MODULE_REGISTRY.md)
 - **Referenzen:** MQTT_TOPICS.md, ERROR_CODES.md, COMMUNICATION_FLOWS.md
@@ -37,14 +37,14 @@
 - **Andere Agenten:** server-debug, mqtt-debug, db-inspector, system-control
 
 ## 1.5 frontend-dev
-- **Datei:** `.claude/agents/frontend/frontend_dev_agent.md`
+- **Datei:** `.claude/agents/frontend-dev.md`
 - **Rolle:** Pattern-konformer Implementierer für Vue 3/TypeScript/Pinia. Erweitert existierende Patterns.
 - **Skills:** frontend-development (via SKILL.md)
 - **Referenzen:** REST_ENDPOINTS.md, WEBSOCKET_EVENTS.md, ERROR_CODES.md
 - **Andere Agenten:** frontend-debug, server-dev, mqtt-dev
 
 ## 1.6 frontend-debug
-- **Datei:** `.claude/agents/frontend/frontend-debug-agent.md`
+- **Datei:** `.claude/agents/frontend-debug.md`
 - **Rolle:** Frontend-Analyse. Build-Errors (Vite/TypeScript), WebSocket, Pinia, API-Fehler.
 - **Skills:** frontend-debug (implizit)
 - **Referenzen:** SYSTEM_CONTROL_REPORT.md (Primär-Input), frontend_build.log, browser_console.log, WEBSOCKET_EVENTS.md, REST_ENDPOINTS.md, frontend-rules.md. **Browser-Inspection:** Playwright MCP (docs/plans/Debug.md „Playwright MCP“, SYSTEM_OPERATIONS_REFERENCE.md §9.1).
@@ -59,28 +59,28 @@
 - **Andere Agenten:** esp32-debug, server-debug, mqtt-debug, collect-reports
 
 ## 1.8 mqtt-dev
-- **Datei:** `.claude/agents/mqtt/mqtt_dev_agent.md`
+- **Datei:** `.claude/agents/mqtt-dev.md`
 - **Rolle:** MQTT-Implementierung auf Server und ESP32. Topics und Handler synchron halten.
 - **Skills:** Keine explizit; nutzt MQTT_TOPICS.md
 - **Referenzen:** MQTT_TOPICS.md, COMMUNICATION_FLOWS.md, ERROR_CODES.md
 - **Andere Agenten:** mqtt-debug, server-dev, esp32-dev
 
 ## 1.9 mqtt-debug
-- **Datei:** `.claude/agents/mqtt/mqtt-debug-agent.md`
+- **Datei:** `.claude/agents/mqtt-debug.md`
 - **Rolle:** MQTT-Traffic-Analyse. Topic-Sequenzen, Timing, Payload-Validierung.
 - **Skills:** mqtt-debug
 - **Referenzen:** STATUS.md, mqtt_traffic.log, MQTT_TOPICS.md, COMMUNICATION_FLOWS.md
 - **Andere Agenten:** esp32-debug, server-debug, db-inspector, system-control
 
 ## 1.10 server-dev
-- **Datei:** `.claude/agents/server/server_dev_agent.md`
+- **Datei:** `.claude/agents/server-dev.md`
 - **Rolle:** Pattern-konformer Implementierer für Python/FastAPI.
 - **Skills:** server-development (via SKILL.md, MODULE_REGISTRY.md)
 - **Referenzen:** COMMUNICATION_FLOWS.md, ARCHITECTURE_DEPENDENCIES.md, MQTT_TOPICS.md, REST_ENDPOINTS.md, ERROR_CODES.md
 - **Andere Agenten:** server-debug, mqtt-debug, db-inspector, mqtt-dev
 
 ## 1.11 server-debug
-- **Datei:** `.claude/agents/server/server-debug-agent.md`
+- **Datei:** `.claude/agents/server-debug.md`
 - **Rolle:** Server-Log-Analyse. JSON-Logs, MQTT-Handler, Error-Codes 5000–5699.
 - **Skills:** server-debug
 - **Referenzen:** STATUS.md, god_kaiser.log, ERROR_CODES.md, MQTT_TOPICS.md, server-development SKILL
@@ -94,7 +94,7 @@
 - **Andere Agenten:** esp32-debug, server-debug, mqtt-debug, db-inspector
 
 ## 1.13 test-log-analyst
-- **Datei:** `.claude/agents/testing/test-log-analyst.md`
+- **Datei:** `.claude/agents/test-log-analyst.md`
 - **Rolle:** Analysiert Test-Outputs (pytest, Vitest, Playwright, Wokwi) lokal und in CI.
 - **Skills:** test-log-analyst
 - **Referenzen:** LOG_LOCATIONS.md, CI_PIPELINE.md, TEST_ENGINE_REFERENCE.md, TEST_WORKFLOW.md, flow_reference.md
@@ -299,16 +299,18 @@ mosquitto_sub -h localhost -t "kaiser/god/esp/+/sensor/+/data" -v -C 3 -W 90
 
 ### ESP32
 
-**Wichtig:** PlatformIO muessen aus `El Trabajante/` ausgefuehrt werden. Flash/Monitor NUR in PowerShell (COM-Port).
+**Wichtig:** PlatformIO muessen aus `El Trabajante/` ausgefuehrt werden. Build, Flash UND zeitbegrenzter Monitor funktionieren aus Git Bash (COM5/CH340 verifiziert 2026-02-26).
 
 ```bash
-# Build (Git Bash / Agent)
+# Build, Flash, Monitor (Git Bash / Agent)
 cd "El Trabajante"
-~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev                          # Build
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev -t upload                # Flash
+timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev    # Monitor (30s)
 ```
 
 ```powershell
-# Flash + Monitor (PowerShell, User-Befehl)
+# Interaktiver Monitor (PowerShell, User-Befehl, Ctrl+C beendet)
 cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev

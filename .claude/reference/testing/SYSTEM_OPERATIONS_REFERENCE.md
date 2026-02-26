@@ -1,6 +1,6 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.13 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-23
+> **Version:** 2.14 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-26
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
 > **Änderungen 2.13:** Auth-Token-Pfad korrigiert (response.tokens.access_token statt response.access_token)
 > **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
@@ -1101,7 +1101,7 @@ mosquitto_pub -h localhost -t "kaiser/broadcast/emergency" -r -n
 
 ## 5. ESP32-Hardware
 
-**Hinweis:** `pio` ist in Git Bash nicht im PATH. Vollständiger Pfad: `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Upload/Monitor-Befehle erfordern COM-Port-Zugriff → PowerShell oder PlatformIO Terminal nutzen (Git Bash kann COM-Ports nicht öffnen).
+**Hinweis:** `pio` ist in Git Bash nicht im PATH. Vollständiger Pfad: `~/.platformio/penv/Scripts/pio.exe` (v6.1.18). Build, Flash UND zeitbegrenzter Monitor funktionieren aus Git Bash (COM5/CH340 verifiziert 2026-02-26). Fuer interaktiven Monitor (Ctrl+C) PowerShell nutzen.
 
 ### 5.1 Flash-Operationen
 
@@ -1135,7 +1135,7 @@ pio run -e esp32_dev -t upload
 
 ### 5.2 Monitoring
 
-**Wichtig:** Flash/Monitor erfordern COM-Port → NUR in PowerShell (nicht Git Bash). `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen.
+**Wichtig:** Flash/Monitor funktionieren auch aus Git Bash (`timeout N pio device monitor` fuer zeitbegrenzten Capture). Fuer interaktiven Monitor (Ctrl+C): PowerShell. `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen.
 
 ```powershell
 # Zuerst ins PlatformIO-Projektverzeichnis wechseln
@@ -1310,7 +1310,7 @@ Die NVS-Operationen erfolgen über die Firmware oder Boot-Button:
 #### Reale Hardware (Provisioning Portal)
 
 ```bash
-# 1. ESP flashen (PowerShell oder PlatformIO Terminal empfohlen, Git Bash kann COM-Port nicht öffnen)
+# 1. ESP flashen (Git Bash, PowerShell oder PlatformIO Terminal)
 cd "El Trabajante"
 pio run -e esp32_dev -t upload
 
@@ -1355,7 +1355,7 @@ curl -X POST http://localhost:8000/api/v1/actuators/ESP_XXXXX/5 \
   -d '{"actuator_type": "pump", "name": "Pumpe", "enabled": true}'
 ```
 
-**Hinweis:** `$TOKEN` muss vorher via Login geholt werden (siehe §0.2). Upload/Monitor-Befehle funktionieren NICHT aus Git Bash (COM-Port-Zugriff fehlt) - PowerShell oder PlatformIO Terminal nutzen.
+**Hinweis:** `$TOKEN` muss vorher via Login geholt werden (siehe §0.2). Flash/Monitor funktionieren aus Git Bash (verifiziert 2026-02-26). Serial Monitor zeitbegrenzt: `timeout N pio device monitor`.
 
 ---
 

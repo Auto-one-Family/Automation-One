@@ -420,9 +420,9 @@ public:
     void logCommunicationError(uint16_t code, const char* message);
     void logApplicationError(uint16_t code, const char* message);
     
-    // MQTT Integration
+    // MQTT Integration (rate-limited: max 1 publish per error code per 60s)
     void setMqttPublishCallback(MqttErrorPublishCallback callback, const String& esp_id);
-    
+
     // Status
     String getErrorHistory(uint8_t max_entries = 20) const;
     bool hasActiveErrors() const;
@@ -638,6 +638,11 @@ struct SensorConfig {
     uint32_t last_raw_value = 0;
     unsigned long last_reading = 0;
     String onewire_address = "";       // ROM-Code for DS18B20
+    uint8_t i2c_address = 0;          // 7-bit I2C address (0x00-0x7F)
+    // Circuit Breaker (F7 — per-sensor runtime state)
+    SensorCBState cb_state = SensorCBState::CLOSED;  // CLOSED/OPEN/HALF_OPEN
+    uint32_t cb_open_since_ms = 0;     // millis() when entering OPEN
+    uint8_t consecutive_failures = 0;  // Consecutive measurement failures
 };
 ```
 

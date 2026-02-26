@@ -122,7 +122,7 @@ Ich implementiere ESP32-Firmware fuer das AutomationOne IoT-Framework. Meine Dom
    └── Tabelle aus Sektion 6 pruefen
 
 5. VERIFIKATION
-   └── pio run -e seeed_xiao_esp32c3
+   └── cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
 
 6. REPORT SCHREIBEN
    └── .claude/reports/current/ESP32_DEV_REPORT.md
@@ -136,7 +136,7 @@ Ich implementiere ESP32-Firmware fuer das AutomationOne IoT-Framework. Meine Dom
 
 **Finden:**
 ```bash
-grep -rn "getInstance" El\ Trabajante/src/services/ --include="*.h" | head -5
+grep -rn "getInstance" "El Trabajante/src/services/" --include="*.h" | head -5
 ```
 
 **Referenz-Implementation:** `SensorManager`, `ActuatorManager`, `ConfigManager`
@@ -173,7 +173,7 @@ XManager& XManager::getInstance() {
 
 **Finden:**
 ```bash
-grep -rn "class I.*Driver" El\ Trabajante/src/services/ --include="*.h"
+grep -rn "class I.*Driver" "El Trabajante/src/services/" --include="*.h"
 ```
 
 **Referenz-Implementation:** `IActuatorDriver`, `ISensorDriver`
@@ -202,7 +202,7 @@ public:
 
 **Finden:**
 ```bash
-grep -rn "createDriver\|make_unique" El\ Trabajante/src/services/ --include="*.cpp"
+grep -rn "createDriver\|make_unique" "El Trabajante/src/services/" --include="*.cpp"
 ```
 
 **Referenz-Implementation:** `ActuatorManager::createDriver()`
@@ -225,7 +225,7 @@ std::unique_ptr<IXDriver> XManager::createDriver(const String& type) {
 
 **Finden:**
 ```bash
-grep -rn "errorTracker.trackError" El\ Trabajante/src/ --include="*.cpp" | head -5
+grep -rn "errorTracker.trackError" "El Trabajante/src/" --include="*.cpp" | head -5
 ```
 
 **Referenz:** `error_codes.h`
@@ -242,7 +242,7 @@ if (!precondition) {
 
 **Finden:**
 ```bash
-grep -rn "struct.*Config" El\ Trabajante/src/models/ --include="*.h"
+grep -rn "struct.*Config" "El Trabajante/src/models/" --include="*.h"
 ```
 
 **Referenz:** `SensorConfig`, `ActuatorConfig`
@@ -262,7 +262,7 @@ struct XConfig {
 
 **Finden:**
 ```bash
-grep -rn "mqttClient.publish\|buildTopic" El\ Trabajante/src/ --include="*.cpp" | head -5
+grep -rn "mqttClient.publish\|buildTopic" "El Trabajante/src/" --include="*.cpp" | head -5
 ```
 
 **Referenz:** `SensorManager::publishSensorReading()`
@@ -361,7 +361,7 @@ Dies ist eine unverrückbare Regel, kein optionaler Workflow-Schritt.
 - Exakt gleiche Struktur wie Referenz verwenden
 - Error-Codes aus `error_codes.h`
 - Member-Variablen mit `_` Suffix
-- `pio run -e seeed_xiao_esp32c3` am Ende
+- Build-Verifikation am Ende: `cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev`
 - 8-Dimensionen-Checkliste vor jeder Code-Aenderung
 
 ### Konsistenz-Checks
@@ -408,5 +408,7 @@ Bei Cross-Layer-Problemen: Falls `META_ANALYSIS.md` existiert, die ESP32-relevan
 
 ---
 
-**Version:** 2.0
+**Version:** 2.1
 **Codebase:** El Trabajante (~13.300 Zeilen)
+
+**PlatformIO-Hinweis:** `pio` ist nicht im Git Bash PATH. Voller Pfad noetig: `~/.platformio/penv/Scripts/pio.exe`. Alle PlatformIO-Befehle muessen aus `El Trabajante/` ausgefuehrt werden. Build, Flash UND zeitbegrenzter Monitor funktionieren aus Git Bash (COM5/CH340 verifiziert 2026-02-26).

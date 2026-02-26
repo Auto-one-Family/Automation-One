@@ -52,6 +52,8 @@ allowed-tools: Read
 | **5600-5699** | Server | SEQUENCE_ERROR |
 | **6000-6099** | Test | TEST (Testinfrastruktur-Fehler) |
 
+**MQTT Error Publishing Rate-Limiting (F8):** ESP32 ErrorTracker throttles MQTT error publishes to max 1 per error code per 60s window. Suppressed occurrences are counted and logged on next publish. Implementation: `error_tracker.cpp` — `shouldPublishError()` with modulo-hashed 32-slot static table.
+
 ---
 
 ## 2. ESP32 Hardware Errors (1000-1999)
@@ -80,6 +82,14 @@ allowed-tools: Read
 | 1016 | `I2C_BUS_RECOVERY_STARTED` | I2C bus recovery initiated |
 | 1017 | `I2C_BUS_RECOVERY_FAILED` | I2C bus recovery failed after max attempts |
 | 1018 | `I2C_BUS_RECOVERED` | I2C bus recovered successfully |
+
+### I2C Protocol-Layer Errors (1007, 1009, 1019)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 1007 | `I2C_TIMEOUT` | I2C operation timed out (sensor not responding) |
+| 1009 | `I2C_CRC_FAILED` | I2C sensor data CRC validation failed |
+| 1019 | `I2C_PROTOCOL_UNSUPPORTED` | I2C sensor type has no registered communication protocol |
 
 ### OneWire Errors (1020-1029)
 
@@ -492,7 +502,7 @@ const char* range = getErrorCodeRange(1002);   // → "HARDWARE"
 | Range | ESP32 (error_codes.h) | Server (error_codes.py) | Status |
 |-------|----------------------|-------------------------|--------|
 | GPIO (1001-1006) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
-| I2C (1010-1014) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
+| I2C (1007-1019) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | OneWire (1020-1029) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | PWM (1030-1032) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | Sensor (1040-1043) | ✅ Vollständig | ✅ Vollständig | ✅ OK |

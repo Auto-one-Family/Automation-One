@@ -249,6 +249,7 @@ Topic: `kaiser/{kaiser_id}/esp/{esp_id}/system/error` (QoS 1)
 |---------|-------|-----------|----------|-----------|
 | MQTT | mqtt_client.cpp | 5 failures | 30s | 10s |
 | WiFi | wifi_manager.cpp | 10 failures | 60s | - |
+| Sensor | sensor_manager.cpp | 10 failures | 300s (5 min) | 1 probe |
 
 ### Serial-Output bei CB-Events
 
@@ -256,6 +257,9 @@ Topic: `kaiser/{kaiser_id}/esp/{esp_id}/system/error` (QoS 1)
 [MQTT] Circuit Breaker: CLOSED → OPEN (5 failures)
 [MQTT] Circuit Breaker: OPEN → HALF_OPEN (30s elapsed)
 [MQTT] Circuit Breaker: HALF_OPEN → CLOSED (test success)
+[SENSOR] Sensor sht31_temp: Circuit Breaker OPEN — 10 consecutive failures, retry in 300s
+[SENSOR] Sensor sht31_temp: Circuit Breaker HALF_OPEN — probing
+[SENSOR] Sensor sht31_temp: Circuit Breaker CLOSED — sensor recovered
 ```
 
 ### CB-State Impact

@@ -31,6 +31,7 @@ gpio_manager_ = &GPIOManager::getInstance();
 - Raw data acquisition (analogRead, digitalRead, I2C, OneWire)
 - Coordination with PiEnhancedProcessor for server-side processing
 - MQTT publishing of sensor readings
+- Per-sensor circuit breaker (SensorCBState in SensorConfig: CLOSED/OPEN/HALF_OPEN, skips measurement on OPEN, probes on HALF_OPEN)
 
 ---
 
@@ -161,7 +162,7 @@ enum class EmergencyState : uint8_t {
 
 **Key Responsibilities:**
 - Error tracking and severity classification
-- MQTT publishing of errors for server observability
+- MQTT publishing of errors for server observability (rate-limited: max 1 per error code per 60s)
 - Critical error detection
 
 ---
@@ -194,7 +195,8 @@ Application Layer (main.cpp setup())
     │   ├─> MQTTClient (singleton)
     │   ├─> PiEnhancedProcessor (singleton)
     │   ├─> I2CBusManager (singleton)
-    │   └─> OneWireBusManager (singleton)
+    │   ├─> OneWireBusManager (singleton)
+    │   └─> ErrorTracker (singleton, for CB error tracking)
     │
     ├─> ActuatorManager
     │   ├─> GPIOManager (singleton)

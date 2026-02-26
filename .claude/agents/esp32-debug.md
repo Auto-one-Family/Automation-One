@@ -96,7 +96,8 @@ Bei Auffaelligkeiten im Serial-Log pruefst du eigenstaendig weiter – keine Del
 | ESP-bezogene Server-Errors | Server-Log scannen | `grep "ESP_XXX" logs/server/god_kaiser.log \| tail -20` |
 | Sensor-Daten fehlen am Server | MQTT-Traffic direkt pruefen | `mosquitto_sub -t "kaiser/god/esp/+/sensor/+/data" -v -C 5 -W 15` |
 | Actuator reagiert nicht | Command/Response pruefen | `mosquitto_sub -t "kaiser/god/esp/+/actuator/+/command" -v -C 3 -W 10` |
-| Wokwi-Simulation noetig | Firmware-Test ohne Hardware | `pio run -e wokwi_simulation` (163 Szenarien in 13 Kategorien) |
+| Wokwi-Simulation noetig | Firmware-Test ohne Hardware | `cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e wokwi_simulation` |
+| Live Serial-Capture noetig | Frische Logs vom echten ESP | `cd "El Trabajante" && timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev > /tmp/serial_capture.log 2>&1` |
 
 ---
 
@@ -293,6 +294,10 @@ grep "ESP_XXX" logs/server/god_kaiser.log | tail -20
 
 # Circuit Breaker Status im Serial-Log
 grep -iE "circuit|breaker" logs/current/esp32_serial.log
+
+# --- Live Serial Capture (wenn ESP angeschlossen, COM5/CH340) ---
+# Frische Serial-Logs vom echten ESP32 (30s Capture)
+cd "El Trabajante" && timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev 2>&1 | tee /tmp/serial_capture.log
 
 # --- Loki Cross-Layer (wenn Monitoring-Stack aktiv) ---
 

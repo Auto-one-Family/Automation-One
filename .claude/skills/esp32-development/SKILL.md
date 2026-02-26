@@ -76,14 +76,16 @@ El Trabajante/
 
 **Wichtig:** PlatformIO-Befehle muessen aus `El Trabajante/` ausgefuehrt werden (dort liegt `platformio.ini`).
 
-- **Git Bash (Agent):** `pio` nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`. Build funktioniert, aber Upload/Monitor NICHT (COM-Port nicht erreichbar)
-- **PowerShell (User):** `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen
+- **Git Bash (Agent):** `pio` nicht im PATH → `~/.platformio/penv/Scripts/pio.exe`. Build, Flash UND zeitbegrenzter Monitor funktionieren (COM5/CH340 verifiziert 2026-02-26)
+- **PowerShell (User):** `&&` geht NICHT in PS 5.x → Befehle einzeln oder mit `;` trennen. Interaktiver Monitor mit Ctrl+C
 
-### Git Bash (Agent-Befehle, nur Build/Test)
+### Git Bash (Agent-Befehle: Build, Flash, zeitbegrenzter Monitor)
 
 ```bash
 cd "El Trabajante"
-~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev                          # Build
+~/.platformio/penv/Scripts/pio.exe run -e esp32_dev -t upload                # Flash (COM5)
+timeout 30 ~/.platformio/penv/Scripts/pio.exe device monitor -e esp32_dev    # Monitor (30s Capture)
 ~/.platformio/penv/Scripts/pio.exe run -e seeed_xiao_esp32c3
 ~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp01   # ESP_00000001
 ~/.platformio/penv/Scripts/pio.exe run -e wokwi_esp02   # ESP_00000002
@@ -91,7 +93,7 @@ cd "El Trabajante"
 ~/.platformio/penv/Scripts/pio.exe test -e native -vvv   # 22 Native Unit Tests
 ```
 
-### PowerShell (User-Befehle, Flash + Monitor)
+### PowerShell (User-Befehle: interaktiver Monitor)
 
 ```powershell
 cd "C:\Users\PCUser\Documents\PlatformIO\Projects\Auto-one\El Trabajante"
@@ -102,7 +104,7 @@ C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev
 # Flash
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload
 
-# Serial Monitor
+# Serial Monitor (interaktiv, Ctrl+C beendet)
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 
 # Flash + Monitor (nacheinander, ; statt &&)
@@ -353,6 +355,8 @@ bool SomeManager::doOperation() {
 ```
 
 ### Circuit-Breaker
+
+**Service-Level** (MQTT, WiFi): `CircuitBreaker` Klasse in `error_handling/circuit_breaker.h`
 ```cpp
 CircuitBreaker cb("MQTT", 5, 30000, 10000);
 
@@ -364,6 +368,17 @@ if (!cb.allowRequest()) {
 bool success = actualOperation();
 success ? cb.recordSuccess() : cb.recordFailure();
 ```
+
+**Sensor-Level** (per-sensor): Inline in `SensorConfig` via `SensorCBState`
+- CLOSED → OPEN: 10 consecutive failures
+- OPEN → HALF_OPEN: 5 min probe interval
+- Config-Push from server → CLOSED (reset)
+
+### Error Rate-Limiting
+
+MQTT error publishes throttled to max 1 per error code per 60s window.
+Implementation: `error_tracker.cpp` — `shouldPublishError()` with 32-slot modulo-hashed static table.
+Local error tracking (`addToBuffer`, `logErrorToLogger`) is NOT throttled — only MQTT publish.
 
 ---
 
