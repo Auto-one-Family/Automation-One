@@ -35,7 +35,7 @@ import {
   Thermometer,
   Zap,
 } from 'lucide-vue-next'
-import { Badge } from '@/shared/design'
+import { Badge, AccordionSection } from '@/shared/design/primitives'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
 import SensorConfigPanel from './SensorConfigPanel.vue'
 import ActuatorConfigPanel from './ActuatorConfigPanel.vue'
@@ -532,14 +532,14 @@ onUnmounted(() => {
               </div>
             </section>
 
-            <!-- STATUS Section -->
+            <!-- STATUS Section (Quick status inline + details in accordion) -->
             <section class="sheet-section">
               <h4 class="sheet-section__title">
                 <Activity class="w-3.5 h-3.5" />
                 Status
               </h4>
               <div class="sheet-section__content">
-                <!-- Online Status -->
+                <!-- Online Status (always visible) -->
                 <div class="info-row">
                   <span class="info-row__label">Verbindung</span>
                   <Badge
@@ -552,45 +552,7 @@ onUnmounted(() => {
                   </Badge>
                 </div>
 
-                <!-- WiFi Signal -->
-                <div class="info-row">
-                  <span class="info-row__label">
-                    <Wifi class="w-4 h-4 inline mr-1" />
-                    WiFi
-                  </span>
-                  <div class="info-row__value wifi-display">
-                    <div :class="['wifi-bars', wifiColorClass]">
-                      <span :class="['wifi-bar', { active: wifiInfo.bars >= 1 }]" />
-                      <span :class="['wifi-bar', { active: wifiInfo.bars >= 2 }]" />
-                      <span :class="['wifi-bar', { active: wifiInfo.bars >= 3 }]" />
-                      <span :class="['wifi-bar', { active: wifiInfo.bars >= 4 }]" />
-                    </div>
-                    <span :class="wifiColorClass">{{ wifiInfo.label }}</span>
-                    <span v-if="device.wifi_rssi" class="text-muted text-xs ml-1">
-                      ({{ device.wifi_rssi }} dBm)
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Heap Memory -->
-                <div v-if="heapDisplay" class="info-row">
-                  <span class="info-row__label">
-                    <HardDrive class="w-4 h-4 inline mr-1" />
-                    Speicher
-                  </span>
-                  <span class="info-row__value">{{ heapDisplay }} frei</span>
-                </div>
-
-                <!-- Uptime -->
-                <div v-if="uptimeDisplay" class="info-row">
-                  <span class="info-row__label">
-                    <Clock class="w-4 h-4 inline mr-1" />
-                    Uptime
-                  </span>
-                  <span class="info-row__value">{{ uptimeDisplay }}</span>
-                </div>
-
-                <!-- Last Heartbeat -->
+                <!-- Last Heartbeat (always visible) -->
                 <div class="info-row">
                   <span class="info-row__label">
                     <Heart class="w-4 h-4 inline mr-1" />
@@ -600,6 +562,51 @@ onUnmounted(() => {
                     {{ formatRelativeTime(device.last_heartbeat || device.last_seen || '') }}
                   </span>
                 </div>
+
+                <!-- Details (accordion) -->
+                <AccordionSection
+                  title="Status-Details"
+                  storage-key="esp-settings-status-details"
+                  :icon="Activity"
+                >
+                  <!-- WiFi Signal -->
+                  <div class="info-row">
+                    <span class="info-row__label">
+                      <Wifi class="w-4 h-4 inline mr-1" />
+                      WiFi
+                    </span>
+                    <div class="info-row__value wifi-display">
+                      <div :class="['wifi-bars', wifiColorClass]">
+                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 1 }]" />
+                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 2 }]" />
+                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 3 }]" />
+                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 4 }]" />
+                      </div>
+                      <span :class="wifiColorClass">{{ wifiInfo.label }}</span>
+                      <span v-if="device.wifi_rssi" class="text-muted text-xs ml-1">
+                        ({{ device.wifi_rssi }} dBm)
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Heap Memory -->
+                  <div v-if="heapDisplay" class="info-row">
+                    <span class="info-row__label">
+                      <HardDrive class="w-4 h-4 inline mr-1" />
+                      Speicher
+                    </span>
+                    <span class="info-row__value">{{ heapDisplay }} frei</span>
+                  </div>
+
+                  <!-- Uptime -->
+                  <div v-if="uptimeDisplay" class="info-row">
+                    <span class="info-row__label">
+                      <Clock class="w-4 h-4 inline mr-1" />
+                      Uptime
+                    </span>
+                    <span class="info-row__value">{{ uptimeDisplay }}</span>
+                  </div>
+                </AccordionSection>
               </div>
             </section>
 
@@ -636,47 +643,46 @@ onUnmounted(() => {
             </section>
 
             <!-- SENSOR CONFIGURATION Section (Phase 4.3) -->
-            <section v-if="sensors.length > 0" class="sheet-section">
-              <h4 class="sheet-section__title">
-                <Thermometer class="w-3.5 h-3.5" />
-                Sensor-Konfiguration
-              </h4>
-              <div class="sheet-section__content">
-                <div v-for="sensor in sensors" :key="`s-${sensor.gpio}`" class="config-panel-item">
-                  <SensorConfigPanel
-                    :esp-id="espId"
-                    :gpio="sensor.gpio"
-                    :sensor-type="sensor.sensor_type || sensor.type || 'generic'"
-                    :unit="sensor.unit || ''"
-                  />
-                </div>
+            <AccordionSection
+              v-if="sensors.length > 0"
+              :title="`Sensor-Konfiguration (${sensors.length})`"
+              storage-key="esp-settings-sensors"
+              :icon="Thermometer"
+            >
+              <div v-for="sensor in sensors" :key="`s-${sensor.gpio}`" class="config-panel-item">
+                <SensorConfigPanel
+                  :esp-id="espId"
+                  :gpio="sensor.gpio"
+                  :sensor-type="sensor.sensor_type || sensor.type || 'generic'"
+                  :unit="sensor.unit || ''"
+                />
               </div>
-            </section>
+            </AccordionSection>
 
             <!-- ACTUATOR CONFIGURATION Section (Phase 4.3) -->
-            <section v-if="actuators.length > 0" class="sheet-section">
-              <h4 class="sheet-section__title">
-                <Zap class="w-3.5 h-3.5" />
-                Aktor-Konfiguration
-              </h4>
-              <div class="sheet-section__content">
-                <div v-for="actuator in actuators" :key="`a-${actuator.gpio}`" class="config-panel-item">
-                  <ActuatorConfigPanel
-                    :esp-id="espId"
-                    :gpio="actuator.gpio"
-                    :actuator-type="actuator.actuator_type || actuator.type || 'generic'"
-                  />
-                </div>
+            <AccordionSection
+              v-if="actuators.length > 0"
+              :title="`Aktor-Konfiguration (${actuators.length})`"
+              storage-key="esp-settings-actuators"
+              :icon="Zap"
+            >
+              <div v-for="actuator in actuators" :key="`a-${actuator.gpio}`" class="config-panel-item">
+                <ActuatorConfigPanel
+                  :esp-id="espId"
+                  :gpio="actuator.gpio"
+                  :actuator-type="actuator.actuator_type || actuator.type || 'generic'"
+                />
               </div>
-            </section>
+            </AccordionSection>
 
             <!-- MOCK CONTROLS Section -->
             <section v-if="isMock" class="sheet-section sheet-section--mock">
-              <h4 class="sheet-section__title">
-                <Settings2 class="w-3.5 h-3.5" />
-                Mock-Steuerung
-              </h4>
-              <div class="sheet-section__content">
+              <AccordionSection
+                title="Mock-Steuerung"
+                storage-key="esp-settings-mock-controls"
+                :icon="Settings2"
+                default-open
+              >
                 <button
                   class="action-btn action-btn--heartbeat"
                   :disabled="heartbeatLoading"
@@ -732,20 +738,20 @@ onUnmounted(() => {
                   </template>
                   <template v-else>
                     Mock ESPs senden keine automatischen Heartbeats.
-                    Aktiviere diese Option für regelmäßige Updates.
+                    Aktiviere diese Option fuer regelmaessige Updates.
                   </template>
                 </p>
-              </div>
+              </AccordionSection>
             </section>
 
             <!-- REAL ESP INFO -->
             <section v-if="!isMock" class="sheet-section sheet-section--info">
-              <h4 class="sheet-section__title">Geräteinformation</h4>
+              <h4 class="sheet-section__title">Geraeteinformation</h4>
               <div class="sheet-section__content">
                 <p class="text-muted text-sm">
                   <Info class="w-4 h-4 inline mr-1" />
-                  Dieses Gerät sendet automatisch alle 60 Sekunden einen Heartbeat.
-                  Sensor- und Aktor-Daten werden in Echtzeit über MQTT synchronisiert.
+                  Dieses Geraet sendet automatisch alle 60 Sekunden einen Heartbeat.
+                  Sensor- und Aktor-Daten werden in Echtzeit ueber MQTT synchronisiert.
                 </p>
               </div>
             </section>

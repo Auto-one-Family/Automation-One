@@ -24,6 +24,8 @@ describe('shared/design primitives exports', () => {
     expect(mod.SlideOver).toBeDefined()
     expect(mod.RangeSlider).toBeDefined()
     expect(mod.QualityIndicator).toBeDefined()
+    // Settings-Panel Modernisation (Block B)
+    expect(mod.AccordionSection).toBeDefined()
   })
 
   it('exports convenience aliases for migration', async () => {
@@ -50,13 +52,13 @@ describe('shared/design primitives exports', () => {
     expect(mod.Spinner).toBe(mod.BaseSpinner)
   })
 
-  it('exports 20 named exports (9 Base + 8 aliases + 3 new primitives)', async () => {
+  it('exports 21 named exports (9 Base + 8 aliases + 4 new primitives)', async () => {
     // 9 Base*: BaseCard, BaseBadge, BaseButton, BaseModal, BaseInput, BaseToggle,
     //          BaseSelect, BaseSpinner, BaseSkeleton
     // 8 aliases: Badge, Card, Button, Input, Modal, Select, Toggle, Spinner
-    // 3 new (Dashboard Redesign): SlideOver, RangeSlider, QualityIndicator
+    // 4 new: SlideOver, RangeSlider, QualityIndicator, AccordionSection
     const mod = await import('@/shared/design/primitives')
     const exportedKeys = Object.keys(mod)
-    expect(exportedKeys.length).toBe(20)
+    expect(exportedKeys.length).toBe(21)
   })
 })

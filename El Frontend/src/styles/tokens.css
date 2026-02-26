@@ -25,6 +25,7 @@
   --color-text-primary:   #eaeaf2;  /* headlines, primary values, white-ish */
   --color-text-secondary: #8585a0;  /* labels, descriptions, body text */
   --color-text-muted:     #484860;  /* timestamps, hints, disabled — 4.1:1 on primary, use on tertiary+ bg only */
+  --color-text-inverse:   #ffffff;  /* light text on dark/accent buttons */
 
   /* ═══════════════════════════════════════════════════════════════════════════
      ACCENT — 1 color, 3 intensities
@@ -81,6 +82,10 @@
   --glass-border-hover: rgba(255, 255, 255, 0.12);
   --glass-shadow:       0 8px 32px rgba(0, 0, 0, 0.4);
   --glass-shadow-glow:  0 0 20px rgba(96, 165, 250, 0.2);
+
+  /* Semantic aliases — point to existing values for consistent usage */
+  --color-border:        var(--glass-border);
+  --color-surface-hover: var(--color-bg-hover);
 
   /* ═══════════════════════════════════════════════════════════════════════════
      SPACING — 4px grid, strict adherence

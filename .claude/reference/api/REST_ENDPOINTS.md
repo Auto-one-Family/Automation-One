@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.2 | **Aktualisiert:** 2026-02-22
+> **Version:** 2.3 | **Aktualisiert:** 2026-02-26
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -99,12 +99,15 @@ allowed-tools: Read
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/subzone` | GET | JWT | Alle Subzones |
-| `/subzone/{subzone_id}` | GET | JWT | Subzone Details |
-| `/subzone` | POST | JWT | Subzone erstellen |
-| `/subzone/{subzone_id}` | DELETE | JWT | Subzone löschen |
-| `/subzone/{subzone_id}/sensors/{sensor_id}` | POST | JWT | Sensor zu Subzone |
-| `/subzone/{subzone_id}/sensors/{sensor_id}` | DELETE | JWT | Sensor aus Subzone |
+| `/subzone/devices/{esp_id}/subzones/assign` | POST | Operator | GPIOs einer Subzone zuweisen (MQTT) |
+| `/subzone/devices/{esp_id}/subzones/{subzone_id}` | DELETE | Operator | Subzone entfernen |
+| `/subzone/devices/{esp_id}/subzones` | GET | JWT | Alle Subzones eines ESP |
+| `/subzone/devices/{esp_id}/subzones/{subzone_id}` | GET | JWT | Subzone Details |
+| `/subzone/devices/{esp_id}/subzones/{subzone_id}/safe-mode` | POST | Operator | Safe-Mode aktivieren |
+| `/subzone/devices/{esp_id}/subzones/{subzone_id}/safe-mode` | DELETE | Operator | Safe-Mode deaktivieren |
+
+> **Hinweis:** Subzone-Endpoints sind device-scoped (wie Zone-Endpoints).
+> Subzones haben eine eigene `subzone_configs` DB-Tabelle (im Gegensatz zu Zonen, die String-Felder auf `esp_devices` sind).
 
 ### Logic/Automation (`/logic`) - 8 Endpoints
 

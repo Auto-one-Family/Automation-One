@@ -76,11 +76,11 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('1/2 Online')
   })
 
-  it('shows total sensor/actuator counts in header', () => {
+  it('shows ESP count and online stats in header', () => {
     const w = mountPlate()
-    // Total: 3 sensors (1 + 2), 1 actuator — shown as meta pills
-    expect(w.text()).toContain('3S')
-    expect(w.text()).toContain('1A')
+    // Slim header: "2 ESPs · 1/2 Online" (meta pills removed in Block 2 redesign)
+    expect(w.text()).toContain('2 ESPs')
+    expect(w.text()).toContain('1/2 Online')
   })
 
   it('renders device wrappers for each device', () => {

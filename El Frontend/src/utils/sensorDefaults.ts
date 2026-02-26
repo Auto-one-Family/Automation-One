@@ -33,8 +33,10 @@ export interface SensorTypeConfig {
   recommendedMode?: SensorOperatingMode
   /** Empfohlener Timeout in Sekunden (0 = kein Timeout) */
   recommendedTimeout?: number
-  /** Ob dieser Sensor-Typ On-Demand-Messungen unterstützt */
+  /** Ob dieser Sensor-Typ On-Demand-Messungen unterstuetzt */
   supportsOnDemand?: boolean
+  /** Default read interval in seconds (for AddSensorModal type-aware defaults) */
+  defaultIntervalSeconds?: number
   // =========================================================================
   // ONEWIRE SUPPORT (Phase 6 - DS18B20)
   // =========================================================================
@@ -99,6 +101,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 30,
     // OneWire (Phase 6)
     requiresAddressScanning: true,
     supportsMultipleOnSamePin: true,
@@ -119,6 +122,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 30,
     requiresAddressScanning: true,
     supportsMultipleOnSamePin: true,
     recommendedGpios: [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33],
@@ -170,6 +174,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 30,
   },
 
   // Lowercase variants for consistency
@@ -186,6 +191,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 30,
   },
 
   'sht31_temp': {
@@ -248,6 +254,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
   },
 
   'BME280_humidity': {
@@ -467,6 +474,52 @@ export function formatSensorValueWithUnit(value: number | null, sensorType: stri
   if (!config) return `${value}`
 
   return `${value.toFixed(config.decimals)} ${config.unit}`
+}
+
+/**
+ * Get the default read interval for a sensor type
+ * @returns Interval in seconds, or 30 as fallback
+ */
+export function getDefaultInterval(sensorType: string): number {
+  return SENSOR_TYPE_CONFIG[sensorType]?.defaultIntervalSeconds ?? 30
+}
+
+/**
+ * Build a human-readable summary for sensor-type-aware defaults.
+ *
+ * @example
+ * getSensorTypeAwareSummary('SHT31')
+ * // "SHT31 auf I2C 0x44, misst Temperatur + Luftfeuchtigkeit alle 30s"
+ */
+export function getSensorTypeAwareSummary(sensorType: string): string | null {
+  const config = SENSOR_TYPE_CONFIG[sensorType]
+  if (!config) return null
+
+  const iface = inferInterfaceType(sensorType)
+  const interval = config.defaultIntervalSeconds ?? 30
+
+  // Check if multi-value device
+  const deviceType = getDeviceTypeFromSensorType(sensorType)
+  const mvDevice = deviceType ? MULTI_VALUE_DEVICES[deviceType] : null
+
+  const parts: string[] = [config.label || sensorType]
+
+  if (iface === 'I2C' && mvDevice?.i2cAddress) {
+    parts.push(`auf I2C ${mvDevice.i2cAddress}`)
+  } else if (iface === 'ONEWIRE') {
+    parts.push('auf OneWire-Bus')
+  }
+
+  if (mvDevice) {
+    const valueNames = mvDevice.values.map(v => v.label)
+    parts.push(`misst ${valueNames.join(' + ')}`)
+  } else {
+    parts.push(`misst ${config.unit}`)
+  }
+
+  parts.push(`alle ${interval}s`)
+
+  return parts.join(', ')
 }
 
 // ════════════════════════════════════════════════════════════════════════════

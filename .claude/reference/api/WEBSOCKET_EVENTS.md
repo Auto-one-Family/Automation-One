@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.2 | **Aktualisiert:** 2026-02-25
+> **Version:** 2.3 | **Aktualisiert:** 2026-02-26
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 28 verschiedene Event-Typen (esp_diagnostics hinzugefügt)
@@ -1117,6 +1117,7 @@ interface WebSocketFilters {
 | `heartbeat_handler.py` | `esp_health`, `device_discovered`, `device_rediscovered` |
 | `config_handler.py` | `config_response` |
 | `zone_ack_handler.py` | `zone_assignment` |
+| `subzone_ack_handler.py` | `subzone_assignment` |
 | `error_handler.py` | `error_event` |
 | `lwt_handler.py` | `esp_health` (offline) |
 

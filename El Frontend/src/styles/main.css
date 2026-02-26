@@ -12,10 +12,13 @@
 /* 3. Glass & iridescent effects */
 @import './glass.css';
 
-/* 4. Animations */
+/* 4. Shared form & modal styles (global, not scoped) */
+@import './forms.css';
+
+/* 5. Animations */
 @import './animations.css';
 
-/* 5. Base styles */
+/* 6. Base styles */
 @layer base {
   html {
     font-family: var(--font-display);
@@ -55,7 +58,7 @@
   }
 }
 
-/* 6. Component styles */
+/* 7. Component styles */
 @layer components {
   /* ============================================================================
      BUTTONS — Precision controls for mission-critical actions
@@ -631,7 +634,7 @@
   }
 }
 
-/* 8. Utility classes */
+/* 9. Utility classes */
 @layer utilities {
   .text-balance {
     text-wrap: balance;

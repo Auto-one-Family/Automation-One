@@ -11,6 +11,7 @@ import { useEspStore } from '@/stores/esp'
 import { useRouter } from 'vue-router'
 import { Cpu, Wifi, WifiOff } from 'lucide-vue-next'
 import type { ESPDevice } from '@/api/esp'
+import { getESPStatus } from '@/composables/useESPStatus'
 
 interface Props {
   zoneFilter?: string | null
@@ -25,6 +26,11 @@ const props = withDefaults(defineProps<Props>(), {
 const espStore = useEspStore()
 const router = useRouter()
 
+/** Check if device is online using shared status logic */
+function isDeviceOnline(device: ESPDevice): boolean {
+  return getESPStatus(device) === 'online'
+}
+
 const filteredDevices = computed(() => {
   let devices = [...espStore.devices]
 
@@ -33,13 +39,13 @@ const filteredDevices = computed(() => {
   }
 
   if (props.showOfflineOnly) {
-    devices = devices.filter(d => d.status !== 'online' && d.connected !== true)
+    devices = devices.filter(d => !isDeviceOnline(d))
   }
 
   // Sort: offline first, then by name
   devices.sort((a, b) => {
-    const aOnline = a.status === 'online' || a.connected === true
-    const bOnline = b.status === 'online' || b.connected === true
+    const aOnline = isDeviceOnline(a)
+    const bOnline = isDeviceOnline(b)
     if (aOnline !== bOnline) return aOnline ? 1 : -1
     const aName = a.name || espStore.getDeviceId(a)
     const bName = b.name || espStore.getDeviceId(b)
@@ -51,15 +57,14 @@ const filteredDevices = computed(() => {
 
 const summary = computed(() => {
   const all = espStore.devices
-  const online = all.filter(d => d.status === 'online' || d.connected === true).length
+  const online = all.filter(d => isDeviceOnline(d)).length
   const offline = all.length - online
-  const warning = all.filter(d => d.status === 'warning' || d.status === 'safemode').length
+  const warning = all.filter(d => {
+    const s = getESPStatus(d)
+    return s === 'error' || s === 'safemode'
+  }).length
   return { online, offline, warning, total: all.length }
 })
-
-function isOnline(device: ESPDevice): boolean {
-  return device.status === 'online' || device.connected === true
-}
 
 function rssiLevel(rssi: number | null | undefined): number {
   if (rssi == null) return 0
@@ -109,13 +114,13 @@ function navigateToDevice(device: ESPDevice) {
         @click="navigateToDevice(device)"
       >
         <span
-          :class="['esp-health-widget__dot', isOnline(device) ? 'esp-health-widget__dot--online' : 'esp-health-widget__dot--offline']"
+          :class="['esp-health-widget__dot', isDeviceOnline(device) ? 'esp-health-widget__dot--online' : 'esp-health-widget__dot--offline']"
         />
         <span class="esp-health-widget__name">
           {{ device.name || espStore.getDeviceId(device) }}
         </span>
         <span class="esp-health-widget__rssi" :title="`RSSI: ${device.wifi_rssi ?? '?'} dBm`">
-          <component :is="isOnline(device) ? Wifi : WifiOff" class="w-3 h-3" />
+          <component :is="isDeviceOnline(device) ? Wifi : WifiOff" class="w-3 h-3" />
           <span class="esp-health-widget__rssi-bars">
             <span
               v-for="i in 5"

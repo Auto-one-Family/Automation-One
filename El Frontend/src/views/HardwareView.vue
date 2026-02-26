@@ -19,7 +19,9 @@ import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useUiStore, useDashboardStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
-import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation, getESPStatus } from '@/composables'
+import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
+import { useToast } from '@/composables/useToast'
+import { zonesApi } from '@/api/zones'
 import { Plus, Filter, GitBranch, Workflow } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
 
@@ -51,8 +53,9 @@ const espStore = useEspStore()
 const logicStore = useLogicStore()
 const uiStore = useUiStore()
 const dashStore = useDashboardStore()
-const { groupDevicesByZone, handleDeviceDrop } = useZoneDragDrop()
+const { groupDevicesByZone, handleDeviceDrop, generateZoneId } = useZoneDragDrop()
 const { register } = useKeyboardShortcuts()
+const { success: showSuccess, error: showError } = useToast()
 
 // =============================================================================
 // Navigation State (route-param based, 2 levels)
@@ -79,7 +82,7 @@ useSwipeNavigation(zoomContainerRef, {
 const expandedZones = ref<Set<string>>(new Set())
 const allZonesInitialized = ref(false)
 
-/** Initialize all zones as expanded when data first arrives */
+/** Initialize zones: open all if <5 zones, otherwise collapsed */
 watch(
   () => espStore.devices.length,
   () => {
@@ -89,7 +92,7 @@ watch(
           .filter(d => d.zone_id)
           .map(d => d.zone_id!)
       )
-      expandedZones.value = allZoneIds
+      expandedZones.value = allZoneIds.size < 5 ? allZoneIds : new Set()
       allZonesInitialized.value = true
     }
   },
@@ -228,10 +231,9 @@ const filteredEsps = computed(() => {
       const deviceId = espStore.getDeviceId(device)
       const isMock = espStore.isMock(deviceId)
       const mockDevice = device as any
-      const { isReachable } = getESPStatus(device)
 
-      if (filters.has('online') && isReachable) return true
-      if (filters.has('offline') && !isReachable) return true
+      if (filters.has('online') && (device.status === 'online' || device.connected === true)) return true
+      if (filters.has('offline') && (device.status === 'offline' || device.connected === false)) return true
       if (filters.has('warning')) {
         if (isMock && (mockDevice.system_state === 'ERROR' || mockDevice.actuators?.some((a: any) => a.emergency_stopped))) return true
         if (!isMock && device.status === 'error') return true
@@ -248,6 +250,49 @@ const zoneGroups = computed(() => {
   const allGroups = groupDevicesByZone(filteredEsps.value)
   return allGroups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
 })
+
+/** Unassigned devices (for zone create ESP picker) */
+const unassignedDevices = computed(() => {
+  const allGroups = groupDevicesByZone(espStore.devices)
+  const unassigned = allGroups.find(g => g.zoneId === ZONE_UNASSIGNED)
+  return unassigned?.devices || []
+})
+
+// =============================================================================
+// Zone Create (inline form)
+// =============================================================================
+const showCreateZoneForm = ref(false)
+const newZoneName = ref('')
+const selectedEspForNewZone = ref('')
+
+async function handleZoneCreate() {
+  const name = newZoneName.value.trim()
+  if (!name || !selectedEspForNewZone.value) return
+
+  const zoneId = generateZoneId(name)
+  try {
+    await zonesApi.assignZone(selectedEspForNewZone.value, {
+      zone_id: zoneId,
+      zone_name: name,
+    })
+    showSuccess(`Zone "${name}" erstellt`)
+    showCreateZoneForm.value = false
+    newZoneName.value = ''
+    selectedEspForNewZone.value = ''
+    await espStore.fetchAll()
+    // Auto-expand the new zone
+    setZoneExpanded(zoneId, true)
+  } catch (err) {
+    showError(err instanceof Error ? err.message : 'Zone konnte nicht erstellt werden')
+    logger.error('Failed to create zone', err)
+  }
+}
+
+function cancelZoneCreate() {
+  showCreateZoneForm.value = false
+  newZoneName.value = ''
+  selectedEspForNewZone.value = ''
+}
 
 // =============================================================================
 // Level 2 (Orbital) computed
@@ -372,6 +417,49 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
 }
 
 // =============================================================================
+// Zone Management (Rename / Delete) — zones are string fields, not DB entities
+// =============================================================================
+
+/** Rename zone: reassign all ESPs in the zone with the new zone_name */
+async function handleZoneRename(payload: { zoneId: string; newName: string }) {
+  const devicesInZone = espStore.devices.filter(d => d.zone_id === payload.zoneId)
+  if (devicesInZone.length === 0) return
+
+  try {
+    for (const device of devicesInZone) {
+      const devId = espStore.getDeviceId(device)
+      await zonesApi.assignZone(devId, {
+        zone_id: payload.zoneId,
+        zone_name: payload.newName,
+      })
+    }
+    showSuccess(`Zone umbenannt zu "${payload.newName}"`)
+    await espStore.fetchAll()
+  } catch (err) {
+    showError(err instanceof Error ? err.message : 'Zone konnte nicht umbenannt werden')
+    logger.error(`Failed to rename zone ${payload.zoneId}`, err)
+  }
+}
+
+/** Delete zone: remove all ESPs from the zone (devices are NOT deleted) */
+async function handleZoneDelete(zoneId: string) {
+  const devicesInZone = espStore.devices.filter(d => d.zone_id === zoneId)
+  if (devicesInZone.length === 0) return
+
+  try {
+    for (const device of devicesInZone) {
+      const devId = espStore.getDeviceId(device)
+      await zonesApi.removeZone(devId)
+    }
+    showSuccess('Zone gelöscht — Geräte sind jetzt unzugewiesen')
+    await espStore.fetchAll()
+  } catch (err) {
+    showError(err instanceof Error ? err.message : 'Zone konnte nicht gelöscht werden')
+    logger.error(`Failed to delete zone ${zoneId}`, err)
+  }
+}
+
+// =============================================================================
 // SlideOver handlers: open config panels from ESP detail view
 // =============================================================================
 
@@ -484,8 +572,61 @@ function formatTimeAgo(timestamp: number): string {
                 @update:is-expanded="setZoneExpanded(group.zoneId, $event)"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"
+                @rename="handleZoneRename"
+                @delete="handleZoneDelete"
+                @device-delete="handleDelete"
                 @settings="handleSettings"
               />
+
+              <!-- Zone Create: inline form -->
+              <div v-if="showCreateZoneForm" class="zone-create-form">
+                <input
+                  v-model="newZoneName"
+                  class="zone-create-form__input"
+                  placeholder="Zone-Name"
+                  maxlength="60"
+                  @keydown.enter.prevent="handleZoneCreate"
+                  @keydown.escape.prevent="cancelZoneCreate"
+                />
+                <select
+                  v-model="selectedEspForNewZone"
+                  class="zone-create-form__select"
+                >
+                  <option value="" disabled>ESP wählen...</option>
+                  <option
+                    v-for="dev in unassignedDevices"
+                    :key="espStore.getDeviceId(dev)"
+                    :value="espStore.getDeviceId(dev)"
+                  >
+                    {{ dev.name || espStore.getDeviceId(dev) }}
+                  </option>
+                </select>
+                <button
+                  class="zone-create-form__btn zone-create-form__btn--primary"
+                  :disabled="!newZoneName.trim() || !selectedEspForNewZone"
+                  @click="handleZoneCreate"
+                >
+                  Erstellen
+                </button>
+                <button
+                  class="zone-create-form__btn"
+                  @click="cancelZoneCreate"
+                >
+                  Abbrechen
+                </button>
+              </div>
+
+              <!-- + Zone erstellen button -->
+              <button
+                v-if="!showCreateZoneForm"
+                class="zone-create-btn"
+                :disabled="unassignedDevices.length === 0"
+                :title="unassignedDevices.length === 0 ? 'Keine unzugewiesenen ESPs vorhanden' : 'Neue Zone erstellen'"
+                @click="showCreateZoneForm = true"
+              >
+                <Plus class="zone-create-btn__icon" />
+                Zone erstellen
+              </button>
             </div>
 
             <button
@@ -529,13 +670,8 @@ function formatTimeAgo(timestamp: number): string {
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
 
-    <!-- Pending Devices Panel (Geräte + Wartend + Anleitung) -->
-    <PendingDevicesPanel
-      v-model:is-open="dashStore.showPendingPanel"
-      :anchor-el="null"
-      @close="dashStore.showPendingPanel = false"
-      @open-esp-config="(d) => { dashStore.showPendingPanel = false; handleSettings(d) }"
-    />
+    <!-- Pending Devices Panel -->
+    <PendingDevicesPanel v-model:is-open="dashStore.showPendingPanel" :anchor-el="null" @close="dashStore.showPendingPanel = false" />
 
     <!-- ESP Settings Sheet -->
     <ESPSettingsSheet
@@ -719,9 +855,121 @@ function formatTimeAgo(timestamp: number): string {
   color: white;
 }
 
+/* Zone Create Button */
+.zone-create-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  background: transparent;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.zone-create-btn:hover:not(:disabled) {
+  border-color: var(--color-accent-bright);
+  color: var(--color-accent-bright);
+  background: rgba(96, 165, 250, 0.04);
+}
+
+.zone-create-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.zone-create-btn__icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Zone Create Form */
+.zone-create-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.zone-create-form__input {
+  flex: 1;
+  min-width: 120px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.zone-create-form__input:focus {
+  border-color: var(--color-iridescent-1);
+}
+
+.zone-create-form__select {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  min-width: 150px;
+  cursor: pointer;
+}
+
+.zone-create-form__select:focus {
+  border-color: var(--color-iridescent-1);
+}
+
+.zone-create-form__btn {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.zone-create-form__btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--glass-border-hover);
+}
+
+.zone-create-form__btn--primary {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-accent-bright);
+}
+
+.zone-create-form__btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.zone-create-form__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 @media (max-width: 640px) {
   .hardware-view { padding-bottom: 80px; }
   .zone-accordion-list { gap: var(--space-3); }
   .hardware-main-layout { flex-direction: column; }
+  .zone-create-form { flex-wrap: wrap; }
 }
 </style>

@@ -5,8 +5,6 @@
  * HardwareView writes counts, breadcrumb, and reads filter state.
  * TopBar reads counts/breadcrumb and writes filter changes.
  *
- * deviceCounts and pendingCount are computed from espStore (server-centric).
- *
  * Extended with Custom Dashboard Layout management (Phase 2).
  */
 
@@ -61,14 +59,16 @@ export const useDashboardStore = defineStore('dashboard', () => {
   /* ── Visibility ── */
   const showControls = ref(false)
 
-  /* ── Counts: statusCounts written by HardwareView; deviceCounts/pendingCount from espStore ── */
+  /* ── Counts (written by DashboardView) ── */
   const statusCounts = ref({ online: 0, offline: 0, warning: 0, safeMode: 0 })
+
+  /* ── Device counts (computed from espStore — reactive to device changes) ── */
   const deviceCounts = computed(() => ({
     all: espStore.devices.length,
     mock: espStore.mockDevices.length,
     real: espStore.realDevices.length,
   }))
-  const pendingCount = computed(() => espStore.pendingCount)
+  const pendingCount = ref(0)
 
   /* ── Filters (bidirectional: TopBar writes, DashboardView reads) ── */
   const activeStatusFilters = ref<Set<StatusFilter>>(new Set())

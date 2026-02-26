@@ -1,147 +1,185 @@
 /**
- * useESPStatus — Central ESP Status Logic
+ * useESPStatus Composable
  *
- * Server-centric: Status derived from last_heartbeat/last_seen and device metadata.
- * Used by: espStore (onlineDevices/offlineDevices), DeviceMiniCard, ESPSettingsSheet,
- * ZonePlate, StatusPill.
+ * Single source of truth for ESP device status calculation.
+ * Replaces duplicated status logic in DeviceMiniCard, DeviceSummaryCard,
+ * ESPHealthWidget, and ESPOrbitalLayout.
  *
- * Thresholds (aligned with Server heartbeat_handler):
- * - online: last_seen < 1.5× heartbeat_interval (default 90s)
- * - stale: 1.5× - 5min (data delayed but device may still be reachable)
- * - offline: > 5min
+ * Status priority:
+ * 1. Server-provided status field (primary source)
+ * 2. MQTT connected flag (secondary)
+ * 3. Heartbeat-based timing (fallback for stale detection)
  */
 
-import { computed } from 'vue'
+import { computed, type ComputedRef, toValue, type MaybeRefOrGetter } from 'vue'
 import type { ESPDevice } from '@/api/esp'
-import { formatRelativeTime } from '@/utils/formatters'
 
-/** Status values for UI display */
-export type ESPStatusValue =
-  | 'online'
-  | 'stale'
-  | 'offline'
-  | 'unknown'
-  | 'error'
-  | 'safe_mode'
-  | 'pending'
+/** Possible ESP status values */
+export type ESPStatus = 'online' | 'stale' | 'offline' | 'error' | 'safemode' | 'unknown'
 
-/** Default heartbeat interval (seconds) when not provided by device */
-const DEFAULT_HEARTBEAT_INTERVAL = 60
-
-/** Online threshold: 1.5× interval */
-const ONLINE_MULTIPLIER = 1.5
-
-/** Stale threshold: 5 minutes */
-const STALE_THRESHOLD_SEC = 300
-
-export interface ESPStatusInfo {
-  status: ESPStatusValue
-  /** Human-readable label for UI */
-  label: string
-  /** "Zuletzt vor X Min." for stale/offline */
-  lastSeenLabel: string | null
-  /** Whether data should be shown as stale (gray sparkbars, etc.) */
-  isStale: boolean
-  /** Whether device is considered reachable (online or stale) */
-  isReachable: boolean
+/** Status display configuration */
+interface StatusDisplay {
+  color: string
+  text: string
+  icon: string
+  pulse: boolean
 }
 
+/** Status color mapping — uses CSS custom properties from tokens.css */
+const STATUS_DISPLAY: Record<ESPStatus, StatusDisplay> = {
+  online: {
+    color: 'var(--color-success)',
+    text: 'Online',
+    icon: 'check-circle',
+    pulse: true,
+  },
+  stale: {
+    color: 'var(--color-warning)',
+    text: 'Verzoegert',
+    icon: 'clock',
+    pulse: false,
+  },
+  offline: {
+    color: 'var(--color-text-muted)',
+    text: 'Offline',
+    icon: 'wifi-off',
+    pulse: false,
+  },
+  error: {
+    color: 'var(--color-error)',
+    text: 'Fehler',
+    icon: 'alert-triangle',
+    pulse: false,
+  },
+  safemode: {
+    color: 'var(--color-warning)',
+    text: 'SafeMode',
+    icon: 'shield-alert',
+    pulse: false,
+  },
+  unknown: {
+    color: 'var(--color-text-muted)',
+    text: 'Unbekannt',
+    icon: 'help-circle',
+    pulse: false,
+  },
+}
+
+/** Heartbeat timing thresholds */
+const HEARTBEAT_STALE_MS = 90_000   // 1.5x default 60s interval
+const HEARTBEAT_OFFLINE_MS = 300_000 // 5 minutes
+
 /**
- * Get status from device metadata (error, safe_mode, pending) — server-provided.
+ * Pure function: calculate ESP status from device data.
+ * Use this in list iterations (v-for) where the composable can't be called per-item.
  */
-function getStatusFromMetadata(device: ESPDevice): ESPStatusValue | null {
+export function getESPStatus(device: ESPDevice): ESPStatus {
+  // Priority 1: Server-provided status + connected flag
+  if (device.status === 'online' || device.connected === true) return 'online'
   if (device.status === 'error') return 'error'
-  if (device.status === 'pending_approval' || device.status === 'rejected') return 'pending'
+  if (device.status === 'safemode' || (device as any).system_state === 'SAFE_MODE') return 'safemode'
+  if (device.status === 'offline') return 'offline'
 
-  const d = device as any
-  if (d.system_state === 'SAFE_MODE') return 'safe_mode'
+  // Priority 2: Heartbeat-based timing (for devices without explicit status)
+  const ts = device.last_seen || device.last_heartbeat
+  if (ts) {
+    const age = Date.now() - new Date(ts).getTime()
+    if (age < HEARTBEAT_STALE_MS) return 'online'
+    if (age < HEARTBEAT_OFFLINE_MS) return 'stale'
+    return 'offline'
+  }
 
-  return null
+  return 'unknown'
+}
+
+/** Get status display config for a given status */
+export function getESPStatusDisplay(status: ESPStatus): StatusDisplay {
+  return STATUS_DISPLAY[status]
 }
 
 /**
- * Compute status from last_seen/last_heartbeat timing.
+ * Calculate ESP device status from all available signals.
+ *
+ * @param esp - Reactive reference or getter to an ESPDevice
+ * @returns Reactive status, color, text, icon, and utility computed refs
  */
-function getStatusFromHeartbeat(
-  device: ESPDevice
-): { status: 'online' | 'stale' | 'offline' | 'unknown'; ageSec: number } {
-  const ts = device.last_seen || device.last_heartbeat
-  if (!ts) {
-    return { status: 'unknown', ageSec: Infinity }
-  }
+export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
+  const status: ComputedRef<ESPStatus> = computed(() => getESPStatus(toValue(esp)))
 
-  const then = new Date(ts).getTime()
-  const now = Date.now()
-  const ageSec = Math.floor((now - then) / 1000)
+  const statusColor = computed(() => STATUS_DISPLAY[status.value].color)
+  const statusText = computed(() => STATUS_DISPLAY[status.value].text)
+  const statusIcon = computed(() => STATUS_DISPLAY[status.value].icon)
+  const statusPulse = computed(() => STATUS_DISPLAY[status.value].pulse)
 
-  const interval = device.heartbeat_interval_seconds ?? DEFAULT_HEARTBEAT_INTERVAL
-  const onlineThreshold = interval * ONLINE_MULTIPLIER
+  /** Whether the device is reachable (online or stale) */
+  const isReachable = computed(() => status.value === 'online' || status.value === 'stale')
 
-  if (ageSec < 0) return { status: 'unknown', ageSec }
-  if (ageSec < onlineThreshold) return { status: 'online', ageSec }
-  if (ageSec < STALE_THRESHOLD_SEC) return { status: 'stale', ageSec }
-  return { status: 'offline', ageSec }
-}
+  /** Whether the device is fully online */
+  const isOnline = computed(() => status.value === 'online')
 
-/**
- * Get full ESP status info for a device.
- * Use this in components for consistent status display.
- */
-export function getESPStatus(device: ESPDevice | null | undefined): ESPStatusInfo {
-  if (!device) {
-    return {
-      status: 'unknown',
-      label: 'Unbekannt',
-      lastSeenLabel: null,
-      isStale: true,
-      isReachable: false,
-    }
-  }
+  /** Mock vs Real distinction */
+  const isMock = computed(() => {
+    const device = toValue(esp)
+    const id = device.device_id || device.esp_id || ''
+    return id.includes('MOCK') || (device.hardware_type === 'MOCK_ESP32')
+  })
 
-  const metaStatus = getStatusFromMetadata(device)
-  if (metaStatus) {
-    const labels: Record<ESPStatusValue, string> = {
-      online: 'Online',
-      stale: 'Verzögert',
-      offline: 'Offline',
-      unknown: 'Unbekannt',
-      error: 'Fehler',
-      safe_mode: 'Safe-Mode',
-      pending: 'Warte auf Genehmigung',
-    }
-    return {
-      status: metaStatus,
-      label: labels[metaStatus],
-      lastSeenLabel: null,
-      isStale: metaStatus !== 'online',
-      isReachable: false,
-    }
-  }
+  /** Border color for mock/real visual distinction */
+  const borderColor = computed(() =>
+    isMock.value ? 'var(--color-mock)' : 'var(--color-real)'
+  )
 
-  const { status } = getStatusFromHeartbeat(device)
-  const ts = device.last_seen || device.last_heartbeat
-  const lastSeenLabel = ts ? formatRelativeTime(ts) : null
+  /** Device display name (name or device_id fallback) */
+  const displayName = computed(() => {
+    const device = toValue(esp)
+    return device.name || device.device_id || device.esp_id || 'Unbenannt'
+  })
 
-  const labels: Record<string, string> = {
-    online: 'Online',
-    stale: 'Verzögert',
-    offline: 'Offline',
-    unknown: 'Unbekannt',
-  }
+  /** Device ID (canonical) */
+  const deviceId = computed(() => {
+    const device = toValue(esp)
+    return device.device_id || device.esp_id || ''
+  })
+
+  /** Relative time since last seen */
+  const lastSeenText = computed(() => {
+    const device = toValue(esp)
+    const ts = device.last_seen || device.last_heartbeat
+    if (!ts) return 'Nie'
+    return formatRelativeTime(ts)
+  })
 
   return {
     status,
-    label: labels[status] ?? 'Unbekannt',
-    lastSeenLabel: status !== 'online' ? lastSeenLabel : null,
-    isStale: status === 'stale' || status === 'offline' || status === 'unknown',
-    isReachable: status === 'online' || status === 'stale',
+    statusColor,
+    statusText,
+    statusIcon,
+    statusPulse,
+    isReachable,
+    isOnline,
+    isMock,
+    borderColor,
+    displayName,
+    deviceId,
+    lastSeenText,
   }
 }
 
-/**
- * Composable: returns getESPStatus and a computed for a given device.
- */
-export function useESPStatus(device: () => ESPDevice | null | undefined) {
-  const statusInfo = computed(() => getESPStatus(device()))
-  return { getESPStatus, statusInfo }
+/** Format a timestamp as relative time (e.g., "vor 2 Min.") */
+function formatRelativeTime(timestamp: string): string {
+  const now = Date.now()
+  const then = new Date(timestamp).getTime()
+  const diffMs = now - then
+
+  if (diffMs < 0) return 'Jetzt'
+  if (diffMs < 60_000) return 'Gerade eben'
+
+  const minutes = Math.floor(diffMs / 60_000)
+  if (minutes < 60) return `vor ${minutes} Min.`
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `vor ${hours} Std.`
+
+  const days = Math.floor(hours / 24)
+  return `vor ${days} Tag${days > 1 ? 'en' : ''}`
 }

@@ -71,10 +71,11 @@ import {
   Activity,
 } from 'lucide-vue-next'
 import { Badge } from '@/shared/design'
-import { formatRelativeTime, formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
+import { formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
-import { espApi, type ESPDevice } from '@/api/esp'
+import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
+import { useESPStatus } from '@/composables/useESPStatus'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ESPCard')
@@ -194,19 +195,13 @@ function handleNameKeydown(event: KeyboardEvent) {
   }
 }
 
-// Computed properties
-const isMock = computed(() => {
-  const deviceId = props.esp.device_id || props.esp.esp_id || ''
-  return espApi.isMockEsp(deviceId)
-})
-
-const isOnline = computed(() => 
-  props.esp.status === 'online' || props.esp.connected === true
-)
-
-const espId = computed(() => 
-  props.esp.device_id || props.esp.esp_id || ''
-)
+// Unified status from composable (single source of truth)
+const {
+  isOnline,
+  isMock,
+  deviceId: espId,
+  lastSeenText,
+} = useESPStatus(() => props.esp)
 
 const hasEmergencyStopped = computed(() => {
   if (!props.esp.actuators) return false
@@ -489,13 +484,10 @@ function handleHeartbeatClick() {
  * Heartbeat tooltip based on device type
  */
 const heartbeatTooltip = computed(() => {
-  const timestamp = props.esp.last_heartbeat || props.esp.last_seen
-  const relativeTime = timestamp ? formatRelativeTime(timestamp) : 'Nie'
-
   if (isMock.value) {
-    return `Letzter Heartbeat: ${relativeTime}\nKlicken um Heartbeat auszulösen`
+    return `Letzter Heartbeat: ${lastSeenText.value}\nKlicken um Heartbeat auszulösen`
   }
-  return `Letzter Heartbeat: ${relativeTime}\nReal ESPs senden automatisch alle 60s`
+  return `Letzter Heartbeat: ${lastSeenText.value}\nReal ESPs senden automatisch alle 60s`
 })
 
 // =============================================================================
@@ -856,7 +848,7 @@ const offlineTimeAbsolute = computed(() => {
           ]"
         />
         <span class="esp-card__heartbeat-text">
-          {{ formatRelativeTime(esp.last_heartbeat || esp.last_seen || '') }}
+          {{ lastSeenText }}
         </span>
         <Loader2 v-if="heartbeatLoading" class="w-3 h-3 animate-spin ml-1" />
       </button>

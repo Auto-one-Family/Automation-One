@@ -233,9 +233,10 @@ class YourRepository(BaseRepository[YourModel]):
 
 | Model | Tabelle | Wichtige Felder |
 |-------|---------|-----------------|
-| ESPDevice | `esps` | esp_id (PK), zone_id, is_online, last_heartbeat |
+| ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat |
 | SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address |
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted |
+| SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
 | CrossESPLogic | `cross_esp_logic` | rule_name, conditions (JSON), actions (JSON) |
 | SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value |
 | AuditLog | `audit_logs` | event_type, severity, source_type |

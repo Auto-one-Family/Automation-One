@@ -1,21 +1,16 @@
 <script setup lang="ts">
 /**
- * SensorConfigPanel — Full Sensor Configuration (Redesigned)
+ * SensorConfigPanel — Three-Zone Sensor Configuration
  *
- * Replaces the previous DynamicForm-based panel with a comprehensive
- * configuration interface organized in sections:
+ * Zone 1 (Basic, always visible): Name, Unit, Enabled, Subzone
+ * Zone 2 (Accordion): Thresholds & Alarms, Operation & Interval, Calibration
+ * Zone 3 (Accordion - Expert): Hardware (GPIO/I2C/OneWire), Live Preview
  *
- * 1. Basic fields (name, zone, unit, active)
- * 2. Interface-specific fields (GPIO/I2C/OneWire)
- * 3. Threshold configuration (4-point range slider)
- * 4. Calibration wizard (pH/EC only)
- * 5. Live preview chart
- *
- * Used inside a SlideOver panel on ESP detail view.
+ * Used inside ESPSettingsSheet as SlideOver panel.
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, RotateCcw, ChevronDown, ChevronRight, Beaker } from 'lucide-vue-next'
+import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { subzonesApi } from '@/api/subzones'
 import { useEspStore } from '@/stores/esp'
@@ -23,6 +18,7 @@ import { useToast } from '@/composables/useToast'
 import { useCalibration } from '@/composables/useCalibration'
 import { inferInterfaceType } from '@/utils/sensorDefaults'
 import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
+import { AccordionSection } from '@/shared/design/primitives'
 import RangeSlider from '@/shared/design/primitives/RangeSlider.vue'
 import LiveDataPreview from './LiveDataPreview.vue'
 
@@ -67,14 +63,12 @@ const measureRangeMax = ref(100)
 const pulsesPerLiter = ref(450)
 
 // Thresholds
-const showThresholds = ref(false)
 const alarmLow = ref(0)
 const warnLow = ref(0)
 const warnHigh = ref(100)
 const alarmHigh = ref(100)
 
 // Calibration
-const showCalibration = ref(false)
 const currentRawValue = ref(0)
 
 // =============================================================================
@@ -104,6 +98,9 @@ const i2cAddressOptions = computed(() => {
   if (t.includes('bmp280') || t.includes('bme280')) return [{ value: '0x76', label: '0x76 (Default)' }, { value: '0x77', label: '0x77 (Alt)' }]
   return [{ value: '0x44', label: '0x44' }, { value: '0x45', label: '0x45' }, { value: '0x76', label: '0x76' }, { value: '0x77', label: '0x77' }]
 })
+
+/** Storage key prefix for accordion persistence */
+const accordionKey = computed(() => `sensor-${props.espId}-${props.gpio}`)
 
 // =============================================================================
 // Load existing config
@@ -238,7 +235,7 @@ async function handleSave() {
     <div v-if="loading" class="sensor-config__loading">Lade Konfiguration...</div>
 
     <template v-else>
-      <!-- ═══ SECTION: Basic Fields ═══════════════════════════════════════ -->
+      <!-- ═══ ZONE 1: BASIC (always visible) ══════════════════════════════ -->
       <section class="sensor-config__section">
         <h3 class="sensor-config__section-title">Grundeinstellungen</h3>
 
@@ -299,12 +296,171 @@ async function handleSave() {
         </div>
       </section>
 
-      <!-- ═══ SECTION: Interface-Specific Fields ═══════════════════════════ -->
-      <section class="sensor-config__section">
-        <h3 class="sensor-config__section-title">
-          Hardware —
+      <!-- ═══ ZONE 2: ADVANCED (Accordion sections) ═══════════════════════ -->
+
+      <!-- Thresholds -->
+      <AccordionSection
+        title="Schwellwerte & Alarme"
+        :storage-key="`${accordionKey}-thresholds`"
+        :icon="Gauge"
+      >
+        <RangeSlider
+          :min="sensorConfig?.min ?? 0"
+          :max="sensorConfig?.max ?? 100"
+          :alarm-low="alarmLow"
+          :warn-low="warnLow"
+          :warn-high="warnHigh"
+          :alarm-high="alarmHigh"
+          :unit="unitValue"
+          :step="0.1"
+          @update:alarm-low="alarmLow = $event"
+          @update:warn-low="warnLow = $event"
+          @update:warn-high="warnHigh = $event"
+          @update:alarm-high="alarmHigh = $event"
+        />
+
+        <div class="sensor-config__threshold-inputs">
+          <div class="sensor-config__field sensor-config__field--quarter">
+            <label class="sensor-config__label sensor-config__label--alarm">Alarm &#8595;</label>
+            <input v-model.number="alarmLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+          </div>
+          <div class="sensor-config__field sensor-config__field--quarter">
+            <label class="sensor-config__label sensor-config__label--warn">Warn &#8595;</label>
+            <input v-model.number="warnLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+          </div>
+          <div class="sensor-config__field sensor-config__field--quarter">
+            <label class="sensor-config__label sensor-config__label--warn">Warn &#8593;</label>
+            <input v-model.number="warnHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+          </div>
+          <div class="sensor-config__field sensor-config__field--quarter">
+            <label class="sensor-config__label sensor-config__label--alarm">Alarm &#8593;</label>
+            <input v-model.number="alarmHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+          </div>
+        </div>
+      </AccordionSection>
+
+      <!-- Calibration (pH/EC only) -->
+      <AccordionSection
+        v-if="needsCalibration"
+        title="Kalibrierung"
+        :storage-key="`${accordionKey}-calibration`"
+        :icon="Beaker"
+      >
+        <!-- Current raw value display -->
+        <div class="sensor-config__cal-current">
+          <span class="sensor-config__cal-label">Aktueller Rohwert:</span>
+          <span class="sensor-config__cal-value">{{ currentRawValue.toFixed(0) }} ADC</span>
+        </div>
+
+        <!-- Not started -->
+        <template v-if="!calibration.isActive.value">
+          <button
+            class="sensor-config__cal-start"
+            @click="calibration.startCalibration(sensorType.toLowerCase() === 'ph' ? 'pH' : 'EC')"
+          >
+            <Beaker class="w-4 h-4" />
+            Kalibrierung starten
+          </button>
+        </template>
+
+        <!-- pH Calibration Wizard -->
+        <template v-else-if="calibration.calibrationType.value === 'pH'">
+          <!-- Step 1: pH 4.0 -->
+          <div v-if="calibration.step.value === 'point1'" class="sensor-config__cal-step">
+            <h4>Schritt 1: pH 4.0 Pufferloesung</h4>
+            <p>Sensor in pH 4.0 Loesung tauchen und warten bis der Wert stabil ist.</p>
+            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
+            <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 4.0)">
+              Kalibrierungspunkt 1 setzen (pH 4.0)
+            </button>
+          </div>
+
+          <!-- Step 2: pH 7.0 -->
+          <div v-else-if="calibration.step.value === 'point2'" class="sensor-config__cal-step">
+            <h4>Schritt 2: pH 7.0 Pufferloesung</h4>
+            <p>Sensor in pH 7.0 Loesung tauchen und warten bis der Wert stabil ist.</p>
+            <div class="sensor-config__cal-raw">
+              Punkt 1: {{ calibration.point1.value?.rawValue.toFixed(0) }} ADC &rarr; pH 4.0 &#10003;
+            </div>
+            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
+            <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 7.0)">
+              Kalibrierungspunkt 2 setzen (pH 7.0)
+            </button>
+          </div>
+
+          <!-- Complete -->
+          <div v-else-if="calibration.step.value === 'complete'" class="sensor-config__cal-step sensor-config__cal-step--complete">
+            <h4>Kalibrierung abgeschlossen &#10003;</h4>
+            <div class="sensor-config__cal-result">
+              <span>Steigung: {{ calibration.result.value?.slope }}</span>
+              <span>Offset: {{ calibration.result.value?.offset }}</span>
+            </div>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
+                Kalibrierung speichern
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
+                <RotateCcw class="w-3 h-3" />
+                Zuruecksetzen
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- EC Calibration Wizard -->
+        <template v-else-if="calibration.calibrationType.value === 'EC'">
+          <!-- Step 1: Dry -->
+          <div v-if="calibration.step.value === 'point1'" class="sensor-config__cal-step">
+            <h4>Schritt 1: Trockene Elektrode (Luft)</h4>
+            <p>Elektrode in der Luft halten (trocken).</p>
+            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
+            <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 0)">
+              Nullpunkt setzen
+            </button>
+          </div>
+
+          <!-- Step 2: Solution -->
+          <div v-else-if="calibration.step.value === 'point2'" class="sensor-config__cal-step">
+            <h4>Schritt 2: Kalibrierlosung</h4>
+            <p>Elektrode in Kalibrierlosung (1413 &micro;S/cm) tauchen.</p>
+            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
+            <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 1413)">
+              Kalibrierungspunkt setzen (1413 &micro;S/cm)
+            </button>
+          </div>
+
+          <!-- Complete -->
+          <div v-else-if="calibration.step.value === 'complete'" class="sensor-config__cal-step sensor-config__cal-step--complete">
+            <h4>EC-Kalibrierung abgeschlossen &#10003;</h4>
+            <div class="sensor-config__cal-result">
+              <span>Faktor: {{ calibration.result.value?.slope }}</span>
+              <span>Offset: {{ calibration.result.value?.offset }}</span>
+            </div>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
+                Kalibrierung speichern
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
+                <RotateCcw class="w-3 h-3" />
+                Zuruecksetzen
+              </button>
+            </div>
+          </div>
+        </template>
+      </AccordionSection>
+
+      <!-- ═══ ZONE 3: EXPERT (Hardware + Preview) ═════════════════════════ -->
+
+      <!-- Hardware / Interface -->
+      <AccordionSection
+        title="Hardware & Interface"
+        :storage-key="`${accordionKey}-hardware`"
+        :icon="Cpu"
+      >
+        <div class="sensor-config__interface-badge-row">
+          Interface:
           <span class="sensor-config__interface-badge">{{ interfaceType }}</span>
-        </h3>
+        </div>
 
         <!-- ANALOG: GPIO (ADC1 only) + Range -->
         <template v-if="isAnalog">
@@ -315,7 +471,7 @@ async function handleSave() {
                 GPIO {{ pin }}
               </option>
             </select>
-            <span class="sensor-config__helper">Analoge Sensoren können nur ADC1-Pins verwenden</span>
+            <span class="sensor-config__helper">Analoge Sensoren koennen nur ADC1-Pins verwenden</span>
           </div>
           <div class="sensor-config__row">
             <div class="sensor-config__field sensor-config__field--half">
@@ -332,7 +488,7 @@ async function handleSave() {
         <!-- I2C: Address + Bus (NO GPIO!) -->
         <template v-else-if="isI2C">
           <div class="sensor-config__info-box">
-            I2C-Sensoren teilen sich den Bus — kein GPIO-Pin nötig.
+            I2C-Sensoren teilen sich den Bus &mdash; kein GPIO-Pin noetig.
             Standard: SDA=GPIO 21, SCL=GPIO 22.
           </div>
           <div class="sensor-config__field">
@@ -346,8 +502,8 @@ async function handleSave() {
           <div class="sensor-config__field">
             <label class="sensor-config__label">I2C-Bus</label>
             <select v-model.number="i2cBus" class="sensor-config__select">
-              <option :value="0">Bus 0 — Wire (GPIO 21/22)</option>
-              <option :value="1">Bus 1 — Wire1 (konfigurierbar)</option>
+              <option :value="0">Bus 0 &mdash; Wire (GPIO 21/22)</option>
+              <option :value="1">Bus 1 &mdash; Wire1 (konfigurierbar)</option>
             </select>
           </div>
         </template>
@@ -363,7 +519,7 @@ async function handleSave() {
             </select>
           </div>
           <div class="sensor-config__info-box">
-            OneWire-Sensoren werden automatisch erkannt. Mehrere DS18B20 können denselben GPIO teilen.
+            OneWire-Sensoren werden automatisch erkannt. Mehrere DS18B20 koennen denselben GPIO teilen.
           </div>
         </template>
 
@@ -383,172 +539,18 @@ async function handleSave() {
             <span class="sensor-config__helper">Kalibrierungsfaktor des Durchfluss-Sensors</span>
           </div>
         </template>
-      </section>
+      </AccordionSection>
 
-      <!-- ═══ SECTION: Thresholds ═════════════════════════════════════════ -->
-      <section class="sensor-config__section">
-        <button class="sensor-config__accordion" @click="showThresholds = !showThresholds">
-          <component :is="showThresholds ? ChevronDown : ChevronRight" class="w-4 h-4" />
-          <span>Schwellwerte</span>
-        </button>
-
-        <div v-if="showThresholds" class="sensor-config__accordion-content">
-          <RangeSlider
-            :min="sensorConfig?.min ?? 0"
-            :max="sensorConfig?.max ?? 100"
-            :alarm-low="alarmLow"
-            :warn-low="warnLow"
-            :warn-high="warnHigh"
-            :alarm-high="alarmHigh"
-            :unit="unitValue"
-            :step="0.1"
-            @update:alarm-low="alarmLow = $event"
-            @update:warn-low="warnLow = $event"
-            @update:warn-high="warnHigh = $event"
-            @update:alarm-high="alarmHigh = $event"
-          />
-
-          <div class="sensor-config__threshold-inputs">
-            <div class="sensor-config__field sensor-config__field--quarter">
-              <label class="sensor-config__label sensor-config__label--alarm">Alarm ↓</label>
-              <input v-model.number="alarmLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
-            </div>
-            <div class="sensor-config__field sensor-config__field--quarter">
-              <label class="sensor-config__label sensor-config__label--warn">Warn ↓</label>
-              <input v-model.number="warnLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
-            </div>
-            <div class="sensor-config__field sensor-config__field--quarter">
-              <label class="sensor-config__label sensor-config__label--warn">Warn ↑</label>
-              <input v-model.number="warnHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
-            </div>
-            <div class="sensor-config__field sensor-config__field--quarter">
-              <label class="sensor-config__label sensor-config__label--alarm">Alarm ↑</label>
-              <input v-model.number="alarmHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ═══ SECTION: Calibration (pH/EC only) ══════════════════════════ -->
-      <section v-if="needsCalibration" class="sensor-config__section">
-        <button class="sensor-config__accordion" @click="showCalibration = !showCalibration">
-          <component :is="showCalibration ? ChevronDown : ChevronRight" class="w-4 h-4" />
-          <Beaker class="w-4 h-4" />
-          <span>Kalibrierung</span>
-        </button>
-
-        <div v-if="showCalibration" class="sensor-config__accordion-content">
-          <!-- Current raw value display -->
-          <div class="sensor-config__cal-current">
-            <span class="sensor-config__cal-label">Aktueller Rohwert:</span>
-            <span class="sensor-config__cal-value">{{ currentRawValue.toFixed(0) }} ADC</span>
-          </div>
-
-          <!-- Not started -->
-          <template v-if="!calibration.isActive.value">
-            <button
-              class="sensor-config__cal-start"
-              @click="calibration.startCalibration(sensorType.toLowerCase() === 'ph' ? 'pH' : 'EC')"
-            >
-              <Beaker class="w-4 h-4" />
-              Kalibrierung starten
-            </button>
-          </template>
-
-          <!-- pH Calibration Wizard -->
-          <template v-else-if="calibration.calibrationType.value === 'pH'">
-            <!-- Step 1: pH 4.0 -->
-            <div v-if="calibration.step.value === 'point1'" class="sensor-config__cal-step">
-              <h4>Schritt 1: pH 4.0 Pufferlösung</h4>
-              <p>Sensor in pH 4.0 Lösung tauchen und warten bis der Wert stabil ist.</p>
-              <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 4.0)">
-                Kalibrierungspunkt 1 setzen (pH 4.0)
-              </button>
-            </div>
-
-            <!-- Step 2: pH 7.0 -->
-            <div v-else-if="calibration.step.value === 'point2'" class="sensor-config__cal-step">
-              <h4>Schritt 2: pH 7.0 Pufferlösung</h4>
-              <p>Sensor in pH 7.0 Lösung tauchen und warten bis der Wert stabil ist.</p>
-              <div class="sensor-config__cal-raw">
-                Punkt 1: {{ calibration.point1.value?.rawValue.toFixed(0) }} ADC → pH 4.0 ✓
-              </div>
-              <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 7.0)">
-                Kalibrierungspunkt 2 setzen (pH 7.0)
-              </button>
-            </div>
-
-            <!-- Complete -->
-            <div v-else-if="calibration.step.value === 'complete'" class="sensor-config__cal-step sensor-config__cal-step--complete">
-              <h4>Kalibrierung abgeschlossen ✓</h4>
-              <div class="sensor-config__cal-result">
-                <span>Steigung: {{ calibration.result.value?.slope }}</span>
-                <span>Offset: {{ calibration.result.value?.offset }}</span>
-              </div>
-              <div class="sensor-config__cal-actions">
-                <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
-                  Kalibrierung speichern
-                </button>
-                <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
-                  <RotateCcw class="w-3 h-3" />
-                  Zurücksetzen
-                </button>
-              </div>
-            </div>
-          </template>
-
-          <!-- EC Calibration Wizard -->
-          <template v-else-if="calibration.calibrationType.value === 'EC'">
-            <!-- Step 1: Dry -->
-            <div v-if="calibration.step.value === 'point1'" class="sensor-config__cal-step">
-              <h4>Schritt 1: Trockene Elektrode (Luft)</h4>
-              <p>Elektrode in der Luft halten (trocken).</p>
-              <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 0)">
-                Nullpunkt setzen
-              </button>
-            </div>
-
-            <!-- Step 2: Solution -->
-            <div v-else-if="calibration.step.value === 'point2'" class="sensor-config__cal-step">
-              <h4>Schritt 2: Kalibrierlösung</h4>
-              <p>Elektrode in Kalibrierlösung (1413 µS/cm) tauchen.</p>
-              <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 1413)">
-                Kalibrierungspunkt setzen (1413 µS/cm)
-              </button>
-            </div>
-
-            <!-- Complete -->
-            <div v-else-if="calibration.step.value === 'complete'" class="sensor-config__cal-step sensor-config__cal-step--complete">
-              <h4>EC-Kalibrierung abgeschlossen ✓</h4>
-              <div class="sensor-config__cal-result">
-                <span>Faktor: {{ calibration.result.value?.slope }}</span>
-                <span>Offset: {{ calibration.result.value?.offset }}</span>
-              </div>
-              <div class="sensor-config__cal-actions">
-                <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
-                  Kalibrierung speichern
-                </button>
-                <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
-                  <RotateCcw class="w-3 h-3" />
-                  Zurücksetzen
-                </button>
-              </div>
-            </div>
-          </template>
-        </div>
-      </section>
-
-      <!-- ═══ SECTION: Live Preview ═══════════════════════════════════════ -->
-      <section class="sensor-config__section sensor-config__section--preview">
-        <h3 class="sensor-config__section-title">Live-Vorschau</h3>
+      <!-- Live Preview -->
+      <AccordionSection
+        title="Live-Vorschau"
+        :storage-key="`${accordionKey}-preview`"
+        :icon="Settings"
+      >
         <div class="sensor-config__preview">
           <LiveDataPreview :esp-id="espId" :gpio="gpio" :unit="unitValue || defaultUnit" />
         </div>
-      </section>
+      </AccordionSection>
 
       <!-- ═══ SAVE BUTTON ════════════════════════════════════════════════ -->
       <div class="sensor-config__actions">
@@ -569,7 +571,7 @@ async function handleSave() {
 .sensor-config {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 
 .sensor-config--loading {
@@ -583,7 +585,7 @@ async function handleSave() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SECTIONS
+   SECTIONS (Zone 1)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .sensor-config__section {
@@ -592,10 +594,6 @@ async function handleSave() {
   gap: var(--space-3);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--glass-border);
-}
-
-.sensor-config__section:last-of-type {
-  border-bottom: none;
 }
 
 .sensor-config__section-title {
@@ -697,6 +695,15 @@ async function handleSave() {
   line-height: var(--leading-normal);
 }
 
+.sensor-config__interface-badge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
 .sensor-config__interface-badge {
   display: inline-block;
   padding: 1px 6px;
@@ -738,35 +745,6 @@ async function handleSave() {
 
 .sensor-config__toggle--on .sensor-config__toggle-dot {
   transform: translateX(18px);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ACCORDION
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-.sensor-config__accordion {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0;
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: color var(--transition-fast);
-}
-
-.sensor-config__accordion:hover {
-  color: var(--color-text-primary);
-}
-
-.sensor-config__accordion-content {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding-top: var(--space-2);
 }
 
 /* Threshold inputs */
@@ -898,10 +876,6 @@ async function handleSave() {
 /* ═══════════════════════════════════════════════════════════════════════════
    LIVE PREVIEW
    ═══════════════════════════════════════════════════════════════════════════ */
-
-.sensor-config__section--preview {
-  max-height: 240px;
-}
 
 .sensor-config__preview {
   height: 180px;

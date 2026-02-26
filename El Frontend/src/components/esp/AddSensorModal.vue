@@ -24,6 +24,7 @@ import {
   getSensorTypeOptions,
   inferInterfaceType,
   getI2CAddressOptions,
+  getSensorTypeAwareSummary,
 } from '@/utils/sensorDefaults'
 import { getRecommendedGpios } from '@/utils/gpioConfig'
 import type { MockSensorConfig } from '@/types'
@@ -151,6 +152,8 @@ const allOneWireDevicesSelected = computed(() => {
   if (newOneWireDevices.value.length === 0) return false
   return newOneWireDevices.value.every(d => oneWireScanState.value.selectedRomCodes.includes(d.rom_code))
 })
+
+const typeSummary = computed(() => getSensorTypeAwareSummary(newSensor.value.sensor_type))
 
 const recommendedMode = computed(() => {
   const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
@@ -309,6 +312,12 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
         </select>
       </div>
 
+      <!-- Type-Aware Summary -->
+      <div v-if="typeSummary" class="type-summary">
+        <Info :size="14" class="type-summary-icon" />
+        <span>{{ typeSummary }}</span>
+      </div>
+
       <!-- OneWire Scan Section -->
       <div v-if="isOneWireSensor" class="onewire-scan-section">
         <div class="onewire-scan-header">
@@ -442,77 +451,29 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
 </template>
 
 <style scoped>
-/* ── Modal Form Layout ─────────────────────────────────────────────── */
-.modal-form {
+/* Form/modal base classes provided globally by styles/forms.css */
+
+/* ── Type-Aware Summary ──────────────────────────────────────────── */
+.type-summary {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: flex-end;
-}
-
-/* ── Form Elements ─────────────────────────────────────────────────── */
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.form-label {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-.form-input,
-.form-select {
+  align-items: flex-start;
+  gap: 0.5rem;
   padding: 0.625rem 0.75rem;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-  color: var(--color-text-primary);
-  transition: border-color 0.15s ease;
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: var(--radius-sm, 0.375rem);
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
 }
 
-.form-input:focus,
-.form-select:focus {
-  outline: none;
-  border-color: var(--color-iridescent-1);
+.type-summary-icon {
+  flex-shrink: 0;
+  color: var(--color-info, #60a5fa);
+  margin-top: 0.0625rem;
 }
 
-.form-input--readonly {
-  background: var(--color-bg-primary);
-  color: var(--color-text-muted);
-  cursor: not-allowed;
-}
-
-.form-select--sm {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.8125rem;
-  width: auto;
-  min-width: 100px;
-}
-
-.form-hint {
-  margin-top: 0.375rem;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-}
-
-/* ── OneWire Scan Section ──────────────────────────────────────────── */
+/* ── OneWire Scan Section (component-specific) ───────────────────── */
 .onewire-scan-section {
   margin-top: 0.25rem;
   padding: 1rem;

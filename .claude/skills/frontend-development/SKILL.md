@@ -15,10 +15,10 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.0
-**Letzte Aktualisierung:** 2026-02-23
+**Version:** 9.2
+**Letzte Aktualisierung:** 2026-02-26
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
-**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 129 .vue Komponenten)
+**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 130 .vue Komponenten)
 
 > **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
 > **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
@@ -126,7 +126,7 @@ El Frontend/src/
 │   ├── common/        # Modal, Toast, Skeleton (13 Dateien)
 │   ├── layout/        # MainLayout, AppHeader, AppSidebar
 │   ├── dashboard/     # Dashboard subcomponents (9 Dateien)
-│   ├── esp/           # ESPCard, ESPOrbitalLayout (10 Dateien)
+│   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout (11 Dateien)
 │   ├── zones/         # ZoneGroup, ZoneAssignmentPanel
 │   ├── charts/        # MultiSensorChart
 │   ├── system-monitor/ # 18 Dateien
@@ -138,17 +138,18 @@ El Frontend/src/
 │   └── safety/        # EmergencyStopButton
 ├── shared/        # Design System + Shared Stores (NEU)
 │   ├── design/
-│   │   ├── primitives/  # 9 Base-Komponenten (BaseBadge, BaseButton, BaseCard, etc.)
+│   │   ├── primitives/  # 10 Komponenten (9 Base + AccordionSection)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # EmptyState, ErrorState, ToastContainer (3 Dateien)
 │   └── stores/          # 12 Shared Stores (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, sensor, ui, zone)
-├── styles/        # CSS Design Tokens (NEU)
+├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
 │   ├── animations.css   # Animationen
-│   ├── main.css         # Hauptstyles
+│   ├── main.css         # Hauptstyles (Buttons, Layout)
+│   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 16 Composables
+├── composables/   # 18 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -161,8 +162,10 @@ El Frontend/src/
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts
 │   ├── useDeviceActions.ts
+│   ├── useESPStatus.ts
 │   ├── useGrafana.ts
 │   ├── useKeyboardShortcuts.ts
+│   ├── useOrbitalDragDrop.ts
 │   ├── useScrollLock.ts
 │   └── useZoomNavigation.ts
 ├── router/        # Route-Definitionen + Guards
@@ -347,7 +350,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | Store | Datei | State | Wichtigste Actions |
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
-| esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap |
+| esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
 | logic | stores/logic.ts | rules[], activeExecutions | fetchRules, toggleRule, crossEspConnections |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
@@ -486,6 +489,7 @@ baseURL: '/api/v1'
 | `sensors.ts` | `/sensors/*` | Sensor CRUD + History + Stats |
 | `actuators.ts` | `/actuators/*` | Actuator Control |
 | `zones.ts` | `/zone/*` | Zone Assignment/Removal |
+| `subzones.ts` | `/subzone/*` | Subzone CRUD + Safe-Mode |
 | `logic.ts` | `/logic/*` | Cross-ESP Automation Rules |
 | `debug.ts` | `/debug/*` | Mock ESP Simulation |
 | `audit.ts` | `/audit/*` | Audit Log Query + Stats |
@@ -561,6 +565,7 @@ SENSOR_TYPE_CONFIG: Record<string, {
   icon: string       // "Thermometer"
   defaultValue: number
   category: SensorCategoryId
+  defaultIntervalSeconds?: number  // 30 (DS18B20/SHT31), 60 (BME280)
 }>
 
 // Helper Functions
@@ -568,6 +573,8 @@ getSensorUnit(type): string
 getSensorLabel(type): string
 getSensorDefault(type): number
 isValidSensorValue(type, value): boolean
+getDefaultInterval(type): number           // Default poll interval in seconds
+getSensorTypeAwareSummary(type): string | null  // "SHT31, auf I2C 0x44, misst Temperatur + Luftfeuchtigkeit, alle 30s"
 ```
 
 ---
@@ -800,7 +807,7 @@ Mock ESP erstellen (POST /v1/debug/mock-esp)
 | i18n | Hardcoded German | Kein Mehrsprachigkeit |
 | Unit Tests | 5 Files, 250 Tests (Vitest + MSW) | Stores, Composables, Utils |
 | E2E Tests | Nicht vorhanden | - |
-| ESPOrbitalLayout | Name irrefuehrend | Ist 3-Spalten Grid, NICHT orbital |
+| ESPOrbitalLayout | 410 Zeilen (von 3913 reduziert) | 3-Spalten Grid, DnD-Logik in useOrbitalDragDrop Composable |
 
 ---
 
@@ -897,8 +904,37 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.0
-**Letzte Aktualisierung:** 2026-02-23
+**Version:** 9.3
+**Letzte Aktualisierung:** 2026-02-26
+
+### Aenderungen in v9.3
+
+- esp.ts Store: onlineDevices/offlineDevices nutzen jetzt getESPStatus() statt einfacher status/connected Checks (Heartbeat-Timing-Fallback, stale=online)
+- DeviceMiniCard.vue: Stale-Daten-Visualisierung via getESPStatus — graue Sparkbars, "Zuletzt vor X Min." Label, CSS-Klasse device-mini-card--stale
+- useESPStatus ist jetzt Single Source of Truth fuer Status in Store UND Komponenten (nicht nur Komponenten)
+
+### Aenderungen in v9.2
+
+- Composables Expansion: 16 → 18 (neu: useESPStatus, useOrbitalDragDrop)
+- useESPStatus: Single source of truth fuer ESP-Status (composable + pure functions getESPStatus/getESPStatusDisplay)
+- useOrbitalDragDrop: DnD-Logik aus ESPOrbitalLayout extrahiert (250 Zeilen)
+- ESPOrbitalLayout.vue: 655 → 410 Zeilen (DnD-Handler + Analysis-Auto-Open + Modal-Watchers in Composable)
+- ESPCardBase.vue: Neue Base-Komponente (4 Varianten: mini/compact/standard/full)
+- dashboard.store.ts: deviceCounts Fix (dead ref → computed)
+- forms.css: Neues Shared CSS fuer Form/Modal Styles, doppelte BEM-Button-Definitionen entfernt
+- tokens.css: 3 neue semantische Aliase (--color-text-inverse, --color-border, --color-surface-hover)
+- ESPCard.vue + ESPHealthWidget.vue: Status-Logik auf useESPStatus migriert
+- Styles: 5 → 6 CSS Dateien (forms.css hinzugefuegt)
+- esp/ Components: 10 → 11 (ESPCardBase.vue hinzugefuegt)
+
+### Aenderungen in v9.1
+
+- Settings-Panel Modernisierung (Block B): Three-Zone-Pattern fuer SensorConfigPanel + ActuatorConfigPanel
+- Neue Design Primitive: AccordionSection.vue (localStorage-Persistenz, CSS grid-template-rows Animation)
+- ESPSettingsSheet.vue: Status-Details, Sensor/Aktor-Config, Mock-Controls als Accordion-Sektionen
+- AddSensorModal.vue: Sensor-Type-Aware Summary (SHT31 → "auf I2C 0x44, misst Temperatur + Luftfeuchtigkeit, alle 30s")
+- sensorDefaults.ts: Neues Feld defaultIntervalSeconds, neue Funktionen getDefaultInterval(), getSensorTypeAwareSummary()
+- Primitives: 9 → 10 (AccordionSection), Barrel Exports: 20 → 21
 
 ### Aenderungen in v9.0
 

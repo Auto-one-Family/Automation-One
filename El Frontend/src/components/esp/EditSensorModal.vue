@@ -316,12 +316,12 @@ async function triggerMeasureNow() {
 
         <!-- Footer -->
         <div class="modal-footer modal-footer--with-delete">
-          <button v-if="isMock" class="btn btn--danger btn--icon" :disabled="isEditSaving" @click="removeSensor">
+          <button v-if="isMock" class="btn btn-danger btn--icon" :disabled="isEditSaving" @click="removeSensor">
             <Trash2 :size="16" />Entfernen
           </button>
           <div class="modal-footer__spacer" />
-          <button class="btn btn--secondary" :disabled="isEditSaving" @click="close">Abbrechen</button>
-          <button class="btn btn--primary" :disabled="isEditSaving" @click="saveEditSensor">
+          <button class="btn btn-secondary" :disabled="isEditSaving" @click="close">Abbrechen</button>
+          <button class="btn btn-primary" :disabled="isEditSaving" @click="saveEditSensor">
             <Loader2 v-if="isEditSaving" class="animate-spin" :size="16" />
             {{ isEditSaving ? 'Speichere...' : 'Speichern' }}
           </button>
@@ -332,5 +332,5 @@ async function triggerMeasureNow() {
 </template>
 
 <style scoped>
-/* Styles inherited from parent/global modal styles */
+/* All form/modal/button styles provided globally by styles/forms.css */
 </style>

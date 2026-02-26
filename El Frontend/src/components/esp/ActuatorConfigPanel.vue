@@ -1,24 +1,21 @@
 <script setup lang="ts">
 /**
- * ActuatorConfigPanel — Full Actuator Configuration (Redesigned)
+ * ActuatorConfigPanel — Three-Zone Actuator Configuration
  *
- * Replaces the previous DynamicForm-based panel with a comprehensive
- * configuration interface organized in sections:
+ * Zone 1 (Basic, always visible): Control (ON/OFF/PWM), Name, Enabled, Subzone
+ * Zone 2 (Accordion): Type-specific settings (Pump/Valve/PWM/Relay)
+ * Zone 3 (Accordion - Expert): Safety status, Emergency Stop
  *
- * 1. Basic fields (name, zone, active)
- * 2. Type-specific fields (pump/valve/pwm/relay)
- * 3. Control panel (toggle/slider, current state)
- * 4. Safety status (runtime, last command, emergency stop)
- *
- * Used inside a SlideOver panel on ESP detail view.
+ * Used inside ESPSettingsSheet as SlideOver panel.
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, Power, AlertOctagon, Zap, Clock, Shield } from 'lucide-vue-next'
+import { Save, Power, AlertOctagon, Zap, Clock, Shield, Settings } from 'lucide-vue-next'
 import { actuatorsApi } from '@/api/actuators'
 import { subzonesApi } from '@/api/subzones'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
+import { AccordionSection } from '@/shared/design/primitives'
 import type { MockActuator } from '@/types'
 
 interface Props {
@@ -74,6 +71,9 @@ const liveActuator = computed<MockActuator | null>(() => {
 
 const isOn = computed(() => !!liveActuator.value?.state)
 const currentPwmValue = ref(0)
+
+/** Storage key prefix for accordion persistence */
+const accordionKey = computed(() => `actuator-${props.espId}-${props.gpio}`)
 
 // =============================================================================
 // Load existing config
@@ -164,9 +164,9 @@ async function emergencyStop() {
     await actuatorsApi.emergencyStop({
       esp_id: props.espId,
       gpio: props.gpio,
-      reason: 'Manueller Stopp über Konfigurations-Panel',
+      reason: 'Manueller Stopp ueber Konfigurations-Panel',
     })
-    toast.warning('Emergency-Stop ausgelöst')
+    toast.warning('Emergency-Stop ausgeloest')
   } catch {
     toast.error('Emergency-Stop fehlgeschlagen')
   } finally {
@@ -234,7 +234,9 @@ function formatDuration(seconds: number): string {
     <div v-if="loading" class="actuator-config__loading">Lade Konfiguration...</div>
 
     <template v-else>
-      <!-- ═══ SECTION: Control Panel ══════════════════════════════════════ -->
+      <!-- ═══ ZONE 1: BASIC (Control + Identity) ═════════════════════════ -->
+
+      <!-- Control Panel -->
       <section class="actuator-config__section actuator-config__section--control">
         <h3 class="actuator-config__section-title">
           <Power class="w-4 h-4" />
@@ -277,13 +279,13 @@ function formatDuration(seconds: number): string {
         </div>
       </section>
 
-      <!-- ═══ SECTION: Basic Fields ═══════════════════════════════════════ -->
+      <!-- Basic Fields -->
       <section class="actuator-config__section">
         <h3 class="actuator-config__section-title">Grundeinstellungen</h3>
 
         <div class="actuator-config__field">
           <label class="actuator-config__label">Name</label>
-          <input v-model="name" type="text" class="actuator-config__input" placeholder="z.B. Bewässerungspumpe Zone A" />
+          <input v-model="name" type="text" class="actuator-config__input" placeholder="z.B. Bewaesserungspumpe Zone A" />
         </div>
 
         <div class="actuator-config__field">
@@ -317,19 +319,25 @@ function formatDuration(seconds: number): string {
         </div>
       </section>
 
-      <!-- ═══ SECTION: Type-Specific ══════════════════════════════════════ -->
-      <section class="actuator-config__section">
-        <h3 class="actuator-config__section-title">
-          <Zap class="w-4 h-4" />
-          Typ-Einstellungen — <span class="actuator-config__type-badge">{{ actuatorType }}</span>
-        </h3>
+      <!-- ═══ ZONE 2: ADVANCED (Accordion) ════════════════════════════════ -->
+
+      <!-- Type-Specific Settings -->
+      <AccordionSection
+        title="Typ-Einstellungen"
+        :storage-key="`${accordionKey}-type`"
+        :icon="Settings"
+      >
+        <div class="actuator-config__type-badge-row">
+          Typ:
+          <span class="actuator-config__type-badge">{{ actuatorType }}</span>
+        </div>
 
         <div class="actuator-config__field">
           <label class="actuator-config__label">GPIO Pin</label>
           <select class="actuator-config__select" disabled>
             <option :value="gpio">GPIO {{ gpio }}</option>
           </select>
-          <span class="actuator-config__helper">Pin kann nach Erstellung nicht geändert werden</span>
+          <span class="actuator-config__helper">Pin kann nach Erstellung nicht geaendert werden</span>
         </div>
 
         <!-- Pump -->
@@ -343,7 +351,7 @@ function formatDuration(seconds: number): string {
             <span class="actuator-config__helper">Pumpe schaltet IMMER nach dieser Zeit ab</span>
           </div>
           <div class="actuator-config__field">
-            <label class="actuator-config__label">Mindest-Pause zwischen Läufen</label>
+            <label class="actuator-config__label">Mindest-Pause zwischen Laeufen</label>
             <div class="actuator-config__input-with-unit">
               <input v-model.number="minPause" type="number" min="0" class="actuator-config__input" />
               <span class="actuator-config__unit">Sek.</span>
@@ -379,7 +387,7 @@ function formatDuration(seconds: number): string {
               <input v-model.number="pwmFrequency" type="number" min="1" max="40000" class="actuator-config__input" />
               <span class="actuator-config__unit">Hz</span>
             </div>
-            <span class="actuator-config__helper">Typisch: 1000 Hz (Motoren), 25000 Hz (Lüfter)</span>
+            <span class="actuator-config__helper">Typisch: 1000 Hz (Motoren), 25000 Hz (Luefter)</span>
           </div>
           <div class="actuator-config__field">
             <label class="actuator-config__label">Leistungs-Limit (Safety)</label>
@@ -402,26 +410,25 @@ function formatDuration(seconds: number): string {
             </button>
           </div>
           <div class="actuator-config__field">
-            <label class="actuator-config__label">Schalt-Verzögerung (Anti-Prellen)</label>
+            <label class="actuator-config__label">Schalt-Verzoegerung (Anti-Prellen)</label>
             <div class="actuator-config__input-with-unit">
               <input v-model.number="switchDelay" type="number" min="0" max="5000" class="actuator-config__input" />
               <span class="actuator-config__unit">ms</span>
             </div>
           </div>
         </template>
-      </section>
+      </AccordionSection>
 
-      <!-- ═══ SECTION: Safety ═════════════════════════════════════════════ -->
-      <section class="actuator-config__section actuator-config__section--safety">
-        <h3 class="actuator-config__section-title">
-          <Shield class="w-4 h-4" />
-          Safety-Status
-        </h3>
-
+      <!-- Safety -->
+      <AccordionSection
+        title="Safety-Status"
+        :storage-key="`${accordionKey}-safety`"
+        :icon="Shield"
+      >
         <div class="actuator-config__safety-info">
           <div class="actuator-config__safety-row">
             <Clock class="w-3.5 h-3.5" />
-            <span>Letzter Befehl: {{ liveActuator?.last_command || '—' }}</span>
+            <span>Letzter Befehl: {{ liveActuator?.last_command || '&mdash;' }}</span>
           </div>
           <div class="actuator-config__safety-row">
             <Zap class="w-3.5 h-3.5" />
@@ -438,7 +445,7 @@ function formatDuration(seconds: number): string {
           <AlertOctagon class="w-5 h-5" />
           NOTFALL-STOPP
         </button>
-      </section>
+      </AccordionSection>
 
       <!-- ═══ SAVE BUTTON ════════════════════════════════════════════════ -->
       <div class="actuator-config__actions">
@@ -459,7 +466,7 @@ function formatDuration(seconds: number): string {
 .actuator-config {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 
 .actuator-config--loading { opacity: 0.6; }
@@ -631,6 +638,15 @@ function formatDuration(seconds: number): string {
 .actuator-config__helper {
   font-size: 10px;
   color: var(--color-text-muted);
+}
+
+.actuator-config__type-badge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-weight: 600;
 }
 
 .actuator-config__type-badge {

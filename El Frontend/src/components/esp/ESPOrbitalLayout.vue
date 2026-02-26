@@ -15,29 +15,24 @@
  * - Chart panel expands within center card (not overlaying satellites)
  */
 
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { X, Heart, Settings2, Loader2, Pencil, Check } from 'lucide-vue-next'
 import ESPCard from './ESPCard.vue'
-// wifiStrength + formatRelativeTime now provided by useDeviceActions
 import SensorColumn from './SensorColumn.vue'
 import ActuatorColumn from './ActuatorColumn.vue'
 import AddSensorModal from './AddSensorModal.vue'
 import AddActuatorModal from './AddActuatorModal.vue'
 import AnalysisDropZone from './AnalysisDropZone.vue'
-// GpioPicker, Badge used by extracted modal components
 import { Badge } from '@/shared/design/primitives'
 import ZoneAssignmentDropdown from './ZoneAssignmentDropdown.vue'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, ChartSensor } from '@/types'
-// espApi + getStateInfo now provided by useDeviceActions
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useDeviceActions } from '@/composables/useDeviceActions'
 import { useGpioStatus } from '@/composables/useGpioStatus'
-import { createLogger } from '@/utils/logger'
-
-const logger = createLogger('ESPOrbitalLayout')
+import { useOrbitalDragDrop } from '@/composables/useOrbitalDragDrop'
 
 interface Props {
   /** The ESP device data */
@@ -71,6 +66,28 @@ const emit = defineEmits<{
   'name-updated': [payload: { deviceId: string; name: string | null }]
 }>()
 
+// ── Device Actions (shared composable) ───────────────────────────────
+const actions = useDeviceActions(() => props.device)
+const {
+  espId, isMock, displayName, isOnline, systemState, stateInfo,
+  wifiInfo, wifiColorClass, wifiTooltip,
+  heartbeatLoading, isHeartbeatFresh, heartbeatTooltip, heartbeatText,
+  isEditingName, editedName, isSavingName, saveError, nameInputRef,
+  startEditName, cancelEditName, handleNameKeydown,
+} = actions
+
+// GPIO Status for dynamic GPIO selection (Phase 5)
+useGpioStatus(espId)
+
+// ── Drag & Drop (extracted composable) ───────────────────────────────
+const {
+  onDragEnter, onDragOver, onDragLeave, onDrop,
+  isDragOver,
+  showAddSensorModal, showAddActuatorModal,
+  droppedSensorType, droppedActuatorType,
+  analysisExpanded, wasAutoOpened,
+} = useOrbitalDragDrop(espId)
+
 // =============================================================================
 // Zone Assignment (Dropdown alternative to drag)
 // =============================================================================
@@ -88,163 +105,10 @@ async function handleZoneChanged(_deviceId: string, zoneId: string | null) {
   }
 }
 
-// =============================================================================
-// Analysis Drop Zone State
-// =============================================================================
-const analysisExpanded = ref(false)
-
-// Track if chart was auto-opened (to auto-close when drag ends)
-const wasAutoOpened = ref(false)
-
 // Handle sensor dropped into analysis zone
 function handleSensorDrop(sensor: ChartSensor) {
   emit('sensorDropped', sensor)
 }
-
-// =============================================================================
-// Add Sensor Drop Handler State
-// =============================================================================
-const isDragOver = ref(false)
-const showAddSensorModal = ref(false)
-const showAddActuatorModal = ref(false)
-const droppedSensorType = ref<string | null>(null)
-const droppedActuatorType = ref<string | null>(null)
-
-// =============================================================================
-// Debug Logger
-// =============================================================================
-function log(message: string, data?: Record<string, unknown>): void {
-  logger.debug(message, data)
-}
-
-// =============================================================================
-// Drop Event Handlers (for adding sensors via drag from sidebar)
-// =============================================================================
-
-function onDragEnter(event: DragEvent) {
-  // Prüfe ob das ein VueDraggable-Event ist (ESP-Card-Reordering)
-  // VueDraggable setzt keine dataTransfer-Typen, native Drags schon
-  const types = event.dataTransfer?.types || []
-
-  log('dragenter', {
-    isDraggingSensorType: dragStore.isDraggingSensorType,
-    isDraggingSensor: dragStore.isDraggingSensor,
-    isDraggingActuatorType: dragStore.isDraggingActuatorType,
-    types: Array.from(types),
-    target: (event.target as Element)?.className?.slice?.(0, 50) || (event.target as Element)?.tagName,
-  })
-
-  // KRITISCH: Wenn weder SensorType noch Sensor noch ActuatorType gedraggt wird,
-  // ist es wahrscheinlich ein VueDraggable-Event (ESP-Card-Reordering)
-  // In diesem Fall NICHT reagieren, um VueDraggable nicht zu stören!
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
-    log('dragenter IGNORED - likely VueDraggable ESP-Card reordering')
-    return
-  }
-
-  // React visually if dragging a sensor or actuator type from sidebar (for adding new items)
-  if (dragStore.isDraggingSensorType || dragStore.isDraggingActuatorType) {
-    isDragOver.value = true
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = 'copy'
-    }
-    logger.info('[DnD] Drag ENTER on ESP', {
-      espId: espId.value,
-      isSensor: dragStore.isDraggingSensorType,
-      isActuator: dragStore.isDraggingActuatorType,
-    })
-  }
-  // Sensor-Satellite-Drags (für Chart) werden durchgelassen zur AnalysisDropZone
-}
-
-function onDragOver(event: DragEvent) {
-  // KRITISCH: Wenn weder SensorType noch Sensor noch ActuatorType gedraggt wird,
-  // ist es wahrscheinlich ein VueDraggable-Event (ESP-Card-Reordering)
-  // In diesem Fall NICHT preventDefault() aufrufen, um VueDraggable nicht zu stören!
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
-    // VueDraggable ESP-Card-Reordering - durchlassen ohne Intervention
-    return
-  }
-
-  // KRITISCH: preventDefault() muss aufgerufen werden um Drop zu erlauben!
-  // Ohne preventDefault() zeigt der Browser "nicht zulässig" (roter Kreis)
-
-  if (dragStore.isDraggingSensorType || dragStore.isDraggingActuatorType) {
-    // Sensor/Aktor-Typ aus Sidebar → Drop auf ESP-Card erlauben (zum Hinzufügen)
-    event.preventDefault()
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = 'copy'
-    }
-  } else if (dragStore.isDraggingSensor) {
-    // Sensor-Satellite für Chart → Drop auf AnalysisDropZone erlauben
-    // Wir erlauben den Drop hier, die AnalysisDropZone entscheidet ob sie ihn annimmt
-    event.preventDefault()
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = 'copy'
-    }
-  }
-}
-
-function onDragLeave(event: DragEvent) {
-  // KRITISCH: Ignorieren wenn es ein VueDraggable-Event ist
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
-    return
-  }
-
-  // Only reset if leaving the container entirely
-  const target = event.currentTarget as HTMLElement
-  const related = event.relatedTarget as HTMLElement
-  if (!target.contains(related)) {
-    isDragOver.value = false
-    log('dragleave - isDragOver = false')
-  }
-}
-
-function onDrop(event: DragEvent) {
-  // KRITISCH: Ignorieren wenn es ein VueDraggable-Event ist
-  if (!dragStore.isDraggingSensorType && !dragStore.isDraggingSensor && !dragStore.isDraggingActuatorType) {
-    log('DROP IGNORED - likely VueDraggable ESP-Card reordering')
-    return
-  }
-
-  logger.info('[DnD] DROP on ESP', {
-    espId: espId.value,
-    hasJsonData: !!event.dataTransfer?.getData('application/json'),
-    types: event.dataTransfer?.types ? Array.from(event.dataTransfer.types) : [],
-  })
-
-  event.preventDefault()
-  isDragOver.value = false
-
-  const jsonData = event.dataTransfer?.getData('application/json')
-  if (!jsonData) {
-    log('DROP - no JSON data, ignoring')
-    return
-  }
-
-  try {
-    const payload = JSON.parse(jsonData)
-    log('DROP payload parsed', payload)
-
-    if (payload.action === 'add-sensor') {
-      logger.info('[DnD] Opening AddSensorModal', { sensorType: payload.sensorType, espId: espId.value })
-      droppedSensorType.value = payload.sensorType || null
-      showAddSensorModal.value = true
-    } else if (payload.action === 'add-actuator') {
-      logger.info('[DnD] Opening AddActuatorModal', { actuatorType: payload.actuatorType, espId: espId.value })
-      droppedActuatorType.value = payload.actuatorType || null
-      showAddActuatorModal.value = true
-    } else if (payload.type === 'sensor') {
-      log('DROP - sensor for chart, should be handled by AnalysisDropZone')
-    } else {
-      log('DROP - unknown payload type', { type: payload.type, action: payload.action })
-    }
-  } catch (error) {
-    log('DROP ERROR - failed to parse', { error })
-  }
-}
-
-
 
 // =============================================================================
 // Refs
@@ -267,33 +131,22 @@ const actuators = computed<MockActuator[]>(() => {
   return (props.device?.actuators as MockActuator[]) || []
 })
 
-// ── Device Actions (shared composable) ───────────────────────────────
-const actions = useDeviceActions(() => props.device)
-const {
-  espId, isMock, displayName, isOnline, systemState, stateInfo,
-  wifiInfo, wifiColorClass, wifiTooltip,
-  heartbeatLoading, isHeartbeatFresh, heartbeatTooltip, heartbeatText,
-  isEditingName, editedName, isSavingName, saveError, nameInputRef,
-  startEditName, cancelEditName, handleNameKeydown,
-} = actions
-
-// GPIO Status für dynamische GPIO-Auswahl (Phase 5)
-useGpioStatus(espId)
-
 const totalItems = computed(() => {
   return sensors.value.length + actuators.value.length
 })
 
 /**
  * Determine if sensors should use multi-row layout.
- * - ≤5 sensors: single row (horizontal)
+ * - <=5 sensors: single row (horizontal)
  * - >5 sensors: 2-column grid (wraps into multiple rows)
  */
 const sensorsUseMultiRow = computed(() => {
   return sensors.value.length > 5
 })
 
-// WiFi, Heartbeat, Name Editing — all provided by useDeviceActions above
+// =============================================================================
+// Event Handlers
+// =============================================================================
 
 /** Heartbeat click: trigger + emit */
 async function handleHeartbeatClick() {
@@ -301,7 +154,7 @@ async function handleHeartbeatClick() {
   emit('heartbeat', props.device)
 }
 
-/** Settings click → emit to parent */
+/** Settings click -> emit to parent */
 function handleSettingsClick() {
   emit('settings', props.device)
 }
@@ -312,12 +165,8 @@ async function saveName() {
   if (result) emit('name-updated', result)
 }
 
-// =============================================================================
-// Event Handlers
-// =============================================================================
-
 function handleSensorClick(gpio: number) {
-  // Emit to parent → opens SensorConfigPanel in SlideOver
+  // Emit to parent -> opens SensorConfigPanel in SlideOver
   emit('sensorClick', gpio)
 }
 
@@ -331,95 +180,6 @@ function handleActuatorClick(gpio: number) {
   }
   emit('actuatorClick', gpio)
 }
-
-// =============================================================================
-// Lifecycle
-// =============================================================================
-
-onMounted(() => {
-  // Component mounted - no special initialization needed for horizontal layout
-})
-
-onUnmounted(() => {
-  // Cleanup handled by Vue reactivity
-})
-
-// =============================================================================
-// Auto-Opening Chart when Sensor is Dragged
-// =============================================================================
-
-/**
- * Check if a sensor from THIS ESP is being dragged.
- * Used to immediately activate drop target (before visual opening).
- */
-const isSensorFromThisEspDragging = computed(() =>
-  dragStore.isDraggingSensor && dragStore.draggingSensorEspId === espId.value
-)
-
-/**
- * Watch for sensor drag state changes.
- * Auto-opens the chart IMMEDIATELY when a sensor from THIS ESP is being dragged.
- *
- * WICHTIG: Die DropZone wird während des Drags als OVERLAY angezeigt (position: absolute),
- * damit das Layout stabil bleibt und das Drag-Event nicht unterbrochen wird.
- * Nach dem Drop wechselt sie in den normalen Inline-Modus.
- */
-watch(
-  () => isSensorFromThisEspDragging.value,
-  (isDraggingFromThisEsp) => {
-    log('isSensorFromThisEspDragging changed', {
-      isDraggingFromThisEsp,
-      analysisExpanded: analysisExpanded.value,
-      wasAutoOpened: wasAutoOpened.value,
-    })
-
-    if (isDraggingFromThisEsp) {
-      // Sofort öffnen - kein Delay, da wir Overlay-Modus verwenden
-      // Overlay verhindert Layout-Shifts die Drag unterbrechen könnten
-      if (!analysisExpanded.value) {
-        wasAutoOpened.value = true // ZUERST setzen - aktiviert Overlay-Modus
-        analysisExpanded.value = true
-        log('Auto-opening chart (overlay mode)')
-      }
-    } else {
-      // Nach Drag-Ende: Overlay-Modus beenden, Chart bleibt aber offen
-      // Kurze Verzögerung damit Drop-Event verarbeitet werden kann
-      if (wasAutoOpened.value) {
-        log('Drag ended, transitioning from overlay to inline mode')
-        setTimeout(() => {
-          wasAutoOpened.value = false
-          log('wasAutoOpened = false (inline mode now)')
-          // Chart bleibt geöffnet im normalen Inline-Modus
-        }, 300)
-      }
-    }
-  }
-)
-
-// Wenn User manuell schließt, auch wasAutoOpened zurücksetzen
-watch(
-  () => analysisExpanded.value,
-  (expanded) => {
-    if (!expanded) {
-      wasAutoOpened.value = false
-    }
-  }
-)
-
-// Reset dropped types when modals close → ensures watcher fires on next drag
-// (Prevents stale state when user closes modal without adding, then drags same type again)
-watch(showAddSensorModal, (isOpen) => {
-  if (!isOpen) {
-    droppedSensorType.value = null
-    logger.info('[DnD] Sensor modal closed, droppedSensorType reset')
-  }
-})
-watch(showAddActuatorModal, (isOpen) => {
-  if (!isOpen) {
-    droppedActuatorType.value = null
-    logger.info('[DnD] Actuator modal closed, droppedActuatorType reset')
-  }
-})
 </script>
 
 <template>
@@ -589,8 +349,8 @@ watch(showAddActuatorModal, (isOpen) => {
         </div>
 
         <!--
-          Analysis Drop Zone - Öffnet sich automatisch bei Sensor-Drag.
-          IMMER im DOM (kein v-if!), nur mit CSS versteckt/sichtbar.
+          Analysis Drop Zone - Opens automatically on sensor drag.
+          Always in DOM (no v-if!), only hidden/shown via CSS.
         -->
         <AnalysisDropZone
           :esp-id="espId"
@@ -622,7 +382,7 @@ watch(showAddActuatorModal, (isOpen) => {
       @actuator-click="handleActuatorClick"
     />
 
-    <!-- Drop Indicator Overlay (Phase 2B: für alle ESPs) -->
+    <!-- Drop Indicator Overlay (Phase 2B: for all ESPs) -->
     <Transition name="fade">
       <div v-if="isDragOver" class="esp-horizontal-layout__drop-indicator">
         <span class="esp-horizontal-layout__drop-text">{{ dragStore.isDraggingActuatorType ? 'Aktor hinzufügen' : 'Sensor hinzufügen' }}</span>
@@ -638,7 +398,6 @@ watch(showAddActuatorModal, (isOpen) => {
     @added="() => { droppedSensorType = null; espStore.fetchDevice(espId); espStore.fetchGpioStatus(espId) }"
   />
 
-  <!-- LEGACY: Old inline Add Sensor Modal removed — now uses AddSensorModal component -->
   <!-- Add Actuator Modal (extracted component) -->
   <AddActuatorModal
     v-model="showAddActuatorModal"
@@ -646,10 +405,6 @@ watch(showAddActuatorModal, (isOpen) => {
     :initial-actuator-type="droppedActuatorType"
     @added="() => { droppedActuatorType = null; espStore.fetchDevice(espId); espStore.fetchGpioStatus(espId) }"
   />
-
-  <!-- Old inline sensor/actuator modals removed (see AddSensorModal.vue, AddActuatorModal.vue) -->
-
-  <!-- Sensor config now handled by SensorConfigPanel in SlideOver (parent view) -->
 </template>
 
 <style scoped src="./ESPOrbitalLayout.css"></style>

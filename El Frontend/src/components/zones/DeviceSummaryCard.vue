@@ -3,17 +3,18 @@
  * DeviceSummaryCard Component (~240x140px)
  *
  * Level 2 (Zone Detail): Medium device card showing:
- * - Name, status dot, mock/real badge
+ * - Name, status dot, mock/real badge (via ESPCardBase)
  * - Top-2 live sensor values (fallback to count)
  * - Health-bar at bottom edge
  * - Quick-action buttons (heartbeat mock-only, settings)
  * - Value-flash animation on sensor data change
+ *
+ * Wraps ESPCardBase variant="summary" for consistent header rendering.
  */
 
 import { computed, ref, watch } from 'vue'
 import type { ESPDevice } from '@/api/esp'
-import { useEspStore } from '@/stores/esp'
-import { formatRelativeTime } from '@/utils/formatters'
+import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import {
   Heart,
   Settings2,
@@ -32,37 +33,16 @@ const emit = defineEmits<{
   (e: 'settings', device: ESPDevice): void
 }>()
 
-const espStore = useEspStore()
-const cardRef = ref<HTMLElement | null>(null)
+const cardRef = ref<InstanceType<typeof ESPCardBase> | null>(null)
 
 /** Value-flash trigger: toggled when sensor data changes */
 const valueFlashing = ref(false)
 
-const deviceId = computed(() => espStore.getDeviceId(props.device))
-const displayName = computed(() => props.device.name || deviceId.value)
-
-/** Status dot color */
-const statusColor = computed(() => {
-  if (props.device.status === 'online' || props.device.connected === true) {
-    return 'var(--color-success)'
-  }
-  if (props.device.status === 'error') {
-    return 'var(--color-error)'
-  }
-  if (props.isMock && (props.device as any).system_state === 'SAFE_MODE') {
-    return 'var(--color-warning)'
-  }
-  return 'var(--color-text-muted)'
+/** Device ID (needed locally for emit payloads) */
+const deviceId = computed(() => {
+  const d = props.device
+  return d.device_id || (d as any).esp_id || ''
 })
-
-/** Border color */
-const borderColor = computed(() =>
-  props.isMock ? 'var(--color-mock)' : 'var(--color-real)'
-)
-
-/** Badge */
-const badgeText = computed(() => props.isMock ? 'MOCK' : 'REAL')
-const badgeClass = computed(() => props.isMock ? 'badge--mock' : 'badge--real')
 
 /** Top-2 live sensor values */
 interface LiveSensor {
@@ -96,13 +76,6 @@ const sensorCount = computed(() => {
 const actuatorCount = computed(() => {
   const actuators = props.device.actuators as any[] | undefined
   return actuators?.length ?? props.device.actuator_count ?? 0
-})
-
-/** Last heartbeat */
-const lastSeen = computed(() => {
-  const ts = props.device.last_seen || props.device.last_heartbeat
-  if (!ts) return 'Nie'
-  return formatRelativeTime(ts)
 })
 
 /** Health percentage (0-100) for health-bar.
@@ -142,7 +115,8 @@ watch(
 
 function handleClick(event: Event) {
   if ((event.target as HTMLElement).closest('.device-summary-card__actions')) return
-  const rect = cardRef.value?.getBoundingClientRect()
+  const el = cardRef.value?.$el as HTMLElement | undefined
+  const rect = el?.getBoundingClientRect()
   if (rect) {
     emit('click', { deviceId: deviceId.value, originRect: rect })
   }
@@ -160,92 +134,84 @@ function handleSettings(event: MouseEvent) {
 </script>
 
 <template>
-  <div
+  <ESPCardBase
     ref="cardRef"
+    :esp="device"
+    variant="summary"
     class="device-summary-card"
     :class="{ 'device-summary-card--flashing': valueFlashing }"
-    :style="{ borderLeftColor: borderColor }"
     :data-device-id="deviceId"
-    role="button"
-    :aria-label="`${displayName}, Status: ${device.status || 'unbekannt'}`"
-    tabindex="0"
     @click="handleClick"
     @keydown.enter="handleClick"
   >
-    <!-- Header: status dot + name + badge -->
-    <div class="device-summary-card__header esp-drag-handle">
-      <span
-        class="device-summary-card__status-dot"
-        :style="{ backgroundColor: statusColor }"
-      />
-      <span class="device-summary-card__name">{{ displayName }}</span>
-      <span class="device-summary-card__badge" :class="badgeClass">{{ badgeText }}</span>
-    </div>
-
-    <!-- Live sensor values OR fallback counts -->
-    <div v-if="liveSensors.length > 0" class="device-summary-card__live-data">
-      <div
-        v-for="(sensor, idx) in liveSensors"
-        :key="idx"
-        class="device-summary-card__live-value"
-      >
-        <span class="device-summary-card__live-number">{{ sensor.value }}</span>
-        <span class="device-summary-card__live-unit">{{ sensor.unit }}</span>
+    <!-- Content: live sensor values OR fallback counts + actions -->
+    <template #default="{ lastSeenText }">
+      <!-- Live sensor values -->
+      <div v-if="liveSensors.length > 0" class="device-summary-card__live-data">
+        <div
+          v-for="(sensor, idx) in liveSensors"
+          :key="idx"
+          class="device-summary-card__live-value"
+        >
+          <span class="device-summary-card__live-number">{{ sensor.value }}</span>
+          <span class="device-summary-card__live-unit">{{ sensor.unit }}</span>
+        </div>
+        <div class="device-summary-card__live-meta">
+          {{ lastSeenText }}
+        </div>
       </div>
-      <div class="device-summary-card__live-meta">
-        {{ lastSeen }}
+
+      <!-- Fallback: sensor/actuator counts -->
+      <div v-else class="device-summary-card__meta">
+        <span>{{ sensorCount }} Sensor{{ sensorCount !== 1 ? 'en' : '' }}</span>
+        <span class="device-summary-card__meta-sep">·</span>
+        <span>{{ actuatorCount }} Aktor{{ actuatorCount !== 1 ? 'en' : '' }}</span>
+        <span class="device-summary-card__meta-sep">·</span>
+        <span>{{ lastSeenText }}</span>
       </div>
-    </div>
 
-    <div v-else class="device-summary-card__meta">
-      <span>{{ sensorCount }} Sensor{{ sensorCount !== 1 ? 'en' : '' }}</span>
-      <span class="device-summary-card__meta-sep">·</span>
-      <span>{{ actuatorCount }} Aktor{{ actuatorCount !== 1 ? 'en' : '' }}</span>
-      <span class="device-summary-card__meta-sep">·</span>
-      <span>{{ lastSeen }}</span>
-    </div>
-
-    <!-- Quick actions -->
-    <div class="device-summary-card__actions">
-      <button
-        v-if="isMock"
-        class="device-summary-card__action-btn"
-        title="Heartbeat auslösen"
-        @click="handleHeartbeat"
-      >
-        <Heart class="w-3 h-3" />
-      </button>
-      <button
-        class="device-summary-card__action-btn"
-        title="Einstellungen"
-        @click="handleSettings"
-      >
-        <Settings2 class="w-3 h-3" />
-      </button>
-    </div>
+      <!-- Quick actions -->
+      <div class="device-summary-card__actions">
+        <button
+          v-if="isMock"
+          class="device-summary-card__action-btn"
+          title="Heartbeat auslösen"
+          @click="handleHeartbeat"
+        >
+          <Heart class="w-3 h-3" />
+        </button>
+        <button
+          class="device-summary-card__action-btn"
+          title="Einstellungen"
+          @click="handleSettings"
+        >
+          <Settings2 class="w-3 h-3" />
+        </button>
+      </div>
+    </template>
 
     <!-- Health bar at bottom edge -->
-    <div class="device-summary-card__health-bar">
-      <div
-        class="device-summary-card__health-fill"
-        :style="{
-          width: healthPercent + '%',
-          backgroundColor: healthColor,
-        }"
-      />
-    </div>
-  </div>
+    <template #footer>
+      <div class="device-summary-card__health-bar">
+        <div
+          class="device-summary-card__health-fill"
+          :style="{
+            width: healthPercent + '%',
+            backgroundColor: healthColor,
+          }"
+        />
+      </div>
+    </template>
+  </ESPCardBase>
 </template>
 
 <style scoped>
+/* ── Root overrides on ESPCardBase for glassmorphism ── */
 .device-summary-card {
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
   padding: var(--space-4);
   padding-bottom: calc(var(--space-4) + 3px); /* room for health-bar */
-  border-left: 3px solid var(--color-mock);
   cursor: pointer;
   transition:
     transform var(--transition-base),
@@ -276,29 +242,9 @@ function handleSettings(event: MouseEvent) {
   backdrop-filter: blur(16px);
 }
 
-/* Action buttons reveal on hover */
-.device-summary-card__actions {
-  display: flex;
-  gap: var(--space-1);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--glass-border);
-  opacity: 0.5;
-  transition: opacity var(--transition-base);
-}
-
-.device-summary-card:hover .device-summary-card__actions {
-  opacity: 1;
-}
-
 /* Value-flash animation */
 .device-summary-card--flashing .device-summary-card__live-data {
   animation: value-flash 0.6s ease-out;
-}
-
-.device-summary-card:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
 }
 
 /* Tactile press */
@@ -307,55 +253,46 @@ function handleSettings(event: MouseEvent) {
   transition-duration: 60ms;
 }
 
-/* Header */
-.device-summary-card__header {
-  display: flex;
-  align-items: center;
+/* ── ESPCardBase inner overrides ── */
+
+/* Hide status line (we show lastSeenText in content area instead) */
+:deep(.esp-card-base__status-line) {
+  display: none;
+}
+
+/* Match original header spacing */
+:deep(.esp-card-base__header) {
   gap: var(--space-2);
   margin-bottom: var(--space-3);
 }
 
-.device-summary-card__status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  flex-shrink: 0;
-  transition: box-shadow var(--transition-fast);
-}
-
-.device-summary-card:hover .device-summary-card__status-dot {
-  box-shadow: 0 0 10px currentColor;
-}
-
-.device-summary-card__name {
+/* Match original name styling */
+:deep(.esp-card-base__name) {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text-secondary);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.device-summary-card__badge {
-  font-size: 9px;
+/* Match original badge styling */
+:deep(.esp-card-base__badge) {
   font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-weight: 600;
-  flex-shrink: 0;
+  font-size: 9px;
 }
 
-.badge--mock {
-  color: var(--color-mock);
-  background: rgba(167, 139, 250, 0.12);
+/* Status dot glow on hover */
+.device-summary-card:hover :deep(.esp-card-base__status-dot) {
+  box-shadow: 0 0 10px currentColor;
 }
 
-.badge--real {
-  color: var(--color-real);
-  background: rgba(34, 211, 238, 0.12);
+/* Footer: absolute health-bar positioning */
+:deep(.esp-card-base__footer) {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
 }
 
 /* ── Live sensor data display ── */
@@ -411,6 +348,20 @@ function handleSettings(event: MouseEvent) {
 }
 
 /* ── Action buttons ── */
+.device-summary-card__actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--glass-border);
+  opacity: 0.5;
+  transition: opacity var(--transition-base);
+}
+
+.device-summary-card:hover .device-summary-card__actions {
+  opacity: 1;
+}
+
 .device-summary-card__action-btn {
   display: flex;
   align-items: center;
@@ -433,10 +384,6 @@ function handleSettings(event: MouseEvent) {
 
 /* ── Health bar (bottom edge) ── */
 .device-summary-card__health-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
   height: 3px;
   background: rgba(255, 255, 255, 0.03);
 }

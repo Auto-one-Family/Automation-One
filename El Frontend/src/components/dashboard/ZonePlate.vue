@@ -3,27 +3,26 @@
  * ZonePlate Component — Accordion Zone Section
  *
  * Renders a zone as an expandable section showing ESP devices directly.
- * Default: expanded (all ESPs visible). Collapsible for large installations.
+ * Uses AccordionSection primitive for expand/collapse animation.
  *
  * Features:
  * - Glassmorphism styling with noise texture
  * - Iridescent top border for healthy zones
- * - Zone header: ESP count, online/total, alerts (data on cards)
- * - Sensor/Actuator/Cross-ESP counts in header
+ * - Slim header: Zone-Name + ESP-Count + Online-Status + Alerts + Overflow Menu
+ * - Inline zone name editing (pencil icon)
  * - Subzone grouping by device.subzone_id
  * - VueDraggable for cross-zone device drag-drop
- * - Status aggregation (online/warning/error counts)
- * - Expand/Collapse toggle with animation
+ * - Zone management: rename, delete via context menu
  */
 
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
-import { useLogicStore } from '@/shared/stores/logic.store'
 import { useDragStateStore } from '@/shared/stores'
-import { getESPStatus } from '@/composables/useESPStatus'
-import { ChevronDown, GitBranch } from 'lucide-vue-next'
+import { useUiStore } from '@/shared/stores/ui.store'
+import { ChevronDown, MoreVertical, Pencil, Trash2 } from 'lucide-vue-next'
+import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import DeviceMiniCard from './DeviceMiniCard.vue'
 
 
@@ -45,11 +44,14 @@ const emit = defineEmits<{
   (e: 'device-dropped', payload: { device: ESPDevice; fromZoneId: string | null; toZoneId: string }): void
   (e: 'device-click', payload: { deviceId: string; originRect: DOMRect }): void
   (e: 'settings', device: ESPDevice): void
+  (e: 'rename', payload: { zoneId: string; newName: string }): void
+  (e: 'delete', zoneId: string): void
+  (e: 'device-delete', deviceId: string): void
 }>()
 
 const espStore = useEspStore()
-const logicStore = useLogicStore()
 const dragStore = useDragStateStore()
+const uiStore = useUiStore()
 const plateRef = ref<HTMLElement | null>(null)
 
 // Local copy of ALL devices for VueDraggable v-model.
@@ -59,10 +61,12 @@ watch(() => props.devices, (newDevices) => {
   localDevices.value = [...newDevices]
 })
 
-// ── Status Aggregation (server-centric via getESPStatus) ───────────────────
+// ── Status Aggregation ───────────────────────────────────────────────────
 const stats = computed(() => {
   const total = props.devices.length
-  const online = props.devices.filter(d => getESPStatus(d).isReachable).length
+  const online = props.devices.filter(d =>
+    d.status === 'online' || d.connected === true
+  ).length
   const warnings = props.devices.filter(d => {
     const id = espStore.getDeviceId(d)
     if (espStore.isMock(id)) {
@@ -80,29 +84,6 @@ const statusVariant = computed(() => {
   if (stats.value.total > 0 && stats.value.online === stats.value.total) return 'zone-plate--healthy'
   if (props.devices.some(d => d.status === 'error')) return 'zone-plate--error'
   return ''
-})
-
-// ── Sensor / Actuator / Cross-ESP Counts ─────────────────────────────────
-const totalSensors = computed(() =>
-  props.devices.reduce((sum, d) => {
-    const sensors = d.sensors as any[] | undefined
-    return sum + (sensors?.length ?? d.sensor_count ?? 0)
-  }, 0)
-)
-
-const totalActuators = computed(() =>
-  props.devices.reduce((sum, d) => {
-    const actuators = d.actuators as any[] | undefined
-    return sum + (actuators?.length ?? d.actuator_count ?? 0)
-  }, 0)
-)
-
-const crossEspCount = computed(() => {
-  return logicStore.crossEspConnections.filter(conn => {
-    const sourceDevice = espStore.devices.find(d => espStore.getDeviceId(d) === conn.sourceEspId)
-    const targetDevice = espStore.devices.find(d => espStore.getDeviceId(d) === conn.targetEspId)
-    return sourceDevice?.zone_id === props.zoneId || targetDevice?.zone_id === props.zoneId
-  }).length
 })
 
 // ── Subzone Grouping ─────────────────────────────────────────────────────
@@ -137,10 +118,73 @@ const subzoneGroups = computed((): SubzoneGroup[] => {
   return result
 })
 
+// ── Inline Rename ────────────────────────────────────────────────────────
+const isRenaming = ref(false)
+const renameValue = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+function startRename() {
+  renameValue.value = props.zoneName
+  isRenaming.value = true
+  nextTick(() => {
+    renameInputRef.value?.focus()
+    renameInputRef.value?.select()
+  })
+}
+
+function confirmRename() {
+  if (!isRenaming.value) return
+  const trimmed = renameValue.value.trim()
+  isRenaming.value = false
+  if (trimmed && trimmed !== props.zoneName) {
+    emit('rename', { zoneId: props.zoneId, newName: trimmed })
+  }
+}
+
+function cancelRename() {
+  isRenaming.value = false
+}
+
+// ── Overflow Menu ────────────────────────────────────────────────────────
+function openOverflowMenu(event: MouseEvent) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  uiStore.openContextMenu(rect.right, rect.bottom, [
+    {
+      id: 'rename',
+      label: 'Umbenennen',
+      icon: Pencil,
+      action: () => startRename(),
+    },
+    {
+      id: 'delete',
+      label: 'Löschen',
+      icon: Trash2,
+      variant: 'danger',
+      action: () => handleZoneDelete(),
+    },
+  ])
+}
+
+async function handleZoneDelete() {
+  const deviceCount = stats.value.total
+  const confirmed = await uiStore.confirm({
+    title: 'Zone löschen',
+    message: deviceCount > 0
+      ? `Alle ${deviceCount} Geräte in "${props.zoneName}" werden aus der Zone entfernt. Die Geräte werden nicht gelöscht.`
+      : `Zone "${props.zoneName}" wird entfernt.`,
+    variant: 'danger',
+    confirmText: 'Zone löschen',
+  })
+  if (confirmed) {
+    emit('delete', props.zoneId)
+  }
+}
+
 // ── Toggle Handler ────────────────────────────────────────────────────────
-function toggleExpanded() {
+function handleHeaderClick(toggle: () => void) {
   if (dragStore.isAnyDragActive) return
-  emit('update:isExpanded', !props.isExpanded)
+  if (isRenaming.value) return
+  toggle()
 }
 
 function handleDeviceClick(payload: { deviceId: string; originRect: DOMRect }) {
@@ -149,6 +193,10 @@ function handleDeviceClick(payload: { deviceId: string; originRect: DOMRect }) {
 
 function handleDeviceSettings(device: ESPDevice) {
   emit('settings', device)
+}
+
+function handleDeviceDelete(deviceId: string) {
+  emit('device-delete', deviceId)
 }
 
 // ── Drag & Drop ──────────────────────────────────────────────────────────
@@ -190,58 +238,75 @@ function handleDragEnd() {
       statusVariant,
       {
         'zone-plate--drop-target': isDropTarget || dragStore.isDraggingEspCard,
-        'zone-plate--collapsed': !isExpanded,
       },
     ]"
     role="region"
     :aria-label="`Zone ${zoneName}: ${stats.online}/${stats.total} Geräte online`"
-    :aria-expanded="isExpanded"
   >
-    <!-- Zone Header (always visible, clickable to toggle) -->
-    <div class="zone-plate__header" @click="toggleExpanded">
-      <div class="zone-plate__header-left">
-        <ChevronDown
-          class="zone-plate__chevron"
-          :class="{ 'zone-plate__chevron--collapsed': !isExpanded }"
-        />
-        <h3 class="zone-plate__title">{{ zoneName }}</h3>
-        <span class="zone-plate__stats">
-          <span class="zone-plate__count">{{ stats.total }} ESP{{ stats.total !== 1 ? 's' : '' }} · {{ stats.online }}/{{ stats.total }} Online</span>
+    <AccordionSection
+      :model-value="isExpanded"
+      class="zone-plate__accordion"
+      @update:model-value="(val: boolean) => emit('update:isExpanded', val)"
+    >
+      <!-- Custom zone header -->
+      <template #header="{ isOpen, toggle }">
+        <div
+          class="zone-plate__header"
+          :aria-expanded="isOpen"
+          @click="handleHeaderClick(toggle)"
+        >
+          <ChevronDown
+            class="zone-plate__chevron"
+            :class="{ 'zone-plate__chevron--collapsed': !isOpen }"
+          />
+
+          <!-- Zone name: inline editable -->
+          <template v-if="isRenaming">
+            <input
+              ref="renameInputRef"
+              v-model="renameValue"
+              class="zone-plate__rename-input"
+              maxlength="60"
+              @click.stop
+              @keydown.enter.prevent="confirmRename"
+              @keydown.escape.prevent="cancelRename"
+              @blur="confirmRename"
+            />
+          </template>
+          <template v-else>
+            <h3 class="zone-plate__title">{{ zoneName }}</h3>
+            <button
+              class="zone-plate__edit-btn"
+              title="Zone umbenennen"
+              @click.stop="startRename"
+            >
+              <Pencil class="zone-plate__edit-icon" />
+            </button>
+          </template>
+
+          <span class="zone-plate__stats">
+            {{ stats.total }} ESP{{ stats.total !== 1 ? 's' : '' }}
+            <span class="zone-plate__stats-sep">·</span>
+            {{ stats.online }}/{{ stats.total }} Online
+          </span>
+
           <span
             v-if="stats.warnings > 0"
-            class="zone-plate__warning"
+            class="zone-plate__alert"
           >
-            · ⚠ {{ stats.warnings }}
+            ⚠ {{ stats.warnings }}
           </span>
-        </span>
-      </div>
-      <div class="zone-plate__header-right">
-        <span v-if="totalSensors > 0" class="zone-plate__meta-pill">{{ totalSensors }}S</span>
-        <span v-if="totalActuators > 0" class="zone-plate__meta-pill">{{ totalActuators }}A</span>
-        <RouterLink
-          v-if="crossEspCount > 0"
-          to="/logic"
-          class="zone-plate__cross-esp-badge"
-          @click.stop
-        >
-          <GitBranch class="zone-plate__cross-icon" />
-          {{ crossEspCount }}
-        </RouterLink>
-      </div>
-    </div>
 
-    <!-- Expanded: full zone content (metrics/sensor-preview removed; data on ESP cards) -->
-    <div v-show="isExpanded" class="zone-plate__body">
-      <!-- Subzone chips -->
-      <div v-if="subzoneGroups.length > 1" class="zone-plate__subzone-chips">
-        <span
-          v-for="g in subzoneGroups.filter(sg => sg.subzoneId)"
-          :key="g.subzoneId!"
-          class="zone-plate__chip"
-        >
-          {{ g.subzoneName }}
-        </span>
-      </div>
+          <!-- Overflow menu -->
+          <button
+            class="zone-plate__menu-btn"
+            title="Zone-Aktionen"
+            @click.stop="openOverflowMenu($event)"
+          >
+            <MoreVertical class="zone-plate__menu-icon" />
+          </button>
+        </div>
+      </template>
 
       <!-- Devices grouped by subzone, inside ONE VueDraggable for cross-zone drag-drop -->
       <VueDraggable
@@ -277,6 +342,7 @@ function handleDragEnd() {
               :is-mock="isMock(device)"
               @click="handleDeviceClick"
               @settings="handleDeviceSettings"
+              @delete="handleDeviceDelete"
             />
           </div>
         </template>
@@ -286,7 +352,7 @@ function handleDragEnd() {
       <div v-if="devices.length === 0" class="zone-plate__empty">
         Keine Geräte — ziehe ESPs hierher
       </div>
-    </div>
+    </AccordionSection>
   </section>
 </template>
 
@@ -361,34 +427,31 @@ function handleDragEnd() {
   z-index: 1;
 }
 
+/* ═══════ Accordion override ═══════ */
+.zone-plate__accordion :deep(.accordion) {
+  border-bottom: none;
+}
+
+.zone-plate__accordion :deep(.accordion__panel--open .accordion__content) {
+  padding-bottom: 0;
+}
+
 /* ═══════ Header ═══════ */
 .zone-plate__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2);
   cursor: pointer;
   user-select: none;
   padding: var(--space-1) 0;
-  margin-bottom: var(--space-1);
 }
 
 .zone-plate__header:hover .zone-plate__title {
   color: var(--color-accent-bright);
 }
 
-.zone-plate__header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.zone-plate__header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
+.zone-plate__header:hover .zone-plate__edit-btn {
+  opacity: 1;
 }
 
 .zone-plate__chevron {
@@ -414,81 +477,100 @@ function handleDragEnd() {
   transition: color var(--transition-fast);
 }
 
+/* Inline rename input */
+.zone-plate__rename-input {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-iridescent-1);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  outline: none;
+  min-width: 100px;
+  max-width: 250px;
+}
+
+/* Pencil edit button (hover only) */
+.zone-plate__edit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  padding: 0;
+}
+
+.zone-plate__edit-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.zone-plate__edit-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* Stats label */
 .zone-plate__stats {
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   white-space: nowrap;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
-.zone-plate__count {
-  color: var(--color-text-secondary);
-}
-
-.zone-plate__warning {
-  color: var(--color-warning);
-}
-
-/* Meta pills (sensor/actuator counts) */
-.zone-plate__meta-pill {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.zone-plate__stats-sep {
   color: var(--color-text-muted);
+  opacity: 0.5;
+  margin: 0 1px;
+}
+
+/* Alert badge */
+.zone-plate__alert {
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  font-weight: 500;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
-/* Cross-ESP badge */
-.zone-plate__cross-esp-badge {
-  display: inline-flex;
+/* Overflow menu button */
+.zone-plate__menu-btn {
+  display: flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  color: var(--color-accent-bright);
-  background: rgba(96, 165, 250, 0.08);
-  border: 1px solid rgba(96, 165, 250, 0.15);
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
   border-radius: var(--radius-sm);
-  padding: 1px 6px;
-  text-decoration: none;
-  transition: all var(--transition-fast);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  padding: 0;
 }
 
-.zone-plate__cross-esp-badge:hover {
-  background: rgba(96, 165, 250, 0.15);
-  color: var(--color-iridescent-2);
+.zone-plate__menu-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.zone-plate__cross-icon {
-  width: 10px;
-  height: 10px;
+.zone-plate__menu-icon {
+  width: 14px;
+  height: 14px;
 }
 
 /* ═══════ Body (expanded content) ═══════ */
-.zone-plate__body {
-  padding-top: var(--space-1);
-}
-
-/* ── Subzone chips ── */
-.zone-plate__subzone-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-bottom: var(--space-2);
-}
-
-.zone-plate__chip {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
 
 /* Device flex grid */
 .zone-plate__devices {
@@ -496,6 +578,7 @@ function handleDragEnd() {
   flex-wrap: wrap;
   gap: 6px;
   min-height: 32px;
+  padding-top: var(--space-1);
 }
 
 .zone-plate__device-wrapper {
@@ -526,19 +609,13 @@ function handleDragEnd() {
   border-radius: var(--radius-md);
 }
 
-/* Collapsed compact padding */
-.zone-plate--collapsed {
-  padding-bottom: var(--space-2);
-}
-
 @media (max-width: 640px) {
   .zone-plate__header {
     flex-wrap: wrap;
   }
 
-  .zone-plate__header-right {
-    width: 100%;
-    justify-content: flex-end;
+  .zone-plate__stats {
+    margin-left: 0;
   }
 }
 </style>

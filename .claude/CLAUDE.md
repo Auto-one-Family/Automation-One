@@ -176,7 +176,7 @@ Agents koennen Loki-Logs per CLI oder API abfragen:
 | `reference/security/` | PRODUCTION_CHECKLIST |
 | `docs/debugging/` | logql-queries, debug-workflow |
 | `El Frontend/src/styles/` | tokens.css (Design Tokens), glass.css, animations.css |
-| `El Frontend/src/shared/design/` | Primitives (9), Layout (3), Patterns (5) |
+| `El Frontend/src/shared/design/` | Primitives (10), Layout (3), Patterns (5) |
 | `El Frontend/tailwind.config.js` | Tailwind Theme Extension |
 
 ## Regeln

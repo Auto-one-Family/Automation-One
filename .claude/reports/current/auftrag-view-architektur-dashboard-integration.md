@@ -1,11 +1,33 @@
 # Auftrag: View-Architektur + Dashboard-Integration + Navigation
 
 > **Datum:** 2026-02-25
+> **Korrigiert:** 2026-02-26 (Code-Review Robin — 8 Korrekturen)
+> **Korrigiert:** 2026-02-26 (Erstanalyse-Ergebnisse — 6 kritische Korrekturen, siehe unten)
+> **Aktualisiert:** 2026-02-26 (IST-Analyse: Dead Code BEREITS geloescht, ESPCardBase+useESPStatus existieren, Routing dokumentiert)
 > **Prioritaet:** P1 (Strukturell)
-> **Aufwand:** ~14-18 Stunden (5 Bloecke)
-> **Voraussetzung:** `auftrag-hardware-tab-css-settings-ux.md` Block A (CSS) muss erledigt sein
+> **Aufwand:** ~14-18 Stunden (5 Bloecke) — Aufwand wird sich durch Korrekturen aendern
+> **Voraussetzung:** `auftrag-hardware-tab-css-settings-ux.md` Block A (CSS) muss erledigt sein — **IST-Analyse: ~60% bereits erledigt**
 > **Agent:** Frontend-Dev Agent (auto-one)
 > **Branch:** `feature/view-architecture-dashboard`
+
+---
+
+## ⚠ ERSTANALYSE-KORREKTUREN (2026-02-26)
+
+> Die Erstanalyse (`auftrag-dashboard-umbenennung-erstanalyse.md` Block C) hat 6 kritische Fehleinschaetzungen in diesem Auftrag aufgedeckt.
+> **Dieser Auftrag muss ueberarbeitet werden bevor die Implementierung beginnt.**
+
+| # | Fehleinschaetzung | Realitaet | Betroffene Bloecke |
+|---|-------------------|-----------|-------------------|
+| **C1** | `useZoomNavigation.ts` (354 Z.) existiert | **Existiert NICHT.** Navigation ist direkt in HardwareView.vue route-basiert (`currentLevel` computed). Funktioniert korrekt | A1, A3, B2.6 |
+| **C2** | ZoneMonitorView.vue als Basis fuer useMonitorPerspective.ts | **Dead Code (0 Imports).** 633 Zeilen nie integriert. Kann nicht als Basis dienen | A1 (komplett umschreiben) |
+| **C3** | Monitor ist flache Perspektive → als Query-Parameter integrierbar | **Hat eigenes 2-Level-System** (`/monitor`, `/monitor/:zoneId`). Integration deutlich komplexer als geplant | A1, A2 (Monitor-Strategie ueberdenken) |
+| **C4** | Tab-Struktur [Hardware] [Dashboards] | **Empfehlung: [Uebersicht] [Monitor] [Editor]** — Monitor als eigenstaendiger Tab behalten | A2, B4, E1 |
+| **C5** | Redundanzen nur dokumentieren | **~1969 Zeilen Dead Code** in 5 Dateien mit 0 Imports → Cleanup VOR Architektur-Umbau | Neuer Block 0 |
+| **C6** | DashboardGalleryView als neue View | **Gallery als Start-Screen im Editor-Tab** — kein Route-Umbau noetig, ~2h statt ~4h | B1, B2 |
+
+> **Empfohlene Reihenfolge:** Dead-Code-Cleanup → Tab-Umbenennung → Gallery-Integration → dann Bloecke A-E ueberarbeiten.
+> **Details:** Siehe `auftrag-dashboard-umbenennung-erstanalyse.md` Block C (C1-C6).
 
 ---
 
@@ -13,7 +35,7 @@
 
 Die aktuelle View-Architektur hat strukturelle UX-Probleme:
 
-1. **Monitor-Tab ist redundant:** MonitorView zeigt dieselben Sensoren/Aktoren wie HardwareView, nur anders gruppiert (nach Subzone). Das sind keine zwei verschiedenen Konzepte — es ist eine andere Perspektive auf dieselben Daten.
+1. **~~Monitor-Tab ist redundant~~** *(KORREKTUR C3: Monitor hat eigenes 2-Level-System, ist NICHT einfach redundant — sondern eine daten-fokussierte Perspektive gegenueber der topologie-fokussierten HardwareView. Zusammenlegung ist komplexer als angenommen.)*
 2. **Dashboard-Tab ist unklar:** "Dashboard" suggeriert eine fertige Ansicht, ist aber der Builder. Gespeicherte Dashboards haben keinen Ort wo sie angezeigt werden.
 3. **5+ Klicks bis Sensor-Config:** User muss durch Zone→ESP→Sensor navigieren, nur um einen Schwellwert zu aendern.
 4. **Kein persistenter Overview:** Beim Drill-Down in Level 2/3 verschwindet der Gesamtueberblick komplett ("Lost in Space"-Problem, Baudisch 2002).
@@ -74,15 +96,84 @@ Ein Toggle-Button (Icon: Grid vs. List) wechselt zwischen beiden Perspektiven.
 
 ---
 
+## Vorbedingungen (Abhaengigkeiten vor Implementierungsbeginn)
+
+> **KORRIGIERT (2026-02-26):** Explizite Vorbedingungen eingefuegt nach Code-Review.
+
+Bevor mit der Implementierung begonnen wird, muss geklaert sein:
+
+- [ ] **AccordionSection.vue** aus `auftrag-hardware-tab-css-settings-ux.md` Block B muss existieren (wird in A1 wiederverwendet) — **IST-Analyse: existiert NOCH NICHT**
+- [x] **useESPStatus.ts** ~~aus `auftrag-hardware-tab-css-settings-ux.md` Block C muss existieren~~ — **IST-Analyse: EXISTIERT BEREITS** (176 Z., `composables/useESPStatus.ts`, 6 Status-Werte, genutzt von DeviceMiniCard + ESPCardBase). KEIN Blocker mehr
+- [x] **ESPCardBase.vue** — **IST-Analyse: EXISTIERT BEREITS** (274 Z., 4 Varianten, Named Slots, nutzt useESPStatus). Hat aber 0 Consumer — Adoption muss in hardware-tab-css Block C erfolgen
+- [ ] **SensorsView.vue Abgrenzung** (siehe Abschnitt unten) ist konzeptionell geklaert: `/sensors` = CRUD-Management, `?view=monitor` = Live-Read-Only
+- [ ] **Dashboard-Persistenz Backend** (`/v1/dashboards`) ist fuer Block C3 NICHT erforderlich — localStorage-Interim ist im Plan vorgesehen und korrekt
+
+---
+
+## SensorsView.vue (/sensors) — Abgrenzung zur Monitor-Perspektive
+
+> **KORRIGIERT (2026-02-26):** SensorsView.vue war im urspruenglichen Plan komplett ignoriert. Sie muss explizit abgegrenzt werden.
+
+### Was SensorsView.vue ist
+
+SensorsView.vue (`/sensors`, Sidebar-Eintrag "Komponenten") ist ein ~67KB schwerer Management-View mit:
+- Sensor + Actuator Tabs
+- Umfangreiche Filterfunktion (Typ, Status, Zone, Suchfeld)
+- Gruppierung nach Zone / Subzone / ESP mit Accordion
+- Inline-Sparklines + Expand-Charts
+- Sensor-Konfiguration per SlideOver
+- Add / Edit / Delete Sensor + Actuator (vollstaendiger CRUD)
+
+### Klare Abgrenzung
+
+| Aspekt | `/sensors` (SensorsView) | `/hardware?view=monitor` (Monitor-Perspektive) |
+|--------|--------------------------|------------------------------------------------|
+| Zweck | **CRUD-Management** | **Live-Ueberwachung** |
+| Modus | Read + Write | Read-Only |
+| Aktionen | Add/Edit/Delete Sensor, Zone-Zuweisung | Wert lesen, Alert-Status sehen |
+| Zielgruppe | Techniker beim Einrichten | Operator beim Betrieb |
+| Sparklines | Ja (Expand-Chart) | Ja (Mini, letzte 15 Min) |
+| Sensor hinzufuegen | Ja | Nein |
+| Kalibrierung | Ja (Link zu CalibrationWizard) | Nein |
+
+### Konsequenz fuer diesen Auftrag
+
+SensorsView.vue bleibt unveraendert als dedizierter Management-View. Die Monitor-Perspektive in HardwareView ist eine **andere Zielgruppe mit anderem Workflow**. Kein Merge noetig.
+
+Die Monitor-Perspektive (`useMonitorPerspective.ts`) kann Teile der Gruppierungs-Logik aus SensorsView.vue wiederverwenden (Subzone-Accordion), aber SensorsView.vue selbst wird nicht angefasst.
+
+---
+
+## Redundanz-Inventar
+
+> **KORRIGIERT (2026-02-26):** Redundanzen explizit dokumentiert fuer spaetere Bereinigung.
+
+| Komponente | Pfad | Redundant mit | Status (IST-Analyse 2026-02-26) |
+|------------|------|---------------|--------------------------------|
+| SensorSidebar.vue | ~~`components/dashboard/`~~ | ComponentSidebar.vue | **GELOESCHT** ✓ (nur Kommentar-Referenzen verbleiben) |
+| ActuatorSidebar.vue | ~~`components/dashboard/`~~ | ComponentSidebar.vue | **GELOESCHT** ✓ (nur Kommentar-Referenzen verbleiben) |
+| LevelNavigation.vue | ~~`components/dashboard/`~~ | ViewTabBar.vue | **GELOESCHT** ✓ |
+| ZoomBreadcrumb.vue | ~~`components/dashboard/`~~ | TopBar.vue Breadcrumb (Zeilen 74-100) | **GELOESCHT** ✓ (nur Kommentar in TopBar.vue verbleibt) |
+| ZoneMonitorView.vue | ~~`components/zones/`~~ | MonitorView Level 2 Logik | **GELOESCHT** ✓ |
+
+**Update (2026-02-26):** Alle 5 Redundanzen sind BEREITS GELOESCHT (~1969 Zeilen entfernt). Kein separater Cleanup-Auftrag mehr noetig.
+
+---
+
 ## Block A: Monitor-Integration in Hardware (~4h)
 
 ### A1: MonitorView-Inhalte als Perspektive
 
-**NICHT MonitorView.vue loeschen, sondern refactoren:**
+> **KORRIGIERT (2026-02-26):** ZoneMonitorView.vue als Basis fuer useMonitorPerspective.ts explizit erwaehnen.
 
-1. MonitorView-Logik (Sensor-Gruppierung nach Subzone, Live-Werte, Sparklines) in Composable extrahieren: `useMonitorPerspective.ts`
-2. In HardwareView.vue einen Perspektiven-Toggle einbauen (oben rechts, neben Level-1-Header)
-3. `?view=monitor` Query-Parameter steuert die Perspektive
+**ZoneMonitorView.vue besteht bereits (634 Zeilen)** und ist eine sensor+actuator-zentrische Zone-View mit Subzone-Gruppierung. Sie deckt ~80% der Monitor-Perspektiven-Logik ab, wird aber aktuell weder in HardwareView noch in MonitorView verwendet.
+
+**Vorgehen:** NICHT neu schreiben, sondern ZoneMonitorView.vue als Basis nutzen:
+
+1. Logik aus ZoneMonitorView.vue (Sensor-Gruppierung nach Subzone, Live-Werte, Sparklines) in Composable extrahieren: `useMonitorPerspective.ts`
+2. ZoneMonitorView.vue kann danach als duenne Wrapper-Komponente bestehen bleiben oder direkt in HardwareView eingebettet werden
+3. In HardwareView.vue einen Perspektiven-Toggle einbauen (oben rechts, neben Level-1-Header)
+4. `?view=monitor` Query-Parameter steuert die Perspektive
 
 **Toggle-Implementierung:**
 ```vue
@@ -115,13 +206,18 @@ Ein Toggle-Button (Icon: Grid vs. List) wechselt zwischen beiden Perspektiven.
 - `/monitor` Route entfernen aus `router/index.ts`
 - MonitorView.vue behalten als interne Komponente (wird von HardwareView importiert)
 - ViewTabBar.vue: Monitor-Tab entfernen
-- Sidebar: Monitor-Eintrag entfernen (einer weniger = besser)
+
+> **KORRIGIERT (2026-02-26):** "Sidebar: Monitor-Eintrag entfernen" wurde gestrichen. Monitor war NIE in der Sidebar — er existierte nur im ViewTabBar. Kein Sidebar-Aenderungsbedarf fuer diesen Schritt.
 
 ### A3: Breadcrumb mit Status-Kontext
 
+> **KORRIGIERT (2026-02-26):** Kein neues BreadcrumbNav.vue erstellen. TopBar.vue hat bereits Breadcrumbs (Zeilen 74-100). ZoomBreadcrumb.vue existiert ebenfalls (aber ungenutzt in HardwareView). Beide werden nicht neu gebaut, sondern erweitert.
+>
+> ~~**ABHAENGIGKEIT:** `useESPStatus.ts` aus `auftrag-hardware-tab-css-settings-ux.md` Block C muss vorher existieren~~ — **IST-Analyse: EXISTIERT BEREITS** (176 Z., 6 Status-Werte). KEIN Blocker mehr.
+
 **Problem:** Beim Drill-Down in Level 2/3 verliert der User den Gesamtueberblick.
 
-**Loesung:** Breadcrumb-Leiste mit Mini-Status-Indikatoren:
+**Loesung:** Bestehende TopBar-Breadcrumb-Logik (TopBar.vue Zeilen 74-100) um Mini-Status-Indikatoren erweitern:
 
 ```
 Hardware > Zone A (3/5 ● OK) > ESP_472204 (● Online)
@@ -133,9 +229,9 @@ Jedes Breadcrumb-Segment zeigt:
 - Klick auf jedes Segment navigiert zurueck
 
 **Implementation:**
-- Neue Komponente `BreadcrumbNav.vue`
-- Daten aus `useESPStatus.ts` Composable (aus CSS-Auftrag Block C)
-- Position: Unter dem Tab-Header, ueber dem Content
+- TopBar.vue Breadcrumb-Abschnitt (Zeilen 74-100) erweitern — KEIN neues BreadcrumbNav.vue
+- Daten aus `useESPStatus.ts` Composable — **EXISTIERT BEREITS** (keine Abhaengigkeit mehr)
+- ZoomBreadcrumb.vue ist redundant zur TopBar-Breadcrumb — als veraltet markieren, nicht anfassen
 
 ### A4: Sensor-Quick-Access (Klick-Reduktion)
 
@@ -184,7 +280,9 @@ Neue View unter `/dashboards` die alle gespeicherten Dashboards als Karten zeigt
 │  │ haus       │  │ Status     │  │ ueberblick │  │
 │  │ Aktualisiert│  │ Aktualisiert│  │ Aktualisiert│  │
 │  │ vor 2 Min  │  │ vor 5 Min  │  │ vor 1h     │  │
-│  │ ⚙️ 📋 🗑️    │  │ ⚙️ 📋 🗑️    │  │ ⚙️ 📋 🗑️    │  │
+│  │ Bearbeiten  │  │ Bearbeiten  │  │ Bearbeiten  │  │
+│  │ Kopieren    │  │ Kopieren    │  │ Kopieren    │  │
+│  │ Loeschen    │  │ Loeschen    │  │ Loeschen    │  │
 │  └─────────────┘  └─────────────┘  └─────────────┘  │
 └────────────────────────────────────────────────────────┘
 ```
@@ -194,15 +292,18 @@ Neue View unter `/dashboards` die alle gespeicherten Dashboards als Karten zeigt
 - Dashboard-Name (editierbar per Inline-Edit)
 - "Aktualisiert vor X" Timestamp
 - Actions: Bearbeiten (→ Builder), Duplizieren, Loeschen (mit Bestaetigung)
-- Default-Badge (★) fuer das Standard-Dashboard
+- Default-Badge (Stern) fuer das Standard-Dashboard
 
 **Leerer Zustand:** "Noch keine Dashboards erstellt. [+ Erstes Dashboard erstellen]"
 
 ### B2: Dashboard-Routing Umbau
 
+> **KORRIGIERT (2026-02-26):** Die bestehende Route heisst `/custom-dashboard` (router/index.ts Zeilen 75-79), nicht `/dashboard`. `/dashboard-legacy` existiert bereits als Redirect nach `/hardware`. Alle Route-Referenzen entsprechend korrigiert.
+
 **Vorher:**
 ```
-/dashboard → CustomDashboardView.vue (Builder, immer Edit-Mode)
+/custom-dashboard → CustomDashboardView.vue (Builder, immer Edit-Mode)
+/dashboard-legacy → Redirect nach /hardware (existiert bereits)
 ```
 
 **Nachher:**
@@ -249,7 +350,7 @@ Eine schlanke View die ein gespeichertes Dashboard im Read-Only-Modus rendert:
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Dashboard: Gewaechshaus   [Bearbeiten] [⏱️] [⛶]  │  ← View-Mode
+│  Dashboard: Gewaechshaus   [Bearbeiten] [Uhr] [Vollbild]  │  ← View-Mode
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐          │
 │  │ Widget 1 │ │ Widget 2 │ │ Widget 3 │          │
 │  │ (Live)   │ │ (Live)   │ │ (Live)   │          │
@@ -262,7 +363,7 @@ Eine schlanke View die ein gespeichertes Dashboard im Read-Only-Modus rendert:
 │  Dashboard: Gewaechshaus   [Speichern] [Abbrechen]│  ← Edit-Mode
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐          │
 │  │ Widget 1 │ │ Widget 2 │ │ Widget 3 │          │
-│  │ [✏️][🗑️]  │ │ [✏️][🗑️]  │ │ [✏️][🗑️]  │          │
+│  │ [Edit][X]│ │ [Edit][X]│ │ [Edit][X]│          │
 │  └──────────┘ └──────────┘ └──────────┘          │
 │                                                    │
 │  [+Widget-Library Sidebar]                         │
@@ -321,6 +422,8 @@ So kann spaeter von localStorage auf API umgeschaltet werden ohne Frontend-Aende
 
 ### D1: Kontext-Menues statt Navigation
 
+> **KORRIGIERT (2026-02-26):** useContextMenu.ts existiert bereits und arbeitet mit `uiStore.openContextMenu(x, y, items)`. Kein neues `v-context-menu` Directive oder neue ContextMenu.vue Komponente erstellen.
+
 **Rechtsklick / Long-Press auf ESP-MiniCard (Level 1):**
 ```
 ├── Sensor-Monitor oeffnen
@@ -332,15 +435,17 @@ So kann spaeter von localStorage auf API umgeschaltet werden ohne Frontend-Aende
 
 Das spart den Umweg ueber Level 2/3 fuer haeufige Aktionen.
 
-**Implementation:** Vue 3 Custom-Directive `v-context-menu` oder eine `ContextMenu.vue` Komponente.
+**Implementation:** Bestehenden `useContextMenu.ts` Composable nutzen (`uiStore.openContextMenu(x, y, items)`). Nur die ContextMenu-Item-Liste fuer ESP-MiniCards definieren — keine neue Infrastruktur.
 
 ### D2: Global-Search (Cmd+K / Ctrl+K)
+
+> **KORRIGIERT (2026-02-26):** `useCommandPalette.ts` existiert bereits mit Fuzzy-Search, Kategorien (navigation, devices, actions, rules, sensors) und Keyboard-Navigation. AppShell.vue Zeilen 36-43 binden Ctrl+K bereits an `uiStore.toggleCommandPalette()`. Kein neues `useGlobalSearch.ts` erstellen.
 
 Schnellzugriff auf jeden Sensor, Aktor oder ESP per Name:
 
 ```
 ┌────────────────────────────────────────┐
-│ 🔍 Suche nach Sensor, ESP oder Zone... │
+│ Suche nach Sensor, ESP oder Zone...    │
 │                                        │
 │ Sensoren:                              │
 │   ● Gewaechshaus Temp (SHT31, 23.5°C) │
@@ -354,11 +459,13 @@ Schnellzugriff auf jeden Sensor, Aktor oder ESP per Name:
 └────────────────────────────────────────┘
 ```
 
-**Implementation:**
-- Composable `useGlobalSearch.ts`
-- Keyboard-Shortcut: `Ctrl+K` / `Cmd+K`
-- Filtert ueber alle Pinia Stores (espStore, sensorStore, zoneStore)
-- Klick navigiert direkt zum Objekt (Sensor → SensorConfigPanel, ESP → Level 3, Zone → Level 2)
+**Implementation:** Bestehende Command Palette (`useCommandPalette.ts`) erweitern:
+- Kategorie "sensors" um Live-Werte ergaenzen (aktueller Wert in der Suchergebnisliste)
+- Kategorie "devices" um ESP-Status (Online/Offline) ergaenzen
+- Neue Kategorie "zones" hinzufuegen (Zone → Level 2 Navigation)
+- Klick-Handler: Sensor → SensorConfigPanel SlideOver, ESP → Level 3, Zone → Level 2
+
+Ctrl+K Binding in AppShell.vue existiert bereits — KEIN neues Binding.
 
 ### D3: Click-Path-Metrik
 
@@ -380,24 +487,44 @@ Verifiziere nach Implementierung:
 
 ### E1: Sidebar aktualisieren
 
-**VORHER (6 Eintraege):**
+> **KORRIGIERT (2026-02-26):** Die Sidebar hatte nie 6 Eintraege mit Monitor und Dashboard. Die echten Eintraege sind 9 (inkl. Admin-Bereich). Monitor und Dashboard existierten NUR im ViewTabBar, nicht in der Sidebar. Die Korrektur besteht darin, nur `/custom-dashboard` auf `/dashboards` umzubenennen.
+
+**Echte Sidebar-Eintraege VORHER (9 Eintraege):**
 ```
-Hardware
-Monitor        ← ENTFERNEN
-Dashboard      ← UMBENENNEN
-System Monitor
-Einstellungen
-Benutzer
+Hardware         (/hardware — Link aktiv fuer /hardware, /monitor UND /custom-dashboard)
+Regeln           (/rules)
+Komponenten      (/sensors)
+Zeitreihen       (/sensor-history)
+--- Admin-Bereich ---
+System           (/system)
+Benutzer         (/users)
+Wartung          (/maintenance)
+Kalibrierung     (/calibration)
+--- ---
+Einstellungen    (/settings)
 ```
 
-**NACHHER (5 Eintraege):**
+**Sidebar-Aenderung NACHHER (8 Eintraege):**
 ```
-Hardware
-Dashboards     ← Plural, zeigt Gallery
-System Monitor
-Einstellungen
-Benutzer
+Hardware         (/hardware — Link aktiv fuer /hardware UND /dashboards)
+Regeln           (/rules)
+Komponenten      (/sensors)
+Zeitreihen       (/sensor-history)
+--- Admin-Bereich ---
+System           (/system)
+Benutzer         (/users)
+Wartung          (/maintenance)
+Kalibrierung     (/calibration)
+--- ---
+Einstellungen    (/settings)
 ```
+
+**Konkrete Aenderungen:**
+- Hardware-Link-Aktivierung: `/custom-dashboard` aus der Aktivierungs-Liste entfernen, `/dashboards` hinzufuegen
+- Kein Sidebar-Eintrag hinzufuegen oder entfernen (Monitor war nie dort, Dashboard war nie dort)
+- Die Tabs [Hardware] [Monitor] [Dashboard] im ViewTabBar werden zu [Hardware] [Dashboards]
+
+**Hinweis zu SensorHistoryView.vue (/sensor-history, Sidebar "Zeitreihen"):** Bleibt unveraendert als dedizierter View fuer tiefe Zeitreihen-Analyse. Ueberschneidung mit HistoricalChart in MonitorView ist gewollt — unterschiedliche Detailtiefe fuer unterschiedliche Anwendungsfaelle.
 
 ### E2: Default-Route
 
@@ -413,11 +540,13 @@ Wenn ein User ein Default-Dashboard konfiguriert hat, koennte optional:
 
 ### E3: 404-Handling fuer alte Routes
 
+> **KORRIGIERT (2026-02-26):** `/dashboard-legacy` existiert bereits als Redirect nach `/hardware` (kein neuer Redirect noetig). `/custom-dashboard` wird auf `/dashboards` umgeleitet.
+
 ```typescript
 // Redirect alte Routes
 { path: '/monitor', redirect: '/hardware?view=monitor' },
-{ path: '/dashboard', redirect: '/dashboards' },
-{ path: '/dashboard-legacy', redirect: '/hardware' },
+{ path: '/custom-dashboard', redirect: '/dashboards' },
+// Hinweis: /dashboard-legacy → /hardware existiert bereits, NICHT erneut anlegen
 ```
 
 ### E4: Tests + Verifikation
@@ -428,10 +557,12 @@ Wenn ein User ein Default-Dashboard konfiguriert hat, koennte optional:
 - [ ] Route `/hardware?view=monitor` zeigt Sensor-Monitor-Perspektive
 - [ ] Route `/dashboards` zeigt Gallery (auch leer)
 - [ ] Route `/dashboards/new` oeffnet Builder
-- [ ] Breadcrumb-Navigation auf Level 2/3 korrekt
-- [ ] Kontext-Menu auf ESP-MiniCard funktional
-- [ ] Ctrl+K oeffnet Global-Search
-- [ ] Alte Routes redirecten korrekt
+- [ ] Breadcrumb-Navigation auf Level 2/3 korrekt (TopBar.vue erweitert)
+- [ ] Kontext-Menu auf ESP-MiniCard funktional (useContextMenu.ts genutzt)
+- [ ] Ctrl+K oeffnet Command Palette (existiert bereits, Kategorien erweitert)
+- [ ] Alte Routes redirecten korrekt (`/custom-dashboard` → `/dashboards`)
+- [ ] SensorsView.vue (`/sensors`) unveraendert und funktional
+- [ ] SensorHistoryView.vue (`/sensor-history`) unveraendert und funktional
 
 **Commit:** `feat(nav): update sidebar, redirects, final integration`
 
@@ -441,7 +572,7 @@ Wenn ein User ein Default-Dashboard konfiguriert hat, koennte optional:
 
 | Auftrag | Beziehung |
 |---------|-----------|
-| `auftrag-hardware-tab-css-settings-ux.md` | **VORHER (Block A CSS mindestens).** AccordionSection.vue und ESPCardBase werden hier wiederverwendet |
+| `auftrag-hardware-tab-css-settings-ux.md` | **VORHER (Block A CSS mindestens, Block C useESPStatus.ts fuer A3 BLOCKING).** AccordionSection.vue und ESPCardBase werden hier wiederverwendet |
 | `auftrag-orbital-split.md` | **PARALLEL MOEGLICH.** HardwareView importiert ESPOrbitalLayout — Pfad-Aenderung noetig wenn Split vorher passiert |
 | `auftrag-dashboard-persistenz.md` | **SYNERGIEN:** Block B+C setzen das Dashboard-Service-Interface. Backend-Auftrag implementiert die API-Seite |
 | `auftrag-dashboard-reaktivitaet-performance.md` | **SYNERGIEN:** Bug 3b (keine Live-Daten) muss fuer DashboardViewerView geloest sein |
@@ -452,13 +583,21 @@ Wenn ein User ein Default-Dashboard konfiguriert hat, koennte optional:
 
 ## Zusammenfassung der Ergebnisse
 
+> **KORRIGIERT (2026-02-26):** Sidebar-Eintraege 9→8 (nicht 6→5). Tabs 3→2 bleibt korrekt.
+
 | Metrik | Vorher | Nachher |
 |--------|--------|---------|
-| Haupt-Tabs | 3 (Hardware, Monitor, Dashboard) | 2 (Hardware, Dashboards) |
-| Sidebar-Eintraege | 6 | 5 |
+| Haupt-Tabs (ViewTabBar) | 3 (Hardware, Monitor, Dashboard) | 2 (Hardware, Dashboards) |
+| Sidebar-Eintraege | 9 | 8 (nur Hardware-Link-Aktivierung geaendert) |
 | Klicks bis Sensor-Config | 5 | 2-3 |
-| Klicks bis ESP finden | 3-4 | 1-2 (Global Search) |
+| Klicks bis ESP finden | 3-4 | 1-2 (Command Palette — bereits vorhanden, erweitert) |
 | Gespeicherte Dashboards sichtbar | Nein (nur localStorage) | Ja (Gallery + URLs) |
 | Dashboard Edit/View getrennt | Nein | Ja (ThingsBoard-Pattern) |
-| Breadcrumb mit Status | Nein | Ja (Focus+Context) |
+| Breadcrumb mit Status | Nein | Ja (TopBar.vue erweitert) |
 | Monitor als eigener Tab | Ja (redundant) | Nein (integriert in Hardware) |
+| SensorsView.vue (/sensors) | Unveraendert | Unveraendert (dedizierter CRUD-View) |
+| ZoneMonitorView.vue | Ungenutzt | Als Basis fuer useMonitorPerspective.ts |
+| Neue Infrastruktur-Komponenten | — | Nur BreadcrumbNav-Erweiterung entfaellt (TopBar.vue erweitert), kein useGlobalSearch.ts (Command Palette erweitert), kein neues ContextMenu (useContextMenu.ts genutzt) |
+| Dead-Code-Bereinigung (~1969 Z.) | Offen | **ERLEDIGT** ✓ (IST-Analyse 2026-02-26: alle 5 Dateien geloescht) |
+| useESPStatus.ts (Blocker fuer A3) | Nicht existent | **EXISTIERT** (176 Z., kein Blocker mehr) |
+| ESPCardBase.vue | Nicht existent | **EXISTIERT** (274 Z., aber 0 Consumer — Adoption pending) |

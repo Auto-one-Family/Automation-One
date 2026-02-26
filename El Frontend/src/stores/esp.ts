@@ -12,6 +12,7 @@ import { debugApi } from '@/api/debug'
 import { sensorsApi } from '@/api/sensors'
 import { actuatorsApi } from '@/api/actuators'
 import { useWebSocket } from '@/composables/useWebSocket'
+import { getESPStatus } from '@/composables/useESPStatus'
 import { websocketService } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
@@ -34,7 +35,6 @@ import {
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
 import { isPwmActuator } from '@/utils/actuatorDefaults'
-import { getESPStatus } from '@/composables/useESPStatus'
 
 /**
  * Extract error message from Axios error response.
@@ -154,11 +154,17 @@ export const useEspStore = defineStore('esp', () => {
   const deviceCount = computed(() => devices.value.length)
 
   const onlineDevices = computed(() =>
-    devices.value.filter(device => getESPStatus(device).isReachable)
+    devices.value.filter(device => {
+      const s = getESPStatus(device)
+      return s === 'online' || s === 'stale'
+    })
   )
 
   const offlineDevices = computed(() =>
-    devices.value.filter(device => !getESPStatus(device).isReachable)
+    devices.value.filter(device => {
+      const s = getESPStatus(device)
+      return s !== 'online' && s !== 'stale'
+    })
   )
 
   const mockDevices = computed(() =>
