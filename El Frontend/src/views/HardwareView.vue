@@ -19,7 +19,7 @@ import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useUiStore, useDashboardStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
-import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
+import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation, getESPStatus } from '@/composables'
 import { Plus, Filter, GitBranch, Workflow } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
 
@@ -228,9 +228,10 @@ const filteredEsps = computed(() => {
       const deviceId = espStore.getDeviceId(device)
       const isMock = espStore.isMock(deviceId)
       const mockDevice = device as any
+      const { isReachable } = getESPStatus(device)
 
-      if (filters.has('online') && (device.status === 'online' || device.connected === true)) return true
-      if (filters.has('offline') && (device.status === 'offline' || device.connected === false)) return true
+      if (filters.has('online') && isReachable) return true
+      if (filters.has('offline') && !isReachable) return true
       if (filters.has('warning')) {
         if (isMock && (mockDevice.system_state === 'ERROR' || mockDevice.actuators?.some((a: any) => a.emergency_stopped))) return true
         if (!isMock && device.status === 'error') return true
