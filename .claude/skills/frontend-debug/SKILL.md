@@ -4,7 +4,7 @@ description: |
   Frontend Debug-Wissensdatenbank: Vue 3 Architektur, 26+ WebSocket-Events,
   API-Client mit Token-Refresh, 13 Pinia Stores (esp + 12 shared), Auth-Flow, Build-Chain,
   Error-Kategorien, Component-Hierarchie, Design System (shared/design/), Test-Infrastruktur,
-  Dashboard-Zoom (ZonePlate→ZoneDetail→DeviceDetail), useZoomNavigation.
+  Dashboard-Navigation (ZonePlate→DeviceDetail, route-based 2-Level), useSwipeNavigation.
   Trigger-Keywords: frontend, vue, vite, typescript, websocket, store, pinia,
   component, build, ts2, axios, 401, token, tailwind, dashboard
 allowed-tools: Read, Grep, Glob, Bash
@@ -337,14 +337,13 @@ Loki-Labels: `compose_service="el-frontend"`, `container="automationone-frontend
 
 ## 9. Component-Hierarchie
 
-### Dashboard-Kette (Drei-Stufen-Zoom)
+### Dashboard-Kette (Zwei-Stufen-Navigation, route-based)
 
 ```
-DashboardView (useZoomNavigation, useDashboardStore)
-  Level 1: ZonePlate (pro Zone) → Klick zoomt in Zone
-  Level 2: ZoneDetailView → DeviceSummaryCard (pro ESP) → Klick zoomt in Device
-  Level 3: DeviceDetailView → ESPOrbitalLayout (SensorSatellite, ActuatorSatellite)
-+ ZoomBreadcrumb (TopBar)
+HardwareView (router.push, useSwipeNavigation)
+  Level 1: ZonePlate (pro Zone) → DeviceMiniCard (pro ESP) → Klick navigiert zu Device
+  Level 2: DeviceDetailView → ESPOrbitalLayout (SensorSatellite, ActuatorSatellite)
++ Breadcrumb via Router
 + UnassignedDropBar (Drag&Drop unzugewiesene Devices)
 + PendingDevicesPanel (device_discovered → Approve/Reject)
 + DeviceMiniCard, DeviceHeaderBar
@@ -475,4 +474,4 @@ grep -rn ": any" "El Frontend/src" --include="*.ts" --include="*.vue"
 | Bei Flows | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Datenfluesse |
 | Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Server-Errors (5xxx) |
 | Bei Type-Fragen | `El Frontend/src/types/` | Type-Definitionen |
-| Bei Zoom-Navigation | `El Frontend/src/composables/useZoomNavigation.ts` | Drei-Stufen-Dashboard-Zoom |
+| Bei Swipe-Navigation | `El Frontend/src/composables/useSwipeNavigation.ts` | Zwei-Stufen-Dashboard-Navigation (route-based) |

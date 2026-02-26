@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.2
-**Letzte Aktualisierung:** 2026-02-26
+**Version:** 9.4
+**Letzte Aktualisierung:** 2026-02-27
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 130 .vue Komponenten)
 
@@ -167,7 +167,7 @@ El Frontend/src/
 │   ├── useKeyboardShortcuts.ts
 │   ├── useOrbitalDragDrop.ts
 │   ├── useScrollLock.ts
-│   └── useZoomNavigation.ts
+│   └── useSwipeNavigation.ts
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
@@ -240,6 +240,20 @@ DashboardView.vue
 ├── UnassignedDropBar.vue (bottom)
 ├── PendingDevicesPanel.vue (slide-over)
 └── ESPSettingsPopover.vue (floating)
+```
+
+### Komponentenhierarchie (HardwareView / Zone Accordion)
+
+```
+HardwareView.vue
+├── ActionBar.vue (Filter, View Toggle)
+├── ZonePlate.vue[] (Accordion, sortiert: offline→online→leer→alpha)
+│   ├── Header: Aggregierte Sensorwerte + Status-Dot + Subzone-Chips
+│   ├── VueDraggable (filteredDevices)
+│   │   └── DeviceMiniCard.vue[] (Compact: groupSensorsByBaseType)
+│   └── EmptyState (PackageOpen, wenn Zone leer)
+├── UnassignedDropBar.vue (bottom, MOCK-Badge, Sensor-Summary)
+└── PendingDevicesPanel.vue (slide-over)
 ```
 
 ### Standard Component Template
@@ -557,8 +571,8 @@ Error-Codes (1xxx-5xxx) → Deutsche Beschreibungen
 
 ```typescript
 SENSOR_TYPE_CONFIG: Record<string, {
-  label: string      // "Temperatur (DS18B20)"
-  unit: string       // "°C"
+  label: string      // "Temperatur" (gekuerzt, ohne Geraetesuffix)
+  unit: string       // "°C", "%RH" (ohne Leerzeichen)
   min: number        // 0
   max: number        // 100
   decimals: number   // 1
@@ -568,13 +582,27 @@ SENSOR_TYPE_CONFIG: Record<string, {
   defaultIntervalSeconds?: number  // 30 (DS18B20/SHT31), 60 (BME280)
 }>
 
-// Helper Functions
+// Helper Functions (Lookup)
 getSensorUnit(type): string
 getSensorLabel(type): string
 getSensorDefault(type): number
 isValidSensorValue(type, value): boolean
-getDefaultInterval(type): number           // Default poll interval in seconds
-getSensorTypeAwareSummary(type): string | null  // "SHT31, auf I2C 0x44, misst Temperatur + Luftfeuchtigkeit, alle 30s"
+getDefaultInterval(type): number
+getSensorTypeAwareSummary(type): string | null
+
+// Aggregation Functions (NEU v9.4)
+groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[]
+  // Gruppiert Raw-Sensoren nach Basistyp (SHT31 → temp+humidity)
+aggregateZoneSensors(devices: {sensors}[]): ZoneAggregation
+  // Zone-weite Mittelwerte pro Kategorie (Klima, Wasser, Licht, System)
+formatAggregatedValue(agg: ZoneAggregation, cat: AggCategory): string
+  // Display-Formatierung mit Ø-Prefix bei Multi-Device Zonen
+
+// Types (NEU v9.4)
+type RawSensor = { type: string; raw_value: number | null; quality: string }
+type GroupedSensor = { label: string; value: string; unit: string; valueColor: string }
+type ZoneAggregation = Record<AggCategory, { avg: number; count: number; unit: string; quality: string }>
+type AggCategory = 'climate' | 'water' | 'light' | 'system'
 ```
 
 ---
@@ -904,8 +932,22 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.3
-**Letzte Aktualisierung:** 2026-02-26
+**Version:** 9.4
+**Letzte Aktualisierung:** 2026-02-27
+
+### Aenderungen in v9.4
+
+- HardwareView Level 1 Redesign (Zone Accordion) — 4-Block Implementierung
+- sensorDefaults.ts: Labels gekuerzt ("Temperatur (DS18B20)" → "Temperatur"), Units normalisiert ("% RH" → "%RH")
+- sensorDefaults.ts: 3 neue Aggregation-Funktionen (groupSensorsByBaseType, aggregateZoneSensors, formatAggregatedValue)
+- sensorDefaults.ts: 4 neue Types (RawSensor, GroupedSensor, ZoneAggregation, AggCategory)
+- DeviceMiniCard.vue: Sensor-Display nutzt groupSensorsByBaseType (Multi-Value-Aufloesung), Spark-Bars entfernt, Quality-Textfarbe
+- DeviceMiniCard.vue: "Oeffnen"-Button entfernt → ChevronRight-Hint + MoreVertical drill-down
+- ZonePlate.vue: Aggregierte Sensorwerte im Zone-Header, farbiger Status-Dot (8px), Subzone-Chips mit Filter
+- ZonePlate.vue: EmptyState-Pattern (PackageOpen) fuer leere Zonen, getESPStatus fuer online-Zaehlung
+- HardwareView.vue: Zone-Sortierung (offline/warning → online → leer → alphabetisch)
+- HardwareView.vue: localStorage-Persistenz fuer Accordion-Zustand, Smart Defaults (≤4 alle offen, >4 nur erste)
+- UnassignedDropBar.vue: Badge SIM/HW → nur MOCK (kein Badge fuer echte Devices), Sensor-Summary statt Count
 
 ### Aenderungen in v9.3
 
@@ -941,7 +983,7 @@ cleanupWebSocket() {
 - Dashboard-Merge (cursor/dashboard-neue-struktur): 5 neue Views (CustomDashboard, Hardware, Monitor, Calibration, LoadTest)
 - Shared Stores Expansion: 4 → 12 (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, sensor, ui, zone)
 - Original stores/ konsolidiert: 5 → 1 (nur esp.ts verbleibt, Rest nach shared/stores/ migriert)
-- Composables Expansion: 8 → 16 (neu: useCalibration, useCommandPalette, useContextMenu, useDeviceActions, useGrafana, useKeyboardShortcuts, useScrollLock, useZoomNavigation)
+- Composables Expansion: 8 → 16 (neu: useCalibration, useCommandPalette, useContextMenu, useDeviceActions, useGrafana, useKeyboardShortcuts, useScrollLock, useSwipeNavigation)
 - Neue Pakete: gridstack (Dashboard Builder), chartjs-plugin-annotation (Threshold-Linien), @vue-flow/core (Rule Editor)
 - dashboard.store.ts: Exportierte Types WidgetType, DashboardWidget, DashboardLayout
 - Component Count: 97 → 129 .vue, Views: 11 → 16, Stores: 9 → 13, Composables: 8 → 16

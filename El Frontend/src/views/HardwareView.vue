@@ -23,6 +23,7 @@ import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigat
 import { useToast } from '@/composables/useToast'
 import { zonesApi } from '@/api/zones'
 import { Plus, Filter, GitBranch, Workflow } from 'lucide-vue-next'
+import { getESPStatus } from '@/composables/useESPStatus'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('HardwareView')
@@ -77,22 +78,75 @@ useSwipeNavigation(zoomContainerRef, {
 })
 
 // =============================================================================
-// Accordion State — per-zone expand/collapse
+// Accordion State — per-zone expand/collapse with localStorage persistence (D3)
 // =============================================================================
+const COLLAPSE_KEY_PREFIX = 'ao-zone-collapse-'
+
+/** Load persisted collapse state from localStorage */
+function loadCollapseState(zoneId: string): boolean | null {
+  try {
+    const stored = localStorage.getItem(`${COLLAPSE_KEY_PREFIX}${zoneId}`)
+    if (stored === null) return null
+    return stored === '1'
+  } catch {
+    return null
+  }
+}
+
+/** Persist collapse state to localStorage */
+function saveCollapseState(zoneId: string, expanded: boolean) {
+  try {
+    localStorage.setItem(`${COLLAPSE_KEY_PREFIX}${zoneId}`, expanded ? '1' : '0')
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 const expandedZones = ref<Set<string>>(new Set())
 const allZonesInitialized = ref(false)
 
-/** Initialize zones: open all if <5 zones, otherwise collapsed */
+/** Initialize zones: restore from localStorage, fallback to smart defaults */
 watch(
   () => espStore.devices.length,
   () => {
     if (!allZonesInitialized.value && espStore.devices.length > 0) {
-      const allZoneIds = new Set(
+      const allZoneIds = Array.from(new Set(
         espStore.devices
           .filter(d => d.zone_id)
           .map(d => d.zone_id!)
-      )
-      expandedZones.value = allZoneIds.size < 5 ? allZoneIds : new Set()
+      ))
+
+      const expanded = new Set<string>()
+      let hasStoredState = false
+
+      for (const zoneId of allZoneIds) {
+        const stored = loadCollapseState(zoneId)
+        if (stored !== null) {
+          hasStoredState = true
+          if (stored) expanded.add(zoneId)
+        }
+      }
+
+      if (!hasStoredState) {
+        // First visit: expand all if ≤4 zones, otherwise only the first
+        if (allZoneIds.length <= 4) {
+          allZoneIds.forEach(id => expanded.add(id))
+        } else if (allZoneIds.length > 0) {
+          expanded.add(allZoneIds[0])
+        }
+      }
+
+      // D3: Zones with offline devices → always expanded
+      for (const zoneId of allZoneIds) {
+        const devicesInZone = espStore.devices.filter(d => d.zone_id === zoneId)
+        const hasOffline = devicesInZone.some(d => {
+          const s = getESPStatus(d)
+          return s === 'offline' || s === 'error'
+        })
+        if (hasOffline) expanded.add(zoneId)
+      }
+
+      expandedZones.value = expanded
       allZonesInitialized.value = true
     }
   },
@@ -111,6 +165,7 @@ function setZoneExpanded(zoneId: string, expanded: boolean) {
     next.delete(zoneId)
   }
   expandedZones.value = next
+  saveCollapseState(zoneId, expanded)
 }
 
 /**
@@ -248,7 +303,32 @@ const filteredEsps = computed(() => {
 
 const zoneGroups = computed(() => {
   const allGroups = groupDevicesByZone(filteredEsps.value)
-  return allGroups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
+  const zones = allGroups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
+
+  // D1: Sort zones — offline/warning first, then online, empty last, alpha within
+  zones.sort((a, b) => {
+    const aHasProblems = a.devices.some(d => {
+      const s = getESPStatus(d)
+      return s === 'offline' || s === 'error'
+    })
+    const bHasProblems = b.devices.some(d => {
+      const s = getESPStatus(d)
+      return s === 'offline' || s === 'error'
+    })
+    const aEmpty = a.devices.length === 0
+    const bEmpty = b.devices.length === 0
+
+    // Problems first
+    if (aHasProblems && !bHasProblems) return -1
+    if (!aHasProblems && bHasProblems) return 1
+    // Empty last
+    if (aEmpty && !bEmpty) return 1
+    if (!aEmpty && bEmpty) return -1
+    // Alpha within same category
+    return a.zoneName.localeCompare(b.zoneName)
+  })
+
+  return zones
 })
 
 /** Unassigned devices (for zone create ESP picker) */

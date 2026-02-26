@@ -16,8 +16,6 @@ import {
   Inbox,
   ChevronUp,
   ChevronDown,
-  Thermometer,
-  Zap,
   Loader2,
   ArrowUpRight
 } from 'lucide-vue-next'
@@ -28,6 +26,7 @@ import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { espApi, type ESPDevice } from '@/api/esp'
 import { createLogger } from '@/utils/logger'
 import { formatRelativeTime } from '@/utils/formatters'
+import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
 
 const log = createLogger('UnassignedDropBar')
 
@@ -73,16 +72,22 @@ function getStatusClass(device: ESPDevice): string {
   return 'status--unknown'
 }
 
-// Get sensor count display
-function getSensorCount(device: ESPDevice): number {
-  if (device.sensors && Array.isArray(device.sensors)) return device.sensors.length
-  return device.sensor_count ?? 0
-}
-
-// Get actuator count display
-function getActuatorCount(device: ESPDevice): number {
-  if (device.actuators && Array.isArray(device.actuators)) return device.actuators.length
-  return device.actuator_count ?? 0
+/** Compact 1-line sensor summary: "22°C  45%" */
+function getSensorSummary(device: ESPDevice): string {
+  const sensors = (device.sensors as RawSensor[] | undefined) || []
+  if (sensors.length === 0) return ''
+  const grouped = groupSensorsByBaseType(sensors)
+  const parts: string[] = []
+  for (const group of grouped) {
+    for (const val of group.values) {
+      if (val.value === null) continue
+      const formatted = Number.isInteger(val.value) ? String(val.value) : val.value.toFixed(1)
+      parts.push(`${formatted}${val.unit}`)
+      if (parts.length >= 3) break
+    }
+    if (parts.length >= 3) break
+  }
+  return parts.join('  ')
 }
 
 // Toggle collapsed state
@@ -207,8 +212,8 @@ async function handleDragAdd(event: any) {
             <!-- Device Info -->
             <div class="unassigned-card__info">
               <div class="unassigned-card__row-top">
-                <Badge :variant="isMock(device) ? 'mock' : 'real'" size="xs">
-                  {{ isMock(device) ? 'SIM' : 'HW' }}
+                <Badge v-if="isMock(device)" variant="mock" size="xs">
+                  MOCK
                 </Badge>
                 <span class="unassigned-card__name">
                   {{ device.name || getDeviceId(device) }}
@@ -220,17 +225,12 @@ async function handleDragAdd(event: any) {
                 />
               </div>
               <div class="unassigned-card__row-meta">
-                <span v-if="getSensorCount(device) > 0" class="unassigned-card__meta-item">
-                  <Thermometer class="w-3 h-3" />
-                  {{ getSensorCount(device) }}
-                </span>
-                <span v-if="getActuatorCount(device) > 0" class="unassigned-card__meta-item">
-                  <Zap class="w-3 h-3" />
-                  {{ getActuatorCount(device) }}
-                </span>
                 <span v-if="device.last_seen" class="unassigned-card__meta-item unassigned-card__meta-item--time">
                   {{ formatRelativeTime(device.last_seen) }}
                 </span>
+              </div>
+              <div v-if="getSensorSummary(device)" class="unassigned-card__row-sensors">
+                {{ getSensorSummary(device) }}
               </div>
             </div>
 
@@ -500,6 +500,16 @@ async function handleDragAdd(event: any) {
 
 .unassigned-card__meta-item--time {
   opacity: 0.7;
+}
+
+.unassigned-card__row-sensors {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Settings Link */
