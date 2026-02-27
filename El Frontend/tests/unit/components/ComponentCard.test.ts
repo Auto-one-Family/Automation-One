@@ -88,21 +88,21 @@ describe('ComponentCard', () => {
       expect(wrapper.text()).toContain('Pumpe 1')
     })
 
-    it('shows ON for active actuator', () => {
+    it('shows Ein for active actuator', () => {
       const wrapper = mount(ComponentCard, { props: { item: actuatorItem } })
-      expect(wrapper.text()).toContain('ON')
+      expect(wrapper.text()).toContain('Ein')
     })
 
-    it('shows OFF for inactive actuator', () => {
+    it('shows Aus for inactive actuator', () => {
       const item = { ...actuatorItem, state: false }
       const wrapper = mount(ComponentCard, { props: { item } })
-      expect(wrapper.text()).toContain('OFF')
+      expect(wrapper.text()).toContain('Aus')
     })
 
-    it('shows E-STOP for emergency stopped', () => {
+    it('shows Not-Stopp for emergency stopped', () => {
       const item = { ...actuatorItem, emergencyStopped: true }
       const wrapper = mount(ComponentCard, { props: { item } })
-      expect(wrapper.text()).toContain('E-STOP')
+      expect(wrapper.text()).toContain('Not-Stopp')
     })
 
     it('has actuator border class', () => {

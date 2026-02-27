@@ -1652,7 +1652,7 @@ watch(activeTab, (newTab) => {
 }
 
 .filter-fab--active::before {
-  background: linear-gradient(135deg, #f093fb 0%, #c084fc 100%);
+  background: linear-gradient(135deg, var(--color-iridescent-3) 0%, var(--color-iridescent-4) 100%);
 }
 
 .filter-fab--active:hover {
@@ -2390,15 +2390,15 @@ watch(activeTab, (newTab) => {
 }
 
 .toast--success .toast__icon {
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .toast--error .toast__icon {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .toast--info .toast__icon {
-  color: #60a5fa;
+  color: var(--color-info);
 }
 
 .toast__message {
