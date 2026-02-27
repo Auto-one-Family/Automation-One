@@ -1283,7 +1283,8 @@ uint32_t SensorManager::readRawAnalog(uint8_t gpio) {
     
     // Configure pin as analog input if needed
     gpio_manager_->configurePinMode(gpio, INPUT);
-    
+    analogSetPinAttenuation(gpio, ADC_ATTEN_DB_11);  // Safety-Net: 100-3100mV range for all analog sensors
+
     // Read analog value (ESP32: 0-4095)
     return analogRead(gpio);
 }

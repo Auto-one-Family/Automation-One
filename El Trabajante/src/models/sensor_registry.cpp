@@ -177,7 +177,8 @@ static const SensorTypeMapping SENSOR_TYPE_MAP[] = {
     
     // Moisture sensor
     {"moisture", &MOISTURE_CAP},
-    
+    {"soil_moisture", &MOISTURE_CAP},  // Alias — canonical name is "moisture"
+
     // End marker
     {nullptr, nullptr}
 };
